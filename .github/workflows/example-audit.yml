@@ -12,10 +12,8 @@ jobs:
       contents: read
 
     steps:
-      # TODO: switch to a SHA-pinned release tag (e.g. @<sha> # v1.0.0) once
-      # the first release is published — see renovate.json's custom manager.
       - name: Discover required domains with isolated-run
-        uses: buildcage/isolated-run@main
+        uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
         with:
           proxy_mode: audit
           # Audit mode allows and logs every connection instead of blocking any

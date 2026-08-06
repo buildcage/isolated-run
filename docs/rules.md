@@ -70,7 +70,7 @@ Since the regex is tested against the `domain:port` string, include a port patte
 
 ```yaml
 - name: Run tests with outbound network isolation
-  uses: buildcage/isolated-run@<sha> # v1.0.0
+  uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
   with:
     proxy_mode: restrict
 
