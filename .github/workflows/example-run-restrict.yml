@@ -1,0 +1,34 @@
+name: Example (restrict mode)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      # TODO: switch to a SHA-pinned release tag (e.g. @<sha> # v1.0.0) once
+      # the first release is published — see renovate.json's custom manager.
+      - name: Run tests with outbound network isolation
+        uses: buildcage/isolated-run@main
+        with:
+          proxy_mode: restrict
+          allowed_https_rules: |
+            registry.npmjs.org:443
+          # This step intentionally triggers a blocked connection below to
+          # demonstrate enforcement — that's expected, not a failure.
+          fail_on_blocked: false
+          run: |
+            npm init -y
+            npm install --ignore-scripts express
+
+            echo "=== allowlisted host must be reachable ==="
+            npm ping
+
+            echo "=== non-allowlisted host must be blocked ==="
+            wget -q -O /dev/null --timeout=5 https://example.com/ || true

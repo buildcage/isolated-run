@@ -1,0 +1,79 @@
+name: Update major/minor/latest tags
+
+on:
+  release:
+    types: [published]
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.0.0)"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  update-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Extract major version
+        id: version
+        run: |
+          MAJOR="${TAG%%.*}"
+          echo "major=$MAJOR" >> "$GITHUB_OUTPUT"
+
+      - name: Update major version tag
+        env:
+          MAJOR: ${{ steps.version.outputs.major }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
+          git tag -fa "$MAJOR" -m "Update $MAJOR to $TAG"
+          git push origin "$MAJOR" --force
+
+      - name: Login to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Docker major/minor/latest tags
+        env:
+          MAJOR: ${{ steps.version.outputs.major }}
+          REPO: ghcr.io/${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${TAG#v}"
+          MINOR=$(echo "$VERSION" | cut -d. -f1-2)
+
+          TAGS=$(gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags" \
+            --jq '.[].ref | ltrimstr("refs/tags/")')
+
+          LATEST_IN_MAJOR=$(echo "$TAGS" | grep -E "^v${MAJOR#v}\.[0-9]+\.[0-9]+$" | sort -V | tail -1)
+          LATEST_IN_MINOR=$(echo "$TAGS" | grep -E "^v${MINOR}\.[0-9]+$" | sort -V | tail -1)
+          LATEST_OVERALL=$(echo "$TAGS" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+
+          if [ "$TAG" = "$LATEST_IN_MINOR" ]; then
+            docker buildx imagetools create --tag "${REPO}:${MINOR}" "${REPO}:${VERSION}"
+          fi
+          if [ "$TAG" = "$LATEST_IN_MAJOR" ]; then
+            docker buildx imagetools create --tag "${REPO}:${MAJOR#v}" "${REPO}:${VERSION}"
+          fi
+          if [ "$TAG" = "$LATEST_OVERALL" ]; then
+            docker buildx imagetools create --tag "${REPO}:latest" "${REPO}:${VERSION}"
+          fi

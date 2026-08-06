@@ -1,0 +1,164 @@
+name: Build and Push Docker Image
+run-name: Build and Push Docker Image (${{ github.ref_name }})
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (leave empty to use latest)"
+        required: false
+        type: string
+
+concurrency:
+  group: docker-publish
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+      attestations: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      bundle-content: ${{ steps.bundle.outputs.content }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine version
+        id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ -n "$INPUT_TAG" ]; then
+              TAG="$INPUT_TAG"
+            else
+              TAG=$(git tag --sort=-version:refname --list 'v*.*' | head -1)
+              if [ -z "$TAG" ]; then
+                echo "::error::No version tag found"
+                exit 1
+              fi
+            fi
+            git checkout "$TAG"
+          else
+            TAG="$REF_NAME"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # "latest" is applied later, by update-major-tag.yml on release publish.
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.tag }}
+            type=raw,value=sha-${{ steps.version.outputs.sha }},priority=100
+
+      - name: Login to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        env:
+          DOCKER_BUILD_CHECKS_ANNOTATIONS: true
+          DOCKER_BUILD_SUMMARY: true
+          DOCKER_BUILD_RECORD_UPLOAD: false
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign Docker image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REPO: ${{ github.repository }}
+        run: |
+          cosign sign --yes --new-bundle-format ghcr.io/${REPO}@${DIGEST}
+
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Read bundle content
+        id: bundle
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          echo "content<<EOF" >> "$GITHUB_OUTPUT"
+          cat "$BUNDLE" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+  upload-release-assets:
+    needs: build-and-push
+    runs-on: ubuntu-slim
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check release
+        id: check
+        env:
+          TAG: ${{ needs.build-and-push.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft 2>&1) || {
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          if [ "$(echo "$RELEASE" | jq -r '.isDraft')" != "true" ]; then
+            echo "::warning::Release $TAG is already published, skipping upload"
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "upload=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Release
+        if: steps.check.outputs.upload == 'true'
+        env:
+          TAG: ${{ needs.build-and-push.outputs.tag }}
+          BUNDLE: ${{ needs.build-and-push.outputs['bundle-content'] }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$BUNDLE" > isolated-run-container.sigstore.json
+          gh release upload --repo "$GITHUB_REPOSITORY" "$TAG" \
+            isolated-run-container.sigstore.json
