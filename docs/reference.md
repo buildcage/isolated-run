@@ -5,7 +5,7 @@ runner, not just inside a Docker build.
 
 ```yaml
 - name: Run tests with outbound network isolation
-  uses: buildcage/isolated-run@<sha> # v1.0.0
+  uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
   with:
     proxy_mode: restrict
     allowed_https_rules: registry.npmjs.org:443
@@ -27,8 +27,8 @@ In `audit` mode, the Job Summary also includes a ready-to-paste `restrict` mode 
 with `proxy_mode: restrict` and allowlist rules generated from the hosts observed during the
 audited run.
 
-See the [restrict mode](../.github/workflows/example-run-restrict.yml) and
-[audit mode](../.github/workflows/example-run-audit.yml) example workflows for each in full.
+See the [restrict mode](../.github/workflows/example-restrict.yml) and
+[audit mode](../.github/workflows/example-audit.yml) example workflows for each in full.
 
 ## Parameters
 
@@ -54,7 +54,7 @@ Use the step's own `env:` (not a `with:` input) to pass values into `run` — ex
 anything set via `env:` is available there too:
 
 ```yaml
-- uses: buildcage/isolated-run@<sha> # v1.0.0
+- uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
   env:
     PR_TITLE: ${{ github.event.pull_request.title }}
   with:
@@ -105,7 +105,7 @@ If `run` needs to write somewhere else — a tool-specific cache directory, for 
 under `writable`:
 
 ```yaml
-- uses: buildcage/isolated-run@<sha> # v1.0.0
+- uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
   with:
     writable: |
       /opt/some-tool/cache
