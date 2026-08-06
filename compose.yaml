@@ -1,0 +1,20 @@
+# Local-development counterpart to docker/compose.action.yaml (which the
+# action itself uses with a verified, digest-pinned image ref). This one
+# builds the proxy image from source — CI's test_sandbox/test_sandbox_*
+# jobs use this (via a bare `docker compose build proxy`, relying on
+# Compose's default-filename discovery), never docker/compose.action.yaml.
+services:
+  proxy:
+    container_name: ${PROXY_CONTAINER_NAME:-buildcage-proxy}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - PROXY_MODE=${PROXY_MODE:-restrict}
+      - ALLOWED_HTTPS_RULES=${ALLOWED_HTTPS_RULES:-}
+      - ALLOWED_HTTP_RULES=${ALLOWED_HTTP_RULES:-}
+      - ALLOWED_IP_RULES=${ALLOWED_IP_RULES:-}
+      - EXTERNAL_RESOLVER=${EXTERNAL_RESOLVER:-}
+    restart: unless-stopped
