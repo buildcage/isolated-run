@@ -48,9 +48,7 @@ describe("createDocker", () => {
   it("copyFromContainer runs a docker cp with containerId:containerPath -> hostPath", () => {
     const { run, calls } = fakeRun([""]);
     createDocker(run).copyFromContainer("abc123", SOME_CONTAINER_PATH, "/tmp/some-script.js");
-    expect(calls).toStrictEqual([
-      ["cp", `abc123:${SOME_CONTAINER_PATH}`, "/tmp/some-script.js"],
-    ]);
+    expect(calls).toStrictEqual([["cp", `abc123:${SOME_CONTAINER_PATH}`, "/tmp/some-script.js"]]);
   });
 
   it("readEnv runs docker inspect and parses the Env JSON array", () => {

@@ -1,5 +1,5 @@
 name: Isolated Run
-description: Run a command with outbound network isolation (allowlist enforcement) — the same proxy-based enforcement Buildcage uses for Docker builds, applied directly to a run: step
+description: "Run a command with outbound network isolation (allowlist enforcement) — the same proxy-based enforcement Buildcage uses for Docker builds, applied directly to a run: step"
 
 inputs:
   run:

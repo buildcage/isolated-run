@@ -194,9 +194,7 @@ describe("buildRestrictExample", () => {
 
   it("strips the trailing newline GitHub Actions adds to `run: |` block scalars", () => {
     const rows = [{ host: "registry.npmjs.org", port: "443", ruleType: "HTTPS", count: 1 }];
-    expect(
-      buildRestrictExample(rows, REPO, REF, { runCommand: "npm ci\nnpm test\n" }),
-    ).toBe(
+    expect(buildRestrictExample(rows, REPO, REF, { runCommand: "npm ci\nnpm test\n" })).toBe(
       wrap(
         [
           "- name: Start isolated-run in restrict mode",

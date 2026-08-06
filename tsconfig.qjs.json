@@ -12,10 +12,6 @@
     "skipLibCheck": true,
     "types": []
   },
-  "include": [
-    "src/core/scripts/**/*.ts",
-    "src/core/lib/acl/**/*.ts",
-    "src/core/lib/test/**/*.ts"
-  ],
+  "include": ["src/core/scripts/**/*.ts", "src/core/lib/acl/**/*.ts", "src/core/lib/test/**/*.ts"],
   "exclude": ["**/*.property.test.ts", "**/*.node.ts"]
 }
