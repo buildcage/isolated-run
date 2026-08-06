@@ -1,7 +1,7 @@
 /**
- * Property-based tests for run/main.ts and its helpers.
+ * Property-based tests for main.ts and its helpers.
  *
- * Run with: vp test run run/src/main.property.test.ts
+ * Run with: vp test run src/main.property.test.ts
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";

@@ -9,9 +9,9 @@ export type Report = TransparentReportData;
 const LOG_FILE = "/var/log/haproxy/current";
 
 /**
- * run always runs the transparent-engine stack and, unlike report/src/main.ts,
- * has no version-skew concern of its own (one pinned version end to end),
- * so it fetches the raw log and calls the shared builder in-process.
+ * This action has no version-skew concern of its own (one pinned version
+ * end to end, unlike a separately-versioned report action), so it fetches
+ * the raw log and calls the shared builder in-process.
  */
 export function fetchReport(
   containerName: string,

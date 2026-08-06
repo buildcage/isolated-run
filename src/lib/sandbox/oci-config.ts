@@ -9,8 +9,8 @@ import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 // readonlyPaths) and adds kallsyms/kmsg, which runc's default doesn't
 // cover at all.
 //
-// Imported from a shared JSON file (rather than a JS literal) so run/dev's
-// build-test-bundle.sh — a bash/jq stand-in for this same function, used
+// Imported from a shared JSON file (rather than a JS literal) so
+// dev/build-test-bundle.sh — a bash/jq stand-in for this same function, used
 // by the Mac dev loop — has a single source of truth to read the same
 // list from instead of hand-duplicating it.
 import EXTRA_MASKED_PROC_PATHS from "../../../scripts/extra-masked-proc-paths.json" with { type: "json" };
