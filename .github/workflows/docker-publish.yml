@@ -27,6 +27,7 @@ jobs:
       contents: read
       packages: write
       attestations: write
+      artifact-metadata: write
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       bundle-content: ${{ steps.bundle.outputs.content }}
