@@ -8622,9 +8622,9 @@ function annotateKnownBlocked(blockedRows, knownBlockedRules) {
 //#endregion
 //#region src/core/lib/report/build/transparent.ts
 /**
-* Pure — no I/O; callers (report-action.node.ts, run/src/lib/report.ts)
-* fetch lines/parameters themselves. An empty input naturally yields
-* passed:[]/blocked:[]/blockedCount:0, so no special-case branch is needed.
+* Pure — no I/O; the caller (src/lib/report.ts) fetches lines/parameters
+* itself. An empty input naturally yields passed:[]/blocked:[]/blockedCount:0,
+* so no special-case branch is needed.
 */
 async function buildTransparentReportData(lines, parameters) {
 	let { passed, blocked: blockedRawRows, blockedCount, hasNonBuildcageContent } = await scanHaproxyLog(lines, parameters.mode === "audit");
@@ -8638,9 +8638,9 @@ async function buildTransparentReportData(lines, parameters) {
 	};
 }
 /**
-* run always runs the transparent-engine stack and, unlike report/src/main.ts,
-* has no version-skew concern of its own (one pinned version end to end),
-* so it fetches the raw log and calls the shared builder in-process.
+* This action has no version-skew concern of its own (one pinned version
+* end to end, unlike a separately-versioned report action), so it fetches
+* the raw log and calls the shared builder in-process.
 */
 function fetchReport(containerName, parameters) {
 	return buildTransparentReportData(createDocker().readFileLines(containerName, "/var/log/haproxy/current"), parameters);
