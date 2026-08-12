@@ -19,7 +19,7 @@ certificates to install — works with any language or package manager.
   unmodified inside the isolated command
 
 This is built on the same network-isolation technology as
-[Buildcage](https://github.com/dash14/buildcage) (which applies it to `docker build` `RUN` steps),
+[Buildcage](https://github.com/buildcage/docker) (which applies it to `docker build` `RUN` steps),
 split into its own repository so the `run:` step use case can version and release independently.
 
 ## Features

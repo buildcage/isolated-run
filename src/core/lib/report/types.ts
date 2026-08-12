@@ -36,7 +36,7 @@ export interface ReportDataCommon {
 }
 
 /** isolated-run's proxy image only ever produces transparent-shaped data
- *  (no buildkitd/vertex logs) — unlike dash14/buildcage, there's no
+ *  (no buildkitd/vertex logs) — unlike buildcage/docker, there's no
  *  discriminated union with an explicit-engine variant here. */
 export interface TransparentReportData extends ReportDataCommon {
   engine: "transparent";

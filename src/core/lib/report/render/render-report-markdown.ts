@@ -13,7 +13,7 @@ export interface RenderReportMarkdownOptions {
 
 /** isolated-run's proxy image always produces transparent-shaped data (see
  *  ../types.ts) — no explicit-engine branch here, unlike
- *  dash14/buildcage's shared renderer. */
+ *  buildcage/docker's shared renderer. */
 export function renderReportMarkdown(
   report: ReportData,
   actionRepo: string,

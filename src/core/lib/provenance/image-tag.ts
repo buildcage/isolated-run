@@ -1,5 +1,5 @@
 /**
- * Convert an action ref into the Docker image tag. Unlike dash14/buildcage
+ * Convert an action ref into the Docker image tag. Unlike buildcage/docker
  * (which publishes transparent/explicit/proxy engines as suffixed tags under
  * one shared image repository), isolated-run publishes a single image, so
  * the tag is always the plain version (e.g. `1.0.0`) — no engine suffix.
