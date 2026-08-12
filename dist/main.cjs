@@ -7496,10 +7496,10 @@ async function verifyBundle(bundleJson, options, expectedDigest) {
 //#endregion
 //#region src/core/lib/provenance/image-tag.ts
 /**
-* Convert an action ref into the Docker image tag. Unlike dash14/buildcage
-* (which publishes transparent/explicit/proxy engines as suffixed tags under
-* one shared image repository), isolated-run publishes a single image, so
-* the tag is always the plain version (e.g. `1.0.0`) — no engine suffix.
+* Convert an action ref into the Docker image tag. Unlike buildcage/docker
+* (which publishes transparent/explicit engines as suffixed tags under one
+* shared image repository), isolated-run publishes a single image, so the
+* tag is always the plain version (e.g. `1.0.0`) — no engine suffix.
 */
 function imageTagFromRef(actionRef) {
 	return actionRef ? /^[0-9a-f]{40}$/i.test(actionRef) ? `sha-${actionRef.toLowerCase()}` : actionRef.startsWith("v") ? actionRef.slice(1) : actionRef : "";
@@ -8499,9 +8499,9 @@ const ruleTypeToParam = {
 * Returns a markdown string wrapped in <details> tags, or "" if no rows.
 *
 * actionRef is the ref (tag or commit SHA) this action was invoked with.
-* Unlike dash14/buildcage (which hosts setup/run/report as subdirectories of
-* one repo), isolated-run's action.yml lives at the repo root, so the
-* example's `uses:` never has an action-name path segment.
+* Unlike buildcage/docker's report action (which lives in a `report`
+* subdirectory of that repo), isolated-run's action.yml lives at the repo
+* root, so the example's `uses:` never has an action-name path segment.
 */
 function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand } = {}) {
 	if (!auditedRows || auditedRows.length === 0) return "";
@@ -8528,7 +8528,7 @@ function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand }
 //#region src/core/lib/report/render/render-report-markdown.ts
 /** isolated-run's proxy image always produces transparent-shaped data (see
 *  ../types.ts) — no explicit-engine branch here, unlike
-*  dash14/buildcage's shared renderer. */
+*  buildcage/docker's shared renderer. */
 function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", runCommand } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${title} (${report.parameters.mode} mode)\n\n`;
 	return report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += buildRestrictExample(report.passed, actionRepo, actionRef, { runCommand })), report.blocked.length > 0 && (report.passed.length > 0 && (markdown += "\n"), markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(report.blocked, {
