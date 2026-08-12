@@ -1,4 +1,4 @@
-module github.com/dash14/buildcage/gen-seccomp-profile
+module github.com/buildcage/gen-seccomp-profile
 
 go 1.25.0
 
