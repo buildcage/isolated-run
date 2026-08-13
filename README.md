@@ -1,4 +1,4 @@
-# isolated-run
+# Buildcage for `run:` Steps
 
 [![GitHub](https://img.shields.io/badge/GitHub-buildcage%2Fisolated--run-blue?logo=github)](https://github.com/buildcage/isolated-run)
 ![build](https://img.shields.io/github/actions/workflow/status/buildcage/isolated-run/docker-publish.yml)
@@ -18,9 +18,10 @@ certificates to install — works with any language or package manager.
 - **Same UID and `$HOME`**: earlier steps' credentials, caches, and toolchains keep working
   unmodified inside the isolated command
 
-This is built on the same network-isolation technology as
-[Buildcage](https://github.com/buildcage/docker) (which applies it to `docker build` `RUN` steps),
-split into its own repository so the `run:` step use case can version and release independently.
+This is the `run:` step member of Buildcage;
+[Buildcage for Docker](https://github.com/buildcage/docker) applies the same network-isolation
+technology to `docker build` `RUN` steps. Each lives in its own repository so it can version and
+release independently.
 
 ## Features
 
