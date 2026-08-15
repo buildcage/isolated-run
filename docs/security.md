@@ -296,7 +296,7 @@ source commit without requiring an independent rebuild.
   subsequent `docker pull` is digest-pinned (`image@sha256:…`), so there is no TOCTOU between
   verification and the actual image pull; the residual window is limited to between the
   manifest-digest fetch and the bundle fetch.
-- **Local/CI self-test bypass**: `BUILDCAGE_BUILD_TEST_HOOKS=1 pnpm build` compiles a
+- **Local/CI self-test bypass**: `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build` compiles a
   `dist/main.cjs` where a `BUILDCAGE_LOCAL_IMAGE_REF` escape hatch is reachable, used only by this
   repo's own CI jobs and local development. The bypass logic lives in its own module
   (`src/core/lib/provenance/local-image-override.ts`), loaded only via a dynamic `import()` gated

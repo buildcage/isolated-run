@@ -67,7 +67,7 @@ vp lint --fix
 vp fmt --write
 ```
 
-`pnpm typecheck` (`tsc`) remains the authoritative full type check; `vp check`'s type-aware
+`vp run typecheck` (`tsc`) remains the authoritative full type check; `vp check`'s type-aware
 linting (via `oxlint-tsgolint`) catches a subset of type-driven issues fast but doesn't replace it.
 
 Running `vp install` (in place of `pnpm install`) automatically sets up a pre-commit hook — via
@@ -160,7 +160,7 @@ the [README](../README.md).
 Sigstore verification requires a real, published GHCR image, so the action normally can't run
 against an unpublished branch or local changes. This repo's own CI (the `test_sandbox_*` jobs in
 `.github/workflows/test-e2e.yml`) tests the real action end-to-end against a locally built image
-instead, via a build-time-gated mechanism: `BUILDCAGE_BUILD_TEST_HOOKS=1 pnpm build` compiles
+instead, via a build-time-gated mechanism: `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build` compiles
 `dist/main.cjs` where the `BUILDCAGE_LOCAL_IMAGE_REF` override is reachable. The override logic
 lives in its own module (`src/core/lib/provenance/local-image-override.ts`), loaded only via a
 dynamic `import()` gated by that build-time flag. Without the flag (i.e. every normal/committed
@@ -172,12 +172,12 @@ guarding against a future refactor silently breaking that guarantee.
 To exercise it locally:
 
 1. Build the image: `docker compose build proxy`.
-2. `BUILDCAGE_BUILD_TEST_HOOKS=1 pnpm build`
+2. `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build`
 3. Run it with `BUILDCAGE_LOCAL_IMAGE_REF=<image ref from step 1>` set (e.g. via `act`, or by
    invoking `node dist/main.cjs` directly with the relevant `INPUT_*` env vars — note the action's
    own isolation step still needs a real Linux host, so this only gets you past image
    verification, not a full local run on macOS). Never commit a `dist/main.cjs` built this way —
-   run `pnpm build` again (without the flag) before committing.
+   run `vp run build` again (without the flag) before committing.
 
 See [security.md](./security.md#verification-limitations) for more details.
 
