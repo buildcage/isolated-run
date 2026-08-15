@@ -5,8 +5,6 @@
 ![test](https://img.shields.io/github/actions/workflow/status/buildcage/isolated-run/test-e2e.yml?label=test)
 ![license](https://img.shields.io/github/license/buildcage/isolated-run)
 
-## About
-
 GitHub Action that restricts outbound network access for a workflow `run:` step to an allowlist of
 domains. The command runs isolated directly on the runner, with no changes to the command itself,
 no proxy configuration, and no certificates to install — it works with any language or package
