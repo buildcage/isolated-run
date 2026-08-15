@@ -5,7 +5,7 @@ runner, not just inside a Docker build.
 
 ```yaml
 - name: Run tests with outbound network isolation
-  uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
+  uses: buildcage/isolated-run@1c9299a00ef0a3c2678515afd173d06f8cba798f # v1.0.1
   with:
     proxy_mode: restrict
     allowed_https_rules: registry.npmjs.org:443
@@ -54,7 +54,7 @@ Use the step's own `env:` (not a `with:` input) to pass values into `run` — ex
 anything set via `env:` is available there too:
 
 ```yaml
-- uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
+- uses: buildcage/isolated-run@1c9299a00ef0a3c2678515afd173d06f8cba798f # v1.0.1
   env:
     PR_TITLE: ${{ github.event.pull_request.title }}
   with:
@@ -105,7 +105,7 @@ If `run` needs to write somewhere else — a tool-specific cache directory, for 
 under `writable`:
 
 ```yaml
-- uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
+- uses: buildcage/isolated-run@1c9299a00ef0a3c2678515afd173d06f8cba798f # v1.0.1
   with:
     writable: |
       /opt/some-tool/cache
