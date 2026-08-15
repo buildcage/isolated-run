@@ -12,7 +12,7 @@ const REQUIREMENT =
   "The run action requires a Linux runner with passwordless sudo for the isolation setup itself " +
   '(network namespace, veth, iptables) — this is the default on GitHub-hosted "ubuntu-*" runners, ' +
   'but NOT on lightweight images such as "ubuntu-slim" or many self-hosted/minimal runners. See ' +
-  "docs/reference.md and docs/security.md for details.";
+  "README.md and docs/security.md for details.";
 
 const SLIM_RUNNER_NOTE = `${SLIM_RUNNER_DETECTED_PREFIX} — these typically don't have passwordless sudo configured for this kind of privileged setup.`;
 

@@ -83,7 +83,7 @@ git commit --no-verify
 
 This section walks through how the action isolates one `run:` command, in the order it actually
 happens. For the user-facing behavior and threat model, see [Security Details](./security.md) and
-the [Reference](./reference.md) doc.
+the [README](../README.md).
 
 1. Verify the proxy image's provenance and resolve a digest-pinned image ref (`src/main.ts`).
 2. Start a dedicated, throwaway proxy container for this one step (`src/main.ts`).
@@ -250,7 +250,7 @@ Fields: `[timestamp] buildcage [status] "domain:port" reason`
 │                              # seccomp/die-with-parent checks driving dist/main.cjs directly)
 ├── dev/                       # Mac dev-loop-only Dockerfile + smoke-test.sh + build-test-bundle.sh
 │                              # (see docker/compose.sandbox-dev.yaml) — not used in production or CI
-├── docs/                      # development.md, rules.md, reference.md, security.md, self-hosting.md
+├── docs/                      # development.md, security.md, self-hosting.md
 ├── compose.yaml               # Docker Compose config for local dev (builds docker/Dockerfile;
 │                              # also what CI's test_sandbox/test_sandbox_* jobs build from)
 └── Makefile                   # Operational commands
@@ -270,7 +270,7 @@ If you encounter issues, try reproducing the problem locally to get detailed log
 
    ```bash
    make setup_sandbox_dev
-   # or drive the action directly — see docs/reference.md
+   # or drive the action directly — see README.md
    ```
 
 3. **Open an issue** at [github.com/buildcage/isolated-run/issues](https://github.com/buildcage/isolated-run/issues) with:

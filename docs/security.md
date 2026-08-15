@@ -88,7 +88,7 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   outright — see [Known Limitations](#known-limitations) below. The `writable` input adds further
   paths to the writable set for tools that need to write elsewhere (e.g. a cache directory); setting
   it to `/` disables this restriction entirely — see
-  [Filesystem Access](./reference.md#filesystem-access) in Reference.
+  [Filesystem access](../README.md#filesystem-access) in the README.
 - **Die-with-parent**: the isolated command's life is tied to `run-isolated.sh`'s own via a two-hop
   `setpriv --pdeathsig=KILL` chain (`run-isolated.sh` → `runc run` → the isolated command — `runc
 run`'s own process sits between the two, so a single-hop guard wouldn't be enough). If
@@ -107,7 +107,7 @@ run`'s own process sits between the two, so a single-hop guard wouldn't be enoug
   recursive bind-mounts, so allowing it would recursively re-expose the whole host `/` inside the
   sandbox as a second, writable copy. This is a misconfiguration guard against an operator-supplied
   `writable:` value, not a defense against the isolated command itself (see
-  [Filesystem Access](./reference.md#filesystem-access) in Reference).
+  [Filesystem access](../README.md#filesystem-access) in the README).
 - **Docker cannot be used inside the isolated command**: supplementary groups (including `docker`)
   are cleared before the command runs, so even where the Docker socket is visible through the
   read-only host filesystem, the isolated command has no permission to use it. A `run:` step that

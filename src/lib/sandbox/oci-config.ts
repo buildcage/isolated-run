@@ -157,7 +157,7 @@ function assertScratchBaseNotWritable(writableDirs: string[]): void {
  *   set.
  *
  * `writablePaths` containing "/" is a sentinel meaning "disable the
- * read-only restriction entirely" (see docs/reference.md's `writable`
+ * read-only restriction entirely" (see README.md's `writable`
  * input).
  */
 /** Linux-level identity the sandboxed process runs as. */
