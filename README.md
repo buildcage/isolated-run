@@ -44,7 +44,7 @@ audit → restrict flow either way.
 
 ```yaml
 - name: Discover required domains
-  uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
+  uses: buildcage/isolated-run@1c9299a00ef0a3c2678515afd173d06f8cba798f # v1.0.1
   with:
     proxy_mode: audit # Log every destination, block nothing
     run: |
@@ -65,7 +65,7 @@ Copy the domain names into `allowed_https_rules` or `allowed_http_rules` for Ste
 
 ```yaml
 - name: Run tests with outbound network isolation
-  uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
+  uses: buildcage/isolated-run@1c9299a00ef0a3c2678515afd173d06f8cba798f # v1.0.1
   with:
     proxy_mode: restrict # Block every destination except the ones you allow
     allowed_https_rules: |
@@ -143,7 +143,7 @@ See [Reference](./docs/reference.md) for the full mechanism.
 - **Can I host this in my own private repository?**
 
   Yes, see the [Self-Hosting Guide](./docs/self-hosting.md). Most projects don't need to, though:
-  pinning the action to a commit SHA (`uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0`) locks in an
+  pinning the action to a commit SHA (`uses: buildcage/isolated-run@1c9299a00ef0a3c2678515afd173d06f8cba798f # v1.0.1`) locks in an
   exact, Sigstore-verified image for that release, which covers most of the same risk self-hosting
   is meant to address, without the overhead of maintaining a fork.
 

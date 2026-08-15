@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Discover required domains with isolated-run
-        uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
+        uses: buildcage/isolated-run@1c9299a00ef0a3c2678515afd173d06f8cba798f # v1.0.1
         with:
           proxy_mode: audit
           # Audit mode allows and logs every connection instead of blocking any
