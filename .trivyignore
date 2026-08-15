@@ -4,3 +4,35 @@
 # once image-scan.yml has actually flagged a finding against this image and
 # the finding has been reviewed as inapplicable — no CVE IDs are
 # pre-suppressed by default.
+
+# --- opt/buildcage/bin/runc ---
+# Go stdlib/x/net CVEs in runc's statically-linked toolchain. All require a
+# TLS/HTTP server or parsing untrusted XML/HTML/DNS — runc here only runs
+# locally against a locally-built config.json (docs/security.md). Not reachable.
+CVE-2026-56862
+CVE-2026-56860
+CVE-2026-56859
+CVE-2026-56858
+CVE-2026-56853
+CVE-2026-39821
+CVE-2026-33818
+CVE-2026-42506
+CVE-2026-42502
+CVE-2026-27141
+CVE-2026-25680
+CVE-2026-46600
+CVE-2026-33814
+CVE-2026-27136
+CVE-2026-25681
+
+# --- opt/buildcage/bin/gen-seccomp-profile ---
+# Same class of Go stdlib CVEs. This binary (docker/gen-seccomp-profile/main.go)
+# takes no input at all — it just prints a hardcoded seccomp profile as JSON.
+# Not reachable.
+CVE-2026-56862
+CVE-2026-56860
+CVE-2026-56859
+CVE-2026-56858
+CVE-2026-46600
+CVE-2026-39821
+CVE-2026-33818
