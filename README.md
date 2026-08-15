@@ -30,11 +30,11 @@ Wrap the command you want to isolate with this action instead of a plain `run:` 
 
 ```yaml
 - name: Discover required domains
-  uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
+  uses: buildcage/isolated-run@1c9299a00ef0a3c2678515afd173d06f8cba798f # v1.0.1
   with:
     proxy_mode: audit # Log every destination, block nothing
     run: |
-      npm install
+      npm ci
       npm test
 ```
 
@@ -45,13 +45,13 @@ ready-to-paste `restrict` mode example with the allowlist already filled in from
 
 ```yaml
 - name: Run tests with outbound network isolation
-  uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
+  uses: buildcage/isolated-run@1c9299a00ef0a3c2678515afd173d06f8cba798f # v1.0.1
   with:
     proxy_mode: restrict # Block every destination except the ones you allow
     allowed_https_rules: |
       registry.npmjs.org:443
     run: |
-      npm install
+      npm ci
       npm test
 ```
 
@@ -70,8 +70,16 @@ Complete workflows: [audit](.github/workflows/example-audit.yml) ·
 - Private registries work like any other host: add the domain to `allowed_https_rules`.
 - The isolated command **cannot use Docker** — the `docker` group is cleared before it runs, so even
   though the Docker socket is visible on the filesystem, the command has no permission to use it.
-- Separate HTTP and HTTPS domains — some services use different hosts for each protocol, and some
-  package managers still download over plain HTTP (e.g. certain Debian mirrors).
+- HTTP and HTTPS have separate inputs — some package managers still download over plain HTTP
+  (e.g. certain Debian mirrors), and those hosts go in `allowed_http_rules`:
+
+  ```yaml
+  allowed_http_rules: deb.debian.org:80
+  allowed_https_rules: registry.npmjs.org:443
+  ```
+
+- One registry often needs several domains. PyPI, for example, uses both `pypi.org` and
+  `files.pythonhosted.org` — the audit report lists every one of them, so start from that.
 
 > [!NOTE]
 > This action sets up its isolation directly on the runner host (via `sudo -n`), so it requires a
@@ -97,7 +105,7 @@ Complete workflows: [audit](.github/workflows/example-audit.yml) ·
 | `fail_on_blocked`     | No       | `true`     | Fail the step if blocked connections are detected (restrict mode only; ignored in audit mode)                                                                                 |
 | `known_blocked_rules` | No       | empty      | Domains expected to be blocked intentionally (wildcard or regex, port required); blocked connections matching these don't fail the step even when `fail_on_blocked` is `true` |
 | `writable`            | No       | empty      | Additional writable directories (newline-separated), on top of `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, and `$RUNNER_TEMP` — see [Filesystem access](#filesystem-access)         |
-| `label`               | No       | empty      | Label appended to this step's Job Summary heading, e.g. `npm install` — useful to tell steps apart when this action is used more than once in the same job                    |
+| `label`               | No       | empty      | Label appended to this step's Job Summary heading, e.g. `npm ci` — useful to tell steps apart when this action is used more than once in the same job                         |
 
 If some blocked connections are expected — a known-noisy dependency, or a domain you are
 deliberately keeping off the allowlist to confirm it stays blocked — list them in
@@ -171,7 +179,7 @@ pattern if you want to restrict by port — a range of addresses can be matched 
 ### Together
 
 ```yaml
-- uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
+- uses: buildcage/isolated-run@1c9299a00ef0a3c2678515afd173d06f8cba798f # v1.0.1
   with:
     proxy_mode: restrict
 
@@ -187,7 +195,7 @@ pattern if you want to restrict by port — a range of addresses can be matched 
       192.168.1.1:443
 
     run: |
-      npm install
+      npm ci
       npm test
 ```
 
@@ -198,7 +206,7 @@ Use the step's own `env:` (not a `with:` input) to pass values into `run` — ex
 anything set via `env:` is available there too:
 
 ```yaml
-- uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
+- uses: buildcage/isolated-run@1c9299a00ef0a3c2678515afd173d06f8cba798f # v1.0.1
   env:
     PR_TITLE: ${{ github.event.pull_request.title }}
   with:
@@ -229,7 +237,7 @@ If `run` needs to write somewhere else — a tool-specific cache directory, for 
 under `writable`:
 
 ```yaml
-- uses: buildcage/isolated-run@ac2e29dec8ab46d717d6b1ba1688d63ff7983ffe # v1.0.0
+- uses: buildcage/isolated-run@1c9299a00ef0a3c2678515afd173d06f8cba798f # v1.0.1
   with:
     writable: |
       /opt/some-tool/cache
