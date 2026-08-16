@@ -1,5 +1,8 @@
-name: Isolated Run
-description: "Run a command with outbound network isolation (allowlist enforcement) — the same proxy-based enforcement Buildcage uses for Docker builds, applied directly to a run: step"
+name: "Buildcage for run steps"
+description: "Restrict outbound network access in a workflow run step to an allowlist of domains"
+branding:
+  icon: terminal
+  color: blue
 
 inputs:
   run:
@@ -42,7 +45,3 @@ runs:
   using: node24
   main: dist/main.cjs
   post: dist/post.cjs
-
-branding:
-  icon: shield
-  color: blue
