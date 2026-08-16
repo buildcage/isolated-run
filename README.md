@@ -15,12 +15,6 @@ See [buildcage.github.io](https://buildcage.github.io/) for what it does and why
 Docker build's `RUN` steps rather than a workflow step, use
 [Buildcage for Docker](https://github.com/buildcage/docker).
 
-> [!IMPORTANT]
-> Buildcage controls _where_ your command can connect, not _what code_ it runs. A malicious package
-> delivered through an allowed domain still runs. Use it as one layer in a defense-in-depth
-> strategy — a last line of defense so that if something slips through your other measures, at
-> least it can't call home. See [Security Details](./docs/security.md) for the full threat model.
-
 ## Usage
 
 Wrap the command you want to isolate with this action instead of a plain `run:` step. Run once in
@@ -93,12 +87,6 @@ Complete workflows: [audit](.github/workflows/example-audit.yml) ·
 > Linux runner with passwordless `sudo` and a working Docker installation — both are the default on
 > GitHub-hosted `ubuntu-*` runners, but lightweight images such as `ubuntu-slim` (a Docker client
 > with no daemon) are not supported.
->
-> The Docker image is always pulled from `ghcr.io/<action-owner>/<action-repo>` and its build
-> provenance is cryptographically verified (keyless signature) before the image is pulled. External
-> image overrides are not supported, to preserve that guarantee. Pin the action to a commit SHA:
-> `uses: buildcage/isolated-run@<40-char-sha> # vX.Y.Z`. Running your own image requires forking the
-> repository — see the [Self-Hosting Guide](./docs/self-hosting.md).
 
 ## Inputs
 
@@ -256,6 +244,13 @@ To disable the read-only restriction entirely, set `writable` to `/`:
 ```yaml
 writable: /
 ```
+
+## Scope
+
+Buildcage controls _where_ your command can connect, not _what code_ it runs. A malicious package
+delivered through an allowed domain still runs. Use it as one layer in a defense-in-depth strategy —
+a last line of defense so that if something slips through your other measures, at least it can't
+call home. See [Security Details](./docs/security.md) for the full threat model.
 
 ## Documentation
 
