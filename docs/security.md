@@ -284,27 +284,30 @@ source commit without requiring an independent rebuild.
 
 ### Verification Limitations
 
-- **Account compromise**: If the repository owner's GitHub account or the repository itself is
-  compromised, an attacker could trigger the release workflow and produce a legitimately-signed
-  malicious image.
-- **Trust in Sigstore infrastructure**: Verification relies on the availability and integrity of
-  the Rekor transparency log and the Fulcio certificate authority. The TUF-backed trust root is
-  fetched at verification time; a network outage will cause the main phase to hard-fail.
-- **TOCTOU window**: The manifest digest is fetched before the bundle is pulled. A highly targeted
-  attack that replaces the registry content in the window between these two steps would still
-  succeed — though such an attack requires compromising the registry itself. Note that the
-  subsequent `docker pull` is digest-pinned (`image@sha256:…`), so there is no TOCTOU between
-  verification and the actual image pull; the residual window is limited to between the
-  manifest-digest fetch and the bundle fetch.
-- **Local/CI self-test bypass**: `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build` compiles a
-  `dist/main.cjs` where a `BUILDCAGE_LOCAL_IMAGE_REF` escape hatch is reachable, used only by this
-  repo's own CI jobs and local development. The bypass logic lives in its own module
-  (`src/core/lib/provenance/local-image-override.ts`), loaded only via a dynamic `import()` gated
-  by this build-time flag; in every normal build (including every published release), rolldown's
-  own module-graph tree-shaking excludes that entire file from the bundle — not just the call to
-  it. A consumer of the published `buildcage/isolated-run@<ref>` action cannot reach it no matter
-  what `env:` they set, since the code is physically absent from what they execute. `unit_test`'s
-  CI job additionally asserts, by inspecting the built file directly, that a normal build never
-  contains a live runtime read of `BUILDCAGE_BUILD_TEST_HOOKS` — guarding against a future
-  refactor silently breaking that guarantee. See
-  [development.md](./development.md#local-development) for details.
+Verification establishes where the image came from. Here is what it leaves uncovered.
+
+- **A signature says who built the image, not what the code does.** It attests that this
+  repository's release workflow built it from the pinned commit — a release published by someone who
+  has taken over that identity verifies just as cleanly as a legitimate one. Two things limit the
+  damage: with a commit-SHA pin, a newly published release cannot reach your workflow until you
+  change the pin yourself, and every signature is recorded in the Rekor transparency log, so an
+  unintended release is discoverable after the fact.
+
+- **Sigstore has to be reachable.** Verification depends on the Rekor transparency log and the
+  Fulcio CA, and fetches the TUF trust root at verification time. An outage there fails the action
+  rather than skipping the check.
+
+- **The registry decides which signed image gets verified.** Resolving the tag yields a manifest
+  digest, and everything after that is bound to it: the bundle is fetched by digest, the verified
+  signature must cover that same digest, and the `docker pull` is digest-pinned. Content substituted
+  at any point after the tag lookup therefore makes verification **fail** rather than falsely pass —
+  there is no time-of-check/time-of-use gap. What remains is the tag lookup itself: an attacker with
+  write access to the registry could repoint the tag, but only at an image genuinely signed for the
+  same pinned commit — in practice, another image from that same release.
+
+- **A build-time test hook exists, but not in what you run.**
+  `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build` produces a `dist/` where a `BUILDCAGE_LOCAL_IMAGE_REF`
+  override can point the action at an unpublished image, used only by this repo's own CI and local
+  development. Tree-shaking drops that module out of every normal build, and a CI check inspects the
+  published `dist/` to confirm it never reads the flag — so no `env:` a consumer sets can reach it.
+  See [development.md](./development.md#local-development).
