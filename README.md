@@ -1,5 +1,7 @@
 # Buildcage for `run:` Steps
 
+![Buildcage](./assets/banner.png)
+
 [![GitHub](https://img.shields.io/badge/GitHub-buildcage%2Fisolated--run-blue?logo=github)](https://github.com/buildcage/isolated-run)
 ![build](https://img.shields.io/github/actions/workflow/status/buildcage/isolated-run/docker-publish.yml)
 ![test](https://img.shields.io/github/actions/workflow/status/buildcage/isolated-run/test-e2e.yml?label=test)
@@ -14,6 +16,17 @@ toolchains set up by earlier steps keep working unmodified.
 See [buildcage.github.io](https://buildcage.github.io/) for what it does and why. To isolate a
 Docker build's `RUN` steps rather than a workflow step, use
 [Buildcage for Docker](https://github.com/buildcage/docker).
+
+## Contents
+
+- [Usage](#usage)
+- [Inputs](#inputs)
+- [Operation modes](#operation-modes)
+- [Rule syntax](#rule-syntax)
+- [Passing values to `run`](#passing-values-to-run)
+- [Filesystem access](#filesystem-access)
+- [Scope](#scope)
+- [Documentation](#documentation)
 
 ## Usage
 
