@@ -3,6 +3,7 @@
 ![Buildcage](./assets/banner.png)
 
 [![GitHub](https://img.shields.io/badge/GitHub-buildcage%2Fisolated--run-blue?logo=github)](https://github.com/buildcage/isolated-run)
+[![Marketplace](https://img.shields.io/badge/marketplace-Buildcage%20for%20run%20steps-blue?logo=github)](https://github.com/marketplace/actions/buildcage-for-run-steps)
 ![build](https://img.shields.io/github/actions/workflow/status/buildcage/isolated-run/docker-publish.yml)
 ![test](https://img.shields.io/github/actions/workflow/status/buildcage/isolated-run/test-e2e.yml?label=test)
 ![license](https://img.shields.io/github/license/buildcage/isolated-run)
