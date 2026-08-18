@@ -27,6 +27,7 @@ Docker build's `RUN` steps rather than a workflow step, use
 - [Passing values to `run`](#passing-values-to-run)
 - [Filesystem access](#filesystem-access)
 - [Scope](#scope)
+- [Hardening](#hardening)
 - [Documentation](#documentation)
 
 ## Usage
@@ -265,6 +266,18 @@ Buildcage controls _where_ your command can connect, not _what code_ it runs. A 
 delivered through an allowed domain still runs. Use it as one layer in a defense-in-depth strategy —
 a last line of defense so that if something slips through your other measures, at least it can't
 call home. See [Security Details](./docs/security.md) for the full threat model.
+
+## Hardening
+
+An allowlist works on domain names, so it cannot stop anything leaving through a service you had to
+allow anyway. That is a structural limit. What it does stop is traffic to a destination that is not
+on the list, and infrastructure an attacker set up is normally not on it, because the command has no
+reason to reach it. That is also the hardest kind of leak to find afterwards.
+
+Buildcage runs against the command you already have, and an allowlist generated from an audit run
+already blocks every destination the audit did not record. Whether to go further depends on what the
+step has access to. [Hardening](./docs/security.md#hardening) is what to look at when it holds
+credentials, personal data, or source you do not publish.
 
 ## Documentation
 
