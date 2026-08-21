@@ -149,6 +149,69 @@ run`'s own process sits between the two, so a single-hop guard wouldn't be enoug
   treated as suspicious rather than an automatic pass), but the effective defense is procedural,
   not technical: don't place an untrusted workflow step immediately around this action.
 
+## Hardening
+
+An allowlist decides which destinations a step can reach. It works on domain names, so it cannot
+tell a legitimate use of an allowed destination from an abusive one. Anything leaving through a
+service you had to allow anyway still leaves. That is a structural limit, not something a better
+rule set fixes.
+
+What it does stop is narrower. Traffic to a destination that is not on the list does not go out, and
+infrastructure an attacker set up is normally not on it, because the command has no reason to reach
+it. That is also the hardest kind of leak to find afterwards, which is why closing it is worth doing
+even though the rest stays open.
+
+An attacker who sends the same data through a service the command already uses stays inside the
+limit above. The rest of this section is about making that set of services smaller. Buildcage runs
+against the command you already have, and an allowlist generated from an audit run already blocks
+every destination the audit did not record. Weigh what follows against what the step has access to.
+
+### Keep each rule as narrow as it can be
+
+An audit run only ever emits the exact `host:port` pairs it observed. Wildcards and `:*` ports come
+from broadening a rule by hand, and each one covers destinations the command never asked for. Where
+a broad rule exists, it is worth checking whether the command can be changed instead.
+
+Pay particular attention to general-purpose destinations: a gist host, object storage, or an API
+that can create repositories. They accept uploads as readily as they serve downloads, which is what
+makes them useful for sending data out.
+
+### Reduce what has to be reachable
+
+Each step carries its own allowlist, so work that needs a wide one can be separated from work that
+does not. Fetching dependencies is usually what puts a package registry on the list:
+
+```yaml
+- name: Install
+  uses: buildcage/isolated-run@<sha>
+  with:
+    allowed_https_rules: registry.npmjs.org:443
+    run: npm ci --ignore-scripts
+
+- name: Build and test
+  uses: buildcage/isolated-run@<sha>
+  with:
+    allowed_https_rules: "" # nothing
+    run: |
+      npm run build
+      npm test
+```
+
+This only helps when fetching does not itself execute dependency code. `--ignore-scripts` makes that
+explicit rather than leaning on npm's default, and it is what keeps the step with the registry and
+the step running third-party code separate. Where fetching does run third-party code, such as a
+`pip install` that builds an sdist or a Cargo build script, the split moves nothing, because the
+code still runs where the network is.
+
+A mirror configured as a read-only pull-through cache serves upstream packages on demand and
+accepts no publishes, so nothing can be uploaded to the destination on your allowlist. Running one
+is a bigger commitment than anything else in this section.
+
+### Keep the rest of your supply chain practice
+
+Pinning versions, lockfiles, review, least-privilege tokens, and a dependency cooldown each cover
+something an allowlist does not. Buildcage is one layer among them, not a replacement for any.
+
 ## Trusting the Image
 
 isolated-run is a security tool — so it's fair to ask: _how do you trust it?_
