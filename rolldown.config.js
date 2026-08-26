@@ -27,11 +27,15 @@ const configs = [
   // BUILDCAGE_TEST_COMPOSE_FILE override as main.ts (see
   // LOCAL_IMAGE_OVERRIDE_ENABLED in src/post.ts), so it needs the same
   // build-time substitution to keep that reachable only in a test build.
-  { input: "src/post.ts", file: "dist/post.cjs", plugins: mainPlugins },
+  // In a BUILDCAGE_BUILD_TEST_HOOKS=1 build, that gate is reachable, so its
+  // dynamic import needs the same codeSplitting: false as main.ts — without
+  // it, rolldown wants a second chunk for the dynamic import, which
+  // conflicts with output.file (single-file mode).
+  { input: "src/post.ts", file: "dist/post.cjs", plugins: mainPlugins, codeSplitting: false },
 ];
 
 export default defineConfig(
-  configs.map(({ input, file, plugins, codeSplitting = true }) => ({
+  configs.map(({ input, file, plugins, codeSplitting }) => ({
     input,
     external: [/^node:/],
     platform: "node",
