@@ -123,6 +123,21 @@ cleanup() {
   # running (e.g. this trap fired from INT/TERM mid-run), so it must run
   # before the network/mount resources below are torn out from under it.
   "$RUNC_PATH" delete -f "$CONTAINER_ID" >/dev/null 2>&1
+  # inspect engine only: for a file-to-file bind mount whose destination
+  # doesn't already exist, runc creates an empty placeholder file to mount
+  # onto -- ordinarily harmless (a disposable layer), but ROOTFS_BIND_DIR is
+  # a bind-mount of the real host `/`, so that placeholder is a real write to
+  # the host filesystem that unmounting alone does not undo (see
+  # sandbox/ca-trust.ts's OWN_CA_DESTINATION). Removed here, after the mount
+  # that covered it is gone (runc delete, above) but before the rootfs bind
+  # itself is torn down, so this path is still reachable through
+  # ROOTFS_BIND_DIR. `-s` (non-empty) guards against ever deleting real
+  # content: our own mount never writes through to the underlying file, so
+  # anything we created here is still exactly 0 bytes; a non-empty file at
+  # this path predates this run and is left alone. A no-op (silently) for
+  # every other engine, which never mounts anything here at all.
+  BUILDCAGE_CA_PLACEHOLDER="${ROOTFS_BIND_DIR}/etc/buildcage-ca.pem"
+  [ -s "$BUILDCAGE_CA_PLACEHOLDER" ] || rm -f "$BUILDCAGE_CA_PLACEHOLDER" 2>/dev/null
   # Not silenced: a failed unmount here (e.g. EBUSY from a lingering
   # process) leaves ROOTFS_BIND_DIR -- a bind-mount of the entire host
   # filesystem -- still live, so it's worth surfacing even though

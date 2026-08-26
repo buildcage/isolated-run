@@ -19,11 +19,20 @@ import type { MountEntry } from "./types.ts";
  * Instead, the two files below are written into this run's own scratch
  * directory and mounted *over* the sandbox's own view of the relevant
  * paths (see caTrustAdditions / buildOciConfig) -- a mount-namespace-scoped
- * overlay, not a host write. Nothing needs to be undone afterward:
- * run-isolated.sh's `umount -R` (and the scratch dir's own cleanup) removes
- * both, along with the rest of the rootfs bind-mount, when the step ends.
- * The real host files these paths would otherwise resolve to are never
- * touched.
+ * overlay, not a host write. The *mount* itself needs nothing undone
+ * afterward: run-isolated.sh's `umount -R` (and the scratch dir's own
+ * cleanup) removes it, along with the rest of the rootfs bind-mount, when
+ * the step ends, and the real host file SYSTEM_CA_DESTINATION resolves to is
+ * never touched (it already exists, so runc mounts straight over it).
+ *
+ * OWN_CA_DESTINATION is the one exception: nothing exists at that path
+ * ahead of time, so runc itself creates an empty placeholder file there to
+ * have something to mount onto -- ordinarily harmless on a disposable
+ * layer, but ROOTFS_BIND_DIR is a bind-mount of the real host `/`, so that
+ * placeholder is a real (if empty) write to the host filesystem that
+ * unmounting alone does not undo. run-isolated.sh's cleanup() removes it
+ * explicitly, once the mount covering it is gone but before the rootfs
+ * bind-mount itself is torn down.
  */
 export interface CaTrustFiles {
   /** A CA-only file, mounted at OWN_CA_DESTINATION -- for variables that add
@@ -49,7 +58,9 @@ const SYSTEM_CA_CANDIDATES = [
   "/etc/ssl/cert.pem", // Alpine
 ];
 
-/** Where the two files above are mounted inside the sandbox. */
+/** Where the two files above are mounted inside the sandbox. Changing this
+ *  value must stay in sync with run-isolated.sh's own BUILDCAGE_CA_PLACEHOLDER
+ *  (its cleanup() targets this exact path -- see the module doc comment). */
 export const OWN_CA_DESTINATION = "/etc/buildcage-ca.pem";
 export const SYSTEM_CA_DESTINATION = SYSTEM_CA_CANDIDATES[0];
 

@@ -22,6 +22,10 @@ set -uo pipefail
 
 FAILURES=0
 S="curl -sS --max-time 10"
+# Deliberately unquoted here: $C is expanded unquoted below (word-split into
+# argv), so a literal quote around %{http_code} would become part of the
+# argument itself instead of being stripped -- see the direct curl calls
+# further down, where it's a single literal invocation and quoting is correct.
 C="curl -sS -o /dev/null -w %{http_code} --max-time 10"
 
 check_ok() {
@@ -68,7 +72,7 @@ check_status "GET /public/../private/secret" "$CODE" "403"
 echo "=== [Traversal, encoded] ==="
 for P in "%2e%2e/private/secret" "%2e%2e%2fprivate/secret" \
          "%2E%2E%2Fprivate/secret" "..%2fprivate/secret"; do
-  CODE=$(curl -sS -o /dev/null -w %{http_code} --path-as-is --max-time 10 \
+  CODE=$(curl -sS -o /dev/null -w '%{http_code}' --path-as-is --max-time 10 \
          "https://allowed.example.com/public/$P")
   check_status "GET /public/$P" "$CODE" "403"
 done
@@ -76,7 +80,7 @@ done
 echo "=== [Traversal, backslash] ==="
 for P in "x/..%5c../private/secret" "x/%2e%2e%5cprivate/secret" \
          "x/..\\../private/secret" "x/\\..\\../private/secret"; do
-  CODE=$(curl -sS -o /dev/null -w %{http_code} --path-as-is --max-time 10 \
+  CODE=$(curl -sS -o /dev/null -w '%{http_code}' --path-as-is --max-time 10 \
          "https://allowed.example.com/public/$P")
   check_status "GET /public/$P" "$CODE" "403"
 done
