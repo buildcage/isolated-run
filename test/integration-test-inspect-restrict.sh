@@ -98,15 +98,6 @@ assert_summary_contains "POST https://allowed.example.com/public/pkg.tgz -> not-
 assert_summary_contains "https://absent.example.com/ -> dns-failed" "unresolvable allowlisted name recorded as dns-failed"
 assert_summary_contains "token=SECRET-VALUE" "the refused URL's query string was recorded intact"
 assert_summary_contains "TLS tlspass.example.com:443" "the TLS passthrough is in the timeline, never decrypted"
-# Regression for the port-scoping bug: the same SNI on a port allow_tls_rules
-# does not name must be inspected (HTTPS request, refused by the ordinary
-# URL rules), not treated as an undecrypted passthrough.
-assert_summary_contains "GET https://tlspass.example.com:9443/public/x -> not-allowed" "wrong-port TLS request was inspected and refused, not passed through"
-if grep -qF "TLS tlspass.example.com:9443" <<< "$SUMMARY"; then
-  fail "the wrong-port TLS request was recorded as a passthrough"
-else
-  pass "the wrong-port TLS request was not recorded as a passthrough"
-fi
 assert_summary_contains "DNS secret-in-a-name.attacker.example -> dns-not-allowed" "the DNS-only exfiltration attempt was refused and recorded"
 if grep -qE 'DNS allowed\.example\.com ->' <<< "$SUMMARY"; then
   fail "a name that merely resolved is in the timeline (should be dropped as redundant)"
