@@ -9053,9 +9053,10 @@ function reasonForStatus(status) {
 function actionFor(refused, isAudit) {
 	return refused ? "block" : isAudit ? "audit" : "allow";
 }
+const URL_AUTHORITY = /^https?:\/\/([^/?#]+)/;
 /** The host half of an absolute URL's authority, without its port. */
 function hostOf(url) {
-	let match = /^https?:\/\/([^/?#]+)/.exec(url);
+	let match = URL_AUTHORITY.exec(url);
 	if (!match) return url;
 	let authority = match[1], colon = authority.lastIndexOf(":");
 	return colon > 0 ? authority.slice(0, colon) : authority;
@@ -9179,7 +9180,7 @@ function toHostRow(event) {
 * unlike the explicit engine.
 */
 async function buildInspectReportData(proxyLines, dnsLines, parameters) {
-	let isAudit = parameters.mode === "audit", { events: proxyEvents, startedAt } = await scanInspectLog(proxyLines, isAudit), dnsEvents = await scanInspectDnsLog(dnsLines, isAudit), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), passedRows = [], blockedRows = [];
+	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt }, dnsEvents] = await Promise.all([scanInspectLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), passedRows = [], blockedRows = [];
 	for (let event of timeline) (event.protocol !== "dns" || event.action === "block") && (isRedundantBlockedDns(event, timeline) || (event.action === "block" ? blockedRows : passedRows).push(toHostRow(event)));
 	let blocked = annotateKnownBlocked(aggregate(blockedRows), parameters.knownBlockedRules);
 	return {

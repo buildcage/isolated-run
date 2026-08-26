@@ -23,11 +23,15 @@ const configs = [
     plugins: mainPlugins,
     codeSplitting: false,
   },
-  { input: "src/post.ts", file: "dist/post.cjs" },
+  // Also gated: post.ts's own crash-fallback cleanup reads the same
+  // BUILDCAGE_TEST_COMPOSE_FILE override as main.ts (see
+  // LOCAL_IMAGE_OVERRIDE_ENABLED in src/post.ts), so it needs the same
+  // build-time substitution to keep that reachable only in a test build.
+  { input: "src/post.ts", file: "dist/post.cjs", plugins: mainPlugins },
 ];
 
 export default defineConfig(
-  configs.map(({ input, file, plugins = [], codeSplitting = true }) => ({
+  configs.map(({ input, file, plugins, codeSplitting = true }) => ({
     input,
     external: [/^node:/],
     platform: "node",
