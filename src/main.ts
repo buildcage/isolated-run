@@ -41,7 +41,7 @@ import { applyOutcomeAnnotation } from "#core/lib/report/outcome/annotate.ts";
 export { buildACLRules };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const composeFile = join(__dirname, "../docker/compose.action.yaml");
+const defaultComposeFile = join(__dirname, "../docker/compose.action.yaml");
 
 // Gates a local-image override used only by this repo's own CI/dev testing
 // (see the test_sandbox_* jobs in .github/workflows/test-e2e.yml and
@@ -360,6 +360,7 @@ async function main(): Promise<void> {
   const { imageRef, pullPolicy } =
     localOverride ?? (await resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }));
   console.log(`buildcage: proxy image: ${imageRef}`);
+  const composeFile = localOverride?.composeFile ?? defaultComposeFile;
 
   const rules = buildACLRules({
     httpsRulesInput: core.getInput("allowed_https_rules"),

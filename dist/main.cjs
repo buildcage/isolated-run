@@ -9250,7 +9250,7 @@ function applyOutcomeAnnotation(annotation, { level, message, shouldFail }) {
 }
 //#endregion
 //#region src/main.ts
-const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), composeFile = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml");
+const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), defaultComposeFile = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml");
 /**
 * Verifies image provenance and resolves the digest-pinned image ref for
 * isolated-run's (buildkitd-less) proxy image.
@@ -9425,7 +9425,7 @@ async function main() {
 		proxyEngine
 	});
 	console.log(`buildcage: proxy image: ${imageRef}`);
-	let rules = buildACLRules({
+	let composeFile = defaultComposeFile, rules = buildACLRules({
 		httpsRulesInput: getInput("allowed_https_rules"),
 		httpRulesInput: getInput("allowed_http_rules"),
 		ipRulesInput: getInput("allowed_ip_rules")

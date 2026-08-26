@@ -178,6 +178,88 @@ jobs:
       # No cleanup step: the action stops its own proxy container in its
       # finally block.
 
+  # One representative case through the real action wrapper, against real
+  # internet hosts (no fixture network) -- proves proxy_engine: inspect wiring
+  # end-to-end: engine selection, method/path enforcement via
+  # allowed_url_rules, TLS passthrough via allow_tls_rules, and CA trust (a
+  # plain https GET succeeding with no --insecure, despite the proxy
+  # terminating TLS). Deeper scenario coverage (SSRF/forged-Host/DNS
+  # non-leak/wildcard host+path/CA residue) lives in
+  # test/integration-test-inspect-restrict.sh, which needs a fixture network
+  # this job deliberately does not set up.
+  test_sandbox_inspect_enforcement:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    name: "e2e: test (sandbox, inspect engine)"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-vp
+
+      - name: Build local inspect-engine proxy image
+        env:
+          PROXY_ENGINE: inspect
+        run: docker compose build proxy
+
+      - name: Resolve local image ref
+        id: local_image
+        env:
+          PROXY_ENGINE: inspect
+        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild the action with the local-image test hook enabled
+        env:
+          BUILDCAGE_BUILD_TEST_HOOKS: "1"
+        run: vp run build
+
+      - name: "Run an isolated command via the real action (proxy_engine: inspect)"
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-inspect-summary.md
+        with:
+          proxy_engine: inspect
+          allowed_url_rules: "GET|HEAD https://example.com/**"
+          allow_tls_rules: "github.com:443"
+          # Blocked connections below are expected, not a failure.
+          fail_on_blocked: false
+          run: |
+            echo "=== URL-allowed host, over TLS the proxy terminated (proves CA trust) ==="
+            curl -fsS --max-time 10 https://example.com/ > /dev/null
+
+            echo "=== method outside the rule must be refused ==="
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -X POST https://example.com/)
+            if [ "$CODE" != "403" ]; then
+              echo "UNEXPECTED: POST https://example.com/ returned $CODE, not 403"
+              exit 1
+            fi
+
+            echo "=== host outside allowed_url_rules must be refused ==="
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://neverssl.com/)
+            if [ "$CODE" != "403" ]; then
+              echo "UNEXPECTED: https://neverssl.com/ returned $CODE, not 403"
+              exit 1
+            fi
+
+            echo "=== allow_tls_rules host: passed through undecrypted, real cert visible ==="
+            curl -fsS --max-time 10 https://github.com/ > /dev/null
+
+      - name: Verify the sandbox report contains the expected allowed/blocked entries
+        if: always()
+        env:
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-inspect-summary.md
+        run: ./test/assert-sandbox-inspect.sh
+
+      # No cleanup step: the action stops its own proxy container in its
+      # finally block.
+
   # fail_on_blocked defaults to true and should fail on a blocked
   # connection; known_blocked_rules should exempt a matching one. Both are
   # unit-tested at the logic level — this proves the wiring end-to-end,
@@ -346,6 +428,7 @@ jobs:
         changes,
         test_sandbox_audit_mode,
         test_sandbox_enforcement,
+        test_sandbox_inspect_enforcement,
         test_sandbox_fail_on_blocked,
         test_sandbox_concurrency,
       ]
