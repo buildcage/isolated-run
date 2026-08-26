@@ -7896,6 +7896,46 @@ function withScratchDir(fn, containerName) {
 	}
 }
 //#endregion
+//#region src/lib/sandbox/ca-trust.ts
+const SYSTEM_CA_CANDIDATES = [
+	"/etc/ssl/certs/ca-certificates.crt",
+	"/etc/pki/tls/certs/ca-bundle.crt",
+	"/etc/ssl/ca-bundle.pem",
+	"/etc/pki/tls/cacert.pem",
+	"/etc/ssl/cert.pem"
+], OWN_CA_DESTINATION = "/etc/buildcage-ca.pem", SYSTEM_CA_DESTINATION = SYSTEM_CA_CANDIDATES[0], POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_STORE = [
+	"REQUESTS_CA_BUNDLE",
+	"PIP_CERT",
+	"SSL_CERT_FILE"
+];
+/**
+* The extra mounts and env vars buildOciConfig should add on top of the
+* step's own, so the sandboxed process trusts the proxy's CA -- see the
+* module doc comment for why these are mounts, not host writes.
+*/
+function caTrustAdditions(files, env) {
+	let mounts = [{
+		destination: OWN_CA_DESTINATION,
+		type: "none",
+		source: files.ownCaPath,
+		options: ["rbind", "ro"]
+	}], extraEnv = {};
+	for (let name of POINT_AT_OWN_CA) env[name] || (extraEnv[name] = OWN_CA_DESTINATION);
+	if (files.systemCaPath) {
+		mounts.push({
+			destination: SYSTEM_CA_DESTINATION,
+			type: "none",
+			source: files.systemCaPath,
+			options: ["rbind", "ro"]
+		});
+		for (let name of POINT_AT_SYSTEM_STORE) env[name] || (extraEnv[name] = SYSTEM_CA_DESTINATION);
+	}
+	return {
+		mounts,
+		env: extraEnv
+	};
+}
+//#endregion
 //#region scripts/extra-masked-proc-paths.json
 var extra_masked_proc_paths_default = [
 	"/proc/kallsyms",
@@ -7985,13 +8025,17 @@ function assertScratchBaseNotWritable(writableDirs) {
 	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
 	if (overlapping) throw Error(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
 }
-function buildOciConfig(baseSpec, { identity, writable, runtime, env }) {
-	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, scriptPath, hostMounts = [] } = runtime, disableReadonly = writablePaths.includes("/"), mounts = [...baseSpec.mounts, {
-		destination: "/etc/resolv.conf",
-		type: "none",
-		source: resolvConfPath,
-		options: ["rbind", "ro"]
-	}], writableDirs = [...new Set([
+function buildOciConfig(baseSpec, { identity, writable, runtime, env, caTrust }) {
+	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, scriptPath, hostMounts = [] } = runtime, disableReadonly = writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, mounts = [
+		...baseSpec.mounts,
+		{
+			destination: "/etc/resolv.conf",
+			type: "none",
+			source: resolvConfPath,
+			options: ["rbind", "ro"]
+		},
+		...caAdditions?.mounts ?? []
+	], writableDirs = [...new Set([
 		workdir,
 		home,
 		"/tmp",
@@ -8031,7 +8075,10 @@ function buildOciConfig(baseSpec, { identity, writable, runtime, env }) {
 				"--",
 				scriptPath
 			],
-			env: Object.entries(env).filter(([, v]) => v !== void 0).map(([k, v]) => `${k}=${v}`),
+			env: Object.entries({
+				...env,
+				...caAdditions?.env
+			}).filter(([, v]) => v !== void 0).map(([k, v]) => `${k}=${v}`),
 			cwd: workdir || "/",
 			capabilities: {
 				bounding: [],

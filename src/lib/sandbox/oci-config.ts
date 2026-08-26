@@ -2,6 +2,7 @@ import { writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { HasMounts, OciSpec, BuiltOciSpec, HostMount } from "./types.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
+import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
 // Sensitive /proc paths masked with /dev/null. runc's own `runc spec`
 // default already masks /proc/kcore, /proc/keys, and /proc/timer_list
 // (among others) and leaves /proc/sysrq-trigger merely read-only —
@@ -151,7 +152,9 @@ function assertScratchBaseNotWritable(writableDirs: string[]): void {
  * - process.capabilities: fully cleared (all five sets empty) plus
  *   noNewPrivileges — runc applies this natively, no setpriv needed.
  * - process.env: the step's real environment, replacing runc spec's
- *   invented PATH/TERM defaults.
+ *   invented PATH/TERM defaults, plus (inspect engine only, when `caTrust`
+ *   is given) the CA-trust env vars a tool reads that were left unset --
+ *   see ca-trust.ts.
  * - linux.seccomp: the Docker-default-profile-derived filter (see
  *   gen-seccomp-profile), resolved against this same empty capability
  *   set.
@@ -191,11 +194,16 @@ export interface BuildOciConfigOptions {
   writable: WritablePolicy;
   runtime: SandboxRuntimeWiring;
   env: NodeJS.ProcessEnv;
+  /** inspect engine only: the proxy's CA, mounted in rather than written to
+   *  the real host filesystem -- see ca-trust.ts. Omitted entirely for the
+   *  transparent engine, which never terminates TLS and so has no CA to
+   *  distribute. */
+  caTrust?: CaTrustFiles;
 }
 
 export function buildOciConfig(
   baseSpec: OciSpec,
-  { identity, writable, runtime, env }: BuildOciConfigOptions,
+  { identity, writable, runtime, env, caTrust }: BuildOciConfigOptions,
 ): BuiltOciSpec {
   const { uid, gid } = identity;
   const { workdir, home, runnerTemp, writablePaths = [] } = writable;
@@ -209,6 +217,7 @@ export function buildOciConfig(
   } = runtime;
   const disableReadonly = writablePaths.includes("/");
 
+  const caAdditions = caTrust ? caTrustAdditions(caTrust, env) : undefined;
   const mounts = [
     ...baseSpec.mounts,
     {
@@ -217,6 +226,7 @@ export function buildOciConfig(
       source: resolvConfPath,
       options: ["rbind", "ro"],
     },
+    ...(caAdditions?.mounts ?? []),
   ];
   // Paths kept writable on top of the read-only root. RUNNER_TEMP is included
   // because many actions/tools write there and it isn't always under $HOME
@@ -279,7 +289,7 @@ export function buildOciConfig(
       // and no_new_privs are already applied by runc itself (above/below)
       // before this execs.
       args: [resolveSetprivPath(), "--pdeathsig=KILL", "--", scriptPath],
-      env: Object.entries(env)
+      env: Object.entries({ ...env, ...caAdditions?.env })
         .filter(([, v]) => v !== undefined)
         .map(([k, v]) => `${k}=${v}`),
       cwd: workdir || "/",
