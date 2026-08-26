@@ -45,7 +45,6 @@ EXTERNAL_RESOLVER="10.200.0.53" \
 INPUT_PROXY_ENGINE="inspect" \
 INPUT_PROXY_MODE="audit" \
 INPUT_RUN="
-set -uo pipefail
 S='curl -sS --max-time 10'
 \$S https://allowed.example.com/public/pkg.tgz
 \$S -X POST https://api.example.com/v1/thing
