@@ -17,7 +17,7 @@ The action's own isolation mechanism (`run-isolated.sh`) uses Linux-only primiti
 PID/netns via `/proc` — close enough to the real "runner host + separate proxy container"
 arrangement for day-to-day iteration, though it can't validate the container-boundary parts of
 production (see [Action Internals](#action-internals) below). `runc` and `gen-seccomp-profile` are
-built directly into the dev-loop image (mirroring `docker/Dockerfile`) rather than
+built directly into the dev-loop image (mirroring `docker/transparent/Dockerfile`) rather than
 `docker cp`-extracted from the proxy image at runtime, so the dev loop doesn't need the Docker
 socket mounted in just to reach a sibling container; `dev/build-test-bundle.sh` stands in for
 `lib/sandbox/oci-config.ts`'s `buildOciConfig` to build a minimal OCI bundle for the smoke test.
@@ -246,7 +246,7 @@ Fields: `[timestamp] buildcage [status] "domain:port" reason`
 ├── dev/                       # Mac dev-loop-only Dockerfile + smoke-test.sh + build-test-bundle.sh
 │                              # (see docker/compose.sandbox-dev.yaml) — not used in production or CI
 ├── docs/                      # development.md, security.md, self-hosting.md
-├── compose.yaml               # Docker Compose config for local dev (builds docker/Dockerfile;
+├── compose.yaml               # Docker Compose config for local dev (builds docker/transparent/Dockerfile;
 │                              # also what CI's test_sandbox/test_sandbox_* jobs build from)
 └── Makefile                   # Operational commands
 ```
