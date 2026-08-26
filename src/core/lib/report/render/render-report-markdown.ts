@@ -1,5 +1,7 @@
 import { renderHostTable } from "./host-table.ts";
 import { buildRestrictExample } from "./build-example.ts";
+import { renderInspectDetails } from "./inspect-details.ts";
+import { buildInspectRestrictExample } from "./inspect-example.ts";
 import type { ReportData } from "../types.ts";
 
 export interface RenderReportMarkdownOptions {
@@ -10,9 +12,10 @@ export interface RenderReportMarkdownOptions {
   runCommand?: string;
 }
 
-/** isolated-run's proxy image always produces transparent-shaped data (see
- *  ../types.ts) — no explicit-engine branch here, unlike
- *  buildcage/docker's shared renderer. */
+/** Branches on `report.engine` rather than being duplicated per engine, same
+ *  as buildcage/docker's shared renderer — but there is no explicit-engine
+ *  branch here, since isolated-run's proxy image never produces
+ *  buildkitd/vertex logs (see ../types.ts). */
 export function renderReportMarkdown(
   report: ReportData,
   actionRepo: string,
@@ -29,9 +32,12 @@ export function renderReportMarkdown(
     markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n";
   }
   if (isAudit) {
-    markdown += buildRestrictExample(report.passed, actionRepo, actionRef, {
-      runCommand,
-    });
+    // inspect saw the method and the path of every request, so its example
+    // can be that much narrower than one built from hosts alone.
+    markdown +=
+      report.engine === "inspect"
+        ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, { runCommand })
+        : buildRestrictExample(report.passed, actionRepo, actionRef, { runCommand });
   }
   if (report.blocked.length > 0) {
     if (report.passed.length > 0) markdown += "\n";
@@ -46,10 +52,15 @@ export function renderReportMarkdown(
     markdown += "_(no communication)_\n\n";
   }
 
-  // SNI-based sniffing is how the proxy classifies HTTPS traffic — see
-  // docs/security.md.
-  markdown +=
-    "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n";
+  if (report.engine === "inspect") {
+    markdown += renderInspectDetails(report.timeline, report.startedAt);
+  } else {
+    // SNI-based sniffing is how the proxy classifies HTTPS traffic — see
+    // docs/security.md. inspect terminates TLS instead, so this caveat
+    // doesn't apply there.
+    markdown +=
+      "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n";
+  }
 
   markdown += `\n*Reported by [Buildcage](https://github.com/${actionRepo})*\n`;
   return markdown;

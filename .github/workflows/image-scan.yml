@@ -16,6 +16,15 @@ jobs:
       contents: read
       security-events: write
 
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: transparent
+            dockerfile: docker/transparent/Dockerfile
+          - engine: inspect
+            dockerfile: docker/inspect/Dockerfile
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,33 +42,34 @@ jobs:
           DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
-          file: docker/Dockerfile
+          file: ${{ matrix.dockerfile }}
           load: true
-          tags: isolated-run-proxy:scan
+          tags: isolated-run-${{ matrix.engine }}:scan
 
       - name: Scan image with Trivy
         if: github.ref == 'refs/heads/main'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: isolated-run-proxy:scan
+          image-ref: isolated-run-${{ matrix.engine }}:scan
           ignore-unfixed: true
           trivyignores: .trivyignore
           scanners: vuln
           format: sarif
-          output: trivy-results.sarif
+          output: trivy-results-${{ matrix.engine }}.sarif
           severity: CRITICAL,HIGH
 
       - name: Upload Trivy scan results to GitHub Security
         if: github.ref == 'refs/heads/main'
         uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
-          sarif_file: trivy-results.sarif
+          sarif_file: trivy-results-${{ matrix.engine }}.sarif
+          category: ${{ matrix.engine }}
 
       - name: Scan image with Trivy
         if: github.ref != 'refs/heads/main'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: isolated-run-proxy:scan
+          image-ref: isolated-run-${{ matrix.engine }}:scan
           ignore-unfixed: true
           trivyignores: .trivyignore
           scanners: vuln

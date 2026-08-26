@@ -1,6 +1,7 @@
 import { describe, it, expect, reportResults } from "#core/lib/test/test-shim.ts";
 import { renderReportMarkdown } from "./render-report-markdown.ts";
-import type { GenReportParameters, TransparentReportData } from "../types.ts";
+import type { GenReportParameters, TransparentReportData, InspectReportData } from "../types.ts";
+import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
 function params(overrides: Partial<GenReportParameters> = {}): GenReportParameters {
   return {
@@ -142,6 +143,57 @@ describe("renderReportMarkdown", () => {
       "v1",
     );
     assertNotMatch(md, /Expected/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// inspect: no vertex/buildkitd log here (unlike buildcage/docker's explicit
+// engine), so it only ever needs the branch below, not a discriminated
+// three-way split.
+// ---------------------------------------------------------------------------
+describe("renderReportMarkdown — inspect", () => {
+  const t = 1787471975;
+  const timeline: TrafficEvent[] = [
+    {
+      time: t,
+      action: "allow",
+      protocol: "https",
+      host: "good.com",
+      port: 443,
+      method: "GET",
+      url: "https://good.com/pkg",
+      status: 200,
+      bytes: 1,
+    },
+  ];
+  const base: InspectReportData = {
+    engine: "inspect",
+    parameters: params(),
+    passed: [],
+    blocked: [],
+    blockedCount: 0,
+    logLooksPlausible: true,
+    timeline: [],
+    startedAt: t,
+  };
+
+  it("renders Communication details instead of the SNI footnote", () => {
+    const md = renderReportMarkdown({ ...base, timeline }, "buildcage/isolated-run", "v1");
+    expect(md).toMatch(/Communication details/);
+    assertNotMatch(md, /based on the Host header/);
+  });
+
+  it("builds the audit-mode example from the timeline, method and path included", () => {
+    const md = renderReportMarkdown(
+      { ...base, parameters: params({ mode: "audit" }), timeline },
+      "buildcage/isolated-run",
+      "v1",
+      { runCommand: "npm install" },
+    );
+    expect(md).toMatch(/proxy_engine: inspect/);
+    expect(md).toMatch(/allowed_url_rules: \|/);
+    expect(md).toMatch(/GET https:\/\/good\.com\/pkg/);
+    expect(md).toMatch(/run: \|\n\s+npm install/);
   });
 });
 

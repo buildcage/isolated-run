@@ -8,7 +8,7 @@ services:
     container_name: ${PROXY_CONTAINER_NAME:-buildcage-proxy}
     build:
       context: .
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/${PROXY_ENGINE:-transparent}/Dockerfile
     cap_add:
       - NET_ADMIN
     environment:
@@ -16,5 +16,8 @@ services:
       - ALLOWED_HTTPS_RULES=${ALLOWED_HTTPS_RULES:-}
       - ALLOWED_HTTP_RULES=${ALLOWED_HTTP_RULES:-}
       - ALLOWED_IP_RULES=${ALLOWED_IP_RULES:-}
+      # inspect only: it is the one engine that can see a method or a path.
+      - ALLOWED_URL_RULES=${ALLOWED_URL_RULES:-}
+      - ALLOW_TLS_RULES=${ALLOW_TLS_RULES:-}
       - EXTERNAL_RESOLVER=${EXTERNAL_RESOLVER:-}
     restart: unless-stopped

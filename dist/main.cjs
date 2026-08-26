@@ -7371,13 +7371,17 @@ async function verifyBundle(bundleJson, options, expectedDigest) {
 //#endregion
 //#region src/core/lib/provenance/image-tag.ts
 /**
-* Convert an action ref into the Docker image tag. Unlike buildcage/docker
-* (which publishes transparent/explicit engines as suffixed tags under one
-* shared image repository), isolated-run publishes a single image, so the
-* tag is always the plain version (e.g. `1.0.0`) — no engine suffix.
+* Convert an action ref into the base Docker image tag, then append the
+* proxy engine suffix for a non-default engine. The `transparent` engine
+* (default) publishes the plain version tag (e.g. `1.0.0`), matching the
+* pre-multi-engine tagging scheme; `inspect` publishes under its own
+* suffix (e.g. `1.0.0-inspect`). Both share the same Sigstore verification
+* identity (same workflow, same git ref) — only the published Docker tag
+* differs, so this does not affect verify-policy.ts's buildVerifyOptions.
 */
-function imageTagFromRef(actionRef) {
-	return actionRef ? /^[0-9a-f]{40}$/i.test(actionRef) ? `sha-${actionRef.toLowerCase()}` : actionRef.startsWith("v") ? actionRef.slice(1) : actionRef : "";
+function imageTagFromRef(actionRef, proxyEngine = "transparent") {
+	let base;
+	return base = actionRef ? /^[0-9a-f]{40}$/i.test(actionRef) ? `sha-${actionRef.toLowerCase()}` : actionRef.startsWith("v") ? actionRef.slice(1) : actionRef : "", proxyEngine !== "transparent" && proxyEngine !== "" ? `${base}-${proxyEngine}` : base;
 }
 //#endregion
 //#region src/core/lib/provenance/verify-policy.ts
@@ -7429,13 +7433,13 @@ const REGISTRY = "ghcr.io";
 * the error message.
 *
 */
-async function verifyImageDigest({ actionRef, actionRepo }) {
+async function verifyImageDigest({ actionRef, actionRepo, proxyEngine = "transparent" }) {
 	let repoPath = actionRepo.toLowerCase(), verifyOptions = buildVerifyOptions({
 		actionRef,
 		actionRepo
 	});
 	if (!verifyOptions) return null;
-	let tag = imageTagFromRef(actionRef), regToken = await fetchRegistryToken(REGISTRY, repoPath, readGhcrBasicAuth()), digest = await fetchManifestDigest(REGISTRY, repoPath, tag, regToken);
+	let tag = imageTagFromRef(actionRef, proxyEngine), regToken = await fetchRegistryToken(REGISTRY, repoPath, readGhcrBasicAuth()), digest = await fetchManifestDigest(REGISTRY, repoPath, tag, regToken);
 	return await verifyBundle(await fetchBundle(REGISTRY, repoPath, digest, regToken), verifyOptions, digest), digest;
 }
 /** Maps a VerifyImageError (or any other thrown value) to the caller-facing ProvenanceError. */
@@ -7456,12 +7460,13 @@ function requireDigest(digest, actionRef) {
 * of the low-level VerifyImageError, so a caller gets one already-typed
 * error to catch rather than having to translate the result itself.
 */
-async function verifyImageDigestOrThrow({ actionRef, actionRepo }) {
+async function verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine }) {
 	let digest;
 	try {
 		digest = await verifyImageDigest({
 			actionRef,
-			actionRepo
+			actionRepo,
+			proxyEngine
 		});
 	} catch (e) {
 		throw toProvenanceError(e);
@@ -7630,6 +7635,238 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 	};
 }
 //#endregion
+//#region src/core/lib/acl/partial-wildcard.ts
+/**
+* Domain pattern compiler for the `inspect` engine, which allows a wildcard
+* inside a label: `abc*.amazonaws.com`.
+*
+* The shared compiler in wildcard-rules.ts rejects that, requiring a label
+* containing `*` to be exactly `*` or `**`. For the other engines that is only
+* a restriction on how a rule can be phrased. For `inspect` it would be a
+* hazard, because the resolver's scope is generated from these same patterns:
+* a rule unable to say "only names beginning with abc" forces the author to
+* write `*.amazonaws.com` instead, widening what the build is allowed to
+* resolve and therefore what it can leak through a DNS query alone.
+*
+* The wildcard vocabulary is otherwise unchanged, and keeps the same meaning
+* wherever it appears in a label:
+*
+*   `**` — one or more characters, dots included
+*   `*`  — one or more characters, dots excluded
+*   `?`  — a single character, dots excluded
+*
+* Kept separate from wildcard-rules.ts rather than added to it, so widening
+* this grammar cannot change what the `transparent` and `explicit` engines
+* accept.
+*/
+/** Characters that must be escaped to appear literally in a regex. */
+const REGEX_META = /[.+^$()[\]{}|\\]/g, DOMAIN = {
+	across: ".+",
+	within: "[^.]+",
+	single: "[^.]"
+}, PATH = {
+	across: ".*",
+	within: "[^/]+",
+	single: "[^/]"
+};
+/**
+* Compile one atom (a domain label or a path segment), allowing wildcards to
+* sit among literal text.
+*/
+function atomToRegex(atom, vocab) {
+	let out = "";
+	for (let i = 0; i < atom.length; i++) {
+		if (atom[i] === "*") {
+			atom[i + 1] === "*" ? (out += vocab.across, i++) : out += vocab.within;
+			continue;
+		}
+		if (atom[i] === "?") {
+			out += vocab.single;
+			continue;
+		}
+		out += atom[i].replace(REGEX_META, "\\$&");
+	}
+	return out;
+}
+/**
+* Convert a domain pattern to a regex string, without anchors or port.
+*
+* @throws {Error} if a label is empty
+*/
+function domainToRegexPartial(domain) {
+	return domain.split(".").map((label) => {
+		if (label === "") throw Error(`Invalid domain "${domain}": empty label`);
+		return atomToRegex(label, DOMAIN);
+	}).join("\\.");
+}
+/**
+* Convert a path pattern to a regex fragment, without anchors and keeping the
+* leading `/`.
+*
+* Empty segments are allowed, unlike domain labels: a path begins with `/`, so
+* splitting always yields one.
+*/
+function pathToRegexPartial(path) {
+	return path === "" ? "" : path.split("/").map((segment) => atomToRegex(segment, PATH)).join("/");
+}
+/**
+* Convert a `<domain>:<port|*>` pattern to a regex string, without anchors.
+*
+* Mirrors wildcardToRegex's shape so callers can split the result on the last
+* colon to recover the host and port halves.
+*
+* @throws {Error} if the pattern is malformed
+*/
+function wildcardToRegexPartial(pattern) {
+	if (!/^[^:]+:(?:\d+|\*)$/.test(pattern)) throw Error(`Invalid pattern "${pattern}"`);
+	let colonIndex = pattern.lastIndexOf(":"), domain = pattern.slice(0, colonIndex), port = pattern.slice(colonIndex + 1);
+	return `${domainToRegexPartial(domain)}:${port === "*" ? "\\d+" : port}`;
+}
+//#endregion
+//#region src/core/lib/acl/url-rules.ts
+/**
+* URL rule compiler for the squid-based proxy engine.
+*
+* A rule is a method list followed by a URL pattern:
+*
+*   GET https://registry.npmjs.org/@myorg/**
+*   GET|HEAD https://example.com/public/*
+*   * https://internal.example.com
+*
+* Methods may be separated by `|` or `,`, and `*` means any method. The method
+* is required: there is no default, so a rule always states what it permits.
+* Because a rule contains a space, the input is split on NEWLINES, unlike the
+* whitespace-separated host rules in wildcard-rules.ts.
+*
+* The URL pattern extends the host rule syntax to a path, reusing the same
+* wildcard vocabulary applied to path segments instead of dot-separated labels:
+*
+*   `**` — matches across separators
+*   `*`  — one or more characters, not crossing a separator
+*   `?`  — a single character
+*
+* A wildcard may sit among literal text, in a path segment as in a domain
+* label; see partial-wildcard.ts for why that matters.
+*
+* A `~` prefix on the URL passes the remainder through as a raw regex. Every
+* generated regex sticks to syntax valid in both JavaScript and POSIX ERE,
+* because squid matches with regcomp(3): no `(?:` groups and no `\\d`. A `~`
+* rule is the user's own, so it must be written in POSIX ERE too.
+*
+* Path traversal is NOT handled here. `*` cannot cross a `/`, but a segment
+* that IS `..` still matches it, and `**` crosses freely — so the generated
+* squid.conf carries one global guard rejecting `..` path segments. Squid
+* decodes %-escapes before matching, so that guard catches the encoded forms
+* too; see the squid config generator.
+*/
+const DEFAULT_PORT$1 = {
+	http: "80",
+	https: "443"
+};
+/**
+* Parse the method list preceding a URL.
+*
+* @throws {Error} if a method is not a bare token
+*/
+function parseMethods(spec, rule) {
+	let tokens = spec.split(/[|,]/).map((t) => t.trim()).filter(Boolean);
+	if (tokens.length === 0) throw Error(`Invalid rule "${rule}": no method given`);
+	if (tokens.includes("*")) return null;
+	for (let token of tokens) if (!/^[A-Za-z]+$/.test(token)) throw Error(`Invalid method "${token}" in rule "${rule}"`);
+	return [...new Set(tokens.map((t) => t.toUpperCase()))];
+}
+/**
+* Split a URL pattern into scheme, authority (host:port) and path.
+*
+* @throws {Error} if the pattern is not an http(s) URL
+*/
+function splitUrl(url, rule) {
+	let match = /^(https?):\/\/([^/]+)(\/.*)?$/.exec(url);
+	if (!match) throw Error(`Invalid URL in rule "${rule}": expected http:// or https:// followed by a host`);
+	return {
+		scheme: match[1],
+		authority: match[2],
+		path: match[3] ?? ""
+	};
+}
+/**
+* Compile the URL half of a rule to a regex matching the URL squid sees.
+*
+* The port is optional in the pattern: when omitted, or when it is the
+* scheme's default, the generated regex accepts both the bare host and the
+* host with an explicit default port, because clients and proxies disagree
+* about whether to spell it out.
+*
+* A pattern with no path matches any path on that host, which keeps a URL
+* rule without a path equivalent to the host rule it looks like.
+*
+* @throws {Error} if the pattern has invalid URL or wildcard syntax
+*/
+function compileUrl(url, rule) {
+	if (url.startsWith("~")) {
+		let regex = url.slice(1);
+		try {
+			new RegExp(regex);
+		} catch (e) {
+			throw Error(`Invalid regex in rule "${rule}": ${e.message}`);
+		}
+		return {
+			scheme: "https",
+			regex,
+			authorityRegex: null,
+			pathRegex: null
+		};
+	}
+	let { scheme, authority, path } = splitUrl(url, rule), colonIndex = authority.lastIndexOf(":"), hasPort = colonIndex !== -1 && !authority.slice(colonIndex + 1).includes("]"), host = hasPort ? authority.slice(0, colonIndex) : authority, port = hasPort ? authority.slice(colonIndex + 1) : "";
+	if (host === "") throw Error(`Invalid URL in rule "${rule}": missing host`);
+	if (port !== "" && !/^(?:\d+|\*)$/.test(port)) throw Error(`Invalid port in rule "${rule}": "${port}"`);
+	let combined = wildcardToRegexPartial(`${host}:${port === "" ? DEFAULT_PORT$1[scheme] : port}`), hostRegex = combined.slice(0, combined.lastIndexOf(":")), portRegex = port === "" || port === DEFAULT_PORT$1[scheme] ? `(:${DEFAULT_PORT$1[scheme]})?` : port === "*" ? "(:[0-9]+)?" : `:${port}`, pathRegex = path === "" ? "(/.*)?" : pathToRegexPartial(path), authorityRegex = `^${hostRegex}:${port === "*" ? "[0-9]+" : port === "" ? DEFAULT_PORT$1[scheme] : port}$`;
+	return {
+		scheme,
+		regex: `^${scheme}://${hostRegex}${portRegex}${pathRegex}$`,
+		authorityRegex,
+		pathRegex: path === "" ? "^/" : `^${pathRegex}$`
+	};
+}
+/**
+* Compile one rule line: `<methods> <url>`.
+*
+* @throws {Error} if the line is malformed
+*/
+function convertUrlRule(rule) {
+	let trimmed = rule.trim(), separator = /\s+/.exec(trimmed);
+	if (!separator) throw Error(`Invalid rule "${trimmed}": expected a method and a URL, e.g. "GET https://example.com/x"`);
+	let methodSpec = trimmed.slice(0, separator.index), url = trimmed.slice(separator.index + separator[0].length).trim();
+	if (url === "") throw Error(`Invalid rule "${trimmed}": missing URL`);
+	if (/\s/.test(url)) throw Error(`Invalid rule "${trimmed}": URL must not contain whitespace`);
+	let methods = parseMethods(methodSpec, trimmed), { scheme, regex, authorityRegex, pathRegex } = compileUrl(url, trimmed);
+	return {
+		methods,
+		scheme,
+		regex,
+		authorityRegex,
+		pathRegex,
+		raw: trimmed
+	};
+}
+/**
+* Split a rules input into rule lines.
+*
+* Newline-separated, because a rule contains a space between its method list
+* and its URL.
+*/
+function splitUrlRuleLines(rulesInput) {
+	return rulesInput?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) ?? [];
+}
+/**
+* Compile a newline-separated URL rules input.
+*
+* @throws {Error} if any rule is malformed
+*/
+function buildUrlRules(rulesInput) {
+	return splitUrlRuleLines(rulesInput).map(convertUrlRule);
+}
+//#endregion
 //#region src/lib/errors.ts
 var SandboxError = class extends ActionError {};
 //#endregion
@@ -7787,6 +8024,79 @@ function extractRuncBootstrap({ containerName, destDir }) {
 		runcPath,
 		seccompProfile,
 		baseSpec
+	};
+}
+//#endregion
+//#region src/lib/sandbox/ca-trust.ts
+const SYSTEM_CA_CANDIDATES = [
+	"/etc/ssl/certs/ca-certificates.crt",
+	"/etc/pki/tls/certs/ca-bundle.crt",
+	"/etc/ssl/ca-bundle.pem",
+	"/etc/pki/tls/cacert.pem",
+	"/etc/ssl/cert.pem"
+], OWN_CA_DESTINATION = "/etc/buildcage-ca.pem", SYSTEM_CA_DESTINATION = SYSTEM_CA_CANDIDATES[0];
+/**
+* Pull the proxy's own CA (generated once per container by
+* init-inspect-cfg) out of the inspect proxy image, the same way
+* extractRuncBootstrap pulls runc and gen-seccomp-profile: `docker cp`, run
+* once per `run:` step, into this run's own scratch dir.
+*/
+function extractCaCert(containerName, destDir) {
+	let caCertPath = (0, node_path.join)(destDir, "proxy-ca.pem");
+	return (0, node_child_process.execFileSync)("docker", buildDockerCpArgs({
+		containerName,
+		containerPath: "/opt/buildcage/ca.pem",
+		hostPath: caCertPath
+	})), (0, node_fs.chmodSync)(caCertPath, 420), caCertPath;
+}
+/**
+* Write the CA trust files a step's env vars will point at, into `dir`
+* (this run's own scratch directory). `caCertPath` is the proxy's own CA,
+* already `docker cp`'d onto the host -- see extractCaCert.
+*/
+function writeCaTrustFiles(caCertPath, dir) {
+	let ca = (0, node_fs.readFileSync)(caCertPath, "utf8").trimEnd(), ownCaPath = (0, node_path.join)(dir, "buildcage-ca.pem");
+	(0, node_fs.writeFileSync)(ownCaPath, `${ca}\n`, { mode: 420 });
+	let systemStoreSource = SYSTEM_CA_CANDIDATES.find((p) => (0, node_fs.existsSync)(p)), systemCaPath;
+	if (systemStoreSource) {
+		let existing = (0, node_fs.readFileSync)(systemStoreSource, "utf8").trimEnd();
+		systemCaPath = (0, node_path.join)(dir, "system-ca-bundle.pem"), (0, node_fs.writeFileSync)(systemCaPath, `${existing}\n${ca}\n`, { mode: 420 });
+	}
+	return {
+		ownCaPath,
+		systemCaPath
+	};
+}
+const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_STORE = [
+	"REQUESTS_CA_BUNDLE",
+	"PIP_CERT",
+	"SSL_CERT_FILE"
+];
+/**
+* The extra mounts and env vars buildOciConfig should add on top of the
+* step's own, so the sandboxed process trusts the proxy's CA -- see the
+* module doc comment for why these are mounts, not host writes.
+*/
+function caTrustAdditions(files, env) {
+	let mounts = [{
+		destination: OWN_CA_DESTINATION,
+		type: "none",
+		source: files.ownCaPath,
+		options: ["rbind", "ro"]
+	}], extraEnv = {};
+	for (let name of POINT_AT_OWN_CA) env[name] || (extraEnv[name] = OWN_CA_DESTINATION);
+	if (files.systemCaPath) {
+		mounts.push({
+			destination: SYSTEM_CA_DESTINATION,
+			type: "none",
+			source: files.systemCaPath,
+			options: ["rbind", "ro"]
+		});
+		for (let name of POINT_AT_SYSTEM_STORE) env[name] || (extraEnv[name] = SYSTEM_CA_DESTINATION);
+	}
+	return {
+		mounts,
+		env: extraEnv
 	};
 }
 //#endregion
@@ -8018,13 +8328,17 @@ function assertScratchBaseNotWritable(writableDirs) {
 	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
 	if (overlapping) throw Error(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
 }
-function buildOciConfig(baseSpec, { identity, writable, runtime, env }) {
-	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, scriptPath, hostMounts = [] } = runtime, disableReadonly = writablePaths.includes("/"), mounts = [...baseSpec.mounts, {
-		destination: "/etc/resolv.conf",
-		type: "none",
-		source: resolvConfPath,
-		options: ["rbind", "ro"]
-	}], writableDirs = [...new Set([
+function buildOciConfig(baseSpec, { identity, writable, runtime, env, caTrust }) {
+	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, scriptPath, hostMounts = [] } = runtime, disableReadonly = writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, mounts = [
+		...baseSpec.mounts,
+		{
+			destination: "/etc/resolv.conf",
+			type: "none",
+			source: resolvConfPath,
+			options: ["rbind", "ro"]
+		},
+		...caAdditions?.mounts ?? []
+	], writableDirs = [...new Set([
 		workdir,
 		home,
 		"/tmp",
@@ -8064,7 +8378,10 @@ function buildOciConfig(baseSpec, { identity, writable, runtime, env }) {
 				"--",
 				scriptPath
 			],
-			env: Object.entries(env).filter(([, v]) => v !== void 0).map(([k, v]) => `${k}=${v}`),
+			env: Object.entries({
+				...env,
+				...caAdditions?.env
+			}).filter(([, v]) => v !== void 0).map(([k, v]) => `${k}=${v}`),
 			cwd: workdir || "/",
 			capabilities: {
 				bounding: [],
@@ -8400,21 +8717,247 @@ function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand }
 	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += yaml, md += "```\n\n", md += "</details>\n", md;
 }
 //#endregion
+//#region src/core/lib/log/traffic-event.ts
+/**
+* A blocked DNS-only lookup is worth keeping on its own -- it is the sole
+* trace of a name the build never actually connected to -- but once the same
+* host also shows up as a blocked request elsewhere in the timeline, the DNS
+* line says nothing that request does not already say, and only doubles the
+* row.
+*/
+function isRedundantBlockedDns(event, timeline) {
+	return event.protocol !== "dns" || event.action !== "block" ? !1 : timeline.some((e) => e !== event && e.protocol !== "dns" && e.host === event.host && e.action === "block");
+}
+//#endregion
+//#region src/core/lib/report/elapsed-time.ts
+function toParts(elapsedSeconds) {
+	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
+	return {
+		hours: Math.floor(totalMinutes / 60),
+		minutes,
+		seconds,
+		ms
+	};
+}
+function pad(n, width = 2) {
+	return String(n).padStart(width, "0");
+}
+/**
+* MM:SS.mmm, widening to HH:MM:SS.mmm only once elapsed reaches an hour --
+* a build that runs a few minutes never carries a leading "00:" that never
+* changes. Negative input (clock/measurement noise) clamps to zero.
+*/
+function formatElapsedVariable(elapsedSeconds) {
+	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
+	return hours === 0 ? `${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
+}
+//#endregion
+//#region src/core/lib/report/render/inspect-details.ts
+/**
+* Render the communication detail as a collapsed markdown section, or "" if
+* empty. One timeline, allowed and refused interleaved. Name lookups that only
+* resolved are dropped (the request that followed already shows the name); a
+* refused name is kept only while it is its own sole trace, and dropped once
+* a refused request for the same name shows up too.
+*
+* `startedAt` is when the proxy itself started (seconds since the epoch),
+* so every event reads as time elapsed since then rather than an absolute
+* clock reading nobody has a reference point for. Undefined only when the
+* log never showed a startup marker at all (logLooksPlausible false) --
+* that rare case falls back to the old absolute-time rendering rather than
+* inventing a start time it does not have.
+*/
+function renderInspectDetails(timeline, startedAt) {
+	let body = renderInspectDetailsBody(timeline, startedAt);
+	return body ? `\n<details>\n<summary>💬 Communication details</summary>\n\n\`\`\`\n${body}\`\`\`\n\n</details>\n` : "";
+}
+/**
+* The same content with no `<details>`/`<summary>` wrapper and no fenced
+* code block, or "" if there's nothing to show -- for a plain-text
+* destination like the job log, where both would render as literal text
+* rather than the collapsible, syntax-highlighted section they give the
+* Job Summary.
+*/
+function renderInspectDetailsBody(timeline, startedAt) {
+	let shown = timeline.filter((e) => (e.protocol !== "dns" || e.action === "block") && !isRedundantBlockedDns(e, timeline));
+	return shown.length === 0 ? "" : shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n";
+}
+function renderEvent(event, startedAt) {
+	return `${event.action === "block" ? "🚫" : "✅"} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}`;
+}
+/** What was asked for, in the most specific form available. */
+function subject(event) {
+	return event.protocol === "dns" ? `DNS ${event.host}` : event.url === void 0 ? `${event.protocol.toUpperCase()} ${event.host}:${event.port}` : `${event.method} ${event.url}`;
+}
+/** What came of it: a refusal names its reason, anything else its result. */
+function outcome(event) {
+	if (event.action === "block") return event.reason ?? "blocked";
+	let parts = [];
+	return event.status !== void 0 && parts.push(String(event.status)), event.bytes !== void 0 && parts.push(`(${formatBytes(event.bytes)})`), parts.length > 0 ? parts.join(" ") : "resolved";
+}
+/**
+* Elapsed since the proxy started, to the millisecond -- several requests
+* routinely land in the same second, and only this engine's log carries the
+* resolution to tell them apart. Falls back to absolute UTC only when there
+* is no start time to be relative to.
+*/
+function formatTime(epochSeconds, startedAt) {
+	return startedAt === void 0 ? (/* @__PURE__ */ new Date(epochSeconds * 1e3)).toISOString().slice(11, 23) + "Z" : formatElapsedVariable(epochSeconds - startedAt);
+}
+function formatBytes(bytes) {
+	return bytes < 1024 ? `${bytes}B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1048576).toFixed(1)}MB`;
+}
+//#endregion
+//#region src/core/lib/report/render/inspect-example.ts
+/** Ports a URL rule may leave unwritten, because the scheme implies them. */
+const DEFAULT_PORT = {
+	https: "443",
+	http: "80"
+}, METHOD_ORDER = [
+	"GET",
+	"HEAD",
+	"POST",
+	"PUT",
+	"PATCH",
+	"DELETE",
+	"OPTIONS"
+];
+function parseRequest(request) {
+	if (request.url === void 0 || request.method === void 0) return null;
+	let match = /^(https?):\/\/([^/?#]+)([^?#]*)/.exec(request.url);
+	if (!match) return null;
+	let [, scheme, authority, rawPath] = match, colon = authority.lastIndexOf(":"), port = colon > 0 ? authority.slice(colon + 1) : "";
+	return {
+		origin: port && port === DEFAULT_PORT[scheme] ? `${scheme}://${authority.slice(0, colon)}` : `${scheme}://${authority}`,
+		method: request.method,
+		path: rawPath || "/"
+	};
+}
+/** The segments every path shares, from the left. */
+function commonPrefixSegments(paths) {
+	let split = paths.map((p) => p.split("/").filter((s) => s !== ""));
+	if (split.length === 0) return [];
+	let prefix = split[0];
+	for (let segments of split.slice(1)) {
+		let i = 0;
+		for (; i < prefix.length && i < segments.length && prefix[i] === segments[i];) i++;
+		prefix = prefix.slice(0, i);
+	}
+	return prefix;
+}
+/**
+* The path patterns covering one group of observed paths.
+*
+* Usually one. A second is needed when the shared prefix is itself one of the
+* observed paths: `/express/**` does not match `/express`, so a build that
+* fetched both a package's metadata and its tarball needs both spelled out.
+*/
+function pathPatternsFor(paths) {
+	let distinct = [...new Set(paths)].sort();
+	if (distinct.length === 0) return [];
+	if (distinct.length === 1) return distinct;
+	let prefix = commonPrefixSegments(distinct);
+	if (prefix.length === 0) return ["/**"];
+	let base = `/${prefix.join("/")}`, patterns = [`${base}/**`];
+	return distinct.includes(base) && patterns.unshift(base), patterns;
+}
+function sortMethods(methods) {
+	return [...new Set(methods)].sort((a, b) => {
+		let ai = METHOD_ORDER.indexOf(a), bi = METHOD_ORDER.indexOf(b);
+		return ai !== -1 && bi !== -1 ? ai - bi : ai === -1 ? bi === -1 ? a < b ? -1 : +(a > b) : 1 : -1;
+	});
+}
+/**
+* Build the rule lines, one per emitted rule, in a stable order.
+*
+* Grouping is by origin and method first, so a path that only a POST reached
+* cannot become reachable by GET. Groups that end up with the same pattern are
+* then merged back into one rule with a method list, which is what keeps
+* `GET|HEAD` on one line instead of two.
+*/
+function buildUrlRuleLines(requests) {
+	let byOriginMethod = /* @__PURE__ */ new Map();
+	for (let request of requests) {
+		if (request.action === "block") continue;
+		let parsed = parseRequest(request);
+		if (!parsed) continue;
+		let key = `${parsed.origin}\t${parsed.method}`, group = byOriginMethod.get(key);
+		group ? group.paths.push(parsed.path) : byOriginMethod.set(key, {
+			origin: parsed.origin,
+			method: parsed.method,
+			paths: [parsed.path]
+		});
+	}
+	let byPattern = /* @__PURE__ */ new Map();
+	for (let { origin, method, paths } of byOriginMethod.values()) for (let pattern of pathPatternsFor(paths)) {
+		let key = `${origin}\t${pattern}`, entry = byPattern.get(key);
+		entry ? entry.methods.push(method) : byPattern.set(key, {
+			origin,
+			pattern,
+			methods: [method]
+		});
+	}
+	return [...byPattern.values()].sort((a, b) => a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : a.pattern < b.pattern ? -1 : 1).map(({ origin, pattern, methods }) => `${sortMethods(methods).join("|")} ${origin}${pattern}`);
+}
+/**
+* Render the rules as a collapsed markdown section, or "" if nothing was
+* observed.
+*
+* `actionRef` is the ref this action was invoked with. A 40-character SHA is
+* specific to this run and opaque to the reader, so it is shown as a
+* placeholder; a tag is stable and useful as written.
+*/
+function buildInspectRestrictExample(requests, actionRepo, actionRef, { runCommand } = {}) {
+	let lines = buildUrlRuleLines(requests ?? []);
+	if (lines.length === 0) return "";
+	let ref = actionRef && /^[0-9a-f]{40}$/i.test(actionRef) ? "<sha>" : actionRef, yaml = "- name: Start isolated-run in restrict mode\n";
+	if (yaml += `  uses: ${actionRepo}@${ref}\n`, yaml += "  with:\n", runCommand) {
+		yaml += "    run: |\n";
+		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
+	}
+	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: inspect\n", yaml += "    allowed_url_rules: |\n";
+	for (let line of lines) yaml += `      ${line}\n`;
+	let md = "\n<details>\n";
+	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += yaml, md += "```\n\n", md += "These rules permit exactly what this build did, so read them before using them: a URL that\n", md += "carried a version or a date will not match the next run, and anything reached through\n", md += "`allow_tls_rules` or `allowed_ip_rules` is not here, because it was never inspected.\n\n", md += "</details>\n", md;
+}
+//#endregion
 //#region src/core/lib/report/render/render-report-markdown.ts
-/** isolated-run's proxy image always produces transparent-shaped data (see
-*  ../types.ts) — no explicit-engine branch here, unlike
-*  buildcage/docker's shared renderer. */
+/** Branches on `report.engine` rather than being duplicated per engine, same
+*  as buildcage/docker's shared renderer — but there is no explicit-engine
+*  branch here, since isolated-run's proxy image never produces
+*  buildkitd/vertex logs (see ../types.ts). */
 function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", runCommand } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${title} (${report.parameters.mode} mode)\n\n`;
-	return report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += buildRestrictExample(report.passed, actionRepo, actionRef, { runCommand })), report.blocked.length > 0 && (report.passed.length > 0 && (markdown += "\n"), markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(report.blocked, {
+	return report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, { runCommand }) : buildRestrictExample(report.passed, actionRepo, actionRef, { runCommand })), report.blocked.length > 0 && (report.passed.length > 0 && (markdown += "\n"), markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(report.blocked, {
 		showReason: !0,
 		showExpected
-	}) + "\n"), report.passed.length === 0 && report.blocked.length === 0 && (markdown += "_(no communication)_\n\n"), markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n", markdown += `\n*Reported by [Buildcage](https://github.com/${actionRepo})*\n`, markdown;
+	}) + "\n"), report.passed.length === 0 && report.blocked.length === 0 && (markdown += "_(no communication)_\n\n"), report.engine === "inspect" ? markdown += renderInspectDetails(report.timeline, report.startedAt) : markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n", markdown += `\n*Reported by [Buildcage](https://github.com/${actionRepo})*\n`, markdown;
 }
 //#endregion
 //#region src/core/lib/log/aggregate.ts
 function compareAggregated(a, b) {
 	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
+}
+/**
+* Aggregate log entries by (host, port, ruleType, reason) with counts, sorted
+* descending.
+*/
+function aggregate(filtered) {
+	let map = {};
+	for (let e of filtered) {
+		let key = `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
+		map[key] = (map[key] || 0) + 1;
+	}
+	return Object.keys(map).map((key) => {
+		let [host, portStr, ruleType, reason] = key.split("	");
+		return {
+			host,
+			port: portStr,
+			ruleType,
+			reason,
+			count: map[key]
+		};
+	}).sort(compareAggregated);
 }
 /** Streaming counterpart to aggregate(): folds one entry at a time into a
 *  running Map, bounding memory by the number of unique combinations seen
@@ -8491,8 +9034,19 @@ function annotateKnownBlocked(blockedRows, knownBlockedRules) {
 	let matchers = knownBlockedRules.map((rule) => new RegExp(convertRule(rule)));
 	return blockedRows.map((row) => ({
 		...row,
-		expected: matchers.some((re) => re.test(`${row.host}:${row.port}`))
+		expected: matchers.some((re) => re.test(targetOf(row)))
 	}));
+}
+/**
+* What a known_blocked_rules pattern is tested against, normally `host:port`.
+*
+* A row with no port is a refused name, connected to nothing. It is tested as
+* port 0, which `host:*` matches (compiling to `host:\d+`) but `host:443` does
+* not -- right, since no port was involved. Without this a refused name could
+* never be marked expected.
+*/
+function targetOf(row) {
+	return `${row.host}:${row.port === "-" ? "0" : row.port}`;
 }
 //#endregion
 //#region src/core/lib/report/build/transparent.ts
@@ -8512,13 +9066,180 @@ async function buildTransparentReportData(lines, parameters) {
 		logLooksPlausible: hasNonBuildcageContent
 	};
 }
+//#endregion
+//#region src/core/lib/log/inspect.ts
+const REQUEST = /^buildcage (\d+) (https?) (\S+) (\S+) (-?\d+) (\d+) ts=(\S*) dst=(\S+):(\d+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) sni=(\S+) (\d+) ts=(\S*) dst=(\S+):(\d+)$/, DNS = /^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=(\S+?)\.?$/, START = /^buildcage haproxy starting (\d+)$/;
+/**
+* Whether buildcage ended the exchange, rather than an origin answering.
+*
+* The status cannot say: an origin answers 403 or 503 of its own accord too.
+* HAProxy's termination state can: `P` for a deny/reject, `S` for a backend
+* unreachable or unverified, `-` for a relayed response.
+*/
+function isRefusal(terminationState) {
+	return terminationState.startsWith("P") || terminationState.startsWith("S");
+}
+/** Refusal reason, matching the transparent engine's kebab-case vocabulary. */
+function reasonForStatus(status) {
+	return status === 502 ? "dns-failed" : status === 503 ? "origin-unreachable" : "not-allowed";
+}
+function actionFor(refused, isAudit) {
+	return refused ? "block" : isAudit ? "audit" : "allow";
+}
+const URL_AUTHORITY = /^https?:\/\/([^/?#]+)/;
+/** The host half of an absolute URL's authority, without its port. */
+function hostOf(url) {
+	let match = URL_AUTHORITY.exec(url);
+	if (!match) return url;
+	let authority = match[1], colon = authority.lastIndexOf(":");
+	return colon > 0 ? authority.slice(0, colon) : authority;
+}
+/** Parse one proxy-log line, or null if it is not one of ours. */
+function parseProxyLine(line, isAudit) {
+	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
+	if (request) {
+		let refused = isRefusal(request[7]), event = {
+			time: Number(request[1]) / 1e3,
+			action: actionFor(refused, isAudit),
+			protocol: request[2],
+			host: hostOf(request[4]),
+			port: Number(request[9]),
+			method: request[3],
+			url: request[4],
+			destination: `${request[8]}:${request[9]}`
+		};
+		return refused ? event.reason = reasonForStatus(Number(request[5])) : (event.status = Number(request[5]), event.bytes = Number(request[6])), event;
+	}
+	let pass = PASSTHROUGH.exec(trimmed);
+	if (pass) {
+		let refused = isRefusal(pass[5]), sni = pass[3], event = {
+			time: Number(pass[1]) / 1e3,
+			action: actionFor(refused, isAudit),
+			protocol: pass[2],
+			host: sni === "-" ? pass[6] : sni,
+			port: Number(pass[7]),
+			destination: `${pass[6]}:${pass[7]}`
+		};
+		return refused ? event.reason = "not-allowed" : event.bytes = Number(pass[4]), event;
+	}
+	return null;
+}
+/**
+* Read the proxy log once, collecting both the events and the startup marker.
+*
+* The report needs both, and the log arrives as a stream that can only be
+* consumed once, so they cannot be two separate passes. `for await` also
+* accepts a plain array, so callers with the lines already in memory pass one.
+*/
+async function scanInspectLog(lines, isAudit = !1) {
+	let events = [], startedAt;
+	for await (let line of lines) {
+		let event = parseProxyLine(line, isAudit);
+		if (event) {
+			events.push(event);
+			continue;
+		}
+		if (startedAt === void 0) {
+			let match = START.exec(line.trim());
+			match && (startedAt = Number(match[1]) / 1e3);
+		}
+	}
+	return {
+		events,
+		startedAt
+	};
+}
+/**
+* Parse the resolver log into one event per name.
+*
+* A name is asked about repeatedly, and for A and AAAA separately, so only the
+* first mention of each is kept: the report is about which names a build
+* reached for, not how many times a resolver was consulted. An allowed answer
+* is decisive, so an AAAA refusal cannot mask an A that resolved.
+*
+* The time comes from s6-log rather than from CoreDNS, whose log plugin has no
+* timestamp replacement of its own. CoreDNS lowercases the name it logs, so a
+* name that carried information in its capitalisation is recorded without it.
+*/
+async function scanInspectDnsLog(lines, isAudit = !1) {
+	let seen = /* @__PURE__ */ new Map();
+	for await (let line of lines) {
+		let match = DNS.exec(line.trim());
+		if (!match) continue;
+		let parsed = Date.parse(`${match[1].replace(" ", "T")}Z`), time = Number.isNaN(parsed) ? 0 : parsed / 1e3, allowed = match[2] === "allowed", existing = seen.get(match[3]);
+		existing ? existing.allowed ||= allowed : seen.set(match[3], {
+			time,
+			allowed
+		});
+	}
+	return [...seen.entries()].map(([host, { time, allowed }]) => {
+		let event = {
+			time,
+			action: actionFor(!allowed, isAudit),
+			protocol: "dns",
+			host
+		};
+		return allowed || (event.reason = "dns-not-allowed"), event;
+	});
+}
+//#endregion
+//#region src/core/lib/report/build/inspect.ts
+/** How a protocol appears in the host tables, matching the rule kind that
+*  would permit it. */
+const RULE_TYPE = {
+	https: "HTTPS",
+	http: "HTTP",
+	tls: "TLS",
+	tcp: "IP",
+	dns: "DNS"
+};
+/** Reduce an event to the host row a rule is written against. A dns event has
+*  no port, having connected to nothing. */
+function toHostRow(event) {
+	return {
+		host: event.host,
+		port: event.port === void 0 ? "-" : String(event.port),
+		ruleType: RULE_TYPE[event.protocol],
+		reason: event.reason ?? "-"
+	};
+}
+/**
+* Build the report data from the proxy and resolver logs. Pure -- the caller
+* fetches both logs and the parameters.
+*
+* The resolver log matters because a refused name never reached the proxy, so
+* a DNS-only exfiltration attempt would otherwise leave no trace. Everything
+* lands in one time-ordered timeline: no event can be attributed to a RUN step,
+* unlike the explicit engine.
+*/
+async function buildInspectReportData(proxyLines, dnsLines, parameters) {
+	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt }, dnsEvents] = await Promise.all([scanInspectLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), passedRows = [], blockedRows = [];
+	for (let event of timeline) (event.protocol !== "dns" || event.action === "block") && (isRedundantBlockedDns(event, timeline) || (event.action === "block" ? blockedRows : passedRows).push(toHostRow(event)));
+	let blocked = annotateKnownBlocked(aggregate(blockedRows), parameters.knownBlockedRules);
+	return {
+		engine: "inspect",
+		parameters,
+		passed: aggregate(passedRows),
+		blocked,
+		blockedCount: blockedRows.length,
+		logLooksPlausible: startedAt !== void 0,
+		startedAt,
+		timeline
+	};
+}
+//#endregion
+//#region src/lib/report.ts
+const HAPROXY_LOG_FILE = "/var/log/haproxy/current";
 /**
 * This action has no version-skew concern of its own (one pinned version
 * end to end, unlike a separately-versioned report action), so it fetches
-* the raw log and calls the shared builder in-process.
+* the raw log(s) and calls the shared builder in-process. Which log(s) to
+* read and which builder to call depends on which proxy image ran --
+* inspect's has a second (CoreDNS) log the transparent image does not.
 */
-function fetchReport(containerName, parameters) {
-	return buildTransparentReportData(createDocker().readFileLines(containerName, "/var/log/haproxy/current"), parameters);
+function fetchReport(containerName, parameters, proxyEngine) {
+	let docker = createDocker();
+	return proxyEngine === "inspect" ? buildInspectReportData(docker.readFileLines(containerName, HAPROXY_LOG_FILE), docker.readFileLines(containerName, "/var/log/coredns/current"), parameters) : buildTransparentReportData(docker.readFileLines(containerName, HAPROXY_LOG_FILE), parameters);
 }
 /**
 * Pure decision + rendering step, kept free of process.env/file I/O so it's
@@ -8563,15 +9284,16 @@ function applyOutcomeAnnotation(annotation, { level, message, shouldFail }) {
 }
 //#endregion
 //#region src/main.ts
-const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), composeFile = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml");
+const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), defaultComposeFile = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml");
 /**
 * Verifies image provenance and resolves the digest-pinned image ref for
 * isolated-run's (buildkitd-less) proxy image.
 */
-async function resolveVerifiedImage({ actionRef, actionRepo }) {
+async function resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }) {
 	let digest = await verifyImageDigestOrThrow({
 		actionRef,
-		actionRepo
+		actionRepo,
+		proxyEngine
 	});
 	return console.log(`Image provenance verified for ref: ${JSON.stringify(actionRef)} (digest ${digest}).`), {
 		imageRef: resolveBuildcageImageRef({
@@ -8595,6 +9317,12 @@ function readKnownBlockedRules(input) {
 */
 function parseWritablePaths(input) {
 	return input?.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) ?? [];
+}
+const ENGINES = ["transparent", "inspect"];
+function resolveProxyEngine(input) {
+	let engine = input?.trim() || "transparent";
+	if (!ENGINES.includes(engine)) throw new SandboxError(`Invalid proxy_engine: ${JSON.stringify(input)}. Must be one of ${ENGINES.join(", ")}.`, "INVALID_PROXY_ENGINE");
+	return engine;
 }
 /**
 * Wraps buildcage's own (non-user) log output in a collapsed
@@ -8651,7 +9379,7 @@ async function stopSandboxProxy({ composeFile, projectName, composeEnv, annotati
 * OCI bundle, and runs the user's command inside it via run-isolated.sh.
 * Returns the isolated command's exit code.
 */
-function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths, env }) {
+function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths, env, proxyEngine }) {
 	let dns = "172.20.0.1";
 	return withScratchDir((dir) => {
 		let runcPath, seccompProfile, baseSpec;
@@ -8662,6 +9390,12 @@ function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths,
 			}));
 		} catch (e) {
 			throw new SandboxError(`Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`, "RUNC_EXTRACT_FAILED");
+		}
+		let caTrust;
+		if (proxyEngine === "inspect") try {
+			caTrust = writeCaTrustFiles(extractCaCert(containerName, dir), dir);
+		} catch (e) {
+			throw new SandboxError(`Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`, "CA_EXTRACT_FAILED");
 		}
 		let workdir = env.GITHUB_WORKSPACE || "", home = env.HOME || "", netnsName = containerName.replace(/^buildcage-proxy-/, "buildcage-sandbox-"), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 		try {
@@ -8685,7 +9419,8 @@ function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths,
 					scriptPath,
 					hostMounts
 				},
-				env
+				env,
+				caTrust
 			});
 		} catch (e) {
 			throw new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
@@ -8716,27 +9451,33 @@ async function writeReportSummary(report, annotation, options) {
 async function main() {
 	let env = process.env, actionRef = env.GITHUB_ACTION_REF || "v1", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = getInput("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
-	checkPasswordlessSudo();
+	let proxyEngine = resolveProxyEngine(getInput("proxy_engine"));
+	console.log(`Proxy engine: ${proxyEngine}`), checkPasswordlessSudo();
 	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), { imageRef, pullPolicy } = await resolveVerifiedImage({
 		actionRef,
-		actionRepo
+		actionRepo,
+		proxyEngine
 	});
 	console.log(`buildcage: proxy image: ${imageRef}`);
-	let rules = buildACLRules({
+	let composeFile = defaultComposeFile, rules = buildACLRules({
 		httpsRulesInput: getInput("allowed_https_rules"),
 		httpRulesInput: getInput("allowed_http_rules"),
 		ipRulesInput: getInput("allowed_ip_rules")
-	}), knownBlockedRules = readKnownBlockedRules(getInput("known_blocked_rules"));
-	console.log("::group::buildcage: Configured ACL Rules"), logRules("HTTPS", rules.httpsRules), logRules("HTTP", rules.httpRules), logRules("IP", rules.ipRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), console.log("::endgroup::");
+	}), knownBlockedRules = readKnownBlockedRules(getInput("known_blocked_rules")), urlRulesInput = getInput("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput("allow_tls_rules")), urlRules = buildUrlRules(urlRulesInput).map((r) => r.raw);
+	if (proxyEngine !== "inspect" && (urlRules.length > 0 || tlsRules.length > 0)) throw new SandboxError(`allowed_url_rules and allow_tls_rules need proxy_engine: inspect. The ${proxyEngine} engine cannot see a method or a path.`, "INVALID_PROXY_ENGINE");
+	console.log("::group::buildcage: Configured ACL Rules"), logRules("HTTPS", rules.httpsRules), logRules("HTTP", rules.httpRules), logRules("IP", rules.ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), console.log("::endgroup::");
 	let writablePaths = parseWritablePaths(getInput("writable")), containerName = generateContainerName(), projectName = deriveProjectName(containerName);
 	env.GITHUB_STATE && (saveState("container_name", containerName), saveState("project_name", projectName));
 	let composeEnv = {
 		...env,
 		PROXY_CONTAINER_NAME: containerName,
 		PROXY_MODE: getInput("proxy_mode") || "restrict",
+		PROXY_ENGINE: proxyEngine,
 		ALLOWED_HTTPS_RULES: rules.httpsRules.join("\n"),
 		ALLOWED_HTTP_RULES: rules.httpRules.join("\n"),
 		ALLOWED_IP_RULES: rules.ipRules.join("\n"),
+		ALLOWED_URL_RULES: urlRules.join("\n"),
+		ALLOW_TLS_RULES: tlsRules.join("\n"),
 		BUILDCAGE_PROXY_IMAGE_REF: imageRef
 	};
 	await startSandboxProxy({
@@ -8754,7 +9495,8 @@ async function main() {
 			proxyPid,
 			runInput,
 			writablePaths,
-			env
+			env,
+			proxyEngine
 		});
 	} finally {
 		try {
@@ -8764,7 +9506,7 @@ async function main() {
 				allowedHttpRules: rules.httpRules,
 				allowedIpRules: rules.ipRules,
 				knownBlockedRules
-			}), failOnBlocked;
+			}, proxyEngine), failOnBlocked;
 			try {
 				failOnBlocked = getBooleanInput("fail_on_blocked");
 			} catch {
@@ -8791,4 +9533,4 @@ async function main() {
 }
 process.argv[1] === (0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href) && main().catch((err) => {
 	err instanceof ActionError ? console.log(`::error::${err.message}`) : console.log(`::error::Unexpected error in sandbox: ${errorMessage(err)}`), process.exit(1);
-}), exports.buildACLRules = buildACLRules, exports.parseWritablePaths = parseWritablePaths, exports.readKnownBlockedRules = readKnownBlockedRules;
+}), exports.buildACLRules = buildACLRules, exports.parseWritablePaths = parseWritablePaths, exports.readKnownBlockedRules = readKnownBlockedRules, exports.resolveProxyEngine = resolveProxyEngine;

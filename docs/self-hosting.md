@@ -26,7 +26,7 @@ Since forking creates a public repository, use **GitHub's import** feature to cr
 
 ## 2. Build and Publish the Docker Image
 
-Your imported repository already contains the **Build and Push Docker Image** workflow (`.github/workflows/docker-publish.yml`). This workflow builds the proxy image from `docker/Dockerfile` and publishes it to your repository's GitHub Container Registry (GHCR), signed.
+Your imported repository already contains the **Build and Push Docker Image** workflow (`.github/workflows/docker-publish.yml`). This workflow builds the proxy image from `docker/transparent/Dockerfile` and publishes it to your repository's GitHub Container Registry (GHCR), signed.
 
 To trigger the build:
 

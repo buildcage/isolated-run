@@ -433,21 +433,28 @@ function scratchDirFor(containerName) {
 }
 //#endregion
 //#region src/post.ts
-const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), containerName = getState("container_name"), projectName = getState("project_name");
+const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), defaultComposeFile = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml"), containerName = getState("container_name"), projectName = getState("project_name");
 if (containerName.startsWith("buildcage-proxy-")) try {
 	let scratchDir = scratchDirFor(containerName);
 	(0, node_fs.existsSync)(scratchDir) && cleanupScratchDir(scratchDir);
 } catch (e) {
 	console.log(`::warning::run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
 }
-containerName && projectName ? (0, node_child_process.execFileSync)("docker", buildComposeDownArgs({
-	composeFile: (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml"),
-	projectName
-}), {
-	stdio: "inherit",
-	env: {
-		...process.env,
-		PROXY_CONTAINER_NAME: containerName
+async function stopProxyContainer() {
+	if (!(containerName && projectName)) {
+		containerName && console.log(`::warning::run post-cleanup: container_name is set but project_name is missing from GITHUB_STATE; skipping cleanup to avoid targeting Compose's implicit, shared project name. Container ${containerName} may need manual removal.`);
+		return;
 	}
-}) : containerName && console.log(`::warning::run post-cleanup: container_name is set but project_name is missing from GITHUB_STATE; skipping cleanup to avoid targeting Compose's implicit, shared project name. Container ${containerName} may need manual removal.`);
+	(0, node_child_process.execFileSync)("docker", buildComposeDownArgs({
+		composeFile: defaultComposeFile,
+		projectName
+	}), {
+		stdio: "inherit",
+		env: {
+			...process.env,
+			PROXY_CONTAINER_NAME: containerName
+		}
+	});
+}
+stopProxyContainer();
 //#endregion

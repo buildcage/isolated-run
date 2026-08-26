@@ -1,0 +1,53 @@
+# Fixture network for the inspect engine's integration tests
+# (test/integration-test-inspect-restrict.sh, test/integration-test-inspect-audit.sh).
+#
+# Unlike buildcage/docker's compose.test-inspect.yaml, this file does not
+# also define the proxy service: isolated-run's real action always starts its
+# own throwaway proxy container via docker/compose.action.yaml (or, for these
+# tests, docker/compose.action.test-inspect.yaml — see
+# BUILDCAGE_TEST_COMPOSE_FILE in src/core/lib/provenance/local-image-override.ts),
+# a separate `docker compose` invocation/project from this one. This file only
+# has to bring up the fixture origins and the network both invocations join.
+services:
+  # The origin every allowed name resolves to. Distinguishes paths and echoes
+  # the method, so a path or method rule can be told to have actually applied.
+  test-server:
+    build: test/test-server-inspect
+    networks:
+      test-net:
+        ipv4_address: 10.200.0.100
+
+  # A second origin nothing resolves to. Reaching it means the destination came
+  # from the client rather than from the proxy's own resolution.
+  test-server-impostor:
+    build: test/test-server-impostor
+    networks:
+      test-net:
+        ipv4_address: 10.200.0.101
+
+  # Echoes whatever UDP it is sent. The sandboxed step must not be able to
+  # reach it, and a container beside it must, or "unreachable" would prove
+  # nothing.
+  test-udp-echo:
+    build: test/test-udp-echo
+    networks:
+      test-net:
+        ipv4_address: 10.200.0.102
+
+  # Upstream for the proxy's HAProxy, which resolves the real destination
+  # against it once a request has already passed the rules; CoreDNS itself
+  # never forwards here.
+  test-dns:
+    build: test/test-dns-inspect
+    networks:
+      test-net:
+        ipv4_address: 10.200.0.53
+
+networks:
+  # Fixed, external name: docker/compose.action.test-inspect.yaml joins this
+  # same network from its own, separate compose project.
+  test-net:
+    name: buildcage-test-inspect-net
+    ipam:
+      config:
+        - subnet: 10.200.0.0/24

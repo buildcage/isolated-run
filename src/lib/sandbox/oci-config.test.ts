@@ -11,6 +11,7 @@ import {
 } from "./oci-config.ts";
 import { parseMountinfo } from "./mountinfo.ts";
 import { withScratchDir } from "./scratch-dir.ts";
+import { OWN_CA_DESTINATION, SYSTEM_CA_DESTINATION } from "./ca-trust.ts";
 
 describe("writeRunScript", () => {
   it("wraps plain commands in a #!/bin/sh + set -e preamble", () => {
@@ -422,6 +423,66 @@ describe("buildOciConfig", () => {
       runtime: { ...baseArgs.runtime, hostMounts },
     });
     expect(config.linux.readonlyPaths.includes("/sys/kernel/security")).toBeTruthy();
+  });
+});
+
+// inspect engine only -- transparent never passes caTrust, and the tests
+// above (which don't) already cover that this is fully opt-in.
+describe("buildOciConfig — caTrust", () => {
+  const baseArgs = {
+    identity: { uid: 1000, gid: 1000 },
+    writable: {
+      workdir: "/home/runner/work/repo/repo",
+      home: "/home/runner",
+      writablePaths: [] as string[],
+    },
+    runtime: {
+      netnsPath: "/var/run/netns/buildcage-sandbox-abcd1234",
+      rootfsBindDir: "/tmp/buildcage-sandbox-xyz/rootfs",
+      resolvConfPath: "/tmp/buildcage-sandbox-xyz/resolv.conf",
+      seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
+      scriptPath: "/tmp/buildcage-sandbox-xyz/run-script.sh",
+    },
+    env: { FOO: "bar", UNSET: undefined },
+  };
+  const caTrust = {
+    ownCaPath: "/scratch/buildcage-ca.pem",
+    systemCaPath: "/scratch/system-ca-bundle.pem",
+  };
+
+  it("adds no CA mounts or env when caTrust is omitted", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    expect(config.mounts.some((m) => m.destination === OWN_CA_DESTINATION)).toBe(false);
+    expect(config.mounts.some((m) => m.destination === SYSTEM_CA_DESTINATION)).toBe(false);
+    expect(config.process.env.some((e) => e.startsWith("NODE_EXTRA_CA_CERTS="))).toBe(false);
+  });
+
+  it("adds the CA mounts and env when caTrust is given", () => {
+    const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, caTrust });
+    expect(config.mounts).toContainEqual({
+      destination: OWN_CA_DESTINATION,
+      type: "none",
+      source: caTrust.ownCaPath,
+      options: ["rbind", "ro"],
+    });
+    expect(config.mounts).toContainEqual({
+      destination: SYSTEM_CA_DESTINATION,
+      type: "none",
+      source: caTrust.systemCaPath,
+      options: ["rbind", "ro"],
+    });
+    expect(config.process.env).toContain(`NODE_EXTRA_CA_CERTS=${OWN_CA_DESTINATION}`);
+    expect(config.process.env).toContain(`REQUESTS_CA_BUNDLE=${SYSTEM_CA_DESTINATION}`);
+  });
+
+  it("does not override a CA env var the step's own env already set", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      env: { ...baseArgs.env, NODE_EXTRA_CA_CERTS: "/my/own/bundle.pem" },
+      caTrust,
+    });
+    expect(config.process.env).toContain("NODE_EXTRA_CA_CERTS=/my/own/bundle.pem");
+    expect(config.process.env.some((e) => e.startsWith("NODE_EXTRA_CA_CERTS=/etc/"))).toBe(false);
   });
 });
 

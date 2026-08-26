@@ -1,5 +1,6 @@
 import type { HostTableRow } from "./render/host-table.ts";
 import type { AnnotatedBlockedRow } from "./build/aggregate.ts";
+import type { TrafficEvent } from "../log/traffic-event.ts";
 
 /** Echoed back verbatim rather than re-derived — only the container's own
  *  env (or, for run, its own action input) reflects what was configured. */
@@ -35,11 +36,27 @@ export interface ReportDataCommon {
   logLooksPlausible: boolean;
 }
 
-/** isolated-run's proxy image only ever produces transparent-shaped data
- *  (no buildkitd/vertex logs) — unlike buildcage/docker, there's no
- *  discriminated union with an explicit-engine variant here. */
 export interface TransparentReportData extends ReportDataCommon {
   engine: "transparent";
 }
 
-export type ReportData = TransparentReportData;
+/** The inspect engine decrypts, so it has the method and full URL of every
+ *  request, refused ones included. Nothing is attributable to a RUN step: the
+ *  proxy log carries no vertex identifier. One timeline is therefore the only
+ *  structure available, and the more useful one: a refusal reads in the
+ *  context of what the build was doing when it happened. */
+export interface InspectReportData extends ReportDataCommon {
+  engine: "inspect";
+  /** Every request, passthrough and refused name, oldest first. */
+  timeline: TrafficEvent[];
+  /** Seconds since the epoch the proxy itself started, so the report can
+   *  show every event's time relative to it. Undefined exactly when
+   *  logLooksPlausible is false -- there was no startup marker to read it
+   *  from. */
+  startedAt: number | undefined;
+}
+
+/** isolated-run's proxy image never produces buildkitd/vertex logs (there is
+ *  no buildkitd here) — unlike buildcage/docker, there's no explicit-engine
+ *  variant in this union. */
+export type ReportData = TransparentReportData | InspectReportData;
