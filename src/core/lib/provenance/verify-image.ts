@@ -24,7 +24,9 @@ import { errorMessage } from "../errors.ts";
 
 const REGISTRY = "ghcr.io";
 
-export type VerifyImageDigestOptions = VerifyImageIdentity;
+export interface VerifyImageDigestOptions extends VerifyImageIdentity {
+  proxyEngine?: string;
+}
 
 /** The verified, digest-pinned image ref an action is about to pull. */
 export interface ResolvedImage {
@@ -43,13 +45,14 @@ export interface ResolvedImage {
 export async function verifyImageDigest({
   actionRef,
   actionRepo,
+  proxyEngine = "transparent",
 }: VerifyImageDigestOptions): Promise<string | null> {
   const repoPath = actionRepo.toLowerCase();
 
   const verifyOptions = buildVerifyOptions({ actionRef, actionRepo });
   if (!verifyOptions) return null;
 
-  const tag = imageTagFromRef(actionRef);
+  const tag = imageTagFromRef(actionRef, proxyEngine);
   const regToken = await fetchRegistryToken(REGISTRY, repoPath, readGhcrBasicAuth());
   const digest = await fetchManifestDigest(REGISTRY, repoPath, tag, regToken);
   const bundle = await fetchBundle(REGISTRY, repoPath, digest, regToken);
@@ -89,10 +92,11 @@ export function requireDigest(digest: string | null, actionRef: string): string 
 export async function verifyImageDigestOrThrow({
   actionRef,
   actionRepo,
+  proxyEngine,
 }: VerifyImageDigestOptions): Promise<string> {
   let digest;
   try {
-    digest = await verifyImageDigest({ actionRef, actionRepo });
+    digest = await verifyImageDigest({ actionRef, actionRepo, proxyEngine });
   } catch (e) {
     throw toProvenanceError(e);
   }

@@ -12,6 +12,10 @@ inputs:
     description: "audit or restrict"
     required: false
     default: "restrict"
+  proxy_engine:
+    description: "Network enforcement engine: transparent (transparent proxy, default) or inspect (terminates TLS to enforce on method and URL; see docs/inspect-engine.md)"
+    required: false
+    default: "transparent"
   allowed_https_rules:
     description: "HTTPS allow rules (wildcard or ~regex), separated by whitespace. Port required. e.g., '*.example.com:443 ~^custom\\.pattern:443$'"
     required: false
@@ -22,6 +26,14 @@ inputs:
     default: ""
   allowed_ip_rules:
     description: "IP address allow rules (wildcard or ~regex), separated by whitespace. Port required. e.g., '192.168.1.1:443 10.0.0.1:8080'"
+    required: false
+    default: ""
+  allowed_url_rules:
+    description: "URL allow rules, one per line, as '<methods> <url>'. Methods are separated by | or , and * means any. Requires proxy_engine: inspect. e.g., 'GET|HEAD https://registry.npmjs.org/**'"
+    required: false
+    default: ""
+  allow_tls_rules:
+    description: "TLS destinations passed through undecrypted, judged on SNI alone, separated by whitespace. Port required. Requires proxy_engine: inspect. e.g., 'db.example.com:5432'"
     required: false
     default: ""
   fail_on_blocked:

@@ -37,4 +37,14 @@ describe("imageTagFromRef", () => {
   it("returns empty string for undefined", () => {
     expect(imageTagFromRef(undefined)).toBe("");
   });
+
+  it("appends no suffix for the default (transparent) engine, or when omitted", () => {
+    expect(imageTagFromRef("v1.1.0", "transparent")).toBe("1.1.0");
+    expect(imageTagFromRef("v1.1.0")).toBe("1.1.0");
+  });
+
+  it("appends the inspect engine suffix when requested", () => {
+    expect(imageTagFromRef("v1.1.0", "inspect")).toBe("1.1.0-inspect");
+    expect(imageTagFromRef("a".repeat(40), "inspect")).toBe(`sha-${"a".repeat(40)}-inspect`);
+  });
 });

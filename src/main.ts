@@ -12,12 +12,14 @@ import { createAnnotation, type Annotation } from "#core/lib/actions/annotation.
 import { logRules } from "#core/lib/actions/log.ts";
 import { ActionError, errorMessage } from "#core/lib/errors.ts";
 import { buildACLRules, parseRulesOrThrow } from "#core/lib/acl/rules.ts";
+import { buildUrlRules } from "#core/lib/acl/url-rules.ts";
 import { SandboxError } from "./lib/errors.ts";
 import { checkPasswordlessSudo } from "./lib/sudo-preflight.ts";
 import { generateContainerName, getContainerPid } from "./lib/container.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { buildComposeUpArgs, buildComposeDownArgs } from "#core/lib/docker/args.ts";
 import { extractRuncBootstrap } from "./lib/sandbox/runc-bootstrap.ts";
+import { extractCaCert, writeCaTrustFiles } from "./lib/sandbox/ca-trust.ts";
 import {
   writeRunScript,
   writeResolvConf,
@@ -54,8 +56,9 @@ const LOCAL_IMAGE_OVERRIDE_ENABLED = process.env.BUILDCAGE_BUILD_TEST_HOOKS === 
 async function resolveVerifiedImage({
   actionRef,
   actionRepo,
-}: VerifyImageIdentity): Promise<ResolvedImage> {
-  const digest = await verifyImageDigestOrThrow({ actionRef, actionRepo });
+  proxyEngine,
+}: VerifyImageIdentity & { proxyEngine: ProxyEngine }): Promise<ResolvedImage> {
+  const digest = await verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine });
   console.log(
     `Image provenance verified for ref: ${JSON.stringify(actionRef)} (digest ${digest}).`,
   );
@@ -85,6 +88,20 @@ export function parseWritablePaths(input: string | undefined): string[] {
       .map((s) => s.trim())
       .filter(Boolean) ?? []
   );
+}
+
+const ENGINES = ["transparent", "inspect"] as const;
+export type ProxyEngine = (typeof ENGINES)[number];
+
+export function resolveProxyEngine(input: string | undefined): ProxyEngine {
+  const engine = input?.trim() || "transparent";
+  if (!(ENGINES as readonly string[]).includes(engine)) {
+    throw new SandboxError(
+      `Invalid proxy_engine: ${JSON.stringify(input)}. Must be one of ${ENGINES.join(", ")}.`,
+      "INVALID_PROXY_ENGINE",
+    );
+  }
+  return engine as ProxyEngine;
 }
 
 /**
@@ -168,6 +185,7 @@ interface RunSandboxedCommandOptions {
   runInput: string;
   writablePaths: string[];
   env: NodeJS.ProcessEnv;
+  proxyEngine: ProxyEngine;
 }
 
 /**
@@ -181,6 +199,7 @@ function runSandboxedCommand({
   runInput,
   writablePaths,
   env,
+  proxyEngine,
 }: RunSandboxedCommandOptions): number {
   // Fixed addressing for the direct veth link to the proxy's sandbox0 interface.
   const gateway = "172.20.0.1";
@@ -203,6 +222,22 @@ function runSandboxedCommand({
         `Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`,
         "RUNC_EXTRACT_FAILED",
       );
+    }
+
+    // inspect only: the proxy terminates TLS, so the sandboxed process has to
+    // be made to trust its CA -- see ca-trust.ts for why this is a mount, not
+    // a write into the sandbox's (real, host) rootfs.
+    let caTrust;
+    if (proxyEngine === "inspect") {
+      try {
+        const caCertPath = extractCaCert(containerName, dir);
+        caTrust = writeCaTrustFiles(caCertPath, dir);
+      } catch (e) {
+        throw new SandboxError(
+          `Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`,
+          "CA_EXTRACT_FAILED",
+        );
+      }
     }
 
     const workdir = env.GITHUB_WORKSPACE || "";
@@ -243,6 +278,7 @@ function runSandboxedCommand({
           hostMounts,
         },
         env,
+        caTrust,
       });
     } catch (e) {
       throw new SandboxError(
@@ -300,6 +336,9 @@ async function main(): Promise<void> {
     throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
   }
 
+  const proxyEngine = resolveProxyEngine(core.getInput("proxy_engine"));
+  console.log(`Proxy engine: ${proxyEngine}`);
+
   // Fail fast — before image verification or starting the proxy container —
   // if the runner can't support the isolation setup at all.
   checkPasswordlessSudo();
@@ -319,7 +358,7 @@ async function main(): Promise<void> {
     );
   }
   const { imageRef, pullPolicy } =
-    localOverride ?? (await resolveVerifiedImage({ actionRef, actionRepo }));
+    localOverride ?? (await resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }));
   console.log(`buildcage: proxy image: ${imageRef}`);
 
   const rules = buildACLRules({
@@ -328,11 +367,25 @@ async function main(): Promise<void> {
     ipRulesInput: core.getInput("allowed_ip_rules"),
   });
   const knownBlockedRules = readKnownBlockedRules(core.getInput("known_blocked_rules"));
+  // Only inspect can enforce on a method or a path, so these are compiled here
+  // purely to fail on a typo at setup rather than inside the container.
+  const urlRulesInput = core.getInput("allowed_url_rules");
+  const tlsRules = parseRulesOrThrow(core.getInput("allow_tls_rules"));
+  const urlRules = buildUrlRules(urlRulesInput).map((r) => r.raw);
+  if (proxyEngine !== "inspect" && (urlRules.length > 0 || tlsRules.length > 0)) {
+    throw new SandboxError(
+      "allowed_url_rules and allow_tls_rules need proxy_engine: inspect. " +
+        `The ${proxyEngine} engine cannot see a method or a path.`,
+      "INVALID_PROXY_ENGINE",
+    );
+  }
 
   console.log("::group::buildcage: Configured ACL Rules");
   logRules("HTTPS", rules.httpsRules);
   logRules("HTTP", rules.httpRules);
   logRules("IP", rules.ipRules);
+  logRules("URL", urlRules);
+  logRules("TLS", tlsRules);
   logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
   console.log("::endgroup::");
 
@@ -354,9 +407,12 @@ async function main(): Promise<void> {
     ...env,
     PROXY_CONTAINER_NAME: containerName,
     PROXY_MODE: core.getInput("proxy_mode") || "restrict",
+    PROXY_ENGINE: proxyEngine,
     ALLOWED_HTTPS_RULES: rules.httpsRules.join("\n"),
     ALLOWED_HTTP_RULES: rules.httpRules.join("\n"),
     ALLOWED_IP_RULES: rules.ipRules.join("\n"),
+    ALLOWED_URL_RULES: urlRules.join("\n"),
+    ALLOW_TLS_RULES: tlsRules.join("\n"),
     BUILDCAGE_PROXY_IMAGE_REF: imageRef,
   };
 
@@ -372,7 +428,14 @@ async function main(): Promise<void> {
       );
     }
 
-    exitCode = runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths, env });
+    exitCode = runSandboxedCommand({
+      containerName,
+      proxyPid,
+      runInput,
+      writablePaths,
+      env,
+      proxyEngine,
+    });
   } finally {
     try {
       const report = await fetchReport(
@@ -384,8 +447,7 @@ async function main(): Promise<void> {
           allowedIpRules: rules.ipRules,
           knownBlockedRules,
         },
-        // TODO: read from the proxy_engine input once it exists.
-        "transparent",
+        proxyEngine,
       );
       // Several integration scripts invoke this action directly without
       // setting fail_on_blocked, unlike a real workflow where action.yml's
