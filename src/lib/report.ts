@@ -2,23 +2,39 @@ import { createDocker } from "#core/lib/docker/client.ts";
 import { describeBlockedOutcome } from "#core/lib/report/outcome/blocked-outcome.ts";
 import { renderReportMarkdown } from "#core/lib/report/render/render-report-markdown.ts";
 import { buildTransparentReportData } from "#core/lib/report/build/transparent.ts";
-import type { GenReportParameters, TransparentReportData } from "#core/lib/report/types.ts";
+import { buildInspectReportData } from "#core/lib/report/build/inspect.ts";
+import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
-export type Report = TransparentReportData;
+export type Report = ReportData;
+export type ProxyEngine = "transparent" | "inspect";
 
-const LOG_FILE = "/var/log/haproxy/current";
+const HAPROXY_LOG_FILE = "/var/log/haproxy/current";
+/** inspect-only: the resolver's own log, the sole trace of a name that was
+ *  only looked up and never connected to. */
+const COREDNS_LOG_FILE = "/var/log/coredns/current";
 
 /**
  * This action has no version-skew concern of its own (one pinned version
  * end to end, unlike a separately-versioned report action), so it fetches
- * the raw log and calls the shared builder in-process.
+ * the raw log(s) and calls the shared builder in-process. Which log(s) to
+ * read and which builder to call depends on which proxy image ran --
+ * inspect's has a second (CoreDNS) log the transparent image does not.
  */
 export function fetchReport(
   containerName: string,
   parameters: GenReportParameters,
+  proxyEngine: ProxyEngine,
 ): Promise<Report> {
+  const docker = createDocker();
+  if (proxyEngine === "inspect") {
+    return buildInspectReportData(
+      docker.readFileLines(containerName, HAPROXY_LOG_FILE),
+      docker.readFileLines(containerName, COREDNS_LOG_FILE),
+      parameters,
+    );
+  }
   return buildTransparentReportData(
-    createDocker().readFileLines(containerName, LOG_FILE),
+    docker.readFileLines(containerName, HAPROXY_LOG_FILE),
     parameters,
   );
 }

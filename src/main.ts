@@ -375,13 +375,18 @@ async function main(): Promise<void> {
     exitCode = runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths, env });
   } finally {
     try {
-      const report = await fetchReport(containerName, {
-        mode: core.getInput("proxy_mode") || "restrict",
-        allowedHttpsRules: rules.httpsRules,
-        allowedHttpRules: rules.httpRules,
-        allowedIpRules: rules.ipRules,
-        knownBlockedRules,
-      });
+      const report = await fetchReport(
+        containerName,
+        {
+          mode: core.getInput("proxy_mode") || "restrict",
+          allowedHttpsRules: rules.httpsRules,
+          allowedHttpRules: rules.httpRules,
+          allowedIpRules: rules.ipRules,
+          knownBlockedRules,
+        },
+        // TODO: read from the proxy_engine input once it exists.
+        "transparent",
+      );
       // Several integration scripts invoke this action directly without
       // setting fail_on_blocked, unlike a real workflow where action.yml's
       // own default always supplies it — fall back to that same default.

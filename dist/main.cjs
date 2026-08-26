@@ -8367,21 +8367,247 @@ function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand }
 	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += yaml, md += "```\n\n", md += "</details>\n", md;
 }
 //#endregion
+//#region src/core/lib/log/traffic-event.ts
+/**
+* A blocked DNS-only lookup is worth keeping on its own -- it is the sole
+* trace of a name the build never actually connected to -- but once the same
+* host also shows up as a blocked request elsewhere in the timeline, the DNS
+* line says nothing that request does not already say, and only doubles the
+* row.
+*/
+function isRedundantBlockedDns(event, timeline) {
+	return event.protocol !== "dns" || event.action !== "block" ? !1 : timeline.some((e) => e !== event && e.protocol !== "dns" && e.host === event.host && e.action === "block");
+}
+//#endregion
+//#region src/core/lib/report/elapsed-time.ts
+function toParts(elapsedSeconds) {
+	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
+	return {
+		hours: Math.floor(totalMinutes / 60),
+		minutes,
+		seconds,
+		ms
+	};
+}
+function pad(n, width = 2) {
+	return String(n).padStart(width, "0");
+}
+/**
+* MM:SS.mmm, widening to HH:MM:SS.mmm only once elapsed reaches an hour --
+* a build that runs a few minutes never carries a leading "00:" that never
+* changes. Negative input (clock/measurement noise) clamps to zero.
+*/
+function formatElapsedVariable(elapsedSeconds) {
+	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
+	return hours === 0 ? `${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
+}
+//#endregion
+//#region src/core/lib/report/render/inspect-details.ts
+/**
+* Render the communication detail as a collapsed markdown section, or "" if
+* empty. One timeline, allowed and refused interleaved. Name lookups that only
+* resolved are dropped (the request that followed already shows the name); a
+* refused name is kept only while it is its own sole trace, and dropped once
+* a refused request for the same name shows up too.
+*
+* `startedAt` is when the proxy itself started (seconds since the epoch),
+* so every event reads as time elapsed since then rather than an absolute
+* clock reading nobody has a reference point for. Undefined only when the
+* log never showed a startup marker at all (logLooksPlausible false) --
+* that rare case falls back to the old absolute-time rendering rather than
+* inventing a start time it does not have.
+*/
+function renderInspectDetails(timeline, startedAt) {
+	let body = renderInspectDetailsBody(timeline, startedAt);
+	return body ? `\n<details>\n<summary>💬 Communication details</summary>\n\n\`\`\`\n${body}\`\`\`\n\n</details>\n` : "";
+}
+/**
+* The same content with no `<details>`/`<summary>` wrapper and no fenced
+* code block, or "" if there's nothing to show -- for a plain-text
+* destination like the job log, where both would render as literal text
+* rather than the collapsible, syntax-highlighted section they give the
+* Job Summary.
+*/
+function renderInspectDetailsBody(timeline, startedAt) {
+	let shown = timeline.filter((e) => (e.protocol !== "dns" || e.action === "block") && !isRedundantBlockedDns(e, timeline));
+	return shown.length === 0 ? "" : shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n";
+}
+function renderEvent(event, startedAt) {
+	return `${event.action === "block" ? "🚫" : "✅"} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}`;
+}
+/** What was asked for, in the most specific form available. */
+function subject(event) {
+	return event.protocol === "dns" ? `DNS ${event.host}` : event.url === void 0 ? `${event.protocol.toUpperCase()} ${event.host}:${event.port}` : `${event.method} ${event.url}`;
+}
+/** What came of it: a refusal names its reason, anything else its result. */
+function outcome(event) {
+	if (event.action === "block") return event.reason ?? "blocked";
+	let parts = [];
+	return event.status !== void 0 && parts.push(String(event.status)), event.bytes !== void 0 && parts.push(`(${formatBytes(event.bytes)})`), parts.length > 0 ? parts.join(" ") : "resolved";
+}
+/**
+* Elapsed since the proxy started, to the millisecond -- several requests
+* routinely land in the same second, and only this engine's log carries the
+* resolution to tell them apart. Falls back to absolute UTC only when there
+* is no start time to be relative to.
+*/
+function formatTime(epochSeconds, startedAt) {
+	return startedAt === void 0 ? (/* @__PURE__ */ new Date(epochSeconds * 1e3)).toISOString().slice(11, 23) + "Z" : formatElapsedVariable(epochSeconds - startedAt);
+}
+function formatBytes(bytes) {
+	return bytes < 1024 ? `${bytes}B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1048576).toFixed(1)}MB`;
+}
+//#endregion
+//#region src/core/lib/report/render/inspect-example.ts
+/** Ports a URL rule may leave unwritten, because the scheme implies them. */
+const DEFAULT_PORT = {
+	https: "443",
+	http: "80"
+}, METHOD_ORDER = [
+	"GET",
+	"HEAD",
+	"POST",
+	"PUT",
+	"PATCH",
+	"DELETE",
+	"OPTIONS"
+];
+function parseRequest(request) {
+	if (request.url === void 0 || request.method === void 0) return null;
+	let match = /^(https?):\/\/([^/?#]+)([^?#]*)/.exec(request.url);
+	if (!match) return null;
+	let [, scheme, authority, rawPath] = match, colon = authority.lastIndexOf(":"), port = colon > 0 ? authority.slice(colon + 1) : "";
+	return {
+		origin: port && port === DEFAULT_PORT[scheme] ? `${scheme}://${authority.slice(0, colon)}` : `${scheme}://${authority}`,
+		method: request.method,
+		path: rawPath || "/"
+	};
+}
+/** The segments every path shares, from the left. */
+function commonPrefixSegments(paths) {
+	let split = paths.map((p) => p.split("/").filter((s) => s !== ""));
+	if (split.length === 0) return [];
+	let prefix = split[0];
+	for (let segments of split.slice(1)) {
+		let i = 0;
+		for (; i < prefix.length && i < segments.length && prefix[i] === segments[i];) i++;
+		prefix = prefix.slice(0, i);
+	}
+	return prefix;
+}
+/**
+* The path patterns covering one group of observed paths.
+*
+* Usually one. A second is needed when the shared prefix is itself one of the
+* observed paths: `/express/**` does not match `/express`, so a build that
+* fetched both a package's metadata and its tarball needs both spelled out.
+*/
+function pathPatternsFor(paths) {
+	let distinct = [...new Set(paths)].sort();
+	if (distinct.length === 0) return [];
+	if (distinct.length === 1) return distinct;
+	let prefix = commonPrefixSegments(distinct);
+	if (prefix.length === 0) return ["/**"];
+	let base = `/${prefix.join("/")}`, patterns = [`${base}/**`];
+	return distinct.includes(base) && patterns.unshift(base), patterns;
+}
+function sortMethods(methods) {
+	return [...new Set(methods)].sort((a, b) => {
+		let ai = METHOD_ORDER.indexOf(a), bi = METHOD_ORDER.indexOf(b);
+		return ai !== -1 && bi !== -1 ? ai - bi : ai === -1 ? bi === -1 ? a < b ? -1 : +(a > b) : 1 : -1;
+	});
+}
+/**
+* Build the rule lines, one per emitted rule, in a stable order.
+*
+* Grouping is by origin and method first, so a path that only a POST reached
+* cannot become reachable by GET. Groups that end up with the same pattern are
+* then merged back into one rule with a method list, which is what keeps
+* `GET|HEAD` on one line instead of two.
+*/
+function buildUrlRuleLines(requests) {
+	let byOriginMethod = /* @__PURE__ */ new Map();
+	for (let request of requests) {
+		if (request.action === "block") continue;
+		let parsed = parseRequest(request);
+		if (!parsed) continue;
+		let key = `${parsed.origin}\t${parsed.method}`, group = byOriginMethod.get(key);
+		group ? group.paths.push(parsed.path) : byOriginMethod.set(key, {
+			origin: parsed.origin,
+			method: parsed.method,
+			paths: [parsed.path]
+		});
+	}
+	let byPattern = /* @__PURE__ */ new Map();
+	for (let { origin, method, paths } of byOriginMethod.values()) for (let pattern of pathPatternsFor(paths)) {
+		let key = `${origin}\t${pattern}`, entry = byPattern.get(key);
+		entry ? entry.methods.push(method) : byPattern.set(key, {
+			origin,
+			pattern,
+			methods: [method]
+		});
+	}
+	return [...byPattern.values()].sort((a, b) => a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : a.pattern < b.pattern ? -1 : 1).map(({ origin, pattern, methods }) => `${sortMethods(methods).join("|")} ${origin}${pattern}`);
+}
+/**
+* Render the rules as a collapsed markdown section, or "" if nothing was
+* observed.
+*
+* `actionRef` is the ref this action was invoked with. A 40-character SHA is
+* specific to this run and opaque to the reader, so it is shown as a
+* placeholder; a tag is stable and useful as written.
+*/
+function buildInspectRestrictExample(requests, actionRepo, actionRef, { runCommand } = {}) {
+	let lines = buildUrlRuleLines(requests ?? []);
+	if (lines.length === 0) return "";
+	let ref = actionRef && /^[0-9a-f]{40}$/i.test(actionRef) ? "<sha>" : actionRef, yaml = "- name: Start isolated-run in restrict mode\n";
+	if (yaml += `  uses: ${actionRepo}@${ref}\n`, yaml += "  with:\n", runCommand) {
+		yaml += "    run: |\n";
+		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
+	}
+	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: inspect\n", yaml += "    allowed_url_rules: |\n";
+	for (let line of lines) yaml += `      ${line}\n`;
+	let md = "\n<details>\n";
+	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += yaml, md += "```\n\n", md += "These rules permit exactly what this build did, so read them before using them: a URL that\n", md += "carried a version or a date will not match the next run, and anything reached through\n", md += "`allow_tls_rules` or `allowed_ip_rules` is not here, because it was never inspected.\n\n", md += "</details>\n", md;
+}
+//#endregion
 //#region src/core/lib/report/render/render-report-markdown.ts
-/** isolated-run's proxy image always produces transparent-shaped data (see
-*  ../types.ts) — no explicit-engine branch here, unlike
-*  buildcage/docker's shared renderer. */
+/** Branches on `report.engine` rather than being duplicated per engine, same
+*  as buildcage/docker's shared renderer — but there is no explicit-engine
+*  branch here, since isolated-run's proxy image never produces
+*  buildkitd/vertex logs (see ../types.ts). */
 function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", runCommand } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${title} (${report.parameters.mode} mode)\n\n`;
-	return report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += buildRestrictExample(report.passed, actionRepo, actionRef, { runCommand })), report.blocked.length > 0 && (report.passed.length > 0 && (markdown += "\n"), markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(report.blocked, {
+	return report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, { runCommand }) : buildRestrictExample(report.passed, actionRepo, actionRef, { runCommand })), report.blocked.length > 0 && (report.passed.length > 0 && (markdown += "\n"), markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(report.blocked, {
 		showReason: !0,
 		showExpected
-	}) + "\n"), report.passed.length === 0 && report.blocked.length === 0 && (markdown += "_(no communication)_\n\n"), markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n", markdown += `\n*Reported by [Buildcage](https://github.com/${actionRepo})*\n`, markdown;
+	}) + "\n"), report.passed.length === 0 && report.blocked.length === 0 && (markdown += "_(no communication)_\n\n"), report.engine === "inspect" ? markdown += renderInspectDetails(report.timeline, report.startedAt) : markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n", markdown += `\n*Reported by [Buildcage](https://github.com/${actionRepo})*\n`, markdown;
 }
 //#endregion
 //#region src/core/lib/log/aggregate.ts
 function compareAggregated(a, b) {
 	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
+}
+/**
+* Aggregate log entries by (host, port, ruleType, reason) with counts, sorted
+* descending.
+*/
+function aggregate(filtered) {
+	let map = {};
+	for (let e of filtered) {
+		let key = `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
+		map[key] = (map[key] || 0) + 1;
+	}
+	return Object.keys(map).map((key) => {
+		let [host, portStr, ruleType, reason] = key.split("	");
+		return {
+			host,
+			port: portStr,
+			ruleType,
+			reason,
+			count: map[key]
+		};
+	}).sort(compareAggregated);
 }
 /** Streaming counterpart to aggregate(): folds one entry at a time into a
 *  running Map, bounding memory by the number of unique combinations seen
@@ -8458,8 +8684,19 @@ function annotateKnownBlocked(blockedRows, knownBlockedRules) {
 	let matchers = knownBlockedRules.map((rule) => new RegExp(convertRule(rule)));
 	return blockedRows.map((row) => ({
 		...row,
-		expected: matchers.some((re) => re.test(`${row.host}:${row.port}`))
+		expected: matchers.some((re) => re.test(targetOf(row)))
 	}));
+}
+/**
+* What a known_blocked_rules pattern is tested against, normally `host:port`.
+*
+* A row with no port is a refused name, connected to nothing. It is tested as
+* port 0, which `host:*` matches (compiling to `host:\d+`) but `host:443` does
+* not -- right, since no port was involved. Without this a refused name could
+* never be marked expected.
+*/
+function targetOf(row) {
+	return `${row.host}:${row.port === "-" ? "0" : row.port}`;
 }
 //#endregion
 //#region src/core/lib/report/build/transparent.ts
@@ -8479,13 +8716,179 @@ async function buildTransparentReportData(lines, parameters) {
 		logLooksPlausible: hasNonBuildcageContent
 	};
 }
+//#endregion
+//#region src/core/lib/log/inspect.ts
+const REQUEST = /^buildcage (\d+) (https?) (\S+) (\S+) (-?\d+) (\d+) ts=(\S*) dst=(\S+):(\d+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) sni=(\S+) (\d+) ts=(\S*) dst=(\S+):(\d+)$/, DNS = /^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=(\S+?)\.?$/, START = /^buildcage haproxy starting (\d+)$/;
+/**
+* Whether buildcage ended the exchange, rather than an origin answering.
+*
+* The status cannot say: an origin answers 403 or 503 of its own accord too.
+* HAProxy's termination state can: `P` for a deny/reject, `S` for a backend
+* unreachable or unverified, `-` for a relayed response.
+*/
+function isRefusal(terminationState) {
+	return terminationState.startsWith("P") || terminationState.startsWith("S");
+}
+/** Refusal reason, matching the transparent engine's kebab-case vocabulary. */
+function reasonForStatus(status) {
+	return status === 502 ? "dns-failed" : status === 503 ? "origin-unreachable" : "not-allowed";
+}
+function actionFor(refused, isAudit) {
+	return refused ? "block" : isAudit ? "audit" : "allow";
+}
+/** The host half of an absolute URL's authority, without its port. */
+function hostOf(url) {
+	let match = /^https?:\/\/([^/?#]+)/.exec(url);
+	if (!match) return url;
+	let authority = match[1], colon = authority.lastIndexOf(":");
+	return colon > 0 ? authority.slice(0, colon) : authority;
+}
+/** Parse one proxy-log line, or null if it is not one of ours. */
+function parseProxyLine(line, isAudit) {
+	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
+	if (request) {
+		let refused = isRefusal(request[7]), event = {
+			time: Number(request[1]) / 1e3,
+			action: actionFor(refused, isAudit),
+			protocol: request[2],
+			host: hostOf(request[4]),
+			port: Number(request[9]),
+			method: request[3],
+			url: request[4],
+			destination: `${request[8]}:${request[9]}`
+		};
+		return refused ? event.reason = reasonForStatus(Number(request[5])) : (event.status = Number(request[5]), event.bytes = Number(request[6])), event;
+	}
+	let pass = PASSTHROUGH.exec(trimmed);
+	if (pass) {
+		let refused = isRefusal(pass[5]), sni = pass[3], event = {
+			time: Number(pass[1]) / 1e3,
+			action: actionFor(refused, isAudit),
+			protocol: pass[2],
+			host: sni === "-" ? pass[6] : sni,
+			port: Number(pass[7]),
+			destination: `${pass[6]}:${pass[7]}`
+		};
+		return refused ? event.reason = "not-allowed" : event.bytes = Number(pass[4]), event;
+	}
+	return null;
+}
+/**
+* Read the proxy log once, collecting both the events and the startup marker.
+*
+* The report needs both, and the log arrives as a stream that can only be
+* consumed once, so they cannot be two separate passes. `for await` also
+* accepts a plain array, so callers with the lines already in memory pass one.
+*/
+async function scanInspectLog(lines, isAudit = !1) {
+	let events = [], startedAt;
+	for await (let line of lines) {
+		let event = parseProxyLine(line, isAudit);
+		if (event) {
+			events.push(event);
+			continue;
+		}
+		if (startedAt === void 0) {
+			let match = START.exec(line.trim());
+			match && (startedAt = Number(match[1]) / 1e3);
+		}
+	}
+	return {
+		events,
+		startedAt
+	};
+}
+/**
+* Parse the resolver log into one event per name.
+*
+* A name is asked about repeatedly, and for A and AAAA separately, so only the
+* first mention of each is kept: the report is about which names a build
+* reached for, not how many times a resolver was consulted. An allowed answer
+* is decisive, so an AAAA refusal cannot mask an A that resolved.
+*
+* The time comes from s6-log rather than from CoreDNS, whose log plugin has no
+* timestamp replacement of its own. CoreDNS lowercases the name it logs, so a
+* name that carried information in its capitalisation is recorded without it.
+*/
+async function scanInspectDnsLog(lines, isAudit = !1) {
+	let seen = /* @__PURE__ */ new Map();
+	for await (let line of lines) {
+		let match = DNS.exec(line.trim());
+		if (!match) continue;
+		let parsed = Date.parse(`${match[1].replace(" ", "T")}Z`), time = Number.isNaN(parsed) ? 0 : parsed / 1e3, allowed = match[2] === "allowed", existing = seen.get(match[3]);
+		existing ? existing.allowed ||= allowed : seen.set(match[3], {
+			time,
+			allowed
+		});
+	}
+	return [...seen.entries()].map(([host, { time, allowed }]) => {
+		let event = {
+			time,
+			action: actionFor(!allowed, isAudit),
+			protocol: "dns",
+			host
+		};
+		return allowed || (event.reason = "dns-not-allowed"), event;
+	});
+}
+//#endregion
+//#region src/core/lib/report/build/inspect.ts
+/** How a protocol appears in the host tables, matching the rule kind that
+*  would permit it. */
+const RULE_TYPE = {
+	https: "HTTPS",
+	http: "HTTP",
+	tls: "TLS",
+	tcp: "IP",
+	dns: "DNS"
+};
+/** Reduce an event to the host row a rule is written against. A dns event has
+*  no port, having connected to nothing. */
+function toHostRow(event) {
+	return {
+		host: event.host,
+		port: event.port === void 0 ? "-" : String(event.port),
+		ruleType: RULE_TYPE[event.protocol],
+		reason: event.reason ?? "-"
+	};
+}
+/**
+* Build the report data from the proxy and resolver logs. Pure -- the caller
+* fetches both logs and the parameters.
+*
+* The resolver log matters because a refused name never reached the proxy, so
+* a DNS-only exfiltration attempt would otherwise leave no trace. Everything
+* lands in one time-ordered timeline: no event can be attributed to a RUN step,
+* unlike the explicit engine.
+*/
+async function buildInspectReportData(proxyLines, dnsLines, parameters) {
+	let isAudit = parameters.mode === "audit", { events: proxyEvents, startedAt } = await scanInspectLog(proxyLines, isAudit), dnsEvents = await scanInspectDnsLog(dnsLines, isAudit), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), passedRows = [], blockedRows = [];
+	for (let event of timeline) (event.protocol !== "dns" || event.action === "block") && (isRedundantBlockedDns(event, timeline) || (event.action === "block" ? blockedRows : passedRows).push(toHostRow(event)));
+	let blocked = annotateKnownBlocked(aggregate(blockedRows), parameters.knownBlockedRules);
+	return {
+		engine: "inspect",
+		parameters,
+		passed: aggregate(passedRows),
+		blocked,
+		blockedCount: blockedRows.length,
+		logLooksPlausible: startedAt !== void 0,
+		startedAt,
+		timeline
+	};
+}
+//#endregion
+//#region src/lib/report.ts
+const HAPROXY_LOG_FILE = "/var/log/haproxy/current";
 /**
 * This action has no version-skew concern of its own (one pinned version
 * end to end, unlike a separately-versioned report action), so it fetches
-* the raw log and calls the shared builder in-process.
+* the raw log(s) and calls the shared builder in-process. Which log(s) to
+* read and which builder to call depends on which proxy image ran --
+* inspect's has a second (CoreDNS) log the transparent image does not.
 */
-function fetchReport(containerName, parameters) {
-	return buildTransparentReportData(createDocker().readFileLines(containerName, "/var/log/haproxy/current"), parameters);
+function fetchReport(containerName, parameters, proxyEngine) {
+	let docker = createDocker();
+	return proxyEngine === "inspect" ? buildInspectReportData(docker.readFileLines(containerName, HAPROXY_LOG_FILE), docker.readFileLines(containerName, "/var/log/coredns/current"), parameters) : buildTransparentReportData(docker.readFileLines(containerName, HAPROXY_LOG_FILE), parameters);
 }
 /**
 * Pure decision + rendering step, kept free of process.env/file I/O so it's
@@ -8731,7 +9134,7 @@ async function main() {
 				allowedHttpRules: rules.httpRules,
 				allowedIpRules: rules.ipRules,
 				knownBlockedRules
-			}), failOnBlocked;
+			}, "transparent"), failOnBlocked;
 			try {
 				failOnBlocked = getBooleanInput("fail_on_blocked");
 			} catch {
