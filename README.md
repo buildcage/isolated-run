@@ -39,7 +39,7 @@ Wrap the command you want to isolate with this action instead of a plain `run:` 
 
 ```yaml
 - name: Discover required domains
-  uses: buildcage/isolated-run@6c105ec20e59259bf0f6f3831397d25273f1c158 # v1.0.3
+  uses: buildcage/isolated-run@d9c6a461166ef1489d43ecc9eca1cada10abf122 # v1.0.4
   with:
     proxy_mode: audit # Log every destination, block nothing
     run: |
@@ -57,7 +57,7 @@ Its **Switch to restrict mode** section contains the allowlist already filled in
 
 ```yaml
 - name: Run tests with outbound network isolation
-  uses: buildcage/isolated-run@6c105ec20e59259bf0f6f3831397d25273f1c158 # v1.0.3
+  uses: buildcage/isolated-run@d9c6a461166ef1489d43ecc9eca1cada10abf122 # v1.0.4
   with:
     proxy_mode: restrict # Block every destination except the ones you allow
     allowed_https_rules: |
@@ -189,7 +189,7 @@ pattern if you want to restrict by port — a range of addresses can be matched 
 ### Together
 
 ```yaml
-- uses: buildcage/isolated-run@6c105ec20e59259bf0f6f3831397d25273f1c158 # v1.0.3
+- uses: buildcage/isolated-run@d9c6a461166ef1489d43ecc9eca1cada10abf122 # v1.0.4
   with:
     proxy_mode: restrict
 
@@ -216,7 +216,7 @@ Use the step's own `env:` (not a `with:` input) to pass values into `run` — ex
 anything set via `env:` is available there too:
 
 ```yaml
-- uses: buildcage/isolated-run@6c105ec20e59259bf0f6f3831397d25273f1c158 # v1.0.3
+- uses: buildcage/isolated-run@d9c6a461166ef1489d43ecc9eca1cada10abf122 # v1.0.4
   env:
     PR_TITLE: ${{ github.event.pull_request.title }}
   with:
@@ -247,7 +247,7 @@ If `run` needs to write somewhere else — a tool-specific cache directory, for 
 under `writable`:
 
 ```yaml
-- uses: buildcage/isolated-run@6c105ec20e59259bf0f6f3831397d25273f1c158 # v1.0.3
+- uses: buildcage/isolated-run@d9c6a461166ef1489d43ecc9eca1cada10abf122 # v1.0.4
   with:
     writable: |
       /opt/some-tool/cache
