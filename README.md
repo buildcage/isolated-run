@@ -24,6 +24,7 @@ Docker build's `RUN` steps rather than a workflow step, use
 - [Inputs](#inputs)
 - [Operation modes](#operation-modes)
 - [Rule syntax](#rule-syntax)
+- [Proxy engines](#proxy-engines)
 - [Passing values to `run`](#passing-values-to-run)
 - [Filesystem access](#filesystem-access)
 - [Scope](#scope)
@@ -105,17 +106,20 @@ Complete workflows: [audit](.github/workflows/example-audit.yml) ·
 
 ## Inputs
 
-| Input                 | Required | Default    | Description                                                                                                                                                                   |
-| --------------------- | -------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`                 | Yes      | —          | Command(s) to run inside the isolated sandbox (multi-line supported, like a workflow `run:` step)                                                                             |
-| `proxy_mode`          | No       | `restrict` | Operation mode (`audit` / `restrict`, see [Operation modes](#operation-modes))                                                                                                |
-| `allowed_https_rules` | No       | empty      | HTTPS allow rules (wildcard or regex, port required)                                                                                                                          |
-| `allowed_http_rules`  | No       | empty      | HTTP allow rules (wildcard or regex, port required)                                                                                                                           |
-| `allowed_ip_rules`    | No       | empty      | IP address allow rules (wildcard or regex, port required)                                                                                                                     |
-| `fail_on_blocked`     | No       | `true`     | Fail the step if blocked connections are detected (restrict mode only; ignored in audit mode)                                                                                 |
-| `known_blocked_rules` | No       | empty      | Domains expected to be blocked intentionally (wildcard or regex, port required); blocked connections matching these don't fail the step even when `fail_on_blocked` is `true` |
-| `writable`            | No       | empty      | Additional writable directories (newline-separated), on top of `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, and `$RUNNER_TEMP` — see [Filesystem access](#filesystem-access)         |
-| `label`               | No       | empty      | Label appended to this step's Job Summary heading, e.g. `npm ci` — useful to tell steps apart when this action is used more than once in the same job                         |
+| Input                 | Required | Default       | Description                                                                                                                                                                   |
+| --------------------- | -------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`                 | Yes      | —             | Command(s) to run inside the isolated sandbox (multi-line supported, like a workflow `run:` step)                                                                             |
+| `proxy_mode`          | No       | `restrict`    | Operation mode (`audit` / `restrict`, see [Operation modes](#operation-modes))                                                                                                |
+| `proxy_engine`        | No       | `transparent` | Network enforcement engine (`transparent`, or the experimental `inspect` — see [Proxy engines](#proxy-engines))                                                               |
+| `allowed_https_rules` | No       | empty         | HTTPS allow rules (wildcard or regex, port required)                                                                                                                          |
+| `allowed_http_rules`  | No       | empty         | HTTP allow rules (wildcard or regex, port required)                                                                                                                           |
+| `allowed_ip_rules`    | No       | empty         | IP address allow rules (wildcard or regex, port required)                                                                                                                     |
+| `allowed_url_rules`   | No       | empty         | Method + URL allow rules (`inspect` only — see [Proxy engines](#proxy-engines))                                                                                               |
+| `allow_tls_rules`     | No       | empty         | TLS destinations passed through undecrypted, judged on SNI alone (`inspect` only — see [Proxy engines](#proxy-engines))                                                       |
+| `fail_on_blocked`     | No       | `true`        | Fail the step if blocked connections are detected (restrict mode only; ignored in audit mode)                                                                                 |
+| `known_blocked_rules` | No       | empty         | Domains expected to be blocked intentionally (wildcard or regex, port required); blocked connections matching these don't fail the step even when `fail_on_blocked` is `true` |
+| `writable`            | No       | empty         | Additional writable directories (newline-separated), on top of `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, and `$RUNNER_TEMP` — see [Filesystem access](#filesystem-access)         |
+| `label`               | No       | empty         | Label appended to this step's Job Summary heading, e.g. `npm ci` — useful to tell steps apart when this action is used more than once in the same job                         |
 
 If some blocked connections are expected — a known-noisy dependency, or a domain you are
 deliberately keeping off the allowlist to confirm it stays blocked — list them in
@@ -209,6 +213,21 @@ pattern if you want to restrict by port — a range of addresses can be matched 
       npm test
 ```
 
+## Proxy engines
+
+`proxy_engine` selects how this action intercepts and enforces traffic. The default, `transparent`,
+intercepts at the network level and needs no proxy configuration or CA trust inside the isolated
+command — it works with any tool whether or not the tool is proxy-aware, which is why it is the
+default.
+
+`proxy_engine: inspect` is an **experimental** alternative that terminates TLS inside the sandbox
+and re-signs it with a CA the isolated command is made to trust. That is what lets a rule name a
+method and a URL path rather than only a host, so fetching a package can be allowed while publishing
+one is refused. Every request is recorded with its full URL, refused ones included. In exchange, a
+tool that pins a certificate or ships its own trust store will not work under it. See
+[Inspect Proxy Engine](./docs/inspect-engine.md) for the rule syntax, the report it produces, and
+its limitations.
+
 ## Passing values to `run`
 
 Use the step's own `env:` (not a `with:` input) to pass values into `run` — exactly like a native
@@ -281,11 +300,12 @@ credentials, personal data, or source you do not publish.
 
 ## Documentation
 
-| Doc                                          | What's in it                                                |
-| -------------------------------------------- | ----------------------------------------------------------- |
-| [Security Details](./docs/security.md)       | Architecture, attack resistance, and known limitations      |
-| [Self-Hosting Guide](./docs/self-hosting.md) | Hosting your own isolated-run image in a private repository |
-| [Development Guide](./docs/development.md)   | Local usage, testing, logs, and implementation internals    |
+| Doc                                              | What's in it                                                |
+| ------------------------------------------------ | ----------------------------------------------------------- |
+| [Inspect Proxy Engine](./docs/inspect-engine.md) | The experimental `proxy_engine: inspect` in full            |
+| [Security Details](./docs/security.md)           | Architecture, attack resistance, and known limitations      |
+| [Self-Hosting Guide](./docs/self-hosting.md)     | Hosting your own isolated-run image in a private repository |
+| [Development Guide](./docs/development.md)       | Local usage, testing, logs, and implementation internals    |
 
 ## Contributing
 
