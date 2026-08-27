@@ -69,11 +69,11 @@ ENV S6_KEEP_ENV=1
 ENV S6_LOGGING=0
 
 # DNS
-COPY docker/transparent/files/dnsmasq.conf /etc/dnsmasq.conf
+COPY docker/universal/files/dnsmasq.conf /etc/dnsmasq.conf
 
 # HAProxy
 RUN mkdir -p /etc/haproxy/rules /var/log/haproxy
-COPY docker/transparent/files/haproxy.cfg.template /etc/haproxy/haproxy.cfg.template
+COPY docker/universal/files/haproxy.cfg.template /etc/haproxy/haproxy.cfg.template
 
 # Tools (QuickJS scripts, rolldown-bundled by qjs-build above) — convert-rule.js is used
 # by init-haproxy-cfg. Self-contained bundle — no separate /opt/buildcage/shared/ copy
@@ -91,10 +91,10 @@ COPY --from=deps /opt/buildcage/bin/runc /opt/buildcage/bin/runc
 COPY --from=gen-seccomp-profile-build /out/gen-seccomp-profile /opt/buildcage/bin/gen-seccomp-profile
 
 # License
-COPY docker/transparent/files/THIRD_PARTY_LICENSES /opt/buildcage/THIRD_PARTY_LICENSES
+COPY docker/universal/files/THIRD_PARTY_LICENSES /opt/buildcage/THIRD_PARTY_LICENSES
 
 # s6 service definitions and init scripts
-COPY docker/transparent/files/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
-COPY docker/transparent/files/s6-scripts/ /etc/s6-overlay/scripts/
+COPY docker/universal/files/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
+COPY docker/universal/files/s6-scripts/ /etc/s6-overlay/scripts/
 
 ENTRYPOINT ["/init"]

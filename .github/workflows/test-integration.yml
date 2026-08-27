@@ -83,7 +83,7 @@ jobs:
 
   # Separate job from test_sandbox: needs its own (inspect-engine) image build
   # and the fixture origin network in compose.test-inspect.yaml, which the
-  # transparent-engine tests above have no reason to know about.
+  # universal-engine tests above have no reason to know about.
   test_sandbox_inspect:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_inspect == 'true'

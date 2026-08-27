@@ -5,8 +5,9 @@
 # is unique per step anyway, so a later step could never read an earlier
 # step's copy back through it. The run action itself stops its own
 # throwaway proxy container before this script runs, so unlike
-# test/assert-{transparent,explicit}-*.sh, there's no long-lived builder
-# container left to `docker compose exec` into either.
+# buildcage/docker's assert-{universal,explicit}-*.sh (which this repo has
+# no equivalent of), there's no long-lived builder container left to
+# `docker compose exec` into either.
 set -euo pipefail
 
 echo ""

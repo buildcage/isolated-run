@@ -8,7 +8,7 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "/^docker/transparent/Dockerfile$/",
+        "/^docker/universal/Dockerfile$/",
         "/^docker/inspect/Dockerfile$/",
         "/^dev/Dockerfile$/"
       ],

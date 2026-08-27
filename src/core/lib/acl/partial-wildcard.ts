@@ -18,8 +18,7 @@
  *   `?`  — a single character, dots excluded
  *
  * Kept separate from wildcard-rules.ts rather than added to it, so widening
- * this grammar cannot change what the `transparent` and `explicit` engines
- * accept.
+ * this grammar cannot change what the `universal` engine accepts.
  */
 
 /** Characters that must be escaped to appear literally in a regex. */

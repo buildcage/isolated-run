@@ -3,19 +3,19 @@
 > [!WARNING]
 > `inspect` is an **experimental** engine. It terminates TLS inside the sandbox, so a tool that pins
 > a certificate or ships its own trust store will not work under it. Read this page before relying
-> on it. `transparent` remains the default and recommended engine.
+> on it. `universal` remains the default and recommended engine.
 
 `inspect` terminates TLS inside the sandbox and re-signs it with a CA the isolated command is made
 to trust. That is what lets it enforce on the method, path and query of a request rather than only
 on its destination.
 
-|                    | `transparent` (default) | `inspect`                     |
-| ------------------ | ----------------------- | ----------------------------- |
-| Interception       | network level           | network level                 |
-| Visible to policy  | destination             | method, full URL, path, query |
-| CA trusted by step | not needed              | **required**                  |
+|                    | `universal` (default) | `inspect`                     |
+| ------------------ | --------------------- | ----------------------------- |
+| Interception       | network level         | network level                 |
+| Visible to policy  | destination           | method, full URL, path, query |
+| CA trusted by step | not needed            | **required**                  |
 
-Nothing about `transparent` changes when this engine is used, and it stays the default.
+Nothing about `universal` changes when this engine is used, and it stays the default.
 
 ```yaml
 - name: Start isolated-run
@@ -91,12 +91,12 @@ no default, so a rule always states what it permits and nobody has to guess what
 | `~`     | raw regex for the whole URL |                        |
 
 **A wildcard may sit among literal text here**, in a path segment as in a domain label:
-`abc*.amazonaws.com`, `/pkg-*/**`. `transparent`'s own rule syntax requires a label containing `*`
+`abc*.amazonaws.com`, `/pkg-*/**`. `universal`'s own rule syntax requires a label containing `*`
 to be exactly `*` or `**`, and for it that is only a restriction on phrasing. For `inspect` it would
 be a hazard, because an author who cannot write `abc*` has to widen the rule to `*.amazonaws.com`
 instead — and CoreDNS's allow/deny decision is generated from the same host pattern the HTTP rule
 is, so a wider host is a wider grant on both sides at once, not just a less precise log line. The
-grammar lives in its own compiler, so relaxing it cannot change what `transparent` accepts.
+grammar lives in its own compiler, so relaxing it cannot change what `universal` accepts.
 
 **A path or method never narrows what a wildcard host resolves.** DNS has no notion of a path: a
 rule of `GET https://*.example.com/release/**` still makes CoreDNS log any name under
@@ -215,7 +215,7 @@ allowed, so a name that was only looked up still appears in the report.
 
 **Audit is not a passive observer.** TLS is still terminated, so a tool that pins a certificate, or
 that consults a trust store the sandbox cannot reach, fails under `audit` exactly as under
-`restrict`. That differs from `transparent`, whose audit mode inspects nothing and breaks nothing.
+`restrict`. That differs from `universal`, whose audit mode inspects nothing and breaks nothing.
 
 ### The resolved address, not just the name
 
@@ -237,14 +237,14 @@ resolves to it. An explicitly named address is exempt, having been asked for rat
 
 ## Network isolation
 
-The same boundary `transparent` uses, unaffected by the choice of engine — see
+The same boundary `universal` uses, unaffected by the choice of engine — see
 [Isolation Mechanisms](./security.md#isolation-mechanisms). In short: a dedicated veth pair (fixed
 addressing, `172.20.0.1` for the proxy/gateway, `172.20.0.101` for the isolated command — no bridge,
 since it is always a 1:1 connection) puts every step's traffic through a single proxy container; the
 proxy's `sandbox0`-facing `iptables` redirects all TCP to the one listener above and drops
 everything else, including `FORWARD`, so a packet that escaped redirection goes nowhere. Only TCP is
 redirected, so this also stops UDP and ICMP: the isolated command has no way out over either, and
-IPv6 is dropped outright the same way `transparent` drops it.
+IPv6 is dropped outright the same way `universal` drops it.
 
 ## DNS
 
@@ -254,10 +254,10 @@ forwards a query anywhere: a step can exfiltrate through the query itself
 forwarded, no connection ever needed), and closing that off unconditionally is simpler, and safer,
 than closing it off only for the names a rule happens to deny. All the resolver decides is what gets
 logged as `allowed` or `denied`, which still has to match the rules exactly, on a regex rather than a
-domain suffix — `transparent`'s own resolver can only express `/amazonaws.com/`, which covers
+domain suffix — `universal`'s own resolver can only express `/amazonaws.com/`, which covers
 everything beneath it, so a rule of `abc*.amazonaws.com` would be logged as allowed for names it
 never meant to grant. That precision is why this engine uses **CoreDNS** in place of
-`transparent`'s resolver.
+`universal`'s resolver.
 
 ```
 # Allowlisted names are logged as allowed, but answered exactly like a denied
@@ -309,7 +309,7 @@ it is stopped at the end of the step.
 Leaving the resolver's log out would let a step exfiltrate through a DNS query alone and have the
 report show nothing, since no connection is ever made in that case.
 
-Refused requests carry their full URL, which is what this engine has and `transparent` does not: the
+Refused requests carry their full URL, which is what this engine has and `universal` does not: the
 request is read before it is decided on, and the origin is never contacted. A blocked entry
 therefore names the exact URL that was attempted, query string included, rather than a bare host.
 

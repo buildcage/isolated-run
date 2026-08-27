@@ -30,7 +30,7 @@ QJS_TEST_DIRS := \
 .PHONY: test_unit_qjs
 test_unit_qjs: ## Run unit tests in Docker
 	@vp run build:qjs-test
-	@docker build -f docker/transparent/Dockerfile -t buildcage-qjs-test .
+	@docker build -f docker/universal/Dockerfile -t buildcage-qjs-test .
 	@docker run --rm --entrypoint qjs $(QJS_MOUNTS) buildcage-qjs-test \
 		--std -m /opt/buildcage/core/scripts/test/run-tests.qjs.js $(QJS_TEST_DIRS)
 
@@ -83,7 +83,7 @@ test_integration_sandbox_linux: ## Run the action's integration tests (needs BUI
 
 # Separate from test_integration_sandbox_linux: these need an inspect-engine
 # image (a different Dockerfile/build) and the fixture origin network in
-# compose.test-inspect.yaml, neither of which the transparent-engine tests
+# compose.test-inspect.yaml, neither of which the universal-engine tests
 # above use.
 .PHONY: test_integration_sandbox_inspect
 test_integration_sandbox_inspect: ## Run the inspect-engine integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF built from docker/inspect with test hooks)

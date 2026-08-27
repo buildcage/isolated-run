@@ -426,7 +426,7 @@ describe("buildOciConfig", () => {
   });
 });
 
-// inspect engine only -- transparent never passes caTrust, and the tests
+// inspect engine only -- universal never passes caTrust, and the tests
 // above (which don't) already cover that this is fully opt-in.
 describe("buildOciConfig — caTrust", () => {
   const baseArgs = {
