@@ -38,8 +38,8 @@ describe("imageTagFromRef", () => {
     expect(imageTagFromRef(undefined)).toBe("");
   });
 
-  it("appends no suffix for the default (transparent) engine, or when omitted", () => {
-    expect(imageTagFromRef("v1.1.0", "transparent")).toBe("1.1.0");
+  it("appends no suffix for the default (universal) engine, or when omitted", () => {
+    expect(imageTagFromRef("v1.1.0", "universal")).toBe("1.1.0");
     expect(imageTagFromRef("v1.1.0")).toBe("1.1.0");
   });
 

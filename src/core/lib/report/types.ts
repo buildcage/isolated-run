@@ -25,7 +25,7 @@ export interface ReportDataCommon {
   blocked: AnnotatedBlockedRow[];
 
   /** Raw blocked-event count — can differ from blocked.length for the
-   *  transparent engine (pre-aggregation log line count). */
+   *  universal engine (pre-aggregation log line count). */
   blockedCount: number;
 
   /** False iff the log looks structurally implausible for a real run (no
@@ -36,8 +36,8 @@ export interface ReportDataCommon {
   logLooksPlausible: boolean;
 }
 
-export interface TransparentReportData extends ReportDataCommon {
-  engine: "transparent";
+export interface UniversalReportData extends ReportDataCommon {
+  engine: "universal";
 }
 
 /** The inspect engine decrypts, so it has the method and full URL of every
@@ -59,4 +59,4 @@ export interface InspectReportData extends ReportDataCommon {
 /** isolated-run's proxy image never produces buildkitd/vertex logs (there is
  *  no buildkitd here) — unlike buildcage/docker, there's no explicit-engine
  *  variant in this union. */
-export type ReportData = TransparentReportData | InspectReportData;
+export type ReportData = UniversalReportData | InspectReportData;

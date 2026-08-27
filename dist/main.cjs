@@ -7372,16 +7372,18 @@ async function verifyBundle(bundleJson, options, expectedDigest) {
 //#region src/core/lib/provenance/image-tag.ts
 /**
 * Convert an action ref into the base Docker image tag, then append the
-* proxy engine suffix for a non-default engine. The `transparent` engine
-* (default) publishes the plain version tag (e.g. `1.0.0`), matching the
+* proxy engine suffix for a non-default engine. The `universal` engine
+* (default; formerly named `transparent` — see resolveProxyEngine's
+* ENGINE_ALIASES, which normalizes that alias away before this ever runs)
+* publishes the plain version tag (e.g. `1.0.0`), matching the
 * pre-multi-engine tagging scheme; `inspect` publishes under its own
 * suffix (e.g. `1.0.0-inspect`). Both share the same Sigstore verification
 * identity (same workflow, same git ref) — only the published Docker tag
 * differs, so this does not affect verify-policy.ts's buildVerifyOptions.
 */
-function imageTagFromRef(actionRef, proxyEngine = "transparent") {
+function imageTagFromRef(actionRef, proxyEngine = "universal") {
 	let base;
-	return base = actionRef ? /^[0-9a-f]{40}$/i.test(actionRef) ? `sha-${actionRef.toLowerCase()}` : actionRef.startsWith("v") ? actionRef.slice(1) : actionRef : "", proxyEngine !== "transparent" && proxyEngine !== "" ? `${base}-${proxyEngine}` : base;
+	return base = actionRef ? /^[0-9a-f]{40}$/i.test(actionRef) ? `sha-${actionRef.toLowerCase()}` : actionRef.startsWith("v") ? actionRef.slice(1) : actionRef : "", proxyEngine !== "universal" && proxyEngine !== "" ? `${base}-${proxyEngine}` : base;
 }
 //#endregion
 //#region src/core/lib/provenance/verify-policy.ts
@@ -7433,7 +7435,7 @@ const REGISTRY = "ghcr.io";
 * the error message.
 *
 */
-async function verifyImageDigest({ actionRef, actionRepo, proxyEngine = "transparent" }) {
+async function verifyImageDigest({ actionRef, actionRepo, proxyEngine = "universal" }) {
 	let repoPath = actionRepo.toLowerCase(), verifyOptions = buildVerifyOptions({
 		actionRef,
 		actionRepo
@@ -7656,8 +7658,7 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 *   `?`  — a single character, dots excluded
 *
 * Kept separate from wildcard-rules.ts rather than added to it, so widening
-* this grammar cannot change what the `transparent` and `explicit` engines
-* accept.
+* this grammar cannot change what the `universal` engine accepts.
 */
 /** Characters that must be escaped to appear literally in a regex. */
 const REGEX_META = /[.+^$()[\]{}|\\]/g, DOMAIN = {
@@ -9049,16 +9050,16 @@ function targetOf(row) {
 	return `${row.host}:${row.port === "-" ? "0" : row.port}`;
 }
 //#endregion
-//#region src/core/lib/report/build/transparent.ts
+//#region src/core/lib/report/build/universal.ts
 /**
 * Pure — no I/O; the caller (src/lib/report.ts) fetches lines/parameters
 * itself. An empty input naturally yields passed:[]/blocked:[]/blockedCount:0,
 * so no special-case branch is needed.
 */
-async function buildTransparentReportData(lines, parameters) {
+async function buildUniversalReportData(lines, parameters) {
 	let { passed, blocked: blockedRawRows, blockedCount, hasNonBuildcageContent } = await scanHaproxyLog(lines, parameters.mode === "audit");
 	return {
-		engine: "transparent",
+		engine: "universal",
 		parameters,
 		passed,
 		blocked: annotateKnownBlocked(blockedRawRows, parameters.knownBlockedRules),
@@ -9079,7 +9080,7 @@ const REQUEST = /^buildcage (\d+) (https?) (\S+) (\S+) (-?\d+) (\d+) ts=(\S*) ds
 function isRefusal(terminationState) {
 	return terminationState.startsWith("P") || terminationState.startsWith("S");
 }
-/** Refusal reason, matching the transparent engine's kebab-case vocabulary. */
+/** Refusal reason, matching the universal engine's kebab-case vocabulary. */
 function reasonForStatus(status) {
 	return status === 502 ? "dns-failed" : status === 503 ? "origin-unreachable" : "not-allowed";
 }
@@ -9235,11 +9236,11 @@ const HAPROXY_LOG_FILE = "/var/log/haproxy/current";
 * end to end, unlike a separately-versioned report action), so it fetches
 * the raw log(s) and calls the shared builder in-process. Which log(s) to
 * read and which builder to call depends on which proxy image ran --
-* inspect's has a second (CoreDNS) log the transparent image does not.
+* inspect's has a second (CoreDNS) log the universal image does not.
 */
 function fetchReport(containerName, parameters, proxyEngine) {
 	let docker = createDocker();
-	return proxyEngine === "inspect" ? buildInspectReportData(docker.readFileLines(containerName, HAPROXY_LOG_FILE), docker.readFileLines(containerName, "/var/log/coredns/current"), parameters) : buildTransparentReportData(docker.readFileLines(containerName, HAPROXY_LOG_FILE), parameters);
+	return proxyEngine === "inspect" ? buildInspectReportData(docker.readFileLines(containerName, HAPROXY_LOG_FILE), docker.readFileLines(containerName, "/var/log/coredns/current"), parameters) : buildUniversalReportData(docker.readFileLines(containerName, HAPROXY_LOG_FILE), parameters);
 }
 /**
 * Pure decision + rendering step, kept free of process.env/file I/O so it's
@@ -9318,9 +9319,11 @@ function readKnownBlockedRules(input) {
 function parseWritablePaths(input) {
 	return input?.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) ?? [];
 }
-const ENGINES = ["transparent", "inspect"];
+const ENGINES = ["universal", "inspect"], ENGINE_ALIASES = { transparent: "universal" };
 function resolveProxyEngine(input) {
-	let engine = input?.trim() || "transparent";
+	let trimmed = input?.trim() || "universal", alias = ENGINE_ALIASES[trimmed];
+	alias && console.log("::notice::proxy_engine: transparent is now called universal; transparent still works, but consider updating to proxy_engine: universal.");
+	let engine = alias ?? trimmed;
 	if (!ENGINES.includes(engine)) throw new SandboxError(`Invalid proxy_engine: ${JSON.stringify(input)}. Must be one of ${ENGINES.join(", ")}.`, "INVALID_PROXY_ENGINE");
 	return engine;
 }

@@ -10,7 +10,7 @@ ARG COREDNS_SHA256_ARM64=bf26782d19b5340e3e6cb50f1ed6df72f58e4a30932c79d167f0f0a
 
 # Prepare dependencies — runc's official release binaries are already
 # statically linked (including libseccomp), so no compilation is needed,
-# only a checksum-pinned download, same as docker/transparent/Dockerfile.
+# only a checksum-pinned download, same as docker/universal/Dockerfile.
 # CoreDNS ships the same way.
 FROM alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS deps
 ARG RUNC_VERSION
@@ -95,7 +95,7 @@ RUN mkdir -p /etc/haproxy/rules /etc/coredns /var/log/haproxy /var/log/coredns
 # and the CoreDNS Corefile from one shared rule parse, so the two can't
 # describe different allowlists. No report-action.js here: src/lib/report.ts
 # builds its own report in-process instead of fetching one from the
-# container, same as docker/transparent/Dockerfile.
+# container, same as docker/universal/Dockerfile.
 COPY --from=qjs-build /build/dist/qjs/docker/inspect/scripts/gen-configs.js /opt/buildcage/scripts/gen-configs.js
 
 # runc — extracted onto the runner host at action startup and used by

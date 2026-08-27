@@ -175,6 +175,31 @@ jobs:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
         run: ./test/assert-sandbox.sh
 
+      # `transparent` is universal's old name, kept working permanently as an
+      # alias (see resolveProxyEngine's ENGINE_ALIASES) -- this proves it
+      # actually still works end-to-end, not just that it validates. Reuses
+      # the same already-built local image: the alias only affects the
+      # action's own input resolution, not which image BUILDCAGE_LOCAL_IMAGE_REF
+      # points at.
+      - name: "Run an isolated command via the real action (proxy_engine: transparent alias)"
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+        with:
+          proxy_engine: transparent
+          allowed_https_rules: example.com:443
+          fail_on_blocked: false
+          run: |
+            echo "=== allowlisted host must be reachable under the transparent alias ==="
+            wget -q -T 5 -O /dev/null https://example.com/
+
+            echo "=== non-allowlisted host must be blocked under the transparent alias ==="
+            if wget -q -T 5 -O /dev/null https://example.org/ 2>&1; then
+              echo "UNEXPECTED: example.org was reachable"
+              exit 1
+            fi
+            echo "OK: example.org correctly blocked"
+
       # No cleanup step: the action stops its own proxy container in its
       # finally block.
 

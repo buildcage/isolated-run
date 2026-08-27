@@ -196,7 +196,7 @@ export interface BuildOciConfigOptions {
   env: NodeJS.ProcessEnv;
   /** inspect engine only: the proxy's CA, mounted in rather than written to
    *  the real host filesystem -- see ca-trust.ts. Omitted entirely for the
-   *  transparent engine, which never terminates TLS and so has no CA to
+   *  universal engine, which never terminates TLS and so has no CA to
    *  distribute. */
   caTrust?: CaTrustFiles;
 }

@@ -1,12 +1,12 @@
 import { createDocker } from "#core/lib/docker/client.ts";
 import { describeBlockedOutcome } from "#core/lib/report/outcome/blocked-outcome.ts";
 import { renderReportMarkdown } from "#core/lib/report/render/render-report-markdown.ts";
-import { buildTransparentReportData } from "#core/lib/report/build/transparent.ts";
+import { buildUniversalReportData } from "#core/lib/report/build/universal.ts";
 import { buildInspectReportData } from "#core/lib/report/build/inspect.ts";
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
 export type Report = ReportData;
-export type ProxyEngine = "transparent" | "inspect";
+export type ProxyEngine = "universal" | "inspect";
 
 const HAPROXY_LOG_FILE = "/var/log/haproxy/current";
 /** inspect-only: the resolver's own log, the sole trace of a name that was
@@ -18,7 +18,7 @@ const COREDNS_LOG_FILE = "/var/log/coredns/current";
  * end to end, unlike a separately-versioned report action), so it fetches
  * the raw log(s) and calls the shared builder in-process. Which log(s) to
  * read and which builder to call depends on which proxy image ran --
- * inspect's has a second (CoreDNS) log the transparent image does not.
+ * inspect's has a second (CoreDNS) log the universal image does not.
  */
 export function fetchReport(
   containerName: string,
@@ -33,7 +33,7 @@ export function fetchReport(
       parameters,
     );
   }
-  return buildTransparentReportData(
+  return buildUniversalReportData(
     docker.readFileLines(containerName, HAPROXY_LOG_FILE),
     parameters,
   );

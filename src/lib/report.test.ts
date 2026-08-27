@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import { computeReportOutcome, type ComputeReportOutcomeOptions } from "./report.ts";
 import { annotateKnownBlocked } from "#core/lib/report/build/aggregate.ts";
-import type { GenReportParameters, TransparentReportData } from "#core/lib/report/types.ts";
+import type { GenReportParameters, UniversalReportData } from "#core/lib/report/types.ts";
 
 function parameters(overrides: Partial<GenReportParameters> = {}): GenReportParameters {
   return {
@@ -24,12 +24,12 @@ function options(
 // blocked rows are already expected to be annotated by the time a Report
 // reaches computeReportOutcome — this mirrors that, applying
 // parameters.knownBlockedRules the same way. computeReportOutcome only ever
-// touches ReportDataCommon fields, so a transparent-shaped fixture exercises
+// touches ReportDataCommon fields, so a universal-shaped fixture exercises
 // it just as well as an inspect-shaped one would.
-function report(overrides: Partial<TransparentReportData> = {}): TransparentReportData {
+function report(overrides: Partial<UniversalReportData> = {}): UniversalReportData {
   const params = overrides.parameters ?? parameters();
   return {
-    engine: "transparent",
+    engine: "universal",
     parameters: params,
     passed: [],
     blocked: [],
