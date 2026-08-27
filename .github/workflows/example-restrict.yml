@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Run tests with outbound network isolation
-        uses: buildcage/isolated-run@d9c6a461166ef1489d43ecc9eca1cada10abf122 # v1.0.4
+        uses: buildcage/isolated-run@9fd37420d523edf91266328c4aa83bd407f1dd29 # v1.1.0
         with:
           proxy_mode: restrict
           allowed_https_rules: |
