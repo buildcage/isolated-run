@@ -18,9 +18,8 @@ export interface BuildRestrictExampleOptions {
  * Returns a markdown string wrapped in <details> tags, or "" if no rows.
  *
  * actionRef is the ref (tag or commit SHA) this action was invoked with.
- * Unlike buildcage/docker's report action (which lives in a `report`
- * subdirectory of that repo), isolated-run's action.yml lives at the repo
- * root, so the example's `uses:` never has an action-name path segment.
+ * isolated-run's action.yml lives at the repo root, not in a subdirectory,
+ * so the example's `uses:` never has an action-name path segment.
  */
 export function buildRestrictExample(
   auditedRows: AuditedRow[] | null | undefined,

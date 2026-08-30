@@ -4,10 +4,8 @@
 # GitHub silently ignores attempts to reassign that reserved env var, and it
 # is unique per step anyway, so a later step could never read an earlier
 # step's copy back through it. The run action itself stops its own
-# throwaway proxy container before this script runs, so unlike
-# buildcage/docker's assert-{universal,explicit}-*.sh (which this repo has
-# no equivalent of), there's no long-lived builder container left to
-# `docker compose exec` into either.
+# throwaway proxy container before this script runs, so there is no
+# long-lived container left to `docker compose exec` into either.
 set -euo pipefail
 
 echo ""

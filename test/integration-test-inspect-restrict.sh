@@ -8,11 +8,11 @@
 # test/inspect-restrict-scenarios.sh for the scenario list itself).
 #
 # Also checks the CA-injection design this port introduces (see
-# src/lib/sandbox/ca-trust.ts): unlike buildcage-runc's disposable-layer
-# approach, this sandbox's rootfs is the real host `/`, so CA trust is
-# injected as mounts, torn down with the rest of the sandbox's mount
-# namespace -- never written to the host. That is a regression risk unique to
-# this repo, so it is checked here rather than only in theory.
+# src/lib/sandbox/ca-trust.ts): this sandbox's rootfs is the real host `/`,
+# so CA trust is injected as mounts, torn down with the rest of the
+# sandbox's mount namespace -- never written to the host. That is a
+# regression risk unique to this repo, so it is checked here rather than
+# only in theory.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

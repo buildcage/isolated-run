@@ -12,9 +12,8 @@ export interface RenderReportMarkdownOptions {
   runCommand?: string;
 }
 
-/** Branches on `report.engine` rather than being duplicated per engine, same
- *  as buildcage/docker's shared renderer — but there is no explicit-engine
- *  branch here, since isolated-run's proxy image never produces
+/** Branches on `report.engine` rather than being duplicated per engine. There
+ *  is no explicit-engine branch: isolated-run's proxy image never produces
  *  buildkitd/vertex logs (see ../types.ts). */
 export function renderReportMarkdown(
   report: ReportData,
