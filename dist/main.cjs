@@ -8930,7 +8930,7 @@ function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound
 	return report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, { runCommand }) : buildRestrictExample(report.passed, actionRepo, actionRef, { runCommand })), report.blocked.length > 0 && (report.passed.length > 0 && (markdown += "\n"), markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(report.blocked, {
 		showReason: !0,
 		showExpected
-	}) + "\n"), report.passed.length === 0 && report.blocked.length === 0 && (markdown += "_(no communication)_\n\n"), report.engine === "inspect" ? markdown += renderInspectDetails(report.timeline, report.startedAt) : markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n", markdown += `\n*Reported by [Buildcage](https://github.com/${actionRepo})*\n`, markdown;
+	}) + "\n"), report.passed.length === 0 && report.blocked.length === 0 && (markdown += "_(no communication)_\n\n"), report.engine === "inspect" ? markdown += renderInspectDetails(report.timeline, report.startedAt) : markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n", markdown += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, markdown;
 }
 //#endregion
 //#region src/core/lib/log/aggregate.ts
