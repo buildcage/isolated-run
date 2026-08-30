@@ -37,6 +37,8 @@ requires terminating TLS.
 
 ## Architecture
 
+<img src="../assets/diagram-architecture-inspect.png" alt="Inspect proxy engine architecture" width="620" height="832">
+
 Two components, plus a CA-trust mount.
 
 **HAProxy** does the inspecting, and the engine depends on three of its behaviours:

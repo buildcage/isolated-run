@@ -8,7 +8,7 @@ import type { MountEntry } from "./types.ts";
  * CA trust for the inspect engine, adapted for this sandbox's rootfs being
  * the live host `/` (via `mount --rbind /`), not a throwaway image layer.
  *
- * buildcage/docker's inspect engine has a runc wrapper (buildkit-runc)
+ * buildcage/docker's inspect engine has a runc wrapper (buildcage-runc)
  * write the CA into the BuildKit worker's own disposable rootfs layer, then
  * delete it again once the step's process exits, before the layer is
  * committed as a snapshot. That design leans on the rootfs being torn down
@@ -106,7 +106,7 @@ export function writeCaTrustFiles(caCertPath: string, dir: string): CaTrustFiles
   return { ownCaPath, systemCaPath };
 }
 
-// Mirrors buildcage/docker's buildkit-runc CA-injection policy table (see
+// Mirrors buildcage/docker's buildcage-runc CA-injection policy table (see
 // docs/security.md): NODE_EXTRA_CA_CERTS/DENO_CERT add to a built-in trust
 // set, so they're pointed at a CA-only file; REQUESTS_CA_BUNDLE/PIP_CERT/
 // SSL_CERT_FILE replace a tool's bundle outright, so they're pointed at the
@@ -117,7 +117,7 @@ export function writeCaTrustFiles(caCertPath: string, dir: string): CaTrustFiles
 // Only applied when a variable is unset. A step that already points one of
 // these somewhere keeps doing so unmodified: safely appending to an
 // arbitrary already-set path would need the same host-escape-safe symlink
-// resolution buildkit-runc's castore.go does, which this port does not
+// resolution buildcage-runc's castore.go does, which this port does not
 // implement yet.
 const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"];
 const POINT_AT_SYSTEM_STORE = ["REQUESTS_CA_BUNDLE", "PIP_CERT", "SSL_CERT_FILE"];
