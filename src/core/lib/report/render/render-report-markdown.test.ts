@@ -74,7 +74,7 @@ describe("renderReportMarkdown", () => {
   it("uses the real actionRepo in the footer, not a placeholder", () => {
     const md = renderReportMarkdown(base, "buildcage/isolated-run", "v1");
     expect(md).toMatch(
-      /Reported by \[Buildcage\]\(https:\/\/github\.com\/buildcage\/isolated-run\)/,
+      /Reported by \[buildcage\/isolated-run\]\(https:\/\/github\.com\/buildcage\/isolated-run\)/,
     );
     assertNotMatch(md, /GITHUB_ACTION_REPOSITORY/);
   });
