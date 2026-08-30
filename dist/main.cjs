@@ -8692,9 +8692,8 @@ const ruleTypeToParam = {
 * Returns a markdown string wrapped in <details> tags, or "" if no rows.
 *
 * actionRef is the ref (tag or commit SHA) this action was invoked with.
-* Unlike buildcage/docker's report action (which lives in a `report`
-* subdirectory of that repo), isolated-run's action.yml lives at the repo
-* root, so the example's `uses:` never has an action-name path segment.
+* isolated-run's action.yml lives at the repo root, not in a subdirectory,
+* so the example's `uses:` never has an action-name path segment.
 */
 function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand } = {}) {
 	if (!auditedRows || auditedRows.length === 0) return "";
@@ -8923,9 +8922,8 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { runComma
 }
 //#endregion
 //#region src/core/lib/report/render/render-report-markdown.ts
-/** Branches on `report.engine` rather than being duplicated per engine, same
-*  as buildcage/docker's shared renderer — but there is no explicit-engine
-*  branch here, since isolated-run's proxy image never produces
+/** Branches on `report.engine` rather than being duplicated per engine. There
+*  is no explicit-engine branch: isolated-run's proxy image never produces
 *  buildkitd/vertex logs (see ../types.ts). */
 function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", runCommand } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${title} (${report.parameters.mode} mode)\n\n`;

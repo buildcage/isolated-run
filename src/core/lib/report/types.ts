@@ -57,6 +57,5 @@ export interface InspectReportData extends ReportDataCommon {
 }
 
 /** isolated-run's proxy image never produces buildkitd/vertex logs (there is
- *  no buildkitd here) — unlike buildcage/docker, there's no explicit-engine
- *  variant in this union. */
+ *  no buildkitd here), so this union has no explicit-engine variant. */
 export type ReportData = UniversalReportData | InspectReportData;

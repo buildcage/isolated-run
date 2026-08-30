@@ -1,13 +1,13 @@
 # Fixture network for the inspect engine's integration tests
 # (test/integration-test-inspect-restrict.sh, test/integration-test-inspect-audit.sh).
 #
-# Unlike buildcage/docker's compose.test-inspect.yaml, this file does not
-# also define the proxy service: isolated-run's real action always starts its
-# own throwaway proxy container via docker/compose.action.yaml (or, for these
-# tests, docker/compose.action.test-inspect.yaml — see
-# BUILDCAGE_TEST_COMPOSE_FILE in src/core/lib/provenance/local-image-override.ts),
-# a separate `docker compose` invocation/project from this one. This file only
-# has to bring up the fixture origins and the network both invocations join.
+# This file does not define the proxy service: isolated-run's real action
+# always starts its own throwaway proxy container via
+# docker/compose.action.yaml (or, for these tests,
+# docker/compose.action.test-inspect.yaml — see BUILDCAGE_TEST_COMPOSE_FILE in
+# src/core/lib/provenance/local-image-override.ts), a separate
+# `docker compose` invocation/project from this one. This file only has to
+# bring up the fixture origins and the network both invocations join.
 services:
   # The origin every allowed name resolves to. Distinguishes paths and echoes
   # the method, so a path or method rule can be told to have actually applied.
