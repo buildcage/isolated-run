@@ -20,7 +20,7 @@ identity keep working unmodified.
 
 ## Isolation Mechanisms
 
-<img src="../assets/diagram-architecture.png" alt="isolated-run sandbox architecture" width="620" height="544">
+<img src="../assets/diagram-architecture-universal.png" alt="isolated-run sandbox architecture" width="620" height="544">
 
 The isolated command runs as an [OCI](https://github.com/opencontainers/runtime-spec) container
 under [runc](https://github.com/opencontainers/runc) rather than being wrapped directly by
