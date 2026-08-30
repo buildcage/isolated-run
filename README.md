@@ -303,12 +303,11 @@ credentials, personal data, or source you do not publish.
 
 ## Documentation
 
-| Doc                                              | What's in it                                                |
-| ------------------------------------------------ | ----------------------------------------------------------- |
-| [Inspect Proxy Engine](./docs/inspect-engine.md) | The experimental `proxy_engine: inspect` in full            |
-| [Security Details](./docs/security.md)           | Architecture, attack resistance, and known limitations      |
-| [Self-Hosting Guide](./docs/self-hosting.md)     | Hosting your own isolated-run image in a private repository |
-| [Development Guide](./docs/development.md)       | Local usage, testing, logs, and implementation internals    |
+| Doc                                              | What's in it                                             |
+| ------------------------------------------------ | -------------------------------------------------------- |
+| [Inspect Proxy Engine](./docs/inspect-engine.md) | The experimental `proxy_engine: inspect` in full         |
+| [Security Details](./docs/security.md)           | Architecture, attack resistance, and known limitations   |
+| [Development Guide](./docs/development.md)       | Local usage, testing, logs, and implementation internals |
 
 ## Contributing
 

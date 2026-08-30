@@ -245,7 +245,7 @@ Fields: `[timestamp] buildcage [status] "domain:port" reason`
 │                              # seccomp/die-with-parent checks driving dist/main.cjs directly)
 ├── dev/                       # Mac dev-loop-only Dockerfile + smoke-test.sh + build-test-bundle.sh
 │                              # (see docker/compose.sandbox-dev.yaml) — not used in production or CI
-├── docs/                      # development.md, security.md, self-hosting.md
+├── docs/                      # development.md, security.md
 ├── compose.yaml               # Docker Compose config for local dev (builds docker/universal/Dockerfile;
 │                              # also what CI's test_sandbox/test_sandbox_* jobs build from)
 └── Makefile                   # Operational commands
