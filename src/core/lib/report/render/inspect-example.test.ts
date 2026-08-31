@@ -237,7 +237,7 @@ describe("buildInspectRestrictExample", () => {
     const md = buildInspectRestrictExample(requests, "buildcage/isolated-run", "v2", {
       runCommand: "npm install",
     });
-    expect(md.includes("    run: |\n      npm install\n")).toBe(true);
+    expect(md.includes("          run: |\n            npm install\n")).toBe(true);
   });
 
   it("omits the run: block when no runCommand is given", () => {
