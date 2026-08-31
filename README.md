@@ -22,6 +22,7 @@ Docker build's `RUN` steps rather than a workflow step, use
 
 - [Usage](#usage)
 - [Inputs](#inputs)
+- [Outputs](#outputs)
 - [Operation modes](#operation-modes)
 - [Rule syntax](#rule-syntax)
 - [Proxy engines](#proxy-engines)
@@ -128,6 +129,32 @@ deliberately keeping off the allowlist to confirm it stays blocked — list them
 `known_blocked_rules`. When every blocked connection matches, the step no longer fails even with
 `fail_on_blocked: true`, and a `::notice::` is emitted instead of `::error::`; any unmatched blocked
 connection still fails the step.
+
+## Outputs
+
+| Output                  | Description                                                                                         |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| `traffic_artifact_name` | Name of the uploaded traffic artifact, when `upload_traffic_artifact` produced one; empty otherwise |
+
+Using this action several times in the same job gives each invocation a differently-named
+artifact (see [Traffic artifact](./docs/inspect-engine.md#traffic-artifact)), so a later step
+that wants a specific run's artifact should read this output from that step rather than guessing
+the name:
+
+```yaml
+- name: Run tests with outbound network isolation
+  id: sandbox
+  uses: buildcage/isolated-run@v2
+  with:
+    proxy_engine: inspect
+    upload_traffic_artifact: true
+    run: npm test
+
+- uses: actions/download-artifact@v8
+  if: steps.sandbox.outputs.traffic_artifact_name != ''
+  with:
+    name: ${{ steps.sandbox.outputs.traffic_artifact_name }}
+```
 
 ## Operation modes
 

@@ -339,10 +339,11 @@ function trafficArtifactName(containerName: string): string {
 }
 
 /**
- * Upload the traffic JSON, when the engine produced one. Best-effort: the
- * step's own outcome is already decided by this point, so a failed upload
- * only warns. @actions/artifact is imported lazily so a run that asks for no
- * artifact does not load it.
+ * Upload the traffic JSON, when the engine produced one, and set the
+ * traffic_artifact_name output on success. Best-effort: the step's own
+ * outcome is already decided by this point, so a failed upload only warns.
+ * @actions/artifact is imported lazily so a run that asks for no artifact
+ * does not load it.
  */
 async function uploadTrafficArtifact(
   report: Report,
@@ -367,6 +368,11 @@ async function uploadTrafficArtifact(
       retentionDays: Number.isFinite(days) && days > 0 ? days : undefined,
     });
     console.log(`Uploaded the traffic JSON as ${name}`);
+    // Set only on confirmed success, and only here (after the sandboxed
+    // command has already exited) -- GITHUB_OUTPUT's own last-write-wins
+    // parsing means this always overrides anything the isolated command
+    // itself may have written to the same key.
+    core.setOutput("traffic_artifact_name", name);
   } catch (e) {
     annotation.warning(`Could not upload the traffic artifact: ${errorMessage(e)}`);
   } finally {

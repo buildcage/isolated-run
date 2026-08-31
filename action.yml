@@ -61,6 +61,10 @@ inputs:
     required: false
     default: ""
 
+outputs:
+  traffic_artifact_name:
+    description: "Name of the uploaded traffic artifact, when upload_traffic_artifact produced one. Empty otherwise, so a later step can tell an upload apart from none having been requested."
+
 runs:
   using: node24
   main: dist/main.cjs

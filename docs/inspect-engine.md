@@ -370,6 +370,9 @@ collide): an array of everything above, oldest first, and name lookups that mere
 well. This one is read by machines, where the volume costs nothing and a name resolved but never
 connected to is how a too-wide rule being probed shows up.
 
+The exact name is also on the step's own `traffic_artifact_name` output — a later step reads that
+rather than reconstructing or guessing the `<id>` suffix (see [Outputs](../README.md#outputs)).
+
 | Field         | Always | Notes                                                  |
 | ------------- | ------ | ------------------------------------------------------ |
 | `time`        | yes    | ISO 8601 UTC                                           |

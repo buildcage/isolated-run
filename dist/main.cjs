@@ -12058,6 +12058,16 @@ function getBooleanInput(name, options) {
 	throw TypeError(`Input does not meet YAML 1.2 "Core Schema" specification: ${name}\nSupport boolean input list: \`true | True | TRUE | false | False | FALSE\``);
 }
 /**
+* Sets the value of an output.
+*
+* @param     name     name of the output to set
+* @param     value    value to store. Non-string values will be converted to a string via JSON.stringify
+*/
+function setOutput(name, value) {
+	if (process.env.GITHUB_OUTPUT) return issueFileCommand("OUTPUT", prepareKeyValueMessage(name, value));
+	process.stdout.write(os.EOL), issueCommand("set-output", { name }, toCommandValue(value));
+}
+/**
 * Writes debug message to user log
 * @param message debug message
 */
@@ -78702,10 +78712,11 @@ function trafficArtifactName(containerName) {
 	return `buildcage-traffic-${containerName.split("-").at(-1)}`;
 }
 /**
-* Upload the traffic JSON, when the engine produced one. Best-effort: the
-* step's own outcome is already decided by this point, so a failed upload
-* only warns. @actions/artifact is imported lazily so a run that asks for no
-* artifact does not load it.
+* Upload the traffic JSON, when the engine produced one, and set the
+* traffic_artifact_name output on success. Best-effort: the step's own
+* outcome is already decided by this point, so a failed upload only warns.
+* @actions/artifact is imported lazily so a run that asks for no artifact
+* does not load it.
 */
 async function uploadTrafficArtifact(report, containerName, annotation) {
 	if (report.engine !== "inspect") {
@@ -78717,7 +78728,7 @@ async function uploadTrafficArtifact(report, containerName, annotation) {
 		let file = (0, node_path.join)(scratchDir, "traffic.json");
 		writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));
 		let days = Number(getInput("traffic_artifact_retention_days") || ""), { DefaultArtifactClient } = await Promise.resolve().then(() => (init_artifact(), artifact_exports)), name = trafficArtifactName(containerName);
-		await new DefaultArtifactClient().uploadArtifact(name, [file], scratchDir, { retentionDays: Number.isFinite(days) && days > 0 ? days : void 0 }), console.log(`Uploaded the traffic JSON as ${name}`);
+		await new DefaultArtifactClient().uploadArtifact(name, [file], scratchDir, { retentionDays: Number.isFinite(days) && days > 0 ? days : void 0 }), console.log(`Uploaded the traffic JSON as ${name}`), setOutput("traffic_artifact_name", name);
 	} catch (e) {
 		annotation.warning(`Could not upload the traffic artifact: ${errorMessage(e)}`);
 	} finally {
