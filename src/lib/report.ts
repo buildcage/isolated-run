@@ -40,11 +40,34 @@ export function fetchReport(
   );
 }
 
+/**
+ * Best-effort `org.opencontainers.image.version` label read, converted back
+ * into the `vX.Y.Z` git tag it was published from (the label itself is the
+ * bare Docker tag, e.g. `3.1.4-inspect` for a non-universal engine — see
+ * image-tag.ts). A `docker inspect` failure here must not fail the report
+ * over one comment.
+ */
+export function readActionVersion(
+  containerName: string,
+  proxyEngine: ProxyEngine,
+): string | undefined {
+  try {
+    const label = createDocker().readLabels(containerName)["org.opencontainers.image.version"];
+    if (!label) return undefined;
+    const suffix = `-${proxyEngine}`;
+    const version = label.endsWith(suffix) ? label.slice(0, -suffix.length) : label;
+    return `v${version}`;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface ComputeReportOutcomeOptions {
   stepLabel?: string;
   actionRepo: string;
   actionRef: string;
   runCommand?: string;
+  actionVersion?: string;
   failOnBlocked?: boolean;
 }
 
@@ -62,7 +85,14 @@ export interface ReportOutcome {
  */
 export function computeReportOutcome(
   report: Report,
-  { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand }: ComputeReportOutcomeOptions,
+  {
+    stepLabel,
+    failOnBlocked,
+    actionRepo,
+    actionRef,
+    runCommand,
+    actionVersion,
+  }: ComputeReportOutcomeOptions,
 ): ReportOutcome {
   const { level, message, shouldFail } = describeBlockedOutcome({
     isAudit: report.parameters.mode === "audit",
@@ -75,6 +105,7 @@ export function computeReportOutcome(
   const markdown = renderReportMarkdown(report, actionRepo, actionRef, {
     title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : undefined,
     runCommand,
+    actionVersion,
   });
 
   return { markdown, message, level, shouldFail };

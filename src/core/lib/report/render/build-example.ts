@@ -11,6 +11,8 @@ export type AuditedRow = Pick<AggregatedEntry, "host" | "port" | "ruleType">;
 export interface BuildRestrictExampleOptions {
   /** the `run:` input, always included — isolated-run's action.yml requires it */
   runCommand?: string;
+  /** Version to annotate the `uses:` line with, if known, as `# 3.1.4`. */
+  actionVersion?: string;
 }
 
 /**
@@ -25,7 +27,7 @@ export function buildRestrictExample(
   auditedRows: AuditedRow[] | null | undefined,
   actionRepo: string,
   actionRef?: string,
-  { runCommand }: BuildRestrictExampleOptions = {},
+  { runCommand, actionVersion }: BuildRestrictExampleOptions = {},
 ): string {
   if (!auditedRows || auditedRows.length === 0) return "";
 
@@ -43,7 +45,7 @@ export function buildRestrictExample(
   // Build YAML lines
   let yaml = "";
   yaml += "- name: Start isolated-run\n";
-  yaml += `  uses: ${actionRepo}@${actionRef}\n`;
+  yaml += `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
   yaml += "  with:\n";
   // `run` is a single self-contained step, so the example must repeat the
   // run: command to stay copy-pasteable on its own.

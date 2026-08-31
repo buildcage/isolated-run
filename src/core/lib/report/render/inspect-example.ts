@@ -146,6 +146,8 @@ export interface BuildInspectRestrictExampleOptions {
   /** the `run:` input, always included — isolated-run's action.yml requires it,
    *  same as build-example.ts's own BuildRestrictExampleOptions. */
   runCommand?: string;
+  /** Version to annotate the `uses:` line with, if known, as `# 3.1.4`. */
+  actionVersion?: string;
 }
 
 /**
@@ -158,13 +160,13 @@ export function buildInspectRestrictExample(
   requests: TrafficEvent[] | null | undefined,
   actionRepo: string,
   actionRef?: string,
-  { runCommand }: BuildInspectRestrictExampleOptions = {},
+  { runCommand, actionVersion }: BuildInspectRestrictExampleOptions = {},
 ): string {
   const lines = buildUrlRuleLines(requests ?? []);
   if (lines.length === 0) return "";
 
   let yaml = "- name: Start isolated-run\n";
-  yaml += `  uses: ${actionRepo}@${actionRef}\n`;
+  yaml += `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
   yaml += "  with:\n";
   // `run` is a single self-contained step, so the example must repeat the
   // run: command to stay copy-pasteable on its own — see build-example.ts.

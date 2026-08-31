@@ -33,6 +33,7 @@ import { withScratchDir } from "./lib/sandbox/scratch-dir.ts";
 import {
   fetchReport,
   computeReportOutcome,
+  readActionVersion,
   type Report,
   type ComputeReportOutcomeOptions,
 } from "./lib/report.ts";
@@ -549,6 +550,7 @@ async function main(): Promise<void> {
           actionRepo,
           actionRef,
           runCommand: runInput,
+          actionVersion: readActionVersion(containerName, proxyEngine),
           stepLabel: core.getInput("label") || undefined,
           failOnBlocked,
         },

@@ -20148,6 +20148,11 @@ function parseDockerInspectEnv(inspectOutput) {
 	}
 	return env;
 }
+/** Parses `docker inspect <id> --format '{{json .Config.Labels}}'`'s output
+*  into a lookup map; `null` (no labels) becomes `{}`. */
+function parseDockerInspectLabels(inspectOutput) {
+	return JSON.parse(inspectOutput) ?? {};
+}
 //#endregion
 //#region src/core/lib/docker/client.ts
 /** `docker ps --format '{{.ID}}'` prints one ID per line, possibly with
@@ -20246,6 +20251,14 @@ function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand
 				containerId,
 				"--format",
 				"{{json .Config.Env}}"
+			]));
+		},
+		readLabels(containerId) {
+			return parseDockerInspectLabels(run([
+				"inspect",
+				containerId,
+				"--format",
+				"{{json .Config.Labels}}"
 			]));
 		},
 		exec(containerId, args) {
@@ -20404,7 +20417,7 @@ const ruleTypeToParam = {
 * isolated-run's action.yml lives at the repo root, not in a subdirectory,
 * so the example's `uses:` never has an action-name path segment.
 */
-function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand } = {}) {
+function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand, actionVersion } = {}) {
 	if (!auditedRows || auditedRows.length === 0) return "";
 	let groups = /* @__PURE__ */ new Map();
 	for (let r of auditedRows) {
@@ -20413,7 +20426,7 @@ function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand }
 	}
 	if (groups.size === 0) return "";
 	let yaml = "";
-	if (yaml += "- name: Start isolated-run\n", yaml += `  uses: ${actionRepo}@${actionRef}\n`, yaml += "  with:\n", runCommand) {
+	if (yaml += "- name: Start isolated-run\n", yaml += `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`, yaml += "  with:\n", runCommand) {
 		yaml += "    run: |\n";
 		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
 	}
@@ -20623,11 +20636,11 @@ function buildUrlRuleLines(requests) {
 *
 * `actionRef` is the ref this action was invoked with.
 */
-function buildInspectRestrictExample(requests, actionRepo, actionRef, { runCommand } = {}) {
+function buildInspectRestrictExample(requests, actionRepo, actionRef, { runCommand, actionVersion } = {}) {
 	let lines = buildUrlRuleLines(requests ?? []);
 	if (lines.length === 0) return "";
 	let yaml = "- name: Start isolated-run\n";
-	if (yaml += `  uses: ${actionRepo}@${actionRef}\n`, yaml += "  with:\n", runCommand) {
+	if (yaml += `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`, yaml += "  with:\n", runCommand) {
 		yaml += "    run: |\n";
 		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
 	}
@@ -20642,9 +20655,15 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { runComma
 /** Branches on `report.engine` rather than being duplicated per engine. There
 *  is no explicit-engine branch: isolated-run's proxy image never produces
 *  buildkitd/vertex logs (see ../types.ts). */
-function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", runCommand } = {}) {
+function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", runCommand, actionVersion } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${title} (${report.parameters.mode} mode)\n\n`;
-	return report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, { runCommand }) : buildRestrictExample(report.passed, actionRepo, actionRef, { runCommand })), report.blocked.length > 0 && (report.passed.length > 0 && (markdown += "\n"), markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(report.blocked, {
+	return report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
+		runCommand,
+		actionVersion
+	}) : buildRestrictExample(report.passed, actionRepo, actionRef, {
+		runCommand,
+		actionVersion
+	})), report.blocked.length > 0 && (report.passed.length > 0 && (markdown += "\n"), markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(report.blocked, {
 		showReason: !0,
 		showExpected
 	}) + "\n"), report.passed.length === 0 && report.blocked.length === 0 && (markdown += "_(no communication)_\n\n"), report.engine === "inspect" ? markdown += renderInspectDetails(report.timeline, report.startedAt) : markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n", markdown += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, markdown;
@@ -20958,11 +20977,28 @@ function fetchReport(containerName, parameters, proxyEngine) {
 	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, "/var/log/coredns"), parameters) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), parameters);
 }
 /**
+* Best-effort `org.opencontainers.image.version` label read, converted back
+* into the `vX.Y.Z` git tag it was published from (the label itself is the
+* bare Docker tag, e.g. `3.1.4-inspect` for a non-universal engine — see
+* image-tag.ts). A `docker inspect` failure here must not fail the report
+* over one comment.
+*/
+function readActionVersion(containerName, proxyEngine) {
+	try {
+		let label = createDocker().readLabels(containerName)["org.opencontainers.image.version"];
+		if (!label) return;
+		let suffix = `-${proxyEngine}`;
+		return `v${label.endsWith(suffix) ? label.slice(0, -suffix.length) : label}`;
+	} catch {
+		return;
+	}
+}
+/**
 * Pure decision + rendering step, kept free of process.env/file I/O so it's
 * testable without touching the filesystem — see main.ts's writeReportSummary
 * for the side-effecting half (actual summary/annotation output).
 */
-function computeReportOutcome(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand }) {
+function computeReportOutcome(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, actionVersion }) {
 	let { level, message, shouldFail } = describeBlockedOutcome({
 		isAudit: report.parameters.mode === "audit",
 		failOnBlocked: failOnBlocked ?? !1,
@@ -20974,7 +21010,8 @@ function computeReportOutcome(report, { stepLabel, failOnBlocked, actionRepo, ac
 	return {
 		markdown: renderReportMarkdown(report, actionRepo, actionRef, {
 			title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
-			runCommand
+			runCommand,
+			actionVersion
 		}),
 		message,
 		level,
@@ -78820,6 +78857,7 @@ async function main() {
 				actionRepo,
 				actionRef,
 				runCommand: runInput,
+				actionVersion: readActionVersion(containerName, proxyEngine),
 				stepLabel: getInput("label") || void 0,
 				failOnBlocked
 			}, wantsArtifact && report.engine === "inspect"), wantsArtifact && await uploadTrafficArtifact(report, containerName, annotation);
