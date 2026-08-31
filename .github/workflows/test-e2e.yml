@@ -300,9 +300,9 @@ jobs:
             const fs = require("node:fs");
             const path = require("node:path");
             const base = process.env.RUNNER_TEMP + "/buildcage-traffic";
-            // download-artifact with pattern: does not always nest a matched
-            // artifact's single file under an artifact-name subdirectory, so
-            // this searches recursively instead of assuming a fixed depth.
+            // download-artifact with pattern: does not always nest the one
+            // matched artifact under an artifact-name subdirectory, so this
+            // searches recursively instead of assuming a fixed depth.
             const file = fs.readdirSync(base, { recursive: true }).find((f) => f.endsWith("traffic.json"));
             if (!file) {
               console.log("::error::no traffic.json found under " + base);
