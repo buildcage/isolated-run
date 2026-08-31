@@ -211,9 +211,10 @@ describe("buildInspectRestrictExample", () => {
     expect(md.includes("proxy_engine: inspect")).toBe(true);
   });
 
-  it("shows a placeholder for a commit sha, which is opaque and run-specific", () => {
-    const md = buildInspectRestrictExample(requests, "buildcage/isolated-run", "a".repeat(40));
-    expect(md.includes("@<sha>")).toBe(true);
+  it("renders a commit sha as-is, same as a tag", () => {
+    const sha = "a".repeat(40);
+    const md = buildInspectRestrictExample(requests, "buildcage/isolated-run", sha);
+    expect(md.includes(`@${sha}`)).toBe(true);
   });
 
   it("keeps a tag as written, since it is stable", () => {
@@ -236,7 +237,7 @@ describe("buildInspectRestrictExample", () => {
     const md = buildInspectRestrictExample(requests, "buildcage/isolated-run", "v2", {
       runCommand: "npm install",
     });
-    expect(md.includes("    run: |\n      npm install\n")).toBe(true);
+    expect(md.includes("          run: |\n            npm install\n")).toBe(true);
   });
 
   it("omits the run: block when no runCommand is given", () => {

@@ -20406,14 +20406,14 @@ const ruleTypeToParam = {
 */
 function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand } = {}) {
 	if (!auditedRows || auditedRows.length === 0) return "";
-	let ref = /^[0-9a-f]{40}$/i.test(actionRef) ? "<sha>" : actionRef, groups = /* @__PURE__ */ new Map();
+	let groups = /* @__PURE__ */ new Map();
 	for (let r of auditedRows) {
 		let param = ruleTypeToParam[r.ruleType];
 		param && (groups.has(param) || groups.set(param, []), groups.get(param).push(`${r.host}:${r.port}`));
 	}
 	if (groups.size === 0) return "";
 	let yaml = "";
-	if (yaml += "- name: Start isolated-run in restrict mode\n", yaml += `  uses: ${actionRepo}@${ref}\n`, yaml += "  with:\n", runCommand) {
+	if (yaml += "- name: Start isolated-run\n", yaml += `  uses: ${actionRepo}@${actionRef}\n`, yaml += "  with:\n", runCommand) {
 		yaml += "    run: |\n";
 		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
 	}
@@ -20422,6 +20422,7 @@ function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand }
 		yaml += `    ${param}: >-\n`;
 		for (let rule of rules) yaml += `      ${rule}\n`;
 	}
+	yaml = yaml.split("\n").map((line) => line && "      " + line).join("\n");
 	let md = "\n<details>\n";
 	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += yaml, md += "```\n\n", md += "</details>\n", md;
 }
@@ -20620,20 +20621,19 @@ function buildUrlRuleLines(requests) {
 * Render the rules as a collapsed markdown section, or "" if nothing was
 * observed.
 *
-* `actionRef` is the ref this action was invoked with. A 40-character SHA is
-* specific to this run and opaque to the reader, so it is shown as a
-* placeholder; a tag is stable and useful as written.
+* `actionRef` is the ref this action was invoked with.
 */
 function buildInspectRestrictExample(requests, actionRepo, actionRef, { runCommand } = {}) {
 	let lines = buildUrlRuleLines(requests ?? []);
 	if (lines.length === 0) return "";
-	let ref = actionRef && /^[0-9a-f]{40}$/i.test(actionRef) ? "<sha>" : actionRef, yaml = "- name: Start isolated-run in restrict mode\n";
-	if (yaml += `  uses: ${actionRepo}@${ref}\n`, yaml += "  with:\n", runCommand) {
+	let yaml = "- name: Start isolated-run\n";
+	if (yaml += `  uses: ${actionRepo}@${actionRef}\n`, yaml += "  with:\n", runCommand) {
 		yaml += "    run: |\n";
 		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
 	}
 	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: inspect\n", yaml += "    allowed_url_rules: |\n";
 	for (let line of lines) yaml += `      ${line}\n`;
+	yaml = yaml.split("\n").map((line) => line && "      " + line).join("\n");
 	let md = "\n<details>\n";
 	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += yaml, md += "```\n\n", md += "These rules permit exactly what this build did, so read them before using them: a URL that\n", md += "carried a version or a date will not match the next run, and anything reached through\n", md += "`allow_tls_rules` or `allowed_ip_rules` is not here, because it was never inspected.\n\n", md += "</details>\n", md;
 }

@@ -29,10 +29,6 @@ export function buildRestrictExample(
 ): string {
   if (!auditedRows || auditedRows.length === 0) return "";
 
-  // A 40-char SHA is opaque to the reader and specific to this run, so show a
-  // placeholder instead; a tag (e.g. v1, v1.1.0) is stable and useful as-is.
-  const ref = /^[0-9a-f]{40}$/i.test(actionRef!) ? "<sha>" : actionRef;
-
   // Group by ruleType, preserving order of first appearance
   const groups = new Map<string, string[]>();
   for (const r of auditedRows) {
@@ -46,8 +42,8 @@ export function buildRestrictExample(
 
   // Build YAML lines
   let yaml = "";
-  yaml += "- name: Start isolated-run in restrict mode\n";
-  yaml += `  uses: ${actionRepo}@${ref}\n`;
+  yaml += "- name: Start isolated-run\n";
+  yaml += `  uses: ${actionRepo}@${actionRef}\n`;
   yaml += "  with:\n";
   // `run` is a single self-contained step, so the example must repeat the
   // run: command to stay copy-pasteable on its own.
@@ -67,6 +63,15 @@ export function buildRestrictExample(
       yaml += `      ${rule}\n`;
     }
   }
+
+  // GitHub Actions' own indentation convention (jobs: -> <id>: -> steps: ->
+  // "- name:") always puts a step 6 spaces in, so the generated snippet can
+  // be pasted directly into an existing steps: list without re-indenting it.
+  const STEP_INDENT = "      ";
+  yaml = yaml
+    .split("\n")
+    .map((line) => (line ? STEP_INDENT + line : line))
+    .join("\n");
 
   let md = "\n<details>\n";
   md += "<summary>🛡️ Switch to restrict mode</summary>\n\n";
