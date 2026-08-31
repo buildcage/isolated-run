@@ -245,6 +245,7 @@ jobs:
         run: vp run build
 
       - name: "Run an isolated command via the real action (proxy_engine: inspect)"
+        id: sandbox
         uses: ./
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
@@ -285,30 +286,29 @@ jobs:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-inspect-summary.md
         run: ./test/assert-sandbox-inspect.sh
 
-      # The artifact name is suffixed with this run's own proxy container ID
-      # (see trafficArtifactName in src/main.ts), so this matches by pattern
-      # rather than a fixed name.
+      - name: Check the traffic_artifact_name output was set
+        run: |
+          if [ -z "${{ steps.sandbox.outputs.traffic_artifact_name }}" ]; then
+            echo "::error::traffic_artifact_name output was empty despite upload_traffic_artifact: true"
+            exit 1
+          fi
+
+      # Downloading by the exact name from the output above, rather than
+      # matching buildcage-traffic-* by pattern, proves the output itself is
+      # both set and correct.
       - name: Download the traffic artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: buildcage-traffic-*
+          name: ${{ steps.sandbox.outputs.traffic_artifact_name }}
           path: ${{ runner.temp }}/buildcage-traffic
 
       - name: Verify the traffic artifact
         run: |
           node -e '
             const fs = require("node:fs");
-            const path = require("node:path");
-            const base = process.env.RUNNER_TEMP + "/buildcage-traffic";
-            // download-artifact with pattern: does not always nest the one
-            // matched artifact under an artifact-name subdirectory, so this
-            // searches recursively instead of assuming a fixed depth.
-            const file = fs.readdirSync(base, { recursive: true }).find((f) => f.endsWith("traffic.json"));
-            if (!file) {
-              console.log("::error::no traffic.json found under " + base);
-              process.exit(1);
-            }
-            const rows = JSON.parse(fs.readFileSync(path.join(base, file), "utf8"));
+            const rows = JSON.parse(
+              fs.readFileSync(process.env.RUNNER_TEMP + "/buildcage-traffic/traffic.json", "utf8"),
+            );
             const methodRefused = rows.some(
               (r) => r.action === "block" && r.host === "example.com" && r.method === "POST",
             );
