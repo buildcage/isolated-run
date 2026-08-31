@@ -8577,6 +8577,34 @@ function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand
 	};
 }
 //#endregion
+//#region src/core/lib/docker/rotated-log.ts
+const SEGMENT = /^@[0-9a-f]{24}\.[a-z]$/;
+/**
+* Extract the log segment filenames from `ls -1 <dir>` output, oldest first,
+* with `current` last if present. Anything else (`lock`, `state`, s6's other
+* bookkeeping files) is dropped by not matching either pattern.
+*
+* TAI64N timestamps are fixed-width hex, so a plain string sort already puts
+* the archives in chronological order.
+*/
+function parseLogSegments(lsOutput) {
+	let entries = lsOutput.split("\n").map((line) => line.trim()).filter(Boolean), segments = entries.filter((name) => SEGMENT.test(name)).sort();
+	return entries.includes("current") && segments.push("current"), segments;
+}
+/**
+* Read every segment in `dir` as one time-ordered line stream: oldest
+* rotated archive first, `current` last. See the module doc comment for why
+* this exists instead of reading `current` alone.
+*/
+async function* readRotatedLog(docker, containerId, dir) {
+	let listing = docker.exec(containerId, [
+		"ls",
+		"-1",
+		dir
+	]);
+	for (let name of parseLogSegments(listing)) yield* docker.readFileLines(containerId, `${dir}/${name}`);
+}
+//#endregion
 //#region src/core/lib/report/outcome/blocked-outcome.ts
 function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible }) {
 	if (!blockedCount) return logLooksPlausible ? {
@@ -9228,7 +9256,7 @@ async function buildInspectReportData(proxyLines, dnsLines, parameters) {
 }
 //#endregion
 //#region src/lib/report.ts
-const HAPROXY_LOG_FILE = "/var/log/haproxy/current";
+const HAPROXY_LOG_DIR = "/var/log/haproxy";
 /**
 * This action has no version-skew concern of its own (one pinned version
 * end to end, unlike a separately-versioned report action), so it fetches
@@ -9238,7 +9266,7 @@ const HAPROXY_LOG_FILE = "/var/log/haproxy/current";
 */
 function fetchReport(containerName, parameters, proxyEngine) {
 	let docker = createDocker();
-	return proxyEngine === "inspect" ? buildInspectReportData(docker.readFileLines(containerName, HAPROXY_LOG_FILE), docker.readFileLines(containerName, "/var/log/coredns/current"), parameters) : buildUniversalReportData(docker.readFileLines(containerName, HAPROXY_LOG_FILE), parameters);
+	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, "/var/log/coredns"), parameters) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), parameters);
 }
 /**
 * Pure decision + rendering step, kept free of process.env/file I/O so it's

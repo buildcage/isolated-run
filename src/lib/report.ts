@@ -1,4 +1,5 @@
 import { createDocker } from "#core/lib/docker/client.ts";
+import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
 import { describeBlockedOutcome } from "#core/lib/report/outcome/blocked-outcome.ts";
 import { renderReportMarkdown } from "#core/lib/report/render/render-report-markdown.ts";
 import { buildUniversalReportData } from "#core/lib/report/build/universal.ts";
@@ -8,10 +9,10 @@ import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts"
 export type Report = ReportData;
 export type ProxyEngine = "universal" | "inspect";
 
-const HAPROXY_LOG_FILE = "/var/log/haproxy/current";
+const HAPROXY_LOG_DIR = "/var/log/haproxy";
 /** inspect-only: the resolver's own log, the sole trace of a name that was
  *  only looked up and never connected to. */
-const COREDNS_LOG_FILE = "/var/log/coredns/current";
+const COREDNS_LOG_DIR = "/var/log/coredns";
 
 /**
  * This action has no version-skew concern of its own (one pinned version
@@ -28,13 +29,13 @@ export function fetchReport(
   const docker = createDocker();
   if (proxyEngine === "inspect") {
     return buildInspectReportData(
-      docker.readFileLines(containerName, HAPROXY_LOG_FILE),
-      docker.readFileLines(containerName, COREDNS_LOG_FILE),
+      readRotatedLog(docker, containerName, HAPROXY_LOG_DIR),
+      readRotatedLog(docker, containerName, COREDNS_LOG_DIR),
       parameters,
     );
   }
   return buildUniversalReportData(
-    docker.readFileLines(containerName, HAPROXY_LOG_FILE),
+    readRotatedLog(docker, containerName, HAPROXY_LOG_DIR),
     parameters,
   );
 }
