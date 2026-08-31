@@ -115,10 +115,17 @@ run`'s own process sits between the two, so a single-hop guard wouldn't be enoug
   action.
 - **Credential retrieval is intentionally not blocked**: this action restricts _where_ the isolated
   command can send network traffic and, since the filesystem is read-only outside
-  `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`, _where_ it can persist a payload — but not what it reads. A
-  compromised dependency can still read `~/.aws/credentials`, `~/.docker/config.json`, or similar
-  local credential files anywhere on the filesystem; it just cannot exfiltrate them anywhere outside
-  the allowlist.
+  `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP`, _where_ it can persist a payload — but not what
+  it reads. A compromised dependency can still read `~/.aws/credentials`, `~/.docker/config.json`,
+  or similar local credential files anywhere on the filesystem; it just cannot exfiltrate them
+  anywhere outside the allowlist. The same goes for `GITHUB_OUTPUT`, `GITHUB_ENV`, and
+  `GITHUB_PATH`: the whole environment is forwarded into the sandbox, and these files live under
+  `$RUNNER_TEMP`, a writable exception. The isolated command can set an output, an env var, or
+  `$PATH` for later steps exactly as an un-sandboxed one could. `$RUNNER_TEMP` and `/tmp` are also
+  the same real directory across every invocation of this action in a job, not scoped per sandbox:
+  two concurrent invocations are isolated at the container/network level (see
+  [Notes](../README.md#notes)), not the filesystem, so one can reach another's in-flight scratch
+  files there.
 - **Linux only**: requires a Linux runner with passwordless `sudo` for the isolation setup itself
   (network namespace, veth, iptables) and a working Docker installation (client and daemon) for the
   sandbox proxy container — both are the default on GitHub-hosted `ubuntu-*` runners, but not on
