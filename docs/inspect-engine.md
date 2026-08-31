@@ -19,7 +19,7 @@ Nothing about `universal` changes when this engine is used, and it stays the def
 
 ```yaml
 - name: Start isolated-run
-  uses: buildcage/isolated-run@9f33cbcfc42e8094652bf0b613478b9a1a6fd2d6 # v1.1.2
+  uses: buildcage/isolated-run@eb076226d15bbadefb7545dc1e02c05ff9f09ae5 # v1.1.3
   with:
     proxy_mode: restrict
     proxy_engine: inspect
