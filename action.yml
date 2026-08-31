@@ -36,6 +36,14 @@ inputs:
     description: "TLS destinations passed through undecrypted, judged on SNI alone, separated by whitespace. Port required. Requires proxy_engine: inspect. e.g., 'db.example.com:5432'"
     required: false
     default: ""
+  upload_traffic_artifact:
+    description: "Upload the observed traffic as a JSON artifact, fetchable afterwards by whoever turns out to want it — a later job in the same run via actions/download-artifact, or anyone else via the API, subject to the retention period below. Requires proxy_engine: inspect."
+    required: false
+    default: "false"
+  traffic_artifact_retention_days:
+    description: "How long to keep that artifact, in days. Empty uses the repository's own default, and a value above the repository maximum is refused by GitHub."
+    required: false
+    default: ""
   fail_on_blocked:
     description: "Fail the step if any connection was blocked (restrict mode only)"
     required: false

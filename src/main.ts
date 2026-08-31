@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as core from "@actions/core";
@@ -37,6 +38,7 @@ import {
 } from "./lib/report.ts";
 import { writeStepSummary } from "#core/lib/actions/write-step-summary.ts";
 import { applyOutcomeAnnotation } from "#core/lib/report/outcome/annotate.ts";
+import { buildTrafficRecords, writeTrafficFile } from "#core/lib/report/outcome/traffic-output.ts";
 
 export { buildACLRules };
 
@@ -318,18 +320,76 @@ function runSandboxedCommand({
   }, containerName);
 }
 
+function wantsTrafficArtifact(): boolean {
+  try {
+    return core.getBooleanInput("upload_traffic_artifact");
+  } catch {
+    // Unset, as in the integration/unit invocations that run this from
+    // source rather than through action.yml's own defaults.
+    return false;
+  }
+}
+
+/** Guaranteed collision-free across concurrent invocations of this action in
+ *  the same job, since containerName's own random suffix already is (see
+ *  generateContainerName) -- unlike buildcage/docker, there is no stable
+ *  builder_name-equivalent identity to name it from instead. */
+function trafficArtifactName(containerName: string): string {
+  return `buildcage-traffic-${containerName.split("-").at(-1)}`;
+}
+
+/**
+ * Upload the traffic JSON, when the engine produced one. Best-effort: the
+ * step's own outcome is already decided by this point, so a failed upload
+ * only warns. @actions/artifact is imported lazily so a run that asks for no
+ * artifact does not load it.
+ */
+async function uploadTrafficArtifact(
+  report: Report,
+  containerName: string,
+  annotation: Annotation,
+): Promise<void> {
+  if (report.engine !== "inspect") {
+    annotation.warning(
+      "upload_traffic_artifact was set, but this engine produces no traffic JSON. " +
+        "Only proxy_engine: inspect does.",
+    );
+    return;
+  }
+  const scratchDir = mkdtempSync(join(tmpdir(), "buildcage-traffic-"));
+  try {
+    const file = join(scratchDir, "traffic.json");
+    writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));
+    const days = Number(core.getInput("traffic_artifact_retention_days") || "");
+    const { DefaultArtifactClient } = await import("@actions/artifact");
+    const name = trafficArtifactName(containerName);
+    await new DefaultArtifactClient().uploadArtifact(name, [file], scratchDir, {
+      retentionDays: Number.isFinite(days) && days > 0 ? days : undefined,
+    });
+    console.log(`Uploaded the traffic JSON as ${name}`);
+  } catch (e) {
+    annotation.warning(`Could not upload the traffic artifact: ${errorMessage(e)}`);
+  } finally {
+    rmSync(scratchDir, { recursive: true, force: true });
+  }
+}
+
 /**
  * Side-effecting half of the report step: computeReportOutcome() decides
  * what to say, this writes it to the Job Summary/annotations/exit code.
+ * `artifactAvailable` only affects the wording of a truncation notice if the
+ * report turns out to be too large for GitHub's own per-step limit -- it
+ * does not gate whether truncation happens.
  */
 async function writeReportSummary(
   report: Report,
   annotation: Annotation,
   options: ComputeReportOutcomeOptions,
+  artifactAvailable: boolean,
 ): Promise<void> {
   const outcome = computeReportOutcome(report, options);
 
-  await writeStepSummary(outcome.markdown);
+  await writeStepSummary(outcome.markdown, artifactAvailable);
 
   // Debug-only mirror: GITHUB_STEP_SUMMARY is unique per step and can't be
   // reassigned, so a later step has no way to read this step's copy back.
@@ -475,13 +535,22 @@ async function main(): Promise<void> {
       } catch {
         failOnBlocked = true;
       }
-      await writeReportSummary(report, annotation, {
-        actionRepo,
-        actionRef,
-        runCommand: runInput,
-        stepLabel: core.getInput("label") || undefined,
-        failOnBlocked,
-      });
+      const wantsArtifact = wantsTrafficArtifact();
+      await writeReportSummary(
+        report,
+        annotation,
+        {
+          actionRepo,
+          actionRef,
+          runCommand: runInput,
+          stepLabel: core.getInput("label") || undefined,
+          failOnBlocked,
+        },
+        wantsArtifact && report.engine === "inspect",
+      );
+      if (wantsArtifact) {
+        await uploadTrafficArtifact(report, containerName, annotation);
+      }
     } catch (e) {
       annotation.warning(`Failed to fetch sandbox report: ${errorMessage(e)}`);
     }
