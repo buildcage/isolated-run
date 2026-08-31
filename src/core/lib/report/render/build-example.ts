@@ -29,10 +29,6 @@ export function buildRestrictExample(
 ): string {
   if (!auditedRows || auditedRows.length === 0) return "";
 
-  // A 40-char SHA is opaque to the reader and specific to this run, so show a
-  // placeholder instead; a tag (e.g. v1, v1.1.0) is stable and useful as-is.
-  const ref = /^[0-9a-f]{40}$/i.test(actionRef!) ? "<sha>" : actionRef;
-
   // Group by ruleType, preserving order of first appearance
   const groups = new Map<string, string[]>();
   for (const r of auditedRows) {
@@ -47,7 +43,7 @@ export function buildRestrictExample(
   // Build YAML lines
   let yaml = "";
   yaml += "- name: Start isolated-run\n";
-  yaml += `  uses: ${actionRepo}@${ref}\n`;
+  yaml += `  uses: ${actionRepo}@${actionRef}\n`;
   yaml += "  with:\n";
   // `run` is a single self-contained step, so the example must repeat the
   // run: command to stay copy-pasteable on its own.
