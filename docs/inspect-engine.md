@@ -351,6 +351,74 @@ The proxy prints one guaranteed line at startup. An empty log is otherwise ambig
 nothing" and "never ran", and reporting "nothing was blocked" for a proxy that never started is the
 dangerous reading of the two.
 
+### When the log is too large for the summary
+
+GitHub caps a Job Summary at 1 MiB per step and, if a write exceeds that, drops the **entire**
+step's summary rather than truncating it — the report would otherwise vanish instead of degrading.
+Everything in the report besides Communication details is small and fixed in size, so if the full
+timeline would push the summary over that limit, only this section is cut, at a line boundary,
+closing off any code block left open by the cut. A note takes the place of what was removed,
+pointing at the traffic artifact when `upload_traffic_artifact` was set, or suggesting it when it
+wasn't. The console log (the workflow run's own logs, not the summary) is never truncated, since it
+carries no such limit.
+
+### Traffic artifact
+
+`upload_traffic_artifact: true` uploads a JSON artifact named `buildcage-traffic-<id>` (`<id>` is
+this run's own proxy container suffix, so several invocations of this action in the same job never
+collide): an array of everything above, oldest first, and name lookups that merely resolved as
+well. This one is read by machines, where the volume costs nothing and a name resolved but never
+connected to is how a too-wide rule being probed shows up.
+
+The exact name is also on the step's own `traffic_artifact_name` output — a later step reads that
+rather than reconstructing or guessing the `<id>` suffix (see [Outputs](../README.md#outputs)).
+
+| Field         | Always | Notes                                                  |
+| ------------- | ------ | ------------------------------------------------------ |
+| `time`        | yes    | ISO 8601 UTC                                           |
+| `elapsed`     |        | since the proxy started, fixed `HH:MM:SS.mmm`          |
+| `action`      | yes    | `allow`, `block`, or `audit` when nothing was enforced |
+| `protocol`    | yes    | `https`, `http`, `tls`, `tcp`, `dns`                   |
+| `host`        | yes    | the name asked for, or the address when there was none |
+| `port`        |        | absent for `dns`, which connects to nothing            |
+| `method`      |        | `http` and `https` only                                |
+| `url`         |        | `http` and `https` only                                |
+| `status`      |        | only when something answered                           |
+| `bytes`       |        | absent for a refusal and for `dns`                     |
+| `reason`      |        | only when `action` is `block`                          |
+| `destination` |        | the address it actually resolved to; absent for `dns`  |
+
+**A field is absent because it does not apply, never because it was zero.** A refusal has no status
+because nothing answered, and a passthrough none because nothing was decrypted. Filter on `action`.
+`elapsed` is the one exception tied to the whole run rather than to one event: it is absent on every
+record when the proxy's own start time could not be determined, rather than measured against
+something else and presented as if it meant "since start".
+
+`action: "audit"` rather than `allow` in audit mode: no allow decision was made, and claiming one
+would misrepresent a run that enforced nothing.
+
+`universal` never sees a method or a URL, so this artifact carries no such detail for it —
+`upload_traffic_artifact` only does anything for `proxy_engine: inspect`.
+
+```yaml
+- uses: buildcage/isolated-run@v2
+  with:
+    proxy_engine: inspect
+    upload_traffic_artifact: true
+    traffic_artifact_retention_days: 30
+    run: npm ci
+
+# A later job, or a later run entirely via the API/gh CLI — an artifact
+# outlives the step that made it, unlike a job output a step must be written
+# in advance to read.
+- uses: actions/download-artifact@v8
+  with:
+    name: buildcage-traffic-<id>
+- run: jq '[.[] | select(.action == "block")]' buildcage-traffic-*/traffic.json
+```
+
+The artifact is uploaded even when the step fails, since a failing run is when it is most wanted.
+
 ## From audit to restrict
 
 An `audit` report ends with the `allowed_url_rules` that would have permitted exactly what the step

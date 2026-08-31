@@ -22,6 +22,7 @@ Docker build's `RUN` steps rather than a workflow step, use
 
 - [Usage](#usage)
 - [Inputs](#inputs)
+- [Outputs](#outputs)
 - [Operation modes](#operation-modes)
 - [Rule syntax](#rule-syntax)
 - [Proxy engines](#proxy-engines)
@@ -106,26 +107,54 @@ Complete workflows: [audit](.github/workflows/example-audit.yml) ·
 
 ## Inputs
 
-| Input                 | Required | Default     | Description                                                                                                                                                                   |
-| --------------------- | -------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`                 | Yes      | —           | Command(s) to run inside the isolated sandbox (multi-line supported, like a workflow `run:` step)                                                                             |
-| `proxy_mode`          | No       | `restrict`  | Operation mode (`audit` / `restrict`, see [Operation modes](#operation-modes))                                                                                                |
-| `proxy_engine`        | No       | `universal` | Network enforcement engine (`universal`, or the experimental `inspect` — see [Proxy engines](#proxy-engines))                                                                 |
-| `allowed_https_rules` | No       | empty       | HTTPS allow rules (wildcard or regex, port required)                                                                                                                          |
-| `allowed_http_rules`  | No       | empty       | HTTP allow rules (wildcard or regex, port required)                                                                                                                           |
-| `allowed_ip_rules`    | No       | empty       | IP address allow rules (wildcard or regex, port required)                                                                                                                     |
-| `allowed_url_rules`   | No       | empty       | Method + URL allow rules (`inspect` only — see [Proxy engines](#proxy-engines))                                                                                               |
-| `allow_tls_rules`     | No       | empty       | TLS destinations passed through undecrypted, judged on SNI alone (`inspect` only — see [Proxy engines](#proxy-engines))                                                       |
-| `fail_on_blocked`     | No       | `true`      | Fail the step if blocked connections are detected (restrict mode only; ignored in audit mode)                                                                                 |
-| `known_blocked_rules` | No       | empty       | Domains expected to be blocked intentionally (wildcard or regex, port required); blocked connections matching these don't fail the step even when `fail_on_blocked` is `true` |
-| `writable`            | No       | empty       | Additional writable directories (newline-separated), on top of `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, and `$RUNNER_TEMP` — see [Filesystem access](#filesystem-access)         |
-| `label`               | No       | empty       | Label appended to this step's Job Summary heading, e.g. `npm ci` — useful to tell steps apart when this action is used more than once in the same job                         |
+| Input                             | Required | Default     | Description                                                                                                                                                                   |
+| --------------------------------- | -------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`                             | Yes      | —           | Command(s) to run inside the isolated sandbox (multi-line supported, like a workflow `run:` step)                                                                             |
+| `proxy_mode`                      | No       | `restrict`  | Operation mode (`audit` / `restrict`, see [Operation modes](#operation-modes))                                                                                                |
+| `proxy_engine`                    | No       | `universal` | Network enforcement engine (`universal`, or the experimental `inspect` — see [Proxy engines](#proxy-engines))                                                                 |
+| `allowed_https_rules`             | No       | empty       | HTTPS allow rules (wildcard or regex, port required)                                                                                                                          |
+| `allowed_http_rules`              | No       | empty       | HTTP allow rules (wildcard or regex, port required)                                                                                                                           |
+| `allowed_ip_rules`                | No       | empty       | IP address allow rules (wildcard or regex, port required)                                                                                                                     |
+| `allowed_url_rules`               | No       | empty       | Method + URL allow rules (`inspect` only — see [Proxy engines](#proxy-engines))                                                                                               |
+| `allow_tls_rules`                 | No       | empty       | TLS destinations passed through undecrypted, judged on SNI alone (`inspect` only — see [Proxy engines](#proxy-engines))                                                       |
+| `upload_traffic_artifact`         | No       | `false`     | Upload the observed traffic as a JSON artifact (`inspect` only — see [Proxy engines](#proxy-engines))                                                                         |
+| `traffic_artifact_retention_days` | No       | empty       | How long to keep that artifact, in days; empty uses the repository's own default                                                                                              |
+| `fail_on_blocked`                 | No       | `true`      | Fail the step if blocked connections are detected (restrict mode only; ignored in audit mode)                                                                                 |
+| `known_blocked_rules`             | No       | empty       | Domains expected to be blocked intentionally (wildcard or regex, port required); blocked connections matching these don't fail the step even when `fail_on_blocked` is `true` |
+| `writable`                        | No       | empty       | Additional writable directories (newline-separated), on top of `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, and `$RUNNER_TEMP` — see [Filesystem access](#filesystem-access)         |
+| `label`                           | No       | empty       | Label appended to this step's Job Summary heading, e.g. `npm ci` — useful to tell steps apart when this action is used more than once in the same job                         |
 
 If some blocked connections are expected — a known-noisy dependency, or a domain you are
 deliberately keeping off the allowlist to confirm it stays blocked — list them in
 `known_blocked_rules`. When every blocked connection matches, the step no longer fails even with
 `fail_on_blocked: true`, and a `::notice::` is emitted instead of `::error::`; any unmatched blocked
 connection still fails the step.
+
+## Outputs
+
+| Output                  | Description                                                                                         |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| `traffic_artifact_name` | Name of the uploaded traffic artifact, when `upload_traffic_artifact` produced one; empty otherwise |
+
+Using this action several times in the same job gives each invocation a differently-named
+artifact (see [Traffic artifact](./docs/inspect-engine.md#traffic-artifact)), so a later step
+that wants a specific run's artifact should read this output from that step rather than guessing
+the name:
+
+```yaml
+- name: Run tests with outbound network isolation
+  id: sandbox
+  uses: buildcage/isolated-run@v2
+  with:
+    proxy_engine: inspect
+    upload_traffic_artifact: true
+    run: npm test
+
+- uses: actions/download-artifact@v8
+  if: steps.sandbox.outputs.traffic_artifact_name != ''
+  with:
+    name: ${{ steps.sandbox.outputs.traffic_artifact_name }}
+```
 
 ## Operation modes
 
