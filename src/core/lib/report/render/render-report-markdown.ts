@@ -10,6 +10,8 @@ export interface RenderReportMarkdownOptions {
   title?: string;
   /** The `run:` input, included in the audit-mode restrict example. */
   runCommand?: string;
+  /** Version to annotate the restrict-mode example's `uses:` line with. */
+  actionVersion?: string;
 }
 
 /** Branches on `report.engine` rather than being duplicated per engine. There
@@ -19,7 +21,11 @@ export function renderReportMarkdown(
   report: ReportData,
   actionRepo: string,
   actionRef: string,
-  { title = "Outbound Traffic Report", runCommand }: RenderReportMarkdownOptions = {},
+  {
+    title = "Outbound Traffic Report",
+    runCommand,
+    actionVersion,
+  }: RenderReportMarkdownOptions = {},
 ): string {
   const isAudit = report.parameters.mode === "audit";
   const showExpected = report.parameters.knownBlockedRules.length > 0;
@@ -35,8 +41,11 @@ export function renderReportMarkdown(
     // can be that much narrower than one built from hosts alone.
     markdown +=
       report.engine === "inspect"
-        ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, { runCommand })
-        : buildRestrictExample(report.passed, actionRepo, actionRef, { runCommand });
+        ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
+            runCommand,
+            actionVersion,
+          })
+        : buildRestrictExample(report.passed, actionRepo, actionRef, { runCommand, actionVersion });
   }
   if (report.blocked.length > 0) {
     if (report.passed.length > 0) markdown += "\n";
