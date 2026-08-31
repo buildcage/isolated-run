@@ -33,7 +33,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF)).toBe(
       wrap(
         [
-          "- name: Start isolated-run in restrict mode",
+          "- name: Start isolated-run",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    proxy_mode: restrict",
@@ -53,7 +53,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF)).toBe(
       wrap(
         [
-          "- name: Start isolated-run in restrict mode",
+          "- name: Start isolated-run",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    proxy_mode: restrict",
@@ -71,7 +71,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF)).toBe(
       wrap(
         [
-          "- name: Start isolated-run in restrict mode",
+          "- name: Start isolated-run",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    proxy_mode: restrict",
@@ -91,7 +91,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF)).toBe(
       wrap(
         [
-          "- name: Start isolated-run in restrict mode",
+          "- name: Start isolated-run",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    proxy_mode: restrict",
@@ -111,7 +111,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, "myorg/myrepo", REF)).toBe(
       wrap(
         [
-          "- name: Start isolated-run in restrict mode",
+          "- name: Start isolated-run",
           `  uses: myorg/myrepo@${REF}`,
           "  with:",
           "    proxy_mode: restrict",
@@ -127,7 +127,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, "v1.1.0")).toBe(
       wrap(
         [
-          "- name: Start isolated-run in restrict mode",
+          "- name: Start isolated-run",
           `  uses: ${REPO}@v1.1.0`,
           "  with:",
           "    proxy_mode: restrict",
@@ -144,7 +144,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, sha)).toBe(
       wrap(
         [
-          "- name: Start isolated-run in restrict mode",
+          "- name: Start isolated-run",
           `  uses: ${REPO}@<sha>`,
           "  with:",
           "    proxy_mode: restrict",
@@ -160,7 +160,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF, { runCommand: "npm install" })).toBe(
       wrap(
         [
-          "- name: Start isolated-run in restrict mode",
+          "- name: Start isolated-run",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    run: |",
@@ -178,7 +178,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF, { runCommand: "npm ci\nnpm test" })).toBe(
       wrap(
         [
-          "- name: Start isolated-run in restrict mode",
+          "- name: Start isolated-run",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    run: |",
@@ -197,7 +197,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF, { runCommand: "npm ci\nnpm test\n" })).toBe(
       wrap(
         [
-          "- name: Start isolated-run in restrict mode",
+          "- name: Start isolated-run",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    run: |",
@@ -216,7 +216,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF)).toBe(
       wrap(
         [
-          "- name: Start isolated-run in restrict mode",
+          "- name: Start isolated-run",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    proxy_mode: restrict",

@@ -46,7 +46,7 @@ export function buildRestrictExample(
 
   // Build YAML lines
   let yaml = "";
-  yaml += "- name: Start isolated-run in restrict mode\n";
+  yaml += "- name: Start isolated-run\n";
   yaml += `  uses: ${actionRepo}@${ref}\n`;
   yaml += "  with:\n";
   // `run` is a single self-contained step, so the example must repeat the

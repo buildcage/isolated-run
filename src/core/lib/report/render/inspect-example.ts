@@ -167,7 +167,7 @@ export function buildInspectRestrictExample(
 
   const ref = actionRef && /^[0-9a-f]{40}$/i.test(actionRef) ? "<sha>" : actionRef;
 
-  let yaml = "- name: Start isolated-run in restrict mode\n";
+  let yaml = "- name: Start isolated-run\n";
   yaml += `  uses: ${actionRepo}@${ref}\n`;
   yaml += "  with:\n";
   // `run` is a single self-contained step, so the example must repeat the
