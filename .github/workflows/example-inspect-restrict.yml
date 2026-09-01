@@ -1,0 +1,46 @@
+name: Example (inspect engine, restrict mode)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      # Same command as the audit example, with the rules that run produced.
+      # Each rule names the methods it permits, so npm can install a package
+      # but not publish one: npm publish is a PUT to the same host, which no
+      # rule here covers.
+      #
+      # fail_on_blocked is false only because this example blocks something on
+      # purpose. Leave it at its default so a real workflow fails on a request
+      # it did not allow.
+      - name: Install dependencies with outbound network isolation
+        uses: buildcage/isolated-run@eb076226d15bbadefb7545dc1e02c05ff9f09ae5 # v1.1.3
+        with:
+          proxy_mode: restrict
+          proxy_engine: inspect
+          allowed_url_rules: |
+            # npm: package metadata and tarballs, plus the one POST npm makes
+            # to the audit endpoint after an install.
+            GET|HEAD https://registry.npmjs.org/**
+            POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk
+
+            # pip: the index, and the files it points at.
+            GET|HEAD https://pypi.org/simple/**
+            GET|HEAD https://files.pythonhosted.org/**
+          fail_on_blocked: false
+          run: |
+            npm init -y
+            npm install --ignore-scripts express
+
+            python3 -m pip install --user --quiet requests
+
+            # No rule covers it, so the report names the full URL that was
+            # refused, not just the host.
+            curl -sS --max-time 5 -o /dev/null https://example.com/ || true
