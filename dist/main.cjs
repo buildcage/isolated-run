@@ -20655,24 +20655,34 @@ function buildUrlRuleLines(requests) {
 	return [...byPattern.values()].sort((a, b) => a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : a.pattern < b.pattern ? -1 : 1).map(({ origin, pattern, methods }) => `${sortMethods(methods).join("|")} ${origin}${pattern}`);
 }
 /**
-* Render the rules as a collapsed markdown section, or "" if nothing was
-* observed.
+* Render the rules as a collapsed markdown section, or "" if there is
+* nothing to show.
 *
 * `actionRef` is the ref this action was invoked with.
 */
-function buildInspectRestrictExample(requests, actionRepo, actionRef, { runCommand, actionVersion } = {}) {
+function buildInspectRestrictExample(requests, actionRepo, actionRef, { runCommand, actionVersion, allowedIpRules = [], allowTlsRules = [] } = {}) {
 	let lines = buildUrlRuleLines(requests ?? []);
-	if (lines.length === 0) return "";
+	if (lines.length === 0 && allowedIpRules.length === 0 && allowTlsRules.length === 0) return "";
 	let yaml = "- name: Start isolated-run\n";
 	if (yaml += `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`, yaml += "  with:\n", runCommand) {
 		yaml += "    run: |\n";
 		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
 	}
-	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: inspect\n", yaml += "    allowed_url_rules: |\n";
-	for (let line of lines) yaml += `      ${line}\n`;
+	if (yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: inspect\n", lines.length > 0) {
+		yaml += "    allowed_url_rules: |\n";
+		for (let line of lines) yaml += `      ${line}\n`;
+	}
+	if (allowTlsRules.length > 0) {
+		yaml += "    allow_tls_rules: |\n";
+		for (let rule of allowTlsRules) yaml += `      ${rule}\n`;
+	}
+	if (allowedIpRules.length > 0) {
+		yaml += "    allowed_ip_rules: |\n";
+		for (let rule of allowedIpRules) yaml += `      ${rule}\n`;
+	}
 	yaml = yaml.split("\n").map((line) => line && "      " + line).join("\n");
 	let md = "\n<details>\n";
-	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += yaml, md += "```\n\n", md += "These rules permit exactly what this build did, so read them before using them: a URL that\n", md += "carried a version or a date will not match the next run, and anything reached through\n", md += "`allow_tls_rules` or `allowed_ip_rules` is not here, because it was never inspected.\n\n", md += "</details>\n", md;
+	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += yaml, md += "```\n\n", md += "These rules permit exactly what this build did, so read them before using them: a URL\n", md += "that carried a version or a date will not match the next run.\n\n", md += "</details>\n", md;
 }
 //#endregion
 //#region src/core/lib/report/render/render-report-markdown.ts
@@ -20683,7 +20693,9 @@ function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${title} (${report.parameters.mode} mode)\n\n`;
 	return report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 		runCommand,
-		actionVersion
+		actionVersion,
+		allowedIpRules: report.parameters.allowedIpRules,
+		allowTlsRules: report.parameters.allowTlsRules
 	}) : buildRestrictExample(report.passed, actionRepo, actionRef, {
 		runCommand,
 		actionVersion
@@ -78873,6 +78885,7 @@ async function main() {
 				allowedHttpsRules: rules.httpsRules,
 				allowedHttpRules: rules.httpRules,
 				allowedIpRules: rules.ipRules,
+				allowTlsRules: tlsRules,
 				knownBlockedRules
 			}, proxyEngine), failOnBlocked;
 			try {

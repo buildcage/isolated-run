@@ -528,6 +528,7 @@ async function main(): Promise<void> {
           allowedHttpsRules: rules.httpsRules,
           allowedHttpRules: rules.httpRules,
           allowedIpRules: rules.ipRules,
+          allowTlsRules: tlsRules,
           knownBlockedRules,
         },
         proxyEngine,
