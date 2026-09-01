@@ -464,6 +464,10 @@ next run. `allow_tls_rules` and `allowed_ip_rules` aren't derived from what the 
 way -- a passthrough is never decrypted, so there is nothing in the traffic to build them from --
 they're carried over unchanged from whatever the audit run was configured with, since the same rule
 applies as-is under `restrict` (only enforcement differs; see [Audit mode](#audit-mode)).
+`make test_integration_sandbox_inspect` (specifically
+`test/integration-test-inspect-roundtrip.sh`) runs an audit step, feeds its own generated rules back
+as `restrict`, and checks both halves: that every request still passes, and that a path, method, host
+or port the run never used is refused.
 
 A `~` regex rule cannot be split into a host and a path, so it cannot be matched by an engine that
 matches the two separately. The generator warns and emits nothing for it; such a rule needs an

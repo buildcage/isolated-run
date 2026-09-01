@@ -89,3 +89,4 @@ test_integration_sandbox_linux: ## Run the action's integration tests (needs BUI
 test_integration_sandbox_inspect: ## Run the inspect-engine integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF built from docker/inspect with test hooks)
 	@./test/integration-test-inspect-restrict.sh
 	@./test/integration-test-inspect-audit.sh
+	@./test/integration-test-inspect-roundtrip.sh
