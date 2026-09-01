@@ -19552,6 +19552,30 @@ function buildUrlRules(rulesInput) {
 //#region src/lib/errors.ts
 var SandboxError = class extends ActionError {};
 //#endregion
+//#region src/lib/engine-rule-support.ts
+/**
+* Only `inspect` terminates TLS, so it's the only engine that can see an HTTP
+* method or a path — `allowed_url_rules` and `allow_tls_rules` are no-ops on
+* `universal`. Called once at setup, before the sandbox proxy starts, so a
+* mismatch is caught immediately instead of silently not enforcing.
+*
+* In `restrict` mode this is an error: a rule that looks like it protects the
+* run but can't actually be enforced is worse than no rule at all. In
+* `audit` mode nothing is enforced anyway, so it's a warning — the run still
+* proceeds, with these rules ignored.
+*/
+function checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, warn) {
+	if (proxyEngine === "inspect") return;
+	let unsupported = [];
+	if (urlRules.length > 0 && unsupported.push("allowed_url_rules"), tlsRules.length > 0 && unsupported.push("allow_tls_rules"), unsupported.length === 0) return;
+	let list = unsupported.join(" and "), reason = `${list} ${unsupported.length > 1 ? "have" : "has"} no effect with proxy_engine: ${proxyEngine} — this engine only sees the host and port, never a method or a path.`;
+	if (proxyMode === "audit") {
+		warn(`${reason} They are ignored for this run. Switch to proxy_engine: inspect if you need to enforce a method or a path.`);
+		return;
+	}
+	throw new SandboxError(`${reason} In restrict mode that means ${list} would not actually be enforced — the run would look protected but isn't. Switch to proxy_engine: inspect, or remove ${list} from your workflow.`, "INVALID_PROXY_ENGINE");
+}
+//#endregion
 //#region src/lib/sudo-preflight.ts
 const SLIM_RUNNER_NOTE = `${SLIM_RUNNER_DETECTED_PREFIX} — these typically don't have passwordless sudo configured for this kind of privileged setup.`;
 function describeSudoFailure(e, { env = process.env, exists = node_fs.existsSync } = {}) {
@@ -78799,19 +78823,23 @@ async function main() {
 		proxyEngine
 	});
 	console.log(`buildcage: proxy image: ${imageRef}`);
-	let composeFile = defaultComposeFile, rules = buildACLRules({
+	let composeFile = defaultComposeFile, proxyMode = getInput("proxy_mode") || "restrict", rules = buildACLRules({
 		httpsRulesInput: getInput("allowed_https_rules"),
 		httpRulesInput: getInput("allowed_http_rules"),
 		ipRulesInput: getInput("allowed_ip_rules")
 	}), knownBlockedRules = readKnownBlockedRules(getInput("known_blocked_rules")), urlRulesInput = getInput("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput("allow_tls_rules")), urlRules = buildUrlRules(urlRulesInput).map((r) => r.raw);
-	if (proxyEngine !== "inspect" && (urlRules.length > 0 || tlsRules.length > 0)) throw new SandboxError(`allowed_url_rules and allow_tls_rules need proxy_engine: inspect. The ${proxyEngine} engine cannot see a method or a path.`, "INVALID_PROXY_ENGINE");
-	console.log("::group::buildcage: Configured ACL Rules"), logRules("HTTPS", rules.httpsRules), logRules("HTTP", rules.httpRules), logRules("IP", rules.ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), console.log("::endgroup::");
+	checkUrlAndTlsRuleSupport({
+		proxyEngine,
+		proxyMode,
+		urlRules,
+		tlsRules
+	}, (message) => annotation.warning(message)), console.log("::group::buildcage: Configured ACL Rules"), logRules("HTTPS", rules.httpsRules), logRules("HTTP", rules.httpRules), logRules("IP", rules.ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), console.log("::endgroup::");
 	let writablePaths = parseWritablePaths(getInput("writable")), containerName = generateContainerName(), projectName = deriveProjectName(containerName);
 	env.GITHUB_STATE && (saveState("container_name", containerName), saveState("project_name", projectName));
 	let composeEnv = {
 		...env,
 		PROXY_CONTAINER_NAME: containerName,
-		PROXY_MODE: getInput("proxy_mode") || "restrict",
+		PROXY_MODE: proxyMode,
 		PROXY_ENGINE: proxyEngine,
 		ALLOWED_HTTPS_RULES: rules.httpsRules.join("\n"),
 		ALLOWED_HTTP_RULES: rules.httpRules.join("\n"),
@@ -78841,7 +78869,7 @@ async function main() {
 	} finally {
 		try {
 			let report = await fetchReport(containerName, {
-				mode: getInput("proxy_mode") || "restrict",
+				mode: proxyMode,
 				allowedHttpsRules: rules.httpsRules,
 				allowedHttpRules: rules.httpRules,
 				allowedIpRules: rules.ipRules,
