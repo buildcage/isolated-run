@@ -5,7 +5,7 @@
 I welcome reports about:
 
 - **Proxy bypass** — ways to make network connections from an isolated `run:` command that evade
-  the allowlist proxy (other than the [known domain fronting limitation](./docs/security.md#known-limitations))
+  the allowlist proxy (other than the [known domain fronting limitation](./docs/security.md#universal-proxy-engine))
 - **Network isolation escape** — bypassing the network namespace/iptables setup to reach the
   internet directly
 - **DNS filtering bypass** — bypassing the DNS redirect mechanism
@@ -18,7 +18,7 @@ The following are **out of scope** (please report to the respective projects ins
 
 - Vulnerabilities in `runc`, Docker, or other upstream dependencies
 - Issues that require the attacker to already have privileged access to the host
-- Domain fronting via shared CDN infrastructure (documented in [Security Details](./docs/security.md#known-limitations))
+- Domain fronting via shared CDN infrastructure (documented in [Security Details](./docs/security.md#universal-proxy-engine))
 
 ## Supported Versions
 
