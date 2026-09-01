@@ -148,11 +148,18 @@ export interface BuildInspectRestrictExampleOptions {
   runCommand?: string;
   /** Version to annotate the `uses:` line with, if known, as `# 3.1.4`. */
   actionVersion?: string;
+  /** Not derived from `requests` -- a passthrough is never decrypted, so
+   *  there is nothing in the traffic to build these from -- they are the
+   *  same values the audit run was configured with, echoed back as-is,
+   *  since they apply unchanged under `restrict` (only enforcement
+   *  differs). */
+  allowedIpRules?: string[];
+  allowTlsRules?: string[];
 }
 
 /**
- * Render the rules as a collapsed markdown section, or "" if nothing was
- * observed.
+ * Render the rules as a collapsed markdown section, or "" if there is
+ * nothing to show.
  *
  * `actionRef` is the ref this action was invoked with.
  */
@@ -160,10 +167,15 @@ export function buildInspectRestrictExample(
   requests: TrafficEvent[] | null | undefined,
   actionRepo: string,
   actionRef?: string,
-  { runCommand, actionVersion }: BuildInspectRestrictExampleOptions = {},
+  {
+    runCommand,
+    actionVersion,
+    allowedIpRules = [],
+    allowTlsRules = [],
+  }: BuildInspectRestrictExampleOptions = {},
 ): string {
   const lines = buildUrlRuleLines(requests ?? []);
-  if (lines.length === 0) return "";
+  if (lines.length === 0 && allowedIpRules.length === 0 && allowTlsRules.length === 0) return "";
 
   let yaml = "- name: Start isolated-run\n";
   yaml += `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
@@ -180,8 +192,18 @@ export function buildInspectRestrictExample(
   yaml += "    proxy_engine: inspect\n";
   // A literal block, not a folded one: a URL rule contains a space, so the
   // rules are separated by newlines and folding would join them into one.
-  yaml += "    allowed_url_rules: |\n";
-  for (const line of lines) yaml += `      ${line}\n`;
+  if (lines.length > 0) {
+    yaml += "    allowed_url_rules: |\n";
+    for (const line of lines) yaml += `      ${line}\n`;
+  }
+  if (allowTlsRules.length > 0) {
+    yaml += "    allow_tls_rules: |\n";
+    for (const rule of allowTlsRules) yaml += `      ${rule}\n`;
+  }
+  if (allowedIpRules.length > 0) {
+    yaml += "    allowed_ip_rules: |\n";
+    for (const rule of allowedIpRules) yaml += `      ${rule}\n`;
+  }
 
   // GitHub Actions' own indentation convention (jobs: -> <id>: -> steps: ->
   // "- name:") always puts a step 6 spaces in, so the generated snippet can
@@ -197,10 +219,8 @@ export function buildInspectRestrictExample(
   md += "```yaml\n";
   md += yaml;
   md += "```\n\n";
-  md +=
-    "These rules permit exactly what this build did, so read them before using them: a URL that\n";
-  md += "carried a version or a date will not match the next run, and anything reached through\n";
-  md += "`allow_tls_rules` or `allowed_ip_rules` is not here, because it was never inspected.\n\n";
+  md += "These rules permit exactly what this build did, so read them before using them: a URL\n";
+  md += "that carried a version or a date will not match the next run.\n\n";
   md += "</details>\n";
   return md;
 }
