@@ -13,7 +13,7 @@ inputs:
     required: false
     default: "restrict"
   proxy_engine:
-    description: "Network enforcement engine: universal (network-level proxy, default, needs no CA trust; 'transparent' is accepted as an alias) or inspect (terminates TLS to enforce on method and URL; see docs/inspect-engine.md)"
+    description: "Network enforcement engine: inspect (terminates TLS to enforce on method and URL) or universal (network-level proxy, default, needs no CA trust; 'transparent' is accepted as an alias)"
     required: false
     default: "universal"
   allowed_https_rules:
@@ -53,7 +53,7 @@ inputs:
     required: false
     default: ""
   writable:
-    description: "Additional writable directories (newline-separated), on top of $GITHUB_WORKSPACE, $HOME, and /tmp which are always writable — everything else is read-only. Use '/' to disable the read-only restriction entirely. Mutually exclusive with filesystem: ephemeral."
+    description: "Additional writable directories (newline-separated), on top of $GITHUB_WORKSPACE, $HOME, /tmp and $RUNNER_TEMP  which are always writable — everything else is read-only. Use '/' to disable the read-only restriction entirely. Mutually exclusive with filesystem: ephemeral."
     required: false
     default: ""
   filesystem:
