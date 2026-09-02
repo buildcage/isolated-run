@@ -63,7 +63,8 @@ INPUT_ALLOWED_URL_RULES="GET https://allowed.example.com/public/**
 GET https://allowed.example.com:9443/public/**
 GET|POST https://api.example.com/v1/*
 GET http://10.200.0.100/pub-by-addr/**
-GET https://*.wildcard.example.com/public/**" \
+GET https://*.wildcard.example.com/public/**
+GET ~^https://blocked\.example\.com:9443/public/.*$" \
 INPUT_FAIL_ON_BLOCKED="false" \
 INPUT_RUN="bash $REPO_ROOT/test/inspect-restrict-scenarios.sh" \
   node "$REPO_ROOT/dist/main.cjs" 2>&1 | tee "$TMPDIR/out.log"
@@ -93,6 +94,7 @@ assert_summary_contains() {
 assert_summary_contains "| allowed.example.com:443 | HTTPS |" "allowed.example.com:443 recorded as allowed"
 assert_summary_contains "| allowed.example.com:80 | HTTP |" "allowed.example.com:80 recorded as allowed"
 assert_summary_contains "| blocked.example.com:443 | HTTPS |" "blocked.example.com:443 recorded as blocked"
+assert_summary_contains "| blocked.example.com:9443 | HTTPS |" "the ~regex rule's blocked.example.com:9443 recorded as allowed"
 assert_summary_contains "| absent.example.com:443 | HTTPS |" "absent.example.com:443 recorded as blocked"
 assert_summary_contains "POST https://allowed.example.com/public/pkg.tgz -> not-allowed" "out-of-rule POST recorded with its reason"
 assert_summary_contains "https://absent.example.com/ -> dns-failed" "unresolvable allowlisted name recorded as dns-failed"
