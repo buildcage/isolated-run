@@ -121,7 +121,7 @@ check_status "GET blocked.example.com/public/pkg.tgz" "$CODE" "403"
 # 9443 through too.
 echo "=== [Regex URL rule - no port names the default port only] ==="
 OUT=$($S https://blocked.example.com/defaultport/pkg.tgz)
-check_ok "GET blocked.example.com/defaultport/pkg.tgz" "$OUT" "PUBLIC GET"
+check_ok "GET blocked.example.com/defaultport/pkg.tgz" "$OUT" "ROOT GET"
 
 echo "=== [Regex URL rule - portless rule does not also grant a non-default port] ==="
 CODE=$($C https://blocked.example.com:9443/defaultport/pkg.tgz)
