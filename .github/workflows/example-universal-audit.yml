@@ -12,13 +12,10 @@ jobs:
       contents: read
 
     steps:
-      # The universal engine reads the SNI without decrypting, so nothing in
-      # the command has to trust an injected CA. A JVM build needs that: Maven
-      # verifies TLS against the JVM's own cacerts store and ignores the
-      # CA-trust environment variables the inspect engine sets.
-      #
-      # audit blocks nothing and records every destination. The Job Summary's
-      # "Switch to restrict mode" section returns them as allowed_https_rules.
+      # universal reads the SNI without decrypting, so a JVM build like this
+      # one (Maven trusts only its own cacerts store) needs no injected CA.
+      # audit records every destination; "Switch to restrict mode" in the
+      # Job Summary returns them as allowed_https_rules.
       - name: Discover required domains with isolated-run
         uses: buildcage/isolated-run@eb076226d15bbadefb7545dc1e02c05ff9f09ae5 # v1.1.3
         with:
@@ -27,6 +24,5 @@ jobs:
           run: |
             mvn -B dependency:get -Dartifact=org.apache.commons:commons-lang3:3.17.0
 
-            # Nothing here needs this. audit records it like any other
-            # destination, so leave it out of the rules you paste back in.
+            # Unneeded by the build; leave it out of the rules you paste back in.
             curl -sS --max-time 5 -o /dev/null https://example.com/ || true
