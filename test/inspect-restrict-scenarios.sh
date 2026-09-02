@@ -14,6 +14,7 @@
 #     GET|POST https://api.example.com/v1/*
 #     GET http://10.200.0.100/pub-by-addr/**
 #     GET https://*.wildcard.example.com/public/**
+#     GET ~^https://blocked\.example\.com:9443/public/.*$
 #   allowed_https_rules: sub.wildcard.example.com:443 absent.example.com:443 metadata.example.com:443
 #   allowed_http_rules:  allowed.example.com:80
 #   allow_tls_rules:     tlspass.example.com:443
@@ -94,6 +95,23 @@ done
 echo "=== [Non-standard TLS port 9443] ==="
 OUT=$($S https://allowed.example.com:9443/public/pkg.tgz)
 check_ok "GET :9443/public/pkg.tgz" "$OUT" "PUBLIC GET"
+
+# blocked.example.com is otherwise always refused (see [Blocked host]
+# below), so reaching it here proves the ~regex rule itself granted access.
+echo "=== [Regex URL rule - host, port and path all matched] ==="
+OUT=$($S https://blocked.example.com:9443/public/pkg.tgz)
+check_ok "GET blocked.example.com:9443/public/pkg.tgz" "$OUT" "PUBLIC GET"
+
+echo "=== [Regex URL rule - path not allowed] ==="
+CODE=$($C https://blocked.example.com:9443/private/secret)
+check_status "GET blocked.example.com:9443/private/secret" "$CODE" "403"
+
+# Same host and path, default port instead of the rule's 9443: a ~regex rule
+# that failed to carry its port into a real restriction would wrongly let
+# this through as "any port".
+echo "=== [Regex URL rule - default port not covered by the literal-port rule] ==="
+CODE=$($C https://blocked.example.com/public/pkg.tgz)
+check_status "GET blocked.example.com/public/pkg.tgz" "$CODE" "403"
 
 echo "=== [Host rule] ==="
 OUT=$($S -X DELETE https://sub.wildcard.example.com/anything/at/all)
