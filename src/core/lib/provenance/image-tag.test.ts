@@ -22,6 +22,14 @@ describe("imageTagFromRef", () => {
     expect(imageTagFromRef("v1.1.0")).toBe("1.1.0");
   });
 
+  it("strips leading 'v' from a prerelease tag", () => {
+    expect(imageTagFromRef("v1.1.0-rc1")).toBe("1.1.0-rc1");
+  });
+
+  it("appends the inspect engine suffix after a prerelease tag", () => {
+    expect(imageTagFromRef("v1.1.0-rc1", "inspect")).toBe("1.1.0-rc1-inspect");
+  });
+
   it("strips 'v' from a major-only tag", () => {
     expect(imageTagFromRef("v1")).toBe("1");
   });
