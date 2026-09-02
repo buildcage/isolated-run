@@ -58,13 +58,15 @@ INPUT_PROXY_ENGINE="inspect" \
 INPUT_PROXY_MODE="restrict" \
 INPUT_ALLOWED_HTTPS_RULES="sub.wildcard.example.com:443 absent.example.com:443 metadata.example.com:443" \
 INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80" \
-INPUT_ALLOW_TLS_RULES="tlspass.example.com:443" \
+INPUT_ALLOW_TLS_RULES="tlspass.example.com:443 ~^tlspass\.example\.com:8443$" \
+INPUT_ALLOWED_IP_RULES="~^10\.200\.0\.\d+:9080$" \
 INPUT_ALLOWED_URL_RULES="GET https://allowed.example.com/public/**
 GET https://allowed.example.com:9443/public/**
 GET|POST https://api.example.com/v1/*
 GET http://10.200.0.100/pub-by-addr/**
 GET https://*.wildcard.example.com/public/**
-GET ~^https://blocked\.example\.com:9443/public/.*$" \
+GET ~^https://blocked\.example\.com:9443/public/.*$
+GET ~^https://blocked\.example\.com/defaultport/.*$" \
 INPUT_FAIL_ON_BLOCKED="false" \
 INPUT_RUN="bash $REPO_ROOT/test/inspect-restrict-scenarios.sh" \
   node "$REPO_ROOT/dist/main.cjs" 2>&1 | tee "$TMPDIR/out.log"
@@ -95,6 +97,7 @@ assert_summary_contains "| allowed.example.com:443 | HTTPS |" "allowed.example.c
 assert_summary_contains "| allowed.example.com:80 | HTTP |" "allowed.example.com:80 recorded as allowed"
 assert_summary_contains "| blocked.example.com:443 | HTTPS |" "blocked.example.com:443 recorded as blocked"
 assert_summary_contains "| blocked.example.com:9443 | HTTPS |" "the ~regex rule's blocked.example.com:9443 recorded as allowed"
+assert_summary_contains "| 10.200.0.100:9080 | IP |" "the ~regex allowed_ip_rules entry recorded as allowed"
 assert_summary_contains "| absent.example.com:443 | HTTPS |" "absent.example.com:443 recorded as blocked"
 assert_summary_contains "POST https://allowed.example.com/public/pkg.tgz -> not-allowed" "out-of-rule POST recorded with its reason"
 assert_summary_contains "https://absent.example.com/ -> dns-failed" "unresolvable allowlisted name recorded as dns-failed"
