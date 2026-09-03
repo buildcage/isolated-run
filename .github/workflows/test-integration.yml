@@ -20,6 +20,7 @@ jobs:
     if: github.event_name == 'pull_request'
     outputs:
       test_sandbox: ${{ steps.filter.outputs.test_sandbox }}
+      test_sandbox_universal: ${{ steps.filter.outputs.test_sandbox_universal }}
       test_sandbox_inspect: ${{ steps.filter.outputs.test_sandbox_inspect }}
     steps:
       - name: Filter changed paths
@@ -31,6 +32,15 @@ jobs:
               - 'src/core/**'
               - 'docker/**'
               - 'compose.yaml'
+              - 'src/**'
+              - 'test/**'
+              - 'Makefile'
+              - '.github/workflows/test-integration.yml'
+            test_sandbox_universal:
+              - 'src/core/**'
+              - 'docker/**'
+              - 'compose.yaml'
+              - 'compose.test-universal.yaml'
               - 'src/**'
               - 'test/**'
               - 'Makefile'
@@ -80,6 +90,55 @@ jobs:
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
         run: make test_integration_sandbox_linux
+
+  # Separate job from test_sandbox: brings up the fixture origin network in
+  # compose.test-universal.yaml (fake DNS + an origin under our own control)
+  # instead of the real internet, covering cases real hosts can't -- an
+  # allowlisted name resolving to an internal address, NXDOMAIN, etc. Same
+  # proxy image build as test_sandbox (universal needs no test-hooks build
+  # arg, unlike inspect below).
+  test_sandbox_universal:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_universal == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    name: "integration: test (sandbox, universal engine fixture)"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-vp
+
+      - name: Build local sandbox proxy image
+        run: docker compose build proxy
+
+      - name: Resolve local image ref
+        id: local_image
+        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild the action with the local-image test hook enabled
+        env:
+          BUILDCAGE_BUILD_TEST_HOOKS: "1"
+        run: vp run build
+
+      - name: Run universal-engine fixture-based integration tests
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+        run: make test_integration_sandbox_universal
+
+      - name: Verify no leftover fixture/proxy containers or networks
+        if: always()
+        run: |
+          docker compose -f compose.test-universal.yaml down -v || true
+          LEFTOVER_N=$(docker network ls --filter "name=buildcage-test-universal-net" -q)
+          if [ -n "$LEFTOVER_N" ]; then
+            echo "::error::leftover buildcage-test-universal-net network found"
+            exit 1
+          fi
 
   # Separate job from test_sandbox: needs its own (inspect-engine) image build
   # and the fixture origin network in compose.test-inspect.yaml, which the
@@ -135,7 +194,7 @@ jobs:
   integration-tests-passed:
     name: Integration tests passed
     runs-on: ubuntu-latest
-    needs: [changes, test_sandbox, test_sandbox_inspect]
+    needs: [changes, test_sandbox, test_sandbox_universal, test_sandbox_inspect]
     if: always()
     permissions: {}
     steps:

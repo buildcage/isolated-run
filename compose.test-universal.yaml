@@ -1,0 +1,33 @@
+# Fixture network for the universal engine's integration tests
+# (test/integration-test-universal-restrict.sh, test/integration-test-universal-audit.sh).
+#
+# This file does not define the proxy service: isolated-run's real action
+# always starts its own throwaway proxy container via
+# docker/compose.action.yaml (or, for these tests,
+# docker/compose.action.test-universal.yaml -- see BUILDCAGE_TEST_COMPOSE_FILE
+# in src/core/lib/provenance/local-image-override.ts), a separate
+# `docker compose` invocation/project from this one. This file only has to
+# bring up the fixture origin and the network both invocations join.
+services:
+  # The origin every allowed name resolves to.
+  test-server:
+    build: test/test-server-universal
+    networks:
+      test-net:
+        ipv4_address: 10.200.0.100
+
+  # Upstream resolver for the proxy's HAProxy.
+  test-dns:
+    build: test/test-dns-universal
+    networks:
+      test-net:
+        ipv4_address: 10.200.0.53
+
+networks:
+  # Fixed, external name: docker/compose.action.test-universal.yaml joins
+  # this same network from its own, separate compose project.
+  test-net:
+    name: buildcage-test-universal-net
+    ipam:
+      config:
+        - subnet: 10.200.0.0/24
