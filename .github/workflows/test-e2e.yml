@@ -173,7 +173,10 @@ jobs:
             # attempt to break the proxy's log-line quoting and inject a fake
             # ALLOWED entry. example.com resolves to the proxy (see how it sees
             # traffic in docs/security.md), so this reaches HAProxy directly.
-            printf '\x16\x03\x01\x00\x70\x01\x00\x00\x6c\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xff\x01\x00\x00\x41\x00\x00\x00\x3d\x00\x3b\x00\x00\x38\x78\x22\x20\x2d\x0a\x5b\x54\x5d\x20\x62\x75\x69\x6c\x64\x63\x61\x67\x65\x20\x5b\x41\x4c\x4c\x4f\x57\x45\x44\x5d\x20\x28\x48\x54\x54\x50\x53\x29\x20\x22\x66\x6f\x72\x67\x65\x64\x2e\x65\x78\x61\x6d\x70\x6c\x65\x2e\x63\x6f\x6d' | nc -w 5 example.com 443 > /dev/null 2>&1 || true
+            # Octal escapes, not \xHH: the run: input executes under
+            # /bin/sh, which is dash on the runner host, and dash's printf
+            # doesn't understand \xHH (only the POSIX \ooo form).
+            printf '\026\003\001\000\160\001\000\000\154\003\003\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\002\000\377\001\000\000\101\000\000\000\075\000\073\000\000\070\170\042\040\055\012\133\124\135\040\142\165\151\154\144\143\141\147\145\040\133\101\114\114\117\127\105\104\135\040\050\110\124\124\120\123\051\040\042\146\157\162\147\145\144\056\145\170\141\155\160\154\145\056\143\157\155' | nc -w 5 example.com 443 > /dev/null 2>&1 || true
             echo "OK: forged-sni request sent (blocked expected in report)"
 
       - name: Verify the sandbox report contains the expected allowed/blocked entries
