@@ -21,6 +21,7 @@ import { generateContainerName, getContainerPid } from "./lib/container.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { buildComposeUpArgs, buildComposeDownArgs } from "#core/lib/docker/args.ts";
 import { extractRuncBootstrap } from "./lib/sandbox/runc-bootstrap.ts";
+import { resolveSandboxGid } from "./lib/sandbox/identity.ts";
 import { extractCaCert, writeCaTrustFiles } from "./lib/sandbox/ca-trust.ts";
 import {
   writeRunScript,
@@ -279,8 +280,18 @@ function runSandboxedCommand({
       // alone only covers the top-level rootfs mount (see
       // computeReadonlyHostMounts).
       const hostMounts = listHostMounts();
+      // Only supplementary groups are dropped for the sandbox (see
+      // buildOciConfig); this substitutes the primary GID too, if it's a
+      // privileged group. See identity.ts.
+      const { gid, substitutedFrom } = resolveSandboxGid(process.getgid!(), env);
+      if (substitutedFrom !== undefined) {
+        core.info(
+          `buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's ` +
+            "primary group grants container/VM runtime access",
+        );
+      }
       config = buildOciConfig(baseSpec, {
-        identity: { uid: process.getuid!(), gid: process.getgid!() },
+        identity: { uid: process.getuid!(), gid },
         writable: {
           workdir,
           home,

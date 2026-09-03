@@ -19830,6 +19830,102 @@ function extractRuncBootstrap({ containerName, destDir }) {
 	};
 }
 //#endregion
+//#region scripts/extra-masked-runtime-paths.json
+var extra_masked_runtime_paths_default = [
+	"/var/run/docker.sock",
+	"/run/docker.sock",
+	"/run/containerd/containerd.sock",
+	"/var/run/docker/containerd/containerd.sock",
+	"/run/buildkit/buildkitd.sock",
+	"/run/podman/podman.sock",
+	"/var/run/crio/crio.sock"
+];
+//#endregion
+//#region src/lib/sandbox/runtime-sockets.ts
+/**
+* Rootless container runtimes (Docker Desktop's rootless mode, rootless
+* Podman) put their socket under `$XDG_RUNTIME_DIR` instead of `/run`, so
+* the fixed paths above miss them. Returns [] when the variable isn't set.
+*/
+function rootlessRuntimeSocketPaths(env) {
+	let dir = env.XDG_RUNTIME_DIR;
+	return dir ? [`${dir}/docker.sock`, `${dir}/podman/podman.sock`] : [];
+}
+//#endregion
+//#region src/lib/sandbox/identity.ts
+/** Group names that conventionally grant root-equivalent access. Not
+*  exhaustive -- ownerGids below catches an unlisted name that still owns a
+*  known runtime socket. */
+const PRIVILEGED_GROUP_NAMES = /* @__PURE__ */ new Set([
+	"root",
+	"docker",
+	"containerd",
+	"podman",
+	"lxd",
+	"libvirt",
+	"libvirt-qemu",
+	"kvm",
+	"sudo",
+	"wheel"
+]), FALLBACK_GROUP_NAMES = ["nogroup", "nobody"], FALLBACK_GID = 65534;
+/** Parses a /etc/group-formatted file into gid -> group name(s). null if the
+*  file can't be read at all (missing, permission denied) -- callers fall
+*  back to the runtime-socket-ownership check alone in that case. */
+function readGroupNamesByGid(groupFile) {
+	let content;
+	try {
+		content = (0, node_fs.readFileSync)(groupFile, "utf8");
+	} catch {
+		return null;
+	}
+	let map = /* @__PURE__ */ new Map();
+	for (let line of content.split("\n")) {
+		if (!line || line.startsWith("#")) continue;
+		let [name, , gidStr] = line.split(":"), gid = Number(gidStr);
+		if (!name || !Number.isInteger(gid)) continue;
+		let names = map.get(gid);
+		names ? names.push(name) : map.set(gid, [name]);
+	}
+	return map;
+}
+/** GIDs owning any of `paths` on this host, regardless of group name.
+*  A path that doesn't exist is skipped, not an error. */
+function ownerGids(paths) {
+	let gids = /* @__PURE__ */ new Set();
+	for (let p of paths) try {
+		gids.add((0, node_fs.statSync)(p).gid);
+	} catch {}
+	return gids;
+}
+/**
+* Only supplementary groups are dropped for the sandboxed process (see
+* main.ts); the primary GID passes through unchanged. If it belongs to a
+* group that grants container/VM runtime access, substitutes a safe GID
+* instead. Complements the socket masking in runtime-sockets.ts: that
+* closes specific paths, this closes the GID-membership route itself.
+*/
+function resolveSandboxGid(primaryGid, env, options = {}) {
+	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...extra_masked_runtime_paths_default, ...rootlessRuntimeSocketPaths(env)], groupNamesByGid = readGroupNamesByGid(groupFile), socketOwnerGids = ownerGids(runtimeSocketPaths), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1;
+	if (!isPrivileged(primaryGid)) return { gid: primaryGid };
+	let gidForName = (name) => {
+		if (groupNamesByGid) {
+			for (let [gid, names] of groupNamesByGid) if (names.includes(name)) return gid;
+		}
+	};
+	for (let name of FALLBACK_GROUP_NAMES) {
+		let gid = gidForName(name);
+		if (gid !== void 0 && !isPrivileged(gid)) return {
+			gid,
+			substitutedFrom: primaryGid
+		};
+	}
+	if (!isPrivileged(FALLBACK_GID)) return {
+		gid: FALLBACK_GID,
+		substitutedFrom: primaryGid
+	};
+	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
+}
+//#endregion
 //#region src/lib/sandbox/ca-trust.ts
 const SYSTEM_CA_CANDIDATES = [
 	"/etc/ssl/certs/ca-certificates.crt",
@@ -20157,7 +20253,12 @@ function buildOciConfig(baseSpec, { identity, writable, runtime, env, caTrust })
 			options: ["rbind", "rw"]
 		});
 	}
-	let maskedPaths = [...baseSpec.linux.maskedPaths ?? [], ...extra_masked_proc_paths_default], baseReadonlyPaths = (baseSpec.linux.readonlyPaths ?? []).filter((p) => !extra_masked_proc_paths_default.includes(p)), readonlyPaths = disableReadonly ? baseReadonlyPaths : Array.from(/* @__PURE__ */ new Set([...baseReadonlyPaths, ...computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinationsFrom(baseSpec))])), namespaces = baseSpec.linux.namespaces.map((ns) => ns.type === "network" ? {
+	let maskedPaths = [
+		...baseSpec.linux.maskedPaths ?? [],
+		...extra_masked_proc_paths_default,
+		...extra_masked_runtime_paths_default,
+		...rootlessRuntimeSocketPaths(env)
+	], baseReadonlyPaths = (baseSpec.linux.readonlyPaths ?? []).filter((p) => !extra_masked_proc_paths_default.includes(p)), readonlyPaths = disableReadonly ? baseReadonlyPaths : Array.from(/* @__PURE__ */ new Set([...baseReadonlyPaths, ...computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinationsFrom(baseSpec))])), namespaces = baseSpec.linux.namespaces.map((ns) => ns.type === "network" ? {
 		...ns,
 		path: netnsPath
 	} : ns);
@@ -78828,11 +78929,11 @@ function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths,
 		}
 		let workdir = env.GITHUB_WORKSPACE || "", home = env.HOME || "", netnsName = containerName.replace(/^buildcage-proxy-/, "buildcage-sandbox-"), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 		try {
-			let resolvConfPath = writeResolvConf(dns, dir), scriptPath = writeRunScript(runInput, dir), hostMounts = listHostMounts();
-			config = buildOciConfig(baseSpec, {
+			let resolvConfPath = writeResolvConf(dns, dir), scriptPath = writeRunScript(runInput, dir), hostMounts = listHostMounts(), { gid, substitutedFrom } = resolveSandboxGid(process.getgid(), env);
+			substitutedFrom !== void 0 && info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's primary group grants container/VM runtime access`), config = buildOciConfig(baseSpec, {
 				identity: {
 					uid: process.getuid(),
-					gid: process.getgid()
+					gid
 				},
 				writable: {
 					workdir,

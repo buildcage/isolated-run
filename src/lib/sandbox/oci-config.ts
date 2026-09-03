@@ -15,6 +15,11 @@ import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
 // by the Mac dev loop — has a single source of truth to read the same
 // list from instead of hand-duplicating it.
 import EXTRA_MASKED_PROC_PATHS from "../../../scripts/extra-masked-proc-paths.json" with { type: "json" };
+// A read-only bind mount doesn't stop connect(2) on a still-live socket;
+// masking replaces the path with /dev/null in this mount namespace, so
+// there's no socket left to connect to. See identity.ts for the
+// complementary GID-based layer.
+import { EXTRA_MASKED_RUNTIME_PATHS, rootlessRuntimeSocketPaths } from "./runtime-sockets.ts";
 
 /**
  * Write the user-supplied `run:` input to an executable script file.
@@ -247,7 +252,12 @@ export function buildOciConfig(
       mounts.push({ destination: p, type: "none", source: p, options: ["rbind", "rw"] });
   }
 
-  const maskedPaths = [...(baseSpec.linux.maskedPaths ?? []), ...EXTRA_MASKED_PROC_PATHS];
+  const maskedPaths = [
+    ...(baseSpec.linux.maskedPaths ?? []),
+    ...EXTRA_MASKED_PROC_PATHS,
+    ...EXTRA_MASKED_RUNTIME_PATHS,
+    ...rootlessRuntimeSocketPaths(env),
+  ];
   const baseReadonlyPaths = (baseSpec.linux.readonlyPaths ?? []).filter(
     (p) => !EXTRA_MASKED_PROC_PATHS.includes(p),
   );

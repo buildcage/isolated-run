@@ -40,6 +40,7 @@ jq \
   --arg scriptPath "$SCRIPT_PATH" \
   --slurpfile seccomp "$BUNDLE_DIR/seccomp.json" \
   --slurpfile extraMasked /etc/buildcage/extra-masked-proc-paths.json \
+  --slurpfile extraMaskedRuntime /etc/buildcage/extra-masked-runtime-paths.json \
   '
   .root.path = $rootfsBindDir | .root.readonly = true |
   .mounts += [
@@ -48,7 +49,7 @@ jq \
   ] |
   .linux.namespaces = (.linux.namespaces | map(if .type == "network" then . + {"path": $netnsPath} else . end)) |
   .linux.seccomp = $seccomp[0] |
-  .linux.maskedPaths += $extraMasked[0] |
+  .linux.maskedPaths += $extraMasked[0] + $extraMaskedRuntime[0] |
   .linux.readonlyPaths -= $extraMasked[0] |
   .process.terminal = false |
   .process.user = {"uid": 1000, "gid": 1000} |

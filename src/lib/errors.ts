@@ -15,6 +15,7 @@ import { ActionError } from "#core/lib/errors.ts";
  *   OCI_CONFIG_BUILD_FAILED    – failed to run gen-seccomp-profile/runc spec or assemble config.json
  *   DOCKER_UNAVAILABLE         – docker CLI missing from PATH or a docker command failed
  *   PASSWORDLESS_SUDO_REQUIRED – sudo -n check failed; passwordless sudo isn't configured
+ *   UNSAFE_PRIMARY_GID         – the runner's primary GID is privileged and no safe substitute GID exists
  */
 export type SandboxErrorCode =
   | "MISSING_RUN"
@@ -24,6 +25,7 @@ export type SandboxErrorCode =
   | "CA_EXTRACT_FAILED"
   | "OCI_CONFIG_BUILD_FAILED"
   | "DOCKER_UNAVAILABLE"
-  | "PASSWORDLESS_SUDO_REQUIRED";
+  | "PASSWORDLESS_SUDO_REQUIRED"
+  | "UNSAFE_PRIMARY_GID";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}

@@ -80,6 +80,7 @@ test_integration_sandbox_linux: ## Run the action's integration tests (needs BUI
 	@./test/integration-test-non-runc-default-pseudofs-readonly.sh
 	@./test/integration-test-concurrent.sh
 	@./test/integration-test-known-blocked-rules.sh
+	@./test/integration-test-docker-socket.sh
 
 # Separate from test_integration_sandbox_linux: these need an inspect-engine
 # image (a different Dockerfile/build) and the fixture origin network in

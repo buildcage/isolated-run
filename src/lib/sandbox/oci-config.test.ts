@@ -233,6 +233,38 @@ describe("buildOciConfig", () => {
     expect(config.linux.readonlyPaths.includes("/proc/bus")).toBeTruthy();
   });
 
+  it("masks known container/VM runtime sockets", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    for (const p of [
+      "/var/run/docker.sock",
+      "/run/docker.sock",
+      "/run/containerd/containerd.sock",
+      "/var/run/docker/containerd/containerd.sock",
+      "/run/buildkit/buildkitd.sock",
+      "/run/podman/podman.sock",
+      "/var/run/crio/crio.sock",
+    ]) {
+      expect(
+        config.linux.maskedPaths.includes(p),
+        `expected maskedPaths to include ${p}`,
+      ).toBeTruthy();
+    }
+  });
+
+  it("also masks the rootless runtime sockets under $XDG_RUNTIME_DIR when set", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      env: { ...baseArgs.env, XDG_RUNTIME_DIR: "/run/user/1000" },
+    });
+    expect(config.linux.maskedPaths).toContain("/run/user/1000/docker.sock");
+    expect(config.linux.maskedPaths).toContain("/run/user/1000/podman/podman.sock");
+  });
+
+  it("doesn't add rootless runtime socket paths when $XDG_RUNTIME_DIR is unset", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    expect(config.linux.maskedPaths.some((p) => p.startsWith("/run/user/"))).toBe(false);
+  });
+
   it("embeds the seccomp profile as-is", () => {
     const config = buildOciConfig(fakeBaseSpec(), baseArgs);
     expect(config.linux.seccomp).toStrictEqual(baseArgs.runtime.seccompProfile);
