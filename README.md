@@ -132,8 +132,10 @@ Complete workflows, each pair running the same command with and without rules:
   project are namespaced by a per-step random suffix, so concurrent steps never tear down each
   other's containers. Use [`label`](#inputs) to tell their report sections apart.
 - Private registries are ordinary hosts: add the domain like any other.
-- The isolated command **cannot use Docker**. The `docker` group is cleared before it runs, so even
-  though the Docker socket is visible on the filesystem, the command has no permission to use it.
+- The isolated command **cannot use Docker**. If `docker` (or another container/VM runtime group)
+  is the runner's primary group, it's substituted for a safe one before the command runs; the
+  runtime sockets themselves are also masked. See [Isolation Mechanisms](docs/security.md#isolation-mechanisms)
+  in the Security doc for both layers.
 - One registry often needs several domains. PyPI, for example, uses both `pypi.org` and
   `files.pythonhosted.org`. The audit report lists every one of them, so start from that.
 - If something the command runs pins a certificate or carries its own trust store (the JVM is the

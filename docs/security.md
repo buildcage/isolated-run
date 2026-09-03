@@ -65,12 +65,21 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
 - **`no_new_privileges`**: set as defense-in-depth alongside the capability drop, so setuid/setgid
   binaries and file capabilities can't grant anything even in edge cases the capability drop
   doesn't cover on its own.
-- **Supplementary groups cleared**: `docker` and any other supplementary group membership is
-  dropped (the OCI spec's `process.user` carries no `additionalGids`). Runner users are typically
-  members of the `docker` group, which is equivalent to root: the Docker daemon will happily mount
-  `/` into a new privileged container for anyone who can reach its socket, regardless of that user's
-  own capabilities. Group membership is what gates that reach, not capabilities, so it has to be
-  cleared independently.
+- **Supplementary groups cleared, primary group checked too**: any supplementary group membership is
+  dropped (the OCI spec's `process.user` carries no `additionalGids`). That alone doesn't cover the
+  primary group, though, and a runner's own user could have `docker` (or another container/VM
+  runtime group) configured as its primary group rather than a supplementary one -- equivalent to
+  root, since the daemon will happily mount `/` into a new privileged container for anyone who can
+  reach its socket, regardless of capabilities. So the primary GID is checked against a list of
+  group names known to grant this kind of access (`docker`, `containerd`, `podman`, `lxd`, `libvirt`,
+  `kvm`, `sudo`, `wheel`, and a few more) and against the owning GID of any container/VM runtime
+  socket actually present on the host; if it matches, the sandboxed process runs under
+  `nogroup`/`nobody`/GID 65534 instead. If none of those turn out to be safe either, the sandbox
+  refuses to start rather than run under a privileged primary GID. As a second, independent layer,
+  the sockets themselves (`/var/run/docker.sock`, containerd's, podman's, buildkit's, crio's, and
+  their rootless `$XDG_RUNTIME_DIR` equivalents) are masked with `/dev/null` inside the sandbox's own
+  mount namespace, so even an unenumerated privileged group wouldn't find a live socket to connect to
+  at that path.
 - **PID namespace**: the isolated command runs in its own PID namespace. This isn't just about
   hiding other processes from `ps`. The Linux kernel structurally forbids a process from tracing
   (`ptrace`) or reading `/proc/<pid>/mem` for any process outside its own PID namespace's lineage,
@@ -454,9 +463,10 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   the sandbox as a second, writable copy. This is a misconfiguration guard against an
   operator-supplied `writable:` value, not a defense against the isolated command itself (see
   [Filesystem access](../README.md#filesystem-access) in the README).
-- **Docker cannot be used inside the isolated command**: supplementary groups (including `docker`)
-  are cleared before the command runs, so even where the Docker socket is visible through the
-  read-only host filesystem, the isolated command has no permission to use it. A `run:` step that
+- **Docker cannot be used inside the isolated command**: the primary GID substitution and the masked
+  runtime sockets (see [Supplementary groups cleared, primary group checked
+  too](#isolation-mechanisms) above) together mean the isolated command can neither reach a runtime
+  socket through group membership nor find one still present at its usual path. A `run:` step that
   itself needs to invoke `docker` (build an image, run a container, etc.) cannot be wrapped by this
   action.
 - **Credential retrieval is intentionally not blocked**: this action restricts _where_ the isolated
