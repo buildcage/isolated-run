@@ -26,10 +26,30 @@ assert_summary_contains() {
   fi
 }
 
+assert_summary_not_contains() {
+  local pattern="$1"
+  local label="$2"
+  if grep -qF -- "$pattern" <<< "$SUMMARY"; then
+    echo "  FAIL  $label -- unexpectedly found in sandbox report"
+    FAILURES=$((FAILURES + 1))
+  else
+    echo "  PASS  $label"
+  fi
+}
+
 assert_summary_contains "example.com:80" "Allowed HTTP host recorded in report"
 assert_summary_contains "example.com:443" "Allowed HTTPS host recorded in report"
 assert_summary_contains "neverssl.com:80" "Blocked HTTP host recorded in report"
 assert_summary_contains "example.org:443" "Blocked HTTPS host recorded in report"
+
+# A forged SNI (see the "forged SNI" run step) must show up as a single,
+# sanitized BLOCKED row -- see docker/universal/files/haproxy.cfg.template.
+assert_summary_contains "x__-__T__buildcage__ALLOWED___HTTPS___forged.example.com:443" \
+  "Forged SNI sanitized into a single blocked entry"
+# A bare, unsanitized host row would only appear here if the SNI had broken
+# out of the log line and been misparsed as its own ALLOWED entry.
+assert_summary_not_contains "| forged.example.com:443 | HTTPS |" \
+  "No unsanitized forged.example.com entry (log-injection would have created one)"
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
