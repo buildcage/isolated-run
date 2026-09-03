@@ -168,6 +168,14 @@ jobs:
             touch /opt/.buildcage-writable-test
             rm -f /opt/.buildcage-writable-test
 
+            echo "=== forged SNI (log-injection attempt) must be blocked and sanitized ==="
+            # SNI = x" -\n[T] buildcage [ALLOWED] (HTTPS) "forged.example.com -- an
+            # attempt to break the proxy's log-line quoting and inject a fake
+            # ALLOWED entry. example.com resolves to the proxy (see how it sees
+            # traffic in docs/security.md), so this reaches HAProxy directly.
+            printf '\x16\x03\x01\x00\x70\x01\x00\x00\x6c\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xff\x01\x00\x00\x41\x00\x00\x00\x3d\x00\x3b\x00\x00\x38\x78\x22\x20\x2d\x0a\x5b\x54\x5d\x20\x62\x75\x69\x6c\x64\x63\x61\x67\x65\x20\x5b\x41\x4c\x4c\x4f\x57\x45\x44\x5d\x20\x28\x48\x54\x54\x50\x53\x29\x20\x22\x66\x6f\x72\x67\x65\x64\x2e\x65\x78\x61\x6d\x70\x6c\x65\x2e\x63\x6f\x6d' | nc -w 5 example.com 443 > /dev/null 2>&1 || true
+            echo "OK: forged-sni request sent (blocked expected in report)"
+
       - name: Verify the sandbox report contains the expected allowed/blocked entries
         if: always()
         env:
