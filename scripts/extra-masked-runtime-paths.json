@@ -1,0 +1,9 @@
+[
+  "/var/run/docker.sock",
+  "/run/docker.sock",
+  "/run/containerd/containerd.sock",
+  "/var/run/docker/containerd/containerd.sock",
+  "/run/buildkit/buildkitd.sock",
+  "/run/podman/podman.sock",
+  "/var/run/crio/crio.sock"
+]
