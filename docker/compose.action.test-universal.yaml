@@ -1,0 +1,34 @@
+# Test-only counterpart to compose.action.yaml, used only via
+# BUILDCAGE_TEST_COMPOSE_FILE (see
+# src/core/lib/provenance/local-image-override.ts) by this repo's own
+# universal-engine integration tests. Adds the one thing a published action
+# has no reason to know about: a second network joining the fixture origin
+# started by ../compose.test-universal.yaml. Unlike
+# compose.action.test-inspect.yaml, there is no CA cert to trust: the
+# universal engine never terminates TLS.
+#
+# BUILDCAGE_TEST_COMPOSE_FILE only takes effect at all when
+# BUILDCAGE_BUILD_TEST_HOOKS=1 was set at build time (see
+# LOCAL_IMAGE_OVERRIDE_ENABLED in src/main.ts) -- unreachable, and therefore
+# irrelevant, in a published action's dist/main.cjs.
+services:
+  proxy:
+    container_name: ${PROXY_CONTAINER_NAME:-buildcage-proxy}
+    image: ${BUILDCAGE_PROXY_IMAGE_REF:-placeholder}
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - PROXY_MODE=${PROXY_MODE:-restrict}
+      - ALLOWED_HTTPS_RULES=${ALLOWED_HTTPS_RULES:-}
+      - ALLOWED_HTTP_RULES=${ALLOWED_HTTP_RULES:-}
+      - ALLOWED_IP_RULES=${ALLOWED_IP_RULES:-}
+      - EXTERNAL_RESOLVER=${EXTERNAL_RESOLVER:-}
+    networks:
+      default:
+      test-net:
+    restart: unless-stopped
+
+networks:
+  test-net:
+    name: buildcage-test-universal-net
+    external: true

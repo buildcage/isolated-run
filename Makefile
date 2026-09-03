@@ -82,10 +82,18 @@ test_integration_sandbox_linux: ## Run the action's integration tests (needs BUI
 	@./test/integration-test-known-blocked-rules.sh
 	@./test/integration-test-docker-socket.sh
 
-# Separate from test_integration_sandbox_linux: these need an inspect-engine
-# image (a different Dockerfile/build) and the fixture origin network in
-# compose.test-inspect.yaml, neither of which the universal-engine tests
-# above use.
+# Separate from test_integration_sandbox_linux: these use the fixture origin
+# network in compose.test-universal.yaml (fake DNS + an origin under our own
+# control) instead of the real internet, which is what lets them cover cases
+# real hosts can't -- an allowlisted name resolving to an internal address,
+# NXDOMAIN, direct-IP blocking with no allowed_ip_rules, etc.
+.PHONY: test_integration_sandbox_universal
+test_integration_sandbox_universal: ## Run the universal-engine fixture-based integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF built with test hooks)
+	@./test/integration-test-universal-restrict.sh
+	@./test/integration-test-universal-audit.sh
+
+# Separate from the above: these need an inspect-engine image (a different
+# Dockerfile/build) and the fixture origin network in compose.test-inspect.yaml.
 .PHONY: test_integration_sandbox_inspect
 test_integration_sandbox_inspect: ## Run the inspect-engine integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF built from docker/inspect with test hooks)
 	@./test/integration-test-inspect-restrict.sh
