@@ -126,10 +126,10 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   outright, see [Known Limitations](#known-limitations) below. The `writable` input adds further
   paths to the writable set for tools that need to write elsewhere, such as a cache directory;
   setting it to `/` disables this restriction entirely. This is all `filesystem: persistent`
-  (the default) — `filesystem: ephemeral` replaces it with an overlay that discards every write not
-  explicitly named in `allow_write:`, closing off using a writable exception itself (not just the
-  read-only area around it) to plant a payload for a later step. See
-  [Filesystem access](../README.md#filesystem-access) in the README.
+  (the default and the stable mode) — `filesystem: ephemeral` (**experimental**) replaces it with an
+  overlay that discards every write not explicitly named in `allow_write:`, closing off using a
+  writable exception itself (not just the read-only area around it) to plant a payload for a later
+  step. See [Filesystem access](../README.md#filesystem-access) in the README.
 - **Die-with-parent**: the isolated command's life is tied to `run-isolated.sh`'s own via a two-hop
   `setpriv --pdeathsig=KILL` chain (`run-isolated.sh` to `runc run` to the isolated command, since
   `runc run`'s own process sits between the two and a single-hop guard wouldn't be enough). If
@@ -491,9 +491,9 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   `GITHUB_OUTPUT`, `GITHUB_ENV`, and `GITHUB_PATH` live under `$RUNNER_TEMP`, a writable exception,
   so the isolated command can set an output, an env var, or `$PATH` for later steps exactly as an
   un-sandboxed one could — and the same goes for `~/.bashrc`, `~/.npmrc`, `~/.docker/config.json`,
-  and anything else under `$HOME`, `/tmp`, or `$GITHUB_WORKSPACE`. `filesystem: ephemeral` (see
-  [Filesystem access](../README.md#filesystem-access) in the README) closes this off for everything
-  except what's explicitly named in `allow_write:` — which in practice has to include
+  and anything else under `$HOME`, `/tmp`, or `$GITHUB_WORKSPACE`. `filesystem: ephemeral`
+  (**experimental** — see [Filesystem access](../README.md#filesystem-access) in the README) closes
+  this off for everything except what's explicitly named in `allow_write:` — which in practice has to include
   `$GITHUB_WORKSPACE` for the job to do anything useful, so that specific path (and whatever else you
   list) remains exactly as exposed to this as `persistent` mode always is. `$RUNNER_TEMP` and `/tmp`
   are also the same real directory across every invocation of this action in a job, not scoped per
@@ -501,8 +501,8 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   level (see [Notes](../README.md#notes)), not the filesystem, so one can reach another's in-flight
   scratch files there. `filesystem: ephemeral` resolves this too, since each invocation gets its own
   overlay.
-- **`filesystem: ephemeral` requires overlayfs support on the runner's own filesystem**: checked with
-  a preflight probe before the sandbox starts, so an unsupported runner fails the step with a clear
+- **`filesystem: ephemeral` (experimental) requires overlayfs support on the runner's own
+  filesystem**: checked with a preflight probe before the sandbox starts, so an unsupported runner fails the step with a clear
   error rather than a cryptic one partway through. This is known to fail when the runner process
   itself runs inside a container whose own root filesystem is overlayfs (common for container-based
   self-hosted runners), since the kernel doesn't allow an overlay mount's `upperdir`/`workdir` to

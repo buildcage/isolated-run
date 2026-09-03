@@ -158,7 +158,7 @@ Complete workflows, each pair running the same command with and without rules:
 | `proxy_engine`                    | `universal`  | `inspect` or `universal`. See [Engines](#engines).                                                                |
 | `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                           |
 | `writable`                        | empty        | Directories the command may write to, beyond the defaults. See [Filesystem access](#filesystem-access).           |
-| `filesystem`                      | `persistent` | `persistent` or `ephemeral`. See [Filesystem access](#filesystem-access).                                         |
+| `filesystem`                      | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](#filesystem-access).                      |
 | `allow_write`                     | empty        | `filesystem: ephemeral` only — paths to keep writable and persisted. See [Filesystem access](#filesystem-access). |
 | `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                    |
 | `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact, `inspect` only. See [The report](#the-report).                    |
@@ -524,10 +524,17 @@ binary earlier on `$PATH`. It doesn't restrict what the command can _read_ (see
 
 `filesystem` controls what happens to those writes once the step ends:
 
-| `filesystem`           | What it does                                                                                                                                                      |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `persistent` (default) | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, exactly as today. `writable:` adds further writable paths.      |
-| `ephemeral`            | Only paths listed in `allow_write:` persist; every other writable path is discarded when the step ends (via an overlay). `writable:` has no meaning in this mode. |
+| `filesystem`               | What it does                                                                                                                                                      |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, exactly as today. `writable:` adds further writable paths.      |
+| `ephemeral` (experimental) | Only paths listed in `allow_write:` persist; every other writable path is discarded when the step ends (via an overlay). `writable:` has no meaning in this mode. |
+
+> [!WARNING]
+> `filesystem: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
+> change in a future release without following semver, and it has seen less real-world use than the
+> rest of this action. `persistent` (the default) is unaffected and stays stable. Try `ephemeral` in
+> a non-critical workflow first, and pin this action to a commit SHA rather than a version tag if you
+> adopt it.
 
 Use `filesystem: ephemeral` when the command is untrusted and you want to stop it from planting
 something a later, non-isolated step in the same job would pick up — a rewritten `~/.bashrc`,
