@@ -125,7 +125,10 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   the whole host `/`. A `writable:` input naming that directory (or an ancestor of it) is rejected
   outright, see [Known Limitations](#known-limitations) below. The `writable` input adds further
   paths to the writable set for tools that need to write elsewhere, such as a cache directory;
-  setting it to `/` disables this restriction entirely, see
+  setting it to `/` disables this restriction entirely. This is all `filesystem: persistent`
+  (the default) — `filesystem: ephemeral` replaces it with an overlay that discards every write not
+  explicitly named in `allow_write:`, closing off using a writable exception itself (not just the
+  read-only area around it) to plant a payload for a later step. See
   [Filesystem access](../README.md#filesystem-access) in the README.
 - **Die-with-parent**: the isolated command's life is tied to `run-isolated.sh`'s own via a two-hop
   `setpriv --pdeathsig=KILL` chain (`run-isolated.sh` to `runc run` to the isolated command, since
@@ -478,18 +481,33 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   itself needs to invoke `docker` (build an image, run a container, etc.) cannot be wrapped by this
   action.
 - **Credential retrieval is intentionally not blocked**: this action restricts _where_ the isolated
-  command can send network traffic and, since the filesystem is read-only outside
-  `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP`, _where_ it can persist a payload, but not what
-  it reads. A compromised dependency can still read `~/.aws/credentials`, `~/.docker/config.json`,
-  or similar local credential files anywhere on the filesystem; it just cannot exfiltrate them
-  anywhere outside the allowlist. The same goes for `GITHUB_OUTPUT`, `GITHUB_ENV`, and
-  `GITHUB_PATH`: the whole environment is forwarded into the sandbox, and these files live under
-  `$RUNNER_TEMP`, a writable exception. The isolated command can set an output, an env var, or
-  `$PATH` for later steps exactly as an un-sandboxed one could. `$RUNNER_TEMP` and `/tmp` are also
-  the same real directory across every invocation of this action in a job, not scoped per sandbox:
-  two concurrent invocations are isolated at the container/network level (see
-  [Notes](../README.md#notes)), not the filesystem, so one can reach another's in-flight scratch
-  files there.
+  command can send network traffic, but not what it reads. A compromised dependency can still read
+  `~/.aws/credentials`, `~/.docker/config.json`, or similar local credential files anywhere on the
+  filesystem; it just cannot exfiltrate them anywhere outside the allowlist. That's unaffected by
+  `filesystem` mode.
+- **`filesystem: persistent` (the default) lets the command plant a payload for a later step, not
+  just read one**: since the filesystem is read-only outside
+  `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP`, that's also _where_ it can persist one.
+  `GITHUB_OUTPUT`, `GITHUB_ENV`, and `GITHUB_PATH` live under `$RUNNER_TEMP`, a writable exception,
+  so the isolated command can set an output, an env var, or `$PATH` for later steps exactly as an
+  un-sandboxed one could — and the same goes for `~/.bashrc`, `~/.npmrc`, `~/.docker/config.json`,
+  and anything else under `$HOME`, `/tmp`, or `$GITHUB_WORKSPACE`. `filesystem: ephemeral` (see
+  [Filesystem access](../README.md#filesystem-access) in the README) closes this off for everything
+  except what's explicitly named in `allow_write:` — which in practice has to include
+  `$GITHUB_WORKSPACE` for the job to do anything useful, so that specific path (and whatever else you
+  list) remains exactly as exposed to this as `persistent` mode always is. `$RUNNER_TEMP` and `/tmp`
+  are also the same real directory across every invocation of this action in a job, not scoped per
+  sandbox, in `persistent` mode: two concurrent invocations are isolated at the container/network
+  level (see [Notes](../README.md#notes)), not the filesystem, so one can reach another's in-flight
+  scratch files there. `filesystem: ephemeral` resolves this too, since each invocation gets its own
+  overlay.
+- **`filesystem: ephemeral` requires overlayfs support on the runner's own filesystem**: checked with
+  a preflight probe before the sandbox starts, so an unsupported runner fails the step with a clear
+  error rather than a cryptic one partway through. This is known to fail when the runner process
+  itself runs inside a container whose own root filesystem is overlayfs (common for container-based
+  self-hosted runners), since the kernel doesn't allow an overlay mount's `upperdir`/`workdir` to
+  themselves sit on overlayfs — `filesystem: persistent` remains available on any runner this action
+  otherwise supports.
 - **Linux only**: requires a Linux runner with passwordless `sudo` for the isolation setup itself
   (network namespace, veth, iptables) and a working Docker installation (client and daemon) for the
   sandbox proxy container. Both are the default on GitHub-hosted `ubuntu-*` runners, but not on
