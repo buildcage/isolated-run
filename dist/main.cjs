@@ -21318,7 +21318,7 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { runComma
 *  is no explicit-engine branch: isolated-run's proxy image never produces
 *  buildkitd/vertex logs (see ../types.ts). */
 function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", runCommand, actionVersion } = {}) {
-	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${title} (${report.parameters.mode} mode)\n\n`;
+	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${title}${isAudit ? " (audit mode)" : ""}\n\n`;
 	return report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 		runCommand,
 		actionVersion,

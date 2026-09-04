@@ -40,14 +40,15 @@ describe("renderReportMarkdown", () => {
     logLooksPlausible: true,
   };
 
-  it("renders the restrict-mode heading and Allowed Hosts table", () => {
+  it("renders a bare restrict-mode title, since that is the day-to-day mode", () => {
     const md = renderReportMarkdown(
       { ...base, passed: [allowedRow] },
       "buildcage/isolated-run",
       "v1",
       { title: "Outbound Traffic Report" },
     );
-    expect(md).toMatch(/## Outbound Traffic Report \(restrict mode\)/);
+    expect(md).toMatch(/^## Outbound Traffic Report\n/);
+    assertNotMatch(md, /restrict mode\)/);
     expect(md).toMatch(/### ✅ Allowed Hosts/);
     expect(md).toMatch(/good\.com/);
   });
@@ -58,6 +59,7 @@ describe("renderReportMarkdown", () => {
       "buildcage/isolated-run",
       "v1",
     );
+    expect(md).toMatch(/^## Outbound Traffic Report \(audit mode\)\n/);
     expect(md).toMatch(/### 📋 Audited Hosts/);
     expect(md).toMatch(/Switch to restrict mode/);
   });
@@ -110,7 +112,7 @@ describe("renderReportMarkdown", () => {
     const md = renderReportMarkdown(base, "buildcage/isolated-run", "v1", {
       title: "Outbound Traffic Report — npm install",
     });
-    expect(md).toMatch(/^## Outbound Traffic Report — npm install \(restrict mode\)/);
+    expect(md).toMatch(/^## Outbound Traffic Report — npm install\n/);
   });
 
   it("shows a restrict-mode example including the run: command", () => {
