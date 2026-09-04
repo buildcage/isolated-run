@@ -19731,7 +19731,7 @@ function listHostMounts() {
 }
 //#endregion
 //#region src/lib/sandbox/scratch-dir.ts
-const SANDBOX_SCRATCH_BASE = "/var/tmp/buildcage";
+const SANDBOX_SCRATCH_BASE = `/var/tmp/buildcage-${process.getuid?.() ?? 0}`;
 /**
 * Pure: mount points from raw /proc/self/mountinfo content that are
 * nested under `dir` (including `dir` itself), deepest-path-first so a
@@ -19849,6 +19849,39 @@ function scratchDirFor(containerName) {
 	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, containerName.replace(/^buildcage-proxy-/, "sandbox-"));
 }
 /**
+* Create SANDBOX_SCRATCH_BASE, or verify that an existing one is genuinely
+* ours. /var/tmp is 1777, so any local user can pre-create this path -- as a
+* symlink, or as a world-writable directory -- and thereby redirect the OCI
+* bundle (config.json carries the whole step environment, secrets included),
+* the root-run `mount --rbind /`, and cleanup's `sudo umount`/`rmSync`.
+* `mkdirSync`'s `recursive: true` accepts any of those silently and applies
+* `mode` only on creation, so this uses a non-recursive mkdir and validates
+* the EEXIST case explicitly.
+*
+* Strictly speaking, another local OS user is outside this action's threat
+* model: isolated-run exists to contain a malicious `run:` command, not to
+* defend against a separate, already-present actor on the host -- someone
+* with real root (or the proxy container's own internals) is unstoppable by
+* design, and that's an accepted limitation elsewhere in this codebase. But
+* this particular hole needs neither: an ordinary, unprivileged local
+* account is enough to win the race, which is a much lower bar than root or
+* the `docker` group, so it's worth closing even though the general case is
+* out of scope.
+*
+* Fails closed: an unexpected owner or mode is not repaired, because
+* nothing legitimate produces one.
+*/
+function ensureOwnScratchBase(base = SANDBOX_SCRATCH_BASE) {
+	try {
+		(0, node_fs.mkdirSync)(base, { mode: 448 });
+		return;
+	} catch (e) {
+		if (e.code !== "EEXIST") throw e;
+	}
+	let st = (0, node_fs.lstatSync)(base), uid = process.getuid();
+	if (!st.isDirectory() || st.uid !== uid || st.mode & 63) throw new SandboxError(`${base} exists but is not a private directory owned by uid ${uid} (mode ${(st.mode & 4095).toString(8)}, uid ${st.uid}). Another user may have created it. Remove it and re-run.`, "SCRATCH_BASE_UNSAFE");
+}
+/**
 * Create/remove a scratch directory for this step's OCI bundle + run-script.
 * With `containerName` the dir is named deterministically (scratchDirFor) so
 * post.ts can reclaim it after a hard kill; without it a random mkdtemp name
@@ -19861,10 +19894,7 @@ function scratchDirFor(containerName) {
 */
 function withScratchDir(fn, containerName, ephemeralRoots) {
 	let dir;
-	(0, node_fs.mkdirSync)(SANDBOX_SCRATCH_BASE, {
-		recursive: !0,
-		mode: 493
-	}), containerName ? (dir = scratchDirFor(containerName), cleanupScratchDir(dir), (0, node_fs.mkdirSync)(dir, {
+	ensureOwnScratchBase(), containerName ? (dir = scratchDirFor(containerName), cleanupScratchDir(dir), (0, node_fs.mkdirSync)(dir, {
 		recursive: !0,
 		mode: 448
 	})) : dir = (0, node_fs.mkdtempSync)((0, node_path.join)(SANDBOX_SCRATCH_BASE, "sandbox-"));
@@ -20515,7 +20545,7 @@ function caTrustAdditions(files, env) {
 /**
 * True if `a` and `b` are the same path, or one is an ancestor directory of
 * the other (path-component-wise, not a bare string prefix -- "/var/tmp/bu"
-* must not count as overlapping "/var/tmp/buildcage").
+* must not count as overlapping "/var/tmp/buildcage-1000").
 */
 function pathsOverlap(a, b) {
 	if (a === b) return !0;
@@ -20530,7 +20560,7 @@ function pathsOverlap(a, b) {
 * re-expose that rootfs inside the sandbox as a second, *writable* copy of
 * the whole host `/` -- the exact escape SANDBOX_SCRATCH_BASE's placement
 * (outside the default writable set) exists to avoid. Only reachable via an
-* explicit `writable:` input naming /var/tmp/buildcage or an ancestor of it
+* explicit `writable:` input naming SANDBOX_SCRATCH_BASE or an ancestor of it
 * (workdir/home/tmp/RUNNER_TEMP are operator/runner-controlled, not
 * attacker-controlled), so this is a misconfiguration guard, not a
 * hardening measure against a hostile isolated command.

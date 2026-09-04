@@ -346,6 +346,9 @@ function parseMountinfo(mountinfoContent) {
 		};
 	});
 }
+//#endregion
+//#region src/lib/sandbox/scratch-dir.ts
+const SANDBOX_SCRATCH_BASE = `/var/tmp/buildcage-${process.getuid?.() ?? 0}`;
 /**
 * Pure: mount points from raw /proc/self/mountinfo content that are
 * nested under `dir` (including `dir` itself), deepest-path-first so a
@@ -460,7 +463,7 @@ function cleanupScratchDir(dir, ephemeralRoots) {
 * alone.
 */
 function scratchDirFor(containerName) {
-	return (0, node_path.join)("/var/tmp/buildcage", containerName.replace(/^buildcage-proxy-/, "sandbox-"));
+	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, containerName.replace(/^buildcage-proxy-/, "sandbox-"));
 }
 //#endregion
 //#region src/post.ts
