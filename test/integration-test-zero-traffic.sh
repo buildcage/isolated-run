@@ -1,13 +1,8 @@
 #!/bin/bash
 # A `run:` step that makes no outbound connection at all must still pass in
-# restrict mode with fail_on_blocked=true. The report's plausibility check
-# treats a completely empty haproxy log as a wholesale-erasure tamper (see
-# R-H2), so the universal image emits a guaranteed startup line to keep a
-# genuinely silent run from being confused with one -- see
-# docker/universal/files/s6-rc.d/haproxy/run and haproxy.ts. Drives
-# dist/main.cjs directly, without the real action wrapper -- see
-# test-e2e.yml's test_sandbox_enforcement for the one case that does
-# exercise the real action.
+# restrict mode. Drives dist/main.cjs directly, without the real action
+# wrapper -- see test-e2e.yml's test_sandbox_enforcement for the one case
+# that does exercise the real action.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
