@@ -1,10 +1,10 @@
 #!/bin/bash
 # Verifies the sandbox does NOT re-expose a writable copy of the whole host
 # `/` through the scratch dir's `mount --rbind /` rootfs. That rootfs lives
-# under the scratch dir at /var/tmp/buildcage/sandbox-*/rootfs; that base
-# isn't one of the writable exceptions, so the recursive writable rbinds
-# never re-expose it. Drives dist/main.cjs directly, like the other run
-# integration tests.
+# under the scratch dir at /var/tmp/buildcage-<uid>/sandbox-*/rootfs; that
+# base isn't one of the writable exceptions, so the recursive writable
+# rbinds never re-expose it. Drives dist/main.cjs directly, like the other
+# run integration tests.
 set -uo pipefail
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
@@ -22,7 +22,7 @@ BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_RUN='set -e
 echo "=== the scratch rootfs must not re-expose host / ==="
 escaped=0
-for d in /var/tmp/buildcage/sandbox-*/rootfs; do
+for d in /var/tmp/buildcage-$(id -u)/sandbox-*/rootfs; do
   [ -e "$d" ] || continue
   if [ -e "$d/etc" ] || [ -e "$d/bin" ] || [ -e "$d/usr" ]; then
     echo "ESCAPE: host / reachable via $d"
@@ -64,28 +64,29 @@ else
 fi
 echo ""
 
-# Misconfiguration guard: `writable: /var/tmp/buildcage` (or an ancestor of
-# it) would recursively re-expose the sandbox's own rootfs read-write --
-# assertScratchBaseNotWritable in sandbox/oci-config.ts must fail the step closed
-# rather than silently running with that hole open.
+# Misconfiguration guard: `writable: /var/tmp/buildcage-<uid>` (or an
+# ancestor of it) would recursively re-expose the sandbox's own rootfs
+# read-write -- assertScratchBaseNotWritable in sandbox/oci-config.ts must
+# fail the step closed rather than silently running with that hole open.
 touch "$WORKDIR2/state.env" "$WORKDIR2/summary.md"
+SCRATCH_BASE="/var/tmp/buildcage-$(id -u)"
 
 GITHUB_WORKSPACE="$WORKDIR2" \
 GITHUB_STATE="$WORKDIR2/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR2/summary.md" \
 BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_WRITABLE="/var/tmp/buildcage" \
+INPUT_WRITABLE="$SCRATCH_BASE" \
 INPUT_RUN="true" \
   node dist/main.cjs
 GUARD_CODE=$?
 
-echo "=== Sandbox writable:/var/tmp/buildcage Fail-Closed Assertion ==="
+echo "=== Sandbox writable:$SCRATCH_BASE Fail-Closed Assertion ==="
 echo ""
 if [ "$GUARD_CODE" != "0" ]; then
-  echo "  PASS  writable: /var/tmp/buildcage was rejected (fails closed)"
+  echo "  PASS  writable: $SCRATCH_BASE was rejected (fails closed)"
 else
-  echo "  FAIL  writable: /var/tmp/buildcage was accepted (should fail closed, exit 0)"
+  echo "  FAIL  writable: $SCRATCH_BASE was accepted (should fail closed, exit 0)"
   exit 1
 fi
 echo ""

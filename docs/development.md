@@ -106,7 +106,7 @@ the [README](../README.md).
      step's real environment; and a seccomp filter resolved from Docker's own default profile,
      applied against an empty capability set to match the sandbox.
    - The writable exceptions are recursive bind-mounts (so legitimately nested mounts under them
-     stay visible). The `mount --rbind /` rootfs is therefore staged under `/var/tmp/buildcage` —
+     stay visible). The `mount --rbind /` rootfs is therefore staged under `/var/tmp/buildcage-<uid>` —
      never one of the writable exceptions — so those recursive rbinds don't re-expose it as a
      second, _writable_ copy of the whole host `/` inside the sandbox. A `writable:` input naming
      that directory (or an ancestor of it) is rejected outright rather than silently accepted. The

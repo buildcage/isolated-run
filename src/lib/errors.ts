@@ -25,6 +25,7 @@ import { ActionError } from "#core/lib/errors.ts";
  *   FILESYSTEM_PLAN_FAILED        – computing filesystem: ephemeral's overlay roots failed for a reason
  *                                    unrelated to allow_write's own syntax (e.g. a permissions error reading
  *                                    one of the fixed $HOME/$RUNNER_TEMP/etc. candidate paths)
+ *   SCRATCH_BASE_UNSAFE           – the sandbox scratch base exists but isn't a private directory we own
  */
 export type SandboxErrorCode =
   | "MISSING_RUN"
@@ -42,6 +43,7 @@ export type SandboxErrorCode =
   | "ALLOW_WRITE_TARGET_MISSING"
   | "ALLOW_WRITE_TARGET_UNCREATABLE"
   | "OVERLAYFS_UNSUPPORTED"
-  | "FILESYSTEM_PLAN_FAILED";
+  | "FILESYSTEM_PLAN_FAILED"
+  | "SCRATCH_BASE_UNSAFE";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}

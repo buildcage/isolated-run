@@ -1,23 +1,101 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { readFileSync } from "node:fs";
+import {
+  readFileSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  chmodSync,
+  writeFileSync,
+  statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// lstatSync mocked (return value overridden per-call) so the "owned by a
+// different uid" case can be exercised without actually needing a second
+// uid -- see the ensureOwnScratchBase describe block below.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, lstatSync: vi.fn(actual.lstatSync) };
+});
+import { lstatSync } from "node:fs";
 
 import {
   withScratchDir,
   cleanupScratchDir,
   scratchDirFor,
   parseMountsUnder,
+  ensureOwnScratchBase,
+  SANDBOX_SCRATCH_BASE,
 } from "./scratch-dir.ts";
 import { writeRunScript } from "./oci-config.ts";
 
 describe("scratchDirFor", () => {
-  it("derives a path under /var/tmp/buildcage from the container name (not under a writable exception)", () => {
+  it("derives a path under SANDBOX_SCRATCH_BASE from the container name (not under a writable exception)", () => {
     const dir = scratchDirFor("buildcage-proxy-abcd1234");
-    expect(dir).toBe("/var/tmp/buildcage/sandbox-abcd1234");
+    expect(dir).toBe(`${SANDBOX_SCRATCH_BASE}/sandbox-abcd1234`);
   });
 
   it("is deterministic for the same container name (so post.ts can reconstruct it)", () => {
     expect(scratchDirFor("buildcage-proxy-xyz")).toBe(scratchDirFor("buildcage-proxy-xyz"));
+  });
+});
+
+describe("ensureOwnScratchBase", () => {
+  let base: string;
+
+  const freshBasePath = () =>
+    join(tmpdir(), `buildcage-scratch-base-test-${Math.random().toString(36).slice(2)}`);
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(base, { recursive: true, force: true });
+    rmSync(`${base}-target`, { recursive: true, force: true });
+  });
+
+  it("creates the base as a private 0700 directory when it doesn't exist", () => {
+    base = freshBasePath();
+    ensureOwnScratchBase(base);
+    const st = statSync(base);
+    expect(st.isDirectory()).toBe(true);
+    expect(st.mode & 0o777).toBe(0o700);
+  });
+
+  it("passes through when the base already exists, owned by the caller, at 0700", () => {
+    base = freshBasePath();
+    mkdirSync(base, { mode: 0o700 });
+    expect(() => ensureOwnScratchBase(base)).not.toThrow();
+  });
+
+  it("throws when the base is a symlink, even one pointing at a valid directory", () => {
+    base = freshBasePath();
+    mkdirSync(`${base}-target`, { mode: 0o700 });
+    symlinkSync(`${base}-target`, base);
+    expect(() => ensureOwnScratchBase(base)).toThrow(/Another user may have created it/);
+  });
+
+  it("throws when the base is group/other writable", () => {
+    base = freshBasePath();
+    mkdirSync(base, { mode: 0o700 });
+    chmodSync(base, 0o777);
+    expect(() => ensureOwnScratchBase(base)).toThrow(/Another user may have created it/);
+  });
+
+  it("throws when the base is a plain file, not a directory", () => {
+    base = freshBasePath();
+    writeFileSync(base, "");
+    expect(() => ensureOwnScratchBase(base)).toThrow(/Another user may have created it/);
+  });
+
+  it("throws when the base is owned by a different uid (lstatSync mocked -- can't chown to another user without root)", () => {
+    base = freshBasePath();
+    mkdirSync(base, { mode: 0o700 });
+    vi.mocked(lstatSync).mockReturnValueOnce({
+      isDirectory: () => true,
+      uid: process.getuid!() + 1,
+      mode: 0o40700,
+    } as unknown as ReturnType<typeof lstatSync>);
+    expect(() => ensureOwnScratchBase(base)).toThrow(/Another user may have created it/);
   });
 });
 

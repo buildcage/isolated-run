@@ -220,8 +220,7 @@ rm -rf "$CASE7"
 # SANDBOX_SCRATCH_BASE from this run. Compares the directory listing
 # before/after rather than relying on knowing the (randomly generated)
 # container name.
-SCRATCH_BASE="/var/tmp/buildcage"
-sudo -n mkdir -p "$SCRATCH_BASE"
+SCRATCH_BASE="/var/tmp/buildcage-$(id -u)"
 BEFORE=$(sudo -n find "$SCRATCH_BASE" -maxdepth 1 -mindepth 1 2>/dev/null | sort)
 CASE9=$(mktemp -d)
 run_ephemeral "$CASE9" "" 'true'
