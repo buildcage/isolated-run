@@ -75,6 +75,21 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   (the OCI spec's `linux.maskedPaths`, extending runc's own sensible defaults), closing off
   kernel-memory-adjacent information disclosure paths that aren't already covered by the capability
   drop.
+- **Runtime sockets masked**: a read-only bind mount doesn't stop `connect(2)` on a still-live Unix
+  domain socket — the kernel's DAC check for a socket connection only looks at write permission
+  bits, which `mount -o ro` doesn't change. The known container/VM runtime sockets (Docker,
+  containerd, BuildKit, Podman, CRI-O — both their fixed paths and, when `$XDG_RUNTIME_DIR` is set,
+  their rootless equivalents under it), the system D-Bus socket, and the whole `/run/user/<uid>`
+  directory (where a `systemd --user` instance, if one happens to be running for the runner's UID,
+  keeps its own session bus — a unit started through it runs entirely outside every namespace this
+  action creates, bypassing the network/filesystem/capability/seccomp restrictions below) are all
+  bind-mounted over with `/dev/null` (files) or an empty read-only directory (`/run/user/<uid>`) via
+  `linux.maskedPaths`. Masking the whole directory, rather than enumerating individual sockets under
+  it, means a future tool that drops a new socket there is covered without a code change; a path
+  that doesn't exist on a given host (e.g. `/run/user/<uid>` on a runner with no active login
+  session) is silently skipped by runc, not an error. Abstract-namespace sockets need no equivalent
+  treatment — unlike pathname sockets, they're scoped to the network namespace that created them, so
+  the sandbox's own netns already keeps them unreachable from outside.
 - **Filesystem read-only outside the workspace/home/tmp**: `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, and
   `$RUNNER_TEMP` are bind-mounted as writable exceptions on top of a read-only root (`root.readonly`
   in `config.json`, applied by runc itself). This closes off tampering with anything outside those
@@ -113,6 +128,12 @@ run`'s own process sits between the two, so a single-hop guard wouldn't be enoug
   read-only host filesystem, the isolated command has no permission to use it. A `run:` step that
   itself needs to invoke `docker` (build an image, run a container, etc.) cannot be wrapped by this
   action.
+- **`$XDG_RUNTIME_DIR` is an empty directory inside the sandbox**: `/run/user/<uid>` (and any other
+  path `$XDG_RUNTIME_DIR` points at) is masked whole — see Runtime sockets masked above — so a tool
+  that expects to read or write something there (a session keyring, a PipeWire/Wayland socket, its
+  own scratch state) will find nothing and, if it writes, fail outright rather than silently landing
+  on the host's real directory. There's no opt-out input for this; it's considered part of the same
+  hardening as the container-runtime-socket masking above, not a separate, disableable feature.
 - **Credential retrieval is intentionally not blocked**: this action restricts _where_ the isolated
   command can send network traffic and, since the filesystem is read-only outside
   `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP`, _where_ it can persist a payload — but not what
