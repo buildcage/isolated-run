@@ -19,7 +19,11 @@ import EXTRA_MASKED_PROC_PATHS from "../../../scripts/extra-masked-proc-paths.js
 // masking replaces the path with /dev/null in this mount namespace, so
 // there's no socket left to connect to. See identity.ts for the
 // complementary GID-based layer.
-import { EXTRA_MASKED_RUNTIME_PATHS, rootlessRuntimeSocketPaths } from "./runtime-sockets.ts";
+import {
+  EXTRA_MASKED_RUNTIME_PATHS,
+  rootlessRuntimeSocketPaths,
+  perUserRuntimeDirs,
+} from "./runtime-sockets.ts";
 
 /**
  * Write the user-supplied `run:` input to an executable script file.
@@ -263,15 +267,28 @@ export function buildOciConfig(
     }
   }
 
+  const extraMaskedRuntimePaths = [
+    ...EXTRA_MASKED_RUNTIME_PATHS,
+    ...rootlessRuntimeSocketPaths(env),
+    ...perUserRuntimeDirs(uid, env),
+  ];
   const maskedPaths = [
     ...(baseSpec.linux.maskedPaths ?? []),
     ...EXTRA_MASKED_PROC_PATHS,
-    ...EXTRA_MASKED_RUNTIME_PATHS,
-    ...rootlessRuntimeSocketPaths(env),
+    ...extraMaskedRuntimePaths,
   ];
-  const baseReadonlyPaths = (baseSpec.linux.readonlyPaths ?? []).filter(
-    (p) => !EXTRA_MASKED_PROC_PATHS.includes(p),
-  );
+  // EXTRA_MASKED_PROC_PATHS are files runc's base spec already lists in
+  // readonlyPaths (sysrq-trigger). The runtime-socket paths don't come from
+  // the base spec, but perUserRuntimeDirs's `/run/user/<uid>` is a real
+  // host mount point (a tmpfs), so computeReadonlyHostMounts below would
+  // otherwise re-add it: masked and readonly on the same path is
+  // unnecessary and, in the order runc applies them, would make the mask
+  // pointless. Filtering both sources here (the base spec's own list, and
+  // the host-mount sweep) keeps every masked path out of readonlyPaths
+  // regardless of which of the two ways it could have entered it.
+  const isExtraMasked = (p: string): boolean =>
+    EXTRA_MASKED_PROC_PATHS.includes(p) || extraMaskedRuntimePaths.includes(p);
+  const baseReadonlyPaths = (baseSpec.linux.readonlyPaths ?? []).filter((p) => !isExtraMasked(p));
   const readonlyPaths = disableReadonly
     ? baseReadonlyPaths
     : Array.from(
@@ -281,7 +298,7 @@ export function buildOciConfig(
             hostMounts,
             protectedPaths,
             freshMountDestinationsFrom(baseSpec),
-          ),
+          ).filter((p) => !isExtraMasked(p)),
         ]),
       );
 

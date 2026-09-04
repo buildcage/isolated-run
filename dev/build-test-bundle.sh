@@ -41,16 +41,18 @@ jq \
   --slurpfile seccomp "$BUNDLE_DIR/seccomp.json" \
   --slurpfile extraMasked /etc/buildcage/extra-masked-proc-paths.json \
   --slurpfile extraMaskedRuntime /etc/buildcage/extra-masked-runtime-paths.json \
+  --arg perUserRuntimeDir "/run/user/1000" \
   '
   .root.path = $rootfsBindDir | .root.readonly = true |
+  ($extraMasked[0] + $extraMaskedRuntime[0] + [$perUserRuntimeDir]) as $allExtraMasked |
   .mounts += [
     {"destination":"/etc/resolv.conf","type":"none","source":$resolvConf,"options":["rbind","ro"]},
     {"destination":"/tmp","type":"none","source":"/tmp","options":["rbind","rw"]}
   ] |
   .linux.namespaces = (.linux.namespaces | map(if .type == "network" then . + {"path": $netnsPath} else . end)) |
   .linux.seccomp = $seccomp[0] |
-  .linux.maskedPaths += $extraMasked[0] + $extraMaskedRuntime[0] |
-  .linux.readonlyPaths -= $extraMasked[0] |
+  .linux.maskedPaths += $allExtraMasked |
+  .linux.readonlyPaths -= $allExtraMasked |
   .process.terminal = false |
   .process.user = {"uid": 1000, "gid": 1000} |
   .process.args = ["setpriv", "--pdeathsig=KILL", "--", $scriptPath] |

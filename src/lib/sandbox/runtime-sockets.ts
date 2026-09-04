@@ -15,3 +15,24 @@ export function rootlessRuntimeSocketPaths(env: NodeJS.ProcessEnv): string[] {
   if (!dir) return [];
   return [`${dir}/docker.sock`, `${dir}/podman/podman.sock`];
 }
+
+/**
+ * Per-user runtime-socket directories, masked whole rather than
+ * file-by-file. `/run/user/<uid>` is where a `systemd --user` instance (if
+ * one happens to be running for this UID -- see docs/security.md) puts its
+ * D-Bus socket, and it's also where rootless Docker/Podman/PipeWire/etc.
+ * put theirs when $XDG_RUNTIME_DIR points at the systemd default instead of
+ * somewhere else. Masking the whole directory (runc covers it with an
+ * empty read-only tmpfs) closes off that entire class without having to
+ * enumerate every socket a future tool might drop in there.
+ *
+ * Always includes `/run/user/<uid>` regardless of whether $XDG_RUNTIME_DIR
+ * is set -- that's the fixed path systemd itself uses, and a workflow step
+ * could unset the env var without changing where a real user session's
+ * bus actually lives. A path that doesn't exist on this host is a no-op:
+ * runc's maskPath ignores ENOENT.
+ */
+export function perUserRuntimeDirs(uid: number, env: NodeJS.ProcessEnv): string[] {
+  const xdg = env.XDG_RUNTIME_DIR;
+  return [...new Set([`/run/user/${uid}`, ...(xdg ? [xdg] : [])])];
+}

@@ -20328,7 +20328,9 @@ var extra_masked_runtime_paths_default = [
 	"/var/run/docker/containerd/containerd.sock",
 	"/run/buildkit/buildkitd.sock",
 	"/run/podman/podman.sock",
-	"/var/run/crio/crio.sock"
+	"/var/run/crio/crio.sock",
+	"/run/dbus/system_bus_socket",
+	"/var/run/dbus/system_bus_socket"
 ];
 //#endregion
 //#region src/lib/sandbox/runtime-sockets.ts
@@ -20340,6 +20342,26 @@ var extra_masked_runtime_paths_default = [
 function rootlessRuntimeSocketPaths(env) {
 	let dir = env.XDG_RUNTIME_DIR;
 	return dir ? [`${dir}/docker.sock`, `${dir}/podman/podman.sock`] : [];
+}
+/**
+* Per-user runtime-socket directories, masked whole rather than
+* file-by-file. `/run/user/<uid>` is where a `systemd --user` instance (if
+* one happens to be running for this UID -- see docs/security.md) puts its
+* D-Bus socket, and it's also where rootless Docker/Podman/PipeWire/etc.
+* put theirs when $XDG_RUNTIME_DIR points at the systemd default instead of
+* somewhere else. Masking the whole directory (runc covers it with an
+* empty read-only tmpfs) closes off that entire class without having to
+* enumerate every socket a future tool might drop in there.
+*
+* Always includes `/run/user/<uid>` regardless of whether $XDG_RUNTIME_DIR
+* is set -- that's the fixed path systemd itself uses, and a workflow step
+* could unset the env var without changing where a real user session's
+* bus actually lives. A path that doesn't exist on this host is a no-op:
+* runc's maskPath ignores ENOENT.
+*/
+function perUserRuntimeDirs(uid, env) {
+	let xdg = env.XDG_RUNTIME_DIR;
+	return [.../* @__PURE__ */ new Set([`/run/user/${uid}`, ...xdg ? [xdg] : []])];
 }
 //#endregion
 //#region src/lib/sandbox/identity.ts
@@ -20628,12 +20650,15 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 			});
 		}
 	}
-	let maskedPaths = [
+	let extraMaskedRuntimePaths = [
+		...extra_masked_runtime_paths_default,
+		...rootlessRuntimeSocketPaths(env),
+		...perUserRuntimeDirs(uid, env)
+	], maskedPaths = [
 		...baseSpec.linux.maskedPaths ?? [],
 		...extra_masked_proc_paths_default,
-		...extra_masked_runtime_paths_default,
-		...rootlessRuntimeSocketPaths(env)
-	], baseReadonlyPaths = (baseSpec.linux.readonlyPaths ?? []).filter((p) => !extra_masked_proc_paths_default.includes(p)), readonlyPaths = disableReadonly ? baseReadonlyPaths : Array.from(/* @__PURE__ */ new Set([...baseReadonlyPaths, ...computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinationsFrom(baseSpec))])), namespaces = baseSpec.linux.namespaces.map((ns) => ns.type === "network" ? {
+		...extraMaskedRuntimePaths
+	], isExtraMasked = (p) => extra_masked_proc_paths_default.includes(p) || extraMaskedRuntimePaths.includes(p), baseReadonlyPaths = (baseSpec.linux.readonlyPaths ?? []).filter((p) => !isExtraMasked(p)), readonlyPaths = disableReadonly ? baseReadonlyPaths : Array.from(/* @__PURE__ */ new Set([...baseReadonlyPaths, ...computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinationsFrom(baseSpec)).filter((p) => !isExtraMasked(p))])), namespaces = baseSpec.linux.namespaces.map((ns) => ns.type === "network" ? {
 		...ns,
 		path: netnsPath
 	} : ns);

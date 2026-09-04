@@ -243,6 +243,8 @@ describe("buildOciConfig", () => {
       "/run/buildkit/buildkitd.sock",
       "/run/podman/podman.sock",
       "/var/run/crio/crio.sock",
+      "/run/dbus/system_bus_socket",
+      "/var/run/dbus/system_bus_socket",
     ]) {
       expect(
         config.linux.maskedPaths.includes(p),
@@ -262,7 +264,42 @@ describe("buildOciConfig", () => {
 
   it("doesn't add rootless runtime socket paths when $XDG_RUNTIME_DIR is unset", () => {
     const config = buildOciConfig(fakeBaseSpec(), baseArgs);
-    expect(config.linux.maskedPaths.some((p) => p.startsWith("/run/user/"))).toBe(false);
+    expect(config.linux.maskedPaths).not.toContain("/run/user/1000/docker.sock");
+    expect(config.linux.maskedPaths).not.toContain("/run/user/1000/podman/podman.sock");
+  });
+
+  it("masks /run/user/<uid> (the systemd --user bus dir) built from identity.uid, even without $XDG_RUNTIME_DIR", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    expect(config.linux.maskedPaths).toContain("/run/user/1000");
+  });
+
+  it("masks /run/user/<uid> and a different $XDG_RUNTIME_DIR when the two diverge", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      env: { ...baseArgs.env, XDG_RUNTIME_DIR: "/run/custom-xdg" },
+    });
+    expect(config.linux.maskedPaths).toContain("/run/user/1000");
+    expect(config.linux.maskedPaths).toContain("/run/custom-xdg");
+  });
+
+  it("doesn't leak /run/user/<uid> into readonlyPaths alongside masking it", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      runtime: {
+        ...baseArgs.runtime,
+        hostMounts: [{ mountPoint: "/run/user/1000", fsType: "tmpfs" }],
+      },
+    });
+    expect(config.linux.maskedPaths).toContain("/run/user/1000");
+    expect(config.linux.readonlyPaths).not.toContain("/run/user/1000");
+  });
+
+  it("keeps masking /run/user/<uid> even when writable: / disables the read-only root", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      writable: { ...baseArgs.writable, writablePaths: ["/"] },
+    });
+    expect(config.linux.maskedPaths).toContain("/run/user/1000");
   });
 
   it("embeds the seccomp profile as-is", () => {
