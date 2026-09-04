@@ -21310,7 +21310,7 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { runComma
 	}
 	yaml = yaml.split("\n").map((line) => line && "      " + line).join("\n");
 	let md = "\n<details>\n";
-	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += yaml, md += "```\n\n", md += "These rules permit exactly what this build did, so read them before using them: a URL\n", md += "that carried a version or a date will not match the next run.\n\n", md += "</details>\n", md;
+	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += yaml, md += "```\n\n", md += "<sub>*Permits exactly what this build did; a versioned or dated URL may drift.*</sub>\n\n", md += "</details>\n", md;
 }
 //#endregion
 //#region src/core/lib/report/render/render-report-markdown.ts
