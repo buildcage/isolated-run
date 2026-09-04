@@ -1,8 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { withScratchDir, scratchDirFor, parseMountsUnder } from "./scratch-dir.ts";
+import {
+  withScratchDir,
+  cleanupScratchDir,
+  scratchDirFor,
+  parseMountsUnder,
+} from "./scratch-dir.ts";
 import { writeRunScript } from "./oci-config.ts";
 
 describe("scratchDirFor", () => {
@@ -46,6 +51,10 @@ describe("parseMountsUnder", () => {
 });
 
 describe("withScratchDir", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("removes the directory after the callback returns", () => {
     let capturedDir: string;
     withScratchDir((dir) => {
@@ -64,5 +73,33 @@ describe("withScratchDir", () => {
       });
     }).toThrow();
     expect(() => readFileSync(join(capturedDir, "run-script.sh"))).toThrow();
+  });
+
+  it("logs a discard line for ephemeralRoots on the way out, once", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    withScratchDir(() => {}, undefined, ["/home/runner", "/tmp"]);
+    const discardCalls = log.mock.calls.filter((args) =>
+      String(args[0]).startsWith("Discarded ephemeral writes under"),
+    );
+    expect(discardCalls).toStrictEqual([["Discarded ephemeral writes under /home/runner, /tmp"]]);
+  });
+
+  it("logs nothing for a plain persistent-mode run (no ephemeralRoots)", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    withScratchDir(() => {});
+    expect(log.mock.calls.some((args) => String(args[0]).startsWith("Discarded"))).toBe(false);
+  });
+});
+
+describe("cleanupScratchDir", () => {
+  it("does not log when ephemeralRoots is an empty array", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    withScratchDir(() => {}, undefined, []);
+    expect(log.mock.calls.some((args) => String(args[0]).startsWith("Discarded"))).toBe(false);
+    log.mockRestore();
+  });
+
+  it("no-ops safely on a directory that doesn't exist (post.ts's own usage pattern)", () => {
+    expect(() => cleanupScratchDir("/var/tmp/buildcage/does-not-exist-xyz")).not.toThrow();
   });
 });

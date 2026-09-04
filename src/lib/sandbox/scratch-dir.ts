@@ -89,8 +89,18 @@ function removeScratchDir(dir: string): void {
  * safety net — see unmountAllUnder) and then recursively remove it. Exported
  * so post.ts can reclaim a scratch dir orphaned by a hard kill that bypassed
  * withScratchDir's own finally. No-ops safely when `dir` doesn't exist.
+ *
+ * `ephemeralRoots`, when given, is filesystem: ephemeral's own already-folded
+ * overlay-root paths (see ephemeral-fs.ts's determineOverlayRoots) -- logged
+ * here, right before the upper/work dirs holding those writes are deleted,
+ * so there's a visible record of what was discarded. Omitted by
+ * withScratchDir's own stale-remnant-clearing call (this isn't the current
+ * run's own discard) and by every persistent-mode call.
  */
-export function cleanupScratchDir(dir: string): void {
+export function cleanupScratchDir(dir: string, ephemeralRoots?: string[]): void {
+  if (ephemeralRoots && ephemeralRoots.length > 0) {
+    console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`);
+  }
   unmountAllUnder(dir);
   removeScratchDir(dir);
 }
@@ -112,8 +122,16 @@ export function scratchDirFor(containerName: string): string {
  * post.ts can reclaim it after a hard kill; without it a random mkdtemp name
  * is used (unit tests). Cleaned up on every exit path that unwinds — a
  * SIGKILL bypasses this finally, which is exactly what post.ts covers.
+ *
+ * `ephemeralRoots` (filesystem: ephemeral only) is passed through only to
+ * the run's own final cleanup, not the stale-remnant clear above (that dir,
+ * if any, is left over from a previous, already-reported run).
  */
-export function withScratchDir<T>(fn: (dir: string) => T, containerName?: string): T {
+export function withScratchDir<T>(
+  fn: (dir: string) => T,
+  containerName?: string,
+  ephemeralRoots?: string[],
+): T {
   let dir: string;
   mkdirSync(SANDBOX_SCRATCH_BASE, { recursive: true, mode: 0o755 });
   if (containerName) {
@@ -126,6 +144,6 @@ export function withScratchDir<T>(fn: (dir: string) => T, containerName?: string
   try {
     return fn(dir);
   } finally {
-    cleanupScratchDir(dir);
+    cleanupScratchDir(dir, ephemeralRoots);
   }
 }

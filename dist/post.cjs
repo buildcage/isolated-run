@@ -417,9 +417,16 @@ function removeScratchDir(dir) {
 * safety net — see unmountAllUnder) and then recursively remove it. Exported
 * so post.ts can reclaim a scratch dir orphaned by a hard kill that bypassed
 * withScratchDir's own finally. No-ops safely when `dir` doesn't exist.
+*
+* `ephemeralRoots`, when given, is filesystem: ephemeral's own already-folded
+* overlay-root paths (see ephemeral-fs.ts's determineOverlayRoots) -- logged
+* here, right before the upper/work dirs holding those writes are deleted,
+* so there's a visible record of what was discarded. Omitted by
+* withScratchDir's own stale-remnant-clearing call (this isn't the current
+* run's own discard) and by every persistent-mode call.
 */
-function cleanupScratchDir(dir) {
-	unmountAllUnder(dir), removeScratchDir(dir);
+function cleanupScratchDir(dir, ephemeralRoots) {
+	ephemeralRoots && ephemeralRoots.length > 0 && console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`), unmountAllUnder(dir), removeScratchDir(dir);
 }
 /**
 * Absolute path of the scratch dir for a given proxy container, derived
@@ -436,7 +443,13 @@ function scratchDirFor(containerName) {
 const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), defaultComposeFile = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml"), containerName = getState("container_name"), projectName = getState("project_name");
 if (containerName.startsWith("buildcage-proxy-")) try {
 	let scratchDir = scratchDirFor(containerName);
-	(0, node_fs.existsSync)(scratchDir) && cleanupScratchDir(scratchDir);
+	if ((0, node_fs.existsSync)(scratchDir)) {
+		let ephemeralRoots, raw = getState("ephemeral_overlay_roots");
+		if (raw) try {
+			ephemeralRoots = JSON.parse(raw);
+		} catch {}
+		cleanupScratchDir(scratchDir, ephemeralRoots);
+	}
 } catch (e) {
 	console.log(`::warning::run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
 }
