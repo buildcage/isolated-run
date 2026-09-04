@@ -86,6 +86,7 @@ rm -rf "$CASE1"
 # covered by RUNNER_TEMP's own overlay in the default case.
 CASE2=$(mktemp -d)
 GITHUB_ENV_FILE2=$(mktemp)
+touch "$CASE2/state.env" "$CASE2/summary.md"
 # Not via run_ephemeral -- GITHUB_ENV/RUNNER_TEMP need to be set together
 # below, unlike its fixed default env.
 GITHUB_ENV="$GITHUB_ENV_FILE2" \
@@ -110,6 +111,7 @@ rm -rf "$CASE2" "$GITHUB_ENV_FILE2"
 
 CASE3=$(mktemp -d)
 GITHUB_ENV_FILE3=$(mktemp)
+touch "$CASE3/state.env" "$CASE3/summary.md"
 GITHUB_ENV="$GITHUB_ENV_FILE3" \
 GITHUB_WORKSPACE="$CASE3" \
 GITHUB_STATE="$CASE3/state.env" \

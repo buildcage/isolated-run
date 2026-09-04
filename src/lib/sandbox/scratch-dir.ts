@@ -70,6 +70,16 @@ function unmountAllUnder(dir: string): void {
  * directory rmSync is about to delete spuriously report EBUSY even
  * though it's no longer listed as a mountpoint at all. Resolves on the
  * very next attempt after a brief wait.
+ *
+ * Falls back to `sudo rm -rf` on EACCES: filesystem: ephemeral's overlay
+ * roots (see ephemeral-fs.ts's createOverlayScratchDirs) are mounted by
+ * runc running as root, and the kernel's own overlayfs implementation
+ * writes bookkeeping content directly into each root's `work` dir while
+ * mounted (notably a "work/work" subdirectory used for atomic rename
+ * during copy-up) -- content that stays on disk, root-owned and not
+ * traversable by the unprivileged runner user, once the mount itself is
+ * gone. The plain (unprivileged) rmSync above stays the fast path, since
+ * it's all persistent mode -- and every unit test -- ever needs.
  */
 function removeScratchDir(dir: string): void {
   const maxAttempts = 5;
@@ -78,7 +88,12 @@ function removeScratchDir(dir: string): void {
       rmSync(dir, { recursive: true, force: true });
       return;
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EBUSY" || attempt === maxAttempts) throw e;
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "EACCES") {
+        execFileSync("sudo", ["-n", "rm", "-rf", dir], { stdio: ["ignore", "ignore", "pipe"] });
+        return;
+      }
+      if (code !== "EBUSY" || attempt === maxAttempts) throw e;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
     }
   }
