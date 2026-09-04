@@ -97,7 +97,7 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   step in the same job. The rest of the host filesystem, including nested mounts, stays fully
   _visible_ (read-only) so existing tools keep working; only writes are restricted. The writable
   exceptions are recursive bind-mounts (preserving any legitimately nested mounts under them); the
-  sandbox's own `mount --rbind /` rootfs is staged under `/var/tmp/buildcage`, which is never one of
+  sandbox's own `mount --rbind /` rootfs is staged under `/var/tmp/buildcage-<uid>`, which is never one of
   those writable exceptions, so that recursion doesn't re-expose it as a second, writable copy of
   the whole host `/`. A `writable:` input naming that directory (or an ancestor of it) is rejected
   outright — see [Known Limitations](#known-limitations) below. The `writable` input adds further
@@ -117,12 +117,24 @@ run`'s own process sits between the two, so a single-hop guard wouldn't be enoug
   close off the specific escape routes considered (privilege escalation, Docker-socket access,
   cross-namespace ptrace/memory access).
 - **`writable:` cannot name the sandbox's own scratch directory**: a `run:` step's `writable:` input
-  listing `/var/tmp/buildcage` (or an ancestor of it, e.g. `/var/tmp` or `/`) is rejected outright —
+  listing `/var/tmp/buildcage-<uid>` (or an ancestor of it, e.g. `/var/tmp` or `/`) is rejected outright —
   that directory holds the run's own `mount --rbind /` rootfs, and the writable exceptions are
   recursive bind-mounts, so allowing it would recursively re-expose the whole host `/` inside the
   sandbox as a second, writable copy. This is a misconfiguration guard against an operator-supplied
   `writable:` value, not a defense against the isolated command itself (see
   [Filesystem access](../README.md#filesystem-access) in the README).
+- **Scratch directory on a multi-user host**: `/var/tmp` is world-writable (sticky bit set), so on a
+  host shared with other, unprivileged local users, one of them could pre-create
+  `/var/tmp/buildcage-<uid>` themselves before the action ever runs — as a symlink, or as a
+  world-writable directory — and redirect the OCI bundle (secrets included), the root-run `mount
+--rbind /`, and cleanup's `sudo umount`/`rm -rf` wherever they chose. This is technically outside
+  this action's threat model (isolating a malicious `run:` command, not defending against a separate
+  actor already on the host — see [Co-located workflow step
+  tampering](#known-limitations) below for the same principle applied to another step in the same
+  job), but the bar here is only an ordinary local account, not root or the `docker` group, so the
+  action verifies the base directory's owner, type, and mode at startup and refuses to proceed rather
+  than silently reusing an unexpected one. If a host is genuinely shared with other local users,
+  prefer a dedicated, single-tenant runner (one host, one user) over relying on this check alone.
 - **Docker cannot be used inside the isolated command**: supplementary groups (including `docker`)
   are cleared before the command runs, so even where the Docker socket is visible through the
   read-only host filesystem, the isolated command has no permission to use it. A `run:` step that
