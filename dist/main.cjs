@@ -20138,6 +20138,35 @@ function withScratchDir(fn, containerName) {
 	}
 }
 //#endregion
+//#region src/lib/sandbox/paths.ts
+/**
+* True if `a` and `b` are the same path, or one is an ancestor directory of
+* the other (path-component-wise, not a bare string prefix -- "/var/tmp/bu"
+* must not count as overlapping "/var/tmp/buildcage").
+*/
+function pathsOverlap(a, b) {
+	if (a === b) return !0;
+	let withSlash = (p) => p.endsWith("/") ? p : `${p}/`;
+	return a.startsWith(withSlash(b)) || b.startsWith(withSlash(a));
+}
+/**
+* Fail closed if any writable-exception directory is, or contains, or is
+* contained in, SANDBOX_SCRATCH_BASE. That directory holds the run's own
+* `mount --rbind /` rootfs (see rootfsBindDir in main.ts); the writable
+* exceptions are recursive bind-mounts, so any overlap would recursively
+* re-expose that rootfs inside the sandbox as a second, *writable* copy of
+* the whole host `/` -- the exact escape SANDBOX_SCRATCH_BASE's placement
+* (outside the default writable set) exists to avoid. Only reachable via an
+* explicit `writable:` input naming /var/tmp/buildcage or an ancestor of it
+* (workdir/home/tmp/RUNNER_TEMP are operator/runner-controlled, not
+* attacker-controlled), so this is a misconfiguration guard, not a
+* hardening measure against a hostile isolated command.
+*/
+function assertScratchBaseNotWritable(writableDirs) {
+	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
+	if (overlapping) throw Error(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
+}
+//#endregion
 //#region scripts/extra-masked-proc-paths.json
 var extra_masked_proc_paths_default = [
 	"/proc/kallsyms",
@@ -20200,35 +20229,8 @@ const SETPRIV_CANDIDATE_PATHS = [
 function resolveSetprivPath() {
 	return SETPRIV_CANDIDATE_PATHS.find((p) => (0, node_fs.existsSync)(p)) ?? "setpriv";
 }
-/**
-* True if `a` and `b` are the same path, or one is an ancestor directory of
-* the other (path-component-wise, not a bare string prefix -- "/var/tmp/bu"
-* must not count as overlapping "/var/tmp/buildcage").
-*/
-function pathsOverlap(a, b) {
-	if (a === b) return !0;
-	let withSlash = (p) => p.endsWith("/") ? p : `${p}/`;
-	return a.startsWith(withSlash(b)) || b.startsWith(withSlash(a));
-}
-/**
-* Fail closed if any writable-exception directory is, or contains, or is
-* contained in, SANDBOX_SCRATCH_BASE. That directory holds the run's own
-* `mount --rbind /` rootfs (see rootfsBindDir in main.ts); the writable
-* exceptions are recursive bind-mounts, so any overlap would recursively
-* re-expose that rootfs inside the sandbox as a second, *writable* copy of
-* the whole host `/` -- the exact escape SANDBOX_SCRATCH_BASE's placement
-* (outside the default writable set) exists to avoid. Only reachable via an
-* explicit `writable:` input naming /var/tmp/buildcage or an ancestor of it
-* (workdir/home/tmp/RUNNER_TEMP are operator/runner-controlled, not
-* attacker-controlled), so this is a misconfiguration guard, not a
-* hardening measure against a hostile isolated command.
-*/
-function assertScratchBaseNotWritable(writableDirs) {
-	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
-	if (overlapping) throw Error(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
-}
-function buildOciConfig(baseSpec, { identity, writable, runtime, env, caTrust }) {
-	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, scriptPath, hostMounts = [] } = runtime, disableReadonly = writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, mounts = [
+function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust }) {
+	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, mounts = [
 		...baseSpec.mounts,
 		{
 			destination: "/etc/resolv.conf",
@@ -20237,21 +20239,43 @@ function buildOciConfig(baseSpec, { identity, writable, runtime, env, caTrust })
 			options: ["rbind", "ro"]
 		},
 		...caAdditions?.mounts ?? []
-	], writableDirs = [...new Set([
-		workdir,
-		home,
-		"/tmp",
-		runnerTemp,
-		...writablePaths
-	].filter((p) => !!p))], protectedPaths = new Set(writableDirs);
-	if (!disableReadonly) {
-		assertScratchBaseNotWritable(writableDirs);
-		for (let p of writableDirs) mounts.push({
+	], protectedPaths;
+	if (ephemeral) {
+		let { overlayRoots, allowWrite } = ephemeral, overlayPaths = overlayRoots.map((r) => r.path);
+		assertScratchBaseNotWritable([...overlayPaths, ...allowWrite]), protectedPaths = /* @__PURE__ */ new Set([...overlayPaths, ...allowWrite]);
+		for (let root of [...overlayRoots].sort((a, b) => a.path.length - b.path.length)) mounts.push({
+			destination: root.path,
+			type: "overlay",
+			source: "overlay",
+			options: [
+				`lowerdir=${root.path}`,
+				`upperdir=${root.upper}`,
+				`workdir=${root.work}`
+			]
+		});
+		for (let p of [...allowWrite].sort((a, b) => a.length - b.length)) mounts.push({
 			destination: p,
 			type: "none",
 			source: p,
 			options: ["rbind", "rw"]
 		});
+	} else {
+		let writableDirs = [...new Set([
+			workdir,
+			home,
+			"/tmp",
+			runnerTemp,
+			...writablePaths
+		].filter((p) => !!p))];
+		if (protectedPaths = new Set(writableDirs), !disableReadonly) {
+			assertScratchBaseNotWritable(writableDirs);
+			for (let p of writableDirs) mounts.push({
+				destination: p,
+				type: "none",
+				source: p,
+				options: ["rbind", "rw"]
+			});
+		}
 	}
 	let maskedPaths = [
 		...baseSpec.linux.maskedPaths ?? [],

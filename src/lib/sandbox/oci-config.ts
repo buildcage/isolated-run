@@ -1,7 +1,7 @@
 import { writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { HasMounts, OciSpec, BuiltOciSpec, HostMount } from "./types.ts";
-import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
+import { assertScratchBaseNotWritable } from "./paths.ts";
 import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
 // Sensitive /proc paths masked with /dev/null. runc's own `runc spec`
 // default already masks /proc/kcore, /proc/keys, and /proc/timer_list
@@ -100,40 +100,6 @@ function resolveSetprivPath(): string {
 }
 
 /**
- * True if `a` and `b` are the same path, or one is an ancestor directory of
- * the other (path-component-wise, not a bare string prefix -- "/var/tmp/bu"
- * must not count as overlapping "/var/tmp/buildcage").
- */
-function pathsOverlap(a: string, b: string): boolean {
-  if (a === b) return true;
-  const withSlash = (p: string) => (p.endsWith("/") ? p : `${p}/`);
-  return a.startsWith(withSlash(b)) || b.startsWith(withSlash(a));
-}
-
-/**
- * Fail closed if any writable-exception directory is, or contains, or is
- * contained in, SANDBOX_SCRATCH_BASE. That directory holds the run's own
- * `mount --rbind /` rootfs (see rootfsBindDir in main.ts); the writable
- * exceptions are recursive bind-mounts, so any overlap would recursively
- * re-expose that rootfs inside the sandbox as a second, *writable* copy of
- * the whole host `/` -- the exact escape SANDBOX_SCRATCH_BASE's placement
- * (outside the default writable set) exists to avoid. Only reachable via an
- * explicit `writable:` input naming /var/tmp/buildcage or an ancestor of it
- * (workdir/home/tmp/RUNNER_TEMP are operator/runner-controlled, not
- * attacker-controlled), so this is a misconfiguration guard, not a
- * hardening measure against a hostile isolated command.
- */
-function assertScratchBaseNotWritable(writableDirs: string[]): void {
-  const overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
-  if (overlapping) {
-    throw new Error(
-      `writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); ` +
-        `this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`,
-    );
-  }
-}
-
-/**
  * Build the final OCI Runtime Spec (config.json) for the isolated command,
  * starting from runc's own `baseSpec` (see generateBaseOciSpec) and
  * overriding only what this sandbox needs to control:
@@ -194,9 +160,22 @@ export interface SandboxRuntimeWiring {
   hostMounts?: HostMount[];
 }
 
+/** `filesystem: ephemeral` only. Already fully resolved/folded by
+ *  ephemeral-fs.ts and main.ts before this is called -- buildOciConfig does
+ *  no path resolution of its own here, only mount assembly and ordering. */
+export interface EphemeralPolicy {
+  overlayRoots: { path: string; upper: string; work: string }[];
+  allowWrite: string[];
+}
+
 export interface BuildOciConfigOptions {
   identity: SandboxIdentity;
+  /** Always used for `process.cwd` (workdir) regardless of mode. `writablePaths`
+   *  is only meaningful when `ephemeral` is absent -- see §3.1: `filesystem:
+   *  ephemeral` and `writable:` are mutually exclusive at the input level. */
   writable: WritablePolicy;
+  /** Present iff `filesystem: ephemeral`. */
+  ephemeral?: EphemeralPolicy;
   runtime: SandboxRuntimeWiring;
   env: NodeJS.ProcessEnv;
   /** inspect engine only: the proxy's CA, mounted in rather than written to
@@ -208,7 +187,7 @@ export interface BuildOciConfigOptions {
 
 export function buildOciConfig(
   baseSpec: OciSpec,
-  { identity, writable, runtime, env, caTrust }: BuildOciConfigOptions,
+  { identity, writable, ephemeral, runtime, env, caTrust }: BuildOciConfigOptions,
 ): BuiltOciSpec {
   const { uid, gid } = identity;
   const { workdir, home, runnerTemp, writablePaths = [] } = writable;
@@ -220,7 +199,7 @@ export function buildOciConfig(
     scriptPath,
     hostMounts = [],
   } = runtime;
-  const disableReadonly = writablePaths.includes("/");
+  const disableReadonly = !ephemeral && writablePaths.includes("/");
 
   const caAdditions = caTrust ? caTrustAdditions(caTrust, env) : undefined;
   const mounts = [
@@ -233,23 +212,55 @@ export function buildOciConfig(
     },
     ...(caAdditions?.mounts ?? []),
   ];
-  // Paths kept writable on top of the read-only root. RUNNER_TEMP is included
-  // because many actions/tools write there and it isn't always under $HOME
-  // (self-hosted runners can place it elsewhere), so the $HOME exception
-  // wouldn't otherwise cover it. Deduped so an overlapping entry (RUNNER_TEMP
-  // nested under $HOME, or a writablePaths duplicate) isn't bind-mounted twice.
-  const writableDirs = [
-    ...new Set(
-      [workdir, home, "/tmp", runnerTemp, ...writablePaths].filter((p): p is string => Boolean(p)),
-    ),
-  ];
-  const protectedPaths = new Set(writableDirs);
-  if (!disableReadonly) {
-    // `writable: /` (disableReadonly) is an intentional, documented full
-    // opt-out of the read-only restriction, so it's exempt from this guard.
-    assertScratchBaseNotWritable(writableDirs);
-    for (const p of writableDirs)
+
+  let protectedPaths: Set<string>;
+  if (ephemeral) {
+    const { overlayRoots, allowWrite } = ephemeral;
+    const overlayPaths = overlayRoots.map((r) => r.path);
+    // Defense in depth: by construction (determineOverlayRoots never
+    // proposes a candidate under SANDBOX_SCRATCH_BASE) this can't actually
+    // fire, but keep the same fail-closed guard persistent mode has.
+    assertScratchBaseNotWritable([...overlayPaths, ...allowWrite]);
+    protectedPaths = new Set([...overlayPaths, ...allowWrite]);
+
+    // Layer 2: overlay roots, shallow-first -- lower is the untouched host
+    // path (readable/writable during the step, discarded after); upper/work
+    // live under this run's own scratch dir (createOverlayScratchDirs).
+    for (const root of [...overlayRoots].sort((a, b) => a.path.length - b.path.length)) {
+      mounts.push({
+        destination: root.path,
+        type: "overlay",
+        source: "overlay",
+        options: [`lowerdir=${root.path}`, `upperdir=${root.upper}`, `workdir=${root.work}`],
+      });
+    }
+    // Layer 3: allow_write entries, shallow-first. ensureAllowWriteTargetsExist
+    // has already guaranteed every one of these exists on the host before
+    // this runs, so runc never has to synthesize a root-owned placeholder
+    // for any of them (see that function's own doc comment for why).
+    for (const p of [...allowWrite].sort((a, b) => a.length - b.length))
       mounts.push({ destination: p, type: "none", source: p, options: ["rbind", "rw"] });
+  } else {
+    // Paths kept writable on top of the read-only root. RUNNER_TEMP is included
+    // because many actions/tools write there and it isn't always under $HOME
+    // (self-hosted runners can place it elsewhere), so the $HOME exception
+    // wouldn't otherwise cover it. Deduped so an overlapping entry (RUNNER_TEMP
+    // nested under $HOME, or a writablePaths duplicate) isn't bind-mounted twice.
+    const writableDirs = [
+      ...new Set(
+        [workdir, home, "/tmp", runnerTemp, ...writablePaths].filter((p): p is string =>
+          Boolean(p),
+        ),
+      ),
+    ];
+    protectedPaths = new Set(writableDirs);
+    if (!disableReadonly) {
+      // `writable: /` (disableReadonly) is an intentional, documented full
+      // opt-out of the read-only restriction, so it's exempt from this guard.
+      assertScratchBaseNotWritable(writableDirs);
+      for (const p of writableDirs)
+        mounts.push({ destination: p, type: "none", source: p, options: ["rbind", "rw"] });
+    }
   }
 
   const maskedPaths = [
