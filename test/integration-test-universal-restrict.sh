@@ -81,6 +81,27 @@ assert_summary_contains "| nxdomain.wildcard.example.com:443 | HTTPS | dns-faile
 assert_summary_contains "| internal.wildcard.example.com:443 | HTTPS | internal-address |" "SSRF via allowlisted name recorded as blocked, reason internal-address"
 assert_summary_contains "| internal.wildcard.example.com:80 | HTTP | internal-address |" "SSRF via allowlisted name (HTTP) recorded as blocked, reason internal-address"
 
+# The Allowed Hosts table never shows a reason column, so a plain substring
+# search for "| blocked.example.com:80 | HTTP |" would also match the start
+# of its correct Blocked Hosts row ("| blocked.example.com:80 | HTTP |
+# not-allowed |"). Scope the search to just the Allowed Hosts section instead.
+ALLOWED_SECTION=$(awk '
+  /^### / { in_section = (index($0, "Allowed Hosts") > 0) ? 1 : 0; next }
+  in_section { print }
+' <<< "$SUMMARY")
+
+assert_absent_in_allowed() {
+  local pattern="$1" label="$2"
+  if grep -qF -- "$pattern" <<< "$ALLOWED_SECTION"; then
+    fail "$label -- found in the Allowed Hosts table"
+  else
+    pass "$label"
+  fi
+}
+
+assert_absent_in_allowed "| blocked.example.com:80 | HTTP |" \
+  "keep-alive: second (blocked) request on a reused connection did not inherit the first request's ALLOWED verdict"
+
 rm -rf "$TMPDIR"
 
 echo ""

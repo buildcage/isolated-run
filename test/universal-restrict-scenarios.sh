@@ -136,5 +136,16 @@ else
   FAILURES=$((FAILURES + 1))
 fi
 
+# [HTTP keep-alive - allowed then blocked: a second request on a reused
+# HTTP/1.1 keep-alive connection must be judged on its own merits, not
+# inherit the first request's decision. Verified against the report by
+# test/integration-test-universal-restrict.sh, since this script only sees
+# curl/nc exit status, not the proxy's log.]
+echo "=== [HTTP keep-alive - allowed then blocked] ==="
+((printf 'GET / HTTP/1.1\r\nHost: allowed.example.com\r\n\r\n'; sleep 1; \
+  printf 'GET / HTTP/1.1\r\nHost: blocked.example.com\r\nConnection: close\r\n\r\n'; sleep 1) \
+ | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true)
+echo "  requests sent over one keep-alive connection (checked against the report)"
+
 echo "=== End of scenarios: $FAILURES failure(s) ==="
 exit "$FAILURES"
