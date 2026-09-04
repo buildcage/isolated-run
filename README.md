@@ -517,10 +517,13 @@ native `run:` step.
 ## Filesystem access
 
 Only `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, and `$RUNNER_TEMP` are writable by default. Every other
-path is remounted read-only for the duration of the `run` command. This closes off using the
-filesystem to plant a payload for a later, non-sandboxed step in the same job, such as rewriting a
-binary earlier on `$PATH`. It doesn't restrict what the command can _read_ (see
-[Known Limitations](./docs/security.md#known-limitations)).
+path is remounted read-only for the duration of the `run` command, which closes off planting a
+payload anywhere outside those four paths. It doesn't close off planting one inside them: `$HOME`
+and `$RUNNER_TEMP` stay writable, and `GITHUB_ENV`/`GITHUB_PATH`/`GITHUB_OUTPUT` live under
+`$RUNNER_TEMP`, so a later, non-isolated step in the same job can still pick up whatever the command
+left there — see `filesystem: ephemeral` below, and
+[Known Limitations](./docs/security.md#known-limitations) for what neither mode closes off. It also
+doesn't restrict what the command can _read_.
 
 `filesystem` controls what happens to those writes once the step ends:
 
@@ -620,6 +623,13 @@ Buildcage controls _where_ your command can connect, not _what code_ it runs. A 
 delivered through an allowed domain still runs. Treat it as one layer in a defense-in-depth
 strategy, a last line of defense so that if something slips through your other measures, at least it
 can't call home.
+
+This action isolates the step it wraps, not the job. Anything the command sets in `$GITHUB_ENV`,
+`$GITHUB_PATH`, or an output — or writes under `$HOME`, `/tmp`, `$RUNNER_TEMP`, or
+`$GITHUB_WORKSPACE` — reaches later steps unchanged, and those steps run without this action's
+restrictions unless you wrap them too. If a step runs untrusted code, isolate the steps after it in
+the same job as well, or move them to a separate job, and don't treat an env var, `$PATH` entry, or
+output an isolated step set as trustworthy.
 
 An allowlist also cannot stop anything leaving through a service you had to allow anyway. That is a
 structural limit. What it does stop is traffic to a destination that is not on the list, and
