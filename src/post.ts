@@ -37,7 +37,22 @@ const projectName = core.getState("project_name");
 if (containerName.startsWith("buildcage-proxy-")) {
   try {
     const scratchDir = scratchDirFor(containerName);
-    if (existsSync(scratchDir)) cleanupScratchDir(scratchDir);
+    if (existsSync(scratchDir)) {
+      // filesystem: ephemeral only; absent (persistent mode) or unparseable
+      // (e.g. main.ts never reached the point it's saved) both mean no
+      // discard log line -- cleanupScratchDir already treats undefined the
+      // same as "nothing to log".
+      let ephemeralRoots: string[] | undefined;
+      const raw = core.getState("ephemeral_overlay_roots");
+      if (raw) {
+        try {
+          ephemeralRoots = JSON.parse(raw);
+        } catch {
+          // left undefined
+        }
+      }
+      cleanupScratchDir(scratchDir, ephemeralRoots);
+    }
   } catch (e) {
     console.log(
       `::warning::run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`,

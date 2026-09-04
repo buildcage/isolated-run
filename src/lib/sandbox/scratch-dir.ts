@@ -70,6 +70,16 @@ function unmountAllUnder(dir: string): void {
  * directory rmSync is about to delete spuriously report EBUSY even
  * though it's no longer listed as a mountpoint at all. Resolves on the
  * very next attempt after a brief wait.
+ *
+ * Falls back to `sudo rm -rf` on EACCES: filesystem: ephemeral's overlay
+ * roots (see ephemeral-fs.ts's createOverlayScratchDirs) are mounted by
+ * runc running as root, and the kernel's own overlayfs implementation
+ * writes bookkeeping content directly into each root's `work` dir while
+ * mounted (notably a "work/work" subdirectory used for atomic rename
+ * during copy-up) -- content that stays on disk, root-owned and not
+ * traversable by the unprivileged runner user, once the mount itself is
+ * gone. The plain (unprivileged) rmSync above stays the fast path, since
+ * it's all persistent mode -- and every unit test -- ever needs.
  */
 function removeScratchDir(dir: string): void {
   const maxAttempts = 5;
@@ -78,7 +88,12 @@ function removeScratchDir(dir: string): void {
       rmSync(dir, { recursive: true, force: true });
       return;
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EBUSY" || attempt === maxAttempts) throw e;
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "EACCES") {
+        execFileSync("sudo", ["-n", "rm", "-rf", dir], { stdio: ["ignore", "ignore", "pipe"] });
+        return;
+      }
+      if (code !== "EBUSY" || attempt === maxAttempts) throw e;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
     }
   }
@@ -89,8 +104,18 @@ function removeScratchDir(dir: string): void {
  * safety net — see unmountAllUnder) and then recursively remove it. Exported
  * so post.ts can reclaim a scratch dir orphaned by a hard kill that bypassed
  * withScratchDir's own finally. No-ops safely when `dir` doesn't exist.
+ *
+ * `ephemeralRoots`, when given, is filesystem: ephemeral's own already-folded
+ * overlay-root paths (see ephemeral-fs.ts's determineOverlayRoots) -- logged
+ * here, right before the upper/work dirs holding those writes are deleted,
+ * so there's a visible record of what was discarded. Omitted by
+ * withScratchDir's own stale-remnant-clearing call (this isn't the current
+ * run's own discard) and by every persistent-mode call.
  */
-export function cleanupScratchDir(dir: string): void {
+export function cleanupScratchDir(dir: string, ephemeralRoots?: string[]): void {
+  if (ephemeralRoots && ephemeralRoots.length > 0) {
+    console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`);
+  }
   unmountAllUnder(dir);
   removeScratchDir(dir);
 }
@@ -112,8 +137,16 @@ export function scratchDirFor(containerName: string): string {
  * post.ts can reclaim it after a hard kill; without it a random mkdtemp name
  * is used (unit tests). Cleaned up on every exit path that unwinds — a
  * SIGKILL bypasses this finally, which is exactly what post.ts covers.
+ *
+ * `ephemeralRoots` (filesystem: ephemeral only) is passed through only to
+ * the run's own final cleanup, not the stale-remnant clear above (that dir,
+ * if any, is left over from a previous, already-reported run).
  */
-export function withScratchDir<T>(fn: (dir: string) => T, containerName?: string): T {
+export function withScratchDir<T>(
+  fn: (dir: string) => T,
+  containerName?: string,
+  ephemeralRoots?: string[],
+): T {
   let dir: string;
   mkdirSync(SANDBOX_SCRATCH_BASE, { recursive: true, mode: 0o755 });
   if (containerName) {
@@ -126,6 +159,6 @@ export function withScratchDir<T>(fn: (dir: string) => T, containerName?: string
   try {
     return fn(dir);
   } finally {
-    cleanupScratchDir(dir);
+    cleanupScratchDir(dir, ephemeralRoots);
   }
 }

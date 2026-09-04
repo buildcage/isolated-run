@@ -399,6 +399,16 @@ function unmountAllUnder(dir) {
 * directory rmSync is about to delete spuriously report EBUSY even
 * though it's no longer listed as a mountpoint at all. Resolves on the
 * very next attempt after a brief wait.
+*
+* Falls back to `sudo rm -rf` on EACCES: filesystem: ephemeral's overlay
+* roots (see ephemeral-fs.ts's createOverlayScratchDirs) are mounted by
+* runc running as root, and the kernel's own overlayfs implementation
+* writes bookkeeping content directly into each root's `work` dir while
+* mounted (notably a "work/work" subdirectory used for atomic rename
+* during copy-up) -- content that stays on disk, root-owned and not
+* traversable by the unprivileged runner user, once the mount itself is
+* gone. The plain (unprivileged) rmSync above stays the fast path, since
+* it's all persistent mode -- and every unit test -- ever needs.
 */
 function removeScratchDir(dir) {
 	for (let attempt = 1; attempt <= 5; attempt++) try {
@@ -408,7 +418,21 @@ function removeScratchDir(dir) {
 		});
 		return;
 	} catch (e) {
-		if (e.code !== "EBUSY" || attempt === 5) throw e;
+		let code = e.code;
+		if (code === "EACCES") {
+			(0, node_child_process.execFileSync)("sudo", [
+				"-n",
+				"rm",
+				"-rf",
+				dir
+			], { stdio: [
+				"ignore",
+				"ignore",
+				"pipe"
+			] });
+			return;
+		}
+		if (code !== "EBUSY" || attempt === 5) throw e;
 		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
 	}
 }
@@ -417,9 +441,16 @@ function removeScratchDir(dir) {
 * safety net — see unmountAllUnder) and then recursively remove it. Exported
 * so post.ts can reclaim a scratch dir orphaned by a hard kill that bypassed
 * withScratchDir's own finally. No-ops safely when `dir` doesn't exist.
+*
+* `ephemeralRoots`, when given, is filesystem: ephemeral's own already-folded
+* overlay-root paths (see ephemeral-fs.ts's determineOverlayRoots) -- logged
+* here, right before the upper/work dirs holding those writes are deleted,
+* so there's a visible record of what was discarded. Omitted by
+* withScratchDir's own stale-remnant-clearing call (this isn't the current
+* run's own discard) and by every persistent-mode call.
 */
-function cleanupScratchDir(dir) {
-	unmountAllUnder(dir), removeScratchDir(dir);
+function cleanupScratchDir(dir, ephemeralRoots) {
+	ephemeralRoots && ephemeralRoots.length > 0 && console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`), unmountAllUnder(dir), removeScratchDir(dir);
 }
 /**
 * Absolute path of the scratch dir for a given proxy container, derived
@@ -436,7 +467,13 @@ function scratchDirFor(containerName) {
 const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), defaultComposeFile = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml"), containerName = getState("container_name"), projectName = getState("project_name");
 if (containerName.startsWith("buildcage-proxy-")) try {
 	let scratchDir = scratchDirFor(containerName);
-	(0, node_fs.existsSync)(scratchDir) && cleanupScratchDir(scratchDir);
+	if ((0, node_fs.existsSync)(scratchDir)) {
+		let ephemeralRoots, raw = getState("ephemeral_overlay_roots");
+		if (raw) try {
+			ephemeralRoots = JSON.parse(raw);
+		} catch {}
+		cleanupScratchDir(scratchDir, ephemeralRoots);
+	}
 } catch (e) {
 	console.log(`::warning::run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
 }

@@ -17,6 +17,17 @@ import { buildUrlRules } from "#core/lib/acl/url-rules.ts";
 import { SandboxError } from "./lib/errors.ts";
 import { checkUrlAndTlsRuleSupport } from "./lib/engine-rule-support.ts";
 import { checkPasswordlessSudo } from "./lib/sudo-preflight.ts";
+import { checkOverlayfsSupport } from "./lib/overlayfs-preflight.ts";
+import {
+  resolveAllowWritePaths,
+  ensureAllowWriteTargetsExist,
+  AllowWriteTargetMissingError,
+  AllowWriteTargetUncreatableError,
+  determineOverlayRoots,
+  createOverlayScratchDirs,
+  formatFilesystemPlanLog,
+  type OverlayRoot,
+} from "./lib/sandbox/ephemeral-fs.ts";
 import { generateContainerName, getContainerPid } from "./lib/container.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { buildComposeUpArgs, buildComposeDownArgs } from "#core/lib/docker/args.ts";
@@ -125,6 +136,120 @@ export function resolveProxyEngine(input: string | undefined): ProxyEngine {
   return engine as ProxyEngine;
 }
 
+const FILESYSTEM_MODES = ["persistent", "ephemeral"] as const;
+export type FilesystemMode = (typeof FILESYSTEM_MODES)[number];
+
+export function resolveFilesystemMode(input: string | undefined): FilesystemMode {
+  const trimmed = input?.trim() || "persistent";
+  if (!(FILESYSTEM_MODES as readonly string[]).includes(trimmed)) {
+    throw new SandboxError(
+      `Invalid filesystem: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`,
+      "INVALID_FILESYSTEM_MODE",
+    );
+  }
+  return trimmed as FilesystemMode;
+}
+
+export interface FilesystemPlan {
+  /** filesystem: ephemeral only -- already folded (determineOverlayRoots). [] in persistent mode. */
+  overlayRoots: OverlayRoot[];
+  /** filesystem: ephemeral only -- already resolved (resolveAllowWritePaths) and
+   *  pre-created (ensureAllowWriteTargetsExist). [] in persistent mode. */
+  allowWritePaths: string[];
+}
+
+/** Test-only seam onto ensureAllowWriteTargetsExist/determineOverlayRoots's
+ *  own filesystem/sudo dependencies -- see ephemeral-fs.ts. */
+export interface ResolveFilesystemPlanDeps {
+  exists?: (path: string) => boolean;
+  stat?: (path: string) => { uid: number; gid: number; mode: number };
+  execFile?: (command: string, args: string[]) => void;
+  deviceOf?: (path: string) => number;
+}
+
+/**
+ * Validates the filesystem/writable/allow_write inputs against each other
+ * (§3.1: ephemeral and writable: are mutually exclusive; persistent and
+ * allow_write: are mutually exclusive). Pure, no I/O -- deliberately called
+ * on its own, ahead of checkPasswordlessSudo()/checkOverlayfsSupport() in
+ * main(), so a plain input-conflict mistake is rejected immediately rather
+ * than only after those privileged preflight checks have already run.
+ * resolveFilesystemPlan below also calls this itself, so it stays safe to
+ * call directly too.
+ */
+export function validateFilesystemInputs(
+  filesystemMode: FilesystemMode,
+  writableInput: string,
+  allowWriteInput: string,
+): void {
+  if (filesystemMode === "ephemeral" && writableInput.trim()) {
+    throw new SandboxError(
+      "filesystem: ephemeral and writable: are mutually exclusive (this includes writable: / " +
+        "as a full opt-out, which has no meaning in ephemeral mode) -- use allow_write: instead.",
+      "FILESYSTEM_INPUT_CONFLICT",
+    );
+  }
+  if (filesystemMode === "persistent" && allowWriteInput.trim()) {
+    throw new SandboxError(
+      "allow_write: has no effect outside filesystem: ephemeral -- persistent mode (the default) " +
+        "uses writable: instead.",
+      "FILESYSTEM_INPUT_CONFLICT",
+    );
+  }
+}
+
+/**
+ * In ephemeral mode, resolves + pre-creates the allow_write targets and
+ * folds the overlay-root candidates down to what's actually needed
+ * (ephemeral-fs.ts). Throws SandboxError, never ephemeral-fs.ts's own error
+ * classes directly, so a caller doesn't need to know about those.
+ */
+export function resolveFilesystemPlan(
+  filesystemMode: FilesystemMode,
+  writableInput: string,
+  allowWriteInput: string,
+  env: NodeJS.ProcessEnv,
+  deps: ResolveFilesystemPlanDeps = {},
+): FilesystemPlan {
+  validateFilesystemInputs(filesystemMode, writableInput, allowWriteInput);
+  if (filesystemMode !== "ephemeral") return { overlayRoots: [], allowWritePaths: [] };
+
+  // Kept as its own try/catch, separate from determineOverlayRoots below:
+  // everything in here is genuinely about allow_write's own input (parsing
+  // it, then creating what it names), so wrapping any failure as an
+  // allow_write problem is accurate.
+  let allowWritePaths: string[];
+  try {
+    allowWritePaths = resolveAllowWritePaths(allowWriteInput, env);
+    ensureAllowWriteTargetsExist(allowWritePaths, env, deps);
+  } catch (e) {
+    if (e instanceof AllowWriteTargetMissingError) {
+      throw new SandboxError(e.message, "ALLOW_WRITE_TARGET_MISSING");
+    }
+    if (e instanceof AllowWriteTargetUncreatableError) {
+      throw new SandboxError(e.message, "ALLOW_WRITE_TARGET_UNCREATABLE");
+    }
+    throw new SandboxError(`Invalid allow_write: ${errorMessage(e)}`, "INVALID_ALLOW_WRITE_PATH");
+  }
+
+  // Separate from the above: this only touches the fixed $HOME/$RUNNER_TEMP/
+  // /tmp/$GITHUB_WORKSPACE candidates, not allow_write's own input, so a
+  // failure here (e.g. a permissions error reading one of those paths) must
+  // not be mislabeled as an allow_write syntax problem.
+  try {
+    const overlayCandidates = [env.HOME, env.RUNNER_TEMP, "/tmp", env.GITHUB_WORKSPACE].filter(
+      (p): p is string => Boolean(p),
+    );
+    const overlayRoots = determineOverlayRoots(overlayCandidates, allowWritePaths, deps);
+    return { overlayRoots, allowWritePaths };
+  } catch (e) {
+    throw new SandboxError(
+      `Failed to determine filesystem: ephemeral's overlay roots: ${errorMessage(e)}`,
+      "FILESYSTEM_PLAN_FAILED",
+    );
+  }
+}
+
 /**
  * Wraps buildcage's own (non-user) log output in a collapsed
  * `::group::`/`::endgroup::` block, so a step's default (collapsed) view
@@ -207,6 +332,12 @@ interface RunSandboxedCommandOptions {
   writablePaths: string[];
   env: NodeJS.ProcessEnv;
   proxyEngine: ProxyEngine;
+  filesystemMode: FilesystemMode;
+  /** filesystem: ephemeral only -- already folded (determineOverlayRoots), not raw candidates. */
+  overlayRoots: OverlayRoot[];
+  /** filesystem: ephemeral only -- already resolved (resolveAllowWritePaths) and
+   *  pre-created (ensureAllowWriteTargetsExist) by main() before this runs. */
+  allowWritePaths: string[];
 }
 
 /**
@@ -221,116 +352,133 @@ function runSandboxedCommand({
   writablePaths,
   env,
   proxyEngine,
+  filesystemMode,
+  overlayRoots,
+  allowWritePaths,
 }: RunSandboxedCommandOptions): number {
   // Fixed addressing for the direct veth link to the proxy's sandbox0 interface.
   const gateway = "172.20.0.1";
   const dns = "172.20.0.1";
   const targetIp = "172.20.0.101";
 
-  return withScratchDir((dir) => {
-    let runcPath, seccompProfile, baseSpec;
-    try {
-      // Extracted into this run's own scratch dir — see extractRuncBootstrap.
-      // Run natively on the runner host (not `docker exec`, which would
-      // resolve against the container's kernel/arch instead of the real
-      // one) — see gen-seccomp-profile/main.go.
-      ({ runcPath, seccompProfile, baseSpec } = extractRuncBootstrap({
-        containerName,
-        destDir: dir,
-      }));
-    } catch (e) {
-      throw new SandboxError(
-        `Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`,
-        "RUNC_EXTRACT_FAILED",
-      );
-    }
-
-    // inspect only: the proxy terminates TLS, so the sandboxed process has to
-    // be made to trust its CA -- see ca-trust.ts for why this is a mount, not
-    // a write into the sandbox's (real, host) rootfs.
-    let caTrust;
-    if (proxyEngine === "inspect") {
+  return withScratchDir(
+    (dir) => {
+      let runcPath, seccompProfile, baseSpec;
       try {
-        const caCertPath = extractCaCert(containerName, dir);
-        caTrust = writeCaTrustFiles(caCertPath, dir);
+        // Extracted into this run's own scratch dir — see extractRuncBootstrap.
+        // Run natively on the runner host (not `docker exec`, which would
+        // resolve against the container's kernel/arch instead of the real
+        // one) — see gen-seccomp-profile/main.go.
+        ({ runcPath, seccompProfile, baseSpec } = extractRuncBootstrap({
+          containerName,
+          destDir: dir,
+        }));
       } catch (e) {
         throw new SandboxError(
-          `Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`,
-          "CA_EXTRACT_FAILED",
+          `Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`,
+          "RUNC_EXTRACT_FAILED",
         );
       }
-    }
 
-    const workdir = env.GITHUB_WORKSPACE || "";
-    const home = env.HOME || "";
-    // Distinct from the Docker container name/Compose project name
-    // (different ID namespace — `ip netns`/runc container IDs), but
-    // derived from it to keep `ip netns`/`docker ps` output correlated
-    // per step, same reasoning as deriveProjectName.
-    const netnsName = containerName.replace(/^buildcage-proxy-/, "buildcage-sandbox-");
-    const rootfsBindDir = join(dir, "rootfs");
+      // inspect only: the proxy terminates TLS, so the sandboxed process has to
+      // be made to trust its CA -- see ca-trust.ts for why this is a mount, not
+      // a write into the sandbox's (real, host) rootfs.
+      let caTrust;
+      if (proxyEngine === "inspect") {
+        try {
+          const caCertPath = extractCaCert(containerName, dir);
+          caTrust = writeCaTrustFiles(caCertPath, dir);
+        } catch (e) {
+          throw new SandboxError(
+            `Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`,
+            "CA_EXTRACT_FAILED",
+          );
+        }
+      }
 
-    let config;
-    try {
-      const resolvConfPath = writeResolvConf(dns, dir);
-      const scriptPath = writeRunScript(runInput, dir);
-      // Real host mount table, read now (before run-isolated.sh's `mount
-      // --rbind /` duplicates it into rootfsBindDir) so buildOciConfig can
-      // force every real submount read-only individually -- root.readonly
-      // alone only covers the top-level rootfs mount (see
-      // computeReadonlyHostMounts).
-      const hostMounts = listHostMounts();
-      // Only supplementary groups are dropped for the sandbox (see
-      // buildOciConfig); this substitutes the primary GID too, if it's a
-      // privileged group. See identity.ts.
-      const { gid, substitutedFrom } = resolveSandboxGid(process.getgid!(), env);
-      if (substitutedFrom !== undefined) {
-        core.info(
-          `buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's ` +
-            "primary group grants container/VM runtime access",
+      const workdir = env.GITHUB_WORKSPACE || "";
+      const home = env.HOME || "";
+      // Distinct from the Docker container name/Compose project name
+      // (different ID namespace — `ip netns`/runc container IDs), but
+      // derived from it to keep `ip netns`/`docker ps` output correlated
+      // per step, same reasoning as deriveProjectName.
+      const netnsName = containerName.replace(/^buildcage-proxy-/, "buildcage-sandbox-");
+      const rootfsBindDir = join(dir, "rootfs");
+
+      let config;
+      try {
+        // Side-effecting (mkdirSync); must happen before run-isolated.sh's
+        // `mount --rbind /` and before runIsolated() below, same timing
+        // constraint as ensureAllowWriteTargetsExist (already run in main()
+        // by this point) -- see ephemeral-fs.ts.
+        const overlayScratchPaths =
+          filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [];
+        const resolvConfPath = writeResolvConf(dns, dir);
+        const scriptPath = writeRunScript(runInput, dir);
+        // Real host mount table, read now (before run-isolated.sh's `mount
+        // --rbind /` duplicates it into rootfsBindDir) so buildOciConfig can
+        // force every real submount read-only individually -- root.readonly
+        // alone only covers the top-level rootfs mount (see
+        // computeReadonlyHostMounts).
+        const hostMounts = listHostMounts();
+        // Only supplementary groups are dropped for the sandbox (see
+        // buildOciConfig); this substitutes the primary GID too, if it's a
+        // privileged group. See identity.ts.
+        const { gid, substitutedFrom } = resolveSandboxGid(process.getgid!(), env);
+        if (substitutedFrom !== undefined) {
+          core.info(
+            `buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's ` +
+              "primary group grants container/VM runtime access",
+          );
+        }
+        config = buildOciConfig(baseSpec, {
+          identity: { uid: process.getuid!(), gid },
+          writable: {
+            workdir,
+            home,
+            // Standard writable runner scratch; not always under $HOME on
+            // self-hosted runners, so covered explicitly (see buildOciConfig).
+            runnerTemp: env.RUNNER_TEMP || "",
+            writablePaths,
+          },
+          ephemeral:
+            filesystemMode === "ephemeral"
+              ? { overlayRoots: overlayScratchPaths, allowWrite: allowWritePaths }
+              : undefined,
+          runtime: {
+            netnsPath: `/var/run/netns/${netnsName}`,
+            rootfsBindDir,
+            resolvConfPath,
+            seccompProfile,
+            scriptPath,
+            hostMounts,
+          },
+          env,
+          caTrust,
+        });
+      } catch (e) {
+        throw new SandboxError(
+          `Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`,
+          "OCI_CONFIG_BUILD_FAILED",
         );
       }
-      config = buildOciConfig(baseSpec, {
-        identity: { uid: process.getuid!(), gid },
-        writable: {
-          workdir,
-          home,
-          // Standard writable runner scratch; not always under $HOME on
-          // self-hosted runners, so covered explicitly (see buildOciConfig).
-          runnerTemp: env.RUNNER_TEMP || "",
-          writablePaths,
-        },
-        runtime: {
-          netnsPath: `/var/run/netns/${netnsName}`,
-          rootfsBindDir,
-          resolvConfPath,
-          seccompProfile,
-          scriptPath,
-          hostMounts,
-        },
-        env,
-        caTrust,
+      writeOciConfig(config, dir);
+
+      return runIsolated({
+        runcPath,
+        proxyPid,
+        bundleDir: dir,
+        containerId: containerName,
+        netnsName,
+        rootfsBindDir,
+        gateway,
+        dns,
+        targetIp,
       });
-    } catch (e) {
-      throw new SandboxError(
-        `Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`,
-        "OCI_CONFIG_BUILD_FAILED",
-      );
-    }
-    writeOciConfig(config, dir);
-
-    return runIsolated({
-      runcPath,
-      proxyPid,
-      bundleDir: dir,
-      containerId: containerName,
-      netnsName,
-      rootfsBindDir,
-      gateway,
-      dns,
-      targetIp,
-    });
-  }, containerName);
+    },
+    containerName,
+    filesystemMode === "ephemeral" ? overlayRoots.map((r) => r.path) : undefined,
+  );
 }
 
 function wantsTrafficArtifact(): boolean {
@@ -434,9 +582,45 @@ async function main(): Promise<void> {
   const proxyEngine = resolveProxyEngine(core.getInput("proxy_engine"));
   console.log(`Proxy engine: ${proxyEngine}`);
 
+  const filesystemMode = resolveFilesystemMode(core.getInput("filesystem"));
+  const writableInput = core.getInput("writable");
+  const allowWriteInput = core.getInput("allow_write");
+
+  // Cheap, pure input-conflict check first, so a plain mistake (e.g.
+  // filesystem: ephemeral combined with writable:) is rejected immediately
+  // rather than only after the privileged preflight checks below have
+  // already run (checkOverlayfsSupport in particular performs a real
+  // sudo/unshare/mount probe).
+  validateFilesystemInputs(filesystemMode, writableInput, allowWriteInput);
+
   // Fail fast — before image verification or starting the proxy container —
-  // if the runner can't support the isolation setup at all.
+  // if the runner can't support the isolation setup at all. Deliberately
+  // ahead of resolveFilesystemPlan below: ensureAllowWriteTargetsExist (part
+  // of that call, ephemeral mode only) itself shells out to sudo, and doing
+  // that before this check risks a confusing ALLOW_WRITE_TARGET_UNCREATABLE
+  // in place of this more specific, better-diagnosed error.
   checkPasswordlessSudo();
+  if (filesystemMode === "ephemeral") checkOverlayfsSupport();
+
+  // Resolved/pre-created here (not inside runSandboxedCommand) so a bad
+  // allow_write entry, or a target that can't be created, fails before the
+  // proxy container ever starts -- same reasoning as checkPasswordlessSudo
+  // above.
+  const { overlayRoots, allowWritePaths } = resolveFilesystemPlan(
+    filesystemMode,
+    writableInput,
+    allowWriteInput,
+    env,
+  );
+  if (filesystemMode === "ephemeral") {
+    for (const line of formatFilesystemPlanLog(
+      filesystemMode,
+      overlayRoots.map((r) => r.path),
+      allowWritePaths,
+    )) {
+      core.info(line);
+    }
+  }
 
   // Same gate as writeReportSummary() below — suppresses annotations when
   // this script isn't running as the real action.
@@ -483,7 +667,7 @@ async function main(): Promise<void> {
   logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
   console.log("::endgroup::");
 
-  const writablePaths = parseWritablePaths(core.getInput("writable"));
+  const writablePaths = parseWritablePaths(writableInput);
 
   // Each `run` step gets its own throwaway proxy container — start, run
   // the isolated command, report, and stop, all within this one step —
@@ -495,6 +679,9 @@ async function main(): Promise<void> {
   if (env.GITHUB_STATE) {
     core.saveState("container_name", containerName);
     core.saveState("project_name", projectName);
+    if (filesystemMode === "ephemeral") {
+      core.saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots.map((r) => r.path)));
+    }
   }
 
   const composeEnv = {
@@ -529,6 +716,9 @@ async function main(): Promise<void> {
       writablePaths,
       env,
       proxyEngine,
+      filesystemMode,
+      overlayRoots,
+      allowWritePaths,
     });
   } finally {
     try {

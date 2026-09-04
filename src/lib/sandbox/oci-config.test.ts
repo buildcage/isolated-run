@@ -458,6 +458,137 @@ describe("buildOciConfig", () => {
   });
 });
 
+describe("buildOciConfig ephemeral mode", () => {
+  const baseArgs = {
+    identity: { uid: 1000, gid: 1000 },
+    writable: {
+      workdir: "/home/runner/work/repo/repo",
+      home: "/home/runner",
+      writablePaths: [] as string[],
+    },
+    runtime: {
+      netnsPath: "/var/run/netns/buildcage-sandbox-abcd1234",
+      rootfsBindDir: "/var/tmp/buildcage/sandbox-xyz/rootfs",
+      resolvConfPath: "/var/tmp/buildcage/sandbox-xyz/resolv.conf",
+      seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
+      scriptPath: "/var/tmp/buildcage/sandbox-xyz/run-script.sh",
+    },
+    env: { FOO: "bar" },
+  };
+
+  const ephemeral = {
+    overlayRoots: [
+      {
+        path: "/home/runner",
+        upper: "/var/tmp/buildcage/sandbox-xyz/ephemeral/_home_runner/upper",
+        work: "/var/tmp/buildcage/sandbox-xyz/ephemeral/_home_runner/work",
+      },
+      {
+        path: "/tmp",
+        upper: "/var/tmp/buildcage/sandbox-xyz/ephemeral/_tmp/upper",
+        work: "/var/tmp/buildcage/sandbox-xyz/ephemeral/_tmp/work",
+      },
+    ],
+    allowWrite: [baseArgs.writable.workdir],
+  };
+
+  it("emits one overlay mount per overlay root, with lowerdir/upperdir/workdir set from the given paths", () => {
+    const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, ephemeral });
+    for (const root of ephemeral.overlayRoots) {
+      expect(config.mounts).toContainEqual({
+        destination: root.path,
+        type: "overlay",
+        source: "overlay",
+        options: [`lowerdir=${root.path}`, `upperdir=${root.upper}`, `workdir=${root.work}`],
+      });
+    }
+  });
+
+  it("emits a plain rw rbind for each allow_write entry", () => {
+    const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, ephemeral });
+    expect(config.mounts).toContainEqual({
+      destination: baseArgs.writable.workdir,
+      type: "none",
+      source: baseArgs.writable.workdir,
+      options: ["rbind", "rw"],
+    });
+  });
+
+  it("does not fall back to the persistent writableDirs logic (workdir/home/tmp/RUNNER_TEMP) when ephemeral is set", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      ephemeral,
+      writable: { ...baseArgs.writable, writablePaths: ["/opt/should-be-ignored"] },
+    });
+    expect(config.mounts.some((m) => m.destination === "/opt/should-be-ignored")).toBe(false);
+  });
+
+  it("orders mounts as base spec, then overlay roots shallow-first, then allow_write entries shallow-first", () => {
+    const deepEphemeral = {
+      overlayRoots: [
+        { path: "/home/runner/deep", upper: "/scratch/deep/upper", work: "/scratch/deep/work" },
+        { path: "/home", upper: "/scratch/home/upper", work: "/scratch/home/work" },
+      ],
+      allowWrite: ["/home/runner/deep/allow-deep", "/allow-shallow"],
+    };
+    const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, ephemeral: deepEphemeral });
+    const indexOf = (destination: string) =>
+      config.mounts.findIndex((m) => m.destination === destination);
+
+    const homeIdx = indexOf("/home");
+    const homeRunnerDeepIdx = indexOf("/home/runner/deep");
+    const allowShallowIdx = indexOf("/allow-shallow");
+    const allowDeepIdx = indexOf("/home/runner/deep/allow-deep");
+
+    expect(homeIdx).toBeLessThan(homeRunnerDeepIdx);
+    expect(homeRunnerDeepIdx).toBeLessThan(allowShallowIdx);
+    expect(allowShallowIdx).toBeLessThan(allowDeepIdx);
+  });
+
+  it("keeps root.readonly true even though no writablePaths sentinel applies", () => {
+    const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, ephemeral });
+    expect(config.root.readonly).toBe(true);
+  });
+
+  it("never places an overlay root's upper/work dir under rootfsBindDir", () => {
+    const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, ephemeral });
+    const overlayMounts = config.mounts.filter((m) => m.type === "overlay");
+    for (const m of overlayMounts) {
+      for (const opt of m.options ?? []) {
+        if (opt.startsWith("upperdir=") || opt.startsWith("workdir=")) {
+          expect(opt.startsWith(`${baseArgs.runtime.rootfsBindDir}/`)).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("feeds overlay roots and allow_write paths into the readonlyPaths host-mount pass as protected", () => {
+    const hostMounts = [
+      { mountPoint: "/", fsType: "ext4" },
+      { mountPoint: "/home/runner", fsType: "ext4" },
+      { mountPoint: baseArgs.writable.workdir, fsType: "ext4" },
+      { mountPoint: "/mnt", fsType: "ext4" },
+    ];
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      ephemeral,
+      runtime: { ...baseArgs.runtime, hostMounts },
+    });
+    expect(config.linux.readonlyPaths.includes("/home/runner")).toBe(false);
+    expect(config.linux.readonlyPaths.includes(baseArgs.writable.workdir)).toBe(false);
+    expect(config.linux.readonlyPaths.includes("/mnt")).toBe(true);
+  });
+
+  it("still fails closed if an overlay root or allow_write entry somehow overlaps the scratch base", () => {
+    expect(() =>
+      buildOciConfig(fakeBaseSpec(), {
+        ...baseArgs,
+        ephemeral: { overlayRoots: [], allowWrite: ["/var/tmp/buildcage"] },
+      }),
+    ).toThrow(/overlaps the sandbox's own scratch directory/);
+  });
+});
+
 // inspect engine only -- universal never passes caTrust, and the tests
 // above (which don't) already cover that this is fully opt-in.
 describe("buildOciConfig — caTrust", () => {
