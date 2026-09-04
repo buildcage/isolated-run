@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { SandboxError } from "./errors.ts";
@@ -25,25 +25,27 @@ export function describeOverlayFailure(e: unknown): string {
 }
 
 /**
- * Removes the probe dir, retrying on EBUSY -- same reasoning, and same
- * retry shape, as scratch-dir.ts's removeScratchDir: a lazy unmount (the
- * private mount namespace here is torn down when the `sudo unshare` child
- * exits, which behaves like one) can leave the kernel's teardown of that
- * now-orphaned mount lagging behind by a short, bounded window, which can
- * make rmSync spuriously report EBUSY on a directory that's already gone
- * from /proc/self/mountinfo. Resolves on the very next attempt after a
- * brief wait -- without this, that transient EBUSY would escape
- * checkOverlayfsSupport's own try/catch (this runs in its finally) as a
- * raw, confusing filesystem error instead of the step just proceeding.
+ * Removes the probe dir via sudo, not a plain rmSync: the probe mount
+ * itself runs as root (sudo unshare ... mount -t overlay ...), and the
+ * kernel's own overlayfs implementation writes bookkeeping content directly
+ * into workdir while mounted (notably a "work/work" subdirectory used for
+ * atomic rename during copy-up) -- content that stays on disk, root-owned
+ * and not traversable by the unprivileged runner user, after the mount
+ * itself is torn down when the `sudo unshare` child exits. A plain rmSync
+ * here reliably fails with EACCES on any host where the probe mount
+ * actually succeeded (confirmed in CI). Retries on EBUSY for the same
+ * reason scratch-dir.ts's removeScratchDir does: a lazy-unmount-style
+ * teardown can leave the kernel's own bookkeeping lagging behind by a
+ * short, bounded window.
  */
 function removeProbeDir(dir: string): void {
   const maxAttempts = 5;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      rmSync(dir, { recursive: true, force: true });
+      execFileSync("sudo", ["-n", "rm", "-rf", dir], { stdio: ["ignore", "ignore", "pipe"] });
       return;
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EBUSY" || attempt === maxAttempts) throw e;
+      if (attempt === maxAttempts) throw e;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
     }
   }
