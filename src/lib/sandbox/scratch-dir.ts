@@ -16,7 +16,11 @@ import { parseMountinfo } from "./mountinfo.ts";
 // buildOciConfig fails closed if a step's `writable:` input tries to list
 // this directory (or an ancestor of it) as writable — see
 // assertScratchBaseNotWritable.
-export const SANDBOX_SCRATCH_BASE = "/var/tmp/buildcage";
+//
+// Suffixed with the runner's UID so two runners running as different users
+// on one host don't contend for the same base -- ensureOwnScratchBase below
+// would otherwise reject the second one outright as looking like tampering.
+export const SANDBOX_SCRATCH_BASE = `/var/tmp/buildcage-${process.getuid?.() ?? 0}`;
 
 /**
  * Pure: mount points from raw /proc/self/mountinfo content that are

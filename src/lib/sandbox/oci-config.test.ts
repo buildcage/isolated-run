@@ -10,7 +10,7 @@ import {
   writeOciConfig,
 } from "./oci-config.ts";
 import { parseMountinfo } from "./mountinfo.ts";
-import { withScratchDir } from "./scratch-dir.ts";
+import { withScratchDir, SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import { OWN_CA_DESTINATION, SYSTEM_CA_DESTINATION } from "./ca-trust.ts";
 
 describe("writeRunScript", () => {
@@ -320,7 +320,7 @@ describe("buildOciConfig", () => {
     );
   });
 
-  it("does not mount anything over rootfsBindDir (it lives under /var/tmp/buildcage, so nothing re-exposes it)", () => {
+  it("does not mount anything over rootfsBindDir (it lives under the scratch base, so nothing re-exposes it)", () => {
     const config = buildOciConfig(fakeBaseSpec(), {
       ...baseArgs,
       writable: { ...baseArgs.writable, writablePaths: ["/opt/cache"] },
@@ -334,7 +334,7 @@ describe("buildOciConfig", () => {
     expect(() =>
       buildOciConfig(fakeBaseSpec(), {
         ...baseArgs,
-        writable: { ...baseArgs.writable, writablePaths: ["/var/tmp/buildcage"] },
+        writable: { ...baseArgs.writable, writablePaths: [SANDBOX_SCRATCH_BASE] },
       }),
     ).toThrow(/overlaps the sandbox's own scratch directory/);
   });
@@ -354,7 +354,7 @@ describe("buildOciConfig", () => {
         ...baseArgs,
         writable: {
           ...baseArgs.writable,
-          writablePaths: ["/var/tmp/buildcage/some-other-run"],
+          writablePaths: [`${SANDBOX_SCRATCH_BASE}/some-other-run`],
         },
       }),
     ).toThrow(/overlaps/);
@@ -364,7 +364,7 @@ describe("buildOciConfig", () => {
     expect(() =>
       buildOciConfig(fakeBaseSpec(), {
         ...baseArgs,
-        writable: { ...baseArgs.writable, home: "/var/tmp/buildcage", writablePaths: [] },
+        writable: { ...baseArgs.writable, home: SANDBOX_SCRATCH_BASE, writablePaths: [] },
       }),
     ).toThrow(/overlaps/);
   });
@@ -505,10 +505,10 @@ describe("buildOciConfig ephemeral mode", () => {
     },
     runtime: {
       netnsPath: "/var/run/netns/buildcage-sandbox-abcd1234",
-      rootfsBindDir: "/var/tmp/buildcage/sandbox-xyz/rootfs",
-      resolvConfPath: "/var/tmp/buildcage/sandbox-xyz/resolv.conf",
+      rootfsBindDir: "/var/tmp/buildcage-1000/sandbox-xyz/rootfs",
+      resolvConfPath: "/var/tmp/buildcage-1000/sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
-      scriptPath: "/var/tmp/buildcage/sandbox-xyz/run-script.sh",
+      scriptPath: "/var/tmp/buildcage-1000/sandbox-xyz/run-script.sh",
     },
     env: { FOO: "bar" },
   };
@@ -517,13 +517,13 @@ describe("buildOciConfig ephemeral mode", () => {
     overlayRoots: [
       {
         path: "/home/runner",
-        upper: "/var/tmp/buildcage/sandbox-xyz/ephemeral/_home_runner/upper",
-        work: "/var/tmp/buildcage/sandbox-xyz/ephemeral/_home_runner/work",
+        upper: "/var/tmp/buildcage-1000/sandbox-xyz/ephemeral/_home_runner/upper",
+        work: "/var/tmp/buildcage-1000/sandbox-xyz/ephemeral/_home_runner/work",
       },
       {
         path: "/tmp",
-        upper: "/var/tmp/buildcage/sandbox-xyz/ephemeral/_tmp/upper",
-        work: "/var/tmp/buildcage/sandbox-xyz/ephemeral/_tmp/work",
+        upper: "/var/tmp/buildcage-1000/sandbox-xyz/ephemeral/_tmp/upper",
+        work: "/var/tmp/buildcage-1000/sandbox-xyz/ephemeral/_tmp/work",
       },
     ],
     allowWrite: [baseArgs.writable.workdir],
@@ -620,7 +620,7 @@ describe("buildOciConfig ephemeral mode", () => {
     expect(() =>
       buildOciConfig(fakeBaseSpec(), {
         ...baseArgs,
-        ephemeral: { overlayRoots: [], allowWrite: ["/var/tmp/buildcage"] },
+        ephemeral: { overlayRoots: [], allowWrite: [SANDBOX_SCRATCH_BASE] },
       }),
     ).toThrow(/overlaps the sandbox's own scratch directory/);
   });
