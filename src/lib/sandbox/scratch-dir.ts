@@ -1,7 +1,8 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, lstatSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { errorMessage } from "#core/lib/errors.ts";
+import { SandboxError } from "../errors.ts";
 import { parseMountinfo } from "./mountinfo.ts";
 
 // Base directory for each run's scratch dir (OCI bundle + the host-`/`
@@ -132,6 +133,48 @@ export function scratchDirFor(containerName: string): string {
 }
 
 /**
+ * Create SANDBOX_SCRATCH_BASE, or verify that an existing one is genuinely
+ * ours. /var/tmp is 1777, so any local user can pre-create this path -- as a
+ * symlink, or as a world-writable directory -- and thereby redirect the OCI
+ * bundle (config.json carries the whole step environment, secrets included),
+ * the root-run `mount --rbind /`, and cleanup's `sudo umount`/`rmSync`.
+ * `mkdirSync`'s `recursive: true` accepts any of those silently and applies
+ * `mode` only on creation, so this uses a non-recursive mkdir and validates
+ * the EEXIST case explicitly.
+ *
+ * Strictly speaking, another local OS user is outside this action's threat
+ * model: isolated-run exists to contain a malicious `run:` command, not to
+ * defend against a separate, already-present actor on the host -- someone
+ * with real root (or the proxy container's own internals) is unstoppable by
+ * design, and that's an accepted limitation elsewhere in this codebase. But
+ * this particular hole needs neither: an ordinary, unprivileged local
+ * account is enough to win the race, which is a much lower bar than root or
+ * the `docker` group, so it's worth closing even though the general case is
+ * out of scope.
+ *
+ * Fails closed: an unexpected owner or mode is not repaired, because
+ * nothing legitimate produces one.
+ */
+export function ensureOwnScratchBase(base: string = SANDBOX_SCRATCH_BASE): void {
+  try {
+    mkdirSync(base, { mode: 0o700 }); // no recursive: /var/tmp always exists
+    return;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+  }
+  const st = lstatSync(base); // lstat: never follows a symlink
+  const uid = process.getuid!();
+  if (!st.isDirectory() || st.uid !== uid || (st.mode & 0o077) !== 0) {
+    throw new SandboxError(
+      `${base} exists but is not a private directory owned by uid ${uid} ` +
+        `(mode ${(st.mode & 0o7777).toString(8)}, uid ${st.uid}). Another user may have created it. ` +
+        `Remove it and re-run.`,
+      "SCRATCH_BASE_UNSAFE",
+    );
+  }
+}
+
+/**
  * Create/remove a scratch directory for this step's OCI bundle + run-script.
  * With `containerName` the dir is named deterministically (scratchDirFor) so
  * post.ts can reclaim it after a hard kill; without it a random mkdtemp name
@@ -148,7 +191,7 @@ export function withScratchDir<T>(
   ephemeralRoots?: string[],
 ): T {
   let dir: string;
-  mkdirSync(SANDBOX_SCRATCH_BASE, { recursive: true, mode: 0o755 });
+  ensureOwnScratchBase();
   if (containerName) {
     dir = scratchDirFor(containerName);
     cleanupScratchDir(dir); // clear any stale remnant at this deterministic path (unmount-safe)
