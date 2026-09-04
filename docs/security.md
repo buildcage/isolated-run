@@ -541,6 +541,19 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   one across steps in the same job. This keeps allowlists independently configurable per step and
   keeps the traffic report's step-to-container mapping unambiguous, at the cost of container
   startup overhead on jobs with many isolated steps.
+- **No CPU/memory/process-count limits (out of scope by design)**: the OCI `config.json` runc builds
+  for the isolated command never sets `linux.resources`, so the cgroup it runs under carries no
+  memory, pids, or CPU ceiling. Capability bounding and the seccomp profile don't close this either,
+  since a legitimate build has to call `fork(2)` and `mmap(2)` freely. A fork bomb or a runaway
+  allocation inside the isolated command isn't refused, it consumes host memory or the host process
+  table until something else gives out. This isn't a containment gap: the threat model here is
+  confining where the command's network traffic goes, not bounding what it consumes, and wrapping a
+  step with this action doesn't change that step's exposure, since an un-sandboxed `run:` step has
+  exactly the same absence of cgroup limits on the same host. On GitHub-hosted runners that stays
+  contained to the job's own disposable VM; on a shared self-hosted runner it can starve other jobs
+  running alongside it. Bounding that is a runner-service concern, not a per-step one, for instance a
+  systemd slice's `MemoryMax=`/`TasksMax=` around the runner service itself, not something this
+  action's OCI spec attempts.
 - **Co-located workflow step tampering (out of scope by design)**: the threat model here is
   preventing network exfiltration by malicious code inside the wrapped command, the contents of the
   command itself. **A malicious workflow environment, a compromised or untrustworthy third-party
