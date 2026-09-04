@@ -80,6 +80,18 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   their rootless `$XDG_RUNTIME_DIR` equivalents) are masked with `/dev/null` inside the sandbox's own
   mount namespace, so even an unenumerated privileged group wouldn't find a live socket to connect to
   at that path.
+- **D-Bus system bus and per-user runtime directory masked**: a read-only mount doesn't stop
+  `connect(2)` on a still-live Unix domain socket, since the kernel's permission check for a socket
+  connection only looks at write permission bits, which `mount -o ro` doesn't touch. Two more paths
+  matter here beyond the container/VM runtime sockets above: `/run/dbus/system_bus_socket`, and the
+  whole `/run/user/<uid>` directory, which is where a `systemd --user` instance (if one happens to
+  be running for the runner's UID) keeps its own session bus. Reaching that bus lets a compromised
+  command start a unit that runs entirely outside every namespace this action creates, bypassing the
+  network, filesystem, capability, and seccomp restrictions in this list. Both are masked the same
+  way as the runtime sockets above (`linux.maskedPaths`); the per-user directory is masked whole
+  rather than by individual socket, so a future tool dropping a new socket there is covered without a
+  code change, and a path that doesn't exist on a given runner (there might be no active login
+  session) is silently skipped by runc rather than an error.
 - **PID namespace**: the isolated command runs in its own PID namespace. This isn't just about
   hiding other processes from `ps`. The Linux kernel structurally forbids a process from tracing
   (`ptrace`) or reading `/proc/<pid>/mem` for any process outside its own PID namespace's lineage,
@@ -480,6 +492,13 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   socket through group membership nor find one still present at its usual path. A `run:` step that
   itself needs to invoke `docker` (build an image, run a container, etc.) cannot be wrapped by this
   action.
+- **`$XDG_RUNTIME_DIR` is an empty directory inside the sandbox**: `/run/user/<uid>` (and any other
+  path `$XDG_RUNTIME_DIR` points at) is masked whole, see [D-Bus system bus and per-user runtime
+  directory masked](#isolation-mechanisms) above, so a tool that expects to read or write something
+  there, a session keyring, a PipeWire/Wayland socket, its own scratch state, finds nothing and, if
+  it writes, fails outright rather than silently landing on the host's real directory. There's no
+  opt-out input for this; it's considered part of the same hardening as the container-runtime-socket
+  masking above, not a separate, disableable feature.
 - **Credential retrieval is intentionally not blocked**: this action restricts _where_ the isolated
   command can send network traffic, but not what it reads. A compromised dependency can still read
   `~/.aws/credentials`, `~/.docker/config.json`, or similar local credential files anywhere on the
