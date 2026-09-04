@@ -571,19 +571,24 @@ explicitly.
 - A leading `~/` expands to `$HOME`.
 - A relative path (`./dist`) resolves against `$GITHUB_WORKSPACE`, matching the sandbox's own
   working directory.
-- A path that doesn't already exist is created before the step runs. `$GITHUB_OUTPUT`,
-  `$GITHUB_ENV`, `$GITHUB_PATH`, and `$GITHUB_STEP_SUMMARY` are the runner's own generated files and
-  must already exist — a missing one is an error, not something this action creates. Anything else
-  missing (`./dist`, say) is created for you, with the same owner and permissions as its nearest
-  already-existing parent directory: a path under a tree the runner already owns becomes writable,
-  same as today, but a path under a tree it doesn't own (`/etc/something`, for instance) is created
-  yet stays exactly as unwritable to the sandboxed command as naming that existing parent directly
-  would be. Nothing here grants access beyond what the surrounding filesystem already implies.
-- `allow_write:` accepts files as well as directories. A file entry is bind-mounted file-to-file
-  (the same technique the `inspect` engine already uses to distribute its CA), so an append or a
-  truncating write goes through, but a tool that replaces the file outright (`mv`, or unlink plus
-  recreate) does not. `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`'s own contract is append-only, so
-  this doesn't affect them in practice.
+- A path that doesn't already exist is created before the step runs, **always as a directory** —
+  the same convention Docker itself uses for a bind mount whose host source doesn't exist yet
+  (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and
+  `$GITHUB_STEP_SUMMARY` are the runner's own generated files and must already exist — a missing one
+  is an error, not something this action creates. Anything else missing (`./dist`, say) is created
+  for you as a directory, with the same owner and permissions as its nearest already-existing parent
+  directory: a path under a tree the runner already owns becomes writable, same as today, but a path
+  under a tree it doesn't own (`/etc/something`, for instance) is created yet stays exactly as
+  unwritable to the sandboxed command as naming that existing parent directly would be. Nothing here
+  grants access beyond what the surrounding filesystem already implies.
+- `allow_write:` accepts files as well as directories — but only a path that's **already** a file
+  when the step starts; a missing target is always created as a directory (see above), never a file.
+  A file entry is bind-mounted file-to-file (the same technique the `inspect` engine already uses to
+  distribute its CA), so an append or a truncating write goes through, but a tool that replaces the
+  file outright (`mv`, or unlink plus recreate) does not. `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`'s
+  own contract is append-only, so this doesn't affect them in practice. If you need a file that
+  doesn't exist yet to persist, either have an earlier step create it first, or list its
+  (already-existing) parent directory instead.
 
 If you `allow_write: $GITHUB_OUTPUT`, treat every output it sets the same as any other value from
 untrusted code: never interpolate `${{ steps.<id>.outputs.<name> }}` directly into a later `run:`
