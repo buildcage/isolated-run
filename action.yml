@@ -53,7 +53,15 @@ inputs:
     required: false
     default: ""
   writable:
-    description: "Additional writable directories (newline-separated), on top of $GITHUB_WORKSPACE, $HOME, and /tmp which are always writable — everything else is read-only. Use '/' to disable the read-only restriction entirely."
+    description: "Additional writable directories (newline-separated), on top of $GITHUB_WORKSPACE, $HOME, and /tmp which are always writable — everything else is read-only. Use '/' to disable the read-only restriction entirely. Mutually exclusive with filesystem: ephemeral."
+    required: false
+    default: ""
+  filesystem:
+    description: "persistent (default) keeps writes to $HOME/$RUNNER_TEMP/$GITHUB_WORKSPACE/tmp on the host after the step ends. ephemeral discards them instead (via an overlay), except for paths listed in allow_write — use this to stop a step from planting files (e.g. GITHUB_ENV, ~/.bashrc, ~/.npmrc) that a later, non-isolated step would pick up. Mutually exclusive with writable."
+    required: false
+    default: "persistent"
+  allow_write:
+    description: "filesystem: ephemeral only — paths to keep writable and persisted on the host (newline-separated), e.g. GITHUB_ENV or ./dist. Supports $HOME, $GITHUB_WORKSPACE, $RUNNER_TEMP, $GITHUB_OUTPUT, $GITHUB_ENV, $GITHUB_PATH, $GITHUB_STEP_SUMMARY and a leading ~/. A missing path is created (as needed, via sudo) with the same owner/permissions as its nearest existing parent directory."
     required: false
     default: ""
   label:
