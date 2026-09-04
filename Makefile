@@ -80,6 +80,7 @@ test_integration_sandbox_linux: ## Run the action's integration tests (needs BUI
 	@./test/integration-test-non-runc-default-pseudofs-readonly.sh
 	@./test/integration-test-concurrent.sh
 	@./test/integration-test-known-blocked-rules.sh
+	@./test/integration-test-zero-traffic.sh
 	@./test/integration-test-runtime-sockets.sh
 	@./test/integration-test-ephemeral-fs.sh
 
