@@ -480,12 +480,24 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 ## Known Limitations
 
 - **`writable:` cannot name the sandbox's own scratch directory**: a `run:` step's `writable:` input
-  listing `/var/tmp/buildcage` (or an ancestor of it, `/var/tmp` or `/` for instance) is rejected
+  listing `/var/tmp/buildcage-<uid>` (or an ancestor of it, `/var/tmp` or `/` for instance) is rejected
   outright. That directory holds the run's own `mount --rbind /` rootfs, and the writable exceptions
   are recursive bind-mounts, so allowing it would recursively re-expose the whole host `/` inside
   the sandbox as a second, writable copy. This is a misconfiguration guard against an
   operator-supplied `writable:` value, not a defense against the isolated command itself (see
   [Filesystem access](../README.md#filesystem-access) in the README).
+- **Scratch directory on a multi-user host**: `/var/tmp` is world-writable (sticky bit set), so on a
+  host shared with other, unprivileged local users, one of them could pre-create
+  `/var/tmp/buildcage-<uid>` themselves before the action ever runs, as a symlink, or as a
+  world-writable directory, and redirect the OCI bundle (secrets included), the root-run
+  `mount --rbind /`, and cleanup's `sudo umount`/`rm -rf` wherever they chose. This is technically outside
+  this action's threat model (isolating a malicious `run:` command, not defending against a separate
+  actor already on the host, see [Co-located workflow step tampering](#known-limitations) below for
+  the same principle applied to another step in the same job), but the bar here is only an ordinary
+  local account, not root or the `docker` group, so the action verifies the base directory's owner,
+  type, and mode at startup and refuses to proceed rather than silently reusing an unexpected one. If
+  a host is genuinely shared with other local users, prefer a dedicated, single-tenant runner (one
+  host, one user) over relying on this check alone.
 - **Docker cannot be used inside the isolated command**: the primary GID substitution and the masked
   runtime sockets (see [Supplementary groups cleared, primary group checked
   too](#isolation-mechanisms) above) together mean the isolated command can neither reach a runtime
