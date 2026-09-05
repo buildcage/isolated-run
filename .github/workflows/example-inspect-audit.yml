@@ -15,7 +15,7 @@ jobs:
       # inspect decrypts, so it logs each request's method and full URL, and
       # the Job Summary's "Switch to restrict mode" section returns allowed_url_rules.
       - name: Discover required URLs with isolated-run
-        uses: buildcage/isolated-run@eb076226d15bbadefb7545dc1e02c05ff9f09ae5 # v1.1.3
+        uses: buildcage/isolated-run@fe2214b3bbdab7cf8a8be819c25a83ce45077f89 # v1.1.4-rc2
         with:
           proxy_mode: audit
           proxy_engine: inspect
