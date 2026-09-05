@@ -123,7 +123,7 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   outright, see [Known Limitations](#known-limitations) below. The `writable` input adds further
   paths to the writable set for tools that need to write elsewhere, such as a cache directory;
   setting it to `/` disables this restriction entirely. This is all `filesystem: persistent`
-  (the default and the stable mode) — `filesystem: ephemeral` (**experimental**) replaces it with an
+  (the default and the stable mode). `filesystem: ephemeral` (**experimental**) replaces it with an
   overlay that discards every write not explicitly named in `allow_write:`, closing off using a
   writable exception itself (not just the read-only area around it) to plant a payload for a later
   step. See [Filesystem access](../README.md#filesystem-access) in the README.
@@ -225,12 +225,12 @@ What each kind of rule decides, and what stays undecrypted:
   intended setup. An address named directly in a rule is exempt too, having been asked for rather
   than arrived at.
 
-  This guard is about a _name_ landing somewhere it never should — it has nothing to do with, and
+  This guard is about a _name_ landing somewhere it never should. It has nothing to do with, and
   never restricts, a rule whose host is itself a literal address (an `https`/`http` rule that names
   one directly, or a `Host` header the request sent as a bare IP): reaching that connection already
   required a rule to match the address as sent, so nothing was arrived at that wasn't first asked
-  for. Direct access to a cloud metadata endpoint this way — the normal way any AWS/GCP/Azure CLI or
-  SDK reaches it — is not something this guard is meant to stop; `allowed_ip_rules` is the intended,
+  for. Direct access to a cloud metadata endpoint this way, the normal way any AWS/GCP/Azure CLI or
+  SDK reaches it, is not something this guard is meant to stop; `allowed_ip_rules` is the intended,
   always-uninspected path for it (see below).
 
 - **The resolver never forwards a query, allowed or not.** Every name is answered locally with the
@@ -285,7 +285,7 @@ What each kind of rule decides, and what stays undecrypted:
   The internal-address guard above stays active in `audit` too, unconditionally: a name resolving
   to cloud metadata isn't traffic `audit` needs to observe, since nothing legitimate depends on that
   specific resolved address. A literal-IP request, such as a command calling a metadata endpoint
-  directly, is unaffected by this guard in either mode — blocking it would only hide real
+  directly, is unaffected by this guard in either mode: blocking it would only hide real
   information about what the command needs, without closing anything DNS could have redirected.
 
 - **`allow_tls_rules` and `allowed_ip_rules` stay uninspected by design.** Each is recorded with a
@@ -333,7 +333,7 @@ engine cover any language or package manager, a pinned certificate included.
   [`inspect`](#inspect-proxy-engine)'s (see [What it actually stops](#what-it-actually-stops)):
   loopback, link-local, CGNAT, the IETF protocol block, and the proxy's own address are all refused
   (`internal-address` in the report). Unlike `inspect`, there's no literal-address exemption to carve
-  out here — a connection to a bare address never reaches this guard at all, since it skips DNS and
+  out here, since a connection to a bare address never reaches this guard at all: it skips DNS and
   `do-resolve` entirely on a separate code path; `allowed_ip_rules` is the always-uninspected path for
   a destination named directly.
 - **DNS never leaves the job.** The internal resolver has no upstream and answers every query
@@ -506,12 +506,12 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP`, that's also _where_ it can persist one.
   `GITHUB_OUTPUT`, `GITHUB_ENV`, and `GITHUB_PATH` live under `$RUNNER_TEMP`, a writable exception,
   so the isolated command can set an output, an env var, or `$PATH` for later steps exactly as an
-  un-sandboxed one could — and the same goes for `~/.bashrc`, `~/.npmrc`, `~/.docker/config.json`,
+  un-sandboxed one could, and the same goes for `~/.bashrc`, `~/.npmrc`, `~/.docker/config.json`,
   and anything else under `$HOME`, `/tmp`, or `$GITHUB_WORKSPACE`. `filesystem: ephemeral`
-  (**experimental** — see [Filesystem access](../README.md#filesystem-access) in the README) closes
-  this off for everything except what's explicitly named in `allow_write:` — which in practice has to include
-  `$GITHUB_WORKSPACE` for the job to do anything useful, so that specific path (and whatever else you
-  list) remains exactly as exposed to this as `persistent` mode always is. `$RUNNER_TEMP` and `/tmp`
+  (**experimental**; see [Filesystem access](../README.md#filesystem-access) in the README) closes
+  this off for everything except what's explicitly named in `allow_write:`, which in practice has to
+  include `$GITHUB_WORKSPACE` for the job to do anything useful, so that specific path (and whatever
+  else you list) remains exactly as exposed to this as `persistent` mode always is. `$RUNNER_TEMP` and `/tmp`
   are also the same real directory across every invocation of this action in a job, not scoped per
   sandbox, in `persistent` mode: two concurrent invocations are isolated at the container/network
   level (see [Notes](../README.md#notes)), not the filesystem, so one can reach another's in-flight
@@ -522,7 +522,7 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   error rather than a cryptic one partway through. This is known to fail when the runner process
   itself runs inside a container whose own root filesystem is overlayfs (common for container-based
   self-hosted runners), since the kernel doesn't allow an overlay mount's `upperdir`/`workdir` to
-  themselves sit on overlayfs — `filesystem: persistent` remains available on any runner this action
+  themselves sit on overlayfs. `filesystem: persistent` remains available on any runner this action
   otherwise supports.
 - **Linux only**: requires a Linux runner with passwordless `sudo` for the isolation setup itself
   (network namespace, veth, iptables) and a working Docker installation (client and daemon) for the

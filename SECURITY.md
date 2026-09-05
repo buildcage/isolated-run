@@ -4,14 +4,14 @@
 
 I welcome reports about:
 
-- **Proxy bypass** — ways to make network connections from an isolated `run:` command that evade
+- **Proxy bypass**: ways to make network connections from an isolated `run:` command that evade
   the allowlist proxy (other than the [known domain fronting limitation](./docs/security.md#universal-proxy-engine))
-- **Network isolation escape** — bypassing the network namespace/iptables setup to reach the
+- **Network isolation escape**: bypassing the network namespace/iptables setup to reach the
   internet directly
-- **DNS filtering bypass** — bypassing the DNS redirect mechanism
-- **Sandbox escape** — privilege escalation, capability re-acquisition, or reaching the Docker
+- **DNS filtering bypass**: bypassing the DNS redirect mechanism
+- **Sandbox escape**: privilege escalation, capability re-acquisition, or reaching the Docker
   socket from inside the isolated command
-- **GitHub Actions setup** — vulnerabilities in the action itself (e.g., injection, credential
+- **GitHub Actions setup**: vulnerabilities in the action itself (e.g., injection, credential
   leak)
 
 The following are **out of scope** (please report to the respective projects instead):
@@ -30,8 +30,8 @@ The following are **out of scope** (please report to the respective projects ins
 
 isolated-run ships one artifact: a Docker image at `ghcr.io/buildcage/isolated-run`, tagged
 `vX.Y.Z`. Each release is signed keylessly with [cosign](https://github.com/sigstore/cosign) and
-carries a GitHub build-provenance attestation, both issued via GitHub Actions OIDC at release time
-— there is no long-lived signing key to leak or rotate. The action verifies this automatically,
+carries a GitHub build-provenance attestation, both issued via GitHub Actions OIDC at release time.
+There is no long-lived signing key to leak or rotate. The action verifies this automatically,
 in-process, on every run (see [Image Provenance Verification](./docs/security.md#image-provenance-verification)
 for exactly how); to verify a release manually instead:
 
@@ -57,7 +57,7 @@ The Sigstore bundle for each release is also attached as a downloadable asset
   standard library is preferred where practical.
 - [Trivy](https://github.com/aquasecurity/trivy) scans the built image for known vulnerabilities
   (on each push to `main` and monthly on schedule), and Dependabot alerts are enabled on the
-  repository — both report into this repository's Security tab.
+  repository; both report into this repository's Security tab.
 
 ## Reporting a Vulnerability
 
