@@ -65,11 +65,10 @@ The steps below use `inspect`. [Engines](#engines) compares the two in full.
 
 The step writes every destination the command contacted to the Job Summary:
 
-<img src="assets/report-audit-mode.png" alt="Outbound Traffic Report - audit mode" width="556">
+<img src="assets/report-inspect-audit-mode.png" alt="Outbound Traffic Report - audit mode" width="556">
 
 Its **Switch to restrict mode** section holds the allowlist, already written out from what the
-command actually did. What the engine never decrypted (`allow_tls_rules` and `allowed_ip_rules`)
-cannot be derived from traffic, so those come back exactly as the audit run was configured with them.
+command actually did.
 
 ### 2. Enforce the allowlist
 
@@ -90,33 +89,22 @@ Paste that allowlist into the step and switch the mode:
 ```
 
 Each rule names the methods it permits, so these let npm install packages without letting it publish
-any: `npm publish` is a `PUT` to the same host, which no rule here covers. The report lists what was
-blocked and fails the step, naming the full URL of every refused request:
+any: `npm publish` is a `PUT` to the same host, which no rule here covers. Whatever is refused is
+listed under **Blocked Hosts** with the reason, and **Communication details** names the full URL of
+every request, allowed or refused:
 
-<img src="assets/report-restrict-mode.png" alt="Outbound Traffic Report - restrict mode" width="556">
+<img src="assets/report-inspect-restrict-mode.png" alt="Outbound Traffic Report - restrict mode" width="556">
+
+A blocked connection fails the step, so a command that starts reaching somewhere new doesn't pass
+unnoticed. Set `fail_on_blocked: false` to report without failing, or list destinations you expect to
+stay blocked in `known_blocked_rules`.
 
 Nothing about the command changes. The CA it has to trust is mounted into the sandbox's own view of
 the filesystem, so the command sees an ordinary HTTPS connection.
 
-### 3. Allow a whole host where that is enough
+### Example workflows
 
-A host rule allows any method and any path on that host. It is shorter, it survives a service
-reorganising its URLs, and it is what the `universal` engine takes:
-
-```yaml
-allowed_https_rules: |
-  registry.npmjs.org:443
-  files.pythonhosted.org:443
-```
-
-Plain HTTP has a separate input, since some package managers still download over it:
-
-```yaml
-allowed_http_rules: deb.debian.org:80
-allowed_https_rules: registry.npmjs.org:443
-```
-
-Complete workflows, each pair running the same command with and without rules:
+Each pair runs the same command with and without rules:
 `inspect` on an npm and pip install ([audit](.github/workflows/example-inspect-audit.yml) ·
 [restrict](.github/workflows/example-inspect-restrict.yml)), `universal` on a Maven build
 ([audit](.github/workflows/example-universal-audit.yml) ·
@@ -138,6 +126,8 @@ Complete workflows, each pair running the same command with and without rules:
   in the Security doc for both layers.
 - One registry often needs several domains. PyPI, for example, uses both `pypi.org` and
   `files.pythonhosted.org`. The audit report lists every one of them, so start from that.
+- The generated allowlist covers only what the engine decrypted. `allow_tls_rules` and
+  `allowed_ip_rules` come back exactly as the audit run was configured with them.
 - If something the command runs pins a certificate or carries its own trust store (the JVM is the
   usual case), use `proxy_engine: universal` instead. See [Engines](#engines).
 
@@ -151,18 +141,18 @@ Complete workflows, each pair running the same command with and without rules:
 
 `run` is the only required input.
 
-| Input                             | Default      | Description                                                                                                       |
-| --------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `run`                             | required     | Command(s) to run inside the isolated sandbox, multi-line like a workflow `run:` step                             |
-| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                   |
-| `proxy_engine`                    | `universal`  | `inspect` or `universal`. See [Engines](#engines).                                                                |
-| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                           |
-| `writable`                        | empty        | Directories the command may write to, beyond the defaults. See [Filesystem access](#filesystem-access).           |
-| `filesystem`                      | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](#filesystem-access).                      |
-| `allow_write`                     | empty        | `filesystem: ephemeral` only — paths to keep writable and persisted. See [Filesystem access](#filesystem-access). |
-| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                    |
-| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact, `inspect` only. See [The report](#the-report).                    |
-| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, in days; empty uses the repository's own default                                  |
+| Input                             | Default      | Description                                                                                                      |
+| --------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `run`                             | required     | Command(s) to run inside the isolated sandbox, multi-line like a workflow `run:` step                            |
+| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                  |
+| `proxy_engine`                    | `universal`  | `inspect` or `universal`. See [Engines](#engines).                                                               |
+| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                          |
+| `writable`                        | empty        | Directories the command may write to, beyond the defaults. See [Filesystem access](#filesystem-access).          |
+| `filesystem`                      | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](#filesystem-access).                     |
+| `allow_write`                     | empty        | `filesystem: ephemeral` only: paths to keep writable and persisted. See [Filesystem access](#filesystem-access). |
+| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                   |
+| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact, `inspect` only. See [The report](#the-report).                   |
+| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, in days; empty uses the repository's own default                                 |
 
 ### Rule inputs
 
@@ -206,7 +196,8 @@ nothing and breaks nothing.
 ## Rule syntax
 
 `allowed_url_rules` and `allow_tls_rules` need `proxy_engine: inspect`. The host rules work with
-either engine.
+either engine. The inputs are additive: a connection is allowed when any rule in any of them
+matches.
 
 ### URL rules: `allowed_url_rules`
 
@@ -321,35 +312,6 @@ is matched against always carries the port.
 In `allowed_url_rules` a `~` expression covers the URL, and is split into a host half and a path
 half as described above. A rule the split cannot handle, one with no `/` after `://`, is refused
 with an error naming what to write instead.
-
-### All of them together
-
-```yaml
-- uses: buildcage/isolated-run@eb076226d15bbadefb7545dc1e02c05ff9f09ae5 # v1.1.3
-  with:
-    proxy_mode: restrict
-    proxy_engine: inspect
-
-    allowed_url_rules: |
-      GET|HEAD https://registry.npmjs.org/**
-
-    allowed_https_rules: |
-      *.githubusercontent.com:443
-      ~^.*\.example\.com:443$
-
-    allowed_http_rules: |
-      deb.debian.org:80
-
-    allowed_ip_rules: |
-      192.168.1.1:443
-
-    allow_tls_rules: |
-      db.example.com:5432
-
-    run: |
-      npm ci
-      npm test
-```
 
 ## Engines
 
@@ -521,7 +483,7 @@ path is remounted read-only for the duration of the `run` command, which closes 
 payload anywhere outside those four paths. It doesn't close off planting one inside them: `$HOME`
 and `$RUNNER_TEMP` stay writable, and `GITHUB_ENV`/`GITHUB_PATH`/`GITHUB_OUTPUT` live under
 `$RUNNER_TEMP`, so a later, non-isolated step in the same job can still pick up whatever the command
-left there — see `filesystem: ephemeral` below, and
+left there. See `filesystem: ephemeral` below, and
 [Known Limitations](./docs/security.md#known-limitations) for what neither mode closes off. It also
 doesn't restrict what the command can _read_.
 
@@ -540,7 +502,7 @@ doesn't restrict what the command can _read_.
 > adopt it.
 
 Use `filesystem: ephemeral` when the command is untrusted and you want to stop it from planting
-something a later, non-isolated step in the same job would pick up — a rewritten `~/.bashrc`,
+something a later, non-isolated step in the same job would pick up: a rewritten `~/.bashrc`,
 `~/.npmrc`, `~/.docker/config.json`, or a `$GITHUB_ENV`/`$GITHUB_PATH`/`$GITHUB_OUTPUT` edit meant
 to run code once the sandbox is gone.
 
@@ -562,29 +524,29 @@ This still doesn't close the delayed-exfiltration path off completely: `$GITHUB_
 persist for the job to do anything with it, and a later step routinely runs whatever ends up there,
 so `allow_write: $GITHUB_WORKSPACE` is effectively required for any real build and is exactly as
 exposed to this as `persistent` mode is. What `ephemeral` mode actually buys you is closing off
-everything else — `$HOME`, `$RUNNER_TEMP`, and the runner's own generated files unless you name them
+everything else: `$HOME`, `$RUNNER_TEMP`, and the runner's own generated files unless you name them
 explicitly.
 
 `allow_write:` entries resolve like this:
 
 - `$NAME` / `${NAME}` expand only for `HOME`, `GITHUB_WORKSPACE`, `RUNNER_TEMP`, `GITHUB_OUTPUT`,
-  `GITHUB_ENV`, `GITHUB_PATH`, and `GITHUB_STEP_SUMMARY` — not arbitrary env, so a value smuggled in
+  `GITHUB_ENV`, `GITHUB_PATH`, and `GITHUB_STEP_SUMMARY`, not arbitrary env, so a value smuggled in
   through the step's own `env:` block can't redirect where a listed path resolves. Any other `$NAME`
   is rejected.
 - A leading `~/` expands to `$HOME`.
 - A relative path (`./dist`) resolves against `$GITHUB_WORKSPACE`, matching the sandbox's own
   working directory.
-- A path that doesn't already exist is created before the step runs, **always as a directory** —
+- A path that doesn't already exist is created before the step runs, **always as a directory**,
   the same convention Docker itself uses for a bind mount whose host source doesn't exist yet
   (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and
-  `$GITHUB_STEP_SUMMARY` are the runner's own generated files and must already exist — a missing one
+  `$GITHUB_STEP_SUMMARY` are the runner's own generated files and must already exist: a missing one
   is an error, not something this action creates. Anything else missing (`./dist`, say) is created
   for you as a directory, with the same owner and permissions as its nearest already-existing parent
   directory: a path under a tree the runner already owns becomes writable, same as today, but a path
   under a tree it doesn't own (`/etc/something`, for instance) is created yet stays exactly as
   unwritable to the sandboxed command as naming that existing parent directly would be. Nothing here
   grants access beyond what the surrounding filesystem already implies.
-- `allow_write:` accepts files as well as directories — but only a path that's **already** a file
+- `allow_write:` accepts files as well as directories, but only a path that's **already** a file
   when the step starts; a missing target is always created as a directory (see above), never a file.
   A file entry is bind-mounted file-to-file (the same technique the `inspect` engine already uses to
   distribute its CA), so an append or a truncating write goes through, but a tool that replaces the
@@ -595,8 +557,8 @@ explicitly.
 
 If you `allow_write: $GITHUB_OUTPUT`, treat every output it sets the same as any other value from
 untrusted code: never interpolate `${{ steps.<id>.outputs.<name> }}` directly into a later `run:`
-block (see [Passing values to run](#passing-values-to-run) above) — it came from the sandboxed
-command. `allow_write: $GITHUB_STEP_SUMMARY` lets the sandboxed command append to the Job Summary
+block (see [Passing values to run](#passing-values-to-run) above), since it came from the
+sandboxed command. `allow_write: $GITHUB_STEP_SUMMARY` lets the sandboxed command append to the Job Summary
 directly; this action's own report is written to the same file, so anything the command adds appears
 alongside it, not in place of it.
 
@@ -624,9 +586,9 @@ delivered through an allowed domain still runs. Treat it as one layer in a defen
 strategy, a last line of defense so that if something slips through your other measures, at least it
 can't call home.
 
-This action isolates the step it wraps, not the job. Anything the command sets in `$GITHUB_ENV`,
-`$GITHUB_PATH`, or an output — or writes under `$HOME`, `/tmp`, `$RUNNER_TEMP`, or
-`$GITHUB_WORKSPACE` — reaches later steps unchanged, and those steps run without this action's
+This action isolates the step it wraps, not the job. What the command sets in `$GITHUB_ENV`,
+`$GITHUB_PATH`, or an output reaches later steps unchanged, and so does anything it writes under
+`$HOME`, `/tmp`, `$RUNNER_TEMP`, or `$GITHUB_WORKSPACE`. Those steps run without this action's
 restrictions unless you wrap them too. If a step runs untrusted code, isolate the steps after it in
 the same job as well, or move them to a separate job, and don't treat an env var, `$PATH` entry, or
 output an isolated step set as trustworthy.
