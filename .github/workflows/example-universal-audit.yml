@@ -1,0 +1,28 @@
+name: Example (universal engine, audit mode)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      # universal reads the SNI without decrypting, so a JVM build like this
+      # one (Maven trusts only its own cacerts store) needs no injected CA.
+      # audit records every destination; "Switch to restrict mode" in the
+      # Job Summary returns them as allowed_https_rules.
+      - name: Discover required domains with isolated-run
+        uses: buildcage/isolated-run@fe2214b3bbdab7cf8a8be819c25a83ce45077f89 # v1.1.4-rc2
+        with:
+          proxy_mode: audit
+          proxy_engine: universal
+          run: |
+            mvn -B dependency:get -Dartifact=org.apache.commons:commons-lang3:3.17.0
+
+            # Unneeded by the build; leave it out of the rules you paste back in.
+            curl -sS --max-time 5 -o /dev/null https://example.com/ || true

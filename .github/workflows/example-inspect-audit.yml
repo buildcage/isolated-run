@@ -1,0 +1,30 @@
+name: Example (inspect engine, audit mode)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      # inspect decrypts, so it logs each request's method and full URL, and
+      # the Job Summary's "Switch to restrict mode" section returns allowed_url_rules.
+      - name: Discover required URLs with isolated-run
+        uses: buildcage/isolated-run@fe2214b3bbdab7cf8a8be819c25a83ce45077f89 # v1.1.4-rc2
+        with:
+          proxy_mode: audit
+          proxy_engine: inspect
+          run: |
+            npm init -y
+            npm install --ignore-scripts express
+
+            # A second registry, spanning two domains: the index and the files it points at.
+            python3 -m pip install --user --quiet requests
+
+            # Unneeded by the build; leave it out of the rules you paste back in.
+            curl -sS --max-time 5 -o /dev/null https://example.com/ || true

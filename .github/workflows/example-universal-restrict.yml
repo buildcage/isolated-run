@@ -1,0 +1,32 @@
+name: Example (universal engine, restrict mode)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      # Same command as the audit example, with the rules that run produced.
+      # universal enforces on host and port only -- as far as it can see
+      # without decrypting, and all a JVM build like this one can accept.
+      # fail_on_blocked is false only because this example blocks on purpose;
+      # leave it at its default so a real workflow fails on a disallowed destination.
+      - name: Run a Maven build with outbound network isolation
+        uses: buildcage/isolated-run@fe2214b3bbdab7cf8a8be819c25a83ce45077f89 # v1.1.4-rc2
+        with:
+          proxy_mode: restrict
+          proxy_engine: universal
+          allowed_https_rules: |
+            repo.maven.apache.org:443
+          fail_on_blocked: false
+          run: |
+            mvn -B dependency:get -Dartifact=org.apache.commons:commons-lang3:3.17.0
+
+            # Not on the allowlist, so the report shows it as a blocked host.
+            curl -sS --max-time 5 -o /dev/null https://example.com/ || true
