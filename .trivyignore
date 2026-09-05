@@ -25,6 +25,12 @@ CVE-2026-33814
 CVE-2026-27136
 CVE-2026-25681
 
+# github.com/cilium/ebpf: integer overflow parsing a crafted BTF blob in
+# LoadCollectionSpec/loadRawSpec. runc here uses this library only to load
+# its own bundled cgroup-device BPF programs, never a BTF blob derived from
+# external input.
+CVE-2026-10722
+
 # --- opt/buildcage/bin/gen-seccomp-profile ---
 # Same class of Go stdlib CVEs. This binary (docker/gen-seccomp-profile/main.go)
 # takes no input at all — it just prints a hardcoded seccomp profile as JSON.
@@ -36,3 +42,45 @@ CVE-2026-56858
 CVE-2026-46600
 CVE-2026-39821
 CVE-2026-33818
+
+# --- usr/local/bin/coredns ---
+# CoreDNS: DoH/DoQ, forwarding-dependent TXID prediction, and acl/rewrite/
+# transfer/loop plugin bugs. The Corefile runs only view+template+log+errors
+# on plain UDP/TCP:53 and never forwards; those plugins don't run.
+CVE-2023-28452
+CVE-2024-0874
+CVE-2025-47950
+CVE-2025-68151
+CVE-2026-26017
+CVE-2026-26018
+CVE-2026-32934
+CVE-2026-32936
+CVE-2026-33190
+CVE-2026-33489
+CVE-2026-35579
+GHSA-gv9j-4w24-q7vx
+
+# golang.org/x/crypto/ssh: bugs reachable only by a malicious SSH peer.
+# Unused transitive dependency — CoreDNS never opens an SSH connection.
+CVE-2026-56854
+
+# golang.org/x/mod: GOPROXY/GOSUMDB sumdb-tile forgery, compromising
+# `go build`/`go mod` supply-chain integrity. Same unused dependency —
+# CoreDNS is a compiled binary that never runs go tooling.
+CVE-2026-56865
+CVE-2026-56864
+
+# --- library/isolated-run-universal ---
+# OpenSSL: QUIC/CMP/CMS/DTLS/RPK bugs and direct EVP_Cipher() misuse.
+# haproxy here only peeks at the raw TLS ClientHello for its SNI (mode tcp,
+# req.ssl_sni) — it never completes a handshake or touches those subsystems.
+CVE-2026-14456
+CVE-2026-14457
+CVE-2026-18798
+CVE-2026-54874
+CVE-2026-63072
+CVE-2026-63073
+CVE-2026-63074
+CVE-2026-63075
+CVE-2026-63076
+CVE-2026-75803
