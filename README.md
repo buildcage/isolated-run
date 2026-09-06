@@ -588,7 +588,8 @@ can't call home.
 
 This action isolates the step it wraps, not the job. What the command sets in `$GITHUB_ENV`,
 `$GITHUB_PATH`, or an output reaches later steps unchanged, and so does anything it writes under
-`$HOME`, `/tmp`, `$RUNNER_TEMP`, or `$GITHUB_WORKSPACE`. Those steps run without this action's
+`$HOME`, `/tmp`, `$RUNNER_TEMP`, or `$GITHUB_WORKSPACE`. The same is true of `$GITHUB_STATE`, which
+this action's own post step reads back after the step ends. Those steps run without this action's
 restrictions unless you wrap them too. If a step runs untrusted code, isolate the steps after it in
 the same job as well, or move them to a separate job, and don't treat an env var, `$PATH` entry, or
 output an isolated step set as trustworthy.

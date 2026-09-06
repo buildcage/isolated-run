@@ -496,6 +496,18 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   it writes, fails outright rather than silently landing on the host's real directory. There's no
   opt-out input for this; it's considered part of the same hardening as the container-runtime-socket
   masking above, not a separate, disableable feature.
+- **The post step validates `$GITHUB_STATE` before acting on it, not just reads it back**:
+  `$GITHUB_STATE` is how this action passes its proxy container's identity from the main step to
+  its own post (cleanup) step. That file lives under `$RUNNER_TEMP`, which stays writable in
+  `filesystem: persistent` (the default), so the isolated command can overwrite what this action
+  wrote there before the post step reads it. The post step checks that the container name it reads
+  back is actually shaped like one this action generates, and computes the Compose project name for
+  its own proxy stack itself rather than trusting a stored value, so an isolated command can't
+  redirect cleanup at an unrelated container, path, or Compose project. A value that fails this
+  check is treated as absent: the post step skips cleanup for that run and logs `::error::` instead
+  of guessing, leaving the proxy container and its scratch directory in place. That leftover state
+  disappears with the job's own disposable VM on GitHub-hosted runners, but needs manual removal on
+  a self-hosted one.
 - **Credential retrieval is intentionally not blocked**: this action restricts _where_ the isolated
   command can send network traffic, but not what it reads. A compromised dependency can still read
   `~/.aws/credentials`, `~/.docker/config.json`, or similar local credential files anywhere on the
