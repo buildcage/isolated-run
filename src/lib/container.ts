@@ -14,6 +14,17 @@ export function generateContainerName(): string {
 }
 
 /**
+ * A container name read back from GITHUB_STATE can differ from the one this
+ * action saved there, since the sandboxed command can overwrite it. Kept
+ * next to generateContainerName so the two can't drift apart.
+ */
+export const CONTAINER_NAME_PATTERN = /^buildcage-proxy-[0-9a-f]{8}$/;
+
+export function isValidContainerName(name: string): boolean {
+  return CONTAINER_NAME_PATTERN.test(name);
+}
+
+/**
  * Distinguishes "this container doesn't exist" (docker's own wording, e.g.
  * `no such object`) from "docker itself is unusable on this runner" — both
  * phrasings are matched for resilience across docker CLI versions.
