@@ -19701,6 +19701,61 @@ function checkPasswordlessSudo() {
 	}
 }
 //#endregion
+//#region src/lib/container.ts
+/**
+* Each `run` step gets its own throwaway proxy container (start -> run ->
+* report -> stop) rather than reusing one across steps, so a random name
+* avoids collisions across concurrent/successive steps by construction.
+*/
+function generateContainerName() {
+	return `buildcage-proxy-${(0, node_crypto.randomBytes)(4).toString("hex")}`;
+}
+/**
+* A container name read back from GITHUB_STATE can differ from the one this
+* action saved there, since the sandboxed command can overwrite it. Kept
+* next to generateContainerName so the two can't drift apart.
+*/
+const CONTAINER_NAME_PATTERN = /^buildcage-proxy-[0-9a-f]{8}$/;
+function isValidContainerName(name) {
+	return CONTAINER_NAME_PATTERN.test(name);
+}
+/**
+* Distinguishes "this container doesn't exist" (docker's own wording, e.g.
+* `no such object`) from "docker itself is unusable on this runner" — both
+* phrasings are matched for resilience across docker CLI versions.
+*/
+function isContainerNotFoundError(e) {
+	let err = e && typeof e == "object" ? e : {}, text = `${err.stderr ?? ""} ${err.message ?? ""}`.toLowerCase();
+	return text.includes("no such object") || text.includes("no such container");
+}
+function getContainerPid(containerName, { exec = node_child_process.execFileSync } = {}) {
+	let out;
+	try {
+		out = exec("docker", [
+			"inspect",
+			"--format",
+			"{{.State.Pid}}",
+			containerName
+		], {
+			encoding: "utf8",
+			stdio: [
+				"ignore",
+				"pipe",
+				"pipe"
+			],
+			env: {
+				...process.env,
+				LC_ALL: "C"
+			}
+		}).trim();
+	} catch (e) {
+		if (isContainerNotFoundError(e)) return null;
+		throw new SandboxError(describeDockerFailure(e, { operation: "docker inspect" }), "DOCKER_UNAVAILABLE");
+	}
+	let pid = Number(out);
+	return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+//#endregion
 //#region src/lib/sandbox/mountinfo.ts
 /**
 * Pure: extract {mountPoint, fsType} for every line of raw
@@ -19806,6 +19861,8 @@ function removeScratchDir(dir) {
 	} catch (e) {
 		let code = e.code;
 		if (code === "EACCES") {
+			let st = (0, node_fs.lstatSync)(dir);
+			if (!st.isDirectory() || st.uid !== process.getuid()) throw new SandboxError(`Refusing to sudo rm -rf ${dir}: not a directory owned by uid ${process.getuid()}.`, "SCRATCH_DIR_UNSAFE");
 			(0, node_child_process.execFileSync)("sudo", [
 				"-n",
 				"rm",
@@ -19836,7 +19893,22 @@ function removeScratchDir(dir) {
 * run's own discard) and by every persistent-mode call.
 */
 function cleanupScratchDir(dir, ephemeralRoots) {
-	ephemeralRoots && ephemeralRoots.length > 0 && console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`), unmountAllUnder(dir), removeScratchDir(dir);
+	assertUnderScratchBase(dir), ephemeralRoots && ephemeralRoots.length > 0 && console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`), unmountAllUnder(dir), removeScratchDir(dir);
+}
+/**
+* Path-shape gate for every privileged operation below: `resolve` collapses
+* any `..` first, so a traversal outside the scratch base is caught before
+* reaching `sudo umount -R -l`. Placed in cleanupScratchDir rather than
+* removeScratchDir since unmountAllUnder runs first and is itself
+* privileged.
+*
+* Accepts both naming schemes withScratchDir produces: scratchDirFor's
+* deterministic `sandbox-<8 hex>` and mkdtemp's random `sandbox-XXXXXX`
+* (used in tests).
+*/
+function assertUnderScratchBase(dir) {
+	let abs = (0, node_path.resolve)(dir);
+	if ((0, node_path.dirname)(abs) !== SANDBOX_SCRATCH_BASE || !/^sandbox-[A-Za-z0-9]+$/.test((0, node_path.basename)(abs))) throw new SandboxError(`Refusing to clean up ${JSON.stringify(dir)}: not a scratch dir under ${SANDBOX_SCRATCH_BASE}.`, "SCRATCH_DIR_OUT_OF_BASE");
 }
 /**
 * Absolute path of the scratch dir for a given proxy container, derived
@@ -19846,6 +19918,7 @@ function cleanupScratchDir(dir, ephemeralRoots) {
 * alone.
 */
 function scratchDirFor(containerName) {
+	if (!isValidContainerName(containerName)) throw new SandboxError(`Refusing to derive a scratch dir from container name ${JSON.stringify(containerName)}.`, "CONTAINER_NAME_INVALID");
 	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, containerName.replace(/^buildcage-proxy-/, "sandbox-"));
 }
 /**
@@ -20219,52 +20292,6 @@ function formatFilesystemPlanLog(mode, overlayRoots, allowWrite) {
 	for (let root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
 	for (let entry of allowWrite) lines.push(`Writable (persisted):                    ${entry}`);
 	return lines;
-}
-//#endregion
-//#region src/lib/container.ts
-/**
-* Each `run` step gets its own throwaway proxy container (start -> run ->
-* report -> stop) rather than reusing one across steps, so a random name
-* avoids collisions across concurrent/successive steps by construction.
-*/
-function generateContainerName() {
-	return `buildcage-proxy-${(0, node_crypto.randomBytes)(4).toString("hex")}`;
-}
-/**
-* Distinguishes "this container doesn't exist" (docker's own wording, e.g.
-* `no such object`) from "docker itself is unusable on this runner" — both
-* phrasings are matched for resilience across docker CLI versions.
-*/
-function isContainerNotFoundError(e) {
-	let err = e && typeof e == "object" ? e : {}, text = `${err.stderr ?? ""} ${err.message ?? ""}`.toLowerCase();
-	return text.includes("no such object") || text.includes("no such container");
-}
-function getContainerPid(containerName, { exec = node_child_process.execFileSync } = {}) {
-	let out;
-	try {
-		out = exec("docker", [
-			"inspect",
-			"--format",
-			"{{.State.Pid}}",
-			containerName
-		], {
-			encoding: "utf8",
-			stdio: [
-				"ignore",
-				"pipe",
-				"pipe"
-			],
-			env: {
-				...process.env,
-				LC_ALL: "C"
-			}
-		}).trim();
-	} catch (e) {
-		if (isContainerNotFoundError(e)) return null;
-		throw new SandboxError(describeDockerFailure(e, { operation: "docker inspect" }), "DOCKER_UNAVAILABLE");
-	}
-	let pid = Number(out);
-	return Number.isInteger(pid) && pid > 0 ? pid : null;
 }
 //#endregion
 //#region src/core/lib/docker/compose-project-name.ts
@@ -79534,7 +79561,7 @@ async function main() {
 		tlsRules
 	}, (message) => annotation.warning(message)), console.log("::group::buildcage: Configured ACL Rules"), logRules("HTTPS", rules.httpsRules), logRules("HTTP", rules.httpRules), logRules("IP", rules.ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), console.log("::endgroup::");
 	let writablePaths = parseWritablePaths(writableInput), containerName = generateContainerName(), projectName = deriveProjectName(containerName);
-	env.GITHUB_STATE && (saveState("container_name", containerName), saveState("project_name", projectName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots.map((r) => r.path))));
+	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots.map((r) => r.path))));
 	let composeEnv = {
 		...env,
 		PROXY_CONTAINER_NAME: containerName,

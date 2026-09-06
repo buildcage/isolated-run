@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 
-import { generateContainerName, getContainerPid, isContainerNotFoundError } from "./container.ts";
+import {
+  generateContainerName,
+  getContainerPid,
+  isContainerNotFoundError,
+  isValidContainerName,
+  CONTAINER_NAME_PATTERN,
+} from "./container.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { SandboxError } from "./errors.ts";
 
@@ -12,6 +18,30 @@ describe("generateContainerName", () => {
   it("produces distinct names across calls", () => {
     const names = new Set(Array.from({ length: 20 }, () => generateContainerName()));
     expect(names.size).toBe(20);
+  });
+
+  it("always matches CONTAINER_NAME_PATTERN (drift detection between generation and validation)", () => {
+    for (let i = 0; i < 100; i++) {
+      expect(generateContainerName()).toMatch(CONTAINER_NAME_PATTERN);
+    }
+  });
+});
+
+describe("isValidContainerName", () => {
+  it("accepts a genuine generated name", () => {
+    expect(isValidContainerName(generateContainerName())).toBe(true);
+  });
+
+  it("rejects a path traversal payload", () => {
+    expect(isValidContainerName("buildcage-proxy-x/../../../..")).toBe(false);
+  });
+
+  it("rejects an uppercase-hex payload", () => {
+    expect(isValidContainerName("buildcage-proxy-ABCD1234")).toBe(false);
+  });
+
+  it("rejects a too-long suffix", () => {
+    expect(isValidContainerName("buildcage-proxy-abcd12345")).toBe(false);
   });
 });
 

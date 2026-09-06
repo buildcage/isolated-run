@@ -6,6 +6,7 @@ import * as core from "@actions/core";
 
 import { buildComposeDownArgs } from "#core/lib/docker/args.ts";
 import { cleanupScratchDir, scratchDirFor } from "./lib/sandbox/scratch-dir.ts";
+import { resolvePostState } from "./lib/post-state.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -25,8 +26,13 @@ const LOCAL_IMAGE_OVERRIDE_ENABLED = process.env.BUILDCAGE_BUILD_TEST_HOOKS === 
 // runner cancels the step). State saved by main.ts's core.saveState surfaces
 // here via core.getState — see
 // https://docs.github.com/en/actions/creating-actions/dockerfile-support-for-github-actions#saving-state.
-const containerName = core.getState("container_name");
-const projectName = core.getState("project_name");
+const { targets, problems } = resolvePostState({
+  containerName: core.getState("container_name"),
+  ephemeralRoots: core.getState("ephemeral_overlay_roots"),
+});
+for (const problem of problems) {
+  console.log(`::error::run post-cleanup: ${problem}`);
+}
 
 // Reclaim this step's sandbox scratch dir if a hard kill bypassed main.ts's
 // own withScratchDir finally. Its path is derived deterministically from
@@ -34,24 +40,11 @@ const projectName = core.getState("project_name");
 // cleanupScratchDir force-detaches the rootfs bind-mount before deleting, so
 // this can't walk into the host filesystem even if a mount somehow survived.
 // Independent of the container teardown below, so it runs regardless.
-if (containerName.startsWith("buildcage-proxy-")) {
+if (targets) {
   try {
-    const scratchDir = scratchDirFor(containerName);
+    const scratchDir = scratchDirFor(targets.containerName);
     if (existsSync(scratchDir)) {
-      // filesystem: ephemeral only; absent (persistent mode) or unparseable
-      // (e.g. main.ts never reached the point it's saved) both mean no
-      // discard log line -- cleanupScratchDir already treats undefined the
-      // same as "nothing to log".
-      let ephemeralRoots: string[] | undefined;
-      const raw = core.getState("ephemeral_overlay_roots");
-      if (raw) {
-        try {
-          ephemeralRoots = JSON.parse(raw);
-        } catch {
-          // left undefined
-        }
-      }
-      cleanupScratchDir(scratchDir, ephemeralRoots);
+      cleanupScratchDir(scratchDir, targets.ephemeralRoots);
     }
   } catch (e) {
     console.log(
@@ -61,20 +54,8 @@ if (containerName.startsWith("buildcage-proxy-")) {
 }
 
 async function stopProxyContainer(): Promise<void> {
-  if (!(containerName && projectName)) {
-    if (containerName) {
-      // Without project_name, the only fallback compose can use is its
-      // implicit, directory-derived project name — which every concurrent
-      // `run` step in the job shares. Running `down` against it would risk
-      // tearing down another step's still-running proxy container, the exact
-      // collision this project-name scheme exists to prevent, so skip cleanup
-      // instead.
-      console.log(
-        `::warning::run post-cleanup: container_name is set but project_name is missing from GITHUB_STATE; skipping cleanup to avoid targeting Compose's implicit, shared project name. Container ${containerName} may need manual removal.`,
-      );
-    }
-    return;
-  }
+  if (!targets) return;
+  const { containerName, projectName } = targets;
 
   const localOverride = LOCAL_IMAGE_OVERRIDE_ENABLED
     ? (await import("./core/lib/provenance/local-image-override.ts")).readLocalImageOverride(

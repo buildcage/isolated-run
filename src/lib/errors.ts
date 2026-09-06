@@ -26,6 +26,9 @@ import { ActionError } from "#core/lib/errors.ts";
  *                                    unrelated to allow_write's own syntax (e.g. a permissions error reading
  *                                    one of the fixed $HOME/$RUNNER_TEMP/etc. candidate paths)
  *   SCRATCH_BASE_UNSAFE           – the sandbox scratch base exists but isn't a private directory we own
+ *   CONTAINER_NAME_INVALID        – a value read back from GITHUB_STATE isn't a name this action generates
+ *   SCRATCH_DIR_OUT_OF_BASE       – a scratch dir path resolves outside SANDBOX_SCRATCH_BASE
+ *   SCRATCH_DIR_UNSAFE            – the sudo rm -rf fallback's target isn't owned by the runner uid
  */
 export type SandboxErrorCode =
   | "MISSING_RUN"
@@ -44,6 +47,9 @@ export type SandboxErrorCode =
   | "ALLOW_WRITE_TARGET_UNCREATABLE"
   | "OVERLAYFS_UNSUPPORTED"
   | "FILESYSTEM_PLAN_FAILED"
-  | "SCRATCH_BASE_UNSAFE";
+  | "SCRATCH_BASE_UNSAFE"
+  | "CONTAINER_NAME_INVALID"
+  | "SCRATCH_DIR_OUT_OF_BASE"
+  | "SCRATCH_DIR_UNSAFE";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}

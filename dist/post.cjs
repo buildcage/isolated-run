@@ -18,7 +18,7 @@ let path = require("path");
 path = __toESM(path, 1);
 let events = require("events");
 events = __toESM(events, 1);
-let child_process = require("child_process");
+let node_crypto = require("node:crypto"), child_process = require("child_process");
 child_process = __toESM(child_process, 1), require("timers");
 //#endregion
 //#region node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/summary.js
@@ -321,11 +321,33 @@ function buildComposeDownArgs({ composeFile, projectName }) {
 //#endregion
 //#region src/core/lib/errors.ts
 /**
+* Base class for an action's own "intentional" errors — a caught failure
+* whose message is safe to print directly via ::error::, as opposed to an
+* unexpected one. A top-level catch checks `instanceof ActionError`.
+* `name` is derived from `new.target`, so a subclass needs no constructor
+* of its own to get its own name.
+*/
+var ActionError = class extends Error {
+	code;
+	constructor(message, code) {
+		super(message), this.name = new.target.name, this.code = code;
+	}
+};
+/**
 * Safely extract a message from a caught value of unknown shape — a plain
 * `Error` most of the time, but `catch` doesn't guarantee that.
 */
 function errorMessage(e) {
 	return e instanceof Error ? e.message : String(e);
+}
+//#endregion
+//#region src/lib/errors.ts
+var SandboxError = class extends ActionError {};
+//#endregion
+//#region src/core/lib/actions/docker-error.ts
+const CONTAINER_NAME_PATTERN = /^buildcage-proxy-[0-9a-f]{8}$/;
+function isValidContainerName(name) {
+	return CONTAINER_NAME_PATTERN.test(name);
 }
 //#endregion
 //#region src/lib/sandbox/mountinfo.ts
@@ -423,6 +445,8 @@ function removeScratchDir(dir) {
 	} catch (e) {
 		let code = e.code;
 		if (code === "EACCES") {
+			let st = (0, node_fs.lstatSync)(dir);
+			if (!st.isDirectory() || st.uid !== process.getuid()) throw new SandboxError(`Refusing to sudo rm -rf ${dir}: not a directory owned by uid ${process.getuid()}.`, "SCRATCH_DIR_UNSAFE");
 			(0, node_child_process.execFileSync)("sudo", [
 				"-n",
 				"rm",
@@ -453,7 +477,22 @@ function removeScratchDir(dir) {
 * run's own discard) and by every persistent-mode call.
 */
 function cleanupScratchDir(dir, ephemeralRoots) {
-	ephemeralRoots && ephemeralRoots.length > 0 && console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`), unmountAllUnder(dir), removeScratchDir(dir);
+	assertUnderScratchBase(dir), ephemeralRoots && ephemeralRoots.length > 0 && console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`), unmountAllUnder(dir), removeScratchDir(dir);
+}
+/**
+* Path-shape gate for every privileged operation below: `resolve` collapses
+* any `..` first, so a traversal outside the scratch base is caught before
+* reaching `sudo umount -R -l`. Placed in cleanupScratchDir rather than
+* removeScratchDir since unmountAllUnder runs first and is itself
+* privileged.
+*
+* Accepts both naming schemes withScratchDir produces: scratchDirFor's
+* deterministic `sandbox-<8 hex>` and mkdtemp's random `sandbox-XXXXXX`
+* (used in tests).
+*/
+function assertUnderScratchBase(dir) {
+	let abs = (0, node_path.resolve)(dir);
+	if ((0, node_path.dirname)(abs) !== SANDBOX_SCRATCH_BASE || !/^sandbox-[A-Za-z0-9]+$/.test((0, node_path.basename)(abs))) throw new SandboxError(`Refusing to clean up ${JSON.stringify(dir)}: not a scratch dir under ${SANDBOX_SCRATCH_BASE}.`, "SCRATCH_DIR_OUT_OF_BASE");
 }
 /**
 * Absolute path of the scratch dir for a given proxy container, derived
@@ -463,28 +502,84 @@ function cleanupScratchDir(dir, ephemeralRoots) {
 * alone.
 */
 function scratchDirFor(containerName) {
+	if (!isValidContainerName(containerName)) throw new SandboxError(`Refusing to derive a scratch dir from container name ${JSON.stringify(containerName)}.`, "CONTAINER_NAME_INVALID");
 	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, containerName.replace(/^buildcage-proxy-/, "sandbox-"));
 }
 //#endregion
-//#region src/post.ts
-const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), defaultComposeFile = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml"), containerName = getState("container_name"), projectName = getState("project_name");
-if (containerName.startsWith("buildcage-proxy-")) try {
-	let scratchDir = scratchDirFor(containerName);
-	if ((0, node_fs.existsSync)(scratchDir)) {
-		let ephemeralRoots, raw = getState("ephemeral_overlay_roots");
-		if (raw) try {
-			ephemeralRoots = JSON.parse(raw);
-		} catch {}
-		cleanupScratchDir(scratchDir, ephemeralRoots);
+//#region src/core/lib/docker/compose-project-name.ts
+/**
+* An explicit, deterministic Compose project name, so concurrent
+* `up`/`down`/`ps` from different steps in the same job never collide on
+* Compose's shared, directory-derived default.
+*
+* Hashed rather than used verbatim: Compose project names are constrained
+* to `^[a-z0-9][a-z0-9_-]*$`, but the input can be a wider-charset
+* user-supplied `builder_name` — a hex digest is always in-charset
+* regardless, so this never needs to validate its input.
+*/
+function deriveProjectName(containerName) {
+	return `buildcage-${(0, node_crypto.createHash)("sha256").update(containerName).digest("hex").slice(0, 12)}`;
+}
+//#endregion
+//#region src/lib/post-state.ts
+/**
+* Validates the GITHUB_STATE values post.ts acts on before they reach a
+* path, a sudo call, or a log line. Nothing read back from state is trusted
+* at face value, since the sandboxed command can overwrite it.
+*
+* projectName isn't one of the inputs: it's a pure function of
+* containerName, so it's derived here instead of being read from state.
+*
+* A missing containerName is the ordinary case (main.ts was never reached)
+* and yields null with no problems. An invalid one is reported and also
+* yields null: the only path derivable from it is one this action can't
+* confirm it wrote, so no cleanup runs at all.
+*/
+function resolvePostState(state) {
+	let problems = [], { containerName, ephemeralRoots } = state;
+	if (!containerName) return {
+		targets: null,
+		problems
+	};
+	if (!isValidContainerName(containerName)) return problems.push(`container_name in GITHUB_STATE is ${JSON.stringify(containerName)}, which is not a name this action generates. Skipping all post-step cleanup: the sandboxed command can append to GITHUB_STATE, so this value cannot be trusted to name a path to unmount or delete. A proxy container and a scratch directory under /var/tmp may need manual removal.`), {
+		targets: null,
+		problems
+	};
+	let targets = {
+		containerName,
+		projectName: deriveProjectName(containerName)
+	}, roots = parseEphemeralRoots(ephemeralRoots);
+	return roots ? targets.ephemeralRoots = roots : ephemeralRoots && problems.push("ephemeral_overlay_roots in GITHUB_STATE is malformed; not logging discarded paths."), {
+		targets,
+		problems
+	};
+}
+function parseEphemeralRoots(raw) {
+	if (!raw) return;
+	let parsed;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return;
 	}
+	if (Array.isArray(parsed)) return parsed.every((p) => typeof p == "string" && (0, node_path.isAbsolute)(p) && !/[\x00-\x1f\x7f]/.test(p)) ? parsed : void 0;
+}
+//#endregion
+//#region src/post.ts
+const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), defaultComposeFile = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml"), { targets, problems } = resolvePostState({
+	containerName: getState("container_name"),
+	ephemeralRoots: getState("ephemeral_overlay_roots")
+});
+for (let problem of problems) console.log(`::error::run post-cleanup: ${problem}`);
+if (targets) try {
+	let scratchDir = scratchDirFor(targets.containerName);
+	(0, node_fs.existsSync)(scratchDir) && cleanupScratchDir(scratchDir, targets.ephemeralRoots);
 } catch (e) {
 	console.log(`::warning::run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
 }
 async function stopProxyContainer() {
-	if (!(containerName && projectName)) {
-		containerName && console.log(`::warning::run post-cleanup: container_name is set but project_name is missing from GITHUB_STATE; skipping cleanup to avoid targeting Compose's implicit, shared project name. Container ${containerName} may need manual removal.`);
-		return;
-	}
+	if (!targets) return;
+	let { containerName, projectName } = targets;
 	(0, node_child_process.execFileSync)("docker", buildComposeDownArgs({
 		composeFile: defaultComposeFile,
 		projectName
