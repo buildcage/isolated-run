@@ -55,6 +55,12 @@ echo ""
 echo "=== Sandbox filesystem: ephemeral / allow_write: Assertions ==="
 echo ""
 
+# A fresh runner has no scratch base at all, which is the state this test
+# has to cover: earlier runs in the same Makefile target (all persistent
+# mode) leave one behind at 0700, masking a preflight that only works
+# because the base already exists in the right shape.
+sudo rm -rf "/var/tmp/buildcage-$(id -u)"
+
 # --- Case 1+6: $HOME writes (create + delete) during the step never reach
 # the host, whether or not the sandbox itself observes them mid-step.
 HOME_MARKER="$HOME/.buildcage-ephemeral-test-marker"
