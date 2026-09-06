@@ -83,6 +83,7 @@ test_integration_sandbox_linux: ## Run the action's integration tests (needs BUI
 	@./test/integration-test-zero-traffic.sh
 	@./test/integration-test-runtime-sockets.sh
 	@./test/integration-test-ephemeral-fs.sh
+	@./test/integration-test-post-state-tampering.sh
 
 # Separate from test_integration_sandbox_linux: these use the fixture origin
 # network in compose.test-universal.yaml (fake DNS + an origin under our own
