@@ -3,7 +3,9 @@ import { mkdtempSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { SandboxError } from "./errors.ts";
-import { SANDBOX_SCRATCH_BASE } from "./sandbox/scratch-dir.ts";
+import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase } from "./sandbox/scratch-dir.ts";
+
+type ExecLike = typeof execFileSync;
 
 const REQUIREMENT =
   `filesystem: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE} -- an overlay ` +
@@ -38,17 +40,22 @@ export function describeOverlayFailure(e: unknown): string {
  * teardown can leave the kernel's own bookkeeping lagging behind by a
  * short, bounded window.
  */
-function removeProbeDir(dir: string): void {
+function removeProbeDir(dir: string, exec: ExecLike): void {
   const maxAttempts = 5;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      execFileSync("sudo", ["-n", "rm", "-rf", dir], { stdio: ["ignore", "ignore", "pipe"] });
+      exec("sudo", ["-n", "rm", "-rf", dir], { stdio: ["ignore", "ignore", "pipe"] });
       return;
     } catch (e) {
       if (attempt === maxAttempts) throw e;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
     }
   }
+}
+
+export interface CheckOverlayfsSupportOptions {
+  base?: string;
+  exec?: ExecLike;
 }
 
 /**
@@ -71,17 +78,27 @@ function removeProbeDir(dir: string): void {
  * is generally a "shared" mount point, and without this the probe's overlay
  * mount could propagate back onto the real host namespace instead of
  * disappearing when the child process exits.
+ *
+ * Delegates base creation to ensureOwnScratchBase rather than mkdir'ing it
+ * directly: a local mkdir here can only ever produce a mode/ownership that
+ * function's own later validation (the one withScratchDir goes through) has
+ * to reject, and `recursive: true` follows a pre-existing symlink at that
+ * path instead of refusing it. Idempotent, so persistent-mode's own call to
+ * it later is unaffected.
  */
-export function checkOverlayfsSupport(): void {
-  mkdirSync(SANDBOX_SCRATCH_BASE, { recursive: true, mode: 0o755 });
-  const probeDir = mkdtempSync(join(SANDBOX_SCRATCH_BASE, "overlay-probe-"));
+export function checkOverlayfsSupport({
+  base = SANDBOX_SCRATCH_BASE,
+  exec = execFileSync,
+}: CheckOverlayfsSupportOptions = {}): void {
+  ensureOwnScratchBase(base);
+  const probeDir = mkdtempSync(join(base, "overlay-probe-"));
   try {
     const lower = join(probeDir, "lower");
     const upper = join(probeDir, "upper");
     const work = join(probeDir, "work");
     const merged = join(probeDir, "merged");
     for (const dir of [lower, upper, work, merged]) mkdirSync(dir);
-    execFileSync(
+    exec(
       "sudo",
       [
         "-n",
@@ -99,6 +116,6 @@ export function checkOverlayfsSupport(): void {
   } catch (e) {
     throw new SandboxError(describeOverlayFailure(e), "OVERLAYFS_UNSUPPORTED");
   } finally {
-    removeProbeDir(probeDir);
+    removeProbeDir(probeDir, exec);
   }
 }
