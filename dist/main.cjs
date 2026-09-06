@@ -20002,9 +20002,9 @@ function describeOverlayFailure(e) {
 * teardown can leave the kernel's own bookkeeping lagging behind by a
 * short, bounded window.
 */
-function removeProbeDir(dir) {
+function removeProbeDir(dir, exec) {
 	for (let attempt = 1; attempt <= 5; attempt++) try {
-		(0, node_child_process.execFileSync)("sudo", [
+		exec("sudo", [
 			"-n",
 			"rm",
 			"-rf",
@@ -20040,13 +20040,17 @@ function removeProbeDir(dir) {
 * is generally a "shared" mount point, and without this the probe's overlay
 * mount could propagate back onto the real host namespace instead of
 * disappearing when the child process exits.
+*
+* Delegates base creation to ensureOwnScratchBase rather than mkdir'ing it
+* directly: a local mkdir here can only ever produce a mode/ownership that
+* function's own later validation (the one withScratchDir goes through) has
+* to reject, and `recursive: true` follows a pre-existing symlink at that
+* path instead of refusing it. Idempotent, so persistent-mode's own call to
+* it later is unaffected.
 */
-function checkOverlayfsSupport() {
-	(0, node_fs.mkdirSync)(SANDBOX_SCRATCH_BASE, {
-		recursive: !0,
-		mode: 493
-	});
-	let probeDir = (0, node_fs.mkdtempSync)((0, node_path.join)(SANDBOX_SCRATCH_BASE, "overlay-probe-"));
+function checkOverlayfsSupport({ base = SANDBOX_SCRATCH_BASE, exec = node_child_process.execFileSync } = {}) {
+	ensureOwnScratchBase(base);
+	let probeDir = (0, node_fs.mkdtempSync)((0, node_path.join)(base, "overlay-probe-"));
 	try {
 		let lower = (0, node_path.join)(probeDir, "lower"), upper = (0, node_path.join)(probeDir, "upper"), work = (0, node_path.join)(probeDir, "work"), merged = (0, node_path.join)(probeDir, "merged");
 		for (let dir of [
@@ -20055,7 +20059,7 @@ function checkOverlayfsSupport() {
 			work,
 			merged
 		]) (0, node_fs.mkdirSync)(dir);
-		(0, node_child_process.execFileSync)("sudo", [
+		exec("sudo", [
 			"-n",
 			"unshare",
 			"--mount",
@@ -20076,7 +20080,7 @@ function checkOverlayfsSupport() {
 	} catch (e) {
 		throw new SandboxError(describeOverlayFailure(e), "OVERLAYFS_UNSUPPORTED");
 	} finally {
-		removeProbeDir(probeDir);
+		removeProbeDir(probeDir, exec);
 	}
 }
 //#endregion
