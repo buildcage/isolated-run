@@ -678,7 +678,6 @@ async function main(): Promise<void> {
   // before reaching its own finally block below.
   if (env.GITHUB_STATE) {
     core.saveState("container_name", containerName);
-    core.saveState("project_name", projectName);
     if (filesystemMode === "ephemeral") {
       core.saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots.map((r) => r.path)));
     }
