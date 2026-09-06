@@ -1,8 +1,9 @@
 import { mkdtempSync, mkdirSync, lstatSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname, basename, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { errorMessage } from "#core/lib/errors.ts";
 import { SandboxError } from "../errors.ts";
+import { isValidContainerName } from "../container.ts";
 import { parseMountinfo } from "./mountinfo.ts";
 
 // Base directory for each run's scratch dir (OCI bundle + the host-`/`
@@ -95,6 +96,18 @@ function removeScratchDir(dir: string): void {
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if (code === "EACCES") {
+        // This is the one call that runs as root, so ownership is checked
+        // again immediately before it rather than relying on the caller's
+        // own check. lstat, not stat, since a symlink here must not be
+        // followed. Safe even for filesystem: ephemeral's root-owned overlay
+        // bookkeeping, since that lives inside the dir, not as the dir itself.
+        const st = lstatSync(dir);
+        if (!st.isDirectory() || st.uid !== process.getuid!()) {
+          throw new SandboxError(
+            `Refusing to sudo rm -rf ${dir}: not a directory owned by uid ${process.getuid!()}.`,
+            "SCRATCH_DIR_UNSAFE",
+          );
+        }
         execFileSync("sudo", ["-n", "rm", "-rf", dir], { stdio: ["ignore", "ignore", "pipe"] });
         return;
       }
@@ -118,11 +131,33 @@ function removeScratchDir(dir: string): void {
  * run's own discard) and by every persistent-mode call.
  */
 export function cleanupScratchDir(dir: string, ephemeralRoots?: string[]): void {
+  assertUnderScratchBase(dir);
   if (ephemeralRoots && ephemeralRoots.length > 0) {
     console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`);
   }
   unmountAllUnder(dir);
   removeScratchDir(dir);
+}
+
+/**
+ * Path-shape gate for every privileged operation below: `resolve` collapses
+ * any `..` first, so a traversal outside the scratch base is caught before
+ * reaching `sudo umount -R -l`. Placed in cleanupScratchDir rather than
+ * removeScratchDir since unmountAllUnder runs first and is itself
+ * privileged.
+ *
+ * Accepts both naming schemes withScratchDir produces: scratchDirFor's
+ * deterministic `sandbox-<8 hex>` and mkdtemp's random `sandbox-XXXXXX`
+ * (used in tests).
+ */
+function assertUnderScratchBase(dir: string): void {
+  const abs = resolve(dir);
+  if (dirname(abs) !== SANDBOX_SCRATCH_BASE || !/^sandbox-[A-Za-z0-9]+$/.test(basename(abs))) {
+    throw new SandboxError(
+      `Refusing to clean up ${JSON.stringify(dir)}: not a scratch dir under ${SANDBOX_SCRATCH_BASE}.`,
+      "SCRATCH_DIR_OUT_OF_BASE",
+    );
+  }
 }
 
 /**
@@ -133,6 +168,14 @@ export function cleanupScratchDir(dir: string, ephemeralRoots?: string[]): void 
  * alone.
  */
 export function scratchDirFor(containerName: string): string {
+  // Guards the function itself, not just its callers, so a future caller
+  // can't reopen this by skipping validation.
+  if (!isValidContainerName(containerName)) {
+    throw new SandboxError(
+      `Refusing to derive a scratch dir from container name ${JSON.stringify(containerName)}.`,
+      "CONTAINER_NAME_INVALID",
+    );
+  }
   return join(SANDBOX_SCRATCH_BASE, containerName.replace(/^buildcage-proxy-/, "sandbox-"));
 }
 

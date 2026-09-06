@@ -20,6 +20,14 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 import { lstatSync } from "node:fs";
 
+// execFileSync mocked the same way, so a guard-rejection test can assert the
+// privileged `sudo umount`/`sudo rm` call underneath it was never reached.
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+});
+import { execFileSync } from "node:child_process";
+
 import {
   withScratchDir,
   cleanupScratchDir,
@@ -37,7 +45,15 @@ describe("scratchDirFor", () => {
   });
 
   it("is deterministic for the same container name (so post.ts can reconstruct it)", () => {
-    expect(scratchDirFor("buildcage-proxy-xyz")).toBe(scratchDirFor("buildcage-proxy-xyz"));
+    expect(scratchDirFor("buildcage-proxy-deadbeef")).toBe(
+      scratchDirFor("buildcage-proxy-deadbeef"),
+    );
+  });
+
+  it("refuses a name it wouldn't itself have generated (e.g. a path-traversal payload)", () => {
+    expect(() => scratchDirFor("buildcage-proxy-x/../../../..")).toThrow(
+      /Refusing to derive a scratch dir/,
+    );
   });
 });
 
@@ -178,6 +194,24 @@ describe("cleanupScratchDir", () => {
   });
 
   it("no-ops safely on a directory that doesn't exist (post.ts's own usage pattern)", () => {
-    expect(() => cleanupScratchDir("/var/tmp/buildcage/does-not-exist-xyz")).not.toThrow();
+    expect(() =>
+      cleanupScratchDir(join(SANDBOX_SCRATCH_BASE, "sandbox-doesnotexistxyz")),
+    ).not.toThrow();
+  });
+
+  it("refuses to touch a path resolving to the scratch base's parent", () => {
+    vi.mocked(execFileSync).mockClear();
+    expect(() => cleanupScratchDir("/")).toThrow(/not a scratch dir under/);
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+
+  it("refuses a traversal that resolves outside the scratch base", () => {
+    expect(() =>
+      cleanupScratchDir(join(SANDBOX_SCRATCH_BASE, "sandbox-abcd1234", "..", "..", "etc")),
+    ).toThrow(/not a scratch dir under/);
+  });
+
+  it("refuses a sibling of the scratch base whose basename merely looks right", () => {
+    expect(() => cleanupScratchDir("/etc/sandbox-abcd1234")).toThrow(/not a scratch dir under/);
   });
 });
