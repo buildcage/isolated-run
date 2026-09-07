@@ -53,11 +53,11 @@ setup_sandbox_dev: ## Start sandbox proxy + dev runner (mac-friendly dev loop)
 .PHONY: test_sandbox_dev
 test_sandbox_dev: ## Run a sample isolated command in the dev loop and verify isolation
 	@$(MAKE) setup_sandbox_dev
-	@PROXY_PID=$$(docker inspect --format '{{.State.Pid}}' buildcage-proxy); \
+	@PROXY_NETNS=$$(docker inspect --format '{{.NetworkSettings.SandboxKey}}' buildcage-proxy); \
 	  docker compose -f compose.yaml -f docker/compose.sandbox-dev.yaml exec sandbox-dev-runner sh -c " \
 	    set -e; \
 	    build-test-bundle.sh --netns-name buildcage-sandbox-dev --script /usr/local/bin/smoke-test.sh --bundle /var/tmp/buildcage/dev-bundle; \
-	    run-isolated.sh --proxy-netns /proc/$$PROXY_PID/ns/net --runc /usr/local/bin/runc --bundle /var/tmp/buildcage/dev-bundle \
+	    run-isolated.sh --proxy-netns $$PROXY_NETNS --runc /usr/local/bin/runc --bundle /var/tmp/buildcage/dev-bundle \
 	      --container-id buildcage-sandbox-dev --netns-name buildcage-sandbox-dev --rootfs-bind-dir /var/tmp/buildcage/dev-bundle/rootfs \
 	      --gateway 172.20.0.1 --dns 172.20.0.1 --target-ip 172.20.0.101"
 	@$(MAKE) clean_sandbox_dev

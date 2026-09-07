@@ -26,9 +26,10 @@ the uppercase form of the same names (`PROXY_MODE`).
 
 The action's own isolation mechanism (`run-isolated.sh`) uses Linux-only primitives (`ip netns`,
 `nsenter`, `runc`) that can't run natively on macOS. `make setup_sandbox_dev` /
-`make test_sandbox_dev` instead drive it from inside a container with `pid: host` (see
-`dev/Dockerfile` and `docker/compose.sandbox-dev.yaml`), which can see the proxy container's
-PID/netns via `/proc`. That is close enough to the real "runner host + separate proxy container"
+`make test_sandbox_dev` instead drive it from inside a container with `pid: host` and
+`/var/run/docker/netns` mounted in (see `dev/Dockerfile` and `docker/compose.sandbox-dev.yaml`),
+which is enough to reach the proxy container's `SandboxKey` netns the same way production does.
+That is close enough to the real "runner host + separate proxy container"
 arrangement for day-to-day iteration, though it can't validate the container-boundary parts of
 production (see [Action Internals](#action-internals) below). `runc` and `gen-seccomp-profile` are
 built directly into the dev-loop image (mirroring `docker/universal/Dockerfile`) rather than
