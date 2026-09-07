@@ -251,9 +251,19 @@ the [README](../README.md).
      not-yet-created bind-mount directory, made read-only (every real host mount point is forced
      individually read-only outside workdir/home/tmp/RUNNER_TEMP/writable, since the top-level
      read-only flag alone doesn't cover separate mount points); a network namespace reference to the
-     netns created in the next step; all Linux capabilities cleared plus no-new-privileges; the
-     step's real environment; and a seccomp filter resolved from Docker's own default profile,
-     applied against an empty capability set to match the sandbox.
+     netns created in the next step; all Linux capabilities cleared plus no-new-privileges; and a
+     seccomp filter resolved from Docker's own default profile, applied against an empty
+     capability set to match the sandbox.
+   - The step's environment is deliberately _not_ part of that config. It is piped to the
+     sandboxed process over stdin as NUL-delimited `KEY=VALUE` records and applied by a small
+     loader that execs the run script, so an `env:` secret is never written to the runner's disk.
+     Do not move it back into `config.json`.
+   - `/var/tmp/buildcage-<uid>` is covered with an empty tmpfs inside the sandbox, with only this
+     run's own `exec/` subdirectory (the run script and that loader) bound back on top, read-only.
+     Without it, the host-`/` rootfs below would hand every step a readable copy of every other
+     concurrent step's bundle. The reveal is a non-recursive `bind`: the scratch directory also
+     holds the live `mount --rbind /` rootfs, and an `rbind` would pull that in as a second,
+     writable copy of the whole host `/`.
    - The writable exceptions are recursive bind-mounts (so legitimately nested mounts under them
      stay visible). The `mount --rbind /` rootfs is therefore staged under `/var/tmp/buildcage-<uid>`,
      never one of the writable exceptions, so those recursive rbinds don't re-expose it as a

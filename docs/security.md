@@ -529,6 +529,18 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   level (see [Notes](../README.md#notes)), not the filesystem, so one can reach another's in-flight
   scratch files there. `filesystem: ephemeral` resolves this too, since each invocation gets its own
   overlay.
+- **A step's own scratch directory is hidden from every sandbox, including its own**: each
+  `run:` step stages its OCI bundle and its run script under `/var/tmp/buildcage-<uid>/`, and the
+  sandbox's root filesystem is a bind-mount of the host's own `/`, so without further work every
+  concurrently running (or crashed and not yet cleaned up) step's staging directory would be
+  plainly readable from inside every other one. Those directories are 0700/0600, which does not
+  help: there is no user namespace, so every sandbox on a runner shares one real UID. The whole
+  base directory is therefore covered with an empty tmpfs inside each sandbox, with only that
+  run's own run script bound back on top of it, and the step environment is no longer written into
+  the OCI config at all — it is piped to the sandboxed process over stdin, so `env:` secrets never
+  reach the runner's disk. What this does _not_ cover is a process running as the same user
+  outside any sandbox: it can still read `/var/tmp/buildcage-<uid>/` directly, which is the same
+  accepted limitation as credential retrieval above.
 - **`filesystem: ephemeral` (experimental) requires overlayfs support on the runner's own
   filesystem**: checked with a preflight probe before the sandbox starts, so an unsupported runner fails the step with a clear
   error rather than a cryptic one partway through. This is known to fail when the runner process
