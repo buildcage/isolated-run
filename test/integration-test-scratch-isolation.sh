@@ -31,6 +31,8 @@ export BC_EQUALS='a=b=c'
 export BC_SPACES=' leading and trailing '
 export BC_DOLLAR="\$(touch $INJECTION_MARKER) \`id\` \${HOME}"
 export BC_EMPTY=""
+# Stands in for an `env:` secret; asserted absent from config.json below.
+export BC_STEP_SECRET="buildcage-step-secret-$$"
 
 # Dumped from node, since what has to survive the trip is what the action's
 # own process.env holds, not what this shell happens to see. Files rather
@@ -45,6 +47,11 @@ node -e '
 ' "$WORKDIR" PATH HOME BC_MULTILINE BC_EQUALS BC_SPACES BC_DOLLAR BC_EMPTY
 
 RUN_INPUT=$(cat <<'SANDBOX'
+# Holds the bundle on disk long enough for the host side to grab this run's
+# config.json while it still exists (the mask means the sandbox can't reach
+# it to check the contents itself).
+sleep 2
+
 fail=0
 BASE="/var/tmp/buildcage-$(id -u)"
 
@@ -107,7 +114,27 @@ BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 BC_DECOY_MARKER="$DECOY_SECRET" \
 BC_INJECTION_MARKER="$INJECTION_MARKER" \
 INPUT_RUN="$RUN_INPUT" \
-  node dist/main.cjs
+  node dist/main.cjs &
+NODE_PID=$!
+
+# The mask proves the sandbox can't *reach* another run's config.json; this
+# proves the environment isn't in one to begin with. Only the host can look,
+# and only while the run is live, since the scratch dir is torn down with it.
+CAPTURED="$WORKDIR/captured-config.json"
+for _ in $(seq 1 300); do
+  kill -0 "$NODE_PID" 2>/dev/null || break
+  found=$(find "$SCRATCH_BASE" -maxdepth 2 -name config.json -not -path "$DECOY_DIR/*" 2>/dev/null | head -1)
+  # Parsed, not just non-empty: the poll can otherwise catch a half-written file.
+  if [ -n "$found" ] &&
+    node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$found" 2>/dev/null
+  then
+    cp "$found" "$CAPTURED"
+    break
+  fi
+  sleep 0.1
+done
+
+wait "$NODE_PID"
 CODE=$?
 
 echo ""
@@ -118,6 +145,20 @@ if [ "$CODE" = "0" ]; then
 else
   echo "  FAIL  scratch-dir isolation or environment transfer check failed (exit $CODE)"
   exit 1
+fi
+echo ""
+
+if [ ! -f "$CAPTURED" ]; then
+  echo "  FAIL  could not capture this run's config.json while it existed"
+  exit 1
+elif grep -q "$BC_STEP_SECRET" "$CAPTURED"; then
+  echo "  FAIL  config.json still carries the step environment"
+  exit 1
+elif ! grep -q '"env":\[\]' "$CAPTURED"; then
+  echo "  FAIL  config.json's process.env is not empty"
+  exit 1
+else
+  echo "  PASS  config.json carries no step environment at all"
 fi
 echo ""
 
