@@ -231,8 +231,8 @@ the [README](../README.md).
 
 1. Verify the proxy image's provenance and resolve a digest-pinned image ref (`src/main.ts`).
 2. Start a dedicated, throwaway proxy container for this one step (`src/main.ts`).
-   - The container provides network-layer isolation only (iptables `REDIRECT`/`DROP` rules,
-     dnsmasq, HAProxy), with no build daemon.
+   - The container provides network-layer isolation only (iptables `REDIRECT`/`INPUT`/`DROP`
+     rules, dnsmasq, HAProxy), with no build daemon.
    - Every `docker compose` invocation passes an explicit `-p <containerName>`, so concurrent
      `run:` steps in the same job (GitHub Actions' `background`/`wait`/`parallel` keywords) never
      share an implicit, directory-derived Compose project; otherwise one step's `up`/`down` could

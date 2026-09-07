@@ -19,11 +19,21 @@ iptables -A INPUT -i sandbox0 -p udp --dport 53 -j ACCEPT
 iptables -A INPUT -i sandbox0 -p tcp --dport 53 -j ACCEPT
 iptables -A INPUT -i sandbox0 -j DROP
 
+# The ACCEPTs above are sandbox0-only, and the DROP above it only covers what
+# arrived on sandbox0 -- a connection from the compose network still reaches
+# the listener. Close that off explicitly, regardless of interface.
+iptables -A INPUT -p tcp --dport "$PORT" -j DROP
+iptables -A INPUT -p udp --dport 53 -j DROP
+iptables -A INPUT -p tcp --dport 53 -j DROP
+
 # Nothing is routed onward, so a packet that escaped redirection goes nowhere.
 iptables -A FORWARD -i sandbox0 -j DROP
 
 if [ -e /proc/net/if_inet6 ]; then
     ip6tables -A INPUT -i sandbox0 -j DROP
+    ip6tables -A INPUT -p tcp --dport "$PORT" -j DROP
+    ip6tables -A INPUT -p udp --dport 53 -j DROP
+    ip6tables -A INPUT -p tcp --dport 53 -j DROP
     ip6tables -A FORWARD -i sandbox0 -j DROP
     echo "init-iptables: configured (IPv4/IPv6)"
 else
