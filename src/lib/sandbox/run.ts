@@ -13,10 +13,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * command — never throws for a non-zero exit, since that's the user's
  * command failing, not this function.
  *
- * uid/gid, capabilities, mounts, and env are entirely described by
- * `config.json` (see buildOciConfig) — run-isolated.sh only needs enough
- * to set up networking and the rootfs bind-mount before handing off to
- * `runc run`.
+ * uid/gid, capabilities and mounts are entirely described by `config.json`
+ * (see buildOciConfig) — run-isolated.sh only needs enough to set up
+ * networking and the rootfs bind-mount before handing off to `runc run`.
+ *
+ * The step's environment is the one exception: it travels as `envBlob` on
+ * stdin, so it is never written to the runner's disk (see env-loader.ts).
+ * Nothing between here and the sandboxed process reads stdin, so the blob
+ * arrives at the loader untouched. `sudo` does not interpose a
+ * pseudo-terminal on it either: `use_pty` applies only when sudo itself is
+ * attached to a terminal, which an Actions runner never is.
  */
 export interface RunIsolatedOptions {
   runcPath: string;
@@ -28,6 +34,7 @@ export interface RunIsolatedOptions {
   gateway: string;
   dns: string;
   targetIp: string;
+  envBlob: Buffer;
 }
 
 export function runIsolated({
@@ -40,6 +47,7 @@ export function runIsolated({
   gateway,
   dns,
   targetIp,
+  envBlob,
 }: RunIsolatedOptions): number {
   const runIsolatedShPath = join(__dirname, "..", "scripts", "run-isolated.sh");
 
@@ -68,7 +76,7 @@ export function runIsolated({
   ];
 
   try {
-    execFileSync("sudo", args, { stdio: "inherit" });
+    execFileSync("sudo", args, { input: envBlob, stdio: ["pipe", "inherit", "inherit"] });
     return 0;
   } catch (e) {
     // A non-zero exit from the isolated command (or run-isolated.sh itself)

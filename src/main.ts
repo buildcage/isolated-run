@@ -42,6 +42,7 @@ import {
 } from "./lib/sandbox/oci-config.ts";
 import { listHostMounts } from "./lib/sandbox/mountinfo.ts";
 import { runIsolated } from "./lib/sandbox/run.ts";
+import { buildEnvBlob, resolveSandboxEnv, writeEnvLoader } from "./lib/sandbox/env-loader.ts";
 import { withScratchDir } from "./lib/sandbox/scratch-dir.ts";
 import {
   fetchReport,
@@ -419,6 +420,7 @@ function runSandboxedCommand({
         const execDir = join(dir, "exec");
         mkdirSync(execDir, { mode: 0o700 });
         const scriptPath = writeRunScript(runInput, execDir);
+        const envLoaderPath = writeEnvLoader(execDir);
         // Real host mount table, read now (before run-isolated.sh's `mount
         // --rbind /` duplicates it into rootfsBindDir) so buildOciConfig can
         // force every real submount read-only individually -- root.readonly
@@ -455,6 +457,7 @@ function runSandboxedCommand({
             resolvConfPath,
             seccompProfile,
             execDir,
+            envLoaderPath,
             scriptPath,
             hostMounts,
           },
@@ -470,6 +473,10 @@ function runSandboxedCommand({
       writeOciConfig(config, dir);
 
       return runIsolated({
+        // Piped to the sandbox rather than written into config.json, so the
+        // step's `env:` secrets never touch the runner's disk -- see
+        // sandbox/env-loader.ts.
+        envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust)),
         runcPath,
         proxyPid,
         bundleDir: dir,

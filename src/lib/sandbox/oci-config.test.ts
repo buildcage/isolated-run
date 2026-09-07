@@ -168,6 +168,7 @@ describe("buildOciConfig", () => {
       resolvConfPath: "/tmp/buildcage-sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
       execDir: "/tmp/buildcage-sandbox-xyz/exec",
+      envLoaderPath: "/tmp/buildcage-sandbox-xyz/exec/env-loader.sh",
       scriptPath: "/tmp/buildcage-sandbox-xyz/exec/run-script.sh",
     },
     env: { FOO: "bar", UNSET: undefined },
@@ -199,13 +200,14 @@ describe("buildOciConfig", () => {
     expect(config.process.args.slice(1)).toStrictEqual([
       "--pdeathsig=KILL",
       "--",
+      baseArgs.runtime.envLoaderPath,
       baseArgs.runtime.scriptPath,
     ]);
   });
 
-  it("replaces process.env with the given env, dropping undefined values", () => {
+  it("leaves process.env empty (the step environment travels over stdin)", () => {
     const config = buildOciConfig(fakeBaseSpec(), baseArgs);
-    expect(config.process.env).toStrictEqual(["FOO=bar"]);
+    expect(config.process.env).toStrictEqual([]);
   });
 
   it("adds `path` to the network namespace entry, leaving other namespace types untouched", () => {
@@ -510,6 +512,7 @@ describe("buildOciConfig ephemeral mode", () => {
       resolvConfPath: "/var/tmp/buildcage-1000/sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
       execDir: "/var/tmp/buildcage-1000/sandbox-xyz/exec",
+      envLoaderPath: "/var/tmp/buildcage-1000/sandbox-xyz/exec/env-loader.sh",
       scriptPath: "/var/tmp/buildcage-1000/sandbox-xyz/exec/run-script.sh",
     },
     env: { FOO: "bar" },
@@ -644,6 +647,7 @@ describe("buildOciConfig — caTrust", () => {
       resolvConfPath: "/tmp/buildcage-sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
       execDir: "/tmp/buildcage-sandbox-xyz/exec",
+      envLoaderPath: "/tmp/buildcage-sandbox-xyz/exec/env-loader.sh",
       scriptPath: "/tmp/buildcage-sandbox-xyz/exec/run-script.sh",
     },
     env: { FOO: "bar", UNSET: undefined },
@@ -653,14 +657,15 @@ describe("buildOciConfig — caTrust", () => {
     systemCaPath: "/scratch/system-ca-bundle.pem",
   };
 
-  it("adds no CA mounts or env when caTrust is omitted", () => {
+  it("adds no CA mounts when caTrust is omitted", () => {
     const config = buildOciConfig(fakeBaseSpec(), baseArgs);
     expect(config.mounts.some((m) => m.destination === OWN_CA_DESTINATION)).toBe(false);
     expect(config.mounts.some((m) => m.destination === SYSTEM_CA_DESTINATION)).toBe(false);
-    expect(config.process.env.some((e) => e.startsWith("NODE_EXTRA_CA_CERTS="))).toBe(false);
   });
 
-  it("adds the CA mounts and env when caTrust is given", () => {
+  // The matching CA *env* vars are resolveSandboxEnv's job now -- see
+  // env-loader.test.ts.
+  it("adds the CA mounts when caTrust is given", () => {
     const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, caTrust });
     expect(config.mounts).toContainEqual({
       destination: OWN_CA_DESTINATION,
@@ -674,18 +679,6 @@ describe("buildOciConfig — caTrust", () => {
       source: caTrust.systemCaPath,
       options: ["rbind", "ro"],
     });
-    expect(config.process.env).toContain(`NODE_EXTRA_CA_CERTS=${OWN_CA_DESTINATION}`);
-    expect(config.process.env).toContain(`REQUESTS_CA_BUNDLE=${SYSTEM_CA_DESTINATION}`);
-  });
-
-  it("does not override a CA env var the step's own env already set", () => {
-    const config = buildOciConfig(fakeBaseSpec(), {
-      ...baseArgs,
-      env: { ...baseArgs.env, NODE_EXTRA_CA_CERTS: "/my/own/bundle.pem" },
-      caTrust,
-    });
-    expect(config.process.env).toContain("NODE_EXTRA_CA_CERTS=/my/own/bundle.pem");
-    expect(config.process.env.some((e) => e.startsWith("NODE_EXTRA_CA_CERTS=/etc/"))).toBe(false);
   });
 });
 
@@ -698,7 +691,7 @@ describe("writeOciConfig", () => {
     });
   });
 
-  it("writes config.json 0600 (process.env can hold secrets from the step's env:)", () => {
+  it("writes config.json 0600 (nothing but runc has any business reading it)", () => {
     withScratchDir((dir) => {
       const path = writeOciConfig({ process: { env: ["SECRET=s3cr3t"] } }, dir);
       const mode = statSync(path).mode & 0o777;

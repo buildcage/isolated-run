@@ -133,10 +133,9 @@ function resolveSetprivPath(): string {
  *   veth into, instead of creating a fresh, unconnected one.
  * - process.capabilities: fully cleared (all five sets empty) plus
  *   noNewPrivileges — runc applies this natively, no setpriv needed.
- * - process.env: the step's real environment, replacing runc spec's
- *   invented PATH/TERM defaults, plus (inspect engine only, when `caTrust`
- *   is given) the CA-trust env vars a tool reads that were left unset --
- *   see ca-trust.ts.
+ * - process.env: emptied. The step's real environment (and, inspect engine
+ *   only, the CA-trust variables ca-trust.ts adds) is handed to the sandbox
+ *   over stdin instead -- see env-loader.ts.
  * - linux.seccomp: the Docker-default-profile-derived filter (see
  *   gen-seccomp-profile), resolved against this same empty capability
  *   set.
@@ -171,8 +170,9 @@ export interface SandboxRuntimeWiring {
   resolvConfPath: string;
   seccompProfile: unknown;
   /** The `exec/` subdirectory of this run's scratch dir -- the only part of
-   *  it the sandbox can see. Holds scriptPath and nothing else. */
+   *  it the sandbox can see. Holds these two paths and nothing else. */
   execDir: string;
+  envLoaderPath: string;
   scriptPath: string;
   hostMounts?: HostMount[];
 }
@@ -214,6 +214,7 @@ export function buildOciConfig(
     resolvConfPath,
     seccompProfile,
     execDir,
+    envLoaderPath,
     scriptPath,
     hostMounts = [],
   } = runtime;
@@ -366,10 +367,12 @@ export function buildOciConfig(
       // No other setpriv flags are needed here -- uid/gid, capabilities,
       // and no_new_privs are already applied by runc itself (above/below)
       // before this execs.
-      args: [resolveSetprivPath(), "--pdeathsig=KILL", "--", scriptPath],
-      env: Object.entries({ ...env, ...caAdditions?.env })
-        .filter(([, v]) => v !== undefined)
-        .map(([k, v]) => `${k}=${v}`),
+      args: [resolveSetprivPath(), "--pdeathsig=KILL", "--", envLoaderPath, scriptPath],
+      // Deliberately empty: the step's environment reaches the sandbox over
+      // stdin, applied by envLoaderPath before it execs scriptPath. Writing
+      // it here instead would put every `env:` secret in a file on the
+      // runner's disk for the length of the step. See env-loader.ts.
+      env: [],
       cwd: workdir || "/",
       capabilities: { bounding: [], effective: [], permitted: [], inheritable: [], ambient: [] },
       noNewPrivileges: true,
@@ -386,9 +389,10 @@ export function buildOciConfig(
 
 /**
  * Write the final OCI config to `bundleDir/config.json` (overwriting the
- * `runc spec` placeholder generateBaseOciSpec left there). Mode 0600:
- * `process.env` embeds the whole step environment, including any secrets
- * passed via `env:`.
+ * `runc spec` placeholder generateBaseOciSpec left there). Kept at mode
+ * 0600: it no longer carries the step environment (see env-loader.ts), but
+ * it still describes this sandbox's whole isolation policy, and nothing but
+ * runc needs to read it.
  */
 export function writeOciConfig(config: unknown, bundleDir: string): string {
   const configPath = join(bundleDir, "config.json");
