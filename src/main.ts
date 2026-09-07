@@ -415,8 +415,8 @@ function runSandboxedCommand({
         const overlayScratchPaths =
           filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [];
         const resolvConfPath = writeResolvConf(dns, dir);
-        // The only part of the scratch dir the sandbox can see (buildOciConfig
-        // masks the rest), so only what the sandbox has to exec goes in here.
+        // The only part of the scratch dir buildOciConfig leaves visible to
+        // the sandbox, so nothing it doesn't have to exec goes in here.
         const execDir = join(dir, "exec");
         mkdirSync(execDir, { mode: 0o700 });
         const scriptPath = writeRunScript(runInput, execDir);
@@ -473,9 +473,6 @@ function runSandboxedCommand({
       writeOciConfig(config, dir);
 
       return runIsolated({
-        // Piped to the sandbox rather than written into config.json, so the
-        // step's `env:` secrets never touch the runner's disk -- see
-        // sandbox/env-loader.ts.
         envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust)),
         runcPath,
         proxyPid,

@@ -1,12 +1,11 @@
 #!/bin/bash
 # Verifies that one `run:` step cannot read another's scratch directory, and
-# that the step environment still arrives intact now that it travels over
-# stdin instead of config.json (see sandbox/env-loader.ts).
+# that the step environment still arrives intact over stdin (see
+# sandbox/env-loader.ts).
 #
-# Uses a decoy scratch directory rather than a second concurrent run, so the
-# leak assertion doesn't depend on two runs overlapping in time: a decoy is
-# exactly what a crashed run leaves behind, and equally what the sandbox
-# must not see.
+# A decoy scratch dir rather than a second concurrent run: it is what a
+# crashed run leaves behind anyway, and the assertion doesn't then depend on
+# two runs overlapping in time.
 set -uo pipefail
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
@@ -18,21 +17,18 @@ WORKDIR=$(mktemp -d)
 trap 'rm -rf "$WORKDIR" "$DECOY_DIR" "$INJECTION_MARKER"' EXIT
 touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 
-# 0700, since ensureOwnScratchBase refuses a base any other user could have
-# tampered with.
+# 0700, or ensureOwnScratchBase rejects the base as tampered with.
 mkdir -p "$SCRATCH_BASE" && chmod 700 "$SCRATCH_BASE"
 mkdir -p "$DECOY_DIR" && chmod 700 "$DECOY_DIR"
-# Only ever named through $BC_DECOY_MARKER below, so the string itself never
-# lands in the run script -- which the sandbox *can* see, and which would
-# otherwise match the search for it.
+# Only ever named through $BC_DECOY_MARKER, so the string itself stays out
+# of the run script, which the sandbox can see and would otherwise match.
 DECOY_SECRET="buildcage-decoy-secret-$$"
 printf '{"process":{"env":["SECRET=%s"]}}' "$DECOY_SECRET" > "$DECOY_DIR/config.json"
 chmod 600 "$DECOY_DIR/config.json"
 
-# Written from here rather than passed as more env vars, so the assertions
-# below compare the transported environment against something that did not
-# travel with it. The sandbox's cwd is $GITHUB_WORKSPACE, hence the relative
-# paths.
+# Files rather than more env vars, so the assertions compare the transported
+# environment against something that did not travel with it. Read by relative
+# path below: the sandbox's cwd is $GITHUB_WORKSPACE.
 BC_MULTILINE=$'-----BEGIN KEY-----\nline two\r\nline three'
 BC_EQUALS='a=b=c'
 BC_SPACES=' leading and trailing '

@@ -31,12 +31,10 @@ import {
  * Routing through a file (rather than passing the command inline to a
  * shell) avoids any shell-injection surface from the input string.
  *
- * Written to `execDir`, the one part of the scratch directory the sandbox
- * can see (see buildOciConfig's scratch-base mask). Nothing that doesn't
- * have to be reachable from inside belongs there, and this file is no
- * exception to why: Actions expands a `${{ secrets.X }}` written inline in
- * `run:` before the input ever reaches this action, so the content below
- * can itself be a secret.
+ * Goes in `execDir` because the sandbox has to exec it; buildOciConfig
+ * hides the rest of the scratch dir from other runs, and this file needs
+ * the same protection: Actions expands a `${{ secrets.X }}` written inline
+ * in `run:` before the input ever reaches here.
  */
 export function writeRunScript(runInput: string, execDir: string): string {
   const scriptPath = join(execDir, "run-script.sh");
@@ -140,9 +138,9 @@ function resolveSetprivPath(): string {
  * - linux.seccomp: the Docker-default-profile-derived filter (see
  *   gen-seccomp-profile), resolved against this same empty capability
  *   set.
- * - mounts: an empty tmpfs over SANDBOX_SCRATCH_BASE, hiding every other
- *   run's scratch directory that the host-`/` rbind swept in, with this
- *   run's own execDir bound back on top of it.
+ * - mounts: a tmpfs over SANDBOX_SCRATCH_BASE, hiding every other run's
+ *   scratch directory the host-`/` rbind swept in, with this run's own
+ *   execDir bound back on top.
  *
  * `writablePaths` containing "/" is a sentinel meaning "disable the
  * read-only restriction entirely" (see README.md's `writable`
@@ -283,17 +281,13 @@ export function buildOciConfig(
     }
   }
 
-  // Last, so every mount above resolves against the real scratch base before
-  // it disappears: the sandbox rootfs is a `mount --rbind /` copy of the
-  // host, which sweeps in every *other* concurrent (or leftover) run's
-  // scratch dir too. Those are 0700/0600 but run under the same real UID as
-  // this sandbox (no user namespace), so file permissions don't separate
-  // them -- an empty tmpfs does. Everything the sandbox still needs to reach
-  // is bind-mounted back on top from execDir.
-  //
-  // Owned by root (runc mounts this) and not group/world-writable, so the
-  // sandbox can traverse it but not plant anything in it. Not maskedPaths:
-  // runc applies those after every mount, which would undo the reveal below.
+  // The rootfs rbind sweeps in every *other* concurrent (or leftover) run's
+  // scratch dir, and their 0700/0600 modes separate nothing: without a user
+  // namespace every sandbox on the host shares one real UID. An empty tmpfs
+  // does. Kept last so the mounts above still resolve against the real
+  // scratch base, and root-owned/unwritable so the sandbox can only traverse
+  // it. Not maskedPaths: runc applies those after every mount, which would
+  // undo the reveal below.
   mounts.push(
     {
       destination: SANDBOX_SCRATCH_BASE,
@@ -301,11 +295,10 @@ export function buildOciConfig(
       source: "tmpfs",
       options: ["nosuid", "nodev", "mode=0555"],
     },
-    // `bind`, never `rbind`: by the time runc gets here the scratch dir also
-    // holds the live `mount --rbind /` rootfs, and a recursive bind would
-    // pull that in as a second copy of the whole host `/` -- read-write,
-    // since `ro` applies only to the top mount. execDir itself never has
-    // submounts, so a plain bind is both sufficient and the safe one.
+    // `bind`, never `rbind`: the scratch dir also holds the live
+    // `mount --rbind /` rootfs by now, and a recursive bind would pull that
+    // in as a second copy of the whole host `/`, read-write at that, since
+    // `ro` covers only the top mount. execDir has no submounts of its own.
     { destination: execDir, type: "none", source: execDir, options: ["bind", "ro"] },
   );
 
@@ -369,10 +362,9 @@ export function buildOciConfig(
       // and no_new_privs are already applied by runc itself (above/below)
       // before this execs.
       args: [resolveSetprivPath(), "--pdeathsig=KILL", "--", envLoaderPath, scriptPath],
-      // Deliberately empty: the step's environment reaches the sandbox over
-      // stdin, applied by envLoaderPath before it execs scriptPath. Writing
-      // it here instead would put every `env:` secret in a file on the
-      // runner's disk for the length of the step. See env-loader.ts.
+      // Empty by design: envLoaderPath applies the step's environment from
+      // stdin before execing scriptPath, keeping `env:` secrets off the
+      // runner's disk. See env-loader.ts.
       env: [],
       cwd: workdir || "/",
       capabilities: { bounding: [], effective: [], permitted: [], inheritable: [], ambient: [] },
@@ -390,10 +382,9 @@ export function buildOciConfig(
 
 /**
  * Write the final OCI config to `bundleDir/config.json` (overwriting the
- * `runc spec` placeholder generateBaseOciSpec left there). Kept at mode
- * 0600: it no longer carries the step environment (see env-loader.ts), but
- * it still describes this sandbox's whole isolation policy, and nothing but
- * runc needs to read it.
+ * `runc spec` placeholder generateBaseOciSpec left there). Still 0600 now
+ * that the step environment has moved out of it (see env-loader.ts): it
+ * describes this sandbox's whole isolation policy, and only runc reads it.
  */
 export function writeOciConfig(config: unknown, bundleDir: string): string {
   const configPath = join(bundleDir, "config.json");

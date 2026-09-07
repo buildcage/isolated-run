@@ -2,37 +2,23 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
 
-/**
- * The step's environment is handed to the sandbox over stdin rather than
- * embedded in config.json, so no part of it (`env:` secrets included) is
- * ever written to the runner's disk. `run.ts` pipes the blob into
- * `sudo run-isolated.sh`, which passes stdin through untouched to
- * `runc run` and from there to the loader below.
- *
- * Records are NUL-delimited: NUL is the one byte an environment value
- * cannot contain (execve's own envp is a NUL-terminated array), so it is
- * the only delimiter that survives values holding newlines -- a multi-line
- * private key or an inline JSON document, both ordinary `env:` contents.
- *
- * The blob ends with an explicit terminator record instead of relying on
- * EOF, so a truncated transfer fails the step rather than running it with
- * silently missing variables. It holds no "=", so it can never collide
- * with a real KEY=VALUE record.
- */
+// The step environment reaches the sandbox over stdin instead of through
+// config.json, so `env:` secrets never land on the runner's disk. Records
+// are NUL-delimited because NUL is the one byte an environment value cannot
+// hold, and values legitimately contain newlines (multi-line keys, JSON).
+
+// Ending the blob explicitly rather than at EOF turns a truncated transfer
+// into a failed step instead of one running with variables silently
+// missing. Holds no "=", so it cannot collide with a real record.
 const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__";
 
-// execve accepts any key without "=", but a shell can only export the
-// identifier-shaped ones. The rest (e.g. bash's own `BASH_FUNC_x%%`
-// function exports, a known injection vector, and absent from a runner's
-// normal environment) are dropped rather than smuggled through.
+// execve accepts any key without "=", but a shell can only export
+// identifier-shaped ones. Also keeps bash's `BASH_FUNC_x%%` function
+// exports, an injection vector, out of the sandbox.
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/**
- * The environment the sandboxed process should see: the step's own, plus
- * (inspect engine only) the CA-trust variables that were left unset -- see
- * ca-trust.ts. Undefined values are dropped, as they were when this went
- * into config.json's `process.env`.
- */
+/** The step's own environment, plus (inspect engine only) the CA-trust
+ *  variables it left unset -- see ca-trust.ts. */
 export function resolveSandboxEnv(
   env: NodeJS.ProcessEnv,
   caTrust?: CaTrustFiles,
@@ -53,30 +39,26 @@ export function resolveSandboxEnv(
   return resolved;
 }
 
-/** Serialize the resolved environment for the loader below. */
 export function buildEnvBlob(resolved: Record<string, string>): Buffer {
   const records = [...Object.entries(resolved).map(([k, v]) => `${k}=${v}`), ENV_BLOB_TERMINATOR];
   return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
 }
 
-// #!/bin/bash, not #!/bin/sh: GitHub-hosted runners' /bin/sh is dash, which
-// has no `read -d`. The sandbox rootfs is the runner's own `/` and
-// run-isolated.sh already runs there under bash, so bash is guaranteed
-// present. Uses only builtins, so it works with the empty environment runc
-// starts it with.
+// Not #!/bin/sh: runners' /bin/sh is dash, which has no `read -d`. bash is
+// guaranteed present, since the sandbox rootfs is the runner's own `/` and
+// run-isolated.sh already runs there under it. Builtins only, so the empty
+// environment runc starts this with is enough.
 const ENV_LOADER_SCRIPT = `#!/bin/bash
 # Applies the step environment from stdin, then execs the run script given
 # as $1. See sandbox/env-loader.ts for the wire format.
 #
-# No eval: \`export "K=V"\` expands the value once, within double quotes, and
-# never re-interprets it, so a value containing $(...) or a backtick stays
-# literal -- the same reasoning as writeRunScript routing the run: input
-# through a file instead of inlining it into a shell.
+# No eval: \`export "K=V"\` expands the value once and never re-interprets
+# it, so a value containing $(...) or a backtick stays literal.
 set -u
 
 while IFS= read -r -d '' record; do
   if [ "$record" = "${ENV_BLOB_TERMINATOR}" ]; then
-    # The run script gets a clean stdin, never the tail of this blob.
+    # Never hand the run script the tail of this blob.
     exec 0</dev/null
     exec "$1"
   fi
@@ -88,7 +70,6 @@ echo "buildcage: the sandbox environment ended before its terminator; refusing t
 exit 1
 `;
 
-/** Write the loader that `process.args` execs ahead of the run script. */
 export function writeEnvLoader(execDir: string): string {
   const loaderPath = join(execDir, "env-loader.sh");
   writeFileSync(loaderPath, ENV_LOADER_SCRIPT, { mode: 0o700 });

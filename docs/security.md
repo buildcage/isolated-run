@@ -536,9 +536,9 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   plainly readable from inside every other one. Those directories are 0700/0600, which does not
   help: there is no user namespace, so every sandbox on a runner shares one real UID. The whole
   base directory is therefore covered with an empty tmpfs inside each sandbox, with only that
-  run's own run script bound back on top of it, and the step environment is no longer written into
-  the OCI config at all — it is piped to the sandboxed process over stdin, so `env:` secrets never
-  reach the runner's disk. What this does _not_ cover is a process running as the same user
+  run's own run script bound back on top of it. The step environment is no longer written into the
+  OCI config at all either: it is piped to the sandboxed process over stdin, so `env:` secrets
+  never reach the runner's disk. What this does _not_ cover is a process running as the same user
   outside any sandbox: it can still read `/var/tmp/buildcage-<uid>/` directly, which is the same
   accepted limitation as credential retrieval above.
 - **`filesystem: ephemeral` (experimental) requires overlayfs support on the runner's own

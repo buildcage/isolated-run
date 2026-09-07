@@ -8,8 +8,8 @@
 #
 # Not a full reimplementation: no writable-path/writable-/ handling, no
 # scratch-base mask, and no env passthrough beyond runc's own PATH default
-# (production hands the step environment to a loader over stdin -- see
-# sandbox/env-loader.ts) -- just enough to run the smoke test with the same
+# (production pipes the step environment to a loader instead, see
+# sandbox/env-loader.ts). Just enough to run the smoke test with the same
 # namespaces/capabilities/seccomp policy production uses.
 set -euo pipefail
 

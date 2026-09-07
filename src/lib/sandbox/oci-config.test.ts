@@ -708,7 +708,7 @@ describe("buildOciConfig — caTrust", () => {
     expect(config.mounts.some((m) => m.destination === SYSTEM_CA_DESTINATION)).toBe(false);
   });
 
-  // The matching CA *env* vars are resolveSandboxEnv's job now -- see
+  // The matching CA env vars are resolveSandboxEnv's job -- see
   // env-loader.test.ts.
   it("adds the CA mounts when caTrust is given", () => {
     const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, caTrust });

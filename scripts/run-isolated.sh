@@ -180,10 +180,9 @@ ip link add "$VETH_T" type veth peer name "$VETH_P"
 ip link set "$VETH_T" netns "$NETNS_NAME"
 ip link set "$VETH_P" netns "$PROXY_PID"
 
-# stdin is the step's environment blob, on its way to the sandboxed process
-# (see sandbox/env-loader.ts). Nothing on the path there reads it, but these
-# nested shells are the only commands here that plausibly could, so they get
-# /dev/null rather than a share of it.
+# stdin carries the step's environment to the sandboxed process (see
+# sandbox/env-loader.ts). These nested shells are the only commands here
+# that could plausibly consume any of it, hence the /dev/null redirects.
 echo "Configuring sandbox namespace network..." >&2
 ip netns exec "$NETNS_NAME" sh -c "
   set -e

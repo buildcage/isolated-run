@@ -20615,12 +20615,10 @@ var extra_masked_proc_paths_default = [
 * Routing through a file (rather than passing the command inline to a
 * shell) avoids any shell-injection surface from the input string.
 *
-* Written to `execDir`, the one part of the scratch directory the sandbox
-* can see (see buildOciConfig's scratch-base mask). Nothing that doesn't
-* have to be reachable from inside belongs there, and this file is no
-* exception to why: Actions expands a `${{ secrets.X }}` written inline in
-* `run:` before the input ever reaches this action, so the content below
-* can itself be a secret.
+* Goes in `execDir` because the sandbox has to exec it; buildOciConfig
+* hides the rest of the scratch dir from other runs, and this file needs
+* the same protection: Actions expands a `${{ secrets.X }}` written inline
+* in `run:` before the input ever reaches here.
 */
 function writeRunScript(runInput, execDir) {
 	let scriptPath = (0, node_path.join)(execDir, "run-script.sh"), content = runInput.startsWith("#!") ? runInput : `#!/bin/sh\nset -e\n${runInput}\n`;
@@ -20789,10 +20787,9 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 }
 /**
 * Write the final OCI config to `bundleDir/config.json` (overwriting the
-* `runc spec` placeholder generateBaseOciSpec left there). Kept at mode
-* 0600: it no longer carries the step environment (see env-loader.ts), but
-* it still describes this sandbox's whole isolation policy, and nothing but
-* runc needs to read it.
+* `runc spec` placeholder generateBaseOciSpec left there). Still 0600 now
+* that the step environment has moved out of it (see env-loader.ts): it
+* describes this sandbox's whole isolation policy, and only runc reads it.
 */
 function writeOciConfig(config, bundleDir) {
 	let configPath = (0, node_path.join)(bundleDir, "config.json");
@@ -20846,30 +20843,9 @@ function runIsolated({ runcPath, proxyPid, bundleDir, containerId, netnsName, ro
 }
 //#endregion
 //#region src/lib/sandbox/env-loader.ts
-/**
-* The step's environment is handed to the sandbox over stdin rather than
-* embedded in config.json, so no part of it (`env:` secrets included) is
-* ever written to the runner's disk. `run.ts` pipes the blob into
-* `sudo run-isolated.sh`, which passes stdin through untouched to
-* `runc run` and from there to the loader below.
-*
-* Records are NUL-delimited: NUL is the one byte an environment value
-* cannot contain (execve's own envp is a NUL-terminated array), so it is
-* the only delimiter that survives values holding newlines -- a multi-line
-* private key or an inline JSON document, both ordinary `env:` contents.
-*
-* The blob ends with an explicit terminator record instead of relying on
-* EOF, so a truncated transfer fails the step rather than running it with
-* silently missing variables. It holds no "=", so it can never collide
-* with a real KEY=VALUE record.
-*/
 const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
-/**
-* The environment the sandboxed process should see: the step's own, plus
-* (inspect engine only) the CA-trust variables that were left unset -- see
-* ca-trust.ts. Undefined values are dropped, as they were when this went
-* into config.json's `process.env`.
-*/
+/** The step's own environment, plus (inspect engine only) the CA-trust
+*  variables it left unset -- see ca-trust.ts. */
 function resolveSandboxEnv(env, caTrust) {
 	let merged = {
 		...env,
@@ -20878,7 +20854,6 @@ function resolveSandboxEnv(env, caTrust) {
 	for (let [key, value] of Object.entries(merged)) value !== void 0 && (ENV_KEY.test(key) ? resolved[key] = value : skipped.push(key));
 	return skipped.length > 0 && console.log(`::warning::Not passing environment variables whose names a shell cannot export: ${skipped.join(", ")}`), resolved;
 }
-/** Serialize the resolved environment for the loader below. */
 function buildEnvBlob(resolved) {
 	let records = [...Object.entries(resolved).map(([k, v]) => `${k}=${v}`), ENV_BLOB_TERMINATOR];
 	return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
@@ -20887,15 +20862,13 @@ const ENV_LOADER_SCRIPT = `#!/bin/bash
 # Applies the step environment from stdin, then execs the run script given
 # as $1. See sandbox/env-loader.ts for the wire format.
 #
-# No eval: \`export "K=V"\` expands the value once, within double quotes, and
-# never re-interprets it, so a value containing $(...) or a backtick stays
-# literal -- the same reasoning as writeRunScript routing the run: input
-# through a file instead of inlining it into a shell.
+# No eval: \`export "K=V"\` expands the value once and never re-interprets
+# it, so a value containing $(...) or a backtick stays literal.
 set -u
 
 while IFS= read -r -d '' record; do
   if [ "$record" = "${ENV_BLOB_TERMINATOR}" ]; then
-    # The run script gets a clean stdin, never the tail of this blob.
+    # Never hand the run script the tail of this blob.
     exec 0</dev/null
     exec "$1"
   fi
@@ -20906,7 +20879,6 @@ done
 echo "buildcage: the sandbox environment ended before its terminator; refusing to run" >&2
 exit 1
 `;
-/** Write the loader that `process.args` execs ahead of the run script. */
 function writeEnvLoader(execDir) {
 	let loaderPath = (0, node_path.join)(execDir, "env-loader.sh");
 	return (0, node_fs.writeFileSync)(loaderPath, ENV_LOADER_SCRIPT, { mode: 448 }), loaderPath;

@@ -14,15 +14,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * command failing, not this function.
  *
  * uid/gid, capabilities and mounts are entirely described by `config.json`
- * (see buildOciConfig) — run-isolated.sh only needs enough to set up
+ * (see buildOciConfig); run-isolated.sh only needs enough to set up
  * networking and the rootfs bind-mount before handing off to `runc run`.
  *
- * The step's environment is the one exception: it travels as `envBlob` on
- * stdin, so it is never written to the runner's disk (see env-loader.ts).
- * Nothing between here and the sandboxed process reads stdin, so the blob
- * arrives at the loader untouched. `sudo` does not interpose a
- * pseudo-terminal on it either: `use_pty` applies only when sudo itself is
- * attached to a terminal, which an Actions runner never is.
+ * The environment is the exception: it travels as `envBlob` on stdin, so it
+ * never reaches the runner's disk (see env-loader.ts). Nothing on the way
+ * to the sandboxed process reads stdin, and `sudo` does not interpose a
+ * pseudo-terminal on it: `use_pty` needs sudo itself to be attached to a
+ * terminal, which an Actions runner never is.
  */
 export interface RunIsolatedOptions {
   runcPath: string;
@@ -81,9 +80,9 @@ export function runIsolated({
   } catch (e) {
     // A non-zero exit from the isolated command (or run-isolated.sh itself)
     // surfaces here as an ExecException; e.status is the actual exit code.
-    // e.status is null if the process was killed by a signal. Read only
-    // e.status, never e.code: a child that exits before draining envBlob
-    // also lands here, with a spurious EPIPE alongside its real exit code.
+    // e.status is null if the process was killed by a signal. Never branch
+    // on e.code here: a child that exits before draining envBlob lands here
+    // too, with a spurious EPIPE alongside its real exit code.
     const status = (e as { status?: number | null }).status;
     return typeof status === "number" ? status : 1;
   }
