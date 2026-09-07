@@ -251,9 +251,11 @@ the [README](../README.md).
      not-yet-created bind-mount directory, made read-only (every real host mount point is forced
      individually read-only outside workdir/home/tmp/RUNNER_TEMP/writable, since the top-level
      read-only flag alone doesn't cover separate mount points); a network namespace reference to the
-     netns created in the next step; all Linux capabilities cleared plus no-new-privileges; the
-     step's real environment; and a seccomp filter resolved from Docker's own default profile,
-     applied against an empty capability set to match the sandbox.
+     netns created in the next step; all Linux capabilities cleared plus no-new-privileges; and a
+     seccomp filter resolved from Docker's own default profile, applied against an empty capability
+     set to match the sandbox. `process.env` is left empty — the step's real environment never
+     touches `config.json` at all; it's piped to the sandboxed process over stdin instead (see
+     step 6), so a process that can read this bundle finds no secrets in it.
    - The writable exceptions are recursive bind-mounts (so legitimately nested mounts under them
      stay visible). The `mount --rbind /` rootfs is therefore staged under `/var/tmp/buildcage-<uid>`,
      never one of the writable exceptions, so those recursive rbinds don't re-expose it as a
@@ -261,6 +263,13 @@ the [README](../README.md).
      that directory (or an ancestor of it) is rejected outright rather than silently accepted. The
      sandbox's real host view (its own `/` and every nested mount) is untouched and stays read-only
      outside the writable set.
+   - `/var/tmp/buildcage-<uid>` itself (holding every `run:` step's own scratch dir, past and
+     present) is masked off inside the sandbox with an empty tmpfs, with only this step's own
+     scratch dir bound back on top at the same path — a plain, non-recursive `bind`, not `rbind`,
+     since that scratch dir also holds rootfsBindDir (`<scratchDir>/rootfs`, the `mount --rbind /`
+     from the step below), and `rbind` would recursively re-expose that too. See [Known
+     Limitations](./security.md#known-limitations) for what this reveal does and doesn't protect
+     against.
 5. Stage the sandbox's network and filesystem as root, via `sudo -n` (`run-isolated.sh`).
    - Re-execs itself into a fresh, private mount namespace before touching anything else, so the
      mount work below is invisible to every other `run:` step running concurrently on the same
@@ -279,6 +288,15 @@ the [README](../README.md).
    - runc creates its own further-nested namespaces per `config.json` and enforces every
      isolation guarantee declared there: capability drop, seccomp filter, read-only filesystem,
      network namespace.
+   - `config.json`'s `process.args` doesn't point straight at the step's script; it points at a
+     small loader script (`src/lib/sandbox/env-loader.ts`) that reads the step's env (NUL-delimited
+     `KEY=VALUE` records, base64-encoded) from its own stdin and `export`s each one before `exec`ing
+     into the real script. This is the one piece of the sandboxed process's setup that doesn't come
+     from `config.json`. The base64 layer matters: `sudo` allocates a pseudo-tty for the child on
+     any host where sudoers sets `Defaults use_pty` (the GitHub-hosted-runner default), and a pty in
+     canonical mode intercepts specific bytes as signals or flow control (Ctrl-C/INTR,
+     Ctrl-S/Ctrl-Q/XON/XOFF, ...) instead of delivering them as data -- base64's output alphabet
+     contains none of those bytes, so a secret value that happens to contain one survives intact.
    - A two-hop process-supervision chain ties the sandboxed process's life to the staging step
      above: the process that starts `runc` and, separately, the sandboxed command itself both
      die if their immediate parent does, so killing the staging step tears down the whole chain
