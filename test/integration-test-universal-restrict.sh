@@ -74,6 +74,11 @@ assert_summary_contains() {
 
 assert_summary_contains "| allowed.example.com:443 | HTTPS |" "allowed.example.com:443 recorded as allowed"
 assert_summary_contains "| allowed.example.com:80 | HTTP |" "allowed.example.com:80 recorded as allowed"
+# No HTTPS/SNI counterpart: curl lowercases the hostname before it ever
+# reaches the TLS handshake, so the SNI this proxy sees is already
+# "allowed.example.com" -- this scenario passing doesn't exercise the ACL's
+# case-insensitivity at all, only the Host-header (HTTP) path does.
+assert_summary_contains "| ALLOWED.example.com:80 | HTTP |" "uppercase host (HTTP) recorded as allowed"
 assert_summary_contains "| sub.wildcard.example.com:443 | HTTPS |" "wildcard-matched name recorded as allowed"
 assert_summary_contains "| blocked.example.com:443 | HTTPS | not-allowed |" "blocked.example.com:443 recorded as blocked, reason not-allowed"
 assert_summary_contains "| 10.200.0.100:80 | IP | ip-not-allowed |" "direct IP recorded as blocked, reason ip-not-allowed"
