@@ -76,6 +76,7 @@ test_integration_sandbox_linux: ## Run the action's integration tests (needs BUI
 	@./test/integration-test-seccomp.sh
 	@./test/integration-test-die-with-parent.sh
 	@./test/integration-test-fs-escape.sh
+	@./test/integration-test-scratch-isolation.sh
 	@./test/integration-test-runner-temp.sh
 	@./test/integration-test-nested-mount-readonly.sh
 	@./test/integration-test-non-runc-default-pseudofs-readonly.sh
