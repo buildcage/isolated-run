@@ -517,6 +517,30 @@ to run code once the sandbox is gone.
     run: npm ci && npm run build && npm test
 ```
 
+> [!NOTE]
+> Discarding those writes is the point, but the same overlay also drops output the command was
+> meant to produce. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and `$GITHUB_STEP_SUMMARY` all
+> live under `$RUNNER_TEMP`, so whatever the command writes to them is gone once the step ends
+> unless you name that file in `allow_write:`:
+>
+> ```yaml
+> - uses: buildcage/isolated-run@68f89e4e4e5d812aeee07a3512394457c70fa110 # v1.1.4
+>   with:
+>     filesystem: ephemeral
+>     allow_write: |
+>       $GITHUB_WORKSPACE
+>       $GITHUB_OUTPUT
+>       $GITHUB_STEP_SUMMARY
+>     run: |
+>       echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+>       echo "### Build report" >> "$GITHUB_STEP_SUMMARY"
+> ```
+>
+> Naming `$GITHUB_STEP_SUMMARY` puts the command's markdown in the same job summary this action
+> writes its own report to. That report and the `traffic_artifact_name` output are unaffected
+> either way: both are written from the runner host after the sandboxed command has exited, outside
+> the overlay.
+
 `filesystem: ephemeral` and `writable:` are mutually exclusive (this includes `writable: /`, which
 has no meaning here); `allow_write:` is rejected outside `filesystem: ephemeral`.
 
