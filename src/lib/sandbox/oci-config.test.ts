@@ -167,7 +167,9 @@ describe("buildOciConfig", () => {
       rootfsBindDir: "/tmp/buildcage-sandbox-xyz/rootfs",
       resolvConfPath: "/tmp/buildcage-sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
-      scriptPath: "/tmp/buildcage-sandbox-xyz/run-script.sh",
+      execDir: "/tmp/buildcage-sandbox-xyz/exec",
+      envLoaderPath: "/tmp/buildcage-sandbox-xyz/exec/env-loader.sh",
+      scriptPath: "/tmp/buildcage-sandbox-xyz/exec/run-script.sh",
     },
     env: { FOO: "bar", UNSET: undefined },
   };
@@ -198,13 +200,14 @@ describe("buildOciConfig", () => {
     expect(config.process.args.slice(1)).toStrictEqual([
       "--pdeathsig=KILL",
       "--",
+      baseArgs.runtime.envLoaderPath,
       baseArgs.runtime.scriptPath,
     ]);
   });
 
-  it("replaces process.env with the given env, dropping undefined values", () => {
+  it("leaves process.env empty (the step environment travels over stdin)", () => {
     const config = buildOciConfig(fakeBaseSpec(), baseArgs);
-    expect(config.process.env).toStrictEqual(["FOO=bar"]);
+    expect(config.process.env).toStrictEqual([]);
   });
 
   it("adds `path` to the network namespace entry, leaving other namespace types untouched", () => {
@@ -328,6 +331,51 @@ describe("buildOciConfig", () => {
     expect(
       !config.mounts.some((m) => m.destination === baseArgs.runtime.rootfsBindDir),
     ).toBeTruthy();
+  });
+
+  it("masks the scratch base with an empty tmpfs and reveals only this run's execDir", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    const mask = config.mounts.find((m) => m.destination === SANDBOX_SCRATCH_BASE);
+    expect(mask).toStrictEqual({
+      destination: SANDBOX_SCRATCH_BASE,
+      type: "tmpfs",
+      source: "tmpfs",
+      options: ["nosuid", "nodev", "mode=0555"],
+    });
+    // Not `rbind`: the scratch dir also holds the live `mount --rbind /`
+    // rootfs, which a recursive bind would re-expose read-write.
+    expect(config.mounts).toContainEqual({
+      destination: baseArgs.runtime.execDir,
+      type: "none",
+      source: baseArgs.runtime.execDir,
+      options: ["bind", "ro"],
+    });
+  });
+
+  it("orders the mask last of all, and the execDir reveal after it", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      writable: { ...baseArgs.writable, writablePaths: ["/opt/cache"] },
+    });
+    const destinations = config.mounts.map((m) => m.destination);
+    expect(destinations.slice(-2)).toStrictEqual([SANDBOX_SCRATCH_BASE, baseArgs.runtime.execDir]);
+  });
+
+  it("masks the scratch base in ephemeral mode too, after the overlays", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      ephemeral: { overlayRoots: [], allowWrite: ["/home/runner/work"] },
+    });
+    const destinations = config.mounts.map((m) => m.destination);
+    expect(destinations.slice(-2)).toStrictEqual([SANDBOX_SCRATCH_BASE, baseArgs.runtime.execDir]);
+  });
+
+  it("masks the scratch base even with the read-only restriction disabled", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      writable: { ...baseArgs.writable, writablePaths: ["/"] },
+    });
+    expect(config.mounts.some((m) => m.destination === SANDBOX_SCRATCH_BASE)).toBe(true);
   });
 
   it("fails closed when writable: lists the scratch base itself", () => {
@@ -508,7 +556,9 @@ describe("buildOciConfig ephemeral mode", () => {
       rootfsBindDir: "/var/tmp/buildcage-1000/sandbox-xyz/rootfs",
       resolvConfPath: "/var/tmp/buildcage-1000/sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
-      scriptPath: "/var/tmp/buildcage-1000/sandbox-xyz/run-script.sh",
+      execDir: "/var/tmp/buildcage-1000/sandbox-xyz/exec",
+      envLoaderPath: "/var/tmp/buildcage-1000/sandbox-xyz/exec/env-loader.sh",
+      scriptPath: "/var/tmp/buildcage-1000/sandbox-xyz/exec/run-script.sh",
     },
     env: { FOO: "bar" },
   };
@@ -641,7 +691,9 @@ describe("buildOciConfig — caTrust", () => {
       rootfsBindDir: "/tmp/buildcage-sandbox-xyz/rootfs",
       resolvConfPath: "/tmp/buildcage-sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
-      scriptPath: "/tmp/buildcage-sandbox-xyz/run-script.sh",
+      execDir: "/tmp/buildcage-sandbox-xyz/exec",
+      envLoaderPath: "/tmp/buildcage-sandbox-xyz/exec/env-loader.sh",
+      scriptPath: "/tmp/buildcage-sandbox-xyz/exec/run-script.sh",
     },
     env: { FOO: "bar", UNSET: undefined },
   };
@@ -650,14 +702,15 @@ describe("buildOciConfig — caTrust", () => {
     systemCaPath: "/scratch/system-ca-bundle.pem",
   };
 
-  it("adds no CA mounts or env when caTrust is omitted", () => {
+  it("adds no CA mounts when caTrust is omitted", () => {
     const config = buildOciConfig(fakeBaseSpec(), baseArgs);
     expect(config.mounts.some((m) => m.destination === OWN_CA_DESTINATION)).toBe(false);
     expect(config.mounts.some((m) => m.destination === SYSTEM_CA_DESTINATION)).toBe(false);
-    expect(config.process.env.some((e) => e.startsWith("NODE_EXTRA_CA_CERTS="))).toBe(false);
   });
 
-  it("adds the CA mounts and env when caTrust is given", () => {
+  // The matching CA env vars are resolveSandboxEnv's job; see
+  // env-loader.test.ts.
+  it("adds the CA mounts when caTrust is given", () => {
     const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, caTrust });
     expect(config.mounts).toContainEqual({
       destination: OWN_CA_DESTINATION,
@@ -671,18 +724,6 @@ describe("buildOciConfig — caTrust", () => {
       source: caTrust.systemCaPath,
       options: ["rbind", "ro"],
     });
-    expect(config.process.env).toContain(`NODE_EXTRA_CA_CERTS=${OWN_CA_DESTINATION}`);
-    expect(config.process.env).toContain(`REQUESTS_CA_BUNDLE=${SYSTEM_CA_DESTINATION}`);
-  });
-
-  it("does not override a CA env var the step's own env already set", () => {
-    const config = buildOciConfig(fakeBaseSpec(), {
-      ...baseArgs,
-      env: { ...baseArgs.env, NODE_EXTRA_CA_CERTS: "/my/own/bundle.pem" },
-      caTrust,
-    });
-    expect(config.process.env).toContain("NODE_EXTRA_CA_CERTS=/my/own/bundle.pem");
-    expect(config.process.env.some((e) => e.startsWith("NODE_EXTRA_CA_CERTS=/etc/"))).toBe(false);
   });
 });
 
@@ -695,7 +736,7 @@ describe("writeOciConfig", () => {
     });
   });
 
-  it("writes config.json 0600 (process.env can hold secrets from the step's env:)", () => {
+  it("writes config.json 0600 (nothing but runc has any business reading it)", () => {
     withScratchDir((dir) => {
       const path = writeOciConfig({ process: { env: ["SECRET=s3cr3t"] } }, dir);
       const mode = statSync(path).mode & 0o777;

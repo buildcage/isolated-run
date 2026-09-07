@@ -183,8 +183,9 @@ export function scratchDirFor(containerName: string): string {
  * Create SANDBOX_SCRATCH_BASE, or verify that an existing one is genuinely
  * ours. /var/tmp is 1777, so any local user can pre-create this path -- as a
  * symlink, or as a world-writable directory -- and thereby redirect the OCI
- * bundle (config.json carries the whole step environment, secrets included),
- * the root-run `mount --rbind /`, and cleanup's `sudo umount`/`rmSync`.
+ * bundle (whose run-script.sh holds the step's command verbatim, secrets
+ * included when the workflow inlined one), the root-run `mount --rbind /`,
+ * and cleanup's `sudo umount`/`rmSync`.
  * `mkdirSync`'s `recursive: true` accepts any of those silently and applies
  * `mode` only on creation, so this uses a non-recursive mkdir and validates
  * the EEXIST case explicitly.

@@ -2,6 +2,7 @@ import { writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { HasMounts, OciSpec, BuiltOciSpec, HostMount } from "./types.ts";
 import { assertScratchBaseNotWritable } from "./paths.ts";
+import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
 // Sensitive /proc paths masked with /dev/null. runc's own `runc spec`
 // default already masks /proc/kcore, /proc/keys, and /proc/timer_list
@@ -29,9 +30,14 @@ import {
  * Write the user-supplied `run:` input to an executable script file.
  * Routing through a file (rather than passing the command inline to a
  * shell) avoids any shell-injection surface from the input string.
+ *
+ * Goes in `execDir` because the sandbox has to exec it; buildOciConfig
+ * hides the rest of the scratch dir from other runs, and this file needs
+ * the same protection: Actions expands a `${{ secrets.X }}` written inline
+ * in `run:` before the input ever reaches here.
  */
-export function writeRunScript(runInput: string, dir: string): string {
-  const scriptPath = join(dir, "run-script.sh");
+export function writeRunScript(runInput: string, execDir: string): string {
+  const scriptPath = join(execDir, "run-script.sh");
   const content = runInput.startsWith("#!") ? runInput : `#!/bin/sh\nset -e\n${runInput}\n`;
   writeFileSync(scriptPath, content, { mode: 0o700 });
   return scriptPath;
@@ -126,13 +132,15 @@ function resolveSetprivPath(): string {
  *   veth into, instead of creating a fresh, unconnected one.
  * - process.capabilities: fully cleared (all five sets empty) plus
  *   noNewPrivileges — runc applies this natively, no setpriv needed.
- * - process.env: the step's real environment, replacing runc spec's
- *   invented PATH/TERM defaults, plus (inspect engine only, when `caTrust`
- *   is given) the CA-trust env vars a tool reads that were left unset --
- *   see ca-trust.ts.
+ * - process.env: emptied. The step's real environment (and, inspect engine
+ *   only, the CA-trust variables ca-trust.ts adds) is handed to the sandbox
+ *   over stdin instead. See env-loader.ts.
  * - linux.seccomp: the Docker-default-profile-derived filter (see
  *   gen-seccomp-profile), resolved against this same empty capability
  *   set.
+ * - mounts: a tmpfs over SANDBOX_SCRATCH_BASE, hiding every other run's
+ *   scratch directory the host-`/` rbind swept in, with this run's own
+ *   execDir bound back on top.
  *
  * `writablePaths` containing "/" is a sentinel meaning "disable the
  * read-only restriction entirely" (see README.md's `writable`
@@ -160,6 +168,10 @@ export interface SandboxRuntimeWiring {
   rootfsBindDir: string;
   resolvConfPath: string;
   seccompProfile: unknown;
+  /** The `exec/` subdirectory of this run's scratch dir: the only part of it
+   *  the sandbox can see. Holds these two paths and nothing else. */
+  execDir: string;
+  envLoaderPath: string;
   scriptPath: string;
   hostMounts?: HostMount[];
 }
@@ -200,6 +212,8 @@ export function buildOciConfig(
     rootfsBindDir,
     resolvConfPath,
     seccompProfile,
+    execDir,
+    envLoaderPath,
     scriptPath,
     hostMounts = [],
   } = runtime;
@@ -267,6 +281,27 @@ export function buildOciConfig(
     }
   }
 
+  // The rootfs rbind sweeps in every *other* concurrent (or leftover) run's
+  // scratch dir, and their 0700/0600 modes separate nothing: without a user
+  // namespace every sandbox on the host shares one real UID. An empty tmpfs
+  // does. Kept last so the mounts above still resolve against the real
+  // scratch base, and root-owned/unwritable so the sandbox can only traverse
+  // it. Not maskedPaths: runc applies those after every mount, which would
+  // undo the reveal below.
+  mounts.push(
+    {
+      destination: SANDBOX_SCRATCH_BASE,
+      type: "tmpfs",
+      source: "tmpfs",
+      options: ["nosuid", "nodev", "mode=0555"],
+    },
+    // `bind`, never `rbind`: the scratch dir also holds the live
+    // `mount --rbind /` rootfs by now, and a recursive bind would pull that
+    // in as a second copy of the whole host `/`, read-write at that, since
+    // `ro` covers only the top mount. execDir has no submounts of its own.
+    { destination: execDir, type: "none", source: execDir, options: ["bind", "ro"] },
+  );
+
   const extraMaskedRuntimePaths = [
     ...EXTRA_MASKED_RUNTIME_PATHS,
     ...rootlessRuntimeSocketPaths(env),
@@ -326,10 +361,11 @@ export function buildOciConfig(
       // No other setpriv flags are needed here -- uid/gid, capabilities,
       // and no_new_privs are already applied by runc itself (above/below)
       // before this execs.
-      args: [resolveSetprivPath(), "--pdeathsig=KILL", "--", scriptPath],
-      env: Object.entries({ ...env, ...caAdditions?.env })
-        .filter(([, v]) => v !== undefined)
-        .map(([k, v]) => `${k}=${v}`),
+      args: [resolveSetprivPath(), "--pdeathsig=KILL", "--", envLoaderPath, scriptPath],
+      // Empty by design: envLoaderPath applies the step's environment from
+      // stdin before execing scriptPath, keeping `env:` secrets off the
+      // runner's disk. See env-loader.ts.
+      env: [],
       cwd: workdir || "/",
       capabilities: { bounding: [], effective: [], permitted: [], inheritable: [], ambient: [] },
       noNewPrivileges: true,
@@ -346,9 +382,9 @@ export function buildOciConfig(
 
 /**
  * Write the final OCI config to `bundleDir/config.json` (overwriting the
- * `runc spec` placeholder generateBaseOciSpec left there). Mode 0600:
- * `process.env` embeds the whole step environment, including any secrets
- * passed via `env:`.
+ * `runc spec` placeholder generateBaseOciSpec left there). Still 0600 now
+ * that the step environment has moved out of it (see env-loader.ts): it
+ * describes this sandbox's whole isolation policy, and only runc reads it.
  */
 export function writeOciConfig(config: unknown, bundleDir: string): string {
   const configPath = join(bundleDir, "config.json");

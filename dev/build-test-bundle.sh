@@ -7,8 +7,10 @@
 # hand-built substitute for the config.json JS would normally produce).
 #
 # Not a full reimplementation: no writable-path/writable-/ handling, no
-# read env passthrough beyond PATH -- just enough to run the smoke test
-# with the same namespaces/capabilities/seccomp policy production uses.
+# scratch-base mask, and no env passthrough beyond runc's own PATH default
+# (production pipes the step environment to a loader instead, see
+# sandbox/env-loader.ts). Just enough to run the smoke test with the same
+# namespaces/capabilities/seccomp policy production uses.
 set -euo pipefail
 
 NETNS_NAME=""

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +42,7 @@ import {
 } from "./lib/sandbox/oci-config.ts";
 import { listHostMounts } from "./lib/sandbox/mountinfo.ts";
 import { runIsolated } from "./lib/sandbox/run.ts";
+import { buildEnvBlob, resolveSandboxEnv, writeEnvLoader } from "./lib/sandbox/env-loader.ts";
 import { withScratchDir } from "./lib/sandbox/scratch-dir.ts";
 import {
   fetchReport,
@@ -414,7 +415,12 @@ function runSandboxedCommand({
         const overlayScratchPaths =
           filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [];
         const resolvConfPath = writeResolvConf(dns, dir);
-        const scriptPath = writeRunScript(runInput, dir);
+        // The only part of the scratch dir buildOciConfig leaves visible to
+        // the sandbox, so nothing it doesn't have to exec goes in here.
+        const execDir = join(dir, "exec");
+        mkdirSync(execDir, { mode: 0o700 });
+        const scriptPath = writeRunScript(runInput, execDir);
+        const envLoaderPath = writeEnvLoader(execDir);
         // Real host mount table, read now (before run-isolated.sh's `mount
         // --rbind /` duplicates it into rootfsBindDir) so buildOciConfig can
         // force every real submount read-only individually -- root.readonly
@@ -450,6 +456,8 @@ function runSandboxedCommand({
             rootfsBindDir,
             resolvConfPath,
             seccompProfile,
+            execDir,
+            envLoaderPath,
             scriptPath,
             hostMounts,
           },
@@ -465,6 +473,7 @@ function runSandboxedCommand({
       writeOciConfig(config, dir);
 
       return runIsolated({
+        envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust)),
         runcPath,
         proxyPid,
         bundleDir: dir,

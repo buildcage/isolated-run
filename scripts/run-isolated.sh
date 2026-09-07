@@ -180,6 +180,9 @@ ip link add "$VETH_T" type veth peer name "$VETH_P"
 ip link set "$VETH_T" netns "$NETNS_NAME"
 ip link set "$VETH_P" netns "$PROXY_PID"
 
+# stdin carries the step's environment to the sandboxed process (see
+# sandbox/env-loader.ts). These nested shells are the only commands here
+# that could plausibly consume any of it, hence the /dev/null redirects.
 echo "Configuring sandbox namespace network..." >&2
 ip netns exec "$NETNS_NAME" sh -c "
   set -e
@@ -188,7 +191,7 @@ ip netns exec "$NETNS_NAME" sh -c "
   ip link set eth0 up
   ip link set lo up
   ip route add default via '${GATEWAY}'
-"
+" </dev/null
 
 echo "Configuring proxy-side veth as sandbox0..." >&2
 # No bridge: this is always a 1:1 connection (one sandbox, one proxy), so
@@ -201,7 +204,7 @@ nsenter --net="/proc/${PROXY_PID}/ns/net" -- sh -c "
   ip link set '${VETH_P}' name sandbox0
   ip addr add '${GATEWAY}/24' dev sandbox0
   ip link set sandbox0 up
-"
+" </dev/null
 
 echo "Executing isolated command via runc..." >&2
 group_end
