@@ -190,11 +190,33 @@ jobs:
             exit 1
           fi
 
+  # Separate job from the others: builds both engines' proxy images itself
+  # (docker compose build), with no sandbox attached, so sandbox0 never
+  # exists -- proving :10024/:53 stay unreachable from anywhere else rather
+  # than merely reachable from the one interface the tests above exercise.
+  test_listener_scope:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    name: "integration: test (listener scope, both engines)"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run listener-scope integration tests
+        run: make test_integration_listener_scope
+
   # Single, stably-named required status check for branch protection.
   integration-tests-passed:
     name: Integration tests passed
     runs-on: ubuntu-latest
-    needs: [changes, test_sandbox, test_sandbox_universal, test_sandbox_inspect]
+    needs:
+      [changes, test_sandbox, test_sandbox_universal, test_sandbox_inspect, test_listener_scope]
     if: always()
     permissions: {}
     steps:
