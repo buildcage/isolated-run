@@ -87,9 +87,10 @@ fi
 rm -f "$HOME_MARKER" "$HOME_PRELOADED"
 rm -rf "$CASE1"
 
-# --- Case 2+3: $GITHUB_ENV is discarded by default, persisted when named
-# in allow_write:. Placed under RUNNER_TEMP (as it is for real) so it's
-# covered by RUNNER_TEMP's own overlay in the default case.
+# --- Case 2+3: the runner's own generated files are discarded by default
+# and persisted when named in allow_write:. Placed under RUNNER_TEMP (as
+# they are for real) so they're covered by RUNNER_TEMP's own overlay in the
+# default case.
 CASE2=$(mktemp -d)
 GITHUB_ENV_FILE2=$(mktemp)
 touch "$CASE2/state.env" "$CASE2/summary.md"
@@ -115,28 +116,56 @@ else
 fi
 rm -rf "$CASE2" "$GITHUB_ENV_FILE2"
 
+# Case 3 covers all three files a step realistically produces output
+# through, since the README tells readers to name any of them.
 CASE3=$(mktemp -d)
 GITHUB_ENV_FILE3=$(mktemp)
-touch "$CASE3/state.env" "$CASE3/summary.md"
+GITHUB_OUTPUT_FILE3=$(mktemp)
+GITHUB_SUMMARY_FILE3=$(mktemp)
+touch "$CASE3/state.env"
+FAILURES_BEFORE3=$FAILURES
 GITHUB_ENV="$GITHUB_ENV_FILE3" \
+GITHUB_OUTPUT="$GITHUB_OUTPUT_FILE3" \
 GITHUB_WORKSPACE="$CASE3" \
 GITHUB_STATE="$CASE3/state.env" \
-GITHUB_STEP_SUMMARY="$CASE3/summary.md" \
+GITHUB_STEP_SUMMARY="$GITHUB_SUMMARY_FILE3" \
 RUNNER_TEMP="$(dirname "$GITHUB_ENV_FILE3")" \
 BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_FILESYSTEM="ephemeral" \
-INPUT_ALLOW_WRITE='$GITHUB_ENV' \
-INPUT_RUN='echo "SHOULD_PERSIST=1" >> "$GITHUB_ENV"' \
+INPUT_ALLOW_WRITE='$GITHUB_ENV
+$GITHUB_OUTPUT
+$GITHUB_STEP_SUMMARY' \
+INPUT_RUN='echo "SHOULD_PERSIST=1" >> "$GITHUB_ENV"
+echo "persisted_output=1" >> "$GITHUB_OUTPUT"
+echo "SHOULD_PERSIST_SUMMARY" >> "$GITHUB_STEP_SUMMARY"' \
   node "$REPO_ROOT/dist/main.cjs" >"$CASE3/out.log" 2>&1
 CODE3=$?
+if [ "$CODE3" != "0" ]; then
+  fail "the allow_write: step itself failed (exit $CODE3) -- see $CASE3/out.log"
+fi
 if [ "$CODE3" = "0" ] && grep -q SHOULD_PERSIST "$GITHUB_ENV_FILE3"; then
   pass "allow_write: \$GITHUB_ENV persists an append to it"
 else
-  fail "allow_write: \$GITHUB_ENV did not persist the append (exit $CODE3) -- see $CASE3/out.log"
+  fail "allow_write: \$GITHUB_ENV did not persist the append"
+fi
+if [ "$CODE3" = "0" ] && grep -q "persisted_output=1" "$GITHUB_OUTPUT_FILE3"; then
+  pass "allow_write: \$GITHUB_OUTPUT persists a step output the command sets"
+else
+  fail "allow_write: \$GITHUB_OUTPUT did not persist the step output"
+fi
+# Also asserts this action's own report is in the same file: it is written
+# from the host after the sandbox exits, so naming $GITHUB_STEP_SUMMARY
+# puts the command's markdown alongside it rather than in place of it.
+if [ "$CODE3" = "0" ] && grep -q SHOULD_PERSIST_SUMMARY "$GITHUB_SUMMARY_FILE3" && grep -q "^## " "$GITHUB_SUMMARY_FILE3"; then
+  pass "allow_write: \$GITHUB_STEP_SUMMARY persists the command's markdown next to this action's report"
+else
+  fail "allow_write: \$GITHUB_STEP_SUMMARY did not persist the command's markdown next to the report"
+fi
+if [ "$FAILURES" != "$FAILURES_BEFORE3" ]; then
   cat "$CASE3/out.log"
 fi
-rm -rf "$CASE3" "$GITHUB_ENV_FILE3"
+rm -rf "$CASE3" "$GITHUB_ENV_FILE3" "$GITHUB_OUTPUT_FILE3" "$GITHUB_SUMMARY_FILE3"
 
 # --- Case 4: a missing allow_write target under a runner-owned tree
 # ($GITHUB_WORKSPACE) is created runner-owned, and the write persists.
