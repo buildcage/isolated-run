@@ -333,6 +333,51 @@ describe("buildOciConfig", () => {
     ).toBeTruthy();
   });
 
+  it("masks the scratch base with an empty tmpfs and reveals only this run's execDir", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    const mask = config.mounts.find((m) => m.destination === SANDBOX_SCRATCH_BASE);
+    expect(mask).toStrictEqual({
+      destination: SANDBOX_SCRATCH_BASE,
+      type: "tmpfs",
+      source: "tmpfs",
+      options: ["nosuid", "nodev", "mode=0555"],
+    });
+    // Not `rbind`: the scratch dir also holds the live `mount --rbind /`
+    // rootfs, which a recursive bind would re-expose read-write.
+    expect(config.mounts).toContainEqual({
+      destination: baseArgs.runtime.execDir,
+      type: "none",
+      source: baseArgs.runtime.execDir,
+      options: ["bind", "ro"],
+    });
+  });
+
+  it("orders the mask last of all, and the execDir reveal after it", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      writable: { ...baseArgs.writable, writablePaths: ["/opt/cache"] },
+    });
+    const destinations = config.mounts.map((m) => m.destination);
+    expect(destinations.slice(-2)).toStrictEqual([SANDBOX_SCRATCH_BASE, baseArgs.runtime.execDir]);
+  });
+
+  it("masks the scratch base in ephemeral mode too, after the overlays", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      ephemeral: { overlayRoots: [], allowWrite: ["/home/runner/work"] },
+    });
+    const destinations = config.mounts.map((m) => m.destination);
+    expect(destinations.slice(-2)).toStrictEqual([SANDBOX_SCRATCH_BASE, baseArgs.runtime.execDir]);
+  });
+
+  it("masks the scratch base even with the read-only restriction disabled", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      writable: { ...baseArgs.writable, writablePaths: ["/"] },
+    });
+    expect(config.mounts.some((m) => m.destination === SANDBOX_SCRATCH_BASE)).toBe(true);
+  });
+
   it("fails closed when writable: lists the scratch base itself", () => {
     expect(() =>
       buildOciConfig(fakeBaseSpec(), {
