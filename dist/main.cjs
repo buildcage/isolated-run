@@ -19925,8 +19925,9 @@ function scratchDirFor(containerName) {
 * Create SANDBOX_SCRATCH_BASE, or verify that an existing one is genuinely
 * ours. /var/tmp is 1777, so any local user can pre-create this path -- as a
 * symlink, or as a world-writable directory -- and thereby redirect the OCI
-* bundle (config.json carries the whole step environment, secrets included),
-* the root-run `mount --rbind /`, and cleanup's `sudo umount`/`rmSync`.
+* bundle (whose run-script.sh holds the step's command verbatim, secrets
+* included when the workflow inlined one), the root-run `mount --rbind /`,
+* and cleanup's `sudo umount`/`rmSync`.
 * `mkdirSync`'s `recursive: true` accepts any of those silently and applies
 * `mode` only on creation, so this uses a non-recursive mkdir and validates
 * the EEXIST case explicitly.
@@ -20613,9 +20614,16 @@ var extra_masked_proc_paths_default = [
 * Write the user-supplied `run:` input to an executable script file.
 * Routing through a file (rather than passing the command inline to a
 * shell) avoids any shell-injection surface from the input string.
+*
+* Written to `execDir`, the one part of the scratch directory the sandbox
+* can see (see buildOciConfig's scratch-base mask). Nothing that doesn't
+* have to be reachable from inside belongs there, and this file is no
+* exception to why: Actions expands a `${{ secrets.X }}` written inline in
+* `run:` before the input ever reaches this action, so the content below
+* can itself be a secret.
 */
-function writeRunScript(runInput, dir) {
-	let scriptPath = (0, node_path.join)(dir, "run-script.sh"), content = runInput.startsWith("#!") ? runInput : `#!/bin/sh\nset -e\n${runInput}\n`;
+function writeRunScript(runInput, execDir) {
+	let scriptPath = (0, node_path.join)(execDir, "run-script.sh"), content = runInput.startsWith("#!") ? runInput : `#!/bin/sh\nset -e\n${runInput}\n`;
 	return (0, node_fs.writeFileSync)(scriptPath, content, { mode: 448 }), scriptPath;
 }
 /**
@@ -20664,7 +20672,7 @@ function resolveSetprivPath() {
 	return SETPRIV_CANDIDATE_PATHS.find((p) => (0, node_fs.existsSync)(p)) ?? "setpriv";
 }
 function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust }) {
-	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, mounts = [
+	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, mounts = [
 		...baseSpec.mounts,
 		{
 			destination: "/etc/resolv.conf",
@@ -20711,6 +20719,21 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 			});
 		}
 	}
+	mounts.push({
+		destination: SANDBOX_SCRATCH_BASE,
+		type: "tmpfs",
+		source: "tmpfs",
+		options: [
+			"nosuid",
+			"nodev",
+			"mode=0555"
+		]
+	}, {
+		destination: execDir,
+		type: "none",
+		source: execDir,
+		options: ["bind", "ro"]
+	});
 	let extraMaskedRuntimePaths = [
 		...extra_masked_runtime_paths_default,
 		...rootlessRuntimeSocketPaths(env),
@@ -20741,12 +20764,10 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 				resolveSetprivPath(),
 				"--pdeathsig=KILL",
 				"--",
+				envLoaderPath,
 				scriptPath
 			],
-			env: Object.entries({
-				...env,
-				...caAdditions?.env
-			}).filter(([, v]) => v !== void 0).map(([k, v]) => `${k}=${v}`),
+			env: [],
 			cwd: workdir || "/",
 			capabilities: {
 				bounding: [],
@@ -20768,9 +20789,10 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 }
 /**
 * Write the final OCI config to `bundleDir/config.json` (overwriting the
-* `runc spec` placeholder generateBaseOciSpec left there). Mode 0600:
-* `process.env` embeds the whole step environment, including any secrets
-* passed via `env:`.
+* `runc spec` placeholder generateBaseOciSpec left there). Kept at mode
+* 0600: it no longer carries the step environment (see env-loader.ts), but
+* it still describes this sandbox's whole isolation policy, and nothing but
+* runc needs to read it.
 */
 function writeOciConfig(config, bundleDir) {
 	let configPath = (0, node_path.join)(bundleDir, "config.json");
@@ -20784,7 +20806,7 @@ function writeResolvConf(dns, dir) {
 //#endregion
 //#region src/lib/sandbox/run.ts
 const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
-function runIsolated({ runcPath, proxyPid, bundleDir, containerId, netnsName, rootfsBindDir, gateway, dns, targetIp }) {
+function runIsolated({ runcPath, proxyPid, bundleDir, containerId, netnsName, rootfsBindDir, gateway, dns, targetIp, envBlob }) {
 	let args = [
 		"-n",
 		"--",
@@ -20809,11 +20831,85 @@ function runIsolated({ runcPath, proxyPid, bundleDir, containerId, netnsName, ro
 		targetIp
 	];
 	try {
-		return (0, node_child_process.execFileSync)("sudo", args, { stdio: "inherit" }), 0;
+		return (0, node_child_process.execFileSync)("sudo", args, {
+			input: envBlob,
+			stdio: [
+				"pipe",
+				"inherit",
+				"inherit"
+			]
+		}), 0;
 	} catch (e) {
 		let status = e.status;
 		return typeof status == "number" ? status : 1;
 	}
+}
+//#endregion
+//#region src/lib/sandbox/env-loader.ts
+/**
+* The step's environment is handed to the sandbox over stdin rather than
+* embedded in config.json, so no part of it (`env:` secrets included) is
+* ever written to the runner's disk. `run.ts` pipes the blob into
+* `sudo run-isolated.sh`, which passes stdin through untouched to
+* `runc run` and from there to the loader below.
+*
+* Records are NUL-delimited: NUL is the one byte an environment value
+* cannot contain (execve's own envp is a NUL-terminated array), so it is
+* the only delimiter that survives values holding newlines -- a multi-line
+* private key or an inline JSON document, both ordinary `env:` contents.
+*
+* The blob ends with an explicit terminator record instead of relying on
+* EOF, so a truncated transfer fails the step rather than running it with
+* silently missing variables. It holds no "=", so it can never collide
+* with a real KEY=VALUE record.
+*/
+const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/**
+* The environment the sandboxed process should see: the step's own, plus
+* (inspect engine only) the CA-trust variables that were left unset -- see
+* ca-trust.ts. Undefined values are dropped, as they were when this went
+* into config.json's `process.env`.
+*/
+function resolveSandboxEnv(env, caTrust) {
+	let merged = {
+		...env,
+		...caTrust ? caTrustAdditions(caTrust, env).env : void 0
+	}, resolved = {}, skipped = [];
+	for (let [key, value] of Object.entries(merged)) value !== void 0 && (ENV_KEY.test(key) ? resolved[key] = value : skipped.push(key));
+	return skipped.length > 0 && console.log(`::warning::Not passing environment variables whose names a shell cannot export: ${skipped.join(", ")}`), resolved;
+}
+/** Serialize the resolved environment for the loader below. */
+function buildEnvBlob(resolved) {
+	let records = [...Object.entries(resolved).map(([k, v]) => `${k}=${v}`), ENV_BLOB_TERMINATOR];
+	return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
+}
+const ENV_LOADER_SCRIPT = `#!/bin/bash
+# Applies the step environment from stdin, then execs the run script given
+# as $1. See sandbox/env-loader.ts for the wire format.
+#
+# No eval: \`export "K=V"\` expands the value once, within double quotes, and
+# never re-interprets it, so a value containing $(...) or a backtick stays
+# literal -- the same reasoning as writeRunScript routing the run: input
+# through a file instead of inlining it into a shell.
+set -u
+
+while IFS= read -r -d '' record; do
+  if [ "$record" = "${ENV_BLOB_TERMINATOR}" ]; then
+    # The run script gets a clean stdin, never the tail of this blob.
+    exec 0</dev/null
+    exec "$1"
+  fi
+  [[ $record =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+  export "\${record%%=*}=\${record#*=}"
+done
+
+echo "buildcage: the sandbox environment ended before its terminator; refusing to run" >&2
+exit 1
+`;
+/** Write the loader that `process.args` execs ahead of the run script. */
+function writeEnvLoader(execDir) {
+	let loaderPath = (0, node_path.join)(execDir, "env-loader.sh");
+	return (0, node_fs.writeFileSync)(loaderPath, ENV_LOADER_SCRIPT, { mode: 448 }), loaderPath;
 }
 //#endregion
 //#region src/core/lib/docker/container-env.ts
@@ -79441,7 +79537,9 @@ function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths,
 		}
 		let workdir = env.GITHUB_WORKSPACE || "", home = env.HOME || "", netnsName = containerName.replace(/^buildcage-proxy-/, "buildcage-sandbox-"), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 		try {
-			let overlayScratchPaths = filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [], resolvConfPath = writeResolvConf(dns, dir), scriptPath = writeRunScript(runInput, dir), hostMounts = listHostMounts(), { gid, substitutedFrom } = resolveSandboxGid(process.getgid(), env);
+			let overlayScratchPaths = filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [], resolvConfPath = writeResolvConf(dns, dir), execDir = (0, node_path.join)(dir, "exec");
+			(0, node_fs.mkdirSync)(execDir, { mode: 448 });
+			let scriptPath = writeRunScript(runInput, execDir), envLoaderPath = writeEnvLoader(execDir), hostMounts = listHostMounts(), { gid, substitutedFrom } = resolveSandboxGid(process.getgid(), env);
 			substitutedFrom !== void 0 && info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's primary group grants container/VM runtime access`), config = buildOciConfig(baseSpec, {
 				identity: {
 					uid: process.getuid(),
@@ -79462,6 +79560,8 @@ function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths,
 					rootfsBindDir,
 					resolvConfPath,
 					seccompProfile,
+					execDir,
+					envLoaderPath,
 					scriptPath,
 					hostMounts
 				},
@@ -79472,6 +79572,7 @@ function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths,
 			throw new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
 		}
 		return writeOciConfig(config, dir), runIsolated({
+			envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust)),
 			runcPath,
 			proxyPid,
 			bundleDir: dir,
