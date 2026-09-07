@@ -27,6 +27,15 @@ check_status() {
 echo "=== [HTTPS - allowed - exact match] ==="
 check_status "allowed.example.com" "$($C https://allowed.example.com/)" "200"
 
+echo "=== [HTTPS - allowed - uppercase host (DNS names are case-insensitive)] ==="
+check_status "ALLOWED.example.com" "$($C https://ALLOWED.example.com/)" "200"
+
+echo "=== [HTTPS - allowed - trailing dot (a trailing dot is the same DNS name)] ==="
+check_status "allowed.example.com." "$($C https://allowed.example.com./)" "200"
+
+echo "=== [HTTP - allowed - uppercase host] ==="
+check_status "ALLOWED.example.com HTTP" "$($C http://ALLOWED.example.com/)" "200"
+
 echo "=== [HTTPS - allowed - wildcard] ==="
 check_status "sub.wildcard.example.com" "$($C https://sub.wildcard.example.com/)" "200"
 
