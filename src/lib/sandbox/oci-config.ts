@@ -2,6 +2,7 @@ import { writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { HasMounts, OciSpec, BuiltOciSpec, HostMount } from "./types.ts";
 import { assertScratchBaseNotWritable } from "./paths.ts";
+import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
 // Sensitive /proc paths masked with /dev/null. runc's own `runc spec`
 // default already masks /proc/kcore, /proc/keys, and /proc/timer_list
@@ -29,9 +30,15 @@ import {
  * Write the user-supplied `run:` input to an executable script file.
  * Routing through a file (rather than passing the command inline to a
  * shell) avoids any shell-injection surface from the input string.
+ *
+ * `execDir` is the one part of the scratch directory the sandbox can see
+ * (see buildOciConfig's scratch-base mask), so nothing else belongs in it:
+ * a `run:` input with `${{ secrets.X }}` written inline is expanded by
+ * Actions before it ever reaches this action, so this file's own content
+ * can hold secrets.
  */
-export function writeRunScript(runInput: string, dir: string): string {
-  const scriptPath = join(dir, "run-script.sh");
+export function writeRunScript(runInput: string, execDir: string): string {
+  const scriptPath = join(execDir, "run-script.sh");
   const content = runInput.startsWith("#!") ? runInput : `#!/bin/sh\nset -e\n${runInput}\n`;
   writeFileSync(scriptPath, content, { mode: 0o700 });
   return scriptPath;
@@ -133,6 +140,9 @@ function resolveSetprivPath(): string {
  * - linux.seccomp: the Docker-default-profile-derived filter (see
  *   gen-seccomp-profile), resolved against this same empty capability
  *   set.
+ * - mounts: an empty tmpfs over SANDBOX_SCRATCH_BASE, hiding every other
+ *   run's scratch directory that the host-`/` rbind swept in, with this
+ *   run's own execDir bound back on top of it.
  *
  * `writablePaths` containing "/" is a sentinel meaning "disable the
  * read-only restriction entirely" (see README.md's `writable`
@@ -160,6 +170,9 @@ export interface SandboxRuntimeWiring {
   rootfsBindDir: string;
   resolvConfPath: string;
   seccompProfile: unknown;
+  /** The `exec/` subdirectory of this run's scratch dir -- the only part of
+   *  it the sandbox can see. Holds scriptPath and nothing else. */
+  execDir: string;
   scriptPath: string;
   hostMounts?: HostMount[];
 }
@@ -200,6 +213,7 @@ export function buildOciConfig(
     rootfsBindDir,
     resolvConfPath,
     seccompProfile,
+    execDir,
     scriptPath,
     hostMounts = [],
   } = runtime;
@@ -266,6 +280,32 @@ export function buildOciConfig(
         mounts.push({ destination: p, type: "none", source: p, options: ["rbind", "rw"] });
     }
   }
+
+  // Last, so every mount above resolves against the real scratch base before
+  // it disappears: the sandbox rootfs is a `mount --rbind /` copy of the
+  // host, which sweeps in every *other* concurrent (or leftover) run's
+  // scratch dir too. Those are 0700/0600 but run under the same real UID as
+  // this sandbox (no user namespace), so file permissions don't separate
+  // them -- an empty tmpfs does. Everything the sandbox still needs to reach
+  // is bind-mounted back on top from execDir.
+  //
+  // Owned by root (runc mounts this) and not group/world-writable, so the
+  // sandbox can traverse it but not plant anything in it. Not maskedPaths:
+  // runc applies those after every mount, which would undo the reveal below.
+  mounts.push(
+    {
+      destination: SANDBOX_SCRATCH_BASE,
+      type: "tmpfs",
+      source: "tmpfs",
+      options: ["nosuid", "nodev", "mode=0555"],
+    },
+    // `bind`, never `rbind`: by the time runc gets here the scratch dir also
+    // holds the live `mount --rbind /` rootfs, and a recursive bind would
+    // pull that in as a second copy of the whole host `/` -- read-write,
+    // since `ro` applies only to the top mount. execDir itself never has
+    // submounts, so a plain bind is both sufficient and the safe one.
+    { destination: execDir, type: "none", source: execDir, options: ["bind", "ro"] },
+  );
 
   const extraMaskedRuntimePaths = [
     ...EXTRA_MASKED_RUNTIME_PATHS,

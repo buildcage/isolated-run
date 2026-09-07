@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -414,7 +414,11 @@ function runSandboxedCommand({
         const overlayScratchPaths =
           filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [];
         const resolvConfPath = writeResolvConf(dns, dir);
-        const scriptPath = writeRunScript(runInput, dir);
+        // The only part of the scratch dir the sandbox can see (buildOciConfig
+        // masks the rest), so only what the sandbox has to exec goes in here.
+        const execDir = join(dir, "exec");
+        mkdirSync(execDir, { mode: 0o700 });
+        const scriptPath = writeRunScript(runInput, execDir);
         // Real host mount table, read now (before run-isolated.sh's `mount
         // --rbind /` duplicates it into rootfsBindDir) so buildOciConfig can
         // force every real submount read-only individually -- root.readonly
@@ -450,6 +454,7 @@ function runSandboxedCommand({
             rootfsBindDir,
             resolvConfPath,
             seccompProfile,
+            execDir,
             scriptPath,
             hostMounts,
           },

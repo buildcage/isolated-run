@@ -167,7 +167,8 @@ describe("buildOciConfig", () => {
       rootfsBindDir: "/tmp/buildcage-sandbox-xyz/rootfs",
       resolvConfPath: "/tmp/buildcage-sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
-      scriptPath: "/tmp/buildcage-sandbox-xyz/run-script.sh",
+      execDir: "/tmp/buildcage-sandbox-xyz/exec",
+      scriptPath: "/tmp/buildcage-sandbox-xyz/exec/run-script.sh",
     },
     env: { FOO: "bar", UNSET: undefined },
   };
@@ -508,7 +509,8 @@ describe("buildOciConfig ephemeral mode", () => {
       rootfsBindDir: "/var/tmp/buildcage-1000/sandbox-xyz/rootfs",
       resolvConfPath: "/var/tmp/buildcage-1000/sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
-      scriptPath: "/var/tmp/buildcage-1000/sandbox-xyz/run-script.sh",
+      execDir: "/var/tmp/buildcage-1000/sandbox-xyz/exec",
+      scriptPath: "/var/tmp/buildcage-1000/sandbox-xyz/exec/run-script.sh",
     },
     env: { FOO: "bar" },
   };
@@ -641,7 +643,8 @@ describe("buildOciConfig — caTrust", () => {
       rootfsBindDir: "/tmp/buildcage-sandbox-xyz/rootfs",
       resolvConfPath: "/tmp/buildcage-sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
-      scriptPath: "/tmp/buildcage-sandbox-xyz/run-script.sh",
+      execDir: "/tmp/buildcage-sandbox-xyz/exec",
+      scriptPath: "/tmp/buildcage-sandbox-xyz/exec/run-script.sh",
     },
     env: { FOO: "bar", UNSET: undefined },
   };
