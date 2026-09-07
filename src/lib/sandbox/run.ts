@@ -25,7 +25,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  */
 export interface RunIsolatedOptions {
   runcPath: string;
-  proxyPid: number;
+  proxyNetns: string;
   bundleDir: string;
   containerId: string;
   netnsName: string;
@@ -38,7 +38,7 @@ export interface RunIsolatedOptions {
 
 export function runIsolated({
   runcPath,
-  proxyPid,
+  proxyNetns,
   bundleDir,
   containerId,
   netnsName,
@@ -54,8 +54,8 @@ export function runIsolated({
     "-n",
     "--",
     runIsolatedShPath,
-    "--proxy-pid",
-    String(proxyPid),
+    "--proxy-netns",
+    proxyNetns,
     "--runc",
     runcPath,
     "--bundle",

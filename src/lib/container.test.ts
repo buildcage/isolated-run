@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   generateContainerName,
-  getContainerPid,
+  getContainerNetns,
   isContainerNotFoundError,
   isValidContainerName,
   CONTAINER_NAME_PATTERN,
@@ -45,22 +45,24 @@ describe("isValidContainerName", () => {
   });
 });
 
-describe("getContainerPid", () => {
+describe("getContainerNetns", () => {
   it("returns null for a container that doesn't exist (no real docker needed)", () => {
     const fakeExec = () => {
       throw { stderr: "error: no such object: buildcage-proxy-xyz" };
     };
-    expect(getContainerPid("buildcage-proxy-xyz", { exec: fakeExec })).toBe(null);
+    expect(getContainerNetns("buildcage-proxy-xyz", { exec: fakeExec })).toBe(null);
   });
 
-  it("parses the PID from a successful docker inspect", () => {
-    const fakeExec = () => "12345\n";
-    expect(getContainerPid("buildcage-proxy-abc", { exec: fakeExec })).toBe(12345);
+  it("parses the SandboxKey from a successful docker inspect", () => {
+    const fakeExec = () => "/var/run/docker/netns/1a2b3c4d5e6f\n";
+    expect(getContainerNetns("buildcage-proxy-abc", { exec: fakeExec })).toBe(
+      "/var/run/docker/netns/1a2b3c4d5e6f",
+    );
   });
 
-  it("returns null when docker inspect prints a non-numeric/empty PID", () => {
+  it("returns null when docker inspect prints an empty SandboxKey (container exists but stopped)", () => {
     const fakeExec = () => "\n";
-    expect(getContainerPid("buildcage-proxy-abc", { exec: fakeExec })).toBe(null);
+    expect(getContainerNetns("buildcage-proxy-abc", { exec: fakeExec })).toBe(null);
   });
 
   it("throws SandboxError with DOCKER_UNAVAILABLE when docker is unreachable", () => {
@@ -69,7 +71,7 @@ describe("getContainerPid", () => {
     };
     expect.assertions(2);
     try {
-      getContainerPid("buildcage-proxy-abc", { exec: fakeExec });
+      getContainerNetns("buildcage-proxy-abc", { exec: fakeExec });
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
       expect((err as SandboxError).code).toBe("DOCKER_UNAVAILABLE");

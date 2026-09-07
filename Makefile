@@ -57,7 +57,7 @@ test_sandbox_dev: ## Run a sample isolated command in the dev loop and verify is
 	  docker compose -f compose.yaml -f docker/compose.sandbox-dev.yaml exec sandbox-dev-runner sh -c " \
 	    set -e; \
 	    build-test-bundle.sh --netns-name buildcage-sandbox-dev --script /usr/local/bin/smoke-test.sh --bundle /var/tmp/buildcage/dev-bundle; \
-	    run-isolated.sh --proxy-pid $$PROXY_PID --runc /usr/local/bin/runc --bundle /var/tmp/buildcage/dev-bundle \
+	    run-isolated.sh --proxy-netns /proc/$$PROXY_PID/ns/net --runc /usr/local/bin/runc --bundle /var/tmp/buildcage/dev-bundle \
 	      --container-id buildcage-sandbox-dev --netns-name buildcage-sandbox-dev --rootfs-bind-dir /var/tmp/buildcage/dev-bundle/rootfs \
 	      --gateway 172.20.0.1 --dns 172.20.0.1 --target-ip 172.20.0.101"
 	@$(MAKE) clean_sandbox_dev
@@ -85,6 +85,7 @@ test_integration_sandbox_linux: ## Run the action's integration tests (needs BUI
 	@./test/integration-test-zero-traffic.sh
 	@./test/integration-test-runtime-sockets.sh
 	@./test/integration-test-post-state-tampering.sh
+	@./test/integration-test-proxy-gone.sh
 
 # Separate from test_integration_sandbox_linux: these use the fixture origin
 # network in compose.test-universal.yaml (fake DNS + an origin under our own

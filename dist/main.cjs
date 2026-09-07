@@ -19728,13 +19728,21 @@ function isContainerNotFoundError(e) {
 	let err = e && typeof e == "object" ? e : {}, text = `${err.stderr ?? ""} ${err.message ?? ""}`.toLowerCase();
 	return text.includes("no such object") || text.includes("no such container");
 }
-function getContainerPid(containerName, { exec = node_child_process.execFileSync } = {}) {
+/**
+* The container's network namespace as a *path* (Docker's own
+* NetworkSettings.SandboxKey), not a PID -- Docker holds this bind mount for
+* the container's lifetime, so it can't be silently redirected by PID reuse
+* the way `/proc/<pid>/ns/net` could, and it vanishes cleanly if the
+* container dies. Null means "container doesn't exist yet" (see
+* isContainerNotFoundError).
+*/
+function getContainerNetns(containerName, { exec = node_child_process.execFileSync } = {}) {
 	let out;
 	try {
 		out = exec("docker", [
 			"inspect",
 			"--format",
-			"{{.State.Pid}}",
+			"{{.NetworkSettings.SandboxKey}}",
 			containerName
 		], {
 			encoding: "utf8",
@@ -19752,8 +19760,7 @@ function getContainerPid(containerName, { exec = node_child_process.execFileSync
 		if (isContainerNotFoundError(e)) return null;
 		throw new SandboxError(describeDockerFailure(e, { operation: "docker inspect" }), "DOCKER_UNAVAILABLE");
 	}
-	let pid = Number(out);
-	return Number.isInteger(pid) && pid > 0 ? pid : null;
+	return out || null;
 }
 //#endregion
 //#region src/lib/sandbox/mountinfo.ts
@@ -20803,13 +20810,13 @@ function writeResolvConf(dns, dir) {
 //#endregion
 //#region src/lib/sandbox/run.ts
 const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
-function runIsolated({ runcPath, proxyPid, bundleDir, containerId, netnsName, rootfsBindDir, gateway, dns, targetIp, envBlob }) {
+function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, dns, targetIp, envBlob }) {
 	let args = [
 		"-n",
 		"--",
 		(0, node_path.join)(__dirname$2, "..", "scripts", "run-isolated.sh"),
-		"--proxy-pid",
-		String(proxyPid),
+		"--proxy-netns",
+		proxyNetns,
 		"--runc",
 		runcPath,
 		"--bundle",
@@ -79489,7 +79496,7 @@ async function stopSandboxProxy({ composeFile, projectName, composeEnv, annotati
 * OCI bundle, and runs the user's command inside it via run-isolated.sh.
 * Returns the isolated command's exit code.
 */
-function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths, env, proxyEngine, filesystemMode, overlayRoots, allowWritePaths }) {
+function runSandboxedCommand({ containerName, proxyNetns, runInput, writablePaths, env, proxyEngine, filesystemMode, overlayRoots, allowWritePaths }) {
 	let dns = "172.20.0.1";
 	return withScratchDir((dir) => {
 		let runcPath, seccompProfile, baseSpec;
@@ -79546,7 +79553,7 @@ function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths,
 		return writeOciConfig(config, dir), runIsolated({
 			envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust)),
 			runcPath,
-			proxyPid,
+			proxyNetns,
 			bundleDir: dir,
 			containerId: containerName,
 			netnsName,
@@ -79659,11 +79666,11 @@ async function main() {
 	});
 	let exitCode = 1;
 	try {
-		let proxyPid = getContainerPid(containerName);
-		if (proxyPid === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
+		let proxyNetns = getContainerNetns(containerName);
+		if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
 		exitCode = runSandboxedCommand({
 			containerName,
-			proxyPid,
+			proxyNetns,
 			runInput,
 			writablePaths,
 			env,
