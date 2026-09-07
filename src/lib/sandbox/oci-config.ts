@@ -31,11 +31,12 @@ import {
  * Routing through a file (rather than passing the command inline to a
  * shell) avoids any shell-injection surface from the input string.
  *
- * `execDir` is the one part of the scratch directory the sandbox can see
- * (see buildOciConfig's scratch-base mask), so nothing else belongs in it:
- * a `run:` input with `${{ secrets.X }}` written inline is expanded by
- * Actions before it ever reaches this action, so this file's own content
- * can hold secrets.
+ * Written to `execDir`, the one part of the scratch directory the sandbox
+ * can see (see buildOciConfig's scratch-base mask). Nothing that doesn't
+ * have to be reachable from inside belongs there, and this file is no
+ * exception to why: Actions expands a `${{ secrets.X }}` written inline in
+ * `run:` before the input ever reaches this action, so the content below
+ * can itself be a secret.
  */
 export function writeRunScript(runInput: string, execDir: string): string {
   const scriptPath = join(execDir, "run-script.sh");
