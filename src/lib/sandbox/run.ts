@@ -81,7 +81,9 @@ export function runIsolated({
   } catch (e) {
     // A non-zero exit from the isolated command (or run-isolated.sh itself)
     // surfaces here as an ExecException; e.status is the actual exit code.
-    // e.status is null if the process was killed by a signal.
+    // e.status is null if the process was killed by a signal. Read only
+    // e.status, never e.code: a child that exits before draining envBlob
+    // also lands here, with a spurious EPIPE alongside its real exit code.
     const status = (e as { status?: number | null }).status;
     return typeof status === "number" ? status : 1;
   }
