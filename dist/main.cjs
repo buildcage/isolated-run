@@ -20601,6 +20601,44 @@ function assertScratchBaseNotWritable(writableDirs) {
 	if (overlapping) throw Error(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
 }
 //#endregion
+//#region src/lib/sandbox/env-loader.ts
+/**
+* NUL-delimited "KEY=VALUE\0KEY=VALUE\0..." encoding, read back by the
+* loader script from writeEnvLoader. NUL, not newline, is the delimiter:
+* a value may legitimately contain newlines, but never a NUL byte --
+* execve's own envp is a NUL-terminated array.
+*/
+function encodeEnvBlob(entries) {
+	return Buffer.concat(entries.map(([k, v]) => Buffer.from(`${k}=${v}\0`, "utf8")));
+}
+/**
+* Write the loader script that sits between runc's process.args and the
+* user's run-script.sh: reads encodeEnvBlob's output, base64-decoded,
+* from its own stdin, exports each KEY=VALUE pair, then execs into $1
+* (the real scriptPath) with that env in place. Keeps the step's
+* environment -- including any `env:` secrets -- out of config.json
+* entirely; see oci-config.ts's buildEnvBlob.
+*
+* base64, not raw bytes: `sudo` allocates a pseudo-tty for the child on
+* any host where sudoers sets `Defaults use_pty` (the GitHub-hosted-
+* runner default), and a pty in canonical mode intercepts specific
+* control bytes (ISIG/IXON) as signals or flow control instead of
+* delivering them as data, corrupting any secret containing one. base64's
+* output alphabet contains none of those bytes.
+*
+* #!/bin/bash, not #!/bin/sh: needs `read -d ''` for NUL-delimited reads,
+* which dash (the default /bin/sh on GitHub-hosted ubuntu-* runners)
+* lacks.
+*
+* `export "$key=$value"`, never eval: the value is expanded exactly once
+* and not re-parsed as shell syntax, so metacharacters inside it stay
+* inert.
+*/
+function writeEnvLoader(dir) {
+	let loaderPath = (0, node_path.join)(dir, "env-loader.sh");
+	return (0, node_fs.writeFileSync)(loaderPath, "#!/bin/bash\nset -e\nwhile IFS= read -r -d '' kv; do\n  key=\"${kv%%=*}\"\n  value=\"${kv#*=}\"\n  if [[ \"$key\" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then\n    export \"$key=$value\"\n  fi\ndone < <(base64 -d)\nexec \"$1\"\n", { mode: 448 }), loaderPath;
+}
+//#endregion
 //#region scripts/extra-masked-proc-paths.json
 var extra_masked_proc_paths_default = [
 	"/proc/kallsyms",
@@ -20664,7 +20702,7 @@ function resolveSetprivPath() {
 	return SETPRIV_CANDIDATE_PATHS.find((p) => (0, node_fs.existsSync)(p)) ?? "setpriv";
 }
 function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust }) {
-	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, mounts = [
+	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, scriptPath, envLoaderPath, scratchDir, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, mounts = [
 		...baseSpec.mounts,
 		{
 			destination: "/etc/resolv.conf",
@@ -20723,7 +20761,23 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		...ns,
 		path: netnsPath
 	} : ns);
-	return {
+	return mounts.push({
+		destination: SANDBOX_SCRATCH_BASE,
+		type: "tmpfs",
+		source: "tmpfs",
+		options: [
+			"nodev",
+			"nosuid",
+			"mode=700",
+			`uid=${uid}`,
+			`gid=${gid}`
+		]
+	}, {
+		destination: scratchDir,
+		type: "none",
+		source: scratchDir,
+		options: ["bind", "ro"]
+	}), {
 		...baseSpec,
 		root: {
 			path: rootfsBindDir,
@@ -20741,12 +20795,10 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 				resolveSetprivPath(),
 				"--pdeathsig=KILL",
 				"--",
+				envLoaderPath,
 				scriptPath
 			],
-			env: Object.entries({
-				...env,
-				...caAdditions?.env
-			}).filter(([, v]) => v !== void 0).map(([k, v]) => `${k}=${v}`),
+			env: [],
 			cwd: workdir || "/",
 			capabilities: {
 				bounding: [],
@@ -20767,10 +20819,23 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 	};
 }
 /**
+* The step's env, merged with caTrust's env additions, encoded for the
+* env-loader script's stdin -- see env-loader.ts and run.ts's runIsolated
+* (which base64-encodes this before handing it to `sudo` as input). Kept
+* here, not main.ts, as the one place this merge is computed.
+*/
+function buildEnvBlob(env, caTrust) {
+	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0;
+	return encodeEnvBlob(Object.entries({
+		...env,
+		...caAdditions?.env
+	}).filter((entry) => entry[1] !== void 0));
+}
+/**
 * Write the final OCI config to `bundleDir/config.json` (overwriting the
-* `runc spec` placeholder generateBaseOciSpec left there). Mode 0600:
-* `process.env` embeds the whole step environment, including any secrets
-* passed via `env:`.
+* `runc spec` placeholder generateBaseOciSpec left there). Mode 0600: the
+* bundle describes the sandbox's exact mount/namespace layout, which is
+* nobody else's business.
 */
 function writeOciConfig(config, bundleDir) {
 	let configPath = (0, node_path.join)(bundleDir, "config.json");
@@ -20784,7 +20849,7 @@ function writeResolvConf(dns, dir) {
 //#endregion
 //#region src/lib/sandbox/run.ts
 const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
-function runIsolated({ runcPath, proxyPid, bundleDir, containerId, netnsName, rootfsBindDir, gateway, dns, targetIp }) {
+function runIsolated({ runcPath, proxyPid, bundleDir, containerId, netnsName, rootfsBindDir, gateway, dns, targetIp, envBlob }) {
 	let args = [
 		"-n",
 		"--",
@@ -20809,7 +20874,15 @@ function runIsolated({ runcPath, proxyPid, bundleDir, containerId, netnsName, ro
 		targetIp
 	];
 	try {
-		return (0, node_child_process.execFileSync)("sudo", args, { stdio: "inherit" }), 0;
+		let encoded = envBlob.toString("base64");
+		return (0, node_child_process.execFileSync)("sudo", args, {
+			stdio: [
+				"pipe",
+				"inherit",
+				"inherit"
+			],
+			input: encoded
+		}), 0;
 	} catch (e) {
 		let status = e.status;
 		return typeof status == "number" ? status : 1;
@@ -79441,7 +79514,7 @@ function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths,
 		}
 		let workdir = env.GITHUB_WORKSPACE || "", home = env.HOME || "", netnsName = containerName.replace(/^buildcage-proxy-/, "buildcage-sandbox-"), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 		try {
-			let overlayScratchPaths = filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [], resolvConfPath = writeResolvConf(dns, dir), scriptPath = writeRunScript(runInput, dir), hostMounts = listHostMounts(), { gid, substitutedFrom } = resolveSandboxGid(process.getgid(), env);
+			let overlayScratchPaths = filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [], resolvConfPath = writeResolvConf(dns, dir), scriptPath = writeRunScript(runInput, dir), envLoaderPath = writeEnvLoader(dir), hostMounts = listHostMounts(), { gid, substitutedFrom } = resolveSandboxGid(process.getgid(), env);
 			substitutedFrom !== void 0 && info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's primary group grants container/VM runtime access`), config = buildOciConfig(baseSpec, {
 				identity: {
 					uid: process.getuid(),
@@ -79463,6 +79536,8 @@ function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths,
 					resolvConfPath,
 					seccompProfile,
 					scriptPath,
+					envLoaderPath,
+					scratchDir: dir,
 					hostMounts
 				},
 				env,
@@ -79480,7 +79555,8 @@ function runSandboxedCommand({ containerName, proxyPid, runInput, writablePaths,
 			rootfsBindDir,
 			gateway: "172.20.0.1",
 			dns,
-			targetIp: "172.20.0.101"
+			targetIp: "172.20.0.101",
+			envBlob: buildEnvBlob(env, caTrust)
 		});
 	}, containerName, filesystemMode === "ephemeral" ? overlayRoots.map((r) => r.path) : void 0);
 }
