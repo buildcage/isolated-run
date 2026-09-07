@@ -51,19 +51,27 @@ interface ExecFileSyncOptions {
 
 type ExecFileSyncLike = (command: string, args: string[], options: ExecFileSyncOptions) => string;
 
-export interface GetContainerPidOptions {
+export interface GetContainerNetnsOptions {
   exec?: ExecFileSyncLike;
 }
 
-export function getContainerPid(
+/**
+ * The container's network namespace as a *path* (Docker's own
+ * NetworkSettings.SandboxKey), not a PID -- Docker holds this bind mount for
+ * the container's lifetime, so it can't be silently redirected by PID reuse
+ * the way `/proc/<pid>/ns/net` could, and it vanishes cleanly if the
+ * container dies. Null means "container doesn't exist yet" (see
+ * isContainerNotFoundError).
+ */
+export function getContainerNetns(
   containerName: string,
-  { exec = execFileSync as unknown as ExecFileSyncLike }: GetContainerPidOptions = {},
-): number | null {
+  { exec = execFileSync as unknown as ExecFileSyncLike }: GetContainerNetnsOptions = {},
+): string | null {
   let out;
   try {
     out = exec(
       "docker",
-      ["inspect", "--format", "{{.State.Pid}}", containerName],
+      ["inspect", "--format", "{{.NetworkSettings.SandboxKey}}", containerName],
       // LC_ALL=C pins docker's own CLI error text to English regardless of
       // the runner's system locale, since isContainerNotFoundError below
       // depends on matching that text.
@@ -76,6 +84,7 @@ export function getContainerPid(
       "DOCKER_UNAVAILABLE",
     );
   }
-  const pid = Number(out);
-  return Number.isInteger(pid) && pid > 0 ? pid : null;
+  // Empty when the container exists but has no network sandbox assigned
+  // (e.g. it's stopped) -- same "nothing to wire into" outcome as not found.
+  return out || null;
 }

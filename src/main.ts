@@ -28,7 +28,7 @@ import {
   formatFilesystemPlanLog,
   type OverlayRoot,
 } from "./lib/sandbox/ephemeral-fs.ts";
-import { generateContainerName, getContainerPid } from "./lib/container.ts";
+import { generateContainerName, getContainerNetns } from "./lib/container.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { buildComposeUpArgs, buildComposeDownArgs } from "#core/lib/docker/args.ts";
 import { extractRuncBootstrap } from "./lib/sandbox/runc-bootstrap.ts";
@@ -328,7 +328,7 @@ async function stopSandboxProxy({
 
 interface RunSandboxedCommandOptions {
   containerName: string;
-  proxyPid: number;
+  proxyNetns: string;
   runInput: string;
   writablePaths: string[];
   env: NodeJS.ProcessEnv;
@@ -348,7 +348,7 @@ interface RunSandboxedCommandOptions {
  */
 function runSandboxedCommand({
   containerName,
-  proxyPid,
+  proxyNetns,
   runInput,
   writablePaths,
   env,
@@ -475,7 +475,7 @@ function runSandboxedCommand({
       return runIsolated({
         envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust)),
         runcPath,
-        proxyPid,
+        proxyNetns,
         bundleDir: dir,
         containerId: containerName,
         netnsName,
@@ -709,8 +709,8 @@ async function main(): Promise<void> {
 
   let exitCode = 1;
   try {
-    const proxyPid = getContainerPid(containerName);
-    if (proxyPid === null) {
+    const proxyNetns = getContainerNetns(containerName);
+    if (proxyNetns === null) {
       throw new SandboxError(
         `Sandbox proxy container ${containerName} is not running.`,
         "PROXY_NOT_RUNNING",
@@ -719,7 +719,7 @@ async function main(): Promise<void> {
 
     exitCode = runSandboxedCommand({
       containerName,
-      proxyPid,
+      proxyNetns,
       runInput,
       writablePaths,
       env,

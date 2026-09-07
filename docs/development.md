@@ -26,9 +26,10 @@ the uppercase form of the same names (`PROXY_MODE`).
 
 The action's own isolation mechanism (`run-isolated.sh`) uses Linux-only primitives (`ip netns`,
 `nsenter`, `runc`) that can't run natively on macOS. `make setup_sandbox_dev` /
-`make test_sandbox_dev` instead drive it from inside a container with `pid: host` (see
-`dev/Dockerfile` and `docker/compose.sandbox-dev.yaml`), which can see the proxy container's
-PID/netns via `/proc`. That is close enough to the real "runner host + separate proxy container"
+`make test_sandbox_dev` instead drive it from inside a container with `pid: host` and
+`/var/run/docker/netns` mounted in (see `dev/Dockerfile` and `docker/compose.sandbox-dev.yaml`),
+which is enough to reach the proxy container's `SandboxKey` netns the same way production does.
+That is close enough to the real "runner host + separate proxy container"
 arrangement for day-to-day iteration, though it can't validate the container-boundary parts of
 production (see [Action Internals](#action-internals) below). `runc` and `gen-seccomp-profile` are
 built directly into the dev-loop image (mirroring `docker/universal/Dockerfile`) rather than
@@ -285,6 +286,9 @@ the [README](../README.md).
      proxy's fixed gateway address directly. There is no bridge, since this is always a 1:1
      connection (one sandbox, one proxy) and a plain named interface is enough for `init-iptables`'s
      `-i sandbox0` rule (added at container startup) to match once this device appears later.
+   - The proxy's netns is referenced by Docker's own `NetworkSettings.SandboxKey` path (see
+     `getContainerNetns` in `src/lib/container.ts`), not by PID -- Docker holds that path for the
+     container's whole lifetime, so it can't be silently reused if the proxy dies before use.
 6. Run the sandboxed command via `runc`.
    - runc creates its own further-nested namespaces per `config.json` and enforces every
      isolation guarantee declared there: capability drop, seccomp filter, read-only filesystem,

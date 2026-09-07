@@ -37,7 +37,7 @@ if [ -z "${BUILDCAGE_UNSHARED:-}" ]; then
   exec unshare --mount --propagation private -- "$0" "$@"
 fi
 
-PROXY_PID=""
+PROXY_NETNS=""
 RUNC_PATH=""
 BUNDLE_DIR=""
 CONTAINER_ID=""
@@ -49,7 +49,7 @@ TARGET_IP=""
 
 usage() {
   cat >&2 <<'EOF'
-Usage: run-isolated.sh --proxy-pid <PID> --runc <PATH> --bundle <DIR>
+Usage: run-isolated.sh --proxy-netns <PATH> --runc <PATH> --bundle <DIR>
          --container-id <ID> --netns-name <NAME> --rootfs-bind-dir <DIR>
          --gateway <IP> --dns <IP> --target-ip <IP>
 EOF
@@ -57,7 +57,7 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --proxy-pid) PROXY_PID="$2"; shift 2 ;;
+    --proxy-netns) PROXY_NETNS="$2"; shift 2 ;;
     --runc) RUNC_PATH="$2"; shift 2 ;;
     --bundle) BUNDLE_DIR="$2"; shift 2 ;;
     --container-id) CONTAINER_ID="$2"; shift 2 ;;
@@ -71,7 +71,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -z "$PROXY_PID" ] && { echo "ERROR: --proxy-pid is required" >&2; usage; exit 1; }
+[ -z "$PROXY_NETNS" ] && { echo "ERROR: --proxy-netns is required" >&2; usage; exit 1; }
 [ -z "$RUNC_PATH" ] && { echo "ERROR: --runc is required" >&2; usage; exit 1; }
 [ -z "$BUNDLE_DIR" ] && { echo "ERROR: --bundle is required" >&2; usage; exit 1; }
 [ -z "$CONTAINER_ID" ] && { echo "ERROR: --container-id is required" >&2; usage; exit 1; }
@@ -88,7 +88,7 @@ fi
 for cmd in nsenter ip mount setpriv; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "ERROR: required command not found: $cmd" >&2; exit 1; }
 done
-[ -e "/proc/${PROXY_PID}/ns/net" ] || { echo "ERROR: proxy netns not found for pid ${PROXY_PID}" >&2; exit 1; }
+[ -e "$PROXY_NETNS" ] || { echo "ERROR: proxy netns not found at ${PROXY_NETNS}" >&2; exit 1; }
 [ -x "$RUNC_PATH" ] || { echo "ERROR: runc not found or not executable: ${RUNC_PATH}" >&2; exit 1; }
 [ -f "${BUNDLE_DIR}/config.json" ] || { echo "ERROR: OCI bundle config not found: ${BUNDLE_DIR}/config.json" >&2; exit 1; }
 
@@ -96,6 +96,9 @@ RAND_ID=$(od -An -tx1 -N4 /dev/urandom 2>/dev/null | tr -d ' \n')
 [ -z "$RAND_ID" ] && RAND_ID=$(printf '%08x' "$$")
 VETH_T="sbxt${RAND_ID}"
 VETH_P="sbxp${RAND_ID}"
+# `ip link set ... netns` needs a name under /var/run/netns/, not a path --
+# see the bind right before its use below.
+PROXY_NETNS_NAME="${NETNS_NAME}-proxy"
 
 CODE=1
 
@@ -153,8 +156,12 @@ cleanup() {
   # unlike the target-side end (torn down for free when the sandbox netns
   # below is deleted), a still-alive namespace doesn't lose its interfaces
   # just because its veth peer's namespace went away.
-  nsenter --net="/proc/${PROXY_PID}/ns/net" -- ip link del sandbox0 >/dev/null 2>&1
+  nsenter --net="$PROXY_NETNS" -- ip link del sandbox0 >/dev/null 2>&1
   ip netns del "$NETNS_NAME" >/dev/null 2>&1
+  # The private mount namespace would drop this bind on exit anyway; explicit
+  # for the same reason the rootfs unmount above is.
+  umount "/var/run/netns/${PROXY_NETNS_NAME}" >/dev/null 2>&1
+  rm -f "/var/run/netns/${PROXY_NETNS_NAME}" >/dev/null 2>&1
   exit "$CODE"
 }
 trap cleanup EXIT INT TERM
@@ -178,7 +185,12 @@ ip netns add "$NETNS_NAME"
 echo "Creating veth pair ${VETH_T} <-> ${VETH_P}..." >&2
 ip link add "$VETH_T" type veth peer name "$VETH_P"
 ip link set "$VETH_T" netns "$NETNS_NAME"
-ip link set "$VETH_P" netns "$PROXY_PID"
+# Bind PROXY_NETNS to a name so `ip link set` can take it -- same as what
+# `ip netns attach` does internally, minus the pid.
+mkdir -p /var/run/netns
+: > "/var/run/netns/${PROXY_NETNS_NAME}"
+mount --bind "$PROXY_NETNS" "/var/run/netns/${PROXY_NETNS_NAME}"
+ip link set "$VETH_P" netns "$PROXY_NETNS_NAME"
 
 # stdin carries the step's environment to the sandboxed process (see
 # sandbox/env-loader.ts). These nested shells are the only commands here
@@ -199,7 +211,7 @@ echo "Configuring proxy-side veth as sandbox0..." >&2
 # proxy's own gateway address directly -- init-iptables's "-i sandbox0"
 # rule (added at container startup, before this device exists) matches
 # against that name regardless of when the device actually appears.
-nsenter --net="/proc/${PROXY_PID}/ns/net" -- sh -c "
+nsenter --net="$PROXY_NETNS" -- sh -c "
   set -e
   ip link set '${VETH_P}' name sandbox0
   ip addr add '${GATEWAY}/24' dev sandbox0

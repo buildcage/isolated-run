@@ -553,11 +553,12 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   sandbox proxy container. Both are the default on GitHub-hosted `ubuntu-*` runners, but not on
   lightweight images such as `ubuntu-slim`, which ships a Docker client with no daemon. Not
   supported on Windows or macOS runners.
-- **Rootful Docker assumed**: the isolation joins the proxy container's network namespace via its
-  host-visible PID (`docker inspect .State.Pid`, entered as `/proc/<pid>/ns/net`). This assumes
-  containers share the host PID namespace, as they do on the default GitHub-hosted runner setup.
-  Under rootless Docker or `userns-remap`, that PID may not be directly reachable, so this action
-  is not currently supported on those setups.
+- **Rootful Docker assumed**: the isolation joins the proxy container's network namespace via
+  Docker's own `NetworkSettings.SandboxKey` (a path Docker itself bind-mounts on the host for the
+  container's lifetime, entered with `nsenter --net=`). This assumes that path is directly reachable
+  from the runner host's own filesystem, as it is on the default GitHub-hosted runner setup. Under
+  rootless Docker or `userns-remap`, that path may live inside a mount namespace of its own and not
+  be directly reachable, so this action is not currently supported on those setups.
 - **Per-step overhead**: each step starts and stops its own proxy container, rather than sharing
   one across steps in the same job. This keeps allowlists independently configurable per step and
   keeps the traffic report's step-to-container mapping unambiguous, at the cost of container
