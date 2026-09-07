@@ -26,18 +26,23 @@ DECOY_SECRET="buildcage-decoy-secret-$$"
 printf '{"process":{"env":["SECRET=%s"]}}' "$DECOY_SECRET" > "$DECOY_DIR/config.json"
 chmod 600 "$DECOY_DIR/config.json"
 
-# Files rather than more env vars, so the assertions compare the transported
-# environment against something that did not travel with it. Read by relative
-# path below: the sandbox's cwd is $GITHUB_WORKSPACE.
-BC_MULTILINE=$'-----BEGIN KEY-----\nline two\r\nline three'
-BC_EQUALS='a=b=c'
-BC_SPACES=' leading and trailing '
-BC_DOLLAR="\$(touch $INJECTION_MARKER) \`id\` \${HOME}"
-printf '%s' "$PATH" > "$WORKDIR/expected-path"
-printf '%s' "$BC_MULTILINE" > "$WORKDIR/expected-multiline"
-printf '%s' "$BC_EQUALS" > "$WORKDIR/expected-equals"
-printf '%s' "$BC_SPACES" > "$WORKDIR/expected-spaces"
-printf '%s' "$BC_DOLLAR" > "$WORKDIR/expected-dollar"
+export BC_MULTILINE=$'-----BEGIN KEY-----\nline two\r\nline three'
+export BC_EQUALS='a=b=c'
+export BC_SPACES=' leading and trailing '
+export BC_DOLLAR="\$(touch $INJECTION_MARKER) \`id\` \${HOME}"
+export BC_EMPTY=""
+
+# Dumped from node, since what has to survive the trip is what the action's
+# own process.env holds, not what this shell happens to see. Files rather
+# than more env vars, so the assertions compare against something that did
+# not travel with the environment; read by relative path below, the sandbox's
+# cwd being $GITHUB_WORKSPACE.
+node -e '
+  const { writeFileSync } = require("node:fs");
+  for (const name of process.argv.slice(2)) {
+    writeFileSync(`${process.argv[1]}/expected-${name}`, process.env[name] ?? "");
+  }
+' "$WORKDIR" PATH HOME BC_MULTILINE BC_EQUALS BC_SPACES BC_DOLLAR BC_EMPTY
 
 RUN_INPUT=$(cat <<'SANDBOX'
 fail=0
@@ -59,7 +64,7 @@ if [ -n "$leaked" ]; then
   echo "LEAK: an OCI config is reachable at: $leaked"
   fail=1
 fi
-if echo x > "$BASE/.buildcage-plant-test" 2>/dev/null; then
+if { echo x > "$BASE/.buildcage-plant-test"; } 2>/dev/null; then
   echo "LEAK: the masked scratch base is writable"
   rm -f "$BASE/.buildcage-plant-test"
   fail=1
@@ -74,18 +79,20 @@ check() {
   if [ "$2" = "$3" ]; then
     echo "OK: $1"
   else
-    echo "MISMATCH: $1: got [$2]"
+    echo "MISMATCH: $1"
+    echo "  got      [$2]"
+    echo "  expected [$3]"
     fail=1
   fi
 }
-check PATH "$PATH" "$(cat ./expected-path)"
-check BC_MULTILINE "$BC_MULTILINE" "$(cat ./expected-multiline)"
-check BC_EQUALS "$BC_EQUALS" "$(cat ./expected-equals)"
-check BC_SPACES "$BC_SPACES" "$(cat ./expected-spaces)"
-check BC_DOLLAR "$BC_DOLLAR" "$(cat ./expected-dollar)"
+check PATH "$PATH" "$(cat ./expected-PATH)"
+check HOME "$HOME" "$(cat ./expected-HOME)"
+check BC_MULTILINE "$BC_MULTILINE" "$(cat ./expected-BC_MULTILINE)"
+check BC_EQUALS "$BC_EQUALS" "$(cat ./expected-BC_EQUALS)"
+check BC_SPACES "$BC_SPACES" "$(cat ./expected-BC_SPACES)"
+check BC_DOLLAR "$BC_DOLLAR" "$(cat ./expected-BC_DOLLAR)"
 check BC_EMPTY-is-set "${BC_EMPTY+set}" set
-check BC_EMPTY "$BC_EMPTY" ""
-[ -n "$HOME" ] || { echo "MISMATCH: HOME is empty"; fail=1; }
+check BC_EMPTY "$BC_EMPTY" "$(cat ./expected-BC_EMPTY)"
 [ ! -e "$BC_INJECTION_MARKER" ] || { echo "LEAK: a value was evaluated, not exported"; fail=1; }
 
 exit "$fail"
@@ -99,11 +106,6 @@ BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 BC_DECOY_MARKER="$DECOY_SECRET" \
 BC_INJECTION_MARKER="$INJECTION_MARKER" \
-BC_MULTILINE="$BC_MULTILINE" \
-BC_EQUALS="$BC_EQUALS" \
-BC_SPACES="$BC_SPACES" \
-BC_DOLLAR="$BC_DOLLAR" \
-BC_EMPTY="" \
 INPUT_RUN="$RUN_INPUT" \
   node dist/main.cjs
 CODE=$?
