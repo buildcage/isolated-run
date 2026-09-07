@@ -134,7 +134,7 @@ function resolveSetprivPath(): string {
  *   noNewPrivileges — runc applies this natively, no setpriv needed.
  * - process.env: emptied. The step's real environment (and, inspect engine
  *   only, the CA-trust variables ca-trust.ts adds) is handed to the sandbox
- *   over stdin instead -- see env-loader.ts.
+ *   over stdin instead. See env-loader.ts.
  * - linux.seccomp: the Docker-default-profile-derived filter (see
  *   gen-seccomp-profile), resolved against this same empty capability
  *   set.
@@ -168,8 +168,8 @@ export interface SandboxRuntimeWiring {
   rootfsBindDir: string;
   resolvConfPath: string;
   seccompProfile: unknown;
-  /** The `exec/` subdirectory of this run's scratch dir -- the only part of
-   *  it the sandbox can see. Holds these two paths and nothing else. */
+  /** The `exec/` subdirectory of this run's scratch dir: the only part of it
+   *  the sandbox can see. Holds these two paths and nothing else. */
   execDir: string;
   envLoaderPath: string;
   scriptPath: string;

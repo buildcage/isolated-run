@@ -20845,7 +20845,7 @@ function runIsolated({ runcPath, proxyPid, bundleDir, containerId, netnsName, ro
 //#region src/lib/sandbox/env-loader.ts
 const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** The step's own environment, plus (inspect engine only) the CA-trust
-*  variables it left unset -- see ca-trust.ts. */
+*  variables it left unset. See ca-trust.ts. */
 function resolveSandboxEnv(env, caTrust) {
 	let merged = {
 		...env,
