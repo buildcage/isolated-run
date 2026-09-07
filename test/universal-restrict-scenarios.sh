@@ -28,6 +28,9 @@ echo "=== [HTTPS - allowed - exact match] ==="
 check_status "allowed.example.com" "$($C https://allowed.example.com/)" "200"
 
 echo "=== [HTTPS - allowed - uppercase host (DNS names are case-insensitive)] ==="
+# curl lowercases the hostname before the TLS handshake, so this always
+# passes regardless of the ACL's own -i flag; see [HTTP - allowed - uppercase
+# host] below for the check that actually exercises it.
 check_status "ALLOWED.example.com" "$($C https://ALLOWED.example.com/)" "200"
 
 echo "=== [HTTPS - allowed - trailing dot (a trailing dot is the same DNS name)] ==="
