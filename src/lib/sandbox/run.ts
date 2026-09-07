@@ -13,10 +13,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * command — never throws for a non-zero exit, since that's the user's
  * command failing, not this function.
  *
- * uid/gid, capabilities, mounts, and env are entirely described by
+ * uid/gid, capabilities, and mounts are entirely described by
  * `config.json` (see buildOciConfig) — run-isolated.sh only needs enough
  * to set up networking and the rootfs bind-mount before handing off to
- * `runc run`.
+ * `runc run`. env is the one exception: it travels over stdin instead
+ * (envBlob below), never through config.json — see oci-config.ts's
+ * buildEnvBlob.
  */
 export interface RunIsolatedOptions {
   runcPath: string;
@@ -28,6 +30,10 @@ export interface RunIsolatedOptions {
   gateway: string;
   dns: string;
   targetIp: string;
+  /** The step's env, NUL-encoded (see oci-config.ts's buildEnvBlob),
+   *  base64-encoded here before being piped to the sandboxed process's
+   *  stdin -- see env-loader.ts for why base64. */
+  envBlob: Buffer;
 }
 
 export function runIsolated({
@@ -40,6 +46,7 @@ export function runIsolated({
   gateway,
   dns,
   targetIp,
+  envBlob,
 }: RunIsolatedOptions): number {
   const runIsolatedShPath = join(__dirname, "..", "scripts", "run-isolated.sh");
 
@@ -68,7 +75,11 @@ export function runIsolated({
   ];
 
   try {
-    execFileSync("sudo", args, { stdio: "inherit" });
+    // stdio[0] must be spelled out as "pipe" for `input` to actually reach
+    // the child -- with stdio given as the string "inherit", Node silently
+    // drops `input` instead of overriding stdio[0] with it as documented.
+    const encoded = envBlob.toString("base64");
+    execFileSync("sudo", args, { stdio: ["pipe", "inherit", "inherit"], input: encoded });
     return 0;
   } catch (e) {
     // A non-zero exit from the isolated command (or run-isolated.sh itself)

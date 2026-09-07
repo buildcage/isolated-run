@@ -3,6 +3,8 @@ import { join } from "node:path";
 import type { HasMounts, OciSpec, BuiltOciSpec, HostMount } from "./types.ts";
 import { assertScratchBaseNotWritable } from "./paths.ts";
 import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
+import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
+import { encodeEnvBlob } from "./env-loader.ts";
 // Sensitive /proc paths masked with /dev/null. runc's own `runc spec`
 // default already masks /proc/kcore, /proc/keys, and /proc/timer_list
 // (among others) and leaves /proc/sysrq-trigger merely read-only —
@@ -126,10 +128,10 @@ function resolveSetprivPath(): string {
  *   veth into, instead of creating a fresh, unconnected one.
  * - process.capabilities: fully cleared (all five sets empty) plus
  *   noNewPrivileges — runc applies this natively, no setpriv needed.
- * - process.env: the step's real environment, replacing runc spec's
- *   invented PATH/TERM defaults, plus (inspect engine only, when `caTrust`
- *   is given) the CA-trust env vars a tool reads that were left unset --
- *   see ca-trust.ts.
+ * - process.env: left empty. The step's real environment (plus, inspect
+ *   engine only, the CA-trust env vars a tool reads -- see ca-trust.ts) is
+ *   handed to envLoaderPath over stdin instead (see buildEnvBlob and
+ *   run.ts), so config.json carries no secrets.
  * - linux.seccomp: the Docker-default-profile-derived filter (see
  *   gen-seccomp-profile), resolved against this same empty capability
  *   set.
@@ -161,6 +163,15 @@ export interface SandboxRuntimeWiring {
   resolvConfPath: string;
   seccompProfile: unknown;
   scriptPath: string;
+  /** Loader that reconstructs the step's env from its own stdin (base64
+   *  decoded, see run.ts) before exec'ing scriptPath -- see env-loader.ts
+   *  and buildEnvBlob below. */
+  envLoaderPath: string;
+  /** This run's own scratch dir (scriptPath/envLoaderPath/config.json,
+   *  plus rootfsBindDir at `<scratchDir>/rootfs`). Revealed back through
+   *  the SANDBOX_SCRATCH_BASE mask near the end of buildOciConfig -- see
+   *  that mounts.push for why the reveal must be a plain `bind`. */
+  scratchDir: string;
   hostMounts?: HostMount[];
 }
 
@@ -201,6 +212,8 @@ export function buildOciConfig(
     resolvConfPath,
     seccompProfile,
     scriptPath,
+    envLoaderPath,
+    scratchDir,
     hostMounts = [],
   } = runtime;
   const disableReadonly = !ephemeral && writablePaths.includes("/");
@@ -306,6 +319,38 @@ export function buildOciConfig(
     ns.type === "network" ? { ...ns, path: netnsPath } : ns,
   );
 
+  // SANDBOX_SCRATCH_BASE has no user-namespace or DAC boundary of its own
+  // (the sandbox keeps the real host uid), so without this every run's
+  // scratch dir would be visible to every other same-uid sandbox through
+  // `mount --rbind /` (run-isolated.sh). Masking it and revealing only
+  // scratchDir back at the same path closes that off. Can't use
+  // `linux.maskedPaths` for the mask half -- runc applies it after
+  // `mounts`, which would cover the reveal too -- so both rely on
+  // `mounts`' array order and must come last, mask then reveal.
+  //
+  // The reveal is a plain `bind`, not `rbind`: scratchDir also contains
+  // rootfsBindDir (`<scratchDir>/rootfs`, itself a `mount --rbind /` of
+  // the entire host filesystem). `rbind` follows nested mounts, so it
+  // would drag that back in too, re-exposing host `/` un-read-only
+  // (`rbind`+`ro` only forces the top mount point read-only). `bind`
+  // shows scratchDir's own files as normal but leaves "rootfs" as the
+  // empty directory it was before run-isolated.sh mounted onto it.
+  mounts.push(
+    {
+      destination: SANDBOX_SCRATCH_BASE,
+      type: "tmpfs",
+      source: "tmpfs",
+      // uid=/gid= matter here, not just mode: runc creates this mount while
+      // still root (before dropping to process.user), so without them the
+      // tmpfs root would be root-owned -- and since there's no user
+      // namespace remap, the sandboxed process (running as the real,
+      // non-root host uid) couldn't even traverse into it to reach
+      // scratchDir's own reveal below, let alone scriptPath.
+      options: ["nodev", "nosuid", "mode=700", `uid=${uid}`, `gid=${gid}`],
+    },
+    { destination: scratchDir, type: "none", source: scratchDir, options: ["bind", "ro"] },
+  );
+
   return {
     ...baseSpec,
     root: { path: rootfsBindDir, readonly: !disableReadonly },
@@ -326,10 +371,8 @@ export function buildOciConfig(
       // No other setpriv flags are needed here -- uid/gid, capabilities,
       // and no_new_privs are already applied by runc itself (above/below)
       // before this execs.
-      args: [resolveSetprivPath(), "--pdeathsig=KILL", "--", scriptPath],
-      env: Object.entries({ ...env, ...caAdditions?.env })
-        .filter(([, v]) => v !== undefined)
-        .map(([k, v]) => `${k}=${v}`),
+      args: [resolveSetprivPath(), "--pdeathsig=KILL", "--", envLoaderPath, scriptPath],
+      env: [],
       cwd: workdir || "/",
       capabilities: { bounding: [], effective: [], permitted: [], inheritable: [], ambient: [] },
       noNewPrivileges: true,
@@ -345,10 +388,24 @@ export function buildOciConfig(
 }
 
 /**
+ * The step's env, merged with caTrust's env additions, encoded for the
+ * env-loader script's stdin -- see env-loader.ts and run.ts's runIsolated
+ * (which base64-encodes this before handing it to `sudo` as input). Kept
+ * here, not main.ts, as the one place this merge is computed.
+ */
+export function buildEnvBlob(env: NodeJS.ProcessEnv, caTrust?: CaTrustFiles): Buffer {
+  const caAdditions = caTrust ? caTrustAdditions(caTrust, env) : undefined;
+  const entries = Object.entries({ ...env, ...caAdditions?.env }).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined,
+  );
+  return encodeEnvBlob(entries);
+}
+
+/**
  * Write the final OCI config to `bundleDir/config.json` (overwriting the
- * `runc spec` placeholder generateBaseOciSpec left there). Mode 0600:
- * `process.env` embeds the whole step environment, including any secrets
- * passed via `env:`.
+ * `runc spec` placeholder generateBaseOciSpec left there). Mode 0600: the
+ * bundle describes the sandbox's exact mount/namespace layout, which is
+ * nobody else's business.
  */
 export function writeOciConfig(config: unknown, bundleDir: string): string {
   const configPath = join(bundleDir, "config.json");

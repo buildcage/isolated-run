@@ -7,11 +7,20 @@ import {
   computeReadonlyHostMounts,
   freshMountDestinationsFrom,
   buildOciConfig,
+  buildEnvBlob,
   writeOciConfig,
 } from "./oci-config.ts";
 import { parseMountinfo } from "./mountinfo.ts";
 import { withScratchDir, SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import { OWN_CA_DESTINATION, SYSTEM_CA_DESTINATION } from "./ca-trust.ts";
+
+/** Inverse of encodeEnvBlob (env-loader.ts), for asserting on buildEnvBlob's output. */
+function decodeEnvBlob(blob: Buffer): string[] {
+  return blob
+    .toString("utf8")
+    .split("\0")
+    .filter((s) => s.length > 0);
+}
 
 describe("writeRunScript", () => {
   it("wraps plain commands in a #!/bin/sh + set -e preamble", () => {
@@ -168,6 +177,8 @@ describe("buildOciConfig", () => {
       resolvConfPath: "/tmp/buildcage-sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
       scriptPath: "/tmp/buildcage-sandbox-xyz/run-script.sh",
+      envLoaderPath: "/tmp/buildcage-sandbox-xyz/env-loader.sh",
+      scratchDir: "/tmp/buildcage-sandbox-xyz",
     },
     env: { FOO: "bar", UNSET: undefined },
   };
@@ -190,7 +201,7 @@ describe("buildOciConfig", () => {
     expect(config.process.cwd).toBe(baseArgs.writable.workdir);
   });
 
-  it("wraps the script in `setpriv --pdeathsig=KILL` (die-with-parent, see run-isolated.sh)", () => {
+  it("wraps the envLoader (then the script) in `setpriv --pdeathsig=KILL` (die-with-parent, see run-isolated.sh)", () => {
     const config = buildOciConfig(fakeBaseSpec(), baseArgs);
     // args[0] is setpriv resolved to an absolute path where it exists (e.g.
     // /usr/bin/setpriv on Linux), falling back to bare "setpriv" otherwise.
@@ -198,13 +209,14 @@ describe("buildOciConfig", () => {
     expect(config.process.args.slice(1)).toStrictEqual([
       "--pdeathsig=KILL",
       "--",
+      baseArgs.runtime.envLoaderPath,
       baseArgs.runtime.scriptPath,
     ]);
   });
 
-  it("replaces process.env with the given env, dropping undefined values", () => {
+  it("never writes the step's env into config.json (it travels over stdin instead -- see buildEnvBlob)", () => {
     const config = buildOciConfig(fakeBaseSpec(), baseArgs);
-    expect(config.process.env).toStrictEqual(["FOO=bar"]);
+    expect(config.process.env).toStrictEqual([]);
   });
 
   it("adds `path` to the network namespace entry, leaving other namespace types untouched", () => {
@@ -493,6 +505,46 @@ describe("buildOciConfig", () => {
     });
     expect(config.linux.readonlyPaths.includes("/sys/kernel/security")).toBeTruthy();
   });
+
+  it("masks SANDBOX_SCRATCH_BASE and reveals only this run's own scratchDir back on top of it", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    const maskIdx = config.mounts.findIndex(
+      (m) => m.destination === SANDBOX_SCRATCH_BASE && m.type === "tmpfs",
+    );
+    const revealIdx = config.mounts.findIndex(
+      (m) => m.destination === baseArgs.runtime.scratchDir && m.options?.includes("ro"),
+    );
+    expect(maskIdx).toBeGreaterThanOrEqual(0);
+    expect(revealIdx).toBeGreaterThanOrEqual(0);
+    // Mount order matters: a later, more specific mount wins over an
+    // already-mounted ancestor, so the reveal must come after the mask.
+    expect(maskIdx).toBeLessThan(revealIdx);
+    expect(config.mounts[revealIdx]).toStrictEqual({
+      destination: baseArgs.runtime.scratchDir,
+      type: "none",
+      source: baseArgs.runtime.scratchDir,
+      options: ["bind", "ro"],
+    });
+  });
+
+  it("reveals scratchDir with a plain `bind`, never `rbind` (rbind would recursively pull in rootfsBindDir's own bind of the whole host `/`)", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    const reveal = config.mounts.find(
+      (m) =>
+        m.destination === baseArgs.runtime.scratchDir && m.source === baseArgs.runtime.scratchDir,
+    );
+    expect(reveal?.options).toContain("bind");
+    expect(reveal?.options).not.toContain("rbind");
+  });
+
+  it("owns the SANDBOX_SCRATCH_BASE mask by the sandboxed uid/gid, not root (runc creates it before dropping privileges)", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    const mask = config.mounts.find(
+      (m) => m.destination === SANDBOX_SCRATCH_BASE && m.type === "tmpfs",
+    );
+    expect(mask?.options).toContain(`uid=${baseArgs.identity.uid}`);
+    expect(mask?.options).toContain(`gid=${baseArgs.identity.gid}`);
+  });
 });
 
 describe("buildOciConfig ephemeral mode", () => {
@@ -509,6 +561,8 @@ describe("buildOciConfig ephemeral mode", () => {
       resolvConfPath: "/var/tmp/buildcage-1000/sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
       scriptPath: "/var/tmp/buildcage-1000/sandbox-xyz/run-script.sh",
+      envLoaderPath: "/var/tmp/buildcage-1000/sandbox-xyz/env-loader.sh",
+      scratchDir: "/var/tmp/buildcage-1000/sandbox-xyz",
     },
     env: { FOO: "bar" },
   };
@@ -624,6 +678,19 @@ describe("buildOciConfig ephemeral mode", () => {
       }),
     ).toThrow(/overlaps the sandbox's own scratch directory/);
   });
+
+  it("also masks SANDBOX_SCRATCH_BASE and reveals scratchDir (via plain `bind`) in ephemeral mode", () => {
+    const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, ephemeral });
+    expect(
+      config.mounts.some((m) => m.destination === SANDBOX_SCRATCH_BASE && m.type === "tmpfs"),
+    ).toBe(true);
+    const reveal = config.mounts.find(
+      (m) =>
+        m.destination === baseArgs.runtime.scratchDir && m.source === baseArgs.runtime.scratchDir,
+    );
+    expect(reveal?.options).toContain("bind");
+    expect(reveal?.options).not.toContain("rbind");
+  });
 });
 
 // inspect engine only -- universal never passes caTrust, and the tests
@@ -642,6 +709,8 @@ describe("buildOciConfig — caTrust", () => {
       resolvConfPath: "/tmp/buildcage-sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
       scriptPath: "/tmp/buildcage-sandbox-xyz/run-script.sh",
+      envLoaderPath: "/tmp/buildcage-sandbox-xyz/env-loader.sh",
+      scratchDir: "/tmp/buildcage-sandbox-xyz",
     },
     env: { FOO: "bar", UNSET: undefined },
   };
@@ -650,14 +719,15 @@ describe("buildOciConfig — caTrust", () => {
     systemCaPath: "/scratch/system-ca-bundle.pem",
   };
 
-  it("adds no CA mounts or env when caTrust is omitted", () => {
+  it("adds no CA mounts when caTrust is omitted, and buildEnvBlob carries no CA env either", () => {
     const config = buildOciConfig(fakeBaseSpec(), baseArgs);
     expect(config.mounts.some((m) => m.destination === OWN_CA_DESTINATION)).toBe(false);
     expect(config.mounts.some((m) => m.destination === SYSTEM_CA_DESTINATION)).toBe(false);
-    expect(config.process.env.some((e) => e.startsWith("NODE_EXTRA_CA_CERTS="))).toBe(false);
+    const records = decodeEnvBlob(buildEnvBlob(baseArgs.env));
+    expect(records.some((e) => e.startsWith("NODE_EXTRA_CA_CERTS="))).toBe(false);
   });
 
-  it("adds the CA mounts and env when caTrust is given", () => {
+  it("adds the CA mounts, and buildEnvBlob carries the CA env, when caTrust is given", () => {
     const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, caTrust });
     expect(config.mounts).toContainEqual({
       destination: OWN_CA_DESTINATION,
@@ -671,18 +741,16 @@ describe("buildOciConfig — caTrust", () => {
       source: caTrust.systemCaPath,
       options: ["rbind", "ro"],
     });
-    expect(config.process.env).toContain(`NODE_EXTRA_CA_CERTS=${OWN_CA_DESTINATION}`);
-    expect(config.process.env).toContain(`REQUESTS_CA_BUNDLE=${SYSTEM_CA_DESTINATION}`);
+    const records = decodeEnvBlob(buildEnvBlob(baseArgs.env, caTrust));
+    expect(records).toContain(`NODE_EXTRA_CA_CERTS=${OWN_CA_DESTINATION}`);
+    expect(records).toContain(`REQUESTS_CA_BUNDLE=${SYSTEM_CA_DESTINATION}`);
   });
 
-  it("does not override a CA env var the step's own env already set", () => {
-    const config = buildOciConfig(fakeBaseSpec(), {
-      ...baseArgs,
-      env: { ...baseArgs.env, NODE_EXTRA_CA_CERTS: "/my/own/bundle.pem" },
-      caTrust,
-    });
-    expect(config.process.env).toContain("NODE_EXTRA_CA_CERTS=/my/own/bundle.pem");
-    expect(config.process.env.some((e) => e.startsWith("NODE_EXTRA_CA_CERTS=/etc/"))).toBe(false);
+  it("buildEnvBlob does not override a CA env var the step's own env already set", () => {
+    const env = { ...baseArgs.env, NODE_EXTRA_CA_CERTS: "/my/own/bundle.pem" };
+    const records = decodeEnvBlob(buildEnvBlob(env, caTrust));
+    expect(records).toContain("NODE_EXTRA_CA_CERTS=/my/own/bundle.pem");
+    expect(records.some((e) => e.startsWith("NODE_EXTRA_CA_CERTS=/etc/"))).toBe(false);
   });
 });
 
