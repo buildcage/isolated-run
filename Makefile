@@ -108,5 +108,5 @@ test_integration_sandbox_inspect: ## Run the inspect-engine integration tests (n
 # Builds each engine's proxy image itself (docker compose build), unlike the
 # two groups above which reuse a pre-built BUILDCAGE_LOCAL_IMAGE_REF.
 .PHONY: test_integration_listener_scope
-test_integration_listener_scope: ## Check :10024/:53 are unreachable outside sandbox0, for both engines
+test_integration_listener_scope: ## Check :10024/:53 are unreachable outside buildcage0, for both engines
 	@./test/integration-test-listener-scope.sh

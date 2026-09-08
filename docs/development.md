@@ -282,10 +282,10 @@ the [README](../README.md).
      mount-table snapshot the read-only patching above was computed from and this actually
      capturing the host's mount table.
    - Creates a network namespace and a veth pair, with one end moved into it (as `eth0`) and the
-     other moved into the proxy container's own netns, renamed to `sandbox0`, and given the
+     other moved into the proxy container's own netns, renamed to `buildcage0`, and given the
      proxy's fixed gateway address directly. There is no bridge, since this is always a 1:1
      connection (one sandbox, one proxy) and a plain named interface is enough for `init-iptables`'s
-     `-i sandbox0` rule (added at container startup) to match once this device appears later.
+     `-i buildcage0` rule (added at container startup) to match once this device appears later.
    - The proxy's netns is referenced by Docker's own `NetworkSettings.SandboxKey` path (see
      `getContainerNetns` in `src/lib/container.ts`), not by PID -- Docker holds that path for the
      container's whole lifetime, so it can't be silently reused if the proxy dies before use.

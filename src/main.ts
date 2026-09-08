@@ -425,7 +425,7 @@ function runSandboxedCommand({
   filesystemMode,
   overlayRoots,
 }: RunSandboxedCommandOptions): number {
-  // Fixed addressing for the direct veth link to the proxy's sandbox0 interface.
+  // Fixed addressing for the direct veth link to the proxy's buildcage0 interface.
   const gateway = "172.20.0.1";
   const dns = "172.20.0.1";
   const targetIp = "172.20.0.101";

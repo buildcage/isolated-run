@@ -3,7 +3,7 @@
 #
 # Creates a network namespace, wires a veth pair directly between it and the
 # buildcage-proxy container's own netns (the proxy-side end is renamed to
-# "sandbox0" and given the proxy's fixed gateway address -- no bridge
+# "buildcage0" and given the proxy's fixed gateway address -- no bridge
 # involved, since this is always a 1:1 connection: one sandbox, one proxy),
 # bind-mounts the host's own "/" so it can be handed to runc as a read-only
 # rootfs, and execs `runc run` against an OCI bundle (config.json) that
@@ -151,12 +151,12 @@ cleanup() {
     echo "WARNING: failed to unmount ${ROOTFS_BIND_DIR}: $(cat "$UMOUNT_ERR_FILE" 2>/dev/null)" >&2
   }
   rm -f "$UMOUNT_ERR_FILE"
-  # The proxy-side veth end (renamed to "sandbox0" below) lives in the
+  # The proxy-side veth end (renamed to "buildcage0" below) lives in the
   # long-lived proxy container's netns, so it must be explicitly removed --
   # unlike the target-side end (torn down for free when the sandbox netns
   # below is deleted), a still-alive namespace doesn't lose its interfaces
   # just because its veth peer's namespace went away.
-  nsenter --net="$PROXY_NETNS" -- ip link del sandbox0 >/dev/null 2>&1
+  nsenter --net="$PROXY_NETNS" -- ip link del buildcage0 >/dev/null 2>&1
   ip netns del "$NETNS_NAME" >/dev/null 2>&1
   # The private mount namespace would drop this bind on exit anyway; explicit
   # for the same reason the rootfs unmount above is.
@@ -205,17 +205,17 @@ ip netns exec "$NETNS_NAME" sh -c "
   ip route add default via '${GATEWAY}'
 " </dev/null
 
-echo "Configuring proxy-side veth as sandbox0..." >&2
+echo "Configuring proxy-side veth as buildcage0..." >&2
 # No bridge: this is always a 1:1 connection (one sandbox, one proxy), so
 # the veth end is simply renamed to a fixed, predictable name and given the
-# proxy's own gateway address directly -- init-iptables's "-i sandbox0"
+# proxy's own gateway address directly -- init-iptables's "-i buildcage0"
 # rule (added at container startup, before this device exists) matches
 # against that name regardless of when the device actually appears.
 nsenter --net="$PROXY_NETNS" -- sh -c "
   set -e
-  ip link set '${VETH_P}' name sandbox0
-  ip addr add '${GATEWAY}/24' dev sandbox0
-  ip link set sandbox0 up
+  ip link set '${VETH_P}' name buildcage0
+  ip addr add '${GATEWAY}/24' dev buildcage0
+  ip link set buildcage0 up
 " </dev/null
 
 echo "Executing isolated command via runc..." >&2

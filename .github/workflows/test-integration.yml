@@ -191,7 +191,7 @@ jobs:
           fi
 
   # Separate job from the others: builds both engines' proxy images itself
-  # (docker compose build), with no sandbox attached, so sandbox0 never
+  # (docker compose build), with no sandbox attached, so buildcage0 never
   # exists -- proving :10024/:53 stay unreachable from anywhere else rather
   # than merely reachable from the one interface the tests above exercise.
   test_listener_scope:
