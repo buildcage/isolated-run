@@ -8,6 +8,9 @@
 # on the proxy's own compose network and from the runner host itself.
 # Sandbox-side access is covered by the existing fixture-based integration
 # tests, which would themselves fail outright if this had blocked too much.
+# The same standalone proxy also has to reach its own readiness checks over
+# loopback and exit on SIGTERM, which is what tells an over-broad rule from a
+# correct one that merely looks unreachable from outside.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -82,6 +85,42 @@ run_engine() {
     else
       pass "[$engine] :53/udp did not answer a query from the runner host"
     fi
+  fi
+
+  echo "--- readiness and shutdown ---"
+
+  # A readiness check the container's own INPUT rules block never succeeds,
+  # leaving s6-rc's start transition running for the container's whole life.
+  # Driven off notification-fd, so an engine that gains a check is covered.
+  local not_ready=""
+  for _ in $(seq 1 20); do
+    not_ready=$(docker exec "$proxy_name" sh -c '
+      for f in /etc/s6-overlay/s6-rc.d/*/notification-fd; do
+        [ -e "$f" ] || continue
+        svc=$(basename "$(dirname "$f")")
+        s6-svstat "/run/service/$svc" 2>/dev/null | grep -q ", ready " || echo "$svc"
+      done' 2>/dev/null)
+    [ -z "$not_ready" ] && break
+    sleep 1
+  done
+  if [ -z "$not_ready" ]; then
+    pass "[$engine] every service declaring a readiness check reached ready"
+  else
+    fail "[$engine] never reached ready: $not_ready (is its check blocked by init-iptables?)"
+  fi
+
+  # Same failure from the other end: an unfinished start transition holds the
+  # s6-rc lock the stop transition needs, so the container never exits on
+  # SIGTERM and Docker SIGKILLs it, adding 10s to every step.
+  local started ended code
+  started=$(date +%s)
+  docker stop -t 30 "$proxy_name" >/dev/null 2>&1
+  ended=$(date +%s)
+  code=$(docker inspect -f '{{.State.ExitCode}}' "$proxy_name" 2>/dev/null)
+  if [ "$code" = "0" ]; then
+    pass "[$engine] exited on SIGTERM in $((ended - started))s"
+  else
+    fail "[$engine] did not exit on SIGTERM (exit $code after $((ended - started))s; 137 means it was SIGKILLed)"
   fi
 }
 
