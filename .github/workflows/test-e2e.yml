@@ -48,7 +48,7 @@ jobs:
   #
   # Split into one job per case (test_sandbox_*) so each gets its own Job
   # Summary section and status check. run-isolated.sh's own mechanics
-  # (privilege drop, filesystem defaults, writable: variations, concurrent
+  # (privilege drop, filesystem defaults, write_through: variations, concurrent
   # lifecycles) are covered more cheaply in test-integration.yml instead.
   #
   # Verifies audit mode's Job Summary includes the auto-generated
@@ -140,9 +140,9 @@ jobs:
           allowed_http_rules: example.com:80
           # Blocked connections below are expected, not a failure.
           fail_on_blocked: false
-          # One representative writable: pattern through the real action;
-          # other writable: values are cheaper to check in test-integration.yml.
-          writable: /opt
+          # One representative write_through: pattern through the real action;
+          # other write_through: values are cheaper to check in test-integration.yml.
+          write_through: /opt
           run: |
             echo "=== allowlisted HTTP host must be reachable ==="
             wget -q -T 5 -O /dev/null http://example.com/
@@ -164,7 +164,7 @@ jobs:
             fi
             echo "OK: example.org (HTTPS) correctly blocked"
 
-            echo "=== /opt must be writable when listed under writable: ==="
+            echo "=== /opt must be writable when listed under write_through: ==="
             touch /opt/.buildcage-writable-test
             rm -f /opt/.buildcage-writable-test
 

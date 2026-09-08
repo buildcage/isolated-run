@@ -3,7 +3,7 @@
 # exception (here, a bind mount under $GITHUB_WORKSPACE) is still visible
 # but individually forced read-only inside the sandbox -- the writable
 # guarantee covers only the exception paths themselves
-# (workdir/home/tmp/RUNNER_TEMP/writable:), not everything nested under
+# (workdir/home/tmp/RUNNER_TEMP/write_through:), not everything nested under
 # them (see computeReadonlyHostMounts: protectedPaths is checked by exact
 # match, not by prefix). Ordinary files/directories under workdir (not
 # separate mount points) are already covered by

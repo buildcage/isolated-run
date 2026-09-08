@@ -64,7 +64,7 @@ else
 fi
 echo ""
 
-# Misconfiguration guard: `writable: /var/tmp/buildcage-<uid>` (or an
+# Misconfiguration guard: `write_through: /var/tmp/buildcage-<uid>` (or an
 # ancestor of it) would recursively re-expose the sandbox's own rootfs
 # read-write -- assertScratchBaseNotWritable in sandbox/oci-config.ts must
 # fail the step closed rather than silently running with that hole open.
@@ -76,17 +76,17 @@ GITHUB_STATE="$WORKDIR2/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR2/summary.md" \
 BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_WRITABLE="$SCRATCH_BASE" \
+INPUT_WRITE_THROUGH="$SCRATCH_BASE" \
 INPUT_RUN="true" \
   node dist/main.cjs
 GUARD_CODE=$?
 
-echo "=== Sandbox writable:$SCRATCH_BASE Fail-Closed Assertion ==="
+echo "=== Sandbox write_through:$SCRATCH_BASE Fail-Closed Assertion ==="
 echo ""
 if [ "$GUARD_CODE" != "0" ]; then
-  echo "  PASS  writable: $SCRATCH_BASE was rejected (fails closed)"
+  echo "  PASS  write_through: $SCRATCH_BASE was rejected (fails closed)"
 else
-  echo "  FAIL  writable: $SCRATCH_BASE was accepted (should fail closed, exit 0)"
+  echo "  FAIL  write_through: $SCRATCH_BASE was accepted (should fail closed, exit 0)"
   exit 1
 fi
 echo ""

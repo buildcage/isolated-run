@@ -16,14 +16,15 @@ import { ActionError } from "#core/lib/errors.ts";
  *   DOCKER_UNAVAILABLE         – docker CLI missing from PATH or a docker command failed
  *   PASSWORDLESS_SUDO_REQUIRED    – sudo -n check failed; passwordless sudo isn't configured
  *   UNSAFE_PRIMARY_GID            – the runner's primary GID is privileged and no safe substitute GID exists
- *   FILESYSTEM_INPUT_CONFLICT      – filesystem/writable/allow_write inputs combined in a disallowed way
+ *   FILESYSTEM_INPUT_CONFLICT      – filesystem/write_through inputs combined in a disallowed way
  *   INVALID_FILESYSTEM_MODE       – filesystem input isn't "persistent" or "ephemeral"
- *   INVALID_ALLOW_WRITE_PATH      – an allow_write entry failed path-resolution rules (unknown $VAR, etc.)
- *   ALLOW_WRITE_TARGET_MISSING    – an allow_write entry resolves to a well-known GITHUB_* file that doesn't exist
- *   ALLOW_WRITE_TARGET_UNCREATABLE – an allow_write entry doesn't exist and couldn't be created (sudo mkdir/chown failed)
+ *   INVALID_WRITE_THROUGH_PATH    – a write_through entry failed path-resolution rules (unknown $VAR, etc.)
+ *   WRITE_THROUGH_TARGET_MISSING  – a write_through entry resolves to a well-known GITHUB_* file that doesn't exist
+ *   WRITE_THROUGH_TARGET_UNCREATABLE – a write_through entry doesn't exist and couldn't be created (sudo mkdir/chown failed)
+ *   ALLOW_WRITE_REMOVED           – the removed allow_write input was supplied (renamed to write_through)
  *   OVERLAYFS_UNSUPPORTED         – filesystem: ephemeral's overlayfs preflight probe failed
  *   FILESYSTEM_PLAN_FAILED        – computing filesystem: ephemeral's overlay roots failed for a reason
- *                                    unrelated to allow_write's own syntax (e.g. a permissions error reading
+ *                                    unrelated to write_through's own syntax (e.g. a permissions error reading
  *                                    one of the fixed $HOME/$RUNNER_TEMP/etc. candidate paths)
  *   SCRATCH_BASE_UNSAFE           – the sandbox scratch base exists but isn't a private directory we own
  *   CONTAINER_NAME_INVALID        – a value read back from GITHUB_STATE isn't a name this action generates
@@ -42,9 +43,10 @@ export type SandboxErrorCode =
   | "UNSAFE_PRIMARY_GID"
   | "FILESYSTEM_INPUT_CONFLICT"
   | "INVALID_FILESYSTEM_MODE"
-  | "INVALID_ALLOW_WRITE_PATH"
-  | "ALLOW_WRITE_TARGET_MISSING"
-  | "ALLOW_WRITE_TARGET_UNCREATABLE"
+  | "INVALID_WRITE_THROUGH_PATH"
+  | "WRITE_THROUGH_TARGET_MISSING"
+  | "WRITE_THROUGH_TARGET_UNCREATABLE"
+  | "ALLOW_WRITE_REMOVED"
   | "OVERLAYFS_UNSUPPORTED"
   | "FILESYSTEM_PLAN_FAILED"
   | "SCRATCH_BASE_UNSAFE"

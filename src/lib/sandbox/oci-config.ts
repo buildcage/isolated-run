@@ -186,11 +186,15 @@ export interface EphemeralPolicy {
 
 export interface BuildOciConfigOptions {
   identity: SandboxIdentity;
-  /** Always used for `process.cwd` (workdir) regardless of mode. `writablePaths`
-   *  is only meaningful when `ephemeral` is absent -- see §3.1: `filesystem:
-   *  ephemeral` and `writable:` are mutually exclusive at the input level. */
+  /** Always used for `process.cwd` (workdir) regardless of mode. In ephemeral
+   *  mode the write_through paths are consumed as `ephemeral.allowWrite`
+   *  instead, so `writablePaths` is read only when `ephemeral` is absent --
+   *  the `!ephemeral` half of `disableReadonly` below is what enforces that,
+   *  and dropping it would let `write_through: /` disable the read-only root
+   *  in ephemeral mode too. */
   writable: WritablePolicy;
-  /** Present iff `filesystem: ephemeral`. */
+  /** Present iff `filesystem: ephemeral`. Carries the same write_through
+   *  paths as `writable.writablePaths` -- one input, two mount strategies. */
   ephemeral?: EphemeralPolicy;
   runtime: SandboxRuntimeWiring;
   env: NodeJS.ProcessEnv;
@@ -252,7 +256,7 @@ export function buildOciConfig(
         options: [`lowerdir=${root.path}`, `upperdir=${root.upper}`, `workdir=${root.work}`],
       });
     }
-    // Layer 3: allow_write entries, shallow-first. ensureAllowWriteTargetsExist
+    // Layer 3: write_through entries, shallow-first. ensureWriteThroughTargetsExist
     // has already guaranteed every one of these exists on the host before
     // this runs, so runc never has to synthesize a root-owned placeholder
     // for any of them (see that function's own doc comment for why).

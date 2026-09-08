@@ -591,7 +591,7 @@ describe("buildOciConfig ephemeral mode", () => {
     }
   });
 
-  it("emits a plain rw rbind for each allow_write entry", () => {
+  it("emits a plain rw rbind for each write_through entry", () => {
     const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, ephemeral });
     expect(config.mounts).toContainEqual({
       destination: baseArgs.writable.workdir,
@@ -610,7 +610,7 @@ describe("buildOciConfig ephemeral mode", () => {
     expect(config.mounts.some((m) => m.destination === "/opt/should-be-ignored")).toBe(false);
   });
 
-  it("orders mounts as base spec, then overlay roots shallow-first, then allow_write entries shallow-first", () => {
+  it("orders mounts as base spec, then overlay roots shallow-first, then write_through entries shallow-first", () => {
     const deepEphemeral = {
       overlayRoots: [
         { path: "/home/runner/deep", upper: "/scratch/deep/upper", work: "/scratch/deep/work" },
@@ -649,7 +649,7 @@ describe("buildOciConfig ephemeral mode", () => {
     }
   });
 
-  it("feeds overlay roots and allow_write paths into the readonlyPaths host-mount pass as protected", () => {
+  it("feeds overlay roots and write_through paths into the readonlyPaths host-mount pass as protected", () => {
     const hostMounts = [
       { mountPoint: "/", fsType: "ext4" },
       { mountPoint: "/home/runner", fsType: "ext4" },
@@ -666,7 +666,7 @@ describe("buildOciConfig ephemeral mode", () => {
     expect(config.linux.readonlyPaths.includes("/mnt")).toBe(true);
   });
 
-  it("still fails closed if an overlay root or allow_write entry somehow overlaps the scratch base", () => {
+  it("still fails closed if an overlay root or write_through entry somehow overlaps the scratch base", () => {
     expect(() =>
       buildOciConfig(fakeBaseSpec(), {
         ...baseArgs,

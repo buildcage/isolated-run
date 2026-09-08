@@ -7,15 +7,17 @@ import { describe, it, expect, vi } from "vitest";
 
 import {
   buildACLRules,
-  parseWritablePaths,
   readKnownBlockedRules,
   resolveProxyEngine,
   resolveFilesystemMode,
   resolveFilesystemPlan,
+  resolveWriteThroughInput,
+  splitWriteThroughInput,
   validateFilesystemInputs,
 } from "./main.ts";
 import { InvalidRulesError } from "#core/lib/acl/rules.ts";
 import { SandboxError } from "./lib/errors.ts";
+import { SANDBOX_SCRATCH_BASE } from "./lib/sandbox/scratch-dir.ts";
 
 describe("resolveProxyEngine", () => {
   it("defaults to universal for undefined", () => {
@@ -111,32 +113,78 @@ describe("resolveFilesystemMode", () => {
   });
 });
 
+describe("resolveWriteThroughInput", () => {
+  const inputs = (over: Partial<Parameters<typeof resolveWriteThroughInput>[0]> = {}) => ({
+    writeThrough: "",
+    writable: "",
+    allowWrite: "",
+    ...over,
+  });
+
+  it("returns write_through: as given", () => {
+    expect(resolveWriteThroughInput(inputs({ writeThrough: "/opt/cache" }))).toBe("/opt/cache");
+  });
+
+  it("accepts writable: as the pre-rename spelling", () => {
+    expect(resolveWriteThroughInput(inputs({ writable: "/opt/cache" }))).toBe("/opt/cache");
+  });
+
+  it("throws FILESYSTEM_INPUT_CONFLICT when both spellings are set", () => {
+    expect.assertions(2);
+    try {
+      resolveWriteThroughInput(inputs({ writeThrough: "/opt/a", writable: "/opt/b" }));
+    } catch (err) {
+      expect(err).toBeInstanceOf(SandboxError);
+      expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
+    }
+  });
+
+  it("rejects the removed allow_write: input rather than ignoring it", () => {
+    expect.assertions(2);
+    try {
+      resolveWriteThroughInput(inputs({ allowWrite: "./dist" }));
+    } catch (err) {
+      expect(err).toBeInstanceOf(SandboxError);
+      expect((err as SandboxError).code).toBe("ALLOW_WRITE_REMOVED");
+    }
+  });
+
+  it("returns an empty string when nothing is set", () => {
+    expect(resolveWriteThroughInput(inputs())).toBe("");
+  });
+});
+
+describe("splitWriteThroughInput", () => {
+  it("splits on newlines, trims, and drops blank lines", () => {
+    expect(splitWriteThroughInput(" /opt/cache \n\n./dist\n")).toStrictEqual([
+      "/opt/cache",
+      "./dist",
+    ]);
+    expect(splitWriteThroughInput("")).toStrictEqual([]);
+  });
+});
+
 describe("validateFilesystemInputs", () => {
-  it("throws FILESYSTEM_INPUT_CONFLICT for ephemeral + writable:, with no filesystem access", () => {
+  it("throws FILESYSTEM_INPUT_CONFLICT for write_through: / in ephemeral mode", () => {
     expect.assertions(2);
     try {
-      validateFilesystemInputs("ephemeral", "/opt/cache", "");
+      validateFilesystemInputs("ephemeral", ["/"]);
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
       expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
     }
   });
 
-  it("throws FILESYSTEM_INPUT_CONFLICT for persistent + allow_write:", () => {
-    expect.assertions(2);
-    try {
-      validateFilesystemInputs("persistent", "", "$GITHUB_WORKSPACE");
-    } catch (err) {
-      expect(err).toBeInstanceOf(SandboxError);
-      expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
-    }
+  it("finds the / sentinel among other entries, not just on its own", () => {
+    expect(() => validateFilesystemInputs("ephemeral", ["./dist", "/"])).toThrow(SandboxError);
   });
 
-  it("does not throw for either mode used with its own matching input", () => {
-    expect(() => validateFilesystemInputs("persistent", "/opt/cache", "")).not.toThrow();
-    expect(() => validateFilesystemInputs("ephemeral", "", "$GITHUB_WORKSPACE")).not.toThrow();
-    expect(() => validateFilesystemInputs("persistent", "", "")).not.toThrow();
-    expect(() => validateFilesystemInputs("ephemeral", "", "")).not.toThrow();
+  it("allows the / sentinel in persistent mode, and ordinary paths in either", () => {
+    expect(() => validateFilesystemInputs("persistent", ["/"])).not.toThrow();
+    expect(() => validateFilesystemInputs("persistent", ["/opt/cache"])).not.toThrow();
+    expect(() => validateFilesystemInputs("ephemeral", ["./dist"])).not.toThrow();
+    expect(() => validateFilesystemInputs("persistent", [])).not.toThrow();
+    expect(() => validateFilesystemInputs("ephemeral", [])).not.toThrow();
   });
 });
 
@@ -146,55 +194,94 @@ describe("resolveFilesystemPlan", () => {
     GITHUB_WORKSPACE: "/home/runner/work/repo/repo",
     RUNNER_TEMP: "/home/runner/work/_temp",
   };
-  // Everything "exists" by default (candidates + allow_write targets) unless
+  // Everything "exists" by default (candidates + write_through targets) unless
   // a test narrows it -- keeps each test focused on the one thing it checks.
   const alwaysExists = () => true;
 
-  it("returns empty plans for persistent mode, without touching the filesystem", () => {
+  it("returns an empty plan for persistent mode with no write_through:, without touching the filesystem", () => {
     const exists = vi.fn(alwaysExists);
-    const plan = resolveFilesystemPlan("persistent", "", "", ENV, { exists });
-    expect(plan).toStrictEqual({ overlayRoots: [], allowWritePaths: [] });
+    const plan = resolveFilesystemPlan("persistent", "", ENV, { exists });
+    expect(plan).toStrictEqual({ overlayRoots: [], writeThroughPaths: [], createdDirs: [] });
     expect(exists).not.toHaveBeenCalled();
   });
 
-  it("persistent mode tolerates a non-empty writable: input (that's its normal use)", () => {
+  it("resolves write_through: in persistent mode too, normalizing each entry", () => {
+    const plan = resolveFilesystemPlan("persistent", "./dist\n/opt/./cache/\n", ENV, {
+      exists: alwaysExists,
+    });
+    expect(plan.writeThroughPaths).toStrictEqual([`${ENV.GITHUB_WORKSPACE}/dist`, "/opt/cache"]);
+    expect(plan.overlayRoots).toStrictEqual([]);
+  });
+
+  it("pre-creates a missing write_through target in persistent mode and reports what it created", () => {
+    const execFileCalls: string[][] = [];
+    const plan = resolveFilesystemPlan("persistent", "/opt/build-output", ENV, {
+      exists: (p) => p !== "/opt/build-output",
+      stat: () => ({ uid: 1000, gid: 1000, mode: 0o40755 }),
+      execFile: (cmd, args) => execFileCalls.push([cmd, ...args]),
+    });
+    expect(execFileCalls[0]).toStrictEqual(["sudo", "mkdir", "-p", "/opt/build-output"]);
+    expect(plan.createdDirs).toStrictEqual(["/opt/build-output"]);
+  });
+
+  it("skips the guard and creates nothing for the / sentinel", () => {
+    const exists = vi.fn(alwaysExists);
+    const plan = resolveFilesystemPlan("persistent", "/", ENV, { exists });
+    expect(plan).toStrictEqual({ overlayRoots: [], writeThroughPaths: ["/"], createdDirs: [] });
+    expect(exists).not.toHaveBeenCalled();
+  });
+
+  it("throws FILESYSTEM_INPUT_CONFLICT for write_through: / in ephemeral mode", () => {
+    expect.assertions(2);
+    try {
+      resolveFilesystemPlan("ephemeral", "/", ENV);
+    } catch (err) {
+      expect(err).toBeInstanceOf(SandboxError);
+      expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
+    }
+  });
+
+  it("catches a / sentinel that only normalization reveals, before the overlay-less early return", () => {
+    // "/." and "$GITHUB_WORKSPACE/../../../.." both normalize to "/". Left
+    // unchecked they'd return a plan with no overlay roots at all under
+    // ephemeral, and only fail much later inside buildOciConfig.
+    for (const spelling of ["/.", "//", `${ENV.GITHUB_WORKSPACE}/../../../../..`]) {
+      expect(() => resolveFilesystemPlan("ephemeral", spelling, ENV)).toThrow(
+        /has no meaning in filesystem: ephemeral/,
+      );
+    }
+  });
+
+  it("rejects a path overlapping the sandbox's own scratch base before creating anything", () => {
+    const execFile = vi.fn();
+    expect.assertions(3);
+    try {
+      resolveFilesystemPlan("persistent", `${SANDBOX_SCRATCH_BASE}/x`, ENV, {
+        exists: () => false,
+        stat: () => ({ uid: 1000, gid: 1000, mode: 0o40755 }),
+        execFile,
+      });
+    } catch (err) {
+      expect(err).toBeInstanceOf(SandboxError);
+      expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
+    }
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it("catches an overlap that only normalization reveals", () => {
     expect(() =>
-      resolveFilesystemPlan("persistent", "/opt/cache", "", ENV, { exists: alwaysExists }),
-    ).not.toThrow();
+      resolveFilesystemPlan("persistent", `${SANDBOX_SCRATCH_BASE}/./x`, ENV, {
+        exists: alwaysExists,
+      }),
+    ).toThrow(/overlaps/);
   });
 
-  it("throws FILESYSTEM_INPUT_CONFLICT when persistent mode is combined with allow_write:", () => {
-    expect.assertions(2);
-    try {
-      resolveFilesystemPlan("persistent", "", "$GITHUB_WORKSPACE", ENV);
-    } catch (err) {
-      expect(err).toBeInstanceOf(SandboxError);
-      expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
-    }
-  });
-
-  it("throws FILESYSTEM_INPUT_CONFLICT when ephemeral mode is combined with writable:", () => {
-    expect.assertions(2);
-    try {
-      resolveFilesystemPlan("ephemeral", "/opt/cache", "", ENV);
-    } catch (err) {
-      expect(err).toBeInstanceOf(SandboxError);
-      expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
-    }
-  });
-
-  it("treats writable: / as non-empty too -- the disable-readonly sentinel has no meaning in ephemeral mode", () => {
-    expect(() => resolveFilesystemPlan("ephemeral", "/", "", ENV)).toThrow(
-      /FILESYSTEM_INPUT_CONFLICT|mutually exclusive/,
-    );
-  });
-
-  it("accepts an empty allow_write: in ephemeral mode silently (maximum isolation is a valid choice)", () => {
-    const plan = resolveFilesystemPlan("ephemeral", "", "", ENV, {
+  it("accepts an empty write_through: in ephemeral mode silently (maximum isolation is a valid choice)", () => {
+    const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
       exists: alwaysExists,
       deviceOf: () => 1,
     });
-    expect(plan.allowWritePaths).toStrictEqual([]);
+    expect(plan.writeThroughPaths).toStrictEqual([]);
     // RUNNER_TEMP is nested under HOME in this fixture's ENV (as on a real
     // GitHub-hosted runner), so it folds away; GITHUB_WORKSPACE is also
     // nested under HOME here, so it folds away too -- only HOME and /tmp
@@ -202,23 +289,23 @@ describe("resolveFilesystemPlan", () => {
     expect(plan.overlayRoots.map((r) => r.path).sort()).toStrictEqual([ENV.HOME, "/tmp"].sort());
   });
 
-  it("resolves and pre-creates allow_write targets, then excludes only what's actually covered by them", () => {
+  it("resolves and pre-creates write_through targets, then excludes only what's actually covered by them", () => {
     // Self-hosted-style ENV: GITHUB_WORKSPACE isn't nested under HOME here,
     // so its own overlay survives folding -- letting this test show, through
     // resolveFilesystemPlan end-to-end, that a candidate merely containing a
-    // narrower allow_write entry (./dist under the workspace) keeps its own
+    // narrower write_through entry (./dist under the workspace) keeps its own
     // overlay rather than being dropped (see determineOverlayRoots' "covered
     // by" rule and buildOciConfig's mount ordering, which layers ./dist's
     // own rw bind on top of that overlay).
     const selfHostedEnv = { ...ENV, GITHUB_WORKSPACE: "/workspace" };
     const execFileCalls: string[][] = [];
-    const plan = resolveFilesystemPlan("ephemeral", "", "./dist", selfHostedEnv, {
+    const plan = resolveFilesystemPlan("ephemeral", "./dist", selfHostedEnv, {
       exists: (p) => p !== "/workspace/dist",
       stat: () => ({ uid: 1000, gid: 1000, mode: 0o40755 }),
       execFile: (cmd, args) => execFileCalls.push([cmd, ...args]),
       deviceOf: () => 1,
     });
-    expect(plan.allowWritePaths).toStrictEqual(["/workspace/dist"]);
+    expect(plan.writeThroughPaths).toStrictEqual(["/workspace/dist"]);
     expect(execFileCalls[0]).toStrictEqual(["sudo", "mkdir", "-p", "/workspace/dist"]);
     // RUNNER_TEMP still folds away under HOME as usual; GITHUB_WORKSPACE
     // keeps its own overlay since it isn't nested under HOME here.
@@ -227,23 +314,23 @@ describe("resolveFilesystemPlan", () => {
     );
   });
 
-  it("wraps a missing well-known runner file as ALLOW_WRITE_TARGET_MISSING", () => {
+  it("wraps a missing well-known runner file as WRITE_THROUGH_TARGET_MISSING", () => {
     const envWithOutput = { ...ENV, GITHUB_OUTPUT: "/home/runner/_temp/set_output" };
     expect.assertions(2);
     try {
-      resolveFilesystemPlan("ephemeral", "", "$GITHUB_OUTPUT", envWithOutput, {
+      resolveFilesystemPlan("ephemeral", "$GITHUB_OUTPUT", envWithOutput, {
         exists: () => false,
       });
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
-      expect((err as SandboxError).code).toBe("ALLOW_WRITE_TARGET_MISSING");
+      expect((err as SandboxError).code).toBe("WRITE_THROUGH_TARGET_MISSING");
     }
   });
 
-  it("wraps a sudo mkdir/chown/chmod failure as ALLOW_WRITE_TARGET_UNCREATABLE", () => {
+  it("wraps a sudo mkdir/chown/chmod failure as WRITE_THROUGH_TARGET_UNCREATABLE", () => {
     expect.assertions(2);
     try {
-      resolveFilesystemPlan("ephemeral", "", "./dist", ENV, {
+      resolveFilesystemPlan("ephemeral", "./dist", ENV, {
         exists: (p) => p !== `${ENV.GITHUB_WORKSPACE}/dist`,
         stat: () => ({ uid: 1000, gid: 1000, mode: 0o40755 }),
         execFile: () => {
@@ -252,28 +339,28 @@ describe("resolveFilesystemPlan", () => {
       });
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
-      expect((err as SandboxError).code).toBe("ALLOW_WRITE_TARGET_UNCREATABLE");
+      expect((err as SandboxError).code).toBe("WRITE_THROUGH_TARGET_UNCREATABLE");
     }
   });
 
-  it("wraps an unsupported $VAR in allow_write: as INVALID_ALLOW_WRITE_PATH", () => {
+  it("wraps an unsupported $VAR in write_through: as INVALID_WRITE_THROUGH_PATH", () => {
     expect.assertions(2);
     try {
-      resolveFilesystemPlan("ephemeral", "", "$SECRET_TOKEN/x", ENV);
+      resolveFilesystemPlan("ephemeral", "$SECRET_TOKEN/x", ENV);
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
-      expect((err as SandboxError).code).toBe("INVALID_ALLOW_WRITE_PATH");
+      expect((err as SandboxError).code).toBe("INVALID_WRITE_THROUGH_PATH");
     }
   });
 
-  it("wraps a determineOverlayRoots failure as FILESYSTEM_PLAN_FAILED, not an allow_write problem", () => {
-    // exists() throwing here isn't about allow_write's own input at all --
+  it("wraps a determineOverlayRoots failure as FILESYSTEM_PLAN_FAILED, not a write_through problem", () => {
+    // exists() throwing here isn't about write_through's own input at all --
     // it's determineOverlayRoots reading one of the fixed candidate paths
     // (e.g. a permissions error on $HOME) -- so it must not come back
-    // labeled as an allow_write syntax issue.
+    // labeled as a write_through syntax issue.
     expect.assertions(2);
     try {
-      resolveFilesystemPlan("ephemeral", "", "", ENV, {
+      resolveFilesystemPlan("ephemeral", "", ENV, {
         exists: () => {
           throw new Error("EACCES: permission denied");
         },
@@ -350,31 +437,5 @@ describe("readKnownBlockedRules", () => {
       expect(err).toBeInstanceOf(InvalidRulesError);
       expect((err as InvalidRulesError).code).toBe("INVALID_RULES");
     }
-  });
-});
-
-describe("parseWritablePaths", () => {
-  it("splits on newlines, trimming each entry", () => {
-    expect(parseWritablePaths("/opt/extra\n /var/cache \n")).toStrictEqual([
-      "/opt/extra",
-      "/var/cache",
-    ]);
-  });
-
-  it("does not split on internal spaces (paths may contain them)", () => {
-    expect(parseWritablePaths("/path with spaces\n/other")).toStrictEqual([
-      "/path with spaces",
-      "/other",
-    ]);
-  });
-
-  it("returns an empty array for empty/undefined input", () => {
-    expect(parseWritablePaths("")).toStrictEqual([]);
-    expect(parseWritablePaths(undefined)).toStrictEqual([]);
-    expect(parseWritablePaths("   \n  \n")).toStrictEqual([]);
-  });
-
-  it("preserves a lone '/' entry (the disable-readonly sentinel)", () => {
-    expect(parseWritablePaths("/")).toStrictEqual(["/"]);
   });
 });

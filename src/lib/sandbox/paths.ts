@@ -4,6 +4,10 @@ import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
  * True if `a` and `b` are the same path, or one is an ancestor directory of
  * the other (path-component-wise, not a bare string prefix -- "/var/tmp/bu"
  * must not count as overlapping "/var/tmp/buildcage-1000").
+ *
+ * Compares the strings as given, so both must already be normalized --
+ * "/var/tmp/./buildcage-1000" would otherwise slip past. resolveWriteThroughEntry
+ * is what guarantees that for the paths reaching here.
  */
 export function pathsOverlap(a: string, b: string): boolean {
   if (a === b) return true;

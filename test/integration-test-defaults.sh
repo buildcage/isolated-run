@@ -21,7 +21,7 @@ echo x >> \"\$GITHUB_WORKSPACE/.buildcage-writable-test\"
 echo x >> \"\$HOME/.buildcage-writable-test\"
 echo x >> /tmp/.buildcage-writable-test
 if touch /opt/.buildcage-writable-test 2>/dev/null; then
-  echo UNEXPECTED: /opt was writable without a writable: entry
+  echo UNEXPECTED: /opt was writable without a write_through: entry
   exit 1
 fi" \
   node dist/main.cjs

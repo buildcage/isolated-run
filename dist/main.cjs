@@ -20093,10 +20093,95 @@ function checkOverlayfsSupport({ base = SANDBOX_SCRATCH_BASE, exec = node_child_
 }
 //#endregion
 //#region src/lib/sandbox/ephemeral-fs.ts
-/** Env vars an allow_write: entry may reference via $NAME/${NAME}. Not
+function isStrictDescendant(child, parent) {
+	if (child === parent) return !1;
+	let withSlash = parent.endsWith("/") ? parent : `${parent}/`;
+	return child.startsWith(withSlash);
+}
+function defaultDeviceOf(path) {
+	return (0, node_fs.statSync)(path).dev;
+}
+/**
+* Pure: fold the fixed candidate paths ($HOME, $RUNNER_TEMP, /tmp,
+* $GITHUB_WORKSPACE) down to the set that actually needs an overlay:
+* 1. Drop any candidate that doesn't exist on disk. Checked first, before
+*    the nesting fold below, so a *different*, existing candidate's own
+*    coverage can never be affected by whether some other candidate
+*    happens to exist -- otherwise an absent outer candidate could still
+*    "swallow" an existing inner one in step 3, then itself get dropped
+*    here, leaving the inner one with no overlay and no protection at all.
+* 2. Drop any candidate that's covered by (equals, or is a descendant of) a
+*    write_through entry -- that entry already persists everything under it,
+*    so no overlay is needed there. A candidate that merely *contains* a
+*    narrower write_through entry (the common case: write_through: ./dist
+*    under an otherwise-ephemeral $GITHUB_WORKSPACE) is kept -- its overlay
+*    still covers everything else under it, and the narrower entry's own rw
+*    bind (a later, and so winning, mount -- see buildOciConfig's ephemeral
+*    branch) persists just that subtree on top. Dropping the candidate here
+*    too would make the rest of it read-only instead of ephemeral-writable,
+*    defeating the point of layering write_through over an overlay at all.
+* 3. Drop any remaining candidate nested under another remaining candidate
+*    (no nested overlays -- the outer one wins) -- but only when they're on
+*    the same filesystem. A candidate that's actually a *separate* mount
+*    nested inside another (an unusual but real self-hosted-runner layout)
+*    keeps its own overlay instead: overlayfs does not show a filesystem
+*    mounted inside its own lowerdir, so folding it away would leave that
+*    whole path invisible/stale in the sandbox rather than covered.
+* Candidates are deduped first (e.g. RUNNER_TEMP === HOME on some
+* self-hosted setups).
+*/
+function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs.existsSync, deviceOf = defaultDeviceOf } = {}) {
+	let notCoveredByWriteThrough = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !writeThroughPaths.some((a) => c === a || isStrictDescendant(c, a)));
+	return notCoveredByWriteThrough.filter((c) => {
+		let nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isStrictDescendant(c, p));
+		if (!nestingParent) return !0;
+		try {
+			return deviceOf(c) !== deviceOf(nestingParent);
+		} catch {
+			return !0;
+		}
+	}).map((path) => ({ path }));
+}
+/** Filesystem-safe subdirectory name for a host path. */
+function slugify(path) {
+	return path.replace(/\//g, "_") || "_root";
+}
+/**
+* Physical upper/work dirs for each overlay root: siblings of rootfsBindDir
+* under this run's own scratch dir (`<scratchDir>/ephemeral/<slug>/{upper,work}`),
+* never inside SANDBOX_SCRATCH_BASE's rootfs subtree itself -- see
+* assertScratchBaseNotWritable's invariant. Creates the directories as a
+* side effect; must run before runIsolated(), for the same reason
+* ensureWriteThroughTargetsExist does.
+*/
+function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync } = {}) {
+	return roots.map(({ path }) => {
+		let base = (0, node_path.join)(scratchDir, "ephemeral", slugify(path)), upper = (0, node_path.join)(base, "upper"), work = (0, node_path.join)(base, "work");
+		return mkdir(upper, { recursive: !0 }), mkdir(work, { recursive: !0 }), {
+			path,
+			upper,
+			work
+		};
+	});
+}
+/**
+* Setup-time log lines for `filesystem: ephemeral` -- the already-folded
+* overlay roots and resolved write_through paths, never the raw input
+* strings. Empty (no lines at all) for `persistent` mode.
+*/
+function formatFilesystemPlanLog(mode, overlayRoots, writeThrough) {
+	if (mode !== "ephemeral") return [];
+	let lines = ["Filesystem mode: ephemeral"];
+	for (let root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
+	for (let entry of writeThrough) lines.push(`Writable (persisted):                    ${entry}`);
+	return lines;
+}
+//#endregion
+//#region src/lib/sandbox/write-through.ts
+/** Env vars a write_through: entry may reference via $NAME/${NAME}. Not
 *  arbitrary env -- a step's own `env:` block could otherwise smuggle a
 *  path override into what's meant to be a fixed, reviewable list. */
-const ALLOWED_ALLOW_WRITE_VARS = [
+const ALLOWED_WRITE_THROUGH_VARS = [
 	"HOME",
 	"GITHUB_WORKSPACE",
 	"RUNNER_TEMP",
@@ -20111,29 +20196,40 @@ const ALLOWED_ALLOW_WRITE_VARS = [
 	"GITHUB_STEP_SUMMARY"
 ], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
 /**
-* Resolve one raw allow_write: line into an absolute, normalized host path:
+* Resolve one raw write_through: line into an absolute, normalized host path:
 * 1. $NAME / ${NAME} expansion -- allowlisted names only.
 * 2. A leading `~/` (only) expands to $HOME.
 * 3. A relative path resolves against $GITHUB_WORKSPACE (matching the
 *    sandbox's own cwd).
 * 4. Normalized (resolves `..`) and stripped of any trailing slash.
+*
+* Normalizing here is what makes assertScratchBaseNotWritable's overlap check
+* sound: it compares path strings, so "/var/tmp/buildcage-1000/./x" would
+* otherwise slip past a guard that the plain path trips.
 */
-function resolveAllowWriteEntry(rawLine, env) {
+function resolveWriteThroughEntry(rawLine, env) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
-		if (!ALLOWED_ALLOW_WRITE_VARS.includes(name)) throw Error(`allow_write entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_ALLOW_WRITE_VARS.join(", ")} may be used.`);
-		return env[name] ?? "";
-	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded), normalized = (0, node_path.normalize)(resolved);
+		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
+		let value = env[name];
+		if (!value) throw Error(`write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
+		return value;
+	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded);
+	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write_through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
+	let normalized = (0, node_path.normalize)(resolved);
 	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
-/** Parse + resolve the whole allow_write: input. Same newline-split / trim /
-*  filter-blank convention as main.ts's parseWritablePaths. */
-function resolveAllowWritePaths(input, env) {
-	return (input?.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) ?? []).map((line) => resolveAllowWriteEntry(line, env));
+/** Parse + resolve the whole write_through: input. Newline-separated (not
+*  whitespace-split like the ACL rule inputs) since paths can legitimately
+*  contain spaces. Duplicates are folded, so the same path listed twice (or
+*  reached twice through different spellings) is only acted on once. */
+function resolveWriteThroughPaths(input, env) {
+	let lines = input?.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) ?? [];
+	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
 }
-/** Thrown by ensureAllowWriteTargetsExist when a resolved path names one of
+/** Thrown by ensureWriteThroughTargetsExist when a resolved path names one of
 *  the well-known runner-generated files but it doesn't actually exist. */
-var AllowWriteTargetMissingError = class extends Error {}, AllowWriteTargetUncreatableError = class extends Error {};
+var WriteThroughTargetMissingError = class extends Error {}, WriteThroughTargetUncreatableError = class extends Error {};
 function defaultStat(path) {
 	let s = (0, node_fs.statSync)(path);
 	return {
@@ -20162,7 +20258,7 @@ function pathSegmentsBetween(ancestor, descendant) {
 	return segments;
 }
 /**
-* For each resolved allow_write path that doesn't already exist:
+* For each resolved write_through path that doesn't already exist:
 * - if it equals the current value of one of KNOWN_FILE_VARS, the runner was
 *   supposed to have already created it -- throw rather than paper over a
 *   broken assumption.
@@ -20173,14 +20269,14 @@ function pathSegmentsBetween(ancestor, descendant) {
 *   sudo performs the mkdir mechanically; ownership is never handed to the
 *   runner's own uid unconditionally -- a target under an already-restricted,
 *   non-runner-writable tree (e.g. /etc/test) ends up exactly as restricted
-*   as naming the existing /etc directly would have. This also closes the
-*   R-L1 concern (runc silently leaving a root-owned, no-thought-given
-*   placeholder behind) by controlling ownership explicitly instead.
+*   as naming the existing /etc directly would have.
 * Already-existing entries are left completely untouched.
+* Returns every path segment it created, shallowest first, so the caller can
+* hand them to removeCreatedDirsIfEmpty once the step is done.
 * Must run before the scratch dir's `mount --rbind /` snapshot (i.e. before
 * runIsolated()), same timing constraint as the overlay upper/work dirs.
 */
-function ensureAllowWriteTargetsExist(resolvedPaths, env, { exists = node_fs.existsSync, stat = defaultStat, execFile = defaultExecFile } = {}) {
+function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = node_fs.existsSync, stat = defaultStat, execFile = defaultExecFile } = {}) {
 	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), created = [], rollback = () => {
 		for (let p of [...created].reverse()) try {
 			execFile("sudo", [
@@ -20192,11 +20288,11 @@ function ensureAllowWriteTargetsExist(resolvedPaths, env, { exists = node_fs.exi
 	};
 	for (let path of resolvedPaths) {
 		if (exists(path)) continue;
-		if (knownFileValues.has(path)) throw rollback(), new AllowWriteTargetMissingError(`allow_write: ${JSON.stringify(path)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
+		if (knownFileValues.has(path)) throw rollback(), new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(path)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
 		let ancestor = (0, node_path.dirname)(path);
 		for (; !exists(ancestor);) {
 			let parent = (0, node_path.dirname)(ancestor);
-			if (parent === ancestor) throw rollback(), new AllowWriteTargetUncreatableError(`allow_write: ${JSON.stringify(path)} has no existing ancestor directory to create it under.`);
+			if (parent === ancestor) throw rollback(), new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} has no existing ancestor directory to create it under.`);
 			ancestor = parent;
 		}
 		try {
@@ -20218,92 +20314,55 @@ function ensureAllowWriteTargetsExist(resolvedPaths, env, { exists = node_fs.exi
 			]);
 			created.push(...segments);
 		} catch (e) {
-			throw rollback(), new AllowWriteTargetUncreatableError(`allow_write: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
+			throw rollback(), new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
-}
-function isStrictDescendant(child, parent) {
-	if (child === parent) return !1;
-	let withSlash = parent.endsWith("/") ? parent : `${parent}/`;
-	return child.startsWith(withSlash);
-}
-function defaultDeviceOf(path) {
-	return (0, node_fs.statSync)(path).dev;
+	return created;
 }
 /**
-* Pure: fold the fixed candidate paths ($HOME, $RUNNER_TEMP, /tmp,
-* $GITHUB_WORKSPACE) down to the set that actually needs an overlay:
-* 1. Drop any candidate that doesn't exist on disk. Checked first, before
-*    the nesting fold below, so a *different*, existing candidate's own
-*    coverage can never be affected by whether some other candidate
-*    happens to exist -- otherwise an absent outer candidate could still
-*    "swallow" an existing inner one in step 3, then itself get dropped
-*    here, leaving the inner one with no overlay and no protection at all.
-* 2. Drop any candidate that's covered by (equals, or is a descendant of) an
-*    allow_write entry -- that entry already persists everything under it,
-*    so no overlay is needed there. A candidate that merely *contains* a
-*    narrower allow_write entry (the common case: allow_write: ./dist under
-*    an otherwise-ephemeral $GITHUB_WORKSPACE) is kept -- its overlay still
-*    covers everything else under it, and the narrower entry's own rw bind
-*    (a later, and so winning, mount -- see buildOciConfig's ephemeral
-*    branch) persists just that subtree on top. Dropping the candidate here
-*    too would make the rest of it read-only instead of ephemeral-writable,
-*    defeating the point of layering allow_write over an overlay at all.
-* 3. Drop any remaining candidate nested under another remaining candidate
-*    (no nested overlays -- the outer one wins) -- but only when they're on
-*    the same filesystem. A candidate that's actually a *separate* mount
-*    nested inside another (an unusual but real self-hosted-runner layout)
-*    keeps its own overlay instead: overlayfs does not show a filesystem
-*    mounted inside its own lowerdir, so folding it away would leave that
-*    whole path invisible/stale in the sandbox rather than covered.
-* Candidates are deduped first (e.g. RUNNER_TEMP === HOME on some
-* self-hosted setups).
+* Give back the directories ensureWriteThroughTargetsExist created, once the
+* step is done with them. Deepest first, and `rmdir` rather than `rm`: a
+* directory the command actually wrote to is non-empty, so the removal fails
+* and the content stays -- which is the whole point of having asked for the
+* path. Failures are therefore expected and ignored.
 */
-function determineOverlayRoots(candidates, allowWritePaths, { exists = node_fs.existsSync, deviceOf = defaultDeviceOf } = {}) {
-	let notCoveredByAllowWrite = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !allowWritePaths.some((a) => c === a || isStrictDescendant(c, a)));
-	return notCoveredByAllowWrite.filter((c) => {
-		let nestingParent = notCoveredByAllowWrite.find((p) => p !== c && isStrictDescendant(c, p));
-		if (!nestingParent) return !0;
-		try {
-			return deviceOf(c) !== deviceOf(nestingParent);
-		} catch {
-			return !0;
-		}
-	}).map((path) => ({ path }));
+function removeCreatedDirsIfEmpty(created, { execFile = defaultExecFile } = {}) {
+	for (let path of [...created].reverse()) try {
+		execFile("sudo", ["rmdir", path]);
+	} catch {}
 }
-/** Filesystem-safe subdirectory name for a host path. */
-function slugify(path) {
-	return path.replace(/\//g, "_") || "_root";
+//#endregion
+//#region src/lib/sandbox/paths.ts
+/**
+* True if `a` and `b` are the same path, or one is an ancestor directory of
+* the other (path-component-wise, not a bare string prefix -- "/var/tmp/bu"
+* must not count as overlapping "/var/tmp/buildcage-1000").
+*
+* Compares the strings as given, so both must already be normalized --
+* "/var/tmp/./buildcage-1000" would otherwise slip past. resolveWriteThroughEntry
+* is what guarantees that for the paths reaching here.
+*/
+function pathsOverlap(a, b) {
+	if (a === b) return !0;
+	let withSlash = (p) => p.endsWith("/") ? p : `${p}/`;
+	return a.startsWith(withSlash(b)) || b.startsWith(withSlash(a));
 }
 /**
-* Physical upper/work dirs for each overlay root: siblings of rootfsBindDir
-* under this run's own scratch dir (`<scratchDir>/ephemeral/<slug>/{upper,work}`),
-* never inside SANDBOX_SCRATCH_BASE's rootfs subtree itself -- see
-* assertScratchBaseNotWritable's invariant. Creates the directories as a
-* side effect; must run before runIsolated(), for the same reason
-* ensureAllowWriteTargetsExist does.
+* Fail closed if any writable-exception directory is, or contains, or is
+* contained in, SANDBOX_SCRATCH_BASE. That directory holds the run's own
+* `mount --rbind /` rootfs (see rootfsBindDir in main.ts); the writable
+* exceptions are recursive bind-mounts, so any overlap would recursively
+* re-expose that rootfs inside the sandbox as a second, *writable* copy of
+* the whole host `/` -- the exact escape SANDBOX_SCRATCH_BASE's placement
+* (outside the default writable set) exists to avoid. Only reachable via an
+* explicit `writable:` input naming SANDBOX_SCRATCH_BASE or an ancestor of it
+* (workdir/home/tmp/RUNNER_TEMP are operator/runner-controlled, not
+* attacker-controlled), so this is a misconfiguration guard, not a
+* hardening measure against a hostile isolated command.
 */
-function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync } = {}) {
-	return roots.map(({ path }) => {
-		let base = (0, node_path.join)(scratchDir, "ephemeral", slugify(path)), upper = (0, node_path.join)(base, "upper"), work = (0, node_path.join)(base, "work");
-		return mkdir(upper, { recursive: !0 }), mkdir(work, { recursive: !0 }), {
-			path,
-			upper,
-			work
-		};
-	});
-}
-/**
-* Setup-time log lines for `filesystem: ephemeral` -- the already-folded
-* overlay roots and resolved allow_write paths, never the raw input
-* strings. Empty (no lines at all) for `persistent` mode.
-*/
-function formatFilesystemPlanLog(mode, overlayRoots, allowWrite) {
-	if (mode !== "ephemeral") return [];
-	let lines = ["Filesystem mode: ephemeral"];
-	for (let root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
-	for (let entry of allowWrite) lines.push(`Writable (persisted):                    ${entry}`);
-	return lines;
+function assertScratchBaseNotWritable(writableDirs) {
+	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
+	if (overlapping) throw Error(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
 }
 //#endregion
 //#region src/core/lib/docker/compose-project-name.ts
@@ -20578,35 +20637,6 @@ function caTrustAdditions(files, env) {
 		mounts,
 		env: extraEnv
 	};
-}
-//#endregion
-//#region src/lib/sandbox/paths.ts
-/**
-* True if `a` and `b` are the same path, or one is an ancestor directory of
-* the other (path-component-wise, not a bare string prefix -- "/var/tmp/bu"
-* must not count as overlapping "/var/tmp/buildcage-1000").
-*/
-function pathsOverlap(a, b) {
-	if (a === b) return !0;
-	let withSlash = (p) => p.endsWith("/") ? p : `${p}/`;
-	return a.startsWith(withSlash(b)) || b.startsWith(withSlash(a));
-}
-/**
-* Fail closed if any writable-exception directory is, or contains, or is
-* contained in, SANDBOX_SCRATCH_BASE. That directory holds the run's own
-* `mount --rbind /` rootfs (see rootfsBindDir in main.ts); the writable
-* exceptions are recursive bind-mounts, so any overlap would recursively
-* re-expose that rootfs inside the sandbox as a second, *writable* copy of
-* the whole host `/` -- the exact escape SANDBOX_SCRATCH_BASE's placement
-* (outside the default writable set) exists to avoid. Only reachable via an
-* explicit `writable:` input naming SANDBOX_SCRATCH_BASE or an ancestor of it
-* (workdir/home/tmp/RUNNER_TEMP are operator/runner-controlled, not
-* attacker-controlled), so this is a misconfiguration guard, not a
-* hardening measure against a hostile isolated command.
-*/
-function assertScratchBaseNotWritable(writableDirs) {
-	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
-	if (overlapping) throw Error(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
 }
 //#endregion
 //#region scripts/extra-masked-proc-paths.json
@@ -79375,12 +79405,15 @@ function readKnownBlockedRules(input) {
 	return parseRulesOrThrow(input);
 }
 /**
-* Parse the `writable` input into a list of directories. Newline-separated
-* (not whitespace-split like the ACL rule inputs above) since paths can
-* legitimately contain spaces.
+* Pick the effective write_through: input. `writable:` is the same input under
+* its old name and still works; `allow_write:` (the ephemeral-only input this
+* replaced) is rejected rather than ignored, since ignoring it would silently
+* discard writes the step asked to keep.
 */
-function parseWritablePaths(input) {
-	return input?.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) ?? [];
+function resolveWriteThroughInput({ writeThrough, writable, allowWrite }) {
+	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input -- the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
+	if (writeThrough.trim() && writable.trim()) throw new SandboxError("write_through: and writable: are the same input under two names. Set only write_through:.", "FILESYSTEM_INPUT_CONFLICT");
+	return !writeThrough.trim() && writable.trim() ? (console.log("::notice::writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writable) : writeThrough;
 }
 const ENGINES = ["universal", "inspect"], ENGINE_ALIASES = { transparent: "universal" };
 function resolveProxyEngine(input) {
@@ -79396,37 +79429,59 @@ function resolveFilesystemMode(input) {
 	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
 	return trimmed;
 }
-/**
-* Validates the filesystem/writable/allow_write inputs against each other
-* (§3.1: ephemeral and writable: are mutually exclusive; persistent and
-* allow_write: are mutually exclusive). Pure, no I/O -- deliberately called
-* on its own, ahead of checkPasswordlessSudo()/checkOverlayfsSupport() in
-* main(), so a plain input-conflict mistake is rejected immediately rather
-* than only after those privileged preflight checks have already run.
-* resolveFilesystemPlan below also calls this itself, so it stays safe to
-* call directly too.
-*/
-function validateFilesystemInputs(filesystemMode, writableInput, allowWriteInput) {
-	if (filesystemMode === "ephemeral" && writableInput.trim()) throw new SandboxError("filesystem: ephemeral and writable: are mutually exclusive (this includes writable: / as a full opt-out, which has no meaning in ephemeral mode) -- use allow_write: instead.", "FILESYSTEM_INPUT_CONFLICT");
-	if (filesystemMode === "persistent" && allowWriteInput.trim()) throw new SandboxError("allow_write: has no effect outside filesystem: ephemeral -- persistent mode (the default) uses writable: instead.", "FILESYSTEM_INPUT_CONFLICT");
+/** The write_through: input as bare lines, for the pre-resolution check in
+*  main(). Resolution proper (variables, ~/, relative paths) is
+*  resolveWriteThroughPaths' job. */
+function splitWriteThroughInput(input) {
+	return input.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
 /**
-* In ephemeral mode, resolves + pre-creates the allow_write targets and
-* folds the overlay-root candidates down to what's actually needed
-* (ephemeral-fs.ts). Throws SandboxError, never ephemeral-fs.ts's own error
-* classes directly, so a caller doesn't need to know about those.
+* Validates write_through: paths against the filesystem mode. Pure, no I/O --
+* deliberately called on its own, ahead of
+* checkPasswordlessSudo()/checkOverlayfsSupport() in main(), so a plain input
+* mistake is rejected immediately rather than only after those privileged
+* preflight checks have already run. That early call passes the raw lines;
+* resolveFilesystemPlan calls it again on the resolved paths, which is the
+* authoritative one -- "/." and "$GITHUB_WORKSPACE/../.." only become "/"
+* after normalization.
 */
-function resolveFilesystemPlan(filesystemMode, writableInput, allowWriteInput, env, deps = {}) {
-	if (validateFilesystemInputs(filesystemMode, writableInput, allowWriteInput), filesystemMode !== "ephemeral") return {
-		overlayRoots: [],
-		allowWritePaths: []
-	};
-	let allowWritePaths;
+function validateFilesystemInputs(filesystemMode, writeThroughPaths) {
+	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
+}
+/**
+* Resolves + pre-creates the write_through targets (write-through.ts) and, in
+* ephemeral mode, folds the overlay-root candidates down to what's actually
+* needed (ephemeral-fs.ts). Throws SandboxError, never those modules' own
+* error classes directly, so a caller doesn't need to know about those.
+*/
+function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
+	let writeThroughPaths;
 	try {
-		allowWritePaths = resolveAllowWritePaths(allowWriteInput, env), ensureAllowWriteTargetsExist(allowWritePaths, env, deps);
+		writeThroughPaths = resolveWriteThroughPaths(writeThroughInput, env);
 	} catch (e) {
-		throw e instanceof AllowWriteTargetMissingError ? new SandboxError(e.message, "ALLOW_WRITE_TARGET_MISSING") : e instanceof AllowWriteTargetUncreatableError ? new SandboxError(e.message, "ALLOW_WRITE_TARGET_UNCREATABLE") : new SandboxError(`Invalid allow_write: ${errorMessage(e)}`, "INVALID_ALLOW_WRITE_PATH");
+		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
+	if (validateFilesystemInputs(filesystemMode, writeThroughPaths), writeThroughPaths.includes("/")) return {
+		overlayRoots: [],
+		writeThroughPaths,
+		createdDirs: []
+	};
+	try {
+		assertScratchBaseNotWritable(writeThroughPaths);
+	} catch (e) {
+		throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
+	}
+	let createdDirs;
+	try {
+		createdDirs = ensureWriteThroughTargetsExist(writeThroughPaths, env, deps);
+	} catch (e) {
+		throw e instanceof WriteThroughTargetMissingError ? new SandboxError(e.message, "WRITE_THROUGH_TARGET_MISSING") : e instanceof WriteThroughTargetUncreatableError ? new SandboxError(e.message, "WRITE_THROUGH_TARGET_UNCREATABLE") : new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
+	}
+	if (filesystemMode !== "ephemeral") return {
+		overlayRoots: [],
+		writeThroughPaths,
+		createdDirs
+	};
 	try {
 		return {
 			overlayRoots: determineOverlayRoots([
@@ -79434,8 +79489,9 @@ function resolveFilesystemPlan(filesystemMode, writableInput, allowWriteInput, e
 				env.RUNNER_TEMP,
 				"/tmp",
 				env.GITHUB_WORKSPACE
-			].filter((p) => !!p), allowWritePaths, deps),
-			allowWritePaths
+			].filter((p) => !!p), writeThroughPaths, deps),
+			writeThroughPaths,
+			createdDirs
 		};
 	} catch (e) {
 		throw new SandboxError(`Failed to determine filesystem: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
@@ -79496,7 +79552,7 @@ async function stopSandboxProxy({ composeFile, projectName, composeEnv, annotati
 * OCI bundle, and runs the user's command inside it via run-isolated.sh.
 * Returns the isolated command's exit code.
 */
-function runSandboxedCommand({ containerName, proxyNetns, runInput, writablePaths, env, proxyEngine, filesystemMode, overlayRoots, allowWritePaths }) {
+function runSandboxedCommand({ containerName, proxyNetns, runInput, writeThroughPaths, env, proxyEngine, filesystemMode, overlayRoots }) {
 	let dns = "172.20.0.1";
 	return withScratchDir((dir) => {
 		let runcPath, seccompProfile, baseSpec;
@@ -79528,11 +79584,11 @@ function runSandboxedCommand({ containerName, proxyNetns, runInput, writablePath
 					workdir,
 					home,
 					runnerTemp: env.RUNNER_TEMP || "",
-					writablePaths
+					writablePaths: writeThroughPaths
 				},
 				ephemeral: filesystemMode === "ephemeral" ? {
 					overlayRoots: overlayScratchPaths,
-					allowWrite: allowWritePaths
+					allowWrite: writeThroughPaths
 				} : void 0,
 				runtime: {
 					netnsPath: `/var/run/netns/${netnsName}`,
@@ -79623,98 +79679,109 @@ async function main() {
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	let proxyEngine = resolveProxyEngine(getInput("proxy_engine"));
 	console.log(`Proxy engine: ${proxyEngine}`);
-	let filesystemMode = resolveFilesystemMode(getInput("filesystem")), writableInput = getInput("writable"), allowWriteInput = getInput("allow_write");
-	validateFilesystemInputs(filesystemMode, writableInput, allowWriteInput), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
-	let { overlayRoots, allowWritePaths } = resolveFilesystemPlan(filesystemMode, writableInput, allowWriteInput, env);
-	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots.map((r) => r.path), allowWritePaths)) info(line);
-	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), { imageRef, pullPolicy } = await resolveVerifiedImage({
-		actionRef,
-		actionRepo,
-		proxyEngine
+	let filesystemMode = resolveFilesystemMode(getInput("filesystem")), writeThroughInput = resolveWriteThroughInput({
+		writeThrough: getInput("write_through"),
+		writable: getInput("writable"),
+		allowWrite: getInput("allow_write")
 	});
-	console.log(`buildcage: proxy image: ${imageRef}`);
-	let composeFile = defaultComposeFile, proxyMode = getInput("proxy_mode") || "restrict", rules = buildACLRules({
-		httpsRulesInput: getInput("allowed_https_rules"),
-		httpRulesInput: getInput("allowed_http_rules"),
-		ipRulesInput: getInput("allowed_ip_rules")
-	}), knownBlockedRules = readKnownBlockedRules(getInput("known_blocked_rules")), urlRulesInput = getInput("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput("allow_tls_rules")), urlRules = buildUrlRules(urlRulesInput).map((r) => r.raw);
-	checkUrlAndTlsRuleSupport({
-		proxyEngine,
-		proxyMode,
-		urlRules,
-		tlsRules
-	}, (message) => annotation.warning(message)), console.log("::group::buildcage: Configured ACL Rules"), logRules("HTTPS", rules.httpsRules), logRules("HTTP", rules.httpRules), logRules("IP", rules.ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), console.log("::endgroup::");
-	let writablePaths = parseWritablePaths(writableInput), containerName = generateContainerName(), projectName = deriveProjectName(containerName);
-	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots.map((r) => r.path))));
-	let composeEnv = {
-		...env,
-		PROXY_CONTAINER_NAME: containerName,
-		PROXY_MODE: proxyMode,
-		PROXY_ENGINE: proxyEngine,
-		ALLOWED_HTTPS_RULES: rules.httpsRules.join("\n"),
-		ALLOWED_HTTP_RULES: rules.httpRules.join("\n"),
-		ALLOWED_IP_RULES: rules.ipRules.join("\n"),
-		ALLOWED_URL_RULES: urlRules.join("\n"),
-		ALLOW_TLS_RULES: tlsRules.join("\n"),
-		BUILDCAGE_PROXY_IMAGE_REF: imageRef
-	};
-	await startSandboxProxy({
-		composeFile,
-		projectName,
-		pullPolicy,
-		composeEnv
-	});
-	let exitCode = 1;
+	validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
+	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), { overlayRoots, writeThroughPaths, createdDirs } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env);
+	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots.map((r) => r.path), writeThroughPaths)) info(line);
 	try {
-		let proxyNetns = getContainerNetns(containerName);
-		if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
-		exitCode = runSandboxedCommand({
-			containerName,
-			proxyNetns,
-			runInput,
-			writablePaths,
-			env,
-			proxyEngine,
-			filesystemMode,
-			overlayRoots,
-			allowWritePaths
+		let { imageRef, pullPolicy } = await resolveVerifiedImage({
+			actionRef,
+			actionRepo,
+			proxyEngine
 		});
-	} finally {
-		try {
-			let report = await fetchReport(containerName, {
-				mode: proxyMode,
-				allowedHttpsRules: rules.httpsRules,
-				allowedHttpRules: rules.httpRules,
-				allowedIpRules: rules.ipRules,
-				allowTlsRules: tlsRules,
-				knownBlockedRules
-			}, proxyEngine), failOnBlocked;
-			try {
-				failOnBlocked = getBooleanInput("fail_on_blocked");
-			} catch {
-				failOnBlocked = !0;
-			}
-			let wantsArtifact = wantsTrafficArtifact();
-			await writeReportSummary(report, annotation, {
-				actionRepo,
-				actionRef,
-				runCommand: runInput,
-				actionVersion: readActionVersion(containerName, proxyEngine),
-				stepLabel: getInput("label") || void 0,
-				failOnBlocked
-			}, wantsArtifact && report.engine === "inspect"), wantsArtifact && await uploadTrafficArtifact(report, containerName, annotation);
-		} catch (e) {
-			annotation.warning(`Failed to fetch sandbox report: ${errorMessage(e)}`);
-		}
-		await stopSandboxProxy({
+		console.log(`buildcage: proxy image: ${imageRef}`);
+		let composeFile = defaultComposeFile, proxyMode = getInput("proxy_mode") || "restrict", rules = buildACLRules({
+			httpsRulesInput: getInput("allowed_https_rules"),
+			httpRulesInput: getInput("allowed_http_rules"),
+			ipRulesInput: getInput("allowed_ip_rules")
+		}), knownBlockedRules = readKnownBlockedRules(getInput("known_blocked_rules")), urlRulesInput = getInput("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput("allow_tls_rules")), urlRules = buildUrlRules(urlRulesInput).map((r) => r.raw);
+		checkUrlAndTlsRuleSupport({
+			proxyEngine,
+			proxyMode,
+			urlRules,
+			tlsRules
+		}, (message) => annotation.warning(message)), console.log("::group::buildcage: Configured ACL Rules"), logRules("HTTPS", rules.httpsRules), logRules("HTTP", rules.httpRules), logRules("IP", rules.ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), console.log("::endgroup::");
+		let containerName = generateContainerName(), projectName = deriveProjectName(containerName);
+		env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots.map((r) => r.path))));
+		let composeEnv = {
+			...env,
+			PROXY_CONTAINER_NAME: containerName,
+			PROXY_MODE: proxyMode,
+			PROXY_ENGINE: proxyEngine,
+			ALLOWED_HTTPS_RULES: rules.httpsRules.join("\n"),
+			ALLOWED_HTTP_RULES: rules.httpRules.join("\n"),
+			ALLOWED_IP_RULES: rules.ipRules.join("\n"),
+			ALLOWED_URL_RULES: urlRules.join("\n"),
+			ALLOW_TLS_RULES: tlsRules.join("\n"),
+			BUILDCAGE_PROXY_IMAGE_REF: imageRef
+		};
+		await startSandboxProxy({
 			composeFile,
 			projectName,
-			composeEnv,
-			annotation
+			pullPolicy,
+			composeEnv
 		});
+		let exitCode = 1;
+		try {
+			let proxyNetns = getContainerNetns(containerName);
+			if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
+			exitCode = runSandboxedCommand({
+				containerName,
+				proxyNetns,
+				runInput,
+				writeThroughPaths,
+				env,
+				proxyEngine,
+				filesystemMode,
+				overlayRoots
+			});
+		} finally {
+			try {
+				let report = await fetchReport(containerName, {
+					mode: proxyMode,
+					allowedHttpsRules: rules.httpsRules,
+					allowedHttpRules: rules.httpRules,
+					allowedIpRules: rules.ipRules,
+					allowTlsRules: tlsRules,
+					knownBlockedRules
+				}, proxyEngine), failOnBlocked;
+				try {
+					failOnBlocked = getBooleanInput("fail_on_blocked");
+				} catch {
+					failOnBlocked = !0;
+				}
+				let wantsArtifact = wantsTrafficArtifact();
+				await writeReportSummary(report, annotation, {
+					actionRepo,
+					actionRef,
+					runCommand: runInput,
+					actionVersion: readActionVersion(containerName, proxyEngine),
+					stepLabel: getInput("label") || void 0,
+					failOnBlocked
+				}, wantsArtifact && report.engine === "inspect"), wantsArtifact && await uploadTrafficArtifact(report, containerName, annotation);
+			} catch (e) {
+				annotation.warning(`Failed to fetch sandbox report: ${errorMessage(e)}`);
+			}
+			await stopSandboxProxy({
+				composeFile,
+				projectName,
+				composeEnv,
+				annotation
+			});
+		}
+		exitCode !== 0 && (process.exitCode = exitCode);
+	} finally {
+		try {
+			removeCreatedDirsIfEmpty(createdDirs);
+		} catch (e) {
+			annotation.warning(`Failed to remove created write_through directories: ${errorMessage(e)}`);
+		}
 	}
-	exitCode !== 0 && (process.exitCode = exitCode);
 }
 process.argv[1] === (0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href) && main().catch((err) => {
 	err instanceof ActionError ? console.log(`::error::${err.message}`) : console.log(`::error::Unexpected error in sandbox: ${errorMessage(err)}`), process.exit(1);
-}), exports.buildACLRules = buildACLRules, exports.parseWritablePaths = parseWritablePaths, exports.readKnownBlockedRules = readKnownBlockedRules, exports.resolveFilesystemMode = resolveFilesystemMode, exports.resolveFilesystemPlan = resolveFilesystemPlan, exports.resolveProxyEngine = resolveProxyEngine, exports.validateFilesystemInputs = validateFilesystemInputs;
+}), exports.buildACLRules = buildACLRules, exports.readKnownBlockedRules = readKnownBlockedRules, exports.resolveFilesystemMode = resolveFilesystemMode, exports.resolveFilesystemPlan = resolveFilesystemPlan, exports.resolveProxyEngine = resolveProxyEngine, exports.resolveWriteThroughInput = resolveWriteThroughInput, exports.splitWriteThroughInput = splitWriteThroughInput, exports.validateFilesystemInputs = validateFilesystemInputs;
