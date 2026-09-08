@@ -91,7 +91,10 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   way as the runtime sockets above (`linux.maskedPaths`); the per-user directory is masked whole
   rather than by individual socket, so a future tool dropping a new socket there is covered without a
   code change, and a path that doesn't exist on a given runner (there might be no active login
-  session) is silently skipped by runc rather than an error.
+  session) is silently skipped by runc rather than an error. What is _not_ masked is a socket whose
+  worst case stays inside the sandbox: an `ssh-agent` a workflow started for itself, for one, since
+  a `run:` step legitimately uses one and masking it would break more than it closes. See
+  [Credential retrieval is intentionally not blocked](#known-limitations) below.
 - **PID namespace**: the isolated command runs in its own PID namespace. This isn't just about
   hiding other processes from `ps`. The Linux kernel structurally forbids a process from tracing
   (`ptrace`) or reading `/proc/<pid>/mem` for any process outside its own PID namespace's lineage,
@@ -522,7 +525,18 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   command can send network traffic, but not what it reads. A compromised dependency can still read
   `~/.aws/credentials`, `~/.docker/config.json`, or similar local credential files anywhere on the
   filesystem; it just cannot exfiltrate them anywhere outside the allowlist. That's unaffected by
-  `filesystem` mode.
+  `filesystem` mode. The same reach extends to an agent socket the workflow started for itself, an
+  `ssh-agent` holding a deploy key or a `gpg-agent` holding an imported signing key: a read-only
+  mount doesn't stop `connect(2)` on a live Unix domain socket, and a network namespace has nothing
+  to do with a pathname `AF_UNIX` one. The isolated command never gets the private key, which is the
+  point of an agent, but it can have the agent sign whatever it likes for as long as the step runs.
+  Where the agent is there for some other step, don't hand it to this one: the environment is
+  forwarded as-is rather than filtered, so `SSH_AUTH_SOCK: ""` in the step's own `env:` passes an
+  empty value through, which `ssh` treats as no agent at all. Where the isolated command is itself
+  what needs the agent, a `npm ci` pulling private git dependencies for instance, there is nothing
+  to scope away. An agent whose socket sits under `$XDG_RUNTIME_DIR` is already out of reach for an
+  unrelated reason, see [`$XDG_RUNTIME_DIR` is an empty directory inside the
+  sandbox](#known-limitations) above.
 - **`filesystem: persistent` (the default) lets the command plant a payload for a later step, not
   just read one**: since the filesystem is read-only outside
   `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP`, that's also _where_ it can persist one.
