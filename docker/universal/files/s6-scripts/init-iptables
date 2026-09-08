@@ -26,7 +26,7 @@ iptables -P FORWARD DROP
 # ip6tables is safe. If it's present, ip6tables must succeed -- set -e keeps
 # this fail-closed rather than silently leaving IPv6 unfiltered.
 #
-# No gateway ports here: the sandbox link is IPv4-only, so nothing may reach
+# No gateway ports here: sandbox0 is IPv4-only, so nothing may reach
 # the listeners over IPv6. ICMPv6 stays open for neighbour discovery.
 if [ -e /proc/net/if_inet6 ]; then
   ip6tables -A INPUT -i lo -j ACCEPT
