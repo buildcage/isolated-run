@@ -126,7 +126,7 @@ Each pair runs the same command with and without rules:
   in the Security doc for both layers.
 - One registry often needs several domains. PyPI, for example, uses both `pypi.org` and
   `files.pythonhosted.org`. The audit report lists every one of them, so start from that.
-- The generated allowlist covers only what the engine decrypted. `allow_tls_rules` and
+- The generated allowlist covers only what the engine decrypted. `allowed_tls_rules` and
   `allowed_ip_rules` come back exactly as the audit run was configured with them.
 - If something the command runs pins a certificate or carries its own trust store (the JVM is the
   usual case), use `proxy_engine: universal` instead. See [Engines](#engines).
@@ -148,7 +148,7 @@ Each pair runs the same command with and without rules:
 | `proxy_engine`                    | `universal`  | `inspect` or `universal`. See [Engines](#engines).                                              |
 | `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)         |
 | `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [Filesystem access](#filesystem-access). |
-| `filesystem`                      | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](#filesystem-access).    |
+| `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](#filesystem-access).    |
 | `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.       |
 | `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart  |
 | `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact, `inspect` only. See [The report](#the-report).  |
@@ -164,7 +164,7 @@ All of these are empty by default. Which ones apply depends on the engine:
 | `allowed_https_rules` |    ✅     |     ✅      | A host and port reached over HTTPS: `registry.npmjs.org:443`                        |
 | `allowed_http_rules`  |    ✅     |     ✅      | A host and port reached over plain HTTP: `deb.debian.org:80`                        |
 | `allowed_ip_rules`    |    ✅     |     ✅      | An address and port, for connections made without DNS: `192.168.1.1:443`            |
-| `allow_tls_rules`     |    ✅     |      -      | A TLS destination to pass through undecrypted, judged on SNI: `db.example.com:5432` |
+| `allowed_tls_rules`   |    ✅     |      -      | A TLS destination to pass through undecrypted, judged on SNI: `db.example.com:5432` |
 | `known_blocked_rules` |    ✅     |     ✅      | A host expected to be blocked, so it doesn't fail the step                          |
 
 Setting a rule the engine can't act on is caught before the command starts: `restrict` fails, since
@@ -195,7 +195,7 @@ nothing and breaks nothing.
 
 ## Rule syntax
 
-`allowed_url_rules` and `allow_tls_rules` need `proxy_engine: inspect`. The host rules work with
+`allowed_url_rules` and `allowed_tls_rules` need `proxy_engine: inspect`. The host rules work with
 either engine. The inputs are additive: a connection is allowed when any rule in any of them
 matches.
 
@@ -284,14 +284,14 @@ any domain. IPv4 only, and what a rule may hold depends on the engine:
 Either way the connection is tunnelled without inspection: once an `ip:port` pair is allowed, any
 TCP-based protocol can use that path. Prefer a domain rule where the destination has a stable name.
 
-### TLS passthrough: `allow_tls_rules`
+### TLS passthrough: `allowed_tls_rules`
 
 For TLS traffic that isn't HTTPS. The SNI and port are checked and the connection passes through
 undecrypted, so the command validates the origin's own certificate. The name is still resolved by
 the proxy, so a passthrough goes where the proxy resolved it and not where the command aimed:
 
 ```yaml
-allow_tls_rules: |
+allowed_tls_rules: |
   db.example.com:5432
 ```
 
@@ -483,13 +483,13 @@ path is remounted read-only for the duration of the `run` command, which closes 
 payload anywhere outside those four paths. It doesn't close off planting one inside them: `$HOME`
 and `$RUNNER_TEMP` stay writable, and `GITHUB_ENV`/`GITHUB_PATH`/`GITHUB_OUTPUT` live under
 `$RUNNER_TEMP`, so a later, non-isolated step in the same job can still pick up whatever the command
-left there. See `filesystem: ephemeral` below, and
+left there. See `filesystem_mode: ephemeral` below, and
 [Known Limitations](./docs/security.md#known-limitations) for what neither mode closes off. It also
 doesn't restrict what the command can _read_.
 
-`filesystem` controls what happens to those writes once the step ends:
+`filesystem_mode` controls what happens to those writes once the step ends:
 
-| `filesystem`               | What it does                                                                                                                                      |
+| `filesystem_mode`          | What it does                                                                                                                                      |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, exactly as today. Everything else is read-only. |
 | `ephemeral` (experimental) | Every writable path is discarded when the step ends (via an overlay).                                                                             |
@@ -497,19 +497,19 @@ doesn't restrict what the command can _read_.
 `write_through:` names the paths whose writes reach the real host filesystem in either mode — the
 paths that opt out of whichever default applies:
 
-| `filesystem` | What `write_through:` does                                               |
-| ------------ | ------------------------------------------------------------------------ |
-| `persistent` | Makes the path writable, on top of the four always-writable paths above. |
-| `ephemeral`  | Exempts the path from the overlay, so writes to it survive the step.     |
+| `filesystem_mode` | What `write_through:` does                                               |
+| ----------------- | ------------------------------------------------------------------------ |
+| `persistent`      | Makes the path writable, on top of the four always-writable paths above. |
+| `ephemeral`       | Exempts the path from the overlay, so writes to it survive the step.     |
 
 > [!WARNING]
-> `filesystem: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
+> `filesystem_mode: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
 > change in a future release without following semver, and it has seen less real-world use than the
 > rest of this action. `persistent` (the default) is unaffected and stays stable. Try `ephemeral` in
 > a non-critical workflow first, and pin this action to a commit SHA rather than a version tag if you
 > adopt it.
 
-Use `filesystem: ephemeral` when the command is untrusted and you want to stop it from planting
+Use `filesystem_mode: ephemeral` when the command is untrusted and you want to stop it from planting
 something a later, non-isolated step in the same job would pick up: a rewritten `~/.bashrc`,
 `~/.npmrc`, `~/.docker/config.json`, or a `$GITHUB_ENV`/`$GITHUB_PATH`/`$GITHUB_OUTPUT` edit meant
 to run code once the sandbox is gone.
@@ -517,7 +517,7 @@ to run code once the sandbox is gone.
 ```yaml
 - uses: buildcage/isolated-run@68f89e4e4e5d812aeee07a3512394457c70fa110 # v1.1.4
   with:
-    filesystem: ephemeral
+    filesystem_mode: ephemeral
     write_through: |
       $GITHUB_WORKSPACE
       $GITHUB_OUTPUT
@@ -534,7 +534,7 @@ to run code once the sandbox is gone.
 > ```yaml
 > - uses: buildcage/isolated-run@68f89e4e4e5d812aeee07a3512394457c70fa110 # v1.1.4
 >   with:
->     filesystem: ephemeral
+>     filesystem_mode: ephemeral
 >     write_through: |
 >       $GITHUB_WORKSPACE
 >       $GITHUB_OUTPUT
@@ -617,7 +617,7 @@ write_through: /
 
 > [!NOTE]
 > `write_through:` was called `writable:` before it covered both filesystem modes, and
-> `allow_write:` was its `filesystem: ephemeral`-only counterpart. `writable:` still works and means
+> `allow_write:` was its `filesystem_mode: ephemeral`-only counterpart. `writable:` still works and means
 > the same thing, with one change: its entries now go through the resolution above, so a relative
 > entry resolves against `$GITHUB_WORKSPACE` rather than being passed through as-is, and a `$NAME`
 > outside the seven supported variables is rejected instead of being treated as a literal path.

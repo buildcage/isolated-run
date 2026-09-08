@@ -221,7 +221,7 @@ jobs:
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network) -- proves proxy_engine: inspect wiring
   # end-to-end: engine selection, method/path enforcement via
-  # allowed_url_rules, TLS passthrough via allow_tls_rules, and CA trust (a
+  # allowed_url_rules, TLS passthrough via allowed_tls_rules, and CA trust (a
   # plain https GET succeeding with no --insecure, despite the proxy
   # terminating TLS). Deeper scenario coverage (SSRF/forged-Host/DNS
   # non-leak/wildcard host+path/CA residue) lives in
@@ -268,7 +268,7 @@ jobs:
         with:
           proxy_engine: inspect
           allowed_url_rules: "GET|HEAD https://example.com/**"
-          allow_tls_rules: "github.com:443"
+          allowed_tls_rules: "github.com:443"
           # Blocked connections below are expected, not a failure.
           fail_on_blocked: false
           # Short retention: this e2e run's own artifacts shouldn't linger.
@@ -292,7 +292,7 @@ jobs:
               exit 1
             fi
 
-            echo "=== allow_tls_rules host: passed through undecrypted, real cert visible ==="
+            echo "=== allowed_tls_rules host: passed through undecrypted, real cert visible ==="
             curl -fsS --max-time 10 https://github.com/ > /dev/null
 
       - name: Verify the sandbox report contains the expected allowed/blocked entries

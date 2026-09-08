@@ -126,7 +126,7 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   rejected outright, see [Known Limitations](#known-limitations) below. The `write_through` input
   adds further paths to the writable set for tools that need to write elsewhere, such as a build
   output or a cache directory; setting it to `/` disables this restriction entirely. This is all
-  `filesystem: persistent` (the default and the stable mode). `filesystem: ephemeral`
+  `filesystem_mode: persistent` (the default and the stable mode). `filesystem_mode: ephemeral`
   (**experimental**) replaces it with an overlay that discards every write not explicitly named in
   `write_through:`, closing off using a
   writable exception itself (not just the read-only area around it) to plant a payload for a later
@@ -212,7 +212,7 @@ What each kind of rule decides, and what stays undecrypted:
 | `allowed_https_rules` | any method and path on the host, over TLS  | Host header          | yes       |
 | `allowed_http_rules`  | any method and path on the host, plaintext | Host header          | n/a       |
 | `allowed_url_rules`   | the named methods on matching URLs         | Host header and path | yes       |
-| `allow_tls_rules`     | TLS to the named host and port             | SNI and port         | **no**    |
+| `allowed_tls_rules`   | TLS to the named host and port             | SNI and port         | **no**    |
 | `allowed_ip_rules`    | TCP to the address and port, any protocol  | address and port     | **no**    |
 
 ### What it actually stops
@@ -292,7 +292,7 @@ What each kind of rule decides, and what stays undecrypted:
   directly, is unaffected by this guard in either mode: blocking it would only hide real
   information about what the command needs, without closing anything DNS could have redirected.
 
-- **`allow_tls_rules` and `allowed_ip_rules` stay uninspected by design.** Each is recorded with a
+- **`allowed_tls_rules` and `allowed_ip_rules` stay uninspected by design.** Each is recorded with a
   byte count and nothing more, since neither carries a name the proxy can re-terminate TLS for.
 - **Query strings are kept in the log**, since that is also where an exfiltration payload would go.
 - **UDP is dropped**, so QUIC and HTTP/3 fall back to TCP or fail. Port 53 to the gateway is the one
@@ -512,7 +512,7 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 - **The post step validates `$GITHUB_STATE` before acting on it, not just reads it back**:
   `$GITHUB_STATE` is how this action passes its proxy container's identity from the main step to
   its own post (cleanup) step. That file lives under `$RUNNER_TEMP`, which stays writable in
-  `filesystem: persistent` (the default), so the isolated command can overwrite what this action
+  `filesystem_mode: persistent` (the default), so the isolated command can overwrite what this action
   wrote there before the post step reads it. The post step checks that the container name it reads
   back is actually shaped like one this action generates, and computes the Compose project name for
   its own proxy stack itself rather than trusting a stored value, so an isolated command can't
@@ -525,7 +525,7 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   command can send network traffic, but not what it reads. A compromised dependency can still read
   `~/.aws/credentials`, `~/.docker/config.json`, or similar local credential files anywhere on the
   filesystem; it just cannot exfiltrate them anywhere outside the allowlist. That's unaffected by
-  `filesystem` mode. The same reach extends to an agent socket the workflow started for itself, an
+  `filesystem_mode`. The same reach extends to an agent socket the workflow started for itself, an
   `ssh-agent` holding a deploy key or a `gpg-agent` holding an imported signing key: a read-only
   mount doesn't stop `connect(2)` on a live Unix domain socket, and a network namespace has nothing
   to do with a pathname `AF_UNIX` one. The isolated command never gets the private key, which is the
@@ -537,13 +537,13 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   to scope away. An agent whose socket sits under `$XDG_RUNTIME_DIR` is already out of reach for an
   unrelated reason, see [`$XDG_RUNTIME_DIR` is an empty directory inside the
   sandbox](#known-limitations) above.
-- **`filesystem: persistent` (the default) lets the command plant a payload for a later step, not
+- **`filesystem_mode: persistent` (the default) lets the command plant a payload for a later step, not
   just read one**: since the filesystem is read-only outside
   `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP`, that's also _where_ it can persist one.
   `GITHUB_OUTPUT`, `GITHUB_ENV`, and `GITHUB_PATH` live under `$RUNNER_TEMP`, a writable exception,
   so the isolated command can set an output, an env var, or `$PATH` for later steps exactly as an
   un-sandboxed one could, and the same goes for `~/.bashrc`, `~/.npmrc`, `~/.docker/config.json`,
-  and anything else under `$HOME`, `/tmp`, or `$GITHUB_WORKSPACE`. `filesystem: ephemeral`
+  and anything else under `$HOME`, `/tmp`, or `$GITHUB_WORKSPACE`. `filesystem_mode: ephemeral`
   (**experimental**; see [Filesystem access](../README.md#filesystem-access) in the README) closes
   this off for everything except what's explicitly named in `write_through:`, which in practice has to
   include `$GITHUB_WORKSPACE` for the job to do anything useful, so that specific path (and whatever
@@ -551,7 +551,7 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   are also the same real directory across every invocation of this action in a job, not scoped per
   sandbox, in `persistent` mode: two concurrent invocations are isolated at the container/network
   level (see [Notes](../README.md#notes)), not the filesystem, so one can reach another's in-flight
-  scratch files there. `filesystem: ephemeral` resolves this too, since each invocation gets its own
+  scratch files there. `filesystem_mode: ephemeral` resolves this too, since each invocation gets its own
   overlay.
 - **A step's own scratch directory is hidden from every sandbox, including its own**: each
   `run:` step stages its OCI bundle and its run script under `/var/tmp/buildcage-<uid>/`, and the
@@ -565,12 +565,12 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   never reach the runner's disk. What this does _not_ cover is a process running as the same user
   outside any sandbox: it can still read `/var/tmp/buildcage-<uid>/` directly, which is the same
   accepted limitation as credential retrieval above.
-- **`filesystem: ephemeral` (experimental) requires overlayfs support on the runner's own
+- **`filesystem_mode: ephemeral` (experimental) requires overlayfs support on the runner's own
   filesystem**: checked with a preflight probe before the sandbox starts, so an unsupported runner fails the step with a clear
   error rather than a cryptic one partway through. This is known to fail when the runner process
   itself runs inside a container whose own root filesystem is overlayfs (common for container-based
   self-hosted runners), since the kernel doesn't allow an overlay mount's `upperdir`/`workdir` to
-  themselves sit on overlayfs. `filesystem: persistent` remains available on any runner this action
+  themselves sit on overlayfs. `filesystem_mode: persistent` remains available on any runner this action
   otherwise supports.
 - **Linux only**: requires a Linux runner with passwordless `sudo` for the isolation setup itself
   (network namespace, veth, iptables) and a working Docker installation (client and daemon) for the

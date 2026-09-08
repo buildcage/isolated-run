@@ -16,14 +16,14 @@ import { ActionError } from "#core/lib/errors.ts";
  *   DOCKER_UNAVAILABLE         – docker CLI missing from PATH or a docker command failed
  *   PASSWORDLESS_SUDO_REQUIRED    – sudo -n check failed; passwordless sudo isn't configured
  *   UNSAFE_PRIMARY_GID            – the runner's primary GID is privileged and no safe substitute GID exists
- *   FILESYSTEM_INPUT_CONFLICT      – filesystem/write_through inputs combined in a disallowed way
+ *   FILESYSTEM_INPUT_CONFLICT      – filesystem_mode/write_through inputs combined in a disallowed way
  *   INVALID_FILESYSTEM_MODE       – filesystem input isn't "persistent" or "ephemeral"
  *   INVALID_WRITE_THROUGH_PATH    – a write_through entry failed path-resolution rules (unknown $VAR, etc.)
  *   WRITE_THROUGH_TARGET_MISSING  – a write_through entry resolves to a well-known GITHUB_* file that doesn't exist
  *   WRITE_THROUGH_TARGET_UNCREATABLE – a write_through entry doesn't exist and couldn't be created (sudo mkdir/chown failed)
  *   ALLOW_WRITE_REMOVED           – the removed allow_write input was supplied (renamed to write_through)
- *   OVERLAYFS_UNSUPPORTED         – filesystem: ephemeral's overlayfs preflight probe failed
- *   FILESYSTEM_PLAN_FAILED        – computing filesystem: ephemeral's overlay roots failed for a reason
+ *   OVERLAYFS_UNSUPPORTED         – filesystem_mode: ephemeral's overlayfs preflight probe failed
+ *   FILESYSTEM_PLAN_FAILED        – computing filesystem_mode: ephemeral's overlay roots failed for a reason
  *                                    unrelated to write_through's own syntax (e.g. a permissions error reading
  *                                    one of the fixed $HOME/$RUNNER_TEMP/etc. candidate paths)
  *   SCRATCH_BASE_UNSAFE           – the sandbox scratch base exists but isn't a private directory we own

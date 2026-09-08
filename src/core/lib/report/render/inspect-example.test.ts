@@ -228,7 +228,7 @@ describe("buildInspectRestrictExample", () => {
     expect(buildInspectRestrictExample(null, "buildcage/isolated-run", "v2")).toBe("");
   });
 
-  it("echoes allow_tls_rules and allowed_ip_rules as configured, not derived from traffic", () => {
+  it("echoes allowed_tls_rules and allowed_ip_rules as configured, not derived from traffic", () => {
     // Neither is ever decrypted, so there is nothing in `requests` to build
     // them from -- they are the same values the audit run was given.
     const md = buildInspectRestrictExample(requests, "buildcage/isolated-run", "v2", {
@@ -237,19 +237,19 @@ describe("buildInspectRestrictExample", () => {
     expect(/allowed_ip_rules: \|\n\s+10\.0\.0\.5:5432\n/.test(md)).toBe(true);
 
     const md2 = buildInspectRestrictExample(requests, "buildcage/isolated-run", "v2", {
-      allowTlsRules: ["db.internal.example.com:8443"],
+      allowedTlsRules: ["db.internal.example.com:8443"],
     });
-    expect(/allow_tls_rules: \|\n\s+db\.internal\.example\.com:8443\n/.test(md2)).toBe(true);
+    expect(/allowed_tls_rules: \|\n\s+db\.internal\.example\.com:8443\n/.test(md2)).toBe(true);
   });
 
   it("still renders a section for tls/ip rules alone, with no observed traffic", () => {
     const md = buildInspectRestrictExample([], "buildcage/isolated-run", "v2", {
       allowedIpRules: ["10.0.0.5:5432"],
-      allowTlsRules: ["db.internal.example.com:8443"],
+      allowedTlsRules: ["db.internal.example.com:8443"],
     });
     expect(md.includes("allowed_url_rules")).toBe(false);
     expect(/allowed_ip_rules: \|\n\s+10\.0\.0\.5:5432\n/.test(md)).toBe(true);
-    expect(/allow_tls_rules: \|\n\s+db\.internal\.example\.com:8443\n/.test(md)).toBe(true);
+    expect(/allowed_tls_rules: \|\n\s+db\.internal\.example\.com:8443\n/.test(md)).toBe(true);
   });
 
   it("includes a run: block when a runCommand is given, same as build-example.ts", () => {

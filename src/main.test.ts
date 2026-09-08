@@ -247,7 +247,7 @@ describe("resolveFilesystemPlan", () => {
     // ephemeral, and only fail much later inside buildOciConfig.
     for (const spelling of ["/.", "//", `${ENV.GITHUB_WORKSPACE}/../../../../..`]) {
       expect(() => resolveFilesystemPlan("ephemeral", spelling, ENV)).toThrow(
-        /has no meaning in filesystem: ephemeral/,
+        /has no meaning in filesystem_mode: ephemeral/,
       );
     }
   });

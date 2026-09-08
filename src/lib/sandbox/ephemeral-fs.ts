@@ -114,7 +114,7 @@ export function createOverlayScratchDirs(
 }
 
 /**
- * Setup-time log lines for `filesystem: ephemeral` -- the already-folded
+ * Setup-time log lines for `filesystem_mode: ephemeral` -- the already-folded
  * overlay roots and resolved write_through paths, never the raw input
  * strings. Empty (no lines at all) for `persistent` mode.
  */

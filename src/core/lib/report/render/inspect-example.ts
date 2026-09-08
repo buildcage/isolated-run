@@ -154,7 +154,7 @@ export interface BuildInspectRestrictExampleOptions {
    *  since they apply unchanged under `restrict` (only enforcement
    *  differs). */
   allowedIpRules?: string[];
-  allowTlsRules?: string[];
+  allowedTlsRules?: string[];
 }
 
 /**
@@ -171,11 +171,11 @@ export function buildInspectRestrictExample(
     runCommand,
     actionVersion,
     allowedIpRules = [],
-    allowTlsRules = [],
+    allowedTlsRules = [],
   }: BuildInspectRestrictExampleOptions = {},
 ): string {
   const lines = buildUrlRuleLines(requests ?? []);
-  if (lines.length === 0 && allowedIpRules.length === 0 && allowTlsRules.length === 0) return "";
+  if (lines.length === 0 && allowedIpRules.length === 0 && allowedTlsRules.length === 0) return "";
 
   let yaml = "- name: Start isolated-run\n";
   yaml += `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
@@ -196,9 +196,9 @@ export function buildInspectRestrictExample(
     yaml += "    allowed_url_rules: |\n";
     for (const line of lines) yaml += `      ${line}\n`;
   }
-  if (allowTlsRules.length > 0) {
-    yaml += "    allow_tls_rules: |\n";
-    for (const rule of allowTlsRules) yaml += `      ${rule}\n`;
+  if (allowedTlsRules.length > 0) {
+    yaml += "    allowed_tls_rules: |\n";
+    for (const rule of allowedTlsRules) yaml += `      ${rule}\n`;
   }
   if (allowedIpRules.length > 0) {
     yaml += "    allowed_ip_rules: |\n";

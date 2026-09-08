@@ -425,7 +425,7 @@ function unmountAllUnder(dir) {
 * though it's no longer listed as a mountpoint at all. Resolves on the
 * very next attempt after a brief wait.
 *
-* Falls back to `sudo rm -rf` on EACCES: filesystem: ephemeral's overlay
+* Falls back to `sudo rm -rf` on EACCES: filesystem_mode: ephemeral's overlay
 * roots (see ephemeral-fs.ts's createOverlayScratchDirs) are mounted by
 * runc running as root, and the kernel's own overlayfs implementation
 * writes bookkeeping content directly into each root's `work` dir while
@@ -469,7 +469,7 @@ function removeScratchDir(dir) {
 * so post.ts can reclaim a scratch dir orphaned by a hard kill that bypassed
 * withScratchDir's own finally. No-ops safely when `dir` doesn't exist.
 *
-* `ephemeralRoots`, when given, is filesystem: ephemeral's own already-folded
+* `ephemeralRoots`, when given, is filesystem_mode: ephemeral's own already-folded
 * overlay-root paths (see ephemeral-fs.ts's determineOverlayRoots) -- logged
 * here, right before the upper/work dirs holding those writes are deleted,
 * so there's a visible record of what was discarded. Omitted by

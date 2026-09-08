@@ -19652,7 +19652,7 @@ var SandboxError = class extends ActionError {};
 //#region src/lib/engine-rule-support.ts
 /**
 * Only `inspect` terminates TLS, so it's the only engine that can see an HTTP
-* method or a path — `allowed_url_rules` and `allow_tls_rules` are no-ops on
+* method or a path — `allowed_url_rules` and `allowed_tls_rules` are no-ops on
 * `universal`. Called once at setup, before the sandbox proxy starts, so a
 * mismatch is caught immediately instead of silently not enforcing.
 *
@@ -19664,7 +19664,7 @@ var SandboxError = class extends ActionError {};
 function checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, warn) {
 	if (proxyEngine === "inspect") return;
 	let unsupported = [];
-	if (urlRules.length > 0 && unsupported.push("allowed_url_rules"), tlsRules.length > 0 && unsupported.push("allow_tls_rules"), unsupported.length === 0) return;
+	if (urlRules.length > 0 && unsupported.push("allowed_url_rules"), tlsRules.length > 0 && unsupported.push("allowed_tls_rules"), unsupported.length === 0) return;
 	let list = unsupported.join(" and "), reason = `${list} ${unsupported.length > 1 ? "have" : "has"} no effect with proxy_engine: ${proxyEngine} — this engine only sees the host and port, never a method or a path.`;
 	if (proxyMode === "audit") {
 		warn(`${reason} They are ignored for this run. Switch to proxy_engine: inspect if you need to enforce a method or a path.`);
@@ -19848,7 +19848,7 @@ function unmountAllUnder(dir) {
 * though it's no longer listed as a mountpoint at all. Resolves on the
 * very next attempt after a brief wait.
 *
-* Falls back to `sudo rm -rf` on EACCES: filesystem: ephemeral's overlay
+* Falls back to `sudo rm -rf` on EACCES: filesystem_mode: ephemeral's overlay
 * roots (see ephemeral-fs.ts's createOverlayScratchDirs) are mounted by
 * runc running as root, and the kernel's own overlayfs implementation
 * writes bookkeeping content directly into each root's `work` dir while
@@ -19892,7 +19892,7 @@ function removeScratchDir(dir) {
 * so post.ts can reclaim a scratch dir orphaned by a hard kill that bypassed
 * withScratchDir's own finally. No-ops safely when `dir` doesn't exist.
 *
-* `ephemeralRoots`, when given, is filesystem: ephemeral's own already-folded
+* `ephemeralRoots`, when given, is filesystem_mode: ephemeral's own already-folded
 * overlay-root paths (see ephemeral-fs.ts's determineOverlayRoots) -- logged
 * here, right before the upper/work dirs holding those writes are deleted,
 * so there's a visible record of what was discarded. Omitted by
@@ -19969,7 +19969,7 @@ function ensureOwnScratchBase(base = SANDBOX_SCRATCH_BASE) {
 * is used (unit tests). Cleaned up on every exit path that unwinds — a
 * SIGKILL bypasses this finally, which is exactly what post.ts covers.
 *
-* `ephemeralRoots` (filesystem: ephemeral only) is passed through only to
+* `ephemeralRoots` (filesystem_mode: ephemeral only) is passed through only to
 * the run's own final cleanup, not the stale-remnant clear above (that dir,
 * if any, is left over from a previous, already-reported run).
 */
@@ -19987,7 +19987,7 @@ function withScratchDir(fn, containerName, ephemeralRoots) {
 }
 //#endregion
 //#region src/lib/overlayfs-preflight.ts
-const REQUIREMENT = `filesystem: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE} -- an overlay mount's upperdir/workdir are placed there, and the kernel doesn't allow those to themselves sit on an overlayfs filesystem. This commonly fails when the runner process is itself running inside a container whose own root filesystem is overlayfs (e.g. many container-based self-hosted runner setups), since that puts SANDBOX_SCRATCH_BASE on overlayfs too. Use filesystem: persistent instead, or run this action from a runner whose filesystem isn't overlayfs-backed.`;
+const REQUIREMENT = `filesystem_mode: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE} -- an overlay mount's upperdir/workdir are placed there, and the kernel doesn't allow those to themselves sit on an overlayfs filesystem. This commonly fails when the runner process is itself running inside a container whose own root filesystem is overlayfs (e.g. many container-based self-hosted runner setups), since that puts SANDBOX_SCRATCH_BASE on overlayfs too. Use filesystem_mode: persistent instead, or run this action from a runner whose filesystem isn't overlayfs-backed.`;
 /**
 * Kept pure (takes the error, not execFileSync's raw output) so it's
 * unit-testable the same way as sudo-preflight.ts's describeSudoFailure.
@@ -20030,7 +20030,7 @@ function removeProbeDir(dir, exec) {
 }
 /**
 * Fails fast, before spinning up the proxy container, so a runner that can't
-* support filesystem: ephemeral at all fails with a clear message rather
+* support filesystem_mode: ephemeral at all fails with a clear message rather
 * than a cryptic runc mount error deep inside runSandboxedCommand.
 *
 * The probe's throwaway lower/upper/work/merged dirs are created under
@@ -20165,7 +20165,7 @@ function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync
 	});
 }
 /**
-* Setup-time log lines for `filesystem: ephemeral` -- the already-folded
+* Setup-time log lines for `filesystem_mode: ephemeral` -- the already-folded
 * overlay roots and resolved write_through paths, never the raw input
 * strings. Empty (no lines at all) for `persistent` mode.
 */
@@ -21424,9 +21424,9 @@ function buildUrlRuleLines(requests) {
 *
 * `actionRef` is the ref this action was invoked with.
 */
-function buildInspectRestrictExample(requests, actionRepo, actionRef, { runCommand, actionVersion, allowedIpRules = [], allowTlsRules = [] } = {}) {
+function buildInspectRestrictExample(requests, actionRepo, actionRef, { runCommand, actionVersion, allowedIpRules = [], allowedTlsRules = [] } = {}) {
 	let lines = buildUrlRuleLines(requests ?? []);
-	if (lines.length === 0 && allowedIpRules.length === 0 && allowTlsRules.length === 0) return "";
+	if (lines.length === 0 && allowedIpRules.length === 0 && allowedTlsRules.length === 0) return "";
 	let yaml = "- name: Start isolated-run\n";
 	if (yaml += `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`, yaml += "  with:\n", runCommand) {
 		yaml += "    run: |\n";
@@ -21436,9 +21436,9 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { runComma
 		yaml += "    allowed_url_rules: |\n";
 		for (let line of lines) yaml += `      ${line}\n`;
 	}
-	if (allowTlsRules.length > 0) {
-		yaml += "    allow_tls_rules: |\n";
-		for (let rule of allowTlsRules) yaml += `      ${rule}\n`;
+	if (allowedTlsRules.length > 0) {
+		yaml += "    allowed_tls_rules: |\n";
+		for (let rule of allowedTlsRules) yaml += `      ${rule}\n`;
 	}
 	if (allowedIpRules.length > 0) {
 		yaml += "    allowed_ip_rules: |\n";
@@ -21459,7 +21459,7 @@ function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound
 		runCommand,
 		actionVersion,
 		allowedIpRules: report.parameters.allowedIpRules,
-		allowTlsRules: report.parameters.allowTlsRules
+		allowedTlsRules: report.parameters.allowedTlsRules
 	}) : buildRestrictExample(report.passed, actionRepo, actionRef, {
 		runCommand,
 		actionVersion
@@ -79426,7 +79426,7 @@ function resolveProxyEngine(input) {
 const FILESYSTEM_MODES = ["persistent", "ephemeral"];
 function resolveFilesystemMode(input) {
 	let trimmed = input?.trim() || "persistent";
-	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
+	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem_mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
 	return trimmed;
 }
 /** The write_through: input as bare lines, for the pre-resolution check in
@@ -79446,7 +79446,7 @@ function splitWriteThroughInput(input) {
 * after normalization.
 */
 function validateFilesystemInputs(filesystemMode, writeThroughPaths) {
-	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
+	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
 }
 /**
 * Resolves + pre-creates the write_through targets (write-through.ts) and, in
@@ -79494,7 +79494,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 			createdDirs
 		};
 	} catch (e) {
-		throw new SandboxError(`Failed to determine filesystem: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
+		throw new SandboxError(`Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
 	}
 }
 /**
@@ -79679,7 +79679,7 @@ async function main() {
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	let proxyEngine = resolveProxyEngine(getInput("proxy_engine"));
 	console.log(`Proxy engine: ${proxyEngine}`);
-	let filesystemMode = resolveFilesystemMode(getInput("filesystem")), writeThroughInput = resolveWriteThroughInput({
+	let filesystemMode = resolveFilesystemMode(getInput("filesystem_mode")), writeThroughInput = resolveWriteThroughInput({
 		writeThrough: getInput("write_through"),
 		writable: getInput("writable"),
 		allowWrite: getInput("allow_write")
@@ -79698,7 +79698,7 @@ async function main() {
 			httpsRulesInput: getInput("allowed_https_rules"),
 			httpRulesInput: getInput("allowed_http_rules"),
 			ipRulesInput: getInput("allowed_ip_rules")
-		}), knownBlockedRules = readKnownBlockedRules(getInput("known_blocked_rules")), urlRulesInput = getInput("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput("allow_tls_rules")), urlRules = buildUrlRules(urlRulesInput).map((r) => r.raw);
+		}), knownBlockedRules = readKnownBlockedRules(getInput("known_blocked_rules")), urlRulesInput = getInput("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput("allowed_tls_rules")), urlRules = buildUrlRules(urlRulesInput).map((r) => r.raw);
 		checkUrlAndTlsRuleSupport({
 			proxyEngine,
 			proxyMode,
@@ -79716,7 +79716,7 @@ async function main() {
 			ALLOWED_HTTP_RULES: rules.httpRules.join("\n"),
 			ALLOWED_IP_RULES: rules.ipRules.join("\n"),
 			ALLOWED_URL_RULES: urlRules.join("\n"),
-			ALLOW_TLS_RULES: tlsRules.join("\n"),
+			ALLOWED_TLS_RULES: tlsRules.join("\n"),
 			BUILDCAGE_PROXY_IMAGE_REF: imageRef
 		};
 		await startSandboxProxy({
@@ -79746,7 +79746,7 @@ async function main() {
 					allowedHttpsRules: rules.httpsRules,
 					allowedHttpRules: rules.httpRules,
 					allowedIpRules: rules.ipRules,
-					allowTlsRules: tlsRules,
+					allowedTlsRules: tlsRules,
 					knownBlockedRules
 				}, proxyEngine), failOnBlocked;
 				try {

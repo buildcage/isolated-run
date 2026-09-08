@@ -8,12 +8,12 @@ import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase } from "./sandbox/scratch-di
 type ExecLike = typeof execFileSync;
 
 const REQUIREMENT =
-  `filesystem: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE} -- an overlay ` +
+  `filesystem_mode: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE} -- an overlay ` +
   "mount's upperdir/workdir are placed there, and the kernel doesn't allow those to themselves " +
   "sit on an overlayfs filesystem. This commonly fails when the runner process is itself running " +
   "inside a container whose own root filesystem is overlayfs (e.g. many container-based " +
   "self-hosted runner setups), since that puts SANDBOX_SCRATCH_BASE on overlayfs too. Use " +
-  "filesystem: persistent instead, or run this action from a runner whose filesystem isn't " +
+  "filesystem_mode: persistent instead, or run this action from a runner whose filesystem isn't " +
   "overlayfs-backed.";
 
 /**
@@ -60,7 +60,7 @@ export interface CheckOverlayfsSupportOptions {
 
 /**
  * Fails fast, before spinning up the proxy container, so a runner that can't
- * support filesystem: ephemeral at all fails with a clear message rather
+ * support filesystem_mode: ephemeral at all fails with a clear message rather
  * than a cryptic runc mount error deep inside runSandboxedCommand.
  *
  * The probe's throwaway lower/upper/work/merged dirs are created under
