@@ -18,8 +18,13 @@ function records(blob: Buffer): string[] {
 }
 
 describe("resolveSandboxEnv", () => {
-  it("keeps the step's own environment and drops undefined values", () => {
-    expect(resolveSandboxEnv({ FOO: "bar", UNSET: undefined })).toStrictEqual({ FOO: "bar" });
+  it("keeps the step's own environment, empty values included, and drops undefined ones", () => {
+    // An empty value has to survive: emptying SSH_AUTH_SOCK in a step's own
+    // `env:` is what keeps an agent out of the sandbox. See docs/security.md.
+    expect(resolveSandboxEnv({ FOO: "bar", EMPTY: "", UNSET: undefined })).toStrictEqual({
+      FOO: "bar",
+      EMPTY: "",
+    });
   });
 
   it("adds the CA trust variables that are unset, without overriding the step's own", () => {
