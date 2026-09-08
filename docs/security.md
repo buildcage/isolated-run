@@ -119,12 +119,13 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   exceptions are recursive bind-mounts (preserving any legitimately nested mounts under them); the
   sandbox's own `mount --rbind /` rootfs is staged under `/var/tmp/buildcage-<uid>`, which is never one of
   those writable exceptions, so that recursion doesn't re-expose it as a second, writable copy of
-  the whole host `/`. A `writable:` input naming that directory (or an ancestor of it) is rejected
-  outright, see [Known Limitations](#known-limitations) below. The `writable` input adds further
-  paths to the writable set for tools that need to write elsewhere, such as a cache directory;
-  setting it to `/` disables this restriction entirely. This is all `filesystem: persistent`
-  (the default and the stable mode). `filesystem: ephemeral` (**experimental**) replaces it with an
-  overlay that discards every write not explicitly named in `allow_write:`, closing off using a
+  the whole host `/`. A `write_through:` input naming that directory (or an ancestor of it) is
+  rejected outright, see [Known Limitations](#known-limitations) below. The `write_through` input
+  adds further paths to the writable set for tools that need to write elsewhere, such as a build
+  output or a cache directory; setting it to `/` disables this restriction entirely. This is all
+  `filesystem: persistent` (the default and the stable mode). `filesystem: ephemeral`
+  (**experimental**) replaces it with an overlay that discards every write not explicitly named in
+  `write_through:`, closing off using a
   writable exception itself (not just the read-only area around it) to plant a payload for a later
   step. See [Filesystem access](../README.md#filesystem-access) in the README.
 - **Die-with-parent**: the isolated command's life is tied to `run-isolated.sh`'s own via a two-hop
@@ -464,13 +465,22 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 
 ## Known Limitations
 
-- **`writable:` cannot name the sandbox's own scratch directory**: a `run:` step's `writable:` input
-  listing `/var/tmp/buildcage-<uid>` (or an ancestor of it, `/var/tmp` or `/` for instance) is rejected
-  outright. That directory holds the run's own `mount --rbind /` rootfs, and the writable exceptions
-  are recursive bind-mounts, so allowing it would recursively re-expose the whole host `/` inside
-  the sandbox as a second, writable copy. This is a misconfiguration guard against an
-  operator-supplied `writable:` value, not a defense against the isolated command itself (see
+- **`write_through:` cannot name the sandbox's own scratch directory**: a `run:` step's
+  `write_through:` input listing `/var/tmp/buildcage-<uid>` (or an ancestor of it, `/var/tmp` or `/`
+  for instance) is rejected outright. That directory holds the run's own `mount --rbind /` rootfs,
+  and the writable exceptions are recursive bind-mounts, so allowing it would recursively re-expose
+  the whole host `/` inside the sandbox as a second, writable copy. Entries are normalized to
+  absolute paths first, so a spelling like `/var/tmp/./buildcage-<uid>` is caught by the same check.
+  This is a misconfiguration guard against an operator-supplied `write_through:` value, not a
+  defense against the isolated command itself (see
   [Filesystem access](../README.md#filesystem-access) in the README).
+- **A created `write_through:` directory outlives a killed step**: a listed path that doesn't exist
+  is created before the step runs (owner and permissions copied from its nearest existing parent, so
+  a restricted tree stays restricted) and removed afterwards with `rmdir`, which only succeeds while
+  it is still empty. That cleanup runs in the action's own process, not its post step: the only way
+  to hand the list of created directories to the post step is `GITHUB_STATE`, which the sandboxed
+  command can rewrite, and that would turn the cleanup into a way to `rmdir` any empty directory as
+  root. A step killed outright therefore leaves an empty directory behind.
 - **Scratch directory on a multi-user host**: `/var/tmp` is world-writable (sticky bit set), so on a
   host shared with other, unprivileged local users, one of them could pre-create
   `/var/tmp/buildcage-<uid>` themselves before the action ever runs, as a symlink, or as a
@@ -521,7 +531,7 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   un-sandboxed one could, and the same goes for `~/.bashrc`, `~/.npmrc`, `~/.docker/config.json`,
   and anything else under `$HOME`, `/tmp`, or `$GITHUB_WORKSPACE`. `filesystem: ephemeral`
   (**experimental**; see [Filesystem access](../README.md#filesystem-access) in the README) closes
-  this off for everything except what's explicitly named in `allow_write:`, which in practice has to
+  this off for everything except what's explicitly named in `write_through:`, which in practice has to
   include `$GITHUB_WORKSPACE` for the job to do anything useful, so that specific path (and whatever
   else you list) remains exactly as exposed to this as `persistent` mode always is. `$RUNNER_TEMP` and `/tmp`
   are also the same real directory across every invocation of this action in a job, not scoped per

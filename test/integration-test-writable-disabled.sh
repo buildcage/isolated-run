@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verifies writable: / (disables the read-only restriction entirely) by
+# Verifies write_through: / (disables the read-only restriction entirely) by
 # driving dist/main.cjs directly, without the real action wrapper --
 # see test-e2e.yml's test_sandbox_enforcement for the one case that does.
 set -uo pipefail
@@ -15,19 +15,19 @@ GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
 BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_WRITABLE="/" \
+INPUT_WRITE_THROUGH="/" \
 INPUT_RUN="touch /opt/.buildcage-writable-test
 rm -f /opt/.buildcage-writable-test" \
   node dist/main.cjs
 CODE=$?
 
 echo ""
-echo "=== Sandbox writable:/ Assertions ==="
+echo "=== Sandbox write_through:/ Assertions ==="
 echo ""
 if [ "$CODE" = "0" ]; then
-  echo "  PASS  / is fully writable when writable: / is set"
+  echo "  PASS  / is fully writable when write_through: / is set"
 else
-  echo "  FAIL  / was not fully writable when writable: / is set (exit $CODE)"
+  echo "  FAIL  / was not fully writable when write_through: / is set (exit $CODE)"
   exit 1
 fi
 echo ""

@@ -252,7 +252,7 @@ export function buildOciConfig(
         options: [`lowerdir=${root.path}`, `upperdir=${root.upper}`, `workdir=${root.work}`],
       });
     }
-    // Layer 3: allow_write entries, shallow-first. ensureAllowWriteTargetsExist
+    // Layer 3: write_through entries, shallow-first. ensureWriteThroughTargetsExist
     // has already guaranteed every one of these exists on the host before
     // this runs, so runc never has to synthesize a root-owned placeholder
     // for any of them (see that function's own doc comment for why).

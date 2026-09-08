@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verifies filesystem: ephemeral / allow_write: end-to-end by driving
+# Verifies filesystem: ephemeral / write_through: end-to-end by driving
 # dist/main.cjs directly, without the real action wrapper -- see
 # test-e2e.yml for the one case that does exercise the real action.
 # The mount-composition/path-resolution rules themselves are already
@@ -30,10 +30,10 @@ fail() {
 # $GITHUB_WORKSPACE/$RUNNER_TEMP (both under mktemp's default, i.e. /tmp --
 # never inside the real $HOME, so $HOME survives folding as its own overlay
 # root instead of being subsumed by GITHUB_WORKSPACE/RUNNER_TEMP -- see
-# determineOverlayRoots). $1=workdir (already created) $2=allow_write input
+# determineOverlayRoots). $1=workdir (already created) $2=write_through input
 # $3=run script. Writes $workdir/out.log and $workdir/exit_code.
 run_ephemeral() {
-  local workdir="$1" allow_write="$2" run_script="$3"
+  local workdir="$1" write_through="$2" run_script="$3"
   local runner_temp
   runner_temp=$(mktemp -d)
   touch "$workdir/state.env" "$workdir/summary.md"
@@ -44,7 +44,7 @@ run_ephemeral() {
   BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_FILESYSTEM="ephemeral" \
-  INPUT_ALLOW_WRITE="$allow_write" \
+  INPUT_WRITE_THROUGH="$write_through" \
   INPUT_RUN="$run_script" \
     node "$REPO_ROOT/dist/main.cjs" >"$workdir/out.log" 2>&1
   echo $? >"$workdir/exit_code"
@@ -52,7 +52,7 @@ run_ephemeral() {
 }
 
 echo ""
-echo "=== Sandbox filesystem: ephemeral / allow_write: Assertions ==="
+echo "=== Sandbox filesystem: ephemeral / write_through: Assertions ==="
 echo ""
 
 # A fresh runner has no scratch base at all, which is the state this test
@@ -88,7 +88,7 @@ rm -f "$HOME_MARKER" "$HOME_PRELOADED"
 rm -rf "$CASE1"
 
 # --- Case 2+3: the runner's own generated files are discarded by default
-# and persisted when named in allow_write:. Placed under RUNNER_TEMP (as
+# and persisted when named in write_through:. Placed under RUNNER_TEMP (as
 # they are for real) so they're covered by RUNNER_TEMP's own overlay in the
 # default case.
 CASE2=$(mktemp -d)
@@ -104,14 +104,14 @@ RUNNER_TEMP="$(dirname "$GITHUB_ENV_FILE2")" \
 BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_FILESYSTEM="ephemeral" \
-INPUT_ALLOW_WRITE="" \
+INPUT_WRITE_THROUGH="" \
 INPUT_RUN='echo "SHOULD_NOT_PERSIST=1" >> "$GITHUB_ENV"' \
   node "$REPO_ROOT/dist/main.cjs" >"$CASE2/out.log" 2>&1
 CODE2=$?
 if [ "$CODE2" = "0" ] && ! grep -q SHOULD_NOT_PERSIST "$GITHUB_ENV_FILE2"; then
   pass "an append to \$GITHUB_ENV during the step is not reflected afterwards (default)"
 else
-  fail "an append to \$GITHUB_ENV during the step was reflected afterwards despite no allow_write: entry (exit $CODE2) -- see $CASE2/out.log"
+  fail "an append to \$GITHUB_ENV during the step was reflected afterwards despite no write_through: entry (exit $CODE2) -- see $CASE2/out.log"
   cat "$CASE2/out.log"
 fi
 rm -rf "$CASE2" "$GITHUB_ENV_FILE2"
@@ -133,7 +133,7 @@ RUNNER_TEMP="$(dirname "$GITHUB_ENV_FILE3")" \
 BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_FILESYSTEM="ephemeral" \
-INPUT_ALLOW_WRITE='$GITHUB_ENV
+INPUT_WRITE_THROUGH='$GITHUB_ENV
 $GITHUB_OUTPUT
 $GITHUB_STEP_SUMMARY' \
 INPUT_RUN='echo "SHOULD_PERSIST=1" >> "$GITHUB_ENV"
@@ -142,32 +142,32 @@ echo "SHOULD_PERSIST_SUMMARY" >> "$GITHUB_STEP_SUMMARY"' \
   node "$REPO_ROOT/dist/main.cjs" >"$CASE3/out.log" 2>&1
 CODE3=$?
 if [ "$CODE3" != "0" ]; then
-  fail "the allow_write: step itself failed (exit $CODE3) -- see $CASE3/out.log"
+  fail "the write_through: step itself failed (exit $CODE3) -- see $CASE3/out.log"
 fi
 if [ "$CODE3" = "0" ] && grep -q SHOULD_PERSIST "$GITHUB_ENV_FILE3"; then
-  pass "allow_write: \$GITHUB_ENV persists an append to it"
+  pass "write_through: \$GITHUB_ENV persists an append to it"
 else
-  fail "allow_write: \$GITHUB_ENV did not persist the append"
+  fail "write_through: \$GITHUB_ENV did not persist the append"
 fi
 if [ "$CODE3" = "0" ] && grep -q "persisted_output=1" "$GITHUB_OUTPUT_FILE3"; then
-  pass "allow_write: \$GITHUB_OUTPUT persists a step output the command sets"
+  pass "write_through: \$GITHUB_OUTPUT persists a step output the command sets"
 else
-  fail "allow_write: \$GITHUB_OUTPUT did not persist the step output"
+  fail "write_through: \$GITHUB_OUTPUT did not persist the step output"
 fi
 # Also asserts this action's own report is in the same file: it is written
 # from the host after the sandbox exits, so naming $GITHUB_STEP_SUMMARY
 # puts the command's markdown alongside it rather than in place of it.
 if [ "$CODE3" = "0" ] && grep -q SHOULD_PERSIST_SUMMARY "$GITHUB_SUMMARY_FILE3" && grep -q "^## " "$GITHUB_SUMMARY_FILE3"; then
-  pass "allow_write: \$GITHUB_STEP_SUMMARY persists the command's markdown next to this action's report"
+  pass "write_through: \$GITHUB_STEP_SUMMARY persists the command's markdown next to this action's report"
 else
-  fail "allow_write: \$GITHUB_STEP_SUMMARY did not persist the command's markdown next to the report"
+  fail "write_through: \$GITHUB_STEP_SUMMARY did not persist the command's markdown next to the report"
 fi
 if [ "$FAILURES" != "$FAILURES_BEFORE3" ]; then
   cat "$CASE3/out.log"
 fi
 rm -rf "$CASE3" "$GITHUB_ENV_FILE3" "$GITHUB_OUTPUT_FILE3" "$GITHUB_SUMMARY_FILE3"
 
-# --- Case 4: a missing allow_write target under a runner-owned tree
+# --- Case 4: a missing write_through target under a runner-owned tree
 # ($GITHUB_WORKSPACE) is created runner-owned, and the write persists.
 CASE4=$(mktemp -d)
 run_ephemeral "$CASE4" "./dist" '
@@ -176,14 +176,14 @@ echo "built" > "$GITHUB_WORKSPACE/dist/output.txt"
 '
 CODE4=$(cat "$CASE4/exit_code")
 if [ "$CODE4" = "0" ] && [ -f "$CASE4/dist/output.txt" ]; then
-  pass "allow_write: ./dist creates the missing dir runner-owned and persists writes under it"
+  pass "write_through: ./dist creates the missing dir runner-owned and persists writes under it"
 else
-  fail "allow_write: ./dist did not persist the write (exit $CODE4) -- see $CASE4/out.log"
+  fail "write_through: ./dist did not persist the write (exit $CODE4) -- see $CASE4/out.log"
   cat "$CASE4/out.log"
 fi
 rm -rf "$CASE4"
 
-# --- Case 4b: a missing allow_write target under a root-owned, non-runner
+# --- Case 4b: a missing write_through target under a root-owned, non-runner
 # tree is still created (via sudo mkdir -p), but mirrors its nearest
 # existing ancestor's owner/mode -- so it stays unwritable by the
 # (non-root) sandboxed process, exactly as naming the existing ancestor
@@ -194,22 +194,22 @@ sudo -n rm -rf "$ETC_TARGET" 2>/dev/null
 CASE4B=$(mktemp -d)
 run_ephemeral "$CASE4B" "$ETC_TARGET" '
 if echo x > "'"$ETC_TARGET"'/should-fail.txt" 2>/dev/null; then
-  echo "UNEXPECTED: write into a root-owned allow_write target succeeded"
+  echo "UNEXPECTED: write into a root-owned write_through target succeeded"
   exit 1
 fi
 '
 CODE4B=$(cat "$CASE4B/exit_code")
 if [ "$CODE4B" = "0" ] && [ -d "$ETC_TARGET" ] && [ ! -e "$ETC_TARGET/should-fail.txt" ]; then
-  pass "allow_write: a missing target under a root-owned tree is created but stays unwritable by the sandbox"
+  pass "write_through: a missing target under a root-owned tree is created but stays unwritable by the sandbox"
 else
-  fail "allow_write: a root-owned missing target did not behave as expected (exit $CODE4B) -- see $CASE4B/out.log"
+  fail "write_through: a root-owned missing target did not behave as expected (exit $CODE4B) -- see $CASE4B/out.log"
   cat "$CASE4B/out.log"
 fi
 sudo -n rm -rf "$ETC_TARGET" 2>/dev/null
 rm -rf "$CASE4B"
 
 # --- Case 5: an existing, already-writable-by-the-runner directory named
-# in allow_write: (not one of the fixed overlay candidates) persists writes.
+# in write_through: (not one of the fixed overlay candidates) persists writes.
 # Matches integration-test-writable-dir.sh's own use of /opt as a directory
 # CI images make writable by the runner user.
 CASE5=$(mktemp -d)
@@ -219,9 +219,9 @@ echo x > /opt/.buildcage-ephemeral-allow-write-test
 '
 CODE5=$(cat "$CASE5/exit_code")
 if [ "$CODE5" = "0" ] && [ -f /opt/.buildcage-ephemeral-allow-write-test ]; then
-  pass "allow_write: /opt persists a write to an existing, already-writable directory"
+  pass "write_through: /opt persists a write to an existing, already-writable directory"
 else
-  fail "allow_write: /opt did not persist the write (exit $CODE5) -- see $CASE5/out.log"
+  fail "write_through: /opt did not persist the write (exit $CODE5) -- see $CASE5/out.log"
   cat "$CASE5/out.log"
 fi
 rm -f /opt/.buildcage-ephemeral-allow-write-test

@@ -19,15 +19,20 @@ import { checkUrlAndTlsRuleSupport } from "./lib/engine-rule-support.ts";
 import { checkPasswordlessSudo } from "./lib/sudo-preflight.ts";
 import { checkOverlayfsSupport } from "./lib/overlayfs-preflight.ts";
 import {
-  resolveAllowWritePaths,
-  ensureAllowWriteTargetsExist,
-  AllowWriteTargetMissingError,
-  AllowWriteTargetUncreatableError,
   determineOverlayRoots,
   createOverlayScratchDirs,
   formatFilesystemPlanLog,
   type OverlayRoot,
 } from "./lib/sandbox/ephemeral-fs.ts";
+import {
+  resolveWriteThroughPaths,
+  ensureWriteThroughTargetsExist,
+  removeCreatedDirsIfEmpty,
+  WriteThroughTargetMissingError,
+  WriteThroughTargetUncreatableError,
+  WRITE_THROUGH_ALL,
+} from "./lib/sandbox/write-through.ts";
+import { assertScratchBaseNotWritable } from "./lib/sandbox/paths.ts";
 import { generateContainerName, getContainerNetns } from "./lib/container.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { buildComposeUpArgs, buildComposeDownArgs } from "#core/lib/docker/args.ts";
@@ -93,18 +98,45 @@ export function readKnownBlockedRules(input: string | undefined): string[] {
   return parseRulesOrThrow(input);
 }
 
+export interface WriteThroughInputs {
+  writeThrough: string;
+  /** Pre-rename spelling of write_through, still accepted. */
+  writable: string;
+  /** Removed input, only read so it can be rejected with a migration hint. */
+  allowWrite: string;
+}
+
 /**
- * Parse the `writable` input into a list of directories. Newline-separated
- * (not whitespace-split like the ACL rule inputs above) since paths can
- * legitimately contain spaces.
+ * Pick the effective write_through: input. `writable:` is the same input under
+ * its old name and still works; `allow_write:` (the ephemeral-only input this
+ * replaced) is rejected rather than ignored, since ignoring it would silently
+ * discard writes the step asked to keep.
  */
-export function parseWritablePaths(input: string | undefined): string[] {
-  return (
-    input
-      ?.split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter(Boolean) ?? []
-  );
+export function resolveWriteThroughInput({
+  writeThrough,
+  writable,
+  allowWrite,
+}: WriteThroughInputs): string {
+  if (allowWrite.trim()) {
+    throw new SandboxError(
+      "allow_write: has been replaced by write_through:, which covers both filesystem modes. " +
+        "Rename the input -- the path syntax is unchanged.",
+      "ALLOW_WRITE_REMOVED",
+    );
+  }
+  if (writeThrough.trim() && writable.trim()) {
+    throw new SandboxError(
+      "write_through: and writable: are the same input under two names. Set only write_through:.",
+      "FILESYSTEM_INPUT_CONFLICT",
+    );
+  }
+  if (!writeThrough.trim() && writable.trim()) {
+    console.log(
+      "::notice::writable: is now called write_through:; writable: still works, but consider updating to write_through:.",
+    );
+    return writable;
+  }
+  return writeThrough;
 }
 
 const ENGINES = ["universal", "inspect"] as const;
@@ -154,13 +186,16 @@ export function resolveFilesystemMode(input: string | undefined): FilesystemMode
 export interface FilesystemPlan {
   /** filesystem: ephemeral only -- already folded (determineOverlayRoots). [] in persistent mode. */
   overlayRoots: OverlayRoot[];
-  /** filesystem: ephemeral only -- already resolved (resolveAllowWritePaths) and
-   *  pre-created (ensureAllowWriteTargetsExist). [] in persistent mode. */
-  allowWritePaths: string[];
+  /** Already resolved (resolveWriteThroughPaths) and pre-created
+   *  (ensureWriteThroughTargetsExist), in either filesystem mode. */
+  writeThroughPaths: string[];
+  /** The directory segments pre-creating those paths actually created, for
+   *  removeCreatedDirsIfEmpty to give back once the step is done. */
+  createdDirs: string[];
 }
 
-/** Test-only seam onto ensureAllowWriteTargetsExist/determineOverlayRoots's
- *  own filesystem/sudo dependencies -- see ephemeral-fs.ts. */
+/** Test-only seam onto ensureWriteThroughTargetsExist/determineOverlayRoots's
+ *  own filesystem/sudo dependencies -- see write-through.ts / ephemeral-fs.ts. */
 export interface ResolveFilesystemPlanDeps {
   exists?: (path: string) => boolean;
   stat?: (path: string) => { uid: number; gid: number; mode: number };
@@ -169,80 +204,100 @@ export interface ResolveFilesystemPlanDeps {
 }
 
 /**
- * Validates the filesystem/writable/allow_write inputs against each other
- * (§3.1: ephemeral and writable: are mutually exclusive; persistent and
- * allow_write: are mutually exclusive). Pure, no I/O -- deliberately called
- * on its own, ahead of checkPasswordlessSudo()/checkOverlayfsSupport() in
- * main(), so a plain input-conflict mistake is rejected immediately rather
- * than only after those privileged preflight checks have already run.
- * resolveFilesystemPlan below also calls this itself, so it stays safe to
- * call directly too.
+ * Validates the write_through: input against the filesystem mode. Pure, no
+ * I/O -- deliberately called on its own, ahead of
+ * checkPasswordlessSudo()/checkOverlayfsSupport() in main(), so a plain input
+ * mistake is rejected immediately rather than only after those privileged
+ * preflight checks have already run. resolveFilesystemPlan below also calls
+ * this itself, so it stays safe to call directly too.
  */
 export function validateFilesystemInputs(
   filesystemMode: FilesystemMode,
-  writableInput: string,
-  allowWriteInput: string,
+  writeThroughInput: string,
 ): void {
-  if (filesystemMode === "ephemeral" && writableInput.trim()) {
+  const listsRoot = writeThroughInput
+    .split(/\r?\n/)
+    .some((line) => line.trim() === WRITE_THROUGH_ALL);
+  if (filesystemMode === "ephemeral" && listsRoot) {
     throw new SandboxError(
-      "filesystem: ephemeral and writable: are mutually exclusive (this includes writable: / " +
-        "as a full opt-out, which has no meaning in ephemeral mode) -- use allow_write: instead.",
-      "FILESYSTEM_INPUT_CONFLICT",
-    );
-  }
-  if (filesystemMode === "persistent" && allowWriteInput.trim()) {
-    throw new SandboxError(
-      "allow_write: has no effect outside filesystem: ephemeral -- persistent mode (the default) " +
-        "uses writable: instead.",
+      "write_through: / drops the read-only restriction wholesale, which has no meaning in " +
+        "filesystem: ephemeral -- it would persist every write, the one thing that mode exists " +
+        "to prevent. List the paths that must survive instead.",
       "FILESYSTEM_INPUT_CONFLICT",
     );
   }
 }
 
 /**
- * In ephemeral mode, resolves + pre-creates the allow_write targets and
- * folds the overlay-root candidates down to what's actually needed
- * (ephemeral-fs.ts). Throws SandboxError, never ephemeral-fs.ts's own error
- * classes directly, so a caller doesn't need to know about those.
+ * Resolves + pre-creates the write_through targets (write-through.ts) and, in
+ * ephemeral mode, folds the overlay-root candidates down to what's actually
+ * needed (ephemeral-fs.ts). Throws SandboxError, never those modules' own
+ * error classes directly, so a caller doesn't need to know about those.
  */
 export function resolveFilesystemPlan(
   filesystemMode: FilesystemMode,
-  writableInput: string,
-  allowWriteInput: string,
+  writeThroughInput: string,
   env: NodeJS.ProcessEnv,
   deps: ResolveFilesystemPlanDeps = {},
 ): FilesystemPlan {
-  validateFilesystemInputs(filesystemMode, writableInput, allowWriteInput);
-  if (filesystemMode !== "ephemeral") return { overlayRoots: [], allowWritePaths: [] };
+  validateFilesystemInputs(filesystemMode, writeThroughInput);
 
-  // Kept as its own try/catch, separate from determineOverlayRoots below:
-  // everything in here is genuinely about allow_write's own input (parsing
-  // it, then creating what it names), so wrapping any failure as an
-  // allow_write problem is accurate.
-  let allowWritePaths: string[];
+  let writeThroughPaths: string[];
   try {
-    allowWritePaths = resolveAllowWritePaths(allowWriteInput, env);
-    ensureAllowWriteTargetsExist(allowWritePaths, env, deps);
+    writeThroughPaths = resolveWriteThroughPaths(writeThroughInput, env);
   } catch (e) {
-    if (e instanceof AllowWriteTargetMissingError) {
-      throw new SandboxError(e.message, "ALLOW_WRITE_TARGET_MISSING");
-    }
-    if (e instanceof AllowWriteTargetUncreatableError) {
-      throw new SandboxError(e.message, "ALLOW_WRITE_TARGET_UNCREATABLE");
-    }
-    throw new SandboxError(`Invalid allow_write: ${errorMessage(e)}`, "INVALID_ALLOW_WRITE_PATH");
+    throw new SandboxError(
+      `Invalid write_through: ${errorMessage(e)}`,
+      "INVALID_WRITE_THROUGH_PATH",
+    );
   }
 
-  // Separate from the above: this only touches the fixed $HOME/$RUNNER_TEMP/
-  // /tmp/$GITHUB_WORKSPACE candidates, not allow_write's own input, so a
-  // failure here (e.g. a permissions error reading one of those paths) must
-  // not be mislabeled as an allow_write syntax problem.
+  // `/` drops the read-only restriction wholesale (persistent only, see
+  // validateFilesystemInputs), so no path is bind-mounted individually --
+  // nothing to create, and buildOciConfig skips the scratch-base guard for
+  // the same reason.
+  if (writeThroughPaths.includes(WRITE_THROUGH_ALL)) {
+    return { overlayRoots: [], writeThroughPaths, createdDirs: [] };
+  }
+
+  // Before anything is created: buildOciConfig rejects a path overlapping the
+  // sandbox's own scratch base outright, so checking it here keeps a doomed
+  // input from leaving freshly-created directories behind. Its own check
+  // stays as the authoritative one -- this is the early copy.
+  try {
+    assertScratchBaseNotWritable(writeThroughPaths);
+  } catch (e) {
+    throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
+  }
+
+  let createdDirs: string[];
+  try {
+    createdDirs = ensureWriteThroughTargetsExist(writeThroughPaths, env, deps);
+  } catch (e) {
+    if (e instanceof WriteThroughTargetMissingError) {
+      throw new SandboxError(e.message, "WRITE_THROUGH_TARGET_MISSING");
+    }
+    if (e instanceof WriteThroughTargetUncreatableError) {
+      throw new SandboxError(e.message, "WRITE_THROUGH_TARGET_UNCREATABLE");
+    }
+    throw new SandboxError(
+      `Invalid write_through: ${errorMessage(e)}`,
+      "INVALID_WRITE_THROUGH_PATH",
+    );
+  }
+
+  if (filesystemMode !== "ephemeral") return { overlayRoots: [], writeThroughPaths, createdDirs };
+
+  // Separate try/catch from the above: this only touches the fixed
+  // $HOME/$RUNNER_TEMP//tmp/$GITHUB_WORKSPACE candidates, not write_through's
+  // own input, so a failure here (e.g. a permissions error reading one of
+  // those paths) must not be mislabeled as a write_through syntax problem.
   try {
     const overlayCandidates = [env.HOME, env.RUNNER_TEMP, "/tmp", env.GITHUB_WORKSPACE].filter(
       (p): p is string => Boolean(p),
     );
-    const overlayRoots = determineOverlayRoots(overlayCandidates, allowWritePaths, deps);
-    return { overlayRoots, allowWritePaths };
+    const overlayRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, deps);
+    return { overlayRoots, writeThroughPaths, createdDirs };
   } catch (e) {
     throw new SandboxError(
       `Failed to determine filesystem: ephemeral's overlay roots: ${errorMessage(e)}`,
@@ -330,15 +385,16 @@ interface RunSandboxedCommandOptions {
   containerName: string;
   proxyNetns: string;
   runInput: string;
-  writablePaths: string[];
+  /** Already resolved (resolveWriteThroughPaths) and pre-created
+   *  (ensureWriteThroughTargetsExist) by main() before this runs. Opens holes
+   *  in the read-only set in persistent mode, and in the overlay in ephemeral
+   *  mode -- see buildOciConfig. */
+  writeThroughPaths: string[];
   env: NodeJS.ProcessEnv;
   proxyEngine: ProxyEngine;
   filesystemMode: FilesystemMode;
   /** filesystem: ephemeral only -- already folded (determineOverlayRoots), not raw candidates. */
   overlayRoots: OverlayRoot[];
-  /** filesystem: ephemeral only -- already resolved (resolveAllowWritePaths) and
-   *  pre-created (ensureAllowWriteTargetsExist) by main() before this runs. */
-  allowWritePaths: string[];
 }
 
 /**
@@ -350,12 +406,11 @@ function runSandboxedCommand({
   containerName,
   proxyNetns,
   runInput,
-  writablePaths,
+  writeThroughPaths,
   env,
   proxyEngine,
   filesystemMode,
   overlayRoots,
-  allowWritePaths,
 }: RunSandboxedCommandOptions): number {
   // Fixed addressing for the direct veth link to the proxy's sandbox0 interface.
   const gateway = "172.20.0.1";
@@ -445,11 +500,11 @@ function runSandboxedCommand({
             // Standard writable runner scratch; not always under $HOME on
             // self-hosted runners, so covered explicitly (see buildOciConfig).
             runnerTemp: env.RUNNER_TEMP || "",
-            writablePaths,
+            writablePaths: writeThroughPaths,
           },
           ephemeral:
             filesystemMode === "ephemeral"
-              ? { overlayRoots: overlayScratchPaths, allowWrite: allowWritePaths }
+              ? { overlayRoots: overlayScratchPaths, allowWrite: writeThroughPaths }
               : undefined,
           runtime: {
             netnsPath: `/var/run/netns/${netnsName}`,
@@ -592,40 +647,42 @@ async function main(): Promise<void> {
   console.log(`Proxy engine: ${proxyEngine}`);
 
   const filesystemMode = resolveFilesystemMode(core.getInput("filesystem"));
-  const writableInput = core.getInput("writable");
-  const allowWriteInput = core.getInput("allow_write");
+  const writeThroughInput = resolveWriteThroughInput({
+    writeThrough: core.getInput("write_through"),
+    writable: core.getInput("writable"),
+    allowWrite: core.getInput("allow_write"),
+  });
 
-  // Cheap, pure input-conflict check first, so a plain mistake (e.g.
-  // filesystem: ephemeral combined with writable:) is rejected immediately
-  // rather than only after the privileged preflight checks below have
-  // already run (checkOverlayfsSupport in particular performs a real
-  // sudo/unshare/mount probe).
-  validateFilesystemInputs(filesystemMode, writableInput, allowWriteInput);
+  // Cheap, pure input check first, so a plain mistake (e.g. write_through: /
+  // under filesystem: ephemeral) is rejected immediately rather than only
+  // after the privileged preflight checks below have already run
+  // (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
+  // probe).
+  validateFilesystemInputs(filesystemMode, writeThroughInput);
 
   // Fail fast — before image verification or starting the proxy container —
   // if the runner can't support the isolation setup at all. Deliberately
-  // ahead of resolveFilesystemPlan below: ensureAllowWriteTargetsExist (part
-  // of that call, ephemeral mode only) itself shells out to sudo, and doing
-  // that before this check risks a confusing ALLOW_WRITE_TARGET_UNCREATABLE
-  // in place of this more specific, better-diagnosed error.
+  // ahead of resolveFilesystemPlan below: ensureWriteThroughTargetsExist (part
+  // of that call) itself shells out to sudo, and doing that before this check
+  // risks a confusing WRITE_THROUGH_TARGET_UNCREATABLE in place of this more
+  // specific, better-diagnosed error.
   checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") checkOverlayfsSupport();
 
   // Resolved/pre-created here (not inside runSandboxedCommand) so a bad
-  // allow_write entry, or a target that can't be created, fails before the
+  // write_through entry, or a target that can't be created, fails before the
   // proxy container ever starts -- same reasoning as checkPasswordlessSudo
   // above.
-  const { overlayRoots, allowWritePaths } = resolveFilesystemPlan(
+  const { overlayRoots, writeThroughPaths, createdDirs } = resolveFilesystemPlan(
     filesystemMode,
-    writableInput,
-    allowWriteInput,
+    writeThroughInput,
     env,
   );
   if (filesystemMode === "ephemeral") {
     for (const line of formatFilesystemPlanLog(
       filesystemMode,
       overlayRoots.map((r) => r.path),
-      allowWritePaths,
+      writeThroughPaths,
     )) {
       core.info(line);
     }
@@ -676,8 +733,6 @@ async function main(): Promise<void> {
   logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
   console.log("::endgroup::");
 
-  const writablePaths = parseWritablePaths(writableInput);
-
   // Each `run` step gets its own throwaway proxy container — start, run
   // the isolated command, report, and stop, all within this one step —
   // rather than sharing one across steps in the same job.
@@ -721,12 +776,11 @@ async function main(): Promise<void> {
       containerName,
       proxyNetns,
       runInput,
-      writablePaths,
+      writeThroughPaths,
       env,
       proxyEngine,
       filesystemMode,
       overlayRoots,
-      allowWritePaths,
     });
   } finally {
     try {
@@ -772,6 +826,18 @@ async function main(): Promise<void> {
       annotation.warning(`Failed to fetch sandbox report: ${errorMessage(e)}`);
     }
     await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
+    // Give back the directories pre-creating write_through targets made, if
+    // the command left them empty. Deliberately not mirrored in post.ts: the
+    // only way to hand this list to the post step is GITHUB_STATE, which the
+    // sandboxed command can rewrite (see post-state.ts), and that would turn
+    // the cleanup into a way to rmdir any empty directory as root. A hard
+    // kill therefore leaves an empty directory behind, which the next run
+    // reuses.
+    try {
+      removeCreatedDirsIfEmpty(createdDirs);
+    } catch (e) {
+      annotation.warning(`Failed to remove created write_through directories: ${errorMessage(e)}`);
+    }
   }
 
   if (exitCode !== 0) {

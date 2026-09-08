@@ -141,18 +141,18 @@ Each pair runs the same command with and without rules:
 
 `run` is the only required input.
 
-| Input                             | Default      | Description                                                                                                      |
-| --------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `run`                             | required     | Command(s) to run inside the isolated sandbox, multi-line like a workflow `run:` step                            |
-| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                  |
-| `proxy_engine`                    | `universal`  | `inspect` or `universal`. See [Engines](#engines).                                                               |
-| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                          |
-| `writable`                        | empty        | Directories the command may write to, beyond the defaults. See [Filesystem access](#filesystem-access).          |
-| `filesystem`                      | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](#filesystem-access).                     |
-| `allow_write`                     | empty        | `filesystem: ephemeral` only: paths to keep writable and persisted. See [Filesystem access](#filesystem-access). |
-| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                   |
-| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact, `inspect` only. See [The report](#the-report).                   |
-| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, in days; empty uses the repository's own default                                 |
+| Input                             | Default      | Description                                                                                     |
+| --------------------------------- | ------------ | ----------------------------------------------------------------------------------------------- |
+| `run`                             | required     | Command(s) to run inside the isolated sandbox, multi-line like a workflow `run:` step           |
+| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                 |
+| `proxy_engine`                    | `universal`  | `inspect` or `universal`. See [Engines](#engines).                                              |
+| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)         |
+| `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [Filesystem access](#filesystem-access). |
+| `filesystem`                      | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](#filesystem-access).    |
+| `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.       |
+| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart  |
+| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact, `inspect` only. See [The report](#the-report).  |
+| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, in days; empty uses the repository's own default                |
 
 ### Rule inputs
 
@@ -489,10 +489,18 @@ doesn't restrict what the command can _read_.
 
 `filesystem` controls what happens to those writes once the step ends:
 
-| `filesystem`               | What it does                                                                                                                                                      |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, exactly as today. `writable:` adds further writable paths.      |
-| `ephemeral` (experimental) | Only paths listed in `allow_write:` persist; every other writable path is discarded when the step ends (via an overlay). `writable:` has no meaning in this mode. |
+| `filesystem`               | What it does                                                                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, exactly as today. Everything else is read-only. |
+| `ephemeral` (experimental) | Every writable path is discarded when the step ends (via an overlay).                                                                             |
+
+`write_through:` names the paths whose writes reach the real host filesystem in either mode — the
+paths that opt out of whichever default applies:
+
+| `filesystem` | What `write_through:` does                                               |
+| ------------ | ------------------------------------------------------------------------ |
+| `persistent` | Makes the path writable, on top of the four always-writable paths above. |
+| `ephemeral`  | Exempts the path from the overlay, so writes to it survive the step.     |
 
 > [!WARNING]
 > `filesystem: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
@@ -510,7 +518,7 @@ to run code once the sandbox is gone.
 - uses: buildcage/isolated-run@68f89e4e4e5d812aeee07a3512394457c70fa110 # v1.1.4
   with:
     filesystem: ephemeral
-    allow_write: |
+    write_through: |
       $GITHUB_WORKSPACE
       $GITHUB_OUTPUT
       ./dist
@@ -521,13 +529,13 @@ to run code once the sandbox is gone.
 > Discarding those writes is the point, but the same overlay also drops output the command was
 > meant to produce. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and `$GITHUB_STEP_SUMMARY` all
 > live under `$RUNNER_TEMP`, so whatever the command writes to them is gone once the step ends
-> unless you name that file in `allow_write:`:
+> unless you name that file in `write_through:`:
 >
 > ```yaml
 > - uses: buildcage/isolated-run@68f89e4e4e5d812aeee07a3512394457c70fa110 # v1.1.4
 >   with:
 >     filesystem: ephemeral
->     allow_write: |
+>     write_through: |
 >       $GITHUB_WORKSPACE
 >       $GITHUB_OUTPUT
 >       $GITHUB_STEP_SUMMARY
@@ -541,17 +549,18 @@ to run code once the sandbox is gone.
 > either way: both are written from the runner host after the sandboxed command has exited, outside
 > the overlay.
 
-`filesystem: ephemeral` and `writable:` are mutually exclusive (this includes `writable: /`, which
-has no meaning here); `allow_write:` is rejected outside `filesystem: ephemeral`.
+`write_through: /` drops the read-only restriction wholesale, so it only means anything under
+`persistent` and is rejected under `ephemeral`, where it would persist every write — the one thing
+that mode exists to prevent.
 
 This still doesn't close the delayed-exfiltration path off completely: `$GITHUB_WORKSPACE` has to
 persist for the job to do anything with it, and a later step routinely runs whatever ends up there,
-so `allow_write: $GITHUB_WORKSPACE` is effectively required for any real build and is exactly as
+so `write_through: $GITHUB_WORKSPACE` is effectively required for any real build and is exactly as
 exposed to this as `persistent` mode is. What `ephemeral` mode actually buys you is closing off
 everything else: `$HOME`, `$RUNNER_TEMP`, and the runner's own generated files unless you name them
 explicitly.
 
-`allow_write:` entries resolve like this:
+`write_through:` entries resolve like this:
 
 - `$NAME` / `${NAME}` expand only for `HOME`, `GITHUB_WORKSPACE`, `RUNNER_TEMP`, `GITHUB_OUTPUT`,
   `GITHUB_ENV`, `GITHUB_PATH`, and `GITHUB_STEP_SUMMARY`, not arbitrary env, so a value smuggled in
@@ -570,7 +579,10 @@ explicitly.
   under a tree it doesn't own (`/etc/something`, for instance) is created yet stays exactly as
   unwritable to the sandboxed command as naming that existing parent directly would be. Nothing here
   grants access beyond what the surrounding filesystem already implies.
-- `allow_write:` accepts files as well as directories, but only a path that's **already** a file
+- A directory created that way is removed again when the step ends, but only if the command left it
+  empty (`rmdir`, never `rm -r`), so a build output directory that actually received output stays.
+  A step killed outright skips this and leaves the empty directory behind; the next run reuses it.
+- `write_through:` accepts files as well as directories, but only a path that's **already** a file
   when the step starts; a missing target is always created as a directory (see above), never a file.
   A file entry is bind-mounted file-to-file (the same technique the `inspect` engine already uses to
   distribute its CA), so an append or a truncating write goes through, but a tool that replaces the
@@ -579,29 +591,35 @@ explicitly.
   doesn't exist yet to persist, either have an earlier step create it first, or list its
   (already-existing) parent directory instead.
 
-If you `allow_write: $GITHUB_OUTPUT`, treat every output it sets the same as any other value from
+If you `write_through: $GITHUB_OUTPUT`, treat every output it sets the same as any other value from
 untrusted code: never interpolate `${{ steps.<id>.outputs.<name> }}` directly into a later `run:`
 block (see [Passing values to run](#passing-values-to-run) above), since it came from the
-sandboxed command. `allow_write: $GITHUB_STEP_SUMMARY` lets the sandboxed command append to the Job Summary
+sandboxed command. `write_through: $GITHUB_STEP_SUMMARY` lets the sandboxed command append to the Job Summary
 directly; this action's own report is written to the same file, so anything the command adds appears
 alongside it, not in place of it.
 
-If `run` needs to write somewhere else in `persistent` mode, a tool-specific cache directory for
-example, list it under `writable`:
+If `run` needs to write somewhere else in `persistent` mode, a build output or a tool-specific cache
+directory for example, list it under `write_through`:
 
 ```yaml
 - uses: buildcage/isolated-run@68f89e4e4e5d812aeee07a3512394457c70fa110 # v1.1.4
   with:
-    writable: |
+    write_through: |
       /opt/some-tool/cache
     run: some-tool build
 ```
 
-To disable the read-only restriction entirely in `persistent` mode, set `writable` to `/`:
+To disable the read-only restriction entirely in `persistent` mode, set `write_through` to `/`:
 
 ```yaml
-writable: /
+write_through: /
 ```
+
+> [!NOTE]
+> `write_through:` was called `writable:` before it covered both filesystem modes, and
+> `allow_write:` was its `filesystem: ephemeral`-only counterpart. `writable:` still works and does
+> the same thing; `allow_write:` has been removed, and a step still passing it fails with a message
+> saying so rather than silently discarding the writes it asked to keep.
 
 ## Scope
 

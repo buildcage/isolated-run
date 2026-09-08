@@ -268,8 +268,8 @@ the [README](../README.md).
    - The writable exceptions are recursive bind-mounts (so legitimately nested mounts under them
      stay visible). The `mount --rbind /` rootfs is therefore staged under `/var/tmp/buildcage-<uid>`,
      never one of the writable exceptions, so those recursive rbinds don't re-expose it as a
-     second, _writable_ copy of the whole host `/` inside the sandbox. A `writable:` input naming
-     that directory (or an ancestor of it) is rejected outright rather than silently accepted. The
+     second, _writable_ copy of the whole host `/` inside the sandbox. A `write_through:` input
+     naming that directory (or an ancestor of it) is rejected outright rather than silently accepted. The
      sandbox's real host view (its own `/` and every nested mount) is untouched and stays read-only
      outside the writable set.
 5. Stage the sandbox's network and filesystem as root, via `sudo -n` (`run-isolated.sh`).
