@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verifies filesystem: ephemeral / write_through: end-to-end by driving
+# Verifies filesystem_mode: ephemeral / write_through: end-to-end by driving
 # dist/main.cjs directly, without the real action wrapper -- see
 # test-e2e.yml for the one case that does exercise the real action.
 # The mount-composition/path-resolution rules themselves are already
@@ -26,7 +26,7 @@ fail() {
   FAILURES=$((FAILURES + 1))
 }
 
-# Runs dist/main.cjs with filesystem: ephemeral against a fresh
+# Runs dist/main.cjs with filesystem_mode: ephemeral against a fresh
 # $GITHUB_WORKSPACE/$RUNNER_TEMP (both under mktemp's default, i.e. /tmp --
 # never inside the real $HOME, so $HOME survives folding as its own overlay
 # root instead of being subsumed by GITHUB_WORKSPACE/RUNNER_TEMP -- see
@@ -43,7 +43,7 @@ run_ephemeral() {
   RUNNER_TEMP="$runner_temp" \
   BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-  INPUT_FILESYSTEM="ephemeral" \
+  INPUT_FILESYSTEM_MODE="ephemeral" \
   INPUT_WRITE_THROUGH="$write_through" \
   INPUT_RUN="$run_script" \
     node "$REPO_ROOT/dist/main.cjs" >"$workdir/out.log" 2>&1
@@ -52,7 +52,7 @@ run_ephemeral() {
 }
 
 echo ""
-echo "=== Sandbox filesystem: ephemeral / write_through: Assertions ==="
+echo "=== Sandbox filesystem_mode: ephemeral / write_through: Assertions ==="
 echo ""
 
 # A fresh runner has no scratch base at all, which is the state this test
@@ -103,7 +103,7 @@ GITHUB_STEP_SUMMARY="$CASE2/summary.md" \
 RUNNER_TEMP="$(dirname "$GITHUB_ENV_FILE2")" \
 BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_FILESYSTEM="ephemeral" \
+INPUT_FILESYSTEM_MODE="ephemeral" \
 INPUT_WRITE_THROUGH="" \
 INPUT_RUN='echo "SHOULD_NOT_PERSIST=1" >> "$GITHUB_ENV"' \
   node "$REPO_ROOT/dist/main.cjs" >"$CASE2/out.log" 2>&1
@@ -132,7 +132,7 @@ GITHUB_STEP_SUMMARY="$GITHUB_SUMMARY_FILE3" \
 RUNNER_TEMP="$(dirname "$GITHUB_ENV_FILE3")" \
 BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_FILESYSTEM="ephemeral" \
+INPUT_FILESYSTEM_MODE="ephemeral" \
 INPUT_WRITE_THROUGH='$GITHUB_ENV
 $GITHUB_OUTPUT
 $GITHUB_STEP_SUMMARY' \

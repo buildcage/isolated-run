@@ -58,7 +58,7 @@ INPUT_PROXY_ENGINE="inspect" \
 INPUT_PROXY_MODE="restrict" \
 INPUT_ALLOWED_HTTPS_RULES="sub.wildcard.example.com:443 absent.example.com:443 metadata.example.com:443" \
 INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80" \
-INPUT_ALLOW_TLS_RULES="tlspass.example.com:443 ~^tlspass\.example\.com:8443$" \
+INPUT_ALLOWED_TLS_RULES="tlspass.example.com:443 ~^tlspass\.example\.com:8443$" \
 INPUT_ALLOWED_IP_RULES="~^10\.200\.0\.\d+:9080$" \
 INPUT_ALLOWED_URL_RULES="GET https://allowed.example.com/public/**
 GET https://allowed.example.com:9443/public/**

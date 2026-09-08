@@ -18,7 +18,7 @@
 #     GET ~^https://blocked\.example\.com/defaultport/.*$
 #   allowed_https_rules: sub.wildcard.example.com:443 absent.example.com:443 metadata.example.com:443
 #   allowed_http_rules:  allowed.example.com:80
-#   allow_tls_rules:     tlspass.example.com:443 ~^tlspass\.example\.com:8443$
+#   allowed_tls_rules:     tlspass.example.com:443 ~^tlspass\.example\.com:8443$
 #   allowed_ip_rules:    ~^10\.200\.0\.\d+:9080$
 # ---------------------------------------------------------------------------
 set -uo pipefail

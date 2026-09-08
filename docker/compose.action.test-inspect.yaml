@@ -22,7 +22,7 @@ services:
       - ALLOWED_HTTP_RULES=${ALLOWED_HTTP_RULES:-}
       - ALLOWED_IP_RULES=${ALLOWED_IP_RULES:-}
       - ALLOWED_URL_RULES=${ALLOWED_URL_RULES:-}
-      - ALLOW_TLS_RULES=${ALLOW_TLS_RULES:-}
+      - ALLOWED_TLS_RULES=${ALLOWED_TLS_RULES:-}
       - EXTERNAL_RESOLVER=${EXTERNAL_RESOLVER:-}
       # Test-only: init-inspect-cfg only honours this in an image built with
       # BUILDCAGE_TEST_HOOKS=1 (see docker/inspect/Dockerfile's

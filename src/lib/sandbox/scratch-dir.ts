@@ -77,7 +77,7 @@ function unmountAllUnder(dir: string): void {
  * though it's no longer listed as a mountpoint at all. Resolves on the
  * very next attempt after a brief wait.
  *
- * Falls back to `sudo rm -rf` on EACCES: filesystem: ephemeral's overlay
+ * Falls back to `sudo rm -rf` on EACCES: filesystem_mode: ephemeral's overlay
  * roots (see ephemeral-fs.ts's createOverlayScratchDirs) are mounted by
  * runc running as root, and the kernel's own overlayfs implementation
  * writes bookkeeping content directly into each root's `work` dir while
@@ -99,7 +99,7 @@ function removeScratchDir(dir: string): void {
         // This is the one call that runs as root, so ownership is checked
         // again immediately before it rather than relying on the caller's
         // own check. lstat, not stat, since a symlink here must not be
-        // followed. Safe even for filesystem: ephemeral's root-owned overlay
+        // followed. Safe even for filesystem_mode: ephemeral's root-owned overlay
         // bookkeeping, since that lives inside the dir, not as the dir itself.
         const st = lstatSync(dir);
         if (!st.isDirectory() || st.uid !== process.getuid!()) {
@@ -123,7 +123,7 @@ function removeScratchDir(dir: string): void {
  * so post.ts can reclaim a scratch dir orphaned by a hard kill that bypassed
  * withScratchDir's own finally. No-ops safely when `dir` doesn't exist.
  *
- * `ephemeralRoots`, when given, is filesystem: ephemeral's own already-folded
+ * `ephemeralRoots`, when given, is filesystem_mode: ephemeral's own already-folded
  * overlay-root paths (see ephemeral-fs.ts's determineOverlayRoots) -- logged
  * here, right before the upper/work dirs holding those writes are deleted,
  * so there's a visible record of what was discarded. Omitted by
@@ -229,7 +229,7 @@ export function ensureOwnScratchBase(base: string = SANDBOX_SCRATCH_BASE): void 
  * is used (unit tests). Cleaned up on every exit path that unwinds — a
  * SIGKILL bypasses this finally, which is exactly what post.ts covers.
  *
- * `ephemeralRoots` (filesystem: ephemeral only) is passed through only to
+ * `ephemeralRoots` (filesystem_mode: ephemeral only) is passed through only to
  * the run's own final cleanup, not the stale-remnant clear above (that dir,
  * if any, is left over from a previous, already-reported run).
  */

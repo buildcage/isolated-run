@@ -176,7 +176,7 @@ export function resolveFilesystemMode(input: string | undefined): FilesystemMode
   const trimmed = input?.trim() || "persistent";
   if (!(FILESYSTEM_MODES as readonly string[]).includes(trimmed)) {
     throw new SandboxError(
-      `Invalid filesystem: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`,
+      `Invalid filesystem_mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`,
       "INVALID_FILESYSTEM_MODE",
     );
   }
@@ -184,7 +184,7 @@ export function resolveFilesystemMode(input: string | undefined): FilesystemMode
 }
 
 export interface FilesystemPlan {
-  /** filesystem: ephemeral only -- already folded (determineOverlayRoots). [] in persistent mode. */
+  /** filesystem_mode: ephemeral only -- already folded (determineOverlayRoots). [] in persistent mode. */
   overlayRoots: OverlayRoot[];
   /** Already resolved (resolveWriteThroughPaths) and pre-created
    *  (ensureWriteThroughTargetsExist), in either filesystem mode. */
@@ -230,7 +230,7 @@ export function validateFilesystemInputs(
   if (filesystemMode === "ephemeral" && writeThroughPaths.includes(WRITE_THROUGH_ALL)) {
     throw new SandboxError(
       "write_through: / drops the read-only restriction wholesale, which has no meaning in " +
-        "filesystem: ephemeral -- it would persist every write, the one thing that mode exists " +
+        "filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists " +
         "to prevent. List the paths that must survive instead.",
       "FILESYSTEM_INPUT_CONFLICT",
     );
@@ -313,7 +313,7 @@ export function resolveFilesystemPlan(
     return { overlayRoots, writeThroughPaths, createdDirs };
   } catch (e) {
     throw new SandboxError(
-      `Failed to determine filesystem: ephemeral's overlay roots: ${errorMessage(e)}`,
+      `Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`,
       "FILESYSTEM_PLAN_FAILED",
     );
   }
@@ -406,7 +406,7 @@ interface RunSandboxedCommandOptions {
   env: NodeJS.ProcessEnv;
   proxyEngine: ProxyEngine;
   filesystemMode: FilesystemMode;
-  /** filesystem: ephemeral only -- already folded (determineOverlayRoots), not raw candidates. */
+  /** filesystem_mode: ephemeral only -- already folded (determineOverlayRoots), not raw candidates. */
   overlayRoots: OverlayRoot[];
 }
 
@@ -659,7 +659,7 @@ async function main(): Promise<void> {
   const proxyEngine = resolveProxyEngine(core.getInput("proxy_engine"));
   console.log(`Proxy engine: ${proxyEngine}`);
 
-  const filesystemMode = resolveFilesystemMode(core.getInput("filesystem"));
+  const filesystemMode = resolveFilesystemMode(core.getInput("filesystem_mode"));
   const writeThroughInput = resolveWriteThroughInput({
     writeThrough: core.getInput("write_through"),
     writable: core.getInput("writable"),
@@ -667,7 +667,7 @@ async function main(): Promise<void> {
   });
 
   // Cheap, pure input check first, so a plain mistake (e.g. write_through: /
-  // under filesystem: ephemeral) is rejected immediately rather than only
+  // under filesystem_mode: ephemeral) is rejected immediately rather than only
   // after the privileged preflight checks below have already run
   // (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
   // probe). resolveFilesystemPlan re-checks the resolved paths.
@@ -732,7 +732,7 @@ async function main(): Promise<void> {
     // Only inspect can enforce on a method or a path, so these are compiled here
     // purely to fail on a typo at setup rather than inside the container.
     const urlRulesInput = core.getInput("allowed_url_rules");
-    const tlsRules = parseRulesOrThrow(core.getInput("allow_tls_rules"));
+    const tlsRules = parseRulesOrThrow(core.getInput("allowed_tls_rules"));
     const urlRules = buildUrlRules(urlRulesInput).map((r) => r.raw);
     checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, (message) =>
       annotation.warning(message),
@@ -770,7 +770,7 @@ async function main(): Promise<void> {
       ALLOWED_HTTP_RULES: rules.httpRules.join("\n"),
       ALLOWED_IP_RULES: rules.ipRules.join("\n"),
       ALLOWED_URL_RULES: urlRules.join("\n"),
-      ALLOW_TLS_RULES: tlsRules.join("\n"),
+      ALLOWED_TLS_RULES: tlsRules.join("\n"),
       BUILDCAGE_PROXY_IMAGE_REF: imageRef,
     };
 
@@ -805,7 +805,7 @@ async function main(): Promise<void> {
             allowedHttpsRules: rules.httpsRules,
             allowedHttpRules: rules.httpRules,
             allowedIpRules: rules.ipRules,
-            allowTlsRules: tlsRules,
+            allowedTlsRules: tlsRules,
             knownBlockedRules,
           },
           proxyEngine,

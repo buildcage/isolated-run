@@ -9,7 +9,7 @@ describe("describeOverlayFailure", () => {
   it("mentions SANDBOX_SCRATCH_BASE and the persistent-mode fallback", () => {
     const message = describeOverlayFailure(new Error("boom"));
     expect(message).toMatch(/\/var\/tmp\/buildcage/);
-    expect(message).toMatch(/filesystem: persistent/);
+    expect(message).toMatch(/filesystem_mode: persistent/);
   });
 
   it("appends captured stderr when the error carries one", () => {

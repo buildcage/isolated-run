@@ -32,7 +32,7 @@ inputs:
     description: "URL allow rules, one per line, as '<methods> <url>'. Methods are separated by | or , and * means any. Requires proxy_engine: inspect. e.g., 'GET|HEAD https://registry.npmjs.org/**'"
     required: false
     default: ""
-  allow_tls_rules:
+  allowed_tls_rules:
     description: "TLS destinations passed through undecrypted, judged on SNI alone, separated by whitespace. Port required. Requires proxy_engine: inspect. e.g., 'db.example.com:5432'"
     required: false
     default: ""
@@ -60,7 +60,7 @@ inputs:
     description: "Deprecated: the former name of write_through. Still works; set write_through instead."
     required: false
     default: ""
-  filesystem:
+  filesystem_mode:
     description: "persistent (default) keeps writes to $HOME/$RUNNER_TEMP/$GITHUB_WORKSPACE/tmp on the host after the step ends. ephemeral discards them instead (via an overlay), except for paths listed in write_through — use this to stop a step from planting files (e.g. GITHUB_ENV, ~/.bashrc, ~/.npmrc) that a later, non-isolated step would pick up."
     required: false
     default: "persistent"

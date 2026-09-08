@@ -176,7 +176,7 @@ export interface SandboxRuntimeWiring {
   hostMounts?: HostMount[];
 }
 
-/** `filesystem: ephemeral` only. Already fully resolved/folded by
+/** `filesystem_mode: ephemeral` only. Already fully resolved/folded by
  *  ephemeral-fs.ts and main.ts before this is called -- buildOciConfig does
  *  no path resolution of its own here, only mount assembly and ordering. */
 export interface EphemeralPolicy {
@@ -193,7 +193,7 @@ export interface BuildOciConfigOptions {
    *  and dropping it would let `write_through: /` disable the read-only root
    *  in ephemeral mode too. */
   writable: WritablePolicy;
-  /** Present iff `filesystem: ephemeral`. Carries the same write_through
+  /** Present iff `filesystem_mode: ephemeral`. Carries the same write_through
    *  paths as `writable.writablePaths` -- one input, two mount strategies. */
   ephemeral?: EphemeralPolicy;
   runtime: SandboxRuntimeWiring;

@@ -31,7 +31,7 @@ const KNOWN_FILE_VARS = [
 const VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
 
 /** The documented sentinel for "drop the read-only restriction entirely"
- *  (`filesystem: persistent` only -- see validateFilesystemInputs). */
+ *  (`filesystem_mode: persistent` only -- see validateFilesystemInputs). */
 export const WRITE_THROUGH_ALL = "/";
 
 /**
