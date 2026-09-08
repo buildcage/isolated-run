@@ -186,11 +186,15 @@ export interface EphemeralPolicy {
 
 export interface BuildOciConfigOptions {
   identity: SandboxIdentity;
-  /** Always used for `process.cwd` (workdir) regardless of mode. `writablePaths`
-   *  is only meaningful when `ephemeral` is absent -- see §3.1: `filesystem:
-   *  ephemeral` and `writable:` are mutually exclusive at the input level. */
+  /** Always used for `process.cwd` (workdir) regardless of mode. In ephemeral
+   *  mode the write_through paths are consumed as `ephemeral.allowWrite`
+   *  instead, so `writablePaths` is read only when `ephemeral` is absent --
+   *  the `!ephemeral` half of `disableReadonly` below is what enforces that,
+   *  and dropping it would let `write_through: /` disable the read-only root
+   *  in ephemeral mode too. */
   writable: WritablePolicy;
-  /** Present iff `filesystem: ephemeral`. */
+  /** Present iff `filesystem: ephemeral`. Carries the same write_through
+   *  paths as `writable.writablePaths` -- one input, two mount strategies. */
   ephemeral?: EphemeralPolicy;
   runtime: SandboxRuntimeWiring;
   env: NodeJS.ProcessEnv;

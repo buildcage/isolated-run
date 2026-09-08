@@ -12,6 +12,7 @@ import {
   resolveFilesystemMode,
   resolveFilesystemPlan,
   resolveWriteThroughInput,
+  splitWriteThroughInput,
   validateFilesystemInputs,
 } from "./main.ts";
 import { InvalidRulesError } from "#core/lib/acl/rules.ts";
@@ -153,11 +154,21 @@ describe("resolveWriteThroughInput", () => {
   });
 });
 
+describe("splitWriteThroughInput", () => {
+  it("splits on newlines, trims, and drops blank lines", () => {
+    expect(splitWriteThroughInput(" /opt/cache \n\n./dist\n")).toStrictEqual([
+      "/opt/cache",
+      "./dist",
+    ]);
+    expect(splitWriteThroughInput("")).toStrictEqual([]);
+  });
+});
+
 describe("validateFilesystemInputs", () => {
   it("throws FILESYSTEM_INPUT_CONFLICT for write_through: / in ephemeral mode", () => {
     expect.assertions(2);
     try {
-      validateFilesystemInputs("ephemeral", "/");
+      validateFilesystemInputs("ephemeral", ["/"]);
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
       expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
@@ -165,15 +176,15 @@ describe("validateFilesystemInputs", () => {
   });
 
   it("finds the / sentinel among other entries, not just on its own", () => {
-    expect(() => validateFilesystemInputs("ephemeral", "./dist\n/\n")).toThrow(SandboxError);
+    expect(() => validateFilesystemInputs("ephemeral", ["./dist", "/"])).toThrow(SandboxError);
   });
 
   it("allows the / sentinel in persistent mode, and ordinary paths in either", () => {
-    expect(() => validateFilesystemInputs("persistent", "/")).not.toThrow();
-    expect(() => validateFilesystemInputs("persistent", "/opt/cache")).not.toThrow();
-    expect(() => validateFilesystemInputs("ephemeral", "./dist")).not.toThrow();
-    expect(() => validateFilesystemInputs("persistent", "")).not.toThrow();
-    expect(() => validateFilesystemInputs("ephemeral", "")).not.toThrow();
+    expect(() => validateFilesystemInputs("persistent", ["/"])).not.toThrow();
+    expect(() => validateFilesystemInputs("persistent", ["/opt/cache"])).not.toThrow();
+    expect(() => validateFilesystemInputs("ephemeral", ["./dist"])).not.toThrow();
+    expect(() => validateFilesystemInputs("persistent", [])).not.toThrow();
+    expect(() => validateFilesystemInputs("ephemeral", [])).not.toThrow();
   });
 });
 
@@ -227,6 +238,17 @@ describe("resolveFilesystemPlan", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
       expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
+    }
+  });
+
+  it("catches a / sentinel that only normalization reveals, before the overlay-less early return", () => {
+    // "/." and "$GITHUB_WORKSPACE/../../../.." both normalize to "/". Left
+    // unchecked they'd return a plan with no overlay roots at all under
+    // ephemeral, and only fail much later inside buildOciConfig.
+    for (const spelling of ["/.", "//", `${ENV.GITHUB_WORKSPACE}/../../../../..`]) {
+      expect(() => resolveFilesystemPlan("ephemeral", spelling, ENV)).toThrow(
+        /has no meaning in filesystem: ephemeral/,
+      );
     }
   });
 

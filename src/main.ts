@@ -203,22 +203,31 @@ export interface ResolveFilesystemPlanDeps {
   deviceOf?: (path: string) => number;
 }
 
+/** The write_through: input as bare lines, for the pre-resolution check in
+ *  main(). Resolution proper (variables, ~/, relative paths) is
+ *  resolveWriteThroughPaths' job. */
+export function splitWriteThroughInput(input: string): string[] {
+  return input
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 /**
- * Validates the write_through: input against the filesystem mode. Pure, no
- * I/O -- deliberately called on its own, ahead of
+ * Validates write_through: paths against the filesystem mode. Pure, no I/O --
+ * deliberately called on its own, ahead of
  * checkPasswordlessSudo()/checkOverlayfsSupport() in main(), so a plain input
  * mistake is rejected immediately rather than only after those privileged
- * preflight checks have already run. resolveFilesystemPlan below also calls
- * this itself, so it stays safe to call directly too.
+ * preflight checks have already run. That early call passes the raw lines;
+ * resolveFilesystemPlan calls it again on the resolved paths, which is the
+ * authoritative one -- "/." and "$GITHUB_WORKSPACE/../.." only become "/"
+ * after normalization.
  */
 export function validateFilesystemInputs(
   filesystemMode: FilesystemMode,
-  writeThroughInput: string,
+  writeThroughPaths: string[],
 ): void {
-  const listsRoot = writeThroughInput
-    .split(/\r?\n/)
-    .some((line) => line.trim() === WRITE_THROUGH_ALL);
-  if (filesystemMode === "ephemeral" && listsRoot) {
+  if (filesystemMode === "ephemeral" && writeThroughPaths.includes(WRITE_THROUGH_ALL)) {
     throw new SandboxError(
       "write_through: / drops the read-only restriction wholesale, which has no meaning in " +
         "filesystem: ephemeral -- it would persist every write, the one thing that mode exists " +
@@ -240,8 +249,6 @@ export function resolveFilesystemPlan(
   env: NodeJS.ProcessEnv,
   deps: ResolveFilesystemPlanDeps = {},
 ): FilesystemPlan {
-  validateFilesystemInputs(filesystemMode, writeThroughInput);
-
   let writeThroughPaths: string[];
   try {
     writeThroughPaths = resolveWriteThroughPaths(writeThroughInput, env);
@@ -251,6 +258,12 @@ export function resolveFilesystemPlan(
       "INVALID_WRITE_THROUGH_PATH",
     );
   }
+
+  // On the resolved paths, not the raw input: only normalization turns "/."
+  // or "$GITHUB_WORKSPACE/../.." into the "/" sentinel, and reaching the
+  // early return below with it under ephemeral would silently leave the run
+  // with no overlay at all.
+  validateFilesystemInputs(filesystemMode, writeThroughPaths);
 
   // `/` drops the read-only restriction wholesale (persistent only, see
   // validateFilesystemInputs), so no path is bind-mounted individually --
@@ -657,8 +670,8 @@ async function main(): Promise<void> {
   // under filesystem: ephemeral) is rejected immediately rather than only
   // after the privileged preflight checks below have already run
   // (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
-  // probe).
-  validateFilesystemInputs(filesystemMode, writeThroughInput);
+  // probe). resolveFilesystemPlan re-checks the resolved paths.
+  validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput));
 
   // Fail fast — before image verification or starting the proxy container —
   // if the runner can't support the isolation setup at all. Deliberately
@@ -668,6 +681,10 @@ async function main(): Promise<void> {
   // specific, better-diagnosed error.
   checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") checkOverlayfsSupport();
+
+  // Same gate as writeReportSummary() below — suppresses annotations when
+  // this script isn't running as the real action.
+  const annotation = createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
 
   // Resolved/pre-created here (not inside runSandboxedCommand) so a bad
   // write_through entry, or a target that can't be created, fails before the
@@ -688,160 +705,161 @@ async function main(): Promise<void> {
     }
   }
 
-  // Same gate as writeReportSummary() below — suppresses annotations when
-  // this script isn't running as the real action.
-  const annotation = createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
-
-  const localOverride = LOCAL_IMAGE_OVERRIDE_ENABLED
-    ? (await import("./core/lib/provenance/local-image-override.ts")).readLocalImageOverride(env)
-    : null;
-  if (localOverride) {
-    console.log(
-      `BUILDCAGE_LOCAL_IMAGE_REF is set (${JSON.stringify(localOverride.imageRef)}) — ` +
-        `skipping image provenance verification entirely. This bypass exists only for ` +
-        `buildcage's own CI self-tests and local development.`,
-    );
-  }
-  const { imageRef, pullPolicy } =
-    localOverride ?? (await resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }));
-  console.log(`buildcage: proxy image: ${imageRef}`);
-  const composeFile = localOverride?.composeFile ?? defaultComposeFile;
-
-  const proxyMode = core.getInput("proxy_mode") || "restrict";
-
-  const rules = buildACLRules({
-    httpsRulesInput: core.getInput("allowed_https_rules"),
-    httpRulesInput: core.getInput("allowed_http_rules"),
-    ipRulesInput: core.getInput("allowed_ip_rules"),
-  });
-  const knownBlockedRules = readKnownBlockedRules(core.getInput("known_blocked_rules"));
-  // Only inspect can enforce on a method or a path, so these are compiled here
-  // purely to fail on a typo at setup rather than inside the container.
-  const urlRulesInput = core.getInput("allowed_url_rules");
-  const tlsRules = parseRulesOrThrow(core.getInput("allow_tls_rules"));
-  const urlRules = buildUrlRules(urlRulesInput).map((r) => r.raw);
-  checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, (message) =>
-    annotation.warning(message),
-  );
-
-  console.log("::group::buildcage: Configured ACL Rules");
-  logRules("HTTPS", rules.httpsRules);
-  logRules("HTTP", rules.httpRules);
-  logRules("IP", rules.ipRules);
-  logRules("URL", urlRules);
-  logRules("TLS", tlsRules);
-  logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
-  console.log("::endgroup::");
-
-  // Each `run` step gets its own throwaway proxy container — start, run
-  // the isolated command, report, and stop, all within this one step —
-  // rather than sharing one across steps in the same job.
-  const containerName = generateContainerName();
-  const projectName = deriveProjectName(containerName);
-  // Recorded so post.ts can still clean up if this run is killed outright
-  // before reaching its own finally block below.
-  if (env.GITHUB_STATE) {
-    core.saveState("container_name", containerName);
-    if (filesystemMode === "ephemeral") {
-      core.saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots.map((r) => r.path)));
-    }
-  }
-
-  const composeEnv = {
-    ...env,
-    PROXY_CONTAINER_NAME: containerName,
-    PROXY_MODE: proxyMode,
-    PROXY_ENGINE: proxyEngine,
-    ALLOWED_HTTPS_RULES: rules.httpsRules.join("\n"),
-    ALLOWED_HTTP_RULES: rules.httpRules.join("\n"),
-    ALLOWED_IP_RULES: rules.ipRules.join("\n"),
-    ALLOWED_URL_RULES: urlRules.join("\n"),
-    ALLOW_TLS_RULES: tlsRules.join("\n"),
-    BUILDCAGE_PROXY_IMAGE_REF: imageRef,
-  };
-
-  await startSandboxProxy({ composeFile, projectName, pullPolicy, composeEnv });
-
-  let exitCode = 1;
   try {
-    const proxyNetns = getContainerNetns(containerName);
-    if (proxyNetns === null) {
-      throw new SandboxError(
-        `Sandbox proxy container ${containerName} is not running.`,
-        "PROXY_NOT_RUNNING",
+    const localOverride = LOCAL_IMAGE_OVERRIDE_ENABLED
+      ? (await import("./core/lib/provenance/local-image-override.ts")).readLocalImageOverride(env)
+      : null;
+    if (localOverride) {
+      console.log(
+        `BUILDCAGE_LOCAL_IMAGE_REF is set (${JSON.stringify(localOverride.imageRef)}) — ` +
+          `skipping image provenance verification entirely. This bypass exists only for ` +
+          `buildcage's own CI self-tests and local development.`,
       );
+    }
+    const { imageRef, pullPolicy } =
+      localOverride ?? (await resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }));
+    console.log(`buildcage: proxy image: ${imageRef}`);
+    const composeFile = localOverride?.composeFile ?? defaultComposeFile;
+
+    const proxyMode = core.getInput("proxy_mode") || "restrict";
+
+    const rules = buildACLRules({
+      httpsRulesInput: core.getInput("allowed_https_rules"),
+      httpRulesInput: core.getInput("allowed_http_rules"),
+      ipRulesInput: core.getInput("allowed_ip_rules"),
+    });
+    const knownBlockedRules = readKnownBlockedRules(core.getInput("known_blocked_rules"));
+    // Only inspect can enforce on a method or a path, so these are compiled here
+    // purely to fail on a typo at setup rather than inside the container.
+    const urlRulesInput = core.getInput("allowed_url_rules");
+    const tlsRules = parseRulesOrThrow(core.getInput("allow_tls_rules"));
+    const urlRules = buildUrlRules(urlRulesInput).map((r) => r.raw);
+    checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, (message) =>
+      annotation.warning(message),
+    );
+
+    console.log("::group::buildcage: Configured ACL Rules");
+    logRules("HTTPS", rules.httpsRules);
+    logRules("HTTP", rules.httpRules);
+    logRules("IP", rules.ipRules);
+    logRules("URL", urlRules);
+    logRules("TLS", tlsRules);
+    logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
+    console.log("::endgroup::");
+
+    // Each `run` step gets its own throwaway proxy container — start, run
+    // the isolated command, report, and stop, all within this one step —
+    // rather than sharing one across steps in the same job.
+    const containerName = generateContainerName();
+    const projectName = deriveProjectName(containerName);
+    // Recorded so post.ts can still clean up if this run is killed outright
+    // before reaching its own finally block below.
+    if (env.GITHUB_STATE) {
+      core.saveState("container_name", containerName);
+      if (filesystemMode === "ephemeral") {
+        core.saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots.map((r) => r.path)));
+      }
     }
 
-    exitCode = runSandboxedCommand({
-      containerName,
-      proxyNetns,
-      runInput,
-      writeThroughPaths,
-      env,
-      proxyEngine,
-      filesystemMode,
-      overlayRoots,
-    });
-  } finally {
+    const composeEnv = {
+      ...env,
+      PROXY_CONTAINER_NAME: containerName,
+      PROXY_MODE: proxyMode,
+      PROXY_ENGINE: proxyEngine,
+      ALLOWED_HTTPS_RULES: rules.httpsRules.join("\n"),
+      ALLOWED_HTTP_RULES: rules.httpRules.join("\n"),
+      ALLOWED_IP_RULES: rules.ipRules.join("\n"),
+      ALLOWED_URL_RULES: urlRules.join("\n"),
+      ALLOW_TLS_RULES: tlsRules.join("\n"),
+      BUILDCAGE_PROXY_IMAGE_REF: imageRef,
+    };
+
+    await startSandboxProxy({ composeFile, projectName, pullPolicy, composeEnv });
+
+    let exitCode = 1;
     try {
-      const report = await fetchReport(
+      const proxyNetns = getContainerNetns(containerName);
+      if (proxyNetns === null) {
+        throw new SandboxError(
+          `Sandbox proxy container ${containerName} is not running.`,
+          "PROXY_NOT_RUNNING",
+        );
+      }
+
+      exitCode = runSandboxedCommand({
         containerName,
-        {
-          mode: proxyMode,
-          allowedHttpsRules: rules.httpsRules,
-          allowedHttpRules: rules.httpRules,
-          allowedIpRules: rules.ipRules,
-          allowTlsRules: tlsRules,
-          knownBlockedRules,
-        },
+        proxyNetns,
+        runInput,
+        writeThroughPaths,
+        env,
         proxyEngine,
-      );
-      // Several integration scripts invoke this action directly without
-      // setting fail_on_blocked, unlike a real workflow where action.yml's
-      // own default always supplies it — fall back to that same default.
-      let failOnBlocked: boolean;
+        filesystemMode,
+        overlayRoots,
+      });
+    } finally {
       try {
-        failOnBlocked = core.getBooleanInput("fail_on_blocked");
-      } catch {
-        failOnBlocked = true;
+        const report = await fetchReport(
+          containerName,
+          {
+            mode: proxyMode,
+            allowedHttpsRules: rules.httpsRules,
+            allowedHttpRules: rules.httpRules,
+            allowedIpRules: rules.ipRules,
+            allowTlsRules: tlsRules,
+            knownBlockedRules,
+          },
+          proxyEngine,
+        );
+        // Several integration scripts invoke this action directly without
+        // setting fail_on_blocked, unlike a real workflow where action.yml's
+        // own default always supplies it — fall back to that same default.
+        let failOnBlocked: boolean;
+        try {
+          failOnBlocked = core.getBooleanInput("fail_on_blocked");
+        } catch {
+          failOnBlocked = true;
+        }
+        const wantsArtifact = wantsTrafficArtifact();
+        await writeReportSummary(
+          report,
+          annotation,
+          {
+            actionRepo,
+            actionRef,
+            runCommand: runInput,
+            actionVersion: readActionVersion(containerName, proxyEngine),
+            stepLabel: core.getInput("label") || undefined,
+            failOnBlocked,
+          },
+          wantsArtifact && report.engine === "inspect",
+        );
+        if (wantsArtifact) {
+          await uploadTrafficArtifact(report, containerName, annotation);
+        }
+      } catch (e) {
+        annotation.warning(`Failed to fetch sandbox report: ${errorMessage(e)}`);
       }
-      const wantsArtifact = wantsTrafficArtifact();
-      await writeReportSummary(
-        report,
-        annotation,
-        {
-          actionRepo,
-          actionRef,
-          runCommand: runInput,
-          actionVersion: readActionVersion(containerName, proxyEngine),
-          stepLabel: core.getInput("label") || undefined,
-          failOnBlocked,
-        },
-        wantsArtifact && report.engine === "inspect",
-      );
-      if (wantsArtifact) {
-        await uploadTrafficArtifact(report, containerName, annotation);
-      }
-    } catch (e) {
-      annotation.warning(`Failed to fetch sandbox report: ${errorMessage(e)}`);
+      await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
     }
-    await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
+
+    if (exitCode !== 0) {
+      process.exitCode = exitCode;
+    }
+  } finally {
     // Give back the directories pre-creating write_through targets made, if
-    // the command left them empty. Deliberately not mirrored in post.ts: the
-    // only way to hand this list to the post step is GITHUB_STATE, which the
-    // sandboxed command can rewrite (see post-state.ts), and that would turn
-    // the cleanup into a way to rmdir any empty directory as root. A hard
-    // kill therefore leaves an empty directory behind, which the next run
+    // the command left them empty. Covers every way out of the step, not just
+    // the ones that reach the proxy teardown -- image verification or a rule
+    // typo can throw after they were created. Deliberately not mirrored in
+    // post.ts: the only way to hand this list to the post step is GITHUB_STATE,
+    // which the sandboxed command can rewrite (see post-state.ts), and that
+    // would turn the cleanup into a way to rmdir any empty directory as root. A
+    // hard kill therefore leaves an empty directory behind, which the next run
     // reuses.
     try {
       removeCreatedDirsIfEmpty(createdDirs);
     } catch (e) {
       annotation.warning(`Failed to remove created write_through directories: ${errorMessage(e)}`);
     }
-  }
-
-  if (exitCode !== 0) {
-    process.exitCode = exitCode;
   }
 }
 

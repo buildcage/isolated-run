@@ -53,6 +53,19 @@ describe("resolveWriteThroughEntry", () => {
     );
   });
 
+  it("rejects an allowed variable that isn't set, rather than resolving somewhere else", () => {
+    // "" would leave "$RUNNER_TEMP/cache" resolving to "<workspace>/cache" --
+    // a different path than the one named, made write-through silently.
+    const { RUNNER_TEMP: _omitted, ...noRunnerTemp } = ENV;
+    expect(() => resolveWriteThroughEntry("$RUNNER_TEMP/cache", noRunnerTemp)).toThrow(
+      /\$RUNNER_TEMP, which is not set/,
+    );
+  });
+
+  it("rejects a relative entry when $GITHUB_WORKSPACE is unset, rather than returning a relative path", () => {
+    expect(() => resolveWriteThroughEntry("./dist", { HOME: ENV.HOME })).toThrow(/is relative/);
+  });
+
   it("strips a trailing slash so the result string-equals the bare candidate path", () => {
     expect(resolveWriteThroughEntry("$HOME/", ENV)).toBe(ENV.HOME);
     expect(resolveWriteThroughEntry("/usr/local/bin/", ENV)).toBe("/usr/local/bin");

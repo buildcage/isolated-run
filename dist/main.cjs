@@ -20211,8 +20211,12 @@ function resolveWriteThroughEntry(rawLine, env) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
 		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
-		return env[name] ?? "";
-	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded), normalized = (0, node_path.normalize)(resolved);
+		let value = env[name];
+		if (!value) throw Error(`write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
+		return value;
+	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded);
+	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write_through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
+	let normalized = (0, node_path.normalize)(resolved);
 	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 /** Parse + resolve the whole write_through: input. Newline-separated (not
@@ -79425,17 +79429,24 @@ function resolveFilesystemMode(input) {
 	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
 	return trimmed;
 }
+/** The write_through: input as bare lines, for the pre-resolution check in
+*  main(). Resolution proper (variables, ~/, relative paths) is
+*  resolveWriteThroughPaths' job. */
+function splitWriteThroughInput(input) {
+	return input.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
 /**
-* Validates the write_through: input against the filesystem mode. Pure, no
-* I/O -- deliberately called on its own, ahead of
+* Validates write_through: paths against the filesystem mode. Pure, no I/O --
+* deliberately called on its own, ahead of
 * checkPasswordlessSudo()/checkOverlayfsSupport() in main(), so a plain input
 * mistake is rejected immediately rather than only after those privileged
-* preflight checks have already run. resolveFilesystemPlan below also calls
-* this itself, so it stays safe to call directly too.
+* preflight checks have already run. That early call passes the raw lines;
+* resolveFilesystemPlan calls it again on the resolved paths, which is the
+* authoritative one -- "/." and "$GITHUB_WORKSPACE/../.." only become "/"
+* after normalization.
 */
-function validateFilesystemInputs(filesystemMode, writeThroughInput) {
-	let listsRoot = writeThroughInput.split(/\r?\n/).some((line) => line.trim() === "/");
-	if (filesystemMode === "ephemeral" && listsRoot) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
+function validateFilesystemInputs(filesystemMode, writeThroughPaths) {
+	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
 }
 /**
 * Resolves + pre-creates the write_through targets (write-through.ts) and, in
@@ -79444,14 +79455,13 @@ function validateFilesystemInputs(filesystemMode, writeThroughInput) {
 * error classes directly, so a caller doesn't need to know about those.
 */
 function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
-	validateFilesystemInputs(filesystemMode, writeThroughInput);
 	let writeThroughPaths;
 	try {
 		writeThroughPaths = resolveWriteThroughPaths(writeThroughInput, env);
 	} catch (e) {
 		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
-	if (writeThroughPaths.includes("/")) return {
+	if (validateFilesystemInputs(filesystemMode, writeThroughPaths), writeThroughPaths.includes("/")) return {
 		overlayRoots: [],
 		writeThroughPaths,
 		createdDirs: []
@@ -79674,101 +79684,104 @@ async function main() {
 		writable: getInput("writable"),
 		allowWrite: getInput("allow_write")
 	});
-	validateFilesystemInputs(filesystemMode, writeThroughInput), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
-	let { overlayRoots, writeThroughPaths, createdDirs } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env);
+	validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
+	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), { overlayRoots, writeThroughPaths, createdDirs } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env);
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots.map((r) => r.path), writeThroughPaths)) info(line);
-	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), { imageRef, pullPolicy } = await resolveVerifiedImage({
-		actionRef,
-		actionRepo,
-		proxyEngine
-	});
-	console.log(`buildcage: proxy image: ${imageRef}`);
-	let composeFile = defaultComposeFile, proxyMode = getInput("proxy_mode") || "restrict", rules = buildACLRules({
-		httpsRulesInput: getInput("allowed_https_rules"),
-		httpRulesInput: getInput("allowed_http_rules"),
-		ipRulesInput: getInput("allowed_ip_rules")
-	}), knownBlockedRules = readKnownBlockedRules(getInput("known_blocked_rules")), urlRulesInput = getInput("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput("allow_tls_rules")), urlRules = buildUrlRules(urlRulesInput).map((r) => r.raw);
-	checkUrlAndTlsRuleSupport({
-		proxyEngine,
-		proxyMode,
-		urlRules,
-		tlsRules
-	}, (message) => annotation.warning(message)), console.log("::group::buildcage: Configured ACL Rules"), logRules("HTTPS", rules.httpsRules), logRules("HTTP", rules.httpRules), logRules("IP", rules.ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), console.log("::endgroup::");
-	let containerName = generateContainerName(), projectName = deriveProjectName(containerName);
-	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots.map((r) => r.path))));
-	let composeEnv = {
-		...env,
-		PROXY_CONTAINER_NAME: containerName,
-		PROXY_MODE: proxyMode,
-		PROXY_ENGINE: proxyEngine,
-		ALLOWED_HTTPS_RULES: rules.httpsRules.join("\n"),
-		ALLOWED_HTTP_RULES: rules.httpRules.join("\n"),
-		ALLOWED_IP_RULES: rules.ipRules.join("\n"),
-		ALLOWED_URL_RULES: urlRules.join("\n"),
-		ALLOW_TLS_RULES: tlsRules.join("\n"),
-		BUILDCAGE_PROXY_IMAGE_REF: imageRef
-	};
-	await startSandboxProxy({
-		composeFile,
-		projectName,
-		pullPolicy,
-		composeEnv
-	});
-	let exitCode = 1;
 	try {
-		let proxyNetns = getContainerNetns(containerName);
-		if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
-		exitCode = runSandboxedCommand({
-			containerName,
-			proxyNetns,
-			runInput,
-			writeThroughPaths,
-			env,
-			proxyEngine,
-			filesystemMode,
-			overlayRoots
+		let { imageRef, pullPolicy } = await resolveVerifiedImage({
+			actionRef,
+			actionRepo,
+			proxyEngine
 		});
-	} finally {
-		try {
-			let report = await fetchReport(containerName, {
-				mode: proxyMode,
-				allowedHttpsRules: rules.httpsRules,
-				allowedHttpRules: rules.httpRules,
-				allowedIpRules: rules.ipRules,
-				allowTlsRules: tlsRules,
-				knownBlockedRules
-			}, proxyEngine), failOnBlocked;
-			try {
-				failOnBlocked = getBooleanInput("fail_on_blocked");
-			} catch {
-				failOnBlocked = !0;
-			}
-			let wantsArtifact = wantsTrafficArtifact();
-			await writeReportSummary(report, annotation, {
-				actionRepo,
-				actionRef,
-				runCommand: runInput,
-				actionVersion: readActionVersion(containerName, proxyEngine),
-				stepLabel: getInput("label") || void 0,
-				failOnBlocked
-			}, wantsArtifact && report.engine === "inspect"), wantsArtifact && await uploadTrafficArtifact(report, containerName, annotation);
-		} catch (e) {
-			annotation.warning(`Failed to fetch sandbox report: ${errorMessage(e)}`);
-		}
-		await stopSandboxProxy({
+		console.log(`buildcage: proxy image: ${imageRef}`);
+		let composeFile = defaultComposeFile, proxyMode = getInput("proxy_mode") || "restrict", rules = buildACLRules({
+			httpsRulesInput: getInput("allowed_https_rules"),
+			httpRulesInput: getInput("allowed_http_rules"),
+			ipRulesInput: getInput("allowed_ip_rules")
+		}), knownBlockedRules = readKnownBlockedRules(getInput("known_blocked_rules")), urlRulesInput = getInput("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput("allow_tls_rules")), urlRules = buildUrlRules(urlRulesInput).map((r) => r.raw);
+		checkUrlAndTlsRuleSupport({
+			proxyEngine,
+			proxyMode,
+			urlRules,
+			tlsRules
+		}, (message) => annotation.warning(message)), console.log("::group::buildcage: Configured ACL Rules"), logRules("HTTPS", rules.httpsRules), logRules("HTTP", rules.httpRules), logRules("IP", rules.ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), console.log("::endgroup::");
+		let containerName = generateContainerName(), projectName = deriveProjectName(containerName);
+		env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots.map((r) => r.path))));
+		let composeEnv = {
+			...env,
+			PROXY_CONTAINER_NAME: containerName,
+			PROXY_MODE: proxyMode,
+			PROXY_ENGINE: proxyEngine,
+			ALLOWED_HTTPS_RULES: rules.httpsRules.join("\n"),
+			ALLOWED_HTTP_RULES: rules.httpRules.join("\n"),
+			ALLOWED_IP_RULES: rules.ipRules.join("\n"),
+			ALLOWED_URL_RULES: urlRules.join("\n"),
+			ALLOW_TLS_RULES: tlsRules.join("\n"),
+			BUILDCAGE_PROXY_IMAGE_REF: imageRef
+		};
+		await startSandboxProxy({
 			composeFile,
 			projectName,
-			composeEnv,
-			annotation
+			pullPolicy,
+			composeEnv
 		});
+		let exitCode = 1;
+		try {
+			let proxyNetns = getContainerNetns(containerName);
+			if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
+			exitCode = runSandboxedCommand({
+				containerName,
+				proxyNetns,
+				runInput,
+				writeThroughPaths,
+				env,
+				proxyEngine,
+				filesystemMode,
+				overlayRoots
+			});
+		} finally {
+			try {
+				let report = await fetchReport(containerName, {
+					mode: proxyMode,
+					allowedHttpsRules: rules.httpsRules,
+					allowedHttpRules: rules.httpRules,
+					allowedIpRules: rules.ipRules,
+					allowTlsRules: tlsRules,
+					knownBlockedRules
+				}, proxyEngine), failOnBlocked;
+				try {
+					failOnBlocked = getBooleanInput("fail_on_blocked");
+				} catch {
+					failOnBlocked = !0;
+				}
+				let wantsArtifact = wantsTrafficArtifact();
+				await writeReportSummary(report, annotation, {
+					actionRepo,
+					actionRef,
+					runCommand: runInput,
+					actionVersion: readActionVersion(containerName, proxyEngine),
+					stepLabel: getInput("label") || void 0,
+					failOnBlocked
+				}, wantsArtifact && report.engine === "inspect"), wantsArtifact && await uploadTrafficArtifact(report, containerName, annotation);
+			} catch (e) {
+				annotation.warning(`Failed to fetch sandbox report: ${errorMessage(e)}`);
+			}
+			await stopSandboxProxy({
+				composeFile,
+				projectName,
+				composeEnv,
+				annotation
+			});
+		}
+		exitCode !== 0 && (process.exitCode = exitCode);
+	} finally {
 		try {
 			removeCreatedDirsIfEmpty(createdDirs);
 		} catch (e) {
 			annotation.warning(`Failed to remove created write_through directories: ${errorMessage(e)}`);
 		}
 	}
-	exitCode !== 0 && (process.exitCode = exitCode);
 }
 process.argv[1] === (0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href) && main().catch((err) => {
 	err instanceof ActionError ? console.log(`::error::${err.message}`) : console.log(`::error::Unexpected error in sandbox: ${errorMessage(err)}`), process.exit(1);
-}), exports.buildACLRules = buildACLRules, exports.readKnownBlockedRules = readKnownBlockedRules, exports.resolveFilesystemMode = resolveFilesystemMode, exports.resolveFilesystemPlan = resolveFilesystemPlan, exports.resolveProxyEngine = resolveProxyEngine, exports.resolveWriteThroughInput = resolveWriteThroughInput, exports.validateFilesystemInputs = validateFilesystemInputs;
+}), exports.buildACLRules = buildACLRules, exports.readKnownBlockedRules = readKnownBlockedRules, exports.resolveFilesystemMode = resolveFilesystemMode, exports.resolveFilesystemPlan = resolveFilesystemPlan, exports.resolveProxyEngine = resolveProxyEngine, exports.resolveWriteThroughInput = resolveWriteThroughInput, exports.splitWriteThroughInput = splitWriteThroughInput, exports.validateFilesystemInputs = validateFilesystemInputs;

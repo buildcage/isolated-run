@@ -57,7 +57,16 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
             `only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`,
         );
       }
-      return env[name] ?? "";
+      const value = env[name];
+      if (!value) {
+        // Expanding to "" would quietly resolve the entry to some *other*
+        // path (or, with $GITHUB_WORKSPACE unset too, to a relative one) and
+        // then make that path write-through instead of the one named.
+        throw new Error(
+          `write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`,
+        );
+      }
+      return value;
     },
   );
 
@@ -68,6 +77,17 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
   const resolved = isAbsolute(tildeExpanded)
     ? tildeExpanded
     : join(env.GITHUB_WORKSPACE || "", tildeExpanded);
+
+  // Everything downstream (the scratch-base overlap check, the sudo mkdir, the
+  // OCI mount destination) assumes an absolute path. Only reachable with $HOME
+  // or $GITHUB_WORKSPACE unset, which no real runner does, but the fallbacks
+  // above would otherwise hand back something relative.
+  if (!isAbsolute(resolved)) {
+    throw new Error(
+      `write_through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, ` +
+        "so it can't be resolved to a host path.",
+    );
+  }
 
   const normalized = normalize(resolved);
   // A trailing slash (e.g. a "$HOME/" entry) would otherwise survive
