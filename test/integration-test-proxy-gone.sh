@@ -1,5 +1,5 @@
 #!/bin/bash
-# run-isolated.sh must fail closed -- no host-side sandbox0, no leftover
+# run-isolated.sh must fail closed -- no host-side buildcage0, no leftover
 # /var/run/netns entries -- when the container behind --proxy-netns is
 # already gone by the time the script checks it.
 #
