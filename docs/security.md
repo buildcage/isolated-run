@@ -91,9 +91,10 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   way as the runtime sockets above (`linux.maskedPaths`); the per-user directory is masked whole
   rather than by individual socket, so a future tool dropping a new socket there is covered without a
   code change, and a path that doesn't exist on a given runner (there might be no active login
-  session) is silently skipped by runc rather than an error. What is _not_ masked is a socket whose
-  worst case stays inside the sandbox: an `ssh-agent` a workflow started for itself, for one, since
-  a `run:` step legitimately uses one and masking it would break more than it closes. See
+  session) is silently skipped by runc rather than an error. Masking covers a known list of paths
+  rather than applying a general rule, so a socket outside that list stays reachable. An `ssh-agent`
+  a workflow started for itself is one, left alone deliberately, since a `run:` step legitimately
+  uses one and masking it would break more than it closes. See
   [Credential retrieval is intentionally not blocked](#known-limitations) below.
 - **PID namespace**: the isolated command runs in its own PID namespace. This isn't just about
   hiding other processes from `ps`. The Linux kernel structurally forbids a process from tracing
