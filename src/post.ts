@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import * as core from "@actions/core";
 
 import { buildComposeDownArgs } from "#core/lib/docker/args.ts";
+import { ownerToken, readContainerOwner } from "./lib/container.ts";
 import { cleanupScratchDir, scratchDirFor } from "./lib/sandbox/scratch-dir.ts";
 import { resolvePostState } from "./lib/post-state.ts";
 import { errorMessage } from "#core/lib/errors.ts";
@@ -34,13 +35,45 @@ for (const problem of problems) {
   console.log(`::error::run post-cleanup: ${problem}`);
 }
 
+/**
+ * A name this action could have generated isn't proof that this step
+ * generated it: the isolated command can name a concurrent Buildcage step's
+ * container just as easily as a malformed one. What the container itself
+ * records about the step that started it is what decides.
+ *
+ * No container behind the name leaves nothing to protect -- main.ts starts
+ * the proxy before the scratch dir and stops it after, so a live sandbox
+ * always has one, and anything left under that name is a dead run's
+ * leftovers. Reclaiming those is what this fallback exists for.
+ *
+ * Deliberately not caught: if docker can't answer, ownership can't be
+ * established and nothing should be torn down.
+ */
+function startedByThisStep(containerName: string): boolean {
+  const owner = readContainerOwner(containerName);
+  return owner === null || owner === ownerToken(process.env);
+}
+
+let owned = true;
+if (targets) {
+  owned = startedByThisStep(targets.containerName);
+  if (!owned) {
+    console.log(
+      `::error::run post-cleanup: the proxy container named in GITHUB_STATE was started by a ` +
+        `different step. Skipping all post-step cleanup: tearing it down would stop that step's ` +
+        `proxy and delete its sandbox scratch directory.`,
+    );
+  }
+}
+
 // Reclaim this step's sandbox scratch dir if a hard kill bypassed main.ts's
 // own withScratchDir finally. Its path is derived deterministically from
 // containerName (scratchDirFor), so no separately recorded path is needed.
 // cleanupScratchDir force-detaches the rootfs bind-mount before deleting, so
 // this can't walk into the host filesystem even if a mount somehow survived.
-// Independent of the container teardown below, so it runs regardless.
-if (targets) {
+// Independent of the container teardown below, so a failure in one still
+// leaves the other to run.
+if (targets && owned) {
   try {
     const scratchDir = scratchDirFor(targets.containerName);
     if (existsSync(scratchDir)) {
@@ -54,7 +87,7 @@ if (targets) {
 }
 
 async function stopProxyContainer(): Promise<void> {
-  if (!targets) return;
+  if (!targets || !owned) return;
   const { containerName, projectName } = targets;
 
   const localOverride = LOCAL_IMAGE_OVERRIDE_ENABLED

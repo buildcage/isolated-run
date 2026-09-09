@@ -318,6 +318,40 @@ function buildComposeDownArgs({ composeFile, projectName }) {
 		"down"
 	];
 }
+/**
+* Turns a caught `docker` invocation error into an actionable message,
+* pointing at the runner requirement instead of surfacing execFileSync's
+* opaque "Command failed: docker ...args..." text. Deliberately doesn't
+* echo `e.message` when stderr was inherited (already visible live in the
+* Actions log) — only captured stderr (e.g. from a piped call) is included,
+* since otherwise nothing points the reader back to it.
+*/
+function describeDockerFailure(e, { operation = "docker", env = process.env, exists = node_fs.existsSync } = {}) {
+	let err = e && typeof e == "object" ? e : {}, slimNote = isLikelySlimRunner(env, exists) ? " Detected a container-based GitHub-hosted runner image (e.g. \"ubuntu-slim\") — these ship a Docker client with no daemon and are not supported for this action." : "", whatHappened;
+	if (err.code === "ENOENT") whatHappened = `The "docker" command was not found on this runner's PATH while running ${operation}.`;
+	else {
+		let captured = typeof err.stderr == "string" ? err.stderr.trim() : "";
+		whatHappened = `${operation} failed${captured ? `: ${captured}` : " (see the Docker output above for the underlying error)"}.`;
+	}
+	return `${whatHappened}${slimNote} Buildcage requires a working Docker installation (client and daemon) on the runner. Lightweight runner images such as GitHub-hosted "ubuntu-slim" ship a Docker client but no daemon and are not supported for this action — use "ubuntu-latest" (or another runner with a full Docker install) instead. See README.md and docs/security.md for details.`;
+}
+/**
+* Best-effort detection of GitHub's container-based hosted runner images
+* (currently: ubuntu-slim) — these run jobs inside a container rather than
+* a dedicated VM, so unlike VM-based ubuntu-latest/22.04/24.04/26.04 they
+* ship a Docker client with no daemon.
+*
+* Not an official/documented API: ImageOS is hardcoded to "Linux" (vs.
+* "ubuntu24" etc. on VM images) and /run/.containerenv is baked into the
+* image at build time by GitHub's own Dockerfile
+* (github.com/actions/runner-images/blob/main/images/ubuntu-slim/Dockerfile).
+* Both signals could change without notice — failing to detect just falls
+* back to the generic message in describeDockerFailure, so this is safe to
+* get wrong.
+*/
+function isLikelySlimRunner(_env = process.env, _exists = node_fs.existsSync) {
+	return _env.ImageOS === "Linux" && _exists("/run/.containerenv");
+}
 //#endregion
 //#region src/core/lib/errors.ts
 /**
@@ -344,10 +378,79 @@ function errorMessage(e) {
 //#region src/lib/errors.ts
 var SandboxError = class extends ActionError {};
 //#endregion
-//#region src/core/lib/actions/docker-error.ts
+//#region src/lib/container.ts
+/**
+* A container name read back from GITHUB_STATE can differ from the one this
+* action saved there, since the sandboxed command can overwrite it. Kept
+* next to generateContainerName so the two can't drift apart.
+*/
 const CONTAINER_NAME_PATTERN = /^buildcage-proxy-[0-9a-f]{8}$/;
 function isValidContainerName(name) {
 	return CONTAINER_NAME_PATTERN.test(name);
+}
+/** Label carrying the identity of the step that started the container. */
+const OWNER_TOKEN_VARS = [
+	"GITHUB_RUN_ID",
+	"GITHUB_RUN_ATTEMPT",
+	"GITHUB_JOB",
+	"GITHUB_ACTION"
+];
+/**
+* Identifies the step that started a proxy container. The post step compares
+* it against the container's own OWNER_LABEL so it only tears down what this
+* step started -- a well-formed container name proves nothing on its own,
+* since the isolated command can write one into GITHUB_STATE.
+*
+* Empty when the environment isn't a real Actions step (this repo's own
+* integration tests and `make setup_sandbox_dev` drive dist/main.cjs
+* directly). Those containers carry an empty label and so still match their
+* own post step, while a container started by a real step never does: its
+* label is non-empty, so an empty token fails the comparison rather than
+* passing it.
+*/
+function ownerToken(env) {
+	let values = OWNER_TOKEN_VARS.map((name) => env[name]);
+	return values.every(Boolean) ? values.join("/") : "";
+}
+/**
+* Distinguishes "this container doesn't exist" (docker's own wording, e.g.
+* `no such object`) from "docker itself is unusable on this runner" — both
+* phrasings are matched for resilience across docker CLI versions.
+*/
+function isContainerNotFoundError(e) {
+	let err = e && typeof e == "object" ? e : {}, text = `${err.stderr ?? ""} ${err.message ?? ""}`.toLowerCase();
+	return text.includes("no such object") || text.includes("no such container");
+}
+/**
+* The identity of the step that started this container (OWNER_LABEL), or
+* null when no such container exists. An unlabelled container reads as an
+* empty string, which is also what ownerToken gives outside Actions.
+*/
+function readContainerOwner(containerName, { exec = node_child_process.execFileSync } = {}) {
+	let out;
+	try {
+		out = exec("docker", [
+			"inspect",
+			"--format",
+			"{{index .Config.Labels \"io.buildcage.owner\"}}",
+			containerName
+		], {
+			encoding: "utf8",
+			stdio: [
+				"ignore",
+				"pipe",
+				"pipe"
+			],
+			env: {
+				...process.env,
+				LC_ALL: "C"
+			}
+		}).trim();
+	} catch (e) {
+		if (isContainerNotFoundError(e)) return null;
+		throw new SandboxError(describeDockerFailure(e, { operation: "docker inspect" }), "DOCKER_UNAVAILABLE");
+	}
+	return out === "<no value>" ? "" : out;
 }
 //#endregion
 //#region src/lib/sandbox/mountinfo.ts
@@ -571,14 +674,33 @@ const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("
 	ephemeralRoots: getState("ephemeral_overlay_roots")
 });
 for (let problem of problems) console.log(`::error::run post-cleanup: ${problem}`);
-if (targets) try {
+/**
+* A name this action could have generated isn't proof that this step
+* generated it: the isolated command can name a concurrent Buildcage step's
+* container just as easily as a malformed one. What the container itself
+* records about the step that started it is what decides.
+*
+* No container behind the name leaves nothing to protect -- main.ts starts
+* the proxy before the scratch dir and stops it after, so a live sandbox
+* always has one, and anything left under that name is a dead run's
+* leftovers. Reclaiming those is what this fallback exists for.
+*
+* Deliberately not caught: if docker can't answer, ownership can't be
+* established and nothing should be torn down.
+*/
+function startedByThisStep(containerName) {
+	let owner = readContainerOwner(containerName);
+	return owner === null || owner === ownerToken(process.env);
+}
+let owned = !0;
+if (targets && (owned = startedByThisStep(targets.containerName), owned || console.log("::error::run post-cleanup: the proxy container named in GITHUB_STATE was started by a different step. Skipping all post-step cleanup: tearing it down would stop that step's proxy and delete its sandbox scratch directory.")), targets && owned) try {
 	let scratchDir = scratchDirFor(targets.containerName);
 	(0, node_fs.existsSync)(scratchDir) && cleanupScratchDir(scratchDir, targets.ephemeralRoots);
 } catch (e) {
 	console.log(`::warning::run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
 }
 async function stopProxyContainer() {
-	if (!targets) return;
+	if (!targets || !owned) return;
 	let { containerName, projectName } = targets;
 	(0, node_child_process.execFileSync)("docker", buildComposeDownArgs({
 		composeFile: defaultComposeFile,

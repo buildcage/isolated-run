@@ -518,10 +518,13 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   `filesystem_mode: persistent` (the default), so the isolated command can overwrite what this action
   wrote there before the post step reads it. The post step checks that the container name it reads
   back is actually shaped like one this action generates, and computes the Compose project name for
-  its own proxy stack itself rather than trusting a stored value, so an isolated command can't
-  redirect cleanup at an unrelated container, path, or Compose project. A value that fails this
-  check is treated as absent: the post step skips cleanup for that run and logs `::error::` instead
-  of guessing, leaving the proxy container and its scratch directory in place. That leftover state
+  its own proxy stack itself rather than trusting a stored value. A well-formed name is still only a
+  name, though, so before tearing anything down it reads back which step started that container —
+  recorded as a label when the container is created, from environment the runner sets per step and
+  the isolated command therefore cannot forge — and acts only on its own. Another Buildcage step's
+  container, correctly named, is left alone. A value that fails either check is treated as absent:
+  the post step skips cleanup for that run and logs `::error::` instead of guessing, leaving the
+  proxy container and its scratch directory in place. That leftover state
   disappears with the job's own disposable VM on GitHub-hosted runners, but needs manual removal on
   a self-hosted one.
 - **Credential retrieval is intentionally not blocked**: this action restricts _where_ the isolated
