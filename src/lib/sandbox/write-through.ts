@@ -40,7 +40,9 @@ export const WRITE_THROUGH_ALL = "/";
  * 2. A leading `~/` (only) expands to $HOME.
  * 3. A relative path resolves against $GITHUB_WORKSPACE (matching the
  *    sandbox's own cwd).
- * 4. Normalized (resolves `..`) and stripped of any trailing slash.
+ * 4. Normalized (resolves `..`) and stripped of any trailing slash. Only a
+ *    literal `/` is the WRITE_THROUGH_ALL sentinel; anything else that
+ *    normalizes to it is an error.
  *
  * Normalizing here is what makes assertScratchBaseNotWritable's overlap check
  * sound: it compares path strings, so "/var/tmp/buildcage-1000/./x" would
@@ -90,6 +92,15 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
   }
 
   const normalized = normalize(resolved);
+  // "/" drops the read-only restriction wholesale, so it has to be asked for
+  // deliberately: a miscounted "../" landing there is a mistake, not an opt-out.
+  if (normalized === "/" && rawLine.trim() !== WRITE_THROUGH_ALL) {
+    throw new Error(
+      `write_through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping ` +
+        'the read-only restriction entirely. Write it as a literal "/" if that is what you meant; ' +
+        'otherwise check the "../" count.',
+    );
+  }
   // A trailing slash (e.g. a "$HOME/" entry) would otherwise survive
   // normalize() and no longer string-equal the bare candidate paths this is
   // compared against elsewhere (determineOverlayRoots' coverage check, the

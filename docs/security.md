@@ -470,14 +470,16 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 ## Known Limitations
 
 - **`write_through:` cannot name the sandbox's own scratch directory**: a `run:` step's
-  `write_through:` input listing `/var/tmp/buildcage-<uid>` (or an ancestor of it, `/var/tmp` or `/`
-  for instance) is rejected outright. That directory holds the run's own `mount --rbind /` rootfs,
+  `write_through:` input listing `/var/tmp/buildcage-<uid>` (or an ancestor of it, `/var/tmp` for
+  instance) is rejected outright. That directory holds the run's own `mount --rbind /` rootfs,
   and the writable exceptions are recursive bind-mounts, so allowing it would recursively re-expose
   the whole host `/` inside the sandbox as a second, writable copy. Entries are normalized to
   absolute paths first, so a spelling like `/var/tmp/./buildcage-<uid>` is caught by the same check.
   This is a misconfiguration guard against an operator-supplied `write_through:` value, not a
   defense against the isolated command itself (see
-  [Filesystem access](../README.md#filesystem-access) in the README).
+  [Filesystem access](../README.md#filesystem-access) in the README). The literal `/` is the exception: it
+  is the documented opt-out from the read-only restriction as a whole, so it skips this guard by
+  design. An entry that only _resolves_ to `/` is rejected rather than read as that opt-out.
 - **A created `write_through:` directory outlives a killed step**: a listed path that doesn't exist
   is created before the step runs (owner and permissions copied from its nearest existing parent, so
   a restricted tree stays restricted) and removed afterwards with `rmdir`, which only succeeds while

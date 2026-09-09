@@ -220,8 +220,9 @@ export function splitWriteThroughInput(input: string): string[] {
  * mistake is rejected immediately rather than only after those privileged
  * preflight checks have already run. That early call passes the raw lines;
  * resolveFilesystemPlan calls it again on the resolved paths, which is the
- * authoritative one -- "/." and "$GITHUB_WORKSPACE/../.." only become "/"
- * after normalization.
+ * authoritative one. Both see the same sentinel: resolveWriteThroughEntry
+ * rejects a spelling that merely normalizes to "/", so only a literal one
+ * reaches either call.
  */
 export function validateFilesystemInputs(
   filesystemMode: FilesystemMode,
@@ -259,10 +260,8 @@ export function resolveFilesystemPlan(
     );
   }
 
-  // On the resolved paths, not the raw input: only normalization turns "/."
-  // or "$GITHUB_WORKSPACE/../.." into the "/" sentinel, and reaching the
-  // early return below with it under ephemeral would silently leave the run
-  // with no overlay at all.
+  // The authoritative call, ahead of the early return below: reaching that
+  // with the sentinel under ephemeral would leave the run with no overlay.
   validateFilesystemInputs(filesystemMode, writeThroughPaths);
 
   // `/` drops the read-only restriction wholesale (persistent only, see
