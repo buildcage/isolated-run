@@ -109,6 +109,17 @@ function resolveSetprivPath(): string {
   return SETPRIV_CANDIDATE_PATHS.find((p) => existsSync(p)) ?? "setpriv";
 }
 
+// `ip netns add` leaves its name as a real file under the host's own /run,
+// which the rootfs rbind carries into every sandbox -- so a step could list
+// the netns names of the other steps running beside it, and the proxy
+// container name each one is derived from with it. Nothing inside the
+// sandbox has a reason to read them, and nothing here is built on their
+// staying unknown -- this only removes an easy way to enumerate them.
+// Both spellings: /var/run is a symlink to /run on most hosts, a real
+// directory on a few. A path that doesn't exist is a no-op -- runc's
+// maskPath ignores ENOENT.
+const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"];
+
 /**
  * Build the final OCI Runtime Spec (config.json) for the isolated command,
  * starting from runc's own `baseSpec` (see generateBaseOciSpec) and
@@ -306,15 +317,16 @@ export function buildOciConfig(
     { destination: execDir, type: "none", source: execDir, options: ["bind", "ro"] },
   );
 
-  const extraMaskedRuntimePaths = [
+  const extraMaskedHostPaths = [
     ...EXTRA_MASKED_RUNTIME_PATHS,
     ...rootlessRuntimeSocketPaths(env),
     ...perUserRuntimeDirs(uid, env),
+    ...EXTRA_MASKED_NETNS_PATHS,
   ];
   const maskedPaths = [
     ...(baseSpec.linux.maskedPaths ?? []),
     ...EXTRA_MASKED_PROC_PATHS,
-    ...extraMaskedRuntimePaths,
+    ...extraMaskedHostPaths,
   ];
   // EXTRA_MASKED_PROC_PATHS are files runc's base spec already lists in
   // readonlyPaths (sysrq-trigger). The runtime-socket paths don't come from
@@ -326,7 +338,7 @@ export function buildOciConfig(
   // the host-mount sweep) keeps every masked path out of readonlyPaths
   // regardless of which of the two ways it could have entered it.
   const isExtraMasked = (p: string): boolean =>
-    EXTRA_MASKED_PROC_PATHS.includes(p) || extraMaskedRuntimePaths.includes(p);
+    EXTRA_MASKED_PROC_PATHS.includes(p) || extraMaskedHostPaths.includes(p);
   const baseReadonlyPaths = (baseSpec.linux.readonlyPaths ?? []).filter((p) => !isExtraMasked(p));
   const readonlyPaths = disableReadonly
     ? baseReadonlyPaths

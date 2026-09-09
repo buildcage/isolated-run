@@ -114,6 +114,12 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   (the OCI spec's `linux.maskedPaths`, extending runc's own sensible defaults), closing off
   kernel-memory-adjacent information disclosure paths that aren't already covered by the capability
   drop.
+- **The named-network-namespace directory masked**: `ip netns add` leaves the namespace's name as a
+  real file under the host's own `/run/netns`, which the rootfs bind-mount carries into every
+  sandbox, so a step could otherwise list the names of the sandboxes running beside it. Nothing
+  inside the sandbox has a reason to read them, so the directory is masked like the ones above.
+  Defense in depth: it removes an easy way to enumerate the other steps on the host, not a boundary
+  anything else rests on.
 - **Filesystem read-only outside the workspace/home/tmp**: `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, and
   `$RUNNER_TEMP` are bind-mounted as writable exceptions on top of a read-only root (`root.readonly`
   in `config.json`, applied by runc itself). This closes off tampering with anything outside those

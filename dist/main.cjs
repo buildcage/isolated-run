@@ -20731,6 +20731,7 @@ const SETPRIV_CANDIDATE_PATHS = [
 function resolveSetprivPath() {
 	return SETPRIV_CANDIDATE_PATHS.find((p) => (0, node_fs.existsSync)(p)) ?? "setpriv";
 }
+const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"];
 function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust }) {
 	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, mounts = [
 		...baseSpec.mounts,
@@ -20794,15 +20795,16 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		source: execDir,
 		options: ["bind", "ro"]
 	});
-	let extraMaskedRuntimePaths = [
+	let extraMaskedHostPaths = [
 		...extra_masked_runtime_paths_default,
 		...rootlessRuntimeSocketPaths(env),
-		...perUserRuntimeDirs(uid, env)
+		...perUserRuntimeDirs(uid, env),
+		...EXTRA_MASKED_NETNS_PATHS
 	], maskedPaths = [
 		...baseSpec.linux.maskedPaths ?? [],
 		...extra_masked_proc_paths_default,
-		...extraMaskedRuntimePaths
-	], isExtraMasked = (p) => extra_masked_proc_paths_default.includes(p) || extraMaskedRuntimePaths.includes(p), baseReadonlyPaths = (baseSpec.linux.readonlyPaths ?? []).filter((p) => !isExtraMasked(p)), readonlyPaths = disableReadonly ? baseReadonlyPaths : Array.from(/* @__PURE__ */ new Set([...baseReadonlyPaths, ...computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinationsFrom(baseSpec)).filter((p) => !isExtraMasked(p))])), namespaces = baseSpec.linux.namespaces.map((ns) => ns.type === "network" ? {
+		...extraMaskedHostPaths
+	], isExtraMasked = (p) => extra_masked_proc_paths_default.includes(p) || extraMaskedHostPaths.includes(p), baseReadonlyPaths = (baseSpec.linux.readonlyPaths ?? []).filter((p) => !isExtraMasked(p)), readonlyPaths = disableReadonly ? baseReadonlyPaths : Array.from(/* @__PURE__ */ new Set([...baseReadonlyPaths, ...computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinationsFrom(baseSpec)).filter((p) => !isExtraMasked(p))])), namespaces = baseSpec.linux.namespaces.map((ns) => ns.type === "network" ? {
 		...ns,
 		path: netnsPath
 	} : ns);
