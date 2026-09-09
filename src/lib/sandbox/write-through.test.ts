@@ -233,15 +233,15 @@ describe("ensureWriteThroughTargetsExist", () => {
       ["sudo", "chown", "1000:1000", "/a/ok/x"],
       ["sudo", "chmod", "755", "/a/ok/x"],
       ["sudo", "mkdir", "-p", "/a/fail"],
-      ["sudo", "rm", "-rf", "/a/ok/x"],
-      ["sudo", "rm", "-rf", "/a/ok"],
+      ["sudo", "rmdir", "/a/ok/x"],
+      ["sudo", "rmdir", "/a/ok"],
     ]);
   });
 
   it("does not let a rollback failure mask the original error", () => {
     const execFile = (cmd: string, args: string[]) => {
       if (cmd === "sudo" && args[0] === "mkdir" && args[2] === "/a") return; // first entry succeeds
-      if (cmd === "sudo" && args[0] === "rm") throw new Error("sudo: rm also failed"); // rollback itself fails
+      if (cmd === "sudo" && args[0] === "rmdir") throw new Error("sudo: rmdir also failed"); // rollback itself fails
       if (cmd === "sudo" && args[0] === "mkdir" && args[2] === "/a/b/fail") {
         throw new Error("sudo: mkdir failed");
       }
