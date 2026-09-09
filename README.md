@@ -110,6 +110,10 @@ Each pair runs the same command with and without rules:
 ([audit](.github/workflows/example-universal-audit.yml) ·
 [restrict](.github/workflows/example-universal-restrict.yml)).
 
+A separate
+[ephemeral filesystem example](.github/workflows/example-ephemeral-filesystem.yml) shows which
+writes survive a `filesystem_mode: ephemeral` step and which the overlay discards.
+
 ### Notes
 
 - Each step is self-contained: it starts its own throwaway proxy container, runs the command in the

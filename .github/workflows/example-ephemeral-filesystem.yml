@@ -1,0 +1,61 @@
+name: Example (ephemeral filesystem)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      # ephemeral discards every write the step makes, except under the paths
+      # named in write_through. This example is about the filesystem, so the
+      # command makes no outbound connection and needs no rules: restrict mode
+      # with an empty allowlist blocks everything, and nothing is attempted.
+      - name: Produce output with an ephemeral filesystem
+        id: sandboxed
+        uses: buildcage/isolated-run@7c9996a30ebac956483c48e216990405fd9a66d1 # v1.1.5-rc2
+        with:
+          filesystem_mode: ephemeral
+          write_through: |
+            $GITHUB_OUTPUT
+            ./dist
+          run: |
+            # Reaches the host: both paths are named in write_through. ./dist
+            # doesn't exist yet, so the action creates it before the step runs.
+            echo "version=1.2.3" >> "$GITHUB_OUTPUT"
+            echo "built" > dist/artifact.txt
+
+            # Discarded when the step ends: nothing else is exempt from the
+            # overlay, including $GITHUB_WORKSPACE outside ./dist, $HOME, and
+            # the runner's own $GITHUB_ENV. A real workflow that builds from a
+            # checkout would name $GITHUB_WORKSPACE here too; leaving it out is
+            # what makes the discard visible below.
+            echo "planted" > "$GITHUB_WORKSPACE/planted.txt"
+            echo "planted" > "$HOME/.buildcage-example-planted"
+            echo "PLANTED=1" >> "$GITHUB_ENV"
+
+      # An output the sandboxed command set is untrusted input, so it belongs in
+      # an if: condition or an env: entry, never interpolated into a run: body.
+      - name: Fail if the step output did not reach the host
+        if: steps.sandboxed.outputs.version != '1.2.3'
+        run: |
+          echo "::error::expected version=1.2.3 through write_through: \$GITHUB_OUTPUT"
+          exit 1
+
+      - name: Check what the overlay kept and what it discarded
+        env:
+          VERSION: ${{ steps.sandboxed.outputs.version }}
+        run: |
+          echo "version output: $VERSION"
+
+          test -f dist/artifact.txt || { echo "::error::dist/artifact.txt is missing"; exit 1; }
+          test "$(cat dist/artifact.txt)" = "built" || { echo "::error::dist/artifact.txt has unexpected content"; exit 1; }
+
+          test ! -e planted.txt || { echo "::error::planted.txt survived the step"; exit 1; }
+          test ! -e "$HOME/.buildcage-example-planted" || { echo "::error::the \$HOME marker survived the step"; exit 1; }
+          test -z "$PLANTED" || { echo "::error::the \$GITHUB_ENV append survived the step"; exit 1; }
