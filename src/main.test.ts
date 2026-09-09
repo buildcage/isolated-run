@@ -241,14 +241,20 @@ describe("resolveFilesystemPlan", () => {
     }
   });
 
-  it("catches a / sentinel that only normalization reveals, before the overlay-less early return", () => {
-    // "/." and "$GITHUB_WORKSPACE/../../../.." both normalize to "/". Left
-    // unchecked they'd return a plan with no overlay roots at all under
-    // ephemeral, and only fail much later inside buildOciConfig.
-    for (const spelling of ["/.", "//", `${ENV.GITHUB_WORKSPACE}/../../../../..`]) {
-      expect(() => resolveFilesystemPlan("ephemeral", spelling, ENV)).toThrow(
-        /has no meaning in filesystem_mode: ephemeral/,
-      );
+  it("rejects a spelling that only resolves to the / sentinel, in either mode", () => {
+    // Unchecked, these would drop the read-only restriction wholesale under
+    // persistent and leave ephemeral with no overlay roots at all.
+    for (const mode of ["persistent", "ephemeral"] as const) {
+      for (const spelling of ["/.", "//", `${ENV.GITHUB_WORKSPACE}/../../../../..`]) {
+        let caught: unknown;
+        try {
+          resolveFilesystemPlan(mode, spelling, ENV);
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toBeInstanceOf(SandboxError);
+        expect((caught as SandboxError).code).toBe("INVALID_WRITE_THROUGH_PATH");
+      }
     }
   });
 

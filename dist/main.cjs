@@ -20201,7 +20201,9 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 * 2. A leading `~/` (only) expands to $HOME.
 * 3. A relative path resolves against $GITHUB_WORKSPACE (matching the
 *    sandbox's own cwd).
-* 4. Normalized (resolves `..`) and stripped of any trailing slash.
+* 4. Normalized (resolves `..`) and stripped of any trailing slash. Only a
+*    literal `/` is the WRITE_THROUGH_ALL sentinel; anything else that
+*    normalizes to it is an error.
 *
 * Normalizing here is what makes assertScratchBaseNotWritable's overlap check
 * sound: it compares path strings, so "/var/tmp/buildcage-1000/./x" would
@@ -20217,6 +20219,7 @@ function resolveWriteThroughEntry(rawLine, env) {
 	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded);
 	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write_through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
 	let normalized = (0, node_path.normalize)(resolved);
+	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write_through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
 	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 /** Parse + resolve the whole write_through: input. Newline-separated (not
@@ -79442,8 +79445,9 @@ function splitWriteThroughInput(input) {
 * mistake is rejected immediately rather than only after those privileged
 * preflight checks have already run. That early call passes the raw lines;
 * resolveFilesystemPlan calls it again on the resolved paths, which is the
-* authoritative one -- "/." and "$GITHUB_WORKSPACE/../.." only become "/"
-* after normalization.
+* authoritative one. Both see the same sentinel: resolveWriteThroughEntry
+* rejects a spelling that merely normalizes to "/", so only a literal one
+* reaches either call.
 */
 function validateFilesystemInputs(filesystemMode, writeThroughPaths) {
 	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");

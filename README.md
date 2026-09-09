@@ -551,7 +551,8 @@ to run code once the sandbox is gone.
 
 `write_through: /` drops the read-only restriction wholesale, so it only means anything under
 `persistent` and is rejected under `ephemeral`, where it would persist every write — the one thing
-that mode exists to prevent.
+that mode exists to prevent. The sentinel is the literal `/` only: an entry that merely _resolves_
+to `/` (a miscounted `../`, say) is an error rather than a silent full opt-out.
 
 This still doesn't close the delayed-exfiltration path off completely: `$GITHUB_WORKSPACE` has to
 persist for the job to do anything with it, and a later step routinely runs whatever ends up there,

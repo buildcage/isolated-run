@@ -75,6 +75,23 @@ describe("resolveWriteThroughEntry", () => {
     expect(resolveWriteThroughEntry("/", ENV)).toBe("/");
   });
 
+  it("rejects an entry that only resolves to '/', so the full opt-out has to be spelled out", () => {
+    for (const spelling of [
+      "/.",
+      "//",
+      "/opt/..",
+      "../../../../..",
+      "$GITHUB_WORKSPACE/../../../../..",
+    ]) {
+      expect(() => resolveWriteThroughEntry(spelling, ENV)).toThrow(/resolves to "\/"/);
+    }
+  });
+
+  it("still allows '..' that lands anywhere other than '/'", () => {
+    expect(resolveWriteThroughEntry("/opt/x/..", ENV)).toBe("/opt");
+    expect(resolveWriteThroughEntry("$GITHUB_WORKSPACE/../..", ENV)).toBe("/home/runner/work");
+  });
+
   it("does not swallow a stray closing brace from a malformed reference", () => {
     // "$GITHUB_WORKSPACE}suffix" is missing its opening brace -- the "}"
     // must be treated as literal text, not consumed into the match.
