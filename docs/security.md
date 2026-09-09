@@ -138,6 +138,12 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   `write_through:`, closing off using a
   writable exception itself (not just the read-only area around it) to plant a payload for a later
   step. See [Filesystem access](../README.md#filesystem-access) in the README.
+- **The sandbox's own mounts outrank `write_through:`**: `/etc/resolv.conf` and, for the `inspect`
+  engine, the two CA files are mounted after every writable exception, so a `write_through:` entry
+  naming a directory that contains them (`write_through: /etc`) cannot take the sandbox's DNS or CA
+  trust with it. Naming one of those three paths directly, or a filesystem runc mounts fresh such as
+  `/proc`, fails the step instead of being silently overridden; without that, `write_through: /proc`
+  would shadow the sandbox's own procfs with the host's and undo the PID-namespace separation below.
 - **Die-with-parent**: the isolated command's life is tied to `run-isolated.sh`'s own via a two-hop
   `setpriv --pdeathsig=KILL` chain (`run-isolated.sh` to `runc run` to the isolated command, since
   `runc run`'s own process sits between the two and a single-hop guard wouldn't be enough). If
