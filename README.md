@@ -503,6 +503,12 @@ paths that opt out of whichever default applies:
 | `persistent`      | Makes the path writable, on top of the four always-writable paths above. |
 | `ephemeral`       | Exempts the path from the overlay, so writes to it survive the step.     |
 
+`filesystem_mode` only decides what happens to writes the sandbox is already allowed to make. It
+never widens that set: `ephemeral` does not make a read-only path writable. Nor does either mode
+change file ownership, and the sandboxed command runs as the runner's own user with every capability
+dropped and `no_new_privileges` set, so `sudo` and setuid binaries do nothing for it. A path the
+runner user could not write outside the sandbox stays unwritable inside it.
+
 > [!WARNING]
 > `filesystem_mode: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
 > change in a future release without following semver, and it has seen less real-world use than the
@@ -599,6 +605,18 @@ block (see [Passing values to run](#passing-values-to-run) above), since it came
 sandboxed command. `write_through: $GITHUB_STEP_SUMMARY` lets the sandboxed command append to the Job Summary
 directly; this action's own report is written to the same file, so anything the command adds appears
 alongside it, not in place of it.
+
+`write_through:` is meant for paths outside `$HOME` that the workflow has already arranged for the
+runner user to write, in an earlier, non-isolated step. It changes how the path is mounted, not who
+owns it, so pointing it at a system directory the runner user cannot write (`/usr`, most of `/etc`)
+gains nothing.
+
+A few paths are reserved, because the sandbox mounts them itself to reach the proxy's DNS and CA
+trust: `/etc/resolv.conf`, `/etc/ssl/certs/ca-certificates.crt` and `/etc/buildcage-ca.pem`. Naming
+one of them (or anything under one) in `write_through:` fails the step rather than being quietly
+ignored. Naming a directory that contains them (`write_through: /etc`) is fine: writes elsewhere
+under it reach the host, and only those three paths stay read-only. The same applies to the
+filesystems the sandbox mounts fresh, such as `/proc` and `/dev`.
 
 If `run` needs to write somewhere else in `persistent` mode, a build output or a tool-specific cache
 directory for example, list it under `write_through`:

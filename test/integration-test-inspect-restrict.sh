@@ -134,7 +134,42 @@ else
   pass "no /etc/buildcage-ca.pem left on the host"
 fi
 
-rm -rf "$TMPDIR"
+echo ""
+echo "--- CA trust survives a write_through: entry containing its mount points ---"
+WT_TMPDIR=$(mktemp -d)
+touch "$WT_TMPDIR/state.env" "$WT_TMPDIR/summary.md"
+GITHUB_WORKSPACE="$WT_TMPDIR" \
+GITHUB_STATE="$WT_TMPDIR/state.env" \
+GITHUB_STEP_SUMMARY="$WT_TMPDIR/summary.md" \
+BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
+BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-inspect.yaml" \
+BUILDCAGE_TEST_CERT_PATH="$REPO_ROOT/test/test-server-inspect/cert.pem" \
+EXTERNAL_RESOLVER="10.200.0.53" \
+INPUT_PROXY_ENGINE="inspect" \
+INPUT_PROXY_MODE="restrict" \
+INPUT_WRITE_THROUGH="/etc" \
+INPUT_ALLOWED_URL_RULES="GET https://allowed.example.com/public/**" \
+INPUT_RUN="curl -sS --max-time 10 -o /dev/null https://allowed.example.com/public/pkg.tgz" \
+  node "$REPO_ROOT/dist/main.cjs" > "$WT_TMPDIR/out.log" 2>&1
+WT_EXIT=$?
+if [ "$WT_EXIT" = "0" ]; then
+  pass "an allowed HTTPS GET still verifies against the injected CA under write_through: /etc"
+else
+  fail "write_through: /etc broke CA trust or DNS (exit $WT_EXIT; see $WT_TMPDIR/out.log)"
+  cat "$WT_TMPDIR/out.log"
+fi
+if [ "$HASH_BEFORE" = "$(sha256sum "$SYSTEM_CA" | awk '{print $1}')" ]; then
+  pass "the host's system CA store is still untouched after the write_through: /etc step"
+else
+  fail "the host's system CA store changed during the write_through: /etc step"
+fi
+if [ -e /etc/buildcage-ca.pem ]; then
+  fail "/etc/buildcage-ca.pem was left on the host by the write_through: /etc step"
+else
+  pass "no /etc/buildcage-ca.pem left on the host after the write_through: /etc step"
+fi
+
+rm -rf "$TMPDIR" "$WT_TMPDIR"
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then

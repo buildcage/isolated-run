@@ -1,14 +1,10 @@
 import { existsSync, statSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { isAtOrUnder } from "./paths.ts";
+
 export interface OverlayRoot {
   path: string;
-}
-
-function isStrictDescendant(child: string, parent: string): boolean {
-  if (child === parent) return false;
-  const withSlash = parent.endsWith("/") ? parent : `${parent}/`;
-  return child.startsWith(withSlash);
 }
 
 function defaultDeviceOf(path: string): number {
@@ -61,11 +57,11 @@ export function determineOverlayRoots(
   const existing = [...new Set(candidates)].filter((c) => exists(c));
 
   const notCoveredByWriteThrough = existing.filter(
-    (c) => !writeThroughPaths.some((a) => c === a || isStrictDescendant(c, a)),
+    (c) => !writeThroughPaths.some((a) => isAtOrUnder(c, a)),
   );
 
   const notNested = notCoveredByWriteThrough.filter((c) => {
-    const nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isStrictDescendant(c, p));
+    const nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isAtOrUnder(c, p));
     if (!nestingParent) return true;
     try {
       return deviceOf(c) !== deviceOf(nestingParent);

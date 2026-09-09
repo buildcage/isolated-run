@@ -8,6 +8,7 @@ import {
   freshMountDestinationsFrom,
   buildOciConfig,
   writeOciConfig,
+  RESOLV_CONF_DESTINATION,
 } from "./oci-config.ts";
 import { parseMountinfo } from "./mountinfo.ts";
 import { withScratchDir, SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
@@ -452,6 +453,42 @@ describe("buildOciConfig", () => {
     ).not.toThrow();
   });
 
+  it("mounts in layer order: base spec, writable binds, this action's own, scratch tmpfs, execDir", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    expect(config.mounts.map((m) => m.destination)).toStrictEqual([
+      "/proc",
+      "/sys",
+      baseArgs.writable.workdir,
+      baseArgs.writable.home,
+      "/tmp",
+      RESOLV_CONF_DESTINATION,
+      SANDBOX_SCRATCH_BASE,
+      baseArgs.runtime.execDir,
+    ]);
+  });
+
+  it("keeps its own mounts after a write_through entry that contains them", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      writable: { ...baseArgs.writable, writablePaths: ["/etc"] },
+    });
+    const destinations = config.mounts.map((m) => m.destination);
+    expect(destinations.indexOf(RESOLV_CONF_DESTINATION)).toBeGreaterThan(
+      destinations.indexOf("/etc"),
+    );
+  });
+
+  it("fails closed when a writable path names a destination runc mounts itself", () => {
+    for (const path of ["/proc", "/sys", "/proc/self"]) {
+      expect(() =>
+        buildOciConfig(fakeBaseSpec(), {
+          ...baseArgs,
+          writable: { ...baseArgs.writable, writablePaths: [path] },
+        }),
+      ).toThrow(/the sandbox mounts itself/);
+    }
+  });
+
   it("keeps RUNNER_TEMP writable (rw bind) and out of readonlyPaths", () => {
     const runnerTemp = "/opt/actions-runner/_work/_temp"; // self-hosted: outside $HOME
     const hostMounts = [
@@ -608,6 +645,15 @@ describe("buildOciConfig ephemeral mode", () => {
     }
   });
 
+  it("fails closed when a write_through entry names a destination runc mounts itself", () => {
+    expect(() =>
+      buildOciConfig(fakeBaseSpec(), {
+        ...baseArgs,
+        ephemeral: { ...ephemeral, allowWrite: ["/proc"] },
+      }),
+    ).toThrow(/the sandbox mounts itself/);
+  });
+
   it("emits a plain rw rbind for each write_through entry", () => {
     const config = buildOciConfig(fakeBaseSpec(), { ...baseArgs, ephemeral });
     expect(config.mounts).toContainEqual({
@@ -741,6 +787,18 @@ describe("buildOciConfig — caTrust", () => {
       source: caTrust.systemCaPath,
       options: ["rbind", "ro"],
     });
+  });
+
+  it("keeps the CA mounts after a write_through entry containing them", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      writable: { ...baseArgs.writable, writablePaths: ["/etc"] },
+      caTrust,
+    });
+    const destinations = config.mounts.map((m) => m.destination);
+    for (const ca of [OWN_CA_DESTINATION, SYSTEM_CA_DESTINATION]) {
+      expect(destinations.indexOf(ca)).toBeGreaterThan(destinations.indexOf("/etc"));
+    }
   });
 });
 

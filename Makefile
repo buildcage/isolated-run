@@ -72,6 +72,7 @@ test_integration_sandbox_linux: ## Run the action's integration tests (needs BUI
 	@./test/integration-test-ephemeral-fs.sh
 	@./test/integration-test-writable-dir.sh
 	@./test/integration-test-writable-disabled.sh
+	@./test/integration-test-reserved-mounts.sh
 	@./test/integration-test-defaults.sh
 	@./test/integration-test-seccomp.sh
 	@./test/integration-test-die-with-parent.sh

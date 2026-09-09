@@ -32,7 +32,7 @@ import {
   WriteThroughTargetUncreatableError,
   WRITE_THROUGH_ALL,
 } from "./lib/sandbox/write-through.ts";
-import { assertScratchBaseNotWritable } from "./lib/sandbox/paths.ts";
+import { assertScratchBaseNotWritable, isAtOrUnder } from "./lib/sandbox/paths.ts";
 import { generateContainerName, getContainerNetns, ownerToken } from "./lib/container.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { buildComposeUpArgs, buildComposeDownArgs } from "#core/lib/docker/args.ts";
@@ -44,6 +44,7 @@ import {
   writeResolvConf,
   buildOciConfig,
   writeOciConfig,
+  RESERVED_INTERNAL_DESTINATIONS,
 } from "./lib/sandbox/oci-config.ts";
 import { listHostMounts } from "./lib/sandbox/mountinfo.ts";
 import { runIsolated } from "./lib/sandbox/run.ts";
@@ -235,6 +236,18 @@ export function validateFilesystemInputs(
         "to prevent. List the paths that must survive instead.",
       "FILESYSTEM_INPUT_CONFLICT",
     );
+  }
+
+  for (const path of writeThroughPaths) {
+    const reserved = RESERVED_INTERNAL_DESTINATIONS.find((r) => isAtOrUnder(path, r));
+    if (reserved) {
+      throw new SandboxError(
+        `write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts ${JSON.stringify(reserved)} ` +
+          "itself for the proxy's DNS and CA trust, last of all, so the entry would have no effect. " +
+          "Name a containing directory instead to persist writes around it.",
+        "FILESYSTEM_INPUT_CONFLICT",
+      );
+    }
   }
 }
 

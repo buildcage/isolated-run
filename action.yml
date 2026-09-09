@@ -53,7 +53,7 @@ inputs:
     required: false
     default: ""
   write_through:
-    description: "Paths whose writes reach the real host filesystem (newline-separated), in either filesystem mode: on top of the always-writable $GITHUB_WORKSPACE/$HOME/tmp/$RUNNER_TEMP under persistent, and exempt from the discard under ephemeral. Relative paths resolve against $GITHUB_WORKSPACE; $HOME, $GITHUB_WORKSPACE, $RUNNER_TEMP, $GITHUB_OUTPUT, $GITHUB_ENV, $GITHUB_PATH, $GITHUB_STEP_SUMMARY and a leading ~/ are supported. A missing path is created (via sudo) with the same owner/permissions as its nearest existing parent directory, and removed again at the end of the step if the command left it empty. Use '/' to drop the read-only restriction entirely (persistent only)."
+    description: "Paths whose writes reach the real host filesystem (newline-separated), in either filesystem mode: on top of the always-writable $GITHUB_WORKSPACE/$HOME/tmp/$RUNNER_TEMP under persistent, and exempt from the discard under ephemeral. Relative paths resolve against $GITHUB_WORKSPACE; $HOME, $GITHUB_WORKSPACE, $RUNNER_TEMP, $GITHUB_OUTPUT, $GITHUB_ENV, $GITHUB_PATH, $GITHUB_STEP_SUMMARY and a leading ~/ are supported. A missing path is created (via sudo) with the same owner/permissions as its nearest existing parent directory, and removed again at the end of the step if the command left it empty. Use '/' to drop the read-only restriction entirely (persistent only). A few paths the sandbox mounts itself (/etc/resolv.conf, /etc/ssl/certs/ca-certificates.crt, /etc/buildcage-ca.pem, and filesystems like /proc and /dev) are reserved and rejected here; naming a directory that contains them is fine."
     required: false
     default: ""
   writable:
