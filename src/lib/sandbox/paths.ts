@@ -1,18 +1,21 @@
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 
 /**
- * True if `a` and `b` are the same path, or one is an ancestor directory of
- * the other (path-component-wise, not a bare string prefix -- "/var/tmp/bu"
- * must not count as overlapping "/var/tmp/buildcage-1000").
+ * True if `path` is `ancestor` itself or sits under it, compared
+ * path-component-wise so "/etc/resolv.confX" is not under "/etc/resolv.conf".
  *
- * Compares the strings as given, so both must already be normalized --
- * "/var/tmp/./buildcage-1000" would otherwise slip past. resolveWriteThroughEntry
- * is what guarantees that for the paths reaching here.
+ * Both sides must already be normalized: "/var/tmp/./buildcage-1000" would
+ * otherwise slip past. resolveWriteThroughEntry guarantees that for the paths
+ * reaching here.
  */
+export function isAtOrUnder(path: string, ancestor: string): boolean {
+  if (path === ancestor) return true;
+  return path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
+}
+
+/** True if `a` and `b` are the same path, or either one contains the other. */
 export function pathsOverlap(a: string, b: string): boolean {
-  if (a === b) return true;
-  const withSlash = (p: string) => (p.endsWith("/") ? p : `${p}/`);
-  return a.startsWith(withSlash(b)) || b.startsWith(withSlash(a));
+  return isAtOrUnder(a, b) || isAtOrUnder(b, a);
 }
 
 /**

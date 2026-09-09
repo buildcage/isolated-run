@@ -20118,12 +20118,41 @@ function checkOverlayfsSupport({ base = SANDBOX_SCRATCH_BASE, exec = node_child_
 	}
 }
 //#endregion
-//#region src/lib/sandbox/ephemeral-fs.ts
-function isStrictDescendant(child, parent) {
-	if (child === parent) return !1;
-	let withSlash = parent.endsWith("/") ? parent : `${parent}/`;
-	return child.startsWith(withSlash);
+//#region src/lib/sandbox/paths.ts
+/**
+* True if `path` is `ancestor` itself or sits under it, compared
+* path-component-wise so "/etc/resolv.confX" is not under "/etc/resolv.conf".
+*
+* Both sides must already be normalized: "/var/tmp/./buildcage-1000" would
+* otherwise slip past. resolveWriteThroughEntry guarantees that for the paths
+* reaching here.
+*/
+function isAtOrUnder(path, ancestor) {
+	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
 }
+/** True if `a` and `b` are the same path, or either one contains the other. */
+function pathsOverlap(a, b) {
+	return isAtOrUnder(a, b) || isAtOrUnder(b, a);
+}
+/**
+* Fail closed if any writable-exception directory is, or contains, or is
+* contained in, SANDBOX_SCRATCH_BASE. That directory holds the run's own
+* `mount --rbind /` rootfs (see rootfsBindDir in main.ts); the writable
+* exceptions are recursive bind-mounts, so any overlap would recursively
+* re-expose that rootfs inside the sandbox as a second, *writable* copy of
+* the whole host `/` -- the exact escape SANDBOX_SCRATCH_BASE's placement
+* (outside the default writable set) exists to avoid. Only reachable via an
+* explicit `writable:` input naming SANDBOX_SCRATCH_BASE or an ancestor of it
+* (workdir/home/tmp/RUNNER_TEMP are operator/runner-controlled, not
+* attacker-controlled), so this is a misconfiguration guard, not a
+* hardening measure against a hostile isolated command.
+*/
+function assertScratchBaseNotWritable(writableDirs) {
+	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
+	if (overlapping) throw Error(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
+}
+//#endregion
+//#region src/lib/sandbox/ephemeral-fs.ts
 function defaultDeviceOf(path) {
 	return (0, node_fs.statSync)(path).dev;
 }
@@ -20157,9 +20186,9 @@ function defaultDeviceOf(path) {
 * self-hosted setups).
 */
 function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs.existsSync, deviceOf = defaultDeviceOf } = {}) {
-	let notCoveredByWriteThrough = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !writeThroughPaths.some((a) => c === a || isStrictDescendant(c, a)));
+	let notCoveredByWriteThrough = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !writeThroughPaths.some((a) => isAtOrUnder(c, a)));
 	return notCoveredByWriteThrough.filter((c) => {
-		let nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isStrictDescendant(c, p));
+		let nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isAtOrUnder(c, p));
 		if (!nestingParent) return !0;
 		try {
 			return deviceOf(c) !== deviceOf(nestingParent);
@@ -20355,39 +20384,6 @@ function removeCreatedDirsIfEmpty(created, { execFile = defaultExecFile } = {}) 
 	for (let path of [...created].reverse()) try {
 		execFile("sudo", ["rmdir", path]);
 	} catch {}
-}
-//#endregion
-//#region src/lib/sandbox/paths.ts
-/**
-* True if `a` and `b` are the same path, or one is an ancestor directory of
-* the other (path-component-wise, not a bare string prefix -- "/var/tmp/bu"
-* must not count as overlapping "/var/tmp/buildcage-1000").
-*
-* Compares the strings as given, so both must already be normalized --
-* "/var/tmp/./buildcage-1000" would otherwise slip past. resolveWriteThroughEntry
-* is what guarantees that for the paths reaching here.
-*/
-function pathsOverlap(a, b) {
-	if (a === b) return !0;
-	let withSlash = (p) => p.endsWith("/") ? p : `${p}/`;
-	return a.startsWith(withSlash(b)) || b.startsWith(withSlash(a));
-}
-/**
-* Fail closed if any writable-exception directory is, or contains, or is
-* contained in, SANDBOX_SCRATCH_BASE. That directory holds the run's own
-* `mount --rbind /` rootfs (see rootfsBindDir in main.ts); the writable
-* exceptions are recursive bind-mounts, so any overlap would recursively
-* re-expose that rootfs inside the sandbox as a second, *writable* copy of
-* the whole host `/` -- the exact escape SANDBOX_SCRATCH_BASE's placement
-* (outside the default writable set) exists to avoid. Only reachable via an
-* explicit `writable:` input naming SANDBOX_SCRATCH_BASE or an ancestor of it
-* (workdir/home/tmp/RUNNER_TEMP are operator/runner-controlled, not
-* attacker-controlled), so this is a misconfiguration guard, not a
-* hardening measure against a hostile isolated command.
-*/
-function assertScratchBaseNotWritable(writableDirs) {
-	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
-	if (overlapping) throw Error(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
 }
 //#endregion
 //#region src/core/lib/docker/compose-project-name.ts
@@ -20731,21 +20727,33 @@ const SETPRIV_CANDIDATE_PATHS = [
 function resolveSetprivPath() {
 	return SETPRIV_CANDIDATE_PATHS.find((p) => (0, node_fs.existsSync)(p)) ?? "setpriv";
 }
-const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"];
+const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"], RESOLV_CONF_DESTINATION = "/etc/resolv.conf", RESERVED_INTERNAL_DESTINATIONS = [
+	RESOLV_CONF_DESTINATION,
+	OWN_CA_DESTINATION,
+	SYSTEM_CA_DESTINATION
+];
+/**
+* Fail closed if a writable bind would land on a destination runc mounts fresh
+* content at. Those come first in `mounts`, so the bind would shadow them:
+* `write_through: /proc` would hand the sandbox the host's real procfs and
+* undo the PID-namespace separation.
+*/
+function assertNoFreshMountDestinations(writableDirs, freshMountDestinations) {
+	for (let dir of writableDirs) {
+		let shadowed = [...freshMountDestinations].find((d) => isAtOrUnder(dir, d));
+		if (shadowed) throw Error(`writable path ${JSON.stringify(dir)} is inside ${JSON.stringify(shadowed)}, which the sandbox mounts itself; bind-mounting the host's copy there would expose it inside the sandbox. Choose a path outside it.`);
+	}
+}
 function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust }) {
-	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, mounts = [
-		...baseSpec.mounts,
-		{
-			destination: "/etc/resolv.conf",
-			type: "none",
-			source: resolvConfPath,
-			options: ["rbind", "ro"]
-		},
-		...caAdditions?.mounts ?? []
-	], protectedPaths;
+	let { uid, gid } = identity, { workdir, home, runnerTemp, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
+		destination: RESOLV_CONF_DESTINATION,
+		type: "none",
+		source: resolvConfPath,
+		options: ["rbind", "ro"]
+	}, ...caAdditions?.mounts ?? []], mounts = [...baseSpec.mounts], freshMountDestinations = freshMountDestinationsFrom(baseSpec), protectedPaths;
 	if (ephemeral) {
 		let { overlayRoots, allowWrite } = ephemeral, overlayPaths = overlayRoots.map((r) => r.path);
-		assertScratchBaseNotWritable([...overlayPaths, ...allowWrite]), protectedPaths = /* @__PURE__ */ new Set([...overlayPaths, ...allowWrite]);
+		assertScratchBaseNotWritable([...overlayPaths, ...allowWrite]), assertNoFreshMountDestinations(allowWrite, freshMountDestinations), protectedPaths = /* @__PURE__ */ new Set([...overlayPaths, ...allowWrite]);
 		for (let root of [...overlayRoots].sort((a, b) => a.path.length - b.path.length)) mounts.push({
 			destination: root.path,
 			type: "overlay",
@@ -20771,7 +20779,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 			...writablePaths
 		].filter((p) => !!p))];
 		if (protectedPaths = new Set(writableDirs), !disableReadonly) {
-			assertScratchBaseNotWritable(writableDirs);
+			assertScratchBaseNotWritable(writableDirs), assertNoFreshMountDestinations(writableDirs, freshMountDestinations);
 			for (let p of writableDirs) mounts.push({
 				destination: p,
 				type: "none",
@@ -20780,7 +20788,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 			});
 		}
 	}
-	mounts.push({
+	mounts.push(...internalMounts), mounts.push({
 		destination: SANDBOX_SCRATCH_BASE,
 		type: "tmpfs",
 		source: "tmpfs",
@@ -20804,7 +20812,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		...baseSpec.linux.maskedPaths ?? [],
 		...extra_masked_proc_paths_default,
 		...extraMaskedHostPaths
-	], isExtraMasked = (p) => extra_masked_proc_paths_default.includes(p) || extraMaskedHostPaths.includes(p), baseReadonlyPaths = (baseSpec.linux.readonlyPaths ?? []).filter((p) => !isExtraMasked(p)), readonlyPaths = disableReadonly ? baseReadonlyPaths : Array.from(/* @__PURE__ */ new Set([...baseReadonlyPaths, ...computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinationsFrom(baseSpec)).filter((p) => !isExtraMasked(p))])), namespaces = baseSpec.linux.namespaces.map((ns) => ns.type === "network" ? {
+	], isExtraMasked = (p) => extra_masked_proc_paths_default.includes(p) || extraMaskedHostPaths.includes(p), baseReadonlyPaths = (baseSpec.linux.readonlyPaths ?? []).filter((p) => !isExtraMasked(p)), readonlyPaths = disableReadonly ? baseReadonlyPaths : Array.from(/* @__PURE__ */ new Set([...baseReadonlyPaths, ...computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinations).filter((p) => !isExtraMasked(p))])), namespaces = baseSpec.linux.namespaces.map((ns) => ns.type === "network" ? {
 		...ns,
 		path: netnsPath
 	} : ns);
@@ -79475,6 +79483,10 @@ function splitWriteThroughInput(input) {
 */
 function validateFilesystemInputs(filesystemMode, writeThroughPaths) {
 	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
+	for (let path of writeThroughPaths) {
+		let reserved = RESERVED_INTERNAL_DESTINATIONS.find((r) => isAtOrUnder(path, r));
+		if (reserved) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts ${JSON.stringify(reserved)} itself for the proxy's DNS and CA trust, last of all, so the entry would have no effect. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
+	}
 }
 /**
 * Resolves + pre-creates the write_through targets (write-through.ts) and, in

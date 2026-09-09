@@ -1,9 +1,14 @@
 import { writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { HasMounts, OciSpec, BuiltOciSpec, HostMount } from "./types.ts";
-import { assertScratchBaseNotWritable } from "./paths.ts";
+import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
-import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
+import {
+  caTrustAdditions,
+  OWN_CA_DESTINATION,
+  SYSTEM_CA_DESTINATION,
+  type CaTrustFiles,
+} from "./ca-trust.ts";
 // Sensitive /proc paths masked with /dev/null. runc's own `runc spec`
 // default already masks /proc/kcore, /proc/keys, and /proc/timer_list
 // (among others) and leaves /proc/sysrq-trigger merely read-only —
@@ -120,6 +125,47 @@ function resolveSetprivPath(): string {
 // maskPath ignores ENOENT.
 const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"];
 
+/** Where the proxy's nameserver is mounted inside the sandbox. */
+export const RESOLV_CONF_DESTINATION = "/etc/resolv.conf";
+
+/**
+ * Paths this action mounts for its own use. A `write_through:` entry naming
+ * one of them, or something under it, is rejected rather than silently
+ * overridden: the mount carrying DNS or CA trust has to win, so honoring such
+ * an entry is not an option. Naming an ancestor (`write_through: /etc`) stays
+ * allowed, since these mounts are applied last and shadow only the paths
+ * themselves.
+ *
+ * The CA destinations are reserved for every engine, not just inspect, so the
+ * same input isn't accepted under one engine and refused under another.
+ */
+export const RESERVED_INTERNAL_DESTINATIONS = [
+  RESOLV_CONF_DESTINATION,
+  OWN_CA_DESTINATION,
+  SYSTEM_CA_DESTINATION,
+];
+
+/**
+ * Fail closed if a writable bind would land on a destination runc mounts fresh
+ * content at. Those come first in `mounts`, so the bind would shadow them:
+ * `write_through: /proc` would hand the sandbox the host's real procfs and
+ * undo the PID-namespace separation.
+ */
+function assertNoFreshMountDestinations(
+  writableDirs: string[],
+  freshMountDestinations: Set<string>,
+): void {
+  for (const dir of writableDirs) {
+    const shadowed = [...freshMountDestinations].find((d) => isAtOrUnder(dir, d));
+    if (shadowed) {
+      throw new Error(
+        `writable path ${JSON.stringify(dir)} is inside ${JSON.stringify(shadowed)}, which the sandbox mounts itself; ` +
+          "bind-mounting the host's copy there would expose it inside the sandbox. Choose a path outside it.",
+      );
+    }
+  }
+}
+
 /**
  * Build the final OCI Runtime Spec (config.json) for the isolated command,
  * starting from runc's own `baseSpec` (see generateBaseOciSpec) and
@@ -149,9 +195,11 @@ const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"];
  * - linux.seccomp: the Docker-default-profile-derived filter (see
  *   gen-seccomp-profile), resolved against this same empty capability
  *   set.
- * - mounts: a tmpfs over SANDBOX_SCRATCH_BASE, hiding every other run's
- *   scratch directory the host-`/` rbind swept in, with this run's own
- *   execDir bound back on top.
+ * - mounts: the writable/overlay layers first, then this action's own mounts
+ *   (RESERVED_INTERNAL_DESTINATIONS, which have to win over any
+ *   `write_through` entry containing them), then a tmpfs over
+ *   SANDBOX_SCRATCH_BASE hiding every other run's scratch directory the
+ *   host-`/` rbind swept in, with this run's own execDir bound back on top.
  *
  * `writablePaths` containing "/" is a sentinel meaning "disable the
  * read-only restriction entirely" (see README.md's `writable`
@@ -235,16 +283,20 @@ export function buildOciConfig(
   const disableReadonly = !ephemeral && writablePaths.includes("/");
 
   const caAdditions = caTrust ? caTrustAdditions(caTrust, env) : undefined;
-  const mounts = [
-    ...baseSpec.mounts,
+  // Pushed after the writable layers below: a write_through entry naming a
+  // directory that contains these (write_through: /etc) would otherwise shadow
+  // them and take the sandbox's DNS and CA trust with it.
+  const internalMounts = [
     {
-      destination: "/etc/resolv.conf",
+      destination: RESOLV_CONF_DESTINATION,
       type: "none",
       source: resolvConfPath,
       options: ["rbind", "ro"],
     },
     ...(caAdditions?.mounts ?? []),
   ];
+  const mounts = [...baseSpec.mounts];
+  const freshMountDestinations = freshMountDestinationsFrom(baseSpec);
 
   let protectedPaths: Set<string>;
   if (ephemeral) {
@@ -254,6 +306,7 @@ export function buildOciConfig(
     // proposes a candidate under SANDBOX_SCRATCH_BASE) this can't actually
     // fire, but keep the same fail-closed guard persistent mode has.
     assertScratchBaseNotWritable([...overlayPaths, ...allowWrite]);
+    assertNoFreshMountDestinations(allowWrite, freshMountDestinations);
     protectedPaths = new Set([...overlayPaths, ...allowWrite]);
 
     // Layer 2: overlay roots, shallow-first -- lower is the untouched host
@@ -291,10 +344,13 @@ export function buildOciConfig(
       // `writable: /` (disableReadonly) is an intentional, documented full
       // opt-out of the read-only restriction, so it's exempt from this guard.
       assertScratchBaseNotWritable(writableDirs);
+      assertNoFreshMountDestinations(writableDirs, freshMountDestinations);
       for (const p of writableDirs)
         mounts.push({ destination: p, type: "none", source: p, options: ["rbind", "rw"] });
     }
   }
+
+  mounts.push(...internalMounts);
 
   // The rootfs rbind sweeps in every *other* concurrent (or leftover) run's
   // scratch dir, and their 0700/0600 modes separate nothing: without a user
@@ -345,11 +401,9 @@ export function buildOciConfig(
     : Array.from(
         new Set([
           ...baseReadonlyPaths,
-          ...computeReadonlyHostMounts(
-            hostMounts,
-            protectedPaths,
-            freshMountDestinationsFrom(baseSpec),
-          ).filter((p) => !isExtraMasked(p)),
+          ...computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinations).filter(
+            (p) => !isExtraMasked(p),
+          ),
         ]),
       );
 

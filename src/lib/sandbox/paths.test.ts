@@ -1,7 +1,28 @@
 import { describe, it, expect } from "vitest";
 
-import { pathsOverlap, assertScratchBaseNotWritable } from "./paths.ts";
+import { isAtOrUnder, pathsOverlap, assertScratchBaseNotWritable } from "./paths.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
+
+describe("isAtOrUnder", () => {
+  it("is true for the path itself and anything under it", () => {
+    expect(isAtOrUnder("/etc/resolv.conf", "/etc/resolv.conf")).toBe(true);
+    expect(isAtOrUnder("/etc/ssl/certs/ca-certificates.crt", "/etc")).toBe(true);
+    expect(isAtOrUnder("/etc/hosts", "/")).toBe(true);
+  });
+
+  it("is false the other way round: an ancestor is not under its own child", () => {
+    expect(isAtOrUnder("/etc", "/etc/resolv.conf")).toBe(false);
+  });
+
+  it("compares whole path components, not bare string prefixes", () => {
+    expect(isAtOrUnder("/etc/resolv.confX", "/etc/resolv.conf")).toBe(false);
+    expect(isAtOrUnder("/etcetera/x", "/etc")).toBe(false);
+  });
+
+  it("is false for unrelated paths", () => {
+    expect(isAtOrUnder("/opt/cache", "/etc")).toBe(false);
+  });
+});
 
 describe("pathsOverlap", () => {
   it("is true for identical paths", () => {
