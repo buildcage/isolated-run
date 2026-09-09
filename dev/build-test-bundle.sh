@@ -46,7 +46,7 @@ jq \
   --arg perUserRuntimeDir "/run/user/1000" \
   '
   .root.path = $rootfsBindDir | .root.readonly = true |
-  ($extraMasked[0] + $extraMaskedRuntime[0] + [$perUserRuntimeDir]) as $allExtraMasked |
+  ($extraMasked[0] + $extraMaskedRuntime[0] + [$perUserRuntimeDir, "/run/netns", "/var/run/netns"]) as $allExtraMasked |
   .mounts += [
     {"destination":"/etc/resolv.conf","type":"none","source":$resolvConf,"options":["rbind","ro"]},
     {"destination":"/tmp","type":"none","source":"/tmp","options":["rbind","rw"]}

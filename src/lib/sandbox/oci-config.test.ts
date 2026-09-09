@@ -256,6 +256,23 @@ describe("buildOciConfig", () => {
     }
   });
 
+  it("masks the named-netns directory, so a step can't list the sandboxes running beside it", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    expect(config.linux.maskedPaths).toContain("/run/netns");
+    expect(config.linux.maskedPaths).toContain("/var/run/netns");
+  });
+
+  it("doesn't leak the netns directory into readonlyPaths alongside masking it", () => {
+    const config = buildOciConfig(fakeBaseSpec(), {
+      ...baseArgs,
+      runtime: {
+        ...baseArgs.runtime,
+        hostMounts: [{ mountPoint: "/run/netns", fsType: "tmpfs" }],
+      },
+    });
+    expect(config.linux.readonlyPaths).not.toContain("/run/netns");
+  });
+
   it("also masks the rootless runtime sockets under $XDG_RUNTIME_DIR when set", () => {
     const config = buildOciConfig(fakeBaseSpec(), {
       ...baseArgs,
