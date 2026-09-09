@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, statSync } from "node:fs";
+import { hostname } from "node:os";
 
 import {
   writeRunScript,
   writeResolvConf,
   computeReadonlyHostMounts,
   freshMountDestinationsFrom,
+  withHostShmSize,
+  parseNofileLimit,
   buildOciConfig,
   writeOciConfig,
   RESOLV_CONF_DESTINATION,
@@ -115,16 +118,88 @@ describe("freshMountDestinationsFrom", () => {
   });
 });
 
+describe("parseNofileLimit", () => {
+  const limits = [
+    "Limit                     Soft Limit           Hard Limit           Units",
+    "Max stack size            8388608              unlimited            bytes",
+    "Max open files            65536                65536                files",
+    "Max locked memory         8388608              8388608              bytes",
+  ].join("\n");
+
+  it("reads the soft and hard limit out of /proc/self/limits", () => {
+    expect(parseNofileLimit(limits)).toStrictEqual({ soft: 65536, hard: 65536 });
+  });
+
+  it("reads an unlimited column as the kernel's own ceiling", () => {
+    const unlimited = limits.replace(
+      "65536                65536",
+      "65536                unlimited",
+    );
+    expect(parseNofileLimit(unlimited, 1048576)).toStrictEqual({ soft: 65536, hard: 1048576 });
+  });
+
+  it("gives up on an unlimited column with no ceiling to substitute", () => {
+    // Rather than guess: RLIM_INFINITY doesn't survive JSON's number type.
+    expect(
+      parseNofileLimit(
+        limits.replace("65536                65536", "65536                unlimited"),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("gives up when the line isn't there at all", () => {
+    expect(parseNofileLimit("Limit Soft Hard Units")).toBeUndefined();
+  });
+});
+
+describe("withHostShmSize", () => {
+  const shm = {
+    destination: "/dev/shm",
+    type: "tmpfs",
+    source: "shm",
+    options: ["nosuid", "noexec", "nodev", "mode=1777", "size=65536k"],
+  };
+  const other = { destination: "/dev", type: "tmpfs", source: "tmpfs", options: ["size=65536k"] };
+
+  it("replaces runc's 64MB cap with the host's own /dev/shm size", () => {
+    const [rewritten] = withHostShmSize([shm], 4 * 1024 * 1024 * 1024);
+    expect(rewritten.options).toStrictEqual([
+      "nosuid",
+      "noexec",
+      "nodev",
+      "mode=1777",
+      "size=4294967296",
+    ]);
+  });
+
+  it("drops the cap entirely when the host's size is unknown, leaving the kernel default", () => {
+    const [rewritten] = withHostShmSize([shm], undefined);
+    expect(rewritten.options).toStrictEqual(["nosuid", "noexec", "nodev", "mode=1777"]);
+  });
+
+  it("leaves every other mount alone, size= included", () => {
+    // /dev is a separate tmpfs holding device nodes only; 64MB is ample there.
+    expect(withHostShmSize([other], 1024)).toStrictEqual([other]);
+  });
+});
+
 // A minimal stand-in for what `runc spec` actually produces (see
 // runc-bootstrap.ts's generateBaseOciSpec) — only the fields buildOciConfig
 // reads/overrides are included.
 function fakeBaseSpec() {
   return {
     ociVersion: "1.0.2",
+    hostname: "runc",
     root: { path: "rootfs", readonly: true },
     mounts: [
       { destination: "/proc", type: "proc", source: "proc" },
       { destination: "/sys", type: "none", source: "/sys", options: ["rbind", "ro"] },
+      {
+        destination: "/dev/shm",
+        type: "tmpfs",
+        source: "shm",
+        options: ["nosuid", "noexec", "nodev", "mode=1777", "size=65536k"],
+      },
     ],
     process: {
       terminal: true,
@@ -139,6 +214,7 @@ function fakeBaseSpec() {
         inheritable: [],
         ambient: [],
       },
+      rlimits: [{ type: "RLIMIT_NOFILE", hard: 1024, soft: 1024 }],
     },
     linux: {
       namespaces: [
@@ -185,6 +261,35 @@ describe("buildOciConfig", () => {
       ambient: [],
     });
     expect(config.process.noNewPrivileges).toBe(true);
+  });
+
+  it("replaces runc's 1024-file default with a real RLIMIT_NOFILE, or none at all", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    const rlimits = config.process.rlimits as
+      | { type: string; soft: number; hard: number }[]
+      | undefined;
+    if (rlimits === undefined) {
+      // No /proc/self/limits to read, so the unit tests are on a non-Linux
+      // machine. runc reads config.json, so the key has to be gone from the
+      // serialised form, not merely undefined on the object.
+      expect(JSON.parse(JSON.stringify(config)).process).not.toHaveProperty("rlimits");
+      return;
+    }
+    expect(rlimits).toStrictEqual([
+      { type: "RLIMIT_NOFILE", soft: expect.any(Number), hard: expect.any(Number) },
+    ]);
+    expect(rlimits[0].soft).not.toBe(1024);
+  });
+
+  it('names the sandbox after the runner instead of runc\'s default "runc"', () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    expect(config.hostname).toBe(hostname());
+  });
+
+  it("resizes /dev/shm away from runc's 64MB container default", () => {
+    const config = buildOciConfig(fakeBaseSpec(), baseArgs);
+    const shm = config.mounts.find((m) => m.destination === "/dev/shm");
+    expect(shm?.options).not.toContain("size=65536k");
   });
 
   it("sets uid/gid and cwd from the given options", () => {
@@ -458,6 +563,7 @@ describe("buildOciConfig", () => {
     expect(config.mounts.map((m) => m.destination)).toStrictEqual([
       "/proc",
       "/sys",
+      "/dev/shm",
       baseArgs.writable.workdir,
       baseArgs.writable.home,
       "/tmp",

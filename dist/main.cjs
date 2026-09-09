@@ -20728,7 +20728,70 @@ const SETPRIV_CANDIDATE_PATHS = [
 function resolveSetprivPath() {
 	return SETPRIV_CANDIDATE_PATHS.find((p) => (0, node_fs.existsSync)(p)) ?? "setpriv";
 }
-const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"], RESOLV_CONF_DESTINATION = "/etc/resolv.conf", RESERVED_INTERNAL_DESTINATIONS = [
+const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"];
+/**
+* Pure: RLIMIT_NOFILE out of a /proc/<pid>/limits dump. `nrOpen` stands in for
+* an "unlimited" column, since RLIM_INFINITY can't round-trip through JSON's
+* number type and /proc/sys/fs/nr_open is the ceiling the kernel enforces
+* anyway; without it such a limit is unreadable rather than guessed at.
+*/
+function parseNofileLimit(procLimits, nrOpen) {
+	let line = procLimits.split("\n").find((l) => l.startsWith("Max open files"));
+	if (!line) return;
+	let [soft, hard] = line.slice(14).trim().split(/\s+/).map((c) => /^\d+$/.test(c) ? Number(c) : c === "unlimited" ? nrOpen : void 0);
+	return soft !== void 0 && hard !== void 0 ? {
+		soft,
+		hard
+	} : void 0;
+}
+function hostNofileRlimit() {
+	let nrOpen = readNumericFile("/proc/sys/fs/nr_open");
+	for (let pid of [process.ppid, "self"]) {
+		let limits = readOptionalFile(`/proc/${pid}/limits`), parsed = limits === void 0 ? void 0 : parseNofileLimit(limits, nrOpen);
+		if (parsed) return parsed;
+	}
+}
+function readOptionalFile(path) {
+	try {
+		return (0, node_fs.readFileSync)(path, "utf8");
+	} catch {
+		return;
+	}
+}
+function readNumericFile(path) {
+	let raw = readOptionalFile(path)?.trim();
+	return raw !== void 0 && /^\d+$/.test(raw) ? Number(raw) : void 0;
+}
+const SHM_DESTINATION = "/dev/shm";
+/**
+* Pure: rewrite runc's 64MB /dev/shm cap to the host's own size, so a step
+* gets the shared memory it would have unwrapped. Chromium, and so Playwright
+* and every headless-Chrome runner, sizes its shared memory to the machine and
+* crashes under the container default. With the host size unknown, drop the
+* option and let the kernel apply its own.
+*/
+function withHostShmSize(mounts, hostShmBytes) {
+	return mounts.map((m) => {
+		if (m.destination !== SHM_DESTINATION) return m;
+		let options = (m.options ?? []).filter((o) => !o.startsWith("size="));
+		return {
+			...m,
+			options: hostShmBytes ? [...options, `size=${hostShmBytes}`] : options
+		};
+	});
+}
+function hostShmSizeBytes() {
+	try {
+		let { type, bsize, blocks } = (0, node_fs.statfsSync)(SHM_DESTINATION);
+		if (type !== 16914836) return;
+		let size = bsize * blocks;
+		return Number.isFinite(size) && size > 0 ? size : void 0;
+	} catch {
+		return;
+	}
+}
+/** Where the proxy's nameserver is mounted inside the sandbox. */
+const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", RESERVED_INTERNAL_DESTINATIONS = [
 	RESOLV_CONF_DESTINATION,
 	OWN_CA_DESTINATION,
 	SYSTEM_CA_DESTINATION
@@ -20751,7 +20814,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		type: "none",
 		source: resolvConfPath,
 		options: ["rbind", "ro"]
-	}, ...caAdditions?.mounts ?? []], mounts = [...baseSpec.mounts], freshMountDestinations = freshMountDestinationsFrom(baseSpec), protectedPaths;
+	}, ...caAdditions?.mounts ?? []], mounts = withHostShmSize(baseSpec.mounts, hostShmSizeBytes()), nofile = hostNofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), protectedPaths;
 	if (ephemeral) {
 		let { overlayRoots, allowWrite } = ephemeral, overlayPaths = overlayRoots.map((r) => r.path);
 		assertScratchBaseNotWritable([...overlayPaths, ...allowWrite]), assertNoFreshMountDestinations(allowWrite, freshMountDestinations), protectedPaths = /* @__PURE__ */ new Set([...overlayPaths, ...allowWrite]);
@@ -20824,6 +20887,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 			readonly: !disableReadonly
 		},
 		mounts,
+		hostname: (0, node_os.hostname)(),
 		process: {
 			...baseSpec.process,
 			terminal: !1,
@@ -20847,7 +20911,12 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 				inheritable: [],
 				ambient: []
 			},
-			noNewPrivileges: !0
+			noNewPrivileges: !0,
+			rlimits: nofile ? [{
+				type: "RLIMIT_NOFILE",
+				soft: nofile.soft,
+				hard: nofile.hard
+			}] : void 0
 		},
 		linux: {
 			...baseSpec.linux,
