@@ -5,6 +5,8 @@ import {
   getContainerNetns,
   isContainerNotFoundError,
   isValidContainerName,
+  ownerToken,
+  readContainerOwner,
   CONTAINER_NAME_PATTERN,
 } from "./container.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
@@ -72,6 +74,71 @@ describe("getContainerNetns", () => {
     expect.assertions(2);
     try {
       getContainerNetns("buildcage-proxy-abc", { exec: fakeExec });
+    } catch (err) {
+      expect(err).toBeInstanceOf(SandboxError);
+      expect((err as SandboxError).code).toBe("DOCKER_UNAVAILABLE");
+    }
+  });
+});
+
+describe("ownerToken", () => {
+  const ACTIONS_ENV = {
+    GITHUB_RUN_ID: "17",
+    GITHUB_RUN_ATTEMPT: "2",
+    GITHUB_JOB: "build",
+    GITHUB_ACTION: "buildcage_2",
+  };
+
+  it("is built from the four per-step variables", () => {
+    expect(ownerToken(ACTIONS_ENV)).toBe("17/2/build/buildcage_2");
+  });
+
+  it("separates two uses of the action in one job, which GITHUB_ACTION numbers", () => {
+    expect(ownerToken({ ...ACTIONS_ENV, GITHUB_ACTION: "buildcage_3" })).not.toBe(
+      ownerToken(ACTIONS_ENV),
+    );
+  });
+
+  it("separates two jobs sharing a host", () => {
+    expect(ownerToken({ ...ACTIONS_ENV, GITHUB_RUN_ID: "18" })).not.toBe(ownerToken(ACTIONS_ENV));
+    expect(ownerToken({ ...ACTIONS_ENV, GITHUB_JOB: "test" })).not.toBe(ownerToken(ACTIONS_ENV));
+  });
+
+  it("is empty outside a real Actions step, rather than a partial token", () => {
+    for (const name of Object.keys(ACTIONS_ENV)) {
+      expect(ownerToken({ ...ACTIONS_ENV, [name]: undefined })).toBe("");
+    }
+    expect(ownerToken({})).toBe("");
+  });
+});
+
+describe("readContainerOwner", () => {
+  it("returns null for a container that doesn't exist", () => {
+    const fakeExec = () => {
+      throw { stderr: "error: no such object: buildcage-proxy-xyz" };
+    };
+    expect(readContainerOwner("buildcage-proxy-xyz", { exec: fakeExec })).toBe(null);
+  });
+
+  it("reads the label back", () => {
+    const fakeExec = () => "17/2/build/buildcage_2\n";
+    expect(readContainerOwner("buildcage-proxy-abc", { exec: fakeExec })).toBe(
+      "17/2/build/buildcage_2",
+    );
+  });
+
+  it("reads a container carrying no labels at all as unowned, not as the literal template output", () => {
+    const fakeExec = () => "<no value>\n";
+    expect(readContainerOwner("buildcage-proxy-abc", { exec: fakeExec })).toBe("");
+  });
+
+  it("throws SandboxError with DOCKER_UNAVAILABLE when docker is unreachable", () => {
+    const fakeExec = () => {
+      throw { stderr: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock" };
+    };
+    expect.assertions(2);
+    try {
+      readContainerOwner("buildcage-proxy-abc", { exec: fakeExec });
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
       expect((err as SandboxError).code).toBe("DOCKER_UNAVAILABLE");

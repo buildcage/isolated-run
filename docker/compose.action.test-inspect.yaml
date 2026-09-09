@@ -37,6 +37,8 @@ services:
     networks:
       default:
       test-net:
+    labels:
+      io.buildcage.owner: ${BUILDCAGE_OWNER:-}
     restart: unless-stopped
 
 networks:

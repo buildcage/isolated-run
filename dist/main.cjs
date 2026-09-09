@@ -19719,6 +19719,32 @@ const CONTAINER_NAME_PATTERN = /^buildcage-proxy-[0-9a-f]{8}$/;
 function isValidContainerName(name) {
 	return CONTAINER_NAME_PATTERN.test(name);
 }
+/** Set by the runner per step, so the isolated command can't reach them:
+*  GITHUB_ACTION is numbered (_2, _3) for repeated uses of one action within
+*  a job, and the run/attempt/job triple separates jobs sharing a host. */
+const OWNER_TOKEN_VARS = [
+	"GITHUB_RUN_ID",
+	"GITHUB_RUN_ATTEMPT",
+	"GITHUB_JOB",
+	"GITHUB_ACTION"
+];
+/**
+* Identifies the step that started a proxy container. The post step compares
+* it against the container's own OWNER_LABEL so it only tears down what this
+* step started -- a well-formed container name proves nothing on its own,
+* since the isolated command can write one into GITHUB_STATE.
+*
+* Empty when the environment isn't a real Actions step (this repo's own
+* integration tests and `make setup_sandbox_dev` drive dist/main.cjs
+* directly). Those containers carry an empty label and so still match their
+* own post step, while a container started by a real step never does: its
+* label is non-empty, so an empty token fails the comparison rather than
+* passing it.
+*/
+function ownerToken(env) {
+	let values = OWNER_TOKEN_VARS.map((name) => env[name]);
+	return values.every(Boolean) ? values.join("/") : "";
+}
 /**
 * Distinguishes "this container doesn't exist" (docker's own wording, e.g.
 * `no such object`) from "docker itself is unusable on this runner" — both
@@ -79710,6 +79736,7 @@ async function main() {
 		let composeEnv = {
 			...env,
 			PROXY_CONTAINER_NAME: containerName,
+			BUILDCAGE_OWNER: ownerToken(env),
 			PROXY_MODE: proxyMode,
 			PROXY_ENGINE: proxyEngine,
 			ALLOWED_HTTPS_RULES: rules.httpsRules.join("\n"),

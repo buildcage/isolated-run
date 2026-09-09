@@ -117,7 +117,8 @@ Each pair runs the same command with and without rules:
   that one step. Using this action several times in the same job gives each step its own allowlist.
   This holds even when the steps run concurrently via GitHub Actions'
   `background`/`wait`/`wait-all`/`parallel` keywords: the proxy container, network, and Compose
-  project are namespaced by a per-step random suffix, so concurrent steps never tear down each
+  project are namespaced by a per-step random suffix, and each container records which step started
+  it, which cleanup checks before tearing anything down — so concurrent steps never tear down each
   other's containers. Use [`label`](#inputs) to tell their report sections apart.
 - Private registries are ordinary hosts: add the domain like any other.
 - The isolated command **cannot use Docker**. If `docker` (or another container/VM runtime group)

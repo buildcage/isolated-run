@@ -33,7 +33,7 @@ import {
   WRITE_THROUGH_ALL,
 } from "./lib/sandbox/write-through.ts";
 import { assertScratchBaseNotWritable } from "./lib/sandbox/paths.ts";
-import { generateContainerName, getContainerNetns } from "./lib/container.ts";
+import { generateContainerName, getContainerNetns, ownerToken } from "./lib/container.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { buildComposeUpArgs, buildComposeDownArgs } from "#core/lib/docker/args.ts";
 import { extractRuncBootstrap } from "./lib/sandbox/runc-bootstrap.ts";
@@ -763,6 +763,7 @@ async function main(): Promise<void> {
     const composeEnv = {
       ...env,
       PROXY_CONTAINER_NAME: containerName,
+      BUILDCAGE_OWNER: ownerToken(env),
       PROXY_MODE: proxyMode,
       PROXY_ENGINE: proxyEngine,
       ALLOWED_HTTPS_RULES: rules.httpsRules.join("\n"),

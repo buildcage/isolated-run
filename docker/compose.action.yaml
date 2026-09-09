@@ -16,4 +16,6 @@ services:
       - ALLOWED_URL_RULES=${ALLOWED_URL_RULES:-}
       - ALLOWED_TLS_RULES=${ALLOWED_TLS_RULES:-}
       - EXTERNAL_RESOLVER=${EXTERNAL_RESOLVER:-}
+    labels:
+      io.buildcage.owner: ${BUILDCAGE_OWNER:-}
     restart: unless-stopped
