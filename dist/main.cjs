@@ -20282,11 +20282,7 @@ function pathSegmentsBetween(ancestor, descendant) {
 function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = node_fs.existsSync, stat = defaultStat, execFile = defaultExecFile } = {}) {
 	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), created = [], rollback = () => {
 		for (let p of [...created].reverse()) try {
-			execFile("sudo", [
-				"rm",
-				"-rf",
-				p
-			]);
+			execFile("sudo", ["rmdir", p]);
 		} catch {}
 	};
 	for (let path of resolvedPaths) {

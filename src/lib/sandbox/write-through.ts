@@ -209,7 +209,9 @@ export function ensureWriteThroughTargetsExist(
   const rollback = () => {
     for (const p of [...created].reverse()) {
       try {
-        execFile("sudo", ["rm", "-rf", p]);
+        // `rmdir`, like removeCreatedDirsIfEmpty: only directories are created
+        // here, and the step hasn't run yet, so every one of them is empty.
+        execFile("sudo", ["rmdir", p]);
       } catch {
         // Best-effort: the original error is what matters here, not a
         // failed cleanup attempt on top of it.
