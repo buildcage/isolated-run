@@ -7,9 +7,11 @@
 # hand-built substitute for the config.json JS would normally produce).
 #
 # Not a full reimplementation: no writable-path/writable-/ handling, no
-# scratch-base mask, and no env passthrough beyond runc's own PATH default
+# scratch-base mask, no env passthrough beyond runc's own PATH default
 # (production pipes the step environment to a loader instead, see
-# sandbox/env-loader.ts). Just enough to run the smoke test with the same
+# sandbox/env-loader.ts), and none of the runner-matching rlimit/shm/hostname
+# overrides (this loop runs inside a container, where they'd match nothing
+# useful). Just enough to run the smoke test with the same
 # namespaces/capabilities/seccomp policy production uses.
 set -euo pipefail
 

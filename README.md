@@ -124,6 +124,9 @@ writes survive a `filesystem_mode: ephemeral` step and which the overlay discard
   project are namespaced by a per-step random suffix, and each container records which step started
   it, which cleanup checks before tearing anything down — so concurrent steps never tear down each
   other's containers. Use [`label`](#inputs) to tell their report sections apart.
+- The sandbox's `/dev` holds the standard container device set, so a command needing a host device
+  node such as `/dev/kvm` or `/dev/fuse` won't work. Open-file limits, `/dev/shm` size, and the
+  hostname match the runner.
 - Private registries are ordinary hosts: add the domain like any other.
 - The isolated command **cannot use Docker**. If `docker` (or another container/VM runtime group)
   is the runner's primary group, it's substituted for a safe one before the command runs; the

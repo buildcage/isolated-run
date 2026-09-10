@@ -109,6 +109,20 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   mechanisms above, not from UID separation. No user namespace is created for this either, since
   that would let the isolated command re-acquire a (namespace-local) root identity via the very
   unprivileged-`CLONE_NEWUSER` primitive the seccomp filter above is specifically closing off.
+- **Process environment matched to the runner**: `runc spec`'s defaults are written for containers,
+  not for a step running on the runner's own machine, so a few of them are overridden. The OCI spec
+  carries the runner's own `RLIMIT_NOFILE`, read from the process that started the action, which is
+  also the one that would have started the step unwrapped. Both runc's default spec and the `sudo`
+  on the way to it pin the soft limit at 1024 against the 65536 a GitHub-hosted runner gives a step,
+  which surfaces as `EMFILE` in webpack and jest. `/dev/shm` is sized from the host's own instead of
+  runc's 64MB cap, which Chromium and everything built on it crashes under. The hostname is the
+  runner's rather than the literal `runc`, matching the `/etc/hostname` the rootfs bind-mount
+  already carries in. None of this is a boundary anything rests on: the sandbox restricts where the
+  command can connect and what it can write, not how much of the machine it can use. `/dev` itself
+  stays a fresh minimal device set, so host device nodes such as `/dev/kvm`, `/dev/fuse`,
+  `/dev/net/tun` and `/dev/dri` are absent. Each needs either a capability the sandbox has dropped
+  or a group the GID substitution above replaces, so nothing usable is lost, and bind-mounting the
+  host's `/dev` would expose raw block devices and undo the read-only root below.
 - **Sensitive `/proc` paths masked**: `/proc/kcore`, `/proc/kallsyms`, `/proc/kmsg`,
   `/proc/sysrq-trigger`, `/proc/timer_list`, and `/proc/keys` are bind-mounted over with `/dev/null`
   (the OCI spec's `linux.maskedPaths`, extending runc's own sensible defaults), closing off

@@ -6,6 +6,7 @@ export interface MountEntry {
 }
 
 export interface OciSpec {
+  hostname?: string;
   mounts: MountEntry[];
   linux: {
     maskedPaths?: string[];
@@ -21,6 +22,7 @@ export interface OciSpec {
 // the general OciSpec above, which also stands in for runc's raw, more
 // loosely-known `runc spec` input.
 export interface BuiltOciSpec extends OciSpec {
+  hostname: string;
   root: { path: string; readonly: boolean };
   process: Record<string, unknown> & {
     args: string[];

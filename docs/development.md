@@ -255,6 +255,19 @@ the [README](../README.md).
      netns created in the next step; all Linux capabilities cleared plus no-new-privileges; and a
      seccomp filter resolved from Docker's own default profile, applied against an empty
      capability set to match the sandbox.
+   - A few of `runc`'s own defaults are overridden so the command sees the environment an
+     unwrapped step would: the runner's own `RLIMIT_NOFILE` in place of the 1024-file cap runc and
+     `sudo` both impose, `/dev/shm` sized from the host's own, and the runner's hostname in place of
+     the literal `runc`. `test/integration-test-host-parity.sh` checks these on a real runner, once
+     with the limits as inherited and once under a deliberately lowered soft limit.
+   - The limit is read from `/proc/<ppid>/limits`, never `self`. Node raises its own soft
+     `RLIMIT_NOFILE` to the hard limit before any JS runs, so the action's own view reports the hard
+     limit as the soft one, and the sandbox would end up with more than the step had. A
+     GitHub-hosted runner sets soft = hard, which hides the difference entirely; that is what the
+     lowered-limit pass in the parity test exists to expose.
+   - `/dev/shm`'s size is taken only after confirming the fstype is tmpfs. Where `/dev/shm` is a
+     plain directory rather than a mount of its own, `statfs` answers for the containing filesystem,
+     and sizing a fresh tmpfs to a whole disk would let a step exhaust host memory.
    - The step's environment is deliberately _not_ part of that config. It is piped to the
      sandboxed process over stdin as NUL-delimited `KEY=VALUE` records and applied by a small
      loader that execs the run script, so an `env:` secret is never written to the runner's disk.

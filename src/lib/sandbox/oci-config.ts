@@ -1,6 +1,7 @@
-import { writeFileSync, existsSync } from "node:fs";
+import { writeFileSync, existsSync, readFileSync, statfsSync } from "node:fs";
+import { hostname as hostHostname } from "node:os";
 import { join } from "node:path";
-import type { HasMounts, OciSpec, BuiltOciSpec, HostMount } from "./types.ts";
+import type { HasMounts, MountEntry, OciSpec, BuiltOciSpec, HostMount } from "./types.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import {
@@ -125,6 +126,92 @@ function resolveSetprivPath(): string {
 // maskPath ignores ENOENT.
 const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"];
 
+const NOFILE_LABEL = "Max open files";
+
+/**
+ * Pure: RLIMIT_NOFILE out of a /proc/<pid>/limits dump. `nrOpen` stands in for
+ * an "unlimited" column, since RLIM_INFINITY can't round-trip through JSON's
+ * number type and /proc/sys/fs/nr_open is the ceiling the kernel enforces
+ * anyway; without it such a limit is unreadable rather than guessed at.
+ */
+export function parseNofileLimit(
+  procLimits: string,
+  nrOpen?: number,
+): { soft: number; hard: number } | undefined {
+  const line = procLimits.split("\n").find((l) => l.startsWith(NOFILE_LABEL));
+  if (!line) return undefined;
+  const columns = line.slice(NOFILE_LABEL.length).trim().split(/\s+/);
+  const [soft, hard] = columns.map((c) =>
+    /^\d+$/.test(c) ? Number(c) : c === "unlimited" ? nrOpen : undefined,
+  );
+  return soft !== undefined && hard !== undefined ? { soft, hard } : undefined;
+}
+
+// Not this process: Node raises its own soft RLIMIT_NOFILE to the hard limit
+// before any JS runs, so /proc/self/limits reports the raised value rather than
+// the runner's. The parent still holds the real one, being the process that
+// spawned this action and that would have spawned the step unwrapped. Reading
+// it here, on the near side of run.ts's `sudo`, which drops the soft limit to
+// 1024 on the way to runc.
+function hostNofileRlimit(): { soft: number; hard: number } | undefined {
+  const nrOpen = readNumericFile("/proc/sys/fs/nr_open");
+  for (const pid of [process.ppid, "self"]) {
+    const limits = readOptionalFile(`/proc/${pid}/limits`);
+    const parsed = limits === undefined ? undefined : parseNofileLimit(limits, nrOpen);
+    if (parsed) return parsed;
+  }
+  return undefined;
+}
+
+function readOptionalFile(path: string): string | undefined {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function readNumericFile(path: string): number | undefined {
+  const raw = readOptionalFile(path)?.trim();
+  return raw !== undefined && /^\d+$/.test(raw) ? Number(raw) : undefined;
+}
+
+const SHM_DESTINATION = "/dev/shm";
+
+/**
+ * Pure: rewrite runc's 64MB /dev/shm cap to the host's own size, so a step
+ * gets the shared memory it would have unwrapped. Chromium, and so Playwright
+ * and every headless-Chrome runner, sizes its shared memory to the machine and
+ * crashes under the container default. With the host size unknown, drop the
+ * option and let the kernel apply its own.
+ */
+export function withHostShmSize(mounts: MountEntry[], hostShmBytes?: number): MountEntry[] {
+  return mounts.map((m) => {
+    if (m.destination !== SHM_DESTINATION) return m;
+    const options = (m.options ?? []).filter((o) => !o.startsWith("size="));
+    return { ...m, options: hostShmBytes ? [...options, `size=${hostShmBytes}`] : options };
+  });
+}
+
+const TMPFS_MAGIC = 0x01021994;
+
+// tmpfs reports f_bsize = PAGE_SIZE and f_blocks = size >> PAGE_SHIFT, so the
+// product round-trips through `size=` exactly. The fstype check is what makes
+// that reasoning hold: where /dev/shm is a plain directory rather than a mount
+// of its own, statfs answers for the containing filesystem instead, and sizing
+// a tmpfs to a whole disk lets a step exhaust the host's memory. Undefined
+// there, and where the path can't be read at all.
+function hostShmSizeBytes(): number | undefined {
+  try {
+    const { type, bsize, blocks } = statfsSync(SHM_DESTINATION);
+    if (type !== TMPFS_MAGIC) return undefined;
+    const size = bsize * blocks;
+    return Number.isFinite(size) && size > 0 ? size : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Where the proxy's nameserver is mounted inside the sandbox. */
 export const RESOLV_CONF_DESTINATION = "/etc/resolv.conf";
 
@@ -195,6 +282,9 @@ function assertNoFreshMountDestinations(
  * - linux.seccomp: the Docker-default-profile-derived filter (see
  *   gen-seccomp-profile), resolved against this same empty capability
  *   set.
+ * - process.rlimits, hostname, /dev/shm size: matched to the runner rather
+ *   than left at runc's container defaults. This sandbox restricts network
+ *   and filesystem writes, not resources.
  * - mounts: the writable/overlay layers first, then this action's own mounts
  *   (RESERVED_INTERNAL_DESTINATIONS, which have to win over any
  *   `write_through` entry containing them), then a tmpfs over
@@ -295,7 +385,8 @@ export function buildOciConfig(
     },
     ...(caAdditions?.mounts ?? []),
   ];
-  const mounts = [...baseSpec.mounts];
+  const mounts = withHostShmSize(baseSpec.mounts, hostShmSizeBytes());
+  const nofile = hostNofileRlimit();
   const freshMountDestinations = freshMountDestinationsFrom(baseSpec);
 
   let protectedPaths: Set<string>;
@@ -415,6 +506,9 @@ export function buildOciConfig(
     ...baseSpec,
     root: { path: rootfsBindDir, readonly: !disableReadonly },
     mounts,
+    // runc's default spec names every container "runc", while /etc/hostname
+    // comes in with the host rootfs and already reads the runner's name.
+    hostname: hostHostname(),
     process: {
       ...baseSpec.process,
       terminal: false,
@@ -439,6 +533,14 @@ export function buildOciConfig(
       cwd: workdir || "/",
       capabilities: { bounding: [], effective: [], permitted: [], inheritable: [], ambient: [] },
       noNewPrivileges: true,
+      // An unwrapped step gets the runner's own RLIMIT_NOFILE, 65536 on
+      // GitHub-hosted runners. Both runc's default spec and the `sudo` on the
+      // way to it pin the soft limit at 1024, which surfaces as EMFILE in
+      // webpack/jest, so carry the real one across explicitly. NOFILE is the
+      // only limit either of them touches.
+      rlimits: nofile
+        ? [{ type: "RLIMIT_NOFILE", soft: nofile.soft, hard: nofile.hard }]
+        : undefined,
     },
     linux: {
       ...baseSpec.linux,
