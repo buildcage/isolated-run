@@ -50,4 +50,15 @@ describe("renderHostTable", () => {
   });
 });
 
+describe("a host carrying markdown syntax", () => {
+  it("stays one cell, so a forged Host header cannot write the rest of the row", () => {
+    const md = renderHostTable(
+      [{ host: "evil.example|HTTPS|-|1|x|", port: "443", ruleType: "HTTPS", count: 1 }],
+      { showReason: true },
+    );
+    const row = md.split("\n")[2];
+    expect(row).toBe("| evil.example\\|HTTPS\\|-\\|1\\|x\\|:443 | HTTPS |  | 1 |");
+  });
+});
+
 reportResults();
