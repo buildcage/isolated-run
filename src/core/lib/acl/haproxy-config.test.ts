@@ -6,6 +6,15 @@ function gen(options: Parameters<typeof generateHaproxyConfig>[0] = {}): string 
   return generateHaproxyConfig(options).config;
 }
 
+/** HAProxy's own per-line word cap (MAX_LINE_ARGS); it truncates past this. */
+const MAX_LINE_WORDS = 64;
+
+function longestLineWords(config: string): number {
+  return config
+    .split("\n")
+    .reduce((most, line) => Math.max(most, line.trim().split(/\s+/).filter(Boolean).length), 0);
+}
+
 /** The text of one `frontend <name> ... ` block, up to the next `frontend`. */
 function frontendSegment(config: string, name: string): string {
   const start = config.indexOf(`frontend ${name}`);
@@ -180,8 +189,8 @@ describe("load-bearing directives", () => {
 
   it("resolves `..` before the rules look at the path", () => {
     const normalise = config.indexOf("normalize-uri path-strip-dotdot");
-    const firstDeny = config.indexOf("http-request deny unless");
-    expect(normalise !== -1 && normalise < firstDeny).toBe(true);
+    const firstRule = config.indexOf("set-var(txn.allowed) bool(true)");
+    expect(normalise !== -1 && normalise < firstRule).toBe(true);
   });
 
   it("refuses a resolved destination that lands on an internal address", () => {
@@ -244,11 +253,12 @@ describe("resolves only once a request already passed the rules", () => {
   it("denies on host, path and method before resolving, on both listeners", () => {
     for (const frontend of ["https_in", "http_in"]) {
       const segment = frontendSegment(config, frontend);
+      const firstRule = segment.indexOf("set-var(txn.allowed) bool(true)");
       const deny = segment.indexOf("http-request deny unless");
       const resolve = segment.indexOf("do-resolve(txn.dst,buildcage,ipv4) req.hdr(host)");
-      expect(deny).not.toBe(-1);
+      expect(firstRule).not.toBe(-1);
       expect(resolve).not.toBe(-1);
-      expect(deny < resolve).toBe(true);
+      expect(firstRule < deny && deny < resolve).toBe(true);
     }
   });
 
@@ -339,9 +349,9 @@ describe("rules", () => {
     ).toBe(true);
     expect(config.includes("acl s0_port dst_port 9443")).toBe(true);
     expect(config.includes("(:9443)?")).toBe(false);
-    expect(config.includes("http-request deny unless s0_host s0_port s0_path s0_method")).toBe(
-      true,
-    );
+    expect(
+      config.includes("set-var(txn.allowed) bool(true) if s0_host s0_port s0_path s0_method"),
+    ).toBe(true);
   });
 
   it("gives a host rule the same treatment", () => {
@@ -366,13 +376,13 @@ describe("rules", () => {
     ).toBe(true);
     // The pattern's own port coverage replaces dst_port entirely.
     expect(config.includes("s0_port")).toBe(false);
-    expect(config.includes("http-request deny unless s0_host s0_path")).toBe(true);
+    expect(config.includes("set-var(txn.allowed) bool(true) if s0_host s0_path")).toBe(true);
   });
 
   it("omits the port acl only when the rule names every port", () => {
     const config = gen({ httpsRules: ["a.com:*"] });
     expect(config.includes("s0_port")).toBe(false);
-    expect(config.includes("http-request deny unless s0_host s0_path")).toBe(true);
+    expect(config.includes("set-var(txn.allowed) bool(true) if s0_host s0_path")).toBe(true);
   });
 
   it("matches the host and the path separately", () => {
@@ -382,9 +392,9 @@ describe("rules", () => {
     ).toBe(true);
     expect(config.includes("acl s0_path path -m reg ^/pub/.*$")).toBe(true);
     expect(config.includes("acl s0_method method GET")).toBe(true);
-    expect(config.includes("http-request deny unless s0_host s0_port s0_path s0_method")).toBe(
-      true,
-    );
+    expect(
+      config.includes("set-var(txn.allowed) bool(true) if s0_host s0_port s0_path s0_method"),
+    ).toBe(true);
   });
 
   it("accepts a Host header with or without the port, since only the name is compared", () => {
@@ -413,8 +423,17 @@ describe("rules", () => {
 
   it("references named acls bare, since braces are for anonymous expressions", () => {
     const config = gen({ httpsRules: ["a.com:443"] });
-    expect(config.includes("http-request deny unless { s0_host }")).toBe(false);
-    expect(config.includes("http-request deny unless s0_host")).toBe(true);
+    expect(config.includes("set-var(txn.allowed) bool(true) if { s0_host }")).toBe(false);
+    expect(config.includes("set-var(txn.allowed) bool(true) if s0_host")).toBe(true);
+    // The verdict variable has no acl of its own, so it is the anonymous case.
+    expect(config.includes("http-request deny unless { var(txn.allowed) -m bool }")).toBe(true);
+  });
+
+  it("decides with one line per rule, which no rule count can outgrow", () => {
+    const rules = Array.from({ length: 40 }, (_, i) => `GET https://h${i}.example.com/pkg/**`);
+    const config = gen({ urlRules: buildUrlRules(rules.join("\n")) });
+    expect(config.includes("set-var(txn.allowed) bool(true) if s39_host")).toBe(true);
+    expect(longestLineWords(config) <= MAX_LINE_WORDS).toBe(true);
   });
 });
 
@@ -442,7 +461,7 @@ describe("passthrough", () => {
     // The port used to be dropped, so db.example.com:443 was permitted too.
     expect(config.includes("acl tls0_port dst_port 443")).toBe(true);
     expect(
-      config.includes("use_backend passthrough if ip0_dst ip0_port or tls0_sni tls0_port"),
+      config.includes("tcp-request content set-var(txn.pass) int(1) if tls0_sni tls0_port"),
     ).toBe(true);
   });
 
@@ -497,12 +516,25 @@ describe("passthrough", () => {
   });
 
   it("sends both to a tcp backend that never terminates", () => {
-    expect(config.includes("use_backend passthrough if ip0_dst ip0_port or tls0_sni")).toBe(true);
+    expect(
+      config.includes("tcp-request content set-var(txn.pass) int(1) if ip0_dst ip0_port"),
+    ).toBe(true);
+    expect(config.includes("tcp-request content set-var(txn.pass) int(1) if tls0_sni")).toBe(true);
+    expect(config.includes("use_backend passthrough if { var(txn.pass) -m found }")).toBe(true);
     expect(config.includes("backend passthrough\n    mode tcp")).toBe(true);
   });
 
   it("omits the port acl when the rule names every port", () => {
     expect(gen({ ipRules: ["10.0.0.5:*"] }).includes("ip0_port")).toBe(false);
+  });
+
+  it("flags a passthrough one line per rule, which no rule count can outgrow", () => {
+    const config = gen({
+      tlsRules: Array.from({ length: 30 }, (_, i) => `h${i}.example.com:443`),
+      ipRules: Array.from({ length: 30 }, (_, i) => `10.0.0.${i}:5432`),
+    });
+    expect(config.includes("set-var(txn.pass) int(1) if tls29_sni tls29_port")).toBe(true);
+    expect(longestLineWords(config) <= MAX_LINE_WORDS).toBe(true);
   });
 
   it("refuses an address pattern rather than approximating a range", () => {
@@ -592,7 +624,9 @@ describe("regex url rules", () => {
     ).toBe(true);
     expect(segment.includes("acl s0_host var(txn.s0_ok) -m bool")).toBe(true);
     expect(segment.includes("path -m reg ^/x$")).toBe(true);
-    expect(segment.includes("http-request deny unless s0_host s0_path s0_method")).toBe(true);
+    expect(segment.includes("set-var(txn.allowed) bool(true) if s0_host s0_path s0_method")).toBe(
+      true,
+    );
     // No dst_port ACL at all: the bare/full duality covers the port.
     expect(segment.includes("s0_port")).toBe(false);
   });

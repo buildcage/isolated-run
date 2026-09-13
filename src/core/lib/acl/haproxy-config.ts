@@ -154,8 +154,14 @@ function ruleBlock(rules: CompiledRule[], mode: string, scheme: "https" | "http"
       `${r.id}_host${r.port ? ` ${r.id}_port` : ""} ${r.id}_path` +
       `${r.methods ? ` ${r.id}_method` : ""}`,
   );
+  // One line per rule, not one `or` chain: the parser truncates a line after 64
+  // words and calls that fatal, which would cap the rule set at 12.
+  lines.push("    http-request set-var(txn.allowed) bool(false)");
+  for (const clause of clauses) {
+    lines.push(`    http-request set-var(txn.allowed) bool(true) if ${clause}`);
+  }
   // One deny, negated against every rule: a request matching none is refused.
-  lines.push(`    http-request deny unless ${clauses.join(" or ")}`);
+  lines.push("    http-request deny unless { var(txn.allowed) -m bool }");
   lines.push("");
   return lines;
 }
@@ -284,7 +290,8 @@ export function generateHaproxyConfig(options: HaproxyConfigOptions = {}): Gener
     // before the rules below reject, so a refused passthrough is logged too.
     l.push(
       "",
-      "    tcp-request content set-var(txn.pass) int(1) if " + conds.join(" or "),
+      // One line per rule, for the same word-limit reason as ruleBlock's deny.
+      ...conds.map((cond) => `    tcp-request content set-var(txn.pass) int(1) if ${cond}`),
       "    tcp-request content set-var(txn.proto) str(tls) if { req.ssl_hello_type 1 }",
       "    tcp-request content set-var(txn.proto) str(tcp) unless { req.ssl_hello_type 1 }",
     );
@@ -332,7 +339,9 @@ export function generateHaproxyConfig(options: HaproxyConfigOptions = {}): Gener
         `%B ts=%ts dst=%[dst]:%[dst_port]"`,
       "",
     );
-    l.push(`    use_backend passthrough if ${conds.join(" or ")}`, "");
+    // txn.pass is set by exactly the conds above, so this selects the same
+    // connections without repeating them on one line.
+    l.push("    use_backend passthrough if { var(txn.pass) -m found }", "");
   }
   l.push(
     "    # `accept` ends content-rule evaluation, so it comes after every rule",
