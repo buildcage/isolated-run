@@ -1,3 +1,19 @@
+# The fixture network's name and subnet are global to the daemon: a linked
+# worktree's run would otherwise collide with the main checkout's. The
+# worktree's own name keeps them apart, so nothing needs configuring, and the
+# main checkout keeps the names CI uses. Exported because the integration test
+# scripts reach docker/compose.action.test-*.yaml through the action's own
+# environment (see startSandboxProxy in src/main.ts).
+GIT_DIR := $(shell git rev-parse --git-dir 2>/dev/null)
+WORKTREE_NAME := $(if $(findstring /worktrees/,$(GIT_DIR)),$(notdir $(GIT_DIR)))
+BUILDCAGE_WORKTREE_SUFFIX ?= $(if $(WORKTREE_NAME),-$(WORKTREE_NAME))
+# test-net cannot be left to Docker's pool, which includes 172.20.0.0/16 and so
+# overlaps the proxy's own bridge, so pick a subnet from the worktree name.
+TEST_NET_SUBNET ?= $(if $(WORKTREE_NAME),$(shell printf '%s' '$(WORKTREE_NAME)' | cksum | awk '{printf "10.%d.%d.0/24", $$1 % 40 + 210, int($$1 / 40) % 254 + 1}'),10.210.0.0/24)
+QJS_TEST_IMAGE ?= buildcage-qjs-test$(BUILDCAGE_WORKTREE_SUFFIX)
+export BUILDCAGE_WORKTREE_SUFFIX
+export TEST_NET_SUBNET
+
 .PHONY: help
 help:
 	@grep -E '^[a-zA-Z_0-9-]+(-%)?:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
@@ -30,8 +46,8 @@ QJS_TEST_DIRS := \
 .PHONY: test_unit_qjs
 test_unit_qjs: ## Run unit tests in Docker
 	@vp run build:qjs-test
-	@docker build -f docker/universal/Dockerfile -t buildcage-qjs-test .
-	@docker run --rm --entrypoint qjs $(QJS_MOUNTS) buildcage-qjs-test \
+	@docker build -f docker/universal/Dockerfile -t $(QJS_TEST_IMAGE) .
+	@docker run --rm --entrypoint qjs $(QJS_MOUNTS) $(QJS_TEST_IMAGE) \
 		--std -m /opt/buildcage/core/scripts/test/run-tests.qjs.js $(QJS_TEST_DIRS)
 
 # ===========================================================================

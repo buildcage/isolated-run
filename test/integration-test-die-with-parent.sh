@@ -18,8 +18,18 @@ cleanup() {
   # sudo itself (setuid root) and everything under it run as root, so
   # this needs the same privilege too.
   sudo -n pkill -9 -f "sudo -n -- .*/scripts/run-isolated.sh" >/dev/null 2>&1
-  docker ps -aq --filter "name=buildcage-proxy-" | xargs -r docker rm -f >/dev/null 2>&1
-  docker network ls --filter "name=buildcage-proxy-" -q | xargs -r docker network rm >/dev/null 2>&1
+  # A bare buildcage-proxy-* sweep would take down another git worktree's
+  # proxy. main.ts writes the name to GITHUB_STATE before creating the
+  # container, so nothing it started escapes this narrower one.
+  local name project
+  name=$(awk '/^container_name<</{getline; print; exit}' "$WORKDIR/state.env" 2>/dev/null)
+  if [ -n "$name" ]; then
+    project=$(docker inspect "$name" \
+      --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null)
+    docker rm -f "$name" >/dev/null 2>&1
+    [ -n "$project" ] && docker network ls --filter "label=com.docker.compose.project=$project" -q |
+      xargs -r docker network rm >/dev/null 2>&1
+  fi
   rm -rf "$WORKDIR"
 }
 trap cleanup EXIT

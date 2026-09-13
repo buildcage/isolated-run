@@ -13,41 +13,57 @@ services:
   # the method, so a path or method rule can be told to have actually applied.
   test-server:
     build: test/test-server-inspect
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - TEST_NET_ADDR=10.200.0.100/24
     networks:
       test-net:
-        ipv4_address: 10.200.0.100
 
   # A second origin nothing resolves to. Reaching it means the destination came
   # from the client rather than from the proxy's own resolution.
   test-server-impostor:
     build: test/test-server-impostor
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - TEST_NET_ADDR=10.200.0.101/24
     networks:
       test-net:
-        ipv4_address: 10.200.0.101
 
   # Echoes whatever UDP it is sent. The sandboxed step must not be able to
   # reach it, and a container beside it must, or "unreachable" would prove
   # nothing.
   test-udp-echo:
     build: test/test-udp-echo
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - TEST_NET_ADDR=10.200.0.102/24
     networks:
       test-net:
-        ipv4_address: 10.200.0.102
 
   # Upstream for the proxy's HAProxy, which resolves the real destination
   # against it once a request has already passed the rules; CoreDNS itself
   # never forwards here.
   test-dns:
     build: test/test-dns-inspect
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - TEST_NET_ADDR=10.200.0.53/24
     networks:
       test-net:
-        ipv4_address: 10.200.0.53
 
 networks:
-  # Fixed, external name: docker/compose.action.test-inspect.yaml joins this
-  # same network from its own, separate compose project.
+  # Explicitly named, because docker/compose.action.test-inspect.yaml joins this
+  # same network from its own, separate compose project. The name is global to
+  # the daemon, so the suffix is what keeps linked worktrees apart.
   test-net:
-    name: buildcage-test-inspect-net
+    name: buildcage-test-inspect-net${BUILDCAGE_WORKTREE_SUFFIX:-}
     ipam:
       config:
-        - subnet: 10.200.0.0/24
+        # Pinned rather than auto-assigned: Docker's pool includes
+        # 172.20.0.0/16, which collides with the proxy's own bridge inside its
+        # netns.
+        - subnet: ${TEST_NET_SUBNET:-10.210.0.0/24}

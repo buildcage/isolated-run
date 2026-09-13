@@ -24,16 +24,22 @@ services:
       - ALLOWED_URL_RULES=${ALLOWED_URL_RULES:-}
       - ALLOWED_TLS_RULES=${ALLOWED_TLS_RULES:-}
       - EXTERNAL_RESOLVER=${EXTERNAL_RESOLVER:-}
+      - TEST_NET_ADDR=10.200.0.2/24
+      - TEST_NET_SUBNET=${TEST_NET_SUBNET:-10.210.0.0/24}
       # Test-only: init-inspect-cfg only honours this in an image built with
       # BUILDCAGE_TEST_HOOKS=1 (see docker/inspect/Dockerfile's
       # /opt/buildcage/.test-hooks marker) -- a fixed in-container path,
       # regardless of where the host-side cert actually lives.
       - BUILDCAGE_EXTRA_CA_FILE=/test-fixtures/test-server-cert.pem
     volumes:
+      - ../test/test-net-addr/attach.sh:/test-hooks/attach-test-net-addr.sh:ro
       # BUILDCAGE_TEST_CERT_PATH: an absolute host path, set by the test
       # script itself -- a relative path here would resolve against this
       # file's own directory (docker/), not the repo root.
       - ${BUILDCAGE_TEST_CERT_PATH:?BUILDCAGE_TEST_CERT_PATH must be an absolute path to test-server-inspect/cert.pem}:/test-fixtures/test-server-cert.pem:ro
+    # Wrapped here rather than in the image: the proxy is the product image
+    # and carries no test-only setup.
+    entrypoint: ["/test-hooks/attach-test-net-addr.sh", "/init"]
     networks:
       default:
       test-net:
@@ -43,5 +49,6 @@ services:
 
 networks:
   test-net:
-    name: buildcage-test-inspect-net
+    # Must match ../compose.test-*.yaml's own name, suffix included.
+    name: buildcage-test-inspect-net${BUILDCAGE_WORKTREE_SUFFIX:-}
     external: true

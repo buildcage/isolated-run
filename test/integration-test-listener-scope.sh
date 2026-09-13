@@ -38,8 +38,10 @@ dns_answered() {
 
 run_engine() {
   local engine="$1"
-  local project="buildcage-listener-scope-$engine"
-  local proxy_name="buildcage-proxy"
+  # Both are global to the daemon, so they carry the Makefile's worktree suffix.
+  local project="buildcage-listener-scope-$engine${BUILDCAGE_WORKTREE_SUFFIX:-}"
+  local proxy_name="buildcage-proxy${BUILDCAGE_WORKTREE_SUFFIX:-}"
+  export PROXY_CONTAINER_NAME="$proxy_name"
 
   echo ""
   echo "=== Listener Scope Test ($engine) ==="

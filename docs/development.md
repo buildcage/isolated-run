@@ -60,6 +60,31 @@ the real action wrapper (see `test/integration-test-*.sh`) and is what CI's `tes
 `test-integration.yml` runs. The CI-only `test_sandbox_*` end-to-end jobs (real runner host, no
 nested container) are described in [Action Internals](#action-internals) below.
 
+### Running the integration tests from several git worktrees
+
+`test_integration_sandbox_universal` and `test_integration_sandbox_inspect` use the fixture origins
+in `compose.test-*.yaml`, whose network name is global to the daemon, so two worktrees would
+otherwise fight over it and over the fixtures' `10.200.0.x` addresses.
+
+Nothing has to be configured. The Makefile takes the worktree's name from `git rev-parse
+--git-dir`, suffixes the network name with it and derives the network's own subnet from it, and
+exports both so the test scripts and the proxy the action starts agree. The main checkout gets the
+unsuffixed name and the subnet CI uses.
+
+The fixtures' addresses are not part of that. Each assigns its own `10.200.0.x` inside its own
+network namespace instead of taking one from Compose IPAM (see each fixture's entrypoint, and
+`test/test-net-addr` for the proxy's side of it), so the daemon never allocates `10.200.0.0/24` and
+every worktree uses the same addresses. That is why the assertions name those addresses literally.
+
+A fresh worktree needs `vp install` first: `node_modules` is per checkout, and these tests run
+`dist/main.cjs` with the repo's own dependencies.
+
+The rest of `test/integration-test-*.sh` clean up only the proxy containers they started
+themselves, read back from their own `GITHUB_STATE` (`main.ts` writes the name there before
+creating the container). A `buildcage-proxy-*` sweep would otherwise remove, or call a leak,
+whatever another worktree has running. `integration-test-listener-scope.sh` is the one script with
+fixed Compose and container names of its own, and those carry the suffix too.
+
 ## Local Development
 
 ### Local testing of the action

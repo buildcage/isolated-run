@@ -63,21 +63,35 @@ for label_dir in "A:$TMP_A" "B:$TMP_B"; do
   fi
 done
 
-LEFTOVER_CONTAINERS=$(docker ps -a --filter "name=buildcage-proxy-" -q)
-if [ -z "$LEFTOVER_CONTAINERS" ]; then
-  echo "  PASS  no leftover buildcage-proxy-* containers"
-else
-  echo "  FAIL  leftover buildcage-proxy-* containers: $LEFTOVER_CONTAINERS"
-  FAILURES=$((FAILURES + 1))
-fi
+# A bare buildcage-proxy-* sweep also matches another git worktree's proxy, and
+# would call someone else's running container a leak.
+for label_dir in "A:$TMP_A" "B:$TMP_B"; do
+  label="${label_dir%%:*}"
+  dir="${label_dir#*:}"
+  name=$(awk '/^container_name<</{getline; print; exit}' "$dir/state.env")
+  if [ -z "$name" ]; then
+    echo "  FAIL  instance $label wrote no container_name to GITHUB_STATE"
+    FAILURES=$((FAILURES + 1))
+    continue
+  fi
 
-LEFTOVER_NETWORKS=$(docker network ls --filter "name=buildcage-proxy-" -q)
-if [ -z "$LEFTOVER_NETWORKS" ]; then
-  echo "  PASS  no leftover buildcage-proxy-* networks"
-else
-  echo "  FAIL  leftover buildcage-proxy-* networks: $LEFTOVER_NETWORKS"
-  FAILURES=$((FAILURES + 1))
-fi
+  if [ -z "$(docker ps -aq --filter "name=$name")" ]; then
+    echo "  PASS  instance $label left no proxy container behind"
+  else
+    echo "  FAIL  instance $label left $name behind"
+    FAILURES=$((FAILURES + 1))
+  fi
+
+  # Mirrors deriveProjectName (src/core/lib/docker/compose-project-name.ts):
+  # the container is already gone here, so its Compose labels can't be read.
+  project="buildcage-$(printf '%s' "$name" | sha256sum | cut -c1-12)"
+  if [ -z "$(docker network ls --filter "label=com.docker.compose.project=$project" -q)" ]; then
+    echo "  PASS  instance $label left no proxy network behind"
+  else
+    echo "  FAIL  instance $label left $project's network behind"
+    FAILURES=$((FAILURES + 1))
+  fi
+done
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then

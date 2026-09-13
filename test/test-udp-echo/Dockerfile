@@ -8,4 +8,7 @@ RUN apk add --no-cache socat
 
 EXPOSE 9999/udp
 
+# Assigned here rather than by Compose IPAM, so 10.200.0.0/24 stays out of the
+# daemon's address space and several worktrees can run the suite at once.
+ENTRYPOINT ["/bin/sh", "-c", "ip addr add \"$TEST_NET_ADDR\" dev eth0 && exec \"$@\"", "sh"]
 CMD ["socat", "-T5", "UDP-RECVFROM:9999,fork", "PIPE"]
