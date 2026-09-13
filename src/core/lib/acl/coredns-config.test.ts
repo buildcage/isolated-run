@@ -13,6 +13,12 @@ function exprLine(config: string): string {
   return config.split("\n").find((l) => l.includes("name() matches")) ?? "";
 }
 
+/** The reverse-zone block on its own, which every config emits first. */
+function reverseBlock(config: string): string {
+  const start = config.indexOf("in-addr.arpa ip6.arpa {");
+  return config.slice(start, config.indexOf("\n}\n", start) + 3);
+}
+
 // ---------------------------------------------------------------------------
 // Nothing is ever forwarded, but a name is still logged as allowed or denied,
 // and that decision has to match the rules and nothing more, or a name
@@ -155,7 +161,26 @@ describe("denied names", () => {
     const denyBlock = config.slice(config.indexOf("# Everything else"));
     const aaaaBlock = denyBlock.slice(denyBlock.indexOf("template IN AAAA"));
     expect(aaaaBlock.includes("answer")).toBe(false);
-    expect(config.includes("rcode NXDOMAIN")).toBe(false);
+    expect(denyBlock.includes("rcode NXDOMAIN")).toBe(false);
+  });
+
+  it("answers every other query type with NODATA rather than leaving it unhandled", () => {
+    // A type that reaches no template at all is answered SERVFAIL, which says
+    // the server is broken and the query worth retrying: musl waits out its
+    // whole resolver timeout on one. NODATA refuses it without the wait.
+    const denyBlock = config.slice(config.indexOf("# Everything else"));
+    const anyBlock = denyBlock.slice(denyBlock.indexOf("template IN ANY"));
+    expect(denyBlock.includes("template IN ANY")).toBe(true);
+    expect(anyBlock.includes("answer")).toBe(false);
+  });
+
+  it("keeps the A template ahead of the catch-all, which matches every type", () => {
+    // CoreDNS takes the first template that matches, so the order in the file
+    // is what stops IN ANY from answering an A query with NODATA.
+    const denyBlock = config.slice(config.indexOf("# Everything else"));
+    expect(denyBlock.indexOf("template IN A {") < denyBlock.indexOf("template IN ANY {")).toBe(
+      true,
+    );
   });
 
   it("labels the two paths distinguishably in the log", () => {
@@ -227,6 +252,46 @@ describe("audit mode", () => {
 
   it("needs no allowlist expression, since nothing is refused", () => {
     expect(config.includes("view allowlist")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reverse lookups. No rule can name a reverse zone, so the only question these
+// answer is how the lookup ends -- and SERVFAIL, what an unhandled query gets,
+// costs musl its whole five-second resolver timeout every time.
+// ---------------------------------------------------------------------------
+describe("reverse lookups", () => {
+  for (const mode of ["audit", "restrict"] as const) {
+    it(`answers PTR with NXDOMAIN in ${mode} mode, so the caller gives up at once`, () => {
+      const block = reverseBlock(gen({ httpsRules: ["a.example.com:443"], mode }));
+      expect(block.includes("template IN PTR")).toBe(true);
+      expect(block.includes("rcode NXDOMAIN")).toBe(true);
+    });
+  }
+
+  it("carries an SOA, so the refusal is cacheable rather than re-asked each time", () => {
+    expect(reverseBlock(gen({})).includes("IN SOA ns.buildcage.invalid.")).toBe(true);
+  });
+
+  it("records the lookup under a verb of its own, neither allowed nor denied", () => {
+    // inspect.ts reads the allowed and denied verbs only, which is what keeps
+    // this out of the report: a row for a reverse zone could never be taken
+    // away by writing a rule, there being no rule that can name one.
+    const block = reverseBlock(gen({ httpsRules: ["a.example.com:443"] }));
+    expect(block.includes('"buildcage dns reverse name={name}"')).toBe(true);
+    expect(block.includes("dns allowed")).toBe(false);
+    expect(block.includes("dns denied")).toBe(false);
+  });
+
+  it("answers anything else under those zones like any other name", () => {
+    // Only PTR is refused. A name that merely sits under in-addr.arpa still
+    // resolves to the proxy, so the request that follows is recorded with its
+    // full URL the way one for any other name is.
+    expect(reverseBlock(gen({})).includes('answer "{{ .Name }} 60 IN A 172.20.0.1"')).toBe(true);
+  });
+
+  it("never forwards, no more than any other block does", () => {
+    expect(reverseBlock(gen({})).includes("forward")).toBe(false);
   });
 });
 

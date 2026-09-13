@@ -380,9 +380,17 @@ behavior, see [Inspect Proxy Engine](./security.md#inspect-proxy-engine) in Secu
       }
       template IN A   { answer "{{ .Name }} 60 IN A <proxy-ip>" }
       template IN AAAA { }
+      template IN ANY  { }
       log . "buildcage dns allowed name={name}"
   }
   ```
+
+  Reverse lookups get their own block, ahead of these, answering `PTR` with `NXDOMAIN` and
+  logging `buildcage dns reverse name=...`. Nothing in the cage has a name to give back, and no
+  rule can name a reverse zone, so the lookup is recorded rather than judged. `NXDOMAIN` is what
+  ends it: a query no template matches is answered `SERVFAIL` instead, which musl retries and then
+  waits out its full five-second resolver timeout on, once per lookup. `template IN ANY` above
+  does the same for every other query type, `SRV` and `HTTPS` included.
 
 - **The CA trust mount** is built by `src/lib/sandbox/` rather than written into the sandbox. The CA
   and, where the step has one, an augmented copy of the system CA store are written into this run's
