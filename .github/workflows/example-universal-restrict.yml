@@ -18,7 +18,7 @@ jobs:
       # fail_on_blocked is false only because this example blocks on purpose;
       # leave it at its default so a real workflow fails on a disallowed destination.
       - name: Run a Maven build with outbound network isolation
-        uses: buildcage/isolated-run@68f89e4e4e5d812aeee07a3512394457c70fa110 # v1.1.4
+        uses: buildcage/isolated-run@e406cff083e1e9475fe2b726b02f6a51a6321291 # v1.2.0
         with:
           proxy_mode: restrict
           proxy_engine: universal
