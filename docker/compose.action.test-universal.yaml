@@ -23,6 +23,13 @@ services:
       - ALLOWED_HTTP_RULES=${ALLOWED_HTTP_RULES:-}
       - ALLOWED_IP_RULES=${ALLOWED_IP_RULES:-}
       - EXTERNAL_RESOLVER=${EXTERNAL_RESOLVER:-}
+      - TEST_NET_ADDR=10.200.0.2/24
+      - TEST_NET_SUBNET=${TEST_NET_SUBNET:-10.210.0.0/24}
+    volumes:
+      - ../test/test-net-addr/attach.sh:/test-hooks/attach-test-net-addr.sh:ro
+    # Wrapped here rather than in the image: the proxy is the product image
+    # and carries no test-only setup.
+    entrypoint: ["/test-hooks/attach-test-net-addr.sh", "/init"]
     networks:
       default:
       test-net:
@@ -32,5 +39,6 @@ services:
 
 networks:
   test-net:
-    name: buildcage-test-universal-net
+    # Must match ../compose.test-*.yaml's own name, suffix included.
+    name: buildcage-test-universal-net${BUILDCAGE_WORKTREE_SUFFIX:-}
     external: true

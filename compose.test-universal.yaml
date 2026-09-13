@@ -12,22 +12,32 @@ services:
   # The origin every allowed name resolves to.
   test-server:
     build: test/test-server-universal
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - TEST_NET_ADDR=10.200.0.100/24
     networks:
       test-net:
-        ipv4_address: 10.200.0.100
 
   # Upstream resolver for the proxy's HAProxy.
   test-dns:
     build: test/test-dns-universal
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - TEST_NET_ADDR=10.200.0.53/24
     networks:
       test-net:
-        ipv4_address: 10.200.0.53
 
 networks:
-  # Fixed, external name: docker/compose.action.test-universal.yaml joins
-  # this same network from its own, separate compose project.
+  # Explicitly named, because docker/compose.action.test-universal.yaml joins this
+  # same network from its own, separate compose project. The name is global to
+  # the daemon, so the suffix is what keeps linked worktrees apart.
   test-net:
-    name: buildcage-test-universal-net
+    name: buildcage-test-universal-net${BUILDCAGE_WORKTREE_SUFFIX:-}
     ipam:
       config:
-        - subnet: 10.200.0.0/24
+        # Pinned rather than auto-assigned: Docker's pool includes
+        # 172.20.0.0/16, which collides with the proxy's own bridge inside its
+        # netns.
+        - subnet: ${TEST_NET_SUBNET:-10.210.0.0/24}

@@ -6,4 +6,6 @@ COPY dnsmasq.conf /etc/dnsmasq.conf
 
 EXPOSE 53/udp 53/tcp
 
-ENTRYPOINT ["dnsmasq", "--no-daemon", "--log-queries"]
+# Assigned here rather than by Compose IPAM, so 10.200.0.0/24 stays out of the
+# daemon's address space and several worktrees can run the suite at once.
+ENTRYPOINT ["/bin/sh", "-c", "ip addr add \"$TEST_NET_ADDR\" dev eth0 && exec dnsmasq --no-daemon --log-queries"]

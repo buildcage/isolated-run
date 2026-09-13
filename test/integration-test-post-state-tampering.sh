@@ -25,10 +25,26 @@ EOS
 chmod +x "$FAKE_BIN/sudo"
 export SUDO_LOG
 
+# A bare buildcage-proxy-* sweep would remove another git worktree's proxy
+# while it is still in use.
+CREATED_CONTAINERS=()
+
+remove_own_container() {
+  local name="$1" project
+  project=$(docker inspect "$name" \
+    --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null)
+  docker rm -f "$name" >/dev/null 2>&1
+  [ -n "$project" ] && docker network ls --filter "label=com.docker.compose.project=$project" -q |
+    xargs -r docker network rm >/dev/null 2>&1
+  return 0
+}
+
 cleanup() {
   rm -rf "$FAKE_BIN" "${CANARY_DIR:-}" "${WORKDIR:-}" "${VICTIM_DIR:-}"
-  docker ps -aq --filter "name=buildcage-proxy-" | xargs -r docker rm -f >/dev/null 2>&1
-  docker network ls --filter "name=buildcage-proxy-" -q | xargs -r docker network rm >/dev/null 2>&1
+  local name
+  for name in "${CREATED_CONTAINERS[@]+"${CREATED_CONTAINERS[@]}"}"; do
+    remove_own_container "$name"
+  done
 }
 trap cleanup EXIT
 
@@ -110,6 +126,7 @@ run_hard_kill_and_post() {
     return
   fi
   container_name=$(awk '/^container_name<</{getline; print; exit}' "$workdir/state.env")
+  CREATED_CONTAINERS+=("$container_name")
   scratch_dir="/var/tmp/buildcage-$(id -u)/sandbox-${container_name#buildcage-proxy-}"
 
   for _ in $(seq 1 60); do
@@ -140,8 +157,7 @@ run_hard_kill_and_post() {
     echo "  PASS  [$label] proxy container removed"
   fi
 
-  docker ps -aq --filter "name=buildcage-proxy-" | xargs -r docker rm -f >/dev/null 2>&1
-  docker network ls --filter "name=buildcage-proxy-" -q | xargs -r docker network rm >/dev/null 2>&1
+  remove_own_container "$container_name"
   rm -rf "$workdir"
 }
 
