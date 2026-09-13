@@ -328,7 +328,14 @@ describe("rules", () => {
   it("matches a host case-insensitively, as a name is", () => {
     // do-resolve already lowercases the name it looks up, so a case-sensitive
     // acl refuses `Host: Registry.NPMJS.org` despite an explicit allow rule.
-    expect(gen({ httpsRules: ["a.com:443"] }).includes("-m reg -i ^a\\\\.com$")).toBe(true);
+    // The header is lowercased once, so the literal pattern must be lowercase
+    // and a pattern that stays a regex keeps -i.
+    const literal = gen({ httpsRules: ["A.com:443"] });
+    expect(literal.includes("set-var(txn.host) hdr(host),lower,host_only")).toBe(true);
+    expect(literal.includes("acl s0_host var(txn.host) -m str a.com")).toBe(true);
+    expect(gen({ httpsRules: ["*.a.com:443"] }).includes("-m reg -i ^[^.]+\\\\.a\\\\.com$")).toBe(
+      true,
+    );
   });
 
   it("strips a trailing dot from the Host header before matching, resolving or verifying it", () => {
@@ -336,7 +343,99 @@ describe("rules", () => {
     // write it that way to skip resolv.conf's search-list expansion. Without
     // this, `Host: a.com.` would refuse an explicit allow rule for a.com.
     const config = gen({ httpsRules: ["a.com:443"] });
-    expect(config.includes("hdr(host),host_only,regsub(\\.$,) -m reg -i ^a\\\\.com$")).toBe(true);
+    expect(
+      config.includes("http-request set-var(txn.host) hdr(host),lower,host_only,regsub(\\.$,)"),
+    ).toBe(true);
+  });
+
+  it("reads the Host header once, however many rules are matched against it", () => {
+    // Every rule used to re-run the fetch and its regsub. The cost of that is
+    // paid per rule per request, and rule sets have no size limit.
+    const config = gen({
+      urlRules: buildUrlRules(
+        Array.from({ length: 8 }, (_, i) => `GET https://h${i}.com/x`).join("\n"),
+      ),
+    });
+    const segment = frontendSegment(config, "https_in");
+    expect(segment.split("hdr(host),lower,host_only").length - 1).toBe(1);
+    expect(segment.includes("acl s7_host var(txn.host) -m str h7.com")).toBe(true);
+  });
+
+  it("matches a literal name as a string and only a wildcard as a regex", () => {
+    // An anchored regex over a literal name only ever matches that one name,
+    // so the regex engine has nothing to decide.
+    expect(
+      gen({ httpsRules: ["a.com:443"] }).includes("acl s0_host var(txn.host) -m str a.com"),
+    ).toBe(true);
+    expect(
+      gen({ httpsRules: ["*.a.com:443"] }).includes(
+        "acl s0_host var(txn.host) -m reg -i ^[^.]+\\\\.a\\\\.com$",
+      ),
+    ).toBe(true);
+  });
+
+  it("matches a literal path as a string and a prefix path as a prefix", () => {
+    const exact = gen({ urlRules: buildUrlRules("GET https://a.com/pkg.json") });
+    expect(exact.includes("acl s0_path path -m str /pkg.json")).toBe(true);
+    const prefix = gen({ urlRules: buildUrlRules("GET https://a.com/pkg/**") });
+    expect(prefix.includes("acl s0_path path -m beg /pkg/")).toBe(true);
+    // A single-segment wildcard is not a prefix: /pkg/a/b must stay refused.
+    const segment = gen({ urlRules: buildUrlRules("GET https://a.com/pkg/*") });
+    expect(segment.includes("acl s0_path path -m reg ^/pkg/[^/]+$")).toBe(true);
+  });
+
+  it("treats both spellings of an any-path rule as the same prefix", () => {
+    // A host rule compiles to `^/` and `/**` to `^/.*$`; both permit any path,
+    // and both still require the leading slash an `OPTIONS *` target lacks.
+    expect(gen({ httpsRules: ["a.com:443"] }).includes("acl s0_path path -m beg /")).toBe(true);
+    expect(
+      gen({ urlRules: buildUrlRules("GET https://a.com/**") }).includes(
+        "acl s0_path path -m beg /",
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves a ~rule's own regex alone, quantifiers included", () => {
+    // `/a+` is one or more `a` to the author. Read as a literal it would allow
+    // only the path `/a+`, and `^/v+/x.*$` as a prefix would allow that same
+    // literal `+` past a rule that never permitted it.
+    const plus = gen({ urlRules: buildUrlRules("GET ~^https://a\\.com/a+$") });
+    expect(plus.includes("acl s0_path path -m reg ^/a+$")).toBe(true);
+    const prefix = gen({ urlRules: buildUrlRules("GET ~^https://a\\.com/v+/x.*$") });
+    expect(prefix.includes("acl s0_path path -m reg ^/v+/x.*$")).toBe(true);
+  });
+
+  it("names the host variable only where a rule reads it", () => {
+    // A ~rule matches its own host variable, so a rule set made only of them
+    // would pay for a fetch and a regsub per request that nothing reads.
+    const regexOnly = gen({ httpsRules: ["~^a\\.com:(443|8443)$"] });
+    expect(regexOnly.includes("set-var(txn.host)")).toBe(false);
+    expect(gen({ httpsRules: ["a.com:443"] }).includes("set-var(txn.host)")).toBe(true);
+  });
+
+  it("matches a name once for every rule that names it", () => {
+    const config = gen({
+      urlRules: buildUrlRules("GET https://a.com/one/**\nGET https://a.com/two/**"),
+    });
+    expect(config.includes("acl s1_host")).toBe(false);
+    expect(
+      config.includes(
+        "bool(true) if !{ var(txn.allowed) -m bool } s0_host s1_port s1_path s1_method",
+      ),
+    ).toBe(true);
+  });
+
+  it("stops matching once a rule has allowed the request", () => {
+    // Without the flag first, every later rule still runs its own matching on
+    // a request that is already allowed.
+    const config = gen({
+      urlRules: buildUrlRules("GET https://a.com/x\nGET https://b.com/y"),
+    });
+    expect(
+      config.includes(
+        "set-var(txn.allowed) bool(true) if !{ var(txn.allowed) -m bool } s1_host s1_port s1_path s1_method",
+      ),
+    ).toBe(true);
   });
 
   it("takes the port from the connection, not from the Host header", () => {
@@ -344,21 +443,19 @@ describe("rules", () => {
     // from it has to accept the port being absent -- which made a rule for
     // :9443 also permit :443 on the same host. Found by the round-trip test.
     const config = gen({ urlRules: buildUrlRules("GET https://a.com:9443/private/x") });
-    expect(
-      config.includes("acl s0_host hdr(host),host_only,regsub(\\.$,) -m reg -i ^a\\\\.com$"),
-    ).toBe(true);
+    expect(config.includes("acl s0_host var(txn.host) -m str a.com")).toBe(true);
     expect(config.includes("acl s0_port dst_port 9443")).toBe(true);
     expect(config.includes("(:9443)?")).toBe(false);
     expect(
-      config.includes("set-var(txn.allowed) bool(true) if s0_host s0_port s0_path s0_method"),
+      config.includes(
+        "bool(true) if !{ var(txn.allowed) -m bool } s0_host s0_port s0_path s0_method",
+      ),
     ).toBe(true);
   });
 
   it("gives a host rule the same treatment", () => {
     const config = gen({ httpsRules: ["a.com:8443"] });
-    expect(
-      config.includes("acl s0_host hdr(host),host_only,regsub(\\.$,) -m reg -i ^a\\\\.com$"),
-    ).toBe(true);
+    expect(config.includes("acl s0_host var(txn.host) -m str a.com")).toBe(true);
     expect(config.includes("acl s0_port dst_port 8443")).toBe(true);
   });
 
@@ -376,36 +473,40 @@ describe("rules", () => {
     ).toBe(true);
     // The pattern's own port coverage replaces dst_port entirely.
     expect(config.includes("s0_port")).toBe(false);
-    expect(config.includes("set-var(txn.allowed) bool(true) if s0_host s0_path")).toBe(true);
+    expect(config.includes("bool(true) if !{ var(txn.allowed) -m bool } s0_host s0_path")).toBe(
+      true,
+    );
   });
 
   it("omits the port acl only when the rule names every port", () => {
     const config = gen({ httpsRules: ["a.com:*"] });
     expect(config.includes("s0_port")).toBe(false);
-    expect(config.includes("set-var(txn.allowed) bool(true) if s0_host s0_path")).toBe(true);
+    expect(config.includes("bool(true) if !{ var(txn.allowed) -m bool } s0_host s0_path")).toBe(
+      true,
+    );
   });
 
   it("matches the host and the path separately", () => {
     const config = gen({ urlRules: buildUrlRules("GET https://a.com/pub/**") });
-    expect(
-      config.includes("acl s0_host hdr(host),host_only,regsub(\\.$,) -m reg -i ^a\\\\.com$"),
-    ).toBe(true);
-    expect(config.includes("acl s0_path path -m reg ^/pub/.*$")).toBe(true);
+    expect(config.includes("acl s0_host var(txn.host) -m str a.com")).toBe(true);
+    expect(config.includes("acl s0_path path -m beg /pub/")).toBe(true);
     expect(config.includes("acl s0_method method GET")).toBe(true);
     expect(
-      config.includes("set-var(txn.allowed) bool(true) if s0_host s0_port s0_path s0_method"),
+      config.includes(
+        "bool(true) if !{ var(txn.allowed) -m bool } s0_host s0_port s0_path s0_method",
+      ),
     ).toBe(true);
   });
 
   it("accepts a Host header with or without the port, since only the name is compared", () => {
     const config = gen({ httpsRules: ["a.com:443"] });
-    expect(config.includes("hdr(host),host_only,regsub(\\.$,) -m reg -i ^a\\\\.com$")).toBe(true);
+    expect(config.includes("acl s0_host var(txn.host) -m str a.com")).toBe(true);
     expect(config.includes("acl s0_port dst_port 443")).toBe(true);
   });
 
   it("lets a host rule permit any path", () => {
     const config = gen({ httpsRules: ["a.com:443"] });
-    expect(config.includes("acl s0_path path -m reg ^/")).toBe(true);
+    expect(config.includes("acl s0_path path -m beg /")).toBe(true);
     expect(config.includes("s0_method")).toBe(false);
   });
 
@@ -423,8 +524,8 @@ describe("rules", () => {
 
   it("references named acls bare, since braces are for anonymous expressions", () => {
     const config = gen({ httpsRules: ["a.com:443"] });
-    expect(config.includes("set-var(txn.allowed) bool(true) if { s0_host }")).toBe(false);
-    expect(config.includes("set-var(txn.allowed) bool(true) if s0_host")).toBe(true);
+    expect(config.includes("-m bool } { s0_host }")).toBe(false);
+    expect(config.includes("bool(true) if !{ var(txn.allowed) -m bool } s0_host")).toBe(true);
     // The verdict variable has no acl of its own, so it is the anonymous case.
     expect(config.includes("http-request deny unless { var(txn.allowed) -m bool }")).toBe(true);
   });
@@ -432,7 +533,7 @@ describe("rules", () => {
   it("decides with one line per rule, which no rule count can outgrow", () => {
     const rules = Array.from({ length: 40 }, (_, i) => `GET https://h${i}.example.com/pkg/**`);
     const config = gen({ urlRules: buildUrlRules(rules.join("\n")) });
-    expect(config.includes("set-var(txn.allowed) bool(true) if s39_host")).toBe(true);
+    expect(config.includes("-m bool } s39_host")).toBe(true);
     expect(longestLineWords(config) <= MAX_LINE_WORDS).toBe(true);
   });
 });
@@ -623,10 +724,10 @@ describe("regex url rules", () => {
       ),
     ).toBe(true);
     expect(segment.includes("acl s0_host var(txn.s0_ok) -m bool")).toBe(true);
-    expect(segment.includes("path -m reg ^/x$")).toBe(true);
-    expect(segment.includes("set-var(txn.allowed) bool(true) if s0_host s0_path s0_method")).toBe(
-      true,
-    );
+    expect(segment.includes("path -m str /x")).toBe(true);
+    expect(
+      segment.includes("bool(true) if !{ var(txn.allowed) -m bool } s0_host s0_path s0_method"),
+    ).toBe(true);
     // No dst_port ACL at all: the bare/full duality covers the port.
     expect(segment.includes("s0_port")).toBe(false);
   });
@@ -670,8 +771,8 @@ describe("escaping rule text for the config parser", () => {
   it("doubles a backslash, since that is the one escape the parser folds", () => {
     // `\.` reaches the regex engine as written, but `\\` collapses to `\`, so
     // every backslash has to be doubled for the pair to survive together.
-    const result = generateHaproxyConfig({ httpsRules: ["a.com:443"] });
-    expect(result.config.includes("-m reg -i ^a\\\\.com$")).toBe(true);
+    const result = generateHaproxyConfig({ httpsRules: ["*.a.com:443"] });
+    expect(result.config.includes("-m reg -i ^[^.]+\\\\.a\\\\.com$")).toBe(true);
   });
 
   it("escapes a '#' in an SNI rule and in a regex ip rule too", () => {
