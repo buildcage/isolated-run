@@ -278,7 +278,9 @@ What each kind of rule decides, and what stays undecrypted:
   exfiltration channel (`SECRET-DATA.attacker.example` would otherwise reach an attacker's own
   nameserver the moment it was forwarded). A name outside the allowlist is answered the same way
   rather than with NXDOMAIN, so the request that follows is recorded with its full URL, query string
-  included, before it is refused.
+  included, before it is refused. Reverse lookups are the one exception: nothing inside the cage has
+  a name to give back, and no rule can name a reverse zone, so `PTR` is answered `NXDOMAIN` and the
+  lookup is recorded in the resolver log without being reported as allowed or blocked.
 - **A wide host rule paired with a narrow path or method does not narrow the DNS side.** DNS has no
   notion of a path, so a name under an allowed `*.example.com` is logged as allowed the moment it is
   looked up, before any path is known. The request that follows is still refused and still never

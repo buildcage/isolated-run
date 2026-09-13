@@ -7,6 +7,10 @@
  *   <timestamp>  [INFO] buildcage dns <allowed|denied> name=<name>.
  *   buildcage haproxy starting <ms>
  *
+ * A fifth, `buildcage dns reverse name=<name>.`, is deliberately none of them:
+ * no rule can name a reverse zone, so an event for it would be a report row no
+ * rule could ever take away. It stays in the resolver log alone.
+ *
  * <ms> is milliseconds since the epoch (HAProxy's date(0,ms), or qjs's
  * Date.now() for the startup line, printed before HAProxy itself is even
  * running); TrafficEvent's own time is in seconds, so parsing divides it

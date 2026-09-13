@@ -111,6 +111,13 @@ assert_summary_contains "https://absent.example.com/ -> dns-failed" "unresolvabl
 assert_summary_contains "token=SECRET-VALUE" "the refused URL's query string was recorded intact"
 assert_summary_contains "TLS tlspass.example.com:443" "the TLS passthrough is in the timeline, never decrypted"
 assert_summary_contains "DNS secret-in-a-name.attacker.example -> dns-not-allowed" "the DNS-only exfiltration attempt was refused and recorded"
+# No rule can name a reverse zone, so a row for one could never be taken away
+# by writing a rule. The resolver records it under a verb of its own instead.
+if grep -qF "in-addr.arpa" <<< "$SUMMARY"; then
+  fail "a reverse lookup reached the report"
+else
+  pass "a reverse lookup is left out of the report entirely"
+fi
 if grep -qE 'DNS allowed\.example\.com ->' <<< "$SUMMARY"; then
   fail "a name that merely resolved is in the timeline (should be dropped as redundant)"
 else
