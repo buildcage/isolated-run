@@ -1,0 +1,11 @@
+# Applied to code scanning default setup through the github-codeql-config-file
+# repository property, and merged with the configuration default setup
+# generates.
+
+# The committed bundles are generated from src/, which is analyzed on its own,
+# so extracting them adds no coverage. The extractor also cannot parse a rest
+# destructuring pattern that one of the bundled dependencies contains, which
+# fails the whole JavaScript analysis on a pull request that changes nothing
+# but the bundles.
+paths-ignore:
+  - dist
