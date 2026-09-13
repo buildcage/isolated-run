@@ -6,7 +6,10 @@
 # environment (see startSandboxProxy in src/main.ts).
 GIT_DIR := $(shell git rev-parse --git-dir 2>/dev/null)
 WORKTREE_NAME := $(if $(findstring /worktrees/,$(GIT_DIR)),$(notdir $(GIT_DIR)))
-BUILDCAGE_WORKTREE_SUFFIX ?= $(if $(WORKTREE_NAME),-$(WORKTREE_NAME))
+# A worktree directory carries the `+` that replaced the branch name's `/`, and
+# no image tag, container name or Compose project name accepts it.
+WORKTREE_SLUG := $(if $(WORKTREE_NAME),$(shell printf '%s' '$(WORKTREE_NAME)' | tr 'A-Z' 'a-z' | tr -Cs 'a-z0-9_-' '-' | sed -e 's/^-//' -e 's/-$$//'))
+BUILDCAGE_WORKTREE_SUFFIX ?= $(if $(WORKTREE_SLUG),-$(WORKTREE_SLUG))
 # test-net cannot be left to Docker's pool, which includes 172.20.0.0/16 and so
 # overlaps the proxy's own bridge, so pick a subnet from the worktree name.
 TEST_NET_SUBNET ?= $(if $(WORKTREE_NAME),$(shell printf '%s' '$(WORKTREE_NAME)' | cksum | awk '{printf "10.%d.%d.0/24", $$1 % 40 + 210, int($$1 / 40) % 254 + 1}'),10.210.0.0/24)
