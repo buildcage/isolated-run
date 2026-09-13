@@ -123,6 +123,15 @@ runc's rootfs (`pivot_root` can't target `/` itself). Everything else below is d
   `/dev/net/tun` and `/dev/dri` are absent. Each needs either a capability the sandbox has dropped
   or a group the GID substitution above replaces, so nothing usable is lost, and bind-mounting the
   host's `/dev` would expose raw block devices and undo the read-only root below.
+- **Runner-only credentials withheld**: this action is a JavaScript action, and the runner hands a
+  JavaScript action's handler variables it does not hand a `run:` step: `ACTIONS_RUNTIME_TOKEN`,
+  which reaches the run's artifacts and cache, plus `ACTIONS_RUNTIME_URL`, `ACTIONS_CACHE_URL`,
+  `ACTIONS_RESULTS_URL`, `ACTIONS_CACHE_SERVICE_V2` and `ACTIONS_CACHE_MODE`, which name the
+  endpoints it is spent against. Those are dropped before the environment is written, as are this
+  action's own `INPUT_*` inputs, so that wrapping a step only ever narrows what it can reach.
+  `ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN` and anything else the runner sets still arrive: this is a
+  named list rather than a sweep over `ACTIONS_*`, which would rest on guessing which of them a
+  `run:` step legitimately sees. A token the runner introduces later needs adding to the list.
 - **Sensitive `/proc` paths masked**: `/proc/kcore`, `/proc/kallsyms`, `/proc/kmsg`,
   `/proc/sysrq-trigger`, `/proc/timer_list`, and `/proc/keys` are bind-mounted over with `/dev/null`
   (the OCI spec's `linux.maskedPaths`, extending runc's own sensible defaults), closing off
@@ -562,9 +571,10 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   mount doesn't stop `connect(2)` on a live Unix domain socket, and a network namespace has nothing
   to do with a pathname `AF_UNIX` one. The isolated command never gets the private key, which is the
   point of an agent, but it can have the agent sign whatever it likes for as long as the step runs.
-  Where the agent is there for some other step, don't hand it to this one: the environment is
-  forwarded as-is rather than filtered, so `SSH_AUTH_SOCK: ""` in the step's own `env:` passes an
-  empty value through, which `ssh` treats as no agent at all. Where the isolated command is itself
+  Where the agent is there for some other step, don't hand it to this one: nothing is filtered out
+  of the environment beyond what [Runner-only credentials withheld](#isolation-mechanisms) above
+  covers, so `SSH_AUTH_SOCK: ""` in the step's own `env:` passes an empty value through, which
+  `ssh` treats as no agent at all. Where the isolated command is itself
   what needs the agent, a `npm ci` pulling private git dependencies for instance, there is nothing
   to scope away. An agent whose socket sits under `$XDG_RUNTIME_DIR` is already out of reach for an
   unrelated reason, see [`$XDG_RUNTIME_DIR` is an empty directory inside the

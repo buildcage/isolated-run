@@ -296,7 +296,9 @@ the [README](../README.md).
    - The step's environment is deliberately _not_ part of that config. It is piped to the
      sandboxed process over stdin as NUL-delimited `KEY=VALUE` records and applied by a small
      loader that execs the run script, so an `env:` secret is never written to the runner's disk.
-     Do not move it back into `config.json`.
+     Do not move it back into `config.json`. `RUNNER_ONLY_ENV_KEYS` in `env-loader.ts` is what
+     keeps the runner's JavaScript-action credentials, and this action's own `INPUT_*`, out of
+     that blob.
    - `/var/tmp/buildcage-<uid>` is covered with an empty tmpfs inside the sandbox, with only this
      run's own `exec/` subdirectory (the run script and that loader) bound back on top, read-only.
      Without it, the host-`/` rootfs below would hand every step a readable copy of every other

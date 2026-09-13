@@ -462,8 +462,8 @@ The artifact is uploaded even when the step fails, since a failing run is when i
 ## Passing values to `run`
 
 Use the step's own `env:` (not a `with:` input) to pass values into `run`, exactly like a native
-`run:` step. The action forwards its whole process environment into the isolated command, so
-anything set via `env:` is available there too:
+`run:` step. The action forwards its process environment into the isolated command, so anything set
+via `env:` is available there too:
 
 ```yaml
 - uses: buildcage/isolated-run@e406cff083e1e9475fe2b726b02f6a51a6321291 # v1.2.0

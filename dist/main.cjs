@@ -20985,15 +20985,26 @@ function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, 
 }
 //#endregion
 //#region src/lib/sandbox/env-loader.ts
-const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
-/** The step's own environment, plus (inspect engine only) the CA-trust
-*  variables it left unset. See ca-trust.ts. */
+const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = /* @__PURE__ */ new Set([
+	"ACTIONS_RUNTIME_URL",
+	"ACTIONS_RUNTIME_TOKEN",
+	"ACTIONS_CACHE_URL",
+	"ACTIONS_RESULTS_URL",
+	"ACTIONS_CACHE_SERVICE_V2",
+	"ACTIONS_CACHE_MODE"
+]);
+function isRunnerOnly(key) {
+	return RUNNER_ONLY_ENV_KEYS.has(key) || key.startsWith("INPUT_");
+}
+/** The step's own environment, minus what the runner added for this action
+*  alone, plus (inspect engine only) the CA-trust variables it left unset.
+*  See ca-trust.ts. */
 function resolveSandboxEnv(env, caTrust) {
 	let merged = {
 		...env,
 		...caTrust ? caTrustAdditions(caTrust, env).env : void 0
 	}, resolved = {}, skipped = [];
-	for (let [key, value] of Object.entries(merged)) value !== void 0 && (ENV_KEY.test(key) ? resolved[key] = value : skipped.push(key));
+	for (let [key, value] of Object.entries(merged)) value !== void 0 && (isRunnerOnly(key) || (ENV_KEY.test(key) ? resolved[key] = value : skipped.push(key)));
 	return skipped.length > 0 && console.log(`::warning::Not passing environment variables whose names a shell cannot export: ${skipped.join(", ")}`), resolved;
 }
 function buildEnvBlob(resolved) {

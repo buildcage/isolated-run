@@ -17,8 +17,35 @@ const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__";
 // exports, an injection vector, out of the sandbox.
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** The step's own environment, plus (inspect engine only) the CA-trust
- *  variables it left unset. See ca-trust.ts. */
+// The difference between NodeScriptActionHandler and ScriptHandler in
+// actions/runner: what a JavaScript action's handler is handed and a `run:`
+// step is not. Forwarding these would give the command a credential it could
+// not have had unwrapped. ACTIONS_ID_TOKEN_REQUEST_* and
+// ACTIONS_ORCHESTRATION_ID are left out because a `run:` step gets those too.
+// Naming each one rather than sweeping ACTIONS_* keeps that distinction exact,
+// at the price of having to follow a token the runner adds later.
+const RUNNER_ONLY_ENV_KEYS = new Set([
+  "ACTIONS_RUNTIME_URL",
+  "ACTIONS_RUNTIME_TOKEN",
+  "ACTIONS_CACHE_URL",
+  "ACTIONS_RESULTS_URL",
+  "ACTIONS_CACHE_SERVICE_V2",
+  "ACTIONS_CACHE_MODE",
+]);
+
+// This action's own `with:` inputs, which a `run:` step has none of. INPUT_RUN
+// holds the command verbatim, secrets included where the workflow inlined one,
+// and the script carrying that same text is 0700 while an environment variable
+// is readable from every process in the sandbox.
+const ACTION_INPUT_PREFIX = "INPUT_";
+
+function isRunnerOnly(key: string): boolean {
+  return RUNNER_ONLY_ENV_KEYS.has(key) || key.startsWith(ACTION_INPUT_PREFIX);
+}
+
+/** The step's own environment, minus what the runner added for this action
+ *  alone, plus (inspect engine only) the CA-trust variables it left unset.
+ *  See ca-trust.ts. */
 export function resolveSandboxEnv(
   env: NodeJS.ProcessEnv,
   caTrust?: CaTrustFiles,
@@ -28,6 +55,9 @@ export function resolveSandboxEnv(
   const skipped: string[] = [];
   for (const [key, value] of Object.entries(merged)) {
     if (value === undefined) continue;
+    // Ahead of ENV_KEY so these never reach the warning below, which is for
+    // input the user can act on.
+    if (isRunnerOnly(key)) continue;
     if (!ENV_KEY.test(key)) skipped.push(key);
     else resolved[key] = value;
   }
