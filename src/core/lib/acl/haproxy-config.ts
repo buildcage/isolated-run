@@ -89,6 +89,76 @@ export function escapeForHaproxy(value: string): string {
   return value.replace(/[\\#'" ]/g, "\\$&");
 }
 
+/**
+ * A compiled pattern as the cheapest HAProxy match that accepts exactly it.
+ *
+ * Most rules name a literal host and a literal path or path prefix, which
+ * compile to an anchored regex that only ever matches one string or one
+ * prefix. `-m str` and `-m beg` decide those without entering the regex
+ * engine, and the rules are evaluated once per rule per request.
+ *
+ * Everything else, `~` rules and wildcards included, stays `-m reg`. A pattern
+ * is only narrowed when every character between the anchors is literal, so a
+ * regex metacharacter anywhere sends it down the regex path untouched.
+ */
+interface Matcher {
+  /** `-m str`, `-m beg` or `-m reg`. */
+  op: string;
+  /** The pattern as that operator reads it, before config escaping. */
+  pattern: string;
+}
+
+/**
+ * Characters that mean themselves to both the regex engine and `-m str`.
+ *
+ * `\.` is the one escape a compiled pattern carries, and a bare `.` is a
+ * wildcard. Every regex metacharacter is absent, `+` included: a `~` rule
+ * carries the author's own regex, where `/a+` means one or more `a`.
+ */
+const LITERAL_BODY = /^(?:[A-Za-z0-9_~:@%\-/]|\\\.)*$/;
+
+/** Undo the one escape, now that the pattern is no longer read as a regex. */
+function unescape(body: string): string {
+  return body.replace(/\\\./g, ".");
+}
+
+/** How to match a rule's host, which arrives lowercased in txn.host. */
+function hostMatcher(hostRegex: string): Matcher {
+  const body = /^\^(.+)\$$/.exec(hostRegex)?.[1];
+  // A name is case-insensitive, and txn.host is lowercased once per request,
+  // so the pattern has to be lowercase for -m str to agree with -m reg -i.
+  return body !== undefined && LITERAL_BODY.test(body)
+    ? { op: "-m str", pattern: unescape(body).toLowerCase() }
+    : { op: "-m reg -i", pattern: hostRegex };
+}
+
+/**
+ * How to match a rule's path, which is matched case-sensitively as sent.
+ *
+ * `^lit$` accepts one path and `^lit.*$` accepts a prefix, as does `^lit` with
+ * no end anchor, which is what a rule permitting any path compiles to (`^/`).
+ */
+function pathMatcher(pathRegex: string): Matcher {
+  const asRegex = { op: "-m reg", pattern: pathRegex };
+  if (!pathRegex.startsWith("^")) return asRegex;
+
+  let body = pathRegex.slice(1);
+  let op = "-m beg";
+  if (body.endsWith("$")) {
+    body = body.slice(0, -1);
+    op = "-m str";
+    if (body.endsWith(".*")) {
+      body = body.slice(0, -2);
+      op = "-m beg";
+    }
+  }
+  // A compiled path always starts with its leading slash. Requiring it keeps
+  // an empty pattern, which the config parser could not read, out of the
+  // narrowed forms.
+  if (!body.startsWith("/") || !LITERAL_BODY.test(body)) return asRegex;
+  return { op, pattern: unescape(body) };
+}
+
 /** Emit the rule ACLs and the single deny that enforces them. */
 function ruleBlock(rules: CompiledRule[], mode: string, scheme: "https" | "http"): string[] {
   const lines: string[] = [];
@@ -121,6 +191,16 @@ function ruleBlock(rules: CompiledRule[], mode: string, scheme: "https" | "http"
     );
   }
 
+  if (rules.some((r) => r.hostMatch === "wildcard")) {
+    // One fetch and one regsub for the request, rather than one per rule.
+    lines.push(`    http-request set-var(txn.host) hdr(host),lower,${HOST_ONLY}`);
+  }
+
+  // Rules naming the same host share one acl, so the name is matched once
+  // however many paths or methods are allowed on it.
+  const aclForHost = new Map<string, string>();
+  const hostAclOf = new Map<string, string>();
+
   for (const rule of rules) {
     const hostRegex = escapeForHaproxy(rule.hostRegex);
     lines.push(`    # ${rule.raw}`);
@@ -136,13 +216,21 @@ function ruleBlock(rules: CompiledRule[], mode: string, scheme: "https" | "http"
         `    acl ${rule.id}_host var(txn.${rule.id}_ok) -m bool`,
       );
     } else {
-      // -i, since a name is case-insensitive and do-resolve lowercases anyway.
-      lines.push(`    acl ${rule.id}_host hdr(host),${HOST_ONLY} -m reg -i ${hostRegex}`);
+      const host = hostMatcher(rule.hostRegex);
+      const shared = aclForHost.get(`${host.op} ${host.pattern}`);
+      if (shared === undefined) {
+        aclForHost.set(`${host.op} ${host.pattern}`, `${rule.id}_host`);
+        lines.push(
+          `    acl ${rule.id}_host var(txn.host) ${host.op} ${escapeForHaproxy(host.pattern)}`,
+        );
+      }
+      hostAclOf.set(rule.id, shared ?? `${rule.id}_host`);
       if (rule.port) {
         lines.push(`    acl ${rule.id}_port dst_port ${rule.port}`);
       }
     }
-    lines.push(`    acl ${rule.id}_path path -m reg ${escapeForHaproxy(rule.pathRegex)}`);
+    const path = pathMatcher(rule.pathRegex);
+    lines.push(`    acl ${rule.id}_path path ${path.op} ${escapeForHaproxy(path.pattern)}`);
     if (rule.methods) {
       lines.push(`    acl ${rule.id}_method method ${rule.methods.join(" ")}`);
     }
@@ -151,14 +239,19 @@ function ruleBlock(rules: CompiledRule[], mode: string, scheme: "https" | "http"
   // Named acls are referenced bare; braces are for anonymous expressions.
   const clauses = rules.map(
     (r) =>
-      `${r.id}_host${r.port ? ` ${r.id}_port` : ""} ${r.id}_path` +
+      `${hostAclOf.get(r.id) ?? `${r.id}_host`}${r.port ? ` ${r.id}_port` : ""} ${r.id}_path` +
       `${r.methods ? ` ${r.id}_method` : ""}`,
   );
   // One line per rule, not one `or` chain: the parser truncates a line after 64
   // words and calls that fatal, which would cap the rule set at 12.
   lines.push("    http-request set-var(txn.allowed) bool(false)");
   for (const clause of clauses) {
-    lines.push(`    http-request set-var(txn.allowed) bool(true) if ${clause}`);
+    // The flag comes first so that once a rule has allowed the request, every
+    // later rule costs one variable read instead of its own matching.
+    lines.push(
+      `    http-request set-var(txn.allowed) bool(true) if ` +
+        `!{ var(txn.allowed) -m bool } ${clause}`,
+    );
   }
   // One deny, negated against every rule: a request matching none is refused.
   lines.push("    http-request deny unless { var(txn.allowed) -m bool }");
