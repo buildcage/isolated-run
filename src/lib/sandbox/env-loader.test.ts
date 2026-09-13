@@ -34,6 +34,44 @@ describe("resolveSandboxEnv", () => {
     expect(resolved.DENO_CERT).toBe(OWN_CA_DESTINATION);
   });
 
+  it("withholds the credentials the runner sets for this action and not for a `run:` step", () => {
+    const resolved = resolveSandboxEnv({
+      ACTIONS_RUNTIME_URL: "https://pipelines.example",
+      ACTIONS_RUNTIME_TOKEN: "a-real-token",
+      ACTIONS_CACHE_URL: "https://cache.example",
+      ACTIONS_RESULTS_URL: "https://results.example",
+      ACTIONS_CACHE_SERVICE_V2: "True",
+      ACTIONS_CACHE_MODE: "gzip",
+      PATH: "/usr/bin",
+    });
+    expect(resolved).toStrictEqual({ PATH: "/usr/bin" });
+  });
+
+  it("keeps every ACTIONS_ variable it doesn't name, a `run:` step's own included", () => {
+    // The last stands for anything a sweep over ACTIONS_* would take with it.
+    const resolved = resolveSandboxEnv({
+      ACTIONS_ID_TOKEN_REQUEST_URL: "https://idtoken.example",
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: "an-oidc-token",
+      ACTIONS_ORCHESTRATION_ID: "abc123",
+      ACTIONS_ADDED_BY_SOMETHING_ELSE: "kept",
+    });
+    expect(Object.keys(resolved).sort()).toStrictEqual([
+      "ACTIONS_ADDED_BY_SOMETHING_ELSE",
+      "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+      "ACTIONS_ID_TOKEN_REQUEST_URL",
+      "ACTIONS_ORCHESTRATION_ID",
+    ]);
+  });
+
+  it("withholds this action's own inputs, INPUT_RUN included", () => {
+    const resolved = resolveSandboxEnv({
+      INPUT_RUN: "echo $SECRET_INLINED_BY_THE_WORKFLOW",
+      INPUT_PROXY_MODE: "restrict",
+      INPUTS_OF_THE_STEPS_OWN: "kept, the prefix is INPUT_",
+    });
+    expect(resolved).toStrictEqual({ INPUTS_OF_THE_STEPS_OWN: "kept, the prefix is INPUT_" });
+  });
+
   it("drops keys a shell cannot export", () => {
     const resolved = resolveSandboxEnv({ "BASH_FUNC_x%%": "() { :; }", "1BAD": "x", OK: "y" });
     expect(resolved).toStrictEqual({ OK: "y" });
