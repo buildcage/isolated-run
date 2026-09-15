@@ -18,7 +18,7 @@
 #     GET ~^https://blocked\.example\.com/defaultport/.*$
 #     GET ~https://ok\.wildcard\.example\.com/regexpub/        (no anchors)
 #     GET ~^https://ok\.wildcard\.example\.com/regexexact$
-#   allowed_https_rules: sub.wildcard.example.com:443 absent.example.com:443 metadata.example.com:443 runner.example.com:443
+#   allowed_https_rules: sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443
 #   allowed_http_rules:  allowed.example.com:80
 #   allowed_tls_rules:     tlspass.example.com:443 ~^tlspass\.example\.com:8443$
 #   allowed_ip_rules:    ~^10\.200\.0\.\d+:9080$
@@ -177,6 +177,11 @@ check_status "GET blocked.example.com/exfil?pad=<1.2KB>&end=TAIL-MARKER" "$CODE"
 echo "=== [Allowlisted name that does not resolve] ==="
 CODE=$($C https://absent.example.com/)
 check_status "GET absent.example.com" "$CODE" "502"
+
+# Refused like an absent name, and on every attempt rather than sometimes.
+echo "=== [Allowlisted name with AAAA records only] ==="
+CODE=$($C https://v6only.example.com/)
+check_status "GET v6only.example.com" "$CODE" "502"
 
 echo "=== [Name outside the allowlist is not even looked up] ==="
 CODE=$($C https://notallowed.example.com/)
