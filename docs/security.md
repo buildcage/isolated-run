@@ -428,7 +428,10 @@ engine cover any language or package manager, a pinned certificate included.
   UDP and QUIC have no exit path at all.
 - **IPv6 is not a way around any of this.** Equivalent ip6tables rules drop forwarded IPv6, the
   resolver answers with the unspecified address (`::`) for every query, and the proxy reaches
-  allowed names over IPv4 only.
+  allowed names over IPv4 only. That last part is stated in the config (`dns-accept-family ipv4`)
+  rather than left to HAProxy's default, which decides from the runner's own IPv6 default route and
+  would make what a name resolves to differ between runners. See [Known
+  Limitations](#known-limitations) for what that costs.
 
 ### Attempts to bypass it
 
@@ -549,6 +552,11 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 
 ## Known Limitations
 
+- **A name with no IPv4 address never resolves**: the proxy resolves and connects over IPv4 only, so
+  an allowed name that has AAAA records and no A record is refused on every attempt, in `audit` too,
+  reported as `dns-failed` in the same words a lookup that merely timed out gets. No rule clears it, since
+  nothing about it is a rule decision. Where the host offers an IPv4 address under a different name,
+  allow that one instead.
 - **`write_through:` cannot name the sandbox's own scratch directory**: a `run:` step's
   `write_through:` input listing `/var/tmp/buildcage-<uid>` (or an ancestor of it, `/var/tmp` for
   instance) is rejected outright. That directory holds the run's own `mount --rbind /` rootfs,

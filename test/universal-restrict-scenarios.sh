@@ -144,6 +144,26 @@ else
   FAILURES=$((FAILURES + 1))
 fi
 
+echo "=== [HTTPS - dns-failed (AAAA only, no A record)] ==="
+CODE=$($C --max-time 5 https://v6only.wildcard.example.com/ 2>/dev/null || echo "000")
+if [ "$CODE" != "200" ]; then
+  echo "  PASS  v6only.wildcard.example.com blocked (got $CODE)"
+else
+  echo "  FAIL  v6only.wildcard.example.com reached the origin"
+  FAILURES=$((FAILURES + 1))
+fi
+
+echo "=== [HTTP - dns-failed (AAAA only, no A record)] ==="
+# The HTTP path resolves through a do-resolve pair of its own, so the HTTPS
+# case above says nothing about it.
+CODE=$($C --max-time 5 http://v6only.wildcard.example.com/ 2>/dev/null || echo "000")
+if [ "$CODE" != "200" ]; then
+  echo "  PASS  v6only.wildcard.example.com HTTP blocked (got $CODE)"
+else
+  echo "  FAIL  v6only.wildcard.example.com HTTP reached the origin"
+  FAILURES=$((FAILURES + 1))
+fi
+
 echo "=== [HTTP - dns-failed (NXDOMAIN)] ==="
 CODE=$($C --max-time 5 http://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000")
 if [ "$CODE" != "200" ]; then
