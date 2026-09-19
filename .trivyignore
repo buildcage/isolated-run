@@ -2,7 +2,7 @@
 # quickjs-ng + a small Go seccomp-profile generator; see docker/Dockerfile)
 # has a small dependency surface. Suppressions here should only be added
 # once image-scan.yml has actually flagged a finding against this image and
-# the finding has been reviewed as inapplicable, no CVE IDs are
+# the finding has been reviewed as inapplicable; no CVE IDs are
 # pre-suppressed by default.
 
 # --- opt/buildcage/bin/runc ---
