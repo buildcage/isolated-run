@@ -17,7 +17,7 @@ jobs:
       # fail_on_blocked is false only because this example blocks on purpose;
       # leave it at its default so a real workflow fails on a disallowed request.
       - name: Install dependencies with outbound network isolation
-        uses: buildcage/isolated-run@ab904288feaffae45b34737f3ebf3611c47df1b0 # v1.2.1
+        uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
         with:
           proxy_mode: restrict
           proxy_engine: inspect

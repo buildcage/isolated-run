@@ -69,7 +69,7 @@ examples below use the `inspect` engine; [Engines](#engines) covers the choice b
 
 ```yaml
 - name: Discover what the command reaches
-  uses: buildcage/isolated-run@ab904288feaffae45b34737f3ebf3611c47df1b0 # v1.2.1
+  uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
   with:
     proxy_mode: audit # Log every destination, block nothing
     proxy_engine: inspect # Record the method and URL of every request
@@ -91,7 +91,7 @@ Paste that allowlist into the step and switch the mode:
 
 ```yaml
 - name: Run tests with outbound network isolation
-  uses: buildcage/isolated-run@ab904288feaffae45b34737f3ebf3611c47df1b0 # v1.2.1
+  uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
   with:
     proxy_mode: restrict
     proxy_engine: inspect
@@ -254,7 +254,7 @@ Use the step's own `env:` (not a `with:` input) to pass values into `run`, exact
 via `env:` is available there too:
 
 ```yaml
-- uses: buildcage/isolated-run@ab904288feaffae45b34737f3ebf3611c47df1b0 # v1.2.1
+- uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
   env:
     PR_TITLE: ${{ github.event.pull_request.title }}
   with:
@@ -316,7 +316,7 @@ something a later, non-isolated step in the same job would pick up: a rewritten 
 to run code once the sandbox is gone.
 
 ```yaml
-- uses: buildcage/isolated-run@ab904288feaffae45b34737f3ebf3611c47df1b0 # v1.2.1
+- uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
   with:
     filesystem_mode: ephemeral
     write_through: |
@@ -347,7 +347,7 @@ If `run` needs to write somewhere else in `persistent` mode, a build output or a
 directory for example, list it under `write_through:`:
 
 ```yaml
-- uses: buildcage/isolated-run@ab904288feaffae45b34737f3ebf3611c47df1b0 # v1.2.1
+- uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
   with:
     write_through: |
       /opt/some-tool/cache
