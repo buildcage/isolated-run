@@ -105,10 +105,9 @@ RUN apk add --no-cache --virtual .setcap libcap-utils && \
     apk del .setcap
 
 # Tools (QuickJS scripts, rolldown-bundled by qjs-build above).
-# convert-rule.js is used by init-haproxy-cfg. gen-coredns.js writes the
-# Corefile from the same host rules the HAProxy allowlist is built from (see
-# init-haproxy-cfg). No report-action.js here: src/lib/report.ts builds its own
-# report in-process instead of fetching one from the container.
+# convert-rule.js and gen-coredns.js are used by init-haproxy-cfg. No
+# report-action.js here: src/lib/report.ts builds its own report in-process
+# instead of fetching one from the container.
 COPY --from=qjs-build /build/dist/qjs/src/core/scripts/convert-rule.js /opt/buildcage/scripts/convert-rule.js
 COPY --from=qjs-build /build/dist/qjs/docker/universal/scripts/gen-coredns.js /opt/buildcage/scripts/gen-coredns.js
 

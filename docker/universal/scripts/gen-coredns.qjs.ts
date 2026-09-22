@@ -1,21 +1,16 @@
 /**
  * Generate the `universal` engine's CoreDNS Corefile from the same host rules
  * the HAProxy allowlist is built from, so a name CoreDNS logs as allowed is one
- * HAProxy would also let through. CoreDNS never resolves a name for real: every
- * name is answered with the proxy's own address, and HAProxy makes the only
- * outbound connection, once a request has already passed these same rules.
+ * HAProxy would also let through.
  *
- * `inspect` generates its haproxy.cfg and Corefile from one script
- * (gen-configs). `universal` keeps its haproxy.cfg on an envsubst template (see
- * init-haproxy-cfg), so only the Corefile is generated here; the same rule
- * strings feed both, so the two views cannot drift.
+ * `universal` templates haproxy.cfg with envsubst (init-haproxy-cfg), so only
+ * the Corefile is generated here.
  *
  * Usage:
  *   qjs --std -m gen-coredns.js <corefile_out> <proxy_address> <mode> \
  *     <https_rules> <http_rules>
  *
- * Host rules are whitespace separated. `universal` supports neither url nor tls
- * rules, so those inputs do not exist.
+ * Host rules are whitespace separated; `universal` has no url or tls rules.
  */
 import * as std from "qjs:std";
 import { generateCorednsConfig } from "#core/lib/acl/coredns-config.js";
@@ -42,16 +37,16 @@ try {
     mode: mode === "audit" ? "audit" : "restrict",
   });
 
-  // A warning here means a rule cannot be honoured in full, so it has to be
-  // visible in the build log rather than only in a file nobody reads.
+  // A warning means a rule cannot be honoured in full, so surface it in the
+  // build log.
   for (const warning of coredns.warnings) {
     std.err.puts(`buildcage: warning: ${warning}\n`);
   }
 
   writeFile(corefileOut, coredns.config);
 } catch (e) {
-  // Failing closed: without the Corefile CoreDNS would not start, taking the
-  // container down rather than answering names off an empty allowlist.
+  // Fail closed: with no Corefile CoreDNS will not start, so the container
+  // stops rather than run without an allowlist.
   std.err.puts(`buildcage: ${(e as Error).message}\n`);
   std.exit(1);
 }
