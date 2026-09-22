@@ -20,11 +20,9 @@ function dnsRow(event: TrafficEvent): LogEntry {
  * empty input naturally yields passed:[]/blocked:[]/blockedCount:0, so no
  * special-case branch is needed.
  *
- * The resolver log is read for the same reason it is on inspect: a name the
- * build looked up but never connected to reaches no HAProxy line, so a
- * DNS-only refusal would otherwise leave no trace. A lookup for a host a
- * connection already covers is dropped (isRedundantDns); a discovery lookup
- * names no host a rule can permit, so it stays out of the host tables.
+ * The resolver log is read because a name the build looked up but never
+ * connected to reaches no HAProxy line, so a DNS-only refusal would otherwise
+ * leave no trace.
  */
 export async function buildUniversalReportData(
   proxyLines: AsyncIterable<string> | Iterable<string>,
