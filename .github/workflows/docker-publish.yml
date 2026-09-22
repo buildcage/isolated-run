@@ -323,8 +323,8 @@ jobs:
           BUNDLE_INSPECT: ${{ needs.sign-and-attest.outputs['bundle-content-inspect'] }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "$BUNDLE_UNIVERSAL" > isolated-run-container.sigstore.json
+          echo "$BUNDLE_UNIVERSAL" > isolated-run-container-universal.sigstore.json
           echo "$BUNDLE_INSPECT" > isolated-run-container-inspect.sigstore.json
           gh release upload --repo "$GITHUB_REPOSITORY" "$TAG" \
-            isolated-run-container.sigstore.json \
+            isolated-run-container-universal.sigstore.json \
             isolated-run-container-inspect.sigstore.json

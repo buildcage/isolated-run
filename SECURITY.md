@@ -43,7 +43,7 @@ gh attestation verify oci://ghcr.io/buildcage/isolated-run:<tag> --owner buildca
 ```
 
 The Sigstore bundle for each release is also attached as a downloadable asset
-(`isolated-run-container.sigstore.json`) on the corresponding
+(`isolated-run-container-universal.sigstore.json`) on the corresponding
 [GitHub Release](https://github.com/buildcage/isolated-run/releases).
 
 ## Dependency Management
