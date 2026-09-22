@@ -395,14 +395,14 @@ where the `Host` would have been.
 | ------------ | ----------------------------------------------------------------------------- |
 | `no-request` | no request arrived, and neither the client nor a rule of Buildcage's ended it |
 
-`no-request` is Buildcage's proxy hitting an error while still reading, or any other connection that
-carried no whole request and that the client did not end. It is rare, and it is not the step's
-doing.
-
-Such a row is in neither host table and never fails the step, not even with `fail_on_blocked: true`:
-no rule refused it, so `known_blocked_rules` has nothing to match, and nothing reached an origin. A
-`::warning::` annotation gives the count, since the collapsed details section is the only other place
-it appears.
+`no-request` is a failsafe, not anything a step can cause: bytes that never parse are refused as
+`bad-request`, and a client that quit before sending a request is dropped from the report entirely
+(see below). It is left for what Buildcage's proxy itself could not resolve while still reading, such
+as an internal error, a resource it ran out of, or a log line whose own fields contradict each other.
+No host, method or URL reached a rule and nothing reached an origin, so it is in neither host table,
+no rule or `known_blocked_rules` entry clears it, and it never fails the step, not even with
+`fail_on_blocked: true`. A `::warning::` annotation gives the count. A run that keeps producing them
+points at the proxy or the runner rather than the step, and is worth reporting.
 
 A connection the client itself ended before sending a request is not shown or counted at all. The
 commonest cause is a container with no `ca-certificates` installed: the client cannot verify the
