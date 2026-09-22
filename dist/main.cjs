@@ -19744,45 +19744,6 @@ async function scanHaproxyLog(lines, isAudit) {
 	};
 }
 //#endregion
-//#region src/core/lib/report/build/aggregate.ts
-function annotateKnownBlocked(blockedRows, knownBlockedRules) {
-	let matchers = knownBlockedRules.map((rule) => {
-		let completed = completeRulePort(rule);
-		return {
-			rule: completed,
-			re: new RegExp(convertRule(completed))
-		};
-	});
-	return blockedRows.map((row) => {
-		let matched = matchers.find(({ re }) => re.test(targetOf(row)));
-		return matched ? {
-			...row,
-			expected: !0,
-			expectedBy: matched.rule
-		} : {
-			...row,
-			expected: !1
-		};
-	});
-}
-function targetOf(row) {
-	return `${row.host}:${row.port === "-" ? "0" : row.port}`;
-}
-//#endregion
-//#region src/core/lib/report/build/universal.ts
-async function buildUniversalReportData(lines, parameters) {
-	let { passed, blocked: blockedRawRows, failed, blockedCount, headIntact, unparsed } = await scanHaproxyLog(lines, parameters.mode === "audit");
-	return {
-		engine: "universal",
-		parameters,
-		passed,
-		blocked: annotateKnownBlocked(blockedRawRows, parameters.knownBlockedRules),
-		failed,
-		blockedCount,
-		logLooksPlausible: headIntact && unparsed === 0
-	};
-}
-//#endregion
 //#region src/core/lib/log/inspect.ts
 const REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS = /^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=(\S+?)\.?$/, DNS_DISCOVERY = /^(\S+ \S+)\s+.*buildcage dns discovery name=(\S+?)\.? type=(\S+)$/, DNS_SERVICE_DENIED = /^(\S+ \S+)\s+.*buildcage dns service-denied name=(\S+?)\.? type=(\S+)$/, START = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
 function timeOf(stamp) {
@@ -19939,6 +19900,64 @@ async function scanInspectDnsLog(lines, isAudit = !1) {
 	};
 }
 //#endregion
+//#region src/core/lib/report/build/aggregate.ts
+function annotateKnownBlocked(blockedRows, knownBlockedRules) {
+	let matchers = knownBlockedRules.map((rule) => {
+		let completed = completeRulePort(rule);
+		return {
+			rule: completed,
+			re: new RegExp(convertRule(completed))
+		};
+	});
+	return blockedRows.map((row) => {
+		let matched = matchers.find(({ re }) => re.test(targetOf(row)));
+		return matched ? {
+			...row,
+			expected: !0,
+			expectedBy: matched.rule
+		} : {
+			...row,
+			expected: !1
+		};
+	});
+}
+function targetOf(row) {
+	return `${row.host}:${row.port === "-" ? "0" : row.port}`;
+}
+//#endregion
+//#region src/core/lib/report/build/universal.ts
+function dnsRow(event) {
+	return {
+		host: event.host,
+		port: "-",
+		ruleType: "DNS",
+		reason: event.reason ?? "-"
+	};
+}
+async function buildUniversalReportData(proxyLines, dnsLines, parameters) {
+	let isAudit = parameters.mode === "audit", [{ passed, blocked: proxyBlocked, failed, blockedCount, headIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact }] = await Promise.all([scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), connected = {
+		any: new Set(),
+		blocked: new Set()
+	};
+	for (let row of [
+		...passed,
+		...failed,
+		...proxyBlocked
+	]) connected.any.add(row.host.toLowerCase());
+	for (let row of proxyBlocked) connected.blocked.add(row.host.toLowerCase());
+	let dnsPassed = [], dnsBlocked = [];
+	for (let event of dnsEvents) event.action !== "discovery" && (isRedundantDns(event, connected) || (event.action === "block" ? dnsBlocked : dnsPassed).push(dnsRow(event)));
+	return {
+		engine: "universal",
+		parameters,
+		passed: [...passed, ...aggregate(dnsPassed)].sort(compareAggregated),
+		blocked: annotateKnownBlocked([...proxyBlocked, ...aggregate(dnsBlocked)].sort(compareAggregated), parameters.knownBlockedRules),
+		failed,
+		blockedCount: blockedCount + dnsBlocked.length,
+		logLooksPlausible: headIntact && dnsHeadIntact && unparsed === 0
+	};
+}
+//#endregion
 //#region src/core/lib/report/build/inspect.ts
 const RULE_TYPE = {
 	https: "HTTPS",
@@ -19978,10 +19997,10 @@ function applyOutcomeAnnotations(annotation, emissions) {
 }
 //#endregion
 //#region src/lib/report.ts
-const HAPROXY_LOG_DIR = "/var/log/haproxy";
+const HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
 function fetchReport(containerName, parameters, proxyEngine) {
 	let docker = createDocker();
-	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, "/var/log/coredns"), parameters) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), parameters);
+	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters);
 }
 function readActionVersion(containerName, proxyEngine, docker) {
 	let client = docker ?? createDocker();
