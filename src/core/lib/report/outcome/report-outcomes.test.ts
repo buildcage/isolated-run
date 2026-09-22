@@ -14,6 +14,8 @@ function universal(overrides: Partial<UniversalReportData> = {}): UniversalRepor
     failed: [],
     blockedCount: 0,
     logLooksPlausible: true,
+    timeline: [],
+    startedAt: undefined,
     ...overrides,
   };
 }

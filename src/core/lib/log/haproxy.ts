@@ -1,97 +1,101 @@
 /** Log parsing library for HAProxy's buildcage decision log. */
-import { createIncrementalAggregator, type AggregatedEntry } from "./aggregate.ts";
 import { splitHostPort } from "./authority.ts";
 import { PROXY_START_MARKER } from "./start-marker.ts";
+import type { TrafficEvent, TrafficProtocol } from "./traffic-event.ts";
 
-export interface HaproxyLogScanResult {
-  /** ALLOWED entries in restrict mode, AUDIT entries in audit mode, never
-   *  both (see `isAudit`). */
-  passed: AggregatedEntry[];
-  blocked: AggregatedEntry[];
-  /** The BLOCKED lines this proxy did not decide; see FAILURE_REASONS. Kept
-   *  out of `blocked` and of `blockedCount`. */
-  failed: AggregatedEntry[];
-  /** Raw BLOCKED line count, pre-aggregation: distinct from blocked.length. */
-  blockedCount: number;
+export interface HaproxyLogScan {
+  /** Every decision, oldest first: one connection the proxy allowed, audited,
+   *  refused, or that failed after it was allowed. */
+  events: TrafficEvent[];
+  /** Seconds since the epoch the proxy started, from the startup marker, so the
+   *  report can time each event relative to it. Undefined when the marker
+   *  carried no stamp (qjs failed) or was rotated away. */
+  startedAt: number | undefined;
   /** True iff the log opens with the startup marker. Anything else means its
-   *  beginning is gone, rotated away or erased. Only the marker counts:
-   *  HAProxy's own output appears mid-run and could stand in for it. */
+   *  beginning is gone, rotated away or erased. */
   headIntact: boolean;
-  /** Lines carrying the decision marker yet matching none of the formats
-   *  below. Each is a decision the report cannot account for. */
+  /** Lines that open like a proxy line yet matched no format below. Each is a
+   *  decision the report cannot account for. */
   unparsed: number;
 }
 
-// The quoted field and reason are restricted to the charset the generators
-// actually emit (host/IP/port, and a kebab-case reason), and the line is
-// anchored at both ends, so a forged target or reason is never parsed as a
-// decision.
-const logPattern =
-  /^\[[^\]]*\]\s+buildcage\s+\[(AUDIT|ALLOWED|BLOCKED)\]\s+\((\w+)\)\s+"([A-Za-z0-9._:-]+)"\s*([A-Za-z0-9-]*)\s*$/;
+// The quoted target and the reason are restricted to the charset the config
+// actually emits (host/IP/port, and a kebab-case reason), and the line is
+// anchored at both ends, so a forged target or reason is never read as a
+// decision. %B is a byte count, or `-` when none was transferred.
+const DECISION =
+  /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za-z0-9._:-]+)" ([A-Za-z0-9-]+) (\d+|-)$/;
 
-/** What a decision line carries and nothing else does: the startup marker has
- *  no bracket after the name. A cut line keeps it, only its tail being lost. */
-const DECISION_MARKER = "buildcage [";
+/** Every line the proxy writes opens with this; used to count unparsed ones. */
+const LINE_PREFIX = "buildcage ";
+
+/** The startup marker with its millisecond epoch (see s6-rc.d/haproxy/run). */
+const START = new RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
+
+/** The proxy's rule kinds mapped to the protocol the timeline records. universal
+ *  never terminates TLS, so an HTTPS connection is a passthrough it sees only
+ *  the SNI of. Anything else, including the UNKNOWN of a connection refused
+ *  before its kind was decided, is a bare TCP connection. */
+const PROTOCOL: Record<string, TrafficProtocol> = {
+  HTTPS: "https",
+  HTTP: "http",
+  IP: "tcp",
+};
 
 /**
- * The refusal this proxy did not decide: a name the upstream resolver could
- * not answer. The config rejects a host no rule covers before it ever resolves
- * one, so a line reaching this reason had passed the allowlist. See
- * TrafficAction for why such a row is kept apart.
+ * A name whose upstream resolution the proxy could not complete. The config
+ * rejects a host no rule covers before it ever resolves one, so a line reaching
+ * this reason had already passed the allowlist. See TrafficAction for why such
+ * a row is kept apart from a refusal.
  */
 const FAILURE_REASONS = new Set(["dns-failed"]);
 
 /**
- * Single forward pass over the log: matching lines fold directly into
- * incremental aggregators (never collected into a flat array first).
- *
- * `isAudit` picks which decision counts as "passed" (AUDIT vs ALLOWED); the
- * other one, if it somehow appears, is dropped rather than aggregated.
+ * Single forward pass over the log, producing the timeline the report builds
+ * its tables and Communication details from. `isAudit` picks which decision
+ * counts as passed (AUDIT vs ALLOWED); the other, if it somehow appears, is
+ * dropped rather than recorded.
  */
 export async function scanHaproxyLog(
   lines: AsyncIterable<string> | Iterable<string>,
   isAudit: boolean,
-): Promise<HaproxyLogScanResult> {
-  const passed = createIncrementalAggregator();
-  const blocked = createIncrementalAggregator();
-  const failed = createIncrementalAggregator();
+): Promise<HaproxyLogScan> {
+  const events: TrafficEvent[] = [];
   const passedDecision = isAudit ? "AUDIT" : "ALLOWED";
-  let blockedCount = 0;
+  let startedAt: number | undefined;
   let headIntact: boolean | undefined;
   let unparsed = 0;
 
   for await (const line of lines) {
-    const m = line.match(logPattern);
-    if (!m) {
-      const trimmed = line.trim();
-      if (trimmed === "") continue;
-      headIntact ??= trimmed.startsWith(PROXY_START_MARKER);
-      if (trimmed.includes(DECISION_MARKER)) unparsed++;
+    const m = DECISION.exec(line);
+    if (m) {
+      headIntact ??= false;
+      const [, ms, decision, ruleType, target, reason, bytes] = m;
+      if (decision !== passedDecision && decision !== "BLOCKED") continue;
+      const { host, port } = splitHostPort(target);
+      const failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason);
+      const refused = decision === "BLOCKED" && !failed;
+      const event: TrafficEvent = {
+        time: Number(ms) / 1000,
+        action: failed ? "failed" : refused ? "block" : isAudit ? "audit" : "allow",
+        protocol: PROTOCOL[ruleType] ?? "tcp",
+        host,
+      };
+      if (port !== undefined) event.port = Number(port);
+      // A refusal names its reason and carries no payload; an allowed
+      // connection is the other way round.
+      if (refused || failed) event.reason = reason;
+      else if (bytes !== "-") event.bytes = Number(bytes);
+      events.push(event);
       continue;
     }
-    headIntact ??= false;
-    const [, decision, ruleType, hostPort, reason] = m;
-    const { host, port } = splitHostPort(hostPort);
-    const entry = { host, port: port ?? "0", ruleType, reason: reason || "-" };
-
-    if (decision === passedDecision) {
-      passed.add(entry);
-    } else if (decision === "BLOCKED") {
-      if (FAILURE_REASONS.has(entry.reason)) {
-        failed.add(entry);
-      } else {
-        blocked.add(entry);
-        blockedCount++;
-      }
-    }
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    const start = START.exec(trimmed);
+    headIntact ??= start !== null;
+    if (start && startedAt === undefined) startedAt = Number(start[1]) / 1000;
+    if (trimmed.startsWith(LINE_PREFIX) && !trimmed.startsWith(PROXY_START_MARKER)) unparsed++;
   }
 
-  return {
-    passed: passed.toSortedArray(),
-    blocked: blocked.toSortedArray(),
-    failed: failed.toSortedArray(),
-    blockedCount,
-    headIntact: headIntact ?? false,
-    unparsed,
-  };
+  return { events, startedAt, headIntact: headIntact ?? false, unparsed };
 }

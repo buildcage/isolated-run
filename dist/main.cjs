@@ -19647,13 +19647,13 @@ function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound
 		actionVersion
 	})), report.blocked.length > 0) {
 		report.passed.length > 0 && (markdown += "\n");
-		let blocked = report.engine === "universal" ? report.blocked : foldExpectedBlockedRows(report.blocked);
+		let blocked = foldExpectedBlockedRows(report.blocked);
 		markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(blocked, {
 			showReason: !0,
 			showExpected
 		}) + "\n";
 	}
-	return report.failed.length > 0 && ((report.passed.length > 0 || report.blocked.length > 0) && (markdown += "\n"), markdown += "### ⚠️ Failed Connections\n\n" + renderHostTable(report.failed, { showReason: !0 }) + "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"), report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && (markdown += "_(no communication)_\n\n"), report.engine === "inspect" ? markdown += renderInspectDetails(report.timeline, report.startedAt) : markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n", markdown += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, markdown += "\n<hr>\n", markdown;
+	return report.failed.length > 0 && ((report.passed.length > 0 || report.blocked.length > 0) && (markdown += "\n"), markdown += "### ⚠️ Failed Connections\n\n" + renderHostTable(report.failed, { showReason: !0 }) + "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"), report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && (markdown += "_(no communication)_\n\n"), markdown += renderInspectDetails(report.timeline, report.startedAt), report.engine === "universal" && (markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), markdown += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, markdown += "\n<hr>\n", markdown;
 }
 //#endregion
 //#region src/core/lib/report/render/truncate-communication-details.ts
@@ -19676,69 +19676,37 @@ function truncationNote(artifactAvailable) {
 	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
 }
 //#endregion
-//#region src/core/lib/log/aggregate.ts
-function compareAggregated(a, b) {
-	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
-}
-function aggregate(filtered) {
-	let map = {};
-	for (let e of filtered) {
-		let key = `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
-		map[key] = (map[key] || 0) + 1;
-	}
-	return Object.keys(map).map((key) => {
-		let [host, portStr, ruleType, reason] = key.split("	");
-		return {
-			host,
-			port: portStr,
-			ruleType,
-			reason,
-			count: map[key]
-		};
-	}).sort(compareAggregated);
-}
-function createIncrementalAggregator() {
-	let map = new Map();
-	return {
-		add(entry) {
-			let key = `${entry.host}\t${entry.port}\t${entry.ruleType}\t${entry.reason}`, existing = map.get(key);
-			existing ? existing.count++ : map.set(key, {
-				...entry,
-				count: 1
-			});
-		},
-		toSortedArray() {
-			return [...map.values()].sort(compareAggregated);
-		}
-	};
-}
-//#endregion
 //#region src/core/lib/log/start-marker.ts
-const PROXY_START_MARKER = "buildcage haproxy starting", logPattern = /^\[[^\]]*\]\s+buildcage\s+\[(AUDIT|ALLOWED|BLOCKED)\]\s+\((\w+)\)\s+"([A-Za-z0-9._:-]+)"\s*([A-Za-z0-9-]*)\s*$/, FAILURE_REASONS$1 = new Set(["dns-failed"]);
+const PROXY_START_MARKER = "buildcage haproxy starting", DECISION = /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za-z0-9._:-]+)" ([A-Za-z0-9-]+) (\d+|-)$/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`), PROTOCOL = {
+	HTTPS: "https",
+	HTTP: "http",
+	IP: "tcp"
+}, FAILURE_REASONS$1 = new Set(["dns-failed"]);
 async function scanHaproxyLog(lines, isAudit) {
-	let passed = createIncrementalAggregator(), blocked = createIncrementalAggregator(), failed = createIncrementalAggregator(), passedDecision = isAudit ? "AUDIT" : "ALLOWED", blockedCount = 0, headIntact, unparsed = 0;
+	let events = [], passedDecision = isAudit ? "AUDIT" : "ALLOWED", startedAt, headIntact, unparsed = 0;
 	for await (let line of lines) {
-		let m = line.match(logPattern);
-		if (!m) {
-			let trimmed = line.trim();
-			if (trimmed === "") continue;
-			headIntact ??= trimmed.startsWith(PROXY_START_MARKER), trimmed.includes("buildcage [") && unparsed++;
+		let m = DECISION.exec(line);
+		if (m) {
+			headIntact ??= !1;
+			let [, ms, decision, ruleType, target, reason, bytes] = m;
+			if (decision !== passedDecision && decision !== "BLOCKED") continue;
+			let { host, port } = splitHostPort(target), failed = decision === "BLOCKED" && FAILURE_REASONS$1.has(reason), refused = decision === "BLOCKED" && !failed, event = {
+				time: Number(ms) / 1e3,
+				action: failed ? "failed" : refused ? "block" : isAudit ? "audit" : "allow",
+				protocol: PROTOCOL[ruleType] ?? "tcp",
+				host
+			};
+			port !== void 0 && (event.port = Number(port)), refused || failed ? event.reason = reason : bytes !== "-" && (event.bytes = Number(bytes)), events.push(event);
 			continue;
 		}
-		headIntact ??= !1;
-		let [, decision, ruleType, hostPort, reason] = m, { host, port } = splitHostPort(hostPort), entry = {
-			host,
-			port: port ?? "0",
-			ruleType,
-			reason: reason || "-"
-		};
-		decision === passedDecision ? passed.add(entry) : decision === "BLOCKED" && (FAILURE_REASONS$1.has(entry.reason) ? failed.add(entry) : (blocked.add(entry), blockedCount++));
+		let trimmed = line.trim();
+		if (trimmed === "") continue;
+		let start = START$1.exec(trimmed);
+		headIntact ??= start !== null, start && startedAt === void 0 && (startedAt = Number(start[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
 	}
 	return {
-		passed: passed.toSortedArray(),
-		blocked: blocked.toSortedArray(),
-		failed: failed.toSortedArray(),
-		blockedCount,
+		events,
+		startedAt,
 		headIntact: headIntact ?? !1,
 		unparsed
 	};
@@ -19900,6 +19868,28 @@ async function scanInspectDnsLog(lines, isAudit = !1) {
 	};
 }
 //#endregion
+//#region src/core/lib/log/aggregate.ts
+function compareAggregated(a, b) {
+	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
+}
+function aggregate(filtered) {
+	let map = {};
+	for (let e of filtered) {
+		let key = `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
+		map[key] = (map[key] || 0) + 1;
+	}
+	return Object.keys(map).map((key) => {
+		let [host, portStr, ruleType, reason] = key.split("	");
+		return {
+			host,
+			port: portStr,
+			ruleType,
+			reason,
+			count: map[key]
+		};
+	}).sort(compareAggregated);
+}
+//#endregion
 //#region src/core/lib/report/build/aggregate.ts
 function annotateKnownBlocked(blockedRows, knownBlockedRules) {
 	let matchers = knownBlockedRules.map((rule) => {
@@ -19924,41 +19914,6 @@ function annotateKnownBlocked(blockedRows, knownBlockedRules) {
 function targetOf(row) {
 	return `${row.host}:${row.port === "-" ? "0" : row.port}`;
 }
-//#endregion
-//#region src/core/lib/report/build/universal.ts
-function dnsRow(event) {
-	return {
-		host: event.host,
-		port: "-",
-		ruleType: "DNS",
-		reason: event.reason ?? "-"
-	};
-}
-async function buildUniversalReportData(proxyLines, dnsLines, parameters) {
-	let isAudit = parameters.mode === "audit", [{ passed, blocked: proxyBlocked, failed, blockedCount, headIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact }] = await Promise.all([scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), connected = {
-		any: new Set(),
-		blocked: new Set()
-	};
-	for (let row of [
-		...passed,
-		...failed,
-		...proxyBlocked
-	]) connected.any.add(row.host.toLowerCase());
-	for (let row of proxyBlocked) connected.blocked.add(row.host.toLowerCase());
-	let dnsPassed = [], dnsBlocked = [];
-	for (let event of dnsEvents) event.action !== "discovery" && (isRedundantDns(event, connected) || (event.action === "block" ? dnsBlocked : dnsPassed).push(dnsRow(event)));
-	return {
-		engine: "universal",
-		parameters,
-		passed: [...passed, ...aggregate(dnsPassed)].sort(compareAggregated),
-		blocked: annotateKnownBlocked([...proxyBlocked, ...aggregate(dnsBlocked)].sort(compareAggregated), parameters.knownBlockedRules),
-		failed,
-		blockedCount: blockedCount + dnsBlocked.length,
-		logLooksPlausible: headIntact && dnsHeadIntact && unparsed === 0
-	};
-}
-//#endregion
-//#region src/core/lib/report/build/inspect.ts
 const RULE_TYPE = {
 	https: "HTTPS",
 	http: "HTTP",
@@ -19974,17 +19929,37 @@ function toHostRow(event) {
 		reason: event.reason ?? "-"
 	};
 }
-async function buildInspectReportData(proxyLines, dnsLines, parameters) {
-	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact }] = await Promise.all([scanInspectLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), passedRows = [], blockedRows = [], failedRows = [], connected = connectedHosts(timeline);
+function reduceTimeline(timeline, knownBlockedRules) {
+	let passedRows = [], blockedRows = [], failedRows = [], connected = connectedHosts(timeline);
 	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : (event.action === "block" ? blockedRows : passedRows).push(toHostRow(event))));
-	let blocked = annotateKnownBlocked(aggregate(blockedRows), parameters.knownBlockedRules);
+	return {
+		passed: aggregate(passedRows),
+		blocked: annotateKnownBlocked(aggregate(blockedRows), knownBlockedRules),
+		failed: aggregate(failedRows),
+		blockedCount: blockedRows.length
+	};
+}
+//#endregion
+//#region src/core/lib/report/build/universal.ts
+async function buildUniversalReportData(proxyLines, dnsLines, parameters) {
+	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact }] = await Promise.all([scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	return {
+		engine: "universal",
+		parameters,
+		...reduceTimeline(timeline, parameters.knownBlockedRules),
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0,
+		startedAt,
+		timeline
+	};
+}
+//#endregion
+//#region src/core/lib/report/build/inspect.ts
+async function buildInspectReportData(proxyLines, dnsLines, parameters) {
+	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact }] = await Promise.all([scanInspectLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
 	return {
 		engine: "inspect",
 		parameters,
-		passed: aggregate(passedRows),
-		blocked,
-		failed: aggregate(failedRows),
-		blockedCount: blockedRows.length,
+		...reduceTimeline(timeline, parameters.knownBlockedRules),
 		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0,
 		startedAt,
 		timeline
@@ -65038,10 +65013,6 @@ const uploadViaActionsArtifact = async (name, files, rootDirectory, options) => 
 	return new DefaultArtifactClient().uploadArtifact(name, files, rootDirectory, options);
 };
 async function uploadTrafficArtifact(report, containerName, annotation, { upload = uploadViaActionsArtifact } = {}) {
-	if (report.engine !== "inspect") {
-		annotation.warning("upload_traffic_artifact was set, but this engine produces no traffic JSON. Only proxy_engine: inspect does.");
-		return;
-	}
 	let scratchDir = (0, node_fs.mkdtempSync)((0, node_path.join)((0, node_os.tmpdir)(), "buildcage-traffic-"));
 	try {
 		let file = (0, node_path.join)(scratchDir, "traffic.json");
@@ -65084,7 +65055,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 			actionVersion: readActionVersion(containerName, proxyEngine),
 			stepLabel: readStepLabel(),
 			failOnBlocked
-		}, wantsArtifact && report.engine === "inspect", env), wantsArtifact && (phase = "upload the traffic artifact", await uploadTrafficArtifact(report, containerName, annotation));
+		}, wantsArtifact, env), wantsArtifact && (phase = "upload the traffic artifact", await uploadTrafficArtifact(report, containerName, annotation));
 	} catch (e) {
 		annotation.warning(`Failed to ${phase}: ${errorMessage(e)}`);
 	}

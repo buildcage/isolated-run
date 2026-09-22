@@ -5,19 +5,17 @@ import { scanHaproxyLog } from "./haproxy.ts";
 import { aggregate } from "./aggregate.ts";
 
 describe("scanHaproxyLog: properties", () => {
-  // A well-formed log line always round-trips into the right bucket:
-  // BLOCKED always lands in `blocked`; ALLOWED/AUDIT lands in `passed` only
-  // if it matches the decision `isAudit` selects, otherwise it's dropped.
-  it("a valid log line always aggregates to exactly one entry in the right bucket", async () => {
+  // A well-formed line always becomes exactly one event with the right action:
+  // BLOCKED → block (or failed for a dns-failed reason); ALLOWED/AUDIT → an
+  // event only when it matches the decision `isAudit` selects, else dropped.
+  it("a valid line always becomes exactly one event in the right shape", async () => {
     const decision = fc.constantFrom("ALLOWED", "BLOCKED", "AUDIT");
     const isAudit = fc.boolean();
-    // ruleType must match \w+ in the log pattern
-    const ruleType = fc.stringMatching(/^\w{1,10}$/);
-    // host: no '"' or ':' to keep the lastIndexOf split unambiguous
+    const ruleType = fc.constantFrom("HTTPS", "HTTP", "IP", "UNKNOWN");
     const host = fc.stringMatching(/^[a-z][a-z0-9.]{0,20}$/);
-    const port = fc.integer({ min: 1, max: 65535 }).map(String);
-    // reason: restricted to the kebab-case charset the log pattern requires
+    const port = fc.integer({ min: 1, max: 65535 });
     const reason = fc.oneof(fc.constant("-"), fc.stringMatching(/^[A-Za-z0-9-]{1,15}$/));
+    const bytes = fc.integer({ min: 0, max: 1_000_000 });
 
     await fc.assert(
       fc.asyncProperty(
@@ -27,48 +25,45 @@ describe("scanHaproxyLog: properties", () => {
         host,
         port,
         reason,
-        async (d, audit, rt, h, p, r) => {
-          const line = `[2024-01-01] buildcage [${d}] (${rt}) "${h}:${p}" ${r}`;
-          const result = await scanHaproxyLog([line], audit);
+        bytes,
+        async (d, audit, rt, h, p, r, b) => {
+          const line = `buildcage 1787471970000 [${d}] (${rt}) "${h}:${p}" ${r} ${b}`;
+          const { events } = await scanHaproxyLog([line], audit);
           const passedDecision = audit ? "AUDIT" : "ALLOWED";
 
           if (d === "BLOCKED") {
-            expect(result.passed.length).toBe(0);
-            expect(result.blocked.length).toBe(1);
-            expect(result.blocked[0].ruleType).toBe(rt);
-            expect(result.blocked[0].host).toBe(h);
-            expect(result.blocked[0].port).toBe(p);
-            expect(result.blocked[0].reason).toBe(r);
+            expect(events.length).toBe(1);
+            expect(events[0].action).toBe(r === "dns-failed" ? "failed" : "block");
+            expect(events[0].host).toBe(h);
+            expect(events[0].port).toBe(p);
+            expect(events[0].reason).toBe(r);
           } else if (d === passedDecision) {
-            expect(result.blocked.length).toBe(0);
-            expect(result.passed.length).toBe(1);
-            expect(result.passed[0].ruleType).toBe(rt);
-            expect(result.passed[0].host).toBe(h);
-            expect(result.passed[0].port).toBe(p);
-            expect(result.passed[0].reason).toBe(r);
+            expect(events.length).toBe(1);
+            expect(events[0].action).toBe(audit ? "audit" : "allow");
+            expect(events[0].host).toBe(h);
+            expect(events[0].port).toBe(p);
+            expect(events[0].bytes).toBe(b);
           } else {
             // The "other" of ALLOWED/AUDIT for this mode: dropped entirely.
-            expect(result.passed.length).toBe(0);
-            expect(result.blocked.length).toBe(0);
+            expect(events.length).toBe(0);
           }
         },
       ),
     );
   });
 
-  // The line is anchored at both ends, so a trailing token after an
-  // otherwise well-formed reason (an injection attempt appended past the
-  // field the report expects) makes the whole line fail to match, rather
-  // than being silently accepted with the reason truncated to its first word.
-  it("a reason with trailing content after it does not match at all", async () => {
+  // The line is anchored at both ends, so a token appended past the last field
+  // (an injection attempt) makes the whole line fail to match rather than being
+  // silently accepted with a field truncated.
+  it("a line with trailing content past its last field does not match", async () => {
     const reason = fc.stringMatching(/^[A-Za-z0-9-]{1,10}$/);
     const trailing = fc.stringMatching(/^\S{1,10}$/);
 
     await fc.assert(
       fc.asyncProperty(reason, trailing, async (r, extra) => {
-        const line = `[ts] buildcage [ALLOWED] (HTTPS) "example.com:443" ${r} ${extra}`;
-        const result = await scanHaproxyLog([line], false);
-        expect(result.passed.length).toBe(0);
+        const line = `buildcage 1787471970000 [ALLOWED] (HTTPS) "example.com:443" ${r} 0 ${extra}`;
+        const { events } = await scanHaproxyLog([line], false);
+        expect(events.length).toBe(0);
       }),
     );
   });

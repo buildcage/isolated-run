@@ -106,9 +106,9 @@ export async function reportStepTraffic(
         stepLabel: readStepLabel(),
         failOnBlocked,
       },
-      // Only the inspect engine produces a traffic JSON, so only its summary
-      // may point at one; uploadTrafficArtifact warns about the mismatch.
-      wantsArtifact && report.engine === "inspect",
+      // Both engines produce a traffic JSON now, so either summary may point at
+      // the artifact when one was asked for.
+      wantsArtifact,
       env,
     );
     if (wantsArtifact) {

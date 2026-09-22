@@ -1,5 +1,6 @@
 import { completeRulePort, convertRule } from "#core/lib/acl/wildcard-rules.ts";
-import type { AggregatedEntry } from "#core/lib/log/aggregate.ts";
+import { aggregate, type AggregatedEntry, type LogEntry } from "#core/lib/log/aggregate.ts";
+import { connectedHosts, isRedundantDns, type TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
 export interface AnnotatedBlockedRow extends AggregatedEntry {
   expected: boolean;
@@ -49,4 +50,62 @@ export function annotateKnownBlocked(
  */
 function targetOf(row: AggregatedEntry): string {
   return `${row.host}:${row.port === "-" ? "0" : row.port}`;
+}
+
+/** How a protocol appears in the host tables, matching the rule kind that would
+ *  permit it. */
+const RULE_TYPE: Record<TrafficEvent["protocol"], string> = {
+  https: "HTTPS",
+  http: "HTTP",
+  tls: "TLS",
+  tcp: "IP",
+  dns: "DNS",
+};
+
+/** Reduce an event to the host row a rule is written against. A dns event has
+ *  no port, having connected to nothing. */
+function toHostRow(event: TrafficEvent): LogEntry {
+  return {
+    host: event.host,
+    port: event.port === undefined ? "-" : String(event.port),
+    ruleType: RULE_TYPE[event.protocol],
+    reason: event.reason ?? "-",
+  };
+}
+
+export interface ReducedTimeline {
+  passed: AggregatedEntry[];
+  blocked: AnnotatedBlockedRow[];
+  failed: AggregatedEntry[];
+  /** Raw blocked-event count, so it can exceed blocked.length. */
+  blockedCount: number;
+}
+
+/**
+ * Turn a timeline into the report's three host tables, the reduction both
+ * engines share. `discovery` and `incomplete` events reach neither table (no
+ * rule decided them; the timeline still keeps them). A lookup a connection
+ * already covers is dropped, and a failed connection gets its own table apart
+ * from refusals (see TrafficAction).
+ */
+export function reduceTimeline(
+  timeline: TrafficEvent[],
+  knownBlockedRules: string[],
+): ReducedTimeline {
+  const passedRows: LogEntry[] = [];
+  const blockedRows: LogEntry[] = [];
+  const failedRows: LogEntry[] = [];
+  const connected = connectedHosts(timeline);
+  for (const event of timeline) {
+    if (event.action === "discovery" || event.action === "incomplete") continue;
+    if (isRedundantDns(event, connected)) continue;
+    if (event.action === "failed") failedRows.push(toHostRow(event));
+    else (event.action === "block" ? blockedRows : passedRows).push(toHostRow(event));
+  }
+  return {
+    passed: aggregate(passedRows),
+    blocked: annotateKnownBlocked(aggregate(blockedRows), knownBlockedRules),
+    failed: aggregate(failedRows),
+    blockedCount: blockedRows.length,
+  };
 }

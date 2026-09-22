@@ -63,10 +63,9 @@ export function renderReportMarkdown(
   }
   if (report.blocked.length > 0) {
     if (report.passed.length > 0) markdown += "\n";
-    // universal has no Communication details section to name a folded row's
-    // hosts in.
-    const blocked =
-      report.engine === "universal" ? report.blocked : foldExpectedBlockedRows(report.blocked);
+    // A folded row names its rule; the hosts it stands for are in the
+    // Communication details section, which both engines now emit.
+    const blocked = foldExpectedBlockedRows(report.blocked);
     markdown +=
       "### 🚫 Blocked Hosts\n\n" +
       renderHostTable(blocked, { showReason: true, showExpected }) +
@@ -86,9 +85,8 @@ export function renderReportMarkdown(
     markdown += "_(no communication)_\n\n";
   }
 
-  if (report.engine === "inspect") {
-    markdown += renderInspectDetails(report.timeline, report.startedAt);
-  } else {
+  markdown += renderInspectDetails(report.timeline, report.startedAt);
+  if (report.engine === "universal") {
     // Only the universal engine identifies a host this way (see
     // docs/security.md); inspect terminates TLS instead.
     markdown +=
