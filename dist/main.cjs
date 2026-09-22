@@ -18298,6 +18298,13 @@ function defaultReadFile$1(path) {
 function defaultWriteFile(path, contents, mode) {
 	(0, node_fs.writeFileSync)(path, contents, { mode });
 }
+function defaultJavaHome(env) {
+	let result = (0, node_child_process.spawnSync)("java", ["-XshowSettings:properties", "-version"], {
+		encoding: "utf8",
+		env
+	}), match = `${result.stdout ?? ""}${result.stderr ?? ""}`.match(/java\.home\s*=\s*(.+)/);
+	return match ? match[1].trim() : void 0;
+}
 function extractCaCert(containerName, destDir, { exec = defaultExec$1, chmod = node_fs.chmodSync } = {}) {
 	let caCertPath = (0, node_path.join)(destDir, "proxy-ca.pem");
 	return exec("docker", buildDockerCpArgs({
@@ -18322,6 +18329,54 @@ function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writ
 		systemCa
 	};
 }
+const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"], KNOWN_JVM_KEYSTORE_DIRS = [
+	"/etc/ssl/certs/java",
+	"/etc/pki/java",
+	"/etc/pki/ca-trust/extracted/java"
+];
+function discoverJvmKeystores(env, { exists = node_fs.existsSync, realpath = node_fs.realpathSync, javaHome = defaultJavaHome } = {}) {
+	let dirs = [], home = javaHome(env);
+	home && dirs.push((0, node_path.join)(home, "lib", "security")), env.JAVA_HOME && dirs.push((0, node_path.join)(env.JAVA_HOME, "lib", "security"), (0, node_path.join)(env.JAVA_HOME, "jre", "lib", "security")), dirs.push(...KNOWN_JVM_KEYSTORE_DIRS);
+	let found = [], seen = new Set();
+	for (let dir of dirs) for (let name of JVM_KEYSTORE_NAMES) {
+		let candidate = (0, node_path.join)(dir, name);
+		if (!exists(candidate)) continue;
+		let real = realpath(candidate);
+		seen.has(real) || (seen.add(real), found.push(real));
+	}
+	return found;
+}
+function writeJvmKeystoreFiles(caCertPath, dir, env, { exec = defaultExec$1, exists = node_fs.existsSync, realpath = node_fs.realpathSync, copyFile = node_fs.copyFileSync, chmod = node_fs.chmodSync, javaHome = defaultJavaHome, warn } = {}) {
+	let keytool = env.JAVA_HOME ? (0, node_path.join)(env.JAVA_HOME, "bin", "keytool") : "keytool", injected = [];
+	return discoverJvmKeystores(env, {
+		exists,
+		realpath,
+		javaHome
+	}).forEach((keystore, i) => {
+		let copy = (0, node_path.join)(dir, `jvm-keystore-${i}`);
+		try {
+			copyFile(keystore, copy), chmod(copy, 420), exec(keytool, [
+				"-importcert",
+				"-noprompt",
+				"-alias",
+				"buildcage-proxy-ca",
+				"-file",
+				caCertPath,
+				"-keystore",
+				copy,
+				"-storepass",
+				"changeit"
+			]);
+		} catch {
+			warn?.(`could not add the proxy CA to the JVM keystore ${keystore}; a Java step will not trust it. Use proxy_engine: universal for a JVM build whose keystore cannot be rewritten.`);
+			return;
+		}
+		injected.push({
+			path: copy,
+			destination: keystore
+		});
+	}), injected;
+}
 const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_STORE = [
 	"REQUESTS_CA_BUNDLE",
 	"PIP_CERT",
@@ -18344,6 +18399,12 @@ function caTrustAdditions(files, env) {
 		});
 		for (let name of POINT_AT_SYSTEM_STORE) env[name] || (extraEnv[name] = files.systemCa.destination);
 	}
+	for (let keystore of files.jvmKeystores) mounts.push({
+		destination: keystore.destination,
+		type: "none",
+		source: keystore.path,
+		options: ["rbind", "ro"]
+	});
 	return {
 		mounts,
 		env: extraEnv
@@ -18846,6 +18907,7 @@ const PROXY_IP = "172.20.0.1", realDeps$2 = {
 	extractRuncBootstrap,
 	extractCaCert,
 	writeCaTrustFiles,
+	writeJvmKeystoreFiles,
 	createOverlayScratchDirs,
 	writeResolvConf,
 	writeRunScript,
@@ -18870,9 +18932,13 @@ function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`, "RUNC_EXTRACT_FAILED");
 	}
 }
-function extractCaTrust(containerName, dir, { extractCaCert, writeCaTrustFiles }) {
+function extractCaTrust(containerName, dir, env, warn, { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles }) {
 	try {
-		return writeCaTrustFiles(extractCaCert(containerName, dir), dir);
+		let caCertPath = extractCaCert(containerName, dir);
+		return {
+			...writeCaTrustFiles(caCertPath, dir),
+			jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, { warn })
+		};
 	} catch (e) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`, "CA_EXTRACT_FAILED");
 	}
@@ -18895,7 +18961,7 @@ function resolveIdentity(env, { resolveSandboxGid, info }) {
 	};
 }
 function assembleBundle(dir, options, deps) {
-	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
+	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode, warn } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, env, warn, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
 		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts();
 		config = buildOciConfig(baseSpec, {

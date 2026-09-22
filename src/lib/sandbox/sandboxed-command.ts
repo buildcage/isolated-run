@@ -142,13 +142,14 @@ function extractCaTrust(
   containerName: string,
   dir: string,
   env: NodeJS.ProcessEnv,
+  warn: Warn,
   { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles }: RunSandboxedCommandDeps,
 ): CaTrustFiles {
   try {
     const caCertPath = extractCaCert(containerName, dir);
     return {
       ...writeCaTrustFiles(caCertPath, dir),
-      jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env),
+      jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, { warn }),
     };
   } catch (e) {
     if (e instanceof SandboxError) throw e;
@@ -230,12 +231,12 @@ export function assembleBundle(
   options: AssembleBundleOptions,
   deps: RunSandboxedCommandDeps,
 ): AssembledBundle {
-  const { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options;
+  const { containerName, writeThroughPaths, env, proxyEngine, filesystemMode, warn } = options;
   const { listHostMounts, buildOciConfig } = deps;
 
   const { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps);
   const caTrust =
-    proxyEngine === "inspect" ? extractCaTrust(containerName, dir, env, deps) : undefined;
+    proxyEngine === "inspect" ? extractCaTrust(containerName, dir, env, warn, deps) : undefined;
 
   const netnsName = netnsNameFor(containerName);
   const rootfsBindDir = join(dir, "rootfs");

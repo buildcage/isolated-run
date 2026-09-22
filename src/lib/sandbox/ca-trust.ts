@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   readFileSync,
   writeFileSync,
@@ -81,6 +81,8 @@ export interface CaTrustDeps {
   chmod?: (path: string, mode: number) => void;
   copyFile?: (source: string, destination: string) => void;
   realpath?: (path: string) => string;
+  javaHome?: (env: NodeJS.ProcessEnv) => string | undefined;
+  warn?: (message: string) => void;
 }
 
 // Untested by design: the defaults behind this module's seams, which only hand
@@ -96,6 +98,19 @@ function defaultReadFile(path: string): string {
 
 function defaultWriteFile(path: string, contents: string, mode: number): void {
   writeFileSync(path, contents, { mode });
+}
+
+// Ask the java that PATH resolves for its own java.home, so the keystore of the
+// JVM the step will actually run is found even when it is not the one JAVA_HOME
+// names (or JAVA_HOME is unset). -XshowSettings writes the properties to stderr;
+// no java, or none that prints one, leaves it to JAVA_HOME and the fixed paths.
+function defaultJavaHome(env: NodeJS.ProcessEnv): string | undefined {
+  const result = spawnSync("java", ["-XshowSettings:properties", "-version"], {
+    encoding: "utf8",
+    env,
+  });
+  const match = `${result.stdout ?? ""}${result.stderr ?? ""}`.match(/java\.home\s*=\s*(.+)/);
+  return match ? match[1].trim() : undefined;
 }
 /* v8 ignore stop */
 
@@ -172,15 +187,21 @@ const KNOWN_JVM_KEYSTORE_DIRS = [
 const JVM_KEYSTORE_ALIAS = "buildcage-proxy-ca";
 
 /**
- * Find the JVM keystores on the runner, from JAVA_HOME (the JDK 9+ lib/security
- * and a JDK 8's jre/lib/security) and then the known fixed directories, each
- * resolved and deduplicated so a symlinked one is not injected into twice.
+ * Find the JVM keystores on the runner: the keystore of the java PATH actually
+ * resolves (its java.home, which mvn/gradle/java read and which need not be the
+ * one JAVA_HOME names), then JAVA_HOME (the JDK 9+ lib/security and a JDK 8's
+ * jre/lib/security, for a tool that goes by JAVA_HOME instead), then the known
+ * fixed directories. Each is resolved and deduplicated so a keystore reachable
+ * by more than one path is injected into once.
  */
 export function discoverJvmKeystores(
   env: NodeJS.ProcessEnv,
-  { exists = existsSync, realpath = realpathSync }: CaTrustDeps = {},
+  { exists = existsSync, realpath = realpathSync, javaHome = defaultJavaHome }: CaTrustDeps = {},
 ): string[] {
   const dirs: string[] = [];
+  // java.home already is the JRE for a JDK 8, so lib/security covers both shapes.
+  const home = javaHome(env);
+  if (home) dirs.push(join(home, "lib", "security"));
   if (env.JAVA_HOME) {
     dirs.push(
       join(env.JAVA_HOME, "lib", "security"),
@@ -223,12 +244,14 @@ export function writeJvmKeystoreFiles(
     realpath = realpathSync,
     copyFile = copyFileSync,
     chmod = chmodSync,
+    javaHome = defaultJavaHome,
+    warn,
   }: CaTrustDeps = {},
 ): CaTrustFiles["jvmKeystores"] {
   const keytool = env.JAVA_HOME ? join(env.JAVA_HOME, "bin", "keytool") : "keytool";
   const injected: CaTrustFiles["jvmKeystores"] = [];
 
-  discoverJvmKeystores(env, { exists, realpath }).forEach((keystore, i) => {
+  discoverJvmKeystores(env, { exists, realpath, javaHome }).forEach((keystore, i) => {
     const copy = join(dir, `jvm-keystore-${i}`);
     try {
       copyFile(keystore, copy);
@@ -246,7 +269,14 @@ export function writeJvmKeystoreFiles(
         "changeit",
       ]);
     } catch {
-      return; // keytool or the copy failed: leave this keystore untrusted.
+      // The copy or keytool failed (a non-default store password, say). Say so,
+      // since the only other sign is an opaque TLS error from the step's JVM.
+      warn?.(
+        `could not add the proxy CA to the JVM keystore ${keystore}; a Java step ` +
+          `will not trust it. Use proxy_engine: universal for a JVM build whose ` +
+          `keystore cannot be rewritten.`,
+      );
+      return;
     }
     injected.push({ path: copy, destination: keystore });
   });
