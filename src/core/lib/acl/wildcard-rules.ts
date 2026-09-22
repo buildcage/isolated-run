@@ -88,12 +88,10 @@ export function splitKnownBlockedLines(rulesInput: string | undefined): string[]
 /**
  * Whether a `known_blocked_rules` line is a URL rule rather than a host rule.
  *
- * A URL rule is a method list, a space, then a URL (see url-rules.ts); a host
- * rule is a single `host:port` token with no space. So the space that a method
- * prefix introduces is what tells the two apart, the same split convertUrlRule
- * makes internally. A host rule that reached here still carrying whitespace
- * would have been two host rules on one line under the old syntax, and is now
- * read as a malformed URL rule, which is the intended v4 behaviour.
+ * A URL rule carries a space between its method and its URL; a host rule is a
+ * bare `host:port`. So the space tells them apart, the same split convertUrlRule
+ * makes internally, and a line with stray whitespace is read as a malformed URL
+ * rule rather than a host rule.
  */
 export function isKnownBlockedUrlRule(line: string): boolean {
   return /\s/.test(line.trim());

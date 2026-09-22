@@ -74,12 +74,10 @@ interface CompiledUrlRule {
  * Only `inspect` records a method and a URL on a block, so an event without
  * them (a host-level refusal, or any block under `universal`) never matches a
  * URL rule; those are acknowledged with a host rule instead. Scheme, host, port
- * and path are matched the way the proxy itself would have (see
- * haproxy-rule-block.ts, and haproxy-rules.ts's per-scheme bucketing): the
- * scheme against the connection's protocol, so an https rule does not cover a
- * plaintext request on 443; the port against the connection rather than the
- * Host header, so `host:9443` does not also cover 443; and the path with its
- * query dropped.
+ * and path are matched as the proxy would (see haproxy-rule-block.ts and
+ * haproxy-rules.ts's per-scheme bucketing): port and scheme against the
+ * connection, not the Host header, so an https rule does not cover a plaintext
+ * request and `host:9443` does not cover 443; the path with its query dropped.
  */
 function matchesUrlRule(
   { rule, hostRe, pathRe, defaultPort }: CompiledUrlRule,
