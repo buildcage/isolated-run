@@ -96,11 +96,11 @@ describe("reportStepTraffic", () => {
   // so it has to be true exactly when one will exist to point at.
   it.each([
     { wants: true, engine: "inspect", available: true },
-    { wants: true, engine: "universal", available: false },
+    { wants: true, engine: "universal", available: true },
     { wants: false, engine: "inspect", available: false },
     { wants: false, engine: "universal", available: false },
   ])(
-    "tells the summary an artifact is available only for inspect and only when wanted ($engine, wants=$wants)",
+    "tells the summary an artifact is available for either engine, only when wanted ($engine, wants=$wants)",
     async ({ wants, engine, available }) => {
       mocks.wantsTrafficArtifact.mockReturnValue(wants);
       mocks.fetchReport.mockResolvedValue({ engine });

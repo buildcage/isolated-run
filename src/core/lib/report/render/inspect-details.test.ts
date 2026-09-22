@@ -68,6 +68,15 @@ describe("renderInspectDetails", () => {
     expect(md.includes("TLS db.example.com:5432 -> (3.3KB)")).toBe(true);
   });
 
+  it("shows a portless connection as just its host, never host:undefined", () => {
+    const out = renderInspectDetails(
+      [{ time: t, action: "allow", protocol: "https", host: "a.example.com" }],
+      t,
+    );
+    expect(out).toContain("HTTPS a.example.com ");
+    expect(out).not.toContain("undefined");
+  });
+
   it("scales the byte count to a readable unit, at each magnitude", () => {
     // A silent unit or rounding error would misreport how much crossed.
     const size = (bytes: number) => {

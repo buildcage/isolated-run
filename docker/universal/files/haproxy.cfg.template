@@ -123,7 +123,10 @@ frontend outbound_proxy
     use_backend tls_passthrough if is_tls
     default_backend http_filter_backend
 
-    log-format "[%T] buildcage [%[var(txn.decision)]] (%[var(txn.rule_type)]) \"%[var(txn.target)]\" %[var(txn.reason)]"
+    # %[date(0,ms)] leads so the report can order the timeline and time each
+    # line against the startup marker; %B is the only per-connection detail a
+    # passthrough has, seeing no method, URL or status. See log/haproxy.ts.
+    log-format "buildcage %[date(0,ms)] [%[var(txn.decision)]] (%[var(txn.rule_type)]) \"%[var(txn.target)]\" %[var(txn.reason)] %B"
 
 # --- IP direct passthrough backend ---
 backend ip_passthrough

@@ -46,6 +46,43 @@ const failed = [
   { host: "c.example.com", port: "443", ruleType: "HTTPS", reason: "dns-failed", count: 1 },
 ];
 
+/** universal's timeline is coarse: a passthrough proxy sees a connection's
+ *  host, port and bytes, never its method, URL or status. Its only richer
+ *  events come from the resolver: a discovery lookup and a refused name. */
+const universalTimeline: TrafficEvent[] = [
+  {
+    time: 1787471975,
+    action: "allow",
+    protocol: "https",
+    host: "a.example.com",
+    port: 443,
+    bytes: 1024,
+  },
+  {
+    time: 1787471977,
+    action: "block",
+    protocol: "https",
+    host: "bad.example.com",
+    port: 443,
+    reason: "https-not-allowed",
+  },
+  {
+    time: 1787471978,
+    action: "discovery",
+    protocol: "dns",
+    host: "_http._tcp.a.example.com",
+    queryType: "SRV",
+  },
+  {
+    time: 1787471981,
+    action: "failed",
+    protocol: "https",
+    host: "c.example.com",
+    port: 443,
+    reason: "dns-failed",
+  },
+];
+
 const universal: UniversalReportData = {
   engine: "universal",
   parameters: params(),
@@ -54,6 +91,8 @@ const universal: UniversalReportData = {
   failed,
   blockedCount: 2,
   logLooksPlausible: true,
+  timeline: universalTimeline,
+  startedAt: 1787471970,
 };
 
 const timeline: TrafficEvent[] = [
@@ -120,9 +159,17 @@ const CASES: Record<string, ReportData> = {
   "universal-audit": audit(universal),
   // The incomplete-log banner sits above the tables and applies to either engine.
   "universal-incomplete": { ...universal, logLooksPlausible: false },
-  // Nothing happened at all: the "(no communication)" note, no tables.
-  "universal-empty": { ...universal, passed: [], blocked: [], failed: [], blockedCount: 0 },
-  // The Expected column, with the known_blocked_rules rows left unfolded.
+  // Nothing happened at all: the "(no communication)" note, no tables, no
+  // timeline (a discovery-only run keeps a timeline; see the unit tests).
+  "universal-empty": {
+    ...universal,
+    passed: [],
+    blocked: [],
+    failed: [],
+    blockedCount: 0,
+    timeline: [],
+  },
+  // The Expected column, with the known_blocked_rules rows folded into one.
   "universal-expected": {
     ...universal,
     parameters: params({ knownBlockedRules: ["*.sury.org:*"] }),

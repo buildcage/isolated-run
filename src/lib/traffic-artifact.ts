@@ -63,13 +63,6 @@ export async function uploadTrafficArtifact(
   annotation: Annotation,
   { upload = uploadViaActionsArtifact }: UploadTrafficArtifactDeps = {},
 ): Promise<void> {
-  if (report.engine !== "inspect") {
-    annotation.warning(
-      "upload_traffic_artifact was set, but this engine produces no traffic JSON. " +
-        "Only proxy_engine: inspect does.",
-    );
-    return;
-  }
   const scratchDir = mkdtempSync(join(tmpdir(), "buildcage-traffic-"));
   try {
     const file = join(scratchDir, "traffic.json");

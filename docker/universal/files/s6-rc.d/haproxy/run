@@ -1,5 +1,8 @@
 #!/command/with-contenv sh
 exec 2>&1
-# Guaranteed non-decision line for report's head check (see log/haproxy.ts).
-echo "buildcage haproxy starting"
+# Guaranteed non-decision line for report's head check (see log/haproxy.ts),
+# carrying a millisecond epoch so the report can time every other line relative
+# to it; qjs rather than `date`, because BusyBox's `date` has no sub-second
+# precision.
+echo "buildcage haproxy starting $(qjs -e 'console.log(Date.now())')"
 exec s6-notifyoncheck -d -w 250 -n 12 haproxy -f /etc/haproxy/haproxy.cfg -db

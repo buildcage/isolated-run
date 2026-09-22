@@ -155,17 +155,14 @@ describe("uploadTrafficArtifact", () => {
     },
   );
 
-  it("warns and uploads nothing for an engine that produces no traffic JSON", async () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  it("uploads the traffic JSON for the universal engine too", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
     const { upload, calls } = fakeUpload();
     const universal = { ...inspectReport(), engine: "universal" } as Report;
 
     await uploadTrafficArtifact(universal, CONTAINER, createAnnotation(true), { upload });
 
-    expect(calls).toStrictEqual([]);
-    expect(log.mock.calls.map(([line]) => line as string)).toContainEqual(
-      expect.stringContaining("Only proxy_engine: inspect does."),
-    );
+    expect(calls.length).toBe(1);
   });
 
   it("warns rather than throwing when the upload fails", async () => {
