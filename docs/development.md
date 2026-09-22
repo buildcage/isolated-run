@@ -175,7 +175,11 @@ docker compose logs -f proxy
 
 Fields: `[timestamp] buildcage [status] "domain:port" reason`
 
-**`inspect` reads two logs instead**, since a name CoreDNS refused never reaches HAProxy at all:
+`universal` also reads the resolver's log (`/var/log/coredns`), since a name CoreDNS refused never
+reaches HAProxy at all: it is the only trace of a name looked up but never connected to.
+
+**`inspect`'s proxy log is richer**, since it terminates TLS and sees each request whole; it reads the
+same resolver log alongside it:
 
 ```bash
 docker compose exec proxy cat /var/log/haproxy/current

@@ -228,6 +228,9 @@ known_blocked_rules: |
   telemetry.example.com
 ```
 
+A name refused at resolution, before any connection, has no port. A bare `telemetry.example.com` (or
+`telemetry.example.com:*`) covers it; `telemetry.example.com:443` does not, since no port was involved.
+
 ## The report
 
 Every step appends its own section to the Job Summary: the hosts it reached, the ones it was

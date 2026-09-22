@@ -9,7 +9,9 @@ export interface AggregatedEntry extends LogEntry {
   count: number;
 }
 
-function compareAggregated(a: AggregatedEntry, b: AggregatedEntry): number {
+/** The host-table order: count descending, then host and port ascending. Used
+ *  by aggregate() below, and to re-sort when two aggregated lists are merged. */
+export function compareAggregated(a: AggregatedEntry, b: AggregatedEntry): number {
   return (
     b.count - a.count ||
     (a.host < b.host ? -1 : a.host > b.host ? 1 : 0) ||

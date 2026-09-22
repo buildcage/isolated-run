@@ -20,16 +20,16 @@ export type Report = ReportData;
 export type { ProxyEngine };
 
 const HAPROXY_LOG_DIR = "/var/log/haproxy";
-/** inspect-only: the resolver's own log, the sole trace of a name that was
- *  only looked up and never connected to. */
+/** The resolver's own log, the sole trace of a name that was only looked up and
+ *  never connected to. Both engines run CoreDNS and produce it. */
 const COREDNS_LOG_DIR = "/var/log/coredns";
 
 /**
  * This action has no version-skew concern of its own (one pinned version
  * end to end, unlike a separately-versioned report action), so it fetches
- * the raw log(s) and calls the shared builder in-process. Which log(s) to
- * read and which builder to call depends on which proxy image ran:
- * inspect's has a second (CoreDNS) log the universal image does not.
+ * the raw logs and calls the shared builder in-process. Both engines read the
+ * proxy and resolver logs; which builder to call depends on which proxy image
+ * ran.
  */
 // Untested by design: the log reader and both builders are tested directly.
 /* v8 ignore start */
@@ -48,6 +48,7 @@ export function fetchReport(
   }
   return buildUniversalReportData(
     readRotatedLog(docker, containerName, HAPROXY_LOG_DIR),
+    readRotatedLog(docker, containerName, COREDNS_LOG_DIR),
     parameters,
   );
 }
