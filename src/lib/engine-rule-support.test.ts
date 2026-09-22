@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 
-import { checkUrlAndTlsRuleSupport } from "./engine-rule-support.ts";
+import {
+  checkKnownBlockedUrlRuleSupport,
+  checkUrlAndTlsRuleSupport,
+} from "./engine-rule-support.ts";
 import { SandboxError } from "./errors.ts";
 
 describe("checkUrlAndTlsRuleSupport", () => {
@@ -93,5 +96,64 @@ describe("checkUrlAndTlsRuleSupport", () => {
     ).not.toThrow();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toMatch(/allowed_url_rules/);
+  });
+});
+
+describe("checkKnownBlockedUrlRuleSupport", () => {
+  it("does nothing on inspect", () => {
+    const warn = vi.fn();
+    expect(() =>
+      checkKnownBlockedUrlRuleSupport(
+        {
+          proxyEngine: "inspect",
+          proxyMode: "restrict",
+          knownBlockedUrlRules: ["POST https://api.example.com/telemetry"],
+        },
+        warn,
+      ),
+    ).not.toThrow();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when no URL lines are present, whatever the engine", () => {
+    const warn = vi.fn();
+    expect(() =>
+      checkKnownBlockedUrlRuleSupport(
+        { proxyEngine: "universal", proxyMode: "restrict", knownBlockedUrlRules: [] },
+        warn,
+      ),
+    ).not.toThrow();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("throws INVALID_PROXY_ENGINE in restrict mode on a non-inspect engine", () => {
+    const warn = vi.fn();
+    expect(() =>
+      checkKnownBlockedUrlRuleSupport(
+        {
+          proxyEngine: "universal",
+          proxyMode: "restrict",
+          knownBlockedUrlRules: ["POST https://api.example.com/telemetry"],
+        },
+        warn,
+      ),
+    ).toThrow(SandboxError);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("warns instead of throwing in audit mode", () => {
+    const warn = vi.fn();
+    expect(() =>
+      checkKnownBlockedUrlRuleSupport(
+        {
+          proxyEngine: "universal",
+          proxyMode: "audit",
+          knownBlockedUrlRules: ["POST https://api.example.com/telemetry"],
+        },
+        warn,
+      ),
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/known_blocked_rules/);
   });
 });

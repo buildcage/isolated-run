@@ -67,11 +67,12 @@ describe("computeReportOutcomes", () => {
       blocked: annotateKnownBlocked(
         [
           {
+            time: 1,
+            action: "block",
+            protocol: "https",
             host: "bad.example.com",
-            port: "443",
-            ruleType: "HTTPS",
+            port: 443,
             reason: "not in allowlist",
-            count: 2,
           },
         ],
         [],
@@ -88,7 +89,7 @@ describe("computeReportOutcomes", () => {
       parameters: reportParams({ mode: "audit", knownBlockedRules }),
       blockedCount: 2,
       blocked: annotateKnownBlocked(
-        [{ host: "known-bad.example.com", port: "443", ruleType: "HTTPS", reason: "-", count: 2 }],
+        [{ time: 1, action: "block", protocol: "https", host: "known-bad.example.com", port: 443 }],
         knownBlockedRules,
       ),
     });
@@ -197,7 +198,7 @@ describe("writeReportSummary", () => {
     return report({
       blockedCount: 1,
       blocked: annotateKnownBlocked(
-        [{ host: "bad.example.com", port: "443", ruleType: "HTTPS", reason: "-", count: 1 }],
+        [{ time: 1, action: "block", protocol: "https", host: "bad.example.com", port: 443 }],
         [],
       ),
     });

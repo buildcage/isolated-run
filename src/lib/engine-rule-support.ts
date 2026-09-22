@@ -55,3 +55,49 @@ export function checkUrlAndTlsRuleSupport(
     "INVALID_PROXY_ENGINE",
   );
 }
+
+/**
+ * A URL rule in `known_blocked_rules` (a method and a URL) matches on a method
+ * and a path, which only `inspect` sees, so it can never match a block on
+ * another engine and acknowledges nothing there. Checked once at setup like
+ * checkUrlAndTlsRuleSupport, and split the same way: an error in `restrict`,
+ * where a rule that reads as covering a block but silently does not is worth
+ * refusing, and a warning in `audit`, where nothing fails on a block anyway.
+ *
+ * A host rule (`host:port`) works on every engine and is not flagged; only the
+ * URL lines are.
+ */
+export function checkKnownBlockedUrlRuleSupport(
+  {
+    proxyEngine,
+    proxyMode,
+    knownBlockedUrlRules,
+  }: {
+    proxyEngine: ProxyEngine;
+    proxyMode: string;
+    knownBlockedUrlRules: string[];
+  },
+  warn: (message: string) => void,
+): void {
+  if (proxyEngine === "inspect") return;
+  if (knownBlockedUrlRules.length === 0) return;
+
+  const reason =
+    `known_blocked_rules contains URL rules (a method and a URL) that need proxy_engine: ` +
+    `inspect, which alone sees a method or a path; proxy_engine: ${proxyEngine} sees only the ` +
+    `host and port, so these rules match no blocked connection and acknowledge nothing.`;
+
+  if (proxyMode === "audit") {
+    warn(
+      `${reason} They are ignored for this run. Drop the method to acknowledge the whole host, ` +
+        `or switch to proxy_engine: inspect.`,
+    );
+    return;
+  }
+
+  throw new SandboxError(
+    `${reason} Drop the method to acknowledge the whole host, or switch to proxy_engine: ` +
+      `inspect.`,
+    "INVALID_PROXY_ENGINE",
+  );
+}

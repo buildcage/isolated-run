@@ -236,6 +236,18 @@ known_blocked_rules: |
 A name refused at resolution, before any connection, has no port. A bare `telemetry.example.com` (or
 `telemetry.example.com:*`) covers it; `telemetry.example.com:443` does not, since no port was involved.
 
+One rule per line, and on `inspect` a line can also be a URL rule (a method and a URL, the
+`allowed_url_rules` syntax) to acknowledge a single endpoint on a host whose other traffic is
+allowed — a telemetry POST to an API you otherwise use, say:
+
+```yaml
+known_blocked_rules: |
+  POST https://api.example.com/telemetry
+```
+
+Any other blocked request to that host still fails the step. See
+[Blocked rules](./docs/reference.md#blocked-rules-known_blocked_rules) for the full syntax.
+
 ## The report
 
 Every step appends its own section to the Job Summary: the hosts it reached, the ones it was
