@@ -63,6 +63,23 @@ export interface ConnectedHosts {
   blocked: Set<string>;
 }
 
+/**
+ * Reasons an `incomplete` names when the client itself ended the connection
+ * before a whole request arrived: it closed, or its own timeout expired. No
+ * rule saw the connection and the proxy did nothing to cause either, so these
+ * carry no result worth a ⚠️ and the report leaves them out of Communication
+ * details and of the undecided-request count. `no-request`, which can be the
+ * proxy hitting an error while still reading, is not among them and still
+ * shows. The raw traffic artifact keeps every one of them regardless.
+ */
+const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
+
+/** Whether the event is an `incomplete` the client itself ended, which the
+ *  report suppresses rather than showing under ⚠️. */
+export function isClientEndedIncomplete(event: TrafficEvent): boolean {
+  return event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "");
+}
+
 /** Index a timeline once. The check below runs for every lookup, and rescanning
  *  the whole timeline for each would be quadratic. */
 export function connectedHosts(timeline: TrafficEvent[]): ConnectedHosts {

@@ -1,4 +1,9 @@
-import { connectedHosts, isRedundantDns, type TrafficEvent } from "#core/lib/log/traffic-event.ts";
+import {
+  connectedHosts,
+  isClientEndedIncomplete,
+  isRedundantDns,
+  type TrafficEvent,
+} from "#core/lib/log/traffic-event.ts";
 import { formatElapsedVariable } from "../elapsed-time.ts";
 import { wrapCommunicationDetails } from "./communication-section.ts";
 
@@ -16,8 +21,13 @@ export function renderInspectDetails(
   timeline: TrafficEvent[],
   startedAt: number | undefined,
 ): string {
-  const connected = connectedHosts(timeline);
-  const shown = timeline.filter((e) => !isRedundantDns(e, connected));
+  // A connection the client itself aborted or timed out on decided no rule and
+  // is none of the proxy's doing, so it is dropped before anything else keys off
+  // the timeline (see isClientEndedIncomplete). Dropping it here rather than in
+  // `shown` keeps it from masking a lookup in connectedHosts.
+  const relevant = timeline.filter((e) => !isClientEndedIncomplete(e));
+  const connected = connectedHosts(relevant);
+  const shown = relevant.filter((e) => !isRedundantDns(e, connected));
   if (shown.length === 0) return "";
 
   const body = shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n";

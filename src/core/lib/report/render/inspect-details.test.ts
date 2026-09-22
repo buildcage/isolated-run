@@ -220,23 +220,25 @@ describe("renderInspectDetails", () => {
     expect(rendered).toMatch(/blocked/);
   });
 
-  it("marks a connection the client dropped, naming it by SNI and port", () => {
-    const rendered = renderInspectDetails(
-      [
-        {
-          time: t,
-          action: "incomplete",
-          protocol: "https",
-          host: "a.example.com",
-          port: 8443,
-          reason: "client-aborted",
-        },
-      ],
-      t,
-    );
-    expect(rendered.includes("⚠️ 00:00.000: HTTPS a.example.com:8443 -> client-aborted")).toBe(
-      true,
-    );
+  it("leaves out a connection the client itself aborted or timed out on", () => {
+    // No rule saw these and the proxy did nothing to cause them, so showing them
+    // under ⚠️ is noise. `no-request`, tested below, is not among them.
+    for (const reason of ["client-aborted", "client-timeout"]) {
+      const rendered = renderInspectDetails(
+        [
+          {
+            time: t,
+            action: "incomplete",
+            protocol: "https",
+            host: "a.example.com",
+            port: 8443,
+            reason,
+          },
+        ],
+        t,
+      );
+      expect(rendered).toBe("");
+    }
   });
 
   it("marks a request the proxy could not read as the refusal it was", () => {

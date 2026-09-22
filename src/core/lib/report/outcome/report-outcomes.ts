@@ -1,5 +1,6 @@
 import type { OutcomeEmission } from "./annotate.ts";
 import { describeBlockedOutcome } from "./blocked-outcome.ts";
+import { isClientEndedIncomplete } from "#core/lib/log/traffic-event.ts";
 import type { ReportData } from "../types.ts";
 
 export interface DescribeReportOutcomesOptions {
@@ -60,7 +61,11 @@ function describeUndecidedRequests(
   engineLabel: "sandbox" | "proxy",
 ): OutcomeEmission | undefined {
   if (report.engine !== "inspect") return undefined;
-  const count = report.timeline.filter((event) => event.action === "incomplete").length;
+  // A connection the client itself ended is left out of the count, as it is out
+  // of Communication details: no rule saw it and the proxy did nothing to it.
+  const count = report.timeline.filter(
+    (event) => event.action === "incomplete" && !isClientEndedIncomplete(event),
+  ).length;
   if (count === 0) return undefined;
   return {
     level: "warning",
@@ -68,10 +73,9 @@ function describeUndecidedRequests(
     message:
       `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in ` +
       "Communication details. Each ended before a whole request had arrived, so no rule decided " +
-      "it and none reached an origin: the client closed, its own timeout expired, or this proxy " +
-      "ran into an error while still reading. None of them fails the step. Bytes this proxy " +
-      "would not read as a request are not among them: that is a refusal, and it is in Blocked " +
-      "Hosts.",
+      "it and none reached an origin: this proxy ran into an error while still reading. None of " +
+      "them fails the step. Bytes this proxy would not read as a request are not among them: that " +
+      "is a refusal, and it is in Blocked Hosts.",
   };
 }
 

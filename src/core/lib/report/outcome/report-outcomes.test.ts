@@ -38,13 +38,15 @@ function inspect(
   };
 }
 
+// A `no-request`, which the warning does count; a client-ended reason would be
+// suppressed and is exercised on its own below.
 const incomplete: TrafficEvent = {
   time: 1787471975,
   action: "incomplete",
   protocol: "https",
-  host: "untrusted-ca.example.com",
+  host: "api.example.com",
   port: 443,
-  reason: "client-aborted",
+  reason: "no-request",
   destination: "172.20.0.1:443",
 };
 
@@ -83,6 +85,16 @@ describe("describeReportOutcomes", () => {
     expect(outcomes[1].message.startsWith("2 request(s) buildcage proxy could not act on")).toBe(
       true,
     );
+  });
+
+  it("stays silent about connections the client itself ended, counting none of them", () => {
+    // These are not the proxy's doing, so they are left out of the count just as
+    // they are out of Communication details.
+    const clientAborted: TrafficEvent = { ...incomplete, reason: "client-aborted" };
+    const clientTimeout: TrafficEvent = { ...incomplete, reason: "client-timeout" };
+    const outcomes = describeReportOutcomes(inspect([clientAborted, clientTimeout]), options);
+    expect(outcomes.length).toBe(1);
+    expect(outcomes[0].level).toBe("none");
   });
 
   it("never fails the step over one: no rule refused it and none can clear it", () => {
