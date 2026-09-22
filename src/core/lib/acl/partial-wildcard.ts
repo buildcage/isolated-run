@@ -7,8 +7,8 @@
  * a restriction on how a rule can be phrased. For `inspect` it would be a
  * hazard, because the resolver's scope is generated from these same patterns:
  * a rule unable to say "only names beginning with abc" forces the author to
- * write `*.amazonaws.com` instead, widening what the step is allowed to
- * resolve and therefore what it can leak through a DNS query alone.
+ * write `*.amazonaws.com` instead, widening what is allowed to resolve and
+ * therefore what can leak through a DNS query alone.
  *
  * The wildcard vocabulary is otherwise unchanged, and keeps the same meaning
  * wherever it appears in a label:
