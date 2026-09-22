@@ -1,5 +1,5 @@
 #!/bin/bash
-# HAProxy's single listener binds *:10024 (universal's dnsmasq also binds
+# HAProxy's single listener binds *:10024 (both engines' CoreDNS also binds
 # *:53), but only buildcage0, the veth end run-isolated.sh wires into the
 # sandbox once a step starts, may reach them (see
 # docker/{universal,inspect}/files/s6-scripts/init-iptables). This starts
@@ -26,8 +26,8 @@ ALPINE_IMAGE="alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db869
 # Sending a real query and checking dig's raw stdout for non-emptiness isn't
 # reliable either: on failure to reach the server, dig still writes a
 # "communications error ... timed out" line to stdout, not just stderr. Match
-# the actual answer record instead: dnsmasq answers every name with
-# 172.20.0.1 (docker/universal/files/dnsmasq.conf).
+# the actual answer record instead: the resolver answers every name with
+# 172.20.0.1, an A record synthesised locally (see coredns-config.ts).
 dns_answered() {
   local network_mode="$1" target="$2"
   docker run --rm --network "$network_mode" "$ALPINE_IMAGE" sh -c \
