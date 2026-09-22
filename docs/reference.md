@@ -92,8 +92,10 @@ either engine.
 ### URL rules: `allowed_url_rules`
 
 A rule is a method list, a space, then a URL pattern. Because a rule contains a space, this input is
-newline-separated. The method is required, so a rule always states what it permits. A blank line, or
-a line starting with `#`, is ignored, which helps once the list gets long.
+newline-separated. The method is required, so a rule always states what it permits. A `#` at the
+start of a line, or after whitespace, begins a comment that runs to the end of the line, and a blank
+line is ignored, which helps once the list gets long. A `#` inside a `~` rule's regex is left alone,
+since it is not preceded by whitespace.
 
 ```yaml
 allowed_url_rules: |
@@ -226,9 +228,11 @@ allowed_tls_rules: |
   repo.maven.apache.org:443
 ```
 
-A host rule input is split on whitespace and has no comment syntax, so `#` cannot be used inside one
-the way [`allowed_url_rules`](#url-rules-allowed_url_rules) allows. The second rule above is the
-shape to use for a JVM build, which won't trust the mounted CA.
+A host rule input is split on whitespace, so a rule per line and a group of rules on one line both
+work. Comments follow the same rule as [`allowed_url_rules`](#url-rules-allowed_url_rules): a `#` at
+the start of a line, or after whitespace, runs to the end of the line, while a `#` written into a `~`
+regex rule stays part of the pattern. The second rule above is the shape to use for a JVM build,
+which won't trust the mounted CA.
 
 ### Regular expressions
 
@@ -550,8 +554,12 @@ that already exists rather than creating one. Both are in
 ## `write_through` paths
 
 `write_through:` names the paths whose writes reach the real host filesystem, in either
-[filesystem mode](../README.md#filesystem-access). Entries resolve like this:
+[filesystem mode](../README.md#filesystem-access). It is one path per line. Entries resolve like
+this:
 
+- A `#` at the start of a line, or after whitespace, starts a comment that runs to the end of the
+  line, and a blank line is skipped, the same as in the rule inputs. Only a whitespace-preceded `#`
+  counts, so a path that actually contains a `#` is left whole.
 - `$NAME` / `${NAME}` expand only for `HOME`, `GITHUB_WORKSPACE`, `RUNNER_TEMP`, `GITHUB_OUTPUT`,
   `GITHUB_ENV`, `GITHUB_PATH`, and `GITHUB_STEP_SUMMARY`, not arbitrary env, so a value smuggled in
   through the step's own `env:` block can't redirect where a listed path resolves. Any other `$NAME`

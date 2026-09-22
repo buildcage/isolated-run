@@ -206,9 +206,10 @@ allowed_ip_rules: |
 
 ```yaml
 allowed_https_rules: |
+  # npm and maven
   registry.npmjs.org:443
   repo.maven.apache.org:443
-  *.internal.example.com:443
+  *.internal.example.com:443  # everything on the internal network
 
 allowed_http_rules: |
   deb.debian.org:80
@@ -216,6 +217,9 @@ allowed_http_rules: |
 allowed_ip_rules: |
   192.168.1.10:443
 ```
+
+A `#` starts a comment at the start of a line or after whitespace, so a group of rules can carry a
+heading or a rule can carry its reason. It works the same in every rule input, and in `write_through`.
 
 ### Destinations you expect to stay blocked
 

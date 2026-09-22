@@ -3,6 +3,7 @@ import {
   wildcardToRegex,
   convertRule,
   buildRules,
+  splitRuleTokens,
   parseAndValidateRules,
   completeRulePort,
   parseAndValidateKnownBlockedRules,
@@ -157,6 +158,34 @@ describe("buildRules", () => {
   });
 });
 
+describe("splitRuleTokens comments", () => {
+  it("drops a full-line comment and a blank line", () => {
+    expect(
+      splitRuleTokens("# npm\nregistry.npmjs.org:443\n\n# internal\napi.example.com:443"),
+    ).toStrictEqual(["registry.npmjs.org:443", "api.example.com:443"]);
+  });
+
+  it("drops an end-of-line comment, keeping the tokens before it", () => {
+    expect(splitRuleTokens("registry.npmjs.org:443  # packages")).toStrictEqual([
+      "registry.npmjs.org:443",
+    ]);
+    // Several tokens can share a line; only the whitespace-preceded # starts the comment.
+    expect(splitRuleTokens("a.example.com:443 b.example.com:443 # both")).toStrictEqual([
+      "a.example.com:443",
+      "b.example.com:443",
+    ]);
+  });
+
+  it("leaves a # inside a ~ regex rule intact", () => {
+    expect(splitRuleTokens("~^a#b:443$")).toStrictEqual(["~^a#b:443$"]);
+  });
+
+  it("treats a comment-only input the same as an empty one", () => {
+    expect(splitRuleTokens("# only a comment")).toStrictEqual([]);
+    expect(splitRuleTokens("")).toStrictEqual([]);
+  });
+});
+
 describe("parseAndValidateRules", () => {
   it("returns raw (unconverted) rule tokens", () => {
     expect(parseAndValidateRules("example.com:443 *.foo.com:8443")).toStrictEqual([
@@ -208,6 +237,14 @@ describe("known_blocked_rules port completion", () => {
       "a.example.com:*",
       "b.example.com:443",
     ]);
+  });
+
+  it("drops comments instead of completing them into a rule", () => {
+    // Port completion would otherwise turn `# noisy` into `#:*` and `noisy:*`,
+    // both valid, so the comment would silently become expected rules.
+    expect(
+      parseAndValidateKnownBlockedRules("# noisy\nnoisy.example.com  # telemetry"),
+    ).toStrictEqual(["noisy.example.com:*"]);
   });
 
   it("still rejects a rule that is malformed for other reasons", () => {

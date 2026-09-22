@@ -3,6 +3,7 @@
  * Converts wildcard patterns to regex strings for HAProxy ACLs.
  */
 
+import { stripLineComment } from "../line-comments.ts";
 import {
   anchorRawRegex,
   endsAnchored,
@@ -10,8 +11,22 @@ import {
   splitRawRegexHost,
 } from "./partial-wildcard.ts";
 
+/**
+ * Split a whitespace-separated rules input into tokens, first dropping any
+ * `#` line comment from each line (see stripLineComment). Newlines are only a
+ * kind of whitespace here, so the comment-stripped lines are rejoined and
+ * split as one.
+ */
 export function splitRuleTokens(rulesInput: string | undefined): string[] {
-  return rulesInput?.trim().split(/\s+/).filter(Boolean) ?? [];
+  return (
+    rulesInput
+      ?.split(/\r?\n/)
+      .map(stripLineComment)
+      .join(" ")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean) ?? []
+  );
 }
 
 export function buildRules(rulesInput: string): string[] {

@@ -139,6 +139,10 @@ describe("resolveWriteThroughPaths", () => {
   it("keeps the lone / sentinel intact", () => {
     expect(resolveWriteThroughPaths("/", ENV)).toStrictEqual(["/"]);
   });
+
+  it("keeps the / sentinel when it carries a comment", () => {
+    expect(resolveWriteThroughPaths("/  # drop the restriction", ENV)).toStrictEqual(["/"]);
+  });
 });
 
 describe("ensureWriteThroughTargetsExist", () => {
@@ -354,5 +358,18 @@ describe("splitWriteThroughInput", () => {
     ]);
     expect(splitWriteThroughInput("")).toStrictEqual([]);
     expect(splitWriteThroughInput(undefined)).toStrictEqual([]);
+  });
+
+  it("drops full-line and end-of-line comments", () => {
+    expect(
+      splitWriteThroughInput("# caches\n/opt/cache  # shared\n\n./dist # build output"),
+    ).toStrictEqual(["/opt/cache", "./dist"]);
+  });
+
+  it("keeps a # that is part of the path (not preceded by whitespace)", () => {
+    expect(splitWriteThroughInput("/opt/cache#1\n/tmp/a#b")).toStrictEqual([
+      "/opt/cache#1",
+      "/tmp/a#b",
+    ]);
   });
 });

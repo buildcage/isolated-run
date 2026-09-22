@@ -28,6 +28,7 @@
  * haproxy-inspect-stage.ts.
  */
 
+import { stripLineComment } from "../line-comments.ts";
 import {
   anchorRawRegex,
   checkRawRegexHalf,
@@ -287,16 +288,17 @@ export function convertUrlRule(rule: string): UrlRule {
 
 /**
  * Split a rules input into rule lines. Newline-separated, because a rule
- * contains a space between its method list and its URL. A blank line, or a
- * line starting with `#`, is dropped. Only a full-line `#` counts, since a
- * `~` rule's own regex might legitimately contain one.
+ * contains a space between its method list and its URL. Each line's `#`
+ * comment is dropped first (see stripLineComment), and a line left empty is
+ * dropped. A `#` inside a `~` rule's regex survives, since it is not preceded
+ * by whitespace.
  */
 function splitUrlRuleLines(rulesInput: string | undefined): string[] {
   return (
     rulesInput
       ?.split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line !== "" && !line.startsWith("#")) ?? []
+      .map((line) => stripLineComment(line).trim())
+      .filter((line) => line !== "") ?? []
   );
 }
 

@@ -186,6 +186,11 @@ describe("buildUrlRules", () => {
     expect(rules.map((r) => r.raw)).toStrictEqual(["GET https://a.com/x", "GET https://b.com/y"]);
   });
 
+  it("drops an end-of-line comment, keeping the rule before it", () => {
+    const rules = buildUrlRules("GET https://a.com/x  # fetch packages\nGET https://b.com/y #cdn");
+    expect(rules.map((r) => r.raw)).toStrictEqual(["GET https://a.com/x", "GET https://b.com/y"]);
+  });
+
   it("does not treat a mid-line # as a comment marker", () => {
     const rules = buildUrlRules("GET ~^https://a\\.com/x#frag$");
     expect(rules[0].raw).toBe("GET ~^https://a\\.com/x#frag$");
