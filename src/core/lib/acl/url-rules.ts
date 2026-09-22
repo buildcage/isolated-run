@@ -110,12 +110,12 @@ function splitUrl(
   // A fragment stays in the browser, so it is never part of the path a request
   // carries and a rule naming one could only ever match nothing. Easy to copy
   // in from a documentation link, so it is refused rather than left to fail
-  // silently.
+  // silently. (splitRuleTokens/splitUrlRuleLines already reject a `#` in the
+  // input; this guards a direct caller.)
   if (url.includes("#")) {
     throw new Error(
       `Invalid URL in rule "${rule}": a "#" fragment is never sent with a request, so this rule ` +
-        `would match nothing. Drop it, or write the rule as a "~" regex if the "#" is meant ` +
-        `literally.`,
+        `would match nothing. Drop it.`,
     );
   }
   return { scheme: match[1] as "https" | "http", authority: match[2], path: match[3] ?? "" };

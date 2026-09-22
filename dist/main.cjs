@@ -17494,7 +17494,7 @@ function parseMethods(spec, rule) {
 function splitUrl(url, rule) {
 	let match = /^(https?):\/\/([^/]+)(\/.*)?$/.exec(url);
 	if (!match) throw Error(`Invalid URL in rule "${rule}": expected http:// or https:// followed by a host`);
-	if (url.includes("#")) throw Error(`Invalid URL in rule "${rule}": a "#" fragment is never sent with a request, so this rule would match nothing. Drop it, or write the rule as a "~" regex if the "#" is meant literally.`);
+	if (url.includes("#")) throw Error(`Invalid URL in rule "${rule}": a "#" fragment is never sent with a request, so this rule would match nothing. Drop it.`);
 	return {
 		scheme: match[1],
 		authority: match[2],
