@@ -9,7 +9,12 @@ import type { FilesystemMode } from "../filesystem-mode.ts";
 import { netnsNameFor } from "../container.ts";
 import { createOverlayScratchDirs } from "./ephemeral-fs.ts";
 import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
-import { extractCaCert, writeCaTrustFiles, type CaTrustFiles } from "./ca-trust.ts";
+import {
+  extractCaCert,
+  writeCaTrustFiles,
+  writeJvmKeystoreFiles,
+  type CaTrustFiles,
+} from "./ca-trust.ts";
 import { resolveSandboxGid } from "./identity.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import { buildOciConfig, type SandboxIdentity } from "./oci-config.ts";
@@ -40,6 +45,7 @@ export interface RunSandboxedCommandDeps {
   extractRuncBootstrap: typeof extractRuncBootstrap;
   extractCaCert: typeof extractCaCert;
   writeCaTrustFiles: typeof writeCaTrustFiles;
+  writeJvmKeystoreFiles: typeof writeJvmKeystoreFiles;
   createOverlayScratchDirs: typeof createOverlayScratchDirs;
   writeResolvConf: typeof writeResolvConf;
   writeRunScript: typeof writeRunScript;
@@ -60,6 +66,7 @@ const realDeps: RunSandboxedCommandDeps = {
   extractRuncBootstrap,
   extractCaCert,
   writeCaTrustFiles,
+  writeJvmKeystoreFiles,
   createOverlayScratchDirs,
   writeResolvConf,
   writeRunScript,
@@ -134,10 +141,16 @@ function extractBootstrap(
 function extractCaTrust(
   containerName: string,
   dir: string,
-  { extractCaCert, writeCaTrustFiles }: RunSandboxedCommandDeps,
+  env: NodeJS.ProcessEnv,
+  warn: Warn,
+  { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles }: RunSandboxedCommandDeps,
 ): CaTrustFiles {
   try {
-    return writeCaTrustFiles(extractCaCert(containerName, dir), dir);
+    const caCertPath = extractCaCert(containerName, dir);
+    return {
+      ...writeCaTrustFiles(caCertPath, dir),
+      jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, { warn }),
+    };
   } catch (e) {
     if (e instanceof SandboxError) throw e;
     throw new SandboxError(
@@ -218,11 +231,12 @@ export function assembleBundle(
   options: AssembleBundleOptions,
   deps: RunSandboxedCommandDeps,
 ): AssembledBundle {
-  const { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options;
+  const { containerName, writeThroughPaths, env, proxyEngine, filesystemMode, warn } = options;
   const { listHostMounts, buildOciConfig } = deps;
 
   const { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps);
-  const caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, deps) : undefined;
+  const caTrust =
+    proxyEngine === "inspect" ? extractCaTrust(containerName, dir, env, warn, deps) : undefined;
 
   const netnsName = netnsNameFor(containerName);
   const rootfsBindDir = join(dir, "rootfs");

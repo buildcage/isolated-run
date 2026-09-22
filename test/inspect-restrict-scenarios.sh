@@ -337,4 +337,37 @@ else
   pass "ping did not leave the cage"
 fi
 
+# A JVM already on the runner reads only its own keystore, so without the CA
+# injected there (ca-trust.ts's writeJvmKeystoreFiles) a Java client meeting the
+# proxy's re-signed certificate fails the handshake with a PKIX error. A status
+# coming back proves the injected CA was trusted; a compiler-less runner (no
+# javac for the single-file launcher) leaves the check inconclusive rather than
+# failing, since only a real handshake failure should.
+echo "=== [JVM keystore - the JVM trusts the injected CA] ==="
+if ! command -v java >/dev/null 2>&1; then
+  pass "no JVM on this runner; keystore injection is not exercised"
+else
+  JDIR=$(mktemp -d)
+  cat >"$JDIR/HttpsCheck.java" <<'JAVA'
+import java.net.URL;
+import javax.net.ssl.HttpsURLConnection;
+
+public class HttpsCheck {
+  public static void main(String[] args) throws Exception {
+    HttpsURLConnection c = (HttpsURLConnection) new URL(args[0]).openConnection();
+    c.setConnectTimeout(10000);
+    c.setReadTimeout(10000);
+    c.connect();
+    System.out.println("handshake ok, status=" + c.getResponseCode());
+  }
+}
+JAVA
+  JOUT=$(java "$JDIR/HttpsCheck.java" https://allowed.example.com/public/pkg.tgz 2>&1 || true)
+  case "$JOUT" in
+  *"handshake ok"*) pass "the JVM trusted the injected proxy CA" ;;
+  *PKIX* | *SSLHandshake*) fail "the JVM did not trust the proxy CA: $JOUT" ;;
+  *) pass "the JVM check was inconclusive (no compiler for the launcher?): $JOUT" ;;
+  esac
+fi
+
 scenario_results

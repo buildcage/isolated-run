@@ -274,7 +274,9 @@ A host rule input is split on whitespace, so a rule per line and a group of rule
 work. Comments follow the same rule as [`allowed_url_rules`](#url-rules-allowed_url_rules): a `#` at
 the start of a line, or after whitespace, runs to the end of the line, and a `#` with no space
 before it is reported as a mistake rather than silently trimmed, since `#` is part of no host. The
-second rule above is the shape to use for a JVM build, which won't trust the mounted CA.
+second rule above is the shape to use for a JVM build whose keystore Buildcage cannot inject into (a
+keystore under a non-default password, or a runner with no `keytool`); a JVM already on the runner
+otherwise trusts the injected CA without a passthrough.
 
 ### Regular expressions
 

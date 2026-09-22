@@ -760,6 +760,7 @@ describe("buildOciConfig: caTrust", () => {
   const caTrust = {
     ownCaPath: "/scratch/buildcage-ca.pem",
     systemCa: { path: "/scratch/system-ca-bundle.pem", destination: SYSTEM_STORE },
+    jvmKeystores: [],
   };
 
   it("adds no CA mounts when caTrust is omitted", () => {

@@ -4,6 +4,8 @@ import {
   extractCaCert,
   writeCaTrustFiles,
   caTrustAdditions,
+  discoverJvmKeystores,
+  writeJvmKeystoreFiles,
   OWN_CA_DESTINATION,
   type CaTrustDeps,
 } from "./ca-trust.ts";
@@ -108,7 +110,7 @@ describe("writeCaTrustFiles", () => {
 describe("caTrustAdditions", () => {
   it("mounts the CA-only file and points the additive variables at it, when unset", () => {
     const { mounts, env } = caTrustAdditions(
-      { ownCaPath: "/scratch/buildcage-ca.pem", systemCa: undefined },
+      { ownCaPath: "/scratch/buildcage-ca.pem", systemCa: undefined, jvmKeystores: [] },
       {},
     );
     expect(mounts).toEqual([
@@ -125,7 +127,7 @@ describe("caTrustAdditions", () => {
 
   it("does not override a variable the step already set", () => {
     const { env } = caTrustAdditions(
-      { ownCaPath: "/scratch/buildcage-ca.pem", systemCa: undefined },
+      { ownCaPath: "/scratch/buildcage-ca.pem", systemCa: undefined, jvmKeystores: [] },
       { NODE_EXTRA_CA_CERTS: "/my/own/bundle.pem" },
     );
     expect(env.NODE_EXTRA_CA_CERTS).toBeUndefined();
@@ -137,6 +139,7 @@ describe("caTrustAdditions", () => {
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
         systemCa: { path: "/scratch/system-ca-bundle.pem", destination: RHEL_STORE },
+        jvmKeystores: [],
       },
       {},
     );
@@ -156,6 +159,7 @@ describe("caTrustAdditions", () => {
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
         systemCa: { path: "/scratch/system-ca-bundle.pem", destination: RHEL_STORE },
+        jvmKeystores: [],
       },
       {},
     );
@@ -167,6 +171,7 @@ describe("caTrustAdditions", () => {
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
         systemCa: { path: "/scratch/system-ca-bundle.pem", destination: RHEL_STORE },
+        jvmKeystores: [],
       },
       { REQUESTS_CA_BUNDLE: "/my/own/bundle.pem" },
     );
@@ -176,7 +181,7 @@ describe("caTrustAdditions", () => {
 
   it("omits the system-store mount entirely when no system store was found", () => {
     const { mounts, env } = caTrustAdditions(
-      { ownCaPath: "/scratch/buildcage-ca.pem", systemCa: undefined },
+      { ownCaPath: "/scratch/buildcage-ca.pem", systemCa: undefined, jvmKeystores: [] },
       {},
     );
     expect(mounts.some((m) => m.destination === RHEL_STORE)).toBe(false);
@@ -207,5 +212,180 @@ describe("extractCaCert", () => {
     extractCaCert(containerName, destDir, deps);
 
     expect(chmod).toStrictEqual([[`${destDir}/proxy-ca.pem`, 0o644]]);
+  });
+});
+
+describe("discoverJvmKeystores", () => {
+  // javaHome stubbed off so the real one never spawns java on the test machine.
+  const at = (paths: string[]): CaTrustDeps => ({
+    exists: (p) => paths.includes(p),
+    realpath: (p) => p,
+    javaHome: () => undefined,
+  });
+
+  it("finds cacerts under JAVA_HOME", () => {
+    expect(
+      discoverJvmKeystores({ JAVA_HOME: "/opt/java" }, at(["/opt/java/lib/security/cacerts"])),
+    ).toEqual(["/opt/java/lib/security/cacerts"]);
+  });
+
+  it("finds a JDK 8's jre/lib/security cacerts", () => {
+    expect(
+      discoverJvmKeystores({ JAVA_HOME: "/opt/jdk8" }, at(["/opt/jdk8/jre/lib/security/cacerts"])),
+    ).toEqual(["/opt/jdk8/jre/lib/security/cacerts"]);
+  });
+
+  // jssecacerts overrides cacerts, so both are found.
+  it("finds jssecacerts alongside cacerts", () => {
+    const dir = "/opt/java/lib/security";
+    expect(
+      discoverJvmKeystores(
+        { JAVA_HOME: "/opt/java" },
+        at([`${dir}/cacerts`, `${dir}/jssecacerts`]),
+      ),
+    ).toEqual([`${dir}/jssecacerts`, `${dir}/cacerts`]);
+  });
+
+  it("falls back to the known fixed directories when JAVA_HOME is unset", () => {
+    expect(discoverJvmKeystores({}, at(["/etc/pki/java/cacerts"]))).toEqual([
+      "/etc/pki/java/cacerts",
+    ]);
+  });
+
+  // JAVA_HOME's cacerts symlinked to a fixed path is one keystore, not two.
+  it("resolves and deduplicates a keystore reachable by two paths", () => {
+    const real = "/etc/pki/ca-trust/extracted/java/cacerts";
+    expect(
+      discoverJvmKeystores(
+        { JAVA_HOME: "/opt/java" },
+        {
+          exists: (p) => p === "/opt/java/lib/security/cacerts" || p === real,
+          realpath: (p) => (p === "/opt/java/lib/security/cacerts" ? real : p),
+          javaHome: () => undefined,
+        },
+      ),
+    ).toEqual([real]);
+  });
+
+  it("finds nothing when there is no keystore", () => {
+    expect(discoverJvmKeystores({ JAVA_HOME: "/opt/java" }, at([]))).toEqual([]);
+  });
+});
+
+describe("writeJvmKeystoreFiles", () => {
+  const CA = "/scratch/proxy-ca.pem";
+
+  function harness(keystores: string[], failKeytool = false) {
+    const copies: [string, string][] = [];
+    const exec: [string, string[]][] = [];
+    const warnings: string[] = [];
+    const deps: CaTrustDeps = {
+      exists: (p) => keystores.includes(p),
+      realpath: (p) => p,
+      javaHome: () => undefined,
+      copyFile: (source, destination) => copies.push([source, destination]),
+      chmod: () => {},
+      exec: (command, args) => {
+        exec.push([command, args]);
+        if (failKeytool) throw new Error("keytool failed");
+      },
+      warn: (message) => warnings.push(message),
+    };
+    return { deps, copies, exec, warnings };
+  }
+
+  it("copies each keystore and imports the CA with the runner's keytool, returning the mounts", () => {
+    const ks = "/opt/java/lib/security/cacerts";
+    const { deps, copies, exec } = harness([ks]);
+
+    const result = writeJvmKeystoreFiles(CA, "/scratch", { JAVA_HOME: "/opt/java" }, deps);
+
+    expect(copies).toEqual([[ks, "/scratch/jvm-keystore-0"]]);
+    expect(exec).toEqual([
+      [
+        "/opt/java/bin/keytool",
+        [
+          "-importcert",
+          "-noprompt",
+          "-alias",
+          "buildcage-proxy-ca",
+          "-file",
+          CA,
+          "-keystore",
+          "/scratch/jvm-keystore-0",
+          "-storepass",
+          "changeit",
+        ],
+      ],
+    ]);
+    expect(result).toEqual([{ path: "/scratch/jvm-keystore-0", destination: ks }]);
+  });
+
+  it("uses keytool on PATH when JAVA_HOME is unset", () => {
+    const { deps, exec } = harness(["/etc/pki/java/cacerts"]);
+    writeJvmKeystoreFiles(CA, "/scratch", {}, deps);
+    expect(exec[0][0]).toBe("keytool");
+  });
+
+  it("skips a keystore keytool cannot rewrite, warns, and leaves it out of the mounts", () => {
+    const { deps, warnings } = harness(["/opt/java/lib/security/cacerts"], true);
+    expect(writeJvmKeystoreFiles(CA, "/scratch", { JAVA_HOME: "/opt/java" }, deps)).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("/opt/java/lib/security/cacerts");
+    expect(warnings[0]).toContain("proxy_engine: universal");
+  });
+
+  it("returns nothing when the runner has no JVM keystore", () => {
+    const { deps } = harness([]);
+    expect(writeJvmKeystoreFiles(CA, "/scratch", { JAVA_HOME: "/opt/java" }, deps)).toEqual([]);
+  });
+
+  // The java PATH resolves need not be the one JAVA_HOME names; its own keystore
+  // is found through java.home even when JAVA_HOME is unset.
+  it("finds the keystore of the java on PATH via java.home", () => {
+    const { deps, exec } = harness(["/opt/actual-jdk/lib/security/cacerts"]);
+    const result = writeJvmKeystoreFiles(
+      CA,
+      "/scratch",
+      {},
+      {
+        ...deps,
+        javaHome: () => "/opt/actual-jdk",
+      },
+    );
+    expect(result).toEqual([
+      { path: "/scratch/jvm-keystore-0", destination: "/opt/actual-jdk/lib/security/cacerts" },
+    ]);
+    expect(exec[0][0]).toBe("keytool");
+  });
+});
+
+describe("caTrustAdditions with JVM keystores", () => {
+  it("mounts each injected keystore over the keystore it stands in for, adding no env", () => {
+    const { mounts, env } = caTrustAdditions(
+      {
+        ownCaPath: "/scratch/buildcage-ca.pem",
+        systemCa: undefined,
+        jvmKeystores: [
+          { path: "/scratch/jvm-keystore-0", destination: "/opt/java/lib/security/cacerts" },
+          { path: "/scratch/jvm-keystore-1", destination: "/opt/java/lib/security/jssecacerts" },
+        ],
+      },
+      {},
+    );
+    expect(mounts).toContainEqual({
+      destination: "/opt/java/lib/security/cacerts",
+      type: "none",
+      source: "/scratch/jvm-keystore-0",
+      options: ["rbind", "ro"],
+    });
+    expect(mounts).toContainEqual({
+      destination: "/opt/java/lib/security/jssecacerts",
+      type: "none",
+      source: "/scratch/jvm-keystore-1",
+      options: ["rbind", "ro"],
+    });
+    // The JVM reads no variable.
+    expect(Object.keys(env)).toEqual(["NODE_EXTRA_CA_CERTS", "DENO_CERT"]);
   });
 });

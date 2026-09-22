@@ -1,5 +1,12 @@
-import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  chmodSync,
+  copyFileSync,
+  realpathSync,
+} from "node:fs";
 import { join } from "node:path";
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 import type { MountEntry } from "./types.ts";
@@ -45,6 +52,12 @@ export interface CaTrustFiles {
    *  are what a self-hosted RHEL or SUSE runner is reached by.
    */
   systemCa: { path: string; destination: string } | undefined;
+  /** Injected copies of the JVM's own keystores (see writeJvmKeystoreFiles),
+   *  each mounted over the keystore it was copied from. A JVM already on the
+   *  runner reads only these, not the system store or the variables above, so
+   *  `mvn`/`gradle`/`java` under the inspect engine trust the CA only once it
+   *  is in here. Empty when the runner has no JVM keystore this found. */
+  jvmKeystores: { path: string; destination: string }[];
 }
 
 export const SYSTEM_CA_CANDIDATES = [
@@ -66,6 +79,10 @@ export interface CaTrustDeps {
   writeFile?: (path: string, contents: string, mode: number) => void;
   exists?: (path: string) => boolean;
   chmod?: (path: string, mode: number) => void;
+  copyFile?: (source: string, destination: string) => void;
+  realpath?: (path: string) => string;
+  javaHome?: (env: NodeJS.ProcessEnv) => string | undefined;
+  warn?: (message: string) => void;
 }
 
 // Untested by design: the defaults behind this module's seams, which only hand
@@ -81,6 +98,19 @@ function defaultReadFile(path: string): string {
 
 function defaultWriteFile(path: string, contents: string, mode: number): void {
   writeFileSync(path, contents, { mode });
+}
+
+// Ask the java that PATH resolves for its own java.home, so the keystore of the
+// JVM the step will actually run is found even when it is not the one JAVA_HOME
+// names (or JAVA_HOME is unset). -XshowSettings writes the properties to stderr;
+// no java, or none that prints one, leaves it to JAVA_HOME and the fixed paths.
+function defaultJavaHome(env: NodeJS.ProcessEnv): string | undefined {
+  const result = spawnSync("java", ["-XshowSettings:properties", "-version"], {
+    encoding: "utf8",
+    env,
+  });
+  const match = `${result.stdout ?? ""}${result.stderr ?? ""}`.match(/java\.home\s*=\s*(.+)/);
+  return match ? match[1].trim() : undefined;
 }
 /* v8 ignore stop */
 
@@ -121,7 +151,7 @@ export function writeCaTrustFiles(
     writeFile = defaultWriteFile,
     exists = existsSync,
   }: CaTrustDeps = {},
-): CaTrustFiles {
+): Omit<CaTrustFiles, "jvmKeystores"> {
   const ca = readFile(caCertPath).trimEnd();
 
   const ownCaPath = join(dir, "buildcage-ca.pem");
@@ -137,6 +167,121 @@ export function writeCaTrustFiles(
   }
 
   return { ownCaPath, systemCa };
+}
+
+// The keystore file names a JVM's default trust manager reads: jssecacerts
+// overrides cacerts when present, so both get the CA.
+const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"];
+
+// Keystore directories tried when JAVA_HOME is unset, for a JVM at a fixed
+// location without it: Debian's ca-certificates-java output and RHEL's, each a
+// symlink realpath resolves to the real file.
+const KNOWN_JVM_KEYSTORE_DIRS = [
+  "/etc/ssl/certs/java",
+  "/etc/pki/java",
+  "/etc/pki/ca-trust/extracted/java",
+];
+
+// The alias the injected trusted certificate carries; only has to not collide
+// with one the keystore already uses.
+const JVM_KEYSTORE_ALIAS = "buildcage-proxy-ca";
+
+/**
+ * Find the JVM keystores on the runner: the keystore of the java PATH actually
+ * resolves (its java.home, which mvn/gradle/java read and which need not be the
+ * one JAVA_HOME names), then JAVA_HOME (the JDK 9+ lib/security and a JDK 8's
+ * jre/lib/security, for a tool that goes by JAVA_HOME instead), then the known
+ * fixed directories. Each is resolved and deduplicated so a keystore reachable
+ * by more than one path is injected into once.
+ */
+export function discoverJvmKeystores(
+  env: NodeJS.ProcessEnv,
+  { exists = existsSync, realpath = realpathSync, javaHome = defaultJavaHome }: CaTrustDeps = {},
+): string[] {
+  const dirs: string[] = [];
+  // java.home already is the JRE for a JDK 8, so lib/security covers both shapes.
+  const home = javaHome(env);
+  if (home) dirs.push(join(home, "lib", "security"));
+  if (env.JAVA_HOME) {
+    dirs.push(
+      join(env.JAVA_HOME, "lib", "security"),
+      join(env.JAVA_HOME, "jre", "lib", "security"),
+    );
+  }
+  dirs.push(...KNOWN_JVM_KEYSTORE_DIRS);
+
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const dir of dirs) {
+    for (const name of JVM_KEYSTORE_NAMES) {
+      const candidate = join(dir, name);
+      if (!exists(candidate)) continue;
+      const real = realpath(candidate);
+      if (seen.has(real)) continue;
+      seen.add(real);
+      found.push(real);
+    }
+  }
+  return found;
+}
+
+/**
+ * Inject the proxy CA into a copy of each JVM keystore, in `dir` (this run's own
+ * scratch directory), and return each copy with the keystore it stands in for,
+ * for caTrustAdditions to mount over. The copy is made and rewritten with the
+ * runner's own keytool, so its output is one that JVM will trust as its cacerts;
+ * the real keystore is only read, never written. A keystore keytool cannot
+ * rewrite (an unusual password, say) is skipped, so the step's JVM does not
+ * trust the CA rather than the step failing.
+ */
+export function writeJvmKeystoreFiles(
+  caCertPath: string,
+  dir: string,
+  env: NodeJS.ProcessEnv,
+  {
+    exec = defaultExec,
+    exists = existsSync,
+    realpath = realpathSync,
+    copyFile = copyFileSync,
+    chmod = chmodSync,
+    javaHome = defaultJavaHome,
+    warn,
+  }: CaTrustDeps = {},
+): CaTrustFiles["jvmKeystores"] {
+  const keytool = env.JAVA_HOME ? join(env.JAVA_HOME, "bin", "keytool") : "keytool";
+  const injected: CaTrustFiles["jvmKeystores"] = [];
+
+  discoverJvmKeystores(env, { exists, realpath, javaHome }).forEach((keystore, i) => {
+    const copy = join(dir, `jvm-keystore-${i}`);
+    try {
+      copyFile(keystore, copy);
+      chmod(copy, 0o644);
+      exec(keytool, [
+        "-importcert",
+        "-noprompt",
+        "-alias",
+        JVM_KEYSTORE_ALIAS,
+        "-file",
+        caCertPath,
+        "-keystore",
+        copy,
+        "-storepass",
+        "changeit",
+      ]);
+    } catch {
+      // The copy or keytool failed (a non-default store password, say). Say so,
+      // since the only other sign is an opaque TLS error from the step's JVM.
+      warn?.(
+        `could not add the proxy CA to the JVM keystore ${keystore}; a Java step ` +
+          `will not trust it. Use proxy_engine: universal for a JVM build whose ` +
+          `keystore cannot be rewritten.`,
+      );
+      return;
+    }
+    injected.push({ path: copy, destination: keystore });
+  });
+
+  return injected;
 }
 
 // Mirrors buildcage/docker's inspect-engine CA-injection policy table (see
@@ -189,6 +334,17 @@ export function caTrustAdditions(files: CaTrustFiles, env: NodeJS.ProcessEnv): C
     for (const name of POINT_AT_SYSTEM_STORE) {
       if (!env[name]) extraEnv[name] = files.systemCa.destination;
     }
+  }
+
+  // The JVM reads no variable, only its own keystore, so these add no env, just
+  // the injected copy mounted over each keystore it stands in for.
+  for (const keystore of files.jvmKeystores) {
+    mounts.push({
+      destination: keystore.destination,
+      type: "none",
+      source: keystore.path,
+      options: ["rbind", "ro"],
+    });
   }
 
   return { mounts, env: extraEnv };

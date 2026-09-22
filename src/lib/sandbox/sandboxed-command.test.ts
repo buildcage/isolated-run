@@ -17,6 +17,7 @@ const mocks = {
   extractRuncBootstrap: vi.fn(),
   extractCaCert: vi.fn(),
   writeCaTrustFiles: vi.fn(),
+  writeJvmKeystoreFiles: vi.fn(),
   createOverlayScratchDirs: vi.fn(),
   writeRunScript: vi.fn(),
   writeResolvConf: vi.fn(),
@@ -69,6 +70,7 @@ beforeEach(() => {
   mocks.extractRuncBootstrap.mockReturnValue(BOOTSTRAP);
   mocks.extractCaCert.mockReturnValue(`${SCRATCH}/ca.crt`);
   mocks.writeCaTrustFiles.mockReturnValue({ bundlePath: `${SCRATCH}/ca-bundle.crt` });
+  mocks.writeJvmKeystoreFiles.mockReturnValue([]);
   mocks.createOverlayScratchDirs.mockReturnValue([]);
   mocks.writeResolvConf.mockReturnValue(`${SCRATCH}/resolv.conf`);
   mocks.writeRunScript.mockReturnValue(`${SCRATCH}/exec/run.sh`);
@@ -129,6 +131,7 @@ describe("runSandboxedCommand", () => {
     expect(mocks.extractCaCert).toHaveBeenCalledWith(CONTAINER, SCRATCH);
     expect(mocks.buildOciConfig.mock.calls[0][1].caTrust).toStrictEqual({
       bundlePath: `${SCRATCH}/ca-bundle.crt`,
+      jvmKeystores: [],
     });
   });
 
@@ -300,6 +303,9 @@ describe("assembleBundle", () => {
   it("hands back the CA trust files the inspect engine needs, for the caller to pass on", () => {
     const bundle = assembleBundle(SCRATCH, options({ proxyEngine: "inspect" }), deps);
 
-    expect(bundle.caTrust).toStrictEqual({ bundlePath: `${SCRATCH}/ca-bundle.crt` });
+    expect(bundle.caTrust).toStrictEqual({
+      bundlePath: `${SCRATCH}/ca-bundle.crt`,
+      jvmKeystores: [],
+    });
   });
 });
