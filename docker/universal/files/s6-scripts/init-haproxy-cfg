@@ -77,4 +77,18 @@ envsubst '${HAPROXY_NAMESERVERS} ${HAPROXY_DECISION_LABEL} ${HAPROXY_AUDIT_ACCEP
   < /etc/haproxy/haproxy.cfg.template \
   > /etc/haproxy/haproxy.cfg
 
+# The Corefile CoreDNS reads at startup (its s6 unit depends on this oneshot).
+# 172.20.0.1 is the proxy gateway every name resolves to. The raw rule strings
+# are passed, not the .lst regexes above: gen-coredns compiles them through the
+# same path the HAProxy allowlist comes from, so what CoreDNS logs as allowed
+# cannot drift from what HAProxy lets through. In audit mode the rules are
+# ignored, every name logged as allowed.
+echo "Generating CoreDNS Corefile..."
+qjs --std -m /opt/buildcage/scripts/gen-coredns.js \
+  /etc/coredns/Corefile \
+  172.20.0.1 \
+  "$PROXY_MODE" \
+  "$ALLOWED_HTTPS_RULES" \
+  "$ALLOWED_HTTP_RULES"
+
 echo "init-haproxy-cfg: configuration generated"

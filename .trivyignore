@@ -1,6 +1,6 @@
 # These proxy images (alpine + haproxy + iptables + runc + quickjs-ng + a
-# small Go seccomp-profile generator, plus dnsmasq in universal and CoreDNS
-# in inspect; see docker/universal/Dockerfile and docker/inspect/Dockerfile)
+# small Go seccomp-profile generator, plus CoreDNS in both engines; see
+# docker/universal/Dockerfile and docker/inspect/Dockerfile)
 # have a small dependency surface. Suppressions here should only be added
 # once image-scan.yml has actually flagged a finding against one of these
 # images and the finding has been reviewed as inapplicable; no CVE IDs are

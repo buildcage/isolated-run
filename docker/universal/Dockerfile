@@ -3,6 +3,11 @@ ARG RUNC_VERSION=v1.5.1
 ARG RUNC_SHA256_AMD64=177df879d50c913eb205e898d5c1c05a18f574053c0ce5524c471208eaf06f6f
 ARG RUNC_SHA256_ARM64=ca70e7dbd6616ca782a59b5d3ac86909123fdaa9fa3f89dcf29051c70eee7ce9
 
+# renovate: datasource=github-releases depName=coredns/coredns
+ARG COREDNS_VERSION=1.14.7
+ARG COREDNS_SHA256_AMD64=9a09356438c6d9591cb80011a2a7a52f87fc3a113f6690e41f243f98b98faac9
+ARG COREDNS_SHA256_ARM64=bf26782d19b5340e3e6cb50f1ed6df72f58e4a30932c79d167f0f0a8b1e92e16
+
 # Stated so a base image bump cannot move HAProxy quietly: apk fails rather than
 # installing whatever the new Alpine carries.
 ARG HAPROXY_BRANCH=3.4
@@ -14,6 +19,9 @@ FROM alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6ee
 ARG RUNC_VERSION
 ARG RUNC_SHA256_AMD64
 ARG RUNC_SHA256_ARM64
+ARG COREDNS_VERSION
+ARG COREDNS_SHA256_AMD64
+ARG COREDNS_SHA256_ARM64
 RUN apk add --no-cache curl && \
     mkdir -p /opt/buildcage/bin && \
     ARCH=$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/') && \
@@ -21,7 +29,12 @@ RUN apk add --no-cache curl && \
     curl -fsSL "https://github.com/opencontainers/runc/releases/download/${RUNC_VERSION}/runc.${ARCH}" \
       -o /opt/buildcage/bin/runc && \
     echo "${EXPECTED_SHA256}  /opt/buildcage/bin/runc" | sha256sum -c && \
-    chmod +x /opt/buildcage/bin/runc
+    chmod +x /opt/buildcage/bin/runc && \
+    COREDNS_SHA=$([ "$ARCH" = "amd64" ] && echo "$COREDNS_SHA256_AMD64" || echo "$COREDNS_SHA256_ARM64") && \
+    curl -fsSL "https://github.com/coredns/coredns/releases/download/v${COREDNS_VERSION}/coredns_${COREDNS_VERSION}_linux_${ARCH}.tgz" \
+      -o /tmp/coredns.tgz && \
+    echo "${COREDNS_SHA}  /tmp/coredns.tgz" | sha256sum -c && \
+    tar -C /usr/local/bin -xz -f /tmp/coredns.tgz coredns
 
 # Building gen-seccomp-profile here only compiles the binary: it's
 # extracted onto the runner host and run natively there, not at image
@@ -48,6 +61,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --ignore-scripts
 COPY rolldown.scripts.config.js ./
 COPY src/core/ ./src/core/
+COPY docker/universal/scripts/ ./docker/universal/scripts/
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm run build:qjs
 
@@ -63,7 +77,6 @@ ARG HAPROXY_BRANCH
 RUN apk add --no-cache \
       s6-overlay \
       "haproxy~${HAPROXY_BRANCH}" \
-      dnsmasq \
       iptables \
       iproute2 \
       gettext \
@@ -80,16 +93,24 @@ ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2
 # the default 3000 costs every teardown 3s. The services stop in under 50ms.
 ENV S6_KILL_GRACETIME=500
 
-COPY docker/universal/files/dnsmasq.conf /etc/dnsmasq.conf
-
-RUN mkdir -p /etc/haproxy/rules /var/log/haproxy
+RUN mkdir -p /etc/haproxy/rules /var/log/haproxy /etc/coredns /var/log/coredns
 COPY docker/universal/files/haproxy.cfg.template /etc/haproxy/haproxy.cfg.template
 
+# CoreDNS answers queries the step controls, so it must not run as root.
+# setcap keeps :53 bindable once it has dropped privileges.
+COPY --from=deps /usr/local/bin/coredns /usr/local/bin/coredns
+RUN apk add --no-cache --virtual .setcap libcap-utils && \
+    addgroup -S coredns && adduser -S -D -H -G coredns coredns && \
+    setcap cap_net_bind_service=+ep /usr/local/bin/coredns && \
+    apk del .setcap
+
 # Tools (QuickJS scripts, rolldown-bundled by qjs-build above).
-# convert-rule.js is used by init-haproxy-cfg. No report-action.js here:
-# src/lib/report.ts builds its own report in-process instead of fetching one
-# from the container.
+# convert-rule.js is used by init-haproxy-cfg. gen-coredns.js writes the
+# Corefile from the same host rules the HAProxy allowlist is built from (see
+# init-haproxy-cfg). No report-action.js here: src/lib/report.ts builds its own
+# report in-process instead of fetching one from the container.
 COPY --from=qjs-build /build/dist/qjs/src/core/scripts/convert-rule.js /opt/buildcage/scripts/convert-rule.js
+COPY --from=qjs-build /build/dist/qjs/docker/universal/scripts/gen-coredns.js /opt/buildcage/scripts/gen-coredns.js
 
 # runc, extracted onto the runner host at action startup and used by
 # run-isolated.sh to execute the isolated command (see docs/development.md)

@@ -253,7 +253,7 @@ runs rather than running it in one go; build the image a group needs, then run t
 ├── dist/                      # Bundled output (rolldown → CommonJS), committed. dist/qjs and
 │                              # dist/qjs-test are gitignored scratch
 ├── docker/                    # Proxy image build contexts, one per proxy_engine
-│   ├── universal/             # alpine + haproxy/dnsmasq/iptables/s6-overlay + pinned runc +
+│   ├── universal/             # alpine + haproxy/CoreDNS/iptables/s6-overlay + pinned runc +
 │   │                          # gen-seccomp-profile, with their config and s6 service definitions
 │   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay, plus scripts/ (gen-configs
 │   │                          # runs under QuickJS at container startup)
