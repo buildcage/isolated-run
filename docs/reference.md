@@ -77,6 +77,9 @@ warns and ignores it.
 `audit` allows what the active engine can classify. A connection it cannot classify, such as an HTTP
 request carrying no `Host` header, is still refused, on each engine's own terms.
 
+Because `audit` enforces nothing, the `allowed_*_rules` have no effect in it; you write them when
+you move to `restrict`.
+
 Under `inspect`, `audit` is not a passive observer: TLS is still terminated, so a tool that pins a
 certificate fails there exactly as it would under `restrict`. `universal`'s audit mode decrypts
 nothing and breaks nothing.
