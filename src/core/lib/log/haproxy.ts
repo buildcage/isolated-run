@@ -22,7 +22,7 @@ export interface HaproxyLogScan {
 // The quoted target and the reason are restricted to the charset the config
 // actually emits (host/IP/port, and a kebab-case reason), and the line is
 // anchored at both ends, so a forged target or reason is never read as a
-// decision. %B is a byte count, or `-` when none was transferred.
+// decision. The last field is %B, a byte count (`-` if the field is empty).
 const DECISION =
   /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za-z0-9._:-]+)" ([A-Za-z0-9-]+) (\d+|-)$/;
 

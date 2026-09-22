@@ -8,10 +8,9 @@ import type { GenReportParameters, UniversalReportData } from "../types.ts";
  * fetches both logs and the parameters.
  *
  * universal never terminates TLS, so its proxy events carry no method, URL or
- * status, only the host, port and bytes of each connection. The resolver log
- * is read for the same reason it is on inspect: a name looked up but never
- * connected to reaches no HAProxy line, so a DNS-only refusal would otherwise
- * leave no trace.
+ * status, only the host, port and bytes of each connection. The resolver log is
+ * read because a name looked up but never connected to reaches no HAProxy line,
+ * so a DNS-only refusal would otherwise leave no trace.
  */
 export async function buildUniversalReportData(
   proxyLines: AsyncIterable<string> | Iterable<string>,
