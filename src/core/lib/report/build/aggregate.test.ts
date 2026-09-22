@@ -142,6 +142,23 @@ describe("annotateKnownBlocked", () => {
       );
     });
 
+    it("does not match across schemes, as the proxy buckets rules by scheme", () => {
+      // A plaintext HTTP request that happens to be on 443 is not what an
+      // https rule acknowledges.
+      const httpOn443 = request({ protocol: "http", url: "http://api.example.com/telemetry" });
+      expect(
+        annotateKnownBlocked([httpOn443], ["* https://api.example.com/telemetry"])[0].expected,
+      ).toBe(false);
+      const httpRule = request({
+        protocol: "http",
+        port: 80,
+        url: "http://api.example.com/telemetry",
+      });
+      expect(
+        annotateKnownBlocked([httpRule], ["POST http://api.example.com/telemetry"])[0].expected,
+      ).toBe(true);
+    });
+
     it("never matches a block with no method or path (a host-level refusal)", () => {
       const refusal = block({ host: "api.example.com" });
       expect(

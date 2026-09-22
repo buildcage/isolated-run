@@ -19898,13 +19898,16 @@ async function scanInspectDnsLog(lines, isAudit = !1) {
 }
 //#endregion
 //#region src/core/lib/log/aggregate.ts
+function entryKey(e) {
+	return `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
+}
 function compareAggregated(a, b) {
 	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
 }
 function aggregate(filtered) {
 	let map = {};
 	for (let e of filtered) {
-		let key = `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
+		let key = entryKey(e);
 		map[key] = (map[key] || 0) + 1;
 	}
 	return Object.keys(map).map((key) => {
@@ -19927,22 +19930,23 @@ function requestPath(url) {
 	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
 	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
 }
-function matchesUrlRule(rule, event) {
-	if (event.method === void 0 || event.url === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !new RegExp(rule.pathRegex).test(requestPath(event.url))) return !1;
+function matchesUrlRule({ rule, hostRe, pathRe, defaultPort }, event) {
+	if (event.method === void 0 || event.url === void 0 || event.protocol !== rule.scheme || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
 	let hostPort = `${event.host}:${event.port}`;
-	if (rule.isRegex) {
-		let hostRegex = new RegExp(rule.hostRegex), defaultPort = Number(DEFAULT_PORT$1[rule.scheme]);
-		return event.port === defaultPort && hostRegex.test(event.host) || hostRegex.test(hostPort);
-	}
-	return new RegExp(rule.authorityRegex).test(hostPort);
+	return rule.isRegex && event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
 }
 function buildMatchers(knownBlockedRules) {
 	return knownBlockedRules.map((line) => {
 		if (isKnownBlockedUrlRule(line)) {
-			let urlRule = convertUrlRule(line);
+			let urlRule = convertUrlRule(line), compiled = {
+				rule: urlRule,
+				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex),
+				pathRe: new RegExp(urlRule.pathRegex),
+				defaultPort: Number(DEFAULT_PORT$1[urlRule.scheme])
+			};
 			return {
 				rule: urlRule.raw,
-				matches: (event) => matchesUrlRule(urlRule, event)
+				matches: (event) => matchesUrlRule(compiled, event)
 			};
 		}
 		let completed = completeRulePort(line), re = new RegExp(convertRule(completed));
@@ -19955,7 +19959,7 @@ function buildMatchers(knownBlockedRules) {
 function annotateKnownBlocked(blockedEvents, knownBlockedRules) {
 	let matchers = buildMatchers(knownBlockedRules), accumulators = new Map();
 	for (let event of blockedEvents) {
-		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = `${entry.host}\t${entry.port}\t${entry.ruleType}\t${entry.reason}`, accumulator = accumulators.get(key);
+		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = entryKey(entry), accumulator = accumulators.get(key);
 		accumulator ? (accumulator.count++, index === -1 ? accumulator.expectedAll = !1 : index < accumulator.bestIndex && (accumulator.bestIndex = index, accumulator.bestRule = matchers[index].rule)) : accumulators.set(key, {
 			entry,
 			count: 1,

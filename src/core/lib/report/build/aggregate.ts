@@ -7,6 +7,7 @@ import {
 import {
   aggregate,
   compareAggregated,
+  entryKey,
   type AggregatedEntry,
   type LogEntry,
 } from "#core/lib/log/aggregate.ts";
@@ -57,30 +58,44 @@ function requestPath(url: string): string {
   return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
 }
 
+/** A URL rule with its regexes compiled once, for matchesUrlRule. */
+interface CompiledUrlRule {
+  rule: UrlRule;
+  /** `authorityRegex` for a wildcard rule, `hostRegex` for a `~` rule. */
+  hostRe: RegExp;
+  pathRe: RegExp;
+  /** The scheme's default port, for a `~` rule's optional-port match. */
+  defaultPort: number;
+}
+
 /**
  * Whether a blocked event is one a URL rule acknowledges.
  *
  * Only `inspect` records a method and a URL on a block, so an event without
  * them (a host-level refusal, or any block under `universal`) never matches a
- * URL rule; those are acknowledged with a host rule instead. Host, port and
- * path are matched the way the proxy itself would have (see
- * haproxy-rule-block.ts): the port against the connection rather than the Host
- * header, so `host:9443` does not also cover 443, and the path with its query
- * dropped.
+ * URL rule; those are acknowledged with a host rule instead. Scheme, host, port
+ * and path are matched the way the proxy itself would have (see
+ * haproxy-rule-block.ts, and haproxy-rules.ts's per-scheme bucketing): the
+ * scheme against the connection's protocol, so an https rule does not cover a
+ * plaintext request on 443; the port against the connection rather than the
+ * Host header, so `host:9443` does not also cover 443; and the path with its
+ * query dropped.
  */
-function matchesUrlRule(rule: UrlRule, event: TrafficEvent): boolean {
+function matchesUrlRule(
+  { rule, hostRe, pathRe, defaultPort }: CompiledUrlRule,
+  event: TrafficEvent,
+): boolean {
   if (event.method === undefined || event.url === undefined) return false;
+  if (event.protocol !== rule.scheme) return false;
   if (rule.methods !== null && !rule.methods.includes(event.method.toUpperCase())) return false;
-  if (!new RegExp(rule.pathRegex).test(requestPath(event.url))) return false;
+  if (!pathRe.test(requestPath(event.url))) return false;
   const hostPort = `${event.host}:${event.port}`;
   if (rule.isRegex) {
     // A `~` rule's port is optional: the proxy tries the host bare on the
     // scheme's default port and with the real port, so both are tried here.
-    const hostRegex = new RegExp(rule.hostRegex);
-    const defaultPort = Number(DEFAULT_PORT[rule.scheme as "https" | "http"]);
-    return (event.port === defaultPort && hostRegex.test(event.host)) || hostRegex.test(hostPort);
+    return (event.port === defaultPort && hostRe.test(event.host)) || hostRe.test(hostPort);
   }
-  return new RegExp(rule.authorityRegex).test(hostPort);
+  return hostRe.test(hostPort);
 }
 
 /**
@@ -88,13 +103,20 @@ function matchesUrlRule(rule: UrlRule, event: TrafficEvent): boolean {
  * carrying a space is a URL rule (see isKnownBlockedUrlRule); otherwise it is a
  * host rule, whose missing port is completed here too so a value set straight
  * in the environment behaves like one that came through the action's input, and
- * `rule` reports the completed text rather than the shorthand.
+ * `rule` reports the completed text rather than the shorthand. Each rule's
+ * regexes are compiled here, not per event.
  */
 function buildMatchers(knownBlockedRules: string[]): KnownBlockedMatcher[] {
   return knownBlockedRules.map((line) => {
     if (isKnownBlockedUrlRule(line)) {
       const urlRule = convertUrlRule(line);
-      return { rule: urlRule.raw, matches: (event) => matchesUrlRule(urlRule, event) };
+      const compiled: CompiledUrlRule = {
+        rule: urlRule,
+        hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex),
+        pathRe: new RegExp(urlRule.pathRegex),
+        defaultPort: Number(DEFAULT_PORT[urlRule.scheme as "https" | "http"]),
+      };
+      return { rule: urlRule.raw, matches: (event) => matchesUrlRule(compiled, event) };
     }
     const completed = completeRulePort(line);
     const re = new RegExp(convertRule(completed));
@@ -134,7 +156,7 @@ export function annotateKnownBlocked(
   for (const event of blockedEvents) {
     const entry = toHostRow(event);
     const index = matchers.findIndex((matcher) => matcher.matches(event));
-    const key = `${entry.host}\t${entry.port}\t${entry.ruleType}\t${entry.reason}`;
+    const key = entryKey(entry);
     const accumulator = accumulators.get(key);
     if (accumulator) {
       accumulator.count++;
