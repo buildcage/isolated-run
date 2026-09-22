@@ -10,6 +10,7 @@ import {
   splitDomainFromPortPattern,
   splitRawRegexHost,
 } from "./partial-wildcard.ts";
+import { convertUrlRule } from "./url-rules.ts";
 
 /**
  * Split a whitespace-separated rules input into tokens, first dropping each
@@ -68,15 +69,59 @@ export function completeRulePort(rule: string): string {
 }
 
 /**
- * Split+validate `known_blocked_rules`, completing a missing port first. The
- * completed text is what is returned, so everything downstream sees one shape.
+ * Split a `known_blocked_rules` input into one rule per line. Unlike the
+ * whitespace-separated host rule inputs, this one is newline-separated so a
+ * line can be a URL rule, which carries a space between its method and its
+ * URL (see isKnownBlockedUrlRule). Each line's `#` comment is dropped first, a
+ * blank line is ignored, and a `#` glued to a rule is rejected per line.
+ */
+export function splitKnownBlockedLines(rulesInput: string | undefined): string[] {
+  const lines =
+    rulesInput
+      ?.split(/\r?\n/)
+      .map((line) => stripLineComment(line).trim())
+      .filter((line) => line !== "") ?? [];
+  lines.forEach(rejectGluedHash);
+  return lines;
+}
+
+/**
+ * Whether a `known_blocked_rules` line is a URL rule rather than a host rule.
  *
- * @throws {Error} if any rule has invalid wildcard/regex syntax
+ * A URL rule is a method list, a space, then a URL (see url-rules.ts); a host
+ * rule is a single `host:port` token with no space. So the space that a method
+ * prefix introduces is what tells the two apart, the same split convertUrlRule
+ * makes internally. A host rule that reached here still carrying whitespace
+ * would have been two host rules on one line under the old syntax, and is now
+ * read as a malformed URL rule, which is the intended v4 behaviour.
+ */
+export function isKnownBlockedUrlRule(line: string): boolean {
+  return /\s/.test(line.trim());
+}
+
+/**
+ * Split+validate `known_blocked_rules`, one rule per line. A host line has its
+ * missing port completed (see completeRulePort) and is returned in completed
+ * form; a URL line is validated through the `inspect` engine's own compiler and
+ * returned as written. Everything downstream re-classifies a line the same way
+ * (see isKnownBlockedUrlRule), so the two forms round-trip through the
+ * container's env unchanged.
+ *
+ * Engine support is checked separately (see engine-rule-support.ts): a URL line
+ * matches nothing on an engine that never sees a method or a path.
+ *
+ * @throws {Error} if any rule has invalid wildcard/regex/URL syntax
  */
 export function parseAndValidateKnownBlockedRules(rulesInput: string | undefined): string[] {
-  const rules = splitRuleTokens(rulesInput).map(completeRulePort);
-  rules.forEach(convertRule);
-  return rules;
+  return splitKnownBlockedLines(rulesInput).map((line) => {
+    if (isKnownBlockedUrlRule(line)) {
+      convertUrlRule(line); // validate eagerly; throws on bad syntax
+      return line;
+    }
+    const completed = completeRulePort(line);
+    convertRule(completed); // validate eagerly; throws on bad syntax
+    return completed;
+  });
 }
 
 /**

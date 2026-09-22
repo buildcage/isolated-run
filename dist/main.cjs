@@ -17419,65 +17419,6 @@ function splitRawRegexHost(pattern) {
 	return { host };
 }
 //#endregion
-//#region src/core/lib/acl/wildcard-rules.ts
-function splitRuleTokens(rulesInput) {
-	let tokens = rulesInput?.split(/\r?\n/).map(stripLineComment).join(" ").trim().split(/\s+/).filter(Boolean) ?? [];
-	return tokens.forEach(rejectGluedHash), tokens;
-}
-function parseAndValidateRules(rulesInput) {
-	let rules = splitRuleTokens(rulesInput);
-	return rules.forEach(convertRule), rules;
-}
-function completeRulePort(rule) {
-	if (!rule.startsWith("~")) return rule.includes(":") ? rule : `${rule}:*`;
-	let regex = rule.slice(1);
-	return splitDomainFromPortPattern(regex).portPattern === null ? `~${endsAnchored(regex) ? regex.slice(0, -1) : regex}:\\d+` : rule;
-}
-function parseAndValidateKnownBlockedRules(rulesInput) {
-	let rules = splitRuleTokens(rulesInput).map(completeRulePort);
-	return rules.forEach(convertRule), rules;
-}
-function convertRule(rule) {
-	return rule.startsWith("~") ? (splitRawRegexHost(rule), anchorRawRegex(rule.slice(1))) : `^${wildcardToRegex(rule)}$`;
-}
-function domainToRegex(domain) {
-	return domain.split(".").map((part) => {
-		if (part === "**") return ".+";
-		if (part === "*") return "[^.]+";
-		if (part.includes("*")) throw Error(`Invalid wildcard in "${domain}": part "${part}" mixes "*" with other characters`);
-		return part.replace(/[.+^$()[\]{}|\\]/g, "\\$&").replace(/\?/g, "[^.]");
-	}).join("\\.");
-}
-function wildcardToRegex(pattern) {
-	if (!/^[^:]+:(?:\d+|\*)$/.test(pattern)) throw Error(`Invalid pattern "${pattern}"`);
-	let [domain, port] = pattern.split(":"), portRegex = port === "*" ? "\\d+" : port;
-	return `${domainToRegex(domain)}:${portRegex}`;
-}
-//#endregion
-//#region src/core/lib/acl/rules.ts
-var InvalidRulesError = class extends ActionError {};
-function parseRulesOrThrow(rulesInput) {
-	try {
-		return parseAndValidateRules(rulesInput);
-	} catch (e) {
-		throw new InvalidRulesError(errorMessage(e), "INVALID_RULES");
-	}
-}
-function parseKnownBlockedRulesOrThrow(rulesInput) {
-	try {
-		return parseAndValidateKnownBlockedRules(rulesInput);
-	} catch (e) {
-		throw new InvalidRulesError(errorMessage(e), "INVALID_RULES");
-	}
-}
-function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
-	return {
-		httpsRules: parseRulesOrThrow(httpsRulesInput),
-		httpRules: parseRulesOrThrow(httpRulesInput),
-		ipRules: parseRulesOrThrow(ipRulesInput)
-	};
-}
-//#endregion
 //#region src/core/lib/acl/url-rules.ts
 const DEFAULT_PORT$1 = {
 	https: "443",
@@ -17580,6 +17521,75 @@ function buildUrlRules(rulesInput) {
 	return splitUrlRuleLines(rulesInput).map(convertUrlRule);
 }
 //#endregion
+//#region src/core/lib/acl/wildcard-rules.ts
+function splitRuleTokens(rulesInput) {
+	let tokens = rulesInput?.split(/\r?\n/).map(stripLineComment).join(" ").trim().split(/\s+/).filter(Boolean) ?? [];
+	return tokens.forEach(rejectGluedHash), tokens;
+}
+function parseAndValidateRules(rulesInput) {
+	let rules = splitRuleTokens(rulesInput);
+	return rules.forEach(convertRule), rules;
+}
+function completeRulePort(rule) {
+	if (!rule.startsWith("~")) return rule.includes(":") ? rule : `${rule}:*`;
+	let regex = rule.slice(1);
+	return splitDomainFromPortPattern(regex).portPattern === null ? `~${endsAnchored(regex) ? regex.slice(0, -1) : regex}:\\d+` : rule;
+}
+function splitKnownBlockedLines(rulesInput) {
+	let lines = rulesInput?.split(/\r?\n/).map((line) => stripLineComment(line).trim()).filter((line) => line !== "") ?? [];
+	return lines.forEach(rejectGluedHash), lines;
+}
+function isKnownBlockedUrlRule(line) {
+	return /\s/.test(line.trim());
+}
+function parseAndValidateKnownBlockedRules(rulesInput) {
+	return splitKnownBlockedLines(rulesInput).map((line) => {
+		if (isKnownBlockedUrlRule(line)) return convertUrlRule(line), line;
+		let completed = completeRulePort(line);
+		return convertRule(completed), completed;
+	});
+}
+function convertRule(rule) {
+	return rule.startsWith("~") ? (splitRawRegexHost(rule), anchorRawRegex(rule.slice(1))) : `^${wildcardToRegex(rule)}$`;
+}
+function domainToRegex(domain) {
+	return domain.split(".").map((part) => {
+		if (part === "**") return ".+";
+		if (part === "*") return "[^.]+";
+		if (part.includes("*")) throw Error(`Invalid wildcard in "${domain}": part "${part}" mixes "*" with other characters`);
+		return part.replace(/[.+^$()[\]{}|\\]/g, "\\$&").replace(/\?/g, "[^.]");
+	}).join("\\.");
+}
+function wildcardToRegex(pattern) {
+	if (!/^[^:]+:(?:\d+|\*)$/.test(pattern)) throw Error(`Invalid pattern "${pattern}"`);
+	let [domain, port] = pattern.split(":"), portRegex = port === "*" ? "\\d+" : port;
+	return `${domainToRegex(domain)}:${portRegex}`;
+}
+//#endregion
+//#region src/core/lib/acl/rules.ts
+var InvalidRulesError = class extends ActionError {};
+function parseRulesOrThrow(rulesInput) {
+	try {
+		return parseAndValidateRules(rulesInput);
+	} catch (e) {
+		throw new InvalidRulesError(errorMessage(e), "INVALID_RULES");
+	}
+}
+function parseKnownBlockedRulesOrThrow(rulesInput) {
+	try {
+		return parseAndValidateKnownBlockedRules(rulesInput);
+	} catch (e) {
+		throw new InvalidRulesError(errorMessage(e), "INVALID_RULES");
+	}
+}
+function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
+	return {
+		httpsRules: parseRulesOrThrow(httpsRulesInput),
+		httpRules: parseRulesOrThrow(httpRulesInput),
+		ipRules: parseRulesOrThrow(ipRulesInput)
+	};
+}
+//#endregion
 //#region src/lib/engine.ts
 const ENGINES = ["universal", "inspect"], ENGINE_ALIASES = { transparent: "universal" };
 function resolveProxyEngine(input, notice) {
@@ -17664,6 +17674,15 @@ function checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules 
 		return;
 	}
 	throw new SandboxError(`${reason} In restrict mode that means ${list} would not actually be enforced, so the run would look protected but isn't. Switch to proxy_engine: inspect, or remove ${list} from your workflow.`, "INVALID_PROXY_ENGINE");
+}
+function checkKnownBlockedUrlRuleSupport({ proxyEngine, proxyMode, knownBlockedUrlRules }, warn) {
+	if (proxyEngine === "inspect" || knownBlockedUrlRules.length === 0) return;
+	let reason = `known_blocked_rules contains URL rules (a method and a URL) that need proxy_engine: inspect, which alone sees a method or a path; proxy_engine: ${proxyEngine} sees only the host and port, so these rules match no blocked connection and acknowledge nothing.`;
+	if (proxyMode === "audit") {
+		warn(`${reason} They are ignored for this run. Drop the method to acknowledge the whole host, or switch to proxy_engine: inspect.`);
+		return;
+	}
+	throw new SandboxError(`${reason} Drop the method to acknowledge the whole host, or switch to proxy_engine: inspect.`, "INVALID_PROXY_ENGINE");
 }
 //#endregion
 //#region src/lib/compose-file.ts
@@ -19901,28 +19920,60 @@ function aggregate(filtered) {
 }
 //#endregion
 //#region src/core/lib/report/build/aggregate.ts
-function annotateKnownBlocked(blockedRows, knownBlockedRules) {
-	let matchers = knownBlockedRules.map((rule) => {
-		let completed = completeRulePort(rule);
+function targetOf(event) {
+	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
+}
+function requestPath(url) {
+	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
+	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
+}
+function matchesUrlRule(rule, event) {
+	if (event.method === void 0 || event.url === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !new RegExp(rule.pathRegex).test(requestPath(event.url))) return !1;
+	let hostPort = `${event.host}:${event.port}`;
+	if (rule.isRegex) {
+		let hostRegex = new RegExp(rule.hostRegex), defaultPort = Number(DEFAULT_PORT$1[rule.scheme]);
+		return event.port === defaultPort && hostRegex.test(event.host) || hostRegex.test(hostPort);
+	}
+	return new RegExp(rule.authorityRegex).test(hostPort);
+}
+function buildMatchers(knownBlockedRules) {
+	return knownBlockedRules.map((line) => {
+		if (isKnownBlockedUrlRule(line)) {
+			let urlRule = convertUrlRule(line);
+			return {
+				rule: urlRule.raw,
+				matches: (event) => matchesUrlRule(urlRule, event)
+			};
+		}
+		let completed = completeRulePort(line), re = new RegExp(convertRule(completed));
 		return {
 			rule: completed,
-			re: new RegExp(convertRule(completed))
-		};
-	});
-	return blockedRows.map((row) => {
-		let matched = matchers.find(({ re }) => re.test(targetOf(row)));
-		return matched ? {
-			...row,
-			expected: !0,
-			expectedBy: matched.rule
-		} : {
-			...row,
-			expected: !1
+			matches: (event) => re.test(targetOf(event))
 		};
 	});
 }
-function targetOf(row) {
-	return `${row.host}:${row.port === "-" ? "0" : row.port}`;
+function annotateKnownBlocked(blockedEvents, knownBlockedRules) {
+	let matchers = buildMatchers(knownBlockedRules), accumulators = new Map();
+	for (let event of blockedEvents) {
+		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = `${entry.host}\t${entry.port}\t${entry.ruleType}\t${entry.reason}`, accumulator = accumulators.get(key);
+		accumulator ? (accumulator.count++, index === -1 ? accumulator.expectedAll = !1 : index < accumulator.bestIndex && (accumulator.bestIndex = index, accumulator.bestRule = matchers[index].rule)) : accumulators.set(key, {
+			entry,
+			count: 1,
+			expectedAll: index !== -1,
+			bestIndex: index === -1 ? Infinity : index,
+			bestRule: index === -1 ? void 0 : matchers[index].rule
+		});
+	}
+	return [...accumulators.values()].map(({ entry, count, expectedAll, bestRule }) => expectedAll ? {
+		...entry,
+		count,
+		expected: !0,
+		expectedBy: bestRule
+	} : {
+		...entry,
+		count,
+		expected: !1
+	}).sort(compareAggregated);
 }
 const RULE_TYPE = {
 	https: "HTTPS",
@@ -19940,13 +19991,13 @@ function toHostRow(event) {
 	};
 }
 function reduceTimeline(timeline, knownBlockedRules) {
-	let passedRows = [], blockedRows = [], failedRows = [], connected = connectedHosts(timeline);
-	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : (event.action === "block" ? blockedRows : passedRows).push(toHostRow(event))));
+	let passedRows = [], blockedEvents = [], failedRows = [], connected = connectedHosts(timeline);
+	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : event.action === "block" ? blockedEvents.push(event) : passedRows.push(toHostRow(event))));
 	return {
 		passed: aggregate(passedRows),
-		blocked: annotateKnownBlocked(aggregate(blockedRows), knownBlockedRules),
+		blocked: annotateKnownBlocked(blockedEvents, knownBlockedRules),
 		failed: aggregate(failedRows),
-		blockedCount: blockedRows.length
+		blockedCount: blockedEvents.length
 	};
 }
 //#endregion
@@ -65086,6 +65137,7 @@ const realDeps = {
 	readLocalImageOverride,
 	verifyImageDigestOrThrow,
 	checkUrlAndTlsRuleSupport,
+	checkKnownBlockedUrlRuleSupport,
 	logRules,
 	withLogGroup,
 	generateContainerName,
@@ -65119,7 +65171,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, removeCreatedDirsIfEmpty, saveState, info, log, notice, warn } = {
+	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, removeCreatedDirsIfEmpty, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF || "v1", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs(notice);
@@ -65144,6 +65196,10 @@ async function runSandboxStep(env, overrides = {}) {
 			proxyMode,
 			urlRules,
 			tlsRules
+		}, annotation.warning), checkKnownBlockedUrlRuleSupport({
+			proxyEngine,
+			proxyMode,
+			knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
 		}, annotation.warning), withLogGroup("buildcage: Configured ACL Rules", () => {
 			logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
 		});

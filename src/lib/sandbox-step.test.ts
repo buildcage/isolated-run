@@ -20,6 +20,7 @@ const mocks = {
   readLocalImageOverride: vi.fn(),
   verifyImageDigestOrThrow: vi.fn(),
   checkUrlAndTlsRuleSupport: vi.fn(),
+  checkKnownBlockedUrlRuleSupport: vi.fn(),
   logRules: vi.fn(),
   withLogGroup: vi.fn(),
   generateContainerName: vi.fn(),
@@ -262,6 +263,26 @@ describe("runSandboxStep", () => {
 
     expect(await runSandboxStep(ENV, deps)).toBe(0);
     expect(annotation.warning).toHaveBeenCalledWith("url rules need the inspect engine");
+  });
+
+  it("checks known_blocked_rules URL lines against the engine, host lines excluded", async () => {
+    mocks.readRuleInputs.mockReturnValue({
+      proxyMode: "restrict",
+      httpsRules: [],
+      httpRules: [],
+      ipRules: [],
+      urlRules: [],
+      tlsRules: [],
+      knownBlockedRules: ["telemetry.example.com:*", "POST https://api.example.com/telemetry"],
+    });
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.checkKnownBlockedUrlRuleSupport.mock.calls[0]![0]).toStrictEqual({
+      proxyEngine: "universal",
+      proxyMode: "restrict",
+      knownBlockedUrlRules: ["POST https://api.example.com/telemetry"],
+    });
   });
 
   describe("the state post.ts cleans up from", () => {

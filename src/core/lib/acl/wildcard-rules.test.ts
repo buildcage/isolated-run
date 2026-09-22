@@ -7,6 +7,7 @@ import {
   parseAndValidateRules,
   completeRulePort,
   parseAndValidateKnownBlockedRules,
+  isKnownBlockedUrlRule,
 } from "./wildcard-rules.ts";
 
 describe("wildcardToRegex", () => {
@@ -241,11 +242,43 @@ describe("known_blocked_rules port completion", () => {
     expect(completeRulePort("~^a\\$")).toBe("~^a\\$:\\d+");
   });
 
-  it("is what parseAndValidateKnownBlockedRules returns", () => {
-    expect(parseAndValidateKnownBlockedRules("a.example.com b.example.com:443")).toStrictEqual([
+  it("treats a missing input the same as an empty one", () => {
+    expect(parseAndValidateKnownBlockedRules(undefined)).toStrictEqual([]);
+  });
+
+  it("is what parseAndValidateKnownBlockedRules returns, one rule per line", () => {
+    expect(parseAndValidateKnownBlockedRules("a.example.com\nb.example.com:443")).toStrictEqual([
       "a.example.com:*",
       "b.example.com:443",
     ]);
+  });
+
+  it("reads two host rules crammed onto one line as a malformed URL rule (v4)", () => {
+    // Newline-separated now, so a space is a URL rule's method separator; the
+    // old whitespace-separated form no longer parses.
+    expect(() => parseAndValidateKnownBlockedRules("a.example.com b.example.com:443")).toThrow(
+      /Invalid method/,
+    );
+  });
+
+  it("keeps a URL rule line as written, validating it through the URL compiler", () => {
+    expect(
+      parseAndValidateKnownBlockedRules(
+        "telemetry.example.com\nPOST https://api.example.com/telemetry",
+      ),
+    ).toStrictEqual(["telemetry.example.com:*", "POST https://api.example.com/telemetry"]);
+  });
+
+  it("rejects a malformed URL rule line", () => {
+    expect(() => parseAndValidateKnownBlockedRules("GET https://api.example.com/x#frag")).toThrow();
+  });
+
+  it("classifies a line by the space a method prefix introduces", () => {
+    expect(isKnownBlockedUrlRule("telemetry.example.com")).toBe(false);
+    expect(isKnownBlockedUrlRule("*.example.com:443")).toBe(false);
+    expect(isKnownBlockedUrlRule("~^a[.]example[.]com:443$")).toBe(false);
+    expect(isKnownBlockedUrlRule("POST https://api.example.com/telemetry")).toBe(true);
+    expect(isKnownBlockedUrlRule("* https://api.example.com")).toBe(true);
   });
 
   it("drops comments instead of completing them into a rule", () => {

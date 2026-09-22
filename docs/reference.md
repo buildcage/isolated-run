@@ -44,14 +44,14 @@ details.
 All of these are empty by default, and all of them are additive: a connection is allowed when any
 rule in any input matches. Which ones apply depends on the engine.
 
-| Input                 | `inspect` | `universal` | What one rule matches                                                               |
-| --------------------- | :-------: | :---------: | ----------------------------------------------------------------------------------- |
-| `allowed_url_rules`   |    ✅     |      -      | A method and a URL: `GET https://registry.npmjs.org/**`                             |
-| `allowed_https_rules` |    ✅     |     ✅      | A host and port reached over HTTPS: `registry.npmjs.org:443`                        |
-| `allowed_http_rules`  |    ✅     |     ✅      | A host and port reached over plain HTTP: `deb.debian.org:80`                        |
-| `allowed_ip_rules`    |    ✅     |     ✅      | An address and port, for connections made without DNS: `192.168.1.1:443`            |
-| `allowed_tls_rules`   |    ✅     |      -      | A TLS destination to pass through undecrypted, judged on SNI: `db.example.com:5432` |
-| `known_blocked_rules` |    ✅     |     ✅      | A host expected to be blocked, so it doesn't fail the step                          |
+| Input                 | `inspect` | `universal` | What one rule matches                                                                           |
+| --------------------- | :-------: | :---------: | ----------------------------------------------------------------------------------------------- |
+| `allowed_url_rules`   |    ✅     |      -      | A method and a URL: `GET https://registry.npmjs.org/**`                                         |
+| `allowed_https_rules` |    ✅     |     ✅      | A host and port reached over HTTPS: `registry.npmjs.org:443`                                    |
+| `allowed_http_rules`  |    ✅     |     ✅      | A host and port reached over plain HTTP: `deb.debian.org:80`                                    |
+| `allowed_ip_rules`    |    ✅     |     ✅      | An address and port, for connections made without DNS: `192.168.1.1:443`                        |
+| `allowed_tls_rules`   |    ✅     |      -      | A TLS destination to pass through undecrypted, judged on SNI: `db.example.com:5432`             |
+| `known_blocked_rules` |    ✅     |     ✅      | A host, or (on `inspect`) a method and URL, expected to be blocked, so it doesn't fail the step |
 
 Under `inspect`, `allowed_https_rules` and `allowed_http_rules` still work and are kept for
 compatibility, but `allowed_url_rules` covers them: a host rule is the same as a URL rule with any
@@ -153,8 +153,10 @@ destination.
 
 ### Host rules: `allowed_https_rules`, `allowed_http_rules`, `allowed_ip_rules`, `known_blocked_rules`
 
-These four share one syntax. Rules are separated by whitespace, so one per line reads best. A host
-rule is equivalent to a URL rule with any method and any path.
+`allowed_https_rules`, `allowed_http_rules` and `allowed_ip_rules` share one syntax; rules are
+separated by whitespace, so one per line reads best. A host rule is equivalent to a URL rule with any
+method and any path. `known_blocked_rules` extends this syntax and is newline-separated, since a line
+there can also be a URL rule; see [Blocked rules](#blocked-rules-known_blocked_rules).
 
 ```yaml
 allowed_https_rules: |
@@ -188,10 +190,49 @@ A port is required on every rule.
 | `*.example.com:8443` | Any single-level subdomain of `example.com` on port 8443 only |
 | `example.com:*`      | `example.com` on any port                                     |
 
-`known_blocked_rules` is the exception: a rule there that names no port is read as `:*`. It is
+`known_blocked_rules` is the exception: a host rule there that names no port is read as `:*`. It is
 matched against rows of the report rather than against connections, and a row for a name the
 resolver refused has no port at all, nothing having been connected to. `telemetry.example.com` and
 `telemetry.example.com:*` are the same rule.
+
+### Blocked rules: `known_blocked_rules`
+
+`known_blocked_rules` lists traffic that is expected to be blocked, so a run isn't failed over a
+refusal you already know about. It does not allow anything: the traffic stays blocked. That is the
+point for a telemetry endpoint you want refused but not treated as an error, where allowing it would
+let the request through.
+
+Unlike the allow inputs it is newline-separated, one rule per line, because a line can be either
+form:
+
+- a **host rule** (`host:port`, the syntax above), which works on either engine; and
+- a **URL rule** (a method and a URL, the [`allowed_url_rules`](#url-rules-allowed_url_rules)
+  syntax), which needs `proxy_engine: inspect`, the only engine that sees a method or a path.
+
+```yaml
+known_blocked_rules: |
+  # host rules: acknowledge every port on a name, or a specific one
+  telemetry.example.com
+  *.metrics.example.com:443
+
+  # URL rules (inspect only): acknowledge one endpoint on an otherwise-allowed host
+  POST https://api.example.com/telemetry
+  * https://noisy.example.com/health
+```
+
+A URL rule marks only requests that carry the method and path it names, so it acknowledges one
+endpoint on a host while any other blocked request to the same host still fails the step. A
+host-level refusal — a name the resolver refused, or a connection blocked before any request was
+read — carries no method or path, so it is matched by a host rule, never a URL rule. Port handling
+follows each form: a host rule with no port reads as `:*`, a URL rule with no port as the scheme's
+default (`443`/`80`), exactly as in the allow inputs.
+
+Because a URL rule matches nothing on an engine that never sees a method or a path, a URL line under
+`proxy_engine: universal` is refused in `restrict` mode and warned about in `audit`, the same split
+`allowed_url_rules` gets. A host line works on every engine.
+
+> **Migrating from v1.** `known_blocked_rules` was whitespace-separated, so several host rules could
+> share a line. It is now newline-separated: put each rule on its own line.
 
 ### IP addresses: `allowed_ip_rules`
 
@@ -292,8 +333,10 @@ refused with an error naming what to write instead.
 
 ## Report details
 
-Once `known_blocked_rules` is set, the Blocked Hosts table gains an **Expected** column (✅) on the
-matched rows. Under `inspect` those rows are also folded into one row per rule, named after the rule
+Matching is per request, so a row that counts several requests to one host is Expected only when a
+rule accounts for every one of them: a URL rule that names one endpoint leaves the host's other
+blocked requests to fail the step. Once `known_blocked_rules` is set, the Blocked Hosts table gains
+an **Expected** column (✅) on the matched rows. Under `inspect` those rows are also folded into one row per rule, named after the rule
 and counting the hosts behind it (`*.example.com:* (12 hosts)`), below the rows nothing matched. A
 rule covering noisy traffic then costs the table one line however many hosts it names, which matters
 most when the noise puts its payload in the name itself and every request brings a new long

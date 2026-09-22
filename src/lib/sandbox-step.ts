@@ -27,7 +27,11 @@ import {
   readRuleInputs,
   readRunCommand,
 } from "./inputs.ts";
-import { checkUrlAndTlsRuleSupport } from "./engine-rule-support.ts";
+import {
+  checkKnownBlockedUrlRuleSupport,
+  checkUrlAndTlsRuleSupport,
+} from "./engine-rule-support.ts";
+import { isKnownBlockedUrlRule } from "#core/lib/acl/wildcard-rules.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { buildComposeEnv } from "./compose-env.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
@@ -63,6 +67,7 @@ export interface SandboxStepDeps {
   readLocalImageOverride: typeof readLocalImageOverride;
   verifyImageDigestOrThrow: typeof verifyImageDigestOrThrow;
   checkUrlAndTlsRuleSupport: typeof checkUrlAndTlsRuleSupport;
+  checkKnownBlockedUrlRuleSupport: typeof checkKnownBlockedUrlRuleSupport;
   logRules: typeof logRules;
   withLogGroup: typeof withLogGroup;
   generateContainerName: typeof generateContainerName;
@@ -97,6 +102,7 @@ const realDeps: SandboxStepDeps = {
   readLocalImageOverride,
   verifyImageDigestOrThrow,
   checkUrlAndTlsRuleSupport,
+  checkKnownBlockedUrlRuleSupport,
   logRules,
   withLogGroup,
   generateContainerName,
@@ -171,6 +177,7 @@ export async function runSandboxStep(
     readLocalImageOverride,
     verifyImageDigestOrThrow,
     checkUrlAndTlsRuleSupport,
+    checkKnownBlockedUrlRuleSupport,
     logRules,
     withLogGroup,
     generateContainerName,
@@ -249,6 +256,14 @@ export async function runSandboxStep(
     const { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } =
       readRuleInputs();
     checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, annotation.warning);
+    checkKnownBlockedUrlRuleSupport(
+      {
+        proxyEngine,
+        proxyMode,
+        knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule),
+      },
+      annotation.warning,
+    );
 
     withLogGroup("buildcage: Configured ACL Rules", () => {
       logRules("HTTPS", httpsRules);
