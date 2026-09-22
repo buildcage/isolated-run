@@ -56,9 +56,9 @@
       "schedule": ["at any time"]
     },
     {
-      "description": "vite-plus asserts that @vitest/coverage-v8 matches the vitest version it bundles, so bumping either one alone breaks the unit test job.",
-      "matchPackageNames": ["vite-plus", "@vitest/coverage-v8"],
-      "groupName": "vite-plus toolchain"
+      "description": "@vitest/coverage-v8 must equal the vitest that vite-plus bundles, which Renovate cannot see, so pin it by hand when upgrading vite-plus instead of letting Renovate bump it.",
+      "matchPackageNames": ["@vitest/coverage-v8"],
+      "enabled": false
     }
   ]
 }
