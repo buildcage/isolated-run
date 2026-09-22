@@ -61,8 +61,7 @@ function describeUndecidedRequests(
   engineLabel: "sandbox" | "proxy",
 ): OutcomeEmission | undefined {
   if (report.engine !== "inspect") return undefined;
-  // A connection the client itself ended is left out of the count, as it is out
-  // of Communication details: no rule saw it and the proxy did nothing to it.
+  // Left out of the count as well, to match what Communication details shows.
   const count = report.timeline.filter(
     (event) => event.action === "incomplete" && !isClientEndedIncomplete(event),
   ).length;

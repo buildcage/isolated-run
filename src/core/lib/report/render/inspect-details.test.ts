@@ -221,8 +221,7 @@ describe("renderInspectDetails", () => {
   });
 
   it("leaves out a connection the client itself aborted or timed out on", () => {
-    // No rule saw these and the proxy did nothing to cause them, so showing them
-    // under ⚠️ is noise. `no-request`, tested below, is not among them.
+    // `no-request`, tested below, is not one of these and still shows.
     for (const reason of ["client-aborted", "client-timeout"]) {
       const rendered = renderInspectDetails(
         [

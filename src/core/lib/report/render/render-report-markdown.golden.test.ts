@@ -126,8 +126,7 @@ const timeline: TrafficEvent[] = [
     queryType: "A",
     reason: "dns-not-allowed",
   },
-  // The client ended this one; buildcage did not, so it is left out of the
-  // detail section and never appears in the fixture (see isClientEndedIncomplete).
+  // Suppressed, so it never appears in the fixture (see isClientEndedIncomplete).
   {
     time: 1787471979.123,
     action: "incomplete",

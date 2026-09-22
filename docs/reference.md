@@ -395,23 +395,22 @@ where the `Host` would have been.
 | ------------ | ----------------------------------------------------------------------------- |
 | `no-request` | no request arrived, and neither the client nor a rule of Buildcage's ended it |
 
-`no-request` is Buildcage's proxy running into an error of its own while still reading, or any other
-connection that carried no whole request without the client having ended it. It is rare, and it is
-not the step's doing.
+`no-request` is Buildcage's proxy hitting an error while still reading, or any other connection that
+carried no whole request and that the client did not end. It is rare, and it is not the step's
+doing.
 
 Such a row is in neither host table and never fails the step, not even with `fail_on_blocked: true`:
 no rule refused it, so `known_blocked_rules` has nothing to match, and nothing reached an origin. A
 `::warning::` annotation gives the count, since the collapsed details section is the only other place
 it appears.
 
-A connection the client itself ended before sending a request is not among these, and Buildcage
-shows neither it nor a count of it. The commonest cause is a container with no `ca-certificates`
-installed: the client cannot verify the certificate Buildcage signs and closes, or lets the
-connection time out, rather than sending its request. Buildcage refused nothing and reached no
-origin, so the attempt is noise rather than a result — though the raw
+A connection the client itself ended before sending a request is not shown or counted at all. The
+commonest cause is a container with no `ca-certificates` installed: the client cannot verify the
+certificate Buildcage signs and closes, or lets the connection time out, before sending a request.
+No rule saw it and no origin was reached, so it is noise in the report; the raw
 [traffic artifact](#traffic-artifact) still records every one, as a `client-aborted` or
 `client-timeout` `incomplete`. Where the host is one the step needs, its name usually also appears
-as a blocked `DNS` row, which is the row to act on; installing `ca-certificates`, or whatever else
+as a blocked `DNS` row, which is the row to act on: installing `ca-certificates`, or whatever else
 kept the client from trusting the CA, is what lets the request through. An `allowed_https_rules` or
 `allowed_http_rules` entry changes nothing, there having been no host to match it against.
 

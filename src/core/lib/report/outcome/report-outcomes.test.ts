@@ -38,8 +38,8 @@ function inspect(
   };
 }
 
-// A `no-request`, which the warning does count; a client-ended reason would be
-// suppressed and is exercised on its own below.
+// A `no-request`, which the warning counts; the suppressed client-ended reasons
+// are exercised on their own below.
 const incomplete: TrafficEvent = {
   time: 1787471975,
   action: "incomplete",
@@ -88,8 +88,6 @@ describe("describeReportOutcomes", () => {
   });
 
   it("stays silent about connections the client itself ended, counting none of them", () => {
-    // These are not the proxy's doing, so they are left out of the count just as
-    // they are out of Communication details.
     const clientAborted: TrafficEvent = { ...incomplete, reason: "client-aborted" };
     const clientTimeout: TrafficEvent = { ...incomplete, reason: "client-timeout" };
     const outcomes = describeReportOutcomes(inspect([clientAborted, clientTimeout]), options);

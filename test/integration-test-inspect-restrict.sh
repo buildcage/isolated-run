@@ -154,9 +154,8 @@ if grep -qE 'DNS allowed\.example\.com ->' <<< "$SUMMARY"; then
 else
   pass "a name that merely resolved is left out of the timeline"
 fi
-# A connection the client left before sending a request. No rule ever saw it and
-# buildcage did not end it, so buildcage keeps it out of the report entirely; the
-# raw traffic artifact is the only place it survives.
+# The client left before sending a request, so buildcage keeps it out of the
+# report; the raw traffic artifact is the only place it survives.
 if grep -qE "HTTPS aborted\.example\.com:443 -> client-(aborted|timeout)" <<< "$SUMMARY"; then
   fail "a connection the client left was shown in the report"
 else

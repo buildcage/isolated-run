@@ -21,10 +21,8 @@ export function renderInspectDetails(
   timeline: TrafficEvent[],
   startedAt: number | undefined,
 ): string {
-  // A connection the client itself aborted or timed out on decided no rule and
-  // is none of the proxy's doing, so it is dropped before anything else keys off
-  // the timeline (see isClientEndedIncomplete). Dropping it here rather than in
-  // `shown` keeps it from masking a lookup in connectedHosts.
+  // Dropped before connectedHosts, so a suppressed connection cannot mask a
+  // name's DNS lookup and hide that too (see isClientEndedIncomplete).
   const relevant = timeline.filter((e) => !isClientEndedIncomplete(e));
   const connected = connectedHosts(relevant);
   const shown = relevant.filter((e) => !isRedundantDns(e, connected));
