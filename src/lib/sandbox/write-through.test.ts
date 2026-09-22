@@ -139,6 +139,10 @@ describe("resolveWriteThroughPaths", () => {
   it("keeps the lone / sentinel intact", () => {
     expect(resolveWriteThroughPaths("/", ENV)).toStrictEqual(["/"]);
   });
+
+  it("drops a whole-line comment, keeping the / sentinel on its own line", () => {
+    expect(resolveWriteThroughPaths("# drop the restriction\n/", ENV)).toStrictEqual(["/"]);
+  });
 });
 
 describe("ensureWriteThroughTargetsExist", () => {
@@ -354,5 +358,20 @@ describe("splitWriteThroughInput", () => {
     ]);
     expect(splitWriteThroughInput("")).toStrictEqual([]);
     expect(splitWriteThroughInput(undefined)).toStrictEqual([]);
+  });
+
+  it("drops a whole-line comment (first non-space character is #) and a blank line", () => {
+    expect(splitWriteThroughInput("# caches\n/opt/cache\n\n   # more\n./dist")).toStrictEqual([
+      "/opt/cache",
+      "./dist",
+    ]);
+  });
+
+  it("keeps a # anywhere else in the path, so a path with a # or a space+# is not truncated", () => {
+    expect(splitWriteThroughInput("/opt/cache#1\n/tmp/a#b\n/data/my logs #2/cache")).toStrictEqual([
+      "/opt/cache#1",
+      "/tmp/a#b",
+      "/data/my logs #2/cache",
+    ]);
   });
 });

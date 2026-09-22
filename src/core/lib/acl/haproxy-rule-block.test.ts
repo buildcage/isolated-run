@@ -208,15 +208,14 @@ describe("rule block", () => {
     expect(plain.includes("# No rules for this scheme, so nothing is permitted.")).toBe(true);
   });
 
-  it("escapes a '#' in a path, which would otherwise comment the ACL short", () => {
-    // Verified against haproxy 3.2 by generating this config with the escape
-    // removed: it reports `regex '^/pkg(x' is invalid` for `^/pkg(x#y)$`, so
-    // everything from the `#` really is dropped. With a pattern that stays
-    // valid when cut short, nothing would report anything and the rule would
-    // quietly allow every path merely starting with `/pkg`.
-    const config = block({ urlRules: buildUrlRules("GET ~^https://a\\.com/pkg#frag$") });
-    expect(config.includes("path -m reg ^/pkg\\#frag$")).toBe(true);
-    expect(config.includes("path -m reg ^/pkg#frag$")).toBe(false);
+  it("escapes a special character in a path so it can't break the ACL line", () => {
+    // A raw `"` (like a space or backslash) would otherwise let haproxy
+    // misparse the line; escapeForHaproxy backslash-escapes it. A `#` is the
+    // other such character, but a rule can no longer carry one
+    // (rejectGluedHash), so it never reaches here.
+    const config = block({ urlRules: buildUrlRules('GET ~^https://a\\.com/pkg"x$') });
+    expect(config.includes('path -m reg ^/pkg\\"x$')).toBe(true);
+    expect(config.includes('path -m reg ^/pkg"x$')).toBe(false);
   });
 
   it("references named acls bare, since braces are for anonymous expressions", () => {

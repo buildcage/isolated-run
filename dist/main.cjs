@@ -17314,6 +17314,14 @@ function deriveProjectName(containerName) {
 //#region src/lib/errors.ts
 var SandboxError = class extends ActionError {};
 //#endregion
+//#region src/core/lib/line-comments.ts
+function stripLineComment(line) {
+	return line.replace(/(^|\s)#.*$/, "$1");
+}
+function rejectGluedHash(rule) {
+	if (rule.includes("#")) throw Error(`Invalid rule ${JSON.stringify(rule)}: a "#" starts a comment only with a space before it, and "#" is never part of a host or URL, so a rule cannot contain one.`);
+}
+//#endregion
 //#region src/core/lib/acl/partial-wildcard.ts
 const REGEX_META = /[.+^$()[\]{}|\\]/g, DOMAIN = {
 	across: ".+",
@@ -17413,7 +17421,8 @@ function splitRawRegexHost(pattern) {
 //#endregion
 //#region src/core/lib/acl/wildcard-rules.ts
 function splitRuleTokens(rulesInput) {
-	return rulesInput?.trim().split(/\s+/).filter(Boolean) ?? [];
+	let tokens = rulesInput?.split(/\r?\n/).map(stripLineComment).join(" ").trim().split(/\s+/).filter(Boolean) ?? [];
+	return tokens.forEach(rejectGluedHash), tokens;
 }
 function parseAndValidateRules(rulesInput) {
 	let rules = splitRuleTokens(rulesInput);
@@ -17484,7 +17493,7 @@ function parseMethods(spec, rule) {
 function splitUrl(url, rule) {
 	let match = /^(https?):\/\/([^/]+)(\/.*)?$/.exec(url);
 	if (!match) throw Error(`Invalid URL in rule "${rule}": expected http:// or https:// followed by a host`);
-	if (url.includes("#")) throw Error(`Invalid URL in rule "${rule}": a "#" fragment is never sent with a request, so this rule would match nothing. Drop it, or write the rule as a "~" regex if the "#" is meant literally.`);
+	if (url.includes("#")) throw Error(`Invalid URL in rule "${rule}": a "#" fragment is never sent with a request, so this rule would match nothing. Drop it.`);
 	return {
 		scheme: match[1],
 		authority: match[2],
@@ -17564,7 +17573,8 @@ function convertUrlRule(rule) {
 	};
 }
 function splitUrlRuleLines(rulesInput) {
-	return rulesInput?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
+	let lines = rulesInput?.split(/\r?\n/).map((line) => stripLineComment(line).trim()).filter((line) => line !== "") ?? [];
+	return lines.forEach(rejectGluedHash), lines;
 }
 function buildUrlRules(rulesInput) {
 	return splitUrlRuleLines(rulesInput).map(convertUrlRule);
@@ -18013,7 +18023,7 @@ function resolveWriteThroughEntry(rawLine, env) {
 	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 function splitWriteThroughInput(input) {
-	return input?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) ?? [];
+	return input?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
 }
 function resolveWriteThroughPaths(input, env) {
 	let lines = splitWriteThroughInput(input);

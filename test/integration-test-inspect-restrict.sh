@@ -60,13 +60,13 @@ GET ~^https://blocked\.example\.com:9443/public/.*$
 GET ~^https://blocked\.example\.com/defaultport/.*$
 GET ~https://ok\.wildcard\.example\.com/regexpub/
 GET ~^https://ok\.wildcard\.example\.com/regexexact$
-# Never requested: this puts the characters haproxy's own config parser
-# folds in front of real haproxy. Unescaped, the '#' would comment the
-# line short and leave the regex as ^/frag(x, and the ' would open a
-# quoted string, either way haproxy refuses the config and this test
-# fails, which is the point. A pattern that stayed valid when cut short
-# would regress in silence.
-GET ~^https://blocked\.example\.com/frag(x#y|'z)$" \
+# Never requested: this puts a character haproxy's own config parser
+# folds in front of real haproxy. Unescaped, the ' would open a quoted
+# string, so haproxy refuses the config and this test fails, which is the
+# point. A pattern that stayed valid when cut short would regress in
+# silence. (A '#' is rejected at input as a comment written without its
+# space, so it never reaches the config.)
+GET ~^https://blocked\.example\.com/frag(x|'z)$" \
 INPUT_FAIL_ON_BLOCKED="false" \
 INPUT_RUN="bash $REPO_ROOT/test/inspect-restrict-scenarios.sh" \
   node "$REPO_ROOT/dist/main.cjs" 2>&1 | tee "$TMPDIR/out.log"

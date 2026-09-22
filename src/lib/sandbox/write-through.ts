@@ -111,15 +111,19 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
 
 /** The write_through: input as bare lines. Newline-separated (not
  *  whitespace-split like the ACL rule inputs) since paths can legitimately
- *  contain spaces. Used on its own for the step's pre-resolution check, which
- *  runs before anything privileged; resolution proper (variables, ~/, relative
- *  paths) is resolveWriteThroughPaths' job below. */
+ *  contain spaces. A whole-line `#` comment (the first non-space character is
+ *  `#`) and a blank line are dropped; a `#` anywhere else stays part of the
+ *  path, unlike the rule inputs, since a path may legitimately contain one and
+ *  an inline comment could not be told from it. Used on its own for the step's
+ *  pre-resolution check, which runs before anything privileged; resolution
+ *  proper (variables, ~/, relative paths) is resolveWriteThroughPaths' job
+ *  below. */
 export function splitWriteThroughInput(input: string | undefined): string[] {
   return (
     input
       ?.split(/\r?\n/)
       .map((line) => line.trim())
-      .filter(Boolean) ?? []
+      .filter((line) => line !== "" && !line.startsWith("#")) ?? []
   );
 }
 
