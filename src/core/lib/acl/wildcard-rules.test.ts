@@ -176,8 +176,11 @@ describe("splitRuleTokens comments", () => {
     ]);
   });
 
-  it("leaves a # inside a ~ regex rule intact", () => {
-    expect(splitRuleTokens("~^a#b:443$")).toStrictEqual(["~^a#b:443$"]);
+  it("rejects a # glued to a rule, since one never legitimately appears in a rule", () => {
+    // A bare `#` in a host or a ~ regex would otherwise pass as a rule matching
+    // a `#` that no host ever carries, so it is reported instead of trimmed.
+    expect(() => splitRuleTokens("~^a#b:443$")).toThrow(/Invalid rule/);
+    expect(() => splitRuleTokens("example.com#c:443")).toThrow(/never part of a host or URL/);
   });
 
   it("treats a comment-only input the same as an empty one", () => {
@@ -245,6 +248,11 @@ describe("known_blocked_rules port completion", () => {
     expect(
       parseAndValidateKnownBlockedRules("# noisy\nnoisy.example.com  # telemetry"),
     ).toStrictEqual(["noisy.example.com:*"]);
+  });
+
+  it("rejects a # glued to a rule rather than completing it into a dead rule", () => {
+    // Without a port, `noisy#c` used to gain `:*` and pass as `noisy#c:*`.
+    expect(() => parseAndValidateKnownBlockedRules("noisy.example.com#c")).toThrow(/Invalid rule/);
   });
 
   it("still rejects a rule that is malformed for other reasons", () => {

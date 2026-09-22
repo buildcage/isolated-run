@@ -191,9 +191,10 @@ describe("buildUrlRules", () => {
     expect(rules.map((r) => r.raw)).toStrictEqual(["GET https://a.com/x", "GET https://b.com/y"]);
   });
 
-  it("does not treat a mid-line # as a comment marker", () => {
-    const rules = buildUrlRules("GET ~^https://a\\.com/x#frag$");
-    expect(rules[0].raw).toBe("GET ~^https://a\\.com/x#frag$");
+  it("rejects a # glued to a rule, a stray fragment that never travels with a request", () => {
+    expect(() => buildUrlRules("GET https://a.com/x#frag")).toThrow(/Invalid rule/);
+    // Even a ~ regex: a literal # matches a # no request URL carries.
+    expect(() => buildUrlRules("GET ~^https://a\\.com/x#frag$")).toThrow(/Invalid rule/);
   });
 
   it("refuses a fragment in a literal URL, which no request ever carries", () => {

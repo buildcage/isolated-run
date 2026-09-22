@@ -94,8 +94,9 @@ either engine.
 A rule is a method list, a space, then a URL pattern. Because a rule contains a space, this input is
 newline-separated. The method is required, so a rule always states what it permits. A `#` at the
 start of a line, or after whitespace, begins a comment that runs to the end of the line, and a blank
-line is ignored, which helps once the list gets long. A `#` inside a `~` rule's regex is left alone,
-since it is not preceded by whitespace.
+line is ignored, which helps once the list gets long. A `#` with no space before it is not a
+comment: since `#` never legitimately appears in a rule (it is part of no host or URL, and a
+fragment never travels with a request), it is reported as a mistake rather than silently trimmed.
 
 ```yaml
 allowed_url_rules: |
@@ -230,9 +231,9 @@ allowed_tls_rules: |
 
 A host rule input is split on whitespace, so a rule per line and a group of rules on one line both
 work. Comments follow the same rule as [`allowed_url_rules`](#url-rules-allowed_url_rules): a `#` at
-the start of a line, or after whitespace, runs to the end of the line, while a `#` written into a `~`
-regex rule stays part of the pattern. The second rule above is the shape to use for a JVM build,
-which won't trust the mounted CA.
+the start of a line, or after whitespace, runs to the end of the line, and a `#` with no space
+before it is reported as a mistake rather than silently trimmed, since `#` is part of no host. The
+second rule above is the shape to use for a JVM build, which won't trust the mounted CA.
 
 ### Regular expressions
 
