@@ -127,13 +127,13 @@ writes survive a `filesystem_mode: ephemeral` step and which the overlay discard
 
 `proxy_engine` selects how closely the command's traffic is examined.
 
-|                                             | `inspect`<br>terminates TLS, checks method and URL         | `universal`<br>reads the SNI only, checks host and port |
-| ------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------- |
-| A rule can say                              | `GET\|HEAD https://registry.npmjs.org/**`                  | `registry.npmjs.org:443`                                |
-| Allow a fetch, refuse a publish, same host  | ✅                                                         | -                                                       |
-| The report shows                            | Every request with its URL                                 | Host and port                                           |
-| The command's TLS                           | Terminated and re-signed with a CA generated for that step | Untouched                                               |
-| Certificate pinning, or the JVM's own store | -                                                          | ✅                                                      |
+|                                               | `inspect`<br>terminates TLS, checks method and URL         | `universal`<br>reads the SNI only, checks host and port |
+| --------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------- |
+| A rule can say                                | `GET\|HEAD https://registry.npmjs.org/**`                  | `registry.npmjs.org:443`                                |
+| Allow a fetch, refuse a publish, same host    | ✅                                                         | -                                                       |
+| The report shows                              | Every request with its URL                                 | Host and port                                           |
+| The command's TLS                             | Terminated and re-signed with a CA generated for that step | Untouched                                               |
+| Certificate pinning, or a bundled trust store | -                                                          | ✅                                                      |
 
 Start with `inspect`, and fall back to `universal` when something the command runs won't accept the
 mounted CA. `inspect` is the default value of `proxy_engine`, so `universal` has to be set
@@ -405,7 +405,10 @@ is mounted over the sandbox's own view of those paths, and the mount goes away w
 the step ends. Where the command's environment leaves them unset, Buildcage also points the
 variables the common toolchains read at a store that holds the CA: `NODE_EXTRA_CA_CERTS`,
 `DENO_CERT`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `PIP_CERT`. `CURL_CA_BUNDLE` is left unset,
-since curl reads the system store already.
+since curl reads the system store already. A JVM already on the runner reads none of those, only its
+own keystore, so the CA is added to a copy of `$JAVA_HOME/lib/security/cacerts` (and `jssecacerts`
+when present) with the runner's own `keytool` and mounted over it, letting `mvn`/`gradle`/`java`
+reach the proxy without `proxy_engine: universal`.
 
 The full table is in [Reference](./docs/reference.md#ca-trust-variables). What this cannot cover is
 in [Limitations](#limitations), below.
@@ -494,10 +497,14 @@ reported as blocked; see
 
 ### Under the `inspect` engine
 
-- A tool that pins a certificate, or ships its own trust store instead of reading the CA-trust
-  variables, will not work. The JVM (Java, Kotlin, Scala) is the common case, since it only reads
-  its own `cacerts` file. Use `proxy_engine: universal` for those, or pass the host through
-  undecrypted with `allowed_tls_rules`.
+- A tool that pins a specific certificate, or ships a bundled trust store it never lets the system
+  update, still needs `proxy_engine: universal` or an `allowed_tls_rules` passthrough, since it will
+  not accept the re-signed certificate.
+- The JVM (Java, Kotlin, Scala) reads only its own keystore rather than the CA-trust variables, and
+  a JVM already on the runner is handled: the CA is added to a copy of its
+  `$JAVA_HOME/lib/security/cacerts` for the step. Two cases fall back to `proxy_engine: universal`: a
+  keystore sealed with a non-default password, which the runner's `keytool` cannot rewrite, and a
+  runner with no `keytool` at all.
 - `audit` terminates TLS as well. It drops the rules, not the interception, so a tool that cannot
   accept the CA fails in `audit` exactly as it would in `restrict`. `universal`'s audit mode
   decrypts nothing and breaks nothing.

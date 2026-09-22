@@ -403,9 +403,11 @@ port, so the method and the path are neither enforced nor reported.
 
 ### `inspect` cannot work with everything, in either mode
 
-TLS is terminated, so a tool that pins a certificate, or ships its own trust store instead of
-reading the common CA-trust environment variables, will not work. The JVM (Java, Kotlin, Scala) is
-the common case. Use `universal` for those, and see [Limitations](../README.md#limitations) for the
+TLS is terminated, so a tool that pins a certificate, or ships a bundled trust store it never lets
+the system update, will not work. The JVM (Java, Kotlin, Scala) reads only its own keystore rather
+than the CA-trust variables; a JVM already on the runner is handled by injecting into a copy of that
+keystore with the runner's own `keytool`, but a keystore under a non-default password, or a runner
+without `keytool`, falls back to `universal`. See [Limitations](../README.md#limitations) for the
 rest of the compatibility picture.
 
 `audit` is not a passive observer here either. TLS is terminated in both modes, so a tool that
