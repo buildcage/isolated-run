@@ -558,9 +558,10 @@ that already exists rather than creating one. Both are in
 [filesystem mode](../README.md#filesystem-access). It is one path per line. Entries resolve like
 this:
 
-- A `#` at the start of a line, or after whitespace, starts a comment that runs to the end of the
-  line, and a blank line is skipped, the same as in the rule inputs. Only a whitespace-preceded `#`
-  counts, so a path that actually contains a `#` is left whole.
+- A line whose first non-space character is `#` is a comment, and a blank line is skipped, so a
+  group of paths can carry a heading. Unlike the rule inputs, only a whole-line `#` counts: a `#`
+  anywhere else stays part of the path, since a path may legitimately contain one (or a space before
+  one) and an inline comment could not be told apart from it.
 - `$NAME` / `${NAME}` expand only for `HOME`, `GITHUB_WORKSPACE`, `RUNNER_TEMP`, `GITHUB_OUTPUT`,
   `GITHUB_ENV`, `GITHUB_PATH`, and `GITHUB_STEP_SUMMARY`, not arbitrary env, so a value smuggled in
   through the step's own `env:` block can't redirect where a listed path resolves. Any other `$NAME`

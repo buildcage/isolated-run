@@ -183,6 +183,12 @@ describe("splitRuleTokens comments", () => {
     expect(() => splitRuleTokens("example.com#c:443")).toThrow(/never part of a host or URL/);
   });
 
+  it("names the offending token, not the whole line, when others share it", () => {
+    expect(() => splitRuleTokens("a.example.com:443 b#c.example.com:443")).toThrow(
+      /Invalid rule "b#c\.example\.com:443"/,
+    );
+  });
+
   it("treats a comment-only input the same as an empty one", () => {
     expect(splitRuleTokens("# only a comment")).toStrictEqual([]);
     expect(splitRuleTokens("")).toStrictEqual([]);

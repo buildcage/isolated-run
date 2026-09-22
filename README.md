@@ -219,7 +219,8 @@ allowed_ip_rules: |
 ```
 
 A `#` starts a comment at the start of a line or after whitespace, so a group of rules can carry a
-heading or a rule can carry its reason. It works the same in every rule input, and in `write_through`.
+heading or a rule can carry its reason. It works the same in every rule input. `write_through` takes
+only whole-line `#` comments, since a path may contain a `#`.
 
 ### Destinations you expect to stay blocked
 

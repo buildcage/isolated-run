@@ -28,7 +28,7 @@
  * haproxy-inspect-stage.ts.
  */
 
-import { stripRuleComment } from "../line-comments.ts";
+import { stripLineComment, rejectGluedHash } from "../line-comments.ts";
 import {
   anchorRawRegex,
   checkRawRegexHalf,
@@ -110,8 +110,8 @@ function splitUrl(
   // A fragment stays in the browser, so it is never part of the path a request
   // carries and a rule naming one could only ever match nothing. Easy to copy
   // in from a documentation link, so it is refused rather than left to fail
-  // silently. (splitRuleTokens/splitUrlRuleLines already reject a `#` in the
-  // input; this guards a direct caller.)
+  // silently. (splitUrlRuleLines already rejects a `#` in the input; this
+  // guards a direct caller.)
   if (url.includes("#")) {
     throw new Error(
       `Invalid URL in rule "${rule}": a "#" fragment is never sent with a request, so this rule ` +
@@ -289,16 +289,18 @@ export function convertUrlRule(rule: string): UrlRule {
 /**
  * Split a rules input into rule lines. Newline-separated, because a rule
  * contains a space between its method list and its URL. Each line's `#`
- * comment is dropped first (see stripRuleComment, which rejects a `#` glued to
- * a rule, such as a stray URL fragment), and a line left empty is dropped.
+ * comment is dropped first, and a line left empty is dropped. A `#` glued to a
+ * rule (never a comment, and a stray fragment here) is rejected per line, so
+ * the error names the offending rule.
  */
 function splitUrlRuleLines(rulesInput: string | undefined): string[] {
-  return (
+  const lines =
     rulesInput
       ?.split(/\r?\n/)
-      .map((line) => stripRuleComment(line).trim())
-      .filter((line) => line !== "") ?? []
-  );
+      .map((line) => stripLineComment(line).trim())
+      .filter((line) => line !== "") ?? [];
+  lines.forEach(rejectGluedHash);
+  return lines;
 }
 
 /**

@@ -140,8 +140,8 @@ describe("resolveWriteThroughPaths", () => {
     expect(resolveWriteThroughPaths("/", ENV)).toStrictEqual(["/"]);
   });
 
-  it("keeps the / sentinel when it carries a comment", () => {
-    expect(resolveWriteThroughPaths("/  # drop the restriction", ENV)).toStrictEqual(["/"]);
+  it("drops a whole-line comment, keeping the / sentinel on its own line", () => {
+    expect(resolveWriteThroughPaths("# drop the restriction\n/", ENV)).toStrictEqual(["/"]);
   });
 });
 
@@ -360,16 +360,18 @@ describe("splitWriteThroughInput", () => {
     expect(splitWriteThroughInput(undefined)).toStrictEqual([]);
   });
 
-  it("drops full-line and end-of-line comments", () => {
-    expect(
-      splitWriteThroughInput("# caches\n/opt/cache  # shared\n\n./dist # build output"),
-    ).toStrictEqual(["/opt/cache", "./dist"]);
+  it("drops a whole-line comment (first non-space character is #) and a blank line", () => {
+    expect(splitWriteThroughInput("# caches\n/opt/cache\n\n   # more\n./dist")).toStrictEqual([
+      "/opt/cache",
+      "./dist",
+    ]);
   });
 
-  it("keeps a # that is part of the path (not preceded by whitespace)", () => {
-    expect(splitWriteThroughInput("/opt/cache#1\n/tmp/a#b")).toStrictEqual([
+  it("keeps a # anywhere else in the path, so a path with a # or a space+# is not truncated", () => {
+    expect(splitWriteThroughInput("/opt/cache#1\n/tmp/a#b\n/data/my logs #2/cache")).toStrictEqual([
       "/opt/cache#1",
       "/tmp/a#b",
+      "/data/my logs #2/cache",
     ]);
   });
 });

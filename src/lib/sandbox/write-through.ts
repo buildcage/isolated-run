@@ -2,8 +2,6 @@ import { existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join, isAbsolute, normalize } from "node:path";
 
-import { stripLineComment } from "../../core/lib/line-comments.ts";
-
 /** Env vars a write_through: entry may reference via $NAME/${NAME}. Not
  *  arbitrary env: a step's own `env:` block could otherwise smuggle a
  *  path override into what's meant to be a fixed, reviewable list. */
@@ -113,18 +111,19 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
 
 /** The write_through: input as bare lines. Newline-separated (not
  *  whitespace-split like the ACL rule inputs) since paths can legitimately
- *  contain spaces. Each line's `#` comment is stripped first (see
- *  stripLineComment); only a `#` at the start of a line or after whitespace is
- *  a comment, so a path with a `#` in it is untouched. Used on its own for the
- *  step's pre-resolution check, which runs before anything privileged;
- *  resolution proper (variables, ~/, relative paths) is resolveWriteThroughPaths'
- *  job below. */
+ *  contain spaces. A whole-line `#` comment (the first non-space character is
+ *  `#`) and a blank line are dropped; a `#` anywhere else stays part of the
+ *  path, unlike the rule inputs, since a path may legitimately contain one and
+ *  an inline comment could not be told from it. Used on its own for the step's
+ *  pre-resolution check, which runs before anything privileged; resolution
+ *  proper (variables, ~/, relative paths) is resolveWriteThroughPaths' job
+ *  below. */
 export function splitWriteThroughInput(input: string | undefined): string[] {
   return (
     input
       ?.split(/\r?\n/)
-      .map((line) => stripLineComment(line).trim())
-      .filter(Boolean) ?? []
+      .map((line) => line.trim())
+      .filter((line) => line !== "" && !line.startsWith("#")) ?? []
   );
 }
 
