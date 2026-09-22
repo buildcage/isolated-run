@@ -8,9 +8,9 @@
 ![test](https://img.shields.io/github/actions/workflow/status/buildcage/isolated-run/test-e2e.yml?label=test)
 ![license](https://img.shields.io/github/license/buildcage/isolated-run)
 
-GitHub Action that restricts where a workflow `run:` step can connect. The command runs isolated on
-the runner behind an allowlist you write, and a destination that isn't on it is refused and
-reported.
+A workflow `run:` step, and every tool and dependency it invokes, can connect anywhere on the
+network. Buildcage runs the command behind an allowlist: it reaches only the destinations you name,
+and anything else is refused and reported.
 
 - The command doesn't change: no proxy to configure, no certificate to install, and it runs as the
   same user with the same `$HOME` as the rest of the job, so credentials, caches and toolchains set
