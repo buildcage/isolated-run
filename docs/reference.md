@@ -27,7 +27,7 @@ details.
 | --------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
 | `run`                             | required     | Command(s) to run inside the isolated sandbox, multi-line like a workflow `run:` step                      |
 | `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                            |
-| `proxy_engine`                    | `universal`  | `inspect` or `universal`. See [Engines](../README.md#engines).                                             |
+| `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                             |
 | `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                    |
 | `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).      |
 | `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).   |
@@ -35,9 +35,6 @@ details.
 | `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart             |
 | `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact, `inspect` only. See [Traffic artifact](#traffic-artifact). |
 | `traffic_artifact_retention_days` | empty        | How long to keep that artifact, in days; empty uses the repository's own default                           |
-
-`transparent` is accepted as an alias for `proxy_engine: universal`, the name it had before
-`inspect` existed.
 
 ### Rule inputs
 

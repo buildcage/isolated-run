@@ -13,9 +13,9 @@ inputs:
     required: false
     default: "restrict"
   proxy_engine:
-    description: "Network enforcement engine: inspect (terminates TLS to enforce on method and URL) or universal (network-level proxy, default, needs no CA trust; 'transparent' is accepted as an alias)"
+    description: "Network enforcement engine: inspect (default, terminates TLS to enforce on method and URL) or universal (network-level proxy, needs no CA trust)"
     required: false
-    default: "universal"
+    default: "inspect"
   allowed_https_rules:
     description: "HTTPS allow rules (wildcard or ~regex), separated by whitespace. Port required. e.g., '*.example.com:443 ~^custom\\.pattern:443$'"
     required: false

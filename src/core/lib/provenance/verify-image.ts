@@ -40,7 +40,7 @@ export interface ResolvedImage {
 export async function verifyImageDigest({
   actionRef,
   actionRepo,
-  proxyEngine = "universal",
+  proxyEngine = "inspect",
 }: VerifyImageDigestOptions): Promise<string | null> {
   const repoPath = actionRepo.toLowerCase();
 

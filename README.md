@@ -63,7 +63,7 @@ A runner that falls short fails while the proxy starts, before the command runs.
 
 Wrap the command you want to isolate with this action instead of a plain `run:` step. Run once in
 [`audit`](#operation-modes) mode to collect what the command reaches, then switch to `restrict`. The
-examples below use the `inspect` engine; [Engines](#engines) covers the choice between the two.
+examples below use the default `inspect` engine; [Engines](#engines) covers the choice between the two.
 
 ### 1. Find out what the command reaches
 
@@ -136,7 +136,7 @@ writes survive a `filesystem_mode: ephemeral` step and which the overlay discard
 | Certificate pinning, or the JVM's own store | -                                                          | ✅                                                      |
 
 Start with `inspect`, and fall back to `universal` when something the command runs won't accept the
-mounted CA. `universal` is the default value of `proxy_engine`, so `inspect` has to be set
+mounted CA. `inspect` is the default value of `proxy_engine`, so `universal` has to be set
 explicitly.
 
 Both intercept at the network level, so a tool that ignores `HTTP_PROXY` is covered either way, and

@@ -35,6 +35,7 @@ run_instance() {
   BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-universal.yaml" \
+  INPUT_PROXY_ENGINE="universal" \
   TEST_NET_ADDR="$test_net_addr" \
   INPUT_ALLOWED_HTTPS_RULES="$https_rule" \
   INPUT_ALLOWED_HTTP_RULES="" \

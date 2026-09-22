@@ -193,11 +193,11 @@ export async function runSandboxStep(
 
   const runInput = readRunCommand();
 
-  // `notice`, not `annotation`: both of these read a renamed input (see
-  // SandboxStepDeps).
-  const { proxyEngine } = readEngineInputs(notice);
+  const { proxyEngine } = readEngineInputs();
   log(`Proxy engine: ${proxyEngine}`);
 
+  // `notice`, not `annotation`: readFilesystemInputs reads a renamed input (see
+  // SandboxStepDeps).
   const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
 
   // Cheap, pure input check first, so a plain mistake (e.g. write_through: /

@@ -90,29 +90,26 @@ describe("readRunCommand", () => {
 });
 
 describe("readEngineInputs", () => {
-  it("defaults to universal when unset", () => {
-    expect(readEngineInputs(silent, inputs())).toStrictEqual({ proxyEngine: "universal" });
+  it("defaults to inspect when unset", () => {
+    expect(readEngineInputs(inputs())).toStrictEqual({ proxyEngine: "inspect" });
   });
 
   it("passes the input through resolveProxyEngine", () => {
-    expect(readEngineInputs(silent, inputs({ proxy_engine: "inspect" }))).toStrictEqual({
+    expect(readEngineInputs(inputs({ proxy_engine: "inspect" }))).toStrictEqual({
       proxyEngine: "inspect",
     });
   });
 
   it("rejects an unknown engine", () => {
-    expect(() => readEngineInputs(silent, inputs({ proxy_engine: "nope" }))).toThrow(
+    expect(() => readEngineInputs(inputs({ proxy_engine: "nope" }))).toThrow(
       /Invalid proxy_engine/,
     );
   });
 
-  it("hands the deprecated alias's notice to the caller", () => {
-    const notice = vi.fn();
-
-    expect(readEngineInputs(notice, inputs({ proxy_engine: "transparent" }))).toStrictEqual({
-      proxyEngine: "universal",
-    });
-    expect(notice).toHaveBeenCalledOnce();
+  it("rejects the removed transparent alias", () => {
+    expect(() => readEngineInputs(inputs({ proxy_engine: "transparent" }))).toThrow(
+      /Invalid proxy_engine/,
+    );
   });
 });
 

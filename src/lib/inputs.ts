@@ -90,8 +90,8 @@ export interface EngineInputs {
   proxyEngine: ProxyEngine;
 }
 
-export function readEngineInputs(notice: Notice, getInput: GetInput = core.getInput): EngineInputs {
-  return { proxyEngine: resolveProxyEngine(getInput("proxy_engine"), notice) };
+export function readEngineInputs(getInput: GetInput = core.getInput): EngineInputs {
+  return { proxyEngine: resolveProxyEngine(getInput("proxy_engine")) };
 }
 
 export interface FilesystemInputs {

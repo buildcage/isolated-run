@@ -87,12 +87,15 @@ jobs:
             git push origin "$MAJOR" --force
           fi
 
-          if [ "$TAG" = "$LATEST_IN_MINOR" ]; then
-            docker buildx imagetools create --tag "${REPO}:${MINOR}" "${REPO}:${VERSION}"
-          fi
-          if [ "$TAG" = "$LATEST_IN_MAJOR" ]; then
-            docker buildx imagetools create --tag "${REPO}:${MAJOR#v}" "${REPO}:${VERSION}"
-          fi
-          if [ "$TAG" = "$LATEST_OVERALL" ]; then
-            docker buildx imagetools create --tag "${REPO}:latest" "${REPO}:${VERSION}"
-          fi
+          for ENGINE in universal inspect; do
+            SUFFIX="-${ENGINE}"
+            if [ "$TAG" = "$LATEST_IN_MINOR" ]; then
+              docker buildx imagetools create --tag "${REPO}:${MINOR}${SUFFIX}" "${REPO}:${VERSION}${SUFFIX}"
+            fi
+            if [ "$TAG" = "$LATEST_IN_MAJOR" ]; then
+              docker buildx imagetools create --tag "${REPO}:${MAJOR#v}${SUFFIX}" "${REPO}:${VERSION}${SUFFIX}"
+            fi
+            if [ "$TAG" = "$LATEST_OVERALL" ]; then
+              docker buildx imagetools create --tag "${REPO}:latest${SUFFIX}" "${REPO}:${VERSION}${SUFFIX}"
+            fi
+          done

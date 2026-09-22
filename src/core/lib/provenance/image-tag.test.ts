@@ -4,19 +4,19 @@ import { imageTagFromRef } from "./image-tag.ts";
 
 describe("imageTagFromRef", () => {
   it("converts a 40-char hex SHA to sha-<sha>, lowercased", () => {
-    expect(imageTagFromRef("a".repeat(40))).toBe(`sha-${"a".repeat(40)}`);
+    expect(imageTagFromRef("a".repeat(40), "universal")).toBe(`sha-${"a".repeat(40)}-universal`);
     const mixed = "ABCDEF1234".padEnd(40, "0");
-    expect(imageTagFromRef(mixed)).toBe(`sha-${mixed.toLowerCase()}`);
+    expect(imageTagFromRef(mixed, "universal")).toBe(`sha-${mixed.toLowerCase()}-universal`);
   });
 
   it("strips a leading 'v' from a version, prerelease or major-only tag", () => {
-    expect(imageTagFromRef("v1.1.0")).toBe("1.1.0");
-    expect(imageTagFromRef("v1.1.0-rc1")).toBe("1.1.0-rc1");
-    expect(imageTagFromRef("v1")).toBe("1");
+    expect(imageTagFromRef("v1.1.0", "universal")).toBe("1.1.0-universal");
+    expect(imageTagFromRef("v1.1.0-rc1", "universal")).toBe("1.1.0-rc1-universal");
+    expect(imageTagFromRef("v1", "universal")).toBe("1-universal");
   });
 
   it("returns a branch name as-is", () => {
-    expect(imageTagFromRef("main")).toBe("main");
+    expect(imageTagFromRef("main", "universal")).toBe("main-universal");
   });
 
   // With no ref there is no version to tag, so there is nothing for a suffix
@@ -29,19 +29,16 @@ describe("imageTagFromRef", () => {
     expect(imageTagFromRef(undefined, "inspect")).toBe("");
   });
 
-  it("appends no suffix for the default (universal) engine, or when omitted", () => {
-    expect(imageTagFromRef("v1.1.0", "universal")).toBe("1.1.0");
-    expect(imageTagFromRef("v1.1.0")).toBe("1.1.0");
-  });
-
-  it("appends the inspect engine suffix when requested", () => {
+  it("defaults to the inspect engine suffix when the engine is omitted", () => {
+    expect(imageTagFromRef("v1.1.0")).toBe("1.1.0-inspect");
     expect(imageTagFromRef("v1.1.0", "inspect")).toBe("1.1.0-inspect");
     expect(imageTagFromRef("a".repeat(40), "inspect")).toBe(`sha-${"a".repeat(40)}-inspect`);
   });
 
-  it("gives every non-default engine its own suffix", () => {
-    // A new engine is a separately published image, so forgetting the suffix
-    // would silently pull the universal one.
+  it("gives every engine its own suffix, so no tag is engine-ambiguous", () => {
+    // Each engine is a separately published image, so a tag always names the
+    // engine it was built for.
+    expect(imageTagFromRef("v1.1.0", "universal")).toBe("1.1.0-universal");
     expect(imageTagFromRef("v1.1.0", "proxy")).toBe("1.1.0-proxy");
   });
 });

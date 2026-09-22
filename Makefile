@@ -109,6 +109,7 @@ test_integration: test_integration_sandbox_linux test_integration_sandbox_univer
 
 # Drives dist/main.cjs directly (a host command, not a Docker build).
 .PHONY: test_integration_sandbox_linux
+test_integration_sandbox_linux: export INPUT_PROXY_ENGINE := universal
 test_integration_sandbox_linux: ## Run the action's integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF and a test-hook build of dist/main.cjs)
 	@./test/integration-test-ephemeral-fs.sh
 	@./test/integration-test-writable-dir.sh

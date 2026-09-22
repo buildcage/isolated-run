@@ -25,11 +25,11 @@ function expectRejected(version: string | undefined, proxyEngine: string): Verif
 describe("checkImageEngine", () => {
   it("accepts a label whose suffix names the requested engine", () => {
     expect(() => check("1.0.0-inspect", "inspect")).not.toThrow();
-    expect(() => check("1.0.0", "universal")).not.toThrow();
+    expect(() => check("1.0.0-universal", "universal")).not.toThrow();
   });
 
-  it("accepts a prerelease version, which carries no engine suffix of its own", () => {
-    expect(() => check("1.0.0-rc1", "universal")).not.toThrow();
+  it("accepts a prerelease version carrying the engine suffix", () => {
+    expect(() => check("1.0.0-rc1-universal", "universal")).not.toThrow();
     expect(() => check("1.0.0-rc1-inspect", "inspect")).not.toThrow();
   });
 
@@ -38,8 +38,13 @@ describe("checkImageEngine", () => {
   });
 
   it("rejects the universal image served for an inspect tag", () => {
-    const err = expectRejected("1.0.0", "inspect");
+    const err = expectRejected("1.0.0-universal", "inspect");
     expect(err.message).toContain("not published for proxy engine inspect");
+  });
+
+  it("rejects an unsuffixed release version, which names no engine", () => {
+    expectRejected("1.0.0", "inspect");
+    expectRejected("1.0.0", "universal");
   });
 
   it("rejects an engine image served for a universal tag", () => {
@@ -47,7 +52,7 @@ describe("checkImageEngine", () => {
     expectRejected("1.0.0-rc1-inspect", "universal");
   });
 
-  it("rejects a suffix the action does not offer, rather than reading it as universal", () => {
+  it("rejects a suffix the action does not offer", () => {
     expectRejected("1.0.0-future", "universal");
     expectRejected("1.0.0-rc1-future", "universal");
   });
