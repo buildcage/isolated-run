@@ -61,6 +61,15 @@ CVE-2026-33489
 CVE-2026-35579
 GHSA-gv9j-4w24-q7vx
 
+# CoreDNS flagged against its own module version. Trivy reads the Go build-info
+# pseudo-version embedded in the release binary
+# (v0.0.0-20260819003913-427fc80ed9ca) and, comparing it to the fixed version
+# 1.14.7, treats it as older; but that commit is the v1.14.7 release tag itself,
+# so the fix is already present. Version-comparison false positive, not a live
+# exposure.
+CVE-2026-82399
+CVE-2026-86003
+
 # golang.org/x/crypto/ssh: bugs reachable only by a malicious SSH peer.
 # Unused transitive dependency: CoreDNS never opens an SSH connection.
 CVE-2026-56854
@@ -73,11 +82,16 @@ CVE-2026-78662
 CVE-2026-56865
 CVE-2026-56864
 
-# google.golang.org/grpc: memory exhaustion via an unauthenticated remote peer.
-# CoreDNS here serves no gRPC endpoint: every Corefile server block is plain
-# UDP/TCP:53 with no scheme prefix, and with no forward plugin there is no
-# gRPC upstream either.
+# google.golang.org/grpc: server-side bugs, each reachable only when the binary
+# runs a gRPC server. CVE-2026-84304 is memory exhaustion from an unauthenticated
+# peer; CVE-2026-84445 (xDS server panic on a request missing :authority/Host)
+# and CVE-2026-84303 (xDS RBAC filter bypass on mixed-case headers) need an xDS
+# gRPC server specifically. CoreDNS here serves no gRPC endpoint: every Corefile
+# server block is plain UDP/TCP:53 with no scheme prefix, and with no forward
+# plugin there is no gRPC upstream either; it configures no xDS at all.
 CVE-2026-84304
+CVE-2026-84445
+CVE-2026-84303
 
 # --- library/isolated-run-universal ---
 # OpenSSL: QUIC/CMP/CMS/DTLS/RPK bugs and direct EVP_Cipher() misuse.
