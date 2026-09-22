@@ -15,8 +15,8 @@ import {
  * Split a whitespace-separated rules input into tokens, first dropping each
  * line's `#` comment. Newlines are only a kind of whitespace here, so the
  * comment-stripped lines are rejoined and split as one. A `#` glued to a token
- * (never a comment, never legitimate in a rule) is rejected per token, so the
- * error names the token at fault rather than the whole line.
+ * is rejected per token (see rejectGluedHash), so the error names the token at
+ * fault rather than the whole line.
  */
 export function splitRuleTokens(rulesInput: string | undefined): string[] {
   const tokens =

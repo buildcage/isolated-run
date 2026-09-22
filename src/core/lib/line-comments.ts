@@ -4,7 +4,7 @@
  * line or preceded by whitespace, and runs to the end of the line.
  *
  * (isolated-run's write_through takes only whole-line `#` comments, since a
- * path may legitimately contain a `#` or a space; it does not use these.)
+ * path may legitimately contain a `#` or a space.)
  */
 
 /**

@@ -290,8 +290,8 @@ export function convertUrlRule(rule: string): UrlRule {
  * Split a rules input into rule lines. Newline-separated, because a rule
  * contains a space between its method list and its URL. Each line's `#`
  * comment is dropped first, and a line left empty is dropped. A `#` glued to a
- * rule (never a comment, and a stray fragment here) is rejected per line, so
- * the error names the offending rule.
+ * rule is rejected per line (see rejectGluedHash), so the error names the
+ * offending rule.
  */
 function splitUrlRuleLines(rulesInput: string | undefined): string[] {
   const lines =

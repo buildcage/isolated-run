@@ -211,8 +211,8 @@ describe("rule block", () => {
   it("escapes a special character in a path so it can't break the ACL line", () => {
     // A raw `"` (like a space or backslash) would otherwise let haproxy
     // misparse the line; escapeForHaproxy backslash-escapes it. A `#` is the
-    // other such character, but a rule can no longer carry one (see
-    // stripRuleComment), so it never reaches here.
+    // other such character, but a rule can no longer carry one
+    // (rejectGluedHash), so it never reaches here.
     const config = block({ urlRules: buildUrlRules('GET ~^https://a\\.com/pkg"x$') });
     expect(config.includes('path -m reg ^/pkg\\"x$')).toBe(true);
     expect(config.includes('path -m reg ^/pkg"x$')).toBe(false);
