@@ -159,8 +159,16 @@ const CASES: Record<string, ReportData> = {
   "universal-audit": audit(universal),
   // The incomplete-log banner sits above the tables and applies to either engine.
   "universal-incomplete": { ...universal, logLooksPlausible: false },
-  // Nothing happened at all: the "(no communication)" note, no tables.
-  "universal-empty": { ...universal, passed: [], blocked: [], failed: [], blockedCount: 0 },
+  // Nothing happened at all: the "(no communication)" note, no tables, no
+  // timeline (a discovery-only run keeps a timeline; see the unit tests).
+  "universal-empty": {
+    ...universal,
+    passed: [],
+    blocked: [],
+    failed: [],
+    blockedCount: 0,
+    timeline: [],
+  },
   // The Expected column, with the known_blocked_rules rows folded into one.
   "universal-expected": {
     ...universal,

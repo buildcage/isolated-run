@@ -109,7 +109,10 @@ function subject(event: TrafficEvent): string {
   // request has nothing to show, so for both a name and a port is all there is.
   // Not written as a URL: that would drop a non-default port.
   if (event.url === undefined) {
-    const nameAndPort = `${event.protocol.toUpperCase()} ${event.host}:${event.port}`;
+    // A refused name reached for over no connection has no port; universal's
+    // coarse events otherwise always carry one.
+    const authority = event.port === undefined ? event.host : `${event.host}:${event.port}`;
+    const nameAndPort = `${event.protocol.toUpperCase()} ${authority}`;
     // Unless a method did arrive: the request was then whole, and it is its
     // target that no URL fits (`OPTIONS *`; see log/inspect.ts's urlOf).
     // Dropping the method would read as a connection that carried no request.

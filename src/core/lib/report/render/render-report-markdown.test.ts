@@ -121,6 +121,23 @@ describe("renderReportMarkdown", () => {
     expect(blockedMd).not.toMatch(/_\(no communication\)_/);
   });
 
+  it("omits the '(no communication)' note for a run that only looked names up", () => {
+    const discovery: TrafficEvent = {
+      time: 1,
+      action: "discovery",
+      protocol: "dns",
+      host: "_http._tcp.example.com",
+      queryType: "SRV",
+    };
+    const md = renderReportMarkdown(
+      { ...base, timeline: [discovery] },
+      "buildcage/isolated-run",
+      "v1",
+    );
+    expect(md).not.toMatch(/_\(no communication\)_/);
+    expect(md).toMatch(/Communication details/);
+  });
+
   const failedRow = {
     host: "good.com",
     port: "443",

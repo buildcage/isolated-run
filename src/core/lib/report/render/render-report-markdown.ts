@@ -79,9 +79,16 @@ export function renderReportMarkdown(
       "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule " +
       "can change the outcome and none of them fails the step.*</sub>\n";
   }
-  if (report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0) {
+  if (
+    report.passed.length === 0 &&
+    report.blocked.length === 0 &&
+    report.failed.length === 0 &&
+    report.timeline.length === 0
+  ) {
     // Otherwise a no-traffic run leaves nothing between the heading and the
-    // footer, indistinguishable from a report that failed to generate.
+    // footer, indistinguishable from a report that failed to generate. A run
+    // that only looked names up has empty tables but a non-empty timeline, so
+    // its discovery lookups still show in Communication details below.
     markdown += "_(no communication)_\n\n";
   }
 

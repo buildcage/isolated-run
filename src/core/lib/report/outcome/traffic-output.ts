@@ -3,7 +3,8 @@
  * artifact, so whoever wants it later can act on what a step reached
  * instead of reading it out of a summary.
  *
- * Only the inspect engine can produce this; universal sees host and port only.
+ * Both engines produce this now: inspect records each request whole, universal
+ * a coarser connection-level view (host, port and bytes, no method or URL).
  */
 
 import { writeFileSync } from "node:fs";

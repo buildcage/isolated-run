@@ -19495,7 +19495,7 @@ function subject(event) {
 	if (event.queryType !== void 0) return `DNS ${event.queryType} ${event.host}`;
 	if (event.protocol === "dns") return `DNS ${event.host}`;
 	if (event.url === void 0) {
-		let nameAndPort = `${event.protocol.toUpperCase()} ${event.host}:${event.port}`;
+		let authority = event.port === void 0 ? event.host : `${event.host}:${event.port}`, nameAndPort = `${event.protocol.toUpperCase()} ${authority}`;
 		return event.method === void 0 ? nameAndPort : `${event.method} ${nameAndPort}`;
 	}
 	return `${event.method} ${redactCredentialQuery(event.url)}`;
@@ -19653,7 +19653,7 @@ function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound
 			showExpected
 		}) + "\n";
 	}
-	return report.failed.length > 0 && ((report.passed.length > 0 || report.blocked.length > 0) && (markdown += "\n"), markdown += "### ⚠️ Failed Connections\n\n" + renderHostTable(report.failed, { showReason: !0 }) + "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"), report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && (markdown += "_(no communication)_\n\n"), markdown += renderInspectDetails(report.timeline, report.startedAt), report.engine === "universal" && (markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), markdown += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, markdown += "\n<hr>\n", markdown;
+	return report.failed.length > 0 && ((report.passed.length > 0 || report.blocked.length > 0) && (markdown += "\n"), markdown += "### ⚠️ Failed Connections\n\n" + renderHostTable(report.failed, { showReason: !0 }) + "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"), report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && (markdown += "_(no communication)_\n\n"), markdown += renderInspectDetails(report.timeline, report.startedAt), report.engine === "universal" && (markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), markdown += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, markdown += "\n<hr>\n", markdown;
 }
 //#endregion
 //#region src/core/lib/report/render/truncate-communication-details.ts
