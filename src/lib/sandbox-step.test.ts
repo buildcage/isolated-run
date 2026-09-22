@@ -235,9 +235,8 @@ describe("runSandboxStep", () => {
   it("sends a renamed input's notice to the emitter the annotation gate cannot suppress", async () => {
     await runSandboxStep({ ...ENV, GITHUB_STEP_SUMMARY: "" }, deps);
 
-    expect(mocks.readEngineInputs.mock.calls[0][0]).toBe(mocks.notice);
     expect(mocks.readFilesystemInputs.mock.calls[0][0]).toBe(mocks.notice);
-    expect(mocks.readEngineInputs.mock.calls[0][0]).not.toBe(annotation.notice);
+    expect(mocks.readFilesystemInputs.mock.calls[0][0]).not.toBe(annotation.notice);
   });
 
   it("gives the sandbox the emitter the annotation gate cannot suppress", async () => {

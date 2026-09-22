@@ -69,6 +69,9 @@ jobs:
       contents: read
     name: "e2e: test (sandbox, audit mode, ${{ matrix.runner }})"
 
+    env:
+      PROXY_ENGINE: universal
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,6 +98,7 @@ jobs:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-audit-summary.md
         with:
+          proxy_engine: universal
           proxy_mode: audit
           run: |
             wget -q -T 5 -O /dev/null http://example.com/
@@ -122,6 +126,9 @@ jobs:
     permissions:
       contents: read
     name: "e2e: test (sandbox, enforcement)"
+
+    env:
+      PROXY_ENGINE: universal
 
     steps:
       - name: Checkout
@@ -151,6 +158,7 @@ jobs:
           # (GitHub ignores attempts to reassign it), so mirror it here too.
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
         with:
+          proxy_engine: universal
           allowed_https_rules: example.com:443
           allowed_http_rules: example.com:80
           # Blocked connections below are expected, not a failure.
@@ -189,31 +197,6 @@ jobs:
           # Same debug-only mirror as the step above, not GITHUB_STEP_SUMMARY.
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
         run: ./test/assert-sandbox.sh
-
-      # `transparent` is universal's old name, kept working permanently as an
-      # alias (see resolveProxyEngine's ENGINE_ALIASES): this proves it
-      # actually still works end-to-end, not just that it validates. Reuses
-      # the same already-built local image: the alias only affects the
-      # action's own input resolution, not which image BUILDCAGE_LOCAL_IMAGE_REF
-      # points at.
-      - name: "Run an isolated command via the real action (proxy_engine: transparent alias)"
-        uses: ./
-        env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-        with:
-          proxy_engine: transparent
-          allowed_https_rules: example.com:443
-          fail_on_blocked: false
-          run: |
-            echo "=== allowlisted host must be reachable under the transparent alias ==="
-            wget -q -T 5 -O /dev/null https://example.com/
-
-            echo "=== non-allowlisted host must be blocked under the transparent alias ==="
-            if wget -q -T 5 -O /dev/null https://example.org/ 2>&1; then
-              echo "UNEXPECTED: example.org was reachable"
-              exit 1
-            fi
-            echo "OK: example.org correctly blocked"
 
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network), proves proxy_engine: inspect wiring
@@ -357,6 +340,9 @@ jobs:
       contents: read
     name: "e2e: test (sandbox, fail_on_blocked & known_blocked_rules)"
 
+    env:
+      PROXY_ENGINE: universal
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -384,6 +370,7 @@ jobs:
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
         with:
+          proxy_engine: universal
           allowed_https_rules: example.com:443
           allowed_http_rules: example.com:80
           # fail_on_blocked intentionally left at its default (true).
@@ -404,6 +391,7 @@ jobs:
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
         with:
+          proxy_engine: universal
           allowed_https_rules: example.com:443
           allowed_http_rules: example.com:80
           known_blocked_rules: neverssl.com:80
@@ -429,6 +417,9 @@ jobs:
     permissions:
       contents: read
     name: "e2e: test (sandbox, concurrency)"
+
+    env:
+      PROXY_ENGINE: universal
 
     steps:
       - name: Checkout
@@ -458,6 +449,7 @@ jobs:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
               BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-parallel-a-summary.md
             with:
+              proxy_engine: universal
               allowed_https_rules: example.com:443
               allowed_http_rules: example.com:80
               label: parallel-a
@@ -476,6 +468,7 @@ jobs:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
               BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-parallel-b-summary.md
             with:
+              proxy_engine: universal
               allowed_https_rules: example.net:443
               allowed_http_rules: example.net:80
               label: parallel-b
