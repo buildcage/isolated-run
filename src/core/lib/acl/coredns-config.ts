@@ -56,10 +56,9 @@ export function escapeForCel(regex: string): string {
 }
 
 /**
- * A view expression matching the queried name against `regex`, which must
- * already be escaped for CEL. Case-insensitive, as HAProxy's own host match
- * is (`-i`): a name is the same name in any case, so a rule written
- * `Registry.NPMJS.org` must not log the lookup it permits as denied.
+ * `regex` must already be escaped for CEL. Case-insensitive to agree with
+ * HAProxy's `-i` host match; otherwise a lookup the rules permit is logged as
+ * denied.
  */
 function nameMatches(regex: string): string {
   return `      expr name() matches '(?i)${regex}'`;

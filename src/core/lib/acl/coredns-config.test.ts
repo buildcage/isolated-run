@@ -41,8 +41,8 @@ function matchesLine(config: string, marker: string): string {
 }
 
 /**
- * The regex a CEL `matches` line carries, undoing its CEL escaping. RE2's
- * leading `(?i)` becomes the `i` flag, which is how JS spells it.
+ * The regex a CEL `matches` line carries, undoing its CEL escaping. A leading
+ * `(?i)` becomes JS's `i` flag.
  */
 function regexOf(exprLine: string): RegExp {
   const pattern = exprLine.replace(/\\\\/g, "\\");
@@ -113,8 +113,6 @@ describe("allowlist scope", () => {
   });
 
   it("matches a name in any case, as the proxy does", () => {
-    // HAProxy matches the host with -i, so the resolver has to agree or a
-    // lookup the rule permits is logged as denied.
     const regex = regexOf(exprLine(gen({ httpsRules: ["Registry.NPMJS.org:443"] })));
     expect(regex.test("registry.npmjs.org.")).toBe(true);
     expect(regex.test("REGISTRY.npmjs.ORG.")).toBe(true);
