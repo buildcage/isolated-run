@@ -1,13 +1,8 @@
 #!/bin/bash
-# Verifies that what the step runs on the host after the command exits stays
-# out of the command's reach in persistent mode (see sandbox/host-commands.ts):
-# a `docker` earlier on PATH under $HOME is never run in place of the real one,
-# and the docker CLI's config directory and this action's own checkout are
-# read-only inside the sandbox even though $HOME around them is writable.
-#
-# The stand-in `docker` only leaves a marker file behind, and is in place
-# before the step starts, which is the harder case: pinning has to skip it,
-# not merely resolve before the command could plant one.
+# Verifies, in persistent mode, that a `docker` under $HOME earlier on PATH is
+# never run, and that the docker config directory and this action's checkout
+# are read-only inside the sandbox and cannot be renamed away. See
+# sandbox/host-commands.ts. The stand-in only leaves a marker file.
 set -uo pipefail
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
@@ -31,8 +26,7 @@ printf '#!/bin/sh\ntouch %q\nexit 1\n' "$MARKER" >"$STANDIN_DIR/docker"
 chmod +x "$STANDIN_DIR/docker"
 touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 
-# The checkout is only a read-only candidate when $HOME holds it, as it does on
-# a hosted runner; the dev container keeps it elsewhere.
+# Only a checkout under $HOME is protected; the dev container keeps it elsewhere.
 case "$ACTION_ROOT/" in
   "$HOME"/*) CHECK_ACTION_ROOT=1 ;;
   *) CHECK_ACTION_ROOT=0 ;;
@@ -69,10 +63,7 @@ if [ '$CHECK_ACTION_ROOT' = 1 ]; then
   else
     echo 'OK: the action checkout is read-only'
   fi
-  # The read-only mount is on the checkout itself; renaming a parent would move
-  # it aside and free the original path. Each parent is a mount point, so this
-  # must fail. Nothing moves on the host either way, since the guard is in the
-  # sandbox's mount namespace only.
+  # $HOME is writable through to the host, so a rename that succeeds is undone.
   if mv '$ACTION_PARENT' '$ACTION_PARENT.moved' 2>/dev/null; then
     echo 'UNEXPECTED: a parent of the action checkout could be renamed'
     mv '$ACTION_PARENT.moved' '$ACTION_PARENT' 2>/dev/null || true

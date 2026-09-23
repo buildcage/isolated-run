@@ -67,12 +67,9 @@ export interface BuildOciConfigOptions {
    *  universal engine, which never terminates TLS and so has no CA to
    *  distribute. */
   caTrust?: CaTrustFiles;
-  /** Host directories the sandbox sees read-only whatever the writable layers
-   *  say; see host-commands.ts's sandboxReadonlyHostDirs. */
+  /** See host-commands.ts's sandboxReadonlyHostDirs. */
   readonlyHostDirs?: string[];
-  /** Writable directories above a readonlyHostDir, bound onto themselves so
-   *  they become mount points the sandbox cannot rename out from under it;
-   *  see host-commands.ts's renameGuardDirs. */
+  /** See host-commands.ts's renameGuardDirs. */
   renameGuardDirs?: string[];
 }
 
@@ -137,9 +134,8 @@ export function buildOciConfig(
   const layers = ephemeral
     ? ephemeralLayers(ephemeral, freshMountDestinations)
     : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly });
-  // After the writable layers, so each guard nests inside the root those bound
-  // and pulls that root's writable submounts (workspace, RUNNER_TEMP) along via
-  // rbind. Read-write: these stay writable, they are only made unrenamable.
+  // After the writable layers, so rbind carries their submounts (workspace,
+  // RUNNER_TEMP) along.
   const renameGuards = renameGuardDirs.map((p) => ({
     destination: p,
     type: "none",
@@ -214,8 +210,7 @@ export function buildOciConfig(
       namespaces,
       seccomp: seccompProfile,
       maskedPaths,
-      // runc applies these after every mount above, so they win over a
-      // writable layer containing them, `write_through: /` included.
+      // runc applies these after every mount, so they win over any writable layer.
       readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostDirs])],
     },
   };

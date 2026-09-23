@@ -464,7 +464,6 @@ describe("buildOciConfig", () => {
         const mount = config.mounts.find((m) => m.destination === dir);
         expect(mount).toMatchObject({ source: dir, options: ["rbind", "rw"] });
       }
-      // Not read-only: the point is only that they cannot be renamed.
       expect(config.linux.readonlyPaths).not.toContain("/home/runner/work");
     });
   });

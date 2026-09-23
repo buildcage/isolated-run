@@ -193,8 +193,7 @@ describe("runSandboxedCommand", () => {
   it("keeps the docker CLI's config directory read-only, creating it first", () => {
     runSandboxedCommand(options(), deps);
 
-    // Contains, not equals: the action's own checkout joins it when this test
-    // itself runs from under /home/runner, as it does on a hosted runner.
+    // On CI the checkout is under /home/runner and adds its own entry.
     expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostDirs).toContain(
       "/home/runner/.docker",
     );
@@ -210,8 +209,7 @@ describe("runSandboxedCommand", () => {
       deps,
     );
 
-    // arrayContaining, not equals: the action's own checkout adds its own
-    // guards when this test runs from under /home/runner, as it does on CI.
+    // On CI the checkout is under /home/runner and adds its own guards.
     expect(mocks.buildOciConfig.mock.calls[0][1].renameGuardDirs).toEqual(
       expect.arrayContaining(["/home/runner/a", "/home/runner/a/b"]),
     );

@@ -82,8 +82,7 @@ describe("findPinnableCommand", () => {
   });
 
   it("judges a PATH directory by where it really is, not how it is spelled", () => {
-    // A self-hosted /opt/tools -> ~/tools: /opt/tools/bin/docker is writable
-    // through $HOME even though its spelling is outside it.
+    // A self-hosted /opt/tools -> ~/tools.
     const deps = host(
       ["/opt/tools/bin/docker", "/usr/bin/docker"],
       {},
@@ -117,8 +116,7 @@ describe("findPinnableCommand", () => {
       })[p] ?? null;
     deps.isExecutable = (p) => p === "/usr/bin/docker";
 
-    // A cycle stays entirely outside the persisting paths here, so the guard
-    // must stop it by hop count, not by finding a writable hop.
+    // Stopped by the hop limit: no hop is inside a persisting path.
     expect(findPinnableCommand("docker", "/usr/bin", PERSISTENT, deps)).toBe("/usr/bin/docker");
   });
 
@@ -261,7 +259,6 @@ describe("renameGuardDirs", () => {
   });
 
   it("uses the deepest containing root, so it never pins a path outside the writable area", () => {
-    // WORKSPACE is under HOME; the guards must stop at WORKSPACE, not walk up to HOME.
     expect(renameGuardDirs([`${WORKSPACE}/a/b`], PERSISTENT)).toStrictEqual([`${WORKSPACE}/a`]);
   });
 

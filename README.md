@@ -321,10 +321,10 @@ change file ownership, and the sandboxed command runs as the runner's own user w
 dropped and `no_new_privileges` set, so `sudo` and setuid binaries do nothing for it. A path the
 runner user could not write outside the sandbox stays unwritable inside it.
 
-Two directories stay read-only wherever a write to them would outlive the command: the docker CLI's
-config directory (`$DOCKER_CONFIG`, else `~/.docker`) and this action's own checkout. The step runs
-`docker` and its own post script from them after the command exits. A command that has to write
-docker config (`docker login`, `gcloud auth configure-docker`) belongs in a step of its own.
+The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) and this action's own
+checkout stay read-only, since the action runs `docker` and its post script from them after the
+command exits. A command that writes docker config (`docker login`, `gcloud auth configure-docker`)
+needs a step of its own.
 
 > [!WARNING]
 > `filesystem_mode: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
@@ -429,12 +429,10 @@ This action isolates the step it wraps, not the job. What the command sets in `$
 this action's own post step reads back after the step ends. Those steps run without this action's
 restrictions unless you wrap them too. If a step runs untrusted code, isolate the steps after it in
 the same job as well, or move them to a separate job, and don't treat an env var, `$PATH` entry, or
-output an isolated step set as trustworthy. Post steps cannot be wrapped: every action's runs after
-the last step with what it left behind. This action's own post step keeps `docker` and `sudo` away
-from the paths the command could write and runs from a read-only checkout, but it inherits
-`$GITHUB_ENV` like any other, so an untrusted command in `persistent` mode can still reach it, and
-every other action's post step, wherever the isolated step sits. `filesystem_mode: ephemeral` with
-a narrow `write_through:` keeps it from leaving anything there.
+output an isolated step set as trustworthy. Post steps cannot be wrapped and run after the last step.
+This action's own keeps `docker` and `sudo` out of the command's reach, but like any other it
+inherits `$GITHUB_ENV`, so in `persistent` mode an untrusted command can reach every post step.
+`filesystem_mode: ephemeral` with a narrow `write_through:` prevents that.
 
 An allowlist also cannot stop anything leaving through a service you had to allow anyway. That is a
 structural limit. What it does stop is traffic to a destination that is not on the list, and

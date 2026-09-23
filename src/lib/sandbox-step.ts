@@ -218,8 +218,7 @@ export async function runSandboxStep(
   // probe). resolveFilesystemPlan re-checks the resolved paths.
   validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput));
 
-  // Before the preflights below, which already run sudo: an earlier isolated
-  // step could have left one on PATH under $HOME. See host-commands.ts.
+  // Before the preflights, which already run sudo.
   pinHostCommands(
     pinningPaths(() => writeThroughInput, env),
     env,

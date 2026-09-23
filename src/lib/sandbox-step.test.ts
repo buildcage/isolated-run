@@ -136,8 +136,7 @@ describe("runSandboxStep", () => {
     expect(orderOf(mocks.pinHostCommands)).toBeLessThan(orderOf(mocks.checkPasswordlessSudo));
   });
 
-  // Ephemeral discards only this step's own writes: what an earlier step left
-  // under $HOME is still there, so the set does not shrink with the mode.
+  // An earlier step's writes under $HOME survive this step's ephemeral mode.
   it("pins against persistent mode's paths plus write_through in ephemeral mode too", async () => {
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "ephemeral",

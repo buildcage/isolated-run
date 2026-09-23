@@ -34,8 +34,7 @@ const COREDNS_LOG_DIR = "/var/log/coredns";
  * ran.
  */
 // Untested by design, down to fetchReport's end: the log reader and both
-// builders are tested directly, and this client only hands node:child_process
-// the pinned `docker` in place of the one createDocker would look up on PATH.
+// builders are tested directly, and this client only swaps in the pinned docker.
 /* v8 ignore start */
 function createHostDocker(): Docker {
   return createDocker(

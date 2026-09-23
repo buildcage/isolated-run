@@ -32,7 +32,6 @@ export interface RunIsolatedDeps {
   /** Throws on a non-zero exit, carrying it as `status`, the shape
    *  execFileSync already has, which is what the exit-code read below wants. */
   execFile?: (command: string, args: string[], options: ExecFileOptions) => void;
-  /** Copies `from` to `to` as a root-executable script. */
   copyScript?: (from: string, to: string) => void;
 }
 
@@ -81,10 +80,8 @@ export function runIsolated(
   }: RunIsolatedOptions,
   { execFile = defaultExecFile, copyScript = defaultCopyScript }: RunIsolatedDeps = {},
 ): number {
-  // Run from a copy in the bundle dir, which the sandbox cannot see, rather
-  // than from the action's own checkout: bash reads a script as it goes, and
-  // the checkout can sit under a path the command may write to while this
-  // script is still running as root around it.
+  // bash reads a script as it runs, and the checkout may be writable from the
+  // sandbox, so run a copy the sandbox cannot see.
   const runIsolatedShPath = join(bundleDir, "run-isolated.sh");
   copyScript(join(__dirname, "..", "scripts", "run-isolated.sh"), runIsolatedShPath);
 

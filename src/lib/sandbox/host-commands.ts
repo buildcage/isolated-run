@@ -1,20 +1,11 @@
 /**
- * What this action runs on the host once the sandboxed command has started,
- * kept out of the command's reach.
- *
- * The command can write to some host paths, and those writes outlive it:
- * everything persistent mode binds back read-write, or whatever write_through
- * names in ephemeral mode. This step goes on running `docker` and `sudo` after
- * the command exits, to read the report and tear the sandbox down. Looked up
- * through the inherited `$PATH` at that point, a `docker` the command dropped
- * into `~/.local/bin` would run in their place, outside every namespace and
- * with the runner's own access. An earlier isolated step could have left one
- * there too, for this step's own preflight checks to run. So both are resolved
- * once, before anything runs them, to a binary none of those paths contain.
- *
- * The same applies to what the docker CLI loads (plugins such as `compose`,
- * contexts, config) and to this action's own files (the post step's script),
- * which sandboxReadonlyHostDirs covers by making them read-only inside the sandbox.
+ * Keeps what this action runs on the host out of reach of the sandboxed
+ * command, whose writes to some host paths outlive it. `docker` and `sudo`
+ * are pinned to binaries outside those paths, since a lookup through `$PATH`
+ * could pick one the command planted (`~/.local/bin` precedes `/usr/bin` on
+ * hosted runners). The docker CLI's config directory and this action's own
+ * checkout, which hold its plugins and the post step's script, are made
+ * read-only inside the sandbox.
  */
 
 import { accessSync, constants, readlinkSync, realpathSync } from "node:fs";
@@ -32,16 +23,13 @@ import { resolveWriteThroughPaths } from "./write-through.ts";
 // becomes undefined), so use this form instead.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/** The action's own checkout: `dist/` is where the bundle this runs from lives. */
+/** The bundle runs from `dist/`, one level below the checkout. */
 const ACTION_ROOT = resolve(__dirname, "..");
 
 const PINNED_COMMANDS = ["docker", "sudo"] as const;
 
-/**
- * Host paths the sandboxed command can write to whose contents survive it.
- * Ephemeral mode's overlay roots are left out: their writes are discarded
- * before anything here runs again.
- */
+/** Host paths whose writes outlive the command. Ephemeral mode's overlays
+ *  discard theirs, so only write_through counts there. */
 export function persistingWritablePaths(
   filesystemMode: FilesystemMode,
   writeThroughPaths: string[],
@@ -58,15 +46,12 @@ export function persistingWritablePaths(
 
 export interface FindCommandDeps {
   isExecutable: (path: string) => boolean;
-  /** The immediate target of `path` if it is a symlink (resolved to absolute
-   *  against `path`'s own directory), or null if it is not one. */
+  /** The absolute target of one symlink hop, or null if `path` is not a symlink. */
   readlink: (path: string) => string | null;
-  /** `dir` with every symlink in it resolved, or `dir` itself if it can't be. */
   realpathDir: (dir: string) => string;
 }
 
-// Symlink hops followed before giving up, matching the kernel's own
-// MAXSYMLINKS. A loop hits this too, so it doubles as the cycle guard.
+// The kernel's MAXSYMLINKS; also stops a symlink loop.
 const MAX_SYMLINK_HOPS = 40;
 
 // Untested by design: the defaults behind this module's seams, which only hand
@@ -86,8 +71,6 @@ const realFindCommandDeps: FindCommandDeps = {
       const target = readlinkSync(path);
       return isAbsolute(target) ? target : resolve(dirname(path), target);
     } catch {
-      // ENOENT (dangling) or EINVAL (not a symlink): either way there is no
-      // further hop to follow from here.
       return null;
     }
   },
@@ -101,14 +84,8 @@ const realFindCommandDeps: FindCommandDeps = {
 };
 /* v8 ignore stop */
 
-/**
- * Every path a `command` lookup would touch: the `$PATH` entry itself, then
- * each symlink target down to the real file. What matters is that none of
- * them sits where the sandboxed command can write, since it could repoint any
- * hop that does. A hop's parent directory can be a symlink too (a self-hosted
- * `/opt/tools` pointing into `$HOME`), so each hop is judged by where its
- * directory really is as well as by how it is spelled; see findPinnableCommand.
- */
+/** The `$PATH` entry and each symlink hop after it. The command could repoint
+ *  any hop it can write, so every one of them is checked. */
 function commandChain(candidate: string, readlink: FindCommandDeps["readlink"]): string[] {
   const chain = [candidate];
   let current = candidate;
@@ -122,14 +99,12 @@ function commandChain(candidate: string, readlink: FindCommandDeps["readlink"]):
 }
 
 /**
- * The first `command` on `pathEnv` whose every symlink hop, its own `$PATH`
- * entry included, lies outside all of `persisting`, returned as that `$PATH`
- * entry rather than the resolved target: a tool such as snap's `docker`
- * (`/snap/bin/docker` -> `/usr/bin/snap`) decides its role from the name it
- * was invoked by, which the resolved path would lose. A relative `$PATH`
- * entry is skipped: it resolves against the working directory, which is the
- * workspace. `write_through: /` leaves nothing outside, and is the documented
- * full opt-out, so the first match is taken as is.
+ * The first `command` on `pathEnv` with no hop inside `persisting`, judged by
+ * both its spelling and its real directory (a self-hosted `/opt/tools` may
+ * point into `$HOME`). Returns the `$PATH` entry, not the resolved target:
+ * snap's `/snap/bin/docker` -> `/usr/bin/snap` picks its role from the name it
+ * was invoked by. Relative entries resolve against the workspace, so they are
+ * skipped. `write_through: /` is the documented full opt-out.
  */
 export function findPinnableCommand(
   command: string,
@@ -151,15 +126,9 @@ export function findPinnableCommand(
 }
 
 /**
- * Resolves `docker` and `sudo` for the rest of this process, against
- * pinningPaths. Both steps run it before anything else runs either command:
- * the main step before its own preflight checks, and the post step, a process
- * of its own, before it tears anything down.
- *
- * A command found on PATH only inside those paths fails the step. One missing
- * from PATH altogether is left unpinned, so the caller's own check (the sudo
- * preflight, or docker's ENOENT) still reports it in its own words, which say
- * far more about a runner without sudo or Docker than this could.
+ * Pins `docker` and `sudo` for the rest of this process. A command missing
+ * from PATH altogether is left unpinned, so the sudo preflight or docker's
+ * ENOENT reports a runner without them in clearer terms than this would.
  */
 export function pinHostCommands(
   paths: string[],
@@ -183,13 +152,10 @@ export function pinHostCommands(
 }
 
 /**
- * The paths a pinned command must stay out of: persistent mode's writable set
- * plus what write_through names, whichever mode this step runs in. What
- * matters is what any sandboxed command, this step's or an earlier one's,
- * could have left behind, and ephemeral mode only discards this step's own
- * writes. The post step also cannot take the mode from GITHUB_STATE, which the
- * command could rewrite. An input that does not parse contributes nothing:
- * the step fails on it before it would ever be writable.
+ * Persistent mode's writable set plus write_through, in either mode: an earlier
+ * step's sandbox may have written there even if this one's writes are
+ * discarded, and the post step cannot trust GITHUB_STATE to say which mode ran.
+ * An input that does not parse never became writable, so it adds nothing.
  */
 export function pinningPaths(
   readWriteThroughInput: () => string,
@@ -199,23 +165,21 @@ export function pinningPaths(
   try {
     writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
   } catch {
-    // Left empty, as above.
+    // See above.
   }
   return persistingWritablePaths("persistent", writeThroughPaths, env);
 }
 
-/** The directory the docker CLI reads its config, contexts and plugins from. */
 export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
   if (env.DOCKER_CONFIG) return resolve(env.DOCKER_CONFIG);
   return env.HOME ? join(env.HOME, ".docker") : undefined;
 }
 
 /**
- * Of this action's own directory and the docker CLI's config directory, the
- * ones the sandbox has to see read-only: those inside a persisting writable
- * path. One that itself contains such a path is left alone, since making it
- * read-only would take that path with it: `uses: ./` puts the action in the
- * workspace, and a write_through entry may name the config directory outright.
+ * The action checkout and docker config directory, where a persisting path
+ * contains them. One that itself contains a persisting path is skipped, as
+ * making it read-only would take that path with it (`uses: ./`, or a
+ * write_through entry naming it).
  */
 export function sandboxReadonlyHostDirs(
   persisting: string[],
@@ -230,26 +194,15 @@ export function sandboxReadonlyHostDirs(
 }
 
 /**
- * The directories that must be turned into mount points so a read-only dir
- * from sandboxReadonlyHostDirs cannot be freed by renaming a parent. A
- * read-only bind is itself a mount point, so it cannot be renamed; but the
- * writable directories above it are not, and `mv ~/work/_actions/buildcage
- * ~/x` would move the whole subtree and let the command recreate the action's
- * files at the original path, which its post step runs from. The kernel
- * refuses to rename a mount point (EBUSY), so every directory between the
- * writable root and the read-only dir is bound onto itself read-write here:
- * still writable, but no longer renamable.
- *
- * The writable root itself is already a mount point (persistent binds it, and
- * ephemeral overlays it), and the read-only dir is one too, so only the
- * strictly-in-between directories remain. A dir sitting directly under the
- * root (like `~/.docker`) therefore contributes none.
+ * The writable directories between a read-only dir and the persisting root
+ * above it. Renaming one would move the read-only dir aside and free its path
+ * for a replacement; binding each onto itself makes it a mount point, which
+ * the kernel refuses to rename. The root and the read-only dir are mount
+ * points already.
  */
 export function renameGuardDirs(readonlyDirs: string[], persisting: string[]): string[] {
   const guards = new Set<string>();
   for (const dir of readonlyDirs) {
-    // The deepest containing writable path: fewest intermediates, all of them
-    // still inside the writable area.
     const root = persisting
       .filter((p) => p !== "/" && isAtOrUnder(dir, p))
       .sort((a, b) => b.length - a.length)[0];
@@ -258,7 +211,6 @@ export function renameGuardDirs(readonlyDirs: string[], persisting: string[]): s
       guards.add(p);
     }
   }
-  // Shallowest first, so a parent guard is bound before the child that nests in
-  // it (same ordering persistentLayers uses for its own binds).
+  // Parents are bound before the children nested in them.
   return [...guards].sort((a, b) => a.length - b.length || a.localeCompare(b));
 }

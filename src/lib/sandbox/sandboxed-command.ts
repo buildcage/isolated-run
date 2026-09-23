@@ -259,9 +259,8 @@ export function assembleBundle(
     const persisting = persistingWritablePaths(filesystemMode, writeThroughPaths, env);
     const readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env);
     const renameGuardDirs = renameGuards(readonlyHostDirs, persisting);
-    // The docker CLI creates its config directory on first write, which could
-    // otherwise be the sandboxed command's; runc skips a read-only path that
-    // doesn't exist.
+    // runc skips a read-only path that doesn't exist, and the sandbox could
+    // then create it.
     for (const dir of readonlyHostDirs) deps.mkdir(dir, { mode: 0o700, recursive: true });
     config = buildOciConfig(baseSpec, {
       identity: resolveIdentity(env, deps),

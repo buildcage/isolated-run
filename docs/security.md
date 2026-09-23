@@ -150,24 +150,21 @@ runc mounts fresh such as `/proc`, fails the step rather than being silently ove
 that, `write_through: /proc` would shadow the sandbox's procfs with the host's and undo the
 PID-namespace separation above.
 
-The step itself goes on running on the host after the command exits, to read the report and tear
-the sandbox down, so what it runs then is kept out of those paths. `docker` and `sudo` are resolved
-once, before the step runs either, to a binary outside `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`,
-`$RUNNER_TEMP` and every `write_through:` path, in either mode: ephemeral discards only this step's
-own writes, not what an earlier step left there for this one's preflight checks to run. The step
-fails if either is on `$PATH` only inside one of them. The post step, a process of its own, resolves
-them again the same way. The docker CLI's config directory
-(`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins such as `compose` as well as its
-contexts, and this action's own checkout, which holds its post step's script, are read-only inside
-the sandbox whenever such a path contains them, and every writable directory between them and the
-root of the writable path they sit under is bound onto itself so it cannot be renamed: a read-only
-directory alone can still be freed by renaming a parent out from over it. `run-isolated.sh`, which
-runs as root around the command, runs from a copy in the scratch directory the sandbox cannot see.
-Without these, a
-`docker` dropped into `~/.local/bin`, or a `docker-compose` in `~/.docker/cli-plugins`, would run in
-their place, outside every namespace. A command that writes the docker config itself
-(`docker login`, `gcloud auth configure-docker`) therefore fails in `persistent` mode; give it a
-step of its own.
+After the command exits, the step keeps running on the host to read the report and tear the
+sandbox down, so what it runs is kept out of those paths:
+
+- `docker` and `sudo` are pinned, before either first runs, to a binary outside
+  `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, `$RUNNER_TEMP` and `write_through:`. This applies in
+  `ephemeral` mode too, since an earlier step's writes there survive. The step fails if either is on
+  `$PATH` only inside those paths. The post step pins them again.
+- The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins,
+  and this action's own checkout, which holds the post step's script, are read-only inside the
+  sandbox. The writable directories above them are made mount points, so they cannot be renamed
+  away.
+- `run-isolated.sh`, which runs as root, runs from a copy the sandbox cannot see.
+
+A command that writes the docker config (`docker login`, `gcloud auth configure-docker`) therefore
+fails in `persistent` mode; give it a step of its own.
 
 All of this is `filesystem_mode: persistent`, the default and the stable mode.
 `filesystem_mode: ephemeral` (**experimental**) replaces it with an overlay that discards every
@@ -546,10 +543,9 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 
   That decides how the step is set up. Wrapping every untrusted step is not the way out: a payload
   left in `$GITHUB_ENV`, `$GITHUB_PATH` or `$HOME` runs in the next step before its sandbox does.
-  This action keeps its own `sudo` and `docker` out of those paths, but under `inspect` it runs
-  `java` and `keytool` through `$JAVA_HOME` and `$PATH`, and every process it starts inherits the
-  environment the runner hands it. Making it the last step in the job does
-  not close it off either: every action's post step, this one's included, runs after the last
+  This action's own `sudo` and `docker` are pinned out of reach, but `java` and `keytool` (under
+  `inspect`) are not, and every process inherits the environment. Making it the last step in the
+  job does not close it off either: every action's post step, this one's included, runs after the last
   step, with whatever it left in `$GITHUB_ENV`, `$GITHUB_PATH` and `$HOME`. What holds is
   `filesystem_mode: ephemeral` with `write_through:` narrowed to `$GITHUB_WORKSPACE` and the output
   files the step really has to produce, leaving out `$GITHUB_ENV`, `$GITHUB_PATH` and `$HOME`.

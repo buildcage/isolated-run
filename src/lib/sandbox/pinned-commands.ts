@@ -1,10 +1,9 @@
-// Its own module, importing nothing, so every exec seam can read it without
-// pulling host-commands.ts (and the mount modules behind it) into a cycle.
+// Imports nothing, so every exec seam can use it without an import cycle
+// through host-commands.ts.
 
 const pinned = new Map<string, string>();
 
-/** The absolute path host-commands.ts pinned `command` to, or `command` itself
- *  if it isn't one that gets pinned (or nothing has been pinned yet). */
+/** The pinned path of `command`, or `command` itself if it isn't pinned. */
 export function hostCommand(command: string): string {
   return pinned.get(command) ?? command;
 }

@@ -35,10 +35,8 @@ async function stopProxyContainer({ containerName, projectName }: PostCleanupTar
 // here via core.getState; see
 // https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands#sending-values-to-the-pre-and-post-actions.
 function main(): void {
-  // Before planPostCleanup, whose owner check and scratch-dir fallback already
-  // run docker and sudo: the command's writes are on disk by now, and on a
-  // hosted runner `~/.local/bin` is ahead of `/usr/bin` on PATH. A no-op
-  // notice: the main step already reported any renamed input.
+  // Before planPostCleanup, which already runs docker and sudo. The main step
+  // already reported any renamed input, hence the no-op notice.
   pinHostCommands(
     pinningPaths(() => readFilesystemInputs(() => {}).writeThroughInput, process.env),
     process.env,
