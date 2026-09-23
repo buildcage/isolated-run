@@ -20918,6 +20918,9 @@ function readActionVersion(containerName, proxyEngine, docker) {
 		return;
 	}
 }
+function sanitizeHeadingLabel(label) {
+	return label.replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
+}
 function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
@@ -20925,7 +20928,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 	});
 	return {
 		markdown: renderReportMarkdown(report, actionRepo, actionRef, {
-			title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
+			title: stepLabel ? `Outbound Traffic Report — ${sanitizeHeadingLabel(stepLabel)}` : void 0,
 			runCommand,
 			actionVersion
 		}),

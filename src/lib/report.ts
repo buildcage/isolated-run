@@ -115,6 +115,17 @@ export interface ReportOutcomes {
 }
 
 /**
+ * `label` is a workflow-author input often wired to untrusted text
+ * (`${{ github.event.pull_request.title }}`), and it lands in the Job Summary
+ * heading, which the renderer emits verbatim. Neutralize the same structural
+ * Markdown that host-table cells escape, and fold newlines so it can't break
+ * out of the heading into arbitrary blocks.
+ */
+function sanitizeHeadingLabel(label: string): string {
+  return label.replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+
+/**
  * Pure decision + rendering step, kept free of process.env/file I/O so it's
  * testable without touching the filesystem.
  */
@@ -134,7 +145,7 @@ export function computeReportOutcomes(
     engineLabel: "sandbox",
   });
   const markdown = renderReportMarkdown(report, actionRepo, actionRef, {
-    title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : undefined,
+    title: stepLabel ? `Outbound Traffic Report — ${sanitizeHeadingLabel(stepLabel)}` : undefined,
     runCommand,
     actionVersion,
   });
