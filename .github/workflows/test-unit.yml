@@ -56,7 +56,9 @@ jobs:
 
   unit_test:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.unit_test == 'true'
+    # !cancelled() forces this to evaluate when `changes` is skipped (it runs
+    # only on pull_request); a skipped need otherwise skips the job unevaluated.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.unit_test == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

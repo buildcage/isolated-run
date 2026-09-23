@@ -59,7 +59,9 @@ jobs:
   # restrict-mode example.
   test_sandbox_audit_mode:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true'
+    # !cancelled() forces this to evaluate when `changes` is skipped (it runs
+    # only on pull_request); a skipped need otherwise skips the job unevaluated.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -121,7 +123,7 @@ jobs:
   # which needs a fixture network this job deliberately does not set up.
   test_sandbox_enforcement:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true'
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -209,7 +211,7 @@ jobs:
   # this job deliberately does not set up.
   test_sandbox_inspect_enforcement:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true'
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -334,7 +336,7 @@ jobs:
   # reusing the same built image for both cases.
   test_sandbox_fail_on_blocked:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true'
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -412,7 +414,7 @@ jobs:
   # in test-integration.yml.
   test_sandbox_concurrency:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true'
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
