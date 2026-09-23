@@ -44,8 +44,8 @@ cosign verify ghcr.io/buildcage/isolated-run:X.Y.Z-<engine> \
 gh attestation verify oci://ghcr.io/buildcage/isolated-run:X.Y.Z-<engine> --repo buildcage/isolated-run
 ```
 
-The image tag is `X.Y.Z-<engine>`; the identity names the release tag `vX.Y.Z` and the exact
-workflow that signs it, so a signature from any other workflow, ref or repository is rejected.
+The image tag is `X.Y.Z-<engine>`, but the identity names the release tag `vX.Y.Z`. Pinning the
+exact workflow rejects a signature from any other workflow, ref or repository.
 
 The Sigstore bundle for each release is also attached as a downloadable asset
 (`isolated-run-container-universal.sigstore.json` and `isolated-run-container-inspect.sigstore.json`)
