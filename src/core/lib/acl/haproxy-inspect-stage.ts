@@ -1,5 +1,5 @@
 import { HOST_IS_ADDRESS, type CompiledRule } from "./haproxy-rules.ts";
-import { HOST_ONLY } from "./haproxy-matchers.ts";
+import { escapeForHaproxy, HOST_ONLY, hostMatcher, pathMatcher } from "./haproxy-matchers.ts";
 import { deniesEverything, ruleBlock } from "./haproxy-rule-block.ts";
 import { internalDstAcl, type InternalDstOptions } from "./haproxy-internal-dst.ts";
 
@@ -26,6 +26,52 @@ export interface InspectStageContext extends InternalDstOptions {
  *  are both empty. Client-controlled, hence the detect frontend's charset. */
 function sniField(scheme: "https" | "http"): string {
   return scheme === "https" ? " sni=%[ssl_fc_sni,regsub([^A-Za-z0-9._-],_,g)]" : "";
+}
+
+function addressRules(rules: CompiledRule[]): CompiledRule[] {
+  const isAddress = new RegExp(HOST_IS_ADDRESS);
+  return rules.filter((rule) => {
+    if (rule.hostMatch !== "wildcard") return false;
+    const { op, pattern } = hostMatcher(rule.hostRegex);
+    return op === "-m str" && isAddress.test(pattern);
+  });
+}
+
+/**
+ * Exempt an internal destination only where a rule naming that address as its
+ * host matches the whole request, so `**:80` cannot open 169.254.169.254.
+ * Matched here, not in the rule block: audit has none but still guards.
+ */
+function internalGuard(rules: CompiledRule[]): string[] {
+  const named = addressRules(rules);
+  if (named.length === 0) {
+    return [
+      "    http-request set-var(txn.reason) str(internal-address) if dst_internal",
+      "    http-request deny deny_status 403 if dst_internal",
+      "",
+    ];
+  }
+  const lines = ["    # An address a rule names as its host is exempt where that rule matches."];
+  for (const rule of named) {
+    const path = pathMatcher(rule.pathRegex);
+    const conds = [
+      `{ req.hdr(host),${HOST_ONLY} -m str ${hostMatcher(rule.hostRegex).pattern} }`,
+      ...(rule.port ? [`{ dst_port ${rule.port} }`] : []),
+      `{ path ${path.op} ${escapeForHaproxy(path.pattern)} }`,
+      ...(rule.methods ? [`{ method ${rule.methods.join(" ")} }`] : []),
+    ];
+    lines.push(
+      `    # ${rule.raw}`,
+      `    http-request set-var(txn.named_address) bool(true) if ${conds.join(" ")}`,
+    );
+  }
+  lines.push(
+    "    acl named_address var(txn.named_address) -m bool",
+    "    http-request set-var(txn.reason) str(internal-address) if dst_internal !named_address",
+    "    http-request deny deny_status 403 if dst_internal !named_address",
+    "",
+  );
+  return lines;
 }
 
 /**
@@ -125,12 +171,9 @@ export function inspectStage(
       "    # was: CoreDNS never hands out a real one; see coredns-config.ts.",
       "    http-request set-dst var(txn.dst)",
       "",
-      "    # A resolved destination may not be internal; see INTERNAL_RANGES. An",
-      "    # address named in a rule is exempt.",
+      "    # A resolved destination may not be internal; see INTERNAL_RANGES.",
       ...internalDstAcl("dst_internal", ctx),
-      "    http-request set-var(txn.reason) str(internal-address) if dst_internal !host_is_address",
-      "    http-request deny deny_status 403 if dst_internal !host_is_address",
-      "",
+      ...internalGuard(rules),
     );
   }
   l.push(`    default_backend ${backend}`, "");

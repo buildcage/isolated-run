@@ -1,9 +1,10 @@
 import { describe, it, expect, reportResults } from "../test/test-shim.ts";
 import { inspectStage } from "./haproxy-inspect-stage.ts";
 import { compileRuleSet, INTERNAL_RANGES, type RuleInputs } from "./haproxy-rules.ts";
+import { buildUrlRules } from "./url-rules.ts";
 
 /** The plaintext stage for these rules, as the generated config carries it. */
-function plainStage(inputs: RuleInputs): string {
+function plainStage(inputs: RuleInputs, mode: "restrict" | "audit" = "restrict"): string {
   return inspectStage(
     {
       name: "http_in",
@@ -13,7 +14,7 @@ function plainStage(inputs: RuleInputs): string {
       rules: compileRuleSet(inputs).http,
       backend: "origin_plain",
     },
-    { mode: "restrict", hasResolver: true, internalAddrs: INTERNAL_RANGES },
+    { mode, hasResolver: true, internalAddrs: INTERNAL_RANGES },
   ).join("\n");
 }
 
@@ -34,6 +35,32 @@ describe("inspect stage", () => {
     expect(plain.includes("# No rules for this scheme, so nothing is permitted.")).toBe(true);
     expect(plain.includes("do-resolve")).toBe(false);
     expect(plain.includes("acl dst_internal")).toBe(false);
+  });
+
+  it("exempts only where a rule that writes the address as its host matches", () => {
+    const plain = plainStage({
+      httpRules: ["169.254.169.254:8080", "127.0.0.3:*", "~^127\\.0\\.0\\.1:80$", "*.0.0.1:80"],
+      urlRules: buildUrlRules("GET http://127.0.0.2/latest/**"),
+    });
+    const named = plain.split("\n").filter((l) => l.includes("set-var(txn.named_address)"));
+    expect(named.length).toBe(3);
+    expect(named[0].endsWith("-m str 169.254.169.254 } { dst_port 8080 } { path -m beg / }")).toBe(
+      true,
+    );
+    expect(named[1].endsWith("-m str 127.0.0.3 } { path -m beg / }")).toBe(true);
+    expect(
+      named[2].endsWith(
+        "-m str 127.0.0.2 } { dst_port 80 } { path -m beg /latest/ } { method GET }",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps the exemption in audit, where no rule is enforced", () => {
+    // audit emits no rule block, so the exemption cannot lean on it.
+    const plain = plainStage({ httpRules: ["169.254.169.254:80"] }, "audit");
+    expect(plain.includes("txn.allowed")).toBe(false);
+    expect(plain.includes("-m str 169.254.169.254 } { dst_port 80 }")).toBe(true);
+    expect(plain.includes("deny deny_status 403 if dst_internal !named_address")).toBe(true);
   });
 });
 
