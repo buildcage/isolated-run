@@ -82,6 +82,10 @@ export const HOST_RUN_LOCK_DIR = "/run/lock";
 export function hostRunCoverageLayers(): WritableLayers {
   return {
     mounts: [
+      // Options match the host's own /run and /run/lock mounts: /run carries no
+      // `noexec` (the host's does not either -- code legitimately runs from
+      // /run, and a write_through re-exposed path under it may be an executable),
+      // while /run/lock does (lock files are never code), same as the host.
       {
         destination: HOST_RUN_DIR,
         type: "tmpfs",

@@ -19041,11 +19041,11 @@ function withHostShmSize(mounts, hostShmBytes) {
 		};
 	});
 }
-const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", HOST_RUN_LOCK_DIR = "/run/lock";
+const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", HOST_RUN_DIR = "/run", HOST_RUN_LOCK_DIR = "/run/lock";
 function hostRunCoverageLayers() {
 	return {
 		mounts: [{
-			destination: "/run",
+			destination: HOST_RUN_DIR,
 			type: "tmpfs",
 			source: "tmpfs",
 			options: [
@@ -19147,11 +19147,13 @@ function scratchBaseLayers(execDir) {
 }
 //#endregion
 //#region src/lib/sandbox/filesystem-plan.ts
+const HOST_RUN_DIRS = [HOST_RUN_DIR, "/var/run"];
 function validateFilesystemInputs(filesystemMode, writeThroughPaths) {
 	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
 	for (let path of writeThroughPaths) {
 		let reserved = RESERVED_INTERNAL_DESTINATIONS.find((r) => isAtOrUnder(path, r));
 		if (reserved) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
+		if (HOST_RUN_DIRS.includes(path)) throw new SandboxError(`write_through entry ${JSON.stringify(path)} would re-expose the host's entire /run, undoing the empty-tmpfs coverage that keeps its service sockets out of the sandbox. Name a specific path under it instead (e.g. /run/my-daemon.sock) to re-expose only that one.`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 }
 function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {

@@ -273,10 +273,18 @@ describe("validateFilesystemInputs", () => {
     );
   });
 
-  it("allows a path under /run, which is re-exposed on top of the coverage tmpfs, not reserved", () => {
+  it("allows a specific path under /run, re-exposed on top of the coverage tmpfs", () => {
     // Selective re-exposure: naming /run/<x> punches that one host path back
     // through the empty /run tmpfs (see oci-config.ts's mount order).
     expect(() => validateFilesystemInputs("persistent", ["/run/snapd.socket"])).not.toThrow();
     expect(() => validateFilesystemInputs("ephemeral", ["/run/myapp"])).not.toThrow();
+    expect(() => validateFilesystemInputs("persistent", ["/var/run/docker.sock"])).not.toThrow();
+  });
+
+  it("rejects /run or /var/run as a whole, which would reopen every host socket at once", () => {
+    for (const path of ["/run", "/var/run"]) {
+      expect(() => validateFilesystemInputs("persistent", [path])).toThrow(/entire \/run/);
+      expect(() => validateFilesystemInputs("ephemeral", [path])).toThrow(/entire \/run/);
+    }
   });
 });
