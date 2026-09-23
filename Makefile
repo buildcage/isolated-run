@@ -10,8 +10,8 @@ WORKTREE_NAME := $(if $(findstring /worktrees/,$(GIT_DIR)),$(notdir $(GIT_DIR)))
 # no image tag, container name or Compose project name accepts it.
 WORKTREE_SLUG := $(if $(WORKTREE_NAME),$(shell printf '%s' '$(WORKTREE_NAME)' | tr 'A-Z' 'a-z' | tr -Cs 'a-z0-9_-' '-' | sed -e 's/^-//' -e 's/-$$//'))
 BUILDCAGE_WORKTREE_SUFFIX ?= $(if $(WORKTREE_SLUG),-$(WORKTREE_SLUG))
-# test-net cannot be left to Docker's pool, which includes 172.20.0.0/16 and so
-# overlaps the proxy's own bridge, so pick a subnet from the worktree name.
+# test-net-addr finds test-net by its subnet, so pin one, derived from the
+# worktree name so linked worktrees don't collide.
 TEST_NET_SUBNET ?= $(if $(WORKTREE_NAME),$(shell printf '%s' '$(WORKTREE_NAME)' | cksum | awk '{printf "10.%d.%d.0/24", $$1 % 40 + 210, int($$1 / 40) % 254 + 1}'),10.210.0.0/24)
 QJS_TEST_IMAGE ?= buildcage-qjs-test$(BUILDCAGE_WORKTREE_SUFFIX)
 export BUILDCAGE_WORKTREE_SUFFIX
@@ -85,7 +85,7 @@ test_sandbox_dev: ## Run a sample isolated command in the dev loop and verify is
 	    build-test-bundle.sh --netns-name buildcage-sandbox-dev --script /usr/local/bin/smoke-test.sh --bundle /var/tmp/buildcage/dev-bundle; \
 	    run-isolated.sh --proxy-netns $$PROXY_NETNS --runc /usr/local/bin/runc --bundle /var/tmp/buildcage/dev-bundle \
 	      --container-id buildcage-sandbox-dev --netns-name buildcage-sandbox-dev --rootfs-bind-dir /var/tmp/buildcage/dev-bundle/rootfs \
-	      --gateway 172.20.0.1 --dns 172.20.0.1 --target-ip 172.20.0.101"
+	      --gateway 198.19.255.1 --dns 198.19.255.1 --target-ip 198.19.255.101"
 	@$(MAKE) clean_sandbox_dev
 
 .PHONY: clean_sandbox_dev

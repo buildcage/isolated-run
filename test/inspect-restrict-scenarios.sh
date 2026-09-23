@@ -254,7 +254,7 @@ echo "  queried (checked in the report, see integration-test-inspect-restrict.sh
 # five-second timeout, once for every tool that reverse-resolves its own
 # address or the gateway's. NXDOMAIN is final and costs nothing.
 echo "=== [Reverse lookup] ==="
-RDNS_OUT=$(nslookup 172.20.0.1 2>&1 || true)
+RDNS_OUT=$(nslookup 198.19.255.1 2>&1 || true)
 case "$RDNS_OUT" in
   *NXDOMAIN*) echo "  PASS  the reverse lookup was refused outright" ;;
   *)
@@ -315,7 +315,7 @@ check_status "GET http://10.200.0.100:8080/anything" "$CODE" "403"
 # [What a resolver does when a UDP answer comes back truncated. The gateway's
 # :53 is CoreDNS; any other resolver's is judged by allowed_ip_rules like any
 # other address. The reply opens with its length, then the query's own id.]
-for R in 172.20.0.1 10.200.0.53; do
+for R in 198.19.255.1 10.200.0.53; do
   echo "=== [DNS over TCP - $R] ==="
   ANSWER=$(timeout 5 bash -c '
     exec 3<>/dev/tcp/'"$R"'/53 || exit 1

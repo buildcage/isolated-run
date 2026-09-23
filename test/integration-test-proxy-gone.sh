@@ -52,9 +52,9 @@ sudo -n ./scripts/run-isolated.sh \
   --container-id "buildcage-sandbox-${SUFFIX}" \
   --netns-name "$NETNS_NAME" \
   --rootfs-bind-dir "$ROOTFS_BIND_DIR" \
-  --gateway 172.20.0.1 \
-  --dns 172.20.0.1 \
-  --target-ip 172.20.0.101 \
+  --gateway 198.19.255.1 \
+  --dns 198.19.255.1 \
+  --target-ip 198.19.255.101 \
   >"$WORKDIR/out.log" 2>&1
 CODE=$?
 

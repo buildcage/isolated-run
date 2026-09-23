@@ -7,11 +7,11 @@ echo "init-iptables: configuring isolation..."
 # record) goes to CoreDNS: the listener cannot read a DNS query and logs a line
 # the report cannot parse. Only the gateway's own :53, so TCP to any other
 # resolver is still redirected and logged.
-iptables -t nat -A PREROUTING -i buildcage0 -p tcp -d 172.20.0.1 --dport 53 -j RETURN
+iptables -t nat -A PREROUTING -i buildcage0 -p tcp -d 198.19.255.1 --dport 53 -j RETURN
 iptables -t nat -A PREROUTING -i buildcage0 -p tcp \
   -j REDIRECT --to-ports 10024
 
-# The listeners can't bind 172.20.0.1: that address only exists once buildcage0
+# The listeners can't bind 198.19.255.1: that address only exists once buildcage0
 # is wired in, well after this service runs. Filter on INPUT instead.
 # lo carries the services' own readiness checks, and without the conntrack rule
 # the proxy's own outbound connections never see their replies.

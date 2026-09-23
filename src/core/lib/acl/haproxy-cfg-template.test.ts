@@ -6,8 +6,8 @@ import { generateHaproxyConfig } from "./haproxy-config.ts";
 
 const isNode = typeof (globalThis as { process?: unknown }).process !== "undefined";
 
-/** The proxy's own address in the universal engine's CNI network (172.20.0.0/24). */
-const PROXY_GATEWAY = "172.20.0.1";
+/** The proxy's own address in the universal engine's CNI network (198.19.255.0/24). */
+const PROXY_GATEWAY = "198.19.255.1";
 
 async function readUniversalTemplate(): Promise<string> {
   if (isNode) {

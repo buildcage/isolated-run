@@ -47,7 +47,7 @@ const incomplete: TrafficEvent = {
   host: "api.example.com",
   port: 443,
   reason: "no-request",
-  destination: "172.20.0.1:443",
+  destination: "198.19.255.1:443",
 };
 
 /** Two connections to one host, as the report aggregates them. */

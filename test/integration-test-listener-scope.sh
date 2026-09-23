@@ -27,7 +27,7 @@ ALPINE_IMAGE="alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db869
 # reliable either: on failure to reach the server, dig still writes a
 # "communications error ... timed out" line to stdout, not just stderr. Match
 # the actual answer record instead: the resolver answers every name with
-# 172.20.0.1, an A record synthesised locally (see coredns-config.ts).
+# 198.19.255.1, an A record synthesised locally (see coredns-config.ts).
 dns_answered() {
   local network_mode="$1" target="$2"
   docker run --rm --network "$network_mode" "$ALPINE_IMAGE" sh -c \

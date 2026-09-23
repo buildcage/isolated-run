@@ -7,7 +7,7 @@ import {
 import { compileRuleSet, type RuleInputs } from "./haproxy-rules.ts";
 import { buildUrlRules } from "./url-rules.ts";
 
-const BASE = { proxyAddress: "172.20.0.1" };
+const BASE = { proxyAddress: "198.19.255.1" };
 
 /** Rules and Corefile options in one bag, split apart by `generate` below. */
 type CaseOptions = RuleInputs & Partial<CorednsConfigOptions>;
@@ -199,7 +199,7 @@ describe("denied names", () => {
   const config = gen({ httpsRules: ["a.example.com:443"] });
 
   it("resolves them to the proxy so their URL can still be recorded", () => {
-    expect(config.includes('answer "{{ .Name }} 60 IN A 172.20.0.1"')).toBe(true);
+    expect(config.includes('answer "{{ .Name }} 60 IN A 198.19.255.1"')).toBe(true);
   });
 
   it("answers locally, so the query is never forwarded", () => {
@@ -291,7 +291,7 @@ describe("audit mode", () => {
     // allow-everything policy is HAProxy's job (do-resolve after the ACLs),
     // not this resolver's.
     expect(config.includes("template IN A")).toBe(true);
-    expect(config.includes('answer "{{ .Name }} 60 IN A 172.20.0.1"')).toBe(true);
+    expect(config.includes('answer "{{ .Name }} 60 IN A 198.19.255.1"')).toBe(true);
     expect(config.includes("forward")).toBe(false);
   });
 
@@ -337,7 +337,7 @@ describe("reverse lookups", () => {
     // Only PTR is refused. A name that merely sits under in-addr.arpa still
     // resolves to the proxy, so the request that follows is recorded with its
     // full URL the way one for any other name is.
-    expect(reverseBlock(gen({})).includes('answer "{{ .Name }} 60 IN A 172.20.0.1"')).toBe(true);
+    expect(reverseBlock(gen({})).includes('answer "{{ .Name }} 60 IN A 198.19.255.1"')).toBe(true);
   });
 
   it("never forwards, no more than any other block does", () => {
@@ -350,8 +350,8 @@ describe("reverse lookups", () => {
     // `.in-addr.arpa` appended to it. Everything else under these zones misses
     // the view and falls through to the blocks below, which judge it as usual.
     const regex = regexOf(matchesLine(gen({}), "view reverse"));
-    expect(regex.test("1.0.20.172.in-addr.arpa.")).toBe(true);
-    expect(regex.test("0.20.172.in-addr.arpa.")).toBe(true);
+    expect(regex.test("1.255.19.198.in-addr.arpa.")).toBe(true);
+    expect(regex.test("255.19.198.in-addr.arpa.")).toBe(true);
     expect(regex.test("8.b.d.0.1.0.0.2.ip6.arpa.")).toBe(true);
     expect(regex.test("secret-data.in-addr.arpa.")).toBe(false);
     expect(regex.test("1.2.3.4.in-addr.arpa.attacker.example.")).toBe(false);

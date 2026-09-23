@@ -15,7 +15,7 @@ import { generateHaproxyConfig, type HaproxyConfigOptions } from "./haproxy-conf
 import { buildUrlRules } from "./url-rules.ts";
 import { expectMatchesGolden } from "../test/golden.node.ts";
 
-const PROXY = "172.20.0.1";
+const PROXY = "198.19.255.1";
 
 const CASES: Record<string, HaproxyConfigOptions> = {
   // No options at all: the static skeleton every other case is a delta from.

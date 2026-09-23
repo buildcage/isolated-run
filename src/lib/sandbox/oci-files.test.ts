@@ -33,8 +33,8 @@ describe("writeRunScript", () => {
 describe("writeResolvConf", () => {
   it("writes a single nameserver line", () => {
     withScratchDir((dir) => {
-      const path = writeResolvConf("172.20.0.1", dir);
-      expect(readFileSync(path, "utf8")).toBe("nameserver 172.20.0.1\n");
+      const path = writeResolvConf("198.19.255.1", dir);
+      expect(readFileSync(path, "utf8")).toBe("nameserver 198.19.255.1\n");
     });
   });
 });

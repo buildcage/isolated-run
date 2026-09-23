@@ -9,7 +9,7 @@ import { compileRuleSet, type RuleInputs } from "./haproxy-rules.ts";
 import { buildUrlRules } from "./url-rules.ts";
 import { expectMatchesGolden } from "../test/golden.node.ts";
 
-const PROXY = "172.20.0.1";
+const PROXY = "198.19.255.1";
 
 const CASES: Record<string, RuleInputs & Partial<CorednsConfigOptions>> = {
   // Nothing but the proxy address: the skeleton, refusing every name.

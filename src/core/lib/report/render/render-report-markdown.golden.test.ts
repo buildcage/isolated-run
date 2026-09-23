@@ -134,7 +134,7 @@ const timeline: TrafficEvent[] = [
     host: "untrusted-ca.example.com",
     port: 443,
     reason: "client-aborted",
-    destination: "172.20.0.1:443",
+    destination: "198.19.255.1:443",
   },
 ];
 

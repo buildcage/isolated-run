@@ -12,15 +12,15 @@ const TLS_PASS =
 /** A handshake the client completed and then walked away from, leaving the
  *  proxy's own address as the destination and the SNI as the only name. */
 const ABORTED =
-  "buildcage 1787471978 https <BADREQ> 400 0 ts=CR reason=- tlserr=- dst=172.20.0.1:443 sni=untrusted-ca.example.com host=- -";
+  "buildcage 1787471978 https <BADREQ> 400 0 ts=CR reason=- tlserr=- dst=198.19.255.1:443 sni=untrusted-ca.example.com host=- -";
 /** Bytes haproxy answered 400 to itself, having read no request out of them:
  *  `-` is both the host and the target it never had. */
 const BAD_REQUEST =
-  "buildcage 1787471979 http <BADREQ> 400 0 ts=PR reason=- tlserr=- dst=172.20.0.1:8080 host=- -";
+  "buildcage 1787471979 http <BADREQ> 400 0 ts=PR reason=- tlserr=- dst=198.19.255.1:8080 host=- -";
 /** A request that parsed and carried no `Host`, which the stage refuses ahead
  *  of the rules: there is nothing to match and nothing to resolve. */
 const NO_HOST =
-  "buildcage 1787471979 http GET 400 0 ts=PR reason=missing-host-header tlserr=- dst=172.20.0.1:8080 host=- /x";
+  "buildcage 1787471979 http GET 400 0 ts=PR reason=missing-host-header tlserr=- dst=198.19.255.1:8080 host=- /x";
 /** An origin that took the connection and never sent usable headers. */
 const ORIGIN_FAILED =
   "buildcage 1787471980 https GET 502 0 ts=SH reason=- tlserr=- dst=104.16.1.34:443 host=registry.npmjs.org /slow";
@@ -174,7 +174,7 @@ describe("buildInspectReportData", () => {
   it("tables a refusal sent to an address the build wrote out as an IP row", async () => {
     // allowed_ip_rules is what would have passed it through, so that is the
     // rule kind the row names.
-    const toResolver = BAD_REQUEST.replace("dst=172.20.0.1:8080", "dst=8.8.8.8:53");
+    const toResolver = BAD_REQUEST.replace("dst=198.19.255.1:8080", "dst=8.8.8.8:53");
     const r = await buildInspectReportData([START, toResolver], [], reportParams(), 0);
     expect(
       r.blocked.map((row) => `${row.host}:${row.port} ${row.ruleType} ${row.reason}`),

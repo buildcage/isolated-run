@@ -1,7 +1,7 @@
 import { describe, it, expect, reportResults } from "../test/test-shim.ts";
 import { internalDstAcl } from "./haproxy-internal-dst.ts";
 
-const ADDRS = ["127.0.0.0/8", "169.254.0.0/16", "172.20.0.1"];
+const ADDRS = ["127.0.0.0/8", "169.254.0.0/16", "198.19.255.1"];
 
 describe("the internal-destination acl", () => {
   it("tests the same thing for both stages, differing only in the acl name", () => {
@@ -15,7 +15,7 @@ describe("the internal-destination acl", () => {
 
   it("lists every address inline, as one acl", () => {
     expect(internalDstAcl("dst_internal", { internalAddrs: ADDRS })).toStrictEqual([
-      "    acl dst_internal var(txn.dst) -m ip 127.0.0.0/8 169.254.0.0/16 172.20.0.1",
+      "    acl dst_internal var(txn.dst) -m ip 127.0.0.0/8 169.254.0.0/16 198.19.255.1",
     ]);
   });
 
@@ -23,7 +23,7 @@ describe("the internal-destination acl", () => {
     expect(
       internalDstAcl("dst_internal", { internalAddrs: ADDRS, hostAddressFile: "/run/hosts.lst" }),
     ).toStrictEqual([
-      "    acl dst_internal var(txn.dst) -m ip 127.0.0.0/8 169.254.0.0/16 172.20.0.1",
+      "    acl dst_internal var(txn.dst) -m ip 127.0.0.0/8 169.254.0.0/16 198.19.255.1",
       "    acl dst_internal var(txn.dst) -m ip -f /run/hosts.lst",
     ]);
   });
