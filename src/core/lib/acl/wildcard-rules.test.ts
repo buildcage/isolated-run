@@ -35,8 +35,25 @@ describe("wildcardToRegex", () => {
     expect(() => wildcardToRegex("w*.example.com:443")).toThrow(/Invalid wildcard/);
   });
 
-  it("escapes regex meta characters in domain", () => {
-    expect(wildcardToRegex("example+site.com:443")).toBe("example\\+site\\.com:443");
+  it("rejects a character no hostname can", () => {
+    expect(() => wildcardToRegex("example+site.com:443")).toThrow(/no hostname can/);
+    expect(() => wildcardToRegex("a'b.com:443")).toThrow(/no hostname can/);
+  });
+
+  it("rejects an internationalized name, pointing at its punycode form", () => {
+    expect(() => wildcardToRegex("münchen.de:443")).toThrow(/punycode/);
+    expect(wildcardToRegex("xn--mnchen-3ya.de:443")).toBe("xn--mnchen-3ya\\.de:443");
+  });
+
+  it("rejects an empty label, which no host has", () => {
+    expect(() => wildcardToRegex(".example.com:443")).toThrow(/empty label/);
+    expect(() => wildcardToRegex("example.com.:443")).toThrow(/empty label/);
+    expect(() => wildcardToRegex("a..example.com:443")).toThrow(/empty label/);
+  });
+
+  it("keeps an IPv4 CIDR block, which only an IP rule gives meaning", () => {
+    expect(wildcardToRegex("10.0.0.0/8:443")).toBe("10\\.0\\.0\\.0/8:443");
+    expect(() => wildcardToRegex("example.com/8:443")).toThrow(/no hostname can/);
   });
 
   it("wildcard port *", () => {

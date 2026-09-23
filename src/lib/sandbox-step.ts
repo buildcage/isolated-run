@@ -28,6 +28,7 @@ import {
   readRunCommand,
 } from "./inputs.ts";
 import {
+  checkIpRuleSupport,
   checkKnownBlockedUrlRuleSupport,
   checkUrlAndTlsRuleSupport,
 } from "./engine-rule-support.ts";
@@ -70,6 +71,7 @@ export interface SandboxStepDeps {
   verifyImageDigestOrThrow: typeof verifyImageDigestOrThrow;
   checkUrlAndTlsRuleSupport: typeof checkUrlAndTlsRuleSupport;
   checkKnownBlockedUrlRuleSupport: typeof checkKnownBlockedUrlRuleSupport;
+  checkIpRuleSupport: typeof checkIpRuleSupport;
   logRules: typeof logRules;
   withLogGroup: typeof withLogGroup;
   generateContainerName: typeof generateContainerName;
@@ -106,6 +108,7 @@ const realDeps: SandboxStepDeps = {
   verifyImageDigestOrThrow,
   checkUrlAndTlsRuleSupport,
   checkKnownBlockedUrlRuleSupport,
+  checkIpRuleSupport,
   logRules,
   withLogGroup,
   generateContainerName,
@@ -182,6 +185,7 @@ export async function runSandboxStep(
     verifyImageDigestOrThrow,
     checkUrlAndTlsRuleSupport,
     checkKnownBlockedUrlRuleSupport,
+    checkIpRuleSupport,
     logRules,
     withLogGroup,
     generateContainerName,
@@ -274,6 +278,7 @@ export async function runSandboxStep(
       },
       annotation.warning,
     );
+    checkIpRuleSupport({ proxyEngine, proxyMode, ipRules }, annotation.warning);
 
     withLogGroup("buildcage: Configured ACL Rules", () => {
       logRules("HTTPS", httpsRules);

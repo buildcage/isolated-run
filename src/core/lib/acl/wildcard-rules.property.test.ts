@@ -28,9 +28,10 @@ describe("convertRule: properties", () => {
     );
   });
 
-  // Domain labels do carry regex metacharacters in practice, from unusual hostnames.
-  it("patterns with regex metacharacters in the domain always produce a compilable regex", () => {
-    const metaChar = fc.constantFrom(".", "+", "^", "$", "(", ")", "[", "]", "{", "}", "|", "\\");
+  // No hostname carries one, so a rule that does could only ever match nothing.
+  // The dot is left out: it is the label separator.
+  it("patterns with regex metacharacters in the domain always throw", () => {
+    const metaChar = fc.constantFrom("+", "^", "$", "(", ")", "[", "]", "{", "}", "|", "\\");
     const patternWithMeta = fc
       .tuple(
         fc.stringMatching(/^[a-z]{1,5}$/),
@@ -42,7 +43,7 @@ describe("convertRule: properties", () => {
 
     fc.assert(
       fc.property(patternWithMeta, (pattern) => {
-        expect(() => new RegExp(convertRule(pattern))).not.toThrow();
+        expect(() => convertRule(pattern)).toThrow();
       }),
     );
   });

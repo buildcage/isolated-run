@@ -22,6 +22,7 @@ const mocks = {
   verifyImageDigestOrThrow: vi.fn(),
   checkUrlAndTlsRuleSupport: vi.fn(),
   checkKnownBlockedUrlRuleSupport: vi.fn(),
+  checkIpRuleSupport: vi.fn(),
   logRules: vi.fn(),
   withLogGroup: vi.fn(),
   generateContainerName: vi.fn(),
@@ -309,6 +310,27 @@ describe("runSandboxStep", () => {
       proxyMode: "restrict",
       knownBlockedUrlRules: ["POST https://api.example.com/telemetry"],
     });
+  });
+
+  it("checks allowed_ip_rules against the engine", async () => {
+    mocks.readRuleInputs.mockReturnValue({
+      proxyMode: "restrict",
+      httpsRules: [],
+      httpRules: [],
+      ipRules: ["10.0.0.0/8:443"],
+      urlRules: [],
+      tlsRules: [],
+      knownBlockedRules: [],
+    });
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.checkIpRuleSupport.mock.calls[0]![0]).toStrictEqual({
+      proxyEngine: "universal",
+      proxyMode: "restrict",
+      ipRules: ["10.0.0.0/8:443"],
+    });
+    expect(mocks.checkIpRuleSupport.mock.calls[0]![1]).toBe(annotation.warning);
   });
 
   describe("the state post.ts cleans up from", () => {

@@ -1,4 +1,8 @@
 import { ActionError, errorMessage } from "../errors.ts";
+import { generateCorednsConfig } from "./coredns-config.ts";
+import { generateHaproxyConfig } from "./haproxy-config.ts";
+import { compileRuleSet, type RuleInputs } from "./haproxy-rules.ts";
+import { buildUrlRules, type UrlRule } from "./url-rules.ts";
 import { parseAndValidateKnownBlockedRules, parseAndValidateRules } from "./wildcard-rules.ts";
 
 /**
@@ -26,6 +30,33 @@ export function parseRulesOrThrow(rulesInput: string | undefined): string[] {
 export function parseKnownBlockedRulesOrThrow(rulesInput: string | undefined): string[] {
   try {
     return parseAndValidateKnownBlockedRules(rulesInput);
+  } catch (e) {
+    throw new InvalidRulesError(errorMessage(e), "INVALID_RULES");
+  }
+}
+
+export function buildUrlRulesOrThrow(rulesInput: string | undefined): UrlRule[] {
+  try {
+    return buildUrlRules(rulesInput);
+  } catch (e) {
+    throw new InvalidRulesError(errorMessage(e), "INVALID_RULES");
+  }
+}
+
+/** Only the container knows the real address; the generators just interpolate it. */
+const PLACEHOLDER_PROXY_ADDRESS = "192.0.2.1";
+
+/**
+ * Compile already-parsed rules the way the proxy does when it starts, so a
+ * rule its compilers refuse fails here rather than stopping the container.
+ * Runs every engine's compiler regardless of proxy_engine.
+ *
+ * @throws {InvalidRulesError} if any compiler refuses a rule
+ */
+export function checkRulesCompileOrThrow(inputs: RuleInputs): void {
+  try {
+    generateHaproxyConfig(inputs);
+    generateCorednsConfig(compileRuleSet(inputs), { proxyAddress: PLACEHOLDER_PROXY_ADDRESS });
   } catch (e) {
     throw new InvalidRulesError(errorMessage(e), "INVALID_RULES");
   }

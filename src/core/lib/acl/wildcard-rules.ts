@@ -6,6 +6,7 @@
 import { stripLineComment, rejectGluedHash } from "../line-comments.ts";
 import {
   anchorRawRegex,
+  checkHostLabel,
   endsAnchored,
   splitDomainFromPortPattern,
   splitRawRegexHost,
@@ -140,12 +141,21 @@ export function convertRule(rule: string): string {
 }
 
 /**
+ * An IPv4 CIDR block. Only `allowed_ip_rules` gives one meaning, and only on
+ * `inspect` (see engine-rule-support.ts), but the label check below would
+ * refuse its `/` on every input.
+ */
+const IPV4_CIDR = /^\d{1,3}(?:\.\d{1,3}){3}\/\d{1,2}$/;
+
+/**
  * Convert a domain wildcard to a regex string (without anchors or port).
  *
  * A dot-separated part containing `*` must be exactly `*` or `**`.
  */
 function domainToRegex(domain: string): string {
+  if (IPV4_CIDR.test(domain)) return domain.replace(/\./g, "\\.");
   const regexParts = domain.split(".").map((part) => {
+    checkHostLabel(part, domain);
     if (part === "**") return ".+";
     if (part === "*") return "[^.]+";
     if (part.includes("*")) {
