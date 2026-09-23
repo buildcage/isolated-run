@@ -397,11 +397,12 @@ Under `inspect`, a connection can end before a whole request has arrived. What t
 one turns on who ended it: a client that walks away decided nothing, while bytes Buildcage refused to
 read as a request are a refusal like any other.
 
-Whichever it was, the host is the name from the handshake's SNI; a TLS connection that carried none
-was aimed at an address the step wrote out itself, so the address stands in. The plain-HTTP stage has
-no SNI to fall back on and its destination is Buildcage's own address for every name-based
-connection, so the host reads `(unknown)` there. The address it was sent to is still recorded, in the
-`destination` field of the [traffic artifact](#traffic-artifact).
+Whichever it was, the host is the name from the handshake's SNI. Without one, the address the
+connection was sent to stands in, and the row's rule type reads `IP`: an address the step wrote out
+itself is one only `allowed_ip_rules` could have passed through. The exception is Buildcage's own
+address, where every name-based connection lands because the resolver answers each name with it.
+That address names nothing, so the host reads `(unknown)`. The address is recorded either way, in
+the `destination` field of the [traffic artifact](#traffic-artifact).
 
 A row carries no method or URL where no request line ever parsed. `missing-host-header` is the
 exception: that one did parse, so it keeps the method and the path it asked for, with `-` standing
@@ -444,6 +445,7 @@ and they fail the step under `fail_on_blocked: true` like any other refused conn
 ```
 🚫 00:14.002: GET https://-/pkg.tgz?token=*** -> missing-host-header
 🚫 00:15.880: HTTP (unknown):5432 -> bad-request
+🚫 00:16.204: TCP 10.0.0.9:5432 -> bad-request
 ```
 
 | Reason                | What happened                                                          |
@@ -460,8 +462,8 @@ has nothing to connect to whatever the rules say.
 What clears one is a rule, though not a host rule. For traffic that is not HTTP, add the port to
 `allowed_ip_rules` or the name to `allowed_tls_rules`, and the connection is passed through
 undecrypted instead of being read as a request. `known_blocked_rules` can mark a row whose host is a
-name from the SNI; a row reading `(unknown)` names nothing a rule can be written against, so the
-passthrough rule is the only way to clear that one.
+name from the SNI or an address; a row reading `(unknown)` names nothing a rule can be written
+against, so the passthrough rule is the only way to clear that one.
 
 ## Connections that failed
 

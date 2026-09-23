@@ -21,6 +21,7 @@
 
 import type { TrafficAction, TrafficEvent } from "./traffic-event.ts";
 import { splitHostPort } from "./authority.ts";
+import { PROXY_ADDRESS } from "./proxy-address.ts";
 import { PROXY_START_MARKER } from "./start-marker.ts";
 
 export type { TrafficAction, TrafficEvent, TrafficProtocol } from "./traffic-event.ts";
@@ -251,19 +252,20 @@ const UNKNOWN_HOST = "(unknown)";
 
 /**
  * The host of a connection that never delivered a whole request: its SNI, the
- * only name such a line carries.
+ * only name such a line carries, or failing that the address it was sent to.
  *
- * Without one the destination address stands in, but only on the stage that
- * logs an SNI at all. A name-based TLS client always sends one, so a handshake
- * that carried none was aimed at an address the build wrote out itself, and
- * that address is the connection's identity. The plain stage logs no SNI field,
- * and there the address names nothing: CoreDNS answers every name with the
- * proxy's own, so a name-based connection's destination is the proxy itself,
- * and no field tells that from an address the build really did name.
+ * The address names nothing where it is the proxy's own: CoreDNS answers every
+ * name with it, so the connection was name-based and its name is gone. Any
+ * other address is one the build wrote out itself, and only an ip rule could
+ * have passed it, so `byAddress` has the report say so.
  */
-function hostBeforeRequest(sni: string | undefined, destination: string): string {
-  if (sni === undefined) return UNKNOWN_HOST;
-  return sni === "-" ? destination : sni;
+function hostBeforeRequest(
+  sni: string | undefined,
+  address: string,
+): { host: string; byAddress: boolean } {
+  if (sni !== undefined && sni !== "-") return { host: sni, byAddress: false };
+  if (address === PROXY_ADDRESS) return { host: UNKNOWN_HOST, byAddress: false };
+  return { host: address, byAddress: true };
 }
 
 /** Parse one proxy-log line, or null if it is not one of ours. */
@@ -291,16 +293,15 @@ function parseProxyLine(line: string, isAudit: boolean): TrafficEvent | null {
     const parsedRequest = request[3] !== BAD_REQUEST_METHOD;
     const scheme = request[2] as "http" | "https";
     const authority = request[12];
+    const unnamed = namedByHandshake ? hostBeforeRequest(request[11], request[9]) : undefined;
     const event: TrafficEvent = {
       // <ms> is milliseconds; TrafficEvent.time is seconds.
       time: Number(request[1]) / 1000,
       action: incomplete !== undefined ? "incomplete" : actionFor(reason, isAudit),
-      protocol: scheme,
+      protocol: unnamed?.byAddress ? "tcp" : scheme,
       // The `Host` header names the host; the port comes from dst=, where the
       // request was actually sent.
-      host: namedByHandshake
-        ? hostBeforeRequest(request[11], request[9])
-        : splitHostPort(authority).host,
+      host: unnamed?.host ?? splitHostPort(authority).host,
       port: Number(request[10]),
       destination: `${request[9]}:${request[10]}`,
     };
