@@ -142,10 +142,10 @@ const HOST_LITERAL_ILLEGAL = /\\[[\]]/;
 
 /**
  * Text a host half cannot carry into the Corefile, where it sits inside a
- * single-quoted CEL literal: `'` or a backtick would end it, and `{$` starts
- * the Corefile's own environment substitution.
+ * single-quoted CEL literal: `'` or a backtick would end it, and `{$` or `{%`
+ * starts the Corefile's own environment substitution.
  */
-const COREFILE_UNSAFE = /['`]|\{\$/;
+const COREFILE_UNSAFE = /['`]|\{[$%]/;
 
 /**
  * Check part of a `~` rule against what the rule syntax can represent.
@@ -175,7 +175,7 @@ export function checkRawRegexHalf(
   }
   if (hostHalf && COREFILE_UNSAFE.test(text)) {
     throw new Error(
-      `Invalid regex in rule "${rule}": the ${label} "${text}" holds a "'", a backtick or "{$". ` +
+      `Invalid regex in rule "${rule}": the ${label} "${text}" holds a "'", a backtick, "{$" or "{%". ` +
         `No hostname contains one, and the resolver's config cannot quote it`,
     );
   }

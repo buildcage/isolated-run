@@ -296,8 +296,8 @@ is matched against always carries the port.
 
 `^` and `$` are added where they are missing, so a pattern always covers the whole `domain:port`. An
 IPv6 address is refused here as everywhere else in the rule syntax. A host name matches in any case,
-as it does in a wildcard rule. The host part may not contain `'`, a backtick or `{$`: no host name
-does, and the resolver's configuration has no way to quote them.
+as it does in a wildcard rule. The host part may not contain `'`, a backtick, `{$` or `{%`: no host
+name does, and the resolver's configuration has no way to quote them.
 
 In `allowed_url_rules` a `~` expression covers the URL, and is split at the first `/` after `://`:
 everything before that `/` is matched against the host, everything from it onward against the path.
