@@ -50,7 +50,7 @@ INPUT_PROXY_MODE="restrict" \
 INPUT_ALLOWED_HTTPS_RULES="sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443 deadend.example.com:443" \
 INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80 deadend.example.com:80" \
 INPUT_ALLOWED_TLS_RULES="tlspass.example.com:443 ~^tlspass\.example\.com:8443$" \
-INPUT_ALLOWED_IP_RULES="~^10\.200\.0\.\d+:9080$" \
+INPUT_ALLOWED_IP_RULES="~^10\.200\.0\.\d+:9080$ 10.200.0.53:53" \
 INPUT_ALLOWED_URL_RULES="GET https://allowed.example.com/public/**
 GET https://allowed.example.com:9443/public/**
 GET|POST https://api.example.com/v1/*
@@ -90,6 +90,7 @@ assert_summary_contains "| allowed.example.com:80 | HTTP |" "allowed.example.com
 assert_summary_contains "| blocked.example.com:443 | HTTPS |" "blocked.example.com:443 recorded as blocked"
 assert_summary_contains "| blocked.example.com:9443 | HTTPS |" "the ~regex rule's blocked.example.com:9443 recorded as allowed"
 assert_summary_contains "| 10.200.0.100:9080 | IP |" "the ~regex allowed_ip_rules entry recorded as allowed"
+assert_summary_contains "| 10.200.0.53:53 | IP |" "DNS over TCP to a resolver an ip rule allows recorded as allowed"
 # No rule refused this one and none can clear it, so it is tabled apart.
 assert_summary_contains "### ⚠️ Failed Connections" "a name that resolved nowhere is tabled apart from what the rules refused"
 assert_summary_contains "| absent.example.com:443 | HTTPS | dns-failed |" "absent.example.com:443 recorded as failed, reason dns-failed"

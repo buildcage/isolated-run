@@ -19,7 +19,7 @@
 #   allowed_https_rules: sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443 deadend.example.com:443
 #   allowed_http_rules:  allowed.example.com:80 deadend.example.com:80
 #   allowed_tls_rules:     tlspass.example.com:443 ~^tlspass\.example\.com:8443$
-#   allowed_ip_rules:    ~^10\.200\.0\.\d+:9080$
+#   allowed_ip_rules:    ~^10\.200\.0\.\d+:9080$ 10.200.0.53:53
 # ---------------------------------------------------------------------------
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
@@ -311,6 +311,22 @@ check_ok "GET http://10.200.0.100:9080/anything" "$OUT" "ROOT GET"
 echo "=== [Regex IP rule - other port not covered] ==="
 CODE=$($C http://10.200.0.100:8080/anything)
 check_status "GET http://10.200.0.100:8080/anything" "$CODE" "403"
+
+# [What a resolver does when a UDP answer comes back truncated. The gateway's
+# :53 is CoreDNS; any other resolver's is judged by allowed_ip_rules like any
+# other address. The reply opens with its length, then the query's own id.]
+for R in 172.20.0.1 10.200.0.53; do
+  echo "=== [DNS over TCP - $R] ==="
+  ANSWER=$(timeout 5 bash -c '
+    exec 3<>/dev/tcp/'"$R"'/53 || exit 1
+    printf "\x00\x1d\xab\xcd\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01" >&3
+    head -c 4 <&3 | od -An -tx1' 2>/dev/null | tr -d ' \n')
+  if [ "${ANSWER:4:4}" = "abcd" ]; then
+    pass "a TCP lookup at $R was answered"
+  else
+    fail "a TCP lookup at $R went unanswered (got '$ANSWER')"
+  fi
+done
 
 echo "=== [SSRF via allowlisted name resolving inward] ==="
 CODE=$($C --insecure https://metadata.example.com/latest/meta-data)
