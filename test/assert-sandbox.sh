@@ -14,6 +14,7 @@ echo "=== Sandbox Report Assertions ==="
 echo ""
 
 SUMMARY=$(cat "$BUILDCAGE_RUN_DEBUG_SUMMARY_FILE")
+assert_report_complete
 
 # One row per verdict, which is as much as this layer is for: the real
 # action's own report carries what the proxy decided. Which names, ports and

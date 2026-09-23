@@ -142,9 +142,11 @@ export function describeBlockedOutcome({
   // Enumerated, not attributed: logLooksPlausible collapses several conditions
   // into one flag, and only the benign reading is the reader's to act on.
   const message =
-    `${counted}. Either the logs don't begin where a real run does, or one carries a line the ` +
-    "report cannot read. A missing beginning was either removed or rotated out by traffic heavy " +
-    "enough to fill the 100 MB of log kept, which takes a few hundred thousand requests: the " +
-    "report's own tables still count what survived, per host.";
+    `${counted}. Either the logs don't begin where a real run does, one carries a line the ` +
+    "report cannot read, or the proxy dropped lines it could not write (or could not say whether " +
+    "it had). A missing beginning was either removed or rotated out by traffic heavy enough to " +
+    "fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few " +
+    "thousand made as long as a request can be: the report's own tables still count what " +
+    "survived, per host.";
   return { ...outcome, message };
 }

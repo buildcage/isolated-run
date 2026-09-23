@@ -53,7 +53,7 @@ describe("renderReportMarkdown", () => {
     // as body text, which the "incomplete" match above would not catch.
     expect(warning.split("\n").every((line) => line.startsWith("> "))).toBe(true);
     expect(warning.replaceAll("\n> ", " ")).toMatch(
-      /Either the logs don't begin where a real run does, or one carries a line that cannot be read\./,
+      /Either the logs don't begin where a real run does, one carries a line that cannot be read, or the proxy dropped lines it could not write/,
     );
   });
 

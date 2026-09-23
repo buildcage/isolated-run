@@ -10,6 +10,7 @@ echo "=== Sandbox Report Assertions (inspect engine) ==="
 echo ""
 
 SUMMARY=$(cat "$BUILDCAGE_RUN_DEBUG_SUMMARY_FILE")
+assert_report_complete
 
 assert_summary_contains "example.com:443" "allowed URL-rule host recorded in report"
 assert_summary_contains "not-allowed" "the out-of-rule POST recorded with its refusal reason"

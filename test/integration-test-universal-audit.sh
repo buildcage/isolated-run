@@ -51,6 +51,7 @@ fi
 echo ""
 echo "--- report assertions (Job Summary) ---"
 SUMMARY=$(cat "$SUMMARY_FILE")
+assert_report_complete
 
 assert_summary_contains "| blocked.example.com:443 | HTTPS |" "any domain recorded as audited"
 assert_summary_contains "| 10.200.0.100:80 | IP |" "direct IP recorded as audited (audit passes it through)"

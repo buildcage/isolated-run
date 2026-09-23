@@ -51,6 +51,16 @@ assert_summary_contains() {
   fi
 }
 
+# A test run neither drops nor rotates a line, so an incomplete report here
+# means the dropped-log count could not be read.
+assert_report_complete() {
+  if grep -qF "This report is incomplete" <<< "$SUMMARY"; then
+    fail "Report marks the log incomplete"
+  else
+    pass "Report treats the log as complete"
+  fi
+}
+
 assert_results() {
   echo ""
   if [ "$FAILURES" -gt 0 ]; then

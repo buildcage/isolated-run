@@ -5,7 +5,8 @@ import type { GenReportParameters, UniversalReportData } from "../types.ts";
 
 /**
  * Build the report data from the proxy and resolver logs. Pure: the caller
- * fetches both logs and the parameters.
+ * fetches both logs, the parameters and the proxy's dropped-line count
+ * (undefined where it could not be read).
  *
  * universal never terminates TLS, so its proxy events carry no method, URL or
  * status, only the host, port and bytes of each connection. The resolver log is
@@ -16,6 +17,7 @@ export async function buildUniversalReportData(
   proxyLines: AsyncIterable<string> | Iterable<string>,
   dnsLines: AsyncIterable<string> | Iterable<string>,
   parameters: GenReportParameters,
+  droppedLogs: number | undefined,
 ): Promise<UniversalReportData> {
   const isAudit = parameters.mode === "audit";
   // Independent inputs (separate log streams, no data dependency), so read
@@ -34,9 +36,10 @@ export async function buildUniversalReportData(
     engine: "universal",
     parameters,
     ...reduceTimeline(timeline, parameters.knownBlockedRules),
-    // A decision line this cannot read may well have been a refusal, and either
-    // log losing its beginning loses evidence the other cannot vouch for.
-    logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0,
+    // A decision line this cannot read, or one the proxy dropped, may well have
+    // been a refusal, and either log losing its beginning loses evidence the
+    // other cannot vouch for.
+    logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && droppedLogs === 0,
     startedAt,
     timeline,
   };

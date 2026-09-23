@@ -4,6 +4,7 @@ import { appendFileSync } from "node:fs";
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { writeStepSummary } from "#core/lib/actions/write-step-summary.ts";
 import { createDocker, type Docker } from "#core/lib/docker/client.ts";
+import { readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
 import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
 import { describeReportOutcomes } from "#core/lib/report/outcome/report-outcomes.ts";
 import { renderReportMarkdown } from "#core/lib/report/render/render-report-markdown.ts";
@@ -59,12 +60,14 @@ export function fetchReport(
       readRotatedLog(docker, containerName, HAPROXY_LOG_DIR),
       readRotatedLog(docker, containerName, COREDNS_LOG_DIR),
       parameters,
+      readProxyDroppedLogs(docker, containerName),
     );
   }
   return buildUniversalReportData(
     readRotatedLog(docker, containerName, HAPROXY_LOG_DIR),
     readRotatedLog(docker, containerName, COREDNS_LOG_DIR),
     parameters,
+    readProxyDroppedLogs(docker, containerName),
   );
 }
 /* v8 ignore stop */

@@ -57,6 +57,7 @@ fi
 echo ""
 echo "--- report assertions (Job Summary) ---"
 SUMMARY=$(cat "$SUMMARY_FILE")
+assert_report_complete
 
 assert_summary_contains "📋 Audited Hosts" "audited-hosts heading present"
 assert_summary_contains "| allowed.example.com:443 | HTTPS |" "allowed.example.com:443 audited"

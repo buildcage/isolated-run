@@ -40,9 +40,11 @@ export function renderReportMarkdown(
   if (!report.logLooksPlausible) {
     markdown +=
       "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n" +
-      "> Either the logs don't begin where a real run does, or one carries a line that cannot be\n" +
-      "> read. A missing beginning was either removed or rotated out by traffic heavy enough to\n" +
-      "> fill the 100 MB of log kept, which takes a few hundred thousand requests.\n\n";
+      "> Either the logs don't begin where a real run does, one carries a line that cannot be\n" +
+      "> read, or the proxy dropped lines it could not write (or could not say whether it had).\n" +
+      "> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n" +
+      "> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n" +
+      "> made as long as a request can be.\n\n";
   }
 
   if (report.passed.length > 0) {

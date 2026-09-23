@@ -33,11 +33,15 @@ defaults
     timeout server 1m
 
 # --- Health Check ---
+# Readiness for s6-notifyoncheck, and the dropped-log count for the report.
 frontend health
     bind /var/run/haproxy-health.sock mode 666
     mode http
     no log
     monitor-uri /health
+    # A line that finds the pipe to s6-log full is dropped without a trace in
+    # the log itself; only this counter says one went missing.
+    http-request use-service prometheus-exporter if { path /metrics }
 
 # --- Frontend ---
 frontend outbound_proxy

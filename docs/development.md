@@ -214,6 +214,17 @@ report reads every archive, oldest first, then `current`, so early traffic is ne
 because a later part of the same run pushed the log past a rotation. Reading `current` by hand, as
 above, only shows what has accumulated since the most recent one.
 
+HAProxy writes to s6-log through a pipe without blocking, so a line that finds the pipe full is
+dropped rather than delayed, and nothing in the log marks where. HAProxy counts those lines itself:
+its `health` socket serves the Prometheus exporter, and the report reads
+`haproxy_process_dropped_logs_total` from it. A nonzero count, or one the report cannot read, marks
+the report incomplete. To read it by hand:
+
+```bash
+docker compose exec proxy curl -s --unix-socket /var/run/haproxy-health.sock \
+  'http://localhost/metrics?scope=global' | grep dropped_logs
+```
+
 ## Makefile Commands
 
 `make help` lists every target with its own description. The ones you type most:
