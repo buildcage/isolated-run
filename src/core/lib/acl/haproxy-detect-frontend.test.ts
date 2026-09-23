@@ -143,4 +143,28 @@ describe("passthrough", () => {
   });
 });
 
+describe("ip rules and the proxy's own address", () => {
+  const PROXY = { proxyAddress: "172.20.0.1" };
+
+  it("never passes through a connection that reached the proxy through a name", () => {
+    // 172.16.0.0/12 covers the proxy, which every name resolves to.
+    const result = detect({ ipRules: ["172.16.0.0/12:443", "~^172\\.20\\.0\\.1:443$"] }, PROXY);
+    expect(result.includes("acl dns_routed dst 172.20.0.1")).toBe(true);
+    expect(result.includes("set-var(txn.pass) int(1) if ip0_dst ip0_port !dns_routed\n")).toBe(
+      true,
+    );
+    expect(result.includes("set-var(txn.pass) int(1) if ip1_dst !dns_routed\n")).toBe(true);
+  });
+
+  it("leaves a tls rule's passthrough alone, which is judged on the SNI", () => {
+    const result = detect({ ...FULL }, PROXY);
+    expect(result).toMatch(/set-var\(txn\.pass\) int\(1\) if tls0_sni tls0_port\n/);
+  });
+
+  it("declares nothing without an ip rule or a proxy address", () => {
+    expect(detect({ tlsRules: ["db.example.com:443"] }, PROXY).includes("dns_routed")).toBe(false);
+    expect(detect({ ipRules: ["10.0.0.5:5432"] }).includes("dns_routed")).toBe(false);
+  });
+});
+
 reportResults();
