@@ -380,6 +380,19 @@ const SYSTEM_CA_CANDIDATES = [
 	"/etc/ssl/cert.pem"
 ], OWN_CA_DESTINATION = "/etc/buildcage-ca.pem";
 //#endregion
+//#region src/lib/sandbox/run-host-command.ts
+function runPinnedHostCommand(command, args) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
+}
+//#endregion
 //#region src/lib/retry-briefly.ts
 function retryBriefly(fn, options = {}) {
 	let { attempts = 5, delayMs = 200, retryOn = () => !0 } = options;
@@ -414,16 +427,6 @@ function parseMountsUnder(mountinfoContent, dir) {
 function defaultReadMountinfo() {
 	return (0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8");
 }
-function defaultExec(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv(command)
-	});
-}
 function defaultRemove(path) {
 	(0, node_fs.rmSync)(path, {
 		recursive: !0,
@@ -431,7 +434,7 @@ function defaultRemove(path) {
 	});
 }
 function unmountAllUnder(dir, deps, warn) {
-	let { readMountinfo = defaultReadMountinfo, exec = defaultExec } = deps, mountPoints;
+	let { readMountinfo = defaultReadMountinfo, exec = runPinnedHostCommand } = deps, mountPoints;
 	try {
 		mountPoints = parseMountsUnder(readMountinfo(), dir);
 	} catch {
@@ -449,7 +452,7 @@ function unmountAllUnder(dir, deps, warn) {
 	}
 }
 function removeScratchDir(dir, deps) {
-	let { exec = defaultExec, lstat = node_fs.lstatSync, remove = defaultRemove } = deps;
+	let { exec = runPinnedHostCommand, lstat = node_fs.lstatSync, remove = defaultRemove } = deps;
 	retryBriefly(() => {
 		try {
 			remove(dir);
@@ -479,17 +482,7 @@ function scratchDirFor(containerName) {
 }
 //#endregion
 //#region src/lib/post-cleanup.ts
-function defaultCaExec(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv(command)
-	});
-}
-function reclaimCaPlaceholder(warn, { lstat = node_fs.lstatSync, exec = defaultCaExec } = {}) {
+function reclaimCaPlaceholder(warn, { lstat = node_fs.lstatSync, exec = runPinnedHostCommand } = {}) {
 	let st;
 	try {
 		st = lstat(OWN_CA_DESTINATION);
@@ -504,7 +497,8 @@ function reclaimCaPlaceholder(warn, { lstat = node_fs.lstatSync, exec = defaultC
 			OWN_CA_DESTINATION
 		]);
 	} catch (e) {
-		warn(`run post-cleanup: failed to remove the CA placeholder ${OWN_CA_DESTINATION}: ${errorMessage(e)}`);
+		let captured = capturedStderr(e);
+		warn(`run post-cleanup: failed to remove the CA placeholder ${OWN_CA_DESTINATION}: ${errorMessage(e)}${captured ? ` (${captured})` : ""}`);
 	}
 }
 function startedByThisStep(containerName, env, readOwner) {

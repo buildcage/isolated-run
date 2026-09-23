@@ -1,12 +1,12 @@
 import { existsSync, lstatSync, type Stats } from "node:fs";
-import { execFileSync } from "node:child_process";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
+import { capturedStderr } from "#core/lib/actions/docker-error.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import { ownerToken, readContainerOwner } from "./container.ts";
 import { resolvePostState, type PostCleanupTargets } from "./post-state.ts";
 import { OWN_CA_DESTINATION } from "./sandbox/ca-trust.ts";
-import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
+import { runPinnedHostCommand } from "./sandbox/run-host-command.ts";
 import {
   cleanupScratchDir,
   scratchDirFor,
@@ -27,15 +27,6 @@ export interface PostCleanupDeps {
   reclaimCaPlaceholder?: (warn: (message: string) => void) => void;
 }
 
-/* v8 ignore start */
-function defaultCaExec(command: string, args: string[]): void {
-  execFileSync(hostCommand(command), args, {
-    stdio: ["ignore", "ignore", "pipe"],
-    env: hostCommandEnv(command),
-  });
-}
-/* v8 ignore stop */
-
 /**
  * inspect binds its CA onto OWN_CA_DESTINATION, a path nothing exists at, so
  * runc creates a 0-byte placeholder there to mount over. Because the sandbox
@@ -51,7 +42,7 @@ function defaultCaExec(command: string, args: string[]): void {
  */
 export function reclaimCaPlaceholder(
   warn: (message: string) => void,
-  { lstat = lstatSync, exec = defaultCaExec }: CaPlaceholderDeps = {},
+  { lstat = lstatSync, exec = runPinnedHostCommand }: CaPlaceholderDeps = {},
 ): void {
   let st: Stats;
   try {
@@ -63,8 +54,9 @@ export function reclaimCaPlaceholder(
   try {
     exec("sudo", ["-n", "rm", "-f", OWN_CA_DESTINATION]);
   } catch (e) {
+    const captured = capturedStderr(e);
     warn(
-      `run post-cleanup: failed to remove the CA placeholder ${OWN_CA_DESTINATION}: ${errorMessage(e)}`,
+      `run post-cleanup: failed to remove the CA placeholder ${OWN_CA_DESTINATION}: ${errorMessage(e)}${captured ? ` (${captured})` : ""}`,
     );
   }
 }

@@ -1,8 +1,7 @@
-import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 
 import { SandboxError } from "./errors.ts";
-import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
+import { runPinnedHostCommand } from "./sandbox/run-host-command.ts";
 import {
   SLIM_RUNNER_DETECTED_PREFIX,
   capturedStderr,
@@ -40,18 +39,6 @@ export interface CheckPasswordlessSudoOptions {
   execFile?: (command: string, args: string[]) => void;
 }
 
-// Untested by design: the default behind checkPasswordlessSudo's seam, which
-// only hands node:child_process what the tested caller decided to run.
-/* v8 ignore start */
-function defaultExecFile(command: string, args: string[]): void {
-  execFileSync(hostCommand(command), args, {
-    encoding: "utf8",
-    stdio: ["ignore", "ignore", "pipe"],
-    env: hostCommandEnv(command),
-  });
-}
-/* v8 ignore stop */
-
 /**
  * Fails fast, before spinning up the proxy container, so a missing
  * passwordless-sudo setup is never misattributed to the user's own `run:`
@@ -60,7 +47,7 @@ function defaultExecFile(command: string, args: string[]): void {
  * yet still fail runIsolated()'s later, differently-shaped invocation.
  */
 export function checkPasswordlessSudo({
-  execFile = defaultExecFile,
+  execFile = runPinnedHostCommand,
 }: CheckPasswordlessSudoOptions = {}): void {
   try {
     execFile("sudo", ["-n", "true"]);

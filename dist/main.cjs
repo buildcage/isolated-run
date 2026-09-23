@@ -18377,13 +18377,8 @@ function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, http
 	};
 }
 //#endregion
-//#region src/lib/sudo-preflight.ts
-const SLIM_RUNNER_NOTE = `${SLIM_RUNNER_DETECTED_PREFIX}: these typically don't have passwordless sudo configured for this kind of privileged setup.`;
-function describeSudoFailure(e, { env = process.env, exists = node_fs.existsSync } = {}) {
-	let captured = capturedStderr(e);
-	return `'sudo' is not available without a password on this runner.${isLikelySlimRunner(env, exists) ? SLIM_RUNNER_NOTE : ""} The run action requires a Linux runner with passwordless sudo for the isolation setup itself (network namespace, veth, iptables). That is the default on GitHub-hosted "ubuntu-*" runners, but not on lightweight images such as "ubuntu-slim" or many self-hosted or minimal runners. See README.md and docs/security.md for details.${captured ? ` (${captured})` : ""}`;
-}
-function defaultExecFile$2(command, args) {
+//#region src/lib/sandbox/run-host-command.ts
+function runPinnedHostCommand(command, args) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args, {
 		encoding: "utf8",
 		stdio: [
@@ -18394,7 +18389,14 @@ function defaultExecFile$2(command, args) {
 		env: hostCommandEnv(command)
 	});
 }
-function checkPasswordlessSudo({ execFile = defaultExecFile$2 } = {}) {
+//#endregion
+//#region src/lib/sudo-preflight.ts
+const SLIM_RUNNER_NOTE = `${SLIM_RUNNER_DETECTED_PREFIX}: these typically don't have passwordless sudo configured for this kind of privileged setup.`;
+function describeSudoFailure(e, { env = process.env, exists = node_fs.existsSync } = {}) {
+	let captured = capturedStderr(e);
+	return `'sudo' is not available without a password on this runner.${isLikelySlimRunner(env, exists) ? SLIM_RUNNER_NOTE : ""} The run action requires a Linux runner with passwordless sudo for the isolation setup itself (network namespace, veth, iptables). That is the default on GitHub-hosted "ubuntu-*" runners, but not on lightweight images such as "ubuntu-slim" or many self-hosted or minimal runners. See README.md and docs/security.md for details.${captured ? ` (${captured})` : ""}`;
+}
+function checkPasswordlessSudo({ execFile = runPinnedHostCommand } = {}) {
 	try {
 		execFile("sudo", ["-n", "true"]);
 	} catch (e) {
@@ -18439,16 +18441,6 @@ function parseMountsUnder(mountinfoContent, dir) {
 function defaultReadMountinfo() {
 	return (0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8");
 }
-function defaultExec$2(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv(command)
-	});
-}
 function defaultRemove(path) {
 	(0, node_fs.rmSync)(path, {
 		recursive: !0,
@@ -18459,7 +18451,7 @@ function defaultMkdir(path, mode) {
 	(0, node_fs.mkdirSync)(path, { mode });
 }
 function unmountAllUnder(dir, deps, warn) {
-	let { readMountinfo = defaultReadMountinfo, exec = defaultExec$2 } = deps, mountPoints;
+	let { readMountinfo = defaultReadMountinfo, exec = runPinnedHostCommand } = deps, mountPoints;
 	try {
 		mountPoints = parseMountsUnder(readMountinfo(), dir);
 	} catch {
@@ -18477,7 +18469,7 @@ function unmountAllUnder(dir, deps, warn) {
 	}
 }
 function removeScratchDir(dir, deps) {
-	let { exec = defaultExec$2, lstat = node_fs.lstatSync, remove = defaultRemove } = deps;
+	let { exec = runPinnedHostCommand, lstat = node_fs.lstatSync, remove = defaultRemove } = deps;
 	retryBriefly(() => {
 		try {
 			remove(dir);

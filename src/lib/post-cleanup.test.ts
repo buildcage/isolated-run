@@ -207,12 +207,29 @@ describe("reclaimCaPlaceholder", () => {
     reclaimCaPlaceholder(localWarn, {
       lstat: () => statLike(true, 0),
       exec: () => {
-        throw new Error("sudo: a password is required");
+        throw new Error("Command failed: sudo -n rm -f");
       },
     });
 
     expect(localWarn).toHaveBeenCalledWith(
-      `run post-cleanup: failed to remove the CA placeholder ${OWN_CA_DESTINATION}: sudo: a password is required`,
+      `run post-cleanup: failed to remove the CA placeholder ${OWN_CA_DESTINATION}: Command failed: sudo -n rm -f`,
+    );
+  });
+
+  it("surfaces the command's own stderr in the warning when it captured any", () => {
+    const localWarn = vi.fn();
+    reclaimCaPlaceholder(localWarn, {
+      lstat: () => statLike(true, 0),
+      exec: () => {
+        throw Object.assign(new Error("Command failed: sudo -n rm -f"), {
+          stderr: "rm: cannot remove: Read-only file system\n",
+        });
+      },
+    });
+
+    expect(localWarn).toHaveBeenCalledWith(
+      `run post-cleanup: failed to remove the CA placeholder ${OWN_CA_DESTINATION}: ` +
+        `Command failed: sudo -n rm -f (rm: cannot remove: Read-only file system)`,
     );
   });
 });
