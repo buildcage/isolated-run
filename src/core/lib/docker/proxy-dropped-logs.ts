@@ -13,8 +13,7 @@ import type { Docker } from "./client.ts";
 const SOCKET = "/var/run/haproxy-health.sock";
 const URL = "http://localhost/metrics?scope=global";
 const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m;
-/** A wedged proxy can accept the connection and never answer; the report must
- *  still finish, and reads no answer as lines lost. */
+/** A wedged proxy can accept the connection and never answer. */
 const MAX_TIME_SECONDS = "10";
 
 /** The counter's value in Prometheus text output, or undefined without one. */
@@ -23,11 +22,7 @@ export function parseDroppedLogs(metrics: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
-/**
- * The proxy's dropped-line count, or undefined where it could not be read. The
- * report takes undefined as lines lost: a proxy that cannot answer cannot
- * vouch for its log either.
- */
+/** The proxy's dropped-line count, or undefined where it could not be read. */
 export function readProxyDroppedLogs(docker: Docker, containerId: string): number | undefined {
   try {
     return parseDroppedLogs(

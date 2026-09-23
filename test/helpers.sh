@@ -51,9 +51,8 @@ assert_summary_contains() {
   fi
 }
 
-# A report that calls itself incomplete counts nothing it shows as the whole
-# run, and a proxy whose dropped-log count the report cannot read makes every
-# report one. Nothing else in a run like this one drops or rotates a line.
+# A test run neither drops nor rotates a line, so an incomplete report here
+# means the dropped-log count could not be read.
 assert_report_complete() {
   if grep -qF "This report is incomplete" <<< "$SUMMARY"; then
     fail "Report marks the log incomplete"
