@@ -48,6 +48,14 @@ import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { reportStepTraffic } from "./step-report.ts";
 
 /**
+ * The major-floating ref the report's "switch to restrict" example falls back
+ * to when the runner names no ref (a local-path `uses: ./`). It is a display
+ * default only: image provenance is never verified against it (see the empty
+ * `actionRef` in runSandboxStep).
+ */
+const DEFAULT_ACTION_REF = "v1";
+
+/**
  * The steps this function sequences. Declared rather than imported straight
  * into the body so a test can watch the order and the arguments without
  * standing in for twenty modules at once; each one is tested in its own file.
@@ -208,8 +216,10 @@ export async function runSandboxStep(
   // verification hard-fails rather than silently pinning the latest published
   // v1 image, which can drift from the vendored code; see verify-policy.ts.
   // Local development and the integration scripts set BUILDCAGE_LOCAL_IMAGE_REF,
-  // which short-circuits verification before this ref is read.
+  // which skips verification but still renders the report, so that path takes
+  // reportActionRef below for a valid `uses:` line rather than this empty ref.
   const actionRef = env.GITHUB_ACTION_REF ?? "";
+  const reportActionRef = env.GITHUB_ACTION_REF || DEFAULT_ACTION_REF;
   const actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
 
   const runInput = readRunCommand();
@@ -357,7 +367,7 @@ export async function runSandboxStep(
         },
         annotation,
         actionRepo,
-        actionRef,
+        actionRef: reportActionRef,
         runCommand: runInput,
         env,
       });

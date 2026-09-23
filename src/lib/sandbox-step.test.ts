@@ -230,16 +230,20 @@ describe("runSandboxStep", () => {
     });
   });
 
-  // A local-path `uses: ./` invocation names no ref. It is forwarded empty, not
-  // floated to `v1`, so provenance verification hard-fails on it (see
+  // A local-path `uses: ./` invocation names no ref. Verification receives it
+  // empty, not floated to `v1`, so it hard-fails on that case (see
   // verify-policy.ts) rather than pinning the latest published v1 image, which
-  // can drift from the vendored code. Local dev and the integration scripts take
-  // the BUILDCAGE_LOCAL_IMAGE_REF path below, which never reaches this ref.
-  it("forwards an empty ref for a local-path invocation, not a floating v1", async () => {
+  // can drift from the vendored code. The report still needs a valid `uses:`
+  // line, so it takes the `v1` display fallback instead of an empty ref.
+  it("verifies against an empty ref but reports with the v1 fallback for a local-path invocation", async () => {
     await runSandboxStep({ ...ENV, GITHUB_ACTION_REF: "", GITHUB_ACTION_REPOSITORY: "" }, deps);
 
     expect(mocks.verifyImageDigestOrThrow.mock.calls[0][0]).toMatchObject({
       actionRef: "",
+      actionRepo: "buildcage/isolated-run",
+    });
+    expect(mocks.reportStepTraffic.mock.calls[0][0]).toMatchObject({
+      actionRef: "v1",
       actionRepo: "buildcage/isolated-run",
     });
   });
