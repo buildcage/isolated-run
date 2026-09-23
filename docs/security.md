@@ -293,7 +293,8 @@ checks that against the allowlist.
 - **HTTP**: the `Host` header, checked against `allowed_http_rules`. A request carrying none is
   refused with 400, since there is nothing to check it against.
 - **A connection to a bare address**: nothing at all. It skipped DNS, so there is no name to read.
-  It is matched against `allowed_ip_rules` as `ip:port` and, when nothing matches, refused.
+  It is matched against `allowed_ip_rules` as `ip:port` and, when nothing matches, refused. The
+  address is the one the connection goes to; an SNI it carries is ignored, since the client chose it.
 
 Because nothing in the command has to trust an injected CA or be told about a proxy, this engine
 covers any language or package manager, a pinned certificate included.

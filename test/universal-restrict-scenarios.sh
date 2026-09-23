@@ -10,6 +10,7 @@
 #                        ~^ports\.regex\.example\.com:(443|8443)$
 #   allowed_http_rules:  allowed.example.com:80 allowed.example.com:8080
 #                        *.wildcard.example.com:80 *.wildcard.example.com:8080
+#   allowed_ip_rules:    10.200.0.100:8443
 # ---------------------------------------------------------------------------
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
@@ -107,12 +108,27 @@ else
   fail "blocked.example.com:8080 reached the origin"
 fi
 
-echo "=== [Direct IP - blocked (no allowed_ip_rules configured)] ==="
+echo "=== [Direct IP - blocked (no allowed_ip_rules entry for the port)] ==="
 CODE=$($C --max-time 5 http://10.200.0.100/ 2>/dev/null || echo "000")
 if [ "$CODE" != "200" ]; then
   pass "10.200.0.100 blocked (got $CODE)"
 else
   fail "10.200.0.100 reached the origin directly"
+fi
+
+# The SNI is the client's to choose, so it must decide neither way: a name there
+# must not refuse the allowed address, and the allowed address there must not
+# open another one. curl never sends an address as SNI; openssl does.
+echo "=== [Direct IP - allowed, SNI names a host] ==="
+check_status "10.200.0.100:8443 with SNI allowed.example.com" \
+  "$($C --resolve allowed.example.com:8443:10.200.0.100 https://allowed.example.com:8443/)" "200"
+
+echo "=== [Direct IP - blocked, SNI names an allowed address] ==="
+if timeout 10 openssl s_client -connect 10.200.0.101:8443 -servername 10.200.0.100 \
+  < /dev/null 2>/dev/null | grep -q '^New, '; then
+  fail "10.200.0.101:8443 completed a handshake under SNI 10.200.0.100"
+else
+  pass "10.200.0.101:8443 blocked"
 fi
 
 echo "=== [HTTPS - dns-failed (NXDOMAIN)] ==="

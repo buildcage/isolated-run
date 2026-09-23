@@ -59,7 +59,10 @@ frontend outbound_proxy
     acl is_tls req.ssl_hello_type 1
     acl has_sni req_ssl_sni -m found
 
-    acl is_ip_match var(txn.target) -m reg -i -f /etc/haproxy/rules/allowed_ips.lst
+    # Its own variable, never overwritten: an acl is evaluated where it is used,
+    # and txn.target below turns into the client-chosen SNI.
+    tcp-request content set-var-fmt(txn.dst_target) %[dst]:%[dst_port]
+    acl is_ip_match var(txn.dst_target) -m reg -i -f /etc/haproxy/rules/allowed_ips.lst
 
     # A trailing dot denotes the same DNS name, so it must not affect matching,
     # resolution or logging. Strip it once here, upstream of every other use.
@@ -70,7 +73,6 @@ frontend outbound_proxy
     # reaches the log is reduced to a hostname charset here; the ACL below
     # still matches the untouched txn.sni_port.
     tcp-request content set-var(txn.sni_log) var(txn.sni),regsub([^A-Za-z0-9._-],_,g) if is_tls has_sni
-    tcp-request content set-var-fmt(txn.target) %[var(txn.sni_log)]:%[dst_port] if is_tls has_sni
 
     acl is_https_allowed var(txn.sni_port) -m reg -i -f /etc/haproxy/rules/allowed_https.lst
 
@@ -84,6 +86,9 @@ frontend outbound_proxy
     ${HAPROXY_AUDIT_ACCEPT}
     tcp-request content set-var(txn.reason) str(ip-not-allowed) if !is_dns_routed !is_ip_match
     tcp-request content reject if !is_dns_routed !is_ip_match
+
+    # Only after the IP section, so an IP row logs the address it went to.
+    tcp-request content set-var-fmt(txn.target) %[var(txn.sni_log)]:%[dst_port] if is_tls has_sni
 
     # ---------------------------------------------------------
     # 2. TLS without SNI

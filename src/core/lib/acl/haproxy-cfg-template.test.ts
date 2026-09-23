@@ -121,6 +121,22 @@ describe("universal engine's resolver is tuned like the inspect engine's", () =>
   });
 });
 
+describe("universal engine's IP allowlist judges the real destination", () => {
+  it("matches a variable set once, from dst", () => {
+    // An acl is evaluated where it is used, so a variable a later line
+    // overwrites with the SNI would let the client pick what is matched.
+    const acl = aclLines(TEMPLATE, "is_ip_match");
+    expect(acl.length).toBe(1);
+    const variable = /var\((txn\.[a-z_]+)\)/.exec(acl[0])?.[1];
+    const setters = TEMPLATE.split("\n")
+      .map((l) => l.trim())
+      .filter((l) => new RegExp(`set-var(-fmt)?\\(${variable}\\)`).test(l));
+    expect(setters).toStrictEqual([
+      `tcp-request content set-var-fmt(${variable}) %[dst]:%[dst_port]`,
+    ]);
+  });
+});
+
 describe("universal engine's log line is sized like the inspect engine's", () => {
   it("raises the line length haproxy would otherwise cut at 1024", () => {
     // The template is not generated, so haproxy-config.ts's own `len` says

@@ -38,7 +38,7 @@ INPUT_PROXY_ENGINE="universal" \
 INPUT_PROXY_MODE="restrict" \
 INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443 allowed.example.com:8443 *.wildcard.example.com:443 *.wildcard.example.com:8443 ~ok\\.regex\\.example\\.com:443 ~^ports\\.regex\\.example\\.com:(443|8443)\$" \
 INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80 allowed.example.com:8080 *.wildcard.example.com:80 *.wildcard.example.com:8080" \
-INPUT_ALLOWED_IP_RULES="" \
+INPUT_ALLOWED_IP_RULES="10.200.0.100:8443" \
 INPUT_FAIL_ON_BLOCKED="false" \
 INPUT_RUN="bash $REPO_ROOT/test/universal-restrict-scenarios.sh" \
   node "$REPO_ROOT/dist/main.cjs" 2>&1 | tee "$TMPDIR/out.log"
@@ -79,6 +79,8 @@ assert_summary_contains "| blocked.example.com:80 | HTTP | not-allowed |" "block
 assert_summary_contains "| blocked.example.com:8443 | HTTPS | not-allowed |" "blocked.example.com:8443 recorded as blocked, reason not-allowed"
 assert_summary_contains "| blocked.example.com:8080 | HTTP | not-allowed |" "blocked.example.com:8080 recorded as blocked, reason not-allowed"
 assert_summary_contains "| 10.200.0.100:80 | IP | ip-not-allowed |" "direct IP recorded as blocked, reason ip-not-allowed"
+assert_summary_contains "| 10.200.0.100:8443 | IP |" "an allowed address recorded as allowed, whatever name its SNI carried"
+assert_summary_contains "| 10.200.0.101:8443 | IP | ip-not-allowed |" "an address no rule allows recorded as blocked, though its SNI named an allowed one"
 # No rule refused these and none can clear them, so they are tabled apart.
 assert_summary_contains "### ⚠️ Failed Connections" "a name that resolved nowhere is tabled apart from what the rules refused"
 assert_summary_contains "| nxdomain.wildcard.example.com:443 | HTTPS | dns-failed |" "unresolvable allowlisted name recorded as dns-failed"
