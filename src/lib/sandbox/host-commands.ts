@@ -8,8 +8,9 @@
  * the command exits, to read the report and tear the sandbox down. Looked up
  * through the inherited `$PATH` at that point, a `docker` the command dropped
  * into `~/.local/bin` would run in their place, outside every namespace and
- * with the runner's own access. So both are resolved once, before the command
- * starts, to a binary none of those paths contain.
+ * with the runner's own access. An earlier isolated step could have left one
+ * there too, for this step's own preflight checks to run. So both are resolved
+ * once, before anything runs them, to a binary none of those paths contain.
  *
  * The same applies to what the docker CLI loads (plugins such as `compose`,
  * contexts, config) and to this action's own files (the post step's script),
@@ -150,37 +151,47 @@ export function findPinnableCommand(
 }
 
 /**
- * Resolves `docker` and `sudo` for the rest of this process. The main step
- * runs it before the sandboxed command starts; the post step runs it again,
- * against postStepPersistingPaths, since it is a process of its own.
+ * Resolves `docker` and `sudo` for the rest of this process, against
+ * pinningPaths. Both steps run it before anything else runs either command:
+ * the main step before its own preflight checks, and the post step, a process
+ * of its own, before it tears anything down.
+ *
+ * A command found on PATH only inside those paths fails the step. One missing
+ * from PATH altogether is left unpinned, so the caller's own check (the sudo
+ * preflight, or docker's ENOENT) still reports it in its own words, which say
+ * far more about a runner without sudo or Docker than this could.
  */
 export function pinHostCommands(
-  persisting: string[],
+  paths: string[],
   env: NodeJS.ProcessEnv,
   deps: FindCommandDeps = realFindCommandDeps,
 ): void {
   for (const command of PINNED_COMMANDS) {
-    const path = findPinnableCommand(command, env.PATH, persisting, deps);
-    if (!path) {
-      throw new SandboxError(
-        `No '${command}' found on PATH outside the paths the sandboxed command can write to ` +
-          `(${persisting.join(", ")}). This step runs it after the command exits, so it has to ` +
-          "live somewhere the command cannot replace it.",
-        "HOST_COMMAND_UNPINNABLE",
-      );
+    const path = findPinnableCommand(command, env.PATH, paths, deps);
+    if (path) {
+      pinCommand(command, path);
+      continue;
     }
-    pinCommand(command, path);
+    if (!findPinnableCommand(command, env.PATH, [], deps)) continue;
+    throw new SandboxError(
+      `'${command}' is on PATH only under paths a sandboxed command can write to ` +
+        `(${paths.join(", ")}). This action runs it outside the sandbox, so it has to live ` +
+        "somewhere no sandboxed command can replace it, such as /usr/bin.",
+      "HOST_COMMAND_UNPINNABLE",
+    );
   }
 }
 
 /**
- * The persisting paths as the post step has to assume them. It cannot take the
- * filesystem mode from GITHUB_STATE, which the command could rewrite, so it
- * uses persistent mode's set, a superset of ephemeral's, plus what
- * write_through names. An input that no longer parses contributes nothing:
- * the main step already failed on it.
+ * The paths a pinned command must stay out of: persistent mode's writable set
+ * plus what write_through names, whichever mode this step runs in. What
+ * matters is what any sandboxed command, this step's or an earlier one's,
+ * could have left behind, and ephemeral mode only discards this step's own
+ * writes. The post step also cannot take the mode from GITHUB_STATE, which the
+ * command could rewrite. An input that does not parse contributes nothing:
+ * the step fails on it before it would ever be writable.
  */
-export function postStepPersistingPaths(
+export function pinningPaths(
   readWriteThroughInput: () => string,
   env: NodeJS.ProcessEnv,
 ): string[] {

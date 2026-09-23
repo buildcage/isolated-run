@@ -125,31 +125,31 @@ describe("runSandboxStep", () => {
     });
   });
 
-  it("pins docker and sudo outside what the command can write, before it starts", async () => {
+  it("pins docker and sudo outside what any sandboxed command can write, before the preflights", async () => {
     await runSandboxStep(ENV, deps);
 
     expect(mocks.pinHostCommands).toHaveBeenCalledWith(
       ["/home/runner/work/repo/repo", "/home/runner", "/tmp"],
       ENV,
     );
-    expect(orderOf(mocks.resolveFilesystemPlan)).toBeLessThan(orderOf(mocks.pinHostCommands));
-    expect(orderOf(mocks.pinHostCommands)).toBeLessThan(orderOf(mocks.startSandboxProxy));
+    expect(orderOf(mocks.validateFilesystemInputs)).toBeLessThan(orderOf(mocks.pinHostCommands));
+    expect(orderOf(mocks.pinHostCommands)).toBeLessThan(orderOf(mocks.checkPasswordlessSudo));
   });
 
-  it("pins against only the write_through paths in ephemeral mode", async () => {
+  // Ephemeral discards only this step's own writes: what an earlier step left
+  // under $HOME is still there, so the set does not shrink with the mode.
+  it("pins against persistent mode's paths plus write_through in ephemeral mode too", async () => {
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "ephemeral",
-      writeThroughInput: "./dist",
-    });
-    mocks.resolveFilesystemPlan.mockReturnValue({
-      overlayRoots: ["/home/runner"],
-      writeThroughPaths: ["/home/runner/work/repo/repo/dist"],
-      createdDirs: [],
+      writeThroughInput: "/opt/out",
     });
 
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.pinHostCommands).toHaveBeenCalledWith(["/home/runner/work/repo/repo/dist"], ENV);
+    expect(mocks.pinHostCommands).toHaveBeenCalledWith(
+      ["/home/runner/work/repo/repo", "/home/runner", "/tmp", "/opt/out"],
+      ENV,
+    );
   });
 
   // A plain input mistake must not cost the caller a sudo/unshare/mount probe
@@ -393,14 +393,14 @@ describe("runSandboxStep", () => {
       expect(mocks.removeCreatedDirsIfEmpty).toHaveBeenCalledWith(CREATED_DIRS);
     });
 
-    it("gives them back when docker or sudo cannot be pinned", async () => {
+    it("creates nothing when docker or sudo cannot be pinned", async () => {
       mocks.pinHostCommands.mockImplementation(() => {
         throw new SandboxError("no docker", "HOST_COMMAND_UNPINNABLE");
       });
 
       await expect(runSandboxStep(ENV, deps)).rejects.toThrow("no docker");
-      expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
-      expect(mocks.removeCreatedDirsIfEmpty).toHaveBeenCalledWith(CREATED_DIRS);
+      expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
+      expect(mocks.resolveFilesystemPlan).not.toHaveBeenCalled();
     });
 
     it("warns rather than failing the step when they cannot be removed", async () => {

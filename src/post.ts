@@ -8,7 +8,7 @@ import { readLocalImageOverride, resolveComposeFile } from "./lib/compose-file.t
 import { readFilesystemInputs } from "./lib/inputs.ts";
 import { planPostCleanup } from "./lib/post-cleanup.ts";
 import type { PostCleanupTargets } from "./lib/post-state.ts";
-import { pinHostCommands, postStepPersistingPaths } from "./lib/sandbox/host-commands.ts";
+import { pinHostCommands, pinningPaths } from "./lib/sandbox/host-commands.ts";
 import { hostCommand } from "./lib/sandbox/pinned-commands.ts";
 
 // Untested by design, down to the end of the file: planPostCleanup decides
@@ -40,7 +40,7 @@ function main(): void {
   // hosted runner `~/.local/bin` is ahead of `/usr/bin` on PATH. A no-op
   // notice: the main step already reported any renamed input.
   pinHostCommands(
-    postStepPersistingPaths(() => readFilesystemInputs(() => {}).writeThroughInput, process.env),
+    pinningPaths(() => readFilesystemInputs(() => {}).writeThroughInput, process.env),
     process.env,
   );
   const targets = planPostCleanup(

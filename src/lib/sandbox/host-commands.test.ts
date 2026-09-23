@@ -5,7 +5,7 @@ import {
   findPinnableCommand,
   persistingWritablePaths,
   pinHostCommands,
-  postStepPersistingPaths,
+  pinningPaths,
   renameGuardDirs,
   sandboxReadonlyHostDirs,
   type FindCommandDeps,
@@ -176,21 +176,23 @@ describe("pinHostCommands", () => {
     expect((error as SandboxError).code).toBe("HOST_COMMAND_UNPINNABLE");
     expect((error as SandboxError).message).toContain("'docker'");
   });
+  it("does not fail over a command missing from PATH, leaving it to the caller's own check", () => {
+    expect(() =>
+      pinHostCommands(PERSISTENT, { PATH: "/usr/bin" }, host(["/usr/bin/docker"])),
+    ).not.toThrow();
+  });
 });
 
-describe("postStepPersistingPaths", () => {
+describe("pinningPaths", () => {
   const env = { GITHUB_WORKSPACE: WORKSPACE, HOME, RUNNER_TEMP: "/home/runner/work/_temp" };
 
-  it("is persistent mode's set plus write_through, whatever mode the step ran in", () => {
-    expect(postStepPersistingPaths(() => "/opt/out", env)).toStrictEqual([
-      ...PERSISTENT,
-      "/opt/out",
-    ]);
+  it("is persistent mode's set plus write_through, whatever mode the step runs in", () => {
+    expect(pinningPaths(() => "/opt/out", env)).toStrictEqual([...PERSISTENT, "/opt/out"]);
   });
 
-  it("falls back to persistent mode's set when the input no longer parses", () => {
+  it("falls back to persistent mode's set when the input does not parse", () => {
     expect(
-      postStepPersistingPaths(() => {
+      pinningPaths(() => {
         throw new Error("allow_write was removed");
       }, env),
     ).toStrictEqual(PERSISTENT);

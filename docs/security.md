@@ -152,10 +152,11 @@ PID-namespace separation above.
 
 The step itself goes on running on the host after the command exits, to read the report and tear
 the sandbox down, so what it runs then is kept out of those paths. `docker` and `sudo` are resolved
-once, before the command starts, to a binary outside every path whose writes outlive the command,
-and the step fails if either exists only inside one. The post step, a process of its own, resolves
-them again the same way, against persistent mode's paths plus `write_through:` whichever mode ran,
-since it cannot trust `$GITHUB_STATE` to say which. The docker CLI's config directory
+once, before the step runs either, to a binary outside `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`,
+`$RUNNER_TEMP` and every `write_through:` path, in either mode: ephemeral discards only this step's
+own writes, not what an earlier step left there for this one's preflight checks to run. The step
+fails if either is on `$PATH` only inside one of them. The post step, a process of its own, resolves
+them again the same way. The docker CLI's config directory
 (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins such as `compose` as well as its
 contexts, and this action's own checkout, which holds its post step's script, are read-only inside
 the sandbox whenever such a path contains them, and every writable directory between them and the
@@ -544,9 +545,10 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   `persistent` mode.
 
   That decides how the step is set up. Wrapping every untrusted step is not the way out: a payload
-  left in `$GITHUB_PATH` or `$HOME` runs in the next step before its sandbox does, since this action
-  resolves `sudo` and `docker` through the `$PATH` the runner hands it, and under `inspect` also
-  `java` and `keytool` through `$JAVA_HOME` and `$PATH`. Making it the last step in the job does
+  left in `$GITHUB_ENV`, `$GITHUB_PATH` or `$HOME` runs in the next step before its sandbox does.
+  This action keeps its own `sudo` and `docker` out of those paths, but under `inspect` it runs
+  `java` and `keytool` through `$JAVA_HOME` and `$PATH`, and every process it starts inherits the
+  environment the runner hands it. Making it the last step in the job does
   not close it off either: every action's post step, this one's included, runs after the last
   step, with whatever it left in `$GITHUB_ENV`, `$GITHUB_PATH` and `$HOME`. What holds is
   `filesystem_mode: ephemeral` with `write_through:` narrowed to `$GITHUB_WORKSPACE` and the output

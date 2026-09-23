@@ -38,7 +38,7 @@ import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { removeCreatedDirsIfEmpty, splitWriteThroughInput } from "./sandbox/write-through.ts";
 import { resolveFilesystemPlan, validateFilesystemInputs } from "./sandbox/filesystem-plan.ts";
-import { persistingWritablePaths, pinHostCommands } from "./sandbox/host-commands.ts";
+import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
@@ -218,6 +218,13 @@ export async function runSandboxStep(
   // probe). resolveFilesystemPlan re-checks the resolved paths.
   validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput));
 
+  // Before the preflights below, which already run sudo: an earlier isolated
+  // step could have left one on PATH under $HOME. See host-commands.ts.
+  pinHostCommands(
+    pinningPaths(() => writeThroughInput, env),
+    env,
+  );
+
   // Fail fast, before image verification or starting the proxy container, if
   // the runner can't support the isolation setup at all. Deliberately
   // ahead of resolveFilesystemPlan below: ensureWriteThroughTargetsExist (part
@@ -247,10 +254,6 @@ export async function runSandboxStep(
   }
 
   try {
-    // Once the plan says which host paths the command's writes outlive it in:
-    // see host-commands.ts. The preflights above predate the command, so their
-    // own PATH lookups are safe.
-    pinHostCommands(persistingWritablePaths(filesystemMode, writeThroughPaths, env), env);
     const localOverride = await readLocalImageOverride(env);
     const { imageRef, pullPolicy } =
       localOverride ??

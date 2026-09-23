@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 
 import { SandboxError } from "./errors.ts";
+import { hostCommand } from "./sandbox/pinned-commands.ts";
 import {
   SLIM_RUNNER_DETECTED_PREFIX,
   capturedStderr,
@@ -43,7 +44,10 @@ export interface CheckPasswordlessSudoOptions {
 // only hands node:child_process what the tested caller decided to run.
 /* v8 ignore start */
 function defaultExecFile(command: string, args: string[]): void {
-  execFileSync(command, args, { encoding: "utf8", stdio: ["ignore", "ignore", "pipe"] });
+  execFileSync(hostCommand(command), args, {
+    encoding: "utf8",
+    stdio: ["ignore", "ignore", "pipe"],
+  });
 }
 /* v8 ignore stop */
 

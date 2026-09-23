@@ -17812,7 +17812,7 @@ function describeSudoFailure(e, { env = process.env, exists = node_fs.existsSync
 	return `'sudo' is not available without a password on this runner.${isLikelySlimRunner(env, exists) ? SLIM_RUNNER_NOTE : ""} The run action requires a Linux runner with passwordless sudo for the isolation setup itself (network namespace, veth, iptables). That is the default on GitHub-hosted "ubuntu-*" runners, but not on lightweight images such as "ubuntu-slim" or many self-hosted or minimal runners. See README.md and docs/security.md for details.${captured ? ` (${captured})` : ""}`;
 }
 function defaultExecFile$2(command, args) {
-	(0, node_child_process.execFileSync)(command, args, {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
 		encoding: "utf8",
 		stdio: [
 			"ignore",
@@ -17966,7 +17966,7 @@ function describeProbeCleanupFailure(dir, e) {
 	return `Failed to remove the overlayfs probe directory ${dir}. The probe mount itself succeeded, so this runner does support overlayfs; what failed is removing the probe directory afterwards. That needs \`sudo rm -rf\`, because the kernel writes root-owned overlayfs bookkeeping into workdir while the mount is live (see removeProbeDir), and filesystem_mode: ephemeral's real cleanup discards its overlay work dirs exactly the same way, so a run would fail on this runner anyway, later and with less to go on. This is usually a sudoers config scoped to specific commands rather than a blanket NOPASSWD:ALL, which checkPasswordlessSudo's own \`sudo -n true\` probe cannot detect. Grant the runner user passwordless sudo for \`rm\`, or use filesystem_mode: persistent instead.${captured ? ` (${captured})` : ""}`;
 }
 function removeProbeDir(dir, exec) {
-	retryBriefly(() => exec("sudo", [
+	retryBriefly(() => exec(hostCommand("sudo"), [
 		"-n",
 		"rm",
 		"-rf",
@@ -18000,7 +18000,7 @@ function probeOverlayMount(probeDir, exec) {
 		work,
 		merged
 	]) (0, node_fs.mkdirSync)(dir);
-	exec("sudo", [
+	exec(hostCommand("sudo"), [
 		"-n",
 		"unshare",
 		"--mount",
@@ -18616,12 +18616,22 @@ function findPinnableCommand(command, pathEnv, persisting, { isExecutable, readl
 		if (isExecutable(candidate) && (optedOut || !commandChain(candidate, readlink).some(reachable))) return candidate;
 	}
 }
-function pinHostCommands(persisting, env, deps = realFindCommandDeps) {
+function pinHostCommands(paths, env, deps = realFindCommandDeps) {
 	for (let command of PINNED_COMMANDS) {
-		let path = findPinnableCommand(command, env.PATH, persisting, deps);
-		if (!path) throw new SandboxError(`No '${command}' found on PATH outside the paths the sandboxed command can write to (${persisting.join(", ")}). This step runs it after the command exits, so it has to live somewhere the command cannot replace it.`, "HOST_COMMAND_UNPINNABLE");
-		pinCommand(command, path);
+		let path = findPinnableCommand(command, env.PATH, paths, deps);
+		if (path) {
+			pinCommand(command, path);
+			continue;
+		}
+		if (findPinnableCommand(command, env.PATH, [], deps)) throw new SandboxError(`'${command}' is on PATH only under paths a sandboxed command can write to (${paths.join(", ")}). This action runs it outside the sandbox, so it has to live somewhere no sandboxed command can replace it, such as /usr/bin.`, "HOST_COMMAND_UNPINNABLE");
 	}
+}
+function pinningPaths(readWriteThroughInput, env) {
+	let writeThroughPaths = [];
+	try {
+		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
+	} catch {}
+	return persistingWritablePaths("persistent", writeThroughPaths, env);
 }
 function dockerConfigDir(env) {
 	return env.DOCKER_CONFIG ? (0, node_path.resolve)(env.DOCKER_CONFIG) : env.HOME ? (0, node_path.join)(env.HOME, ".docker") : void 0;
@@ -65366,11 +65376,10 @@ async function runSandboxStep(env, overrides = {}) {
 	}, actionRef = env.GITHUB_ACTION_REF || "v1", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs();
 	log(`Proxy engine: ${proxyEngine}`);
 	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
-	validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
+	validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
 	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), { overlayRoots, writeThroughPaths, createdDirs } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env);
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
 	try {
-		pinHostCommands(persistingWritablePaths(filesystemMode, writeThroughPaths, env), env);
 		let localOverride = await readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
 			actionRef,
 			actionRepo,

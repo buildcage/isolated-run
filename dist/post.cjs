@@ -580,14 +580,17 @@ function findPinnableCommand(command, pathEnv, persisting, { isExecutable, readl
 		if (isExecutable(candidate) && (optedOut || !commandChain(candidate, readlink).some(reachable))) return candidate;
 	}
 }
-function pinHostCommands(persisting, env, deps = realFindCommandDeps) {
+function pinHostCommands(paths, env, deps = realFindCommandDeps) {
 	for (let command of PINNED_COMMANDS) {
-		let path = findPinnableCommand(command, env.PATH, persisting, deps);
-		if (!path) throw new SandboxError(`No '${command}' found on PATH outside the paths the sandboxed command can write to (${persisting.join(", ")}). This step runs it after the command exits, so it has to live somewhere the command cannot replace it.`, "HOST_COMMAND_UNPINNABLE");
-		pinCommand(command, path);
+		let path = findPinnableCommand(command, env.PATH, paths, deps);
+		if (path) {
+			pinCommand(command, path);
+			continue;
+		}
+		if (findPinnableCommand(command, env.PATH, [], deps)) throw new SandboxError(`'${command}' is on PATH only under paths a sandboxed command can write to (${paths.join(", ")}). This action runs it outside the sandbox, so it has to live somewhere no sandboxed command can replace it, such as /usr/bin.`, "HOST_COMMAND_UNPINNABLE");
 	}
 }
-function postStepPersistingPaths(readWriteThroughInput, env) {
+function pinningPaths(readWriteThroughInput, env) {
 	let writeThroughPaths = [];
 	try {
 		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
@@ -610,7 +613,7 @@ async function stopProxyContainer({ containerName, projectName }) {
 	});
 }
 function main() {
-	pinHostCommands(postStepPersistingPaths(() => readFilesystemInputs(() => {}).writeThroughInput, process.env), process.env);
+	pinHostCommands(pinningPaths(() => readFilesystemInputs(() => {}).writeThroughInput, process.env), process.env);
 	let targets = planPostCleanup({
 		containerName: getState("container_name"),
 		ephemeralRoots: getState("ephemeral_overlay_roots")
