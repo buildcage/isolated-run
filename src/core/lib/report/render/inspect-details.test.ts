@@ -221,8 +221,7 @@ describe("renderInspectDetails", () => {
   });
 
   it("keeps a client-ended connection to a host nothing else reached", () => {
-    // No completed connection to this host, so the close is the one sign every
-    // attempt to it ended before a request, as a missing CA makes them.
+    // Nothing else reached this host, so the close is kept (see clientEndedNoise).
     for (const reason of ["client-aborted", "client-timeout"]) {
       const rendered = renderInspectDetails(
         [

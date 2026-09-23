@@ -74,7 +74,7 @@ const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
  * request each took a completed handshake first. A host with none keeps its
  * closes, since then every attempt to it ended before a request, as a client
  * that cannot trust the CA does (a container missing `ca-certificates`). The
- * raw traffic artifact keeps every one regardless.
+ * raw traffic artifact keeps them all either way.
  */
 export function clientEndedNoise(timeline: TrafficEvent[]): (event: TrafficEvent) => boolean {
   const completed = new Set<string>();

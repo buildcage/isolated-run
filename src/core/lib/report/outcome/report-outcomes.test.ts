@@ -38,8 +38,8 @@ function inspect(
   };
 }
 
-// A `no-request`, which the warning counts whatever the host did. Client-ended
-// events are built from it below, where the host they name is what decides.
+// A `no-request`, which the warning always counts. The client-ended tests below
+// build their events from it.
 const incomplete: TrafficEvent = {
   time: 1787471975,
   action: "incomplete",

@@ -21,10 +21,8 @@ export function renderInspectDetails(
   timeline: TrafficEvent[],
   startedAt: number | undefined,
 ): string {
-  // A client-aborted or client-timeout to a host that also completed a
-  // connection is a keepalive pool's noise; one to a host that completed nothing
-  // is kept, the one sign a client got no request out (see clientEndedNoise).
-  // Dropped before connectedHosts so it cannot mask a name's other rows.
+  // The keepalive noise clientEndedNoise marks is dropped here, before
+  // connectedHosts, so a hidden close cannot mask a name's other rows.
   const isNoise = clientEndedNoise(timeline);
   const relevant = timeline.filter((e) => !isNoise(e));
   const connected = connectedHosts(relevant);

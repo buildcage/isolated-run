@@ -62,8 +62,7 @@ function describeUndecidedRequests(
 ): OutcomeEmission | undefined {
   if (report.engine !== "inspect") return undefined;
   // The keepalive noise clientEndedNoise hides from Communication details is out
-  // of the count too, so the two stay in step; a client-ended close to a host
-  // that completed nothing is kept and counted, as no-request is.
+  // of the count too, so the two stay in step.
   const isNoise = clientEndedNoise(report.timeline);
   const count = report.timeline.filter(
     (event) => event.action === "incomplete" && !isNoise(event),
