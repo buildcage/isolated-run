@@ -7,13 +7,14 @@ echo "init-inspect-cfg: proxy_mode=${PROXY_MODE:-restrict}"
 
 # A fresh CA per container. The private key stays here, in a 600 file HAProxy
 # signs per-SNI certificates with; only the certificate is published, at
-# /opt/buildcage/ca.pem, for the caller to install into the workload. How long
-# that trust lasts is the caller's to decide, not this script's.
+# /opt/buildcage/ca.pem, for the caller to install into the workload. It lives
+# no longer than one run needs, so a copy that escapes cleanup stops being
+# trusted soon after, and a random subject makes it this run's alone to match.
 if [ ! -f /etc/haproxy/ca.pem ]; then
     echo "init-inspect-cfg: generating the proxy CA"
-    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+    openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
       -keyout /tmp/ca.key -out /tmp/ca.crt \
-      -subj "/CN=buildcage proxy CA" \
+      -subj "/CN=buildcage proxy CA/serialNumber=$(openssl rand -hex 16)" \
       -addext "basicConstraints=critical,CA:TRUE" 2>/dev/null
     cat /tmp/ca.crt /tmp/ca.key > /etc/haproxy/ca.pem
     cp /tmp/ca.crt /opt/buildcage/ca.pem
@@ -24,7 +25,7 @@ if [ ! -f /etc/haproxy/ca.pem ]; then
     openssl req -newkey rsa:2048 -nodes -keyout /tmp/d.key -out /tmp/d.csr \
       -subj "/CN=buildcage-default" 2>/dev/null
     openssl x509 -req -in /tmp/d.csr -CA /tmp/ca.crt -CAkey /tmp/ca.key \
-      -CAcreateserial -days 3650 -out /tmp/d.crt 2>/dev/null
+      -CAcreateserial -days 2 -out /tmp/d.crt 2>/dev/null
     cat /tmp/d.crt /tmp/d.key > /etc/haproxy/default.pem
     rm -f /tmp/ca.key /tmp/d.key /tmp/d.csr
 fi

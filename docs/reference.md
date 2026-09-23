@@ -574,11 +574,13 @@ Job Summary is the exception: it replaces credential query parameters, see
 ## CA trust variables
 
 `proxy_engine: inspect` terminates TLS and re-signs it with a CA generated for the step, so the
-command has to trust that CA. The CA, and where relevant an augmented copy of the system CA store,
-is mounted over the sandbox's own view of those paths. The store copy goes back over the path it was
-read from, which is what the tools going by their own compiled-in path read, so it is whichever of
-the well-known store paths this runner actually has. Nothing is written to the runner's filesystem,
-and the mount goes away with the sandbox when the step ends.
+command has to trust that CA. The CA is valid for two days from when the proxy starts and carries a
+random `serialNumber` in its subject, so no two runs share one. The CA, and where relevant an
+augmented copy of the system CA store, is mounted over the sandbox's own view of those paths. The
+store copy goes back over the path it was read from, which is what the tools going by their own
+compiled-in path read, so it is whichever of the well-known store paths this runner actually has.
+Nothing is written to the runner's filesystem, and the mount goes away with the sandbox when the
+step ends.
 
 The variables below are set only when the command's environment leaves them unset, and where each
 one points depends on what it means to the tool that reads it:
