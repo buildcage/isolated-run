@@ -120,6 +120,7 @@ test_integration_sandbox_linux: ## Run the action's integration tests (needs BUI
 	@./test/integration-test-fs-escape.sh
 	@./test/integration-test-scratch-isolation.sh
 	@./test/integration-test-mounts-readonly.sh
+	@./test/integration-test-host-commands.sh
 	@./test/integration-test-zero-traffic.sh
 	@./test/integration-test-runtime-sockets.sh
 	@./test/integration-test-post-state-tampering.sh

@@ -193,9 +193,11 @@ describe("runSandboxedCommand", () => {
   it("keeps the docker CLI's config directory read-only, creating it first", () => {
     runSandboxedCommand(options(), deps);
 
-    expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostDirs).toStrictEqual([
+    // Contains, not equals: the action's own checkout joins it when this test
+    // itself runs from under /home/runner, as it does on a hosted runner.
+    expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostDirs).toContain(
       "/home/runner/.docker",
-    ]);
+    );
     expect(mocks.mkdir).toHaveBeenCalledWith("/home/runner/.docker", {
       mode: 0o700,
       recursive: true,
