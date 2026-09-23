@@ -137,6 +137,10 @@ describe("convertUrlRule regex escape hatch", () => {
     expect(() => convertUrlRule("GET ~^https://\\[::1\\]:443/x$")).toThrow(/IPv6/);
   });
 
+  it("rejects a host half the resolver's config cannot quote", () => {
+    expect(() => convertUrlRule("GET ~^https://a'b\\.com/x$")).toThrow(/cannot quote/);
+  });
+
   it("keeps an alternation that a group holds on one side of the split", () => {
     // A URL rule's port is optional, so the host half is matched with and
     // without one rather than folded into a dst_port ACL: any regex is fine

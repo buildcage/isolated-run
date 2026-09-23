@@ -184,6 +184,22 @@ describe("checkRawRegexHalf", () => {
   it("looks for that bracket in the host half only", () => {
     expect(() => check("\\[::1\\]", false)).not.toThrow();
   });
+
+  it("refuses what would break out of the resolver's quoted expression", () => {
+    // The host half lands in a single-quoted CEL literal, and `{$` is
+    // Corefile environment substitution.
+    expect(() => check("a'b\\.com", true)).toThrow(/cannot quote/);
+    expect(() => check("a`b\\.com", true)).toThrow(/cannot quote/);
+    expect(() => check("a{$HOME}\\.com", true)).toThrow(/cannot quote/);
+  });
+
+  it("keeps a quantifier brace, which is not substitution", () => {
+    expect(() => check("a{2}\\.com", true)).not.toThrow();
+  });
+
+  it("looks for those characters in the host half only", () => {
+    expect(() => check("/a'b", false)).not.toThrow();
+  });
 });
 
 describe("endsAnchored", () => {

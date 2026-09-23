@@ -40,10 +40,14 @@ function matchesLine(config: string, marker: string): string {
   );
 }
 
-/** The regex a CEL `matches` line carries, undoing its CEL escaping. */
+/**
+ * The regex a CEL `matches` line carries, undoing its CEL escaping. RE2's
+ * leading `(?i)` becomes the `i` flag, which is how JS spells it.
+ */
 function regexOf(exprLine: string): RegExp {
   const pattern = exprLine.replace(/\\\\/g, "\\");
-  return new RegExp(pattern.slice(pattern.indexOf("'") + 1, pattern.lastIndexOf("'")));
+  const body = pattern.slice(pattern.indexOf("'") + 1, pattern.lastIndexOf("'"));
+  return body.startsWith("(?i)") ? new RegExp(body.slice(4), "i") : new RegExp(body);
 }
 
 /** From a view's declaration to the end of the block holding it. */
@@ -104,8 +108,23 @@ describe("allowlist scope", () => {
 
   it("anchors both ends, including the trailing dot a query carries", () => {
     const expr = exprLine(gen({ httpsRules: ["a.example.com:443"] }));
-    expect(expr.includes("matches '^(")).toBe(true);
+    expect(expr.includes("matches '(?i)^(")).toBe(true);
     expect(expr.trimEnd().endsWith(")[.]$'")).toBe(true);
+  });
+
+  it("matches a name in any case, as the proxy does", () => {
+    // HAProxy matches the host with -i, so the resolver has to agree or a
+    // lookup the rule permits is logged as denied.
+    const regex = regexOf(exprLine(gen({ httpsRules: ["Registry.NPMJS.org:443"] })));
+    expect(regex.test("registry.npmjs.org.")).toBe(true);
+    expect(regex.test("REGISTRY.npmjs.ORG.")).toBe(true);
+  });
+
+  it("marks every view expression case-insensitive", () => {
+    const config = gen({ httpsRules: ["a.example.com:443"] });
+    const lines = config.split("\n").filter((l) => l.includes("name() matches"));
+    expect(lines.length).toBe(4);
+    for (const line of lines) expect(line.includes("matches '(?i)")).toBe(true);
   });
 
   it("combines every rule into one alternation", () => {
