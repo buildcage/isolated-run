@@ -458,9 +458,24 @@ describe("the path the rules see", () => {
     // refused. An encoded separator on its own stays legitimate.
     expect(
       FULL_CONFIG.includes(
-        "http-request deny deny_status 403 if { path -m reg -i (^|/|%2f|%5c)\\.\\.($|/|%2f|%5c) }",
+        "http-request deny deny_status 403 if { path -m reg -i (^|/|%2f|%5c)\\.\\.($|/|;|%2f|%5c|%3b) }",
       ),
     ).toBe(true);
+  });
+
+  it("refuses a dot-dot ended by a path parameter", () => {
+    // Tomcat and Jetty drop `;...` from a segment, so `/public/..;/secret` is
+    // `/secret` to them. HAProxy strips only a bare `..`, and the rules would
+    // match `/public/`.
+    const re = /(^|\/|%2f|%5c)\.\.($|\/|;|%2f|%5c|%3b)/i;
+    for (const p of [
+      "/public/..;/secret",
+      "/public/..%3B/secret",
+      "/public/..;jsessionid=x/secret",
+    ])
+      expect(re.test(p)).toBe(true);
+    for (const p of ["/public/pkg;v=1", "/public/my..;x", "/public/@scope%2fpkg"])
+      expect(re.test(p)).toBe(false);
   });
 
   it("refuses a raw backslash outright, it being no valid path character", () => {

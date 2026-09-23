@@ -326,7 +326,7 @@ Three mechanisms make that enforceable:
   never contacted. The only path that reaches an origin is the backend, after a request has already
   passed the rules, and the origin's own certificate is checked on that connection.
 - **The path is normalized before the rules see it**, and traversal encodings that no normaliser can
-  strip (`%2e%2e`, `..%2f`, a raw backslash, `..%5c`) are refused outright, so a rule cannot be
+  strip (`%2e%2e`, `..%2f`, a raw backslash, `..%5c`, `..;`) are refused outright, so a rule cannot be
   walked out of.
 - **The CA is mounted, never written to the host.** This is where the engine differs most from
   `buildcage/docker`'s, whose runc wrapper can write the CA into a disposable rootfs layer. Here the

@@ -123,8 +123,10 @@ export function inspectStage(
     "    # read `..%2f` / `..%5c` as a segment, and a raw backslash is not a",
     "    # valid path char at all. None is stripped, so each is refused. A lone",
     "    # encoded separator stays legal (e.g. npm's `/@scope%2fpackage`).",
+    "    # `;` (or `%3b`) ends a segment too: Tomcat and Jetty drop what follows",
+    "    # as a path parameter, so they read `..;/` as `../`.",
     "    # `\\\\` is one literal backslash: HAProxy's parser takes the pair as one.",
-    "    http-request deny deny_status 403 if { path -m reg -i (^|/|%2f|%5c)\\.\\.($|/|%2f|%5c) }",
+    "    http-request deny deny_status 403 if { path -m reg -i (^|/|%2f|%5c)\\.\\.($|/|;|%2f|%5c|%3b) }",
     "    http-request deny deny_status 403 if { path -m sub \\\\ }",
     "",
     // %ts tells a refusal from an origin's own 403 or 503, reason says which

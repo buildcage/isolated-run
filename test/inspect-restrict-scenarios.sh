@@ -75,8 +75,18 @@ for P in "x/..%5c../private/secret" "x/%2e%2e%5cprivate/secret" \
   check_status "GET /public/$P" "$CODE" "403"
 done
 
+# Tomcat and Jetty read `..;/` as `../`. This origin does not, so the 403 is
+# what is under test.
+echo "=== [Traversal, path parameter] ==="
+for P in "..;/private/secret" "..%3b/private/secret" "..%3B/private/secret" \
+         "..;jsessionid=x/private/secret" "%2e%2e;/private/secret"; do
+  CODE=$(curl -sS -o /dev/null -w '%{http_code}' --path-as-is --max-time 10 \
+         "https://allowed.example.com/public/$P")
+  check_status "GET /public/$P" "$CODE" "403"
+done
+
 echo "=== [Not traversal] ==="
-for P in "@scope%2fpkg" "my..pkg" "pkg.tgz" "a%5cb"; do
+for P in "@scope%2fpkg" "my..pkg" "pkg.tgz" "a%5cb" "pkg;v=1"; do
   OUT=$(curl -sS --path-as-is --max-time 10 "https://allowed.example.com/public/$P")
   check_ok "GET /public/$P" "$OUT" "PUBLIC"
 done
