@@ -19041,7 +19041,33 @@ function withHostShmSize(mounts, hostShmBytes) {
 		};
 	});
 }
-const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", RESERVED_INTERNAL_DESTINATIONS = [
+const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", HOST_RUN_LOCK_DIR = "/run/lock";
+function hostRunCoverageLayers() {
+	return {
+		mounts: [{
+			destination: "/run",
+			type: "tmpfs",
+			source: "tmpfs",
+			options: [
+				"nosuid",
+				"nodev",
+				"mode=0755"
+			]
+		}, {
+			destination: HOST_RUN_LOCK_DIR,
+			type: "tmpfs",
+			source: "tmpfs",
+			options: [
+				"nosuid",
+				"nodev",
+				"noexec",
+				"mode=1777"
+			]
+		}],
+		writablePaths: new Set([HOST_RUN_LOCK_DIR])
+	};
+}
+const RESERVED_INTERNAL_DESTINATIONS = [
 	RESOLV_CONF_DESTINATION,
 	OWN_CA_DESTINATION,
 	...SYSTEM_CA_CANDIDATES
@@ -19417,19 +19443,20 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		type: "none",
 		source: p,
 		options: ["rbind", "rw"]
-	})), mounts = [
+	})), runCoverage = hostRunCoverageLayers(), mounts = [
 		...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
 		...layers.mounts,
 		...renameGuards,
+		...runCoverage.mounts,
 		...internalMounts,
 		...scratchBaseLayers(execDir)
-	], { maskedPaths, readonlyPaths } = resolveProtectedPaths({
+	], protectedWritablePaths = new Set([...layers.writablePaths, ...runCoverage.writablePaths]), { maskedPaths, readonlyPaths } = resolveProtectedPaths({
 		baseMaskedPaths: baseSpec.linux.maskedPaths ?? [],
 		baseReadonlyPaths: baseSpec.linux.readonlyPaths ?? [],
 		uid,
 		env,
 		hostMounts,
-		writablePaths: layers.writablePaths,
+		writablePaths: protectedWritablePaths,
 		freshMountDestinations,
 		disableReadonly
 	}), namespaces = baseSpec.linux.namespaces.map((ns) => ns.type === "network" ? {

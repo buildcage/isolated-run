@@ -3,6 +3,7 @@ import { resolveProtectedPaths } from "./oci-protected-paths.ts";
 import {
   ephemeralLayers,
   freshMountDestinationsFrom,
+  hostRunCoverageLayers,
   persistentLayers,
   scratchBaseLayers,
   withHostShmSize,
@@ -142,13 +143,21 @@ export function buildOciConfig(
     source: p,
     options: ["rbind", "rw"],
   }));
+  // Covers the host's /run with an empty tmpfs (see hostRunCoverageLayers).
+  // Before internalMounts so the resolv.conf mount lands in the fresh tmpfs:
+  // /etc/resolv.conf is a symlink into /run on these runners, and this is what
+  // recreates its target with the proxy's nameserver. Its writable /run/lock
+  // is merged into writablePaths so it isn't forced read-only below.
+  const runCoverage = hostRunCoverageLayers();
   const mounts = [
     ...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
     ...layers.mounts,
     ...renameGuards,
+    ...runCoverage.mounts,
     ...internalMounts,
     ...scratchBaseLayers(execDir),
   ];
+  const protectedWritablePaths = new Set([...layers.writablePaths, ...runCoverage.writablePaths]);
 
   const { maskedPaths, readonlyPaths } = resolveProtectedPaths({
     baseMaskedPaths: baseSpec.linux.maskedPaths ?? [],
@@ -156,7 +165,7 @@ export function buildOciConfig(
     uid,
     env,
     hostMounts,
-    writablePaths: layers.writablePaths,
+    writablePaths: protectedWritablePaths,
     freshMountDestinations,
     disableReadonly,
   });

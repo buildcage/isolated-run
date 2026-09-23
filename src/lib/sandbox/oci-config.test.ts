@@ -268,6 +268,25 @@ describe("buildOciConfig", () => {
       expect(config.linux.readonlyPaths).not.toContain("/run/netns");
     });
 
+    it("covers /run with an empty tmpfs so the host's sockets never reach the sandbox", () => {
+      const config = build(fakeBaseSpec(), baseArgs);
+      const runMount = config.mounts.find((m) => m.destination === "/run");
+      expect(runMount).toMatchObject({ type: "tmpfs", source: "tmpfs" });
+    });
+
+    it("keeps the recreated /run/lock writable even when the host mounts it separately", () => {
+      // /run/lock is its own tmpfs on the host, so the host-mount sweep would
+      // otherwise force it read-only; the coverage layer reports it writable.
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        runtime: {
+          ...baseArgs.runtime,
+          hostMounts: [{ mountPoint: "/run/lock", fsType: "tmpfs" }],
+        },
+      });
+      expect(config.linux.readonlyPaths).not.toContain("/run/lock");
+    });
+
     it("also masks the rootless runtime sockets under $XDG_RUNTIME_DIR when set", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
@@ -559,7 +578,7 @@ describe("buildOciConfig", () => {
   });
 
   describe("mount order", () => {
-    it("mounts in layer order: base spec, writable binds, this action's own, scratch tmpfs, execDir", () => {
+    it("mounts in layer order: base spec, writable binds, /run coverage, this action's own, scratch tmpfs, execDir", () => {
       const config = build(fakeBaseSpec(), baseArgs);
       expect(config.mounts.map((m) => m.destination)).toStrictEqual([
         "/proc",
@@ -568,6 +587,10 @@ describe("buildOciConfig", () => {
         baseArgs.writable.workdir,
         baseArgs.writable.home,
         "/tmp",
+        // The /run tmpfs and its writable /run/lock come before the internal
+        // mounts, so the resolv.conf mount lands in the fresh /run tmpfs.
+        "/run",
+        "/run/lock",
         RESOLV_CONF_DESTINATION,
         SANDBOX_SCRATCH_BASE,
         baseArgs.runtime.execDir,

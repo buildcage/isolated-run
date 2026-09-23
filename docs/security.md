@@ -100,19 +100,26 @@ invocation, so no step inherits anything another one left behind.
   `libvirt`, `kvm`, `sudo`, `wheel` and a few more) and against the owning GID of any runtime socket
   actually present, and the command runs under `nogroup`/`nobody`/65534 instead when it matches. If
   none of those is safe either, the sandbox refuses to start.
-- **The runtime sockets are masked**, as an independent second layer: `/var/run/docker.sock`,
-  containerd's, podman's, buildkit's, crio's and their rootless `$XDG_RUNTIME_DIR` equivalents are
-  covered with `/dev/null`, so even an unenumerated privileged group finds no live socket. A
-  read-only mount would not do: the kernel's permission check for `connect(2)` on a Unix socket
-  looks at write permission bits, which `mount -o ro` does not touch.
-- **The D-Bus system bus and the per-user runtime directory are masked** the same way.
-  `/run/user/<uid>` is where a `systemd --user` instance keeps its session bus, and reaching either
+- **The host's `/run` is covered by an empty tmpfs.** `mount --rbind /` sweeps the runner's whole
+  `/run` into the sandbox, and every host service keeps a Unix socket there: systemd-resolved's
+  Varlink resolver (which would answer name lookups straight from the runner's own resolver, past
+  the proxy — see [DNS never leaves the job](#dns-never-leaves-the-job)), snapd's store socket, the
+  container runtimes, the D-Bus system bus, and whatever a future daemon adds. An empty tmpfs over
+  `/run` denies the whole directory at once — deny-by-default, not a list to keep current — with only
+  a fresh writable `/run/lock` (where tools take file locks, directly or through `/var/lock`) added
+  back, plus the proxy's own `resolv.conf`, which `/etc/resolv.conf` is a symlink into `/run` for on
+  these runners. A read-only bind would not do: the kernel's `connect(2)` permission check on a Unix
+  socket reads the write bits, which `mount -o ro` leaves untouched. `/var/run` is a symlink to
+  `/run` on every supported runner, so it is covered too.
+- **The runtime-socket paths and per-user runtime directory are also masked**, an independent second
+  layer covering the rare host where `/var/run` is a separate real directory the `/run` tmpfs does
+  not reach: `/var/run/docker.sock`, containerd's, podman's, buildkit's, crio's and their rootless
+  `$XDG_RUNTIME_DIR` equivalents are covered with `/dev/null`, and the D-Bus system bus and
+  `/run/user/<uid>` (a `systemd --user` session bus, whole rather than socket by socket) with an
+  empty directory, so even an unenumerated privileged group finds no live socket. Reaching either
   bus lets a compromised command start a unit that runs outside every namespace this action creates.
-  The per-user directory is masked whole rather than socket by socket, so a future tool dropping a
-  new socket there is covered without a code change. Masking covers a known list of paths rather
-  than a general rule, so a socket outside it stays reachable: an `ssh-agent` a workflow started for
-  itself is one, left alone deliberately, see
-  [What the sandbox does not stop](#what-the-sandbox-does-not-stop).
+  A socket a workflow places _outside_ `/run` stays reachable — an `ssh-agent` under `$TMPDIR`, say —
+  left alone deliberately; see [What the sandbox does not stop](#what-the-sandbox-does-not-stop).
 
 ### What it can see
 

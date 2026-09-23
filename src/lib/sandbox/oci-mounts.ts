@@ -48,6 +48,57 @@ export function withHostShmSize(mounts: MountEntry[], hostShmBytes?: number): Mo
 /** Where the proxy's nameserver is mounted inside the sandbox. */
 export const RESOLV_CONF_DESTINATION = "/etc/resolv.conf";
 
+/** The host's /run, covered whole by hostRunCoverageLayers below. */
+export const HOST_RUN_DIR = "/run";
+/** Recreated writable over the empty /run tmpfs; see hostRunCoverageLayers. */
+export const HOST_RUN_LOCK_DIR = "/run/lock";
+
+/**
+ * Cover the host's `/run` with a fresh, empty tmpfs so the rootfs rbind can't
+ * hand the sandbox any socket living there. The rbind sweeps in every host
+ * service's `/run` socket, and a read-only bind is no defense: connect(2)
+ * succeeds on a live socket whatever the mount's `ro` flag says. Masking each
+ * known path (see oci-protected-paths.ts) only ever covered an enumerated
+ * list; an empty tmpfs denies the whole directory at once, including the ones
+ * no list names -- systemd-resolved's Varlink resolver (a DNS path straight
+ * out of the job, past the proxy), snapd's store socket, and whatever a future
+ * tool drops there. The per-path masks are kept as a second layer, harmless
+ * no-ops here since the paths no longer exist under the tmpfs.
+ *
+ * `/var/run` is a symlink to `/run` on every supported runner, so this covers
+ * it too; the enumerated `/var/run/...` masks stay as the fallback for the rare
+ * host where it is a separate real directory.
+ *
+ * Only what the sandbox itself needs is added back:
+ *  - `/run/lock` (mode 1777 on the host): many tools take file locks there,
+ *    directly or through the `/var/lock` symlink. Reported as writable so
+ *    oci-protected-paths.ts doesn't force it read-only again.
+ *  - `/run/systemd/resolve/stub-resolv.conf` is *not* added here: on these
+ *    runners `/etc/resolv.conf` is a symlink to it, so the resolv.conf mount
+ *    (ordered after these in buildOciConfig) recreates that path inside the
+ *    fresh tmpfs with the proxy's nameserver, which is the only resolver the
+ *    sandbox should reach.
+ */
+export function hostRunCoverageLayers(): WritableLayers {
+  return {
+    mounts: [
+      {
+        destination: HOST_RUN_DIR,
+        type: "tmpfs",
+        source: "tmpfs",
+        options: ["nosuid", "nodev", "mode=0755"],
+      },
+      {
+        destination: HOST_RUN_LOCK_DIR,
+        type: "tmpfs",
+        source: "tmpfs",
+        options: ["nosuid", "nodev", "noexec", "mode=1777"],
+      },
+    ],
+    writablePaths: new Set([HOST_RUN_LOCK_DIR]),
+  };
+}
+
 /**
  * Paths this action mounts for its own use. A `write_through:` entry naming
  * one of them, or something under it, is rejected rather than silently
