@@ -129,7 +129,7 @@ test_integration_sandbox_linux: ## Run the action's integration tests (needs BUI
 # network in compose.test-universal.yaml (fake DNS + an origin this repo
 # controls) instead of the real internet. That covers cases real hosts can't
 # (an allowlisted name resolving to an internal address, NXDOMAIN, direct-IP
-# blocking with no allowed_ip_rules), and keeps the rest from depending on a
+# blocking and an SNI naming another address), and keeps the rest from depending on a
 # third-party site being up.
 .PHONY: test_integration_sandbox_universal
 test_integration_sandbox_universal: ## Run the universal-engine fixture-based integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF built with test hooks)

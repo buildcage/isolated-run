@@ -2,6 +2,7 @@ import { describe, it, expect, reportResults } from "../test/test-shim.ts";
 import {
   buildACLRules,
   InvalidRulesError,
+  parseIpRulesOrThrow,
   parseKnownBlockedRulesOrThrow,
   parseRulesOrThrow,
 } from "./rules.ts";
@@ -63,6 +64,24 @@ describe("parseKnownBlockedRulesOrThrow", () => {
   });
 });
 
+describe("parseIpRulesOrThrow", () => {
+  it("accepts an address, a wildcard, a CIDR block and a regex", () => {
+    const rules = ["10.0.0.5:443", "10.0.*.*:*", "10.0.0.1?:22", "10.0.0.0/8:443", "~^x:443$"];
+    expect(parseIpRulesOrThrow(rules.join(" "))).toStrictEqual(rules);
+  });
+
+  it("refuses a rule that names a host, which the IP path would never match", () => {
+    expect(codeOfThrown(() => parseIpRulesOrThrow("10.0.0.5:443 github.com:443"))).toBe(
+      "INVALID_RULES",
+    );
+    expect(() => parseIpRulesOrThrow("github.com:443")).toThrow(/"github\.com:443" names a host/);
+  });
+
+  it("still rejects a syntax error first", () => {
+    expect(() => parseIpRulesOrThrow(INVALID_RULE)).toThrow(/a\*b\.example\.com/);
+  });
+});
+
 describe("buildACLRules", () => {
   it("parses each input into its own field", () => {
     expect(
@@ -101,6 +120,16 @@ describe("buildACLRules", () => {
         ),
       ).toBe("INVALID_RULES");
     }
+  });
+
+  it("refuses a host name in ipRulesInput alone", () => {
+    const hosts = { httpsRulesInput: "github.com:443", httpRulesInput: "github.com:80" };
+    expect(buildACLRules({ ...hosts, ipRulesInput: undefined }).httpsRules).toStrictEqual([
+      "github.com:443",
+    ]);
+    expect(codeOfThrown(() => buildACLRules({ ...hosts, ipRulesInput: "github.com:443" }))).toBe(
+      "INVALID_RULES",
+    );
   });
 });
 

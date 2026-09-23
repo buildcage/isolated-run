@@ -19,6 +19,16 @@ services:
     networks:
       test-net:
 
+  # The same origin on an address no rule allows.
+  test-server-unlisted:
+    build: test/test-server-universal
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - TEST_NET_ADDR=10.200.0.101/24
+    networks:
+      test-net:
+
   # Upstream resolver for the proxy's HAProxy.
   test-dns:
     build: test/test-dns-universal

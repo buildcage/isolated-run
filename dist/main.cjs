@@ -17582,11 +17582,17 @@ function parseKnownBlockedRulesOrThrow(rulesInput) {
 		throw new InvalidRulesError(errorMessage(e), "INVALID_RULES");
 	}
 }
+const IP_RULE_HOST = /^[0-9.*?/]+$/;
+function parseIpRulesOrThrow(rulesInput) {
+	let rules = parseRulesOrThrow(rulesInput);
+	for (let rule of rules) if (!rule.startsWith("~") && !IP_RULE_HOST.test(rule.slice(0, rule.lastIndexOf(":")))) throw new InvalidRulesError(`IP rule "${rule}" names a host, not an address. allowed_ip_rules is matched against the address a connection goes to; allow a name with allowed_https_rules or allowed_http_rules instead.`, "INVALID_RULES");
+	return rules;
+}
 function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 	return {
 		httpsRules: parseRulesOrThrow(httpsRulesInput),
 		httpRules: parseRulesOrThrow(httpRulesInput),
-		ipRules: parseRulesOrThrow(ipRulesInput)
+		ipRules: parseIpRulesOrThrow(ipRulesInput)
 	};
 }
 //#endregion
