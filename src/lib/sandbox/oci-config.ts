@@ -148,6 +148,16 @@ export function buildOciConfig(
   // /etc/resolv.conf is a symlink into /run on these runners, and this is what
   // recreates its target with the proxy's nameserver. Its writable /run/lock
   // is merged into writablePaths so it isn't forced read-only below.
+  //
+  // Applied unconditionally, `write_through: /` (disableReadonly) included: like
+  // the socket masks in oci-protected-paths.ts, this is an egress control (a
+  // host daemon reached through its /run socket routes traffic outside the
+  // netns), not part of the read-only-filesystem restriction that `/` opts out
+  // of. The empty tmpfs is what denies the sockets; the read-only remount /run
+  // also gets (it is a tmpfs mount on every Linux host, so the host-mount sweep
+  // in resolveProtectedPaths covers it) is secondary. write_through entries at
+  // or under /run are rejected up front, in validateFilesystemInputs, so none
+  // reaches here to be silently shadowed by this tmpfs.
   const runCoverage = hostRunCoverageLayers();
   const mounts = [
     ...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),

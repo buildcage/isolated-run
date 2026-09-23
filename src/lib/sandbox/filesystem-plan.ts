@@ -26,7 +26,7 @@ import {
   type CreatedDir,
 } from "./write-through.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
-import { RESERVED_INTERNAL_DESTINATIONS } from "./oci-mounts.ts";
+import { HOST_RUN_DIR, RESERVED_INTERNAL_DESTINATIONS } from "./oci-mounts.ts";
 
 /**
  * Validates write_through: paths against the filesystem mode. Pure, no I/O.
@@ -60,6 +60,19 @@ export function validateFilesystemInputs(
           `and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to ` +
           "depends on the runner, so every one it could be is refused rather than working on one " +
           "machine and not the next. Name a containing directory instead to persist writes around it.",
+        "FILESYSTEM_INPUT_CONFLICT",
+      );
+    }
+    // Rejected rather than silently shadowed: the sandbox covers /run with an
+    // empty tmpfs to keep the host's service sockets out of reach (see
+    // hostRunCoverageLayers), mounted after the write_through binds, so a bind
+    // at or under /run would be buried and its writes lost with no error.
+    if (isAtOrUnder(path, HOST_RUN_DIR)) {
+      throw new SandboxError(
+        `write_through entry ${JSON.stringify(path)} is under ${JSON.stringify(HOST_RUN_DIR)}, which ` +
+          "the sandbox replaces with an empty tmpfs so the host's service sockets can't be reached " +
+          "from inside it. A bind there would be shadowed and its writes lost. Persist writes to a " +
+          "path outside /run instead.",
         "FILESYSTEM_INPUT_CONFLICT",
       );
     }

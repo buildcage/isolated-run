@@ -335,6 +335,17 @@ describe("buildOciConfig", () => {
       });
       expect(config.linux.maskedPaths).toContain("/run/user/1000");
     });
+
+    it("still covers /run with an empty tmpfs when writable: / disables the read-only root", () => {
+      // The /run coverage is an egress control (a host daemon reached through
+      // its /run socket routes traffic outside the netns), so it applies even
+      // under the read-only opt-out, like the socket masks above.
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/"] },
+      });
+      expect(config.mounts.find((m) => m.destination === "/run")).toMatchObject({ type: "tmpfs" });
+    });
   });
 
   describe("the read-only root and its writable exceptions", () => {

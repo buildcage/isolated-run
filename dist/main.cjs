@@ -19041,11 +19041,11 @@ function withHostShmSize(mounts, hostShmBytes) {
 		};
 	});
 }
-const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", HOST_RUN_LOCK_DIR = "/run/lock";
+const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", HOST_RUN_DIR = "/run", HOST_RUN_LOCK_DIR = "/run/lock";
 function hostRunCoverageLayers() {
 	return {
 		mounts: [{
-			destination: "/run",
+			destination: HOST_RUN_DIR,
 			type: "tmpfs",
 			source: "tmpfs",
 			options: [
@@ -19152,6 +19152,7 @@ function validateFilesystemInputs(filesystemMode, writeThroughPaths) {
 	for (let path of writeThroughPaths) {
 		let reserved = RESERVED_INTERNAL_DESTINATIONS.find((r) => isAtOrUnder(path, r));
 		if (reserved) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
+		if (isAtOrUnder(path, "/run")) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is under ${JSON.stringify(HOST_RUN_DIR)}, which the sandbox replaces with an empty tmpfs so the host's service sockets can't be reached from inside it. A bind there would be shadowed and its writes lost. Persist writes to a path outside /run instead.`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 }
 function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {

@@ -272,4 +272,15 @@ describe("validateFilesystemInputs", () => {
       /"\/etc\/resolv\.conf"/,
     );
   });
+
+  it("rejects /run and paths under it, which the empty-tmpfs coverage would shadow", () => {
+    for (const path of ["/run", "/run/lock", "/run/myapp/sock"]) {
+      expect(() => validateFilesystemInputs("persistent", [path])).toThrow(/\/run/);
+      expect(() => validateFilesystemInputs("ephemeral", [path])).toThrow(/\/run/);
+    }
+  });
+
+  it("still allows /, the read-only opt-out, which only contains /run rather than being under it", () => {
+    expect(() => validateFilesystemInputs("persistent", ["/"])).not.toThrow();
+  });
 });
