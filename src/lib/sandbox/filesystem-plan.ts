@@ -26,11 +26,7 @@ import {
   type CreatedDir,
 } from "./write-through.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
-import { HOST_RUN_DIR, RESERVED_INTERNAL_DESTINATIONS } from "./oci-mounts.ts";
-
-/** `/run` and its `/var/run` alias: re-exposing either whole would undo the
- *  coverage tmpfs. A specific path *under* them stays allowed (see below). */
-const HOST_RUN_DIRS = [HOST_RUN_DIR, "/var/run"];
+import { RESERVED_INTERNAL_DESTINATIONS } from "./oci-mounts.ts";
 
 /**
  * Validates write_through: paths against the filesystem mode. Pure, no I/O.
@@ -64,18 +60,6 @@ export function validateFilesystemInputs(
           `and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to ` +
           "depends on the runner, so every one it could be is refused rather than working on one " +
           "machine and not the next. Name a containing directory instead to persist writes around it.",
-        "FILESYSTEM_INPUT_CONFLICT",
-      );
-    }
-    // `/run` (or its `/var/run` alias) as a whole would rbind the host's entire
-    // /run back over the coverage tmpfs, reopening every host socket at once --
-    // the opposite of what the tmpfs is for. A specific path *under* it stays
-    // allowed: that re-exposes just the one the caller named (see oci-config.ts).
-    if (HOST_RUN_DIRS.includes(path)) {
-      throw new SandboxError(
-        `write_through entry ${JSON.stringify(path)} would re-expose the host's entire /run, undoing ` +
-          "the empty-tmpfs coverage that keeps its service sockets out of the sandbox. Name a specific " +
-          "path under it instead (e.g. /run/my-daemon.sock) to re-expose only that one.",
         "FILESYSTEM_INPUT_CONFLICT",
       );
     }

@@ -145,25 +145,25 @@ export function buildOciConfig(
   }));
   // Covers the host's /run with an empty tmpfs (see hostRunCoverageLayers).
   //
-  // Placed before the writable layers, not after, so a write_through entry at
-  // or under /run is re-exposed on top of the fresh tmpfs rather than buried by
-  // it: naming `/run/<x>` selectively punches a single host path back through
-  // (e.g. a service socket a later step needs), the same opt-in hole
-  // write_through is everywhere else. Its writable /run/lock is merged into
-  // writablePaths so it isn't forced read-only below.
+  // Placed before the writable layers, not after, so a write_through entry at or
+  // under /run is re-exposed on top of the fresh tmpfs rather than buried by it:
+  // naming `/run` brings the whole host /run back, `/run/<x>` just that one path
+  // (e.g. a service socket a later step needs). write_through opens exactly what
+  // it names here, the same as everywhere else. Its writable /run/lock is merged
+  // into writablePaths so it isn't forced read-only below.
   //
-  // Applied unconditionally, `write_through: /` (disableReadonly) included: like
-  // the socket masks in oci-protected-paths.ts, this is an egress control (a
-  // host daemon reached through its /run socket routes traffic outside the
-  // netns), not part of the read-only-filesystem restriction that `/` opts out
-  // of. `write_through: /` leaves /run covered precisely so the opt-out does not
-  // silently reopen every host socket; a step that wants one names it. The empty
-  // tmpfs is what denies the rest; the read-only remount /run also gets (it is a
-  // tmpfs mount on every Linux host, so resolveProtectedPaths's host-mount sweep
-  // covers it) is secondary. The resolv.conf mount in internalMounts still lands
-  // in the fresh tmpfs: /etc/resolv.conf is a symlink into /run on these runners,
-  // and internalMounts comes after, so it recreates its target there.
-  const runCoverage = hostRunCoverageLayers();
+  // Skipped entirely under `write_through: /` (disableReadonly): that is the
+  // documented full opt-out of the read-only restriction, and covering /run
+  // while the rest of the host is handed back writable would be the one
+  // exception to "you get exactly what you opened". The read-only remount /run
+  // otherwise gets comes from resolveProtectedPaths's host-mount sweep, which
+  // disableReadonly also skips, so the two stay consistent. The resolv.conf
+  // mount in internalMounts still lands correctly: with coverage on it recreates
+  // the target in the fresh tmpfs; with it off /run is the host's own, where the
+  // target already exists.
+  const runCoverage = disableReadonly
+    ? { mounts: [], writablePaths: new Set<string>() }
+    : hostRunCoverageLayers();
   const mounts = [
     ...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
     ...runCoverage.mounts,

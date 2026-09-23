@@ -110,11 +110,13 @@ invocation, so no step inherits anything another one left behind.
   back, plus the proxy's own `resolv.conf`, which `/etc/resolv.conf` is a symlink into `/run` for on
   these runners. A read-only bind would not do: the kernel's `connect(2)` permission check on a Unix
   socket reads the write bits, which `mount -o ro` leaves untouched. `/var/run` is a symlink to
-  `/run` on every supported runner, so it is covered too. `write_through:` naming a specific path
-  under `/run` re-exposes just that one on top of the tmpfs, the same opt-in hole `write_through` is
-  elsewhere; re-exposing a host daemon's socket that way reopens an outbound path through that daemon,
-  so it is the caller's call to make deliberately, path by path. `write_through: /` does not reopen
-  `/run`: the empty tmpfs stays, so the read-only opt-out cannot silently undo the socket coverage.
+  `/run` on every supported runner, so it is covered too. `write_through:` re-exposes exactly what it
+  names on top of the tmpfs, the same opt-in hole it is elsewhere: `/run/<x>` brings back a single
+  host path (a service socket a later step needs, say), and `/run` (or `write_through: /`, the full
+  read-only opt-out) brings the whole thing back. Re-exposing a host daemon's socket reopens an
+  outbound path through that daemon, and re-exposing all of `/run` leaves the outbound restriction
+  nearly pointless, so it is the caller's deliberate call — the default is that none of it is
+  reachable.
 - **The runtime-socket paths and per-user runtime directory are also masked**, an independent second
   layer covering the rare host where `/var/run` is a separate real directory the `/run` tmpfs does
   not reach: `/var/run/docker.sock`, containerd's, podman's, buildkit's, crio's and their rootless

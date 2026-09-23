@@ -273,18 +273,12 @@ describe("validateFilesystemInputs", () => {
     );
   });
 
-  it("allows a specific path under /run, re-exposed on top of the coverage tmpfs", () => {
-    // Selective re-exposure: naming /run/<x> punches that one host path back
-    // through the empty /run tmpfs (see oci-config.ts's mount order).
-    expect(() => validateFilesystemInputs("persistent", ["/run/snapd.socket"])).not.toThrow();
-    expect(() => validateFilesystemInputs("ephemeral", ["/run/myapp"])).not.toThrow();
-    expect(() => validateFilesystemInputs("persistent", ["/var/run/docker.sock"])).not.toThrow();
-  });
-
-  it("rejects /run or /var/run as a whole, which would reopen every host socket at once", () => {
-    for (const path of ["/run", "/var/run"]) {
-      expect(() => validateFilesystemInputs("persistent", [path])).toThrow(/entire \/run/);
-      expect(() => validateFilesystemInputs("ephemeral", [path])).toThrow(/entire \/run/);
+  it("allows /run, and any path under it, to be re-exposed on top of the coverage tmpfs", () => {
+    // write_through opens exactly what it names: the whole host /run, or a single
+    // path under it, re-exposed over the empty /run tmpfs (see oci-config.ts).
+    for (const path of ["/run", "/var/run", "/run/snapd.socket", "/run/myapp"]) {
+      expect(() => validateFilesystemInputs("persistent", [path])).not.toThrow();
+      expect(() => validateFilesystemInputs("ephemeral", [path])).not.toThrow();
     }
   });
 });
