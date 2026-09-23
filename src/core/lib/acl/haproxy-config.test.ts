@@ -262,6 +262,12 @@ describe("the internal-address guard", () => {
     expect(FULL_CONFIG.includes("http-request deny deny_status 403 if dst_internal\n")).toBe(true);
   });
 
+  it("includes Azure's WireServer, which sits outside every never-public range", () => {
+    // GitHub-hosted runners are Azure VMs, where 168.63.129.16 serves the guest agent.
+    const acl = FULL_CONFIG.split("\n").find((l) => l.includes("acl dst_internal"))!;
+    expect(acl.split(" ").includes("168.63.129.16/32")).toBe(true);
+  });
+
   it("includes the proxy's own address in the internal set, against a loop", () => {
     // gateway.example.com -> 172.20.0.1 (the proxy) made it connect to itself.
     const acl = FULL_CONFIG.split("\n").find((l) => l.includes("acl dst_internal"))!;

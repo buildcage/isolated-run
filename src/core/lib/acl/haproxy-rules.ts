@@ -31,9 +31,10 @@ export const HOST_IS_ADDRESS = `^${OCTET}\\.${OCTET}\\.${OCTET}\\.${OCTET}$`;
  * kept the same way, since (unlike loopback/link-local) it is never-public but
  * not never-legitimate.
  *
- *   0.0.0.0/8        this host          169.254.0.0/16  link-local (AWS/GCP/Azure IMDS)
- *   127.0.0.0/8      loopback           100.64.0.0/10   CGNAT (Alibaba IMDS)
- *   192.0.0.0/24     IETF (Oracle IMDS) ::1/128 fe80::/10  the v6 loopback/link-local equivalents
+ *   0.0.0.0/8        this host          169.254.0.0/16    link-local (AWS/GCP/Azure IMDS)
+ *   127.0.0.0/8      loopback           100.64.0.0/10     CGNAT (Alibaba IMDS)
+ *   192.0.0.0/24     IETF (Oracle IMDS) 168.63.129.16/32  Azure WireServer
+ *   ::1/128 fe80::/10  the v6 loopback/link-local equivalents
  */
 export const INTERNAL_RANGES = [
   "0.0.0.0/8",
@@ -41,6 +42,7 @@ export const INTERNAL_RANGES = [
   "169.254.0.0/16",
   "100.64.0.0/10",
   "192.0.0.0/24",
+  "168.63.129.16/32",
   "::1/128",
   "fe80::/10",
 ];
