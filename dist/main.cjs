@@ -20498,7 +20498,7 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { runComma
 //#endregion
 //#region src/core/lib/report/render/render-report-markdown.ts
 function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", runCommand, actionVersion } = {}) {
-	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${title}${isAudit ? " (audit mode)" : ""}\n\n`;
+	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
 	if (report.logLooksPlausible || (markdown += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 		runCommand,
 		actionVersion,
@@ -20918,9 +20918,6 @@ function readActionVersion(containerName, proxyEngine, docker) {
 		return;
 	}
 }
-function sanitizeHeadingLabel(label) {
-	return label.replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
-}
 function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
@@ -20928,7 +20925,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 	});
 	return {
 		markdown: renderReportMarkdown(report, actionRepo, actionRef, {
-			title: stepLabel ? `Outbound Traffic Report — ${sanitizeHeadingLabel(stepLabel)}` : void 0,
+			title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
 			runCommand,
 			actionVersion
 		}),

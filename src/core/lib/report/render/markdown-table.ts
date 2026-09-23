@@ -10,6 +10,11 @@ const ALIGN_MARKERS: Record<Align, string> = { left: "---", right: "---:", cente
 const alignMarker = (align?: Align): string => ALIGN_MARKERS[align ?? "left"];
 
 /**
+ * Neutralizes the structural Markdown in a piece of attacker-influenceable
+ * text so it renders as its literal characters. Shared by the table cells and
+ * the report heading (the `label` input); see render-report-markdown.ts, which
+ * relies on this exact set so the heading stays as safe as the rows.
+ *
  * A cell's text is attacker-chosen (a host comes from an SNI or a Host header),
  * and an unescaped `|` opens as many extra cells as it likes: a blocked host
  * can push its own "Reason" and "Expected" values into the row. Brackets and
@@ -26,7 +31,7 @@ const alignMarker = (align?: Align): string => ALIGN_MARKERS[align ?? "left"];
  * A newline would split the row itself, which no backslash can prevent, so it
  * collapses to a space instead.
  */
-function escapeCell(value: string | number | undefined): string {
+export function escapeCell(value: string | number | undefined): string {
   if (value === undefined) return "";
   return String(value)
     .replace(/[\\`[\]<>|*]/g, "\\$&")
