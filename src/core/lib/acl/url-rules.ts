@@ -139,10 +139,8 @@ const RAW_REGEX_SCHEMES = new Map<string, UrlScheme[]>([
 ]);
 
 /**
- * The schemes a `~` rule covers, read from what precedes its `://`. The proxy
- * buckets rules by the listener a request arrived on, so the scheme has to be
- * one of a fixed few rather than any regex: anything else would land in a
- * bucket it does not describe.
+ * The schemes a `~` rule covers, read from what precedes its `://`. Only fixed
+ * spellings: the proxy buckets rules by listener, which a regex cannot name.
  *
  * @throws {Error} if the scheme is not `https`, `http` or `https?`
  */
@@ -252,10 +250,8 @@ function splitRawRegexUrl(
 }
 
 /**
- * A `?` in a path is a single-character wildcard, so a query string copied into
- * a rule would compile into a path no request carries: the proxy matches the
- * path with its query dropped. Refused once what follows the `?` reads as a
- * query, holding an `=` or an `&`; a lone `?` keeps its wildcard meaning.
+ * The proxy matches the path without its query, so a copied-in query string
+ * would match nothing. A `?` not followed by `=` or `&` stays a wildcard.
  *
  * @throws {Error} if the path carries a query string
  */
