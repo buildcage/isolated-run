@@ -32,6 +32,7 @@ Docker build's `RUN` steps rather than a workflow step, use
 - [Engines](#engines)
 - [Inputs](#inputs)
 - [The report](#the-report)
+- [How `run` is executed](#how-run-is-executed)
 - [Passing values to `run`](#passing-values-to-run)
 - [Filesystem access](#filesystem-access)
 - [How it works](#how-it-works)
@@ -266,6 +267,23 @@ means, is in [Reference](./docs/reference.md#report-details).
 and per name lookup, with the method, URL, status, size and the address it resolved to. It is
 uploaded even when the step fails, and `inspect` is the only engine that has anything to put in it.
 The fields are listed in [Reference](./docs/reference.md#traffic-artifact).
+
+## How `run` is executed
+
+`run` runs under `bash -e`, the same as a native `run:` step without `shell:`. To use another
+interpreter, start `run` with a shebang line; the script is then run as written, with no `set -e`
+added:
+
+```yaml
+- uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
+  with:
+    run: |
+      #!/usr/bin/env python3
+      print("hello")
+```
+
+`shell:`, `working-directory:` and the workflow's `defaults.run` do not apply to a `uses:` step, so
+they have no effect here. Use a shebang and `cd` instead.
 
 ## Passing values to `run`
 

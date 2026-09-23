@@ -18902,7 +18902,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 //#endregion
 //#region src/lib/sandbox/oci-files.ts
 function writeRunScript(runInput, execDir) {
-	let scriptPath = (0, node_path.join)(execDir, "run-script.sh"), content = runInput.startsWith("#!") ? runInput : `#!/bin/sh\nset -e\n${runInput}\n`;
+	let scriptPath = (0, node_path.join)(execDir, "run-script.sh"), content = runInput.startsWith("#!") ? runInput : `#!/bin/bash\nset -e\n${runInput}\n`;
 	return (0, node_fs.writeFileSync)(scriptPath, content, { mode: 448 }), scriptPath;
 }
 function writeOciConfig(config, bundleDir) {
