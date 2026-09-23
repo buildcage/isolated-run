@@ -5,6 +5,7 @@ import {
   findPinnableCommand,
   persistingWritablePaths,
   pinHostCommands,
+  postStepPersistingPaths,
   renameGuardDirs,
   sandboxReadonlyHostDirs,
   type FindCommandDeps,
@@ -20,11 +21,17 @@ const PERSISTENT = [WORKSPACE, HOME, "/tmp", "/home/runner/work/_temp"];
  * A host where `files` are the executables, and `links` map a symlink to its
  * immediate target (a chain is spelled out one hop per entry). A path in
  * `links` is executable too, so only its final target need be listed in `files`.
+ * `dirLinks` map a directory to where it really is.
  */
-function host(files: string[], links: Record<string, string> = {}): FindCommandDeps {
+function host(
+  files: string[],
+  links: Record<string, string> = {},
+  dirLinks: Record<string, string> = {},
+): FindCommandDeps {
   return {
     isExecutable: (p) => files.includes(p) || p in links,
     readlink: (p) => links[p] ?? null,
+    realpathDir: (d) => dirLinks[d] ?? d,
   };
 }
 
@@ -71,6 +78,33 @@ describe("findPinnableCommand", () => {
 
     expect(findPinnableCommand("docker", "/snap/bin:/usr/bin", PERSISTENT, deps)).toBe(
       "/snap/bin/docker",
+    );
+  });
+
+  it("judges a PATH directory by where it really is, not how it is spelled", () => {
+    // A self-hosted /opt/tools -> ~/tools: /opt/tools/bin/docker is writable
+    // through $HOME even though its spelling is outside it.
+    const deps = host(
+      ["/opt/tools/bin/docker", "/usr/bin/docker"],
+      {},
+      { "/opt/tools/bin": `${HOME}/tools/bin` },
+    );
+
+    expect(findPinnableCommand("docker", "/opt/tools/bin:/usr/bin", PERSISTENT, deps)).toBe(
+      "/usr/bin/docker",
+    );
+  });
+
+  it("judges a symlink hop's directory the same way", () => {
+    // /usr/local/bin/docker -> /opt/tools/bin/docker, whose directory is ~/tools/bin.
+    const deps = host(
+      ["/opt/tools/bin/docker", "/usr/bin/docker"],
+      { "/usr/local/bin/docker": "/opt/tools/bin/docker" },
+      { "/opt/tools/bin": `${HOME}/tools/bin` },
+    );
+
+    expect(findPinnableCommand("docker", "/usr/local/bin:/usr/bin", PERSISTENT, deps)).toBe(
+      "/usr/bin/docker",
     );
   });
 
@@ -141,6 +175,25 @@ describe("pinHostCommands", () => {
     expect(error).toBeInstanceOf(SandboxError);
     expect((error as SandboxError).code).toBe("HOST_COMMAND_UNPINNABLE");
     expect((error as SandboxError).message).toContain("'docker'");
+  });
+});
+
+describe("postStepPersistingPaths", () => {
+  const env = { GITHUB_WORKSPACE: WORKSPACE, HOME, RUNNER_TEMP: "/home/runner/work/_temp" };
+
+  it("is persistent mode's set plus write_through, whatever mode the step ran in", () => {
+    expect(postStepPersistingPaths(() => "/opt/out", env)).toStrictEqual([
+      ...PERSISTENT,
+      "/opt/out",
+    ]);
+  });
+
+  it("falls back to persistent mode's set when the input no longer parses", () => {
+    expect(
+      postStepPersistingPaths(() => {
+        throw new Error("allow_write was removed");
+      }, env),
+    ).toStrictEqual(PERSISTENT);
   });
 });
 

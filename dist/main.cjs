@@ -18590,6 +18590,13 @@ const realFindCommandDeps = {
 		} catch {
 			return null;
 		}
+	},
+	realpathDir: (dir) => {
+		try {
+			return (0, node_fs.realpathSync)(dir);
+		} catch {
+			return dir;
+		}
 	}
 };
 function commandChain(candidate, readlink) {
@@ -18601,12 +18608,12 @@ function commandChain(candidate, readlink) {
 	}
 	return chain;
 }
-function findPinnableCommand(command, pathEnv, persisting, { isExecutable, readlink } = realFindCommandDeps) {
-	let optedOut = persisting.includes("/");
+function findPinnableCommand(command, pathEnv, persisting, { isExecutable, readlink, realpathDir } = realFindCommandDeps) {
+	let optedOut = persisting.includes("/"), inside = (p) => persisting.some((w) => isAtOrUnder(p, w)), reachable = (hop) => inside(hop) || inside((0, node_path.join)(realpathDir((0, node_path.dirname)(hop)), (0, node_path.basename)(hop)));
 	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
 		if (!(0, node_path.isAbsolute)(dir)) continue;
 		let candidate = (0, node_path.join)(dir, command);
-		if (isExecutable(candidate) && (optedOut || !commandChain(candidate, readlink).some((p) => persisting.some((w) => isAtOrUnder(p, w))))) return candidate;
+		if (isExecutable(candidate) && (optedOut || !commandChain(candidate, readlink).some(reachable))) return candidate;
 	}
 }
 function pinHostCommands(persisting, env, deps = realFindCommandDeps) {

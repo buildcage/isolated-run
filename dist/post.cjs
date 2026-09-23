@@ -162,6 +162,11 @@ var ExitCode;
 (function(ExitCode) {
 	ExitCode[ExitCode.Success = 0] = "Success", ExitCode[ExitCode.Failure = 1] = "Failure";
 })(ExitCode ||= {});
+function getInput(name, options) {
+	let val = process.env[`INPUT_${name.replace(/ /g, "_").toUpperCase()}`] || "";
+	if (options && options.required && !val) throw Error(`Input required and not supplied: ${name}`);
+	return options && options.trimWhitespace === !1 ? val : val.trim();
+}
 function getState(name) {
 	return process.env[`STATE_${name}`] || "";
 }
@@ -199,7 +204,7 @@ function buildComposeDownArgs({ composeFile, projectName }) {
 }
 //#endregion
 //#region src/lib/compose-file.ts
-const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml");
+const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$2, "../docker/compose.action.yaml");
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
 }
@@ -216,6 +221,34 @@ var ActionError = class extends Error {
 };
 function errorMessage(e) {
 	return e instanceof Error ? e.message : String(e);
+}
+//#endregion
+//#region src/lib/errors.ts
+var SandboxError = class extends ActionError {};
+//#endregion
+//#region src/lib/filesystem-mode.ts
+const FILESYSTEM_MODES = ["persistent", "ephemeral"];
+function resolveFilesystemMode(input) {
+	let trimmed = input?.trim() || "persistent";
+	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem_mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
+	return trimmed;
+}
+//#endregion
+//#region src/lib/inputs.ts
+function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice) {
+	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
+	if (writeThrough.trim() && writable.trim()) throw new SandboxError("write_through: and writable: are the same input under two names. Set only write_through:.", "FILESYSTEM_INPUT_CONFLICT");
+	return !writeThrough.trim() && writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writable) : writeThrough;
+}
+function readFilesystemInputs(notice, getInput$1 = getInput) {
+	return {
+		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
+		writeThroughInput: resolveWriteThroughInput({
+			writeThrough: getInput$1("write_through"),
+			writable: getInput$1("writable"),
+			allowWrite: getInput$1("allow_write")
+		}, notice)
+	};
 }
 function capturedStderr(e) {
 	let err = e && typeof e == "object" ? e : {};
@@ -234,13 +267,13 @@ function isLikelySlimRunner(_env = process.env, _exists = node_fs.existsSync) {
 	return _env.ImageOS === "Linux" && _exists("/run/.containerenv");
 }
 //#endregion
-//#region src/lib/errors.ts
-var SandboxError = class extends ActionError {};
-//#endregion
 //#region src/lib/sandbox/pinned-commands.ts
 const pinned = new Map();
 function hostCommand(command) {
 	return pinned.get(command) ?? command;
+}
+function pinCommand(command, path) {
+	pinned.set(command, path);
 }
 //#endregion
 //#region src/lib/container.ts
@@ -449,10 +482,123 @@ function planPostCleanup(state, env, annotation, { readOwner = readContainerOwne
 	return targets;
 }
 //#endregion
+//#region src/lib/sandbox/paths.ts
+function isAtOrUnder(path, ancestor) {
+	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
+}
+function writableDirsOf({ workdir, home, runnerTemp, writablePaths = [] }) {
+	return [...new Set([
+		workdir,
+		home,
+		"/tmp",
+		runnerTemp,
+		...writablePaths
+	].filter((p) => !!p))];
+}
+//#endregion
+//#region src/lib/sandbox/write-through.ts
+const ALLOWED_WRITE_THROUGH_VARS = [
+	"HOME",
+	"GITHUB_WORKSPACE",
+	"RUNNER_TEMP",
+	"GITHUB_OUTPUT",
+	"GITHUB_ENV",
+	"GITHUB_PATH",
+	"GITHUB_STEP_SUMMARY"
+], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
+function resolveWriteThroughEntry(rawLine, env) {
+	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
+		let name = braced ?? bare;
+		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
+		let value = env[name];
+		if (!value) throw Error(`write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
+		return value;
+	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded);
+	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write_through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
+	let normalized = (0, node_path.normalize)(resolved);
+	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write_through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
+	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+function splitWriteThroughInput(input) {
+	return input?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
+}
+function resolveWriteThroughPaths(input, env) {
+	let lines = splitWriteThroughInput(input);
+	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
+}
+//#endregion
+//#region src/lib/sandbox/host-commands.ts
+const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
+(0, node_path.resolve)(__dirname$1, "..");
+const PINNED_COMMANDS = ["docker", "sudo"];
+function persistingWritablePaths(filesystemMode, writeThroughPaths, env) {
+	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
+		workdir: env.GITHUB_WORKSPACE,
+		home: env.HOME,
+		runnerTemp: env.RUNNER_TEMP,
+		writablePaths: writeThroughPaths
+	});
+}
+const realFindCommandDeps = {
+	isExecutable: (path) => {
+		try {
+			return (0, node_fs.accessSync)(path, node_fs.constants.X_OK), !0;
+		} catch {
+			return !1;
+		}
+	},
+	readlink: (path) => {
+		try {
+			let target = (0, node_fs.readlinkSync)(path);
+			return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)((0, node_path.dirname)(path), target);
+		} catch {
+			return null;
+		}
+	},
+	realpathDir: (dir) => {
+		try {
+			return (0, node_fs.realpathSync)(dir);
+		} catch {
+			return dir;
+		}
+	}
+};
+function commandChain(candidate, readlink) {
+	let chain = [candidate], current = candidate;
+	for (let i = 0; i < 40; i++) {
+		let target = readlink(current);
+		if (target === null) break;
+		chain.push(target), current = target;
+	}
+	return chain;
+}
+function findPinnableCommand(command, pathEnv, persisting, { isExecutable, readlink, realpathDir } = realFindCommandDeps) {
+	let optedOut = persisting.includes("/"), inside = (p) => persisting.some((w) => isAtOrUnder(p, w)), reachable = (hop) => inside(hop) || inside((0, node_path.join)(realpathDir((0, node_path.dirname)(hop)), (0, node_path.basename)(hop)));
+	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
+		if (!(0, node_path.isAbsolute)(dir)) continue;
+		let candidate = (0, node_path.join)(dir, command);
+		if (isExecutable(candidate) && (optedOut || !commandChain(candidate, readlink).some(reachable))) return candidate;
+	}
+}
+function pinHostCommands(persisting, env, deps = realFindCommandDeps) {
+	for (let command of PINNED_COMMANDS) {
+		let path = findPinnableCommand(command, env.PATH, persisting, deps);
+		if (!path) throw new SandboxError(`No '${command}' found on PATH outside the paths the sandboxed command can write to (${persisting.join(", ")}). This step runs it after the command exits, so it has to live somewhere the command cannot replace it.`, "HOST_COMMAND_UNPINNABLE");
+		pinCommand(command, path);
+	}
+}
+function postStepPersistingPaths(readWriteThroughInput, env) {
+	let writeThroughPaths = [];
+	try {
+		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
+	} catch {}
+	return persistingWritablePaths("persistent", writeThroughPaths, env);
+}
+//#endregion
 //#region src/post.ts
 async function stopProxyContainer({ containerName, projectName }) {
 	let composeFile = resolveComposeFile(await readLocalImageOverride(process.env));
-	(0, node_child_process.execFileSync)("docker", buildComposeDownArgs({
+	(0, node_child_process.execFileSync)(hostCommand("docker"), buildComposeDownArgs({
 		composeFile,
 		projectName
 	}), {
@@ -464,6 +610,7 @@ async function stopProxyContainer({ containerName, projectName }) {
 	});
 }
 function main() {
+	pinHostCommands(postStepPersistingPaths(() => readFilesystemInputs(() => {}).writeThroughInput, process.env), process.env);
 	let targets = planPostCleanup({
 		containerName: getState("container_name"),
 		ephemeralRoots: getState("ephemeral_overlay_roots")

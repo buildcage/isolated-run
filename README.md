@@ -429,9 +429,11 @@ This action isolates the step it wraps, not the job. What the command sets in `$
 this action's own post step reads back after the step ends. Those steps run without this action's
 restrictions unless you wrap them too. If a step runs untrusted code, isolate the steps after it in
 the same job as well, or move them to a separate job, and don't treat an env var, `$PATH` entry, or
-output an isolated step set as trustworthy. Post steps cannot be wrapped: every action's, this one's
-included, runs after the last step with what it left behind, so an untrusted command in
-`persistent` mode can reach them wherever the isolated step sits. `filesystem_mode: ephemeral` with
+output an isolated step set as trustworthy. Post steps cannot be wrapped: every action's runs after
+the last step with what it left behind. This action's own post step keeps `docker` and `sudo` away
+from the paths the command could write and runs from a read-only checkout, but it inherits
+`$GITHUB_ENV` like any other, so an untrusted command in `persistent` mode can still reach it, and
+every other action's post step, wherever the isolated step sits. `filesystem_mode: ephemeral` with
 a narrow `write_through:` keeps it from leaving anything there.
 
 An allowlist also cannot stop anything leaving through a service you had to allow anyway. That is a

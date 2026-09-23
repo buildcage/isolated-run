@@ -5,8 +5,11 @@ import * as core from "@actions/core";
 import { annotate } from "#core/lib/actions/annotation.ts";
 import { buildComposeDownArgs } from "#core/lib/docker/args.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./lib/compose-file.ts";
+import { readFilesystemInputs } from "./lib/inputs.ts";
 import { planPostCleanup } from "./lib/post-cleanup.ts";
 import type { PostCleanupTargets } from "./lib/post-state.ts";
+import { pinHostCommands, postStepPersistingPaths } from "./lib/sandbox/host-commands.ts";
+import { hostCommand } from "./lib/sandbox/pinned-commands.ts";
 
 // Untested by design, down to the end of the file: planPostCleanup decides
 // what may be torn down, and tearing it down is one `docker compose down`.
@@ -19,7 +22,7 @@ import type { PostCleanupTargets } from "./lib/post-state.ts";
 async function stopProxyContainer({ containerName, projectName }: PostCleanupTargets) {
   const composeFile = resolveComposeFile(await readLocalImageOverride(process.env));
 
-  execFileSync("docker", buildComposeDownArgs({ composeFile, projectName }), {
+  execFileSync(hostCommand("docker"), buildComposeDownArgs({ composeFile, projectName }), {
     stdio: "inherit",
     env: { ...process.env, PROXY_CONTAINER_NAME: containerName },
   });
@@ -32,6 +35,14 @@ async function stopProxyContainer({ containerName, projectName }: PostCleanupTar
 // here via core.getState; see
 // https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands#sending-values-to-the-pre-and-post-actions.
 function main(): void {
+  // Before planPostCleanup, whose owner check and scratch-dir fallback already
+  // run docker and sudo: the command's writes are on disk by now, and on a
+  // hosted runner `~/.local/bin` is ahead of `/usr/bin` on PATH. A no-op
+  // notice: the main step already reported any renamed input.
+  pinHostCommands(
+    postStepPersistingPaths(() => readFilesystemInputs(() => {}).writeThroughInput, process.env),
+    process.env,
+  );
   const targets = planPostCleanup(
     {
       containerName: core.getState("container_name"),

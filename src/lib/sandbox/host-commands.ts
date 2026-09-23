@@ -16,8 +16,8 @@
  * which sandboxReadonlyHostDirs covers by making them read-only inside the sandbox.
  */
 
-import { accessSync, constants, readlinkSync } from "node:fs";
-import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { accessSync, constants, readlinkSync, realpathSync } from "node:fs";
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { SandboxError } from "../errors.ts";
@@ -25,6 +25,7 @@ import type { FilesystemMode } from "../filesystem-mode.ts";
 import { writableDirsOf } from "./oci-mounts.ts";
 import { isAtOrUnder } from "./paths.ts";
 import { pinCommand } from "./pinned-commands.ts";
+import { resolveWriteThroughPaths } from "./write-through.ts";
 
 // rollup's cjs output doesn't convert import.meta.dirname (it silently
 // becomes undefined), so use this form instead.
@@ -59,6 +60,8 @@ export interface FindCommandDeps {
   /** The immediate target of `path` if it is a symlink (resolved to absolute
    *  against `path`'s own directory), or null if it is not one. */
   readlink: (path: string) => string | null;
+  /** `dir` with every symlink in it resolved, or `dir` itself if it can't be. */
+  realpathDir: (dir: string) => string;
 }
 
 // Symlink hops followed before giving up, matching the kernel's own
@@ -87,6 +90,13 @@ const realFindCommandDeps: FindCommandDeps = {
       return null;
     }
   },
+  realpathDir: (dir) => {
+    try {
+      return realpathSync(dir);
+    } catch {
+      return dir;
+    }
+  },
 };
 /* v8 ignore stop */
 
@@ -94,9 +104,9 @@ const realFindCommandDeps: FindCommandDeps = {
  * Every path a `command` lookup would touch: the `$PATH` entry itself, then
  * each symlink target down to the real file. What matters is that none of
  * them sits where the sandboxed command can write, since it could repoint any
- * hop that does. Component symlinks (a symlink in a parent directory) are not
- * walked: the directories `$PATH` names are outside the writable set to begin
- * with, so only the final-component chain can lead back into it.
+ * hop that does. A hop's parent directory can be a symlink too (a self-hosted
+ * `/opt/tools` pointing into `$HOME`), so each hop is judged by where its
+ * directory really is as well as by how it is spelled; see findPinnableCommand.
  */
 function commandChain(candidate: string, readlink: FindCommandDeps["readlink"]): string[] {
   const chain = [candidate];
@@ -124,22 +134,25 @@ export function findPinnableCommand(
   command: string,
   pathEnv: string | undefined,
   persisting: string[],
-  { isExecutable, readlink }: FindCommandDeps = realFindCommandDeps,
+  { isExecutable, readlink, realpathDir }: FindCommandDeps = realFindCommandDeps,
 ): string | undefined {
   const optedOut = persisting.includes("/");
+  const inside = (p: string): boolean => persisting.some((w) => isAtOrUnder(p, w));
+  const reachable = (hop: string): boolean =>
+    inside(hop) || inside(join(realpathDir(dirname(hop)), basename(hop)));
   for (const dir of (pathEnv ?? "").split(delimiter)) {
     if (!isAbsolute(dir)) continue;
     const candidate = join(dir, command);
     if (!isExecutable(candidate)) continue;
-    const reachable = (p: string): boolean => persisting.some((w) => isAtOrUnder(p, w));
     if (optedOut || !commandChain(candidate, readlink).some(reachable)) return candidate;
   }
   return undefined;
 }
 
 /**
- * Resolves `docker` and `sudo` for the rest of this process. Must run before
- * the sandboxed command starts: after that, `$PATH` may lead somewhere it wrote.
+ * Resolves `docker` and `sudo` for the rest of this process. The main step
+ * runs it before the sandboxed command starts; the post step runs it again,
+ * against postStepPersistingPaths, since it is a process of its own.
  */
 export function pinHostCommands(
   persisting: string[],
@@ -158,6 +171,26 @@ export function pinHostCommands(
     }
     pinCommand(command, path);
   }
+}
+
+/**
+ * The persisting paths as the post step has to assume them. It cannot take the
+ * filesystem mode from GITHUB_STATE, which the command could rewrite, so it
+ * uses persistent mode's set, a superset of ephemeral's, plus what
+ * write_through names. An input that no longer parses contributes nothing:
+ * the main step already failed on it.
+ */
+export function postStepPersistingPaths(
+  readWriteThroughInput: () => string,
+  env: NodeJS.ProcessEnv,
+): string[] {
+  let writeThroughPaths: string[] = [];
+  try {
+    writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
+  } catch {
+    // Left empty, as above.
+  }
+  return persistingWritablePaths("persistent", writeThroughPaths, env);
 }
 
 /** The directory the docker CLI reads its config, contexts and plugins from. */

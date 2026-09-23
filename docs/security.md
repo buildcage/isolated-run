@@ -153,7 +153,9 @@ PID-namespace separation above.
 The step itself goes on running on the host after the command exits, to read the report and tear
 the sandbox down, so what it runs then is kept out of those paths. `docker` and `sudo` are resolved
 once, before the command starts, to a binary outside every path whose writes outlive the command,
-and the step fails if either exists only inside one. The docker CLI's config directory
+and the step fails if either exists only inside one. The post step, a process of its own, resolves
+them again the same way, against persistent mode's paths plus `write_through:` whichever mode ran,
+since it cannot trust `$GITHUB_STATE` to say which. The docker CLI's config directory
 (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins such as `compose` as well as its
 contexts, and this action's own checkout, which holds its post step's script, are read-only inside
 the sandbox whenever such a path contains them, and every writable directory between them and the
