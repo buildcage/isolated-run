@@ -72,7 +72,6 @@ examples below use the default `inspect` engine; [Engines](#engines) covers the 
   uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
   with:
     proxy_mode: audit # Log every destination, block nothing
-    proxy_engine: inspect # Record the method and URL of every request
     run: |
       npm ci
       npm test
@@ -94,7 +93,6 @@ Paste that allowlist into the step and switch the mode:
   uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
   with:
     proxy_mode: restrict
-    proxy_engine: inspect
     allowed_url_rules: |
       GET https://registry.npmjs.org/**
       POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk
