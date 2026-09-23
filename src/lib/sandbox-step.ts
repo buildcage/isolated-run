@@ -203,8 +203,13 @@ export async function runSandboxStep(
     warn,
   } = { ...realDeps, ...overrides };
 
-  // Empty (not `??`-catchable) for local-path `uses: ./` invocations.
-  const actionRef = env.GITHUB_ACTION_REF || "v1";
+  // Empty for a local-path `uses: ./` invocation, which names no release to
+  // verify against. Kept empty (not floated to `v1`) so provenance
+  // verification hard-fails rather than silently pinning the latest published
+  // v1 image, which can drift from the vendored code; see verify-policy.ts.
+  // Local development and the integration scripts set BUILDCAGE_LOCAL_IMAGE_REF,
+  // which short-circuits verification before this ref is read.
+  const actionRef = env.GITHUB_ACTION_REF ?? "";
   const actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
 
   const runInput = readRunCommand();
