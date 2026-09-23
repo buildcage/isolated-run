@@ -444,6 +444,30 @@ describe("buildOciConfig", () => {
     });
   });
 
+  describe("the action's own host directories", () => {
+    it("adds them to readonlyPaths, which runc applies over every writable layer", () => {
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        readonlyHostDirs: ["/home/runner/.docker", "/home/runner/work/_actions/x/y/v1"],
+      });
+      expect(config.linux.readonlyPaths).toEqual(
+        expect.arrayContaining(["/home/runner/.docker", "/home/runner/work/_actions/x/y/v1"]),
+      );
+    });
+
+    it("binds each rename-guard dir onto itself read-write, after the writable layers", () => {
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        renameGuardDirs: ["/home/runner/work", "/home/runner/work/_actions"],
+      });
+      for (const dir of ["/home/runner/work", "/home/runner/work/_actions"]) {
+        const mount = config.mounts.find((m) => m.destination === dir);
+        expect(mount).toMatchObject({ source: dir, options: ["rbind", "rw"] });
+      }
+      expect(config.linux.readonlyPaths).not.toContain("/home/runner/work");
+    });
+  });
+
   describe("the scratch base, which nothing may make writable", () => {
     it("does not mount anything over rootfsBindDir (it lives under the scratch base, so nothing re-exposes it)", () => {
       const config = build(fakeBaseSpec(), {
@@ -580,6 +604,15 @@ describe("buildOciConfig", () => {
       expect(config.root.readonly).toBe(false);
       const rw = config.mounts.filter((m) => m.options?.includes("rw"));
       expect(rw.length).toBe(0);
+    });
+
+    it("`writable: /` still keeps the action's own host directories read-only", () => {
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/"] },
+        readonlyHostDirs: ["/home/runner/.docker"],
+      });
+      expect(config.linux.readonlyPaths).toContain("/home/runner/.docker");
     });
 
     it("`writable: /` skips the host-mount readonly pass entirely", () => {

@@ -120,7 +120,7 @@ run_hard_kill_and_post() {
   done
 
   kill -9 "$node_pid" >/dev/null 2>&1
-  sudo -n pkill -9 -f "sudo -n -- .*/scripts/run-isolated.sh" >/dev/null 2>&1
+  sudo -n pkill -9 -f "sudo -n -- .*/run-isolated.sh" >/dev/null 2>&1
   sleep 1
 
   if [ "$label" = "with-spoofed-project-name" ]; then
@@ -239,7 +239,7 @@ else
   # The same container, from its own step: the check must not stand in the
   # way of the hard-kill cleanup this post step exists for.
   kill -9 "$VICTIM_PID" >/dev/null 2>&1
-  sudo -n pkill -9 -f "sudo -n -- .*/scripts/run-isolated.sh" >/dev/null 2>&1
+  sudo -n pkill -9 -f "sudo -n -- .*/run-isolated.sh" >/dev/null 2>&1
   sleep 1
   GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 GITHUB_JOB=test GITHUB_ACTION=buildcage \
     STATE_container_name="$VICTIM_NAME" node dist/post.cjs

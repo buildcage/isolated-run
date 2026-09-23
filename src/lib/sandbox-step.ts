@@ -38,6 +38,7 @@ import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { removeCreatedDirsIfEmpty, splitWriteThroughInput } from "./sandbox/write-through.ts";
 import { resolveFilesystemPlan, validateFilesystemInputs } from "./sandbox/filesystem-plan.ts";
+import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
@@ -64,6 +65,7 @@ export interface SandboxStepDeps {
   checkOverlayfsSupport: typeof checkOverlayfsSupport;
   createAnnotation: typeof createAnnotation;
   resolveFilesystemPlan: typeof resolveFilesystemPlan;
+  pinHostCommands: typeof pinHostCommands;
   readLocalImageOverride: typeof readLocalImageOverride;
   verifyImageDigestOrThrow: typeof verifyImageDigestOrThrow;
   checkUrlAndTlsRuleSupport: typeof checkUrlAndTlsRuleSupport;
@@ -99,6 +101,7 @@ const realDeps: SandboxStepDeps = {
   checkOverlayfsSupport,
   createAnnotation,
   resolveFilesystemPlan,
+  pinHostCommands,
   readLocalImageOverride,
   verifyImageDigestOrThrow,
   checkUrlAndTlsRuleSupport,
@@ -174,6 +177,7 @@ export async function runSandboxStep(
     checkOverlayfsSupport,
     createAnnotation,
     resolveFilesystemPlan,
+    pinHostCommands,
     readLocalImageOverride,
     verifyImageDigestOrThrow,
     checkUrlAndTlsRuleSupport,
@@ -213,6 +217,12 @@ export async function runSandboxStep(
   // (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
   // probe). resolveFilesystemPlan re-checks the resolved paths.
   validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput));
+
+  // Before the preflights, which already run sudo.
+  pinHostCommands(
+    pinningPaths(() => writeThroughInput, env),
+    env,
+  );
 
   // Fail fast, before image verification or starting the proxy container, if
   // the runner can't support the isolation setup at all. Deliberately

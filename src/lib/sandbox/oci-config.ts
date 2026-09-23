@@ -67,6 +67,10 @@ export interface BuildOciConfigOptions {
    *  universal engine, which never terminates TLS and so has no CA to
    *  distribute. */
   caTrust?: CaTrustFiles;
+  /** See host-commands.ts's sandboxReadonlyHostDirs. */
+  readonlyHostDirs?: string[];
+  /** See host-commands.ts's renameGuardDirs. */
+  renameGuardDirs?: string[];
 }
 
 /**
@@ -83,7 +87,16 @@ export interface BuildOciConfigOptions {
  */
 export function buildOciConfig(
   baseSpec: OciSpec,
-  { identity, writable, ephemeral, runtime, env, caTrust }: BuildOciConfigOptions,
+  {
+    identity,
+    writable,
+    ephemeral,
+    runtime,
+    env,
+    caTrust,
+    readonlyHostDirs = [],
+    renameGuardDirs = [],
+  }: BuildOciConfigOptions,
   probes: HostProbes = realHostProbes,
 ): BuiltOciSpec {
   const { uid, gid } = identity;
@@ -121,9 +134,18 @@ export function buildOciConfig(
   const layers = ephemeral
     ? ephemeralLayers(ephemeral, freshMountDestinations)
     : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly });
+  // After the writable layers, so rbind carries their submounts (workspace,
+  // RUNNER_TEMP) along.
+  const renameGuards = renameGuardDirs.map((p) => ({
+    destination: p,
+    type: "none",
+    source: p,
+    options: ["rbind", "rw"],
+  }));
   const mounts = [
     ...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
     ...layers.mounts,
+    ...renameGuards,
     ...internalMounts,
     ...scratchBaseLayers(execDir),
   ];
@@ -188,7 +210,8 @@ export function buildOciConfig(
       namespaces,
       seccomp: seccompProfile,
       maskedPaths,
-      readonlyPaths,
+      // runc applies these after every mount, so they win over any writable layer.
+      readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostDirs])],
     },
   };
 }

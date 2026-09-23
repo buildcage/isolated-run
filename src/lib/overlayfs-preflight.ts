@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { capturedStderr } from "#core/lib/actions/docker-error.ts";
 import { SandboxError } from "./errors.ts";
 import { retryBriefly } from "./retry-briefly.ts";
+import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
 import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase } from "./sandbox/scratch-dir.ts";
 
 type ExecLike = typeof execFileSync;
@@ -61,7 +62,10 @@ export function describeProbeCleanupFailure(dir: string, e: unknown): string {
  */
 function removeProbeDir(dir: string, exec: ExecLike): void {
   retryBriefly(() =>
-    exec("sudo", ["-n", "rm", "-rf", dir], { stdio: ["ignore", "ignore", "pipe"] }),
+    exec(hostCommand("sudo"), ["-n", "rm", "-rf", dir], {
+      stdio: ["ignore", "ignore", "pipe"],
+      env: hostCommandEnv("sudo"),
+    }),
   );
 }
 
@@ -133,7 +137,7 @@ function probeOverlayMount(probeDir: string, exec: ExecLike): void {
   const merged = join(probeDir, "merged");
   for (const dir of [lower, upper, work, merged]) mkdirSync(dir);
   exec(
-    "sudo",
+    hostCommand("sudo"),
     [
       "-n",
       "unshare",
@@ -145,6 +149,6 @@ function probeOverlayMount(probeDir: string, exec: ExecLike): void {
       "-c",
       `mount -t overlay overlay -o lowerdir=${lower},upperdir=${upper},workdir=${work} ${merged}`,
     ],
-    { encoding: "utf8", stdio: ["ignore", "ignore", "pipe"] },
+    { encoding: "utf8", stdio: ["ignore", "ignore", "pipe"], env: hostCommandEnv("sudo") },
   );
 }

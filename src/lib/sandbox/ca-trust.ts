@@ -10,6 +10,7 @@ import {
 import { join } from "node:path";
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 import type { MountEntry } from "./types.ts";
+import { hostCommand } from "./pinned-commands.ts";
 
 /**
  * CA trust for the inspect engine, adapted for this sandbox's rootfs being
@@ -89,7 +90,7 @@ export interface CaTrustDeps {
 // node:fs and node:child_process what the tested caller decided.
 /* v8 ignore start */
 function defaultExec(command: string, args: string[]): void {
-  execFileSync(command, args);
+  execFileSync(hostCommand(command), args);
 }
 
 function defaultReadFile(path: string): string {

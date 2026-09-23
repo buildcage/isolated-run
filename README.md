@@ -323,6 +323,12 @@ change file ownership, and the sandboxed command runs as the runner's own user w
 dropped and `no_new_privileges` set, so `sudo` and setuid binaries do nothing for it. A path the
 runner user could not write outside the sandbox stays unwritable inside it.
 
+The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) and this action's own
+checkout stay read-only, since the action runs `docker` and its post script from them after the
+command exits. The exceptions are a `write_through:` entry naming the directory itself, and
+`uses: ./`, whose checkout is the workspace. A command that writes docker config (`docker login`, `gcloud auth configure-docker`)
+needs a step of its own.
+
 > [!WARNING]
 > `filesystem_mode: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
 > change in a future release without following semver, and it has seen less real-world use than the
@@ -426,7 +432,10 @@ This action isolates the step it wraps, not the job. What the command sets in `$
 this action's own post step reads back after the step ends. Those steps run without this action's
 restrictions unless you wrap them too. If a step runs untrusted code, isolate the steps after it in
 the same job as well, or move them to a separate job, and don't treat an env var, `$PATH` entry, or
-output an isolated step set as trustworthy.
+output an isolated step set as trustworthy. Post steps cannot be wrapped and run after the last step.
+This action's own keeps `docker` and `sudo` out of the command's reach, but like any other it
+inherits `$GITHUB_ENV`, so in `persistent` mode an untrusted command can reach every post step.
+`filesystem_mode: ephemeral` with a narrow `write_through:` prevents that.
 
 An allowlist also cannot stop anything leaving through a service you had to allow anyway. That is a
 structural limit. What it does stop is traffic to a destination that is not on the list, and

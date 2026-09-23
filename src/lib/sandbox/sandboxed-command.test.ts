@@ -190,6 +190,41 @@ describe("runSandboxedCommand", () => {
     });
   });
 
+  it("keeps the docker CLI's config directory read-only, creating it first", () => {
+    runSandboxedCommand(options(), deps);
+
+    // On CI the checkout is under /home/runner and adds its own entry.
+    expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostDirs).toContain(
+      "/home/runner/.docker",
+    );
+    expect(mocks.mkdir).toHaveBeenCalledWith("/home/runner/.docker", {
+      mode: 0o700,
+      recursive: true,
+    });
+  });
+
+  it("guards the writable dirs above a read-only dir so they cannot be renamed", () => {
+    runSandboxedCommand(
+      options({ env: { HOME: "/home/runner", DOCKER_CONFIG: "/home/runner/a/b/cfg" } }),
+      deps,
+    );
+
+    // On CI the checkout is under /home/runner and adds its own guards.
+    expect(mocks.buildOciConfig.mock.calls[0][1].renameGuardDirs).toEqual(
+      expect.arrayContaining(["/home/runner/a", "/home/runner/a/b"]),
+    );
+  });
+
+  it("leaves it writable in ephemeral mode, where no write_through reaches it", () => {
+    runSandboxedCommand(
+      options({ filesystemMode: "ephemeral", overlayRoots: ["/home/runner"] }),
+      deps,
+    );
+
+    expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostDirs).toStrictEqual([]);
+    expect(mocks.mkdir).not.toHaveBeenCalledWith("/home/runner/.docker", expect.anything());
+  });
+
   it("says so when the runner's primary group forced a GID substitution", () => {
     mocks.resolveSandboxGid.mockReturnValue({ gid: 65534, substitutedFrom: 118 });
 

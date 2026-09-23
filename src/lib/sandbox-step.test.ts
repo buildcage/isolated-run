@@ -17,6 +17,7 @@ const mocks = {
   checkOverlayfsSupport: vi.fn(),
   createAnnotation: vi.fn(),
   resolveFilesystemPlan: vi.fn(),
+  pinHostCommands: vi.fn(),
   readLocalImageOverride: vi.fn(),
   verifyImageDigestOrThrow: vi.fn(),
   checkUrlAndTlsRuleSupport: vi.fn(),
@@ -122,6 +123,32 @@ describe("runSandboxStep", () => {
       overlayRoots: ["/home/runner"],
       writeThroughPaths: ["/home/runner/work/repo/repo/dist"],
     });
+  });
+
+  it("pins docker and sudo outside what any sandboxed command can write, before the preflights", async () => {
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.pinHostCommands).toHaveBeenCalledWith(
+      ["/home/runner/work/repo/repo", "/home/runner", "/tmp"],
+      ENV,
+    );
+    expect(orderOf(mocks.validateFilesystemInputs)).toBeLessThan(orderOf(mocks.pinHostCommands));
+    expect(orderOf(mocks.pinHostCommands)).toBeLessThan(orderOf(mocks.checkPasswordlessSudo));
+  });
+
+  // An earlier step's writes under $HOME survive this step's ephemeral mode.
+  it("pins against persistent mode's paths plus write_through in ephemeral mode too", async () => {
+    mocks.readFilesystemInputs.mockReturnValue({
+      filesystemMode: "ephemeral",
+      writeThroughInput: "/opt/out",
+    });
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.pinHostCommands).toHaveBeenCalledWith(
+      ["/home/runner/work/repo/repo", "/home/runner", "/tmp", "/opt/out"],
+      ENV,
+    );
   });
 
   // A plain input mistake must not cost the caller a sudo/unshare/mount probe
@@ -363,6 +390,16 @@ describe("runSandboxStep", () => {
       await expect(runSandboxStep(ENV, deps)).rejects.toThrow("no signature found");
       expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
       expect(mocks.removeCreatedDirsIfEmpty).toHaveBeenCalledWith(CREATED_DIRS);
+    });
+
+    it("creates nothing when docker or sudo cannot be pinned", async () => {
+      mocks.pinHostCommands.mockImplementation(() => {
+        throw new SandboxError("no docker", "HOST_COMMAND_UNPINNABLE");
+      });
+
+      await expect(runSandboxStep(ENV, deps)).rejects.toThrow("no docker");
+      expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
+      expect(mocks.resolveFilesystemPlan).not.toHaveBeenCalled();
     });
 
     it("warns rather than failing the step when they cannot be removed", async () => {

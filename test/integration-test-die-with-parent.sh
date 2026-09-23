@@ -17,7 +17,7 @@ cleanup() {
   [ -n "${NODE_PID:-}" ] && kill -9 "$NODE_PID" >/dev/null 2>&1
   # sudo itself (setuid root) and everything under it run as root, so
   # this needs the same privilege too.
-  sudo -n pkill -9 -f "sudo -n -- .*/scripts/run-isolated.sh" >/dev/null 2>&1
+  sudo -n pkill -9 -f "sudo -n -- .*/run-isolated.sh" >/dev/null 2>&1
   # A bare buildcage-proxy-* sweep would take down another git worktree's
   # proxy. main.ts writes the name to GITHUB_STATE before creating the
   # container, so nothing it started escapes this narrower one.
@@ -63,7 +63,7 @@ sleep 0.5
 # of the actual script, which also matches "run-isolated.sh" in its argv, so
 # this must target the real bash instance, not sudo's monitor (see
 # run-isolated.sh's own comment on this same distinction).
-mapfile -t BASH_PIDS < <(pgrep -f "/bin/bash .*/scripts/run-isolated.sh")
+mapfile -t BASH_PIDS < <(pgrep -f "/bin/bash .*/run-isolated.sh")
 if [ "${#BASH_PIDS[@]}" != "1" ]; then
   echo "  FAIL  expected exactly 1 run-isolated.sh bash process, found ${#BASH_PIDS[@]}: ${BASH_PIDS[*]:-<none>}"
   exit 1

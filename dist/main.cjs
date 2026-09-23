@@ -17690,7 +17690,7 @@ function checkKnownBlockedUrlRuleSupport({ proxyEngine, proxyMode, knownBlockedU
 }
 //#endregion
 //#region src/lib/compose-file.ts
-const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$2, "../docker/compose.action.yaml");
+const __dirname$3 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$3, "../docker/compose.action.yaml");
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
 }
@@ -17715,6 +17715,21 @@ function describeDockerFailure(e, { operation = "docker", env = process.env, exi
 }
 function isLikelySlimRunner(_env = process.env, _exists = node_fs.existsSync) {
 	return _env.ImageOS === "Linux" && _exists("/run/.containerenv");
+}
+//#endregion
+//#region src/lib/sandbox/pinned-commands.ts
+const pinned = new Map();
+function hostCommand(command) {
+	return pinned.get(command) ?? command;
+}
+function pinCommand(command, path) {
+	pinned.set(command, path);
+}
+function hostCommandEnv(command, env = process.env) {
+	return command === "sudo" ? {
+		...env,
+		PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	} : env;
 }
 //#endregion
 //#region src/lib/container.ts
@@ -17747,7 +17762,7 @@ function isContainerNotFoundError(e) {
 	let err = e && typeof e == "object" ? e : {}, text = `${err.stderr ?? ""} ${err.message ?? ""}`.toLowerCase();
 	return text.includes("no such object") || text.includes("no such container");
 }
-const captureDockerViaExec$1 = (args, env) => (0, node_child_process.execFileSync)("docker", args, {
+const captureDockerViaExec$1 = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 	encoding: "utf8",
 	env,
 	stdio: [
@@ -17809,13 +17824,14 @@ function describeSudoFailure(e, { env = process.env, exists = node_fs.existsSync
 	return `'sudo' is not available without a password on this runner.${isLikelySlimRunner(env, exists) ? SLIM_RUNNER_NOTE : ""} The run action requires a Linux runner with passwordless sudo for the isolation setup itself (network namespace, veth, iptables). That is the default on GitHub-hosted "ubuntu-*" runners, but not on lightweight images such as "ubuntu-slim" or many self-hosted or minimal runners. See README.md and docs/security.md for details.${captured ? ` (${captured})` : ""}`;
 }
 function defaultExecFile$2(command, args) {
-	(0, node_child_process.execFileSync)(command, args, {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
 		encoding: "utf8",
 		stdio: [
 			"ignore",
 			"ignore",
 			"pipe"
-		]
+		],
+		env: hostCommandEnv(command)
 	});
 }
 function checkPasswordlessSudo({ execFile = defaultExecFile$2 } = {}) {
@@ -17864,11 +17880,14 @@ function defaultReadMountinfo() {
 	return (0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8");
 }
 function defaultExec$2(command, args) {
-	(0, node_child_process.execFileSync)(command, args, { stdio: [
-		"ignore",
-		"ignore",
-		"pipe"
-	] });
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
 }
 function defaultRemove(path) {
 	(0, node_fs.rmSync)(path, {
@@ -17963,16 +17982,19 @@ function describeProbeCleanupFailure(dir, e) {
 	return `Failed to remove the overlayfs probe directory ${dir}. The probe mount itself succeeded, so this runner does support overlayfs; what failed is removing the probe directory afterwards. That needs \`sudo rm -rf\`, because the kernel writes root-owned overlayfs bookkeeping into workdir while the mount is live (see removeProbeDir), and filesystem_mode: ephemeral's real cleanup discards its overlay work dirs exactly the same way, so a run would fail on this runner anyway, later and with less to go on. This is usually a sudoers config scoped to specific commands rather than a blanket NOPASSWD:ALL, which checkPasswordlessSudo's own \`sudo -n true\` probe cannot detect. Grant the runner user passwordless sudo for \`rm\`, or use filesystem_mode: persistent instead.${captured ? ` (${captured})` : ""}`;
 }
 function removeProbeDir(dir, exec) {
-	retryBriefly(() => exec("sudo", [
+	retryBriefly(() => exec(hostCommand("sudo"), [
 		"-n",
 		"rm",
 		"-rf",
 		dir
-	], { stdio: [
-		"ignore",
-		"ignore",
-		"pipe"
-	] }));
+	], {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv("sudo")
+	}));
 }
 function checkOverlayfsSupport({ base = SANDBOX_SCRATCH_BASE, exec = node_child_process.execFileSync } = {}) {
 	ensureOwnScratchBase(base);
@@ -17997,7 +18019,7 @@ function probeOverlayMount(probeDir, exec) {
 		work,
 		merged
 	]) (0, node_fs.mkdirSync)(dir);
-	exec("sudo", [
+	exec(hostCommand("sudo"), [
 		"-n",
 		"unshare",
 		"--mount",
@@ -18013,7 +18035,8 @@ function probeOverlayMount(probeDir, exec) {
 			"ignore",
 			"ignore",
 			"pipe"
-		]
+		],
+		env: hostCommandEnv("sudo")
 	});
 }
 //#endregion
@@ -18062,11 +18085,14 @@ function defaultStat(path) {
 	};
 }
 function defaultExecFile$1(command, args) {
-	(0, node_child_process.execFileSync)(command, args, { stdio: [
-		"ignore",
-		"ignore",
-		"pipe"
-	] });
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
 }
 function asOwner({ uid, gid }) {
 	return [
@@ -18296,7 +18322,7 @@ const SYSTEM_CA_CANDIDATES = [
 	"/etc/ssl/cert.pem"
 ], OWN_CA_DESTINATION = "/etc/buildcage-ca.pem";
 function defaultExec$1(command, args) {
-	(0, node_child_process.execFileSync)(command, args);
+	(0, node_child_process.execFileSync)(hostCommand(command), args);
 }
 function defaultReadFile$1(path) {
 	return (0, node_fs.readFileSync)(path, "utf8");
@@ -18562,15 +18588,102 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	}
 }
 //#endregion
+//#region src/lib/sandbox/host-commands.ts
+const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), ACTION_ROOT = (0, node_path.resolve)(__dirname$2, ".."), PINNED_COMMANDS = ["docker", "sudo"];
+function persistingWritablePaths(filesystemMode, writeThroughPaths, env) {
+	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
+		workdir: env.GITHUB_WORKSPACE,
+		home: env.HOME,
+		runnerTemp: env.RUNNER_TEMP,
+		writablePaths: writeThroughPaths
+	});
+}
+function realpathOrSelf(path) {
+	try {
+		return (0, node_fs.realpathSync)(path);
+	} catch {
+		return path;
+	}
+}
+const realFindCommandDeps = {
+	isExecutable: (path) => {
+		try {
+			return (0, node_fs.accessSync)(path, node_fs.constants.X_OK), !0;
+		} catch {
+			return !1;
+		}
+	},
+	readlink: (path) => {
+		try {
+			let target = (0, node_fs.readlinkSync)(path);
+			return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)(realpathOrSelf((0, node_path.dirname)(path)), target);
+		} catch {
+			return null;
+		}
+	},
+	realpathDir: realpathOrSelf
+};
+function withRealPaths(paths, realpath = realpathOrSelf) {
+	return [...new Set([...paths, ...paths.map(realpath)])];
+}
+function commandChain(candidate, readlink) {
+	let chain = [candidate], current = candidate;
+	for (let i = 0; i < 40; i++) {
+		let target = readlink(current);
+		if (target === null) break;
+		chain.push(target), current = target;
+	}
+	return chain;
+}
+function findPinnableCommand(command, pathEnv, persisting, { isExecutable, readlink, realpathDir } = realFindCommandDeps) {
+	let optedOut = persisting.includes("/"), writable = withRealPaths(persisting, realpathDir), inside = (p) => writable.some((w) => isAtOrUnder(p, w)), reachable = (hop) => inside(hop) || inside((0, node_path.join)(realpathDir((0, node_path.dirname)(hop)), (0, node_path.basename)(hop)));
+	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
+		if (!(0, node_path.isAbsolute)(dir)) continue;
+		let candidate = (0, node_path.join)(dir, command);
+		if (isExecutable(candidate) && (optedOut || !commandChain(candidate, readlink).some(reachable))) return candidate;
+	}
+}
+function pinHostCommands(paths, env, deps = realFindCommandDeps) {
+	for (let command of PINNED_COMMANDS) {
+		let path = findPinnableCommand(command, env.PATH, paths, deps);
+		if (path) {
+			pinCommand(command, path);
+			continue;
+		}
+		if (findPinnableCommand(command, env.PATH, [], deps)) throw new SandboxError(`'${command}' is on PATH only under paths a sandboxed command can write to (${paths.join(", ")}). This action runs it outside the sandbox, so it has to live somewhere no sandboxed command can replace it, such as /usr/bin.`, "HOST_COMMAND_UNPINNABLE");
+	}
+}
+function pinningPaths(readWriteThroughInput, env) {
+	let writeThroughPaths = [];
+	try {
+		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
+	} catch {}
+	return persistingWritablePaths("persistent", writeThroughPaths, env);
+}
+function dockerConfigDir(env) {
+	return env.DOCKER_CONFIG ? (0, node_path.resolve)(env.DOCKER_CONFIG) : env.HOME ? (0, node_path.join)(env.HOME, ".docker") : void 0;
+}
+function sandboxReadonlyHostDirs(persisting, env, actionRoot = ACTION_ROOT) {
+	return [actionRoot, dockerConfigDir(env)].filter((p) => !!p).filter((dir) => persisting.some((p) => isAtOrUnder(dir, p)) && !persisting.includes(dir));
+}
+function renameGuardDirs(readonlyDirs, persisting) {
+	let guards = new Set();
+	for (let dir of readonlyDirs) {
+		let root = persisting.filter((p) => p !== "/" && isAtOrUnder(dir, p)).sort((a, b) => b.length - a.length)[0];
+		if (root) for (let p = (0, node_path.dirname)(dir); p !== root && isAtOrUnder(p, root); p = (0, node_path.dirname)(p)) guards.add(p);
+	}
+	return [...guards].sort((a, b) => a.length - b.length || a.localeCompare(b));
+}
+//#endregion
 //#region src/lib/sandbox/runc-bootstrap.ts
 function generateBaseOciSpec(runcPath, bundleDir, { execIn = defaultExecIn, readFile = defaultReadFile } = {}) {
 	return execIn(runcPath, ["spec"], bundleDir), JSON.parse(readFile((0, node_path.join)(bundleDir, "config.json")));
 }
 function defaultExec(command, args) {
-	return (0, node_child_process.execFileSync)(command, args, { encoding: "utf8" });
+	return (0, node_child_process.execFileSync)(hostCommand(command), args, { encoding: "utf8" });
 }
 function defaultExecIn(command, args, cwd) {
-	(0, node_child_process.execFileSync)(command, args, { cwd });
+	(0, node_child_process.execFileSync)(hostCommand(command), args, { cwd });
 }
 function defaultReadFile(path) {
 	return (0, node_fs.readFileSync)(path, "utf8");
@@ -18709,15 +18822,21 @@ function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, uid, env, h
 }
 //#endregion
 //#region src/lib/sandbox/oci-config.ts
-function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust }, probes = realHostProbes) {
+function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostDirs = [], renameGuardDirs = [] }, probes = realHostProbes) {
 	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
 		destination: RESOLV_CONF_DESTINATION,
 		type: "none",
 		source: resolvConfPath,
 		options: ["rbind", "ro"]
-	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), mounts = [
+	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), renameGuards = renameGuardDirs.map((p) => ({
+		destination: p,
+		type: "none",
+		source: p,
+		options: ["rbind", "rw"]
+	})), mounts = [
 		...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
 		...layers.mounts,
+		...renameGuards,
 		...internalMounts,
 		...scratchBaseLayers(execDir)
 	], { maskedPaths, readonlyPaths } = resolveProtectedPaths({
@@ -18776,7 +18895,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 			namespaces,
 			seccomp: seccompProfile,
 			maskedPaths,
-			readonlyPaths
+			readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostDirs])]
 		}
 	};
 }
@@ -18865,13 +18984,21 @@ function writeEnvLoader(execDir) {
 //#region src/lib/sandbox/run.ts
 const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
 function defaultExecFile(command, args, options) {
-	(0, node_child_process.execFileSync)(command, args, options);
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		...options,
+		env: hostCommandEnv(command)
+	});
 }
-function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, dns, targetIp, envBlob }, { execFile = defaultExecFile } = {}) {
+function defaultCopyScript(from, to) {
+	(0, node_fs.copyFileSync)(from, to), (0, node_fs.chmodSync)(to, 320);
+}
+function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, dns, targetIp, envBlob }, { execFile = defaultExecFile, copyScript = defaultCopyScript } = {}) {
+	let runIsolatedShPath = (0, node_path.join)(bundleDir, "run-isolated.sh");
+	copyScript((0, node_path.join)(__dirname$1, "..", "scripts", "run-isolated.sh"), runIsolatedShPath);
 	let args = [
 		"-n",
 		"--",
-		(0, node_path.join)(__dirname$1, "..", "scripts", "run-isolated.sh"),
+		runIsolatedShPath,
 		"--proxy-netns",
 		proxyNetns,
 		"--runc",
@@ -18969,7 +19096,11 @@ function resolveIdentity(env, { resolveSandboxGid, info }) {
 function assembleBundle(dir, options, deps) {
 	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode, warn } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, env, warn, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
-		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts();
+		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)), readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env), renameGuardDirs$1 = renameGuardDirs(readonlyHostDirs, persisting);
+		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
+			mode: 448,
+			recursive: !0
+		});
 		config = buildOciConfig(baseSpec, {
 			identity: resolveIdentity(env, deps),
 			writable: {
@@ -18993,7 +19124,9 @@ function assembleBundle(dir, options, deps) {
 				hostMounts
 			},
 			env,
-			caTrust
+			caTrust,
+			readonlyHostDirs,
+			renameGuardDirs: renameGuardDirs$1
 		});
 	} catch (e) {
 		throw e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
@@ -19066,7 +19199,7 @@ function describeContainerStartFailure(state, { role, containerName }) {
 }
 //#endregion
 //#region src/lib/proxy-lifecycle.ts
-const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)("docker", args, {
+const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 	encoding: "utf8",
 	env,
 	stdio: [
@@ -19075,7 +19208,7 @@ const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)
 		"pipe"
 	]
 }), printDockerViaExec = (args, env) => {
-	(0, node_child_process.execFileSync)("docker", args, {
+	(0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 		stdio: "inherit",
 		env
 	});
@@ -20138,12 +20271,27 @@ function applyOutcomeAnnotations(annotation, emissions) {
 //#endregion
 //#region src/lib/report.ts
 const HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
+function createHostDocker() {
+	return createDocker((args) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		maxBuffer: 67108864
+	}), (args) => (0, node_child_process.spawn)(hostCommand("docker"), args, { stdio: [
+		"ignore",
+		"pipe",
+		"pipe"
+	] }));
+}
 function fetchReport(containerName, parameters, proxyEngine) {
-	let docker = createDocker();
+	let docker = createHostDocker();
 	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters);
 }
 function readActionVersion(containerName, proxyEngine, docker) {
-	let client = docker ?? createDocker();
+	let client = docker ?? createHostDocker();
 	try {
 		let label = client.readLabels(containerName)["org.opencontainers.image.version"];
 		if (!label) return;
@@ -65251,6 +65399,7 @@ const realDeps = {
 	checkOverlayfsSupport,
 	createAnnotation,
 	resolveFilesystemPlan,
+	pinHostCommands,
 	readLocalImageOverride,
 	verifyImageDigestOrThrow,
 	checkUrlAndTlsRuleSupport,
@@ -65288,13 +65437,13 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, removeCreatedDirsIfEmpty, saveState, info, log, notice, warn } = {
+	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, removeCreatedDirsIfEmpty, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF || "v1", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs();
 	log(`Proxy engine: ${proxyEngine}`);
 	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
-	validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
+	validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
 	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), { overlayRoots, writeThroughPaths, createdDirs } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env);
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
 	try {

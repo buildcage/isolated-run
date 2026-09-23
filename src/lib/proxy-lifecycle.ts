@@ -16,6 +16,7 @@ import {
   type ContainerState,
 } from "#core/lib/docker/health.ts";
 import { SandboxError } from "./errors.ts";
+import { hostCommand } from "./sandbox/pinned-commands.ts";
 
 /** Lines of container log printed when the proxy fails to come up. */
 const LOG_TAIL = 100;
@@ -33,7 +34,7 @@ export interface ProxyLifecycleDeps {
 // execFileSync what the tested callers decided.
 /* v8 ignore start */
 const captureDockerViaExec: RunDocker = (args, env) =>
-  execFileSync("docker", args, {
+  execFileSync(hostCommand("docker"), args, {
     encoding: "utf8",
     env,
     // Captured, not inherited: no container is the expected outcome here,
@@ -42,7 +43,7 @@ const captureDockerViaExec: RunDocker = (args, env) =>
   });
 
 const printDockerViaExec = (args: string[], env: NodeJS.ProcessEnv): void => {
-  execFileSync("docker", args, { stdio: "inherit", env });
+  execFileSync(hostCommand("docker"), args, { stdio: "inherit", env });
 };
 /* v8 ignore stop */
 

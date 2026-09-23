@@ -28,6 +28,7 @@ import { ActionError } from "#core/lib/errors.ts";
  *   SCRATCH_BASE_UNSAFE               the sandbox scratch base exists but isn't a private directory the action owns
  *   CONTAINER_NAME_INVALID            a value read back from GITHUB_STATE isn't a name this action generates
  *   SCRATCH_DIR_UNSAFE                the sudo rm -rf fallback's target isn't owned by the runner uid
+ *   HOST_COMMAND_UNPINNABLE           `docker` or `sudo` is only on PATH somewhere the sandboxed command can write
  */
 export type SandboxErrorCode =
   | "MISSING_RUN"
@@ -52,6 +53,7 @@ export type SandboxErrorCode =
   | "SCRATCH_BASE_UNSAFE"
   | "CONTAINER_NAME_INVALID"
   | "SCRATCH_DIR_OUT_OF_BASE"
-  | "SCRATCH_DIR_UNSAFE";
+  | "SCRATCH_DIR_UNSAFE"
+  | "HOST_COMMAND_UNPINNABLE";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}

@@ -150,6 +150,25 @@ runc mounts fresh such as `/proc`, fails the step rather than being silently ove
 that, `write_through: /proc` would shadow the sandbox's procfs with the host's and undo the
 PID-namespace separation above.
 
+After the command exits, the step keeps running on the host to read the report and tear the
+sandbox down, so what it runs is kept out of those paths:
+
+- `docker` and `sudo` are pinned, before either first runs, to a binary outside
+  `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, `$RUNNER_TEMP` and `write_through:`. This applies in
+  `ephemeral` mode too, since an earlier step's writes there survive. The step fails if either is on
+  `$PATH` only inside those paths. The post step pins them again. `sudo` runs with only the system
+  directories on its `PATH`, which is what it resolves the commands it runs against when sudoers
+  sets no `secure_path`.
+- The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins,
+  and this action's own checkout, which holds the post step's script, are read-only inside the
+  sandbox, unless `write_through:` names the directory itself or `uses: ./` makes the checkout the
+  workspace. A `write_through:` entry inside one stays writable. The writable directories above
+  them are made mount points, so they cannot be renamed away.
+- `run-isolated.sh`, which runs as root, runs from a copy the sandbox cannot see.
+
+A command that writes the docker config (`docker login`, `gcloud auth configure-docker`) therefore
+fails in `persistent` mode; give it a step of its own.
+
 All of this is `filesystem_mode: persistent`, the default and the stable mode.
 `filesystem_mode: ephemeral` (**experimental**) replaces it with an overlay that discards every
 write not named in `write_through:`, closing off using a writable exception itself to plant a
@@ -529,12 +548,14 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   which in practice has to include `$GITHUB_WORKSPACE`, so that path stays as exposed as it is in
   `persistent` mode.
 
-  That decides where the step goes in the job. Wrapping every untrusted step is not the way out:
-  a payload left in `$GITHUB_PATH` or `$HOME` runs in the next step before its sandbox does, and
-  this action resolves `sudo` and `docker` through the `$PATH` the runner hands it. Two arrangements
-  hold: make the isolated step the last one in the job that runs anything untrusted, or use
+  That decides how the step is set up. Wrapping every untrusted step is not the way out: a payload
+  left in `$GITHUB_ENV`, `$GITHUB_PATH` or `$HOME` runs in the next step before its sandbox does.
+  This action's own `sudo` and `docker` are pinned out of reach, but `java` and `keytool` (under
+  `inspect`) are not, and every process inherits the environment. Making it the last step in the
+  job does not close it off either: every action's post step, this one's included, runs after the last
+  step, with whatever it left in `$GITHUB_ENV`, `$GITHUB_PATH` and `$HOME`. What holds is
   `filesystem_mode: ephemeral` with `write_through:` narrowed to `$GITHUB_WORKSPACE` and the output
-  files the step really has to produce.
+  files the step really has to produce, leaving out `$GITHUB_ENV`, `$GITHUB_PATH` and `$HOME`.
 
 - **Appending to the Job Summary.** The report is rendered from the runner host after the command
   has exited, and a name or URL is escaped before it is written into a table, so the command cannot
