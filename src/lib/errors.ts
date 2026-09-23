@@ -33,6 +33,7 @@ import { ActionError } from "#core/lib/errors.ts";
 export type SandboxErrorCode =
   | "MISSING_RUN"
   | "INVALID_PROXY_ENGINE"
+  | "INVALID_PROXY_MODE"
   | "PROXY_NOT_RUNNING"
   | "PROXY_NOT_READY"
   | "RUNC_EXTRACT_FAILED"

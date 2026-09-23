@@ -61,16 +61,45 @@ function atomToRegex(atom: string, vocab: Vocabulary): string {
   return out;
 }
 
+/** What a domain label may hold: a hostname's own characters, and wildcards. */
+const HOST_LABEL = /^[A-Za-z0-9_*?-]+$/;
+
+/**
+ * Check one label of a domain pattern against what a hostname can hold.
+ *
+ * Anything else would compile into a rule no connection can match: a Host
+ * header or SNI carries an internationalized name in its punycode form, and
+ * an empty label (a leading or trailing dot) names no host at all.
+ *
+ * @throws {Error} if the label is empty or holds a character no hostname can
+ */
+export function checkHostLabel(label: string, domain: string): void {
+  if (label === "") {
+    throw new Error(`Invalid domain "${domain}": empty label (a leading, trailing or doubled dot)`);
+  }
+  if (HOST_LABEL.test(label)) return;
+  if (/[\u0080-￿]/.test(label)) {
+    throw new Error(
+      `Invalid domain "${domain}": "${label}" is not ASCII. A connection names an ` +
+        `internationalized domain in its punycode form, so write that instead (xn--...)`,
+    );
+  }
+  throw new Error(
+    `Invalid domain "${domain}": "${label}" holds a character no hostname can; a label is ` +
+      `letters, digits, "-" and "_", with the wildcards "*" and "?"`,
+  );
+}
+
 /**
  * Convert a domain pattern to a regex string, without anchors or port.
  *
- * @throws {Error} if a label is empty
+ * @throws {Error} if a label is empty or holds a character no hostname can
  */
 export function domainToRegexPartial(domain: string): string {
   return domain
     .split(".")
     .map((label) => {
-      if (label === "") throw new Error(`Invalid domain "${domain}": empty label`);
+      checkHostLabel(label, domain);
       return atomToRegex(label, DOMAIN);
     })
     .join("\\.");
@@ -141,6 +170,38 @@ function hasTopLevelAlternation(regex: string): boolean {
 const HOST_LITERAL_ILLEGAL = /\\[[\]]/;
 
 /**
+ * JavaScript regex syntax that the resolver's regex engine (RE2) does not
+ * have: lookaround and backreferences. A host half is compiled into the
+ * resolver's allowlist as well as the proxy's own rules, so one using these
+ * would pass here and stop the resolver from starting.
+ */
+const RE2_UNSUPPORTED = /^(?:\(\?<?[=!]|\\[1-9]|\\k<)/;
+
+function checkResolverRegexSyntax(text: string, label: string, rule: string): void {
+  let inClass = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (!inClass) {
+      const unsupported = RE2_UNSUPPORTED.exec(text.slice(i));
+      if (unsupported) {
+        throw new Error(
+          `Invalid regex in rule "${rule}": the ${label} "${text}" uses "${unsupported[0]}". ` +
+            `Lookaround and backreferences are not supported in a host pattern, which the ` +
+            `resolver matches with RE2`,
+        );
+      }
+    }
+    if (c === "\\") {
+      i++;
+    } else if (inClass) {
+      if (c === "]") inClass = false;
+    } else if (c === "[") {
+      inClass = true;
+    }
+  }
+}
+
+/**
  * Check part of a `~` rule against what the rule syntax can represent.
  *
  * @throws {Error} if the text carries a top-level `|`, or a host half holds
@@ -152,6 +213,7 @@ export function checkRawRegexHalf(
   rule: string,
   hostHalf: boolean,
 ): void {
+  if (hostHalf) checkResolverRegexSyntax(text, label, rule);
   if (hasTopLevelAlternation(text)) {
     throw new Error(
       `Invalid regex in rule "${rule}": the ${label} "${text}" has a top-level "|". Anchors bind ` +
@@ -198,8 +260,34 @@ export function anchorRawRegex(regex: string): string {
  * (`(:8443)?`, `(:443|:8443)`). Splitting there, rather than at the last `:`
  * in the whole fragment, keeps a port group's own `(` out of the host half
  * so both halves stay balanced regexes on their own.
+ *
+ * A `:` that is escaped, inside a character class, or part of a group's own
+ * syntax (`(?:`, `(?i:`) is not a port separator, so `(?:a|b)\.com:443`
+ * splits at its last colon.
+ *
+ * @returns the index, or -1 when the fragment names no port
  */
-const PORT_PATTERN_START = /\(:|:/;
+function portPatternStart(hostPlusPort: string): number {
+  let inClass = false;
+  for (let i = 0; i < hostPlusPort.length; i++) {
+    const c = hostPlusPort[i];
+    if (c === "\\") {
+      i++;
+    } else if (inClass) {
+      if (c === "]") inClass = false;
+    } else if (c === "[") {
+      inClass = true;
+    } else if (c === ":") {
+      return i;
+    } else if (c === "(") {
+      if (hostPlusPort[i + 1] === ":") return i;
+      // Past the group's own syntax up to its body: `(?:`, `(?i:`, `(?<name>`.
+      const syntax = /^\(\?[A-Za-z-]*:?/.exec(hostPlusPort.slice(i));
+      if (syntax) i += syntax[0].length - 1;
+    }
+  }
+  return -1;
+}
 
 /**
  * Split a `<host>[:<port>]` regex fragment (a `~` rule's own text, minus any
@@ -211,11 +299,11 @@ export function splitDomainFromPortPattern(hostPlusPort: string): {
   domain: string;
   portPattern: string | null;
 } {
-  const match = PORT_PATTERN_START.exec(hostPlusPort);
-  if (!match) return { domain: hostPlusPort, portPattern: null };
+  const start = portPatternStart(hostPlusPort);
+  if (start === -1) return { domain: hostPlusPort, portPattern: null };
   return {
-    domain: hostPlusPort.slice(0, match.index),
-    portPattern: hostPlusPort.slice(match.index),
+    domain: hostPlusPort.slice(0, start),
+    portPattern: hostPlusPort.slice(start),
   };
 }
 

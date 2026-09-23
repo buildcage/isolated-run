@@ -75,7 +75,8 @@ warns and ignores it.
 request carrying no `Host` header, is still refused, on each engine's own terms.
 
 Because `audit` enforces nothing, the `allowed_*_rules` have no effect in it; you write them when
-you move to `restrict`.
+you move to `restrict`. Any other `proxy_mode` value, a differently cased one included, fails the
+step.
 
 Under `inspect`, `audit` is not a passive observer: TLS is still terminated, so a tool that pins a
 certificate fails there exactly as it would under `restrict`. `universal`'s audit mode decrypts
@@ -177,6 +178,10 @@ allowed_http_rules: |
 A label that contains `*` has to be exactly `*` or `**`. `abc*.example.com` is rejected here; only
 [`allowed_url_rules`](#url-rules-allowed_url_rules) takes a wildcard in the middle of a label.
 
+Besides the wildcards, a label holds letters, digits, `-` and `_`, and nothing else. Write an
+internationalized name in its punycode form (`xn--mnchen-3ya.de`, not `münchen.de`), the form a
+connection carries. A leading, trailing or doubled dot is refused.
+
 #### Ports
 
 A port is required on every rule.
@@ -255,9 +260,10 @@ allowed_ip_rules: |
 ```
 
 A rule is matched against the address the connection goes to, never a name the connection carries,
-so a rule naming a host is refused at setup. Either way the connection is tunnelled without
-inspection: once an `ip:port` pair is allowed, any TCP-based protocol can use that path. Prefer a
-domain rule where the destination has a stable name.
+so a rule naming a host is refused at setup, and so is a form the engine cannot match (a wildcard
+on `inspect`, a CIDR block on `universal`): `restrict` fails and `audit` warns. Either way the
+connection is tunnelled without inspection: once an `ip:port` pair is allowed, any TCP-based
+protocol can use that path. Prefer a domain rule where the destination has a stable name.
 
 ### TLS passthrough: `allowed_tls_rules`
 
@@ -296,6 +302,10 @@ is matched against always carries the port.
 
 `^` and `$` are added where they are missing, so a pattern always covers the whole `domain:port`. An
 IPv6 address is refused here as everywhere else in the rule syntax.
+
+The host part of a pattern also decides which names the resolver answers as allowed, and the
+resolver matches it with RE2. Lookaround (`(?=`, `(?!`, `(?<=`, `(?<!`) and backreferences are
+therefore refused there, in a URL rule's host half as well.
 
 In `allowed_url_rules` a `~` expression covers the URL, and is split at the first `/` after `://`:
 everything before that `/` is matched against the host, everything from it onward against the path.
