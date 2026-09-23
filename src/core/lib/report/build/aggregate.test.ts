@@ -166,6 +166,27 @@ describe("annotateKnownBlocked", () => {
       ).toBe(false);
     });
 
+    it("matches a ~ regex URL rule against the scheme it names", () => {
+      const plain = request({
+        protocol: "http",
+        port: 80,
+        url: "http://api.example.com/telemetry",
+      });
+      expect(
+        annotateKnownBlocked([plain], ["POST ~^http://api\\.example\\.com/tele.*$"])[0].expected,
+      ).toBe(true);
+      expect(
+        annotateKnownBlocked([plain], ["POST ~^https://api\\.example\\.com/tele.*$"])[0].expected,
+      ).toBe(false);
+      // https? covers both, each on its own default port.
+      for (const event of [plain, request()]) {
+        expect(
+          annotateKnownBlocked([event], ["POST ~^https?://api\\.example\\.com/tele.*$"])[0]
+            .expected,
+        ).toBe(true);
+      }
+    });
+
     it("matches a ~ regex URL rule, port optional on the default port", () => {
       expect(
         annotateKnownBlocked([request()], ["POST ~^https://api\\.example\\.com/tele.*$"])[0]

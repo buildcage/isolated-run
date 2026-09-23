@@ -17442,15 +17442,27 @@ function splitUrl(url, rule) {
 		path: match[3] ?? ""
 	};
 }
-const SLASH_TOKEN = /\\?\//, SCHEME_SEP = /:(?:\\?\/){2}/;
+const SLASH_TOKEN = /\\?\//, SCHEME_SEP = /:(?:\\?\/){2}/, RAW_REGEX_SCHEMES = new Map([
+	["https", ["https"]],
+	["http", ["http"]],
+	["https?", ["https", "http"]]
+]);
+function rawRegexSchemes(prefix, rule) {
+	let scheme = prefix.startsWith("^") ? prefix.slice(1) : prefix, schemes = RAW_REGEX_SCHEMES.get(scheme);
+	if (!schemes) throw Error(`Invalid regex in rule "${rule}": the scheme "${scheme}" must be written "https", "http" or "https?", so the rule can be matched against the listener a request arrives on`);
+	return schemes;
+}
+function rejectUserinfo(host, rule) {
+	if (host.includes("@")) throw Error(`Invalid URL in rule "${rule}": "${host}" holds an "@", but a request's Host never carries a user name, so this rule would match nothing. Drop everything up to the "@".`);
+}
 function splitRawRegexUrl(regex, rule) {
 	checkRawRegexHalf(regex, "expression", rule, !1);
 	let schemeSep = SCHEME_SEP.exec(regex);
 	if (!schemeSep) throw Error(`Invalid regex in rule "${rule}": expected "://" (or an escaped equivalent like ":\\/\\/ ") separating the scheme from the host, so the host and path can be matched separately`);
-	let hostStart = schemeSep.index + schemeSep[0].length, pathSep = SLASH_TOKEN.exec(regex.slice(hostStart));
+	let schemes = rawRegexSchemes(regex.slice(0, schemeSep.index), rule), hostStart = schemeSep.index + schemeSep[0].length, pathSep = SLASH_TOKEN.exec(regex.slice(hostStart));
 	if (!pathSep) throw Error(`Invalid regex in rule "${rule}": expected a "/" (or "\\/") after "://" to start the path; a host-only rule belongs in allowed_https_rules instead`);
 	let pathStart = hostStart + pathSep.index, hostPart = regex.slice(hostStart, pathStart), pathPart = regex.slice(pathStart);
-	checkRawRegexHalf(hostPart, "host half", rule, !1), checkRawRegexHalf(pathPart, "path half", rule, !1);
+	checkRawRegexHalf(hostPart, "host half", rule, !1), checkRawRegexHalf(pathPart, "path half", rule, !1), rejectUserinfo(hostPart, rule);
 	let { domain: hostOnly } = splitDomainFromPortPattern(hostPart);
 	checkRawRegexHalf(hostOnly, "host half", rule, !0);
 	let hostRegex = anchorRawRegex(hostPart), authorityRegex = anchorRawRegex(hostOnly), pathRegex = `^${pathPart}`;
@@ -17464,10 +17476,15 @@ function splitRawRegexUrl(regex, rule) {
 		throw Error(`Invalid regex in rule "${rule}": the ${label} part "${fragment}" does not compile on its own: ${e.message}`);
 	}
 	return {
+		schemes,
 		hostRegex,
 		authorityRegex,
 		pathRegex
 	};
+}
+function rejectQuery(path, rule) {
+	let query = path.indexOf("?");
+	if (query !== -1 && /[=&]/.test(path.slice(query))) throw Error(`Invalid URL in rule "${rule}": "${path.slice(query)}" reads as a query string, but a rule matches the path only and a query is never matched. Drop everything from the "?"; a "?" in a path is a single-character wildcard.`);
 }
 function compileUrl(url, rule) {
 	if (url.startsWith("~")) {
@@ -17477,22 +17494,24 @@ function compileUrl(url, rule) {
 		} catch (e) {
 			throw Error(`Invalid regex in rule "${rule}": ${e.message}`);
 		}
-		let { hostRegex, authorityRegex, pathRegex } = splitRawRegexUrl(regex, rule);
+		let { schemes, hostRegex, authorityRegex, pathRegex } = splitRawRegexUrl(regex, rule);
 		return {
-			scheme: "https",
+			schemes,
 			authorityRegex,
 			pathRegex,
 			hostRegex,
 			isRegex: !0
 		};
 	}
-	let { scheme, authority, path } = splitUrl(url, rule), colonIndex = authority.lastIndexOf(":"), hasPort = colonIndex !== -1 && !authority.slice(colonIndex + 1).includes("]"), host = hasPort ? authority.slice(0, colonIndex) : authority, port = hasPort ? authority.slice(colonIndex + 1) : "";
+	let { scheme, authority, path } = splitUrl(url, rule);
+	rejectUserinfo(authority, rule), rejectQuery(path, rule);
+	let colonIndex = authority.lastIndexOf(":"), hasPort = colonIndex !== -1 && !authority.slice(colonIndex + 1).includes("]"), host = hasPort ? authority.slice(0, colonIndex) : authority, port = hasPort ? authority.slice(colonIndex + 1) : "";
 	if (host === "") throw Error(`Invalid URL in rule "${rule}": missing host`);
 	if (port !== "" && !/^(?:\d+|\*)$/.test(port)) throw Error(`Invalid port in rule "${rule}": "${port}"`);
-	let combined = wildcardToRegexPartial(`${host}:${port === "" ? DEFAULT_PORT$1[scheme] : port}`), hostRegex = combined.slice(0, combined.lastIndexOf(":")), pathRegex = path === "" ? "^/" : `^${pathToRegexPartial(path)}$`;
+	let combined = wildcardToRegexPartial(`${host}:${port === "" ? DEFAULT_PORT$1[scheme] : port}`), hostRegex = combined.slice(0, combined.lastIndexOf(":")), pathRegex = path === "" ? "^/" : `^${pathToRegexPartial(path)}$`, authorityRegex = `^${hostRegex}:${port === "*" ? "[0-9]+" : port === "" ? DEFAULT_PORT$1[scheme] : port}$`;
 	return {
-		scheme,
-		authorityRegex: `^${hostRegex}:${port === "*" ? "[0-9]+" : port === "" ? DEFAULT_PORT$1[scheme] : port}$`,
+		schemes: [scheme],
+		authorityRegex,
 		pathRegex,
 		hostRegex,
 		isRegex: !1
@@ -17503,10 +17522,10 @@ function convertUrlRule(rule) {
 	if (!separator) throw Error(`Invalid rule "${trimmed}": expected a method and a URL, e.g. "GET https://example.com/x"`);
 	let methodSpec = trimmed.slice(0, separator.index), url = trimmed.slice(separator.index + separator[0].length).trim();
 	if (/\s/.test(url)) throw Error(`Invalid rule "${trimmed}": URL must not contain whitespace`);
-	let methods = parseMethods(methodSpec, trimmed), { scheme, authorityRegex, pathRegex, hostRegex, isRegex } = compileUrl(url, trimmed);
+	let methods = parseMethods(methodSpec, trimmed), { schemes, authorityRegex, pathRegex, hostRegex, isRegex } = compileUrl(url, trimmed);
 	return {
 		methods,
-		scheme,
+		schemes,
 		authorityRegex,
 		pathRegex,
 		hostRegex,
@@ -20164,10 +20183,16 @@ function requestPath(url) {
 	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
 	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
 }
-function matchesUrlRule({ rule, hostRe, pathRe, defaultPort }, event) {
-	if (event.method === void 0 || event.url === void 0 || event.protocol !== rule.scheme || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
+function matchesUrlRule({ rule, hostRe, pathRe }, event) {
+	if (event.method === void 0 || event.url === void 0) return !1;
+	let scheme = rule.schemes.find((s) => s === event.protocol);
+	if (scheme === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
 	let hostPort = `${event.host}:${event.port}`;
-	return rule.isRegex && event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
+	if (rule.isRegex) {
+		let defaultPort = Number(DEFAULT_PORT$1[scheme]);
+		return event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
+	}
+	return hostRe.test(hostPort);
 }
 function buildMatchers(knownBlockedRules) {
 	return knownBlockedRules.map((line) => {
@@ -20175,8 +20200,7 @@ function buildMatchers(knownBlockedRules) {
 			let urlRule = convertUrlRule(line), compiled = {
 				rule: urlRule,
 				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex),
-				pathRe: new RegExp(urlRule.pathRegex),
-				defaultPort: Number(DEFAULT_PORT$1[urlRule.scheme])
+				pathRe: new RegExp(urlRule.pathRegex)
 			};
 			return {
 				rule: urlRule.raw,
