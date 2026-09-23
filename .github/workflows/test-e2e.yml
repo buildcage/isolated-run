@@ -59,9 +59,8 @@ jobs:
   # restrict-mode example.
   test_sandbox_audit_mode:
     needs: changes
-    # !cancelled() so a skipped `changes` (it only runs on pull_request) still
-    # lets this evaluate, instead of skipping the job before the condition and
-    # passing a workflow_dispatch run green having tested nothing.
+    # !cancelled() forces this to evaluate when `changes` is skipped (it runs
+    # only on pull_request); a skipped need otherwise skips the job unevaluated.
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
     strategy:
       fail-fast: false
