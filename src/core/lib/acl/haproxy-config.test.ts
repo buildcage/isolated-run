@@ -307,8 +307,6 @@ describe("the internal-address guard", () => {
   });
 
   it("does not exempt an address that a wildcard merely admits", () => {
-    // `**:80` matches the Host 169.254.169.254 too; before, any address in the
-    // Host skipped the guard once some rule had allowed the request.
     const wide = gen({ ...FULL, httpRules: ["**:80", "*.*.*.*:80"] });
     const plain = frontendSegment(wide, "http_in");
     expect(plain.includes("named_address")).toBe(false);

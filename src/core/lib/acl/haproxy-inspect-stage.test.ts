@@ -43,8 +43,6 @@ describe("inspect stage", () => {
       urlRules: buildUrlRules("GET http://127.0.0.2/latest/**"),
     });
     const named = plain.split("\n").filter((l) => l.includes("set-var(txn.named_address)"));
-    // The port, path and method are the naming rule's own: `**:80` beside
-    // `169.254.169.254:8080` must not exempt 169.254.169.254 on port 80.
     expect(named.length).toBe(2);
     expect(named[0].endsWith("-m str 169.254.169.254 } { dst_port 8080 } { path -m beg / }")).toBe(
       true,
@@ -57,8 +55,7 @@ describe("inspect stage", () => {
   });
 
   it("keeps the exemption in audit, where no rule is enforced", () => {
-    // The guard refuses in audit too, so a named address must stay reachable
-    // there, and the rule block that would otherwise match it is absent.
+    // audit emits no rule block, so the exemption cannot lean on it.
     const plain = plainStage({ httpRules: ["169.254.169.254:80"] }, "audit");
     expect(plain.includes("txn.allowed")).toBe(false);
     expect(plain.includes("-m str 169.254.169.254 } { dst_port 80 }")).toBe(true);

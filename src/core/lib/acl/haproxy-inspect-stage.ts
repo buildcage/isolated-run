@@ -28,7 +28,6 @@ function sniField(scheme: "https" | "http"): string {
   return scheme === "https" ? " sni=%[ssl_fc_sni,regsub([^A-Za-z0-9._-],_,g)]" : "";
 }
 
-/** The rules that write a literal address as their host. */
 function addressRules(rules: CompiledRule[]): CompiledRule[] {
   const isAddress = new RegExp(HOST_IS_ADDRESS);
   return rules.filter((rule) => {
@@ -39,11 +38,9 @@ function addressRules(rules: CompiledRule[]): CompiledRule[] {
 }
 
 /**
- * Refuse an internal destination unless a rule that writes that address as its
- * host matches the request, port, path and method included. Only then was it
- * asked for: `**:80`, or `169.254.169.254:8080` beside it, must not open
- * 169.254.169.254 on port 80. Matched here rather than in the rule block, which
- * audit leaves out, since the guard refuses in audit too.
+ * Exempt an internal destination only where a rule naming that address as its
+ * host matches the whole request, so `**:80` cannot open 169.254.169.254.
+ * Matched here, not in the rule block: audit has none but still guards.
  */
 function internalGuard(rules: CompiledRule[]): string[] {
   const named = addressRules(rules);

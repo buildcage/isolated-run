@@ -262,12 +262,9 @@ Two consequences worth knowing:
 - The list is read once at startup, and on a containerised runner it holds that container's
   addresses rather than the real host's.
 
-This guard is about a _name_ landing somewhere it never should, and it never restricts a rule whose
-host is itself a literal address, such as `169.254.169.254:80`: the rule asked for that address, so
-nothing was arrived at. Only an address written out as a rule's host counts, and only for a
-request that rule itself allows, port, path and method included. A wildcard or regex that merely
-admits one, `**:80` or `~^.*:80$`, does not, so under `inspect` a `Host` of `169.254.169.254` sent
-under `**:80` is still refused as `internal-address`, even beside a rule for `169.254.169.254:8080`. Reaching a cloud
+This guard is about a _name_ landing somewhere it never should. A rule whose host is a literal
+address, such as `169.254.169.254:80`, is exempt for the requests that rule itself allows. A
+wildcard or regex that merely admits the address, `**:80` or `~^.*:80$`, is not. Reaching a cloud
 metadata endpoint directly, the way any AWS or GCP SDK does, is not what this is meant to stop, and
 `allowed_ip_rules` is the intended path for it.
 
