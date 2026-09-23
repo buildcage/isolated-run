@@ -59,7 +59,7 @@ runner with passwordless `sudo` and a working Docker installation:
     [`write_through` paths](./docs/reference.md#write_through-paths)
   - A non-root runner user. The sandbox keeps the runner's own uid, and as uid 0 it refuses to start:
     filesystem permissions alone can't separate the command from root-owned host sockets. Don't run
-    the runner with `RUNNER_ALLOW_RUNASROOT`, and note a root `container:` job runs as uid 0 too.
+    the runner as root (`RUNNER_ALLOW_RUNASROOT`).
 
 A runner that falls short fails while the proxy starts, before the command runs.
 
