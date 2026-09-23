@@ -273,6 +273,36 @@ describe("renderInspectDetails", () => {
     }
   });
 
+  it("hides a client-ended close to a host whose only request failed at the origin", () => {
+    // A failed request still proves the client trusted the CA and a request
+    // arrived, so the later keepalive close to that host is noise too.
+    const md = renderInspectDetails(
+      [
+        {
+          time: t,
+          action: "failed",
+          protocol: "https",
+          host: "cdn.example.com",
+          port: 443,
+          method: "GET",
+          url: "https://cdn.example.com/x.tgz",
+          reason: "origin-aborted",
+        },
+        {
+          time: t + 1,
+          action: "incomplete",
+          protocol: "https",
+          host: "cdn.example.com",
+          port: 443,
+          reason: "client-aborted",
+        },
+      ],
+      t,
+    );
+    expect(md.includes("client-aborted")).toBe(false);
+    expect(md.includes("-> origin-aborted")).toBe(true);
+  });
+
   it("marks a request the proxy could not read as the refusal it was", () => {
     // Refused, so 🚫 rather than ⚠️, and named by its port alone: the plain
     // stage has no SNI, and no request arrived to carry a Host.

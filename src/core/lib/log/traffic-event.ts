@@ -68,16 +68,18 @@ const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
 /**
  * Given a whole timeline, which client-ended `incomplete` connections
  * (client-aborted, client-timeout) are only noise and are left out of the
- * report: those to a host that also completed a connection, where the close is a
- * keepalive pool cleaning up after its work. A host that completed nothing keeps
- * them, since then every attempt to it ended before a request, as a client that
- * cannot trust the CA does (a container missing `ca-certificates`). The raw
- * traffic artifact keeps every one regardless.
+ * report: those to a host the client also got a request read on, where the
+ * close is a keepalive pool cleaning up after its work. Any non-dns event but
+ * these closes proves as much, since an allowed, refused or origin-failed
+ * request each took a completed handshake first. A host with none keeps its
+ * closes, since then every attempt to it ended before a request, as a client
+ * that cannot trust the CA does (a container missing `ca-certificates`). The
+ * raw traffic artifact keeps every one regardless.
  */
 export function clientEndedNoise(timeline: TrafficEvent[]): (event: TrafficEvent) => boolean {
   const completed = new Set<string>();
   for (const event of timeline) {
-    if (event.protocol !== "dns" && (event.action === "allow" || event.action === "audit")) {
+    if (event.protocol !== "dns" && event.action !== "incomplete") {
       completed.add(event.host.toLowerCase());
     }
   }

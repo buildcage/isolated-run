@@ -19346,7 +19346,7 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
 function clientEndedNoise(timeline) {
 	let completed = new Set();
-	for (let event of timeline) event.protocol !== "dns" && (event.action === "allow" || event.action === "audit") && completed.add(event.host.toLowerCase());
+	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && completed.add(event.host.toLowerCase());
 	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "") && completed.has(event.host.toLowerCase());
 }
 function connectedHosts(timeline) {
