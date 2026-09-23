@@ -216,9 +216,7 @@ export async function runSandboxStep(
   // SandboxStepDeps).
   const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
 
-  // Refuse a root runner before any setup: the sandbox keeps the runner's uid,
-  // which as uid 0 leaves only DAC guarding root-owned host sockets (see
-  // assertNonRootUid).
+  // Before any privileged setup; see assertNonRootUid.
   assertNonRootUid(process.getuid!());
 
   // Cheap, pure input check, so a plain mistake (e.g. write_through: /

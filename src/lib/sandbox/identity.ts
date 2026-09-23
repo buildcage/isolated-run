@@ -4,10 +4,10 @@ import { EXTRA_MASKED_RUNTIME_PATHS, rootlessRuntimeSocketPaths } from "./runtim
 
 /**
  * Refuse to run as uid 0. The sandbox keeps the runner's own uid (see
- * docs/security.md), so as root the kernel's DAC is all that stands between the
- * command and root-owned host sockets like /run/systemd/private: reachable
- * despite the dropped capabilities, and enough to start a unit outside every
- * namespace. Only reachable on a self-hosted runner with RUNNER_ALLOW_RUNASROOT.
+ * docs/security.md), so at uid 0 the dropped capabilities don't help: the
+ * kernel's DAC is all that guards root-owned host sockets like
+ * /run/systemd/private, and reaching one starts a unit outside every namespace.
+ * In practice this fires on a self-hosted runner started as root.
  */
 export function assertNonRootUid(uid: number): void {
   if (uid !== 0) return;
