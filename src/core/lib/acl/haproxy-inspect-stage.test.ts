@@ -39,16 +39,17 @@ describe("inspect stage", () => {
 
   it("exempts only where a rule that writes the address as its host matches", () => {
     const plain = plainStage({
-      httpRules: ["169.254.169.254:8080", "~^127\\.0\\.0\\.1:80$", "*.0.0.1:80"],
+      httpRules: ["169.254.169.254:8080", "127.0.0.3:*", "~^127\\.0\\.0\\.1:80$", "*.0.0.1:80"],
       urlRules: buildUrlRules("GET http://127.0.0.2/latest/**"),
     });
     const named = plain.split("\n").filter((l) => l.includes("set-var(txn.named_address)"));
-    expect(named.length).toBe(2);
+    expect(named.length).toBe(3);
     expect(named[0].endsWith("-m str 169.254.169.254 } { dst_port 8080 } { path -m beg / }")).toBe(
       true,
     );
+    expect(named[1].endsWith("-m str 127.0.0.3 } { path -m beg / }")).toBe(true);
     expect(
-      named[1].endsWith(
+      named[2].endsWith(
         "-m str 127.0.0.2 } { dst_port 80 } { path -m beg /latest/ } { method GET }",
       ),
     ).toBe(true);
