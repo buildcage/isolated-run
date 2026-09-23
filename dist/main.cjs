@@ -20317,26 +20317,7 @@ const MARK = {
 function renderEvent(event, startedAt) {
 	return `${MARK[event.action] ?? "✅"} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}`;
 }
-const CREDENTIAL_PARAMS = new Set([
-	"access_token",
-	"api_key",
-	"apikey",
-	"auth",
-	"client_secret",
-	"code",
-	"id_token",
-	"key",
-	"password",
-	"private_token",
-	"refresh_token",
-	"secret",
-	"sig",
-	"signature",
-	"token",
-	"x-amz-security-token",
-	"x-amz-signature",
-	"x-goog-signature"
-]);
+const CREDENTIAL_PARAMS = new Set("access_key.access_token.api_key.api_token.apikey.auth.auth_token.client_secret.code.id_token.jwt.key.passwd.password.private-token.private_token.pwd.refresh_token.secret.session_token.sig.signature.token.x-amz-security-token.x-amz-signature.x-goog-signature".split("."));
 function redactCredentialQuery(url) {
 	let start = url.indexOf("?");
 	if (start === -1) return url;

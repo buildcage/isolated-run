@@ -423,6 +423,15 @@ describe("renderInspectDetails credential parameters", () => {
     expect(subjectOf("https://h/v1?Api_Key=sk_live_1")).toBe("GET https://h/v1?Api_Key=***");
   });
 
+  it("redacts the token names a bearer scheme spells out", () => {
+    expect(subjectOf("https://h/v1?api_token=t&auth_token=t&session_token=t&jwt=t")).toBe(
+      "GET https://h/v1?api_token=***&auth_token=***&session_token=***&jwt=***",
+    );
+    expect(subjectOf("https://h/v1?PRIVATE-TOKEN=t&access_key=k&passwd=p&pwd=p")).toBe(
+      "GET https://h/v1?PRIVATE-TOKEN=***&access_key=***&passwd=***&pwd=***",
+    );
+  });
+
   it("leaves a parameter nobody credentialed alone", () => {
     // A refused request has to keep saying what it tried to send, and an
     // exfiltration payload is named whatever its author chose.
