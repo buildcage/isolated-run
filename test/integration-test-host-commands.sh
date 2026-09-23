@@ -1,7 +1,8 @@
 #!/bin/bash
 # Verifies, in persistent mode, that a `docker` under $HOME earlier on PATH is
 # never run, and that the docker config directory and this action's checkout
-# are read-only inside the sandbox and cannot be renamed away. See
+# are read-only inside the sandbox and cannot be renamed away, while a
+# write_through entry inside the config directory stays writable. See
 # sandbox/host-commands.ts. The stand-in only leaves a marker file.
 set -uo pipefail
 
@@ -14,9 +15,10 @@ WORKDIR=$(mktemp -d)
 STANDIN_DIR="$HOME/.buildcage-test-bin-$$"
 MARKER="$WORKDIR/standin-docker-ran"
 DOCKER_CONFIG_DIR="$HOME/.docker"
+NESTED_WRITABLE="$DOCKER_CONFIG_DIR/buildcage-test-$$"
 
 cleanup() {
-  rm -rf "$WORKDIR" "$STANDIN_DIR"
+  rm -rf "$WORKDIR" "$STANDIN_DIR" "$NESTED_WRITABLE"
   rm -f "$DOCKER_CONFIG_DIR/.buildcage-probe" "$ACTION_ROOT/.buildcage-probe"
 }
 trap cleanup EXIT
@@ -39,6 +41,7 @@ GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
 BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
+INPUT_WRITE_THROUGH="$NESTED_WRITABLE" \
 INPUT_RUN="rc=0
 
 if touch '$DOCKER_CONFIG_DIR/.buildcage-probe' 2>/dev/null; then
@@ -46,6 +49,13 @@ if touch '$DOCKER_CONFIG_DIR/.buildcage-probe' 2>/dev/null; then
   rc=1
 else
   echo 'OK: the docker config directory is read-only'
+fi
+
+if touch '$NESTED_WRITABLE/probe' 2>/dev/null; then
+  echo 'OK: a write_through entry inside it stays writable'
+else
+  echo 'UNEXPECTED: a write_through entry inside it was not writable'
+  rc=1
 fi
 
 if touch \"\$HOME/.buildcage-home-probe\" 2>/dev/null; then

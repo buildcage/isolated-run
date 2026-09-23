@@ -6,7 +6,7 @@ import { SandboxError } from "../errors.ts";
 import { isValidContainerName, scratchDirNameFor } from "../container.ts";
 import { retryBriefly } from "../retry-briefly.ts";
 import { parseMountinfo } from "./mountinfo.ts";
-import { hostCommand } from "./pinned-commands.ts";
+import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 // Base directory for each run's scratch dir (OCI bundle + the host-`/`
 // rootfs bind-mount). Deliberately under /var/tmp rather than os.tmpdir():
@@ -60,7 +60,10 @@ function defaultReadMountinfo(): string {
 }
 
 function defaultExec(command: string, args: string[]): void {
-  execFileSync(hostCommand(command), args, { stdio: ["ignore", "ignore", "pipe"] });
+  execFileSync(hostCommand(command), args, {
+    stdio: ["ignore", "ignore", "pipe"],
+    env: hostCommandEnv(command),
+  });
 }
 
 function defaultRemove(path: string): void {

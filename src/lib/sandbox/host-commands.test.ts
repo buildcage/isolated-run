@@ -8,6 +8,7 @@ import {
   pinningPaths,
   renameGuardDirs,
   sandboxReadonlyHostDirs,
+  withRealPaths,
   type FindCommandDeps,
 } from "./host-commands.ts";
 import { hostCommand } from "./pinned-commands.ts";
@@ -107,6 +108,19 @@ describe("findPinnableCommand", () => {
     );
   });
 
+  it("recognizes a persisting path by its real spelling too", () => {
+    // $HOME=/home/runner is a symlink to /data/runner.
+    const deps = host(
+      ["/data/runner/.local/bin/docker", "/usr/bin/docker"],
+      {},
+      { [HOME]: "/data/runner" },
+    );
+
+    expect(
+      findPinnableCommand("docker", "/data/runner/.local/bin:/usr/bin", PERSISTENT, deps),
+    ).toBe("/usr/bin/docker");
+  });
+
   it("gives up on a symlink cycle rather than looping", () => {
     const deps = host([], { "/usr/bin/docker": "/usr/local/bin/docker" });
     deps.readlink = (p) =>
@@ -141,6 +155,14 @@ describe("findPinnableCommand", () => {
     expect(findPinnableCommand("docker", `${HOME}/.local/bin:/usr/bin`, ["/"], deps)).toBe(
       `${HOME}/.local/bin/docker`,
     );
+  });
+});
+
+describe("withRealPaths", () => {
+  it("adds each path's real spelling, without duplicates", () => {
+    const real = (p: string) => (p === HOME ? "/data/runner" : p);
+
+    expect(withRealPaths([HOME, "/tmp"], real)).toStrictEqual([HOME, "/tmp", "/data/runner"]);
   });
 });
 
@@ -233,6 +255,12 @@ describe("sandboxReadonlyHostDirs", () => {
     expect(sandboxReadonlyHostDirs(PERSISTENT, { HOME }, WORKSPACE)).toStrictEqual([
       `${HOME}/.docker`,
     ]);
+  });
+
+  it("keeps one read-only when a persisting path only sits inside it", () => {
+    expect(
+      sandboxReadonlyHostDirs([...PERSISTENT, `${HOME}/.docker/buildx`], { HOME }, ACTION),
+    ).toStrictEqual([ACTION, `${HOME}/.docker`]);
   });
 
   it("leaves out one a write_through entry names outright", () => {

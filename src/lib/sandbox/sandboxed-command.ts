@@ -19,6 +19,7 @@ import {
   persistingWritablePaths,
   renameGuardDirs as renameGuards,
   sandboxReadonlyHostDirs,
+  withRealPaths,
 } from "./host-commands.ts";
 import { resolveSandboxGid } from "./identity.ts";
 import { listHostMounts } from "./mountinfo.ts";
@@ -256,7 +257,9 @@ export function assembleBundle(
     // alone only covers the top-level rootfs mount (see
     // computeReadonlyHostMounts).
     const hostMounts = listHostMounts();
-    const persisting = persistingWritablePaths(filesystemMode, writeThroughPaths, env);
+    const persisting = withRealPaths(
+      persistingWritablePaths(filesystemMode, writeThroughPaths, env),
+    );
     const readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env);
     const renameGuardDirs = renameGuards(readonlyHostDirs, persisting);
     // runc skips a read-only path that doesn't exist, and the sandbox could

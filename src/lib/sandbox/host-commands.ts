@@ -57,6 +57,14 @@ const MAX_SYMLINK_HOPS = 40;
 // Untested by design: the defaults behind this module's seams, which only hand
 // node:fs what the tested caller decided.
 /* v8 ignore start */
+function realpathOrSelf(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
 const realFindCommandDeps: FindCommandDeps = {
   isExecutable: (path) => {
     try {
@@ -69,20 +77,23 @@ const realFindCommandDeps: FindCommandDeps = {
   readlink: (path) => {
     try {
       const target = readlinkSync(path);
-      return isAbsolute(target) ? target : resolve(dirname(path), target);
+      // The kernel resolves a relative target against the real directory.
+      return isAbsolute(target) ? target : resolve(realpathOrSelf(dirname(path)), target);
     } catch {
       return null;
     }
   },
-  realpathDir: (dir) => {
-    try {
-      return realpathSync(dir);
-    } catch {
-      return dir;
-    }
-  },
+  realpathDir: realpathOrSelf,
 };
 /* v8 ignore stop */
+
+/** `paths` plus their real spellings, since `$HOME` may itself be a symlink. */
+export function withRealPaths(
+  paths: string[],
+  realpath: (path: string) => string = realpathOrSelf,
+): string[] {
+  return [...new Set([...paths, ...paths.map(realpath)])];
+}
 
 /** The `$PATH` entry and each symlink hop after it. The command could repoint
  *  any hop it can write, so every one of them is checked. */
@@ -113,7 +124,8 @@ export function findPinnableCommand(
   { isExecutable, readlink, realpathDir }: FindCommandDeps = realFindCommandDeps,
 ): string | undefined {
   const optedOut = persisting.includes("/");
-  const inside = (p: string): boolean => persisting.some((w) => isAtOrUnder(p, w));
+  const writable = withRealPaths(persisting, realpathDir);
+  const inside = (p: string): boolean => writable.some((w) => isAtOrUnder(p, w));
   const reachable = (hop: string): boolean =>
     inside(hop) || inside(join(realpathDir(dirname(hop)), basename(hop)));
   for (const dir of (pathEnv ?? "").split(delimiter)) {
@@ -177,9 +189,10 @@ export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
 
 /**
  * The action checkout and docker config directory, where a persisting path
- * contains them. One that itself contains a persisting path is skipped, as
- * making it read-only would take that path with it (`uses: ./`, or a
- * write_through entry naming it).
+ * contains them. One that is itself a persisting path is skipped: `uses: ./`
+ * runs the action from the workspace, and write_through may name the config
+ * directory. A persisting path nested inside one stays writable, since runc
+ * remounts only the top of a read-only path.
  */
 export function sandboxReadonlyHostDirs(
   persisting: string[],
@@ -188,8 +201,7 @@ export function sandboxReadonlyHostDirs(
 ): string[] {
   const candidates = [actionRoot, dockerConfigDir(env)].filter((p): p is string => Boolean(p));
   return candidates.filter(
-    (dir) =>
-      persisting.some((p) => isAtOrUnder(dir, p)) && !persisting.some((p) => isAtOrUnder(p, dir)),
+    (dir) => persisting.some((p) => isAtOrUnder(dir, p)) && !persisting.includes(dir),
   );
 }
 

@@ -156,11 +156,14 @@ sandbox down, so what it runs is kept out of those paths:
 - `docker` and `sudo` are pinned, before either first runs, to a binary outside
   `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, `$RUNNER_TEMP` and `write_through:`. This applies in
   `ephemeral` mode too, since an earlier step's writes there survive. The step fails if either is on
-  `$PATH` only inside those paths. The post step pins them again.
+  `$PATH` only inside those paths. The post step pins them again. `sudo` runs with only the system
+  directories on its `PATH`, which is what it resolves the commands it runs against when sudoers
+  sets no `secure_path`.
 - The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins,
   and this action's own checkout, which holds the post step's script, are read-only inside the
-  sandbox. The writable directories above them are made mount points, so they cannot be renamed
-  away.
+  sandbox, unless `write_through:` names the directory itself or `uses: ./` makes the checkout the
+  workspace. A `write_through:` entry inside one stays writable. The writable directories above
+  them are made mount points, so they cannot be renamed away.
 - `run-isolated.sh`, which runs as root, runs from a copy the sandbox cannot see.
 
 A command that writes the docker config (`docker login`, `gcloud auth configure-docker`) therefore

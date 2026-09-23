@@ -17719,6 +17719,12 @@ function hostCommand(command) {
 function pinCommand(command, path) {
 	pinned.set(command, path);
 }
+function hostCommandEnv(command, env = process.env) {
+	return command === "sudo" ? {
+		...env,
+		PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	} : env;
+}
 //#endregion
 //#region src/lib/container.ts
 const CONTAINER_NAME_PREFIX = "buildcage-proxy-";
@@ -17818,7 +17824,8 @@ function defaultExecFile$2(command, args) {
 			"ignore",
 			"ignore",
 			"pipe"
-		]
+		],
+		env: hostCommandEnv(command)
 	});
 }
 function checkPasswordlessSudo({ execFile = defaultExecFile$2 } = {}) {
@@ -17867,11 +17874,14 @@ function defaultReadMountinfo() {
 	return (0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8");
 }
 function defaultExec$2(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, { stdio: [
-		"ignore",
-		"ignore",
-		"pipe"
-	] });
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
 }
 function defaultRemove(path) {
 	(0, node_fs.rmSync)(path, {
@@ -17971,11 +17981,14 @@ function removeProbeDir(dir, exec) {
 		"rm",
 		"-rf",
 		dir
-	], { stdio: [
-		"ignore",
-		"ignore",
-		"pipe"
-	] }));
+	], {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv("sudo")
+	}));
 }
 function checkOverlayfsSupport({ base = SANDBOX_SCRATCH_BASE, exec = node_child_process.execFileSync } = {}) {
 	ensureOwnScratchBase(base);
@@ -18016,7 +18029,8 @@ function probeOverlayMount(probeDir, exec) {
 			"ignore",
 			"ignore",
 			"pipe"
-		]
+		],
+		env: hostCommandEnv("sudo")
 	});
 }
 //#endregion
@@ -18065,11 +18079,14 @@ function defaultStat(path) {
 	};
 }
 function defaultExecFile$1(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, { stdio: [
-		"ignore",
-		"ignore",
-		"pipe"
-	] });
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
 }
 function asOwner({ uid, gid }) {
 	return [
@@ -18575,6 +18592,13 @@ function persistingWritablePaths(filesystemMode, writeThroughPaths, env) {
 		writablePaths: writeThroughPaths
 	});
 }
+function realpathOrSelf(path) {
+	try {
+		return (0, node_fs.realpathSync)(path);
+	} catch {
+		return path;
+	}
+}
 const realFindCommandDeps = {
 	isExecutable: (path) => {
 		try {
@@ -18586,19 +18610,16 @@ const realFindCommandDeps = {
 	readlink: (path) => {
 		try {
 			let target = (0, node_fs.readlinkSync)(path);
-			return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)((0, node_path.dirname)(path), target);
+			return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)(realpathOrSelf((0, node_path.dirname)(path)), target);
 		} catch {
 			return null;
 		}
 	},
-	realpathDir: (dir) => {
-		try {
-			return (0, node_fs.realpathSync)(dir);
-		} catch {
-			return dir;
-		}
-	}
+	realpathDir: realpathOrSelf
 };
+function withRealPaths(paths, realpath = realpathOrSelf) {
+	return [...new Set([...paths, ...paths.map(realpath)])];
+}
 function commandChain(candidate, readlink) {
 	let chain = [candidate], current = candidate;
 	for (let i = 0; i < 40; i++) {
@@ -18609,7 +18630,7 @@ function commandChain(candidate, readlink) {
 	return chain;
 }
 function findPinnableCommand(command, pathEnv, persisting, { isExecutable, readlink, realpathDir } = realFindCommandDeps) {
-	let optedOut = persisting.includes("/"), inside = (p) => persisting.some((w) => isAtOrUnder(p, w)), reachable = (hop) => inside(hop) || inside((0, node_path.join)(realpathDir((0, node_path.dirname)(hop)), (0, node_path.basename)(hop)));
+	let optedOut = persisting.includes("/"), writable = withRealPaths(persisting, realpathDir), inside = (p) => writable.some((w) => isAtOrUnder(p, w)), reachable = (hop) => inside(hop) || inside((0, node_path.join)(realpathDir((0, node_path.dirname)(hop)), (0, node_path.basename)(hop)));
 	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
 		if (!(0, node_path.isAbsolute)(dir)) continue;
 		let candidate = (0, node_path.join)(dir, command);
@@ -18637,7 +18658,7 @@ function dockerConfigDir(env) {
 	return env.DOCKER_CONFIG ? (0, node_path.resolve)(env.DOCKER_CONFIG) : env.HOME ? (0, node_path.join)(env.HOME, ".docker") : void 0;
 }
 function sandboxReadonlyHostDirs(persisting, env, actionRoot = ACTION_ROOT) {
-	return [actionRoot, dockerConfigDir(env)].filter((p) => !!p).filter((dir) => persisting.some((p) => isAtOrUnder(dir, p)) && !persisting.some((p) => isAtOrUnder(p, dir)));
+	return [actionRoot, dockerConfigDir(env)].filter((p) => !!p).filter((dir) => persisting.some((p) => isAtOrUnder(dir, p)) && !persisting.includes(dir));
 }
 function renameGuardDirs(readonlyDirs, persisting) {
 	let guards = new Set();
@@ -18957,7 +18978,10 @@ function writeEnvLoader(execDir) {
 //#region src/lib/sandbox/run.ts
 const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
 function defaultExecFile(command, args, options) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, options);
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		...options,
+		env: hostCommandEnv(command)
+	});
 }
 function defaultCopyScript(from, to) {
 	(0, node_fs.copyFileSync)(from, to), (0, node_fs.chmodSync)(to, 320);
@@ -19066,7 +19090,7 @@ function resolveIdentity(env, { resolveSandboxGid, info }) {
 function assembleBundle(dir, options, deps) {
 	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode, warn } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, env, warn, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
-		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = persistingWritablePaths(filesystemMode, writeThroughPaths, env), readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env), renameGuardDirs$1 = renameGuardDirs(readonlyHostDirs, persisting);
+		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)), readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env), renameGuardDirs$1 = renameGuardDirs(readonlyHostDirs, persisting);
 		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
 			mode: 448,
 			recursive: !0

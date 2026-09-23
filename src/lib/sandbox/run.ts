@@ -3,7 +3,7 @@ import { chmodSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { hostCommand } from "./pinned-commands.ts";
+import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 // rollup's cjs output doesn't convert import.meta.dirname (it silently
 // becomes undefined), so use this form instead.
@@ -39,7 +39,7 @@ export interface RunIsolatedDeps {
 // node:child_process what the tested caller assembled.
 /* v8 ignore start */
 function defaultExecFile(command: string, args: string[], options: ExecFileOptions): void {
-  execFileSync(hostCommand(command), args, options);
+  execFileSync(hostCommand(command), args, { ...options, env: hostCommandEnv(command) });
 }
 
 function defaultCopyScript(from: string, to: string): void {

@@ -323,7 +323,8 @@ runner user could not write outside the sandbox stays unwritable inside it.
 
 The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) and this action's own
 checkout stay read-only, since the action runs `docker` and its post script from them after the
-command exits. A command that writes docker config (`docker login`, `gcloud auth configure-docker`)
+command exits. The exceptions are a `write_through:` entry naming the directory itself, and
+`uses: ./`, whose checkout is the workspace. A command that writes docker config (`docker login`, `gcloud auth configure-docker`)
 needs a step of its own.
 
 > [!WARNING]

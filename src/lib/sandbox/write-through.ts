@@ -2,7 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join, isAbsolute, normalize } from "node:path";
 
-import { hostCommand } from "./pinned-commands.ts";
+import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 /** Env vars a write_through: entry may reference via $NAME/${NAME}. Not
  *  arbitrary env: a step's own `env:` block could otherwise smuggle a
@@ -178,7 +178,10 @@ function defaultStat(path: string): StatShape {
 }
 
 function defaultExecFile(command: string, args: string[]): void {
-  execFileSync(hostCommand(command), args, { stdio: ["ignore", "ignore", "pipe"] });
+  execFileSync(hostCommand(command), args, {
+    stdio: ["ignore", "ignore", "pipe"],
+    env: hostCommandEnv(command),
+  });
 }
 /* v8 ignore stop */
 
