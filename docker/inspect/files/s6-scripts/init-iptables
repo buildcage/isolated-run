@@ -7,10 +7,12 @@ PORT=10024
 # is looking at a handshake or a plain request. Nothing has to be declared as
 # one or the other, which is what lets an audit run record traffic it was never
 # configured for.
-# Port 53 is excluded; otherwise a resolver falling back to TCP (a truncated
-# answer, a large TXT or DNSSEC record) would be rewritten to the listener
-# and handed to the TLS/HTTP classifier, which cannot read a DNS query.
-iptables -t nat -A PREROUTING -i buildcage0 -p tcp ! --dport 53 -j REDIRECT --to-ports "$PORT"
+# A resolver falling back to TCP (a truncated answer, a large TXT or DNSSEC
+# record) goes to CoreDNS: the TLS/HTTP classifier cannot read a DNS query.
+# Only the gateway's own :53, so TCP to any other resolver is still redirected,
+# judged by allowed_ip_rules and logged.
+iptables -t nat -A PREROUTING -i buildcage0 -p tcp -d 172.20.0.1 --dport 53 -j RETURN
+iptables -t nat -A PREROUTING -i buildcage0 -p tcp -j REDIRECT --to-ports "$PORT"
 
 # Reaching the proxy and the resolver is all a step may do with the gateway.
 # lo carries the services' own readiness checks, and without the conntrack rule
