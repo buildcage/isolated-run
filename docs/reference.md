@@ -385,35 +385,32 @@ where the `Host` would have been.
 
 ### The ones nobody decided
 
-**Communication details** shows these with ⚠️ and the reason:
+A connection the client ended before it sent a whole request reached no rule and no origin, so it is
+in neither host table. **Communication details** shows it with ⚠️ and how it ended:
 
 ```
 ⚠️ 00:09.123: HTTPS untrusted-ca.example.com:443 -> client-aborted
 ⚠️ 00:11.407: HTTPS untrusted-ca.example.com:443 -> client-timeout
-⚠️ 00:13.500: HTTPS api.example.com:443 -> no-request
 ```
 
 | Reason           | What happened                                                                   |
 | ---------------- | ------------------------------------------------------------------------------- |
 | `client-aborted` | the client finished the TLS handshake and then closed without sending a request |
-| `client-timeout` | it held the connection open instead of closing it, until the timeout expired    |
-| `no-request`     | no request arrived, and neither the client nor a rule of Buildcage's ended it   |
+| `client-timeout` | it held the connection open instead, until the timeout expired                  |
 
-The commonest cause of the first two is a container with no `ca-certificates` installed: the client
-cannot verify the certificate Buildcage signs and gives up at that point. `no-request` is the rest:
-Buildcage's proxy running into an error of its own while still reading, and any other connection
-that carried no request and that neither of the first two explains. It is rare, and it is not the
-step's doing.
+The commonest cause is a container with no `ca-certificates`: the client cannot verify the
+certificate the `inspect` engine signs with, so every HTTPS request to that host ends at the
+handshake before a request arrives. The step's own output says so first, as a certificate
+verification error; installing `ca-certificates`, or otherwise letting the client trust the CA, is
+what lets the requests through. An `allowed_https_rules` entry changes nothing, the host having
+resolved and been dialled already.
 
-Such a row is in neither host table and never fails the step, not even with `fail_on_blocked: true`:
-no rule refused it, so `known_blocked_rules` has nothing to match, and nothing reached an origin. A
-`::warning::` annotation gives the count, since the collapsed details section is the only other place
-they appear.
-
-What clears one is the client, not a rule. Install `ca-certificates`, or whatever else kept the
-client from trusting the CA. An `allowed_https_rules` or `allowed_http_rules` entry changes nothing,
-there having been no host to match it against. If the host is one the step does need, its name
-usually also appears as a blocked `DNS` row, which is the row to act on.
+A close like this is shown only where its host completed no other connection. Where the same host
+also completed one, the close is a keepalive pool cleaning up after its work rather than a failure,
+so it is left out of Communication details as noise. The raw [traffic artifact](#traffic-artifact)
+keeps every one either way. Neither kind fails the step, not even with `fail_on_blocked: true`: no
+rule refused it, so `known_blocked_rules` has nothing to match, and nothing reached an origin. A
+`::warning::` annotation gives the count of those shown.
 
 ### The ones Buildcage refused
 

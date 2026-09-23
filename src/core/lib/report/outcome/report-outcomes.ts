@@ -1,5 +1,6 @@
 import type { OutcomeEmission } from "./annotate.ts";
 import { describeBlockedOutcome } from "./blocked-outcome.ts";
+import { clientEndedNoise } from "#core/lib/log/traffic-event.ts";
 import type { ReportData } from "../types.ts";
 
 export interface DescribeReportOutcomesOptions {
@@ -60,7 +61,12 @@ function describeUndecidedRequests(
   engineLabel: "sandbox" | "proxy",
 ): OutcomeEmission | undefined {
   if (report.engine !== "inspect") return undefined;
-  const count = report.timeline.filter((event) => event.action === "incomplete").length;
+  // The keepalive noise clientEndedNoise hides from Communication details is out
+  // of the count too, so the two stay in step.
+  const isNoise = clientEndedNoise(report.timeline);
+  const count = report.timeline.filter(
+    (event) => event.action === "incomplete" && !isNoise(event),
+  ).length;
   if (count === 0) return undefined;
   return {
     level: "warning",

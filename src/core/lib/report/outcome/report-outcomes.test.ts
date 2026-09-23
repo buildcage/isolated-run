@@ -38,13 +38,15 @@ function inspect(
   };
 }
 
+// A `no-request`, which the warning always counts. The client-ended tests below
+// build their events from it.
 const incomplete: TrafficEvent = {
   time: 1787471975,
   action: "incomplete",
   protocol: "https",
-  host: "untrusted-ca.example.com",
+  host: "api.example.com",
   port: 443,
-  reason: "client-aborted",
+  reason: "no-request",
   destination: "172.20.0.1:443",
 };
 
@@ -83,6 +85,33 @@ describe("describeReportOutcomes", () => {
     expect(outcomes[1].message.startsWith("2 request(s) buildcage proxy could not act on")).toBe(
       true,
     );
+  });
+
+  it("counts a client-ended close to a host that completed nothing, as it shows it", () => {
+    // Nothing else reached the host, so the close is kept and summarised.
+    const clientAborted: TrafficEvent = { ...incomplete, reason: "client-aborted" };
+    const outcomes = describeReportOutcomes(inspect([clientAborted]), options);
+    expect(outcomes.length).toBe(2);
+    expect(outcomes[1].level).toBe("warning");
+  });
+
+  it("leaves keepalive noise out of the count, as Communication details does", () => {
+    // The same host also completed a connection, so its close is only noise.
+    const completed: TrafficEvent = {
+      time: 1787471974,
+      action: "allow",
+      protocol: "https",
+      host: incomplete.host,
+      port: 443,
+      method: "GET",
+      url: `https://${incomplete.host}/pkg`,
+      status: 200,
+      bytes: 10,
+    };
+    const clientAborted: TrafficEvent = { ...incomplete, reason: "client-aborted" };
+    const outcomes = describeReportOutcomes(inspect([completed, clientAborted]), options);
+    expect(outcomes.length).toBe(1);
+    expect(outcomes[0].level).toBe("none");
   });
 
   it("never fails the step over one: no rule refused it and none can clear it", () => {

@@ -220,23 +220,86 @@ describe("renderInspectDetails", () => {
     expect(rendered).toMatch(/blocked/);
   });
 
-  it("marks a connection the client dropped, naming it by SNI and port", () => {
-    const rendered = renderInspectDetails(
+  it("keeps a client-ended connection to a host nothing else reached", () => {
+    // Nothing else reached this host, so the close is kept (see clientEndedNoise).
+    for (const reason of ["client-aborted", "client-timeout"]) {
+      const rendered = renderInspectDetails(
+        [
+          {
+            time: t,
+            action: "incomplete",
+            protocol: "https",
+            host: "untrusted.example.com",
+            port: 8443,
+            reason,
+          },
+        ],
+        t,
+      );
+      expect(rendered.includes(`HTTPS untrusted.example.com:8443 -> ${reason}`)).toBe(true);
+    }
+  });
+
+  it("hides a client-ended connection to a host that also completed one", () => {
+    // A keepalive pool cleaning up after its work is noise, not a failure.
+    for (const reason of ["client-aborted", "client-timeout"]) {
+      const md = renderInspectDetails(
+        [
+          {
+            time: t,
+            action: "allow",
+            protocol: "https",
+            host: "registry.example.com",
+            port: 443,
+            method: "GET",
+            url: "https://registry.example.com/pkg",
+            status: 200,
+            bytes: 10,
+          },
+          {
+            time: t + 1,
+            action: "incomplete",
+            protocol: "https",
+            host: "registry.example.com",
+            port: 443,
+            reason,
+          },
+        ],
+        t,
+      );
+      expect(md.includes(reason)).toBe(false);
+      expect(md.includes("GET https://registry.example.com/pkg")).toBe(true);
+    }
+  });
+
+  it("hides a client-ended close to a host whose only request failed at the origin", () => {
+    // A failed request still proves the client trusted the CA and a request
+    // arrived, so the later keepalive close to that host is noise too.
+    const md = renderInspectDetails(
       [
         {
           time: t,
+          action: "failed",
+          protocol: "https",
+          host: "cdn.example.com",
+          port: 443,
+          method: "GET",
+          url: "https://cdn.example.com/x.tgz",
+          reason: "origin-aborted",
+        },
+        {
+          time: t + 1,
           action: "incomplete",
           protocol: "https",
-          host: "a.example.com",
-          port: 8443,
+          host: "cdn.example.com",
+          port: 443,
           reason: "client-aborted",
         },
       ],
       t,
     );
-    expect(rendered.includes("⚠️ 00:00.000: HTTPS a.example.com:8443 -> client-aborted")).toBe(
-      true,
-    );
+    expect(md.includes("client-aborted")).toBe(false);
+    expect(md.includes("-> origin-aborted")).toBe(true);
   });
 
   it("marks a request the proxy could not read as the refusal it was", () => {

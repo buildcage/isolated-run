@@ -1,4 +1,9 @@
-import { connectedHosts, isRedundantDns, type TrafficEvent } from "#core/lib/log/traffic-event.ts";
+import {
+  clientEndedNoise,
+  connectedHosts,
+  isRedundantDns,
+  type TrafficEvent,
+} from "#core/lib/log/traffic-event.ts";
 import { formatElapsedVariable } from "../elapsed-time.ts";
 import { wrapCommunicationDetails } from "./communication-section.ts";
 
@@ -16,8 +21,12 @@ export function renderInspectDetails(
   timeline: TrafficEvent[],
   startedAt: number | undefined,
 ): string {
-  const connected = connectedHosts(timeline);
-  const shown = timeline.filter((e) => !isRedundantDns(e, connected));
+  // The keepalive noise clientEndedNoise marks is dropped here, before
+  // connectedHosts, so a hidden close cannot mask a name's other rows.
+  const isNoise = clientEndedNoise(timeline);
+  const relevant = timeline.filter((e) => !isNoise(e));
+  const connected = connectedHosts(relevant);
+  const shown = relevant.filter((e) => !isRedundantDns(e, connected));
   if (shown.length === 0) return "";
 
   const body = shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n";

@@ -126,7 +126,7 @@ const timeline: TrafficEvent[] = [
     queryType: "A",
     reason: "dns-not-allowed",
   },
-  // Neither table can hold this one, so the detail section is where it shows.
+  // Kept: nothing else reached this host, so its close shows (see clientEndedNoise).
   {
     time: 1787471979.123,
     action: "incomplete",

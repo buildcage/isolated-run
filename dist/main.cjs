@@ -19342,6 +19342,31 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 	};
 }
 //#endregion
+//#region src/core/lib/log/traffic-event.ts
+const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
+function clientEndedNoise(timeline) {
+	let completed = new Set();
+	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && completed.add(event.host.toLowerCase());
+	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "") && completed.has(event.host.toLowerCase());
+}
+function connectedHosts(timeline) {
+	let connected = {
+		any: new Set(),
+		blocked: new Set()
+	};
+	for (let event of timeline) {
+		if (event.protocol === "dns") continue;
+		let host = event.host.toLowerCase();
+		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
+	}
+	return connected;
+}
+function isRedundantDns(event, connected) {
+	if (event.protocol !== "dns" || event.action === "discovery") return !1;
+	let host = event.host.toLowerCase();
+	return event.action === "block" ? connected.blocked.has(host) : connected.any.has(host);
+}
+//#endregion
 //#region src/core/lib/report/outcome/report-outcomes.ts
 function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 	let emissions = [describeBlockedOutcome({
@@ -19359,7 +19384,7 @@ function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 }
 function describeUndecidedRequests(report, engineLabel) {
 	if (report.engine !== "inspect") return;
-	let count = report.timeline.filter((event) => event.action === "incomplete").length;
+	let isNoise = clientEndedNoise(report.timeline), count = report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
 	if (count !== 0) return {
 		level: "warning",
 		shouldFail: !1,
@@ -19492,25 +19517,6 @@ function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand, 
 	return restrictExampleBlock(yaml);
 }
 //#endregion
-//#region src/core/lib/log/traffic-event.ts
-function connectedHosts(timeline) {
-	let connected = {
-		any: new Set(),
-		blocked: new Set()
-	};
-	for (let event of timeline) {
-		if (event.protocol === "dns") continue;
-		let host = event.host.toLowerCase();
-		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
-	}
-	return connected;
-}
-function isRedundantDns(event, connected) {
-	if (event.protocol !== "dns" || event.action === "discovery") return !1;
-	let host = event.host.toLowerCase();
-	return event.action === "block" ? connected.blocked.has(host) : connected.any.has(host);
-}
-//#endregion
 //#region src/core/lib/report/elapsed-time.ts
 function toParts(elapsedSeconds) {
 	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
@@ -19541,7 +19547,7 @@ function wrapCommunicationDetails(body) {
 //#endregion
 //#region src/core/lib/report/render/inspect-details.ts
 function renderInspectDetails(timeline, startedAt) {
-	let connected = connectedHosts(timeline), shown = timeline.filter((e) => !isRedundantDns(e, connected));
+	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
 	return shown.length === 0 ? "" : wrapCommunicationDetails(`\`\`\`\n${shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n\n`);
 }
 const MARK = {

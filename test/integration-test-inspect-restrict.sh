@@ -154,9 +154,10 @@ if grep -qE 'DNS allowed\.example\.com ->' <<< "$SUMMARY"; then
 else
   pass "a name that merely resolved is left out of the timeline"
 fi
-# A connection the client left before sending a request. No rule decided it, so
-# it belongs in neither table and the timeline is the only place it can appear.
-# Its host is the SNI, the only name it ever gave.
+# A connection the client left before sending a request. No rule decided it and
+# nothing else reached this host, so its close is kept; it belongs in neither
+# table, and the timeline is the only place it can appear. Its host is the SNI,
+# the only name it ever gave.
 if grep -qE "⚠️ .*: HTTPS aborted\.example\.com:443 -> client-(aborted|timeout)$" <<< "$SUMMARY"; then
   pass "a connection the client left is in the timeline, with a mark of its own"
 else
