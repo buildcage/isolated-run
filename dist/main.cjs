@@ -19491,9 +19491,9 @@ function toRow(group) {
 function usesLine(actionRepo, actionRef, actionVersion) {
 	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
 }
-function restrictExampleBlock(yaml, { footnote } = {}) {
+function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
 	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "\n<details>\n";
-	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
+	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
 }
 //#endregion
 //#region src/core/lib/report/render/build-example.ts
@@ -19635,17 +19635,6 @@ function splitHostPort(authority) {
 		port: authority.slice(colon + 1)
 	};
 }
-function parseObservedUrl(url) {
-	let match = /^(https?):\/\/([^/?#]+)([^?#]*)/.exec(url);
-	if (!match) return null;
-	let [, scheme, authority, path] = match, { host, port } = splitHostPort(authority);
-	return {
-		scheme,
-		host,
-		port: port ?? DEFAULT_PORT[scheme],
-		path: path || "/"
-	};
-}
 //#endregion
 //#region src/core/lib/report/render/inspect-example.ts
 const METHOD_ORDER = [
@@ -19656,12 +19645,18 @@ const METHOD_ORDER = [
 	"PATCH",
 	"DELETE",
 	"OPTIONS"
-];
+], LITERAL_METHOD = /^[A-Z]+$/, LITERAL_HOST = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
 function parseRequest(request) {
-	if (request.url === void 0 || request.method === void 0) return null;
-	let parsed = parseObservedUrl(request.url);
-	if (!parsed) return null;
-	let { scheme, host, port, path } = parsed;
+	if (request.url === void 0 || request.method === void 0 || request.port === void 0) return null;
+	let match = /^(https?):\/\/([^/]*)([^?#]*)/.exec(request.url);
+	if (!match) return null;
+	let [, scheme, authority, target] = match, { host } = splitHostPort(authority), path = target || "/", part = LITERAL_METHOD.test(request.method) ? LITERAL_HOST.test(host) ? path.includes("*") ? "path" : void 0 : "host" : "method";
+	if (part) return {
+		method: request.method,
+		url: `${scheme}://${authority}${path}`,
+		part
+	};
+	let port = String(request.port);
 	return {
 		origin: port === DEFAULT_PORT[scheme] ? `${scheme}://${host}` : `${scheme}://${host}:${port}`,
 		method: request.method,
@@ -19692,12 +19687,21 @@ function sortMethods(methods) {
 		return ai !== -1 && bi !== -1 ? ai - bi : ai === -1 ? bi === -1 && a < b ? -1 : 1 : -1;
 	});
 }
-function buildUrlRuleLines(requests) {
-	let byOriginMethod = new Map();
+function partitionRequests(requests) {
+	let writable = [], leftOut = new Map();
 	for (let request of requests) {
 		if (request.action === "block") continue;
 		let parsed = parseRequest(request);
-		if (!parsed) continue;
+		parsed && ("part" in parsed ? leftOut.set(`${parsed.method} ${parsed.url}`, parsed) : writable.push(parsed));
+	}
+	return {
+		writable,
+		leftOut: [...leftOut.values()]
+	};
+}
+function ruleLinesFrom(requests) {
+	let byOriginMethod = new Map();
+	for (let parsed of requests) {
 		let key = `${parsed.origin}\t${parsed.method}`, group = byOriginMethod.get(key);
 		group ? group.paths.push(parsed.path) : byOriginMethod.set(key, {
 			origin: parsed.origin,
@@ -19716,9 +19720,26 @@ function buildUrlRuleLines(requests) {
 	}
 	return [...byPattern.values()].sort((a, b) => a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : a.pattern < b.pattern ? -1 : 1).map(({ origin, pattern, methods }) => `${sortMethods(methods).join("|")} ${origin}${pattern}`);
 }
+function leftOutSection(leftOut) {
+	let shown = leftOut.slice(0, 20), md = "Left out of the rules above: a rule would read part of each request as a pattern, and so permit more than was sent.\n\n";
+	return md += markdownTable([
+		{
+			key: "method",
+			title: "Method"
+		},
+		{
+			key: "url",
+			title: "URL"
+		},
+		{
+			key: "part",
+			title: "Read as a pattern"
+		}
+	], shown.map((r) => ({ ...r }))), md += "\n\n", leftOut.length > shown.length && (md += `…and ${leftOut.length - shown.length} more, listed in Communication details.\n\n`), md;
+}
 function buildInspectRestrictExample(requests, actionRepo, actionRef, { runCommand, actionVersion, allowedIpRules = [], allowedTlsRules = [] } = {}) {
-	let lines = buildUrlRuleLines(requests ?? []);
-	if (lines.length === 0 && allowedIpRules.length === 0 && allowedTlsRules.length === 0) return "";
+	let { writable, leftOut } = partitionRequests(requests ?? []), lines = ruleLinesFrom(writable);
+	if (lines.length === 0 && leftOut.length === 0 && allowedIpRules.length === 0 && allowedTlsRules.length === 0) return "";
 	let yaml = "- name: Start isolated-run\n";
 	if (yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", runCommand) {
 		yaml += "    run: |\n";
@@ -19736,7 +19757,10 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { runComma
 		yaml += "    allowed_ip_rules: |\n";
 		for (let rule of allowedIpRules) yaml += `      ${rule}\n`;
 	}
-	return restrictExampleBlock(yaml, { footnote: "Permits exactly what this build did; a versioned or dated URL may drift." });
+	return restrictExampleBlock(yaml, {
+		appendix: leftOut.length > 0 ? leftOutSection(leftOut) : void 0,
+		footnote: "Permits exactly what this build did; a versioned or dated URL may drift."
+	});
 }
 //#endregion
 //#region src/core/lib/report/render/render-report-markdown.ts

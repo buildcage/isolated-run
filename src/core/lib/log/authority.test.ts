@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { parseObservedUrl, splitHostPort } from "./authority.ts";
+import { splitHostPort } from "./authority.ts";
 
 describe("splitHostPort", () => {
   it("reports no port as undefined", () => {
@@ -38,52 +38,5 @@ describe("splitHostPort", () => {
   // the whole thing is treated as the host rather than as a bare port.
   it("does not split on a leading colon", () => {
     expect(splitHostPort(":443")).toStrictEqual({ host: ":443", port: undefined });
-  });
-});
-
-describe("parseObservedUrl", () => {
-  it("splits scheme, host, port and path", () => {
-    expect(parseObservedUrl("https://example.com:8443/pkg/a")).toStrictEqual({
-      scheme: "https",
-      host: "example.com",
-      port: "8443",
-      path: "/pkg/a",
-    });
-  });
-
-  it("fills in the port the scheme implies", () => {
-    expect(parseObservedUrl("http://example.com/x")?.port).toBe("80");
-    expect(parseObservedUrl("https://example.com/x")?.port).toBe("443");
-  });
-
-  it("reads a URL with no path as one on /", () => {
-    expect(parseObservedUrl("https://example.com")?.path).toBe("/");
-  });
-
-  it("ends the authority at a query, which a URL may carry without a path", () => {
-    expect(parseObservedUrl("https://example.com?q=1")).toStrictEqual({
-      scheme: "https",
-      host: "example.com",
-      port: "443",
-      path: "/",
-    });
-  });
-
-  it("drops the query from the path", () => {
-    expect(parseObservedUrl("https://example.com/pkg?q=1#frag")?.path).toBe("/pkg");
-  });
-
-  it("keeps an IPv6 literal whole", () => {
-    expect(parseObservedUrl("https://[::1]:8443/x")).toStrictEqual({
-      scheme: "https",
-      host: "[::1]",
-      port: "8443",
-      path: "/x",
-    });
-  });
-
-  it("returns null for anything that is not an http(s) URL", () => {
-    expect(parseObservedUrl("docker-image://docker.io/library/alpine:latest")).toBe(null);
-    expect(parseObservedUrl("example.com/x")).toBe(null);
   });
 });
