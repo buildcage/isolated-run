@@ -1,3 +1,4 @@
+import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
@@ -15,6 +16,7 @@ import {
 } from "#core/lib/report/outcome/annotate.ts";
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 import type { ProxyEngine } from "./engine.ts";
+import { hostCommand } from "./sandbox/pinned-commands.ts";
 
 export type Report = ReportData;
 export type { ProxyEngine };
@@ -31,14 +33,28 @@ const COREDNS_LOG_DIR = "/var/log/coredns";
  * proxy and resolver logs; which builder to call depends on which proxy image
  * ran.
  */
-// Untested by design: the log reader and both builders are tested directly.
+// Untested by design, down to fetchReport's end: the log reader and both
+// builders are tested directly, and this client only hands node:child_process
+// the pinned `docker` in place of the one createDocker would look up on PATH.
 /* v8 ignore start */
+function createHostDocker(): Docker {
+  return createDocker(
+    (args) =>
+      execFileSync(hostCommand("docker"), args, {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        maxBuffer: 64 * 1024 * 1024,
+      }),
+    (args) => spawn(hostCommand("docker"), args, { stdio: ["ignore", "pipe", "pipe"] }),
+  );
+}
+
 export function fetchReport(
   containerName: string,
   parameters: GenReportParameters,
   proxyEngine: ProxyEngine,
 ): Promise<Report> {
-  const docker = createDocker();
+  const docker = createHostDocker();
   if (proxyEngine === "inspect") {
     return buildInspectReportData(
       readRotatedLog(docker, containerName, HAPROXY_LOG_DIR),
@@ -69,7 +85,7 @@ export function readActionVersion(
   // Untested by design: the default behind the seam, which only builds the
   // client the tested caller would otherwise hand in.
   /* v8 ignore next */
-  const client = docker ?? createDocker();
+  const client = docker ?? createHostDocker();
   try {
     const label = client.readLabels(containerName)["org.opencontainers.image.version"];
     if (!label) return undefined;

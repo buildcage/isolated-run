@@ -237,6 +237,12 @@ function isLikelySlimRunner(_env = process.env, _exists = node_fs.existsSync) {
 //#region src/lib/errors.ts
 var SandboxError = class extends ActionError {};
 //#endregion
+//#region src/lib/sandbox/pinned-commands.ts
+const pinned = new Map();
+function hostCommand(command) {
+	return pinned.get(command) ?? command;
+}
+//#endregion
 //#region src/lib/container.ts
 const CONTAINER_NAME_PATTERN = /^buildcage-proxy-[0-9a-f]{8}$/;
 function isValidContainerName(name) {
@@ -260,7 +266,7 @@ function isContainerNotFoundError(e) {
 	let err = e && typeof e == "object" ? e : {}, text = `${err.stderr ?? ""} ${err.message ?? ""}`.toLowerCase();
 	return text.includes("no such object") || text.includes("no such container");
 }
-const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)("docker", args, {
+const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 	encoding: "utf8",
 	env,
 	stdio: [
@@ -361,7 +367,7 @@ function defaultReadMountinfo() {
 	return (0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8");
 }
 function defaultExec(command, args) {
-	(0, node_child_process.execFileSync)(command, args, { stdio: [
+	(0, node_child_process.execFileSync)(hostCommand(command), args, { stdio: [
 		"ignore",
 		"ignore",
 		"pipe"

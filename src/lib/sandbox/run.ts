@@ -1,6 +1,9 @@
 import { execFileSync } from "node:child_process";
+import { chmodSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { hostCommand } from "./pinned-commands.ts";
 
 // rollup's cjs output doesn't convert import.meta.dirname (it silently
 // becomes undefined), so use this form instead.
@@ -29,13 +32,20 @@ export interface RunIsolatedDeps {
   /** Throws on a non-zero exit, carrying it as `status`, the shape
    *  execFileSync already has, which is what the exit-code read below wants. */
   execFile?: (command: string, args: string[], options: ExecFileOptions) => void;
+  /** Copies `from` to `to` as a root-executable script. */
+  copyScript?: (from: string, to: string) => void;
 }
 
 // Untested by design: the default behind runIsolated's seam, which only hands
 // node:child_process what the tested caller assembled.
 /* v8 ignore start */
 function defaultExecFile(command: string, args: string[], options: ExecFileOptions): void {
-  execFileSync(command, args, options);
+  execFileSync(hostCommand(command), args, options);
+}
+
+function defaultCopyScript(from: string, to: string): void {
+  copyFileSync(from, to);
+  chmodSync(to, 0o500);
 }
 /* v8 ignore stop */
 
@@ -69,9 +79,14 @@ export function runIsolated(
     targetIp,
     envBlob,
   }: RunIsolatedOptions,
-  { execFile = defaultExecFile }: RunIsolatedDeps = {},
+  { execFile = defaultExecFile, copyScript = defaultCopyScript }: RunIsolatedDeps = {},
 ): number {
-  const runIsolatedShPath = join(__dirname, "..", "scripts", "run-isolated.sh");
+  // Run from a copy in the bundle dir, which the sandbox cannot see, rather
+  // than from the action's own checkout: bash reads a script as it goes, and
+  // the checkout can sit under a path the command may write to while this
+  // script is still running as root around it.
+  const runIsolatedShPath = join(bundleDir, "run-isolated.sh");
+  copyScript(join(__dirname, "..", "scripts", "run-isolated.sh"), runIsolatedShPath);
 
   const args = [
     "-n",

@@ -67,6 +67,9 @@ export interface BuildOciConfigOptions {
    *  universal engine, which never terminates TLS and so has no CA to
    *  distribute. */
   caTrust?: CaTrustFiles;
+  /** Host directories the sandbox sees read-only whatever the writable layers
+   *  say; see host-commands.ts's sandboxReadonlyHostDirs. */
+  readonlyHostDirs?: string[];
 }
 
 /**
@@ -83,7 +86,15 @@ export interface BuildOciConfigOptions {
  */
 export function buildOciConfig(
   baseSpec: OciSpec,
-  { identity, writable, ephemeral, runtime, env, caTrust }: BuildOciConfigOptions,
+  {
+    identity,
+    writable,
+    ephemeral,
+    runtime,
+    env,
+    caTrust,
+    readonlyHostDirs = [],
+  }: BuildOciConfigOptions,
   probes: HostProbes = realHostProbes,
 ): BuiltOciSpec {
   const { uid, gid } = identity;
@@ -188,7 +199,9 @@ export function buildOciConfig(
       namespaces,
       seccomp: seccompProfile,
       maskedPaths,
-      readonlyPaths,
+      // runc applies these after every mount above, so they win over a
+      // writable layer containing them, `write_through: /` included.
+      readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostDirs])],
     },
   };
 }

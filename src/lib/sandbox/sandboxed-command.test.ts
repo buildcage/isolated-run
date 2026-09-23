@@ -190,6 +190,28 @@ describe("runSandboxedCommand", () => {
     });
   });
 
+  it("keeps the docker CLI's config directory read-only, creating it first", () => {
+    runSandboxedCommand(options(), deps);
+
+    expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostDirs).toStrictEqual([
+      "/home/runner/.docker",
+    ]);
+    expect(mocks.mkdir).toHaveBeenCalledWith("/home/runner/.docker", {
+      mode: 0o700,
+      recursive: true,
+    });
+  });
+
+  it("leaves it writable in ephemeral mode, where no write_through reaches it", () => {
+    runSandboxedCommand(
+      options({ filesystemMode: "ephemeral", overlayRoots: ["/home/runner"] }),
+      deps,
+    );
+
+    expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostDirs).toStrictEqual([]);
+    expect(mocks.mkdir).not.toHaveBeenCalledWith("/home/runner/.docker", expect.anything());
+  });
+
   it("says so when the runner's primary group forced a GID substitution", () => {
     mocks.resolveSandboxGid.mockReturnValue({ gid: 65534, substitutedFrom: 118 });
 

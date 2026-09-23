@@ -17,6 +17,7 @@ const mocks = {
   checkOverlayfsSupport: vi.fn(),
   createAnnotation: vi.fn(),
   resolveFilesystemPlan: vi.fn(),
+  pinHostCommands: vi.fn(),
   readLocalImageOverride: vi.fn(),
   verifyImageDigestOrThrow: vi.fn(),
   checkUrlAndTlsRuleSupport: vi.fn(),
@@ -122,6 +123,33 @@ describe("runSandboxStep", () => {
       overlayRoots: ["/home/runner"],
       writeThroughPaths: ["/home/runner/work/repo/repo/dist"],
     });
+  });
+
+  it("pins docker and sudo outside what the command can write, before it starts", async () => {
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.pinHostCommands).toHaveBeenCalledWith(
+      ["/home/runner/work/repo/repo", "/home/runner", "/tmp"],
+      ENV,
+    );
+    expect(orderOf(mocks.resolveFilesystemPlan)).toBeLessThan(orderOf(mocks.pinHostCommands));
+    expect(orderOf(mocks.pinHostCommands)).toBeLessThan(orderOf(mocks.startSandboxProxy));
+  });
+
+  it("pins against only the write_through paths in ephemeral mode", async () => {
+    mocks.readFilesystemInputs.mockReturnValue({
+      filesystemMode: "ephemeral",
+      writeThroughInput: "./dist",
+    });
+    mocks.resolveFilesystemPlan.mockReturnValue({
+      overlayRoots: ["/home/runner"],
+      writeThroughPaths: ["/home/runner/work/repo/repo/dist"],
+      createdDirs: [],
+    });
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.pinHostCommands).toHaveBeenCalledWith(["/home/runner/work/repo/repo/dist"], ENV);
   });
 
   // A plain input mistake must not cost the caller a sudo/unshare/mount probe
@@ -361,6 +389,16 @@ describe("runSandboxStep", () => {
       mocks.verifyImageDigestOrThrow.mockRejectedValue(new Error("no signature found"));
 
       await expect(runSandboxStep(ENV, deps)).rejects.toThrow("no signature found");
+      expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+      expect(mocks.removeCreatedDirsIfEmpty).toHaveBeenCalledWith(CREATED_DIRS);
+    });
+
+    it("gives them back when docker or sudo cannot be pinned", async () => {
+      mocks.pinHostCommands.mockImplementation(() => {
+        throw new SandboxError("no docker", "HOST_COMMAND_UNPINNABLE");
+      });
+
+      await expect(runSandboxStep(ENV, deps)).rejects.toThrow("no docker");
       expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
       expect(mocks.removeCreatedDirsIfEmpty).toHaveBeenCalledWith(CREATED_DIRS);
     });

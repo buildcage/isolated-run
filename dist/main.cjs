@@ -17684,7 +17684,7 @@ function checkKnownBlockedUrlRuleSupport({ proxyEngine, proxyMode, knownBlockedU
 }
 //#endregion
 //#region src/lib/compose-file.ts
-const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$2, "../docker/compose.action.yaml");
+const __dirname$3 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$3, "../docker/compose.action.yaml");
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
 }
@@ -17709,6 +17709,15 @@ function describeDockerFailure(e, { operation = "docker", env = process.env, exi
 }
 function isLikelySlimRunner(_env = process.env, _exists = node_fs.existsSync) {
 	return _env.ImageOS === "Linux" && _exists("/run/.containerenv");
+}
+//#endregion
+//#region src/lib/sandbox/pinned-commands.ts
+const pinned = new Map();
+function hostCommand(command) {
+	return pinned.get(command) ?? command;
+}
+function pinCommand(command, path) {
+	pinned.set(command, path);
 }
 //#endregion
 //#region src/lib/container.ts
@@ -17741,7 +17750,7 @@ function isContainerNotFoundError(e) {
 	let err = e && typeof e == "object" ? e : {}, text = `${err.stderr ?? ""} ${err.message ?? ""}`.toLowerCase();
 	return text.includes("no such object") || text.includes("no such container");
 }
-const captureDockerViaExec$1 = (args, env) => (0, node_child_process.execFileSync)("docker", args, {
+const captureDockerViaExec$1 = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 	encoding: "utf8",
 	env,
 	stdio: [
@@ -17858,7 +17867,7 @@ function defaultReadMountinfo() {
 	return (0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8");
 }
 function defaultExec$2(command, args) {
-	(0, node_child_process.execFileSync)(command, args, { stdio: [
+	(0, node_child_process.execFileSync)(hostCommand(command), args, { stdio: [
 		"ignore",
 		"ignore",
 		"pipe"
@@ -18056,7 +18065,7 @@ function defaultStat(path) {
 	};
 }
 function defaultExecFile$1(command, args) {
-	(0, node_child_process.execFileSync)(command, args, { stdio: [
+	(0, node_child_process.execFileSync)(hostCommand(command), args, { stdio: [
 		"ignore",
 		"ignore",
 		"pipe"
@@ -18290,7 +18299,7 @@ const SYSTEM_CA_CANDIDATES = [
 	"/etc/ssl/cert.pem"
 ], OWN_CA_DESTINATION = "/etc/buildcage-ca.pem";
 function defaultExec$1(command, args) {
-	(0, node_child_process.execFileSync)(command, args);
+	(0, node_child_process.execFileSync)(hostCommand(command), args);
 }
 function defaultReadFile$1(path) {
 	return (0, node_fs.readFileSync)(path, "utf8");
@@ -18556,15 +18565,59 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	}
 }
 //#endregion
+//#region src/lib/sandbox/host-commands.ts
+const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), ACTION_ROOT = (0, node_path.resolve)(__dirname$2, ".."), PINNED_COMMANDS = ["docker", "sudo"];
+function persistingWritablePaths(filesystemMode, writeThroughPaths, env) {
+	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
+		workdir: env.GITHUB_WORKSPACE,
+		home: env.HOME,
+		runnerTemp: env.RUNNER_TEMP,
+		writablePaths: writeThroughPaths
+	});
+}
+const realFindCommandDeps = {
+	isExecutable: (path) => {
+		try {
+			return (0, node_fs.accessSync)(path, node_fs.constants.X_OK), !0;
+		} catch {
+			return !1;
+		}
+	},
+	realpath: (path) => (0, node_fs.realpathSync)(path)
+};
+function findPinnableCommand(command, pathEnv, persisting, { isExecutable, realpath } = realFindCommandDeps) {
+	let optedOut = persisting.includes("/");
+	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
+		if (!(0, node_path.isAbsolute)(dir)) continue;
+		let candidate = (0, node_path.join)(dir, command);
+		if (!isExecutable(candidate)) continue;
+		let real = realpath(candidate);
+		if (optedOut || !persisting.some((p) => isAtOrUnder(real, p))) return real;
+	}
+}
+function pinHostCommands(persisting, env, deps = realFindCommandDeps) {
+	for (let command of PINNED_COMMANDS) {
+		let path = findPinnableCommand(command, env.PATH, persisting, deps);
+		if (!path) throw new SandboxError(`No '${command}' found on PATH outside the paths the sandboxed command can write to (${persisting.join(", ")}). This step runs it after the command exits, so it has to live somewhere the command cannot replace it.`, "HOST_COMMAND_UNPINNABLE");
+		pinCommand(command, path);
+	}
+}
+function dockerConfigDir(env) {
+	return env.DOCKER_CONFIG ? (0, node_path.resolve)(env.DOCKER_CONFIG) : env.HOME ? (0, node_path.join)(env.HOME, ".docker") : void 0;
+}
+function sandboxReadonlyHostDirs(persisting, env, actionRoot = ACTION_ROOT) {
+	return [actionRoot, dockerConfigDir(env)].filter((p) => !!p).filter((dir) => persisting.some((p) => isAtOrUnder(dir, p)) && !persisting.some((p) => isAtOrUnder(p, dir)));
+}
+//#endregion
 //#region src/lib/sandbox/runc-bootstrap.ts
 function generateBaseOciSpec(runcPath, bundleDir, { execIn = defaultExecIn, readFile = defaultReadFile } = {}) {
 	return execIn(runcPath, ["spec"], bundleDir), JSON.parse(readFile((0, node_path.join)(bundleDir, "config.json")));
 }
 function defaultExec(command, args) {
-	return (0, node_child_process.execFileSync)(command, args, { encoding: "utf8" });
+	return (0, node_child_process.execFileSync)(hostCommand(command), args, { encoding: "utf8" });
 }
 function defaultExecIn(command, args, cwd) {
-	(0, node_child_process.execFileSync)(command, args, { cwd });
+	(0, node_child_process.execFileSync)(hostCommand(command), args, { cwd });
 }
 function defaultReadFile(path) {
 	return (0, node_fs.readFileSync)(path, "utf8");
@@ -18703,7 +18756,7 @@ function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, uid, env, h
 }
 //#endregion
 //#region src/lib/sandbox/oci-config.ts
-function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust }, probes = realHostProbes) {
+function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostDirs = [] }, probes = realHostProbes) {
 	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
 		destination: RESOLV_CONF_DESTINATION,
 		type: "none",
@@ -18770,7 +18823,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 			namespaces,
 			seccomp: seccompProfile,
 			maskedPaths,
-			readonlyPaths
+			readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostDirs])]
 		}
 	};
 }
@@ -18859,13 +18912,18 @@ function writeEnvLoader(execDir) {
 //#region src/lib/sandbox/run.ts
 const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
 function defaultExecFile(command, args, options) {
-	(0, node_child_process.execFileSync)(command, args, options);
+	(0, node_child_process.execFileSync)(hostCommand(command), args, options);
 }
-function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, dns, targetIp, envBlob }, { execFile = defaultExecFile } = {}) {
+function defaultCopyScript(from, to) {
+	(0, node_fs.copyFileSync)(from, to), (0, node_fs.chmodSync)(to, 320);
+}
+function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, dns, targetIp, envBlob }, { execFile = defaultExecFile, copyScript = defaultCopyScript } = {}) {
+	let runIsolatedShPath = (0, node_path.join)(bundleDir, "run-isolated.sh");
+	copyScript((0, node_path.join)(__dirname$1, "..", "scripts", "run-isolated.sh"), runIsolatedShPath);
 	let args = [
 		"-n",
 		"--",
-		(0, node_path.join)(__dirname$1, "..", "scripts", "run-isolated.sh"),
+		runIsolatedShPath,
 		"--proxy-netns",
 		proxyNetns,
 		"--runc",
@@ -18963,7 +19021,11 @@ function resolveIdentity(env, { resolveSandboxGid, info }) {
 function assembleBundle(dir, options, deps) {
 	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode, warn } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, env, warn, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
-		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts();
+		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), readonlyHostDirs = sandboxReadonlyHostDirs(persistingWritablePaths(filesystemMode, writeThroughPaths, env), env);
+		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
+			mode: 448,
+			recursive: !0
+		});
 		config = buildOciConfig(baseSpec, {
 			identity: resolveIdentity(env, deps),
 			writable: {
@@ -18987,7 +19049,8 @@ function assembleBundle(dir, options, deps) {
 				hostMounts
 			},
 			env,
-			caTrust
+			caTrust,
+			readonlyHostDirs
 		});
 	} catch (e) {
 		throw e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
@@ -19060,7 +19123,7 @@ function describeContainerStartFailure(state, { role, containerName }) {
 }
 //#endregion
 //#region src/lib/proxy-lifecycle.ts
-const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)("docker", args, {
+const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 	encoding: "utf8",
 	env,
 	stdio: [
@@ -19069,7 +19132,7 @@ const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)
 		"pipe"
 	]
 }), printDockerViaExec = (args, env) => {
-	(0, node_child_process.execFileSync)("docker", args, {
+	(0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 		stdio: "inherit",
 		env
 	});
@@ -20108,12 +20171,27 @@ function applyOutcomeAnnotations(annotation, emissions) {
 //#endregion
 //#region src/lib/report.ts
 const HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
+function createHostDocker() {
+	return createDocker((args) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		maxBuffer: 67108864
+	}), (args) => (0, node_child_process.spawn)(hostCommand("docker"), args, { stdio: [
+		"ignore",
+		"pipe",
+		"pipe"
+	] }));
+}
 function fetchReport(containerName, parameters, proxyEngine) {
-	let docker = createDocker();
+	let docker = createHostDocker();
 	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters);
 }
 function readActionVersion(containerName, proxyEngine, docker) {
-	let client = docker ?? createDocker();
+	let client = docker ?? createHostDocker();
 	try {
 		let label = client.readLabels(containerName)["org.opencontainers.image.version"];
 		if (!label) return;
@@ -65208,6 +65286,7 @@ const realDeps = {
 	checkOverlayfsSupport,
 	createAnnotation,
 	resolveFilesystemPlan,
+	pinHostCommands,
 	readLocalImageOverride,
 	verifyImageDigestOrThrow,
 	checkUrlAndTlsRuleSupport,
@@ -65245,7 +65324,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, removeCreatedDirsIfEmpty, saveState, info, log, notice, warn } = {
+	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, removeCreatedDirsIfEmpty, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF || "v1", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs();
@@ -65255,6 +65334,7 @@ async function runSandboxStep(env, overrides = {}) {
 	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), { overlayRoots, writeThroughPaths, createdDirs } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env);
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
 	try {
+		pinHostCommands(persistingWritablePaths(filesystemMode, writeThroughPaths, env), env);
 		let localOverride = await readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
 			actionRef,
 			actionRepo,

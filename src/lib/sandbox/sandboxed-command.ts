@@ -15,6 +15,7 @@ import {
   writeJvmKeystoreFiles,
   type CaTrustFiles,
 } from "./ca-trust.ts";
+import { persistingWritablePaths, sandboxReadonlyHostDirs } from "./host-commands.ts";
 import { resolveSandboxGid } from "./identity.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import { buildOciConfig, type SandboxIdentity } from "./oci-config.ts";
@@ -57,7 +58,7 @@ export interface RunSandboxedCommandDeps {
   resolveSandboxEnv: typeof resolveSandboxEnv;
   buildEnvBlob: typeof buildEnvBlob;
   runIsolated: typeof runIsolated;
-  mkdir: (path: string, options: { mode: number }) => void;
+  mkdir: (path: string, options: { mode: number; recursive?: boolean }) => void;
   info: (message: string) => void;
 }
 
@@ -251,6 +252,14 @@ export function assembleBundle(
     // alone only covers the top-level rootfs mount (see
     // computeReadonlyHostMounts).
     const hostMounts = listHostMounts();
+    const readonlyHostDirs = sandboxReadonlyHostDirs(
+      persistingWritablePaths(filesystemMode, writeThroughPaths, env),
+      env,
+    );
+    // The docker CLI creates its config directory on first write, which could
+    // otherwise be the sandboxed command's; runc skips a read-only path that
+    // doesn't exist.
+    for (const dir of readonlyHostDirs) deps.mkdir(dir, { mode: 0o700, recursive: true });
     config = buildOciConfig(baseSpec, {
       identity: resolveIdentity(env, deps),
       writable: {
@@ -277,6 +286,7 @@ export function assembleBundle(
       },
       env,
       caTrust,
+      readonlyHostDirs,
     });
   } catch (e) {
     // A step in here that already speaks to the user keeps its own words:

@@ -444,6 +444,18 @@ describe("buildOciConfig", () => {
     });
   });
 
+  describe("the action's own host directories", () => {
+    it("adds them to readonlyPaths, which runc applies over every writable layer", () => {
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        readonlyHostDirs: ["/home/runner/.docker", "/home/runner/work/_actions/x/y/v1"],
+      });
+      expect(config.linux.readonlyPaths).toEqual(
+        expect.arrayContaining(["/home/runner/.docker", "/home/runner/work/_actions/x/y/v1"]),
+      );
+    });
+  });
+
   describe("the scratch base, which nothing may make writable", () => {
     it("does not mount anything over rootfsBindDir (it lives under the scratch base, so nothing re-exposes it)", () => {
       const config = build(fakeBaseSpec(), {
@@ -580,6 +592,15 @@ describe("buildOciConfig", () => {
       expect(config.root.readonly).toBe(false);
       const rw = config.mounts.filter((m) => m.options?.includes("rw"));
       expect(rw.length).toBe(0);
+    });
+
+    it("`writable: /` still keeps the action's own host directories read-only", () => {
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/"] },
+        readonlyHostDirs: ["/home/runner/.docker"],
+      });
+      expect(config.linux.readonlyPaths).toContain("/home/runner/.docker");
     });
 
     it("`writable: /` skips the host-mount readonly pass entirely", () => {

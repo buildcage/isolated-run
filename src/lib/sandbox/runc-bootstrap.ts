@@ -3,6 +3,7 @@ import { readFileSync, chmodSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 import type { OciSpec } from "./types.ts";
+import { hostCommand } from "./pinned-commands.ts";
 
 /**
  * Generate runc's own default OCI bundle config via `runc spec` (run in
@@ -39,11 +40,11 @@ export interface RuncBootstrapDeps {
 // node:fs and node:child_process what the tested caller decided.
 /* v8 ignore start */
 function defaultExec(command: string, args: string[]): string {
-  return execFileSync(command, args, { encoding: "utf8" });
+  return execFileSync(hostCommand(command), args, { encoding: "utf8" });
 }
 
 function defaultExecIn(command: string, args: string[], cwd: string): void {
-  execFileSync(command, args, { cwd });
+  execFileSync(hostCommand(command), args, { cwd });
 }
 
 function defaultReadFile(path: string): string {

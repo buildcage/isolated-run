@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { describeDockerFailure, type DockerErrorLike } from "#core/lib/actions/docker-error.ts";
 import type { RunDocker } from "#core/lib/docker/client.ts";
 import { SandboxError } from "./errors.ts";
+import { hostCommand } from "./sandbox/pinned-commands.ts";
 
 const CONTAINER_NAME_PREFIX = "buildcage-proxy-";
 
@@ -103,7 +104,11 @@ export interface ContainerInspectOptions {
 // execFileSync what the tested caller decided.
 /* v8 ignore start */
 const captureDockerViaExec: RunDocker = (args, env) =>
-  execFileSync("docker", args, { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
+  execFileSync(hostCommand("docker"), args, {
+    encoding: "utf8",
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 /* v8 ignore stop */
 
 /**
