@@ -127,7 +127,7 @@ assert_summary_contains "DNS secret-in-a-name.attacker.example -> dns-not-allowe
 # away by writing a rule. The resolver records it under a verb of its own
 # instead. An invented name under the same zone is judged like any other, or
 # appending `.in-addr.arpa` would be a way out of the report.
-if grep -qF "1.0.20.172.in-addr.arpa" <<< "$SUMMARY"; then
+if grep -qF "1.255.19.198.in-addr.arpa" <<< "$SUMMARY"; then
   fail "a reverse lookup reached the report"
 else
   pass "a reverse lookup is left out of the report entirely"

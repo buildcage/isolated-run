@@ -38,7 +38,7 @@ import { PROXY_ADDRESS } from "#core/lib/log/proxy-address.ts";
  * proxy is the sandbox's default gateway and its only nameserver, and its own
  * INPUT rules accept nothing else on that interface (see init-iptables).
  */
-const SANDBOX_IP = "172.20.0.101";
+const SANDBOX_IP = "198.19.255.101";
 
 /**
  * The steps this function sequences. Declared rather than imported straight

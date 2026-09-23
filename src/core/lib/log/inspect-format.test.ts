@@ -11,7 +11,7 @@ const OPTIONS = {
   ipRules: ["10.0.0.5:5432"],
   tlsRules: ["db.example.com:443"],
   resolverAddress: ["1.1.1.1"],
-  proxyAddress: "172.20.0.1",
+  proxyAddress: "198.19.255.1",
 };
 
 /** Long enough that the rendered line runs past haproxy's own 1024-byte default. */
@@ -350,7 +350,7 @@ describe("the generated log-format and this parser describe the same line", () =
       const line = render(stage, {
         ...NO_REQUEST,
         "%ts": "CR",
-        "%[dst]": "172.20.0.1",
+        "%[dst]": "198.19.255.1",
         "%[ssl_fc_sni,regsub([^A-Za-z0-9._-],_,g)]": "-",
       });
       const { events, unparsed } = await scanInspectLog([line]);
@@ -360,7 +360,7 @@ describe("the generated log-format and this parser describe the same line", () =
       expect(e.protocol).toBe(stage === HTTP ? "http" : "https");
       expect(e.host).toBe("(unknown)");
       // Still recorded; it is just not a host the build asked for.
-      expect(e.destination).toBe("172.20.0.1:9443");
+      expect(e.destination).toBe("198.19.255.1:9443");
     }
   });
 

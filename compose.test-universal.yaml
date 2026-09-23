@@ -47,7 +47,6 @@ networks:
     name: buildcage-test-universal-net${BUILDCAGE_WORKTREE_SUFFIX:-}
     ipam:
       config:
-        # Pinned rather than auto-assigned: Docker's pool includes
-        # 172.20.0.0/16, which collides with the proxy's own bridge inside its
-        # netns.
+        # Pinned rather than auto-assigned: test-net-addr finds the interface
+        # by it.
         - subnet: ${TEST_NET_SUBNET:-10.210.0.0/24}

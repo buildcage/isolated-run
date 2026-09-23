@@ -35,7 +35,7 @@ mkdir -p "$BUNDLE_DIR"
 (cd "$BUNDLE_DIR" && runc spec)
 gen-seccomp-profile > "$BUNDLE_DIR/seccomp.json"
 
-printf 'nameserver 172.20.0.1\n' > "$BUNDLE_DIR/resolv.conf"
+printf 'nameserver 198.19.255.1\n' > "$BUNDLE_DIR/resolv.conf"
 
 jq \
   --arg netnsPath "/var/run/netns/${NETNS_NAME}" \

@@ -103,9 +103,9 @@ describe("runSandboxedCommand", () => {
     runSandboxedCommand(options(), deps);
 
     expect(mocks.runIsolated.mock.calls[0][0]).toMatchObject({
-      gateway: "172.20.0.1",
-      dns: "172.20.0.1",
-      targetIp: "172.20.0.101",
+      gateway: "198.19.255.1",
+      dns: "198.19.255.1",
+      targetIp: "198.19.255.101",
     });
   });
 
@@ -332,7 +332,7 @@ describe("assembleBundle", () => {
   it("points the sandbox's resolver at the proxy", () => {
     assembleBundle(SCRATCH, options(), deps);
 
-    expect(mocks.writeResolvConf).toHaveBeenCalledWith("172.20.0.1", SCRATCH);
+    expect(mocks.writeResolvConf).toHaveBeenCalledWith("198.19.255.1", SCRATCH);
   });
 
   it("hands back the CA trust files the inspect engine needs, for the caller to pass on", () => {

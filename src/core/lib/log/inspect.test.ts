@@ -435,7 +435,7 @@ describe("a request whose target is not a path", () => {
     const [byAddress, onOtherPort, byProxy] = await parse([
       line("1.2.3.4:80"),
       line("1.2.3.4:8080"),
-      line("172.20.0.1:80"),
+      line("198.19.255.1:80"),
     ]);
     expect(byAddress.url).toBe("http://1.2.3.4/x");
     expect(onOtherPort.url).toBe("http://1.2.3.4:8080/x");

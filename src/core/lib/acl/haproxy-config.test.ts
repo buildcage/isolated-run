@@ -28,7 +28,7 @@ const FULL = {
   ipRules: ["10.0.0.5:5432"],
   tlsRules: ["db.example.com:443"],
   resolverAddress: ["1.1.1.1", "8.8.8.8"],
-  proxyAddress: "172.20.0.1",
+  proxyAddress: "198.19.255.1",
 };
 
 // Each of the directives these cases name still lets ordinary traffic through
@@ -269,9 +269,9 @@ describe("the internal-address guard", () => {
   });
 
   it("includes the proxy's own address in the internal set, against a loop", () => {
-    // gateway.example.com -> 172.20.0.1 (the proxy) made it connect to itself.
+    // gateway.example.com -> 198.19.255.1 (the proxy) made it connect to itself.
     const acl = FULL_CONFIG.split("\n").find((l) => l.includes("acl dst_internal"))!;
-    expect(acl.trim().endsWith("172.20.0.1")).toBe(true);
+    expect(acl.trim().endsWith("198.19.255.1")).toBe(true);
   });
 
   it("extends the internal set with the runner's own addresses, as a second acl of the same name", () => {
@@ -337,7 +337,7 @@ describe("the internal-address guard", () => {
     const acl = FULL_CONFIG.split("\n").find((l) => l.includes("acl dst_internal"))!;
     expect(acl.includes("1.1.1.1")).toBe(false);
     expect(acl.includes("8.8.8.8")).toBe(false);
-    expect(acl.trim().endsWith("172.20.0.1")).toBe(true);
+    expect(acl.trim().endsWith("198.19.255.1")).toBe(true);
   });
 });
 

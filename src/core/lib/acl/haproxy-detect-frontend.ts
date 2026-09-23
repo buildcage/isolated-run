@@ -26,7 +26,7 @@ export function detectFrontend(spec: DetectFrontendSpec): string[] {
   const { listenPort, tlsStagePort, plainStagePort, ipRules, tlsHosts, hasResolver, proxyAddress } =
     spec;
   // Every name resolves to the proxy's own address, so an IP rule covering it
-  // (`172.16.0.0/12:443`) would pass every named connection through
+  // (`198.18.0.0/15:443`) would pass every named connection through
   // uninspected, to an origin that is the proxy itself.
   const excludeDnsRouted = ipRules.length > 0 && proxyAddress !== undefined;
   const notDnsRouted = excludeDnsRouted ? " !dns_routed" : "";

@@ -11,7 +11,7 @@ PORT=10024
 # record) goes to CoreDNS: the TLS/HTTP classifier cannot read a DNS query.
 # Only the gateway's own :53, so TCP to any other resolver is still redirected,
 # judged by allowed_ip_rules and logged.
-iptables -t nat -A PREROUTING -i buildcage0 -p tcp -d 172.20.0.1 --dport 53 -j RETURN
+iptables -t nat -A PREROUTING -i buildcage0 -p tcp -d 198.19.255.1 --dport 53 -j RETURN
 iptables -t nat -A PREROUTING -i buildcage0 -p tcp -j REDIRECT --to-ports "$PORT"
 
 # Reaching the proxy and the resolver is all a step may do with the gateway.

@@ -19628,7 +19628,7 @@ function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, 
 }
 //#endregion
 //#region src/core/lib/log/proxy-address.ts
-const PROXY_ADDRESS = "172.20.0.1";
+const PROXY_ADDRESS = "198.19.255.1";
 //#endregion
 //#region src/lib/sandbox/sandboxed-command.ts
 init_core();
@@ -19753,7 +19753,7 @@ function runSandboxedCommand(options, overrides = {}) {
 			rootfsBindDir,
 			gateway: PROXY_ADDRESS,
 			dns: PROXY_ADDRESS,
-			targetIp: "172.20.0.101"
+			targetIp: "198.19.255.101"
 		});
 	}, {
 		containerName,
@@ -20621,7 +20621,7 @@ function hostBeforeRequest(sni, address) {
 	return sni !== void 0 && sni !== "-" ? {
 		host: sni,
 		byAddress: !1
-	} : address === "172.20.0.1" ? {
+	} : address === "198.19.255.1" ? {
 		host: "(unknown)",
 		byAddress: !1
 	} : {

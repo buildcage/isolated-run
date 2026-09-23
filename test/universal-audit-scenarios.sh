@@ -97,7 +97,7 @@ echo "  request sent (blocked expected in the report)"
 # reply opens with its length, then the query's own id.]
 echo "=== [DNS over TCP] ==="
 ANSWER=$(timeout 5 bash -c '
-  exec 3<>/dev/tcp/172.20.0.1/53 || exit 1
+  exec 3<>/dev/tcp/198.19.255.1/53 || exit 1
   printf "\x00\x1d\xab\xcd\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01" >&3
   head -c 4 <&3 | od -An -tx1' 2>/dev/null | tr -d ' \n')
 if [ "${ANSWER:4:4}" = "abcd" ]; then

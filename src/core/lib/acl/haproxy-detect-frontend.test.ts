@@ -144,12 +144,12 @@ describe("passthrough", () => {
 });
 
 describe("ip rules and the proxy's own address", () => {
-  const PROXY = { proxyAddress: "172.20.0.1" };
+  const PROXY = { proxyAddress: "198.19.255.1" };
 
   it("never passes through a connection that reached the proxy through a name", () => {
-    // 172.16.0.0/12 covers the proxy, which every name resolves to.
-    const result = detect({ ipRules: ["172.16.0.0/12:443", "~^172\\.20\\.0\\.1:443$"] }, PROXY);
-    expect(result.includes("acl dns_routed dst 172.20.0.1")).toBe(true);
+    // 198.18.0.0/15 covers the proxy, which every name resolves to.
+    const result = detect({ ipRules: ["198.18.0.0/15:443", "~^198\\.19\\.255\\.1:443$"] }, PROXY);
+    expect(result.includes("acl dns_routed dst 198.19.255.1")).toBe(true);
     expect(result.includes("set-var(txn.pass) int(1) if ip0_dst ip0_port !dns_routed\n")).toBe(
       true,
     );
