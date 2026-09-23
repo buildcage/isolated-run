@@ -15,7 +15,11 @@ import {
   writeJvmKeystoreFiles,
   type CaTrustFiles,
 } from "./ca-trust.ts";
-import { persistingWritablePaths, sandboxReadonlyHostDirs } from "./host-commands.ts";
+import {
+  persistingWritablePaths,
+  renameGuardDirs as renameGuards,
+  sandboxReadonlyHostDirs,
+} from "./host-commands.ts";
 import { resolveSandboxGid } from "./identity.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import { buildOciConfig, type SandboxIdentity } from "./oci-config.ts";
@@ -252,10 +256,9 @@ export function assembleBundle(
     // alone only covers the top-level rootfs mount (see
     // computeReadonlyHostMounts).
     const hostMounts = listHostMounts();
-    const readonlyHostDirs = sandboxReadonlyHostDirs(
-      persistingWritablePaths(filesystemMode, writeThroughPaths, env),
-      env,
-    );
+    const persisting = persistingWritablePaths(filesystemMode, writeThroughPaths, env);
+    const readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env);
+    const renameGuardDirs = renameGuards(readonlyHostDirs, persisting);
     // The docker CLI creates its config directory on first write, which could
     // otherwise be the sandboxed command's; runc skips a read-only path that
     // doesn't exist.
@@ -287,6 +290,7 @@ export function assembleBundle(
       env,
       caTrust,
       readonlyHostDirs,
+      renameGuardDirs,
     });
   } catch (e) {
     // A step in here that already speaks to the user keeps its own words:

@@ -204,6 +204,18 @@ describe("runSandboxedCommand", () => {
     });
   });
 
+  it("guards the writable dirs above a read-only dir so they cannot be renamed", () => {
+    runSandboxedCommand(
+      options({ env: { HOME: "/home/runner", DOCKER_CONFIG: "/home/runner/a/b/cfg" } }),
+      deps,
+    );
+
+    expect(mocks.buildOciConfig.mock.calls[0][1].renameGuardDirs).toStrictEqual([
+      "/home/runner/a",
+      "/home/runner/a/b",
+    ]);
+  });
+
   it("leaves it writable in ephemeral mode, where no write_through reaches it", () => {
     runSandboxedCommand(
       options({ filesystemMode: "ephemeral", overlayRoots: ["/home/runner"] }),

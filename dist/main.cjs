@@ -18583,16 +18583,30 @@ const realFindCommandDeps = {
 			return !1;
 		}
 	},
-	realpath: (path) => (0, node_fs.realpathSync)(path)
+	readlink: (path) => {
+		try {
+			let target = (0, node_fs.readlinkSync)(path);
+			return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)((0, node_path.dirname)(path), target);
+		} catch {
+			return null;
+		}
+	}
 };
-function findPinnableCommand(command, pathEnv, persisting, { isExecutable, realpath } = realFindCommandDeps) {
+function commandChain(candidate, readlink) {
+	let chain = [candidate], current = candidate;
+	for (let i = 0; i < 40; i++) {
+		let target = readlink(current);
+		if (target === null) break;
+		chain.push(target), current = target;
+	}
+	return chain;
+}
+function findPinnableCommand(command, pathEnv, persisting, { isExecutable, readlink } = realFindCommandDeps) {
 	let optedOut = persisting.includes("/");
 	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
 		if (!(0, node_path.isAbsolute)(dir)) continue;
 		let candidate = (0, node_path.join)(dir, command);
-		if (!isExecutable(candidate)) continue;
-		let real = realpath(candidate);
-		if (optedOut || !persisting.some((p) => isAtOrUnder(real, p))) return real;
+		if (isExecutable(candidate) && (optedOut || !commandChain(candidate, readlink).some((p) => persisting.some((w) => isAtOrUnder(p, w))))) return candidate;
 	}
 }
 function pinHostCommands(persisting, env, deps = realFindCommandDeps) {
@@ -18607,6 +18621,14 @@ function dockerConfigDir(env) {
 }
 function sandboxReadonlyHostDirs(persisting, env, actionRoot = ACTION_ROOT) {
 	return [actionRoot, dockerConfigDir(env)].filter((p) => !!p).filter((dir) => persisting.some((p) => isAtOrUnder(dir, p)) && !persisting.some((p) => isAtOrUnder(p, dir)));
+}
+function renameGuardDirs(readonlyDirs, persisting) {
+	let guards = new Set();
+	for (let dir of readonlyDirs) {
+		let root = persisting.filter((p) => p !== "/" && isAtOrUnder(dir, p)).sort((a, b) => b.length - a.length)[0];
+		if (root) for (let p = (0, node_path.dirname)(dir); p !== root && isAtOrUnder(p, root); p = (0, node_path.dirname)(p)) guards.add(p);
+	}
+	return [...guards].sort((a, b) => a.length - b.length || a.localeCompare(b));
 }
 //#endregion
 //#region src/lib/sandbox/runc-bootstrap.ts
@@ -18756,15 +18778,21 @@ function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, uid, env, h
 }
 //#endregion
 //#region src/lib/sandbox/oci-config.ts
-function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostDirs = [] }, probes = realHostProbes) {
+function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostDirs = [], renameGuardDirs = [] }, probes = realHostProbes) {
 	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
 		destination: RESOLV_CONF_DESTINATION,
 		type: "none",
 		source: resolvConfPath,
 		options: ["rbind", "ro"]
-	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), mounts = [
+	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), renameGuards = renameGuardDirs.map((p) => ({
+		destination: p,
+		type: "none",
+		source: p,
+		options: ["rbind", "rw"]
+	})), mounts = [
 		...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
 		...layers.mounts,
+		...renameGuards,
 		...internalMounts,
 		...scratchBaseLayers(execDir)
 	], { maskedPaths, readonlyPaths } = resolveProtectedPaths({
@@ -19021,7 +19049,7 @@ function resolveIdentity(env, { resolveSandboxGid, info }) {
 function assembleBundle(dir, options, deps) {
 	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode, warn } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, env, warn, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
-		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), readonlyHostDirs = sandboxReadonlyHostDirs(persistingWritablePaths(filesystemMode, writeThroughPaths, env), env);
+		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = persistingWritablePaths(filesystemMode, writeThroughPaths, env), readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env), renameGuardDirs$1 = renameGuardDirs(readonlyHostDirs, persisting);
 		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
 			mode: 448,
 			recursive: !0
@@ -19050,7 +19078,8 @@ function assembleBundle(dir, options, deps) {
 			},
 			env,
 			caTrust,
-			readonlyHostDirs
+			readonlyHostDirs,
+			renameGuardDirs: renameGuardDirs$1
 		});
 	} catch (e) {
 		throw e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");

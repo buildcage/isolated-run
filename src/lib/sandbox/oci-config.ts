@@ -70,6 +70,10 @@ export interface BuildOciConfigOptions {
   /** Host directories the sandbox sees read-only whatever the writable layers
    *  say; see host-commands.ts's sandboxReadonlyHostDirs. */
   readonlyHostDirs?: string[];
+  /** Writable directories above a readonlyHostDir, bound onto themselves so
+   *  they become mount points the sandbox cannot rename out from under it;
+   *  see host-commands.ts's renameGuardDirs. */
+  renameGuardDirs?: string[];
 }
 
 /**
@@ -94,6 +98,7 @@ export function buildOciConfig(
     env,
     caTrust,
     readonlyHostDirs = [],
+    renameGuardDirs = [],
   }: BuildOciConfigOptions,
   probes: HostProbes = realHostProbes,
 ): BuiltOciSpec {
@@ -132,9 +137,19 @@ export function buildOciConfig(
   const layers = ephemeral
     ? ephemeralLayers(ephemeral, freshMountDestinations)
     : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly });
+  // After the writable layers, so each guard nests inside the root those bound
+  // and pulls that root's writable submounts (workspace, RUNNER_TEMP) along via
+  // rbind. Read-write: these stay writable, they are only made unrenamable.
+  const renameGuards = renameGuardDirs.map((p) => ({
+    destination: p,
+    type: "none",
+    source: p,
+    options: ["rbind", "rw"],
+  }));
   const mounts = [
     ...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
     ...layers.mounts,
+    ...renameGuards,
     ...internalMounts,
     ...scratchBaseLayers(execDir),
   ];

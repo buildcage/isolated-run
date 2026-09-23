@@ -156,8 +156,11 @@ once, before the command starts, to a binary outside every path whose writes out
 and the step fails if either exists only inside one. The docker CLI's config directory
 (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins such as `compose` as well as its
 contexts, and this action's own checkout, which holds its post step's script, are read-only inside
-the sandbox whenever such a path contains them. `run-isolated.sh`, which runs as root around the
-command, runs from a copy in the scratch directory the sandbox cannot see. Without these, a
+the sandbox whenever such a path contains them, and every writable directory between them and the
+root of the writable path they sit under is bound onto itself so it cannot be renamed: a read-only
+directory alone can still be freed by renaming a parent out from over it. `run-isolated.sh`, which
+runs as root around the command, runs from a copy in the scratch directory the sandbox cannot see.
+Without these, a
 `docker` dropped into `~/.local/bin`, or a `docker-compose` in `~/.docker/cli-plugins`, would run in
 their place, outside every namespace. A command that writes the docker config itself
 (`docker login`, `gcloud auth configure-docker`) therefore fails in `persistent` mode; give it a

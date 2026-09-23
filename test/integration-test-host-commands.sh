@@ -37,6 +37,7 @@ case "$ACTION_ROOT/" in
   "$HOME"/*) CHECK_ACTION_ROOT=1 ;;
   *) CHECK_ACTION_ROOT=0 ;;
 esac
+ACTION_PARENT=$(dirname "$ACTION_ROOT")
 
 PATH="$STANDIN_DIR:$PATH" \
 GITHUB_WORKSPACE="$WORKDIR" \
@@ -68,6 +69,17 @@ if [ '$CHECK_ACTION_ROOT' = 1 ]; then
   else
     echo 'OK: the action checkout is read-only'
   fi
+  # The read-only mount is on the checkout itself; renaming a parent would move
+  # it aside and free the original path. Each parent is a mount point, so this
+  # must fail. Nothing moves on the host either way, since the guard is in the
+  # sandbox's mount namespace only.
+  if mv '$ACTION_PARENT' '$ACTION_PARENT.moved' 2>/dev/null; then
+    echo 'UNEXPECTED: a parent of the action checkout could be renamed'
+    mv '$ACTION_PARENT.moved' '$ACTION_PARENT' 2>/dev/null || true
+    rc=1
+  else
+    echo 'OK: a parent of the action checkout cannot be renamed'
+  fi
 fi
 
 exit \$rc
@@ -85,6 +97,6 @@ else
   pass "the stand-in docker under \$HOME was never run"
 fi
 if [ "$CHECK_ACTION_ROOT" != 1 ]; then
-  echo "  SKIP  the action checkout is not under \$HOME here"
+  echo "  SKIP  the action checkout is not under \$HOME here, so no parent guard applies"
 fi
 assert_results

@@ -454,6 +454,19 @@ describe("buildOciConfig", () => {
         expect.arrayContaining(["/home/runner/.docker", "/home/runner/work/_actions/x/y/v1"]),
       );
     });
+
+    it("binds each rename-guard dir onto itself read-write, after the writable layers", () => {
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        renameGuardDirs: ["/home/runner/work", "/home/runner/work/_actions"],
+      });
+      for (const dir of ["/home/runner/work", "/home/runner/work/_actions"]) {
+        const mount = config.mounts.find((m) => m.destination === dir);
+        expect(mount).toMatchObject({ source: dir, options: ["rbind", "rw"] });
+      }
+      // Not read-only: the point is only that they cannot be renamed.
+      expect(config.linux.readonlyPaths).not.toContain("/home/runner/work");
+    });
   });
 
   describe("the scratch base, which nothing may make writable", () => {

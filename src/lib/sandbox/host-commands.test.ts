@@ -5,6 +5,7 @@ import {
   findPinnableCommand,
   persistingWritablePaths,
   pinHostCommands,
+  renameGuardDirs,
   sandboxReadonlyHostDirs,
   type FindCommandDeps,
 } from "./host-commands.ts";
@@ -15,11 +16,15 @@ const HOME = "/home/runner";
 const WORKSPACE = "/home/runner/work/repo/repo";
 const PERSISTENT = [WORKSPACE, HOME, "/tmp", "/home/runner/work/_temp"];
 
-/** A host where `files` are the executables, and `links` map a path to its real one. */
+/**
+ * A host where `files` are the executables, and `links` map a symlink to its
+ * immediate target (a chain is spelled out one hop per entry). A path in
+ * `links` is executable too, so only its final target need be listed in `files`.
+ */
 function host(files: string[], links: Record<string, string> = {}): FindCommandDeps {
   return {
     isExecutable: (p) => files.includes(p) || p in links,
-    realpath: (p) => links[p] ?? p,
+    readlink: (p) => links[p] ?? null,
   };
 }
 
@@ -48,10 +53,11 @@ describe("findPinnableCommand", () => {
     expect(findPinnableCommand("docker", path, PERSISTENT, deps)).toBe("/usr/bin/docker");
   });
 
-  it("judges a symlink by where it really points", () => {
-    const deps = host([], {
+  it("skips a candidate whose symlink chain passes through a persisting path", () => {
+    // /usr/local/bin/docker -> ~/bin/docker (writable hop) -> /usr/bin/docker
+    const deps = host(["/usr/bin/docker"], {
       "/usr/local/bin/docker": `${HOME}/bin/docker`,
-      "/usr/bin/docker": "/usr/bin/docker",
+      [`${HOME}/bin/docker`]: "/usr/bin/docker",
     });
 
     expect(findPinnableCommand("docker", "/usr/local/bin:/usr/bin", PERSISTENT, deps)).toBe(
@@ -59,12 +65,27 @@ describe("findPinnableCommand", () => {
     );
   });
 
-  it("returns the real path of a symlink outside them", () => {
-    const deps = host([], { "/usr/local/bin/docker": "/opt/docker/bin/docker" });
+  it("returns the PATH entry, not the resolved target, so name-based tools still work", () => {
+    // snap's docker: /snap/bin/docker -> /usr/bin/snap, both outside.
+    const deps = host(["/usr/bin/snap"], { "/snap/bin/docker": "/usr/bin/snap" });
 
-    expect(findPinnableCommand("docker", "/usr/local/bin", PERSISTENT, deps)).toBe(
-      "/opt/docker/bin/docker",
+    expect(findPinnableCommand("docker", "/snap/bin:/usr/bin", PERSISTENT, deps)).toBe(
+      "/snap/bin/docker",
     );
+  });
+
+  it("gives up on a symlink cycle rather than looping", () => {
+    const deps = host([], { "/usr/bin/docker": "/usr/local/bin/docker" });
+    deps.readlink = (p) =>
+      ({
+        "/usr/bin/docker": "/usr/local/bin/docker",
+        "/usr/local/bin/docker": "/usr/bin/docker",
+      })[p] ?? null;
+    deps.isExecutable = (p) => p === "/usr/bin/docker";
+
+    // A cycle stays entirely outside the persisting paths here, so the guard
+    // must stop it by hop count, not by finding a writable hop.
+    expect(findPinnableCommand("docker", "/usr/bin", PERSISTENT, deps)).toBe("/usr/bin/docker");
   });
 
   it("skips relative and empty PATH entries, which resolve against the workspace", () => {
@@ -165,5 +186,47 @@ describe("sandboxReadonlyHostDirs", () => {
     expect(
       sandboxReadonlyHostDirs([...PERSISTENT, `${HOME}/.docker`], { HOME }, ACTION),
     ).toStrictEqual([ACTION]);
+  });
+});
+
+describe("renameGuardDirs", () => {
+  const ACTION = "/home/runner/work/_actions/buildcage/isolated-run/v1";
+
+  it("pins every directory between the writable root and the read-only dir", () => {
+    expect(renameGuardDirs([ACTION], PERSISTENT)).toStrictEqual([
+      "/home/runner/work",
+      "/home/runner/work/_actions",
+      "/home/runner/work/_actions/buildcage",
+      "/home/runner/work/_actions/buildcage/isolated-run",
+    ]);
+  });
+
+  it("pins nothing for a dir sitting directly under the root, its parent already a mount point", () => {
+    expect(renameGuardDirs([`${HOME}/.docker`], PERSISTENT)).toStrictEqual([]);
+  });
+
+  it("uses the deepest containing root, so it never pins a path outside the writable area", () => {
+    // WORKSPACE is under HOME; the guards must stop at WORKSPACE, not walk up to HOME.
+    expect(renameGuardDirs([`${WORKSPACE}/a/b`], PERSISTENT)).toStrictEqual([`${WORKSPACE}/a`]);
+  });
+
+  it("dedupes shared ancestors across several read-only dirs", () => {
+    expect(
+      renameGuardDirs(
+        ["/home/runner/work/_actions/x/a/v1", "/home/runner/work/_actions/y/b/v1"],
+        PERSISTENT,
+      ),
+    ).toStrictEqual([
+      "/home/runner/work",
+      "/home/runner/work/_actions",
+      "/home/runner/work/_actions/x",
+      "/home/runner/work/_actions/y",
+      "/home/runner/work/_actions/x/a",
+      "/home/runner/work/_actions/y/b",
+    ]);
+  });
+
+  it("pins nothing under write_through: /, the full opt-out", () => {
+    expect(renameGuardDirs([ACTION], ["/"])).toStrictEqual([]);
   });
 });
