@@ -37,29 +37,32 @@ describe("inspect stage", () => {
     expect(plain.includes("acl dst_internal")).toBe(false);
   });
 
-  it("exempts only the addresses a rule writes as its literal host", () => {
+  it("exempts only where a rule that writes the address as its host matches", () => {
     const plain = plainStage({
-      httpRules: [
-        "169.254.169.254:80",
-        "169.254.169.254:8080",
-        "~^127\\.0\\.0\\.1:80$",
-        "*.0.0.1:80",
-      ],
+      httpRules: ["169.254.169.254:8080", "~^127\\.0\\.0\\.1:80$", "*.0.0.1:80"],
       urlRules: buildUrlRules("GET http://127.0.0.2/latest/**"),
     });
-    const named = plain.split("\n").filter((l) => l.includes("acl host_named_address"));
-    expect(named.map((l) => l.slice(l.lastIndexOf(" ") + 1))).toStrictEqual([
-      "169.254.169.254",
-      "127.0.0.2",
-    ]);
+    const named = plain.split("\n").filter((l) => l.includes("set-var(txn.named_address)"));
+    // The port, path and method are the naming rule's own: `**:80` beside
+    // `169.254.169.254:8080` must not exempt 169.254.169.254 on port 80.
+    expect(named.length).toBe(2);
+    expect(named[0].endsWith("-m str 169.254.169.254 } { dst_port 8080 } { path -m beg / }")).toBe(
+      true,
+    );
+    expect(
+      named[1].endsWith(
+        "-m str 127.0.0.2 } { dst_port 80 } { path -m beg /latest/ } { method GET }",
+      ),
+    ).toBe(true);
   });
 
   it("keeps the exemption in audit, where no rule is enforced", () => {
     // The guard refuses in audit too, so a named address must stay reachable
-    // there. The Host is read directly: audit sets no txn.host.
+    // there, and the rule block that would otherwise match it is absent.
     const plain = plainStage({ httpRules: ["169.254.169.254:80"] }, "audit");
-    expect(plain.includes("txn.host)")).toBe(false);
-    expect(plain.includes("deny deny_status 403 if dst_internal !host_named_address")).toBe(true);
+    expect(plain.includes("txn.allowed")).toBe(false);
+    expect(plain.includes("-m str 169.254.169.254 } { dst_port 80 }")).toBe(true);
+    expect(plain.includes("deny deny_status 403 if dst_internal !named_address")).toBe(true);
   });
 });
 

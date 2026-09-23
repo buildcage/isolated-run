@@ -264,9 +264,10 @@ Two consequences worth knowing:
 
 This guard is about a _name_ landing somewhere it never should, and it never restricts a rule whose
 host is itself a literal address, such as `169.254.169.254:80`: the rule asked for that address, so
-nothing was arrived at. Only an address written out as a rule's host counts. A wildcard or regex
-that merely admits one, `**:80` or `~^.*:80$`, does not, so under `inspect` a `Host` of
-`169.254.169.254` sent under `**:80` is still refused as `internal-address`. Reaching a cloud
+nothing was arrived at. Only an address written out as a rule's host counts, and only for a
+request that rule itself allows, port, path and method included. A wildcard or regex that merely
+admits one, `**:80` or `~^.*:80$`, does not, so under `inspect` a `Host` of `169.254.169.254` sent
+under `**:80` is still refused as `internal-address`, even beside a rule for `169.254.169.254:8080`. Reaching a cloud
 metadata endpoint directly, the way any AWS or GCP SDK does, is not what this is meant to stop, and
 `allowed_ip_rules` is the intended path for it.
 

@@ -1,5 +1,5 @@
 import { HOST_IS_ADDRESS, type CompiledRule } from "./haproxy-rules.ts";
-import { HOST_ONLY, hostMatcher } from "./haproxy-matchers.ts";
+import { escapeForHaproxy, HOST_ONLY, hostMatcher, pathMatcher } from "./haproxy-matchers.ts";
 import { deniesEverything, ruleBlock } from "./haproxy-rule-block.ts";
 import { internalDstAcl, type InternalDstOptions } from "./haproxy-internal-dst.ts";
 
@@ -28,39 +28,53 @@ function sniField(scheme: "https" | "http"): string {
   return scheme === "https" ? " sni=%[ssl_fc_sni,regsub([^A-Za-z0-9._-],_,g)]" : "";
 }
 
-/** The addresses these rules name as a literal host, in rule order and without repeats. */
-function namedAddresses(rules: CompiledRule[]): string[] {
+/** The rules that write a literal address as their host. */
+function addressRules(rules: CompiledRule[]): CompiledRule[] {
   const isAddress = new RegExp(HOST_IS_ADDRESS);
-  const out: string[] = [];
-  for (const rule of rules) {
-    if (rule.hostMatch !== "wildcard") continue;
+  return rules.filter((rule) => {
+    if (rule.hostMatch !== "wildcard") return false;
     const { op, pattern } = hostMatcher(rule.hostRegex);
-    if (op === "-m str" && isAddress.test(pattern) && !out.includes(pattern)) out.push(pattern);
-  }
-  return out;
+    return op === "-m str" && isAddress.test(pattern);
+  });
 }
 
 /**
- * Refuse an internal destination unless a rule wrote that address as its host.
- * Only then was it asked for: a wildcard or regex that happens to admit an
- * address, `**:80` say, must not open 169.254.169.254.
+ * Refuse an internal destination unless a rule that writes that address as its
+ * host matches the request, port, path and method included. Only then was it
+ * asked for: `**:80`, or `169.254.169.254:8080` beside it, must not open
+ * 169.254.169.254 on port 80. Matched here rather than in the rule block, which
+ * audit leaves out, since the guard refuses in audit too.
  */
-function internalGuard(addresses: string[]): string[] {
-  if (addresses.length === 0) {
+function internalGuard(rules: CompiledRule[]): string[] {
+  const named = addressRules(rules);
+  if (named.length === 0) {
     return [
       "    http-request set-var(txn.reason) str(internal-address) if dst_internal",
       "    http-request deny deny_status 403 if dst_internal",
       "",
     ];
   }
-  return [
-    "    # An address a rule names as its host is exempt. One acl line each, ORed,",
-    "    # since HAProxy refuses a line past 64 words.",
-    ...addresses.map((a) => `    acl host_named_address req.hdr(host),${HOST_ONLY} -m str ${a}`),
-    "    http-request set-var(txn.reason) str(internal-address) if dst_internal !host_named_address",
-    "    http-request deny deny_status 403 if dst_internal !host_named_address",
+  const lines = ["    # An address a rule names as its host is exempt where that rule matches."];
+  for (const rule of named) {
+    const path = pathMatcher(rule.pathRegex);
+    const conds = [
+      `{ req.hdr(host),${HOST_ONLY} -m str ${hostMatcher(rule.hostRegex).pattern} }`,
+      ...(rule.port ? [`{ dst_port ${rule.port} }`] : []),
+      `{ path ${path.op} ${escapeForHaproxy(path.pattern)} }`,
+      ...(rule.methods ? [`{ method ${rule.methods.join(" ")} }`] : []),
+    ];
+    lines.push(
+      `    # ${rule.raw}`,
+      `    http-request set-var(txn.named_address) bool(true) if ${conds.join(" ")}`,
+    );
+  }
+  lines.push(
+    "    acl named_address var(txn.named_address) -m bool",
+    "    http-request set-var(txn.reason) str(internal-address) if dst_internal !named_address",
+    "    http-request deny deny_status 403 if dst_internal !named_address",
     "",
-  ];
+  );
+  return lines;
 }
 
 /**
@@ -162,7 +176,7 @@ export function inspectStage(
       "",
       "    # A resolved destination may not be internal; see INTERNAL_RANGES.",
       ...internalDstAcl("dst_internal", ctx),
-      ...internalGuard(namedAddresses(rules)),
+      ...internalGuard(rules),
     );
   }
   l.push(`    default_backend ${backend}`, "");

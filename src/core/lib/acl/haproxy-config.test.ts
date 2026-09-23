@@ -299,10 +299,11 @@ describe("the internal-address guard", () => {
     const plain = frontendSegment(named, "http_in");
     expect(
       plain.includes(
-        "acl host_named_address req.hdr(host),host_only,regsub(\\.$,) -m str 169.254.169.254",
+        "set-var(txn.named_address) bool(true) if " +
+          "{ req.hdr(host),host_only,regsub(\\.$,) -m str 169.254.169.254 } { dst_port 80 }",
       ),
     ).toBe(true);
-    expect(plain.includes("deny deny_status 403 if dst_internal !host_named_address")).toBe(true);
+    expect(plain.includes("deny deny_status 403 if dst_internal !named_address")).toBe(true);
   });
 
   it("does not exempt an address that a wildcard merely admits", () => {
@@ -310,7 +311,7 @@ describe("the internal-address guard", () => {
     // Host skipped the guard once some rule had allowed the request.
     const wide = gen({ ...FULL, httpRules: ["**:80", "*.*.*.*:80"] });
     const plain = frontendSegment(wide, "http_in");
-    expect(plain.includes("host_named_address")).toBe(false);
+    expect(plain.includes("named_address")).toBe(false);
     expect(plain.includes("deny deny_status 403 if dst_internal\n")).toBe(true);
   });
 
