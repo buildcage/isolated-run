@@ -5,11 +5,11 @@ import { writeRunScript, writeResolvConf, writeOciConfig } from "./oci-files.ts"
 import { withScratchDir } from "./scratch-dir.ts";
 
 describe("writeRunScript", () => {
-  it("wraps plain commands in a #!/bin/sh + set -e preamble", () => {
+  it("wraps plain commands in a #!/bin/bash + set -e preamble", () => {
     withScratchDir((dir) => {
       const path = writeRunScript("echo hello", dir);
       const content = readFileSync(path, "utf8");
-      expect(content).toBe("#!/bin/sh\nset -e\necho hello\n");
+      expect(content).toBe("#!/bin/bash\nset -e\necho hello\n");
     });
   });
 

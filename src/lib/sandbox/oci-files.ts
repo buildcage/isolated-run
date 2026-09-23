@@ -18,10 +18,13 @@ import { join } from "node:path";
  * hides the rest of the scratch dir from other runs, and this file needs
  * the same protection: Actions expands a `${{ secrets.X }}` written inline
  * in `run:` before the input ever reaches here.
+ *
+ * `bash -e` like a native `run:` step: under dash, `if [[ ... ]]` silently
+ * skips its branch. bash is present, as the rootfs is the runner's own `/`.
  */
 export function writeRunScript(runInput: string, execDir: string): string {
   const scriptPath = join(execDir, "run-script.sh");
-  const content = runInput.startsWith("#!") ? runInput : `#!/bin/sh\nset -e\n${runInput}\n`;
+  const content = runInput.startsWith("#!") ? runInput : `#!/bin/bash\nset -e\n${runInput}\n`;
   writeFileSync(scriptPath, content, { mode: 0o700 });
   return scriptPath;
 }

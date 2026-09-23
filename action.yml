@@ -6,7 +6,7 @@ branding:
 
 inputs:
   run:
-    description: "Command(s) to run inside the isolated sandbox (multi-line supported, like a workflow run: step)"
+    description: "Command(s) to run inside the isolated sandbox (multi-line supported, like a workflow run: step). Runs under bash -e; start with a #! line to use another interpreter."
     required: true
   proxy_mode:
     description: "Traffic policy: audit records every destination the command reaches and blocks nothing (allowed_*_rules have no effect in this mode), or restrict (default) allows only what the rules match and blocks the rest. Run audit once, take the allowlist from its report, then switch to restrict."
