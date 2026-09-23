@@ -37,7 +37,7 @@ inputs:
     required: false
     default: ""
   upload_traffic_artifact:
-    description: "Upload the observed traffic as a JSON artifact, fetchable afterwards by whoever turns out to want it: a later job in the same run via actions/download-artifact, or anyone else via the API, subject to the retention period below. It keeps every URL verbatim, including any credential a build embedded in a query or a path, so treat it as sensitive. Requires proxy_engine: inspect."
+    description: "Upload the observed traffic as a JSON artifact, fetchable afterwards by whoever turns out to want it: a later job in the same run via actions/download-artifact, or anyone else via the API, subject to the retention period below. It keeps every URL verbatim, including any credential a build embedded in a query or a path, so treat it as sensitive. Both engines produce one; under universal it omits the method, URL and status that only inspect sees."
     required: false
     default: "false"
   traffic_artifact_retention_days:
