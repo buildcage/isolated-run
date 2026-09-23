@@ -33,7 +33,7 @@ details.
 | `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                      |
 | `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                     |
 | `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                |
-| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact, `inspect` only. See [Traffic artifact](#traffic-artifact).                    |
+| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact; both engines produce one. See [Traffic artifact](#traffic-artifact).          |
 | `traffic_artifact_retention_days` | empty        | How long to keep that artifact, in days; empty uses the repository's own default                                              |
 
 ### Rule inputs
@@ -529,7 +529,8 @@ resolver saying no rule allows the name, and it does fail the step.
 named `buildcage-traffic-<id>`, where `<id>` is this step's own container suffix so several steps in
 one job never collide. It carries every name lookup, including the ones the summary folds into the
 request that followed them, and service-discovery lookups with the record type that was asked for.
-`universal` never sees a method or a URL, so this input only does anything under `inspect`.
+Both engines produce one; `universal` never sees a method or a URL, so under it those fields are
+absent and the rows are name lookups and a connection-level view (host, port and bytes).
 
 This is also the form to keep where the report is an audit trail rather than something to read: in
 `filesystem_mode: persistent` a later step can add to the Job Summary, but not to an artifact

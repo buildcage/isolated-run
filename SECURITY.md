@@ -28,23 +28,28 @@ The following are **out of scope** (please report to the respective projects ins
 
 ## Verifying Releases
 
-isolated-run ships one artifact: a Docker image at `ghcr.io/buildcage/isolated-run`, tagged
-`vX.Y.Z`. Each release is signed keylessly with [cosign](https://github.com/sigstore/cosign) and
+isolated-run ships one Docker image at `ghcr.io/buildcage/isolated-run`, published per engine:
+release `vX.Y.Z` is tagged `X.Y.Z-inspect` for the default `inspect` engine and `X.Y.Z-universal`
+for the universal engine (the image tag drops the release tag's leading `v` and carries the engine
+suffix). Each release is signed keylessly with [cosign](https://github.com/sigstore/cosign) and
 carries a GitHub build-provenance attestation, both issued via GitHub Actions OIDC at release time.
 There is no long-lived signing key to leak or rotate. The action verifies this automatically,
 in-process, on every run (see [Image Provenance Verification](./docs/security.md#image-provenance-verification)
 for exactly how); to verify a release manually instead:
 
 ```sh
-cosign verify ghcr.io/buildcage/isolated-run:<tag> \
-  --certificate-identity-regexp '^https://github.com/buildcage/isolated-run/' \
+cosign verify ghcr.io/buildcage/isolated-run:X.Y.Z-<engine> \
+  --certificate-identity 'https://github.com/buildcage/isolated-run/.github/workflows/docker-publish.yml@refs/tags/vX.Y.Z' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/buildcage/isolated-run:<tag> --owner buildcage
+gh attestation verify oci://ghcr.io/buildcage/isolated-run:X.Y.Z-<engine> --repo buildcage/isolated-run
 ```
 
+The image tag is `X.Y.Z-<engine>`; the identity names the release tag `vX.Y.Z` and the exact
+workflow that signs it, so a signature from any other workflow, ref or repository is rejected.
+
 The Sigstore bundle for each release is also attached as a downloadable asset
-(`isolated-run-container-universal.sigstore.json`) on the corresponding
-[GitHub Release](https://github.com/buildcage/isolated-run/releases).
+(`isolated-run-container-universal.sigstore.json` and `isolated-run-container-inspect.sigstore.json`)
+on the corresponding [GitHub Release](https://github.com/buildcage/isolated-run/releases).
 
 ## Dependency Management
 
@@ -55,9 +60,9 @@ The Sigstore bundle for each release is also attached as a downloadable asset
   update PRs automatically; each still goes through CI and manual review before merging.
 - New dependencies are chosen for necessity, an OSI-approved license, and active maintenance; the
   standard library is preferred where practical.
-- [Trivy](https://github.com/aquasecurity/trivy) scans the built image for known vulnerabilities
-  (on each push to `main` and monthly on schedule), and Dependabot alerts are enabled on the
-  repository; both report into this repository's Security tab.
+- [Trivy](https://github.com/aquasecurity/trivy) rebuilds each engine's image from source and scans
+  it for known vulnerabilities on a monthly schedule (and on manual dispatch), and Dependabot alerts
+  are enabled on the repository; both report into this repository's Security tab.
 
 ## Reporting a Vulnerability
 
