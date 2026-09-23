@@ -233,7 +233,10 @@ describe("runSandboxStep", () => {
   // A local-path `uses: ./` names no ref: verification takes it empty (and
   // hard-fails on that), the report takes the v1 fallback for a valid `uses:`.
   it("verifies against an empty ref but reports with the v1 fallback for a local-path invocation", async () => {
-    await runSandboxStep({ ...ENV, GITHUB_ACTION_REF: "", GITHUB_ACTION_REPOSITORY: "" }, deps);
+    await runSandboxStep(
+      { ...ENV, GITHUB_ACTION_REF: undefined, GITHUB_ACTION_REPOSITORY: undefined },
+      deps,
+    );
 
     expect(mocks.verifyImageDigestOrThrow.mock.calls[0][0]).toMatchObject({
       actionRef: "",
