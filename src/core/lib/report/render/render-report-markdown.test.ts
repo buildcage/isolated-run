@@ -274,7 +274,7 @@ describe("renderReportMarkdown: inspect", () => {
       "v1",
       { runCommand: "npm install" },
     );
-    expect(md).toMatch(/proxy_engine: inspect/);
+    expect(md).not.toMatch(/proxy_engine/);
     expect(md).toMatch(/allowed_url_rules: \|/);
     expect(md).toMatch(/GET https:\/\/good\.com\/pkg/);
     expect(md).toMatch(/run: \|\n\s+npm install/);
