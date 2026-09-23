@@ -92,4 +92,18 @@ echo "=== [HTTP - missing-host-header] ==="
 ((printf 'GET / HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 blocked.example.com 80 > /dev/null 2>&1 || true)
 echo "  request sent (blocked expected in the report)"
 
+# [What a resolver does when a UDP answer comes back truncated. The query has
+# to reach the resolver itself, not the proxy, which cannot read one. The
+# reply opens with its length, then the query's own id.]
+echo "=== [DNS over TCP] ==="
+ANSWER=$(timeout 5 bash -c '
+  exec 3<>/dev/tcp/172.20.0.1/53 || exit 1
+  printf "\x00\x1d\xab\xcd\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01" >&3
+  head -c 4 <&3 | od -An -tx1' 2>/dev/null | tr -d ' \n')
+if [ "${ANSWER:4:4}" = "abcd" ]; then
+  pass "a TCP lookup at the resolver was answered"
+else
+  fail "a TCP lookup at the resolver went unanswered (got '$ANSWER')"
+fi
+
 scenario_results
