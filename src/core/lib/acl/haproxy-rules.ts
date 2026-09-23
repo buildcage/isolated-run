@@ -8,7 +8,7 @@ import type { UrlRule } from "./url-rules.ts";
 import { anchorRawRegex, domainToRegexPartial, splitRawRegexHost } from "./partial-wildcard.ts";
 
 /** An IPv4 address or CIDR block, which is what HAProxy's `dst` acl accepts. */
-const IPV4_OR_CIDR = /^\d{1,3}(?:\.\d{1,3}){3}(?:\/\d{1,2})?$/;
+export const IPV4_OR_CIDR = /^\d{1,3}(?:\.\d{1,3}){3}(?:\/\d{1,2})?$/;
 
 /**
  * A dotted quad matched against a Host header. Strict about octets: whatever
@@ -226,7 +226,7 @@ function compileSchemeRules(
     });
   }
   for (const rule of urlRules ?? []) {
-    if (rule.scheme !== scheme) continue;
+    if (!rule.schemes.includes(scheme)) continue;
     if (rule.isRegex) {
       out.push({
         id: "",

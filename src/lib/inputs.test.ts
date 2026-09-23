@@ -7,6 +7,7 @@ import {
   readRuleInputs,
   readRunCommand,
   readStepLabel,
+  resolveProxyMode,
   resolveWriteThroughInput,
 } from "./inputs.ts";
 import { SandboxError } from "./errors.ts";
@@ -186,7 +187,46 @@ describe("readRuleInputs", () => {
   });
 
   it("rejects a malformed URL rule even though only inspect enforces one", () => {
-    expect(() => readRuleInputs(inputs({ allowed_url_rules: "GET not-a-url" }))).toThrow();
+    expect(() => readRuleInputs(inputs({ allowed_url_rules: "GET not-a-url" }))).toThrow(
+      expect.objectContaining({ code: "INVALID_RULES" }),
+    );
+  });
+
+  it("rejects a rule the parser accepts but the proxy would refuse", () => {
+    expect(() => readRuleInputs(inputs({ allowed_https_rules: "10.0.0.0/8:443" }))).toThrow(
+      expect.objectContaining({ code: "INVALID_RULES" }),
+    );
+  });
+
+  it("keeps an explicit proxy_mode", () => {
+    expect(readRuleInputs(inputs({ proxy_mode: "audit" })).proxyMode).toBe("audit");
+  });
+
+  it("rejects an unknown proxy_mode before any rule", () => {
+    expect(() =>
+      readRuleInputs(inputs({ proxy_mode: "Audit", allowed_https_rules: "no-port" })),
+    ).toThrow(/Invalid proxy_mode/);
+  });
+});
+
+describe("resolveProxyMode", () => {
+  it("defaults to restrict when unset or blank", () => {
+    expect(resolveProxyMode(undefined)).toBe("restrict");
+    expect(resolveProxyMode("  ")).toBe("restrict");
+  });
+
+  it("accepts both modes", () => {
+    expect(resolveProxyMode("audit")).toBe("audit");
+    expect(resolveProxyMode("restrict")).toBe("restrict");
+  });
+
+  // Anything else would enforce a run meant only to record.
+  it("rejects anything else, a differently cased mode included", () => {
+    for (const mode of ["Audit", "RESTRICT", "enforce"]) {
+      expect(() => resolveProxyMode(mode)).toThrow(
+        expect.objectContaining({ code: "INVALID_PROXY_MODE" }),
+      );
+    }
   });
 });
 

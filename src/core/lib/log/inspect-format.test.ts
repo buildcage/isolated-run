@@ -29,7 +29,7 @@ const SAMPLES: Record<string, string> = {
   "%[ssl_bc_err]": "-",
   "%[dst]": "10.200.0.100",
   "%[dst_port]": "9443",
-  "%[capture.req.hdr(0)]": "registry.npmjs.org",
+  "%[var(txn.host_log)]": "registry.npmjs.org",
   "%[var(txn.pathq)]": PATH,
   "%[var(txn.proto)]": "tls",
   "%[var(txn.sni)]": "db.example.com",
@@ -103,6 +103,19 @@ describe("the generated log-format and this parser describe the same line", () =
     expect(e.protocol).toBe("http");
     expect(e.url).toBe(`http://registry.npmjs.org${PATH}`);
     expect(e.status).toBe(200);
+  });
+
+  it("keeps a Host padded past any real name whole, down to its registered domain", async () => {
+    const host = `registry.npmjs.org.${"a".repeat(300)}.attacker.example`;
+    const line = render(HTTPS, {
+      "%ST": "403",
+      "%B": "0",
+      "%ts": "PR--",
+      "%[var(txn.host_log)]": host,
+    });
+    const [e] = (await scanInspectLog([line])).events;
+    expect(e.host).toBe(host);
+    expect(e.url).toBe(`https://${host}${PATH}`);
   });
 
   it("reads a refusal the config named out of the reason field", async () => {
@@ -194,7 +207,7 @@ describe("the generated log-format and this parser describe the same line", () =
     "%HM": "<BADREQ>",
     "%ST": "400",
     "%B": "0",
-    "%[capture.req.hdr(0)]": "-",
+    "%[var(txn.host_log)]": "-",
     "%[var(txn.pathq)]": "-",
   };
 
@@ -232,7 +245,7 @@ describe("the generated log-format and this parser describe the same line", () =
     // rules to run; see haproxy-inspect-stage.ts.
     const line = render(
       HTTPS,
-      { "%ST": "400", "%B": "0", "%ts": "PR", "%[capture.req.hdr(0)]": "-" },
+      { "%ST": "400", "%B": "0", "%ts": "PR", "%[var(txn.host_log)]": "-" },
       { reason: "missing-host-header" },
     );
     const [e] = (await scanInspectLog([line])).events;
@@ -250,7 +263,7 @@ describe("the generated log-format and this parser describe the same line", () =
     // denies it in either mode, as the universal engine does.
     const line = render(
       HTTPS,
-      { "%ST": "400", "%B": "0", "%ts": "PR", "%[capture.req.hdr(0)]": "-" },
+      { "%ST": "400", "%B": "0", "%ts": "PR", "%[var(txn.host_log)]": "-" },
       { reason: "missing-host-header" },
     );
     const [e] = (await scanInspectLog([line], true)).events;
@@ -258,7 +271,7 @@ describe("the generated log-format and this parser describe the same line", () =
     expect(e.reason).toBe("missing-host-header");
   });
 
-  // The capture rewrites only whitespace, quotes and control characters, so a
+  // The log rewrites only whitespace, quotes and control characters, so a
   // Host of the build's own choosing reaches the log as sent. Reading the
   // authority to decide whether one arrived would let a sender move its own
   // refusals out of both tables and out of fail_on_blocked, by writing the very
@@ -270,7 +283,7 @@ describe("the generated log-format and this parser describe the same line", () =
         "%ST": "403",
         "%B": "0",
         "%ts": "PR",
-        "%[capture.req.hdr(0)]": host,
+        "%[var(txn.host_log)]": host,
       });
       const [e] = (await scanInspectLog([line])).events;
       expect(e.action).toBe("block");
