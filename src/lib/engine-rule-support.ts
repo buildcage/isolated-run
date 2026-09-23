@@ -118,9 +118,8 @@ function unsupportedIpRules(proxyEngine: ProxyEngine, ipRules: string[]): string
 }
 
 /**
- * An IP rule the engine cannot enforce would otherwise be dropped (`inspect`)
- * or never match (`universal`) without a word, and the two engines differ in
- * which form that is, so switching engines can silently disable a rule.
+ * Otherwise the rule is silently dropped (`inspect`) or never matches
+ * (`universal`), and which form fails differs by engine.
  * Checked once at startup and split like checkUrlAndTlsRuleSupport: an error in
  * `restrict`, a warning in `audit`.
  */

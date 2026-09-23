@@ -65,11 +65,9 @@ function atomToRegex(atom: string, vocab: Vocabulary): string {
 const HOST_LABEL = /^[A-Za-z0-9_*?-]+$/;
 
 /**
- * Check one label of a domain pattern against what a hostname can hold.
- *
- * Anything else would compile into a rule no connection can match: a Host
- * header or SNI carries an internationalized name in its punycode form, and
- * an empty label (a leading or trailing dot) names no host at all.
+ * Anything else compiles into a rule no connection matches: a Host or SNI
+ * carries an internationalized name as punycode, and an empty label names no
+ * host.
  *
  * @throws {Error} if the label is empty or holds a character no hostname can
  */
@@ -170,10 +168,8 @@ function hasTopLevelAlternation(regex: string): boolean {
 const HOST_LITERAL_ILLEGAL = /\\[[\]]/;
 
 /**
- * JavaScript regex syntax that the resolver's regex engine (RE2) does not
- * have: lookaround and backreferences. A host half is compiled into the
- * resolver's allowlist as well as the proxy's own rules, so one using these
- * would pass here and stop the resolver from starting.
+ * Lookaround and backreferences, which RE2 lacks: a host half also goes into
+ * the resolver's allowlist, where they would stop the resolver from starting.
  */
 const RE2_UNSUPPORTED = /^(?:\(\?<?[=!]|\\[1-9]|\\k<)/;
 

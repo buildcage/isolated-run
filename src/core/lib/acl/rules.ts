@@ -35,9 +35,6 @@ export function parseKnownBlockedRulesOrThrow(rulesInput: string | undefined): s
   }
 }
 
-/**
- * buildUrlRules, rethrowing its syntax errors as an InvalidRulesError.
- */
 export function buildUrlRulesOrThrow(rulesInput: string | undefined): UrlRule[] {
   try {
     return buildUrlRules(rulesInput);
@@ -46,17 +43,13 @@ export function buildUrlRulesOrThrow(rulesInput: string | undefined): UrlRule[] 
   }
 }
 
-/**
- * Stand-in for the proxy's own address, which only the container knows. The
- * generators only interpolate it, so any address compiles the same.
- */
+/** Only the container knows the real address; the generators just interpolate it. */
 const PLACEHOLDER_PROXY_ADDRESS = "192.0.2.1";
 
 /**
  * Compile already-parsed rules the way the proxy does when it starts, so a
- * rule its compilers refuse is refused here rather than stopping the
- * container. Every engine's compilation is run whatever the engine, the
- * rules being the same syntax on both.
+ * rule its compilers refuse fails here rather than stopping the container.
+ * Runs every engine's compiler regardless of proxy_engine.
  *
  * @throws {InvalidRulesError} if any compiler refuses a rule
  */

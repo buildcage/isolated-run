@@ -220,7 +220,7 @@ describe("resolveProxyMode", () => {
     expect(resolveProxyMode("restrict")).toBe("restrict");
   });
 
-  // Read as restrict before, which enforced a run meant only to record.
+  // Anything else would enforce a run meant only to record.
   it("rejects anything else, a differently cased mode included", () => {
     for (const mode of ["Audit", "RESTRICT", "enforce"]) {
       expect(() => resolveProxyMode(mode)).toThrow(

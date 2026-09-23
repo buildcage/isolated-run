@@ -122,9 +122,8 @@ const PROXY_MODES = ["audit", "restrict"] as const;
 export type ProxyMode = (typeof PROXY_MODES)[number];
 
 /**
- * Resolve and validate the proxy_mode input. Anything but the two modes is
- * refused rather than read as `restrict`, which would enforce a run its author
- * meant only to record.
+ * Anything but the two modes is refused rather than read as `restrict`, which
+ * would enforce a run its author meant only to record.
  */
 export function resolveProxyMode(input: string | undefined): ProxyMode {
   const trimmed = input?.trim() || "restrict";
