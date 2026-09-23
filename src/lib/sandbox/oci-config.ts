@@ -144,23 +144,10 @@ export function buildOciConfig(
     options: ["rbind", "rw"],
   }));
   // Covers the host's /run with an empty tmpfs (see hostRunCoverageLayers).
-  //
-  // Placed before the writable layers, not after, so a write_through entry at or
-  // under /run is re-exposed on top of the fresh tmpfs rather than buried by it:
-  // naming `/run` brings the whole host /run back, `/run/<x>` just that one path
-  // (e.g. a service socket a later step needs). write_through opens exactly what
-  // it names here, the same as everywhere else. Its writable /run/lock is merged
-  // into writablePaths so it isn't forced read-only below.
-  //
-  // Skipped entirely under `write_through: /` (disableReadonly): that is the
-  // documented full opt-out of the read-only restriction, and covering /run
-  // while the rest of the host is handed back writable would be the one
-  // exception to "you get exactly what you opened". The read-only remount /run
-  // otherwise gets comes from resolveProtectedPaths's host-mount sweep, which
-  // disableReadonly also skips, so the two stay consistent. The resolv.conf
-  // mount in internalMounts still lands correctly: with coverage on it recreates
-  // the target in the fresh tmpfs; with it off /run is the host's own, where the
-  // target already exists.
+  // Before the writable layers, so a write_through entry under /run re-exposes
+  // that path on top of the tmpfs instead of being buried by it. Skipped under
+  // `write_through: /`, the documented full filesystem opt-out, so /run comes
+  // back with the rest of the host.
   const runCoverage = disableReadonly
     ? { mounts: [], writablePaths: new Set<string>() }
     : hostRunCoverageLayers();

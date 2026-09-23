@@ -97,17 +97,12 @@ export function resolveProtectedPaths({
   freshMountDestinations,
   disableReadonly,
 }: ProtectedPathsInput): { maskedPaths: string[]; readonlyPaths: string[] } {
-  // A write_through entry re-exposes exactly the host path it names (see
-  // oci-config.ts). runc applies maskedPaths after every mount, so without this
-  // a still-listed mask (e.g. /run/docker.sock) would bind /dev/null back over
-  // a socket the caller deliberately re-exposed, silently defeating the opt-in.
-  // Lift any host-path mask at or under a write_through path -- `/run/<x>` lifts
-  // that one, `/run` lifts all of /run's, and `write_through: /` (the full
-  // filesystem opt-out, which "/" matches) lifts every one. Only the /run-resident
-  // host masks below are lifted this way: the /proc masks are not in this set, so
-  // the kernel-memory info-leak guard (e.g. /proc/kcore) holds even under
-  // `write_through: /` -- that opt-out is about the filesystem, not reading
-  // kernel memory, which runc's own base spec masks regardless.
+  // runc applies maskedPaths after every mount, so a still-listed mask would
+  // bind /dev/null back over a path a write_through entry re-exposed on top of
+  // the /run tmpfs. Lift the host-path mask for anything at or under a
+  // write_through path so the opt-in wins. Only the /run masks below are
+  // filtered; the /proc masks are not in this set, so the kernel-memory guard
+  // (e.g. /proc/kcore) holds even under `write_through: /`.
   const reExposed = (p: string): boolean => [...writablePaths].some((w) => isAtOrUnder(p, w));
   const extraMaskedHostPaths = [
     ...EXTRA_MASKED_RUNTIME_PATHS,

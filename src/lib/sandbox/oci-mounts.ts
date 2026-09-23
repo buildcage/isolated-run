@@ -54,50 +54,34 @@ export const HOST_RUN_DIR = "/run";
 export const HOST_RUN_LOCK_DIR = "/run/lock";
 
 /**
- * Cover the host's `/run` with a fresh, empty tmpfs so the rootfs rbind can't
- * hand the sandbox any socket living there. The rbind sweeps in every host
- * service's `/run` socket, and a read-only bind is no defense: connect(2)
- * succeeds on a live socket whatever the mount's `ro` flag says. Masking each
- * known path (see oci-protected-paths.ts) only ever covered an enumerated
- * list; an empty tmpfs denies the whole directory at once, including the ones
- * no list names -- systemd-resolved's Varlink resolver (a DNS path straight
- * out of the job, past the proxy), snapd's store socket, and whatever a future
- * tool drops there. The per-path masks are kept as a second layer, harmless
- * no-ops here since the paths no longer exist under the tmpfs.
+ * Cover the host's `/run` with an empty tmpfs so the `mount --rbind /` rootfs
+ * can't hand the sandbox the Unix sockets every host service keeps there
+ * (systemd-resolved's resolver, snapd, the container runtimes, the D-Bus bus,
+ * and whatever a future daemon adds). A read-only bind is no defense: connect(2)
+ * succeeds on a live socket whatever the mount's `ro` flag says.
  *
- * `/var/run` is a symlink to `/run` on every supported runner, so this covers
- * it too; the enumerated `/var/run/...` masks stay as the fallback for the rare
- * host where it is a separate real directory.
+ * Added back on top: `/run/lock`, reported as writable so oci-protected-paths.ts
+ * leaves it out of readonlyPaths. The proxy's `resolv.conf` is not added here;
+ * `/etc/resolv.conf` symlinks into `/run`, so buildOciConfig's resolv.conf mount,
+ * ordered after this, recreates the target in the fresh tmpfs.
  *
- * Only what the sandbox itself needs is added back:
- *  - `/run/lock` (mode 1777 on the host): many tools take file locks there,
- *    directly or through the `/var/lock` symlink. Reported as writable so
- *    oci-protected-paths.ts doesn't force it read-only again.
- *  - `/run/systemd/resolve/stub-resolv.conf` is *not* added here: on these
- *    runners `/etc/resolv.conf` is a symlink to it, so the resolv.conf mount
- *    (ordered after these in buildOciConfig) recreates that path inside the
- *    fresh tmpfs with the proxy's nameserver, which is the only resolver the
- *    sandbox should reach.
+ * `/var/run` is a symlink to `/run` on every supported runner, so covering `/run`
+ * covers it; the `/var/run/...` masks in oci-protected-paths.ts are the fallback
+ * for a host where it is instead a separate real directory.
  */
 export function hostRunCoverageLayers(): WritableLayers {
   return {
     mounts: [
-      // /run: no `noexec` and no `size=`, matching the host's own /run and
-      // moot either way -- this tmpfs stays empty, root-owned 0755 and gets
-      // force-remounted read-only, so nothing can be written or executed in it,
-      // and a write_through re-exposed path is a separate mount carrying the
-      // host's own options, not /run's.
+      // No noexec/size, matching the host /run and moot regardless: the tmpfs
+      // stays empty, root-owned and force-remounted read-only.
       {
         destination: HOST_RUN_DIR,
         type: "tmpfs",
         source: "tmpfs",
         options: ["nosuid", "nodev", "mode=0755"],
       },
-      // /run/lock: the one writable part (mode 1777, like the host), so it is
-      // capped at 5 MiB -- systemd's own default for /run/lock -- rather than
-      // left at the kernel's ~50%-of-RAM tmpfs default, where a step could fill
-      // it (directly or via the /var/lock symlink) and OOM the runner. noexec
-      // like the host's: lock files are never code.
+      // Writable (1777, like the host), so capped at systemd's 5 MiB default to
+      // stop a step filling it (also via /var/lock) and OOMing the runner.
       {
         destination: HOST_RUN_LOCK_DIR,
         type: "tmpfs",
