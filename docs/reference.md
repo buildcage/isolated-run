@@ -385,34 +385,31 @@ where the `Host` would have been.
 
 ### The ones nobody decided
 
-**Communication details** shows this with ⚠️ and the reason:
+A connection the client ended before it sent a whole request reached no rule and no origin, so it is
+in neither host table. **Communication details** shows it with ⚠️ and how it ended:
 
 ```
-⚠️ 00:13.500: HTTPS api.example.com:443 -> no-request
+⚠️ 00:09.123: HTTPS untrusted-ca.example.com:443 -> client-aborted
 ```
 
-| Reason       | What happened                                                                 |
-| ------------ | ----------------------------------------------------------------------------- |
-| `no-request` | no request arrived, and neither the client nor a rule of Buildcage's ended it |
+| Reason           | What happened                                                                   |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `client-aborted` | the client finished the TLS handshake and then closed without sending a request |
+| `client-timeout` | it held the connection open instead, until the timeout expired                  |
 
-`no-request` is a failsafe, not anything a step can cause: bytes that never parse are refused as
-`bad-request`, and a client that quit before sending a request is dropped from the report entirely
-(see below). It is left for what Buildcage's proxy itself could not resolve while still reading, such
-as an internal error, a resource it ran out of, or a log line whose own fields contradict each other.
-No host, method or URL reached a rule and nothing reached an origin, so it is in neither host table,
-no rule or `known_blocked_rules` entry clears it, and it never fails the step, not even with
-`fail_on_blocked: true`. A `::warning::` annotation gives the count. A run that keeps producing them
-points at the proxy or the runner rather than the step, and is worth reporting.
+The commonest cause is a container with no `ca-certificates`: the client cannot verify the
+certificate the `inspect` engine signs with, so every HTTPS request to that host ends at the
+handshake before a request arrives. The step's own output says so first, as a certificate
+verification error; installing `ca-certificates`, or otherwise letting the client trust the CA, is
+what lets the requests through. An `allowed_https_rules` entry changes nothing, the host having
+resolved and been dialled already.
 
-A connection the client itself ended before sending a request is not shown or counted at all. The
-commonest cause is a container with no `ca-certificates` installed: the client cannot verify the
-certificate Buildcage signs and closes, or lets the connection time out, before sending a request.
-No rule saw it and no origin was reached, so it is noise in the report; the raw
-[traffic artifact](#traffic-artifact) still records every one, as a `client-aborted` or
-`client-timeout` `incomplete`. Where the host is one the step needs, its name usually also appears
-as a blocked `DNS` row, which is the row to act on: installing `ca-certificates`, or whatever else
-kept the client from trusting the CA, is what lets the request through. An `allowed_https_rules` or
-`allowed_http_rules` entry changes nothing, there having been no host to match it against.
+A close like this is shown only where its host completed no other connection. Where the same host
+also completed one, the close is a keepalive pool cleaning up after its work rather than a failure,
+so it is left out of Communication details as noise. The raw [traffic artifact](#traffic-artifact)
+keeps every one either way. Neither kind fails the step, not even with `fail_on_blocked: true`: no
+rule refused it, so `known_blocked_rules` has nothing to match, and nothing reached an origin. A
+`::warning::` annotation gives the count of those shown.
 
 ### The ones Buildcage refused
 

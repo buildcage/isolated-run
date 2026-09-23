@@ -66,14 +66,25 @@ export interface ConnectedHosts {
 const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
 
 /**
- * Whether the client ended this `incomplete` connection before a whole request
- * arrived, by closing or by letting its own timeout expire. No rule saw it and
- * the proxy caused neither, so the report leaves it out of Communication details
- * and of the undecided-request count, while the raw traffic artifact still keeps
- * it. `no-request`, the proxy failing while still reading, is not one of these.
+ * Given a whole timeline, which client-ended `incomplete` connections
+ * (client-aborted, client-timeout) are only noise and are left out of the
+ * report: those to a host that also completed a connection, where the close is a
+ * keepalive pool cleaning up after its work. A host that completed nothing keeps
+ * them, since then every attempt to it ended before a request, as a client that
+ * cannot trust the CA does (a container missing `ca-certificates`). The raw
+ * traffic artifact keeps every one regardless.
  */
-export function isClientEndedIncomplete(event: TrafficEvent): boolean {
-  return event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "");
+export function clientEndedNoise(timeline: TrafficEvent[]): (event: TrafficEvent) => boolean {
+  const completed = new Set<string>();
+  for (const event of timeline) {
+    if (event.protocol !== "dns" && (event.action === "allow" || event.action === "audit")) {
+      completed.add(event.host.toLowerCase());
+    }
+  }
+  return (event) =>
+    event.action === "incomplete" &&
+    CLIENT_ENDED_REASONS.has(event.reason ?? "") &&
+    completed.has(event.host.toLowerCase());
 }
 
 /** Index a timeline once. The check below runs for every lookup, and rescanning

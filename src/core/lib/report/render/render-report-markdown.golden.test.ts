@@ -126,7 +126,8 @@ const timeline: TrafficEvent[] = [
     queryType: "A",
     reason: "dns-not-allowed",
   },
-  // Suppressed, so it never appears in the fixture (see isClientEndedIncomplete).
+  // Kept: nothing else reached this host, so the close is the one sign every
+  // attempt to it ended before a request (see clientEndedNoise).
   {
     time: 1787471979.123,
     action: "incomplete",

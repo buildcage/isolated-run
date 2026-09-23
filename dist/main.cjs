@@ -19344,8 +19344,10 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 //#endregion
 //#region src/core/lib/log/traffic-event.ts
 const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
-function isClientEndedIncomplete(event) {
-	return event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "");
+function clientEndedNoise(timeline) {
+	let completed = new Set();
+	for (let event of timeline) event.protocol !== "dns" && (event.action === "allow" || event.action === "audit") && completed.add(event.host.toLowerCase());
+	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "") && completed.has(event.host.toLowerCase());
 }
 function connectedHosts(timeline) {
 	let connected = {
@@ -19382,11 +19384,11 @@ function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 }
 function describeUndecidedRequests(report, engineLabel) {
 	if (report.engine !== "inspect") return;
-	let count = report.timeline.filter((event) => event.action === "incomplete" && !isClientEndedIncomplete(event)).length;
+	let isNoise = clientEndedNoise(report.timeline), count = report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
 	if (count !== 0) return {
 		level: "warning",
 		shouldFail: !1,
-		message: `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in Communication details. Each ended before a whole request had arrived, so no rule decided it and none reached an origin: this proxy ran into an error while still reading. None of them fails the step. Bytes this proxy would not read as a request are not among them: that is a refusal, and it is in Blocked Hosts.`
+		message: `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in Communication details. Each ended before a whole request had arrived, so no rule decided it and none reached an origin: the client closed, its own timeout expired, or this proxy ran into an error while still reading. None of them fails the step. Bytes this proxy would not read as a request are not among them: that is a refusal, and it is in Blocked Hosts.`
 	};
 }
 function describeFailedConnections(report, engineLabel) {
@@ -19545,7 +19547,7 @@ function wrapCommunicationDetails(body) {
 //#endregion
 //#region src/core/lib/report/render/inspect-details.ts
 function renderInspectDetails(timeline, startedAt) {
-	let relevant = timeline.filter((e) => !isClientEndedIncomplete(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
+	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
 	return shown.length === 0 ? "" : wrapCommunicationDetails(`\`\`\`\n${shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n\n`);
 }
 const MARK = {

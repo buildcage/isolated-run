@@ -38,8 +38,8 @@ function inspect(
   };
 }
 
-// A `no-request`, which the warning counts; the suppressed client-ended reasons
-// are exercised on their own below.
+// A `no-request`, which the warning counts whatever the host did. Client-ended
+// events are built from it below, where the host they name is what decides.
 const incomplete: TrafficEvent = {
   time: 1787471975,
   action: "incomplete",
@@ -87,10 +87,29 @@ describe("describeReportOutcomes", () => {
     );
   });
 
-  it("stays silent about connections the client itself ended, counting none of them", () => {
+  it("counts a client-ended close to a host that completed nothing, as it shows it", () => {
+    // Nothing else reached the host, so the close is kept and summarised.
     const clientAborted: TrafficEvent = { ...incomplete, reason: "client-aborted" };
-    const clientTimeout: TrafficEvent = { ...incomplete, reason: "client-timeout" };
-    const outcomes = describeReportOutcomes(inspect([clientAborted, clientTimeout]), options);
+    const outcomes = describeReportOutcomes(inspect([clientAborted]), options);
+    expect(outcomes.length).toBe(2);
+    expect(outcomes[1].level).toBe("warning");
+  });
+
+  it("leaves keepalive noise out of the count, as Communication details does", () => {
+    // The same host also completed a connection, so its close is only noise.
+    const completed: TrafficEvent = {
+      time: 1787471974,
+      action: "allow",
+      protocol: "https",
+      host: incomplete.host,
+      port: 443,
+      method: "GET",
+      url: `https://${incomplete.host}/pkg`,
+      status: 200,
+      bytes: 10,
+    };
+    const clientAborted: TrafficEvent = { ...incomplete, reason: "client-aborted" };
+    const outcomes = describeReportOutcomes(inspect([completed, clientAborted]), options);
     expect(outcomes.length).toBe(1);
     expect(outcomes[0].level).toBe("none");
   });

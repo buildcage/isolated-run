@@ -220,8 +220,9 @@ describe("renderInspectDetails", () => {
     expect(rendered).toMatch(/blocked/);
   });
 
-  it("leaves out a connection the client itself aborted or timed out on", () => {
-    // `no-request`, tested below, is not one of these and still shows.
+  it("keeps a client-ended connection to a host nothing else reached", () => {
+    // No completed connection to this host, so the close is the one sign every
+    // attempt to it ended before a request, as a missing CA makes them.
     for (const reason of ["client-aborted", "client-timeout"]) {
       const rendered = renderInspectDetails(
         [
@@ -229,14 +230,46 @@ describe("renderInspectDetails", () => {
             time: t,
             action: "incomplete",
             protocol: "https",
-            host: "a.example.com",
+            host: "untrusted.example.com",
             port: 8443,
             reason,
           },
         ],
         t,
       );
-      expect(rendered).toBe("");
+      expect(rendered.includes(`HTTPS untrusted.example.com:8443 -> ${reason}`)).toBe(true);
+    }
+  });
+
+  it("hides a client-ended connection to a host that also completed one", () => {
+    // A keepalive pool cleaning up after its work is noise, not a failure.
+    for (const reason of ["client-aborted", "client-timeout"]) {
+      const md = renderInspectDetails(
+        [
+          {
+            time: t,
+            action: "allow",
+            protocol: "https",
+            host: "registry.example.com",
+            port: 443,
+            method: "GET",
+            url: "https://registry.example.com/pkg",
+            status: 200,
+            bytes: 10,
+          },
+          {
+            time: t + 1,
+            action: "incomplete",
+            protocol: "https",
+            host: "registry.example.com",
+            port: 443,
+            reason,
+          },
+        ],
+        t,
+      );
+      expect(md.includes(reason)).toBe(false);
+      expect(md.includes("GET https://registry.example.com/pkg")).toBe(true);
     }
   });
 

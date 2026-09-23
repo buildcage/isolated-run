@@ -1,6 +1,6 @@
 import {
+  clientEndedNoise,
   connectedHosts,
-  isClientEndedIncomplete,
   isRedundantDns,
   type TrafficEvent,
 } from "#core/lib/log/traffic-event.ts";
@@ -21,9 +21,12 @@ export function renderInspectDetails(
   timeline: TrafficEvent[],
   startedAt: number | undefined,
 ): string {
-  // Dropped before connectedHosts, so a suppressed connection cannot mask a
-  // name's DNS lookup and hide that too (see isClientEndedIncomplete).
-  const relevant = timeline.filter((e) => !isClientEndedIncomplete(e));
+  // A client-aborted or client-timeout to a host that also completed a
+  // connection is a keepalive pool's noise; one to a host that completed nothing
+  // is kept, the one sign a client got no request out (see clientEndedNoise).
+  // Dropped before connectedHosts so it cannot mask a name's other rows.
+  const isNoise = clientEndedNoise(timeline);
+  const relevant = timeline.filter((e) => !isNoise(e));
   const connected = connectedHosts(relevant);
   const shown = relevant.filter((e) => !isRedundantDns(e, connected));
   if (shown.length === 0) return "";
