@@ -13,6 +13,9 @@ import type { Docker } from "./client.ts";
 const SOCKET = "/var/run/haproxy-health.sock";
 const URL = "http://localhost/metrics?scope=global";
 const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m;
+/** A wedged proxy can accept the connection and never answer; the report must
+ *  still finish, and reads no answer as lines lost. */
+const MAX_TIME_SECONDS = "10";
 
 /** The counter's value in Prometheus text output, or undefined without one. */
 export function parseDroppedLogs(metrics: string): number | undefined {
@@ -28,7 +31,15 @@ export function parseDroppedLogs(metrics: string): number | undefined {
 export function readProxyDroppedLogs(docker: Docker, containerId: string): number | undefined {
   try {
     return parseDroppedLogs(
-      docker.exec(containerId, ["curl", "-sf", "--unix-socket", SOCKET, URL]),
+      docker.exec(containerId, [
+        "curl",
+        "-sf",
+        "--max-time",
+        MAX_TIME_SECONDS,
+        "--unix-socket",
+        SOCKET,
+        URL,
+      ]),
     );
   } catch {
     return undefined;

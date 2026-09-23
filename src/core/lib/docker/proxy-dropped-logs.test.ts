@@ -62,6 +62,8 @@ describe("readProxyDroppedLogs", () => {
         "abc",
         "curl",
         "-sf",
+        "--max-time",
+        "10",
         "--unix-socket",
         "/var/run/haproxy-health.sock",
         "http://localhost/metrics?scope=global",

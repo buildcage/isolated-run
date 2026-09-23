@@ -19410,6 +19410,8 @@ function readProxyDroppedLogs(docker, containerId) {
 		return parseDroppedLogs(docker.exec(containerId, [
 			"curl",
 			"-sf",
+			"--max-time",
+			"10",
 			"--unix-socket",
 			"/var/run/haproxy-health.sock",
 			"http://localhost/metrics?scope=global"
