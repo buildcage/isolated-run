@@ -2,6 +2,23 @@ import { readFileSync, statSync } from "node:fs";
 import { SandboxError } from "../errors.ts";
 import { EXTRA_MASKED_RUNTIME_PATHS, rootlessRuntimeSocketPaths } from "./runtime-sockets.ts";
 
+/**
+ * Refuse to run as uid 0. The sandbox keeps the runner's own uid (see
+ * docs/security.md), so as root the kernel's DAC is all that stands between the
+ * command and root-owned host sockets like /run/systemd/private: reachable
+ * despite the dropped capabilities, and enough to start a unit outside every
+ * namespace. Only reachable on a self-hosted runner with RUNNER_ALLOW_RUNASROOT.
+ */
+export function assertNonRootUid(uid: number): void {
+  if (uid !== 0) return;
+  throw new SandboxError(
+    "Buildcage will not run as root (uid 0): it keeps the runner's own uid, and as root only " +
+      "filesystem permissions separate the command from root-owned host sockets, which cannot " +
+      "guarantee isolation. Run the GitHub Actions runner as a non-root user.",
+    "ROOT_RUNNER",
+  );
+}
+
 /** Group names that conventionally grant root-equivalent access. Not
  *  exhaustive: ownerGids below catches an unlisted name that still owns a
  *  known runtime socket. */

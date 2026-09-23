@@ -100,6 +100,12 @@ invocation, so no step inherits anything another one left behind.
   `libvirt`, `kvm`, `sudo`, `wheel` and a few more) and against the owning GID of any runtime socket
   actually present, and the command runs under `nogroup`/`nobody`/65534 instead when it matches. If
   none of those is safe either, the sandbox refuses to start.
+- **A root runner is refused.** The sandbox keeps the runner's own uid so tools and caches that
+  assume its identity keep working, but that leaves no user-namespace remapping: as uid 0 the dropped
+  capabilities still don't help, because the kernel's DAC is what guards root-owned host sockets like
+  `/run/systemd/private`, and root passes it. Reaching that socket starts a systemd unit outside
+  every namespace, so the sandbox refuses to start under uid 0 rather than run without the guarantee.
+  Only reachable on a self-hosted runner started with `RUNNER_ALLOW_RUNASROOT`.
 - **The host's `/run` is covered by an empty tmpfs.** `mount --rbind /` sweeps the runner's whole
   `/run` in, and every host service keeps a Unix socket there: systemd-resolved's Varlink resolver
   (which would answer lookups from the runner's own resolver, past the proxy; see

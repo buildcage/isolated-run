@@ -39,6 +39,7 @@ import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { removeCreatedDirsIfEmpty, splitWriteThroughInput } from "./sandbox/write-through.ts";
 import { resolveFilesystemPlan, validateFilesystemInputs } from "./sandbox/filesystem-plan.ts";
+import { assertNonRootUid } from "./sandbox/identity.ts";
 import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
@@ -214,6 +215,11 @@ export async function runSandboxStep(
   // `notice`, not `annotation`: readFilesystemInputs reads a renamed input (see
   // SandboxStepDeps).
   const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
+
+  // Refuse a root runner before any setup: the sandbox keeps the runner's uid,
+  // which as uid 0 leaves only DAC guarding root-owned host sockets (see
+  // assertNonRootUid).
+  assertNonRootUid(process.getuid!());
 
   // Cheap, pure input check first, so a plain mistake (e.g. write_through: /
   // under filesystem_mode: ephemeral) is rejected immediately rather than only

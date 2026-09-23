@@ -13,6 +13,7 @@ import { ActionError } from "#core/lib/errors.ts";
  *   OCI_CONFIG_BUILD_FAILED           failed to run gen-seccomp-profile/runc spec or assemble config.json
  *   DOCKER_UNAVAILABLE                docker CLI missing from PATH or a docker command failed
  *   UNSAFE_PRIMARY_GID                the runner's primary GID is privileged and no safe substitute GID exists
+ *   ROOT_RUNNER                       the runner is uid 0, where DAC alone would guard root-owned host sockets
  *   FILESYSTEM_INPUT_CONFLICT         filesystem_mode/write_through inputs combined in a disallowed way, or a
  *                                     writable path that collides with a mount the sandbox needs itself
  *   INVALID_WRITE_THROUGH_PATH        a write_through entry failed path-resolution rules (unknown $VAR, etc.)
@@ -42,6 +43,7 @@ export type SandboxErrorCode =
   | "DOCKER_UNAVAILABLE"
   | "PASSWORDLESS_SUDO_REQUIRED"
   | "UNSAFE_PRIMARY_GID"
+  | "ROOT_RUNNER"
   | "FILESYSTEM_INPUT_CONFLICT"
   | "INVALID_FILESYSTEM_MODE"
   | "INVALID_WRITE_THROUGH_PATH"

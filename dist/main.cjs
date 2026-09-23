@@ -19175,6 +19175,94 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	}
 }
 //#endregion
+//#region scripts/extra-masked-runtime-paths.json
+var extra_masked_runtime_paths_default = [
+	"/var/run/docker.sock",
+	"/run/docker.sock",
+	"/run/containerd/containerd.sock",
+	"/var/run/docker/containerd/containerd.sock",
+	"/run/buildkit/buildkitd.sock",
+	"/run/podman/podman.sock",
+	"/var/run/crio/crio.sock",
+	"/run/dbus/system_bus_socket",
+	"/var/run/dbus/system_bus_socket"
+];
+//#endregion
+//#region src/lib/sandbox/runtime-sockets.ts
+function rootlessRuntimeSocketPaths(env) {
+	let dir = env.XDG_RUNTIME_DIR;
+	return dir ? [`${dir}/docker.sock`, `${dir}/podman/podman.sock`] : [];
+}
+function perUserRuntimeDirs(uid, env) {
+	let xdg = env.XDG_RUNTIME_DIR;
+	return [...new Set([`/run/user/${uid}`, ...xdg ? [xdg] : []])];
+}
+//#endregion
+//#region src/lib/sandbox/identity.ts
+function assertNonRootUid(uid) {
+	if (uid === 0) throw new SandboxError("Buildcage will not run as root (uid 0): it keeps the runner's own uid, and as root only filesystem permissions separate the command from root-owned host sockets, which cannot guarantee isolation. Run the GitHub Actions runner as a non-root user.", "ROOT_RUNNER");
+}
+const PRIVILEGED_GROUP_NAMES = new Set([
+	"root",
+	"docker",
+	"containerd",
+	"podman",
+	"lxd",
+	"libvirt",
+	"libvirt-qemu",
+	"kvm",
+	"sudo",
+	"wheel"
+]), FALLBACK_GROUP_NAMES = ["nogroup", "nobody"], FALLBACK_GID = 65534, realHost = {
+	readGroupFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
+	gidOf: (path) => (0, node_fs.statSync)(path).gid
+};
+function readGroupNamesByGid(groupFile, host) {
+	let content;
+	try {
+		content = host.readGroupFile(groupFile);
+	} catch {
+		return null;
+	}
+	let map = new Map();
+	for (let line of content.split("\n")) {
+		if (!line || line.startsWith("#")) continue;
+		let [name, , gidStr] = line.split(":"), gid = Number(gidStr);
+		if (!name || !Number.isInteger(gid)) continue;
+		let names = map.get(gid);
+		names ? names.push(name) : map.set(gid, [name]);
+	}
+	return map;
+}
+function ownerGids(paths, host) {
+	let gids = new Set();
+	for (let p of paths) try {
+		gids.add(host.gidOf(p));
+	} catch {}
+	return gids;
+}
+function resolveSandboxGid(primaryGid, env, options = {}) {
+	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...extra_masked_runtime_paths_default, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, groupNamesByGid = readGroupNamesByGid(groupFile, host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1;
+	if (!isPrivileged(primaryGid)) return { gid: primaryGid };
+	let gidForName = (name) => {
+		if (groupNamesByGid) {
+			for (let [gid, names] of groupNamesByGid) if (names.includes(name)) return gid;
+		}
+	};
+	for (let name of FALLBACK_GROUP_NAMES) {
+		let gid = gidForName(name);
+		if (gid !== void 0 && !isPrivileged(gid)) return {
+			gid,
+			substitutedFrom: primaryGid
+		};
+	}
+	if (!isPrivileged(FALLBACK_GID)) return {
+		gid: FALLBACK_GID,
+		substitutedFrom: primaryGid
+	};
+	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
+}
+//#endregion
 //#region src/lib/sandbox/host-commands.ts
 const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), ACTION_ROOT = (0, node_path.resolve)(__dirname$2, ".."), PINNED_COMMANDS = ["docker", "sudo"];
 function persistingWritablePaths(filesystemMode, writeThroughPaths, env) {
@@ -19292,91 +19380,6 @@ function extractRuncBootstrap({ containerName, destDir }, deps = {}) {
 		seccompProfile,
 		baseSpec
 	};
-}
-//#endregion
-//#region scripts/extra-masked-runtime-paths.json
-var extra_masked_runtime_paths_default = [
-	"/var/run/docker.sock",
-	"/run/docker.sock",
-	"/run/containerd/containerd.sock",
-	"/var/run/docker/containerd/containerd.sock",
-	"/run/buildkit/buildkitd.sock",
-	"/run/podman/podman.sock",
-	"/var/run/crio/crio.sock",
-	"/run/dbus/system_bus_socket",
-	"/var/run/dbus/system_bus_socket"
-];
-//#endregion
-//#region src/lib/sandbox/runtime-sockets.ts
-function rootlessRuntimeSocketPaths(env) {
-	let dir = env.XDG_RUNTIME_DIR;
-	return dir ? [`${dir}/docker.sock`, `${dir}/podman/podman.sock`] : [];
-}
-function perUserRuntimeDirs(uid, env) {
-	let xdg = env.XDG_RUNTIME_DIR;
-	return [...new Set([`/run/user/${uid}`, ...xdg ? [xdg] : []])];
-}
-//#endregion
-//#region src/lib/sandbox/identity.ts
-const PRIVILEGED_GROUP_NAMES = new Set([
-	"root",
-	"docker",
-	"containerd",
-	"podman",
-	"lxd",
-	"libvirt",
-	"libvirt-qemu",
-	"kvm",
-	"sudo",
-	"wheel"
-]), FALLBACK_GROUP_NAMES = ["nogroup", "nobody"], FALLBACK_GID = 65534, realHost = {
-	readGroupFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
-	gidOf: (path) => (0, node_fs.statSync)(path).gid
-};
-function readGroupNamesByGid(groupFile, host) {
-	let content;
-	try {
-		content = host.readGroupFile(groupFile);
-	} catch {
-		return null;
-	}
-	let map = new Map();
-	for (let line of content.split("\n")) {
-		if (!line || line.startsWith("#")) continue;
-		let [name, , gidStr] = line.split(":"), gid = Number(gidStr);
-		if (!name || !Number.isInteger(gid)) continue;
-		let names = map.get(gid);
-		names ? names.push(name) : map.set(gid, [name]);
-	}
-	return map;
-}
-function ownerGids(paths, host) {
-	let gids = new Set();
-	for (let p of paths) try {
-		gids.add(host.gidOf(p));
-	} catch {}
-	return gids;
-}
-function resolveSandboxGid(primaryGid, env, options = {}) {
-	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...extra_masked_runtime_paths_default, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, groupNamesByGid = readGroupNamesByGid(groupFile, host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1;
-	if (!isPrivileged(primaryGid)) return { gid: primaryGid };
-	let gidForName = (name) => {
-		if (groupNamesByGid) {
-			for (let [gid, names] of groupNamesByGid) if (names.includes(name)) return gid;
-		}
-	};
-	for (let name of FALLBACK_GROUP_NAMES) {
-		let gid = gidForName(name);
-		if (gid !== void 0 && !isPrivileged(gid)) return {
-			gid,
-			substitutedFrom: primaryGid
-		};
-	}
-	if (!isPrivileged(FALLBACK_GID)) return {
-		gid: FALLBACK_GID,
-		substitutedFrom: primaryGid
-	};
-	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
 }
 //#endregion
 //#region scripts/extra-masked-proc-paths.json
@@ -66077,7 +66080,7 @@ async function runSandboxStep(env, overrides = {}) {
 	}, actionRef = env.GITHUB_ACTION_REF || "v1", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs();
 	log(`Proxy engine: ${proxyEngine}`);
 	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
-	validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
+	assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
 	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), { overlayRoots, writeThroughPaths, createdDirs } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env);
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
 	try {
