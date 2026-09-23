@@ -4573,7 +4573,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 		}
 	};
 })), require_proxy_agent = __commonJSMin(((exports, module) => {
-	let { kProxy, kClose, kDestroy, kDispatch, kInterceptors } = require_symbols$4(), { URL: URL$1 } = require("node:url"), Agent = require_agent(), Pool = require_pool(), DispatcherBase = require_dispatcher_base(), { InvalidArgumentError, RequestAbortedError, SecureProxyConnectionError } = require_errors$2(), buildConnector = require_connect(), Client = require_client$1(), kAgent = Symbol("proxy agent"), kClient = Symbol("proxy client"), kProxyHeaders = Symbol("proxy headers"), kRequestTls = Symbol("request tls settings"), kProxyTls = Symbol("proxy tls settings"), kConnectEndpoint = Symbol("connect endpoint function"), kTunnelProxy = Symbol("tunnel proxy");
+	let { kProxy, kClose, kDestroy, kDispatch, kInterceptors } = require_symbols$4(), { URL: URL$2 } = require("node:url"), Agent = require_agent(), Pool = require_pool(), DispatcherBase = require_dispatcher_base(), { InvalidArgumentError, RequestAbortedError, SecureProxyConnectionError } = require_errors$2(), buildConnector = require_connect(), Client = require_client$1(), kAgent = Symbol("proxy agent"), kClient = Symbol("proxy client"), kProxyHeaders = Symbol("proxy headers"), kRequestTls = Symbol("request tls settings"), kProxyTls = Symbol("proxy tls settings"), kConnectEndpoint = Symbol("connect endpoint function"), kTunnelProxy = Symbol("tunnel proxy");
 	function defaultProtocolPort(protocol) {
 		return protocol === "https:" ? 443 : 80;
 	}
@@ -4601,7 +4601,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 			};
 			let { origin, path = "/", headers = {} } = opts;
 			if (opts.path = origin + path, !("host" in headers) && !("Host" in headers)) {
-				let { host } = new URL$1(origin);
+				let { host } = new URL$2(origin);
 				headers.host = host;
 			}
 			return opts.headers = {
@@ -4617,7 +4617,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 		}
 	}, ProxyAgent = class extends DispatcherBase {
 		constructor(opts) {
-			if (super(), !opts || typeof opts == "object" && !(opts instanceof URL$1) && !opts.uri) throw new InvalidArgumentError("Proxy uri is mandatory");
+			if (super(), !opts || typeof opts == "object" && !(opts instanceof URL$2) && !opts.uri) throw new InvalidArgumentError("Proxy uri is mandatory");
 			let { clientFactory = defaultFactory } = opts;
 			if (typeof clientFactory != "function") throw new InvalidArgumentError("Proxy opts.clientFactory must be a function.");
 			let { proxyTunnel = !0 } = opts, url = this.#getUrl(opts), { href, origin, port, protocol, username, password, hostname: proxyHostname } = url;
@@ -4629,7 +4629,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 			let connect = buildConnector({ ...opts.proxyTls });
 			this[kConnectEndpoint] = buildConnector({ ...opts.requestTls });
 			let agentFactory = opts.factory || defaultAgentFactory, factory = (origin, options) => {
-				let { protocol } = new URL$1(origin);
+				let { protocol } = new URL$2(origin);
 				return !this[kTunnelProxy] && protocol === "http:" && this[kProxy].protocol === "http:" ? new Http1ProxyWrapper(this[kProxy].uri, {
 					headers: this[kProxyHeaders],
 					connect,
@@ -4673,7 +4673,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 		dispatch(opts, handler) {
 			let headers = buildHeaders(opts.headers);
 			if (throwIfProxyAuthIsSent(headers), headers && !("host" in headers) && !("Host" in headers)) {
-				let { host } = new URL$1(opts.origin);
+				let { host } = new URL$2(opts.origin);
 				headers.host = host;
 			}
 			return this[kAgent].dispatch({
@@ -4682,7 +4682,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 			}, handler);
 		}
 		#getUrl(opts) {
-			return typeof opts == "string" ? new URL$1(opts) : opts instanceof URL$1 ? opts : new URL$1(opts.uri);
+			return typeof opts == "string" ? new URL$2(opts) : opts instanceof URL$2 ? opts : new URL$2(opts.uri);
 		}
 		async [kClose]() {
 			await this[kAgent].close(), await this[kClient].close();
@@ -19399,6 +19399,26 @@ function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand
 	};
 }
 //#endregion
+//#region src/core/lib/docker/proxy-dropped-logs.ts
+const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m;
+function parseDroppedLogs(metrics) {
+	let match = COUNTER.exec(metrics);
+	return match ? Number(match[1]) : void 0;
+}
+function readProxyDroppedLogs(docker, containerId) {
+	try {
+		return parseDroppedLogs(docker.exec(containerId, [
+			"curl",
+			"-sf",
+			"--unix-socket",
+			"/var/run/haproxy-health.sock",
+			"http://localhost/metrics?scope=global"
+		]));
+	} catch {
+		return;
+	}
+}
+//#endregion
 //#region src/core/lib/docker/rotated-log.ts
 const SEGMENT = /^@[0-9a-f]{24}\.[a-z]$/;
 function parseLogSegments(lsOutput) {
@@ -19474,7 +19494,7 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 		...outcome,
 		message: `${base}, but the logs are incomplete and this is not a full record`
 	};
-	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${countNoun(engine)} still recorded)` : incomplete}. Either the logs don't begin where a real run does, or one carries a line the report cannot read. A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand requests: the report's own tables still count what survived, per host.`;
+	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${countNoun(engine)} still recorded)` : incomplete}. Either the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
 	return {
 		...outcome,
 		message
@@ -19899,7 +19919,7 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { runComma
 //#region src/core/lib/report/render/render-report-markdown.ts
 function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", runCommand, actionVersion } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${title}${isAudit ? " (audit mode)" : ""}\n\n`;
-	if (report.logLooksPlausible || (markdown += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, or one carries a line that cannot be\n> read. A missing beginning was either removed or rotated out by traffic heavy enough to\n> fill the 100 MB of log kept, which takes a few hundred thousand requests.\n\n"), report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
+	if (report.logLooksPlausible || (markdown += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 		runCommand,
 		actionVersion,
 		allowedIpRules: report.parameters.allowedIpRules,
@@ -20239,26 +20259,26 @@ function reduceTimeline(timeline, knownBlockedRules) {
 }
 //#endregion
 //#region src/core/lib/report/build/universal.ts
-async function buildUniversalReportData(proxyLines, dnsLines, parameters) {
+async function buildUniversalReportData(proxyLines, dnsLines, parameters, droppedLogs) {
 	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact }] = await Promise.all([scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
 	return {
 		engine: "universal",
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0,
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && droppedLogs === 0,
 		startedAt,
 		timeline
 	};
 }
 //#endregion
 //#region src/core/lib/report/build/inspect.ts
-async function buildInspectReportData(proxyLines, dnsLines, parameters) {
+async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedLogs) {
 	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact }] = await Promise.all([scanInspectLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
 	return {
 		engine: "inspect",
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0,
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && droppedLogs === 0,
 		startedAt,
 		timeline
 	};
@@ -20288,7 +20308,7 @@ function createHostDocker() {
 }
 function fetchReport(containerName, parameters, proxyEngine) {
 	let docker = createHostDocker();
-	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters);
+	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName)) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName));
 }
 function readActionVersion(containerName, proxyEngine, docker) {
 	let client = docker ?? createHostDocker();

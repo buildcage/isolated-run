@@ -9,6 +9,7 @@ echo "=== Sandbox Audit-Mode Report Assertions ==="
 echo ""
 
 SUMMARY=$(cat "$BUILDCAGE_RUN_DEBUG_SUMMARY_FILE")
+assert_report_complete
 
 assert_summary_contains "example.com:80" "Audited HTTP host recorded in report"
 assert_summary_contains "example.com:443" "Audited HTTPS host recorded in report"

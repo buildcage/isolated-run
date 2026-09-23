@@ -32,12 +32,16 @@ export const PREAMBLE: readonly string[] = [
   "",
   // A unix socket rather than a port, so the readiness check reaching it
   // never depends on what init-iptables allows.
-  "# Readiness only, for s6-notifyoncheck. Not reachable from the network.",
+  "# Readiness for s6-notifyoncheck, and the dropped-log count for the report.",
+  "# Not reachable from the network.",
   "frontend health",
   "    bind /var/run/haproxy-health.sock mode 666",
   "    mode http",
   "    no log",
   "    monitor-uri /health",
+  // A line that finds the pipe to s6-log full is dropped without a trace in
+  // the log itself; only this counter says one went missing.
+  "    http-request use-service prometheus-exporter if { path /metrics }",
   "",
 ];
 

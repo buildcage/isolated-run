@@ -36,8 +36,9 @@ export interface ReportDataCommon {
   blockedCount: number;
 
   /** False iff the log is not a complete record of the run: its beginning is
-   *  gone, a decision line could not be read, or it never carried a trace of a
-   *  real one (haproxy.ts's headIntact and unparsed). Anything written from
+   *  gone, a decision line could not be read, it never carried a trace of a
+   *  real one (haproxy.ts's headIntact and unparsed), or the proxy dropped a
+   *  line or could not say whether it did (proxy-dropped-logs.ts). Anything written from
    *  this flag has to name every one of them, since the flag itself does not say
    *  which applied. The report fails closed rather than passing off what
    *  survived as everything. */

@@ -4,7 +4,8 @@ import type { GenReportParameters, InspectReportData } from "../types.ts";
 
 /**
  * Build the report data from the proxy and resolver logs. Pure: the caller
- * fetches both logs and the parameters.
+ * fetches both logs, the parameters and the proxy's dropped-line count
+ * (undefined where it could not be read).
  *
  * The resolver log matters because a refused name never reached the proxy, so
  * a DNS-only exfiltration attempt would otherwise leave no trace.
@@ -13,6 +14,7 @@ export async function buildInspectReportData(
   proxyLines: AsyncIterable<string> | Iterable<string>,
   dnsLines: AsyncIterable<string> | Iterable<string>,
   parameters: GenReportParameters,
+  droppedLogs: number | undefined,
 ): Promise<InspectReportData> {
   const isAudit = parameters.mode === "audit";
   // Independent inputs (separate `docker exec` log streams, no data
@@ -33,8 +35,8 @@ export async function buildInspectReportData(
     parameters,
     ...reduceTimeline(timeline, parameters.knownBlockedRules),
     // Either log losing its beginning loses evidence the other cannot vouch
-    // for, and an unreadable line is the same gap mid-log.
-    logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0,
+    // for, and an unreadable or dropped line is the same gap mid-log.
+    logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && droppedLogs === 0,
     startedAt,
     timeline,
   };

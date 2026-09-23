@@ -145,4 +145,24 @@ describe("universal engine's log line is sized like the inspect engine's", () =>
   });
 });
 
+describe("universal engine counts the log lines it drops like the inspect engine", () => {
+  it("serves the same counter on the same socket as the generated config", () => {
+    // The report reads the count from one place whichever engine ran, and a
+    // count it cannot read marks the log incomplete.
+    const health = (config: string) => {
+      const lines = config.split("\n").map((l) => l.trim());
+      const start = lines.indexOf("frontend health");
+      const end = lines.indexOf("", start);
+      return lines.slice(start, end).filter((l) => !l.startsWith("#"));
+    };
+    const generated = generateHaproxyConfig({ proxyAddress: PROXY_GATEWAY }).config;
+    expect(health(TEMPLATE)).toStrictEqual(health(generated));
+    expect(
+      health(TEMPLATE).includes(
+        "http-request use-service prometheus-exporter if { path /metrics }",
+      ),
+    ).toBe(true);
+  });
+});
+
 reportResults();
