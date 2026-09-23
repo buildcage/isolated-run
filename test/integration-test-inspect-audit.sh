@@ -67,7 +67,6 @@ else
   pass "no Blocked Hosts table in audit mode"
 fi
 assert_summary_contains "Switch to restrict mode" "restrict-mode example offered"
-assert_summary_contains "proxy_engine: inspect" "restrict-mode example names the inspect engine"
 assert_summary_contains "allowed_url_rules: |" "restrict-mode example is offered as URL rules"
 assert_summary_contains "GET https://allowed.example.com/public/pkg.tgz" "the example includes what was actually observed"
 assert_summary_contains "POST https://api.example.com/v1/thing" "the example keeps the method it actually saw"

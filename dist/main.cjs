@@ -19509,7 +19509,7 @@ function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand, 
 		yaml += "    run: |\n";
 		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
 	}
-	yaml += "    proxy_mode: restrict\n";
+	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: universal\n";
 	for (let [param, rules] of groups) {
 		yaml += `    ${param}: >-\n`;
 		for (let rule of rules) yaml += `      ${rule}\n`;
@@ -19718,7 +19718,7 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { runComma
 		yaml += "    run: |\n";
 		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
 	}
-	if (yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: inspect\n", lines.length > 0) {
+	if (yaml += "    proxy_mode: restrict\n", lines.length > 0) {
 		yaml += "    allowed_url_rules: |\n";
 		for (let line of lines) yaml += `      ${line}\n`;
 	}

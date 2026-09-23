@@ -254,7 +254,7 @@ describe("buildInspectRestrictExample", () => {
   it("uses a literal block, since rules are separated by newlines", () => {
     const md = buildInspectRestrictExample(requests, "buildcage/isolated-run", "v2");
     expect(md.includes("allowed_url_rules: |\n")).toBe(true);
-    expect(md.includes("proxy_engine: inspect")).toBe(true);
+    expect(md.includes("proxy_engine")).toBe(false);
   });
 
   it("renders nothing when nothing was observed and no tls/ip rules were configured", () => {

@@ -56,6 +56,9 @@ export function buildRestrictExample(
     }
   }
   yaml += "    proxy_mode: restrict\n";
+  // universal is no longer the default engine, so the snippet must name it to
+  // reproduce this run; pasted without it, restrict would fall back to inspect.
+  yaml += "    proxy_engine: universal\n";
   for (const [param, rules] of groups) {
     yaml += `    ${param}: >-\n`;
     for (const rule of rules) {
