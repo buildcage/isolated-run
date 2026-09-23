@@ -4,10 +4,9 @@ set -e
 echo "init-iptables: configuring isolation..."
 
 # A resolver falling back to TCP (a truncated answer, a large TXT or DNSSEC
-# record) reaches CoreDNS rather than the listener, which would take the query
-# for an HTTP request and log a refusal of it. Only the gateway's own :53, the
-# address haproxy.cfg.template calls DNS-routed: TCP to any other resolver is
-# still redirected, and logged as the direct connection it is.
+# record) goes to CoreDNS: the listener cannot read a DNS query and logs a line
+# the report cannot parse. Only the gateway's own :53, so TCP to any other
+# resolver is still redirected and logged.
 iptables -t nat -A PREROUTING -i buildcage0 -p tcp -d 172.20.0.1 --dport 53 -j RETURN
 iptables -t nat -A PREROUTING -i buildcage0 -p tcp \
   -j REDIRECT --to-ports 10024
