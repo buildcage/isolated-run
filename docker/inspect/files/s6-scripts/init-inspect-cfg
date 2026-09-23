@@ -7,9 +7,9 @@ echo "init-inspect-cfg: proxy_mode=${PROXY_MODE:-restrict}"
 
 # A fresh CA per container. The private key stays here, in a 600 file HAProxy
 # signs per-SNI certificates with; only the certificate is published, at
-# /opt/buildcage/ca.pem, for the caller to install into the workload. It lives
-# no longer than one run needs, so a copy that escapes cleanup stops being
-# trusted soon after, and a random subject makes it this run's alone to match.
+# /opt/buildcage/ca.pem, for the caller to install into the workload. It is
+# short-lived so a copy that escapes cleanup soon stops being trusted, and the
+# random serialNumber makes its subject unique to this run.
 if [ ! -f /etc/haproxy/ca.pem ]; then
     echo "init-inspect-cfg: generating the proxy CA"
     openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
