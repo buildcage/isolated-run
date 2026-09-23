@@ -91,6 +91,31 @@ export interface FetchLikeResponse {
   status: number;
   headers?: HeadersLike;
   json?(): Promise<any>;
+  text?(): Promise<string>;
+}
+
+/**
+ * Confirm a content-addressed document's bytes hash to the digest that
+ * addressed it, so the registry cannot answer a digest read with other content.
+ * The signature covers the top-level image digest and the config-label chain
+ * hangs off it, but the labels themselves are not signed, so this is what ties
+ * them back to the signed digest.
+ *
+ * Uses the Web Crypto global rather than node:crypto: the registry-stub test
+ * helper imports this module's types under tsconfig.qjs.json, which carries no
+ * node types, and this module already reads `fetch` from the same lib.
+ */
+async function assertContentDigest(raw: string, expected: string, what: string): Promise<void> {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+  const actual =
+    "sha256:" + Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
+  if (actual !== expected) {
+    throw new VerifyImageError(
+      `Content digest mismatch for ${what}: the registry served ${actual}, ` +
+        `not the requested ${expected}.`,
+      "VERIFY_FAILED",
+    );
+  }
 }
 
 export interface FetchInit {
@@ -125,6 +150,12 @@ export interface RegistryClient {
        * contradicts it rather than answering.
        */
       absentOn404?: boolean;
+      /**
+       * The `sha256:<hex>` this document is addressed by. When set, the fetched
+       * bytes are verified against it before they are parsed, so the registry
+       * cannot answer a content-addressed read with different content.
+       */
+      verifyDigest?: string;
     },
   ): Promise<any>;
   /** Fetch a path, leaving the response to a caller with its own status ladder. */
@@ -157,6 +188,11 @@ export function registryClient(
           throw new VerifyImageError(`Not found: ${what}`, "NOT_FOUND");
         }
         assertRegistryOk(resp, what, opts.onFailure ?? "TRANSIENT");
+        if (opts.verifyDigest !== undefined) {
+          const raw = await resp.text!();
+          await assertContentDigest(raw, opts.verifyDigest, what);
+          return JSON.parse(raw);
+        }
         return await resp.json!();
       }),
   };
@@ -206,9 +242,10 @@ export async function fetchManifestDigest(
 /**
  * Fetch an image's config labels, walking index to platform manifest to config
  * blob. Every hop is addressed by a digest read from the one before, so the
- * chain hangs off the digest the signature covers rather than any tag. Like the
- * rest of this module it trusts the registry to serve what a digest addresses;
- * the `docker pull` is what checks those bytes.
+ * chain hangs off the digest the signature covers rather than any tag, and each
+ * hop's bytes are verified against that digest before they are read: the labels
+ * decide which engine the image is accepted for and are not themselves signed,
+ * so the chain back to the signed digest has to be checked, not just followed.
  */
 export async function fetchImageConfigLabels(
   registry: string,
@@ -222,6 +259,7 @@ export async function fetchImageConfigLabels(
 
   const root = await client.getJson(`/manifests/${digest}`, `manifest for ${image}`, {
     accept: [...INDEX_MEDIA_TYPES, ...MANIFEST_MEDIA_TYPES].join(", "),
+    verifyDigest: digest,
   });
 
   let manifest = root;
@@ -237,7 +275,7 @@ export async function fetchImageConfigLabels(
     manifest = await client.getJson(
       `/manifests/${platform.digest}`,
       `platform manifest for ${image}`,
-      { accept: MANIFEST_MEDIA_TYPES.join(", ") },
+      { accept: MANIFEST_MEDIA_TYPES.join(", "), verifyDigest: platform.digest },
     );
   }
 
@@ -245,7 +283,9 @@ export async function fetchImageConfigLabels(
   if (!configDigest) {
     throw new VerifyImageError(`No image config in manifest for ${image}`, "NOT_FOUND");
   }
-  const config = await client.getJson(`/blobs/${configDigest}`, `image config for ${image}`);
+  const config = await client.getJson(`/blobs/${configDigest}`, `image config for ${image}`, {
+    verifyDigest: configDigest,
+  });
   return config.config?.Labels ?? {};
 }
 
