@@ -9,6 +9,7 @@
  */
 
 import type { HostMount } from "./types.ts";
+import { isAtOrUnder } from "./paths.ts";
 // Sensitive /proc paths masked with /dev/null. runc's own `runc spec`
 // default already masks /proc/kcore, /proc/keys, and /proc/timer_list
 // (among others) and leaves /proc/sysrq-trigger merely read-only.
@@ -96,12 +97,25 @@ export function resolveProtectedPaths({
   freshMountDestinations,
   disableReadonly,
 }: ProtectedPathsInput): { maskedPaths: string[]; readonlyPaths: string[] } {
+  // A write_through entry re-exposes exactly the host path it names (see
+  // oci-config.ts). runc applies maskedPaths after every mount, so without this
+  // a still-listed mask (e.g. /run/docker.sock) would bind /dev/null back over
+  // a socket the caller deliberately re-exposed, silently defeating the opt-in.
+  // Lift any host-path mask at or under a *named* write_through path. Only the
+  // /run-resident host masks below are lifted this way; the /proc masks are
+  // never in this set, so an info-leak path like /proc/kcore always stays
+  // masked. The `write_through: /` opt-out (the "/" wildcard) is excluded: it
+  // turns off the read-only-filesystem restriction, deliberately not the socket
+  // hardening, so the runtime-socket masks survive it -- a step that wants one
+  // of those sockets names it explicitly.
+  const reExposed = (p: string): boolean =>
+    [...writablePaths].some((w) => w !== "/" && isAtOrUnder(p, w));
   const extraMaskedHostPaths = [
     ...EXTRA_MASKED_RUNTIME_PATHS,
     ...rootlessRuntimeSocketPaths(env),
     ...perUserRuntimeDirs(uid, env),
     ...EXTRA_MASKED_NETNS_PATHS,
-  ];
+  ].filter((p) => !reExposed(p));
   const maskedPaths = [...baseMaskedPaths, ...EXTRA_MASKED_PROC_PATHS, ...extraMaskedHostPaths];
   // EXTRA_MASKED_PROC_PATHS are files runc's base spec already lists in
   // readonlyPaths (sysrq-trigger). The runtime-socket paths don't come from

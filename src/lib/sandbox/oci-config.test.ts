@@ -257,6 +257,38 @@ describe("buildOciConfig", () => {
       expect(config.linux.maskedPaths).toContain("/var/run/netns");
     });
 
+    it("lifts a runtime-socket mask for the exact path a write_through re-exposes", () => {
+      // Otherwise runc's post-mount mask would bind /dev/null back over the
+      // socket the caller deliberately re-exposed (see oci-protected-paths.ts).
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/run/docker.sock"] },
+      });
+      expect(config.linux.maskedPaths).not.toContain("/run/docker.sock");
+      // Everything not named stays masked.
+      expect(config.linux.maskedPaths).toContain("/run/podman/podman.sock");
+    });
+
+    it("lifts every /run mask when write_through names /run as a whole", () => {
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/run"] },
+      });
+      for (const p of ["/run/docker.sock", "/run/dbus/system_bus_socket", "/run/netns"]) {
+        expect(config.linux.maskedPaths).not.toContain(p);
+      }
+    });
+
+    it("never lifts the /proc info-leak masks, even under writable: /", () => {
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/"] },
+      });
+      for (const p of ["/proc/kcore", "/proc/kallsyms", "/proc/kmsg"]) {
+        expect(config.linux.maskedPaths).toContain(p);
+      }
+    });
+
     it("doesn't leak the netns directory into readonlyPaths alongside masking it", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,

@@ -19061,7 +19061,8 @@ function hostRunCoverageLayers() {
 				"nosuid",
 				"nodev",
 				"noexec",
-				"mode=1777"
+				"mode=1777",
+				"size=5242880"
 			]
 		}],
 		writablePaths: new Set([HOST_RUN_LOCK_DIR])
@@ -19415,12 +19416,12 @@ function computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestina
 	return hostMounts.filter(({ mountPoint }) => mountPoint !== "/" && !freshMountDestinations.has(mountPoint) && !protectedPaths.has(mountPoint)).map(({ mountPoint }) => mountPoint);
 }
 function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, uid, env, hostMounts, writablePaths, freshMountDestinations, disableReadonly }) {
-	let extraMaskedHostPaths = [
+	let reExposed = (p) => [...writablePaths].some((w) => w !== "/" && isAtOrUnder(p, w)), extraMaskedHostPaths = [
 		...extra_masked_runtime_paths_default,
 		...rootlessRuntimeSocketPaths(env),
 		...perUserRuntimeDirs(uid, env),
 		...EXTRA_MASKED_NETNS_PATHS
-	], maskedPaths = [
+	].filter((p) => !reExposed(p)), maskedPaths = [
 		...baseMaskedPaths,
 		...extra_masked_proc_paths_default,
 		...extraMaskedHostPaths

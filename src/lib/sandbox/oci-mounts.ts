@@ -82,21 +82,27 @@ export const HOST_RUN_LOCK_DIR = "/run/lock";
 export function hostRunCoverageLayers(): WritableLayers {
   return {
     mounts: [
-      // Options match the host's own /run and /run/lock mounts: /run carries no
-      // `noexec` (the host's does not either -- code legitimately runs from
-      // /run, and a write_through re-exposed path under it may be an executable),
-      // while /run/lock does (lock files are never code), same as the host.
+      // /run: no `noexec` and no `size=`, matching the host's own /run and
+      // moot either way -- this tmpfs stays empty, root-owned 0755 and gets
+      // force-remounted read-only, so nothing can be written or executed in it,
+      // and a write_through re-exposed path is a separate mount carrying the
+      // host's own options, not /run's.
       {
         destination: HOST_RUN_DIR,
         type: "tmpfs",
         source: "tmpfs",
         options: ["nosuid", "nodev", "mode=0755"],
       },
+      // /run/lock: the one writable part (mode 1777, like the host), so it is
+      // capped at 5 MiB -- systemd's own default for /run/lock -- rather than
+      // left at the kernel's ~50%-of-RAM tmpfs default, where a step could fill
+      // it (directly or via the /var/lock symlink) and OOM the runner. noexec
+      // like the host's: lock files are never code.
       {
         destination: HOST_RUN_LOCK_DIR,
         type: "tmpfs",
         source: "tmpfs",
-        options: ["nosuid", "nodev", "noexec", "mode=1777"],
+        options: ["nosuid", "nodev", "noexec", "mode=1777", "size=5242880"],
       },
     ],
     writablePaths: new Set([HOST_RUN_LOCK_DIR]),

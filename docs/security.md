@@ -112,11 +112,12 @@ invocation, so no step inherits anything another one left behind.
   socket reads the write bits, which `mount -o ro` leaves untouched. `/var/run` is a symlink to
   `/run` on every supported runner, so it is covered too. `write_through:` re-exposes exactly what it
   names on top of the tmpfs, the same opt-in hole it is elsewhere: `/run/<x>` brings back a single
-  host path (a service socket a later step needs, say), and `/run` (or `write_through: /`, the full
-  read-only opt-out) brings the whole thing back. Re-exposing a host daemon's socket reopens an
-  outbound path through that daemon, and re-exposing all of `/run` leaves the outbound restriction
-  nearly pointless, so it is the caller's deliberate call — the default is that none of it is
-  reachable.
+  host path (a service socket a later step needs, say) and lifts its mask, and `/run` brings the whole
+  directory back. Re-exposing a host daemon's socket reopens an outbound path through that daemon, and
+  re-exposing all of `/run` leaves the outbound restriction nearly pointless, so it is the caller's
+  deliberate call — the default is that none of it is reachable. (`write_through: /`, the read-only
+  opt-out, uncovers `/run` too, but is only about the filesystem: the runtime-socket masks below
+  survive it, so name a socket, or `/run`, to lift those.)
 - **The runtime-socket paths and per-user runtime directory are also masked**, an independent second
   layer covering the rare host where `/var/run` is a separate real directory the `/run` tmpfs does
   not reach: `/var/run/docker.sock`, containerd's, podman's, buildkit's, crio's and their rootless
@@ -124,6 +125,8 @@ invocation, so no step inherits anything another one left behind.
   `/run/user/<uid>` (a `systemd --user` session bus, whole rather than socket by socket) with an
   empty directory, so even an unenumerated privileged group finds no live socket. Reaching either
   bus lets a compromised command start a unit that runs outside every namespace this action creates.
+  These masks are lifted for a path a `write_through:` entry names, so re-exposing one is not silently
+  undone by the mask — the caller's deliberate opt-in wins — while everything not named stays covered.
   A socket a workflow places _outside_ `/run` stays reachable — an `ssh-agent` under `$TMPDIR`, say —
   left alone deliberately; see [What the sandbox does not stop](#what-the-sandbox-does-not-stop).
 

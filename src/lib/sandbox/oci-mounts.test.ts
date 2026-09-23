@@ -228,7 +228,7 @@ describe("hostRunCoverageLayers", () => {
         destination: HOST_RUN_LOCK_DIR,
         type: "tmpfs",
         source: "tmpfs",
-        options: ["nosuid", "nodev", "noexec", "mode=1777"],
+        options: ["nosuid", "nodev", "noexec", "mode=1777", "size=5242880"],
       },
     ]);
   });
