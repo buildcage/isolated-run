@@ -16,6 +16,7 @@ assert_summary_contains "Switch to restrict mode" "Restrict-mode example section
 assert_summary_contains "uses: buildcage/isolated-run@v1" "Restrict-mode example uses the run action"
 assert_summary_contains "run: |" "Restrict-mode example preserves the run: command"
 assert_summary_contains "proxy_mode: restrict" "Restrict-mode example sets proxy_mode: restrict"
+assert_summary_contains "proxy_engine: universal" "Restrict-mode example names the non-default engine"
 assert_summary_contains "allowed_https_rules: >-" "Restrict-mode example includes allowed_https_rules"
 assert_summary_contains "allowed_http_rules: >-" "Restrict-mode example includes allowed_http_rules"
 
