@@ -259,9 +259,7 @@ describe("the internal-address guard", () => {
         "acl dst_internal var(txn.dst) -m ip 0.0.0.0/8 127.0.0.0/8 169.254.0.0/16",
       ),
     ).toBe(true);
-    expect(
-      FULL_CONFIG.includes("http-request deny deny_status 403 if dst_internal !host_is_address"),
-    ).toBe(true);
+    expect(FULL_CONFIG.includes("http-request deny deny_status 403 if dst_internal\n")).toBe(true);
   });
 
   it("includes the proxy's own address in the internal set, against a loop", () => {
@@ -296,9 +294,24 @@ describe("the internal-address guard", () => {
     expect(FULL_CONFIG.includes("-m ip -f")).toBe(false);
   });
 
-  it("exempts an explicitly-named address, which was asked for, not arrived at", () => {
-    // allowed_ip_rules and an address in allowed_url_rules stay reachable.
-    expect(FULL_CONFIG.includes("if dst_internal !host_is_address")).toBe(true);
+  it("exempts an address a rule names as its host, which was asked for, not arrived at", () => {
+    const named = gen({ ...FULL, httpRules: ["169.254.169.254:80"] });
+    const plain = frontendSegment(named, "http_in");
+    expect(
+      plain.includes(
+        "acl host_named_address req.hdr(host),host_only,regsub(\\.$,) -m str 169.254.169.254",
+      ),
+    ).toBe(true);
+    expect(plain.includes("deny deny_status 403 if dst_internal !host_named_address")).toBe(true);
+  });
+
+  it("does not exempt an address that a wildcard merely admits", () => {
+    // `**:80` matches the Host 169.254.169.254 too; before, any address in the
+    // Host skipped the guard once some rule had allowed the request.
+    const wide = gen({ ...FULL, httpRules: ["**:80", "*.*.*.*:80"] });
+    const plain = frontendSegment(wide, "http_in");
+    expect(plain.includes("host_named_address")).toBe(false);
+    expect(plain.includes("deny deny_status 403 if dst_internal\n")).toBe(true);
   });
 
   it("guards the passthrough path too, where the rules cannot run", () => {

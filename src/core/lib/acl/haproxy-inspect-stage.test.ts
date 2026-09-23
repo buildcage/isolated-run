@@ -1,9 +1,10 @@
 import { describe, it, expect, reportResults } from "../test/test-shim.ts";
 import { inspectStage } from "./haproxy-inspect-stage.ts";
 import { compileRuleSet, INTERNAL_RANGES, type RuleInputs } from "./haproxy-rules.ts";
+import { buildUrlRules } from "./url-rules.ts";
 
 /** The plaintext stage for these rules, as the generated config carries it. */
-function plainStage(inputs: RuleInputs): string {
+function plainStage(inputs: RuleInputs, mode: "restrict" | "audit" = "restrict"): string {
   return inspectStage(
     {
       name: "http_in",
@@ -13,7 +14,7 @@ function plainStage(inputs: RuleInputs): string {
       rules: compileRuleSet(inputs).http,
       backend: "origin_plain",
     },
-    { mode: "restrict", hasResolver: true, internalAddrs: INTERNAL_RANGES },
+    { mode, hasResolver: true, internalAddrs: INTERNAL_RANGES },
   ).join("\n");
 }
 
@@ -34,6 +35,31 @@ describe("inspect stage", () => {
     expect(plain.includes("# No rules for this scheme, so nothing is permitted.")).toBe(true);
     expect(plain.includes("do-resolve")).toBe(false);
     expect(plain.includes("acl dst_internal")).toBe(false);
+  });
+
+  it("exempts only the addresses a rule writes as its literal host", () => {
+    const plain = plainStage({
+      httpRules: [
+        "169.254.169.254:80",
+        "169.254.169.254:8080",
+        "~^127\\.0\\.0\\.1:80$",
+        "*.0.0.1:80",
+      ],
+      urlRules: buildUrlRules("GET http://127.0.0.2/latest/**"),
+    });
+    const named = plain.split("\n").filter((l) => l.includes("acl host_named_address"));
+    expect(named.map((l) => l.slice(l.lastIndexOf(" ") + 1))).toStrictEqual([
+      "169.254.169.254",
+      "127.0.0.2",
+    ]);
+  });
+
+  it("keeps the exemption in audit, where no rule is enforced", () => {
+    // The guard refuses in audit too, so a named address must stay reachable
+    // there. The Host is read directly: audit sets no txn.host.
+    const plain = plainStage({ httpRules: ["169.254.169.254:80"] }, "audit");
+    expect(plain.includes("txn.host)")).toBe(false);
+    expect(plain.includes("deny deny_status 403 if dst_internal !host_named_address")).toBe(true);
   });
 });
 

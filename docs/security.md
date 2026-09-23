@@ -263,9 +263,11 @@ Two consequences worth knowing:
   addresses rather than the real host's.
 
 This guard is about a _name_ landing somewhere it never should, and it never restricts a rule whose
-host is itself a literal address: reaching that connection already required a rule to match the
-address as sent, so nothing was arrived at that wasn't first asked for. Reaching a cloud metadata
-endpoint directly, the way any AWS or GCP SDK does, is not what this is meant to stop, and
+host is itself a literal address, such as `169.254.169.254:80`: the rule asked for that address, so
+nothing was arrived at. Only an address written out as a rule's host counts. A wildcard or regex
+that merely admits one, `**:80` or `~^.*:80$`, does not, so under `inspect` a `Host` of
+`169.254.169.254` sent under `**:80` is still refused as `internal-address`. Reaching a cloud
+metadata endpoint directly, the way any AWS or GCP SDK does, is not what this is meant to stop, and
 `allowed_ip_rules` is the intended path for it.
 
 ### Only TCP gets out
@@ -352,7 +354,7 @@ more than intended.
 | Requests a path or method no rule covers                                                           | **403** under `inspect`, recorded with its URL; `universal` reads neither and enforces on the host                                                                     |
 | Walks out of an allowed path with `..` or `%2e%2e`                                                 | **403**: the path is normalised before the rules see it, and an encoding no normaliser can strip is refused outright, a raw or escaped backslash included              |
 | Sends an allowed name while aiming elsewhere, or points `/etc/hosts` at an address of its choosing | Reaches the address the proxy resolved; the command's own choice of address is discarded                                                                               |
-| Puts an address in the `Host` header                                                               | Taken as the destination only if a rule names it; the rules decide either way                                                                                          |
+| Puts an address in the `Host` header                                                               | Taken as the destination once a rule allows it; an internal one only if a rule names it as its host                                                                    |
 | Allowlists a name that resolves to an internal address                                             | Refused if it lands on loopback, link-local, the proxy itself, an address the runner holds, or another never-public range, in `audit` too                              |
 | Reaches an allowed host presenting a wrong certificate                                             | **503** under `inspect`, which checks the origin's certificate when it connects and fails the step; under `universal` the command validates it itself                  |
 | Presents a wrong certificate and then stops answering, to look like an outage                      | Still fails the step: a connection `inspect` never completed is one whose origin it never authenticated, so it is refused whether or not the error survived            |
