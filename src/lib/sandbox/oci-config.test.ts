@@ -360,12 +360,17 @@ describe("buildOciConfig", () => {
       expect(config.linux.readonlyPaths).not.toContain("/run/user/1000");
     });
 
-    it("keeps masking /run/user/<uid> even when writable: / disables the read-only root", () => {
+    it("lifts the /run masks under writable: /, the full filesystem opt-out", () => {
+      // write_through: / means "do nothing to the filesystem", so the /run
+      // socket masks come off too (the /proc info-leak masks are separate; see
+      // the test below). The runtime sockets themselves stay unreachable to a
+      // non-privileged GID via the GID substitution in identity.ts.
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
         writable: { ...baseArgs.writable, writablePaths: ["/"] },
       });
-      expect(config.linux.maskedPaths).toContain("/run/user/1000");
+      expect(config.linux.maskedPaths).not.toContain("/run/user/1000");
+      expect(config.linux.maskedPaths).not.toContain("/run/docker.sock");
     });
 
     it("drops the /run coverage tmpfs under writable: /, the documented full opt-out", () => {

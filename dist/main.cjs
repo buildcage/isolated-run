@@ -19416,7 +19416,7 @@ function computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestina
 	return hostMounts.filter(({ mountPoint }) => mountPoint !== "/" && !freshMountDestinations.has(mountPoint) && !protectedPaths.has(mountPoint)).map(({ mountPoint }) => mountPoint);
 }
 function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, uid, env, hostMounts, writablePaths, freshMountDestinations, disableReadonly }) {
-	let reExposed = (p) => [...writablePaths].some((w) => w !== "/" && isAtOrUnder(p, w)), extraMaskedHostPaths = [
+	let reExposed = (p) => [...writablePaths].some((w) => isAtOrUnder(p, w)), extraMaskedHostPaths = [
 		...extra_masked_runtime_paths_default,
 		...rootlessRuntimeSocketPaths(env),
 		...perUserRuntimeDirs(uid, env),

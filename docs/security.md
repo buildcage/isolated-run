@@ -112,12 +112,13 @@ invocation, so no step inherits anything another one left behind.
   socket reads the write bits, which `mount -o ro` leaves untouched. `/var/run` is a symlink to
   `/run` on every supported runner, so it is covered too. `write_through:` re-exposes exactly what it
   names on top of the tmpfs, the same opt-in hole it is elsewhere: `/run/<x>` brings back a single
-  host path (a service socket a later step needs, say) and lifts its mask, and `/run` brings the whole
-  directory back. Re-exposing a host daemon's socket reopens an outbound path through that daemon, and
-  re-exposing all of `/run` leaves the outbound restriction nearly pointless, so it is the caller's
-  deliberate call — the default is that none of it is reachable. (`write_through: /`, the read-only
-  opt-out, uncovers `/run` too, but is only about the filesystem: the runtime-socket masks below
-  survive it, so name a socket, or `/run`, to lift those.)
+  host path (a service socket a later step needs, say) and lifts its mask, `/run` brings the whole
+  directory back, and `write_through: /` (the full filesystem opt-out) brings it back along with the
+  rest of the host. Re-exposing a host daemon's socket reopens an outbound path through that daemon,
+  and re-exposing all of `/run` leaves the outbound restriction nearly pointless, so it is the
+  caller's deliberate call — the default is that none of it is reachable. (The `/proc` kernel-memory
+  masks below are separate: they guard against reading kernel memory, not filesystem access, and stay
+  even under `write_through: /`.)
 - **The runtime-socket paths and per-user runtime directory are also masked**, an independent second
   layer covering the rare host where `/var/run` is a separate real directory the `/run` tmpfs does
   not reach: `/var/run/docker.sock`, containerd's, podman's, buildkit's, crio's and their rootless
