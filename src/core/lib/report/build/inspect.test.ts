@@ -171,6 +171,16 @@ describe("buildInspectReportData", () => {
     expect(r.passed.length).toBe(0);
   });
 
+  it("tables a refusal sent to an address the build wrote out as an IP row", async () => {
+    // allowed_ip_rules is what would have passed it through, so that is the
+    // rule kind the row names.
+    const toResolver = BAD_REQUEST.replace("dst=172.20.0.1:8080", "dst=8.8.8.8:53");
+    const r = await buildInspectReportData([START, toResolver], [], reportParams(), 0);
+    expect(
+      r.blocked.map((row) => `${row.host}:${row.port} ${row.ruleType} ${row.reason}`),
+    ).toStrictEqual(["8.8.8.8:53 IP bad-request"]);
+  });
+
   it("still blocks a refusal whose request did name a host", async () => {
     // Same termination state as the two above, told apart by the reason and
     // by the method haproxy logs where a request never parsed.

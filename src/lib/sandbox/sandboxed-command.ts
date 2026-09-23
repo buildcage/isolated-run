@@ -30,15 +30,14 @@ import { buildEnvBlob, resolveSandboxEnv, writeEnvLoader } from "./env-loader.ts
 import { runIsolated } from "./run.ts";
 import { withScratchDir, type Warn } from "./scratch-dir.ts";
 import type { BuiltOciSpec, OverlayDirs } from "./types.ts";
+import { PROXY_ADDRESS } from "#core/lib/log/proxy-address.ts";
 
 /**
- * Fixed addressing for the direct veth link to the proxy's buildcage0
- * interface. One address covers two roles: the proxy is the sandbox's default
- * gateway and its only nameserver, and its own INPUT rules accept nothing else
- * on that interface (see init-iptables).
+ * The sandbox's own end of the direct veth link to the proxy's buildcage0
+ * interface. The proxy's end is PROXY_ADDRESS, which covers two roles: the
+ * proxy is the sandbox's default gateway and its only nameserver, and its own
+ * INPUT rules accept nothing else on that interface (see init-iptables).
  */
-const PROXY_IP = "172.20.0.1";
-/** The sandbox's own end of that link. */
 const SANDBOX_IP = "172.20.0.101";
 
 /**
@@ -196,7 +195,7 @@ function writeBundleFiles(
 ): BundleFiles {
   const overlayScratchPaths =
     filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [];
-  const resolvConfPath = writeResolvConf(PROXY_IP, dir);
+  const resolvConfPath = writeResolvConf(PROXY_ADDRESS, dir);
   const execDir = join(dir, "exec");
   mkdir(execDir, { mode: 0o700 });
   return {
@@ -342,8 +341,8 @@ export function runSandboxedCommand(
         containerId: containerName,
         netnsName,
         rootfsBindDir,
-        gateway: PROXY_IP,
-        dns: PROXY_IP,
+        gateway: PROXY_ADDRESS,
+        dns: PROXY_ADDRESS,
         targetIp: SANDBOX_IP,
       });
     },

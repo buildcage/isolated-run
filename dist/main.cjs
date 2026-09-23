@@ -19593,9 +19593,12 @@ function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, 
 	}
 }
 //#endregion
+//#region src/core/lib/log/proxy-address.ts
+const PROXY_ADDRESS = "172.20.0.1";
+//#endregion
 //#region src/lib/sandbox/sandboxed-command.ts
 init_core();
-const PROXY_IP = "172.20.0.1", realDeps$2 = {
+const realDeps$2 = {
 	withScratchDir,
 	extractRuncBootstrap,
 	extractCaCert,
@@ -19637,7 +19640,7 @@ function extractCaTrust(containerName, dir, env, warn, { extractCaCert, writeCaT
 	}
 }
 function writeBundleFiles(dir, { runInput, filesystemMode, overlayRoots }, { createOverlayScratchDirs, writeResolvConf, writeRunScript, writeEnvLoader, mkdir }) {
-	let overlayScratchPaths = filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [], resolvConfPath = writeResolvConf(PROXY_IP, dir), execDir = (0, node_path.join)(dir, "exec");
+	let overlayScratchPaths = filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [], resolvConfPath = writeResolvConf(PROXY_ADDRESS, dir), execDir = (0, node_path.join)(dir, "exec");
 	return mkdir(execDir, { mode: 448 }), {
 		overlayScratchPaths,
 		resolvConfPath,
@@ -19714,8 +19717,8 @@ function runSandboxedCommand(options, overrides = {}) {
 			containerId: containerName,
 			netnsName,
 			rootfsBindDir,
-			gateway: PROXY_IP,
-			dns: PROXY_IP,
+			gateway: PROXY_ADDRESS,
+			dns: PROXY_ADDRESS,
 			targetIp: "172.20.0.101"
 		});
 	}, {
@@ -20596,23 +20599,35 @@ function actionFor(reason, isAudit) {
 function urlOf(scheme, authority, target) {
 	return target.startsWith("/") ? `${scheme}://${authority}${target}` : void 0;
 }
-function hostBeforeRequest(sni, destination) {
-	return sni === void 0 ? "(unknown)" : sni === "-" ? destination : sni;
+function authorityOf(host, port, scheme) {
+	return port === DEFAULT_PORT$1[scheme] ? host : `${host}:${port}`;
+}
+function hostBeforeRequest(sni, address) {
+	return sni !== void 0 && sni !== "-" ? {
+		host: sni,
+		byAddress: !1
+	} : address === "172.20.0.1" ? {
+		host: "(unknown)",
+		byAddress: !1
+	} : {
+		host: address,
+		byAddress: !0
+	};
 }
 function parseProxyLine(line, isAudit) {
 	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
 	if (request) {
-		let incomplete = incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], authority = request[12], event = {
+		let incomplete = incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], authority = request[12], unnamed = namedByHandshake ? hostBeforeRequest(request[11], request[9]) : void 0, event = {
 			time: Number(request[1]) / 1e3,
 			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
-			protocol: scheme,
-			host: namedByHandshake ? hostBeforeRequest(request[11], request[9]) : splitHostPort(authority).host,
+			protocol: unnamed?.byAddress ? "tcp" : scheme,
+			host: unnamed?.host ?? splitHostPort(authority).host,
 			port: Number(request[10]),
 			destination: `${request[9]}:${request[10]}`
 		};
 		if (parsedRequest) {
 			event.method = request[3];
-			let url = urlOf(scheme, authority, request[13]);
+			let url = urlOf(scheme, unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority, request[13]);
 			url !== void 0 && (event.url = url);
 		}
 		return reason === void 0 ? (event.status = Number(request[4]), event.bytes = Number(request[5])) : event.reason = reason, event;

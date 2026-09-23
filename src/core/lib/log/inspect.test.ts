@@ -425,13 +425,22 @@ describe("a request whose target is not a path", () => {
   });
 
   it("keeps the URL of a request that named a path but no host", async () => {
-    // The two are separate cases: an authority of `-` still has a path to
+    // The two are separate cases: a request with no Host still has a path to
     // show, and the stage names that refusal for itself. Only the target
-    // being no path leaves nothing to build a URL around.
-    const [e] = await parse([
-      "buildcage 1787471975123 http GET 400 0 ts=PR reason=missing-host-header tlserr=- dst=1.2.3.4:80 host=- /x",
+    // being no path leaves nothing to build a URL around. The URL is built
+    // around the host the row carries, with the port only where it is not the
+    // scheme's own.
+    const line = (dst: string) =>
+      `buildcage 1787471975123 http GET 400 0 ts=PR reason=missing-host-header tlserr=- dst=${dst} host=- /x`;
+    const [byAddress, onOtherPort, byProxy] = await parse([
+      line("1.2.3.4:80"),
+      line("1.2.3.4:8080"),
+      line("172.20.0.1:80"),
     ]);
-    expect(e.url).toBe("http://-/x");
+    expect(byAddress.url).toBe("http://1.2.3.4/x");
+    expect(onOtherPort.url).toBe("http://1.2.3.4:8080/x");
+    expect(byProxy.url).toBe("http://(unknown)/x");
+    expect(byProxy.host).toBe("(unknown)");
   });
 });
 
