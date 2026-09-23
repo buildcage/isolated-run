@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
-import { resolveSandboxGid, type HostGroups } from "./identity.ts";
+import { assertNonRootUid, resolveSandboxGid, type HostGroups } from "./identity.ts";
+import { SandboxError } from "../errors.ts";
 
 // The host is supplied rather than read: a test must not depend on who owns a
 // file on the machine running it (a scratch file is wheel-owned on macOS and
@@ -127,5 +128,21 @@ describe("resolveSandboxGid", () => {
   it("falls back to the runtime-socket check alone when the group file can't be read", () => {
     const result = resolveSandboxGid(1000, {}, { host: host(null), runtimeSocketPaths: [] });
     expect(result).toStrictEqual({ gid: 1000 });
+  });
+});
+
+describe("assertNonRootUid", () => {
+  it("throws ROOT_RUNNER for uid 0", () => {
+    let code: string | undefined;
+    try {
+      assertNonRootUid(0);
+    } catch (e) {
+      code = (e as SandboxError).code;
+    }
+    expect(code).toBe("ROOT_RUNNER");
+  });
+
+  it("is a no-op for any non-root uid", () => {
+    expect(() => assertNonRootUid(1001)).not.toThrow();
   });
 });

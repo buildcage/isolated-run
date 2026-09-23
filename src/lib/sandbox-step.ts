@@ -39,6 +39,7 @@ import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { removeCreatedDirsIfEmpty, splitWriteThroughInput } from "./sandbox/write-through.ts";
 import { resolveFilesystemPlan, validateFilesystemInputs } from "./sandbox/filesystem-plan.ts";
+import { assertNonRootUid } from "./sandbox/identity.ts";
 import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
@@ -215,7 +216,10 @@ export async function runSandboxStep(
   // SandboxStepDeps).
   const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
 
-  // Cheap, pure input check first, so a plain mistake (e.g. write_through: /
+  // Before any privileged setup; see assertNonRootUid.
+  assertNonRootUid(process.getuid!());
+
+  // Cheap, pure input check, so a plain mistake (e.g. write_through: /
   // under filesystem_mode: ephemeral) is rejected immediately rather than only
   // after the privileged preflight checks below have already run
   // (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
