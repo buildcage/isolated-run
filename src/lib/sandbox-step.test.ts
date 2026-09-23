@@ -230,11 +230,8 @@ describe("runSandboxStep", () => {
     });
   });
 
-  // A local-path `uses: ./` invocation names no ref. Verification receives it
-  // empty, not floated to `v1`, so it hard-fails on that case (see
-  // verify-policy.ts) rather than pinning the latest published v1 image, which
-  // can drift from the vendored code. The report still needs a valid `uses:`
-  // line, so it takes the `v1` display fallback instead of an empty ref.
+  // A local-path `uses: ./` names no ref: verification takes it empty (and
+  // hard-fails on that), the report takes the v1 fallback for a valid `uses:`.
   it("verifies against an empty ref but reports with the v1 fallback for a local-path invocation", async () => {
     await runSandboxStep({ ...ENV, GITHUB_ACTION_REF: "", GITHUB_ACTION_REPOSITORY: "" }, deps);
 

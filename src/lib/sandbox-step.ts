@@ -48,10 +48,8 @@ import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { reportStepTraffic } from "./step-report.ts";
 
 /**
- * The major-floating ref the report's "switch to restrict" example falls back
- * to when the runner names no ref (a local-path `uses: ./`). It is a display
- * default only: image provenance is never verified against it (see the empty
- * `actionRef` in runSandboxStep).
+ * Display fallback for the report's `uses:` example when the runner names no
+ * ref. Never verified against; provenance hard-fails on the empty ref instead.
  */
 const DEFAULT_ACTION_REF = "v1";
 
@@ -211,13 +209,9 @@ export async function runSandboxStep(
     warn,
   } = { ...realDeps, ...overrides };
 
-  // Empty for a local-path `uses: ./` invocation, which names no release to
-  // verify against. Kept empty (not floated to `v1`) so provenance
-  // verification hard-fails rather than silently pinning the latest published
-  // v1 image, which can drift from the vendored code; see verify-policy.ts.
-  // Local development and the integration scripts set BUILDCAGE_LOCAL_IMAGE_REF,
-  // which skips verification but still renders the report, so that path takes
-  // reportActionRef below for a valid `uses:` line rather than this empty ref.
+  // A local-path `uses: ./` names no ref. Verification takes it empty so it
+  // hard-fails instead of pinning the floating v1 image, which can drift from
+  // the vendored code; the report keeps a valid `uses:` line via the fallback.
   const actionRef = env.GITHUB_ACTION_REF ?? "";
   const reportActionRef = env.GITHUB_ACTION_REF || DEFAULT_ACTION_REF;
   const actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
