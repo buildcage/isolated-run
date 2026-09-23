@@ -230,12 +230,19 @@ describe("runSandboxStep", () => {
     });
   });
 
-  // A local-path `uses: ./` invocation sets neither, and the integration
-  // scripts drive this action the same way.
-  it("falls back to v1 and this repository when the runner names neither", async () => {
-    await runSandboxStep({ ...ENV, GITHUB_ACTION_REF: "", GITHUB_ACTION_REPOSITORY: "" }, deps);
+  // A local-path `uses: ./` names no ref: verification takes it empty (and
+  // hard-fails on that), the report takes the v1 fallback for a valid `uses:`.
+  it("verifies against an empty ref but reports with the v1 fallback for a local-path invocation", async () => {
+    await runSandboxStep(
+      { ...ENV, GITHUB_ACTION_REF: undefined, GITHUB_ACTION_REPOSITORY: undefined },
+      deps,
+    );
 
     expect(mocks.verifyImageDigestOrThrow.mock.calls[0][0]).toMatchObject({
+      actionRef: "",
+      actionRepo: "buildcage/isolated-run",
+    });
+    expect(mocks.reportStepTraffic.mock.calls[0][0]).toMatchObject({
       actionRef: "v1",
       actionRepo: "buildcage/isolated-run",
     });
