@@ -245,6 +245,26 @@ describe("writeReportSummary", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  // The isolated command can reach GITHUB_STEP_SUMMARY in persistent mode, so
+  // it can make the write throw; the outcome must already be decided by then.
+  it("fails the step even when the summary cannot be written", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const summaryFile = join(scratchDir, "missing.md");
+    vi.stubEnv("GITHUB_STEP_SUMMARY", summaryFile);
+
+    await expect(
+      writeReportSummary(
+        blockedReport(),
+        createAnnotation(true),
+        options({ failOnBlocked: true }),
+        false,
+        { GITHUB_STEP_SUMMARY: summaryFile },
+      ),
+    ).rejects.toThrow();
+    expect(process.exitCode).toBe(1);
+    vi.unstubAllEnvs();
+  });
+
   it("mirrors the summary to BUILDCAGE_RUN_DEBUG_SUMMARY_FILE when it is set", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const appendFile = vi.fn();

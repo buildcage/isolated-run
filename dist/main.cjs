@@ -20139,9 +20139,9 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 }
 async function writeReportSummary(report, annotation, options, artifactAvailable, env, { appendFile = node_fs.appendFileSync } = {}) {
 	let outcomes = computeReportOutcomes(report, options);
-	await writeStepSummary(truncateForStepSummary(outcomes.markdown, artifactAvailable), env.GITHUB_STEP_SUMMARY);
+	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeStepSummary(truncateForStepSummary(outcomes.markdown, artifactAvailable), env.GITHUB_STEP_SUMMARY);
 	let debugSummaryFile = env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE;
-	debugSummaryFile && appendFile(debugSummaryFile, outcomes.markdown), applyOutcomeAnnotations(annotation, outcomes.emissions);
+	debugSummaryFile && appendFile(debugSummaryFile, outcomes.markdown);
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts
@@ -65153,15 +65153,19 @@ async function uploadTrafficArtifact(report, containerName, annotation, { upload
 		let file = (0, node_path.join)(scratchDir, "traffic.json");
 		writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));
 		let days = Number(getInput("traffic_artifact_retention_days") || ""), name = trafficArtifactName(containerName);
-		await upload(name, [file], scratchDir, { retentionDays: Number.isFinite(days) && days > 0 ? days : void 0 }), console.log(`Uploaded the traffic JSON as ${name}`), setOutput("traffic_artifact_name", name);
+		return await upload(name, [file], scratchDir, { retentionDays: Number.isFinite(days) && days > 0 ? days : void 0 }), console.log(`Uploaded the traffic JSON as ${name}`), name;
 	} catch (e) {
 		annotation.warning(`Could not upload the traffic artifact: ${errorMessage(e)}`);
+		return;
 	} finally {
 		(0, node_fs.rmSync)(scratchDir, {
 			recursive: !0,
 			force: !0
 		});
 	}
+}
+function setTrafficArtifactOutput(name) {
+	setOutput("traffic_artifact_name", name);
 }
 //#endregion
 //#region src/lib/step-report.ts
@@ -65171,18 +65175,21 @@ const realDeps$1 = {
 	writeReportSummary,
 	wantsTrafficArtifact,
 	uploadTrafficArtifact,
+	setTrafficArtifactOutput,
 	readFailOnBlocked,
 	readStepLabel
 };
 async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, env }, overrides = {}) {
-	let { fetchReport, readActionVersion, writeReportSummary, wantsTrafficArtifact, uploadTrafficArtifact, readFailOnBlocked, readStepLabel } = {
+	let { fetchReport, readActionVersion, writeReportSummary, wantsTrafficArtifact, uploadTrafficArtifact, setTrafficArtifactOutput, readFailOnBlocked, readStepLabel } = {
 		...realDeps$1,
 		...overrides
-	}, phase = "fetch sandbox report";
+	}, failOnBlocked = readFailOnBlocked(), failClosed = parameters.mode !== "audit" && failOnBlocked, fail = (message) => {
+		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail_on_blocked`), process.exitCode = 1) : annotation.warning(message);
+	}, phase = "fetch sandbox report", artifactName = "";
 	try {
 		let report = await fetchReport(containerName, parameters, proxyEngine);
 		phase = "write the report summary";
-		let failOnBlocked = readFailOnBlocked(), wantsArtifact = wantsTrafficArtifact();
+		let wantsArtifact = wantsTrafficArtifact();
 		await writeReportSummary(report, annotation, {
 			actionRepo,
 			actionRef,
@@ -65190,9 +65197,15 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 			actionVersion: readActionVersion(containerName, proxyEngine),
 			stepLabel: readStepLabel(),
 			failOnBlocked
-		}, wantsArtifact, env), wantsArtifact && (phase = "upload the traffic artifact", await uploadTrafficArtifact(report, containerName, annotation));
+		}, wantsArtifact, env), wantsArtifact && (phase = "upload the traffic artifact", artifactName = await uploadTrafficArtifact(report, containerName, annotation) ?? "");
 	} catch (e) {
-		annotation.warning(`Failed to ${phase}: ${errorMessage(e)}`);
+		let message = `Failed to ${phase}: ${errorMessage(e)}`;
+		phase === "upload the traffic artifact" ? annotation.warning(message) : fail(message);
+	}
+	try {
+		setTrafficArtifactOutput(artifactName);
+	} catch (e) {
+		fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
 	}
 }
 //#endregion

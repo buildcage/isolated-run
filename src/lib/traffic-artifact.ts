@@ -53,16 +53,16 @@ export interface UploadTrafficArtifactDeps {
 }
 
 /**
- * Upload the traffic JSON, when the engine produced one, and set the
- * traffic_artifact_name output on success. Best-effort: the step's own
- * outcome is already decided by this point, so a failed upload only warns.
+ * Upload the traffic JSON and return the artifact's name, or undefined if the
+ * upload failed. Best-effort: the step's own outcome is already decided by
+ * this point, so a failed upload only warns.
  */
 export async function uploadTrafficArtifact(
   report: Report,
   containerName: string,
   annotation: Annotation,
   { upload = uploadViaActionsArtifact }: UploadTrafficArtifactDeps = {},
-): Promise<void> {
+): Promise<string | undefined> {
   const scratchDir = mkdtempSync(join(tmpdir(), "buildcage-traffic-"));
   try {
     const file = join(scratchDir, "traffic.json");
@@ -73,14 +73,21 @@ export async function uploadTrafficArtifact(
       retentionDays: Number.isFinite(days) && days > 0 ? days : undefined,
     });
     console.log(`Uploaded the traffic JSON as ${name}`);
-    // Set only on confirmed success, and only here (after the sandboxed
-    // command has already exited). GITHUB_OUTPUT's own last-write-wins
-    // parsing means this always overrides anything the isolated command
-    // itself may have written to the same key.
-    core.setOutput("traffic_artifact_name", name);
+    return name;
   } catch (e) {
     annotation.warning(`Could not upload the traffic artifact: ${errorMessage(e)}`);
+    return undefined;
   } finally {
     rmSync(scratchDir, { recursive: true, force: true });
   }
+}
+
+/**
+ * Set the traffic_artifact_name output, empty when no artifact was uploaded.
+ * Written on every path, after the isolated command has exited:
+ * GITHUB_OUTPUT is last-write-wins, so this is what overrides anything the
+ * command itself wrote to the same key.
+ */
+export function setTrafficArtifactOutput(name: string): void {
+  core.setOutput("traffic_artifact_name", name);
 }

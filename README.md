@@ -255,7 +255,8 @@ size, refusals included, so a blocked entry names the URL that was attempted rat
 host. A query parameter that names a credential has its value replaced, see
 [Credentials in a URL](docs/security.md#credentials-in-a-url).
 
-In `restrict` mode a blocked connection fails the step. Set `fail_on_blocked: false` to report
+In `restrict` mode a blocked connection fails the step, and so does a report that could not be read
+or written, since it can't show that nothing was blocked. Set `fail_on_blocked: false` to report
 without failing, or list what you expect to stay blocked in `known_blocked_rules`. In `audit` mode
 nothing fails the step. How the report folds expected rows, and what a `dns-service-not-allowed` row
 means, is in [Reference](./docs/reference.md#report-details).

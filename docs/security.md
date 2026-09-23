@@ -366,6 +366,8 @@ more than intended.
 | Reads another process's memory                                                                     | Structurally refused by the kernel across a PID namespace boundary, capabilities or not                                                                      |
 | Ignores the proxy variables entirely                                                               | No effect: interception is at the network level, not opt-in                                                                                                  |
 | Floods the proxy log until earlier entries rotate away                                             | A log that no longer starts where a real run does is not accepted as a complete record: the step fails under `restrict` with `fail_on_blocked` (the default) |
+| Removes or locks `$GITHUB_STEP_SUMMARY` so no report is written                                    | The outcome is decided before the summary is written, and a report that cannot be read or written fails the step under `restrict` with `fail_on_blocked`     |
+| Writes its own `traffic_artifact_name` to `$GITHUB_OUTPUT`                                         | Overwritten after the command exits, with an empty value when no artifact was uploaded                                                                       |
 
 ## What the engines cannot see
 
@@ -535,7 +537,9 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 - **Appending to the Job Summary.** The report is rendered from the runner host after the command
   has exited, and a name or URL is escaped before it is written into a table, so the command cannot
   edit its own report. What it can do in `persistent` mode is append to `$GITHUB_STEP_SUMMARY`
-  beforehand and leave markdown of its own beside the real report. Where the report is meant to be
+  beforehand and leave markdown of its own beside the real report. Removing or locking the file
+  instead leaves the report nowhere to go, which fails the step under `restrict` with
+  `fail_on_blocked`. Where the report is meant to be
   an audit trail, take it from `upload_traffic_artifact: true` instead: the JSON is uploaded when
   the step ends, and is not a file a later step can append a line to.
 - **Exhausting the host.** The OCI spec sets no `linux.resources`, so there is no memory, pids or
