@@ -56,7 +56,10 @@ jobs:
 
   unit_test:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.unit_test == 'true'
+    # !cancelled() so a skipped `changes` (it only runs on pull_request) still
+    # lets this evaluate, instead of skipping the job before the condition and
+    # passing a workflow_dispatch run green having tested nothing.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.unit_test == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

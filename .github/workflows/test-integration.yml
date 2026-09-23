@@ -64,7 +64,10 @@ jobs:
   # representative case each that does exercise the real action.
   test_sandbox:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true'
+    # !cancelled() so a skipped `changes` (it only runs on pull_request) still
+    # lets this evaluate, instead of skipping the job before the condition and
+    # passing a workflow_dispatch run green having tested nothing.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -101,7 +104,7 @@ jobs:
   # Separate job from test_sandbox: this one needs compose.test-universal.yaml's fixtures.
   test_sandbox_universal:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_universal == 'true'
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_universal == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -148,7 +151,7 @@ jobs:
   # Separate job from test_sandbox: this one needs an inspect-engine image and fixtures.
   test_sandbox_inspect:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_inspect == 'true'
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_inspect == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -196,7 +199,7 @@ jobs:
   # Separate job from the others: it builds both engines' images and attaches no sandbox.
   test_listener_scope:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true'
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
