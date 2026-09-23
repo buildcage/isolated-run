@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  setTrafficArtifactOutput,
   trafficArtifactName,
   uploadTrafficArtifact,
   wantsTrafficArtifact,
@@ -85,7 +86,7 @@ describe("trafficArtifactName", () => {
   });
 });
 
-describe("uploadTrafficArtifact", () => {
+describe("setTrafficArtifactOutput", () => {
   // core.setOutput appends to GITHUB_OUTPUT and refuses a file that isn't
   // already there, so every case gets a real (empty) one.
   let outputDir: string;
@@ -102,25 +103,42 @@ describe("uploadTrafficArtifact", () => {
     rmSync(outputDir, { recursive: true, force: true });
   });
 
-  it("uploads the traffic JSON it wrote, and names it as this step's output", async () => {
+  it("writes the name to GITHUB_OUTPUT", () => {
+    setTrafficArtifactOutput("buildcage-traffic-deadbeef");
+
+    expect(readFileSync(outputFile, "utf8")).toMatch(
+      /^traffic_artifact_name<<(\S+)\nbuildcage-traffic-deadbeef\n\1\n$/,
+    );
+  });
+
+  // An empty value is still a line of its own, which is what overrides one the
+  // isolated command wrote earlier.
+  it("writes an empty value rather than nothing", () => {
+    setTrafficArtifactOutput("");
+
+    expect(readFileSync(outputFile, "utf8")).toMatch(/^traffic_artifact_name<<(\S+)\n\n\1\n$/);
+  });
+
+  it("throws when the command removed GITHUB_OUTPUT", () => {
+    rmSync(outputFile);
+
+    expect(() => setTrafficArtifactOutput("")).toThrow();
+  });
+});
+
+describe("uploadTrafficArtifact", () => {
+  it("uploads the traffic JSON it wrote, and returns the artifact's name", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { upload, calls } = fakeUpload();
 
-    await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(true), { upload });
+    const name = await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(true), {
+      upload,
+    });
 
     expect(calls).toHaveLength(1);
     expect(calls[0].name).toBe("buildcage-traffic-deadbeef");
     expect(calls[0].files).toStrictEqual([join(calls[0].root, "traffic.json")]);
-    expect(readFileSync(outputFile, "utf8")).toContain("buildcage-traffic-deadbeef");
-  });
-
-  it("names no output when the upload failed", async () => {
-    vi.spyOn(console, "log").mockImplementation(() => {});
-    const { upload } = fakeUpload(new Error("artifact service unavailable"));
-
-    await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(true), { upload });
-
-    expect(readFileSync(outputFile, "utf8")).toBe("");
+    expect(name).toBe("buildcage-traffic-deadbeef");
   });
 
   it("removes the scratch directory it wrote the JSON into", async () => {

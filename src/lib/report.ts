@@ -132,7 +132,8 @@ export interface WriteReportSummaryDeps {
 
 /**
  * Side-effecting half of the report step: computeReportOutcomes() decides what
- * to say; this writes it to the Job Summary, the annotations and the exit code.
+ * to say; this sets the annotations and the exit code, then writes the Job
+ * Summary.
  * `artifactAvailable` only affects the wording of a truncation notice if the
  * report turns out to be too large for GitHub's own per-step limit: it
  * does not gate whether truncation happens.
@@ -150,6 +151,10 @@ export async function writeReportSummary(
 ): Promise<void> {
   const outcomes = computeReportOutcomes(report, options);
 
+  // Before any write, so a summary file the isolated command removed or locked
+  // cannot take the step's outcome down with it.
+  applyOutcomeAnnotations(annotation, outcomes.emissions);
+
   await writeStepSummary(
     truncateForStepSummary(outcomes.markdown, artifactAvailable),
     env.GITHUB_STEP_SUMMARY,
@@ -163,6 +168,4 @@ export async function writeReportSummary(
   if (debugSummaryFile) {
     appendFile(debugSummaryFile, outcomes.markdown);
   }
-
-  applyOutcomeAnnotations(annotation, outcomes.emissions);
 }

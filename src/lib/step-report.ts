@@ -13,7 +13,11 @@ import type { GenReportParameters } from "#core/lib/report/types.ts";
 import type { ProxyEngine } from "./engine.ts";
 import { readFailOnBlocked, readStepLabel } from "./inputs.ts";
 import { fetchReport, readActionVersion, writeReportSummary } from "./report.ts";
-import { uploadTrafficArtifact, wantsTrafficArtifact } from "./traffic-artifact.ts";
+import {
+  setTrafficArtifactOutput,
+  uploadTrafficArtifact,
+  wantsTrafficArtifact,
+} from "./traffic-artifact.ts";
 
 /**
  * The steps this function sequences. Declared rather than imported straight
@@ -26,6 +30,7 @@ export interface ReportStepDeps {
   writeReportSummary: typeof writeReportSummary;
   wantsTrafficArtifact: typeof wantsTrafficArtifact;
   uploadTrafficArtifact: typeof uploadTrafficArtifact;
+  setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
   readFailOnBlocked: typeof readFailOnBlocked;
   readStepLabel: typeof readStepLabel;
 }
@@ -36,6 +41,7 @@ const realDeps: ReportStepDeps = {
   writeReportSummary,
   wantsTrafficArtifact,
   uploadTrafficArtifact,
+  setTrafficArtifactOutput,
   readFailOnBlocked,
   readStepLabel,
 };
@@ -58,9 +64,10 @@ export interface ReportStepOptions {
  * Fetch the proxy's report, write the Job Summary, and upload the traffic
  * artifact if one was asked for.
  *
- * Never throws. The step's exit code is the isolated command's own, so a
- * failure anywhere here is a warning naming the step that failed, and nothing
- * more. The proxy teardown that runs after this call depends on reaching it.
+ * Never throws. A failure here is a warning naming the step that failed, and
+ * under `restrict` with fail_on_blocked it also fails the step: a report that
+ * could not be read or recorded cannot vouch that nothing was blocked. The
+ * proxy teardown that runs after this call depends on reaching it.
  */
 export async function reportStepTraffic(
   {
@@ -81,19 +88,29 @@ export async function reportStepTraffic(
     writeReportSummary,
     wantsTrafficArtifact,
     uploadTrafficArtifact,
+    setTrafficArtifactOutput,
     readFailOnBlocked,
     readStepLabel,
   } = { ...realDeps, ...overrides };
 
-  // Named so the warning below says which step failed. One catch, not three:
+  const failOnBlocked = readFailOnBlocked();
+  const failClosed = parameters.mode !== "audit" && failOnBlocked;
+  const fail = (message: string): void => {
+    if (failClosed) {
+      annotation.error(`${message}; failing the step under restrict with fail_on_blocked`);
+      process.exitCode = 1;
+    } else {
+      annotation.warning(message);
+    }
+  };
+
+  // Named so the message below says which step failed. One catch, not three:
   // every failure here has the same consequence, and only the wording differs.
   let phase = "fetch sandbox report";
+  let artifactName = "";
   try {
     const report = await fetchReport(containerName, parameters, proxyEngine);
-    // Moved on as soon as the fetch is done, so the two input reads below are
-    // attributed to the step that uses them rather than to the fetch.
     phase = "write the report summary";
-    const failOnBlocked = readFailOnBlocked();
     const wantsArtifact = wantsTrafficArtifact();
     await writeReportSummary(
       report,
@@ -113,9 +130,18 @@ export async function reportStepTraffic(
     );
     if (wantsArtifact) {
       phase = "upload the traffic artifact";
-      await uploadTrafficArtifact(report, containerName, annotation);
+      artifactName = (await uploadTrafficArtifact(report, containerName, annotation)) ?? "";
     }
   } catch (e) {
-    annotation.warning(`Failed to ${phase}: ${errorMessage(e)}`);
+    const message = `Failed to ${phase}: ${errorMessage(e)}`;
+    // The artifact is a copy of what the summary already recorded.
+    if (phase === "upload the traffic artifact") annotation.warning(message);
+    else fail(message);
+  }
+
+  try {
+    setTrafficArtifactOutput(artifactName);
+  } catch (e) {
+    fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
   }
 }

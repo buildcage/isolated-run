@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { reportStepTraffic, type ReportStepDeps, type ReportStepOptions } from "./step-report.ts";
 import { reportParams } from "#core/lib/test/report-data.node.ts";
@@ -12,6 +12,7 @@ const mocks = {
   writeReportSummary: vi.fn(),
   wantsTrafficArtifact: vi.fn(),
   uploadTrafficArtifact: vi.fn(),
+  setTrafficArtifactOutput: vi.fn(),
   readFailOnBlocked: vi.fn(),
   readStepLabel: vi.fn(),
 };
@@ -37,13 +38,20 @@ function options(overrides: Partial<ReportStepOptions> = {}): ReportStepOptions 
   };
 }
 
+let exitCode: typeof process.exitCode;
+
 beforeEach(() => {
+  exitCode = process.exitCode;
   vi.resetAllMocks();
   mocks.fetchReport.mockResolvedValue({ engine: "inspect" });
   mocks.readActionVersion.mockReturnValue("1.2.3");
   mocks.readStepLabel.mockReturnValue("build");
   mocks.readFailOnBlocked.mockReturnValue(true);
   mocks.wantsTrafficArtifact.mockReturnValue(false);
+});
+
+afterEach(() => {
+  process.exitCode = exitCode;
 });
 
 describe("reportStepTraffic", () => {
@@ -111,29 +119,50 @@ describe("reportStepTraffic", () => {
     },
   );
 
-  it("warns rather than throwing when the report cannot be fetched", async () => {
-    mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
+  it.each([
+    { mode: "restrict", failOnBlocked: true, fails: true },
+    { mode: "restrict", failOnBlocked: false, fails: false },
+    { mode: "audit", failOnBlocked: true, fails: false },
+  ])(
+    "fails the step when the report cannot be fetched only under restrict with fail_on_blocked ($mode, fail_on_blocked=$failOnBlocked)",
+    async ({ mode, failOnBlocked, fails }) => {
+      mocks.readFailOnBlocked.mockReturnValue(failOnBlocked);
+      mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
+
+      await expect(
+        reportStepTraffic(options({ parameters: reportParams({ mode }) }), deps),
+      ).resolves.toBeUndefined();
+
+      expect(mocks.writeReportSummary).not.toHaveBeenCalled();
+      if (fails) {
+        expect(annotation.error).toHaveBeenCalledWith(
+          "Failed to fetch sandbox report: container is gone; failing the step under restrict with fail_on_blocked",
+        );
+        expect(process.exitCode).toBe(1);
+      } else {
+        expect(annotation.warning).toHaveBeenCalledWith(
+          "Failed to fetch sandbox report: container is gone",
+        );
+        expect(process.exitCode).toBe(exitCode);
+      }
+    },
+  );
+
+  it("fails the step when writing the summary fails under restrict with fail_on_blocked", async () => {
+    mocks.writeReportSummary.mockRejectedValue(new Error("summary file is gone"));
 
     await expect(reportStepTraffic(options(), deps)).resolves.toBeUndefined();
-    expect(annotation.warning).toHaveBeenCalledWith(
-      "Failed to fetch sandbox report: container is gone",
+    expect(annotation.error).toHaveBeenCalledWith(
+      "Failed to write the report summary: summary file is gone; failing the step under restrict with fail_on_blocked",
     );
-    expect(mocks.writeReportSummary).not.toHaveBeenCalled();
-  });
-
-  it("warns rather than throwing when writing the summary fails", async () => {
-    mocks.writeReportSummary.mockRejectedValue(new Error("summary too large"));
-
-    await expect(reportStepTraffic(options(), deps)).resolves.toBeUndefined();
-    expect(annotation.warning).toHaveBeenCalledWith(
-      "Failed to write the report summary: summary too large",
-    );
+    expect(process.exitCode).toBe(1);
   });
 
   // The real uploadTrafficArtifact warns for itself and resolves, so this is
   // the outer guarantee rather than a path it takes: whatever the upload does,
-  // this function still returns.
-  it("warns rather than throwing when the artifact upload fails", async () => {
+  // this function still returns, and the step is not failed over a copy of what
+  // the summary already recorded.
+  it("only warns when the artifact upload fails", async () => {
     mocks.wantsTrafficArtifact.mockReturnValue(true);
     mocks.uploadTrafficArtifact.mockRejectedValue(new Error("artifact service down"));
 
@@ -141,5 +170,44 @@ describe("reportStepTraffic", () => {
     expect(annotation.warning).toHaveBeenCalledWith(
       "Failed to upload the traffic artifact: artifact service down",
     );
+    expect(process.exitCode).toBe(exitCode);
+  });
+
+  // Written on every path, so a name the isolated command wrote to
+  // GITHUB_OUTPUT itself never survives as this step's output.
+  it.each([
+    { case: "not asked for", wants: false, uploaded: undefined, fetchFails: false, name: "" },
+    {
+      case: "uploaded",
+      wants: true,
+      uploaded: "buildcage-traffic-deadbeef",
+      fetchFails: false,
+      name: "buildcage-traffic-deadbeef",
+    },
+    { case: "upload failed", wants: true, uploaded: undefined, fetchFails: false, name: "" },
+    { case: "report failed", wants: true, uploaded: undefined, fetchFails: true, name: "" },
+  ])(
+    "sets traffic_artifact_name on every path ($case)",
+    async ({ wants, uploaded, fetchFails, name }) => {
+      mocks.wantsTrafficArtifact.mockReturnValue(wants);
+      mocks.uploadTrafficArtifact.mockResolvedValue(uploaded);
+      if (fetchFails) mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
+
+      await reportStepTraffic(options(), deps);
+
+      expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledExactlyOnceWith(name);
+    },
+  );
+
+  it("fails the step when the output cannot be set under restrict with fail_on_blocked", async () => {
+    mocks.setTrafficArtifactOutput.mockImplementation(() => {
+      throw new Error("Missing file at path: /github/output");
+    });
+
+    await expect(reportStepTraffic(options(), deps)).resolves.toBeUndefined();
+    expect(annotation.error).toHaveBeenCalledWith(
+      "Failed to set the traffic_artifact_name output: Missing file at path: /github/output; failing the step under restrict with fail_on_blocked",
+    );
+    expect(process.exitCode).toBe(1);
   });
 });
