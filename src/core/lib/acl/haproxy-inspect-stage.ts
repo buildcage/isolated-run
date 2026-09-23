@@ -22,7 +22,7 @@ export interface InspectStageContext extends InternalDstOptions {
 }
 
 /** The SNI field, for the stage that terminates TLS. It names the host of a
- *  connection that ended before its request, where `%HM` and the Host capture
+ *  connection that ended before its request, where `%HM` and the logged Host
  *  are both empty. Client-controlled, hence the detect frontend's charset. */
 function sniField(scheme: "https" | "http"): string {
   return scheme === "https" ? " sni=%[ssl_fc_sni,regsub([^A-Za-z0-9._-],_,g)]" : "";
@@ -92,7 +92,9 @@ export function inspectStage(
     // SNI), so it can't be reduced to a hostname charset. Single-quoted as
     // a whole so the word parser leaves the embedded " alone for regsub's
     // own (config manual: "Quoting and escaping") argument quoting to handle.
-    `    http-request capture 'req.hdr(host),regsub("[\\s\\"[:cntrl:]]",_,g)' len 100`,
+    // A variable rather than a capture, whose fixed length would cut a padded
+    // name before the domain that registered it.
+    `    http-request set-var(txn.host_log) 'req.hdr(host),regsub("[\\s\\"[:cntrl:]]",_,g)'`,
     "",
     "    # Decode before stripping `..`: `.` is unreserved, so `%2e%2e` is not",
     "    # a dot-dot segment until decoded, and stripping first would miss it.",
@@ -102,7 +104,7 @@ export function inspectStage(
     "    # pathq, not %HU: %HU is the target as sent (a path over HTTP/1.1, an",
     "    # absolute URI over HTTP/2), and pathq is not readable at log time.",
     "    # Set after normalization, so the log shows the path the rules matched.",
-    // Same idea as the Host capture above, minus \s: a raw space can't
+    // Same idea as the Host above, minus \s: a raw space can't
     // reach a path (HTTP's own request-line parsing rejects it first).
     `    http-request set-var(txn.pathq) 'pathq,regsub("[\\"[:cntrl:]]",_,g)'`,
     "",
@@ -138,7 +140,7 @@ export function inspectStage(
     // a CONNECT's authority), the log-format prints an empty sample as `-`,
     // and log/inspect.ts would read the joined-up
     // `https://registry.npmjs.org-` as a host no rule can be written for.
-    `    log-format "buildcage %[date(0,ms)] ${scheme} %HM %ST %B ts=%ts reason=%[var(txn.reason)] tlserr=%[ssl_bc_err] dst=%[dst]:%[dst_port]${sniField(scheme)} host=%[capture.req.hdr(0)] %[var(txn.pathq)]"`,
+    `    log-format "buildcage %[date(0,ms)] ${scheme} %HM %ST %B ts=%ts reason=%[var(txn.reason)] tlserr=%[ssl_bc_err] dst=%[dst]:%[dst_port]${sniField(scheme)} host=%[var(txn.host_log)] %[var(txn.pathq)]"`,
     "",
   );
   // The rules decide first, on the request alone (host, path, method): none
