@@ -11,7 +11,7 @@ function matches(urlPattern: string, url: string): boolean {
   const scheme = parts[1] as "https" | "http";
   const authority = parts[2].includes(":") ? parts[2] : `${parts[2]}:${DEFAULT_PORT[scheme]}`;
   return (
-    scheme === rule.scheme &&
+    rule.schemes.includes(scheme) &&
     new RegExp(rule.authorityRegex).test(authority) &&
     new RegExp(rule.pathRegex).test(parts[3] ?? "/")
   );
@@ -54,6 +54,11 @@ describe("convertUrlRule host and port", () => {
     expect(() => convertUrlRule("GET example.com/x")).toThrow();
   });
 
+  it("refuses userinfo, which no Host carries", () => {
+    expect(() => convertUrlRule("GET https://user@example.com/x")).toThrow(/"@"/);
+    expect(() => convertUrlRule("GET https://user:pw@example.com/x")).toThrow(/"@"/);
+  });
+
   it("rejects a bad port", () => {
     expect(() => convertUrlRule("GET https://example.com:80x/y")).toThrow();
   });
@@ -79,6 +84,16 @@ describe("convertUrlRule paths", () => {
 
   it("is case sensitive, as paths are", () => {
     expect(matches("https://example.com/public/*", "https://example.com/PUBLIC/x")).toBe(false);
+  });
+
+  it("keeps a lone ? as a single-character wildcard", () => {
+    expect(matches("https://example.com/v?/x", "https://example.com/v1/x")).toBe(true);
+    expect(matches("https://example.com/file?", "https://example.com/files")).toBe(true);
+  });
+
+  it("refuses a query string, which a rule never matches", () => {
+    expect(() => convertUrlRule("GET https://example.com/api?x=1")).toThrow(/query string/);
+    expect(() => convertUrlRule("GET https://example.com/api?a&b")).toThrow(/query string/);
   });
 
   // The traversal guard lives in the generated haproxy config, not here: `*`
@@ -145,6 +160,28 @@ describe("convertUrlRule regex escape hatch", () => {
     expect(r.hostRegex).toBe("^a\\.com:(443|8443)$");
     expect(r.authorityRegex).toBe("^a\\.com$");
     expect(r.pathRegex).toBe("^/(x|y)$");
+  });
+
+  it("reads the scheme from what precedes ://", () => {
+    expect(convertUrlRule("GET ~^https://a\\.com/x$").schemes).toStrictEqual(["https"]);
+    expect(convertUrlRule("GET ~^http://a\\.com/x$").schemes).toStrictEqual(["http"]);
+    expect(convertUrlRule("GET ~http://a\\.com/x$").schemes).toStrictEqual(["http"]);
+    expect(convertUrlRule("GET ~^https?://a\\.com/x$").schemes).toStrictEqual(["https", "http"]);
+    expect(convertUrlRule("GET ~^https?:\\/\\/a\\.com/x$").schemes).toStrictEqual([
+      "https",
+      "http",
+    ]);
+  });
+
+  it("rejects any other scheme spelling", () => {
+    expect(() => convertUrlRule("GET ~^ftp://a\\.com/x$")).toThrow(/scheme "ftp"/);
+    expect(() => convertUrlRule("GET ~^.*://a\\.com/x$")).toThrow(/scheme/);
+    expect(() => convertUrlRule("GET ~^(https|http)://a\\.com/x$")).toThrow(/scheme/);
+    expect(() => convertUrlRule("GET ~^://a\\.com/x$")).toThrow(/scheme/);
+  });
+
+  it("refuses userinfo in the host half", () => {
+    expect(() => convertUrlRule("GET ~^https://user@a\\.com/x$")).toThrow(/"@"/);
   });
 
   it("rejects a raw regex with no scheme separator", () => {

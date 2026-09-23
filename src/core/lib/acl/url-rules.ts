@@ -40,11 +40,16 @@ import {
 /** The scheme's default port, used wherever a rule names none. */
 export const DEFAULT_PORT: Record<"https" | "http", string> = { https: "443", http: "80" };
 
+export type UrlScheme = "https" | "http";
+
 export interface UrlRule {
   /** Uppercased HTTP methods, or null when the rule allows any method (`*`). */
   methods: string[] | null;
-  /** "http" or "https". */
-  scheme: string;
+  /**
+   * The schemes the rule covers: one for a literal URL, both for a `~` rule
+   * whose scheme is written `https?`.
+   */
+  schemes: UrlScheme[];
   /**
    * Host-only regex (no port), which the resolver's allowlist is built from:
    * a DNS query carries no port to match against. For a `~` rule, this is
@@ -100,7 +105,7 @@ export function parseMethods(spec: string, rule: string): string[] | null {
 function splitUrl(
   url: string,
   rule: string,
-): { scheme: "https" | "http"; authority: string; path: string } {
+): { scheme: UrlScheme; authority: string; path: string } {
   const match = /^(https?):\/\/([^/]+)(\/.*)?$/.exec(url);
   if (!match) {
     throw new Error(
@@ -118,13 +123,55 @@ function splitUrl(
         `would match nothing. Drop it.`,
     );
   }
-  return { scheme: match[1] as "https" | "http", authority: match[2], path: match[3] ?? "" };
+  return { scheme: match[1] as UrlScheme, authority: match[2], path: match[3] ?? "" };
 }
 
 /** A literal `/`, or its escaped form `\/`. */
 const SLASH_TOKEN = /\\?\//;
 /** `://`, with either slash possibly escaped. */
 const SCHEME_SEP = /:(?:\\?\/){2}/;
+
+/** The scheme spellings a `~` rule may open with, and the buckets each lands in. */
+const RAW_REGEX_SCHEMES = new Map<string, UrlScheme[]>([
+  ["https", ["https"]],
+  ["http", ["http"]],
+  ["https?", ["https", "http"]],
+]);
+
+/**
+ * The schemes a `~` rule covers, read from what precedes its `://`. The proxy
+ * buckets rules by the listener a request arrived on, so the scheme has to be
+ * one of a fixed few rather than any regex: anything else would land in a
+ * bucket it does not describe.
+ *
+ * @throws {Error} if the scheme is not `https`, `http` or `https?`
+ */
+function rawRegexSchemes(prefix: string, rule: string): UrlScheme[] {
+  const scheme = prefix.startsWith("^") ? prefix.slice(1) : prefix;
+  const schemes = RAW_REGEX_SCHEMES.get(scheme);
+  if (!schemes) {
+    throw new Error(
+      `Invalid regex in rule "${rule}": the scheme "${scheme}" must be written "https", "http" ` +
+        `or "https?", so the rule can be matched against the listener a request arrives on`,
+    );
+  }
+  return schemes;
+}
+
+/**
+ * Userinfo (`user@host`) is never part of the Host a request carries, so a host
+ * holding an `@` could only ever match nothing.
+ *
+ * @throws {Error} if `host` holds an `@`
+ */
+function rejectUserinfo(host: string, rule: string): void {
+  if (host.includes("@")) {
+    throw new Error(
+      `Invalid URL in rule "${rule}": "${host}" holds an "@", but a request's Host never carries ` +
+        `a user name, so this rule would match nothing. Drop everything up to the "@".`,
+    );
+  }
+}
 
 /**
  * Split a `~` rule's raw regex into a host half and a path half: the
@@ -144,14 +191,15 @@ const SCHEME_SEP = /:(?:\\?\/){2}/;
  * splitDomainFromPortPattern); the resolver's allowlist has no notion of a
  * port either way.
  *
- * @throws {Error} if the text can't be split into a host and a path, either
+ * @throws {Error} if the text can't be split into a host and a path, the
+ *   scheme is not one of RAW_REGEX_SCHEMES, the host half holds an `@`, either
  *   half carries a top-level `|`, the host half holds a character no hostname
  *   can, or a half fails to compile as a regex on its own
  */
 function splitRawRegexUrl(
   regex: string,
   rule: string,
-): { hostRegex: string; authorityRegex: string; pathRegex: string } {
+): { schemes: UrlScheme[]; hostRegex: string; authorityRegex: string; pathRegex: string } {
   // Over the whole expression: the per-half checks see only what follows the
   // first "://", so a "|" before it would drop its own branch in silence.
   checkRawRegexHalf(regex, "expression", rule, false);
@@ -163,6 +211,7 @@ function splitRawRegexUrl(
         `separately`,
     );
   }
+  const schemes = rawRegexSchemes(regex.slice(0, schemeSep.index), rule);
   const hostStart = schemeSep.index + schemeSep[0].length;
   const pathSep = SLASH_TOKEN.exec(regex.slice(hostStart));
   if (!pathSep) {
@@ -177,6 +226,7 @@ function splitRawRegexUrl(
   const pathPart = regex.slice(pathStart);
   checkRawRegexHalf(hostPart, "host half", rule, false);
   checkRawRegexHalf(pathPart, "path half", rule, false);
+  rejectUserinfo(hostPart, rule);
   const { domain: hostOnly } = splitDomainFromPortPattern(hostPart);
   checkRawRegexHalf(hostOnly, "host half", rule, true);
 
@@ -198,7 +248,26 @@ function splitRawRegexUrl(
     }
   }
 
-  return { hostRegex, authorityRegex, pathRegex };
+  return { schemes, hostRegex, authorityRegex, pathRegex };
+}
+
+/**
+ * A `?` in a path is a single-character wildcard, so a query string copied into
+ * a rule would compile into a path no request carries: the proxy matches the
+ * path with its query dropped. Refused once what follows the `?` reads as a
+ * query, holding an `=` or an `&`; a lone `?` keeps its wildcard meaning.
+ *
+ * @throws {Error} if the path carries a query string
+ */
+function rejectQuery(path: string, rule: string): void {
+  const query = path.indexOf("?");
+  if (query !== -1 && /[=&]/.test(path.slice(query))) {
+    throw new Error(
+      `Invalid URL in rule "${rule}": "${path.slice(query)}" reads as a query string, but a rule ` +
+        `matches the path only and a query is never matched. Drop everything from the "?"; a ` +
+        `"?" in a path is a single-character wildcard.`,
+    );
+  }
 }
 
 /**
@@ -214,7 +283,7 @@ function compileUrl(
   url: string,
   rule: string,
 ): {
-  scheme: string;
+  schemes: UrlScheme[];
   authorityRegex: string;
   pathRegex: string;
   hostRegex: string;
@@ -227,13 +296,13 @@ function compileUrl(
     } catch (e) {
       throw new Error(`Invalid regex in rule "${rule}": ${(e as Error).message}`);
     }
-    // A raw regex governs its own scheme; callers that bucket by scheme treat
-    // it as https, the stricter of the two.
-    const { hostRegex, authorityRegex, pathRegex } = splitRawRegexUrl(regex, rule);
-    return { scheme: "https", authorityRegex, pathRegex, hostRegex, isRegex: true };
+    const { schemes, hostRegex, authorityRegex, pathRegex } = splitRawRegexUrl(regex, rule);
+    return { schemes, authorityRegex, pathRegex, hostRegex, isRegex: true };
   }
 
   const { scheme, authority, path } = splitUrl(url, rule);
+  rejectUserinfo(authority, rule);
+  rejectQuery(path, rule);
   const colonIndex = authority.lastIndexOf(":");
   const hasPort = colonIndex !== -1 && !authority.slice(colonIndex + 1).includes("]");
   const host = hasPort ? authority.slice(0, colonIndex) : authority;
@@ -257,7 +326,7 @@ function compileUrl(
   const authorityPort = port === "*" ? "[0-9]+" : port === "" ? DEFAULT_PORT[scheme] : port;
   const authorityRegex = `^${hostRegex}:${authorityPort}$`;
 
-  return { scheme, authorityRegex, pathRegex, hostRegex, isRegex: false };
+  return { schemes: [scheme], authorityRegex, pathRegex, hostRegex, isRegex: false };
 }
 
 /**
@@ -282,8 +351,8 @@ export function convertUrlRule(rule: string): UrlRule {
   }
 
   const methods = parseMethods(methodSpec, trimmed);
-  const { scheme, authorityRegex, pathRegex, hostRegex, isRegex } = compileUrl(url, trimmed);
-  return { methods, scheme, authorityRegex, pathRegex, hostRegex, isRegex, raw: trimmed };
+  const { schemes, authorityRegex, pathRegex, hostRegex, isRegex } = compileUrl(url, trimmed);
+  return { methods, schemes, authorityRegex, pathRegex, hostRegex, isRegex, raw: trimmed };
 }
 
 /**

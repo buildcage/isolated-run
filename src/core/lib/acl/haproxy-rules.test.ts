@@ -47,6 +47,22 @@ describe("host and url rule compilation", () => {
     expect(set.http[0].methods?.join()).toBe("POST");
   });
 
+  it("puts a ~ url rule in the bucket its scheme names, or both for https?", () => {
+    const set = compileRuleSet({
+      urlRules: buildUrlRules(
+        "GET ~^http://a\\.com/x$\nGET ~^https://b\\.com/x$\nGET ~^https?://c\\.com/x$",
+      ),
+    });
+    expect(set.http.map((r) => r.raw)).toStrictEqual([
+      "GET ~^http://a\\.com/x$",
+      "GET ~^https?://c\\.com/x$",
+    ]);
+    expect(set.https.map((r) => r.raw)).toStrictEqual([
+      "GET ~^https://b\\.com/x$",
+      "GET ~^https?://c\\.com/x$",
+    ]);
+  });
+
   it("ids rules per scheme, so acls never collide", () => {
     const set = compileRuleSet({ httpsRules: ["a.com:443", "b.com:443"], httpRules: ["c.com:80"] });
     expect(set.https.map((r) => r.id).join()).toBe("s0,s1");

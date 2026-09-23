@@ -226,7 +226,7 @@ function compileSchemeRules(
     });
   }
   for (const rule of urlRules ?? []) {
-    if (rule.scheme !== scheme) continue;
+    if (!rule.schemes.includes(scheme)) continue;
     if (rule.isRegex) {
       out.push({
         id: "",

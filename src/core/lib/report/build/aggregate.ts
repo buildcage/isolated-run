@@ -64,8 +64,6 @@ interface CompiledUrlRule {
   /** `authorityRegex` for a wildcard rule, `hostRegex` for a `~` rule. */
   hostRe: RegExp;
   pathRe: RegExp;
-  /** The scheme's default port, for a `~` rule's optional-port match. */
-  defaultPort: number;
 }
 
 /**
@@ -79,18 +77,17 @@ interface CompiledUrlRule {
  * connection, not the Host header, so an https rule does not cover a plaintext
  * request and `host:9443` does not cover 443; the path with its query dropped.
  */
-function matchesUrlRule(
-  { rule, hostRe, pathRe, defaultPort }: CompiledUrlRule,
-  event: TrafficEvent,
-): boolean {
+function matchesUrlRule({ rule, hostRe, pathRe }: CompiledUrlRule, event: TrafficEvent): boolean {
   if (event.method === undefined || event.url === undefined) return false;
-  if (event.protocol !== rule.scheme) return false;
+  const scheme = rule.schemes.find((s) => s === event.protocol);
+  if (scheme === undefined) return false;
   if (rule.methods !== null && !rule.methods.includes(event.method.toUpperCase())) return false;
   if (!pathRe.test(requestPath(event.url))) return false;
   const hostPort = `${event.host}:${event.port}`;
   if (rule.isRegex) {
     // A `~` rule's port is optional: the proxy tries the host bare on the
     // scheme's default port and with the real port, so both are tried here.
+    const defaultPort = Number(DEFAULT_PORT[scheme]);
     return (event.port === defaultPort && hostRe.test(event.host)) || hostRe.test(hostPort);
   }
   return hostRe.test(hostPort);
@@ -112,7 +109,6 @@ function buildMatchers(knownBlockedRules: string[]): KnownBlockedMatcher[] {
         rule: urlRule,
         hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex),
         pathRe: new RegExp(urlRule.pathRegex),
-        defaultPort: Number(DEFAULT_PORT[urlRule.scheme as "https" | "http"]),
       };
       return { rule: urlRule.raw, matches: (event) => matchesUrlRule(compiled, event) };
     }
