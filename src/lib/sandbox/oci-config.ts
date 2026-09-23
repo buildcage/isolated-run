@@ -3,6 +3,7 @@ import { resolveProtectedPaths } from "./oci-protected-paths.ts";
 import {
   ephemeralLayers,
   freshMountDestinationsFrom,
+  hostRunCoverageLayers,
   persistentLayers,
   scratchBaseLayers,
   withHostShmSize,
@@ -142,13 +143,23 @@ export function buildOciConfig(
     source: p,
     options: ["rbind", "rw"],
   }));
+  // Covers the host's /run with an empty tmpfs (see hostRunCoverageLayers).
+  // Before the writable layers, so a write_through entry under /run re-exposes
+  // that path on top of the tmpfs instead of being buried by it. Skipped under
+  // `write_through: /`, the documented full filesystem opt-out, so /run comes
+  // back with the rest of the host.
+  const runCoverage = disableReadonly
+    ? { mounts: [], writablePaths: new Set<string>() }
+    : hostRunCoverageLayers();
   const mounts = [
     ...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
+    ...runCoverage.mounts,
     ...layers.mounts,
     ...renameGuards,
     ...internalMounts,
     ...scratchBaseLayers(execDir),
   ];
+  const protectedWritablePaths = new Set([...layers.writablePaths, ...runCoverage.writablePaths]);
 
   const { maskedPaths, readonlyPaths } = resolveProtectedPaths({
     baseMaskedPaths: baseSpec.linux.maskedPaths ?? [],
@@ -156,7 +167,7 @@ export function buildOciConfig(
     uid,
     env,
     hostMounts,
-    writablePaths: layers.writablePaths,
+    writablePaths: protectedWritablePaths,
     freshMountDestinations,
     disableReadonly,
   });

@@ -3,10 +3,13 @@ import { describe, it, expect } from "vitest";
 import {
   ephemeralLayers,
   freshMountDestinationsFrom,
+  hostRunCoverageLayers,
   persistentLayers,
   scratchBaseLayers,
   withHostShmSize,
   writableDirsOf,
+  HOST_RUN_DIR,
+  HOST_RUN_LOCK_DIR,
 } from "./oci-mounts.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 
@@ -208,5 +211,35 @@ describe("scratchBaseLayers", () => {
   it("reveals it with `bind`, never `rbind`, which would pull in the whole host /", () => {
     const [, reveal] = scratchBaseLayers(execDir);
     expect(reveal.options).toStrictEqual(["bind", "ro"]);
+  });
+});
+
+describe("hostRunCoverageLayers", () => {
+  it("covers /run with an empty tmpfs, then recreates a writable /run/lock", () => {
+    const { mounts } = hostRunCoverageLayers();
+    expect(mounts).toStrictEqual([
+      {
+        destination: HOST_RUN_DIR,
+        type: "tmpfs",
+        source: "tmpfs",
+        options: ["nosuid", "nodev", "mode=0755"],
+      },
+      {
+        destination: HOST_RUN_LOCK_DIR,
+        type: "tmpfs",
+        source: "tmpfs",
+        options: ["nosuid", "nodev", "noexec", "mode=1777", "size=5242880"],
+      },
+    ]);
+  });
+
+  it("mounts /run before /run/lock, so the lock has its parent to mount onto", () => {
+    const { mounts } = hostRunCoverageLayers();
+    expect(mounts.map((m) => m.destination)).toStrictEqual([HOST_RUN_DIR, HOST_RUN_LOCK_DIR]);
+  });
+
+  it("reports /run/lock as writable so it isn't forced read-only again", () => {
+    const { writablePaths } = hostRunCoverageLayers();
+    expect(writablePaths).toStrictEqual(new Set([HOST_RUN_LOCK_DIR]));
   });
 });

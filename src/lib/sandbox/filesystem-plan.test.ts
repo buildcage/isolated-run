@@ -272,4 +272,13 @@ describe("validateFilesystemInputs", () => {
       /"\/etc\/resolv\.conf"/,
     );
   });
+
+  it("allows /run, and any path under it, to be re-exposed on top of the coverage tmpfs", () => {
+    // write_through opens exactly what it names: the whole host /run, or a single
+    // path under it, re-exposed over the empty /run tmpfs (see oci-config.ts).
+    for (const path of ["/run", "/var/run", "/run/snapd.socket", "/run/myapp"]) {
+      expect(() => validateFilesystemInputs("persistent", [path])).not.toThrow();
+      expect(() => validateFilesystemInputs("ephemeral", [path])).not.toThrow();
+    }
+  });
 });

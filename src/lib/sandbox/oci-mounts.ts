@@ -48,6 +48,51 @@ export function withHostShmSize(mounts: MountEntry[], hostShmBytes?: number): Mo
 /** Where the proxy's nameserver is mounted inside the sandbox. */
 export const RESOLV_CONF_DESTINATION = "/etc/resolv.conf";
 
+/** The host's /run, covered whole by hostRunCoverageLayers below. */
+export const HOST_RUN_DIR = "/run";
+/** Recreated writable over the empty /run tmpfs; see hostRunCoverageLayers. */
+export const HOST_RUN_LOCK_DIR = "/run/lock";
+
+/**
+ * Cover the host's `/run` with an empty tmpfs so the `mount --rbind /` rootfs
+ * can't hand the sandbox the Unix sockets every host service keeps there
+ * (systemd-resolved's resolver, snapd, the container runtimes, the D-Bus bus,
+ * and whatever a future daemon adds). A read-only bind is no defense: connect(2)
+ * succeeds on a live socket whatever the mount's `ro` flag says.
+ *
+ * Added back on top: `/run/lock`, reported as writable so oci-protected-paths.ts
+ * leaves it out of readonlyPaths. The proxy's `resolv.conf` is not added here;
+ * `/etc/resolv.conf` symlinks into `/run`, so buildOciConfig's resolv.conf mount,
+ * ordered after this, recreates the target in the fresh tmpfs.
+ *
+ * `/var/run` is a symlink to `/run` on every supported runner, so covering `/run`
+ * covers it; the `/var/run/...` masks in oci-protected-paths.ts are the fallback
+ * for a host where it is instead a separate real directory.
+ */
+export function hostRunCoverageLayers(): WritableLayers {
+  return {
+    mounts: [
+      // No noexec/size, matching the host /run and moot regardless: the tmpfs
+      // stays empty, root-owned and force-remounted read-only.
+      {
+        destination: HOST_RUN_DIR,
+        type: "tmpfs",
+        source: "tmpfs",
+        options: ["nosuid", "nodev", "mode=0755"],
+      },
+      // Writable (1777, like the host), so capped at systemd's 5 MiB default to
+      // stop a step filling it (also via /var/lock) and OOMing the runner.
+      {
+        destination: HOST_RUN_LOCK_DIR,
+        type: "tmpfs",
+        source: "tmpfs",
+        options: ["nosuid", "nodev", "noexec", "mode=1777", "size=5242880"],
+      },
+    ],
+    writablePaths: new Set([HOST_RUN_LOCK_DIR]),
+  };
+}
+
 /**
  * Paths this action mounts for its own use. A `write_through:` entry naming
  * one of them, or something under it, is rejected rather than silently

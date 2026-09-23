@@ -9,6 +9,7 @@
  */
 
 import type { HostMount } from "./types.ts";
+import { isAtOrUnder } from "./paths.ts";
 // Sensitive /proc paths masked with /dev/null. runc's own `runc spec`
 // default already masks /proc/kcore, /proc/keys, and /proc/timer_list
 // (among others) and leaves /proc/sysrq-trigger merely read-only.
@@ -96,12 +97,19 @@ export function resolveProtectedPaths({
   freshMountDestinations,
   disableReadonly,
 }: ProtectedPathsInput): { maskedPaths: string[]; readonlyPaths: string[] } {
+  // runc applies maskedPaths after every mount, so a still-listed mask would
+  // bind /dev/null back over a path a write_through entry re-exposed on top of
+  // the /run tmpfs. Lift the host-path mask for anything at or under a
+  // write_through path so the opt-in wins. Only the /run masks below are
+  // filtered; the /proc masks are not in this set, so the kernel-memory guard
+  // (e.g. /proc/kcore) holds even under `write_through: /`.
+  const reExposed = (p: string): boolean => [...writablePaths].some((w) => isAtOrUnder(p, w));
   const extraMaskedHostPaths = [
     ...EXTRA_MASKED_RUNTIME_PATHS,
     ...rootlessRuntimeSocketPaths(env),
     ...perUserRuntimeDirs(uid, env),
     ...EXTRA_MASKED_NETNS_PATHS,
-  ];
+  ].filter((p) => !reExposed(p));
   const maskedPaths = [...baseMaskedPaths, ...EXTRA_MASKED_PROC_PATHS, ...extraMaskedHostPaths];
   // EXTRA_MASKED_PROC_PATHS are files runc's base spec already lists in
   // readonlyPaths (sysrq-trigger). The runtime-socket paths don't come from

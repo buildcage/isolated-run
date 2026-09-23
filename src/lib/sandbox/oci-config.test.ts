@@ -257,6 +257,38 @@ describe("buildOciConfig", () => {
       expect(config.linux.maskedPaths).toContain("/var/run/netns");
     });
 
+    it("lifts a runtime-socket mask for the exact path a write_through re-exposes", () => {
+      // Otherwise runc's post-mount mask would bind /dev/null back over the
+      // socket the caller deliberately re-exposed (see oci-protected-paths.ts).
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/run/docker.sock"] },
+      });
+      expect(config.linux.maskedPaths).not.toContain("/run/docker.sock");
+      // Everything not named stays masked.
+      expect(config.linux.maskedPaths).toContain("/run/podman/podman.sock");
+    });
+
+    it("lifts every /run mask when write_through names /run as a whole", () => {
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/run"] },
+      });
+      for (const p of ["/run/docker.sock", "/run/dbus/system_bus_socket", "/run/netns"]) {
+        expect(config.linux.maskedPaths).not.toContain(p);
+      }
+    });
+
+    it("never lifts the /proc info-leak masks, even under writable: /", () => {
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/"] },
+      });
+      for (const p of ["/proc/kcore", "/proc/kallsyms", "/proc/kmsg"]) {
+        expect(config.linux.maskedPaths).toContain(p);
+      }
+    });
+
     it("doesn't leak the netns directory into readonlyPaths alongside masking it", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
@@ -266,6 +298,25 @@ describe("buildOciConfig", () => {
         },
       });
       expect(config.linux.readonlyPaths).not.toContain("/run/netns");
+    });
+
+    it("covers /run with an empty tmpfs so the host's sockets never reach the sandbox", () => {
+      const config = build(fakeBaseSpec(), baseArgs);
+      const runMount = config.mounts.find((m) => m.destination === "/run");
+      expect(runMount).toMatchObject({ type: "tmpfs", source: "tmpfs" });
+    });
+
+    it("keeps the recreated /run/lock writable even when the host mounts it separately", () => {
+      // /run/lock is its own tmpfs on the host, so the host-mount sweep would
+      // otherwise force it read-only; the coverage layer reports it writable.
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        runtime: {
+          ...baseArgs.runtime,
+          hostMounts: [{ mountPoint: "/run/lock", fsType: "tmpfs" }],
+        },
+      });
+      expect(config.linux.readonlyPaths).not.toContain("/run/lock");
     });
 
     it("also masks the rootless runtime sockets under $XDG_RUNTIME_DIR when set", () => {
@@ -309,12 +360,28 @@ describe("buildOciConfig", () => {
       expect(config.linux.readonlyPaths).not.toContain("/run/user/1000");
     });
 
-    it("keeps masking /run/user/<uid> even when writable: / disables the read-only root", () => {
+    it("lifts the /run masks under writable: /, the full filesystem opt-out", () => {
+      // write_through: / means "do nothing to the filesystem", so the /run
+      // socket masks come off too (the /proc info-leak masks are separate; see
+      // the test below). The runtime sockets themselves stay unreachable to a
+      // non-privileged GID via the GID substitution in identity.ts.
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
         writable: { ...baseArgs.writable, writablePaths: ["/"] },
       });
-      expect(config.linux.maskedPaths).toContain("/run/user/1000");
+      expect(config.linux.maskedPaths).not.toContain("/run/user/1000");
+      expect(config.linux.maskedPaths).not.toContain("/run/docker.sock");
+    });
+
+    it("drops the /run coverage tmpfs under writable: /, the documented full opt-out", () => {
+      // write_through: / hands the whole host back writable, /run included, so
+      // covering /run would be the one exception to "you get what you opened".
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/"] },
+      });
+      expect(config.mounts.find((m) => m.destination === "/run")).toBeUndefined();
+      expect(config.mounts.find((m) => m.destination === "/run/lock")).toBeUndefined();
     });
   });
 
@@ -559,12 +626,17 @@ describe("buildOciConfig", () => {
   });
 
   describe("mount order", () => {
-    it("mounts in layer order: base spec, writable binds, this action's own, scratch tmpfs, execDir", () => {
+    it("mounts in layer order: base spec, /run coverage, writable binds, this action's own, scratch tmpfs, execDir", () => {
       const config = build(fakeBaseSpec(), baseArgs);
       expect(config.mounts.map((m) => m.destination)).toStrictEqual([
         "/proc",
         "/sys",
         "/dev/shm",
+        // The /run tmpfs and its writable /run/lock come before the writable
+        // binds, so a write_through entry under /run is re-exposed on top of the
+        // fresh tmpfs rather than buried by it.
+        "/run",
+        "/run/lock",
         baseArgs.writable.workdir,
         baseArgs.writable.home,
         "/tmp",
@@ -572,6 +644,19 @@ describe("buildOciConfig", () => {
         SANDBOX_SCRATCH_BASE,
         baseArgs.runtime.execDir,
       ]);
+    });
+
+    it("re-exposes a write_through path under /run on top of the coverage tmpfs", () => {
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/run/snapd.socket"] },
+      });
+      const dests = config.mounts.map((m) => m.destination);
+      // The bind lands after the /run tmpfs, so it is visible rather than shadowed.
+      expect(dests.indexOf("/run/snapd.socket")).toBeGreaterThan(dests.indexOf("/run"));
+      expect(config.mounts.find((m) => m.destination === "/run/snapd.socket")).toMatchObject({
+        options: ["rbind", "rw"],
+      });
     });
 
     it("keeps its own mounts after a write_through entry that contains them", () => {
