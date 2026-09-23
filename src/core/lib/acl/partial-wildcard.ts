@@ -168,6 +168,13 @@ function hasTopLevelAlternation(regex: string): boolean {
 const HOST_LITERAL_ILLEGAL = /\\[[\]]/;
 
 /**
+ * Text a host half cannot carry into the Corefile, where it sits inside a
+ * single-quoted CEL literal: `'` or a backtick would end it, and `{$` or `{%`
+ * starts the Corefile's own environment substitution.
+ */
+const COREFILE_UNSAFE = /['`]|\{[$%]/;
+
+/**
  * Lookaround and backreferences, which RE2 lacks: a host half also goes into
  * the resolver's allowlist, where they would stop the resolver from starting.
  */
@@ -201,7 +208,7 @@ function checkResolverRegexSyntax(text: string, label: string, rule: string): vo
  * Check part of a `~` rule against what the rule syntax can represent.
  *
  * @throws {Error} if the text carries a top-level `|`, or a host half holds
- *   a character no hostname can
+ *   a character no hostname can, or text the resolver's config cannot quote
  */
 export function checkRawRegexHalf(
   text: string,
@@ -222,6 +229,12 @@ export function checkRawRegexHalf(
       `Invalid regex in rule "${rule}": the ${label} "${text}" holds a character no hostname can, ` +
         `so the ":" this rule was split at is not its port separator. An IPv6 address is not ` +
         `supported here, in a "~" rule any more than in a literal one`,
+    );
+  }
+  if (hostHalf && COREFILE_UNSAFE.test(text)) {
+    throw new Error(
+      `Invalid regex in rule "${rule}": the ${label} "${text}" holds a "'", a backtick, "{$" or "{%". ` +
+        `No hostname contains one, and the resolver's config cannot quote it`,
     );
   }
 }

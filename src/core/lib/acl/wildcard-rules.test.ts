@@ -91,6 +91,10 @@ describe("convertRule", () => {
     expect(() => convertRule("~^\\[::1\\]:443$")).toThrow(/IPv6/);
   });
 
+  it("refuses a host half the resolver's config cannot quote", () => {
+    expect(() => convertRule("~a'b\\.com:443")).toThrow(/cannot quote/);
+  });
+
   it("leaves an alternation inside a group or a class alone", () => {
     expect(convertRule("~a\\.com:(443|8443)")).toBe("^a\\.com:(443|8443)$");
     expect(convertRule("~a\\.com:[4|8]443")).toBe("^a\\.com:[4|8]443$");

@@ -121,7 +121,10 @@ allowed_url_rules: |
 
 Methods are separated by `|` or `,`, and `*` means any method. The port may be left out when it is
 the scheme's default, and a pattern with no path allows any path on that host. A `#` fragment is
-refused: it never travels with a request, so a rule carrying one could only match nothing.
+refused: it never travels with a request, so a rule carrying one could only match nothing. So is a
+query string (a `?` followed by text holding `=` or `&`), since a rule matches the path alone and
+the query is never compared, and a user name before an `@` in the host, which no request's Host
+carries.
 
 | Pattern | In a domain                                       | In a path                     |
 | ------- | ------------------------------------------------- | ----------------------------- |
@@ -261,9 +264,11 @@ allowed_ip_rules: |
 
 A rule is matched against the address the connection goes to, never a name the connection carries,
 so a rule naming a host is refused at setup, and so is a form the engine cannot match (a wildcard
-on `inspect`, a CIDR block on `universal`): `restrict` fails and `audit` warns. Either way the
-connection is tunnelled without inspection: once an `ip:port` pair is allowed, any TCP-based
-protocol can use that path. Prefer a domain rule where the destination has a stable name.
+on `inspect`, a CIDR block on `universal`): `restrict` fails and `audit` warns. A range that covers
+the proxy's own address, which every name resolves to inside the cage, still leaves a connection
+made through a name to the domain rules. Either way the connection is tunnelled without
+inspection: once an `ip:port` pair is allowed, any TCP-based protocol can use that path. Prefer a
+domain rule where the destination has a stable name.
 
 ### TLS passthrough: `allowed_tls_rules`
 
@@ -301,7 +306,9 @@ is matched against always carries the port.
 | `~^192\.168\.1\.\d+:80$`          | Matches a range of IP addresses (in `allowed_ip_rules`)    |
 
 `^` and `$` are added where they are missing, so a pattern always covers the whole `domain:port`. An
-IPv6 address is refused here as everywhere else in the rule syntax.
+IPv6 address is refused here as everywhere else in the rule syntax. A host name matches in any case,
+as it does in a wildcard rule. The host part may not contain `'`, a backtick, `{$` or `{%`: no host
+name does, and the resolver's configuration has no way to quote them.
 
 The host part of a pattern also decides which names the resolver answers as allowed, and the
 resolver matches it with RE2. Lookaround (`(?=`, `(?!`, `(?<=`, `(?<!`) and backreferences are
@@ -309,6 +316,8 @@ therefore refused there, in a URL rule's host half as well.
 
 In `allowed_url_rules` a `~` expression covers the URL, and is split at the first `/` after `://`:
 everything before that `/` is matched against the host, everything from it onward against the path.
+The scheme before `://` must be written `https`, `http` or `https?`, the last covering both; any
+other spelling is refused, since the scheme decides which listener the rule is enforced on.
 
 ```yaml
 allowed_url_rules: |
@@ -318,6 +327,9 @@ allowed_url_rules: |
   # the host half's port pattern can be any regex
   GET ~^https://example\.com:(443|8443)/.*$
   GET ~^https://example\.com:\d+/.*$
+
+  # either scheme, each on its own default port
+  GET ~^https?://example\.com/pub/.*$
 ```
 
 Leave the port out and the rule matches the scheme's default port only, 443 for `https` and 80 for
