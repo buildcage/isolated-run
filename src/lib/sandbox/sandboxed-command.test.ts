@@ -210,10 +210,11 @@ describe("runSandboxedCommand", () => {
       deps,
     );
 
-    expect(mocks.buildOciConfig.mock.calls[0][1].renameGuardDirs).toStrictEqual([
-      "/home/runner/a",
-      "/home/runner/a/b",
-    ]);
+    // arrayContaining, not equals: the action's own checkout adds its own
+    // guards when this test runs from under /home/runner, as it does on CI.
+    expect(mocks.buildOciConfig.mock.calls[0][1].renameGuardDirs).toEqual(
+      expect.arrayContaining(["/home/runner/a", "/home/runner/a/b"]),
+    );
   });
 
   it("leaves it writable in ephemeral mode, where no write_through reaches it", () => {
