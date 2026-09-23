@@ -589,23 +589,37 @@ describe("buildOciConfig", () => {
   });
 
   describe("mount order", () => {
-    it("mounts in layer order: base spec, writable binds, /run coverage, this action's own, scratch tmpfs, execDir", () => {
+    it("mounts in layer order: base spec, /run coverage, writable binds, this action's own, scratch tmpfs, execDir", () => {
       const config = build(fakeBaseSpec(), baseArgs);
       expect(config.mounts.map((m) => m.destination)).toStrictEqual([
         "/proc",
         "/sys",
         "/dev/shm",
+        // The /run tmpfs and its writable /run/lock come before the writable
+        // binds, so a write_through entry under /run is re-exposed on top of the
+        // fresh tmpfs rather than buried by it.
+        "/run",
+        "/run/lock",
         baseArgs.writable.workdir,
         baseArgs.writable.home,
         "/tmp",
-        // The /run tmpfs and its writable /run/lock come before the internal
-        // mounts, so the resolv.conf mount lands in the fresh /run tmpfs.
-        "/run",
-        "/run/lock",
         RESOLV_CONF_DESTINATION,
         SANDBOX_SCRATCH_BASE,
         baseArgs.runtime.execDir,
       ]);
+    });
+
+    it("re-exposes a write_through path under /run on top of the coverage tmpfs", () => {
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/run/snapd.socket"] },
+      });
+      const dests = config.mounts.map((m) => m.destination);
+      // The bind lands after the /run tmpfs, so it is visible rather than shadowed.
+      expect(dests.indexOf("/run/snapd.socket")).toBeGreaterThan(dests.indexOf("/run"));
+      expect(config.mounts.find((m) => m.destination === "/run/snapd.socket")).toMatchObject({
+        options: ["rbind", "rw"],
+      });
     });
 
     it("keeps its own mounts after a write_through entry that contains them", () => {

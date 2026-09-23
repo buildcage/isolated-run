@@ -273,14 +273,10 @@ describe("validateFilesystemInputs", () => {
     );
   });
 
-  it("rejects /run and paths under it, which the empty-tmpfs coverage would shadow", () => {
-    for (const path of ["/run", "/run/lock", "/run/myapp/sock"]) {
-      expect(() => validateFilesystemInputs("persistent", [path])).toThrow(/\/run/);
-      expect(() => validateFilesystemInputs("ephemeral", [path])).toThrow(/\/run/);
-    }
-  });
-
-  it("still allows /, the read-only opt-out, which only contains /run rather than being under it", () => {
-    expect(() => validateFilesystemInputs("persistent", ["/"])).not.toThrow();
+  it("allows a path under /run, which is re-exposed on top of the coverage tmpfs, not reserved", () => {
+    // Selective re-exposure: naming /run/<x> punches that one host path back
+    // through the empty /run tmpfs (see oci-config.ts's mount order).
+    expect(() => validateFilesystemInputs("persistent", ["/run/snapd.socket"])).not.toThrow();
+    expect(() => validateFilesystemInputs("ephemeral", ["/run/myapp"])).not.toThrow();
   });
 });

@@ -144,26 +144,31 @@ export function buildOciConfig(
     options: ["rbind", "rw"],
   }));
   // Covers the host's /run with an empty tmpfs (see hostRunCoverageLayers).
-  // Before internalMounts so the resolv.conf mount lands in the fresh tmpfs:
-  // /etc/resolv.conf is a symlink into /run on these runners, and this is what
-  // recreates its target with the proxy's nameserver. Its writable /run/lock
-  // is merged into writablePaths so it isn't forced read-only below.
+  //
+  // Placed before the writable layers, not after, so a write_through entry at
+  // or under /run is re-exposed on top of the fresh tmpfs rather than buried by
+  // it: naming `/run/<x>` selectively punches a single host path back through
+  // (e.g. a service socket a later step needs), the same opt-in hole
+  // write_through is everywhere else. Its writable /run/lock is merged into
+  // writablePaths so it isn't forced read-only below.
   //
   // Applied unconditionally, `write_through: /` (disableReadonly) included: like
   // the socket masks in oci-protected-paths.ts, this is an egress control (a
   // host daemon reached through its /run socket routes traffic outside the
   // netns), not part of the read-only-filesystem restriction that `/` opts out
-  // of. The empty tmpfs is what denies the sockets; the read-only remount /run
-  // also gets (it is a tmpfs mount on every Linux host, so the host-mount sweep
-  // in resolveProtectedPaths covers it) is secondary. write_through entries at
-  // or under /run are rejected up front, in validateFilesystemInputs, so none
-  // reaches here to be silently shadowed by this tmpfs.
+  // of. `write_through: /` leaves /run covered precisely so the opt-out does not
+  // silently reopen every host socket; a step that wants one names it. The empty
+  // tmpfs is what denies the rest; the read-only remount /run also gets (it is a
+  // tmpfs mount on every Linux host, so resolveProtectedPaths's host-mount sweep
+  // covers it) is secondary. The resolv.conf mount in internalMounts still lands
+  // in the fresh tmpfs: /etc/resolv.conf is a symlink into /run on these runners,
+  // and internalMounts comes after, so it recreates its target there.
   const runCoverage = hostRunCoverageLayers();
   const mounts = [
     ...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
+    ...runCoverage.mounts,
     ...layers.mounts,
     ...renameGuards,
-    ...runCoverage.mounts,
     ...internalMounts,
     ...scratchBaseLayers(execDir),
   ];
