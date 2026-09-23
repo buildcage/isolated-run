@@ -141,6 +141,29 @@ export interface WritableLayers {
   writablePaths: Set<string>;
 }
 
+/**
+ * Overlay mount options are comma-separated, and `lowerdir` stacks paths with
+ * `:`; the kernel offers no escaping for either. A root path carrying one
+ * would corrupt the option string and fail the mount with an opaque runc
+ * error, so reject it here with one that names the path and points at the mode
+ * that binds the directory directly instead. The host lowerdir is the exposed
+ * one (it comes from $HOME/$RUNNER_TEMP/the workspace); upper/work sit under
+ * the action's own scratch dir, but are checked too so a stray character there
+ * fails the same clear way rather than at mount time.
+ */
+function assertOverlayPathsAreOptionSafe(roots: OverlayDirs[]): void {
+  for (const { path, upper, work } of roots) {
+    const bad = [path, upper, work].find((p) => p.includes(",") || p.includes(":"));
+    if (bad !== undefined) {
+      throw new WritablePathConflictError(
+        `filesystem_mode: ephemeral cannot overlay ${JSON.stringify(bad)}: an overlay mount ` +
+          `option cannot contain "," or ":", and the kernel offers no way to escape them. ` +
+          `Use filesystem_mode: persistent, which binds the directory directly.`,
+      );
+    }
+  }
+}
+
 /** `filesystem_mode: ephemeral`: an overlay per root, plus the write_through
  *  holes punched back through it. */
 export function ephemeralLayers(
@@ -154,6 +177,7 @@ export function ephemeralLayers(
   // fire, but keep the same fail-closed guard persistent mode has.
   assertScratchBaseNotWritable([...overlayPaths, ...allowWrite]);
   assertNoFreshMountDestinations(allowWrite, freshMountDestinations);
+  assertOverlayPathsAreOptionSafe(overlayRoots);
   const protectedPaths = new Set([...overlayPaths, ...allowWrite]);
 
   // Overlay roots, shallow-first: lower is the untouched host
