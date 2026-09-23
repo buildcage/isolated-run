@@ -253,9 +253,9 @@ describe("the generated log-format and this parser describe the same line", () =
     expect(e.host).toBe("registry.npmjs.org");
     expect(e.reason).toBe("missing-host-header");
     // The request line did parse, and the path is the whole record of what was
-    // asked for. Only the authority is the log's `-` for a Host never sent.
+    // asked for. Its URL names the same host the row does.
     expect(e.method).toBe("GET");
-    expect(e.url).toBe(`https://-${PATH}`);
+    expect(e.url).toBe(`https://registry.npmjs.org:9443${PATH}`);
   });
 
   it("refuses a request that named no host in audit too, where no rule would have", async () => {

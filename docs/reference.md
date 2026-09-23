@@ -405,8 +405,9 @@ That address names nothing, so the host reads `(unknown)`. The address is record
 the `destination` field of the [traffic artifact](#traffic-artifact).
 
 A row carries no method or URL where no request line ever parsed. `missing-host-header` is the
-exception: that one did parse, so it keeps the method and the path it asked for, with `-` standing
-where the `Host` would have been.
+exception: that one did parse, so it keeps the method and the path it asked for. Its URL is built
+around the same host as the row, as HTTP itself does for a request with no `Host` (RFC 9112 §3.3),
+with the port where it is not the scheme's default.
 
 ### The ones nobody decided
 
@@ -443,7 +444,7 @@ These are refusals: they are in **🚫 Blocked Hosts**, counted in the blocked-c
 and they fail the step under `fail_on_blocked: true` like any other refused connection.
 
 ```
-🚫 00:14.002: GET https://-/pkg.tgz?token=*** -> missing-host-header
+🚫 00:14.002: GET http://10.0.0.9/pkg.tgz?token=*** -> missing-host-header
 🚫 00:15.880: HTTP (unknown):5432 -> bad-request
 🚫 00:16.204: TCP 10.0.0.9:5432 -> bad-request
 ```
@@ -543,8 +544,8 @@ already uploaded. See [Known Limitations](./security.md#known-limitations).
 | `host`        | yes    | the name asked for, the address when there was none, or `(unknown)`                      |
 | `port`        |        | absent for `dns`, which connects to nothing                                              |
 | `queryType`   |        | the record asked for; `discovery` rows and refused service names                         |
-| `method`      |        | `http` and `https` only                                                                  |
-| `url`         |        | `http` and `https` only; verbatim, unlike the summary's                                  |
+| `method`      |        | `http` and `https`, and `tcp` for a request with no `Host` sent to an address            |
+| `url`         |        | as `method`; verbatim, unlike the summary's                                              |
 | `status`      |        | only when something answered                                                             |
 | `bytes`       |        | absent for a refusal and for `dns`                                                       |
 | `reason`      |        | only when `action` is `block`, `incomplete` or `failed`                                  |

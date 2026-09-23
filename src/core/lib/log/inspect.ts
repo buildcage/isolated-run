@@ -20,6 +20,7 @@
  */
 
 import type { TrafficAction, TrafficEvent } from "./traffic-event.ts";
+import { DEFAULT_PORT } from "#core/lib/acl/url-rules.ts";
 import { splitHostPort } from "./authority.ts";
 import { PROXY_ADDRESS } from "./proxy-address.ts";
 import { PROXY_START_MARKER } from "./start-marker.ts";
@@ -230,7 +231,7 @@ function actionFor(reason: string | undefined, isAudit: boolean): TrafficAction 
 }
 
 /**
- * The absolute URL a request named, joined from the two fields that carry it,
+ * The absolute URL a request named, joined from its authority and its target,
  * or undefined where its target was no path for one to be built around.
  *
  * haproxy's `pathq` is empty, printed as `-`, for every request-target that is
@@ -238,13 +239,16 @@ function actionFor(reason: string | undefined, isAudit: boolean): TrafficAction 
  * CONNECT's authority. Both are legal requests that reach the rules and are
  * refused by them, since every path matcher wants a leading slash, so the
  * report still has an event to show; it just has no URL to show for it.
- *
- * An authority of `-` still builds one. That request did name a path, and the
- * path is what the report has to show; the host it is joined to is a refusal
- * this proxy names for itself (see REQUESTLESS_REASONS).
  */
 function urlOf(scheme: string, authority: string, target: string): string | undefined {
   return target.startsWith("/") ? `${scheme}://${authority}${target}` : undefined;
+}
+
+/** The authority a URL is built around when the request carried no `Host`:
+ *  the host hostBeforeRequest chose, with the port where it is not the
+ *  scheme's default. RFC 9112 §3.3 builds it from the connection the same way. */
+function authorityOf(host: string, port: string, scheme: "http" | "https"): string {
+  return port === DEFAULT_PORT[scheme] ? host : `${host}:${port}`;
 }
 
 /** Stands in for a host the log has no way to name; see hostBeforeRequest. */
@@ -287,9 +291,8 @@ function parseProxyLine(line: string, isAudit: boolean): TrafficEvent | null {
     const namedByHandshake =
       reason !== undefined && (incomplete !== undefined || REQUESTLESS_REASONS.has(reason));
     // A request line that did parse is kept whole even so. The path is where a
-    // payload sits, and the report is the only place a reader looks; `-` for
-    // the authority is the log's own word for one that never arrived, and no
-    // longer decides anything here.
+    // payload sits, and the report is the only place a reader looks; its URL
+    // is built around the same host the row carries.
     const parsedRequest = request[3] !== BAD_REQUEST_METHOD;
     const scheme = request[2] as "http" | "https";
     const authority = request[12];
@@ -307,7 +310,11 @@ function parseProxyLine(line: string, isAudit: boolean): TrafficEvent | null {
     };
     if (parsedRequest) {
       event.method = request[3];
-      const url = urlOf(scheme, authority, request[13]);
+      const url = urlOf(
+        scheme,
+        unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority,
+        request[13],
+      );
       if (url !== undefined) event.url = url;
     }
     if (reason !== undefined) event.reason = reason;

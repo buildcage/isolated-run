@@ -20598,6 +20598,9 @@ function actionFor(reason, isAudit) {
 function urlOf(scheme, authority, target) {
 	return target.startsWith("/") ? `${scheme}://${authority}${target}` : void 0;
 }
+function authorityOf(host, port, scheme) {
+	return port === DEFAULT_PORT$1[scheme] ? host : `${host}:${port}`;
+}
 function hostBeforeRequest(sni, address) {
 	return sni !== void 0 && sni !== "-" ? {
 		host: sni,
@@ -20623,7 +20626,7 @@ function parseProxyLine(line, isAudit) {
 		};
 		if (parsedRequest) {
 			event.method = request[3];
-			let url = urlOf(scheme, authority, request[13]);
+			let url = urlOf(scheme, unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority, request[13]);
 			url !== void 0 && (event.url = url);
 		}
 		return reason === void 0 ? (event.status = Number(request[4]), event.bytes = Number(request[5])) : event.reason = reason, event;
