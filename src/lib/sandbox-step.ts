@@ -221,7 +221,7 @@ export async function runSandboxStep(
   // assertNonRootUid).
   assertNonRootUid(process.getuid!());
 
-  // Cheap, pure input check first, so a plain mistake (e.g. write_through: /
+  // Cheap, pure input check, so a plain mistake (e.g. write_through: /
   // under filesystem_mode: ephemeral) is rejected immediately rather than only
   // after the privileged preflight checks below have already run
   // (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
