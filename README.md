@@ -82,7 +82,8 @@ The step writes every destination the command contacted to the Job Summary:
 <img src="assets/report-inspect-audit-mode.png" alt="Outbound Traffic Report (audit mode)" width="568">
 
 Its **Switch to restrict mode** section holds the allowlist, already written out from what the
-command actually did.
+command actually did. A request whose method, host or path a rule would read as a wildcard is listed
+under it rather than written in, since copying it would permit more than was sent.
 
 ### 2. Enforce the allowlist
 

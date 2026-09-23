@@ -19,6 +19,8 @@ export function usesLine(actionRepo: string, actionRef?: string, actionVersion?:
 }
 
 export interface RestrictExampleBlockOptions {
+  /** Markdown rendered right under the snippet, ahead of the footnote. */
+  appendix?: string;
   /** Rendered under the snippet as small print, when the engine has a caveat
    *  worth attaching to it. */
   footnote?: string;
@@ -26,7 +28,7 @@ export interface RestrictExampleBlockOptions {
 
 export function restrictExampleBlock(
   yaml: string,
-  { footnote }: RestrictExampleBlockOptions = {},
+  { appendix, footnote }: RestrictExampleBlockOptions = {},
 ): string {
   const indented = yaml
     .split("\n")
@@ -38,6 +40,7 @@ export function restrictExampleBlock(
   md += "```yaml\n";
   md += indented;
   md += "```\n\n";
+  if (appendix) md += appendix;
   if (footnote) md += `<sub>*${footnote}*</sub>\n\n`;
   md += "</details>\n";
   return md;

@@ -94,6 +94,52 @@ describe("what the rules permit", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The method, the Host header and the path are the step's to choose, so none
+// of them may reach a rule as a pattern.
+// ---------------------------------------------------------------------------
+describe("what the step can write into a rule", () => {
+  const legit = req("GET", "https://registry.npmjs.org/express");
+
+  it("writes no rule from a request that names a wildcard", () => {
+    const lines = buildUrlRuleLines([
+      legit,
+      req("*", "https://github.com/**"),
+      req("PUT", "https://*.s3.amazonaws.com/**"),
+      req("GET", "https://**.example.com/x"),
+      req("GET", "https://registry.npmjs.org/**"),
+    ]);
+    expect(lines).toStrictEqual(["GET https://registry.npmjs.org/express"]);
+    expect(permits(lines, "POST", "https://github.com/x")).toBe(false);
+  });
+
+  it("leaves out a method that is not a bare uppercase token", () => {
+    // `|` is a tchar, and a rule would read `PUT|DELETE` as two methods.
+    for (const method of ["PUT|DELETE", "get", "M-SEARCH"]) {
+      expect(buildUrlRuleLines([req(method, "https://a.example.com/x")])).toStrictEqual([]);
+    }
+  });
+
+  it("leaves out a host with a character a rule reads as a pattern, or an empty label", () => {
+    for (const host of ["gith?b.com", "a..example.com", "example.com.", "~example.com"]) {
+      expect(buildUrlRuleLines([req("GET", `https://${host}/x`)])).toStrictEqual([]);
+    }
+  });
+
+  it("keeps a host with an underscore, which no rule reads as a pattern", () => {
+    expect(buildUrlRuleLines([req("GET", "https://a_b.example.com/x")])).toStrictEqual([
+      "GET https://a_b.example.com/x",
+    ]);
+  });
+
+  it("takes the port the request was sent to, not the one in its Host header", () => {
+    const sentTo443 = { ...req("GET", "https://a.example.com:*/x"), port: 443 };
+    expect(buildUrlRuleLines([sentTo443])).toStrictEqual(["GET https://a.example.com/x"]);
+    const sentTo9443 = { ...req("GET", "https://a.example.com/x"), port: 9443 };
+    expect(buildUrlRuleLines([sentTo9443])).toStrictEqual(["GET https://a.example.com:9443/x"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Path patterns
 // ---------------------------------------------------------------------------
 describe("pathPatternsFor", () => {
@@ -272,6 +318,33 @@ describe("buildInspectRestrictExample", () => {
       allowedTlsRules: ["db.internal.example.com:8443"],
     });
     expect(/allowed_tls_rules: \|\n\s+db\.internal\.example\.com:8443\n/.test(md2)).toBe(true);
+  });
+
+  it("lists what it left out under the snippet, escaped and without the query", () => {
+    const md = buildInspectRestrictExample(
+      [
+        ...requests,
+        req("*", "https://github.com/**"),
+        req("*", "https://github.com/**"),
+        req("PUT", "https://*.s3.amazonaws.com/**?token=SECRET"),
+      ],
+      "buildcage/isolated-run",
+      "v2",
+    );
+    const [snippet, rest] = md.split("```\n\n");
+    expect(snippet.includes("*")).toBe(false);
+    expect(rest).toContain("| \\* | https://github.com/\\*\\* | method |");
+    expect(rest).toContain("| PUT | https://\\*.s3.amazonaws.com/\\*\\* | host |");
+    expect(rest.match(/github\.com/g)).toHaveLength(1);
+    expect(rest.includes("SECRET")).toBe(false);
+  });
+
+  it("caps the list, pointing at Communication details for the rest", () => {
+    const many = Array.from({ length: 25 }, (_, i) => req("GET", `https://a.example.com/${i}/*`));
+    const md = buildInspectRestrictExample(many, "buildcage/isolated-run", "v2");
+    expect(md.match(/\| GET \| /g)).toHaveLength(20);
+    expect(md).toContain("…and 5 more, listed in Communication details.");
+    expect(md.includes("allowed_url_rules")).toBe(false);
   });
 
   it("still renders a section for tls/ip rules alone, with no observed traffic", () => {

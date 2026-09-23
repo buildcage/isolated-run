@@ -35,27 +35,3 @@ export function splitHostPort(authority: string): HostPort {
   }
   return { host: authority.slice(0, colon), port: authority.slice(colon + 1) };
 }
-
-export interface ObservedUrl {
-  scheme: string;
-  host: string;
-  /** The scheme's default when the authority left it out. */
-  port: string;
-  /** Path only, `/` where the URL carried none. A query is not part of it. */
-  path: string;
-}
-
-/**
- * Split an observed absolute URL into its parts, or null if it is not an
- * http(s) URL at all.
- *
- * The authority ends at the first `/`, `?` or `#`: a URL that carries a query
- * but no path still has an authority of its own.
- */
-export function parseObservedUrl(url: string): ObservedUrl | null {
-  const match = /^(https?):\/\/([^/?#]+)([^?#]*)/.exec(url);
-  if (!match) return null;
-  const [, scheme, authority, path] = match;
-  const { host, port } = splitHostPort(authority);
-  return { scheme, host, port: port ?? DEFAULT_PORT[scheme], path: path || "/" };
-}
