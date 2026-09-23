@@ -67,13 +67,25 @@ describe("unchanged vocabulary", () => {
     expect(matches("a?c.example.com", "a.c.example.com")).toBe(false);
   });
 
-  it("escapes regex metacharacters in literal text", () => {
-    expect(domainToRegexPartial("a+b.example.com")).toBe("a\\+b\\.example\\.com");
-    expect(matches("a+b.example.com", "aXb.example.com")).toBe(false);
+  it("rejects a character no hostname can", () => {
+    expect(() => domainToRegexPartial("a+b.example.com")).toThrow(/no hostname can/);
+    expect(() => domainToRegexPartial("user@example.com")).toThrow(/no hostname can/);
+  });
+
+  it("rejects an internationalized name, pointing at its punycode form", () => {
+    expect(() => domainToRegexPartial("münchen.de")).toThrow(/punycode/);
+  });
+
+  it("accepts the characters a hostname holds, underscore included", () => {
+    expect(domainToRegexPartial("_acme-challenge.Ex4mple.com")).toBe(
+      "_acme-challenge\\.Ex4mple\\.com",
+    );
   });
 
   it("rejects an empty label", () => {
-    expect(() => domainToRegexPartial("a..b")).toThrow();
+    expect(() => domainToRegexPartial("a..b")).toThrow(/empty label/);
+    expect(() => domainToRegexPartial(".example.com")).toThrow(/empty label/);
+    expect(() => domainToRegexPartial("example.com.")).toThrow(/empty label/);
   });
 });
 
@@ -142,6 +154,41 @@ describe("splitRawRegexHost host-half compilation", () => {
   it("refuses a rule whose host half does not compile on its own", () => {
     expect(() => splitRawRegexHost("~(a\\.com:443)")).toThrow(/does not compile on its own/);
   });
+
+  it("splits a non-capturing group at the port, not at its own colon", () => {
+    expect(splitRawRegexHost("~(?:a|b)\\.example\\.com:443")).toStrictEqual({
+      host: "(?:a|b)\\.example\\.com",
+    });
+  });
+});
+
+describe("checkRawRegexHalf: resolver regex syntax", () => {
+  const check = (text: string, hostHalf: boolean) =>
+    checkRawRegexHalf(text, "host half", `~${text}`, hostHalf);
+
+  it("refuses lookaround and backreferences in a host half, which RE2 lacks", () => {
+    for (const text of [
+      "(?!evil)[a-z]+\\.com",
+      "(?=a)[a-z]+\\.com",
+      "(?<=a)b\\.com",
+      "(?<!a)b\\.com",
+      "(a)\\1\\.com",
+      "(?<n>a)\\k<n>\\.com",
+    ]) {
+      expect(() => check(text, true)).toThrow(/RE2/);
+    }
+  });
+
+  it("leaves the same text alone when it is escaped or inside a character class", () => {
+    expect(() => check("\\(?!a\\.com", true)).not.toThrow();
+    expect(() => check("a\\\\1\\.com", true)).not.toThrow();
+    expect(() => check("[(?!]a\\.com", true)).not.toThrow();
+    expect(() => check("(?<n>a)\\.com", true)).not.toThrow();
+  });
+
+  it("does not apply outside a host half, which only the proxy matches", () => {
+    expect(() => check("/(?!admin).*", false)).not.toThrow();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -183,6 +230,23 @@ describe("checkRawRegexHalf", () => {
 
   it("looks for that bracket in the host half only", () => {
     expect(() => check("\\[::1\\]", false)).not.toThrow();
+  });
+
+  it("refuses what would break out of the resolver's quoted expression", () => {
+    // The host half lands in a single-quoted CEL literal, and `{$` and `{%`
+    // are Corefile environment substitution.
+    expect(() => check("a'b\\.com", true)).toThrow(/cannot quote/);
+    expect(() => check("a`b\\.com", true)).toThrow(/cannot quote/);
+    expect(() => check("a{$HOME}\\.com", true)).toThrow(/cannot quote/);
+    expect(() => check("a{%HOME%}\\.com", true)).toThrow(/cannot quote/);
+  });
+
+  it("keeps a quantifier brace, which is not substitution", () => {
+    expect(() => check("a{2}\\.com", true)).not.toThrow();
+  });
+
+  it("looks for those characters in the host half only", () => {
+    expect(() => check("/a'b", false)).not.toThrow();
   });
 });
 
@@ -253,6 +317,28 @@ describe("splitDomainFromPortPattern", () => {
     expect(splitDomainFromPortPattern("^a\\.com:44[0-9]:x")).toStrictEqual({
       domain: "^a\\.com",
       portPattern: ":44[0-9]:x",
+    });
+  });
+
+  it("skips the colon of a group's own syntax", () => {
+    expect(splitDomainFromPortPattern("(?:a|b)\\.com:443")).toStrictEqual({
+      domain: "(?:a|b)\\.com",
+      portPattern: ":443",
+    });
+    expect(splitDomainFromPortPattern("(?i:a)\\.com(:443)?")).toStrictEqual({
+      domain: "(?i:a)\\.com",
+      portPattern: "(:443)?",
+    });
+    expect(splitDomainFromPortPattern("(?<n>a)\\.com:443")).toStrictEqual({
+      domain: "(?<n>a)\\.com",
+      portPattern: ":443",
+    });
+  });
+
+  it("skips a colon that is escaped or inside a character class", () => {
+    expect(splitDomainFromPortPattern("a[:x]\\:b\\(:c:443")).toStrictEqual({
+      domain: "a[:x]\\:b\\(",
+      portPattern: ":c:443",
     });
   });
 

@@ -339,8 +339,8 @@ describe("what a log line records", () => {
   it("records the path in a form that does not depend on the HTTP version", () => {
     // %HU is the request target as sent: a path over HTTP/1.1, an absolute URI
     // over HTTP/2, which every TLS client negotiates by default.
-    expect(FULL_CONFIG.includes("host=%[capture.req.hdr(0)] %HU")).toBe(false);
-    expect(FULL_CONFIG.includes("host=%[capture.req.hdr(0)] %[var(txn.pathq)]")).toBe(true);
+    expect(FULL_CONFIG.includes("host=%[var(txn.host_log)] %HU")).toBe(false);
+    expect(FULL_CONFIG.includes("host=%[var(txn.host_log)] %[var(txn.pathq)]")).toBe(true);
     expect(FULL_CONFIG.includes("http-request set-var(txn.pathq) 'pathq,regsub(")).toBe(true);
   });
 
@@ -381,7 +381,7 @@ describe("what a log line records", () => {
     // characters are stripped.
     expect(
       FULL_CONFIG.includes(
-        `http-request capture 'req.hdr(host),regsub("[\\s\\"[:cntrl:]]",_,g)' len 100`,
+        `http-request set-var(txn.host_log) 'req.hdr(host),regsub("[\\s\\"[:cntrl:]]",_,g)'`,
       ),
     ).toBe(true);
     expect(
@@ -412,10 +412,16 @@ describe("what a log line records", () => {
     );
     const target = https?.indexOf("%[var(txn.pathq)]") ?? -1;
     expect((https?.indexOf("sni=") ?? -1) < target).toBe(true);
-    expect((https?.indexOf("host=%[capture") ?? -1) < target).toBe(true);
+    expect((https?.indexOf("host=%[var(txn.host_log)") ?? -1) < target).toBe(true);
   });
 
-  it("leaves a non-default port's ':' untouched in the Host capture", () => {
+  it("logs the Host in full rather than through a fixed-length capture", () => {
+    // A capture cuts at its length, so a name padded past it would reach the
+    // report without the domain that registered it.
+    expect(FULL_CONFIG.includes("http-request capture")).toBe(false);
+  });
+
+  it("leaves a non-default port's ':' untouched in the logged Host", () => {
     // Mirrors HAProxy's own regsub("[\s\"[:cntrl:]]",_,g) with a
     // POSIX/PCRE2-equivalent pattern: the ':' of a non-default port has to
     // survive, or "allowed.example.com:9443" reaches the report as
@@ -562,7 +568,7 @@ describe("audit mode", () => {
       true,
     );
     expect(audit.includes('log-format "buildcage %[date(0,ms)] http %HM %ST %B ts=%ts')).toBe(true);
-    expect(audit.includes("host=%[capture.req.hdr(0)] %[var(txn.pathq)]")).toBe(true);
+    expect(audit.includes("host=%[var(txn.host_log)] %[var(txn.pathq)]")).toBe(true);
   });
 
   it("still connects only where it resolved the name", () => {

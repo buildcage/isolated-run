@@ -56,6 +56,15 @@ export function escapeForCel(regex: string): string {
 }
 
 /**
+ * `regex` must already be escaped for CEL. Case-insensitive to agree with
+ * HAProxy's `-i` host match; otherwise a lookup the rules permit is logged as
+ * denied.
+ */
+function nameMatches(regex: string): string {
+  return `      expr name() matches '(?i)${regex}'`;
+}
+
+/**
  * The lines answering a name with the proxy's own address: NOERROR with an
  * empty AAAA (NODATA), never NXDOMAIN. NXDOMAIN claims the name itself does
  * not exist, and musl's getaddrinfo(AF_UNSPEC) takes that literally and
@@ -109,7 +118,7 @@ function reverseZoneLines(proxyAddress: string, ttlSeconds: number): string[] {
     "# under these zones misses the view and falls through to the blocks below.",
     "in-addr.arpa ip6.arpa {",
     "    view reverse {",
-    `      expr name() matches '${REVERSE_NAME_REGEX}'`,
+    nameMatches(REVERSE_NAME_REGEX),
     "    }",
     "    template IN PTR {",
     "      rcode NXDOMAIN",
@@ -170,7 +179,7 @@ function discoveryZoneLines(
     "# any other lookup rather than exempted on a guess.",
     ". {",
     "    view discovery {",
-    `      expr name() matches '^${SERVICE_PREFIX_REGEX}${parent}[.]$'`,
+    nameMatches(`^${SERVICE_PREFIX_REGEX}${parent}[.]$`),
     `      expr type() in [${DISCOVERY_TYPES.map((t) => `'${t}'`).join(", ")}]`,
     "    }",
     ...proxyAnswerLines(proxyAddress, ttlSeconds),
@@ -200,7 +209,7 @@ function serviceZoneLines(proxyAddress: string, ttlSeconds: number): string[] {
     "# itself, which no rule can make resolve.",
     ". {",
     "    view service {",
-    `      expr name() matches '^${SERVICE_PREFIX_REGEX}.+[.]$'`,
+    nameMatches(`^${SERVICE_PREFIX_REGEX}.+[.]$`),
     "    }",
     ...proxyAnswerLines(proxyAddress, ttlSeconds),
     '    log . "buildcage dns service-denied name={name} type={type}"',
@@ -266,7 +275,7 @@ export function generateCorednsConfig(
       "# from, so the two cannot drift apart.",
       ". {",
       "    view allowlist {",
-      `      expr name() matches '^(${escapeForCel(alternation)})[.]$'`,
+      nameMatches(`^(${escapeForCel(alternation)})[.]$`),
       "    }",
       ...proxyAnswerLines(proxyAddress, ttlSeconds),
       '    log . "buildcage dns allowed name={name}"',

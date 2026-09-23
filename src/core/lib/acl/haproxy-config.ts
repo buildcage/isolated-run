@@ -123,6 +123,7 @@ export function generateHaproxyConfig(options: HaproxyConfigOptions = {}): Gener
       plainStagePort: PLAIN_STAGE_PORT,
       ipRules,
       tlsHosts,
+      proxyAddress: opts.proxyAddress,
       ...shared,
     }),
     ...inspectStage(
