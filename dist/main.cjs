@@ -19047,9 +19047,19 @@ function assertNoFreshMountDestinations(writableDirs, freshMountDestinations) {
 		if (shadowed) throw new WritablePathConflictError(`writable path ${JSON.stringify(dir)} is inside ${JSON.stringify(shadowed)}, which the sandbox mounts itself; bind-mounting the host's copy there would expose it inside the sandbox. Choose a path outside it.`);
 	}
 }
+function assertOverlayPathsAreOptionSafe(roots) {
+	for (let { path, upper, work } of roots) {
+		let bad = [
+			path,
+			upper,
+			work
+		].find((p) => p.includes(",") || p.includes(":"));
+		if (bad !== void 0) throw new WritablePathConflictError(`filesystem_mode: ephemeral cannot overlay ${JSON.stringify(bad)}: an overlay mount option cannot contain "," or ":", and the kernel offers no way to escape them. Use filesystem_mode: persistent, which binds the directory directly.`);
+	}
+}
 function ephemeralLayers({ overlayRoots, allowWrite }, freshMountDestinations) {
 	let mounts = [], overlayPaths = overlayRoots.map((r) => r.path);
-	assertScratchBaseNotWritable([...overlayPaths, ...allowWrite]), assertNoFreshMountDestinations(allowWrite, freshMountDestinations);
+	assertScratchBaseNotWritable([...overlayPaths, ...allowWrite]), assertNoFreshMountDestinations(allowWrite, freshMountDestinations), assertOverlayPathsAreOptionSafe(overlayRoots);
 	let protectedPaths = new Set([...overlayPaths, ...allowWrite]);
 	for (let root of [...overlayRoots].sort((a, b) => a.path.length - b.path.length)) mounts.push({
 		destination: root.path,

@@ -188,6 +188,26 @@ describe("ephemeralLayers", () => {
       /which the sandbox mounts itself/,
     );
   });
+
+  it("refuses a root whose host path carries an overlay option delimiter", () => {
+    for (const bad of ["/home/a,b", "/home/a:b"]) {
+      expect(() => ephemeralLayers({ overlayRoots: [root(bad)], allowWrite: [] }, fresh)).toThrow(
+        /an overlay mount option cannot contain/,
+      );
+    }
+  });
+
+  it("refuses a root whose upper/work path carries a delimiter", () => {
+    expect(() =>
+      ephemeralLayers(
+        {
+          overlayRoots: [{ path: "/home", upper: "/scratch/a:b/upper", work: "/scratch/work" }],
+          allowWrite: [],
+        },
+        fresh,
+      ),
+    ).toThrow(/"\/scratch\/a:b\/upper"/);
+  });
 });
 
 describe("scratchBaseLayers", () => {
