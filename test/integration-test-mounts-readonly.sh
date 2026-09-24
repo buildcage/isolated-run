@@ -4,8 +4,8 @@
 # test_sandbox_enforcement for the one case that does. Two mounts, one sandbox,
 # since a start is not cheap.
 #
-# The first is a bind mount nested under $GITHUB_WORKSPACE. A writable path
-# stays writable all the way down, separate mounts under it included.
+# The first is a bind mount nested under $GITHUB_WORKSPACE: a separate mount
+# under a writable path is writable too.
 #
 # The second is a pseudo-filesystem that is not among runc's own default
 # base-spec mounts (see freshMountDestinationsFrom in sandbox/oci-mounts.ts),
