@@ -66047,8 +66047,9 @@ const uploadViaActionsArtifact = async (name, files, rootDirectory, options) => 
 	let { DefaultArtifactClient } = await Promise.resolve().then(() => (init_artifact(), artifact_exports));
 	return new DefaultArtifactClient().uploadArtifact(name, files, rootDirectory, options);
 };
-async function uploadTrafficArtifact(report, containerName, annotation, { upload = uploadViaActionsArtifact } = {}) {
-	let scratchDir = (0, node_fs.mkdtempSync)((0, node_path.join)((0, node_os.tmpdir)(), "buildcage-traffic-"));
+async function uploadTrafficArtifact(report, containerName, annotation, { upload = uploadViaActionsArtifact, scratchBase = SANDBOX_SCRATCH_BASE } = {}) {
+	ensureOwnScratchBase(scratchBase);
+	let scratchDir = (0, node_fs.mkdtempSync)((0, node_path.join)(scratchBase, "traffic-"));
 	try {
 		let file = (0, node_path.join)(scratchDir, "traffic.json");
 		writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));

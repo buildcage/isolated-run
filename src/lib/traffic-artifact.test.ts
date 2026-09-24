@@ -127,17 +127,27 @@ describe("setTrafficArtifactOutput", () => {
 });
 
 describe("uploadTrafficArtifact", () => {
+  let scratchBase: string;
+  beforeEach(() => {
+    scratchBase = mkdtempSync(join(tmpdir(), "buildcage-scratch-"));
+  });
+  afterEach(() => {
+    rmSync(scratchBase, { recursive: true, force: true });
+  });
+
   it("uploads the traffic JSON it wrote, and returns the artifact's name", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { upload, calls } = fakeUpload();
 
     const name = await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(true), {
       upload,
+      scratchBase,
     });
 
     expect(calls).toHaveLength(1);
     expect(calls[0].name).toBe("buildcage-traffic-deadbeef");
     expect(calls[0].files).toStrictEqual([join(calls[0].root, "traffic.json")]);
+    expect(calls[0].root.startsWith(`${scratchBase}/`)).toBe(true);
     expect(name).toBe("buildcage-traffic-deadbeef");
   });
 
@@ -145,7 +155,10 @@ describe("uploadTrafficArtifact", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { upload, calls } = fakeUpload();
 
-    await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(false), { upload });
+    await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(false), {
+      upload,
+      scratchBase,
+    });
 
     expect(() => readFileSync(calls[0].files[0], "utf8")).toThrow();
   });
@@ -155,7 +168,10 @@ describe("uploadTrafficArtifact", () => {
     setInput("traffic_artifact_retention_days", "7");
     const { upload, calls } = fakeUpload();
 
-    await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(false), { upload });
+    await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(false), {
+      upload,
+      scratchBase,
+    });
 
     expect(calls[0].options).toStrictEqual({ retentionDays: 7 });
   });
@@ -167,7 +183,10 @@ describe("uploadTrafficArtifact", () => {
       setInput("traffic_artifact_retention_days", input);
       const { upload, calls } = fakeUpload();
 
-      await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(false), { upload });
+      await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(false), {
+        upload,
+        scratchBase,
+      });
 
       expect(calls[0].options).toStrictEqual({ retentionDays: undefined });
     },
@@ -178,7 +197,10 @@ describe("uploadTrafficArtifact", () => {
     const { upload, calls } = fakeUpload();
     const universal = { ...inspectReport(), engine: "universal" } as Report;
 
-    await uploadTrafficArtifact(universal, CONTAINER, createAnnotation(true), { upload });
+    await uploadTrafficArtifact(universal, CONTAINER, createAnnotation(true), {
+      upload,
+      scratchBase,
+    });
 
     expect(calls.length).toBe(1);
   });
@@ -188,7 +210,10 @@ describe("uploadTrafficArtifact", () => {
     const { upload } = fakeUpload(new Error("artifact service unavailable"));
 
     await expect(
-      uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(true), { upload }),
+      uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(true), {
+        upload,
+        scratchBase,
+      }),
     ).resolves.toBeUndefined();
 
     expect(log).toHaveBeenCalledWith(
