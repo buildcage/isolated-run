@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   resolveWriteThroughEntry,
   resolveWriteThroughPaths,
+  resolveWriteThroughOnHost,
   ensureWriteThroughTargetsExist,
   removeCreatedDirsIfEmpty,
   splitWriteThroughInput,
@@ -166,8 +167,9 @@ describe("ensureWriteThroughTargetsExist", () => {
   it("creates a missing directory with one mkdir -p, run as the nearest existing ancestor's owner", () => {
     const calls: string[][] = [];
     // /a exists; /a/b and /a/b/c do not.
+    const statted: string[] = [];
     const stat = (p: string) => {
-      expect(p).toBe("/a");
+      statted.push(p);
       return DIR;
     };
 
@@ -177,7 +179,8 @@ describe("ensureWriteThroughTargetsExist", () => {
       execFile: (cmd, args) => calls.push([cmd, ...args]),
     });
 
-    expect(calls).toStrictEqual([["sudo", ...asOwner, "mkdir", "-p", "-m", "755", "/a/b/c"]]);
+    expect(calls).toStrictEqual([["sudo", ...asOwner, "mkdir", "-p", "-m", "755", "--", "/a/b/c"]]);
+    expect(statted).toStrictEqual(["/a", "/a/b", "/a/b/c"]);
   });
 
   it("carries an ancestor that is writable through its group or world bits, not its owner", () => {
@@ -190,7 +193,7 @@ describe("ensureWriteThroughTargetsExist", () => {
       execFile: (cmd, args) => calls.push([cmd, ...args]),
     });
     expect(calls).toStrictEqual([
-      ["sudo", "-u", "#0", "-g", "#0", "mkdir", "-p", "-m", "1777", "/sticky/cache"],
+      ["sudo", "-u", "#0", "-g", "#0", "mkdir", "-p", "-m", "1777", "--", "/sticky/cache"],
     ]);
   });
 
@@ -204,7 +207,7 @@ describe("ensureWriteThroughTargetsExist", () => {
     });
 
     expect(calls).toStrictEqual([
-      ["sudo", "-u", "#0", "-g", "#0", "mkdir", "-p", "-m", "755", "/etc/test"],
+      ["sudo", "-u", "#0", "-g", "#0", "mkdir", "-p", "-m", "755", "--", "/etc/test"],
     ]);
   });
 
@@ -244,10 +247,10 @@ describe("ensureWriteThroughTargetsExist", () => {
     // second entry failed: both must be rolled back, deepest first, and as
     // the same identity that created them.
     expect(calls).toStrictEqual([
-      ["sudo", ...asOwner, "mkdir", "-p", "-m", "755", "/a/ok/x"],
-      ["sudo", ...asOwner, "mkdir", "-p", "-m", "755", "/a/fail"],
-      ["sudo", ...asOwner, "rmdir", "/a/ok/x"],
-      ["sudo", ...asOwner, "rmdir", "/a/ok"],
+      ["sudo", ...asOwner, "mkdir", "-p", "-m", "755", "--", "/a/ok/x"],
+      ["sudo", ...asOwner, "mkdir", "-p", "-m", "755", "--", "/a/fail"],
+      ["sudo", ...asOwner, "rmdir", "--", "/a/ok/x"],
+      ["sudo", ...asOwner, "rmdir", "--", "/a/ok"],
     ]);
   });
 
@@ -289,8 +292,8 @@ describe("removeCreatedDirsIfEmpty", () => {
     const calls: string[][] = [];
     removeCreatedDirsIfEmpty(dirs, { execFile: (cmd, args) => calls.push([cmd, ...args]) });
     expect(calls).toStrictEqual([
-      ["sudo", ...asOwner, "rmdir", "/a/b/c"],
-      ["sudo", ...asOwner, "rmdir", "/a/b"],
+      ["sudo", ...asOwner, "rmdir", "--", "/a/b/c"],
+      ["sudo", ...asOwner, "rmdir", "--", "/a/b"],
     ]);
   });
 
@@ -298,12 +301,12 @@ describe("removeCreatedDirsIfEmpty", () => {
     const calls: string[][] = [];
     const execFile = (cmd: string, args: string[]) => {
       calls.push([cmd, ...args]);
-      if (args[5] === "/a/b/c") throw new Error("rmdir: failed to remove: Directory not empty");
+      if (args[6] === "/a/b/c") throw new Error("rmdir: failed to remove: Directory not empty");
     };
     expect(() => removeCreatedDirsIfEmpty(dirs, { execFile })).not.toThrow();
     expect(calls).toStrictEqual([
-      ["sudo", ...asOwner, "rmdir", "/a/b/c"],
-      ["sudo", ...asOwner, "rmdir", "/a/b"],
+      ["sudo", ...asOwner, "rmdir", "--", "/a/b/c"],
+      ["sudo", ...asOwner, "rmdir", "--", "/a/b"],
     ]);
   });
 
@@ -373,5 +376,97 @@ describe("splitWriteThroughInput", () => {
       "/tmp/a#b",
       "/data/my logs #2/cache",
     ]);
+  });
+});
+
+describe("resolveWriteThroughOnHost", () => {
+  const DIR = { uid: 1000, gid: 1000, mode: 0o40755 };
+  const host = (dirs: string[], links: Record<string, { target: string; uid: number }> = {}) => ({
+    exists: (p: string) => p === "/" || dirs.includes(p) || p in links,
+    stat: (p: string) => (p in links ? { uid: links[p]!.uid, gid: 0, mode: 0o120777 } : DIR),
+    readlink: (p: string) => links[p]!.target,
+  });
+
+  it("returns a path with no symlinks on it unchanged", () => {
+    expect(resolveWriteThroughOnHost("/a/b", host(["/a", "/a/b"]))).toBe("/a/b");
+  });
+
+  it("keeps the components that don't exist yet as written", () => {
+    expect(resolveWriteThroughOnHost("/a/b/c", host(["/a"]))).toBe("/a/b/c");
+  });
+
+  it("refuses a symlink the runner's uid owns, which an earlier step could have planted", () => {
+    const fake = host(["/ws", "/tmp/_temp"], { "/ws/cache": { target: "/tmp/_temp", uid: 1000 } });
+    expect(() => resolveWriteThroughOnHost("/ws/cache", fake)).toThrow(
+      /"\/ws\/cache", a symlink to "\/tmp\/_temp" owned by uid 1000/,
+    );
+    // Also when it sits partway along the path.
+    expect(() => resolveWriteThroughOnHost("/ws/cache/sub", fake)).toThrow(/owned by uid 1000/);
+  });
+
+  it("follows a root-owned symlink, absolute or relative, to the directory really there", () => {
+    const fake = host(["/data", "/data/home", "/data/home/runner", "/opt", "/opt/real"], {
+      "/home": { target: "/data/home", uid: 0 },
+      "/opt/link": { target: "../opt/./real", uid: 0 },
+    });
+    expect(resolveWriteThroughOnHost("/home/runner/x", fake)).toBe("/data/home/runner/x");
+    expect(resolveWriteThroughOnHost("/opt/link", fake)).toBe("/opt/real");
+  });
+
+  it("walks a link target's .. back up through a component that doesn't exist yet", () => {
+    const fake = host(["/a"], { "/a/l": { target: "missing/../real", uid: 0 } });
+    expect(resolveWriteThroughOnHost("/a/l", fake)).toBe("/a/real");
+  });
+
+  it("refuses a root-owned symlink that lands on /", () => {
+    const fake = host([], { "/root-link": { target: "/", uid: 0 } });
+    expect(() => resolveWriteThroughOnHost("/root-link", fake)).toThrow(/resolves to "\/"/);
+  });
+
+  it("gives up on a symlink loop", () => {
+    const fake = host([], { "/loop": { target: "/loop", uid: 0 } });
+    expect(() => resolveWriteThroughOnHost("/loop", fake)).toThrow(/too many symlinks/);
+  });
+});
+
+describe("ensureWriteThroughTargetsExist: the path changing under it", () => {
+  const DIR = { uid: 1000, gid: 1000, mode: 0o40755 };
+
+  it("refuses an ancestor that is no longer a directory", () => {
+    const execFile = vi.fn();
+    expect(() =>
+      ensureWriteThroughTargetsExist(["/a/b"], ENV, {
+        exists: (p) => p === "/a",
+        stat: () => ({ uid: 0, gid: 0, mode: 0o120777 }),
+        execFile,
+      }),
+    ).toThrow(/"\/a" is not a directory/);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it("does not record a segment that isn't the owner's directory, and rolls back the rest", () => {
+    const calls: string[][] = [];
+    const stat = (p: string) => (p === "/a/x/y" ? { ...DIR, mode: 0o120777 } : DIR);
+    expect(() =>
+      ensureWriteThroughTargetsExist(["/a/ok", "/a/x/y"], ENV, {
+        exists: (p) => p === "/a",
+        stat,
+        execFile: (cmd, args) => calls.push([cmd, ...args]),
+      }),
+    ).toThrow(/"\/a\/x\/y" is not a directory owned by uid 1000/);
+    expect(calls.filter((c) => c.includes("rmdir"))).toStrictEqual([
+      ["sudo", "-u", "#1000", "-g", "#1000", "rmdir", "--", "/a/ok"],
+    ]);
+  });
+
+  it("does not record a segment someone else owns", () => {
+    const stat = (p: string) => (p === "/a/b" ? { ...DIR, uid: 0 } : DIR);
+    expect(() =>
+      ensureWriteThroughTargetsExist(["/a/b"], ENV, {
+        exists: (p) => p === "/a",
+        stat,
+        execFile: () => {},
+      }),
+    ).toThrow(WriteThroughTargetUncreatableError);
   });
 });

@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { lstatSync, readlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join, isAbsolute, normalize } from "node:path";
 
@@ -148,11 +148,16 @@ export class WriteThroughTargetMissingError extends Error {}
  *  created (the sudo mkdir itself failed). */
 export class WriteThroughTargetUncreatableError extends Error {}
 
+/** From lstat(2): a symlink is reported as itself. */
 interface StatShape {
   uid: number;
   gid: number;
   mode: number;
 }
+
+const S_IFMT = 0o170000;
+const S_IFDIR = 0o040000;
+const S_IFLNK = 0o120000;
 
 /** A directory ensureWriteThroughTargetsExist created, with the identity it
  *  was created as, so removing it again can run as that identity too. */
@@ -163,18 +168,38 @@ export interface CreatedDir {
 }
 
 export interface EnsureWriteThroughTargetsExistOptions {
+  /** A dangling symlink counts as existing. */
   exists?: (path: string) => boolean;
   stat?: (path: string) => StatShape;
   execFile?: (command: string, args: string[]) => void;
 }
 
-// Untested by design: the defaults behind ensureWriteThroughTargetsExist's
-// seams, which only hand node:fs and node:child_process what the tested caller
-// decided.
+export interface ResolveWriteThroughOnHostOptions {
+  exists?: (path: string) => boolean;
+  stat?: (path: string) => StatShape;
+  readlink?: (path: string) => string;
+}
+
+// Untested by design: the defaults behind ensureWriteThroughTargetsExist's and
+// resolveWriteThroughOnHost's seams, which only hand node:fs and
+// node:child_process what the tested caller decided.
 /* v8 ignore start */
+function defaultExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function defaultStat(path: string): StatShape {
-  const s = statSync(path);
+  const s = lstatSync(path);
   return { uid: s.uid, gid: s.gid, mode: s.mode };
+}
+
+function defaultReadlink(path: string): string {
+  return readlinkSync(path);
 }
 
 function defaultExecFile(command: string, args: string[]): void {
@@ -184,6 +209,68 @@ function defaultExecFile(command: string, args: string[]): void {
   });
 }
 /* v8 ignore stop */
+
+const MAX_SYMLINK_HOPS = 40;
+
+/**
+ * Resolve the symlinks along a write_through path, so the checks and the bind
+ * mount act on the real directory. Only root-owned symlinks are followed: steps
+ * share the runner's uid, so any other could have been planted by an earlier
+ * step to make its target writable. Missing components are kept as written.
+ */
+export function resolveWriteThroughOnHost(
+  path: string,
+  {
+    exists = defaultExists,
+    stat = defaultStat,
+    readlink = defaultReadlink,
+  }: ResolveWriteThroughOnHostOptions = {},
+): string {
+  const pending = path.split("/").filter((c) => c !== "");
+  let current = "/";
+  let hops = 0;
+  while (pending.length > 0) {
+    const name = pending.shift()!;
+    if (name === ".") continue;
+    if (name === "..") {
+      current = dirname(current);
+      continue;
+    }
+    const next = join(current, name);
+    // Keep walking: a ".." from a link target can climb back to existing components.
+    if (!exists(next)) {
+      current = next;
+      continue;
+    }
+    const { uid, mode } = stat(next);
+    if ((mode & S_IFMT) !== S_IFLNK) {
+      current = next;
+      continue;
+    }
+    const target = readlink(next);
+    if (uid !== 0) {
+      throw new Error(
+        `write_through entry ${JSON.stringify(path)} passes through ${JSON.stringify(next)}, a symlink ` +
+          `to ${JSON.stringify(target)} owned by uid ${uid}. Only root-owned symlinks are followed, ` +
+          "since any other could have been planted by an earlier step. Name the real path instead.",
+      );
+    }
+    if (++hops > MAX_SYMLINK_HOPS) {
+      throw new Error(
+        `write_through entry ${JSON.stringify(path)} passes through too many symlinks to resolve.`,
+      );
+    }
+    pending.unshift(...target.split("/").filter((c) => c !== ""));
+    if (isAbsolute(target)) current = "/";
+  }
+  if (current === "/") {
+    throw new Error(
+      `write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a ` +
+        'literal "/" if dropping the read-only restriction entirely is what you meant.',
+    );
+  }
+  return current;
+}
 
 /** The sudo flags that run a command as uid/gid rather than as root. Numeric
  *  (`#1000`) so no passwd/group name is needed for the identity itself, though
@@ -205,6 +292,29 @@ function pathSegmentsBetween(ancestor: string, descendant: string): string[] {
 }
 
 /**
+ * The runner creates KNOWN_FILE_VARS' files itself, so a missing one is a
+ * broken environment, not a directory to create. Takes the paths as written:
+ * resolveWriteThroughOnHost can respell one so it no longer matches its variable.
+ */
+export function assertKnownFilesExist(
+  paths: string[],
+  env: NodeJS.ProcessEnv,
+  { exists = defaultExists }: { exists?: (path: string) => boolean } = {},
+): void {
+  const knownFileValues = new Set(
+    KNOWN_FILE_VARS.map((name) => env[name]).filter((v): v is string => Boolean(v)),
+  );
+  const missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
+  if (missing !== undefined) {
+    throw new WriteThroughTargetMissingError(
+      `write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own ` +
+        "generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should " +
+        "already be present -- something is wrong with the environment.",
+    );
+  }
+}
+
+/**
  * For each resolved write_through path that doesn't already exist:
  * - if it equals the current value of one of KNOWN_FILE_VARS, the runner was
  *   supposed to have already created it; throw rather than paper over a
@@ -218,6 +328,8 @@ function pathSegmentsBetween(ancestor: string, descendant: string): string[] {
  *   exactly as restricted as naming the existing /etc directly would have.
  * Must run before the scratch dir's `mount --rbind /` snapshot (i.e. before
  * runIsolated()), same timing constraint as the overlay upper/work dirs.
+ * Takes paths from resolveWriteThroughOnHost: a symlinked ancestor would lend
+ * the new directory its target's owner, root included.
  *
  * Running as the owner rather than as root is what makes this safe against a
  * concurrent step: steps can run in parallel, share the runner's uid, and can
@@ -231,15 +343,11 @@ export function ensureWriteThroughTargetsExist(
   resolvedPaths: string[],
   env: NodeJS.ProcessEnv,
   {
-    exists = existsSync,
+    exists = defaultExists,
     stat = defaultStat,
     execFile = defaultExecFile,
   }: EnsureWriteThroughTargetsExistOptions = {},
 ): CreatedDir[] {
-  const knownFileValues = new Set(
-    KNOWN_FILE_VARS.map((name) => env[name]).filter((v): v is string => Boolean(v)),
-  );
-
   // Every path segment newly created by this call (across every
   // resolvedPaths entry so far), shallowest first. If a later entry fails,
   // rolled back before rethrowing so a run that never actually starts
@@ -251,7 +359,7 @@ export function ensureWriteThroughTargetsExist(
       try {
         // `rmdir`, like removeCreatedDirsIfEmpty: only directories are created
         // here, and the step hasn't run yet, so every one of them is empty.
-        execFile("sudo", [...asOwner(dir), "rmdir", dir.path]);
+        execFile("sudo", [...asOwner(dir), "rmdir", "--", dir.path]);
       } catch {
         // Best-effort: the original error is what matters here, not a
         // failed cleanup attempt on top of it.
@@ -262,13 +370,11 @@ export function ensureWriteThroughTargetsExist(
   for (const path of resolvedPaths) {
     if (exists(path)) continue;
 
-    if (knownFileValues.has(path)) {
+    try {
+      assertKnownFilesExist([path], env, { exists });
+    } catch (e) {
       rollback();
-      throw new WriteThroughTargetMissingError(
-        `write_through: ${JSON.stringify(path)} doesn't exist. This path is one of the runner's own ` +
-          "generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should " +
-          "already be present -- something is wrong with the environment.",
-      );
+      throw e;
     }
 
     let ancestor = dirname(path);
@@ -285,6 +391,10 @@ export function ensureWriteThroughTargetsExist(
 
     try {
       const { uid, gid, mode } = stat(ancestor);
+      // Not a directory means the path changed after resolveWriteThroughOnHost.
+      if ((mode & S_IFMT) !== S_IFDIR) {
+        throw new Error(`${JSON.stringify(ancestor)} is not a directory.`);
+      }
       // One mkdir -p, not one call per segment: only within a single run does
       // it descend with O_NOFOLLOW, and only names it created itself are
       // protected that way. Re-entering per segment would hand the names it
@@ -296,10 +406,16 @@ export function ensureWriteThroughTargetsExist(
       // asked for. With -p, -m applies to the target; anything created above it
       // on the way gets mkdir's own permissions, which the ancestor still gates.
       const modeOctal = (mode & 0o7777).toString(8);
-      execFile("sudo", [...asOwner({ uid, gid }), "mkdir", "-p", "-m", modeOctal, path]);
-      created.push(
-        ...pathSegmentsBetween(ancestor, path).map((segment) => ({ path: segment, uid, gid })),
-      );
+      execFile("sudo", [...asOwner({ uid, gid }), "mkdir", "-p", "-m", modeOctal, "--", path]);
+      // The later rmdir runs as this owner, so record only its own directories.
+      const segments = pathSegmentsBetween(ancestor, path);
+      for (const segment of segments) {
+        const s = stat(segment);
+        if ((s.mode & S_IFMT) !== S_IFDIR || s.uid !== uid) {
+          throw new Error(`${JSON.stringify(segment)} is not a directory owned by uid ${uid}.`);
+        }
+      }
+      created.push(...segments.map((segment) => ({ path: segment, uid, gid })));
     } catch (e) {
       // Neither WriteThroughTargetMissingError nor WriteThroughTargetUncreatableError
       // can originate here: both are only ever thrown above, outside this
@@ -332,7 +448,7 @@ export function removeCreatedDirsIfEmpty(
 ): void {
   for (const dir of [...created].reverse()) {
     try {
-      execFile("sudo", [...asOwner(dir), "rmdir", dir.path]);
+      execFile("sudo", [...asOwner(dir), "rmdir", "--", dir.path]);
     } catch {
       // Non-empty (the command wrote something here) or already gone.
     }

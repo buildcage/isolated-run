@@ -14,6 +14,7 @@ describe("resolveFilesystemPlan", () => {
   // Everything "exists" by default (candidates + write_through targets) unless
   // a test narrows it, which keeps each test focused on the one thing it checks.
   const alwaysExists = () => true;
+  const dirStat = () => ({ uid: 1000, gid: 1000, mode: 0o40755 });
 
   it("returns an empty plan for persistent mode with no write_through:, without touching the filesystem", () => {
     const exists = vi.fn(alwaysExists);
@@ -25,6 +26,7 @@ describe("resolveFilesystemPlan", () => {
   it("resolves write_through: in persistent mode too, normalizing each entry", () => {
     const plan = resolveFilesystemPlan("persistent", "./dist\n/opt/./cache/\n", ENV, {
       exists: alwaysExists,
+      stat: dirStat,
     });
     expect(plan.writeThroughPaths).toStrictEqual([`${ENV.GITHUB_WORKSPACE}/dist`, "/opt/cache"]);
     expect(plan.overlayRoots).toStrictEqual([]);
@@ -47,6 +49,7 @@ describe("resolveFilesystemPlan", () => {
       "-p",
       "-m",
       "755",
+      "--",
       "/opt/build-output",
     ]);
     expect(plan.createdDirs).toStrictEqual([{ path: "/opt/build-output", uid: 1000, gid: 1000 }]);
@@ -102,10 +105,55 @@ describe("resolveFilesystemPlan", () => {
     expect(execFile).not.toHaveBeenCalled();
   });
 
+  describe("an entry that passes through a symlink", () => {
+    const link = (links: Record<string, { target: string; uid: number }>) => ({
+      exists: alwaysExists,
+      stat: (p: string) =>
+        p in links ? { uid: links[p]!.uid, gid: 0, mode: 0o120777 } : dirStat(),
+      readlink: (p: string) => links[p]!.target,
+      execFile: () => {},
+      deviceOf: () => 1,
+    });
+
+    it("refuses one the runner's uid owns as INVALID_WRITE_THROUGH_PATH, before creating anything", () => {
+      const deps = link({
+        [`${ENV.GITHUB_WORKSPACE}/cache`]: { target: ENV.RUNNER_TEMP, uid: 1000 },
+      });
+      const execFile = vi.fn();
+      expect.assertions(3);
+      try {
+        resolveFilesystemPlan("ephemeral", "./cache", ENV, { ...deps, execFile });
+      } catch (err) {
+        expect(err).toBeInstanceOf(SandboxError);
+        expect((err as SandboxError).code).toBe("INVALID_WRITE_THROUGH_PATH");
+      }
+      expect(execFile).not.toHaveBeenCalled();
+    });
+
+    it("checks where a root-owned one leads, not how the entry was written", () => {
+      const deps = link({ "/opt/runc-view": { target: SANDBOX_SCRATCH_BASE, uid: 0 } });
+      expect(() => resolveFilesystemPlan("persistent", "/opt/runc-view", ENV, deps)).toThrow(
+        /overlaps/,
+      );
+      const reserved = RESERVED_INTERNAL_DESTINATIONS[0]!;
+      const toReserved = link({ "/opt/dns": { target: reserved, uid: 0 } });
+      expect(() => resolveFilesystemPlan("persistent", "/opt/dns", ENV, toReserved)).toThrow(
+        /is reserved/,
+      );
+    });
+
+    it("hands the real path on to the mounts and the overlay fold", () => {
+      const deps = link({ "/opt/cache": { target: "/data/cache", uid: 0 } });
+      const plan = resolveFilesystemPlan("persistent", "/opt/cache", ENV, deps);
+      expect(plan.writeThroughPaths).toStrictEqual(["/data/cache"]);
+    });
+  });
+
   it("catches an overlap that only normalization reveals", () => {
     expect(() =>
       resolveFilesystemPlan("persistent", `${SANDBOX_SCRATCH_BASE}/./x`, ENV, {
         exists: alwaysExists,
+        stat: dirStat,
       }),
     ).toThrow(/overlaps/);
   });
@@ -146,6 +194,7 @@ describe("resolveFilesystemPlan", () => {
       "-p",
       "-m",
       "755",
+      "--",
       "/workspace/dist",
     ]);
     // RUNNER_TEMP still folds away under HOME as usual; GITHUB_WORKSPACE
@@ -166,6 +215,25 @@ describe("resolveFilesystemPlan", () => {
     }
   });
 
+  it("still reports a missing runner file as missing when its directory sits behind a root-owned symlink", () => {
+    const envBehindLink = { ...ENV, GITHUB_OUTPUT: "/work/_temp/set_output" };
+    const execFile = vi.fn();
+    expect.assertions(3);
+    try {
+      resolveFilesystemPlan("persistent", "$GITHUB_OUTPUT", envBehindLink, {
+        exists: (p) =>
+          p === "/work" || p === "/mnt" || p === "/mnt/work" || p === "/mnt/work/_temp",
+        stat: (p) => (p === "/work" ? { uid: 0, gid: 0, mode: 0o120777 } : dirStat()),
+        readlink: () => "/mnt/work",
+        execFile,
+      });
+    } catch (err) {
+      expect(err).toBeInstanceOf(SandboxError);
+      expect((err as SandboxError).code).toBe("WRITE_THROUGH_TARGET_MISSING");
+    }
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
   it("wraps a sudo mkdir/chown/chmod failure as WRITE_THROUGH_TARGET_UNCREATABLE", () => {
     expect.assertions(2);
     try {
@@ -184,10 +252,14 @@ describe("resolveFilesystemPlan", () => {
 
   it("wraps any other pre-creation failure as INVALID_WRITE_THROUGH_PATH", () => {
     expect.assertions(2);
+    // Throws on a path's second lookup (pre-creation); the first is the symlink walk.
+    const seen = new Set<string>();
     try {
       resolveFilesystemPlan("ephemeral", "./dist", ENV, {
-        exists: () => {
-          throw new Error("EACCES: permission denied");
+        exists: (p) => {
+          if (seen.has(p)) throw new Error("EACCES: permission denied");
+          seen.add(p);
+          return false;
         },
       });
     } catch (err) {

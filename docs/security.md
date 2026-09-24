@@ -166,6 +166,13 @@ runc mounts fresh such as `/proc`, fails the step rather than being silently ove
 that, `write_through: /proc` would shadow the sandbox's procfs with the host's and undo the
 PID-namespace separation above.
 
+These checks and the mount use the directory an entry really resolves to, since runc follows
+symlinks in a mount's source and destination. Only root-owned symlinks are followed. An entry
+through any other fails the step, since an earlier step running as the same user could have planted
+it to make `$RUNNER_TEMP`, `$HOME` or `/proc` writable. A missing entry takes the owner of its
+nearest existing parent, found the same way. A step running concurrently as the same user can still
+swap a directory for a symlink between the check and the mount.
+
 After the command exits, the step keeps running on the host to read the report and tear the
 sandbox down, so what it runs is kept out of those paths:
 

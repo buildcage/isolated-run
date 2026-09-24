@@ -19,8 +19,9 @@ import type { FilesystemMode } from "../filesystem-mode.ts";
 import { determineOverlayRoots } from "./ephemeral-fs.ts";
 import {
   resolveWriteThroughPaths,
+  resolveWriteThroughOnHost,
+  assertKnownFilesExist,
   ensureWriteThroughTargetsExist,
-  WriteThroughTargetMissingError,
   WriteThroughTargetUncreatableError,
   WRITE_THROUGH_ALL,
   type CreatedDir,
@@ -69,7 +70,7 @@ export function validateFilesystemInputs(
 export interface FilesystemPlan {
   /** filesystem_mode: ephemeral only; already folded (determineOverlayRoots). [] in persistent mode. */
   overlayRoots: string[];
-  /** Already resolved (resolveWriteThroughPaths) and pre-created
+  /** Already resolved (resolveWriteThroughPaths, then resolveWriteThroughOnHost) and pre-created
    *  (ensureWriteThroughTargetsExist), in either filesystem mode. */
   writeThroughPaths: string[];
   /** The directory segments pre-creating those paths actually created, for
@@ -82,6 +83,7 @@ export interface FilesystemPlan {
 export interface ResolveFilesystemPlanDeps {
   exists?: (path: string) => boolean;
   stat?: (path: string) => { uid: number; gid: number; mode: number };
+  readlink?: (path: string) => string;
   execFile?: (command: string, args: string[]) => void;
   deviceOf?: (path: string) => number;
 }
@@ -120,6 +122,26 @@ export function resolveFilesystemPlan(
     return { overlayRoots: [], writeThroughPaths, createdDirs: [] };
   }
 
+  try {
+    assertKnownFilesExist(writeThroughPaths, env, deps);
+  } catch (e) {
+    throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
+  }
+
+  // runc follows symlinks in a mount's source and destination, so everything
+  // below checks and mounts the real path.
+  try {
+    writeThroughPaths = [
+      ...new Set(writeThroughPaths.map((p) => resolveWriteThroughOnHost(p, deps))),
+    ];
+  } catch (e) {
+    throw new SandboxError(
+      `Invalid write_through: ${errorMessage(e)}`,
+      "INVALID_WRITE_THROUGH_PATH",
+    );
+  }
+  validateFilesystemInputs(filesystemMode, writeThroughPaths);
+
   // Before anything is created: buildOciConfig rejects a path overlapping the
   // sandbox's own scratch base outright, so checking it here keeps a doomed
   // input from leaving freshly-created directories behind. Its own check
@@ -134,9 +156,6 @@ export function resolveFilesystemPlan(
   try {
     createdDirs = ensureWriteThroughTargetsExist(writeThroughPaths, env, deps);
   } catch (e) {
-    if (e instanceof WriteThroughTargetMissingError) {
-      throw new SandboxError(e.message, "WRITE_THROUGH_TARGET_MISSING");
-    }
     if (e instanceof WriteThroughTargetUncreatableError) {
       throw new SandboxError(e.message, "WRITE_THROUGH_TARGET_UNCREATABLE");
     }

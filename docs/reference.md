@@ -641,6 +641,9 @@ this:
 - A leading `~/` expands to `$HOME`.
 - A relative path (`./dist`) resolves against `$GITHUB_WORKSPACE`, matching the sandbox's own
   working directory.
+- Symlinks along the path are resolved, and the checks below and the mount use the directory they
+  lead to. Only root-owned symlinks are followed: any other fails the step, since an earlier step
+  running as the same user could have planted it. Name the real path instead.
 - A path that doesn't already exist is created before the step runs, **always as a directory**, the
   same convention Docker itself uses for a bind mount whose host source doesn't exist yet
   (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and
