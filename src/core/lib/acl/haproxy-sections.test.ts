@@ -23,7 +23,7 @@ describe("the origin backends", () => {
     // path, which a hardcoded one would satisfy just as well.
     expect(originBackends("/tmp/other-ca.pem").filter((l) => l.includes("ca-file"))).toStrictEqual([
       "    server origin 0.0.0.0 ssl verify required ca-file /tmp/other-ca.pem " +
-        "sni req.hdr(host),lower,host_only,regsub(\\.$,)",
+        "sni var(txn.host)",
     ]);
   });
 });

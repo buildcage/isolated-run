@@ -15,35 +15,24 @@ describe("rule block", () => {
   it("matches a host case-insensitively, as a name is", () => {
     // do-resolve already lowercases the name it looks up, so a case-sensitive
     // acl refuses `Host: Registry.NPMJS.org` despite an explicit allow rule.
-    // The header is lowercased once, so the literal pattern must be lowercase
+    // txn.host arrives lowercased, so the literal pattern must be lowercase
     // and a pattern that stays a regex keeps -i.
     const literal = block({ httpsRules: ["A.com:443"] });
-    expect(literal.includes("set-var(txn.host) hdr(host),lower,host_only")).toBe(true);
     expect(literal.includes("acl s0_host var(txn.host) -m str a.com")).toBe(true);
     expect(block({ httpsRules: ["*.a.com:443"] }).includes("-m reg -i ^[^.]+\\\\.a\\\\.com$")).toBe(
       true,
     );
   });
 
-  it("strips a trailing dot from the Host header before matching, resolving or verifying it", () => {
-    // "a.com." is the same DNS name as "a.com" (RFC 1035), and some tools
-    // write it that way to skip resolv.conf's search-list expansion. Without
-    // this, `Host: a.com.` would refuse an explicit allow rule for a.com.
-    const config = block({ httpsRules: ["a.com:443"] });
-    expect(
-      config.includes("http-request set-var(txn.host) hdr(host),lower,host_only,regsub(\\.$,)"),
-    ).toBe(true);
-  });
-
-  it("reads the Host header once, however many rules are matched against it", () => {
-    // A fetch and its regsub per rule would be paid per rule per request, and
+  it("reads no Host header of its own, however many rules are matched", () => {
+    // Every rule matches txn.host. A fetch and its regsub per rule would be paid per rule per request, and
     // rule sets have no size limit.
     const config = block({
       urlRules: buildUrlRules(
         Array.from({ length: 8 }, (_, i) => `GET https://h${i}.com/x`).join("\n"),
       ),
     });
-    expect(config.split("hdr(host),lower,host_only").length - 1).toBe(1);
+    expect(config.includes("hdr(host)")).toBe(false);
     expect(config.includes("acl s7_host var(txn.host) -m str h7.com")).toBe(true);
   });
 
@@ -89,14 +78,6 @@ describe("rule block", () => {
     expect(plus.includes("acl s0_path path -m reg ^/a+$")).toBe(true);
     const prefix = block({ urlRules: buildUrlRules("GET ~^https://a\\.com/v+/x.*$") });
     expect(prefix.includes("acl s0_path path -m reg ^/v+/x.*$")).toBe(true);
-  });
-
-  it("names the host variable only where a rule reads it", () => {
-    // A ~rule matches its own host variable, so a rule set made only of them
-    // would pay for a fetch and a regsub per request that nothing reads.
-    const regexOnly = block({ httpsRules: ["~^a\\.com:(443|8443)$"] });
-    expect(regexOnly.includes("set-var(txn.host)")).toBe(false);
-    expect(block({ httpsRules: ["a.com:443"] }).includes("set-var(txn.host)")).toBe(true);
   });
 
   it("matches a name once, however many rules name it", () => {
@@ -147,11 +128,7 @@ describe("rule block", () => {
 
   it("matches a ~regex host rule's host and port as one expression", () => {
     const config = block({ httpsRules: ["~^.*\\.example\\.com:(443|8443)$"] });
-    expect(
-      config.includes(
-        "set-var-fmt(txn.host_port) %[hdr(host),host_only,regsub(\\.$,)]:%[dst_port]",
-      ),
-    ).toBe(true);
+    expect(config.includes("set-var-fmt(txn.host_port) %[var(txn.host)]:%[dst_port]")).toBe(true);
     expect(
       config.includes(
         "acl s0_host var(txn.host_port) -m reg -i ^.*\\\\.example\\\\.com:(443|8443)$",
@@ -228,15 +205,10 @@ describe("rule block", () => {
 });
 
 describe("regex url rules", () => {
-  it("builds the shared bare/full host variables and the default-port gate", () => {
+  it("builds the shared full host variable and the default-port gate", () => {
     const segment = block({ urlRules: buildUrlRules("GET ~^https://a\\.com/x$") });
     expect(segment.includes("acl is_default_port dst_port 443")).toBe(true);
-    expect(segment.includes("set-var(txn.host_bare) hdr(host),host_only,regsub(\\.$,)")).toBe(true);
-    expect(
-      segment.includes(
-        "set-var-fmt(txn.host_full) %[hdr(host),host_only,regsub(\\.$,)]:%[dst_port]",
-      ),
-    ).toBe(true);
+    expect(segment.includes("set-var-fmt(txn.host_full) %[var(txn.host)]:%[dst_port]")).toBe(true);
   });
 
   it("ORs a bare (default-port-only) match with a full (real-port) match per rule", () => {
@@ -244,7 +216,7 @@ describe("regex url rules", () => {
     expect(segment.includes("set-var(txn.s0_ok) bool(false)")).toBe(true);
     expect(
       segment.includes(
-        "set-var(txn.s0_ok) bool(true) if is_default_port { var(txn.host_bare) -m reg -i ^a\\\\.com$ }",
+        "set-var(txn.s0_ok) bool(true) if is_default_port { var(txn.host) -m reg -i ^a\\\\.com$ }",
       ),
     ).toBe(true);
     expect(

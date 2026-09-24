@@ -55,7 +55,7 @@ function internalGuard(rules: CompiledRule[]): string[] {
   for (const rule of named) {
     const path = pathMatcher(rule.pathRegex);
     const conds = [
-      `{ req.hdr(host),${HOST_ONLY} -m str ${hostMatcher(rule.hostRegex).pattern} }`,
+      `{ var(txn.host) -m str ${hostMatcher(rule.hostRegex).pattern} }`,
       ...(rule.port ? [`{ dst_port ${rule.port} }`] : []),
       `{ path ${path.op} ${escapeForHaproxy(path.pattern)} }`,
       ...(rule.methods ? [`{ method ${rule.methods.join(" ")} }`] : []),
@@ -121,6 +121,11 @@ export function inspectStage(
     "    http-request set-var(txn.reason) str(missing-host-header) if !has_host or !host_not_empty",
     "    http-request deny deny_status 400 if !has_host or !host_not_empty",
     "",
+    "    # The one Host every later step reads. An acl on req.hdr(host) scans",
+    "    # every value while a fetch takes the last, so reading the header twice",
+    "    # could judge one value and connect to another.",
+    `    http-request set-var(txn.host) req.hdr(host),lower,${HOST_ONLY}`,
+    "",
     "    # `%2f` and `%5c` survive decoding (both reserved) yet an origin may",
     "    # read `..%2f` / `..%5c` as a segment, and a raw backslash is not a",
     "    # valid path char at all. None is stripped, so each is refused. A lone",
@@ -156,15 +161,14 @@ export function inspectStage(
       "    # Connect to the address this proxy resolves the Host to, discarding",
       "    # the client's address, so a forged Host or doctored /etc/hosts cannot",
       "    # choose the target.",
-      "    # host_only drops the port a header carries, which is not part of the",
-      "    # name. An address is taken as-is: no resolver can answer one, and the",
-      "    # rules above already decided, so nothing is loosened.",
-      `    acl host_is_address req.hdr(host),${HOST_ONLY} -m reg ${HOST_IS_ADDRESS}`,
-      `    http-request set-var(txn.dst) req.hdr(host),${HOST_ONLY} if host_is_address`,
-      `    http-request do-resolve(txn.dst,buildcage,ipv4) req.hdr(host),lower,${HOST_ONLY} ` +
-        "unless host_is_address",
+      "    # txn.host has already dropped the port a header carries, which is not",
+      "    # part of the name. An address is taken as-is: no resolver can answer",
+      "    # one, and the rules above already decided, so nothing is loosened.",
+      `    acl host_is_address var(txn.host) -m reg ${HOST_IS_ADDRESS}`,
+      "    http-request set-var(txn.dst) var(txn.host) if host_is_address",
+      "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address",
       "    # A fresh attempt, not a replay: nothing cached the failure.",
-      `    http-request do-resolve(txn.dst,buildcage,ipv4) req.hdr(host),lower,${HOST_ONLY} ` +
+      "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) " +
         "unless host_is_address or { var(txn.dst) -m found }",
       "    http-request set-var(txn.reason) str(dns-failed) unless { var(txn.dst) -m found }",
       "    http-request deny deny_status 502 unless { var(txn.dst) -m found }",

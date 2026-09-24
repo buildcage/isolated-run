@@ -1,5 +1,3 @@
-import { HOST_ONLY } from "./haproxy-matchers.ts";
-
 /**
  * Everything ahead of the first frontend that carries traffic. No rule and no
  * option reaches it, so it is the same text in every generated config.
@@ -75,11 +73,12 @@ export function resolversSection(resolvers: string[], useResolvConf: boolean): s
 export function originBackends(systemCaFile: string): string[] {
   return [
     "# The only place a request reaches the origin, so where its certificate is",
-    "# checked; a refused request never gets here. host_only on the SNI, since a",
-    "# certificate is verified against a name, not a name and port.",
+    "# checked; a refused request never gets here. The SNI is the port-free",
+    "# txn.host the rules judged, since a certificate is verified against a name,",
+    "# not a name and port.",
     "backend origin_tls",
     "    mode http",
-    `    server origin 0.0.0.0 ssl verify required ca-file ${systemCaFile} sni req.hdr(host),lower,${HOST_ONLY}`,
+    `    server origin 0.0.0.0 ssl verify required ca-file ${systemCaFile} sni var(txn.host)`,
     "",
     "backend origin_plain",
     "    mode http",
