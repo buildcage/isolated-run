@@ -297,7 +297,9 @@ deliberately exempt: a name pointing at an internal mirror is a real, intended s
 
 The runner's addresses come from two places, because neither sees all of them: the action reads the
 runner's interfaces before starting the proxy, and the engine adds the gateway of the network Docker
-then put it on, which did not exist when the action looked. A published container port is DNAT'd, so
+then put it on, which did not exist when the action looked. The engine also adds the proxy's own
+address on that network, which Docker's DNS returns for the proxy's service and container names, so
+a request naming them cannot loop the proxy into itself. A published container port is DNAT'd, so
 it answers on every one of them.
 
 Two consequences worth knowing:
