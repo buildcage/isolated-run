@@ -135,6 +135,18 @@ describe("computeReportOutcomes", () => {
     expect(markdown).toMatch(/uses: buildcage\/isolated-run@v1/);
     expect(markdown).toMatch(/run: \|\n\s+npm install/);
   });
+
+  it("escapes structural Markdown in stepLabel so a label can't inject into the heading", () => {
+    const r = report({ parameters: reportParams({ mode: "audit" }) });
+    const { markdown } = computeReportOutcomes(
+      r,
+      options({ stepLabel: "[x](javascript:alert(1))\n# owned <b>|*" }),
+    );
+    const heading = markdown.split("\n")[0];
+    expect(heading).toBe(
+      "## Outbound Traffic Report — \\[x\\](javascript:alert(1)) # owned \\<b\\>\\|\\* (audit mode)",
+    );
+  });
 });
 
 describe("readActionVersion", () => {

@@ -134,6 +134,8 @@ export function computeReportOutcomes(
     engineLabel: "sandbox",
   });
   const markdown = renderReportMarkdown(report, actionRepo, actionRef, {
+    // stepLabel is the untrusted `label` input; the renderer escapes the whole
+    // title, so it is folded in raw here rather than pre-sanitized twice.
     title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : undefined,
     runCommand,
     actionVersion,

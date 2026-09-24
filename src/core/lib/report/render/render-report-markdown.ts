@@ -3,11 +3,14 @@ import { foldExpectedBlockedRows } from "./fold-expected-blocked.ts";
 import { buildRestrictExample } from "./build-example.ts";
 import { renderInspectDetails } from "./inspect-details.ts";
 import { buildInspectRestrictExample } from "./inspect-example.ts";
+import { escapeCell } from "./markdown-table.ts";
 import type { ReportData } from "../types.ts";
 
 export interface RenderReportMarkdownOptions {
   /** Full heading text, e.g. "Outbound Traffic Report — npm install" when a
-   *  `label` is set. Defaults to a bare "Outbound Traffic Report". */
+   *  `label` is set. Defaults to a bare "Outbound Traffic Report". The caller
+   *  may fold an untrusted `label` into it; the heading escapes it (see below),
+   *  so callers pass it through raw. */
   title?: string;
   /** The `run:` input, included in the audit-mode restrict example. */
   runCommand?: string;
@@ -34,7 +37,9 @@ export function renderReportMarkdown(
   // restrict is what a real run normally uses day to day, so its heading
   // stays bare; audit is the occasional, deliberately different mode and
   // says so, the same way the heading below calls out "Audited" vs "Allowed".
-  let markdown = `## ${title}${isAudit ? " (audit mode)" : ""}\n\n`;
+  // escapeCell because title may carry the untrusted `label` input: unescaped,
+  // it could inject Markdown or a newline into the heading.
+  let markdown = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
 
   // The tables would otherwise read as the whole story.
   if (!report.logLooksPlausible) {

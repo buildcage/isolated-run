@@ -40,6 +40,20 @@ describe("renderReportMarkdown", () => {
     expect(md).toMatch(/good\.com/);
   });
 
+  it("escapes structural Markdown in the title, so a folded-in label can't inject", () => {
+    const md = renderReportMarkdown(
+      { ...base, parameters: reportParams({ mode: "audit" }) },
+      "buildcage/isolated-run",
+      "v1",
+      {
+        title: "Outbound Traffic Report — [x](javascript:alert(1))\n# owned <b>|*",
+      },
+    );
+    expect(md.split("\n")[0]).toBe(
+      "## Outbound Traffic Report — \\[x\\](javascript:alert(1)) # owned \\<b\\>\\|\\* (audit mode)",
+    );
+  });
+
   it("warns above the tables when the log is not a complete record", () => {
     const md = renderReportMarkdown(
       { ...base, passed: [allowedRow], logLooksPlausible: false },
