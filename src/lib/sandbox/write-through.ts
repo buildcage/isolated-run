@@ -300,6 +300,32 @@ function pathSegmentsBetween(ancestor: string, descendant: string): string[] {
 }
 
 /**
+ * Throw WriteThroughTargetMissingError for an entry naming one of
+ * KNOWN_FILE_VARS' current values that doesn't exist: the runner was supposed
+ * to have created it, so something is wrong with the environment, and
+ * creating a directory in its place would only hide that. resolveFilesystemPlan
+ * calls this before resolveWriteThroughOnHost, which can respell the path so it
+ * no longer matches the variable's value.
+ */
+export function assertKnownFilesExist(
+  paths: string[],
+  env: NodeJS.ProcessEnv,
+  { exists = defaultExists }: { exists?: (path: string) => boolean } = {},
+): void {
+  const knownFileValues = new Set(
+    KNOWN_FILE_VARS.map((name) => env[name]).filter((v): v is string => Boolean(v)),
+  );
+  const missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
+  if (missing !== undefined) {
+    throw new WriteThroughTargetMissingError(
+      `write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own ` +
+        "generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should " +
+        "already be present -- something is wrong with the environment.",
+    );
+  }
+}
+
+/**
  * For each resolved write_through path that doesn't already exist:
  * - if it equals the current value of one of KNOWN_FILE_VARS, the runner was
  *   supposed to have already created it; throw rather than paper over a
@@ -334,10 +360,6 @@ export function ensureWriteThroughTargetsExist(
     execFile = defaultExecFile,
   }: EnsureWriteThroughTargetsExistOptions = {},
 ): CreatedDir[] {
-  const knownFileValues = new Set(
-    KNOWN_FILE_VARS.map((name) => env[name]).filter((v): v is string => Boolean(v)),
-  );
-
   // Every path segment newly created by this call (across every
   // resolvedPaths entry so far), shallowest first. If a later entry fails,
   // rolled back before rethrowing so a run that never actually starts
@@ -360,13 +382,11 @@ export function ensureWriteThroughTargetsExist(
   for (const path of resolvedPaths) {
     if (exists(path)) continue;
 
-    if (knownFileValues.has(path)) {
+    try {
+      assertKnownFilesExist([path], env, { exists });
+    } catch (e) {
       rollback();
-      throw new WriteThroughTargetMissingError(
-        `write_through: ${JSON.stringify(path)} doesn't exist. This path is one of the runner's own ` +
-          "generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should " +
-          "already be present -- something is wrong with the environment.",
-      );
+      throw e;
     }
 
     let ancestor = dirname(path);

@@ -217,6 +217,27 @@ describe("resolveFilesystemPlan", () => {
     }
   });
 
+  it("still reports a missing runner file as missing when its directory sits behind a root-owned symlink", () => {
+    // The walk respells the path, so checking only afterwards would no longer
+    // recognize it and would mkdir a directory where the runner expects its file.
+    const envBehindLink = { ...ENV, GITHUB_OUTPUT: "/work/_temp/set_output" };
+    const execFile = vi.fn();
+    expect.assertions(3);
+    try {
+      resolveFilesystemPlan("persistent", "$GITHUB_OUTPUT", envBehindLink, {
+        exists: (p) =>
+          p === "/work" || p === "/mnt" || p === "/mnt/work" || p === "/mnt/work/_temp",
+        stat: (p) => (p === "/work" ? { uid: 0, gid: 0, mode: 0o120777 } : dirStat()),
+        readlink: () => "/mnt/work",
+        execFile,
+      });
+    } catch (err) {
+      expect(err).toBeInstanceOf(SandboxError);
+      expect((err as SandboxError).code).toBe("WRITE_THROUGH_TARGET_MISSING");
+    }
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
   it("wraps a sudo mkdir/chown/chmod failure as WRITE_THROUGH_TARGET_UNCREATABLE", () => {
     expect.assertions(2);
     try {

@@ -18718,8 +18718,12 @@ function pathSegmentsBetween(ancestor, descendant) {
 	for (; current !== ancestor;) segments.unshift(current), current = (0, node_path.dirname)(current);
 	return segments;
 }
+function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
+	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
+	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
+}
 function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultExists, stat = defaultStat, execFile = defaultExecFile$1 } = {}) {
-	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), created = [], rollback = () => {
+	let created = [], rollback = () => {
 		for (let dir of [...created].reverse()) try {
 			execFile("sudo", [
 				...asOwner(dir),
@@ -18731,7 +18735,11 @@ function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultEx
 	};
 	for (let path of resolvedPaths) {
 		if (exists(path)) continue;
-		if (knownFileValues.has(path)) throw rollback(), new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(path)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
+		try {
+			assertKnownFilesExist([path], env, { exists });
+		} catch (e) {
+			throw rollback(), e;
+		}
 		let ancestor = (0, node_path.dirname)(path);
 		for (; !exists(ancestor);) {
 			let parent = (0, node_path.dirname)(ancestor);
@@ -19213,6 +19221,11 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 		createdDirs: []
 	};
 	try {
+		assertKnownFilesExist(writeThroughPaths, env, deps);
+	} catch (e) {
+		throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
+	}
+	try {
 		writeThroughPaths = [...new Set(writeThroughPaths.map((p) => resolveWriteThroughOnHost(p, deps)))];
 	} catch (e) {
 		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
@@ -19227,7 +19240,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	try {
 		createdDirs = ensureWriteThroughTargetsExist(writeThroughPaths, env, deps);
 	} catch (e) {
-		throw e instanceof WriteThroughTargetMissingError ? new SandboxError(e.message, "WRITE_THROUGH_TARGET_MISSING") : e instanceof WriteThroughTargetUncreatableError ? new SandboxError(e.message, "WRITE_THROUGH_TARGET_UNCREATABLE") : new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
+		throw e instanceof WriteThroughTargetUncreatableError ? new SandboxError(e.message, "WRITE_THROUGH_TARGET_UNCREATABLE") : new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
 	if (filesystemMode !== "ephemeral") return {
 		overlayRoots: [],
