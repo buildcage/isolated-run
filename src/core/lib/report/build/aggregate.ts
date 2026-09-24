@@ -99,7 +99,8 @@ function matchesUrlRule({ rule, hostRe, pathRe }: CompiledUrlRule, event: Traffi
  * host rule, whose missing port is completed here too so a value set straight
  * in the environment behaves like one that came through the action's input, and
  * `rule` reports the completed text rather than the shorthand. Each rule's
- * regexes are compiled here, not per event.
+ * regexes are compiled here, not per event. Hosts match case-insensitively and
+ * paths case-sensitively, as the proxy's own rules do.
  */
 function buildMatchers(knownBlockedRules: string[]): KnownBlockedMatcher[] {
   return knownBlockedRules.map((line) => {
@@ -107,13 +108,13 @@ function buildMatchers(knownBlockedRules: string[]): KnownBlockedMatcher[] {
       const urlRule = convertUrlRule(line);
       const compiled: CompiledUrlRule = {
         rule: urlRule,
-        hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex),
+        hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex, "i"),
         pathRe: new RegExp(urlRule.pathRegex),
       };
       return { rule: urlRule.raw, matches: (event) => matchesUrlRule(compiled, event) };
     }
     const completed = completeRulePort(line);
-    const re = new RegExp(convertRule(completed));
+    const re = new RegExp(convertRule(completed), "i");
     return { rule: completed, matches: (event) => re.test(targetOf(event)) };
   });
 }

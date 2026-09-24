@@ -77,16 +77,19 @@ function errorMessage(e) {
 }
 //#endregion
 //#region src/core/lib/actions/annotation.ts
+function escapeData$1(message) {
+	return message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
 function createAnnotation(enabled) {
 	return enabled ? {
 		notice(message) {
-			console.log(`::notice::${message}`);
+			console.log(`::notice::${escapeData$1(message)}`);
 		},
 		warning(message) {
-			console.log(`::warning::${message}`);
+			console.log(`::warning::${escapeData$1(message)}`);
 		},
 		error(message) {
-			console.log(`::error::${message}`);
+			console.log(`::error::${escapeData$1(message)}`);
 		}
 	} : {
 		notice() {},
@@ -20931,7 +20934,7 @@ function buildMatchers(knownBlockedRules) {
 		if (isKnownBlockedUrlRule(line)) {
 			let urlRule = convertUrlRule(line), compiled = {
 				rule: urlRule,
-				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex),
+				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex, "i"),
 				pathRe: new RegExp(urlRule.pathRegex)
 			};
 			return {
@@ -20939,7 +20942,7 @@ function buildMatchers(knownBlockedRules) {
 				matches: (event) => matchesUrlRule(compiled, event)
 			};
 		}
-		let completed = completeRulePort(line), re = new RegExp(convertRule(completed));
+		let completed = completeRulePort(line), re = new RegExp(convertRule(completed), "i");
 		return {
 			rule: completed,
 			matches: (event) => re.test(targetOf(event))

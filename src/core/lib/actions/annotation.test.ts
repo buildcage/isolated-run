@@ -25,6 +25,12 @@ describe("createAnnotation", () => {
     });
   });
 
+  it("escapes a newline so the rest of a message cannot become a workflow command", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    createAnnotation(true).error("bad body\n::add-mask::x\r50%");
+    expect(log.mock.calls[0][0]).toBe("::error::bad body%0A::add-mask::x%0D50%25");
+  });
+
   describe("disabled", () => {
     it("notice() logs nothing", () => {
       const log = vi.spyOn(console, "log").mockImplementation(() => {});

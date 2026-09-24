@@ -6,6 +6,11 @@ export interface Annotation {
   error: (message: string) => void;
 }
 
+/** Escaped as @actions/core does, so a newline cannot start a workflow command. */
+function escapeData(message: string): string {
+  return message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
+
 /**
  * Build a GitHub Actions annotation emitter. When `enabled` is false, every
  * method is a no-op, to suppress annotations when this script isn't
@@ -17,13 +22,13 @@ export function createAnnotation(enabled: boolean): Annotation {
   }
   return {
     notice(message: string) {
-      console.log(`::notice::${message}`);
+      console.log(`::notice::${escapeData(message)}`);
     },
     warning(message: string) {
-      console.log(`::warning::${message}`);
+      console.log(`::warning::${escapeData(message)}`);
     },
     error(message: string) {
-      console.log(`::error::${message}`);
+      console.log(`::error::${escapeData(message)}`);
     },
   };
 }
