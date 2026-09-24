@@ -195,7 +195,7 @@ ip link set "$VETH_P" netns "$PROXY_NETNS_NAME"
 # sandbox/env-loader.ts). These nested shells are the only commands here
 # that could plausibly consume any of it, hence the /dev/null redirects.
 echo "Configuring sandbox namespace network..." >&2
-# Values go in as arguments, never spliced into the script text.
+# Positional arguments, so a value can never become shell syntax.
 ip netns exec "$NETNS_NAME" sh -c '
   set -e
   ip link set "$1" name eth0
