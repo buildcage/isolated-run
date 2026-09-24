@@ -164,6 +164,9 @@ when you first adopt Buildcage or when a dependency changes, and keep `restrict`
 If you forget a domain the command needs, `restrict` blocks it and the step fails with the
 destination named, which is why it is worth running `audit` first.
 
+`audit` also lets a connection made straight to an address through. Under `universal` that includes
+cloud metadata (`169.254.169.254`) and the runner's own addresses; `inspect` still refuses those.
+
 ### Rules for the `inspect` engine
 
 `allowed_url_rules` is the one to reach for. Each line is a method list, a space, and a URL pattern.
