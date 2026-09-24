@@ -10667,8 +10667,15 @@ function assertRegistryOk(resp, subject, onFailure) {
 	if (resp.status === 401 || resp.status === 403) throw new VerifyImageError(`Registry denied access to ${subject}: HTTP ${resp.status}. For private repositories, ensure the runner is authenticated to the registry.`, "TRANSIENT");
 	if (!resp.ok) throw new VerifyImageError(`Failed to fetch ${subject}: HTTP ${resp.status}`, onFailure);
 }
+const CONTENT_DIGEST_ALGORITHMS = {
+	sha256: "SHA-256",
+	sha384: "SHA-384",
+	sha512: "SHA-512"
+};
 async function assertContentDigest(raw, expected, what) {
-	let hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)), actual = "sha256:" + Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
+	let [algorithm] = expected.split(":", 1), subtleName = CONTENT_DIGEST_ALGORITHMS[algorithm];
+	if (!subtleName) throw new VerifyImageError(`Cannot verify ${what}: unsupported digest algorithm in ${expected}.`, "VERIFY_FAILED");
+	let hash = await crypto.subtle.digest(subtleName, new TextEncoder().encode(raw)), actual = `${algorithm}:` + Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
 	if (actual !== expected) throw new VerifyImageError(`Content digest mismatch for ${what}: the registry served ${actual}, not the requested ${expected}.`, "VERIFY_FAILED");
 }
 function registryClient(registry, repo, token, _fetch) {

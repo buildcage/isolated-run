@@ -94,6 +94,13 @@ export interface FetchLikeResponse {
   text?(): Promise<string>;
 }
 
+// OCI digest algorithms, mapped to the SubtleCrypto names crypto.subtle wants.
+const CONTENT_DIGEST_ALGORITHMS: Record<string, string> = {
+  sha256: "SHA-256",
+  sha384: "SHA-384",
+  sha512: "SHA-512",
+};
+
 /**
  * Confirm a content-addressed document's bytes hash to the digest that
  * addressed it, so the registry cannot answer a digest read with other content.
@@ -101,14 +108,26 @@ export interface FetchLikeResponse {
  * hangs off it, but the labels themselves are not signed, so this is what ties
  * them back to the signed digest.
  *
- * Uses the Web Crypto global rather than node:crypto: the registry-stub test
- * helper imports this module's types under tsconfig.qjs.json, which carries no
- * node types, and this module already reads `fetch` from the same lib.
+ * Hashes with the algorithm the digest itself names rather than assuming
+ * sha256, so a hop addressed by another OCI algorithm is verified, not falsely
+ * rejected. Uses the Web Crypto global rather than node:crypto: the
+ * registry-stub test helper imports this module's types under tsconfig.qjs.json,
+ * which carries no node types, and this module already reads `fetch` from the
+ * same lib.
  */
 async function assertContentDigest(raw: string, expected: string, what: string): Promise<void> {
-  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+  const [algorithm] = expected.split(":", 1);
+  const subtleName = CONTENT_DIGEST_ALGORITHMS[algorithm];
+  if (!subtleName) {
+    throw new VerifyImageError(
+      `Cannot verify ${what}: unsupported digest algorithm in ${expected}.`,
+      "VERIFY_FAILED",
+    );
+  }
+  const hash = await crypto.subtle.digest(subtleName, new TextEncoder().encode(raw));
   const actual =
-    "sha256:" + Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
+    `${algorithm}:` +
+    Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
   if (actual !== expected) {
     throw new VerifyImageError(
       `Content digest mismatch for ${what}: the registry served ${actual}, ` +

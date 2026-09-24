@@ -274,6 +274,16 @@ describe("fetchImageConfigLabels", () => {
     await expectVerifyError(callWith(manifestDig, registry), "VERIFY_FAILED", /digest mismatch/i);
   });
 
+  it("refuses a hop addressed by a digest algorithm it cannot verify", async () => {
+    const badDigest = "sha1:" + "0".repeat(40);
+    const registry = stubRegistry({ [`/manifests/${badDigest}`]: okJson({ config: {} }) });
+    await expectVerifyError(
+      callWith(badDigest, registry),
+      "VERIFY_FAILED",
+      /unsupported digest algorithm/i,
+    );
+  });
+
   it("throws TRANSIENT on 5xx", async () => {
     await expectVerifyError(
       call(stubRegistry({ [`/manifests/${DIGEST}`]: failsWith(503) })),
