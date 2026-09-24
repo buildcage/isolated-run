@@ -94,7 +94,7 @@ export interface FetchLikeResponse {
   arrayBuffer?(): Promise<ArrayBuffer>;
 }
 
-// OCI digest algorithms: the SubtleCrypto name crypto.subtle wants, and the hex length.
+// The OCI digest algorithms this module can verify.
 const CONTENT_DIGEST_ALGORITHMS: Record<string, { subtle: string; hexLength: number }> = {
   sha256: { subtle: "SHA-256", hexLength: 64 },
   sha384: { subtle: "SHA-384", hexLength: 96 },

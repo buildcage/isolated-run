@@ -90,7 +90,7 @@ describe("fetchManifestDigest", () => {
     );
   });
 
-  it("refuses a digest header that is not an OCI digest, since it goes into request paths", async () => {
+  it("refuses a digest header that is not a well-formed OCI digest", async () => {
     for (const bad of [
       "sha256:../../blobs/x",
       "sha256:" + "a".repeat(63),
@@ -106,7 +106,7 @@ describe("fetchManifestDigest", () => {
     }
   });
 
-  it("accepts every digest algorithm OCI names, at its own length", async () => {
+  it("accepts a sha512 digest at its own length", async () => {
     const sha512 = "sha512:" + "b".repeat(128);
     expect(await call(async () => manifestHead(200, sha512))).toBe(sha512);
   });
