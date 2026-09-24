@@ -25,6 +25,13 @@ jobs:
     env:
       TAG: ${{ inputs.tag || github.event.release.tag_name }}
     steps:
+      - name: Validate tag format
+        run: |
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$'; then
+            echo "::error::Invalid semver format: $TAG (expected vX.Y.Z or vX.Y.Z-prerelease)"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -105,7 +112,7 @@ jobs:
           if [ "$TAG" = "$LATEST_IN_MAJOR" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
+            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}"
             git tag -fa "$MAJOR" -m "Update $MAJOR to $TAG"
             git push origin "$MAJOR" --force
           fi
