@@ -322,7 +322,7 @@ metadata endpoint directly, the way any AWS or GCP SDK does, is not what this is
 
 Everything that is not TCP is dropped before it reaches the proxy, so ICMP, raw UDP and QUIC have no
 exit path at all; port 53 to the gateway, which is the resolver, is the one exception. IPv6 is
-dropped by equivalent `ip6tables` rules, lookups are answered with the unspecified address (`::`),
+dropped by equivalent `ip6tables` rules, AAAA lookups are answered with no records,
 and the proxy reaches allowed names over IPv4 only. The cost of that last part is in
 [Known Limitations](#known-limitations) below.
 
@@ -375,9 +375,11 @@ Three mechanisms make that enforceable:
 - **The certificate the command sees is generated from the SNI alone**, so a refused destination is
   never contacted. The only path that reaches an origin is the backend, after a request has already
   passed the rules, and the origin's own certificate is checked on that connection.
-- **The path is normalized before the rules see it**, and traversal encodings that no normaliser can
-  strip (`%2e%2e`, `..%2f`, a raw backslash, `..%5c`, `..;`) are refused outright, so a rule cannot be
-  walked out of.
+- **The path is normalized before the rules see it**: `%2e` is decoded and `..` segments are
+  removed. A `..` joined to an encoded separator (`..%2f`, `..%5c`) or to `;`, and any backslash, is
+  refused outright. Encodings HAProxy does not decode, such as a double-encoded `%252e`, `%00` or an
+  overlong UTF-8 dot, reach the origin as written and matter only to an origin that decodes them
+  again.
 - **The CA is mounted, never written to the host.** This is where the engine differs most from
   `buildcage/docker`'s, whose runc wrapper can write the CA into a disposable rootfs layer. Here the
   sandbox rootfs is a bind-mount of the real host root, so the CA, and where relevant an augmented
@@ -401,7 +403,7 @@ more than intended.
 | Asks for any name, on or off the allowlist                                                         | Answered locally with the proxy's own address; the query is never forwarded, allowed or not                                                                            |
 | Requests a host no rule covers                                                                     | Refused, origin never contacted; `inspect` records the URL it asked for                                                                                                |
 | Requests a path or method no rule covers                                                           | **403** under `inspect`, recorded with its URL; `universal` reads neither and enforces on the host                                                                     |
-| Walks out of an allowed path with `..` or `%2e%2e`                                                 | **403**: the path is normalised before the rules see it, and an encoding no normaliser can strip is refused outright, a raw or escaped backslash included              |
+| Walks out of an allowed path with `..` or `%2e%2e`                                                 | **403**: the path is normalised before the rules see it, and a `..` joined to an encoded separator or `;` is refused outright, as is any backslash                     |
 | Sends an allowed name while aiming elsewhere, or points `/etc/hosts` at an address of its choosing | Reaches the address the proxy resolved; the command's own choice of address is discarded                                                                               |
 | Puts an address in the `Host` header                                                               | Taken as the destination once a rule allows it; an internal one only if a rule names it as its host                                                                    |
 | Allowlists a name that resolves to an internal address                                             | Refused if it lands on loopback, link-local, the proxy itself, an address the runner holds, or another never-public range, in `audit` too                              |

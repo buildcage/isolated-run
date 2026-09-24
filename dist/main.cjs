@@ -18161,6 +18161,7 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 const ENGINES = ["universal", "inspect"];
 function resolveProxyEngine(input) {
 	let trimmed = input?.trim() || "inspect";
+	if (trimmed === "transparent") throw new SandboxError("proxy_engine: transparent has been renamed. Use proxy_engine: universal.", "INVALID_PROXY_ENGINE");
 	if (!ENGINES.includes(trimmed)) throw new SandboxError(`Invalid proxy_engine: ${JSON.stringify(input)}. Must be one of ${ENGINES.join(", ")}.`, "INVALID_PROXY_ENGINE");
 	return trimmed;
 }
