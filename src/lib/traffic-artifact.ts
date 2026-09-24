@@ -1,5 +1,4 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as core from "@actions/core";
 
@@ -7,6 +6,7 @@ import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import { buildTrafficRecords, writeTrafficFile } from "#core/lib/report/outcome/traffic-output.ts";
 import type { Report } from "./report.ts";
+import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase } from "./sandbox/scratch-dir.ts";
 
 export function wantsTrafficArtifact(): boolean {
   try {
@@ -50,6 +50,7 @@ const uploadViaActionsArtifact: UploadArtifact = async (name, files, rootDirecto
  *  mocking @actions/artifact directly. */
 export interface UploadTrafficArtifactDeps {
   upload?: UploadArtifact;
+  scratchBase?: string;
 }
 
 /**
@@ -61,9 +62,15 @@ export async function uploadTrafficArtifact(
   report: Report,
   containerName: string,
   annotation: Annotation,
-  { upload = uploadViaActionsArtifact }: UploadTrafficArtifactDeps = {},
+  {
+    upload = uploadViaActionsArtifact,
+    scratchBase = SANDBOX_SCRATCH_BASE,
+  }: UploadTrafficArtifactDeps = {},
 ): Promise<string | undefined> {
-  const scratchDir = mkdtempSync(join(tmpdir(), "buildcage-traffic-"));
+  // The JSON carries URLs verbatim. /tmp is shared with every sandbox; the
+  // scratch base is hidden from them.
+  ensureOwnScratchBase(scratchBase);
+  const scratchDir = mkdtempSync(join(scratchBase, "traffic-"));
   try {
     const file = join(scratchDir, "traffic.json");
     writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));
