@@ -185,8 +185,6 @@ describe("the TUF cache the trusted root is fetched through", () => {
   }
 
   it("starts empty under RUNNER_TEMP, so no root.json an earlier job left is trusted", async () => {
-    // An empty cache has no root.json, so @sigstore/tuf seeds it from the root
-    // it embeds rather than from one a persistent $HOME kept between jobs.
     const seen = recordCache(() => sigstore.trustedRoot);
     await verifyBundle(bundleFor(DIGEST), {}, DIGEST);
     expect(dirname(seen.cachePath!)).toBe(runnerTemp);

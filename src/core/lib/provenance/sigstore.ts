@@ -23,10 +23,8 @@ export interface VerifyBundleOptions {
 }
 
 /**
- * Fetch the trusted root through a TUF cache of this call's own, so the update
- * always starts from the root embedded in @sigstore/tuf. The default cache
- * lives under $HOME and outlives the job on a self-hosted runner, where a
- * root.json an earlier job left there would be the trust anchor instead.
+ * An empty cache per call, so TUF starts from the root @sigstore/tuf embeds, not a
+ * root.json an earlier job left in the default $HOME cache on a self-hosted runner.
  */
 async function fetchTrustedRoot(): ReturnType<typeof getTrustedRoot> {
   const cachePath = await mkdtemp(join(process.env.RUNNER_TEMP || tmpdir(), "buildcage-tuf-"));
