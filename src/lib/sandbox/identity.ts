@@ -48,9 +48,8 @@ const FALLBACK_GID = 65534;
  */
 export interface HostGroups {
   readGroupFile(path: string): string;
-  /** The group database's line for a group name or GID, through NSS, so a
-   *  group served by LDAP or SSSD is seen too. null if there is none, or NSS
-   *  can't be asked. */
+  /** `getent group <key>`'s output, so a group from LDAP or SSSD counts too;
+   *  null when there is none. */
   lookupGroup(key: string): string | null;
   gidOf(path: string): number;
 }
@@ -81,9 +80,8 @@ const realHost: HostGroups = {
 };
 /* v8 ignore stop */
 
-/** gid -> group name(s), from the group file plus NSS lookups of `keys`. null
- *  if neither could be read; callers fall back to the runtime-socket-ownership
- *  check alone in that case. */
+/** gid -> group name(s) from the group file and NSS. null if neither answers,
+ *  leaving only the runtime-socket-ownership check. */
 function readGroupNamesByGid(
   groupFile: string,
   keys: string[],
@@ -164,8 +162,7 @@ export function resolveSandboxGid(
   // the seam exists to avoid.
   /* v8 ignore next */
   const host = options.host ?? realHost;
-  // Only the GIDs and names asked about below: NSS may not enumerate a
-  // directory's groups at all.
+  // Looked up by key: NSS may not enumerate a directory's groups.
   const groupNamesByGid = readGroupNamesByGid(
     groupFile,
     [String(primaryGid), ...FALLBACK_GROUP_NAMES, String(FALLBACK_GID)],
