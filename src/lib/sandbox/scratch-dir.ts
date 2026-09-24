@@ -1,12 +1,11 @@
 import { mkdtempSync, mkdirSync, lstatSync, readFileSync, rmSync } from "node:fs";
 import { join, dirname, basename, resolve } from "node:path";
-import { execFileSync } from "node:child_process";
 import { errorMessage } from "#core/lib/errors.ts";
 import { SandboxError } from "../errors.ts";
 import { isValidContainerName, scratchDirNameFor } from "../container.ts";
 import { retryBriefly } from "../retry-briefly.ts";
 import { parseMountinfo } from "./mountinfo.ts";
-import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
+import { runPinnedHostCommand } from "./run-host-command.ts";
 
 // Base directory for each run's scratch dir (OCI bundle + the host-`/`
 // rootfs bind-mount). Deliberately under /var/tmp rather than os.tmpdir():
@@ -59,13 +58,6 @@ function defaultReadMountinfo(): string {
   return readFileSync("/proc/self/mountinfo", "utf8");
 }
 
-function defaultExec(command: string, args: string[]): void {
-  execFileSync(hostCommand(command), args, {
-    stdio: ["ignore", "ignore", "pipe"],
-    env: hostCommandEnv(command),
-  });
-}
-
 function defaultRemove(path: string): void {
   rmSync(path, { recursive: true, force: true });
 }
@@ -88,7 +80,7 @@ function defaultMkdir(path: string, mode: number): void {
  * or fail the way a normal unmount could.
  */
 function unmountAllUnder(dir: string, deps: ScratchDirDeps, warn?: Warn): void {
-  const { readMountinfo = defaultReadMountinfo, exec = defaultExec } = deps;
+  const { readMountinfo = defaultReadMountinfo, exec = runPinnedHostCommand } = deps;
   let mountPoints;
   try {
     mountPoints = parseMountsUnder(readMountinfo(), dir);
@@ -125,7 +117,7 @@ function unmountAllUnder(dir: string, deps: ScratchDirDeps, warn?: Warn): void {
  * that persistent mode, and every unit test, ever needs.
  */
 function removeScratchDir(dir: string, deps: ScratchDirDeps): void {
-  const { exec = defaultExec, lstat = lstatSync, remove = defaultRemove } = deps;
+  const { exec = runPinnedHostCommand, lstat = lstatSync, remove = defaultRemove } = deps;
   retryBriefly(
     () => {
       try {

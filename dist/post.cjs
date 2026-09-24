@@ -371,6 +371,28 @@ function parseEphemeralRoots(raw) {
 	if (Array.isArray(parsed)) return parsed.every((p) => typeof p == "string" && (0, node_path.isAbsolute)(p) && !/[\x00-\x1f\x7f]/.test(p)) ? parsed : void 0;
 }
 //#endregion
+//#region src/lib/sandbox/ca-trust.ts
+const SYSTEM_CA_CANDIDATES = [
+	"/etc/ssl/certs/ca-certificates.crt",
+	"/etc/pki/tls/certs/ca-bundle.crt",
+	"/etc/ssl/ca-bundle.pem",
+	"/etc/pki/tls/cacert.pem",
+	"/etc/ssl/cert.pem"
+], OWN_CA_DESTINATION = "/etc/buildcage-ca.pem";
+//#endregion
+//#region src/lib/sandbox/run-host-command.ts
+function runPinnedHostCommand(command, args) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
+}
+//#endregion
 //#region src/lib/retry-briefly.ts
 function retryBriefly(fn, options = {}) {
 	let { attempts = 5, delayMs = 200, retryOn = () => !0 } = options;
@@ -405,16 +427,6 @@ function parseMountsUnder(mountinfoContent, dir) {
 function defaultReadMountinfo() {
 	return (0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8");
 }
-function defaultExec(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv(command)
-	});
-}
 function defaultRemove(path) {
 	(0, node_fs.rmSync)(path, {
 		recursive: !0,
@@ -422,7 +434,7 @@ function defaultRemove(path) {
 	});
 }
 function unmountAllUnder(dir, deps, warn) {
-	let { readMountinfo = defaultReadMountinfo, exec = defaultExec } = deps, mountPoints;
+	let { readMountinfo = defaultReadMountinfo, exec = runPinnedHostCommand } = deps, mountPoints;
 	try {
 		mountPoints = parseMountsUnder(readMountinfo(), dir);
 	} catch {
@@ -440,7 +452,7 @@ function unmountAllUnder(dir, deps, warn) {
 	}
 }
 function removeScratchDir(dir, deps) {
-	let { exec = defaultExec, lstat = node_fs.lstatSync, remove = defaultRemove } = deps;
+	let { exec = runPinnedHostCommand, lstat = node_fs.lstatSync, remove = defaultRemove } = deps;
 	retryBriefly(() => {
 		try {
 			remove(dir);
@@ -470,11 +482,30 @@ function scratchDirFor(containerName) {
 }
 //#endregion
 //#region src/lib/post-cleanup.ts
+function reclaimCaPlaceholder(warn, { lstat = node_fs.lstatSync, exec = runPinnedHostCommand } = {}) {
+	let st;
+	try {
+		st = lstat(OWN_CA_DESTINATION);
+	} catch {
+		return;
+	}
+	if (!(!st.isFile() || st.size !== 0)) try {
+		exec("sudo", [
+			"-n",
+			"rm",
+			"-f",
+			OWN_CA_DESTINATION
+		]);
+	} catch (e) {
+		let captured = capturedStderr(e);
+		warn(`run post-cleanup: failed to remove the CA placeholder ${OWN_CA_DESTINATION}: ${errorMessage(e)}${captured ? ` (${captured})` : ""}`);
+	}
+}
 function startedByThisStep(containerName, env, readOwner) {
 	let owner = readOwner(containerName);
 	return owner === null || owner === ownerToken(env);
 }
-function planPostCleanup(state, env, annotation, { readOwner = readContainerOwner, fileExists = node_fs.existsSync, removeScratchDir = cleanupScratchDir } = {}) {
+function planPostCleanup(state, env, annotation, { readOwner = readContainerOwner, fileExists = node_fs.existsSync, removeScratchDir = cleanupScratchDir, reclaimCaPlaceholder: reclaimCa = reclaimCaPlaceholder } = {}) {
 	let { targets, problems } = resolvePostState(state);
 	for (let problem of problems) annotation.error(`run post-cleanup: ${problem}`);
 	if (!targets) return null;
@@ -488,13 +519,14 @@ function planPostCleanup(state, env, annotation, { readOwner = readContainerOwne
 	} catch (e) {
 		annotation.warning(`run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
 	}
-	return targets;
+	return reclaimCa(annotation.warning), targets;
 }
 //#endregion
 //#region src/lib/sandbox/paths.ts
 function isAtOrUnder(path, ancestor) {
 	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
 }
+[...SYSTEM_CA_CANDIDATES];
 function writableDirsOf({ workdir, home, runnerTemp, writablePaths = [] }) {
 	return [...new Set([
 		workdir,

@@ -2,8 +2,14 @@ import { describe, it, expect, vi, type Mock } from "vitest";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 
-import { planPostCleanup, type PostCleanupDeps } from "./post-cleanup.ts";
+import { planPostCleanup, reclaimCaPlaceholder, type PostCleanupDeps } from "./post-cleanup.ts";
+import { OWN_CA_DESTINATION } from "./sandbox/ca-trust.ts";
 import { scratchDirFor } from "./sandbox/scratch-dir.ts";
+
+/** A minimal fs.Stats standing in for lstat's return. */
+function statLike(isFile: boolean, size: number): import("node:fs").Stats {
+  return { isFile: () => isFile, size } as import("node:fs").Stats;
+}
 
 const CONTAINER = "buildcage-proxy-deadbeef";
 const STATE = { containerName: CONTAINER, ephemeralRoots: "" };
@@ -34,6 +40,7 @@ function deps(overrides: PostCleanupDeps = {}): {
       readOwner: () => OWNER,
       fileExists: () => true,
       removeScratchDir: (dir, { ephemeralRoots }) => removed.push({ dir, ephemeralRoots }),
+      reclaimCaPlaceholder: () => {},
       ...overrides,
     },
   };
@@ -145,5 +152,84 @@ describe("planPostCleanup", () => {
     planPostCleanup(STATE, ENV, note, d);
 
     expect(calls[0].warn).toBe(note.warning);
+  });
+
+  it("reclaims the CA placeholder with the same emitter", () => {
+    const note = annotation();
+    const warns: ((message: string) => void)[] = [];
+    const { deps: d } = deps({ reclaimCaPlaceholder: (warn) => warns.push(warn) });
+
+    planPostCleanup(STATE, ENV, note, d);
+
+    expect(warns).toStrictEqual([note.warning]);
+  });
+});
+
+describe("reclaimCaPlaceholder", () => {
+  const warn = vi.fn();
+
+  it("removes the placeholder while it is still the empty file this run created", () => {
+    const exec = vi.fn();
+    reclaimCaPlaceholder(warn, { lstat: () => statLike(true, 0), exec });
+
+    expect(exec).toHaveBeenCalledWith("sudo", ["-n", "rm", "-f", OWN_CA_DESTINATION]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("runs no privileged command when nothing is there (universal, or a clean exit)", () => {
+    const exec = vi.fn();
+    reclaimCaPlaceholder(warn, {
+      lstat: () => {
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      },
+      exec,
+    });
+
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("leaves a non-empty file at the reserved path untouched", () => {
+    const exec = vi.fn();
+    reclaimCaPlaceholder(warn, { lstat: () => statLike(true, 12), exec });
+
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("does not follow a symlink sitting at the reserved path", () => {
+    const exec = vi.fn();
+    reclaimCaPlaceholder(warn, { lstat: () => statLike(false, 0), exec });
+
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("warns rather than throws when the privileged removal fails", () => {
+    const localWarn = vi.fn();
+    reclaimCaPlaceholder(localWarn, {
+      lstat: () => statLike(true, 0),
+      exec: () => {
+        throw new Error("Command failed: sudo -n rm -f");
+      },
+    });
+
+    expect(localWarn).toHaveBeenCalledWith(
+      `run post-cleanup: failed to remove the CA placeholder ${OWN_CA_DESTINATION}: Command failed: sudo -n rm -f`,
+    );
+  });
+
+  it("surfaces the command's own stderr in the warning when it captured any", () => {
+    const localWarn = vi.fn();
+    reclaimCaPlaceholder(localWarn, {
+      lstat: () => statLike(true, 0),
+      exec: () => {
+        throw Object.assign(new Error("Command failed: sudo -n rm -f"), {
+          stderr: "rm: cannot remove: Read-only file system\n",
+        });
+      },
+    });
+
+    expect(localWarn).toHaveBeenCalledWith(
+      `run post-cleanup: failed to remove the CA placeholder ${OWN_CA_DESTINATION}: ` +
+        `Command failed: sudo -n rm -f (rm: cannot remove: Read-only file system)`,
+    );
   });
 });

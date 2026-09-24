@@ -1,19 +1,64 @@
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, type Stats } from "node:fs";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
+import { capturedStderr } from "#core/lib/actions/docker-error.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import { ownerToken, readContainerOwner } from "./container.ts";
 import { resolvePostState, type PostCleanupTargets } from "./post-state.ts";
+import { OWN_CA_DESTINATION } from "./sandbox/ca-trust.ts";
+import { runPinnedHostCommand } from "./sandbox/run-host-command.ts";
 import {
   cleanupScratchDir,
   scratchDirFor,
   type CleanupScratchDirOptions,
 } from "./sandbox/scratch-dir.ts";
 
+export interface CaPlaceholderDeps {
+  /** lstat, never stat: a symlink at the reserved path must not be followed. */
+  lstat?: (path: string) => Stats;
+  /** Runs a privileged command. Throws on a non-zero exit. */
+  exec?: (command: string, args: string[]) => void;
+}
+
 export interface PostCleanupDeps {
   readOwner?: (containerName: string) => string | null;
   fileExists?: (path: string) => boolean;
   removeScratchDir?: (dir: string, options: CleanupScratchDirOptions) => void;
+  reclaimCaPlaceholder?: (warn: (message: string) => void) => void;
+}
+
+/**
+ * inspect binds its CA onto OWN_CA_DESTINATION, a path nothing exists at, so
+ * runc creates a 0-byte placeholder there to mount over. Because the sandbox
+ * rootfs is a bind of the host `/`, that placeholder is a real root-owned file
+ * on the host. run-isolated.sh deletes it on a clean exit, but a hard kill
+ * bypasses that trap and leaves it behind: harmless on an ephemeral runner
+ * whose VM is discarded, an accumulating leftover on a self-hosted one.
+ *
+ * Remove it here too, but only while it is still the empty placeholder this
+ * run created, so a non-empty file that happens to sit at the reserved path is
+ * never touched. universal never creates it, so an absent file runs no
+ * privileged command.
+ */
+export function reclaimCaPlaceholder(
+  warn: (message: string) => void,
+  { lstat = lstatSync, exec = runPinnedHostCommand }: CaPlaceholderDeps = {},
+): void {
+  let st: Stats;
+  try {
+    st = lstat(OWN_CA_DESTINATION);
+  } catch {
+    return;
+  }
+  if (!st.isFile() || st.size !== 0) return;
+  try {
+    exec("sudo", ["-n", "rm", "-f", OWN_CA_DESTINATION]);
+  } catch (e) {
+    const captured = capturedStderr(e);
+    warn(
+      `run post-cleanup: failed to remove the CA placeholder ${OWN_CA_DESTINATION}: ${errorMessage(e)}${captured ? ` (${captured})` : ""}`,
+    );
+  }
 }
 
 /**
@@ -55,6 +100,7 @@ export function planPostCleanup(
     readOwner = readContainerOwner,
     fileExists = existsSync,
     removeScratchDir = cleanupScratchDir,
+    reclaimCaPlaceholder: reclaimCa = reclaimCaPlaceholder,
   }: PostCleanupDeps = {},
 ): PostCleanupTargets | null {
   const { targets, problems } = resolvePostState(state);
@@ -92,6 +138,11 @@ export function planPostCleanup(
       `run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`,
     );
   }
+
+  // Same rationale as the scratch dir: a hard kill can bypass run-isolated.sh's
+  // trap and leave inspect's 0-byte CA placeholder on the host. Independent of
+  // both steps above, and self-guarding, so it needs no try here.
+  reclaimCa(annotation.warning);
 
   return targets;
 }
