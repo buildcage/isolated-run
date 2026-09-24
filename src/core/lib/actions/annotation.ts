@@ -6,8 +6,7 @@ export interface Annotation {
   error: (message: string) => void;
 }
 
-/** Escaped as @actions/core does: a raw newline in a message (a registry's
- *  response body, docker's stderr) would start a workflow command of its own. */
+/** Escaped as @actions/core does, so a newline cannot start a workflow command. */
 function escapeData(message: string): string {
   return message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
 }
