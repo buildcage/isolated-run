@@ -19310,19 +19310,35 @@ const PRIVILEGED_GROUP_NAMES = new Set([
 	"kvm",
 	"sudo",
 	"wheel"
-]), FALLBACK_GROUP_NAMES = ["nogroup", "nobody"], FALLBACK_GID = 65534, realHost = {
+]), FALLBACK_GROUP_NAMES = ["nogroup", "nobody"], FALLBACK_GID = 65534, GETENT_PATHS = ["/usr/bin/getent", "/bin/getent"], realHost = {
 	readGroupFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
+	lookupGroup: (key) => {
+		let getent = GETENT_PATHS.find((p) => (0, node_fs.existsSync)(p));
+		if (!getent) return null;
+		try {
+			return (0, node_child_process.execFileSync)(getent, ["group", key], {
+				encoding: "utf8",
+				stdio: "pipe",
+				timeout: 5e3
+			});
+		} catch {
+			return null;
+		}
+	},
 	gidOf: (path) => (0, node_fs.statSync)(path).gid
 };
-function readGroupNamesByGid(groupFile, host) {
-	let content;
+function readGroupNamesByGid(groupFile, keys, host) {
+	let sources = [];
 	try {
-		content = host.readGroupFile(groupFile);
-	} catch {
-		return null;
+		sources.push(host.readGroupFile(groupFile));
+	} catch {}
+	for (let key of keys) {
+		let line = host.lookupGroup(key);
+		line !== null && sources.push(line);
 	}
+	if (sources.length === 0) return null;
 	let map = new Map();
-	for (let line of content.split("\n")) {
+	for (let line of sources.join("\n").split("\n")) {
 		if (!line || line.startsWith("#")) continue;
 		let [name, , gidStr] = line.split(":"), gid = Number(gidStr);
 		if (!name || !Number.isInteger(gid)) continue;
@@ -19339,7 +19355,11 @@ function ownerGids(paths, host) {
 	return gids;
 }
 function resolveSandboxGid(primaryGid, env, options = {}) {
-	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...extra_masked_runtime_paths_default, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, groupNamesByGid = readGroupNamesByGid(groupFile, host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1;
+	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...extra_masked_runtime_paths_default, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, groupNamesByGid = readGroupNamesByGid(groupFile, [
+		String(primaryGid),
+		...FALLBACK_GROUP_NAMES,
+		"65534"
+	], host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1;
 	if (!isPrivileged(primaryGid)) return { gid: primaryGid };
 	let gidForName = (name) => {
 		if (groupNamesByGid) {

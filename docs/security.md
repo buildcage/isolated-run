@@ -97,7 +97,8 @@ invocation, so no step inherits anything another one left behind.
   _primary_ group, which is equivalent to root: the daemon will mount `/` into a privileged
   container for anyone who can reach its socket, capabilities or not. The primary GID is therefore
   checked against the group names known to grant that (`docker`, `containerd`, `podman`, `lxd`,
-  `libvirt`, `kvm`, `sudo`, `wheel` and a few more) and against the owning GID of any runtime socket
+  `libvirt`, `kvm`, `sudo`, `wheel` and a few more), looked up in `/etc/group` and through NSS so
+  a group from LDAP or SSSD counts too, and against the owning GID of any runtime socket
   actually present, and the command runs under `nogroup`/`nobody`/65534 instead when it matches. If
   none of those is safe either, the sandbox refuses to start.
 - **A root runner is refused.** The sandbox keeps the runner's own uid so tools and caches that
