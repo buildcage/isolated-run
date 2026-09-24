@@ -91,15 +91,21 @@ export interface FetchLikeResponse {
   status: number;
   headers?: HeadersLike;
   json?(): Promise<any>;
-  text?(): Promise<string>;
+  arrayBuffer?(): Promise<ArrayBuffer>;
 }
 
-// OCI digest algorithms, mapped to the SubtleCrypto names crypto.subtle wants.
-const CONTENT_DIGEST_ALGORITHMS: Record<string, string> = {
-  sha256: "SHA-256",
-  sha384: "SHA-384",
-  sha512: "SHA-512",
+// The OCI digest algorithms this module can verify.
+const CONTENT_DIGEST_ALGORITHMS: Record<string, { subtle: string; hexLength: number }> = {
+  sha256: { subtle: "SHA-256", hexLength: 64 },
+  sha384: { subtle: "SHA-384", hexLength: 96 },
+  sha512: { subtle: "SHA-512", hexLength: 128 },
 };
+
+/** A registry-supplied digest goes into request paths, so only this shape passes. */
+function isOciDigest(digest: string): boolean {
+  const match = /^([a-z0-9]+):([0-9a-f]+)$/.exec(digest);
+  return match !== null && CONTENT_DIGEST_ALGORITHMS[match[1]]?.hexLength === match[2].length;
+}
 
 /**
  * Confirm a content-addressed document's bytes hash to the digest that
@@ -115,16 +121,20 @@ const CONTENT_DIGEST_ALGORITHMS: Record<string, string> = {
  * which carries no node types, and this module already reads `fetch` from the
  * same lib.
  */
-async function assertContentDigest(raw: string, expected: string, what: string): Promise<void> {
+async function assertContentDigest(
+  bytes: Uint8Array<ArrayBuffer>,
+  expected: string,
+  what: string,
+): Promise<void> {
   const [algorithm] = expected.split(":", 1);
-  const subtleName = CONTENT_DIGEST_ALGORITHMS[algorithm];
+  const subtleName = CONTENT_DIGEST_ALGORITHMS[algorithm]?.subtle;
   if (!subtleName) {
     throw new VerifyImageError(
       `Cannot verify ${what}: unsupported digest algorithm in ${expected}.`,
       "VERIFY_FAILED",
     );
   }
-  const hash = await crypto.subtle.digest(subtleName, new TextEncoder().encode(raw));
+  const hash = await crypto.subtle.digest(subtleName, bytes);
   const actual =
     `${algorithm}:` +
     Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -208,9 +218,10 @@ export function registryClient(
         }
         assertRegistryOk(resp, what, opts.onFailure ?? "TRANSIENT");
         if (opts.verifyDigest !== undefined) {
-          const raw = await resp.text!();
-          await assertContentDigest(raw, opts.verifyDigest, what);
-          return JSON.parse(raw);
+          // The bytes as served: text() would drop a BOM and replace invalid UTF-8.
+          const bytes = new Uint8Array(await resp.arrayBuffer!());
+          await assertContentDigest(bytes, opts.verifyDigest, what);
+          return JSON.parse(new TextDecoder().decode(bytes));
         }
         return await resp.json!();
       }),
@@ -253,6 +264,12 @@ export async function fetchManifestDigest(
     const digest = resp.headers!.get("Docker-Content-Digest");
     if (!digest) {
       throw new VerifyImageError(`No digest in manifest response for ${image}`, "TRANSIENT");
+    }
+    if (!isOciDigest(digest)) {
+      throw new VerifyImageError(
+        `Malformed digest in manifest response for ${image}: ${JSON.stringify(digest)}`,
+        "VERIFY_FAILED",
+      );
     }
     return digest;
   });

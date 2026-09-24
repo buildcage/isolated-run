@@ -36,8 +36,17 @@ export function stubRegistry(routes: Record<string, Route>): RegistryStub {
 }
 
 export function okJson(body: unknown): FetchLikeResponse {
-  const text = JSON.stringify(body);
-  return { ok: true, status: 200, json: async () => body, text: async () => text };
+  return okBytes(new TextEncoder().encode(JSON.stringify(body)), body);
+}
+
+/** A 200 serving `bytes` as its body, which parse to `body`. */
+export function okBytes(bytes: Uint8Array, body: unknown): FetchLikeResponse {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => body,
+    arrayBuffer: async () => bytes.slice().buffer,
+  };
 }
 
 /** A refusal with an empty JSON body, which some paths read before classifying it. */

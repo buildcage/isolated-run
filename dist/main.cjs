@@ -10668,14 +10668,27 @@ function assertRegistryOk(resp, subject, onFailure) {
 	if (!resp.ok) throw new VerifyImageError(`Failed to fetch ${subject}: HTTP ${resp.status}`, onFailure);
 }
 const CONTENT_DIGEST_ALGORITHMS = {
-	sha256: "SHA-256",
-	sha384: "SHA-384",
-	sha512: "SHA-512"
+	sha256: {
+		subtle: "SHA-256",
+		hexLength: 64
+	},
+	sha384: {
+		subtle: "SHA-384",
+		hexLength: 96
+	},
+	sha512: {
+		subtle: "SHA-512",
+		hexLength: 128
+	}
 };
-async function assertContentDigest(raw, expected, what) {
-	let [algorithm] = expected.split(":", 1), subtleName = CONTENT_DIGEST_ALGORITHMS[algorithm];
+function isOciDigest(digest) {
+	let match = /^([a-z0-9]+):([0-9a-f]+)$/.exec(digest);
+	return match !== null && CONTENT_DIGEST_ALGORITHMS[match[1]]?.hexLength === match[2].length;
+}
+async function assertContentDigest(bytes, expected, what) {
+	let [algorithm] = expected.split(":", 1), subtleName = CONTENT_DIGEST_ALGORITHMS[algorithm]?.subtle;
 	if (!subtleName) throw new VerifyImageError(`Cannot verify ${what}: unsupported digest algorithm in ${expected}.`, "VERIFY_FAILED");
-	let hash = await crypto.subtle.digest(subtleName, new TextEncoder().encode(raw)), actual = `${algorithm}:` + Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
+	let hash = await crypto.subtle.digest(subtleName, bytes), actual = `${algorithm}:` + Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
 	if (actual !== expected) throw new VerifyImageError(`Content digest mismatch for ${what}: the registry served ${actual}, not the requested ${expected}.`, "VERIFY_FAILED");
 }
 function registryClient(registry, repo, token, _fetch) {
@@ -10692,8 +10705,8 @@ function registryClient(registry, repo, token, _fetch) {
 			let resp = await request(path, { accept: opts.accept });
 			if (resp.status === 404 && opts.absentOn404 !== !1) throw new VerifyImageError(`Not found: ${what}`, "NOT_FOUND");
 			if (assertRegistryOk(resp, what, opts.onFailure ?? "TRANSIENT"), opts.verifyDigest !== void 0) {
-				let raw = await resp.text();
-				return await assertContentDigest(raw, opts.verifyDigest, what), JSON.parse(raw);
+				let bytes = new Uint8Array(await resp.arrayBuffer());
+				return await assertContentDigest(bytes, opts.verifyDigest, what), JSON.parse(new TextDecoder().decode(bytes));
 			}
 			return await resp.json();
 		})
@@ -10710,6 +10723,7 @@ async function fetchManifestDigest(registry, repo, tag, token, _fetch = fetch) {
 		assertRegistryOk(resp, `manifest for ${image}`, "TRANSIENT");
 		let digest = resp.headers.get("Docker-Content-Digest");
 		if (!digest) throw new VerifyImageError(`No digest in manifest response for ${image}`, "TRANSIENT");
+		if (!isOciDigest(digest)) throw new VerifyImageError(`Malformed digest in manifest response for ${image}: ${JSON.stringify(digest)}`, "VERIFY_FAILED");
 		return digest;
 	});
 }
@@ -17263,7 +17277,7 @@ function checkImageEngine({ labels, proxyEngine, imageTag }) {
 }
 //#endregion
 //#region src/core/lib/provenance/verify-policy.ts
-const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const RELEASE_REF = /^v\d+(\.\d+(\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?)?)?$/, escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function buildVerifyOptions({ actionRef, actionRepo }) {
 	let sanPrefix = `^${escapeRegex(`https://github.com/${actionRepo}/.github/workflows/docker-publish.yml@refs/tags/`)}`, base = {
 		certificateIssuer: "https://token.actions.githubusercontent.com",
@@ -17274,7 +17288,7 @@ function buildVerifyOptions({ actionRef, actionRepo }) {
 		...base,
 		certificateIdentityURI: `${sanPrefix}v`,
 		certificateOIDs: { "1.3.6.1.4.1.57264.1.13": derUtf8(actionRef.toLowerCase()) }
-	} : actionRef.startsWith("v") ? {
+	} : RELEASE_REF.test(actionRef) ? {
 		...base,
 		certificateIdentityURI: `${sanPrefix}${escapeRegex(actionRef)}(\\.|$)`
 	} : null;

@@ -8,7 +8,7 @@ import type { VerifyBundleOptions } from "./sigstore.ts";
 const EXPECTED_ISSUER = "https://token.actions.githubusercontent.com";
 const RELEASE_WORKFLOW = ".github/workflows/docker-publish.yml";
 const OID_SOURCE_REPO_DIGEST = "1.3.6.1.4.1.57264.1.13";
-const REPO = "buildcage/isolated-run";
+const REPO = "owner/repo";
 
 /** Build a sample SAN URI as Fulcio would embed it. */
 function makeSAN(ref: string) {
@@ -74,21 +74,26 @@ describe("buildVerifyOptions: version tag", () => {
     expect(opts.certificateOIDs).toBe(undefined);
   });
 
-  it("matches exact prerelease @v1.1.0-rc1 against cert SAN v1.1.0-rc1", () => {
-    const opts = getOpts("v1.1.0-rc1");
-    expect(matchesSAN(opts, makeSAN("refs/tags/v1.1.0-rc1"))).toBeTruthy();
+  it("matches exact prerelease @v2.1.6-rc1 against cert SAN v2.1.6-rc1", () => {
+    const opts = getOpts("v2.1.6-rc1");
+    expect(matchesSAN(opts, makeSAN("refs/tags/v2.1.6-rc1"))).toBeTruthy();
   });
 
   it("does NOT match a prerelease tag beyond the one requested", () => {
-    const opts = getOpts("v1.1.0-rc1");
+    const opts = getOpts("v2.1.6-rc1");
     expect(
-      !matchesSAN(opts, makeSAN("refs/tags/v1.1.0")),
-      "@v1.1.0-rc1 must not match the base release v1.1.0",
+      !matchesSAN(opts, makeSAN("refs/tags/v2.1.6")),
+      "@v2.1.6-rc1 must not match the base release v2.1.6",
     ).toBeTruthy();
     expect(
-      !matchesSAN(opts, makeSAN("refs/tags/v1.1.0-rc10")),
-      "@v1.1.0-rc1 must not match v1.1.0-rc10",
+      !matchesSAN(opts, makeSAN("refs/tags/v2.1.6-rc10")),
+      "@v2.1.6-rc1 must not match v2.1.6-rc10",
     ).toBeTruthy();
+  });
+
+  it("matches any prerelease the release workflow can tag", () => {
+    const opts = getOpts("v2.2.0-beta.1");
+    expect(matchesSAN(opts, makeSAN("refs/tags/v2.2.0-beta.1"))).toBeTruthy();
   });
 });
 
@@ -126,6 +131,12 @@ describe("buildVerifyOptions: SHA pin", () => {
 describe("buildVerifyOptions: unverifiable refs", () => {
   it("returns null for a branch ref", () => {
     expect(buildVerifyOptions({ actionRef: "main", actionRepo: REPO })).toBe(null);
+  });
+
+  it("returns null for a branch that only starts with v", () => {
+    for (const ref of ["vendor-fix", "v2-dev", "v2.1.x", "v2.1.0-", "v2..1"]) {
+      expect(buildVerifyOptions({ actionRef: ref, actionRepo: REPO }), ref).toBe(null);
+    }
   });
 
   it("returns null for a local ./setup ref", () => {
