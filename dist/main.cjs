@@ -17243,7 +17243,7 @@ function imageTagFromRef(actionRef, proxyEngine = "inspect") {
 }
 //#endregion
 //#region src/core/lib/provenance/engine-label.ts
-const IMAGE_VERSION_LABEL = "org.opencontainers.image.version", RELEASE_VERSION = /^\d+\.\d+\.\d+(-rc\d+)?$/;
+const IMAGE_VERSION_LABEL = "org.opencontainers.image.version", RELEASE_VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$/;
 function checkImageEngine({ labels, proxyEngine, imageTag }) {
 	let label = labels[IMAGE_VERSION_LABEL];
 	if (!label) throw new VerifyImageError(`Image ${imageTag} carries no ${IMAGE_VERSION_LABEL} label, so the proxy engine it was published for cannot be confirmed.`, "VERIFY_FAILED");

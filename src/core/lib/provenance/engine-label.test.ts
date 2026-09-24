@@ -33,6 +33,19 @@ describe("checkImageEngine", () => {
     expect(() => check("1.0.0-rc1-inspect", "inspect")).not.toThrow();
   });
 
+  it("accepts any prerelease the release workflow can tag", () => {
+    expect(() => check("1.1.0-beta.1-inspect", "inspect")).not.toThrow();
+    expect(() => check("1.1.0-alpha-universal", "universal")).not.toThrow();
+    expect(() => check("1.1.0-rc.2.1-inspect", "inspect")).not.toThrow();
+  });
+
+  it("rejects a prerelease the release workflow cannot tag", () => {
+    // A `-` inside the prerelease, or an empty identifier, never reaches a tag.
+    expectRejected("1.1.0-x-y-inspect", "inspect");
+    expectRejected("1.1.0-beta..1-inspect", "inspect");
+    expectRejected("1.1.0--inspect", "inspect");
+  });
+
   it("ignores the version half, which a floating ref or SHA pin does not match", () => {
     expect(() => check("1.0.1-inspect", "inspect")).not.toThrow();
   });
@@ -50,6 +63,7 @@ describe("checkImageEngine", () => {
   it("rejects an engine image served for a universal tag", () => {
     expectRejected("1.0.0-inspect", "universal");
     expectRejected("1.0.0-rc1-inspect", "universal");
+    expectRejected("1.1.0-beta.1-inspect", "universal");
   });
 
   it("rejects a suffix the action does not offer", () => {
