@@ -42,13 +42,16 @@ fi
 # Addresses the runner itself holds, refused as a resolved destination by the
 # generated internal-address acl. HOST_ADDRESSES is what the action read off the
 # runner; the routing table adds the compose network's gateway, a runner address
-# the action could not see yet. A file because HAProxy silently truncates an acl
-# line past MAX_LINE_ARGS.
+# the action could not see yet. The container's own addresses keep a name
+# Docker's DNS resolves to it (its service or container name) from looping the
+# proxy into itself. A file because HAProxy silently truncates an acl line past
+# MAX_LINE_ARGS.
 HOST_ADDR_FILE=/etc/haproxy/rules/host_addrs.lst
 mkdir -p /etc/haproxy/rules
 {
     for addr in $HOST_ADDRESSES; do echo "$addr"; done
     ip -4 route show | awk '{ for (i = 1; i < NF; i++) if ($i == "via") print $(i + 1) }'
+    ip -4 -o addr show scope global | awk '{ sub("/.*", "", $4); print $4 }'
 } | sort -u > "$HOST_ADDR_FILE"
 echo "init-inspect-cfg: guarded runner addresses=$(tr '\n' ' ' < "$HOST_ADDR_FILE")"
 
