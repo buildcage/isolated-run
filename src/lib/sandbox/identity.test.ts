@@ -11,7 +11,7 @@ import { SandboxError } from "../errors.ts";
 // docker.sock on that machine never leaks in: only the group file below
 // and, where relevant, a named socket path decide the outcome.
 
-/** A host with the given /etc/group contents, socket owners and NSS-only groups. */
+/** A host with the given /etc/group contents, socket owners and NSS entries by key. */
 function host(
   groupFile: string | null,
   socketOwners: Record<string, number> = {},
@@ -22,7 +22,7 @@ function host(
       if (groupFile === null) throw new Error("ENOENT");
       return groupFile;
     },
-    lookupGroup: (key) => nss[key] ?? null,
+    lookupGroups: (keys) => ({ lines: keys.map((key) => nss[key] ?? "").join("") }),
     gidOf: (path) => {
       const gid = socketOwners[path];
       if (gid === undefined) throw new Error("ENOENT");
@@ -117,7 +117,7 @@ describe("resolveSandboxGid", () => {
             readPaths.push(path);
             return "docker:x:999:\nnogroup:x:65534:\n";
           },
-          lookupGroup: () => null,
+          lookupGroups: () => ({ lines: "" }),
           gidOf: (path) => {
             statted.push(path);
             throw new Error("ENOENT");
@@ -160,6 +160,65 @@ describe("resolveSandboxGid: groups served through NSS", () => {
       },
     );
     expect(result).toStrictEqual({ gid: 65534, substitutedFrom: 2000 });
+  });
+
+  it("recognizes a privileged group another source names differently by GID", () => {
+    // By GID, NSS answers with the first source's name; by name, it finds docker.
+    const result = resolveSandboxGid(
+      2000,
+      {},
+      {
+        host: host(
+          "runner:x:2000:\nnogroup:x:65534:\n",
+          {},
+          {
+            "2000": "runner:x:2000:\n",
+            docker: "docker:*:2000:\n",
+          },
+        ),
+        runtimeSocketPaths: [],
+      },
+    );
+    expect(result).toStrictEqual({ gid: 65534, substitutedFrom: 2000 });
+  });
+
+  it("asks NSS once, for the primary GID, the privileged names and the substitutes", () => {
+    const asked: string[][] = [];
+    resolveSandboxGid(
+      1000,
+      {},
+      {
+        host: {
+          readGroupFile: () => "",
+          lookupGroups: (keys) => {
+            asked.push(keys);
+            return { lines: "" };
+          },
+          gidOf: () => {
+            throw new Error("ENOENT");
+          },
+        },
+        runtimeSocketPaths: [],
+      },
+    );
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toEqual(expect.arrayContaining(["1000", "docker", "nogroup", "65534"]));
+  });
+
+  it("reports why NSS could not answer, deciding on /etc/group alone", () => {
+    const failing: HostGroups = {
+      ...host("docker:x:999:\nnogroup:x:65534:\n"),
+      lookupGroups: () => ({ error: "timed out" }),
+    };
+    expect(resolveSandboxGid(999, {}, { host: failing, runtimeSocketPaths: [] })).toStrictEqual({
+      gid: 65534,
+      substitutedFrom: 999,
+      nssError: "timed out",
+    });
+    expect(resolveSandboxGid(1000, {}, { host: failing, runtimeSocketPaths: [] })).toStrictEqual({
+      gid: 1000,
+      nssError: "timed out",
+    });
   });
 });
 

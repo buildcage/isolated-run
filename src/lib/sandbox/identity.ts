@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { errorMessage } from "#core/lib/errors.ts";
 import { SandboxError } from "../errors.ts";
 import { EXTRA_MASKED_RUNTIME_PATHS, rootlessRuntimeSocketPaths } from "./runtime-sockets.ts";
 
@@ -48,9 +49,9 @@ const FALLBACK_GID = 65534;
  */
 export interface HostGroups {
   readGroupFile(path: string): string;
-  /** `getent group <key>`'s output, so a group from LDAP or SSSD counts too;
-   *  null when there is none. */
-  lookupGroup(key: string): string | null;
+  /** `getent group <keys...>`'s output, so a group from LDAP or SSSD counts
+   *  too, or why NSS could not answer. */
+  lookupGroups(keys: string[]): { lines: string } | { error: string };
   gidOf(path: string): number;
 }
 
@@ -63,17 +64,22 @@ const GETENT_PATHS = ["/usr/bin/getent", "/bin/getent"];
 /* v8 ignore start */
 const realHost: HostGroups = {
   readGroupFile: (path) => readFileSync(path, "utf8"),
-  lookupGroup: (key) => {
+  lookupGroups: (keys) => {
     const getent = GETENT_PATHS.find((p) => existsSync(p));
-    if (!getent) return null;
+    if (!getent) return { lines: "" };
     try {
-      return execFileSync(getent, ["group", key], {
-        encoding: "utf8",
-        stdio: "pipe",
-        timeout: 5000,
-      });
-    } catch {
-      return null;
+      return {
+        lines: execFileSync(getent, ["group", ...keys], {
+          encoding: "utf8",
+          stdio: "pipe",
+          timeout: 5000,
+        }),
+      };
+    } catch (e) {
+      const { status, stdout } = e as { status?: number | null; stdout?: string };
+      // 2: some key has no entry; the ones found are still printed.
+      if (status === 2) return { lines: stdout ?? "" };
+      return { error: errorMessage(e) };
     }
   },
   gidOf: (path) => statSync(path).gid,
@@ -84,7 +90,7 @@ const realHost: HostGroups = {
  *  leaving only the runtime-socket-ownership check. */
 function readGroupNamesByGid(
   groupFile: string,
-  keys: string[],
+  nssLines: string | undefined,
   host: HostGroups,
 ): Map<number, string[]> | null {
   const sources: string[] = [];
@@ -93,10 +99,7 @@ function readGroupNamesByGid(
   } catch {
     // Unreadable: NSS may still answer.
   }
-  for (const key of keys) {
-    const line = host.lookupGroup(key);
-    if (line !== null) sources.push(line);
-  }
+  if (nssLines) sources.push(nssLines);
   if (sources.length === 0) return null;
   const map = new Map<number, string[]>();
   for (const line of sources.join("\n").split("\n")) {
@@ -129,6 +132,9 @@ export interface ResolvedSandboxGid {
   gid: number;
   /** Present only when `gid` differs from the GID passed in. */
   substitutedFrom?: number;
+  /** Set when NSS could not answer, leaving /etc/group and the runtime
+   *  sockets' owners to decide. */
+  nssError?: string;
 }
 
 export interface ResolveSandboxGidOptions {
@@ -162,10 +168,18 @@ export function resolveSandboxGid(
   // the seam exists to avoid.
   /* v8 ignore next */
   const host = options.host ?? realHost;
-  // Looked up by key: NSS may not enumerate a directory's groups.
+  // By key, as NSS may not enumerate a directory's groups; the privileged names
+  // too, since a GID lookup returns only the first source's name for it.
+  const nss = host.lookupGroups([
+    String(primaryGid),
+    ...PRIVILEGED_GROUP_NAMES,
+    ...FALLBACK_GROUP_NAMES,
+    String(FALLBACK_GID),
+  ]);
+  const nssError = "error" in nss ? nss.error : undefined;
   const groupNamesByGid = readGroupNamesByGid(
     groupFile,
-    [String(primaryGid), ...FALLBACK_GROUP_NAMES, String(FALLBACK_GID)],
+    "lines" in nss ? nss.lines : undefined,
     host,
   );
   const socketOwnerGids = ownerGids(runtimeSocketPaths, host);
@@ -176,7 +190,8 @@ export function resolveSandboxGid(
     return groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? false;
   };
 
-  if (!isPrivileged(primaryGid)) return { gid: primaryGid };
+  const reported = nssError === undefined ? {} : { nssError };
+  if (!isPrivileged(primaryGid)) return { gid: primaryGid, ...reported };
 
   const gidForName = (name: string): number | undefined => {
     if (!groupNamesByGid) return undefined;
@@ -188,9 +203,13 @@ export function resolveSandboxGid(
 
   for (const name of FALLBACK_GROUP_NAMES) {
     const gid = gidForName(name);
-    if (gid !== undefined && !isPrivileged(gid)) return { gid, substitutedFrom: primaryGid };
+    if (gid !== undefined && !isPrivileged(gid)) {
+      return { gid, substitutedFrom: primaryGid, ...reported };
+    }
   }
-  if (!isPrivileged(FALLBACK_GID)) return { gid: FALLBACK_GID, substitutedFrom: primaryGid };
+  if (!isPrivileged(FALLBACK_GID)) {
+    return { gid: FALLBACK_GID, substitutedFrom: primaryGid, ...reported };
+  }
 
   throw new SandboxError(
     `The runner's primary GID (${primaryGid}) is a privileged group, and no safe substitute GID ` +
