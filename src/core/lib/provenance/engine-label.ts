@@ -4,8 +4,12 @@ import { engineTagSuffix } from "./image-tag.ts";
 /** Holds the published Docker tag, engine suffix included. */
 export const IMAGE_VERSION_LABEL = "org.opencontainers.image.version";
 
-/** A release version as docker-publish.yml writes it, before any engine suffix. */
-const RELEASE_VERSION = /^\d+\.\d+\.\d+(-rc\d+)?$/;
+/**
+ * A release version as docker-publish.yml writes it, before any engine suffix.
+ * The prerelease grammar is the one release.yml and docker-publish.yml accept
+ * for a tag, which admits no `-` inside it.
+ */
+const RELEASE_VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$/;
 
 export interface EngineLabelCheck {
   labels: Record<string, string>;
