@@ -54,16 +54,14 @@ jobs:
           # Both triggers build the ref the run was started on, never a separate
           # checkout: the signing job takes the image's Sigstore identity (SAN
           # ref, OID 1.13 source sha) from that ref, so building any other tag
-          # would sign the image under the wrong ref and commit. The push
-          # trigger's tag filter already guarantees a tag ref; this rejects a
-          # workflow_dispatch started on a branch.
-          case "$GITHUB_REF" in
-            refs/tags/v*.*.*) ;;
-            *)
-              echo "::error::This workflow must run on a version tag (refs/tags/v*.*.*); github.ref is $GITHUB_REF. For a manual rebuild, dispatch it with the release tag selected as the ref."
-              exit 1
-              ;;
-          esac
+          # would sign the image under the wrong ref and commit. Require a
+          # semver release tag ref, the same shape release.yml validates, which
+          # rejects a workflow_dispatch started on a branch or a non-release tag.
+          if ! printf '%s' "$GITHUB_REF" |
+            grep -qE '^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$'; then
+            echo "::error::This workflow must run on a semver release tag (vX.Y.Z or vX.Y.Z-prerelease); github.ref is $GITHUB_REF. For a manual rebuild, dispatch it with the release tag selected as the ref."
+            exit 1
+          fi
           echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
