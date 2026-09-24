@@ -41,6 +41,17 @@ describe("annotateKnownBlocked", () => {
     }
   });
 
+  it("matches the host whatever its case, as the proxy does", () => {
+    const shouted = block({ host: "EVIL.Example.COM" });
+    for (const rule of [
+      "evil.example.com:443",
+      "*.example.com:443",
+      "~^evil\\.example\\.com:443$",
+    ]) {
+      expect(annotateKnownBlocked([shouted], [rule])[0].expected, rule).toBe(true);
+    }
+  });
+
   it("matches a refused name with a rule that names no port", () => {
     // The block has no port at all, nothing having been connected to, so the
     // rule that declares it expected names none either.
@@ -95,6 +106,17 @@ describe("annotateKnownBlocked", () => {
       const [row] = annotateKnownBlocked([request()], ["POST https://api.example.com/telemetry"]);
       expect(row.expected).toBe(true);
       expect(row.expectedBy).toBe("POST https://api.example.com/telemetry");
+    });
+
+    it("matches the host whatever its case, but not the path", () => {
+      const rule = ["POST https://api.example.com/telemetry"];
+      const upperHost = request({
+        host: "API.Example.com",
+        url: "https://API.Example.com/telemetry",
+      });
+      expect(annotateKnownBlocked([upperHost], rule)[0].expected).toBe(true);
+      const upperPath = request({ url: "https://api.example.com/Telemetry" });
+      expect(annotateKnownBlocked([upperPath], rule)[0].expected).toBe(false);
     });
 
     it("does not match when the method differs", () => {

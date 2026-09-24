@@ -172,16 +172,19 @@ function getState(name) {
 }
 //#endregion
 //#region src/core/lib/actions/annotation.ts
+function escapeData(message) {
+	return message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
 function createAnnotation(enabled) {
 	return enabled ? {
 		notice(message) {
-			console.log(`::notice::${message}`);
+			console.log(`::notice::${escapeData(message)}`);
 		},
 		warning(message) {
-			console.log(`::warning::${message}`);
+			console.log(`::warning::${escapeData(message)}`);
 		},
 		error(message) {
-			console.log(`::error::${message}`);
+			console.log(`::error::${escapeData(message)}`);
 		}
 	} : {
 		notice() {},
