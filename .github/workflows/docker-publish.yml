@@ -6,12 +6,9 @@ on:
     tags:
       - "v*.*.*"
 
+  # No inputs: a manual rebuild must be dispatched with the release tag selected
+  # as the ref, so the image's Sigstore identity names the tag it rebuilds.
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to build (leave empty to use latest)"
-        required: false
-        type: string
 
 concurrency:
   group: docker-publish
@@ -53,24 +50,17 @@ jobs:
         id: version
         env:
           REF_NAME: ${{ github.ref_name }}
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            if [ -n "$INPUT_TAG" ]; then
-              TAG="$INPUT_TAG"
-            else
-              TAG=$(git tag --sort=-version:refname --list 'v*.*' | grep -vE '^v[0-9]+\.[0-9]+\.[0-9]+-' | head -1)
-              if [ -z "$TAG" ]; then
-                echo "::error::No version tag found"
-                exit 1
-              fi
-            fi
-            git checkout "$TAG"
-          else
-            TAG="$REF_NAME"
+          # The signing job takes the image's Sigstore identity (SAN ref, OID
+          # 1.13 source sha) from the ref this run was started on, so it must be
+          # the release tag being built. Require a semver tag ref (as release.yml
+          # does), which also rejects a workflow_dispatch started on a branch.
+          if ! printf '%s' "$GITHUB_REF" |
+            grep -qE '^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$'; then
+            echo "::error::This workflow must run on a semver release tag (vX.Y.Z or vX.Y.Z-prerelease); github.ref is $GITHUB_REF. For a manual rebuild, dispatch it with the release tag selected as the ref."
+            exit 1
           fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
@@ -184,7 +174,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # workflow_dispatch can name a tag other than this run's own ref.
+          # The tag this run built, which is the ref the run was started on.
           ref: ${{ needs.build-and-push.outputs.tag }}
           persist-credentials: false
 
