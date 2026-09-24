@@ -17,6 +17,7 @@ import {
   expectVerifyError,
   failsWith,
   networkFailure,
+  okBytes,
   okJson,
   stubRegistry,
 } from "#core/lib/test/registry-stub.ts";
@@ -89,6 +90,27 @@ describe("fetchManifestDigest", () => {
     );
   });
 
+  it("refuses a digest header that is not an OCI digest, since it goes into request paths", async () => {
+    for (const bad of [
+      "sha256:../../blobs/x",
+      "sha256:" + "a".repeat(63),
+      "sha256:" + "A".repeat(64),
+      "sha512:" + "a".repeat(64),
+      "md5:" + "a".repeat(32),
+    ]) {
+      await expectVerifyError(
+        call(async () => manifestHead(200, bad)),
+        "VERIFY_FAILED",
+        /Malformed digest/,
+      );
+    }
+  });
+
+  it("accepts every digest algorithm OCI names, at its own length", async () => {
+    const sha512 = "sha512:" + "b".repeat(128);
+    expect(await call(async () => manifestHead(200, sha512))).toBe(sha512);
+  });
+
   it("throws TRANSIENT on network error", async () => {
     await expectVerifyError(call(networkFailure), "TRANSIENT");
   });
@@ -103,7 +125,7 @@ describe("fetchManifestDigest", () => {
 
 describe("fetchRegistryToken", () => {
   const call = (basicAuth: string | null, _fetch: FetchLike) =>
-    fetchRegistryToken("ghcr.io", "buildcage/isolated-run", basicAuth, _fetch);
+    fetchRegistryToken("ghcr.io", "owner/repo", basicAuth, _fetch);
 
   // ── basicAuth=null (not logged in) ─────────────────────────────────────
 
@@ -183,13 +205,13 @@ describe("fetchRegistryToken", () => {
 });
 
 describe("fetchImageConfigLabels", () => {
-  const labels = { "org.opencontainers.image.version": "1.0.0-inspect" };
+  const labels = { "org.opencontainers.image.version": "2.0.0-inspect" };
   const call = (_fetch: FetchLike) =>
-    fetchImageConfigLabels("ghcr.io", "buildcage/isolated-run", DIGEST, "token", _fetch);
+    fetchImageConfigLabels("ghcr.io", "owner/repo", DIGEST, "token", _fetch);
   // Each hop is verified against the digest that addressed it, so a test states
   // the bodies and addresses each route by its own content digest.
   const callWith = (digest: string, _fetch: FetchLike) =>
-    fetchImageConfigLabels("ghcr.io", "buildcage/isolated-run", digest, "token", _fetch);
+    fetchImageConfigLabels("ghcr.io", "owner/repo", digest, "token", _fetch);
 
   it("follows index → platform manifest → config blob and returns the labels", async () => {
     const configBody = { config: { Labels: labels } };
@@ -260,6 +282,24 @@ describe("fetchImageConfigLabels", () => {
     expect(await callWith(manifestDig, registry)).toStrictEqual({});
   });
 
+  it("hashes the bytes as served, so a leading BOM still matches its digest", async () => {
+    const configBody = { config: { Labels: labels } };
+    const bytes = new Uint8Array([
+      0xef,
+      0xbb,
+      0xbf,
+      ...new TextEncoder().encode(JSON.stringify(configBody)),
+    ]);
+    const configDig = "sha256:" + createHash("sha256").update(bytes).digest("hex");
+    const manifestBody = { config: { digest: configDig } };
+    const manifestDig = digestOf(manifestBody);
+    const registry = stubRegistry({
+      [`/manifests/${manifestDig}`]: okJson(manifestBody),
+      [`/blobs/${configDig}`]: okBytes(bytes, configBody),
+    });
+    expect(await callWith(manifestDig, registry)).toStrictEqual(labels);
+  });
+
   it("refuses content whose bytes do not match the digest that addressed it", async () => {
     const configDig = digestOf({ config: { Labels: labels } });
     const manifestBody = { config: { digest: configDig } };
@@ -295,7 +335,7 @@ describe("fetchImageConfigLabels", () => {
     await expectVerifyError(
       call(stubRegistry({ [`/manifests/${DIGEST}`]: failsWith(404) })),
       "NOT_FOUND",
-      `ghcr.io/buildcage/isolated-run@${DIGEST}`,
+      `ghcr.io/owner/repo@${DIGEST}`,
     );
   });
 

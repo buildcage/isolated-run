@@ -8,6 +8,10 @@ const RELEASE_WORKFLOW = ".github/workflows/docker-publish.yml";
 // Value encoding: DER UTF8String ([0x0C, len, ...utf8bytes]) inside OCTET STRING.
 const OID_SOURCE_REPO_DIGEST = "1.3.6.1.4.1.57264.1.13";
 
+// A release tag, or the major or minor tag update-major-tag.yml moves along with it.
+// The prerelease grammar is the one release.yml accepts.
+const RELEASE_REF = /^v\d+(\.\d+(\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?)?)?$/;
+
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export interface VerifyImageIdentity {
@@ -47,7 +51,7 @@ export function buildVerifyOptions({
     };
   }
 
-  if (actionRef.startsWith("v")) {
+  if (RELEASE_REF.test(actionRef)) {
     return {
       ...base,
       certificateIdentityURI: `${sanPrefix}${escapeRegex(actionRef)}(\\.|$)`,
