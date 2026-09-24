@@ -3,16 +3,20 @@
  * cryptography but the policy this module hands them, how it reports their
  * refusal, and that it still checks the signed digest afterwards.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const sigstore = vi.hoisted(() => ({
   trustedRoot: { marker: "trusted-root" },
+  getTrustedRoot: vi.fn(),
   verify: vi.fn(),
   verifierOptions: vi.fn(),
 }));
 
 vi.mock("@sigstore/tuf", () => ({
-  getTrustedRoot: vi.fn(async () => sigstore.trustedRoot),
+  getTrustedRoot: (options: unknown) => sigstore.getTrustedRoot(options),
 }));
 
 vi.mock("@sigstore/bundle", () => ({
@@ -70,6 +74,8 @@ describe("verifyBundle", () => {
   beforeEach(() => {
     sigstore.verify.mockReset();
     sigstore.verifierOptions.mockReset();
+    sigstore.getTrustedRoot.mockReset();
+    sigstore.getTrustedRoot.mockImplementation(async () => sigstore.trustedRoot);
   });
 
   it("resolves when the signature verifies and the signed digest matches", async () => {
@@ -150,5 +156,56 @@ describe("verifyBundle", () => {
       });
       expect(policy.oids[0].oid).toStrictEqual({ id: [1, 2, 3] });
     });
+  });
+});
+
+describe("the TUF cache the trusted root is fetched through", () => {
+  let runnerTemp: string;
+
+  beforeEach(() => {
+    runnerTemp = mkdtempSync(join(tmpdir(), "runner-temp-"));
+    vi.stubEnv("RUNNER_TEMP", runnerTemp);
+    sigstore.getTrustedRoot.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(runnerTemp, { recursive: true, force: true });
+  });
+
+  /** The cachePath handed to getTrustedRoot, and what it held at that moment. */
+  function recordCache(result: () => unknown) {
+    const seen: { cachePath?: string; entries?: string[] } = {};
+    sigstore.getTrustedRoot.mockImplementation(async (options: { cachePath: string }) => {
+      seen.cachePath = options.cachePath;
+      seen.entries = readdirSync(options.cachePath);
+      return result();
+    });
+    return seen;
+  }
+
+  it("starts empty under RUNNER_TEMP, so no root.json an earlier job left is trusted", async () => {
+    const seen = recordCache(() => sigstore.trustedRoot);
+    await verifyBundle(bundleFor(DIGEST), {}, DIGEST);
+    expect(dirname(seen.cachePath!)).toBe(runnerTemp);
+    expect(seen.entries).toStrictEqual([]);
+    expect(existsSync(seen.cachePath!)).toBe(false);
+  });
+
+  it("is removed when the fetch fails too", async () => {
+    const seen = recordCache(() => {
+      throw new Error("TUF mirror unreachable");
+    });
+    await expect(verifyBundle(bundleFor(DIGEST), {}, DIGEST)).rejects.toThrow(
+      "TUF mirror unreachable",
+    );
+    expect(existsSync(seen.cachePath!)).toBe(false);
+  });
+
+  it("falls back to the system temp dir outside a runner", async () => {
+    vi.stubEnv("RUNNER_TEMP", "");
+    const seen = recordCache(() => sigstore.trustedRoot);
+    await verifyBundle(bundleFor(DIGEST), {}, DIGEST);
+    expect(dirname(seen.cachePath!)).toBe(tmpdir());
   });
 });

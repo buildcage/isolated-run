@@ -56,7 +56,7 @@ let node_os = require("node:os");
 node_os = __toESM(node_os, 1);
 let node_path = require("node:path");
 node_path = __toESM(node_path, 1);
-let fs_promises = require("fs/promises");
+let node_fs_promises = require("node:fs/promises"), fs_promises = require("fs/promises");
 fs_promises = __toESM(fs_promises, 1);
 let node_child_process = require("node:child_process"), node_readline = require("node:readline"), node_process = require("node:process");
 node_process = __toESM(node_process, 1);
@@ -10584,8 +10584,8 @@ ${pendingInterceptorsFormatter.format(pending)}
 			return this.addRaw(element).addEOL();
 		}
 	}, _summary = new Summary(), summary = _summary;
-})), chmod, copyFile, lstat, mkdir, open, readdir, rename, rm, rmdir, stat, symlink, unlink, init_io_util = __esmMin((() => {
-	({chmod, copyFile, lstat, mkdir, open, readdir, rename, rm, rmdir, stat, symlink, unlink} = fs.promises), process.platform, fs.constants.O_RDONLY;
+})), chmod, copyFile, lstat, mkdir, open, readdir, rename, rm$1, rmdir, stat, symlink, unlink, init_io_util = __esmMin((() => {
+	({chmod, copyFile, lstat, mkdir, open, readdir, rename, rm: rm$1, rmdir, stat, symlink, unlink} = fs.promises), process.platform, fs.constants.O_RDONLY;
 })), init_io = __esmMin((() => {
 	init_io_util();
 })), init_toolrunner = __esmMin((() => {
@@ -17216,8 +17216,19 @@ function assertSignedDigest(bundleJson, expectedDigest) {
 }
 //#endregion
 //#region src/core/lib/provenance/sigstore.ts
+async function fetchTrustedRoot() {
+	let cachePath = await (0, node_fs_promises.mkdtemp)((0, node_path.join)(process.env.RUNNER_TEMP || (0, node_os.tmpdir)(), "buildcage-tuf-"));
+	try {
+		return await (0, import_dist$4.getTrustedRoot)({ cachePath });
+	} finally {
+		await (0, node_fs_promises.rm)(cachePath, {
+			recursive: !0,
+			force: !0
+		});
+	}
+}
 async function verifyBundle(bundleJson, options, expectedDigest) {
-	let trustedRoot = await (0, import_dist$4.getTrustedRoot)(), verifier = new import_dist$5.Verifier((0, import_dist$5.toTrustMaterial)(trustedRoot), {
+	let trustedRoot = await fetchTrustedRoot(), verifier = new import_dist$5.Verifier((0, import_dist$5.toTrustMaterial)(trustedRoot), {
 		ctlogThreshold: options.ctLogThreshold,
 		tlogThreshold: options.tlogThreshold
 	}), policy = {};

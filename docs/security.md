@@ -757,7 +757,8 @@ Verification establishes where the image came from. Here is what it leaves uncov
   this repository's release workflow genuinely signed.
 - **Sigstore has to be reachable.** Verification depends on the Rekor transparency log and the
   Fulcio CA, and fetches the TUF trust root at verification time. An outage there fails the action
-  rather than skipping the check.
+  rather than skipping the check. Each fetch starts from the root embedded in the action, never
+  from one an earlier job left on a persistent runner.
 - **A build-time test hook exists, but not in what you run.**
   `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build` produces a `dist/` where a `BUILDCAGE_LOCAL_IMAGE_REF`
   override can point the action at an unpublished image, used only by this repo's own CI and local
