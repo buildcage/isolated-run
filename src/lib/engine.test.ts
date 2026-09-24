@@ -18,7 +18,9 @@ describe("resolveProxyEngine", () => {
     expect(() => resolveProxyEngine("Inspect")).toThrow();
   });
 
-  it("rejects the removed transparent alias, listing the accepted engines", () => {
-    expect(() => resolveProxyEngine("transparent")).toThrowError(/universal, inspect/);
+  it("rejects the removed transparent alias, naming universal", () => {
+    expect(() => resolveProxyEngine("transparent")).toThrowError(
+      /transparent has been renamed.*proxy_engine: universal/,
+    );
   });
 });

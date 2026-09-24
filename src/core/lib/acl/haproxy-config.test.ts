@@ -6,7 +6,7 @@ function gen(options: Parameters<typeof generateHaproxyConfig>[0] = {}): string 
   return generateHaproxyConfig(options).config;
 }
 
-/** HAProxy's own per-line word cap (MAX_LINE_ARGS); it truncates past this. */
+/** HAProxy's own per-line word cap (MAX_LINE_ARGS); it refuses to start past this. */
 const MAX_LINE_WORDS = 64;
 
 function longestLineWords(config: string): number {
@@ -531,8 +531,8 @@ describe("TLS to the origin", () => {
 });
 
 // ---------------------------------------------------------------------------
-// HAProxy truncates a line past MAX_LINE_ARGS words without saying so, so no
-// rule count may push one over.
+// HAProxy refuses to start on a line past MAX_LINE_ARGS words, so no rule
+// count may push one over.
 // ---------------------------------------------------------------------------
 describe("line length", () => {
   it("decides with one line per rule, which no rule count can outgrow", () => {

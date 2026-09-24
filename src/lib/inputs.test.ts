@@ -109,7 +109,7 @@ describe("readEngineInputs", () => {
 
   it("rejects the removed transparent alias", () => {
     expect(() => readEngineInputs(inputs({ proxy_engine: "transparent" }))).toThrow(
-      /Invalid proxy_engine/,
+      /transparent has been renamed/,
     );
   });
 });

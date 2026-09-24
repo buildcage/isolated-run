@@ -51,8 +51,9 @@ export interface HaproxyConfigOptions extends RuleInputs {
   proxyAddress?: string;
   /**
    * Pattern file of the runner's own addresses, added to the
-   * internal-destination guard. A file because HAProxy truncates an acl line
-   * past MAX_LINE_ARGS silently and the address count is environment-dependent.
+   * internal-destination guard. A file because HAProxy refuses to start on an
+   * acl line past MAX_LINE_ARGS words and the address count is
+   * environment-dependent.
    * When omitted, no such acl is emitted.
    */
   hostAddressFile?: string;

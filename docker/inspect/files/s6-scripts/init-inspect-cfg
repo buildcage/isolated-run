@@ -44,8 +44,8 @@ fi
 # runner; the routing table adds the compose network's gateway, a runner address
 # the action could not see yet. The container's own addresses keep a name
 # Docker's DNS resolves to it (its service or container name) from looping the
-# proxy into itself. A file because HAProxy silently truncates an acl line past
-# MAX_LINE_ARGS.
+# proxy into itself. A file because HAProxy refuses to start on an acl line past
+# MAX_LINE_ARGS words.
 HOST_ADDR_FILE=/etc/haproxy/rules/host_addrs.lst
 mkdir -p /etc/haproxy/rules
 {

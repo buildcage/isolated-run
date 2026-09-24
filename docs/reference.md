@@ -185,6 +185,11 @@ Besides the wildcards, a label holds letters, digits, `-` and `_`, and nothing e
 internationalized name in its punycode form (`xn--mnchen-3ya.de`, not `münchen.de`), the form a
 connection carries. A leading, trailing or doubled dot is refused.
 
+`**` alone matches an address too: under `**:443`, a request that reaches the proxy through a name
+with `Host: 10.0.0.5` goes to that private address (see
+[A name may not resolve inward](./security.md#a-name-may-not-resolve-inward)). A connection straight
+to an address goes by `allowed_ip_rules` only.
+
 #### Ports
 
 A port is required on every rule.
@@ -313,6 +318,10 @@ name does, and the resolver's configuration has no way to quote them.
 The host part of a pattern also decides which names the resolver answers as allowed, and the
 resolver matches it with RE2. Lookaround (`(?=`, `(?!`, `(?<=`, `(?<!`) and backreferences are
 therefore refused there, in a URL rule's host half as well.
+
+Setup checks a pattern with JavaScript's regular expressions, but the proxy runs it with PCRE2.
+Syntax only JavaScript accepts, such as `\u0041` or `[\d-z]`, passes setup and then stops the proxy
+from starting.
 
 In `allowed_url_rules` a `~` expression covers the URL, and is split at the first `/` after `://`:
 everything before that `/` is matched against the host, everything from it onward against the path.

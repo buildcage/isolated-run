@@ -13,6 +13,12 @@ export type ProxyEngine = (typeof ENGINES)[number];
 
 export function resolveProxyEngine(input: string | undefined): ProxyEngine {
   const trimmed = input?.trim() || "inspect";
+  if (trimmed === "transparent") {
+    throw new SandboxError(
+      "proxy_engine: transparent has been renamed. Use proxy_engine: universal.",
+      "INVALID_PROXY_ENGINE",
+    );
+  }
   if (!(ENGINES as readonly string[]).includes(trimmed)) {
     throw new SandboxError(
       `Invalid proxy_engine: ${JSON.stringify(input)}. Must be one of ${ENGINES.join(", ")}.`,
