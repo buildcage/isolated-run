@@ -37,8 +37,8 @@ export interface PostCleanupDeps {
  *
  * Remove it here too, but only while it is still the empty placeholder this
  * run created, so a non-empty file that happens to sit at the reserved path is
- * never touched. universal never creates it, so an absent file is the no-op it
- * should be and no privileged command runs.
+ * never touched. universal never creates it, so an absent file runs no
+ * privileged command.
  */
 export function reclaimCaPlaceholder(
   warn: (message: string) => void,
