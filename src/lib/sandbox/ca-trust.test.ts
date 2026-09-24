@@ -398,6 +398,7 @@ describe("writeJvmKeystoreFiles", () => {
     expect(copies).toEqual([]);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(keystores.join(", "));
+    expect(warnings[0]).toContain("Install a JDK outside those paths");
     expect(warnings[0]).toContain("proxy_engine: universal");
   });
 

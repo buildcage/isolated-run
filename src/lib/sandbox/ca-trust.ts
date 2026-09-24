@@ -254,8 +254,10 @@ export function writeJvmKeystoreFiles(
     if (keystores.length > 0) {
       warn?.(
         `could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): no keytool ` +
-          `was found outside the paths a sandboxed command can write to. A Java step will not ` +
-          `trust it. Use proxy_engine: universal for a JVM build on this runner.`,
+          "was found outside $HOME, $GITHUB_WORKSPACE, /tmp, $RUNNER_TEMP and write_through:, " +
+          "where a sandboxed command could have replaced it, so a Java step will not trust the " +
+          "proxy. Install a JDK outside those paths (a system package, or RUNNER_TOOL_CACHE " +
+          "pointed outside $HOME), or use proxy_engine: universal.",
       );
     }
     return [];
