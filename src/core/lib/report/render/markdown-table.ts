@@ -10,10 +10,9 @@ const ALIGN_MARKERS: Record<Align, string> = { left: "---", right: "---:", cente
 const alignMarker = (align?: Align): string => ALIGN_MARKERS[align ?? "left"];
 
 /**
- * Neutralizes the structural Markdown in a piece of attacker-influenceable
- * text so it renders as its literal characters. Shared by the table cells and
- * the report heading (the `label` input); see render-report-markdown.ts, which
- * relies on this exact set so the heading stays as safe as the rows.
+ * Neutralizes the structural Markdown in text so it renders as its literal
+ * characters. Shared by the table cells and the report heading (the `label`
+ * input); render-report-markdown.ts relies on this exact set.
  *
  * A cell's text is attacker-chosen (a host comes from an SNI or a Host header),
  * and an unescaped `|` opens as many extra cells as it likes: a blocked host

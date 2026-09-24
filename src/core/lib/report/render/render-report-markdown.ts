@@ -37,8 +37,8 @@ export function renderReportMarkdown(
   // restrict is what a real run normally uses day to day, so its heading
   // stays bare; audit is the occasional, deliberately different mode and
   // says so, the same way the heading below calls out "Audited" vs "Allowed".
-  // escapeCell because title may carry the untrusted `label` input: an
-  // unescaped one could otherwise inject Markdown or a newline into this line.
+  // escapeCell because title may carry the untrusted `label` input: unescaped,
+  // it could inject Markdown or a newline into the heading.
   let markdown = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
 
   // The tables would otherwise read as the whole story.
