@@ -1,6 +1,6 @@
 import { DEFAULT_PORT } from "./url-rules.ts";
 import type { CompiledRule } from "./haproxy-rules.ts";
-import { escapeForHaproxy, hostMatcher, pathMatcher, HOST_ONLY } from "./haproxy-matchers.ts";
+import { escapeForHaproxy, hostMatcher, pathMatcher } from "./haproxy-matchers.ts";
 
 /**
  * Whether this scheme's block refuses every request outright.
@@ -29,23 +29,18 @@ export function ruleBlock(rules: CompiledRule[], mode: string, scheme: "https" |
     return lines;
   }
 
+  // Every host match reads txn.host, set once per request by inspectStage.
   if (rules.some((r) => r.hostMatch === "hostPort")) {
-    // A ~ rule's own regex covers host and port together, so hdr(host) is
+    // A ~ rule's own regex covers host and port together, so the host is
     // stringified with the real port once here for every such rule to match.
-    lines.push(`    http-request set-var-fmt(txn.host_port) %[hdr(host),${HOST_ONLY}]:%[dst_port]`);
+    lines.push("    http-request set-var-fmt(txn.host_port) %[var(txn.host)]:%[dst_port]");
   }
   if (rules.some((r) => r.hostMatch === "hostBareFull")) {
     // A ~ URL rule's port is optional; see haproxy-rules.ts's HostMatch doc comment.
     lines.push(
       `    acl is_default_port dst_port ${DEFAULT_PORT[scheme]}`,
-      `    http-request set-var(txn.host_bare) hdr(host),${HOST_ONLY}`,
-      `    http-request set-var-fmt(txn.host_full) %[hdr(host),${HOST_ONLY}]:%[dst_port]`,
+      "    http-request set-var-fmt(txn.host_full) %[var(txn.host)]:%[dst_port]",
     );
-  }
-
-  if (rules.some((r) => r.hostMatch === "wildcard")) {
-    // One fetch and one regsub for the request, rather than one per rule.
-    lines.push(`    http-request set-var(txn.host) hdr(host),lower,${HOST_ONLY}`);
   }
 
   // Rules naming the same host share one acl, so the name is matched once
@@ -62,7 +57,7 @@ export function ruleBlock(rules: CompiledRule[], mode: string, scheme: "https" |
       lines.push(
         `    http-request set-var(txn.${rule.id}_ok) bool(false)`,
         `    http-request set-var(txn.${rule.id}_ok) bool(true) if is_default_port ` +
-          `{ var(txn.host_bare) -m reg -i ${hostRegex} }`,
+          `{ var(txn.host) -m reg -i ${hostRegex} }`,
         `    http-request set-var(txn.${rule.id}_ok) bool(true) if ` +
           `{ var(txn.host_full) -m reg -i ${hostRegex} }`,
         `    acl ${rule.id}_host var(txn.${rule.id}_ok) -m bool`,
