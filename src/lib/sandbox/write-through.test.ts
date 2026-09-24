@@ -180,7 +180,6 @@ describe("ensureWriteThroughTargetsExist", () => {
     });
 
     expect(calls).toStrictEqual([["sudo", ...asOwner, "mkdir", "-p", "-m", "755", "--", "/a/b/c"]]);
-    // The ancestor's owner decides the identity; the new segments are only checked after.
     expect(statted).toStrictEqual(["/a", "/a/b", "/a/b/c"]);
   });
 
@@ -382,7 +381,6 @@ describe("splitWriteThroughInput", () => {
 
 describe("resolveWriteThroughOnHost", () => {
   const DIR = { uid: 1000, gid: 1000, mode: 0o40755 };
-  // A fake host: a directory per `dirs` entry, a symlink per `links` entry.
   const host = (dirs: string[], links: Record<string, { target: string; uid: number }> = {}) => ({
     exists: (p: string) => p === "/" || dirs.includes(p) || p in links,
     stat: (p: string) => (p in links ? { uid: links[p]!.uid, gid: 0, mode: 0o120777 } : DIR),

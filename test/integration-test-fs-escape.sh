@@ -91,10 +91,8 @@ else
 fi
 echo ""
 
-# A write_through entry that passes through a symlink the runner's uid owns
-# could have been planted by an earlier step, and runc would follow it to mount
-# whatever it points at read-write (here a directory an ephemeral overlay
-# would otherwise keep). The step must fail closed before anything runs.
+# An earlier step could plant a runner-owned symlink under write_through, so an
+# entry through one must fail before the command runs.
 WORKDIR3=$(mktemp -d)
 TARGET3=$(mktemp -d)
 trap 'rm -rf "$WORKDIR" "$WORKDIR2" "$WORKDIR3" "$TARGET3"' EXIT

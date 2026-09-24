@@ -14,7 +14,6 @@ describe("resolveFilesystemPlan", () => {
   // Everything "exists" by default (candidates + write_through targets) unless
   // a test narrows it, which keeps each test focused on the one thing it checks.
   const alwaysExists = () => true;
-  // A plain runner-owned directory, never a symlink, for every path.
   const dirStat = () => ({ uid: 1000, gid: 1000, mode: 0o40755 });
 
   it("returns an empty plan for persistent mode with no write_through:, without touching the filesystem", () => {
@@ -117,7 +116,6 @@ describe("resolveFilesystemPlan", () => {
     });
 
     it("refuses one the runner's uid owns as INVALID_WRITE_THROUGH_PATH, before creating anything", () => {
-      // Planted by an earlier step to reach the overlay-protected $RUNNER_TEMP.
       const deps = link({
         [`${ENV.GITHUB_WORKSPACE}/cache`]: { target: ENV.RUNNER_TEMP, uid: 1000 },
       });
@@ -218,8 +216,6 @@ describe("resolveFilesystemPlan", () => {
   });
 
   it("still reports a missing runner file as missing when its directory sits behind a root-owned symlink", () => {
-    // The walk respells the path, so checking only afterwards would no longer
-    // recognize it and would mkdir a directory where the runner expects its file.
     const envBehindLink = { ...ENV, GITHUB_OUTPUT: "/work/_temp/set_output" };
     const execFile = vi.fn();
     expect.assertions(3);
@@ -256,8 +252,7 @@ describe("resolveFilesystemPlan", () => {
 
   it("wraps any other pre-creation failure as INVALID_WRITE_THROUGH_PATH", () => {
     expect.assertions(2);
-    // Fails only on a path's second look, which is pre-creation's: the first
-    // is the symlink walk ahead of it.
+    // Throws on a path's second lookup (pre-creation); the first is the symlink walk.
     const seen = new Set<string>();
     try {
       resolveFilesystemPlan("ephemeral", "./dist", ENV, {

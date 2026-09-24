@@ -122,18 +122,14 @@ export function resolveFilesystemPlan(
     return { overlayRoots: [], writeThroughPaths, createdDirs: [] };
   }
 
-  // Ahead of the symlink walk, which can respell a runner file's path so it no
-  // longer matches the variable naming it.
   try {
     assertKnownFilesExist(writeThroughPaths, env, deps);
   } catch (e) {
     throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
   }
 
-  // Every check below and the bind mount itself act on the real directory,
-  // not the spelling: runc follows symlinks in both the mount source and its
-  // destination, so a string that passes the guards could otherwise mount
-  // something else entirely.
+  // runc follows symlinks in a mount's source and destination, so everything
+  // below checks and mounts the real path.
   try {
     writeThroughPaths = [
       ...new Set(writeThroughPaths.map((p) => resolveWriteThroughOnHost(p, deps))),
@@ -160,8 +156,6 @@ export function resolveFilesystemPlan(
   try {
     createdDirs = ensureWriteThroughTargetsExist(writeThroughPaths, env, deps);
   } catch (e) {
-    // WriteThroughTargetMissingError can't reach here: assertKnownFilesExist
-    // above has already caught every entry it would.
     if (e instanceof WriteThroughTargetUncreatableError) {
       throw new SandboxError(e.message, "WRITE_THROUGH_TARGET_UNCREATABLE");
     }

@@ -148,7 +148,7 @@ export class WriteThroughTargetMissingError extends Error {}
  *  created (the sudo mkdir itself failed). */
 export class WriteThroughTargetUncreatableError extends Error {}
 
-/** lstat(2)'s view of a path: a symlink is reported as itself, never followed. */
+/** From lstat(2): a symlink is reported as itself. */
 interface StatShape {
   uid: number;
   gid: number;
@@ -168,7 +168,7 @@ export interface CreatedDir {
 }
 
 export interface EnsureWriteThroughTargetsExistOptions {
-  /** True if the path itself exists, a dangling symlink included. */
+  /** A dangling symlink counts as existing. */
   exists?: (path: string) => boolean;
   stat?: (path: string) => StatShape;
   execFile?: (command: string, args: string[]) => void;
@@ -210,18 +210,13 @@ function defaultExecFile(command: string, args: string[]): void {
 }
 /* v8 ignore stop */
 
-/** Enough for any real symlink chain; a loop hits it rather than spinning. */
 const MAX_SYMLINK_HOPS = 40;
 
 /**
- * Resolve every symlink along a resolved write_through path, so the checks and
- * the bind mount that follow act on the directory that is really there rather
- * than on a spelling of it. Only root-owned symlinks are followed: every other
- * one could have been planted by an earlier step, since steps share the
- * runner's uid, and following it would make whatever it points at writable
- * (the runner's $GITHUB_ENV under an ephemeral overlay, the host's /proc).
- * Components that don't exist yet are kept as written, for
- * ensureWriteThroughTargetsExist to create.
+ * Resolve the symlinks along a write_through path, so the checks and the bind
+ * mount act on the real directory. Only root-owned symlinks are followed: steps
+ * share the runner's uid, so any other could have been planted by an earlier
+ * step to make its target writable. Missing components are kept as written.
  */
 export function resolveWriteThroughOnHost(
   path: string,
@@ -242,8 +237,7 @@ export function resolveWriteThroughOnHost(
       continue;
     }
     const next = join(current, name);
-    // Missing, so nothing below it can be a symlink yet; a ".." in a link
-    // target still walks back up into components that do exist.
+    // Keep walking: a ".." from a link target can climb back to existing components.
     if (!exists(next)) {
       current = next;
       continue;
@@ -269,8 +263,6 @@ export function resolveWriteThroughOnHost(
     pending.unshift(...target.split("/").filter((c) => c !== ""));
     if (isAbsolute(target)) current = "/";
   }
-  // Only a symlink can get here: resolveWriteThroughEntry already refused a
-  // spelling of "/" that wasn't the literal sentinel.
   if (current === "/") {
     throw new Error(
       `write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a ` +
@@ -300,12 +292,9 @@ function pathSegmentsBetween(ancestor: string, descendant: string): string[] {
 }
 
 /**
- * Throw WriteThroughTargetMissingError for an entry naming one of
- * KNOWN_FILE_VARS' current values that doesn't exist: the runner was supposed
- * to have created it, so something is wrong with the environment, and
- * creating a directory in its place would only hide that. resolveFilesystemPlan
- * calls this before resolveWriteThroughOnHost, which can respell the path so it
- * no longer matches the variable's value.
+ * The runner creates KNOWN_FILE_VARS' files itself, so a missing one is a
+ * broken environment, not a directory to create. Takes the paths as written:
+ * resolveWriteThroughOnHost can respell one so it no longer matches its variable.
  */
 export function assertKnownFilesExist(
   paths: string[],
@@ -339,9 +328,8 @@ export function assertKnownFilesExist(
  *   exactly as restricted as naming the existing /etc directly would have.
  * Must run before the scratch dir's `mount --rbind /` snapshot (i.e. before
  * runIsolated()), same timing constraint as the overlay upper/work dirs.
- * Takes paths already through resolveWriteThroughOnHost: an ancestor reached
- * through a symlink would lend the new directory the owner of whatever the
- * link points at, root included.
+ * Takes paths from resolveWriteThroughOnHost: a symlinked ancestor would lend
+ * the new directory its target's owner, root included.
  *
  * Running as the owner rather than as root is what makes this safe against a
  * concurrent step: steps can run in parallel, share the runner's uid, and can
@@ -403,8 +391,7 @@ export function ensureWriteThroughTargetsExist(
 
     try {
       const { uid, gid, mode } = stat(ancestor);
-      // resolveWriteThroughOnHost left no symlink on the way here; one now
-      // means the path changed since.
+      // Not a directory means the path changed after resolveWriteThroughOnHost.
       if ((mode & S_IFMT) !== S_IFDIR) {
         throw new Error(`${JSON.stringify(ancestor)} is not a directory.`);
       }
@@ -420,8 +407,7 @@ export function ensureWriteThroughTargetsExist(
       // on the way gets mkdir's own permissions, which the ancestor still gates.
       const modeOctal = (mode & 0o7777).toString(8);
       execFile("sudo", [...asOwner({ uid, gid }), "mkdir", "-p", "-m", modeOctal, "--", path]);
-      // Recorded only once each is seen to be a directory of the owner's: the
-      // later rmdir runs as that owner and must not act on anything else.
+      // The later rmdir runs as this owner, so record only its own directories.
       const segments = pathSegmentsBetween(ancestor, path);
       for (const segment of segments) {
         const s = stat(segment);
