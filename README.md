@@ -536,7 +536,8 @@ reported as blocked; see
   a JVM already on the runner is handled: the CA is added to a copy of its
   `$JAVA_HOME/lib/security/cacerts` for the step. Two cases fall back to `proxy_engine: universal`: a
   keystore sealed with a non-default password, which the runner's `keytool` cannot rewrite, and a
-  runner with no `keytool` at all.
+  runner with no `keytool` outside the paths a sandboxed command can write to (a JDK installed under
+  `$HOME`, say, with none in `/usr` or the tool cache).
 - `audit` terminates TLS as well. It drops the rules, not the interception, so a tool that cannot
   accept the CA fails in `audit` exactly as it would in `restrict`. `universal`'s audit mode
   decrypts nothing and breaks nothing.

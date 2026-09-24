@@ -175,6 +175,11 @@ sandbox down, so what it runs is kept out of those paths:
   `$PATH` only inside those paths. The post step pins them again. `sudo` runs with only the system
   directories on its `PATH`, which is what it resolves the commands it runs against when sudoers
   sets no `secure_path`.
+- Under `inspect`, `keytool`, which adds the CA to a copy of each JVM keystore, is pinned the same
+  way, trying `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so a
+  `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` meant for the command does not run outside the sandbox. With
+  no such `keytool`, the keystores are left alone and the step warns. The `java` whose keystore is
+  injected is located by following its symlinks, never run.
 - The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins,
   and this action's own checkout, which holds the post step's script, are read-only inside the
   sandbox, unless `write_through:` names the directory itself or `uses: ./` makes the checkout the
@@ -446,8 +451,8 @@ TLS is terminated, so a tool that pins a certificate, or ships a bundled trust s
 the system update, will not work. The JVM (Java, Kotlin, Scala) reads only its own keystore rather
 than the CA-trust variables; a JVM already on the runner is handled by injecting into a copy of that
 keystore with the runner's own `keytool`, but a keystore under a non-default password, or a runner
-without `keytool`, falls back to `universal`. See [Limitations](../README.md#limitations) for the
-rest of the compatibility picture.
+whose only `keytool` is somewhere a sandboxed command can write, falls back to `universal`. See
+[Limitations](../README.md#limitations) for the rest of the compatibility picture.
 
 `audit` is not a passive observer here either. TLS is terminated in both modes, so a tool that
 cannot accept the CA fails under `audit` exactly as it would under `restrict`. What `audit` drops is
@@ -574,8 +579,8 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 
   That decides how the step is set up. Wrapping every untrusted step is not the way out: a payload
   left in `$GITHUB_ENV`, `$GITHUB_PATH` or `$HOME` runs in the next step before its sandbox does.
-  This action's own `sudo` and `docker` are pinned out of reach, but `java` and `keytool` (under
-  `inspect`) are not, and every process inherits the environment. Making it the last step in the
+  This action's own `sudo`, `docker` and `keytool` (under `inspect`) are pinned out of reach, but
+  every process inherits the environment, this action's own included. Making it the last step in the
   job does not close it off either: every action's post step, this one's included, runs after the last
   step, with whatever it left in `$GITHUB_ENV`, `$GITHUB_PATH` and `$HOME`. What holds is
   `filesystem_mode: ephemeral` with `write_through:` narrowed to `$GITHUB_WORKSPACE` and the output

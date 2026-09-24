@@ -216,22 +216,28 @@ describe("extractCaCert", () => {
 });
 
 describe("discoverJvmKeystores", () => {
-  // javaHome stubbed off so the real one never spawns java on the test machine.
-  const at = (paths: string[]): CaTrustDeps => ({
+  const at = (paths: string[], links: Record<string, string> = {}): CaTrustDeps => ({
     exists: (p) => paths.includes(p),
-    realpath: (p) => p,
-    javaHome: () => undefined,
+    realpath: (p) => links[p] ?? p,
   });
 
   it("finds cacerts under JAVA_HOME", () => {
     expect(
-      discoverJvmKeystores({ JAVA_HOME: "/opt/java" }, at(["/opt/java/lib/security/cacerts"])),
+      discoverJvmKeystores(
+        { JAVA_HOME: "/opt/java" },
+        undefined,
+        at(["/opt/java/lib/security/cacerts"]),
+      ),
     ).toEqual(["/opt/java/lib/security/cacerts"]);
   });
 
   it("finds a JDK 8's jre/lib/security cacerts", () => {
     expect(
-      discoverJvmKeystores({ JAVA_HOME: "/opt/jdk8" }, at(["/opt/jdk8/jre/lib/security/cacerts"])),
+      discoverJvmKeystores(
+        { JAVA_HOME: "/opt/jdk8" },
+        undefined,
+        at(["/opt/jdk8/jre/lib/security/cacerts"]),
+      ),
     ).toEqual(["/opt/jdk8/jre/lib/security/cacerts"]);
   });
 
@@ -241,15 +247,37 @@ describe("discoverJvmKeystores", () => {
     expect(
       discoverJvmKeystores(
         { JAVA_HOME: "/opt/java" },
+        undefined,
         at([`${dir}/cacerts`, `${dir}/jssecacerts`]),
       ),
     ).toEqual([`${dir}/jssecacerts`, `${dir}/cacerts`]);
   });
 
   it("falls back to the known fixed directories when JAVA_HOME is unset", () => {
-    expect(discoverJvmKeystores({}, at(["/etc/pki/java/cacerts"]))).toEqual([
+    expect(discoverJvmKeystores({}, undefined, at(["/etc/pki/java/cacerts"]))).toEqual([
       "/etc/pki/java/cacerts",
     ]);
+  });
+
+  // The java PATH resolves need not be the one JAVA_HOME names.
+  it("finds the keystore of the java on PATH through its symlinks, ahead of JAVA_HOME's", () => {
+    const jdk = "/usr/lib/jvm/temurin-21-jdk-amd64";
+    expect(
+      discoverJvmKeystores(
+        { JAVA_HOME: "/opt/java" },
+        "/usr/bin/java",
+        at([`${jdk}/lib/security/cacerts`, "/opt/java/lib/security/cacerts"], {
+          "/usr/bin/java": `${jdk}/bin/java`,
+        }),
+      ),
+    ).toEqual([`${jdk}/lib/security/cacerts`, "/opt/java/lib/security/cacerts"]);
+  });
+
+  // A JDK 8's bin/java sits above the jre/ its java.home names.
+  it("finds a JDK 8's keystore from the java on PATH", () => {
+    expect(
+      discoverJvmKeystores({}, "/opt/jdk8/bin/java", at(["/opt/jdk8/jre/lib/security/cacerts"])),
+    ).toEqual(["/opt/jdk8/jre/lib/security/cacerts"]);
   });
 
   // JAVA_HOME's cacerts symlinked to a fixed path is one keystore, not two.
@@ -258,35 +286,32 @@ describe("discoverJvmKeystores", () => {
     expect(
       discoverJvmKeystores(
         { JAVA_HOME: "/opt/java" },
-        {
-          exists: (p) => p === "/opt/java/lib/security/cacerts" || p === real,
-          realpath: (p) => (p === "/opt/java/lib/security/cacerts" ? real : p),
-          javaHome: () => undefined,
-        },
+        undefined,
+        at(["/opt/java/lib/security/cacerts", real], { "/opt/java/lib/security/cacerts": real }),
       ),
     ).toEqual([real]);
   });
 
   it("finds nothing when there is no keystore", () => {
-    expect(discoverJvmKeystores({ JAVA_HOME: "/opt/java" }, at([]))).toEqual([]);
+    expect(discoverJvmKeystores({ JAVA_HOME: "/opt/java" }, undefined, at([]))).toEqual([]);
   });
 });
 
 describe("writeJvmKeystoreFiles", () => {
   const CA = "/scratch/proxy-ca.pem";
+  const KEYTOOL = "/opt/java/bin/keytool";
 
   function harness(keystores: string[], failKeytool = false) {
     const copies: [string, string][] = [];
-    const exec: [string, string[]][] = [];
+    const exec: [string, string[], NodeJS.ProcessEnv | undefined][] = [];
     const warnings: string[] = [];
     const deps: CaTrustDeps = {
       exists: (p) => keystores.includes(p),
       realpath: (p) => p,
-      javaHome: () => undefined,
       copyFile: (source, destination) => copies.push([source, destination]),
       chmod: () => {},
-      exec: (command, args) => {
-        exec.push([command, args]);
+      exec: (command, args, env) => {
+        exec.push([command, args, env]);
         if (failKeytool) throw new Error("keytool failed");
       },
       warn: (message) => warnings.push(message),
@@ -294,16 +319,22 @@ describe("writeJvmKeystoreFiles", () => {
     return { deps, copies, exec, warnings };
   }
 
-  it("copies each keystore and imports the CA with the runner's keytool, returning the mounts", () => {
+  it("copies each keystore and imports the CA with the pinned keytool, returning the mounts", () => {
     const ks = "/opt/java/lib/security/cacerts";
     const { deps, copies, exec } = harness([ks]);
 
-    const result = writeJvmKeystoreFiles(CA, "/scratch", { JAVA_HOME: "/opt/java" }, deps);
+    const result = writeJvmKeystoreFiles(
+      CA,
+      "/scratch",
+      { JAVA_HOME: "/opt/java" },
+      { java: undefined, keytool: KEYTOOL },
+      deps,
+    );
 
     expect(copies).toEqual([[ks, "/scratch/jvm-keystore-0"]]);
     expect(exec).toEqual([
       [
-        "/opt/java/bin/keytool",
+        KEYTOOL,
         [
           "-importcert",
           "-noprompt",
@@ -316,47 +347,74 @@ describe("writeJvmKeystoreFiles", () => {
           "-storepass",
           "changeit",
         ],
+        {},
       ],
     ]);
     expect(result).toEqual([{ path: "/scratch/jvm-keystore-0", destination: ks }]);
   });
 
-  it("uses keytool on PATH when JAVA_HOME is unset", () => {
-    const { deps, exec } = harness(["/etc/pki/java/cacerts"]);
-    writeJvmKeystoreFiles(CA, "/scratch", {}, deps);
-    expect(exec[0][0]).toBe("keytool");
+  // JAVA_TOOL_OPTIONS=-javaagent:... would otherwise run outside the sandbox.
+  it("runs keytool without the step's environment", () => {
+    const { deps, exec } = harness(["/opt/java/lib/security/cacerts"]);
+    writeJvmKeystoreFiles(
+      CA,
+      "/scratch",
+      { JAVA_HOME: "/opt/java", JAVA_TOOL_OPTIONS: "-javaagent:/home/runner/a.jar" },
+      { java: undefined, keytool: KEYTOOL },
+      deps,
+    );
+    expect(exec[0][2]).toEqual({});
   });
 
   it("skips a keystore keytool cannot rewrite, warns, and leaves it out of the mounts", () => {
     const { deps, warnings } = harness(["/opt/java/lib/security/cacerts"], true);
-    expect(writeJvmKeystoreFiles(CA, "/scratch", { JAVA_HOME: "/opt/java" }, deps)).toEqual([]);
+    expect(
+      writeJvmKeystoreFiles(
+        CA,
+        "/scratch",
+        { JAVA_HOME: "/opt/java" },
+        { java: undefined, keytool: KEYTOOL },
+        deps,
+      ),
+    ).toEqual([]);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("/opt/java/lib/security/cacerts");
     expect(warnings[0]).toContain("proxy_engine: universal");
   });
 
-  it("returns nothing when the runner has no JVM keystore", () => {
-    const { deps } = harness([]);
-    expect(writeJvmKeystoreFiles(CA, "/scratch", { JAVA_HOME: "/opt/java" }, deps)).toEqual([]);
+  it("skips every keystore and warns once when there is no pinnable keytool", () => {
+    const keystores = ["/opt/java/lib/security/cacerts", "/etc/pki/java/cacerts"];
+    const { deps, exec, copies, warnings } = harness(keystores);
+    expect(
+      writeJvmKeystoreFiles(
+        CA,
+        "/scratch",
+        { JAVA_HOME: "/opt/java" },
+        { java: undefined, keytool: undefined },
+        deps,
+      ),
+    ).toEqual([]);
+    expect(exec).toEqual([]);
+    expect(copies).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(keystores.join(", "));
+    expect(warnings[0]).toContain("proxy_engine: universal");
   });
 
-  // The java PATH resolves need not be the one JAVA_HOME names; its own keystore
-  // is found through java.home even when JAVA_HOME is unset.
-  it("finds the keystore of the java on PATH via java.home", () => {
-    const { deps, exec } = harness(["/opt/actual-jdk/lib/security/cacerts"]);
-    const result = writeJvmKeystoreFiles(
-      CA,
-      "/scratch",
-      {},
-      {
-        ...deps,
-        javaHome: () => "/opt/actual-jdk",
-      },
-    );
-    expect(result).toEqual([
-      { path: "/scratch/jvm-keystore-0", destination: "/opt/actual-jdk/lib/security/cacerts" },
-    ]);
-    expect(exec[0][0]).toBe("keytool");
+  it("returns nothing, and does not warn, when the runner has no JVM keystore", () => {
+    for (const keytool of [KEYTOOL, undefined]) {
+      const { deps, warnings } = harness([]);
+      expect(
+        writeJvmKeystoreFiles(
+          CA,
+          "/scratch",
+          { JAVA_HOME: "/opt/java" },
+          { java: undefined, keytool },
+          deps,
+        ),
+      ).toEqual([]);
+      expect(warnings).toEqual([]);
+    }
   });
 });
 

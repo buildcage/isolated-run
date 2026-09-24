@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   dockerConfigDir,
   findPinnableCommand,
+  jvmTools,
   persistingWritablePaths,
   pinHostCommands,
   pinningPaths,
@@ -163,6 +164,53 @@ describe("withRealPaths", () => {
     const real = (p: string) => (p === HOME ? "/data/runner" : p);
 
     expect(withRealPaths([HOME, "/tmp"], real)).toStrictEqual([HOME, "/tmp", "/data/runner"]);
+  });
+});
+
+describe("jvmTools", () => {
+  const JDK = "/usr/lib/jvm/temurin-21-jdk-amd64";
+
+  it("takes JAVA_HOME's keytool and the first java on PATH", () => {
+    const env = { JAVA_HOME: JDK, PATH: "/opt/other/bin:/usr/bin" };
+    expect(
+      jvmTools(
+        env,
+        PERSISTENT,
+        host([`${JDK}/bin/keytool`, "/opt/other/bin/java", "/usr/bin/java", "/usr/bin/keytool"]),
+      ),
+    ).toStrictEqual({ java: "/opt/other/bin/java", keytool: `${JDK}/bin/keytool` });
+  });
+
+  // java is only located, so a JDK under $HOME (sdkman, say) still counts.
+  it("takes a java under a persisting path, but never such a keytool", () => {
+    const sdk = `${HOME}/.sdkman/candidates/java/current`;
+    expect(
+      jvmTools(
+        { JAVA_HOME: sdk, PATH: `${HOME}/.local/bin:${sdk}/bin` },
+        PERSISTENT,
+        host([`${HOME}/.local/bin/java`, `${HOME}/.local/bin/keytool`, `${sdk}/bin/keytool`]),
+      ),
+    ).toStrictEqual({ java: `${HOME}/.local/bin/java`, keytool: undefined });
+  });
+
+  it("falls back to PATH's keytool when JAVA_HOME's is unpinnable or JAVA_HOME is unset", () => {
+    const path = `${HOME}/.local/bin:/usr/bin`;
+    const deps = host([
+      `${HOME}/jdk/bin/keytool`,
+      `${HOME}/.local/bin/keytool`,
+      "/usr/bin/keytool",
+    ]);
+    expect(jvmTools({ JAVA_HOME: `${HOME}/jdk`, PATH: path }, PERSISTENT, deps).keytool).toBe(
+      "/usr/bin/keytool",
+    );
+    expect(jvmTools({ PATH: path }, PERSISTENT, deps).keytool).toBe("/usr/bin/keytool");
+  });
+
+  it("finds neither on a runner without a JDK", () => {
+    expect(jvmTools({ PATH: "/usr/bin" }, PERSISTENT, host([]))).toStrictEqual({
+      java: undefined,
+      keytool: undefined,
+    });
   });
 });
 

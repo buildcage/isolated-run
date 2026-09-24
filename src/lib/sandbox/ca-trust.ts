@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   readFileSync,
   writeFileSync,
@@ -7,7 +7,7 @@ import {
   copyFileSync,
   realpathSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 import type { MountEntry } from "./types.ts";
 import { hostCommand } from "./pinned-commands.ts";
@@ -75,22 +75,22 @@ export const SYSTEM_CA_CANDIDATES = [
 export const OWN_CA_DESTINATION = "/etc/buildcage-ca.pem";
 
 export interface CaTrustDeps {
-  exec?: (command: string, args: string[]) => void;
+  /** `env` replaces the inherited environment when given. */
+  exec?: (command: string, args: string[], env?: NodeJS.ProcessEnv) => void;
   readFile?: (path: string) => string;
   writeFile?: (path: string, contents: string, mode: number) => void;
   exists?: (path: string) => boolean;
   chmod?: (path: string, mode: number) => void;
   copyFile?: (source: string, destination: string) => void;
   realpath?: (path: string) => string;
-  javaHome?: (env: NodeJS.ProcessEnv) => string | undefined;
   warn?: (message: string) => void;
 }
 
 // Untested by design: the defaults behind this module's seams, which only hand
 // node:fs and node:child_process what the tested caller decided.
 /* v8 ignore start */
-function defaultExec(command: string, args: string[]): void {
-  execFileSync(hostCommand(command), args);
+function defaultExec(command: string, args: string[], env?: NodeJS.ProcessEnv): void {
+  execFileSync(hostCommand(command), args, { env });
 }
 
 function defaultReadFile(path: string): string {
@@ -99,19 +99,6 @@ function defaultReadFile(path: string): string {
 
 function defaultWriteFile(path: string, contents: string, mode: number): void {
   writeFileSync(path, contents, { mode });
-}
-
-// Ask the java that PATH resolves for its own java.home, so the keystore of the
-// JVM the step will actually run is found even when it is not the one JAVA_HOME
-// names (or JAVA_HOME is unset). -XshowSettings writes the properties to stderr;
-// no java, or none that prints one, leaves it to JAVA_HOME and the fixed paths.
-function defaultJavaHome(env: NodeJS.ProcessEnv): string | undefined {
-  const result = spawnSync("java", ["-XshowSettings:properties", "-version"], {
-    encoding: "utf8",
-    env,
-  });
-  const match = `${result.stdout ?? ""}${result.stderr ?? ""}`.match(/java\.home\s*=\s*(.+)/);
-  return match ? match[1].trim() : undefined;
 }
 /* v8 ignore stop */
 
@@ -187,28 +174,38 @@ const KNOWN_JVM_KEYSTORE_DIRS = [
 // with one the keystore already uses.
 const JVM_KEYSTORE_ALIAS = "buildcage-proxy-ca";
 
+/** The host binaries writeJvmKeystoreFiles uses; see jvmTools. */
+export interface JvmTools {
+  java: string | undefined;
+  keytool: string | undefined;
+}
+
+// The JDK 9+ lib/security and a JDK 8's jre/lib/security.
+function keystoreDirsOf(home: string): string[] {
+  return [join(home, "lib", "security"), join(home, "jre", "lib", "security")];
+}
+
 /**
  * Find the JVM keystores on the runner: the keystore of the java PATH actually
- * resolves (its java.home, which mvn/gradle/java read and which need not be the
- * one JAVA_HOME names), then JAVA_HOME (the JDK 9+ lib/security and a JDK 8's
- * jre/lib/security, for a tool that goes by JAVA_HOME instead), then the known
- * fixed directories. Each is resolved and deduplicated so a keystore reachable
- * by more than one path is injected into once.
+ * resolves (which mvn/gradle/java read and which need not be the one JAVA_HOME
+ * names), then JAVA_HOME's (for a tool that goes by JAVA_HOME instead), then
+ * the known fixed directories. Each is resolved and deduplicated so a keystore
+ * reachable by more than one path is injected into once.
+ *
+ * The java's home is the directory above the bin/ its symlinks end in, read
+ * off the filesystem rather than asked of the java, which would run a binary
+ * an earlier sandboxed step may have planted. A wrapper script (an asdf or
+ * jenv shim) resolves to the wrong place and leaves it to JAVA_HOME and the
+ * fixed paths.
  */
 export function discoverJvmKeystores(
   env: NodeJS.ProcessEnv,
-  { exists = existsSync, realpath = realpathSync, javaHome = defaultJavaHome }: CaTrustDeps = {},
+  java: string | undefined,
+  { exists = existsSync, realpath = realpathSync }: CaTrustDeps = {},
 ): string[] {
   const dirs: string[] = [];
-  // java.home already is the JRE for a JDK 8, so lib/security covers both shapes.
-  const home = javaHome(env);
-  if (home) dirs.push(join(home, "lib", "security"));
-  if (env.JAVA_HOME) {
-    dirs.push(
-      join(env.JAVA_HOME, "lib", "security"),
-      join(env.JAVA_HOME, "jre", "lib", "security"),
-    );
-  }
+  if (java) dirs.push(...keystoreDirsOf(dirname(dirname(realpath(java)))));
+  if (env.JAVA_HOME) dirs.push(...keystoreDirsOf(env.JAVA_HOME));
   dirs.push(...KNOWN_JVM_KEYSTORE_DIRS);
 
   const found: string[] = [];
@@ -231,44 +228,61 @@ export function discoverJvmKeystores(
  * scratch directory), and return each copy with the keystore it stands in for,
  * for caTrustAdditions to mount over. The copy is made and rewritten with the
  * runner's own keytool, so its output is one that JVM will trust as its cacerts;
- * the real keystore is only read, never written. A keystore keytool cannot
- * rewrite (an unusual password, say) is skipped, so the step's JVM does not
- * trust the CA rather than the step failing.
+ * the real keystore is only read, never written. keytool runs with an empty
+ * environment, so a JAVA_TOOL_OPTIONS or LD_PRELOAD meant for the step's own
+ * process does not run outside the sandbox with it. A keystore keytool cannot
+ * rewrite (an unusual password, say), or every keystore when there is no
+ * pinnable keytool, is skipped, so the step's JVM does not trust the CA rather
+ * than the step failing.
  */
 export function writeJvmKeystoreFiles(
   caCertPath: string,
   dir: string,
   env: NodeJS.ProcessEnv,
+  { java, keytool }: JvmTools,
   {
     exec = defaultExec,
     exists = existsSync,
     realpath = realpathSync,
     copyFile = copyFileSync,
     chmod = chmodSync,
-    javaHome = defaultJavaHome,
     warn,
   }: CaTrustDeps = {},
 ): CaTrustFiles["jvmKeystores"] {
-  const keytool = env.JAVA_HOME ? join(env.JAVA_HOME, "bin", "keytool") : "keytool";
-  const injected: CaTrustFiles["jvmKeystores"] = [];
+  const keystores = discoverJvmKeystores(env, java, { exists, realpath });
+  if (!keytool) {
+    if (keystores.length > 0) {
+      warn?.(
+        `could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): no keytool ` +
+          `was found outside the paths a sandboxed command can write to. A Java step will not ` +
+          `trust it. Use proxy_engine: universal for a JVM build on this runner.`,
+      );
+    }
+    return [];
+  }
 
-  discoverJvmKeystores(env, { exists, realpath, javaHome }).forEach((keystore, i) => {
+  const injected: CaTrustFiles["jvmKeystores"] = [];
+  keystores.forEach((keystore, i) => {
     const copy = join(dir, `jvm-keystore-${i}`);
     try {
       copyFile(keystore, copy);
       chmod(copy, 0o644);
-      exec(keytool, [
-        "-importcert",
-        "-noprompt",
-        "-alias",
-        JVM_KEYSTORE_ALIAS,
-        "-file",
-        caCertPath,
-        "-keystore",
-        copy,
-        "-storepass",
-        "changeit",
-      ]);
+      exec(
+        keytool,
+        [
+          "-importcert",
+          "-noprompt",
+          "-alias",
+          JVM_KEYSTORE_ALIAS,
+          "-file",
+          caCertPath,
+          "-keystore",
+          copy,
+          "-storepass",
+          "changeit",
+        ],
+        {},
+      );
     } catch {
       // The copy or keytool failed (a non-default store password, say). Say so,
       // since the only other sign is an opaque TLS error from the step's JVM.
