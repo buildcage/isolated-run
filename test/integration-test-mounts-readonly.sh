@@ -1,18 +1,11 @@
 #!/bin/bash
-# Verifies that a real mount which is not itself a writable exception is
-# visible inside the sandbox but forced read-only, by driving dist/main.cjs
+# Verifies how the sandbox treats real host mounts, by driving dist/main.cjs
 # directly, without the real action wrapper; see test-e2e.yml's
-# test_sandbox_enforcement for the one case that does. Two mounts, one sandbox:
-# they are the same property seen from two directions, and a start is not
-# cheap.
+# test_sandbox_enforcement for the one case that does. Two mounts, one sandbox,
+# since a start is not cheap.
 #
-# The first is a bind mount nested under $GITHUB_WORKSPACE. The writable
-# guarantee covers the exception paths themselves
-# (workdir/home/tmp/RUNNER_TEMP/write_through:), not everything mounted under
-# them: computeReadonlyHostMounts checks protectedPaths by exact match, not
-# by prefix, and this is the regression guard against that becoming a prefix
-# match. Ordinary files and directories under workdir, which are not separate
-# mount points, are integration-test-defaults.sh's business instead.
+# The first is a bind mount nested under $GITHUB_WORKSPACE. A writable path
+# stays writable all the way down, separate mounts under it included.
 #
 # The second is a pseudo-filesystem that is not among runc's own default
 # base-spec mounts (see freshMountDestinationsFrom in sandbox/oci-mounts.ts),
@@ -61,10 +54,10 @@ if [ ! -d \"\$mp\" ]; then
   echo 'UNEXPECTED: nested mount point not visible in sandbox'
   rc=1
 elif echo x > \"\$mp/.buildcage-nested-mount-test\" 2>/dev/null; then
-  echo 'UNEXPECTED: nested mount under workdir was writable'
-  rc=1
+  echo 'OK: nested mount under workdir is visible and writable'
 else
-  echo 'OK: nested mount under workdir is visible and read-only'
+  echo 'UNEXPECTED: nested mount under workdir was not writable'
+  rc=1
 fi
 
 mp='$SECURITYFS_MOUNT'
@@ -97,10 +90,10 @@ echo ""
 # The step's exit status is the two checks and-ed together, so it is the
 # verdict; the UNEXPECTED line above says which one gave way.
 if [ "$CODE" = "0" ]; then
-  echo "  PASS  a real mount nested under workdir is visible but forced read-only"
+  echo "  PASS  a real mount nested under workdir is visible and writable"
   echo "  PASS  a real securityfs mount not among runc's own default mounts is forced read-only"
 else
-  echo "  FAIL  a mount that is not a writable exception was not read-only (exit $CODE)"
+  echo "  FAIL  a nested mount was not writable, or a mount outside every writable path was not read-only (exit $CODE)"
   exit 1
 fi
 echo ""

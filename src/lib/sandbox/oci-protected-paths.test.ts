@@ -28,13 +28,20 @@ describe("computeReadonlyHostMounts", () => {
     expect(!result.includes("/proc")).toBeTruthy();
   });
 
-  it("excludes explicitly protected (writable) paths", () => {
+  it("excludes writable paths and the mounts nested under them", () => {
     const result = computeReadonlyHostMounts(hostMounts, new Set(["/run"]), freshMountDestinations);
-    expect(!result.includes("/run")).toBeTruthy();
-    expect(
-      result.includes("/run/user/1000"),
-      "a nested mount under a protected path is still its own separate mount point",
-    ).toBeTruthy();
+    expect(result).not.toContain("/run");
+    expect(result).not.toContain("/run/user/1000");
+    expect(result).toContain("/mnt");
+  });
+
+  it("compares path components, so a sibling sharing a prefix stays read-only", () => {
+    const result = computeReadonlyHostMounts(
+      [...hostMounts, { mountPoint: "/runner", fsType: "ext4" }],
+      new Set(["/run"]),
+      freshMountDestinations,
+    );
+    expect(result).toContain("/runner");
   });
 
   it("includes real, non-pseudo, non-protected host mounts (e.g. a separate disk at /mnt)", () => {
