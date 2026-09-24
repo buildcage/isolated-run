@@ -67,7 +67,8 @@ export function computeReadonlyHostMounts(
       ({ mountPoint }) =>
         mountPoint !== "/" &&
         !freshMountDestinations.has(mountPoint) &&
-        !protectedPaths.has(mountPoint),
+        // A mount under a writable path is part of what was asked to be writable.
+        ![...protectedPaths].some((p) => isAtOrUnder(mountPoint, p)),
     )
     .map(({ mountPoint }) => mountPoint);
 }

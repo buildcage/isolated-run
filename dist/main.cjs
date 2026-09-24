@@ -19496,7 +19496,7 @@ var extra_masked_proc_paths_default = [
 //#region src/lib/sandbox/oci-protected-paths.ts
 const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"];
 function computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinations) {
-	return hostMounts.filter(({ mountPoint }) => mountPoint !== "/" && !freshMountDestinations.has(mountPoint) && !protectedPaths.has(mountPoint)).map(({ mountPoint }) => mountPoint);
+	return hostMounts.filter(({ mountPoint }) => mountPoint !== "/" && !freshMountDestinations.has(mountPoint) && ![...protectedPaths].some((p) => isAtOrUnder(mountPoint, p))).map(({ mountPoint }) => mountPoint);
 }
 function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, uid, env, hostMounts, writablePaths, freshMountDestinations, disableReadonly }) {
 	let reExposed = (p) => [...writablePaths].some((w) => isAtOrUnder(p, w)), extraMaskedHostPaths = [
