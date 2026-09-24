@@ -145,11 +145,11 @@ cleanup() {
   # filesystem, still live, so it's worth surfacing even though
   # sandbox/scratch-dir.ts's withScratchDir has its own safety net before it
   # recursively deletes this directory.
-  UMOUNT_ERR_FILE="/tmp/.buildcage-umount-err.$$"
-  umount -R "$ROOTFS_BIND_DIR" >/dev/null 2>"$UMOUNT_ERR_FILE" || {
-    echo "WARNING: failed to unmount ${ROOTFS_BIND_DIR}: $(cat "$UMOUNT_ERR_FILE" 2>/dev/null)" >&2
-  }
-  rm -f "$UMOUNT_ERR_FILE"
+  # Captured, not redirected to a file: /tmp is the sandbox's, and a root
+  # redirect there would follow a symlink it planted.
+  if ! UMOUNT_ERR=$(umount -R "$ROOTFS_BIND_DIR" 2>&1 >/dev/null); then
+    echo "WARNING: failed to unmount ${ROOTFS_BIND_DIR}: ${UMOUNT_ERR}" >&2
+  fi
   # The proxy-side veth end (renamed to "buildcage0" below) lives in the
   # long-lived proxy container's netns, so it must be explicitly removed.
   # Unlike the target-side end (torn down for free when the sandbox netns
