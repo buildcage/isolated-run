@@ -331,8 +331,7 @@ function parseProxyLine(line: string, isAudit: boolean): TrafficEvent | null {
     // handshake to fail and phase `C` is only a connection that was not made.
     // It reads no request either, hence the method it could never log.
     const reason = isRefusal(pass[4]) ? reasonFor(pass[5], pass[4], undefined, "-") : undefined;
-    // The proxy logs an SNI only when a tls rule judged it; under an ip rule
-    // the address is the only identity the connection has.
+    // Only a tls rule's passthrough logs an SNI; otherwise the address names it.
     const sni = pass[8];
     const event: TrafficEvent = {
       time: Number(pass[1]) / 1000,

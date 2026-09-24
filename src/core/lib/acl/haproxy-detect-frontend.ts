@@ -90,9 +90,8 @@ export function detectFrontend(spec: DetectFrontendSpec): string[] {
       "",
       // One line per rule, for the same word-limit reason as ruleBlock's deny.
       ...conds.map((cond) => `    tcp-request content set-var(txn.pass) int(1) if ${cond}`),
-      // Logged only when a tls rule judged the name: under an ip rule the SNI
-      // is whatever the client claims, and the address is the identity.
-      // Reduced to a safe charset, being attacker-controlled.
+      // Only a tls rule judges the name; under an ip rule the SNI is just the
+      // client's claim. Reduced to a safe charset, being attacker-controlled.
       ...tlsConds.map(
         (cond) =>
           `    tcp-request content set-var(txn.sni) req.ssl_sni,regsub([^A-Za-z0-9._-],_,g) if ${cond}`,
