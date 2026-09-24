@@ -105,7 +105,8 @@ export interface RunSandboxedCommandOptions {
   /** filesystem_mode: ephemeral only; already folded (determineOverlayRoots), not raw candidates. */
   overlayRoots: string[];
   /** Where this module's own warnings go: a scratch dir that would not
-   *  unmount, and the environment variables a shell cannot export. Passed in
+   *  unmount, the environment variables a shell cannot export, and NSS not
+   *  answering the primary group check. Passed in
    *  rather than chosen here: which emitter those land on is the caller's
    *  decision, not the sandbox's. */
   warn: Warn;
@@ -218,9 +219,16 @@ function writeBundleFiles(
  */
 function resolveIdentity(
   env: NodeJS.ProcessEnv,
+  warn: Warn,
   { resolveSandboxGid, info }: RunSandboxedCommandDeps,
 ): SandboxIdentity {
-  const { gid, substitutedFrom } = resolveSandboxGid(process.getgid!(), env);
+  const { gid, substitutedFrom, nssError } = resolveSandboxGid(process.getgid!(), env);
+  if (nssError !== undefined) {
+    warn(
+      `buildcage: could not look up groups through NSS (${nssError}); the primary group was ` +
+        "checked against /etc/group and the runtime sockets' owners only",
+    );
+  }
   if (substitutedFrom !== undefined) {
     info(
       `buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's ` +
@@ -269,7 +277,7 @@ export function assembleBundle(
     // then create it.
     for (const dir of readonlyHostDirs) deps.mkdir(dir, { mode: 0o700, recursive: true });
     config = buildOciConfig(baseSpec, {
-      identity: resolveIdentity(env, deps),
+      identity: resolveIdentity(env, options.warn, deps),
       writable: {
         workdir: env.GITHUB_WORKSPACE || "",
         home: env.HOME || "",

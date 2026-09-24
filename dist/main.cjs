@@ -19439,31 +19439,28 @@ const PRIVILEGED_GROUP_NAMES = new Set([
 	"wheel"
 ]), FALLBACK_GROUP_NAMES = ["nogroup", "nobody"], FALLBACK_GID = 65534, GETENT_PATHS = ["/usr/bin/getent", "/bin/getent"], realHost = {
 	readGroupFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
-	lookupGroup: (key) => {
+	lookupGroups: (keys) => {
 		let getent = GETENT_PATHS.find((p) => (0, node_fs.existsSync)(p));
-		if (!getent) return null;
+		if (!getent) return { lines: "" };
 		try {
-			return (0, node_child_process.execFileSync)(getent, ["group", key], {
+			return { lines: (0, node_child_process.execFileSync)(getent, ["group", ...keys], {
 				encoding: "utf8",
 				stdio: "pipe",
 				timeout: 5e3
-			});
-		} catch {
-			return null;
+			}) };
+		} catch (e) {
+			let { status, stdout } = e;
+			return status === 2 ? { lines: stdout ?? "" } : { error: errorMessage(e) };
 		}
 	},
 	gidOf: (path) => (0, node_fs.statSync)(path).gid
 };
-function readGroupNamesByGid(groupFile, keys, host) {
+function readGroupNamesByGid(groupFile, nssLines, host) {
 	let sources = [];
 	try {
 		sources.push(host.readGroupFile(groupFile));
 	} catch {}
-	for (let key of keys) {
-		let line = host.lookupGroup(key);
-		line !== null && sources.push(line);
-	}
-	if (sources.length === 0) return null;
+	if (nssLines && sources.push(nssLines), sources.length === 0) return null;
 	let map = new Map();
 	for (let line of sources.join("\n").split("\n")) {
 		if (!line || line.startsWith("#")) continue;
@@ -19482,12 +19479,16 @@ function ownerGids(paths, host) {
 	return gids;
 }
 function resolveSandboxGid(primaryGid, env, options = {}) {
-	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...extra_masked_runtime_paths_default, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, groupNamesByGid = readGroupNamesByGid(groupFile, [
+	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...extra_masked_runtime_paths_default, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, nss = host.lookupGroups([
 		String(primaryGid),
+		...PRIVILEGED_GROUP_NAMES,
 		...FALLBACK_GROUP_NAMES,
 		"65534"
-	], host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1;
-	if (!isPrivileged(primaryGid)) return { gid: primaryGid };
+	]), nssError = "error" in nss ? nss.error : void 0, groupNamesByGid = readGroupNamesByGid(groupFile, "lines" in nss ? nss.lines : void 0, host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1, reported = nssError === void 0 ? {} : { nssError };
+	if (!isPrivileged(primaryGid)) return {
+		gid: primaryGid,
+		...reported
+	};
 	let gidForName = (name) => {
 		if (groupNamesByGid) {
 			for (let [gid, names] of groupNamesByGid) if (names.includes(name)) return gid;
@@ -19497,12 +19498,14 @@ function resolveSandboxGid(primaryGid, env, options = {}) {
 		let gid = gidForName(name);
 		if (gid !== void 0 && !isPrivileged(gid)) return {
 			gid,
-			substitutedFrom: primaryGid
+			substitutedFrom: primaryGid,
+			...reported
 		};
 	}
 	if (!isPrivileged(FALLBACK_GID)) return {
 		gid: FALLBACK_GID,
-		substitutedFrom: primaryGid
+		substitutedFrom: primaryGid,
+		...reported
 	};
 	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
 }
@@ -19935,9 +19938,9 @@ function writeBundleFiles(dir, { runInput, filesystemMode, overlayRoots }, { cre
 		envLoaderPath: writeEnvLoader(execDir)
 	};
 }
-function resolveIdentity(env, { resolveSandboxGid, info }) {
-	let { gid, substitutedFrom } = resolveSandboxGid(process.getgid(), env);
-	return substitutedFrom !== void 0 && info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's primary group grants container/VM runtime access`), {
+function resolveIdentity(env, warn, { resolveSandboxGid, info }) {
+	let { gid, substitutedFrom, nssError } = resolveSandboxGid(process.getgid(), env);
+	return nssError !== void 0 && warn(`buildcage: could not look up groups through NSS (${nssError}); the primary group was checked against /etc/group and the runtime sockets' owners only`), substitutedFrom !== void 0 && info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's primary group grants container/VM runtime access`), {
 		uid: process.getuid(),
 		gid
 	};
@@ -19951,7 +19954,7 @@ function assembleBundle(dir, options, deps) {
 			recursive: !0
 		});
 		config = buildOciConfig(baseSpec, {
-			identity: resolveIdentity(env, deps),
+			identity: resolveIdentity(env, options.warn, deps),
 			writable: {
 				workdir: env.GITHUB_WORKSPACE || "",
 				home: env.HOME || "",
