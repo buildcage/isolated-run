@@ -36,7 +36,8 @@ export function stubRegistry(routes: Record<string, Route>): RegistryStub {
 }
 
 export function okJson(body: unknown): FetchLikeResponse {
-  return { ok: true, status: 200, json: async () => body };
+  const text = JSON.stringify(body);
+  return { ok: true, status: 200, json: async () => body, text: async () => text };
 }
 
 /** A refusal with an empty JSON body, which some paths read before classifying it. */

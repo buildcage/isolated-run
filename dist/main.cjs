@@ -26,8 +26,8 @@ var __create = Object.create, __defProp = Object.defineProperty, __getOwnPropDes
 //#endregion
 let node_url = require("node:url"), os = require("os");
 os = __toESM(os, 1);
-let crypto = require("crypto");
-crypto = __toESM(crypto, 1);
+let crypto$1 = require("crypto");
+crypto$1 = __toESM(crypto$1, 1);
 let fs = require("fs");
 fs = __toESM(fs, 1);
 let path = require("path");
@@ -158,7 +158,7 @@ function issueFileCommand(command, message) {
 	fs.appendFileSync(filePath, `${toCommandValue(message)}${os.EOL}`, { encoding: "utf8" });
 }
 function prepareKeyValueMessage(key, value) {
-	let delimiter = `ghadelimiter_${crypto.randomUUID()}`, convertedValue = toCommandValue(value);
+	let delimiter = `ghadelimiter_${crypto$1.randomUUID()}`, convertedValue = toCommandValue(value);
 	if (key.includes(delimiter)) throw Error(`Unexpected input: name should not contain the delimiter "${delimiter}"`);
 	if (convertedValue.includes(delimiter)) throw Error(`Unexpected input: value should not contain the delimiter "${delimiter}"`);
 	return `${key}<<${delimiter}${os.EOL}${convertedValue}${os.EOL}${delimiter}`;
@@ -10667,6 +10667,17 @@ function assertRegistryOk(resp, subject, onFailure) {
 	if (resp.status === 401 || resp.status === 403) throw new VerifyImageError(`Registry denied access to ${subject}: HTTP ${resp.status}. For private repositories, ensure the runner is authenticated to the registry.`, "TRANSIENT");
 	if (!resp.ok) throw new VerifyImageError(`Failed to fetch ${subject}: HTTP ${resp.status}`, onFailure);
 }
+const CONTENT_DIGEST_ALGORITHMS = {
+	sha256: "SHA-256",
+	sha384: "SHA-384",
+	sha512: "SHA-512"
+};
+async function assertContentDigest(raw, expected, what) {
+	let [algorithm] = expected.split(":", 1), subtleName = CONTENT_DIGEST_ALGORITHMS[algorithm];
+	if (!subtleName) throw new VerifyImageError(`Cannot verify ${what}: unsupported digest algorithm in ${expected}.`, "VERIFY_FAILED");
+	let hash = await crypto.subtle.digest(subtleName, new TextEncoder().encode(raw)), actual = `${algorithm}:` + Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
+	if (actual !== expected) throw new VerifyImageError(`Content digest mismatch for ${what}: the registry served ${actual}, not the requested ${expected}.`, "VERIFY_FAILED");
+}
 function registryClient(registry, repo, token, _fetch) {
 	let api = `https://${registry}/v2/${repo}`, authorization = `Bearer ${token}`, request = (path, init = {}) => _fetch(`${api}${path}`, {
 		method: init.method,
@@ -10680,7 +10691,11 @@ function registryClient(registry, repo, token, _fetch) {
 		getJson: (path, what, opts = {}) => withRegistryErrors(`fetching ${what}`, async () => {
 			let resp = await request(path, { accept: opts.accept });
 			if (resp.status === 404 && opts.absentOn404 !== !1) throw new VerifyImageError(`Not found: ${what}`, "NOT_FOUND");
-			return assertRegistryOk(resp, what, opts.onFailure ?? "TRANSIENT"), await resp.json();
+			if (assertRegistryOk(resp, what, opts.onFailure ?? "TRANSIENT"), opts.verifyDigest !== void 0) {
+				let raw = await resp.text();
+				return await assertContentDigest(raw, opts.verifyDigest, what), JSON.parse(raw);
+			}
+			return await resp.json();
 		})
 	};
 }
@@ -10699,15 +10714,21 @@ async function fetchManifestDigest(registry, repo, tag, token, _fetch = fetch) {
 	});
 }
 async function fetchImageConfigLabels(registry, repo, digest, token, _fetch = fetch) {
-	let client = registryClient(registry, repo, token, _fetch), image = `${registry}/${repo}@${digest}`, root = await client.getJson(`/manifests/${digest}`, `manifest for ${image}`, { accept: [...INDEX_MEDIA_TYPES, ...MANIFEST_MEDIA_TYPES].join(", ") }), manifest = root;
+	let client = registryClient(registry, repo, token, _fetch), image = `${registry}/${repo}@${digest}`, root = await client.getJson(`/manifests/${digest}`, `manifest for ${image}`, {
+		accept: [...INDEX_MEDIA_TYPES, ...MANIFEST_MEDIA_TYPES].join(", "),
+		verifyDigest: digest
+	}), manifest = root;
 	if (Array.isArray(root.manifests)) {
 		let platform = root.manifests.find((m) => m.platform?.os && m.platform.os !== "unknown");
 		if (!platform) throw new VerifyImageError(`No platform manifest in image index ${image}`, "NOT_FOUND");
-		manifest = await client.getJson(`/manifests/${platform.digest}`, `platform manifest for ${image}`, { accept: MANIFEST_MEDIA_TYPES.join(", ") });
+		manifest = await client.getJson(`/manifests/${platform.digest}`, `platform manifest for ${image}`, {
+			accept: MANIFEST_MEDIA_TYPES.join(", "),
+			verifyDigest: platform.digest
+		});
 	}
 	let configDigest = manifest.config?.digest;
 	if (!configDigest) throw new VerifyImageError(`No image config in manifest for ${image}`, "NOT_FOUND");
-	return (await client.getJson(`/blobs/${configDigest}`, `image config for ${image}`)).config?.Labels ?? {};
+	return (await client.getJson(`/blobs/${configDigest}`, `image config for ${image}`, { verifyDigest: configDigest })).config?.Labels ?? {};
 }
 async function fetchRegistryToken(registry, repo, basicAuth, _fetch = fetch) {
 	let url = `https://${registry}/token?scope=repository:${repo}:pull&service=${registry}`;
@@ -47389,7 +47410,7 @@ function uploadToBlobStorage(authenticatedUploadURL, uploadStream, contentType) 
 				info(`Uploaded bytes ${progress.loadedBytes}`), uploadByteCount = progress.loadedBytes, lastProgressTime = Date.now();
 			},
 			abortSignal: abortController.signal
-		}, sha256Hash, blobUploadStream = new stream.PassThrough(), hashStream = crypto.createHash("sha256");
+		}, sha256Hash, blobUploadStream = new stream.PassThrough(), hashStream = crypto$1.createHash("sha256");
 		uploadStream.pipe(blobUploadStream), uploadStream.pipe(hashStream).setEncoding("hex"), info("Beginning upload of artifact content to blob storage");
 		try {
 			yield Promise.race([blockBlobClient.uploadStream(blobUploadStream, bufferSize, maxConcurrency, options), chunkTimer(getUploadChunkTimeout())]);
@@ -64655,7 +64676,7 @@ function streamExtractExternal(url_1, directory_1) {
 				response.message.destroy(timeoutError), reject(timeoutError);
 			}, timeout), onError = (error) => {
 				debug(`response.message: Artifact download failed: ${error.message}`), clearTimeout(timer), reject(error);
-			}, hashStream = crypto.createHash("sha256").setEncoding("hex"), passThrough = new stream.PassThrough().on("data", () => {
+			}, hashStream = crypto$1.createHash("sha256").setEncoding("hex"), passThrough = new stream.PassThrough().on("data", () => {
 				timer.refresh();
 			}).on("error", onError);
 			response.message.pipe(passThrough), passThrough.pipe(hashStream);
