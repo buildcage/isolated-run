@@ -11,13 +11,18 @@ import { SandboxError } from "../errors.ts";
 // docker.sock on that machine never leaks in: only the group file below
 // and, where relevant, a named socket path decide the outcome.
 
-/** A host with the given /etc/group contents and socket owners. */
-function host(groupFile: string | null, socketOwners: Record<string, number> = {}): HostGroups {
+/** A host with the given /etc/group contents, socket owners and NSS-only groups. */
+function host(
+  groupFile: string | null,
+  socketOwners: Record<string, number> = {},
+  nss: Record<string, string> = {},
+): HostGroups {
   return {
     readGroupFile: () => {
       if (groupFile === null) throw new Error("ENOENT");
       return groupFile;
     },
+    lookupGroup: (key) => nss[key] ?? null,
     gidOf: (path) => {
       const gid = socketOwners[path];
       if (gid === undefined) throw new Error("ENOENT");
@@ -112,6 +117,7 @@ describe("resolveSandboxGid", () => {
             readPaths.push(path);
             return "docker:x:999:\nnogroup:x:65534:\n";
           },
+          lookupGroup: () => null,
           gidOf: (path) => {
             statted.push(path);
             throw new Error("ENOENT");
@@ -128,6 +134,32 @@ describe("resolveSandboxGid", () => {
   it("falls back to the runtime-socket check alone when the group file can't be read", () => {
     const result = resolveSandboxGid(1000, {}, { host: host(null), runtimeSocketPaths: [] });
     expect(result).toStrictEqual({ gid: 1000 });
+  });
+});
+
+describe("resolveSandboxGid: groups served through NSS", () => {
+  it("substitutes a privileged primary GID that only NSS knows the name of", () => {
+    const result = resolveSandboxGid(
+      2000,
+      {},
+      {
+        host: host("nogroup:x:65534:\n", {}, { "2000": "docker:*:2000:runner\n" }),
+        runtimeSocketPaths: [],
+      },
+    );
+    expect(result).toStrictEqual({ gid: 65534, substitutedFrom: 2000 });
+  });
+
+  it("finds the substitute through NSS when the group file can't be read", () => {
+    const result = resolveSandboxGid(
+      2000,
+      {},
+      {
+        host: host(null, {}, { "2000": "docker:*:2000:\n", nogroup: "nogroup:x:65534:\n" }),
+        runtimeSocketPaths: [],
+      },
+    );
+    expect(result).toStrictEqual({ gid: 65534, substitutedFrom: 2000 });
   });
 });
 

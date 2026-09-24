@@ -1,4 +1,5 @@
-import { readFileSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { SandboxError } from "../errors.ts";
 import { EXTRA_MASKED_RUNTIME_PATHS, rootlessRuntimeSocketPaths } from "./runtime-sockets.ts";
 
@@ -47,30 +48,60 @@ const FALLBACK_GID = 65534;
  */
 export interface HostGroups {
   readGroupFile(path: string): string;
+  /** The group database's line for a group name or GID, through NSS, so a
+   *  group served by LDAP or SSSD is seen too. null if there is none, or NSS
+   *  can't be asked. */
+  lookupGroup(key: string): string | null;
   gidOf(path: string): number;
 }
 
+// By absolute path: $PATH may lead into a directory an earlier step could write,
+// and a planted getent could hide the docker group.
+const GETENT_PATHS = ["/usr/bin/getent", "/bin/getent"];
+
 // Untested by design: the default behind resolveSandboxGid's seam, which only
-// hands node:fs the paths the tested caller decided to look at.
+// hands node:fs and getent what the tested caller decided to look up.
 /* v8 ignore start */
 const realHost: HostGroups = {
   readGroupFile: (path) => readFileSync(path, "utf8"),
+  lookupGroup: (key) => {
+    const getent = GETENT_PATHS.find((p) => existsSync(p));
+    if (!getent) return null;
+    try {
+      return execFileSync(getent, ["group", key], {
+        encoding: "utf8",
+        stdio: "pipe",
+        timeout: 5000,
+      });
+    } catch {
+      return null;
+    }
+  },
   gidOf: (path) => statSync(path).gid,
 };
 /* v8 ignore stop */
 
-/** Parses a /etc/group-formatted file into gid -> group name(s). null if the
- *  file can't be read at all (missing, permission denied); callers fall
- *  back to the runtime-socket-ownership check alone in that case. */
-function readGroupNamesByGid(groupFile: string, host: HostGroups): Map<number, string[]> | null {
-  let content: string;
+/** gid -> group name(s), from the group file plus NSS lookups of `keys`. null
+ *  if neither could be read; callers fall back to the runtime-socket-ownership
+ *  check alone in that case. */
+function readGroupNamesByGid(
+  groupFile: string,
+  keys: string[],
+  host: HostGroups,
+): Map<number, string[]> | null {
+  const sources: string[] = [];
   try {
-    content = host.readGroupFile(groupFile);
+    sources.push(host.readGroupFile(groupFile));
   } catch {
-    return null;
+    // Unreadable: NSS may still answer.
   }
+  for (const key of keys) {
+    const line = host.lookupGroup(key);
+    if (line !== null) sources.push(line);
+  }
+  if (sources.length === 0) return null;
   const map = new Map<number, string[]>();
-  for (const line of content.split("\n")) {
+  for (const line of sources.join("\n").split("\n")) {
     if (!line || line.startsWith("#")) continue;
     const [name, , gidStr] = line.split(":");
     const gid = Number(gidStr);
@@ -107,7 +138,7 @@ export interface ResolveSandboxGidOptions {
   groupFile?: string;
   /** @default EXTRA_MASKED_RUNTIME_PATHS + rootlessRuntimeSocketPaths(env), overridable for tests. */
   runtimeSocketPaths?: string[];
-  /** @default the real host's /etc/group and stat. */
+  /** @default the real host's /etc/group, getent and stat. */
   host?: HostGroups;
 }
 
@@ -133,7 +164,13 @@ export function resolveSandboxGid(
   // the seam exists to avoid.
   /* v8 ignore next */
   const host = options.host ?? realHost;
-  const groupNamesByGid = readGroupNamesByGid(groupFile, host);
+  // Only the GIDs and names asked about below: NSS may not enumerate a
+  // directory's groups at all.
+  const groupNamesByGid = readGroupNamesByGid(
+    groupFile,
+    [String(primaryGid), ...FALLBACK_GROUP_NAMES, String(FALLBACK_GID)],
+    host,
+  );
   const socketOwnerGids = ownerGids(runtimeSocketPaths, host);
 
   const isPrivileged = (gid: number): boolean => {
