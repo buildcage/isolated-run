@@ -1307,11 +1307,16 @@ var DecodedURL, init_proxy = __esmMin((() => {
 				arr.push(val[i]);
 			} else if (val[i] === null) arr.push("");
 			else if (typeof val[i] == "object") throw new InvalidArgumentError(`invalid ${key} header`);
-			else arr.push(`${val[i]}`);
+			else {
+				let str = `${val[i]}`;
+				if (!isValidHeaderValue(str)) throw new InvalidArgumentError(`invalid ${key} header`);
+				arr.push(str);
+			}
 			val = arr;
 		} else if (typeof val == "string") {
 			if (!isValidHeaderValue(val)) throw new InvalidArgumentError(`invalid ${key} header`);
-		} else val = val === null ? "" : `${val}`;
+		} else if (val === null) val = "";
+		else if (val = `${val}`, !isValidHeaderValue(val)) throw new InvalidArgumentError(`invalid ${key} header`);
 		if (headerName === "host") {
 			if (request.host !== null) throw new InvalidArgumentError("duplicate host header");
 			if (typeof val != "string") throw new InvalidArgumentError("invalid host header");
@@ -3320,7 +3325,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 		bodyUnusable
 	};
 })), require_client_h1 = __commonJSMin(((exports, module) => {
-	let assert$20 = require("node:assert"), util = require_util$11(), { channels } = require_diagnostics(), timers = require_timers(), { RequestContentLengthMismatchError, ResponseContentLengthMismatchError, RequestAbortedError, HeadersTimeoutError, HeadersOverflowError, SocketError, InformationalError, BodyTimeoutError, HTTPParserError, ResponseExceededMaxSizeError } = require_errors$2(), { kUrl, kReset, kClient, kParser, kBlocking, kRunning, kPending, kSize, kWriting, kQueue, kNoRef, kKeepAliveDefaultTimeout, kHostHeader, kPendingIdx, kRunningIdx, kError, kPipelining, kSocket, kKeepAliveTimeoutValue, kMaxHeadersSize, kKeepAliveMaxTimeout, kKeepAliveTimeoutThreshold, kHeadersTimeout, kBodyTimeout, kStrictContentLength, kMaxRequests, kCounter, kMaxResponseSize, kOnError, kResume, kHTTPContext } = require_symbols$4(), constants = require_constants$5(), EMPTY_BUF = Buffer.alloc(0), FastBuffer = Buffer[Symbol.species], addListener = util.addListener, removeAllListeners = util.removeAllListeners, kIdleSocketValidation = Symbol("kIdleSocketValidation"), kIdleSocketValidationTimeout = Symbol("kIdleSocketValidationTimeout"), kSocketUsed = Symbol("kSocketUsed"), extractBody;
+	let assert$20 = require("node:assert"), util = require_util$11(), { channels } = require_diagnostics(), timers = require_timers(), { RequestContentLengthMismatchError, ResponseContentLengthMismatchError, RequestAbortedError, InvalidArgumentError, HeadersTimeoutError, HeadersOverflowError, SocketError, InformationalError, BodyTimeoutError, HTTPParserError, ResponseExceededMaxSizeError } = require_errors$2(), { kUrl, kReset, kClient, kParser, kBlocking, kRunning, kPending, kSize, kWriting, kQueue, kNoRef, kKeepAliveDefaultTimeout, kHostHeader, kPendingIdx, kRunningIdx, kError, kPipelining, kSocket, kKeepAliveTimeoutValue, kMaxHeadersSize, kKeepAliveMaxTimeout, kKeepAliveTimeoutThreshold, kHeadersTimeout, kBodyTimeout, kStrictContentLength, kMaxRequests, kCounter, kMaxResponseSize, kOnError, kResume, kHTTPContext } = require_symbols$4(), constants = require_constants$5(), EMPTY_BUF = Buffer.alloc(0), FastBuffer = Buffer[Symbol.species], addListener = util.addListener, removeAllListeners = util.removeAllListeners, kIdleSocketValidation = Symbol("kIdleSocketValidation"), kIdleSocketValidationTimeout = Symbol("kIdleSocketValidationTimeout"), kSocketUsed = Symbol("kSocketUsed"), extractBody;
 	async function lazyllhttp() {
 		let llhttpWasmData = process.env.JEST_WORKER_ID ? require_llhttp_wasm() : void 0, mod;
 		try {
@@ -3572,12 +3577,12 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 		};
 	}
 	function clearIdleSocketValidation(socket) {
-		socket[kIdleSocketValidationTimeout] && (clearTimeout(socket[kIdleSocketValidationTimeout]), socket[kIdleSocketValidationTimeout] = null), socket[kIdleSocketValidation] = 0;
+		socket[kIdleSocketValidationTimeout] && (clearImmediate(socket[kIdleSocketValidationTimeout]), socket[kIdleSocketValidationTimeout] = null), socket[kIdleSocketValidation] = 0;
 	}
 	function scheduleIdleSocketValidation(client, socket) {
-		socket[kIdleSocketValidation] = 1, socket[kIdleSocketValidationTimeout] = setTimeout(() => {
+		socket[kIdleSocketValidation] = 1, socket[kIdleSocketValidationTimeout] = setImmediate(() => {
 			socket[kIdleSocketValidationTimeout] = null, socket[kIdleSocketValidation] = 2, client[kSocket] === socket && !socket.destroyed && client[kResume]();
-		}, 0), socket[kIdleSocketValidationTimeout].unref?.();
+		});
 	}
 	function resumeH1(client) {
 		let socket = client[kSocket];
@@ -3603,7 +3608,14 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 			extractBody ||= require_body().extractBody;
 			let [bodyStream, contentType] = extractBody(body);
 			request.contentType ?? headers.push("content-type", contentType), body = bodyStream.stream, contentLength = bodyStream.length;
-		} else util.isBlobLike(body) && request.contentType == null && body.type && headers.push("content-type", body.type);
+		} else if (util.isBlobLike(body) && request.contentType == null) {
+			let contentType = body.type;
+			if (contentType) {
+				let contentTypeValue = `${contentType}`;
+				if (!util.isValidHeaderValue(contentTypeValue)) return util.errorRequest(client, request, new InvalidArgumentError("invalid content-type header")), !1;
+				headers.push("content-type", contentTypeValue);
+			}
+		}
 		body && typeof body.read == "function" && body.read(0);
 		let bodyLength = util.bodyLength(body);
 		if (contentLength = bodyLength ?? contentLength, contentLength === null && (contentLength = request.contentLength), contentLength === 0 && !expectsPayload && (contentLength = null), shouldSendContentLength(method) && contentLength > 0 && request.contentLength !== null && request.contentLength !== contentLength) {
@@ -4783,6 +4795,15 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 		let current = Date.now();
 		return new Date(retryAfter).getTime() - current;
 	}
+	function validatePartialResponseContentLength(headers, range, statusCode, retryCount) {
+		let contentLength = headers["content-length"];
+		if (contentLength == null || !Number.isFinite(range.start) || !Number.isFinite(range.end)) return null;
+		let length = Number(contentLength), expectedLength = range.end - range.start + 1;
+		return !Number.isFinite(length) || length !== expectedLength ? new RequestRetryError("Content-Length mismatch", statusCode, {
+			headers,
+			data: { count: retryCount }
+		}) : null;
+	}
 	module.exports = class RetryHandler {
 		constructor(opts, handlers) {
 			let { retryOptions, ...dispatchOpts } = opts, { retry: retryFn, maxRetries, maxTimeout, minTimeout, timeoutFactor, methods, errorCodes, retryAfter, statusCodes } = retryOptions ?? {};
@@ -4822,9 +4843,16 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 					"EPIPE",
 					"UND_ERR_SOCKET"
 				]
-			}, this.retryCount = 0, this.retryCountCheckpoint = 0, this.start = 0, this.end = null, this.etag = null, this.resume = null, this.handler.onConnect((reason) => {
+			}, this.retryCount = 0, this.retryCountCheckpoint = 0, this.start = 0, this.end = null, this.etag = null, this.resume = null, this.headersSent = !1, this.handler.onConnect((reason) => {
 				this.aborted = !0, this.abort ? this.abort(reason) : this.reason = reason;
 			});
+		}
+		checkpointResponseEnd(headers, resume) {
+			if (this.end == null && this.opts.method !== "HEAD") {
+				let contentLength = headers["content-length"];
+				this.end = contentLength == null ? null : Number(contentLength) - 1, assert$16(this.end == null || Number.isFinite(this.end), "invalid content-length");
+			}
+			this.resume = this.end == null ? null : resume;
 		}
 		onRequestSent() {
 			this.handler.onRequestSent && this.handler.onRequestSent();
@@ -4863,7 +4891,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 		}
 		onHeaders(statusCode, rawHeaders, resume, statusMessage) {
 			let headers = parseHeaders(rawHeaders);
-			if (this.retryCount += 1, statusCode >= 300) return this.retryOpts.statusCodes.includes(statusCode) === !1 ? this.handler.onHeaders(statusCode, rawHeaders, resume, statusMessage) : (this.abort(new RequestRetryError("Request failed", statusCode, {
+			if (this.retryCount += 1, statusCode >= 300) return this.retryOpts.statusCodes.includes(statusCode) === !1 ? (this.headersSent = !0, this.checkpointResponseEnd(headers, resume), this.handler.onHeaders(statusCode, rawHeaders, resume, statusMessage)) : (this.abort(new RequestRetryError("Request failed", statusCode, {
 				headers,
 				data: { count: this.retryCount }
 			})), !1);
@@ -4881,13 +4909,20 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 					headers,
 					data: { count: this.retryCount }
 				})), !1;
+				let contentLengthError = validatePartialResponseContentLength(headers, contentRange, statusCode, this.retryCount);
+				if (contentLengthError != null) return this.abort(contentLengthError), !1;
 				let { start, size, end = size - 1 } = contentRange;
-				return assert$16(this.start === start, "content-range mismatch"), assert$16(this.end == null || this.end === end, "content-range mismatch"), this.resume = resume, !0;
+				return this.start !== start || this.end != null && this.end !== end ? (this.abort(new RequestRetryError("Content-Range mismatch", statusCode, {
+					headers,
+					data: { count: this.retryCount }
+				})), !1) : (this.resume = resume, !0);
 			}
 			if (this.end == null) {
 				if (statusCode === 206) {
 					let range = parseRangeHeader(headers["content-range"]);
-					if (range == null) return this.handler.onHeaders(statusCode, rawHeaders, resume, statusMessage);
+					if (range == null) return this.headersSent = !0, this.handler.onHeaders(statusCode, rawHeaders, resume, statusMessage);
+					let contentLengthError = validatePartialResponseContentLength(headers, range, statusCode, this.retryCount);
+					if (contentLengthError != null) return this.abort(contentLengthError), !1;
 					let { start, size, end = size - 1 } = range;
 					assert$16(start != null && Number.isFinite(start), "content-range mismatch"), assert$16(end != null && Number.isFinite(end), "invalid content-length"), this.start = start, this.end = end;
 				}
@@ -4895,7 +4930,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 					let contentLength = headers["content-length"];
 					this.end = contentLength == null ? null : Number(contentLength) - 1;
 				}
-				return assert$16(Number.isFinite(this.start)), assert$16(this.end == null || Number.isFinite(this.end), "invalid content-length"), this.resume = resume, this.etag = headers.etag == null ? null : headers.etag, this.etag != null && this.etag.startsWith("W/") && (this.etag = null), this.handler.onHeaders(statusCode, rawHeaders, resume, statusMessage);
+				return assert$16(Number.isFinite(this.start)), assert$16(this.end == null || Number.isFinite(this.end), "invalid content-length"), this.resume = resume, this.headersSent = !0, this.etag = headers.etag == null ? null : headers.etag, this.etag != null && this.etag.startsWith("W/") && (this.etag = null), this.handler.onHeaders(statusCode, rawHeaders, resume, statusMessage);
 			}
 			let err = new RequestRetryError("Request failed", statusCode, {
 				headers,
@@ -4910,7 +4945,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 			return this.retryCount = 0, this.handler.onComplete(rawTrailers);
 		}
 		onError(err) {
-			if (this.aborted || isDisturbed(this.opts.body)) return this.handler.onError(err);
+			if (this.aborted || isDisturbed(this.opts.body) || this.headersSent && this.resume == null) return this.handler.onError(err);
 			this.retryCount - this.retryCountCheckpoint > 0 ? this.retryCount = this.retryCountCheckpoint + (this.retryCount - this.retryCountCheckpoint) : this.retryCount += 1, this.retryOpts.retry(err, {
 				state: { counter: this.retryCount },
 				opts: {
@@ -8564,11 +8599,26 @@ ${pendingInterceptorsFormatter.format(pending)}
 	function validateCookiePath(path) {
 		for (let i = 0; i < path.length; ++i) {
 			let code = path.charCodeAt(i);
-			if (code < 32 || code === 127 || code === 59) throw Error("Invalid cookie path");
+			if (code < 32 || code > 126 || code === 59) throw Error("Invalid cookie path");
 		}
 	}
+	function isLetterOrDigit(code) {
+		return code >= 48 && code <= 57 || code >= 65 && code <= 90 || code >= 97 && code <= 122;
+	}
 	function validateCookieDomain(domain) {
-		if (domain.startsWith("-") || domain.endsWith(".") || domain.endsWith("-")) throw Error("Invalid cookie domain");
+		if (domain === " ") return;
+		if (domain.length > 255) throw Error("Invalid cookie domain");
+		let labelLength = 0;
+		for (let i = 0; i < domain.length; ++i) {
+			let code = domain.charCodeAt(i);
+			if (code === 46) {
+				if (labelLength === 0 || domain.charCodeAt(i - 1) === 45) throw Error("Invalid cookie domain");
+				labelLength = 0;
+				continue;
+			}
+			if (labelLength === 0 && !isLetterOrDigit(code) || !isLetterOrDigit(code) && code !== 45 || ++labelLength > 63) throw Error("Invalid cookie domain");
+		}
+		if (labelLength === 0 || domain.charCodeAt(domain.length - 1) === 45) throw Error("Invalid cookie domain");
 	}
 	let IMFDays = [
 		"Sun",
@@ -8605,8 +8655,8 @@ ${pendingInterceptorsFormatter.format(pending)}
 		cookie.name.startsWith("__Secure-") && (cookie.secure = !0), cookie.name.startsWith("__Host-") && (cookie.secure = !0, cookie.domain = null, cookie.path = "/"), cookie.secure && out.push("Secure"), cookie.httpOnly && out.push("HttpOnly"), typeof cookie.maxAge == "number" && (validateCookieMaxAge(cookie.maxAge), out.push(`Max-Age=${cookie.maxAge}`)), cookie.domain && (validateCookieDomain(cookie.domain), out.push(`Domain=${cookie.domain}`)), cookie.path && (validateCookiePath(cookie.path), out.push(`Path=${cookie.path}`)), cookie.expires && cookie.expires.toString() !== "Invalid Date" && out.push(`Expires=${toIMFDate(cookie.expires)}`), cookie.sameSite && out.push(`SameSite=${cookie.sameSite}`);
 		for (let part of cookie.unparsed) {
 			if (!part.includes("=")) throw Error("Invalid unparsed");
-			let [key, ...value] = part.split("=");
-			out.push(`${key.trim()}=${value.join("=")}`);
+			let [key, ...value] = part.split("="), trimmedKey = key.trim(), joinedValue = value.join("=");
+			validateCookieName(trimmedKey), validateCookieValue(joinedValue), out.push(`${trimmedKey}=${joinedValue}`);
 		}
 		return out.join("; ");
 	}
@@ -9219,9 +9269,12 @@ ${pendingInterceptorsFormatter.format(pending)}
 					return;
 				}
 				let secProtocol = response.headersList.get("Sec-WebSocket-Protocol");
-				if (secProtocol !== null && !getDecodeSplit("sec-websocket-protocol", request.headersList).includes(secProtocol)) {
-					failWebsocketConnection(ws, "Protocol was not set in the opening handshake.");
-					return;
+				if (secProtocol !== null) {
+					let requestProtocols = getDecodeSplit("sec-websocket-protocol", request.headersList);
+					if (requestProtocols === null || !requestProtocols.includes(secProtocol)) {
+						failWebsocketConnection(ws, "Protocol was not set in the opening handshake.");
+						return;
+					}
 				}
 				response.socket.on("data", onSocketData), response.socket.on("close", onSocketClose), response.socket.on("error", onSocketError), channels.open.hasSubscribers && channels.open.publish({
 					address: response.socket.address(),
@@ -9298,7 +9351,7 @@ ${pendingInterceptorsFormatter.format(pending)}
 				}
 				this.#inflate[kBuffer] = [], this.#inflate[kLength] = 0, this.#inflate.on("data", (data) => {
 					if (this.#inflate[kLength] += data.length, this.#maxPayloadSize > 0 && this.#inflate[kLength] > this.#maxPayloadSize) {
-						callback(new MessageSizeExceededError()), this.#inflate.removeAllListeners(), this.#inflate = null;
+						callback(new MessageSizeExceededError()), this.#inflate.removeAllListeners(), this.#inflate.destroy(), this.#inflate = null;
 						return;
 					}
 					this.#inflate[kBuffer].push(data);
@@ -9765,14 +9818,31 @@ ${pendingInterceptorsFormatter.format(pending)}
 		239,
 		187,
 		191
-	];
+	], DATA = Buffer.from("data"), EVENT = Buffer.from("event"), ID = Buffer.from("id"), RETRY = Buffer.from("retry");
+	function isASCIINumberBytes(buffer, start) {
+		if (start >= buffer.length) return !1;
+		for (let i = start; i < buffer.length; i++) if (buffer[i] < 48 || buffer[i] > 57) return !1;
+		return !0;
+	}
+	function isValidLastEventIdBytes(buffer, start) {
+		for (let i = start; i < buffer.length; i++) if (buffer[i] === 0) return !1;
+		return !0;
+	}
+	function isFieldName(line, length, field) {
+		if (length !== field.length) return !1;
+		for (let i = 0; i < length; i++) if (line[i] !== field[i]) return !1;
+		return !0;
+	}
 	module.exports = { EventSourceStream: class extends Transform$4 {
 		state = null;
 		checkBOM = !0;
 		crlfCheck = !1;
 		eventEndCheck = !1;
-		buffer = null;
+		chunks = [];
+		chunkIndex = 0;
 		pos = 0;
+		lineChunkIndex = 0;
+		linePos = 0;
 		event = {
 			data: void 0,
 			event: void 0,
@@ -9787,51 +9857,32 @@ ${pendingInterceptorsFormatter.format(pending)}
 				callback();
 				return;
 			}
-			if (this.buffer = this.buffer ? Buffer.concat([this.buffer, chunk]) : chunk, this.checkBOM) switch (this.buffer.length) {
-				case 1:
-					if (this.buffer[0] === BOM[0]) {
-						callback();
-						return;
-					}
-					this.checkBOM = !1, callback();
-					return;
-				case 2:
-					if (this.buffer[0] === BOM[0] && this.buffer[1] === BOM[1]) {
-						callback();
-						return;
-					}
-					this.checkBOM = !1;
-					break;
-				case 3:
-					if (this.buffer[0] === BOM[0] && this.buffer[1] === BOM[1] && this.buffer[2] === BOM[2]) {
-						this.buffer = Buffer.alloc(0), this.checkBOM = !1, callback();
-						return;
-					}
-					this.checkBOM = !1;
-					break;
-				default: this.buffer[0] === BOM[0] && this.buffer[1] === BOM[1] && this.buffer[2] === BOM[2] && (this.buffer = this.buffer.subarray(3)), this.checkBOM = !1;
+			if (this.chunks.push(chunk), this.checkBOM && this.handleBOM()) {
+				callback();
+				return;
 			}
-			for (; this.pos < this.buffer.length;) {
+			for (; this.hasCurrentByte();) {
+				let byte = this.currentByte();
 				if (this.eventEndCheck) {
 					if (this.crlfCheck) {
-						if (this.buffer[this.pos] === 10) {
-							this.buffer = this.buffer.subarray(this.pos + 1), this.pos = 0, this.crlfCheck = !1;
+						if (byte === 10) {
+							this.crlfCheck = !1, this.consumeCurrentByte();
 							continue;
 						}
 						this.crlfCheck = !1;
 					}
-					if (this.buffer[this.pos] === 10 || this.buffer[this.pos] === 13) {
-						this.buffer[this.pos] === 13 && (this.crlfCheck = !0), this.buffer = this.buffer.subarray(this.pos + 1), this.pos = 0, (this.event.data !== void 0 || this.event.event || this.event.id || this.event.retry) && this.processEvent(this.event), this.clearEvent();
+					if (byte === 10 || byte === 13) {
+						byte === 13 && (this.crlfCheck = !0), this.consumeCurrentByte(), this.hasPendingEvent() && this.processEvent(this.event), this.clearEvent();
 						continue;
 					}
 					this.eventEndCheck = !1;
 					continue;
 				}
-				if (this.buffer[this.pos] === 10 || this.buffer[this.pos] === 13) {
-					this.buffer[this.pos] === 13 && (this.crlfCheck = !0), this.parseLine(this.buffer.subarray(0, this.pos), this.event), this.buffer = this.buffer.subarray(this.pos + 1), this.pos = 0, this.eventEndCheck = !0;
+				if (byte === 10 || byte === 13) {
+					byte === 13 && (this.crlfCheck = !0), this.parseLine(this.readLine(), this.event), this.consumeCurrentByte(), this.eventEndCheck = !0;
 					continue;
 				}
-				this.pos++;
+				this.advanceCursor();
 			}
 			callback();
 		}
@@ -9839,23 +9890,23 @@ ${pendingInterceptorsFormatter.format(pending)}
 			if (line.length === 0) return;
 			let colonPosition = line.indexOf(58);
 			if (colonPosition === 0) return;
-			let field = "", value = "";
-			if (colonPosition !== -1) {
-				field = line.subarray(0, colonPosition).toString("utf8");
-				let valueStart = colonPosition + 1;
-				line[valueStart] === 32 && ++valueStart, value = line.subarray(valueStart).toString("utf8");
-			} else field = line.toString("utf8"), value = "";
-			switch (field) {
-				case "data":
-					event[field] === void 0 ? event[field] = value : event[field] += `\n${value}`;
-					break;
-				case "retry":
-					isASCIINumber(value) && (event[field] = value);
-					break;
-				case "id":
-					isValidLastEventId(value) && (event[field] = value);
-					break;
-				case "event": value.length > 0 && (event[field] = value);
+			let fieldLength = line.length, valueStart = line.length;
+			if (colonPosition !== -1 && (fieldLength = colonPosition, valueStart = colonPosition + 1, line[valueStart] === 32 && ++valueStart), isFieldName(line, fieldLength, DATA)) {
+				let value = line.toString("utf8", valueStart);
+				event.data === void 0 ? event.data = value : event.data += `\n${value}`;
+				return;
+			}
+			if (isFieldName(line, fieldLength, RETRY)) {
+				isASCIINumberBytes(line, valueStart) && (event.retry = line.toString("utf8", valueStart));
+				return;
+			}
+			if (isFieldName(line, fieldLength, ID)) {
+				isValidLastEventIdBytes(line, valueStart) && (event.id = line.toString("utf8", valueStart));
+				return;
+			}
+			if (isFieldName(line, fieldLength, EVENT)) {
+				let value = line.toString("utf8", valueStart);
+				value.length > 0 && (event.event = value);
 			}
 		}
 		processEvent(event) {
@@ -9869,12 +9920,57 @@ ${pendingInterceptorsFormatter.format(pending)}
 			});
 		}
 		clearEvent() {
-			this.event = {
-				data: void 0,
-				event: void 0,
-				id: void 0,
-				retry: void 0
-			};
+			this.event.data = void 0, this.event.event = void 0, this.event.id = void 0, this.event.retry = void 0;
+		}
+		hasPendingEvent() {
+			return this.event.data !== void 0 || this.event.event !== void 0 || this.event.id !== void 0 || this.event.retry !== void 0;
+		}
+		hasCurrentByte() {
+			return this.chunkIndex < this.chunks.length && this.pos < this.chunks[this.chunkIndex].length;
+		}
+		currentByte() {
+			return this.chunks[this.chunkIndex][this.pos];
+		}
+		consumeCurrentByte() {
+			this.advanceCursor(), this.syncLineStartToCursor();
+		}
+		advanceCursor() {
+			for (this.pos++; this.chunkIndex < this.chunks.length && this.pos >= this.chunks[this.chunkIndex].length;) this.chunkIndex++, this.pos = 0;
+		}
+		syncLineStartToCursor() {
+			this.lineChunkIndex = this.chunkIndex, this.linePos = this.pos, this.dropConsumedChunks();
+		}
+		dropConsumedChunks() {
+			for (; this.lineChunkIndex > 0;) this.chunks.shift(), this.lineChunkIndex--, this.chunkIndex--;
+			this.chunkIndex === this.chunks.length && (this.chunks.length = 0, this.chunkIndex = 0, this.pos = 0, this.lineChunkIndex = 0, this.linePos = 0);
+		}
+		readLine() {
+			if (this.lineChunkIndex === this.chunkIndex) return this.chunks[this.chunkIndex].subarray(this.linePos, this.pos);
+			let chunks = [], length = 0;
+			for (let i = this.lineChunkIndex; i <= this.chunkIndex; i++) {
+				let chunk = this.chunks[i], start = i === this.lineChunkIndex ? this.linePos : 0, end = i === this.chunkIndex ? this.pos : chunk.length, slice = chunk.subarray(start, end);
+				length += slice.length, chunks.push(slice);
+			}
+			return Buffer.concat(chunks, length);
+		}
+		peekBufferedByte(offset) {
+			let chunkIndex = this.lineChunkIndex, pos = this.linePos;
+			for (; chunkIndex < this.chunks.length;) {
+				let chunk = this.chunks[chunkIndex], remaining = chunk.length - pos;
+				if (offset < remaining) return chunk[pos + offset];
+				offset -= remaining, chunkIndex++, pos = 0;
+			}
+		}
+		discardLeadingBytes(count) {
+			for (; count > 0 && this.lineChunkIndex < this.chunks.length;) {
+				let remaining = this.chunks[this.lineChunkIndex].length - this.linePos;
+				count < remaining ? (this.linePos += count, count = 0) : (count -= remaining, this.lineChunkIndex++, this.linePos = 0);
+			}
+			this.chunkIndex = this.lineChunkIndex, this.pos = this.linePos, this.dropConsumedChunks();
+		}
+		handleBOM() {
+			let first = this.peekBufferedByte(0), second = this.peekBufferedByte(1), third = this.peekBufferedByte(2);
+			return second === void 0 ? (first === BOM[0] || (this.checkBOM = !1), !0) : third === void 0 ? first === BOM[0] && second === BOM[1] || (this.checkBOM = !1, !1) : (first === BOM[0] && second === BOM[1] && third === BOM[2] && this.discardLeadingBytes(3), this.checkBOM = !1, !this.hasCurrentByte());
 		}
 	} };
 })), require_eventsource = __commonJSMin(((exports, module) => {
@@ -12390,12 +12486,12 @@ var require_envelope = __commonJSMin(((exports) => {
 		}
 		return out;
 	}
-	function expandSequence(body, isAlphaSequence, max) {
+	function expandSequence(body, isAlphaSequence, max, maxLength) {
 		let n = body.split(/\.\./), N = [];
 		if (n[0] === void 0 || n[1] === void 0) return N;
 		let x = numeric(n[0]), y = numeric(n[1]), width = Math.max(n[0].length, n[1].length), incr = n.length === 3 && n[2] !== void 0 ? Math.max(Math.abs(numeric(n[2])), 1) : 1, test = lte;
 		y < x && (incr *= -1, test = gte);
-		let pad = n.some(isPadded);
+		let pad = n.some(isPadded), length = 0;
 		for (let i = x; test(i, y) && N.length < max; i += incr) {
 			let c;
 			if (isAlphaSequence) c = String.fromCharCode(i), c === "\\" && (c = "");
@@ -12406,7 +12502,8 @@ var require_envelope = __commonJSMin(((exports) => {
 					c = i < 0 ? "-" + z + c.slice(1) : z + c;
 				}
 			}
-			N.push(c);
+			if (length + c.length > maxLength) break;
+			N.push(c), length += c.length;
 		}
 		return N;
 	}
@@ -12431,7 +12528,7 @@ var require_envelope = __commonJSMin(((exports) => {
 			}
 			firstGroup &&= (dropEmpties = isTop && !isSequence, !1);
 			let values;
-			if (isSequence) values = expandSequence(m.body, isAlphaSequence, max);
+			if (isSequence) values = expandSequence(m.body, isAlphaSequence, max, maxLength);
 			else {
 				let n = parseCommaParts(m.body);
 				if (n.length === 1 && n[0] !== void 0 && (n = expand_(n[0], max, maxLength, !1).map(embrace), n.length === 1)) {
@@ -12439,8 +12536,20 @@ var require_envelope = __commonJSMin(((exports) => {
 					str = m.post;
 					continue;
 				}
+				let dropsEmpties = dropEmpties && !m.post.length && !pre;
+				for (let d = 0; dropsEmpties && d < acc.length; d++) acc[d] && (dropsEmpties = !1);
 				values = [];
-				for (let j = 0; j < n.length; j++) values.push.apply(values, expand_(n[j], max, maxLength, !1));
+				let valuesLength = 0;
+				outer: for (let j = 0; j < n.length; j++) {
+					let expanded = expand_(n[j], max, maxLength, !1);
+					for (let k = 0; k < expanded.length; k++) {
+						let v = expanded[k];
+						if (!(dropsEmpties && !v)) {
+							if (values.length >= max || valuesLength + v.length > maxLength) break outer;
+							values.push(v), valuesLength += v.length;
+						}
+					}
+				}
 			}
 			if (acc = combine(acc, pre, values, max, maxLength, dropEmpties && !m.post.length), !m.post.length) break;
 			str = m.post;
