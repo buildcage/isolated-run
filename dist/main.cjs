@@ -18649,13 +18649,24 @@ function resolveWriteThroughPaths(input, env) {
 	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
 }
 var WriteThroughTargetMissingError = class extends Error {}, WriteThroughTargetUncreatableError = class extends Error {};
+const S_IFMT = 61440, S_IFDIR = 16384;
+function defaultExists(path) {
+	try {
+		return (0, node_fs.lstatSync)(path), !0;
+	} catch {
+		return !1;
+	}
+}
 function defaultStat(path) {
-	let s = (0, node_fs.statSync)(path);
+	let s = (0, node_fs.lstatSync)(path);
 	return {
 		uid: s.uid,
 		gid: s.gid,
 		mode: s.mode
 	};
+}
+function defaultReadlink(path) {
+	return (0, node_fs.readlinkSync)(path);
 }
 function defaultExecFile$1(command, args) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args, {
@@ -18666,6 +18677,33 @@ function defaultExecFile$1(command, args) {
 		],
 		env: hostCommandEnv(command)
 	});
+}
+function resolveWriteThroughOnHost(path, { exists = defaultExists, stat = defaultStat, readlink = defaultReadlink } = {}) {
+	let pending = path.split("/").filter((c) => c !== ""), current = "/", hops = 0;
+	for (; pending.length > 0;) {
+		let name = pending.shift();
+		if (name === ".") continue;
+		if (name === "..") {
+			current = (0, node_path.dirname)(current);
+			continue;
+		}
+		let next = (0, node_path.join)(current, name);
+		if (!exists(next)) {
+			current = next;
+			continue;
+		}
+		let { uid, mode } = stat(next);
+		if ((mode & S_IFMT) != 40960) {
+			current = next;
+			continue;
+		}
+		let target = readlink(next);
+		if (uid !== 0) throw Error(`write_through entry ${JSON.stringify(path)} passes through ${JSON.stringify(next)}, a symlink to ${JSON.stringify(target)} owned by uid ${uid}. Only root-owned symlinks are followed, since any other could have been planted by an earlier step. Name the real path instead.`);
+		if (++hops > 40) throw Error(`write_through entry ${JSON.stringify(path)} passes through too many symlinks to resolve.`);
+		pending.unshift(...target.split("/").filter((c) => c !== "")), (0, node_path.isAbsolute)(target) && (current = "/");
+	}
+	if (current === "/") throw Error(`write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a literal "/" if dropping the read-only restriction entirely is what you meant.`);
+	return current;
 }
 function asOwner({ uid, gid }) {
 	return [
@@ -18680,12 +18718,13 @@ function pathSegmentsBetween(ancestor, descendant) {
 	for (; current !== ancestor;) segments.unshift(current), current = (0, node_path.dirname)(current);
 	return segments;
 }
-function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = node_fs.existsSync, stat = defaultStat, execFile = defaultExecFile$1 } = {}) {
+function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultExists, stat = defaultStat, execFile = defaultExecFile$1 } = {}) {
 	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), created = [], rollback = () => {
 		for (let dir of [...created].reverse()) try {
 			execFile("sudo", [
 				...asOwner(dir),
 				"rmdir",
+				"--",
 				dir.path
 			]);
 		} catch {}
@@ -18700,7 +18739,9 @@ function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = node_fs.e
 			ancestor = parent;
 		}
 		try {
-			let { uid, gid, mode } = stat(ancestor), modeOctal = (mode & 4095).toString(8);
+			let { uid, gid, mode } = stat(ancestor);
+			if ((mode & S_IFMT) != S_IFDIR) throw Error(`${JSON.stringify(ancestor)} is not a directory.`);
+			let modeOctal = (mode & 4095).toString(8);
 			execFile("sudo", [
 				...asOwner({
 					uid,
@@ -18710,8 +18751,15 @@ function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = node_fs.e
 				"-p",
 				"-m",
 				modeOctal,
+				"--",
 				path
-			]), created.push(...pathSegmentsBetween(ancestor, path).map((segment) => ({
+			]);
+			let segments = pathSegmentsBetween(ancestor, path);
+			for (let segment of segments) {
+				let s = stat(segment);
+				if ((s.mode & S_IFMT) != S_IFDIR || s.uid !== uid) throw Error(`${JSON.stringify(segment)} is not a directory owned by uid ${uid}.`);
+			}
+			created.push(...segments.map((segment) => ({
 				path: segment,
 				uid,
 				gid
@@ -18727,6 +18775,7 @@ function removeCreatedDirsIfEmpty(created, { execFile = defaultExecFile$1 } = {}
 		execFile("sudo", [
 			...asOwner(dir),
 			"rmdir",
+			"--",
 			dir.path
 		]);
 	} catch {}
@@ -19163,6 +19212,12 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 		writeThroughPaths,
 		createdDirs: []
 	};
+	try {
+		writeThroughPaths = [...new Set(writeThroughPaths.map((p) => resolveWriteThroughOnHost(p, deps)))];
+	} catch (e) {
+		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
+	}
+	validateFilesystemInputs(filesystemMode, writeThroughPaths);
 	try {
 		assertScratchBaseNotWritable(writeThroughPaths);
 	} catch (e) {

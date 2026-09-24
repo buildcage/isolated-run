@@ -90,3 +90,37 @@ else
   exit 1
 fi
 echo ""
+
+# A write_through entry that passes through a symlink the runner's uid owns
+# could have been planted by an earlier step, and runc would follow it to mount
+# whatever it points at read-write (here a directory an ephemeral overlay
+# would otherwise keep). The step must fail closed before anything runs.
+WORKDIR3=$(mktemp -d)
+TARGET3=$(mktemp -d)
+trap 'rm -rf "$WORKDIR" "$WORKDIR2" "$WORKDIR3" "$TARGET3"' EXIT
+touch "$WORKDIR3/state.env" "$WORKDIR3/summary.md"
+ln -s "$TARGET3" "$WORKDIR3/cache"
+
+LINK_OUTPUT=$(
+  GITHUB_WORKSPACE="$WORKDIR3" \
+  GITHUB_STATE="$WORKDIR3/state.env" \
+  GITHUB_STEP_SUMMARY="$WORKDIR3/summary.md" \
+  BUILDCAGE_BUILD_TEST_HOOKS=1 \
+  BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
+  INPUT_FILESYSTEM_MODE=ephemeral \
+  INPUT_WRITE_THROUGH="./cache" \
+  INPUT_RUN="echo planted > ./cache/written" \
+    node dist/main.cjs 2>&1
+)
+LINK_CODE=$?
+echo "$LINK_OUTPUT"
+
+echo "=== Sandbox write_through: through a runner-owned symlink Fail-Closed Assertion ==="
+echo ""
+if [ "$LINK_CODE" != "0" ] && echo "$LINK_OUTPUT" | grep -q "a symlink" && [ ! -e "$TARGET3/written" ]; then
+  echo "  PASS  write_through: ./cache -> $TARGET3 was rejected before the command ran"
+else
+  echo "  FAIL  write_through: through a runner-owned symlink was not rejected (exit $LINK_CODE)"
+  exit 1
+fi
+echo ""

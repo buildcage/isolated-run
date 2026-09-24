@@ -19,6 +19,7 @@ import type { FilesystemMode } from "../filesystem-mode.ts";
 import { determineOverlayRoots } from "./ephemeral-fs.ts";
 import {
   resolveWriteThroughPaths,
+  resolveWriteThroughOnHost,
   ensureWriteThroughTargetsExist,
   WriteThroughTargetMissingError,
   WriteThroughTargetUncreatableError,
@@ -69,7 +70,7 @@ export function validateFilesystemInputs(
 export interface FilesystemPlan {
   /** filesystem_mode: ephemeral only; already folded (determineOverlayRoots). [] in persistent mode. */
   overlayRoots: string[];
-  /** Already resolved (resolveWriteThroughPaths) and pre-created
+  /** Already resolved (resolveWriteThroughPaths, then resolveWriteThroughOnHost) and pre-created
    *  (ensureWriteThroughTargetsExist), in either filesystem mode. */
   writeThroughPaths: string[];
   /** The directory segments pre-creating those paths actually created, for
@@ -82,6 +83,7 @@ export interface FilesystemPlan {
 export interface ResolveFilesystemPlanDeps {
   exists?: (path: string) => boolean;
   stat?: (path: string) => { uid: number; gid: number; mode: number };
+  readlink?: (path: string) => string;
   execFile?: (command: string, args: string[]) => void;
   deviceOf?: (path: string) => number;
 }
@@ -119,6 +121,22 @@ export function resolveFilesystemPlan(
   if (writeThroughPaths.includes(WRITE_THROUGH_ALL)) {
     return { overlayRoots: [], writeThroughPaths, createdDirs: [] };
   }
+
+  // Every check below and the bind mount itself act on the real directory,
+  // not the spelling: runc follows symlinks in both the mount source and its
+  // destination, so a string that passes the guards could otherwise mount
+  // something else entirely.
+  try {
+    writeThroughPaths = [
+      ...new Set(writeThroughPaths.map((p) => resolveWriteThroughOnHost(p, deps))),
+    ];
+  } catch (e) {
+    throw new SandboxError(
+      `Invalid write_through: ${errorMessage(e)}`,
+      "INVALID_WRITE_THROUGH_PATH",
+    );
+  }
+  validateFilesystemInputs(filesystemMode, writeThroughPaths);
 
   // Before anything is created: buildOciConfig rejects a path overlapping the
   // sandbox's own scratch base outright, so checking it here keeps a doomed
