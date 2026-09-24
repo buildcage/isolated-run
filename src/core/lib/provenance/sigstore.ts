@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { bundleFromJSON } from "@sigstore/bundle";
 import { getTrustedRoot } from "@sigstore/tuf";
 import {
@@ -20,6 +23,21 @@ export interface VerifyBundleOptions {
 }
 
 /**
+ * Fetch the trusted root through a TUF cache of this call's own, so the update
+ * always starts from the root embedded in @sigstore/tuf. The default cache
+ * lives under $HOME and outlives the job on a self-hosted runner, where a
+ * root.json an earlier job left there would be the trust anchor instead.
+ */
+async function fetchTrustedRoot(): ReturnType<typeof getTrustedRoot> {
+  const cachePath = await mkdtemp(join(process.env.RUNNER_TEMP || tmpdir(), "buildcage-tuf-"));
+  try {
+    return await getTrustedRoot({ cachePath });
+  } finally {
+    await rm(cachePath, { recursive: true, force: true });
+  }
+}
+
+/**
  * Cryptographically verify a Sigstore Bundle (DSSE format) against a policy,
  * then assert that the bundle's signed manifest digest matches the fetched digest.
  *
@@ -35,7 +53,7 @@ export async function verifyBundle(
   options: VerifyBundleOptions,
   expectedDigest: string,
 ): Promise<void> {
-  const trustedRoot = await getTrustedRoot();
+  const trustedRoot = await fetchTrustedRoot();
   const verifier = new Verifier(toTrustMaterial(trustedRoot), {
     ctlogThreshold: options.ctLogThreshold,
     tlogThreshold: options.tlogThreshold,
