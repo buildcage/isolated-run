@@ -165,11 +165,9 @@ export function pinHostCommands(
 }
 
 /**
- * The host binaries the inspect engine's JVM keystore injection needs. `java`
- * is the first on PATH, since its keystore is the one the step's JVM reads; it
- * is only located, never run, so it may live anywhere. `keytool` does run,
- * outside the sandbox, so it is pinned like docker and sudo: JAVA_HOME's
- * first, then PATH's, and none at all if both are only under `persisting`.
+ * The first `java` on PATH, whose keystore the step's JVM reads; it is never
+ * run, so it may live anywhere. `keytool` runs on the host, so it is pinned
+ * like docker and sudo, JAVA_HOME's before PATH's.
  */
 export function jvmTools(
   env: NodeJS.ProcessEnv,

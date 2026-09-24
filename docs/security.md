@@ -175,11 +175,10 @@ sandbox down, so what it runs is kept out of those paths:
   `$PATH` only inside those paths. The post step pins them again. `sudo` runs with only the system
   directories on its `PATH`, which is what it resolves the commands it runs against when sudoers
   sets no `secure_path`.
-- Under `inspect`, `keytool`, which adds the CA to a copy of each JVM keystore, is pinned the same
-  way, trying `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so a
-  `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` meant for the command does not run outside the sandbox. With
-  no such `keytool`, the keystores are left alone and the step warns. The `java` whose keystore is
-  injected is located by following its symlinks, never run.
+- Under `inspect`, the `keytool` that adds the CA to the JVM keystores is pinned the same way,
+  `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so the command's
+  `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` stays inside the sandbox. Without one, the step skips the
+  keystores and warns. `java` is never run: its keystore is found by following its symlinks.
 - The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins,
   and this action's own checkout, which holds the post step's script, are read-only inside the
   sandbox, unless `write_through:` names the directory itself or `uses: ./` makes the checkout the

@@ -75,7 +75,6 @@ export const SYSTEM_CA_CANDIDATES = [
 export const OWN_CA_DESTINATION = "/etc/buildcage-ca.pem";
 
 export interface CaTrustDeps {
-  /** `env` replaces the inherited environment when given. */
   exec?: (command: string, args: string[], env?: NodeJS.ProcessEnv) => void;
   readFile?: (path: string) => string;
   writeFile?: (path: string, contents: string, mode: number) => void;
@@ -192,11 +191,10 @@ function keystoreDirsOf(home: string): string[] {
  * the known fixed directories. Each is resolved and deduplicated so a keystore
  * reachable by more than one path is injected into once.
  *
- * The java's home is the directory above the bin/ its symlinks end in, read
- * off the filesystem rather than asked of the java, which would run a binary
- * an earlier sandboxed step may have planted. A wrapper script (an asdf or
- * jenv shim) resolves to the wrong place and leaves it to JAVA_HOME and the
- * fixed paths.
+ * The java's home is read off its symlinks rather than asked of the java,
+ * which may be a binary an earlier sandboxed step planted. A wrapper script
+ * (an asdf or jenv shim) resolves to the wrong place, leaving JAVA_HOME and
+ * the fixed paths.
  */
 export function discoverJvmKeystores(
   env: NodeJS.ProcessEnv,
@@ -228,12 +226,10 @@ export function discoverJvmKeystores(
  * scratch directory), and return each copy with the keystore it stands in for,
  * for caTrustAdditions to mount over. The copy is made and rewritten with the
  * runner's own keytool, so its output is one that JVM will trust as its cacerts;
- * the real keystore is only read, never written. keytool runs with an empty
- * environment, so a JAVA_TOOL_OPTIONS or LD_PRELOAD meant for the step's own
- * process does not run outside the sandbox with it. A keystore keytool cannot
- * rewrite (an unusual password, say), or every keystore when there is no
- * pinnable keytool, is skipped, so the step's JVM does not trust the CA rather
- * than the step failing.
+ * the real keystore is only read, never written. keytool gets an empty
+ * environment, so the step's JAVA_TOOL_OPTIONS or LD_PRELOAD stays inside the
+ * sandbox. A keystore that cannot be rewritten (an unusual password, or no
+ * pinnable keytool) is skipped with a warning rather than failing the step.
  */
 export function writeJvmKeystoreFiles(
   caCertPath: string,
@@ -253,11 +249,11 @@ export function writeJvmKeystoreFiles(
   if (!keytool) {
     if (keystores.length > 0) {
       warn?.(
-        `could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): no keytool ` +
-          "was found outside $HOME, $GITHUB_WORKSPACE, /tmp, $RUNNER_TEMP and write_through:, " +
-          "where a sandboxed command could have replaced it, so a Java step will not trust the " +
-          "proxy. Install a JDK outside those paths (a system package, or RUNNER_TOOL_CACHE " +
-          "pointed outside $HOME), or use proxy_engine: universal.",
+        `could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no ` +
+          "keytool outside the paths a sandboxed command can write to ($HOME, $GITHUB_WORKSPACE, " +
+          "/tmp, $RUNNER_TEMP, write_through:). A Java step will not trust the proxy. Install a " +
+          "JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside $HOME), or " +
+          "use proxy_engine: universal.",
       );
     }
     return [];

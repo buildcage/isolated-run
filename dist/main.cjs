@@ -18952,7 +18952,7 @@ function writeJvmKeystoreFiles(caCertPath, dir, env, { java, keytool }, { exec =
 		exists,
 		realpath
 	});
-	if (!keytool) return keystores.length > 0 && warn?.(`could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): no keytool was found outside \$HOME, \$GITHUB_WORKSPACE, /tmp, \$RUNNER_TEMP and write_through:, where a sandboxed command could have replaced it, so a Java step will not trust the proxy. Install a JDK outside those paths (a system package, or RUNNER_TOOL_CACHE pointed outside \$HOME), or use proxy_engine: universal.`), [];
+	if (!keytool) return keystores.length > 0 && warn?.(`could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no keytool outside the paths a sandboxed command can write to (\$HOME, \$GITHUB_WORKSPACE, /tmp, \$RUNNER_TEMP, write_through:). A Java step will not trust the proxy. Install a JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside \$HOME), or use proxy_engine: universal.`), [];
 	let injected = [];
 	return keystores.forEach((keystore, i) => {
 		let copy = (0, node_path.join)(dir, `jvm-keystore-${i}`);

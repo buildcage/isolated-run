@@ -154,8 +154,7 @@ function extractCaTrust(
 ): CaTrustFiles {
   try {
     const caCertPath = extractCaCert(containerName, dir);
-    // Pinned against persistent mode's paths in either mode, as docker and sudo
-    // are: an earlier step's sandbox may have written there.
+    // Persistent mode's paths in either mode; see pinningPaths.
     const tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env));
     return {
       ...writeCaTrustFiles(caCertPath, dir),
