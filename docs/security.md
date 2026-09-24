@@ -377,7 +377,7 @@ Three mechanisms make that enforceable:
   passed the rules, and the origin's own certificate is checked on that connection.
 - **The path is normalized before the rules see it**: `%2e` is decoded and `..` segments are
   removed. A `..` joined to an encoded separator (`..%2f`, `..%5c`) or to `;`, and any backslash, is
-  refused outright. Encodings HAProxy does not decode, such as a double-encoded `%252e`, `%00` or an
+  refused. Encodings HAProxy does not decode, such as a double-encoded `%252e`, `%00` or an
   overlong UTF-8 dot, reach the origin as written and matter only to an origin that decodes them
   again.
 - **The CA is mounted, never written to the host.** This is where the engine differs most from
@@ -403,7 +403,7 @@ more than intended.
 | Asks for any name, on or off the allowlist                                                         | Answered locally with the proxy's own address; the query is never forwarded, allowed or not                                                                            |
 | Requests a host no rule covers                                                                     | Refused, origin never contacted; `inspect` records the URL it asked for                                                                                                |
 | Requests a path or method no rule covers                                                           | **403** under `inspect`, recorded with its URL; `universal` reads neither and enforces on the host                                                                     |
-| Walks out of an allowed path with `..` or `%2e%2e`                                                 | **403**: the path is normalised before the rules see it, and a `..` joined to an encoded separator or `;` is refused outright, as is any backslash                     |
+| Walks out of an allowed path with `..` or `%2e%2e`                                                 | **403**: the path is normalised before the rules see it, and a `..` joined to an encoded separator or `;` is refused, as is any backslash                              |
 | Sends an allowed name while aiming elsewhere, or points `/etc/hosts` at an address of its choosing | Reaches the address the proxy resolved; the command's own choice of address is discarded                                                                               |
 | Puts an address in the `Host` header                                                               | Taken as the destination once a rule allows it; an internal one only if a rule names it as its host                                                                    |
 | Allowlists a name that resolves to an internal address                                             | Refused if it lands on loopback, link-local, the proxy itself, an address the runner holds, or another never-public range, in `audit` too                              |
