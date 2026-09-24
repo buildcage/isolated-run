@@ -1,11 +1,11 @@
 /**
  * Keeps what this action runs on the host out of reach of the sandboxed
- * command, whose writes to some host paths outlive it. `docker` and `sudo`
- * are pinned to binaries outside those paths, since a lookup through `$PATH`
- * could pick one the command planted (`~/.local/bin` precedes `/usr/bin` on
- * hosted runners). The docker CLI's config directory and this action's own
- * checkout, which hold its plugins and the post step's script, are made
- * read-only inside the sandbox.
+ * command, whose writes to some host paths outlive it. `docker`, `sudo` and
+ * the inspect engine's `keytool` are pinned to binaries outside those paths,
+ * since a lookup through `$PATH` could pick one the command planted
+ * (`~/.local/bin` precedes `/usr/bin` on hosted runners). The docker CLI's
+ * config directory and this action's own checkout, which hold its plugins and
+ * the post step's script, are made read-only inside the sandbox.
  */
 
 import { accessSync, constants, readlinkSync, realpathSync } from "node:fs";
@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
+import type { JvmTools } from "./ca-trust.ts";
 import { writableDirsOf } from "./oci-mounts.ts";
 import { isAtOrUnder } from "./paths.ts";
 import { pinCommand } from "./pinned-commands.ts";
@@ -161,6 +162,25 @@ export function pinHostCommands(
       "HOST_COMMAND_UNPINNABLE",
     );
   }
+}
+
+/**
+ * The first `java` on PATH, whose keystore the step's JVM reads; it is never
+ * run, so it may live anywhere. `keytool` runs on the host, so it is pinned
+ * like docker and sudo, JAVA_HOME's before PATH's.
+ */
+export function jvmTools(
+  env: NodeJS.ProcessEnv,
+  persisting: string[],
+  deps: FindCommandDeps = realFindCommandDeps,
+): JvmTools {
+  const javaHomeBin = env.JAVA_HOME ? join(env.JAVA_HOME, "bin") : undefined;
+  return {
+    java: findPinnableCommand("java", env.PATH, [], deps),
+    keytool:
+      findPinnableCommand("keytool", javaHomeBin, persisting, deps) ??
+      findPinnableCommand("keytool", env.PATH, persisting, deps),
+  };
 }
 
 /**

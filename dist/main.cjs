@@ -18894,21 +18894,14 @@ const SYSTEM_CA_CANDIDATES = [
 	"/etc/pki/tls/cacert.pem",
 	"/etc/ssl/cert.pem"
 ], OWN_CA_DESTINATION = "/etc/buildcage-ca.pem";
-function defaultExec$1(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args);
+function defaultExec$1(command, args, env) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, { env });
 }
 function defaultReadFile$1(path) {
 	return (0, node_fs.readFileSync)(path, "utf8");
 }
 function defaultWriteFile(path, contents, mode) {
 	(0, node_fs.writeFileSync)(path, contents, { mode });
-}
-function defaultJavaHome(env) {
-	let result = (0, node_child_process.spawnSync)("java", ["-XshowSettings:properties", "-version"], {
-		encoding: "utf8",
-		env
-	}), match = `${result.stdout ?? ""}${result.stderr ?? ""}`.match(/java\.home\s*=\s*(.+)/);
-	return match ? match[1].trim() : void 0;
 }
 function extractCaCert(containerName, destDir, { exec = defaultExec$1, chmod = node_fs.chmodSync } = {}) {
 	let caCertPath = (0, node_path.join)(destDir, "proxy-ca.pem");
@@ -18939,9 +18932,12 @@ const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"], KNOWN_JVM_KEYSTORE_DIRS =
 	"/etc/pki/java",
 	"/etc/pki/ca-trust/extracted/java"
 ];
-function discoverJvmKeystores(env, { exists = node_fs.existsSync, realpath = node_fs.realpathSync, javaHome = defaultJavaHome } = {}) {
-	let dirs = [], home = javaHome(env);
-	home && dirs.push((0, node_path.join)(home, "lib", "security")), env.JAVA_HOME && dirs.push((0, node_path.join)(env.JAVA_HOME, "lib", "security"), (0, node_path.join)(env.JAVA_HOME, "jre", "lib", "security")), dirs.push(...KNOWN_JVM_KEYSTORE_DIRS);
+function keystoreDirsOf(home) {
+	return [(0, node_path.join)(home, "lib", "security"), (0, node_path.join)(home, "jre", "lib", "security")];
+}
+function discoverJvmKeystores(env, java, { exists = node_fs.existsSync, realpath = node_fs.realpathSync } = {}) {
+	let dirs = [];
+	java && dirs.push(...keystoreDirsOf((0, node_path.dirname)((0, node_path.dirname)(realpath(java))))), env.JAVA_HOME && dirs.push(...keystoreDirsOf(env.JAVA_HOME)), dirs.push(...KNOWN_JVM_KEYSTORE_DIRS);
 	let found = [], seen = new Set();
 	for (let dir of dirs) for (let name of JVM_KEYSTORE_NAMES) {
 		let candidate = (0, node_path.join)(dir, name);
@@ -18951,13 +18947,14 @@ function discoverJvmKeystores(env, { exists = node_fs.existsSync, realpath = nod
 	}
 	return found;
 }
-function writeJvmKeystoreFiles(caCertPath, dir, env, { exec = defaultExec$1, exists = node_fs.existsSync, realpath = node_fs.realpathSync, copyFile = node_fs.copyFileSync, chmod = node_fs.chmodSync, javaHome = defaultJavaHome, warn } = {}) {
-	let keytool = env.JAVA_HOME ? (0, node_path.join)(env.JAVA_HOME, "bin", "keytool") : "keytool", injected = [];
-	return discoverJvmKeystores(env, {
+function writeJvmKeystoreFiles(caCertPath, dir, env, { java, keytool }, { exec = defaultExec$1, exists = node_fs.existsSync, realpath = node_fs.realpathSync, copyFile = node_fs.copyFileSync, chmod = node_fs.chmodSync, warn } = {}) {
+	let keystores = discoverJvmKeystores(env, java, {
 		exists,
-		realpath,
-		javaHome
-	}).forEach((keystore, i) => {
+		realpath
+	});
+	if (!keytool) return keystores.length > 0 && warn?.(`could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no keytool outside the paths a sandboxed command can write to (\$HOME, \$GITHUB_WORKSPACE, /tmp, \$RUNNER_TEMP, write_through:). A Java step will not trust the proxy. Install a JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside \$HOME), or use proxy_engine: universal.`), [];
+	let injected = [];
+	return keystores.forEach((keystore, i) => {
 		let copy = (0, node_path.join)(dir, `jvm-keystore-${i}`);
 		try {
 			copyFile(keystore, copy), chmod(copy, 420), exec(keytool, [
@@ -18971,7 +18968,7 @@ function writeJvmKeystoreFiles(caCertPath, dir, env, { exec = defaultExec$1, exi
 				copy,
 				"-storepass",
 				"changeit"
-			]);
+			], {});
 		} catch {
 			warn?.(`could not add the proxy CA to the JVM keystore ${keystore}; a Java step will not trust it. Use proxy_engine: universal for a JVM build whose keystore cannot be rewritten.`);
 			return;
@@ -19351,6 +19348,13 @@ function pinHostCommands(paths, env, deps = realFindCommandDeps) {
 		if (findPinnableCommand(command, env.PATH, [], deps)) throw new SandboxError(`'${command}' is on PATH only under paths a sandboxed command can write to (${paths.join(", ")}). This action runs it outside the sandbox, so it has to live somewhere no sandboxed command can replace it, such as /usr/bin.`, "HOST_COMMAND_UNPINNABLE");
 	}
 }
+function jvmTools(env, persisting, deps = realFindCommandDeps) {
+	let javaHomeBin = env.JAVA_HOME ? (0, node_path.join)(env.JAVA_HOME, "bin") : void 0;
+	return {
+		java: findPinnableCommand("java", env.PATH, [], deps),
+		keytool: findPinnableCommand("keytool", javaHomeBin, persisting, deps) ?? findPinnableCommand("keytool", env.PATH, persisting, deps)
+	};
+}
 function pinningPaths(readWriteThroughInput, env) {
 	let writeThroughPaths = [];
 	try {
@@ -19661,6 +19665,7 @@ const realDeps$2 = {
 	extractCaCert,
 	writeCaTrustFiles,
 	writeJvmKeystoreFiles,
+	jvmTools,
 	createOverlayScratchDirs,
 	writeResolvConf,
 	writeRunScript,
@@ -19685,12 +19690,12 @@ function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`, "RUNC_EXTRACT_FAILED");
 	}
 }
-function extractCaTrust(containerName, dir, env, warn, { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles }) {
+function extractCaTrust(containerName, dir, { env, writeThroughPaths, warn }, { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles, jvmTools }) {
 	try {
-		let caCertPath = extractCaCert(containerName, dir);
+		let caCertPath = extractCaCert(containerName, dir), tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env));
 		return {
 			...writeCaTrustFiles(caCertPath, dir),
-			jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, { warn })
+			jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn })
 		};
 	} catch (e) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`, "CA_EXTRACT_FAILED");
@@ -19714,7 +19719,7 @@ function resolveIdentity(env, { resolveSandboxGid, info }) {
 	};
 }
 function assembleBundle(dir, options, deps) {
-	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode, warn } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, env, warn, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
+	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
 		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)), readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env), renameGuardDirs$1 = renameGuardDirs(readonlyHostDirs, persisting);
 		for (let dir of readonlyHostDirs) deps.mkdir(dir, {

@@ -18,6 +18,7 @@ const mocks = {
   extractCaCert: vi.fn(),
   writeCaTrustFiles: vi.fn(),
   writeJvmKeystoreFiles: vi.fn(),
+  jvmTools: vi.fn(),
   createOverlayScratchDirs: vi.fn(),
   writeRunScript: vi.fn(),
   writeResolvConf: vi.fn(),
@@ -71,6 +72,7 @@ beforeEach(() => {
   mocks.extractCaCert.mockReturnValue(`${SCRATCH}/ca.crt`);
   mocks.writeCaTrustFiles.mockReturnValue({ bundlePath: `${SCRATCH}/ca-bundle.crt` });
   mocks.writeJvmKeystoreFiles.mockReturnValue([]);
+  mocks.jvmTools.mockReturnValue({ java: undefined, keytool: undefined });
   mocks.createOverlayScratchDirs.mockReturnValue([]);
   mocks.writeResolvConf.mockReturnValue(`${SCRATCH}/resolv.conf`);
   mocks.writeRunScript.mockReturnValue(`${SCRATCH}/exec/run.sh`);
@@ -133,6 +135,34 @@ describe("runSandboxedCommand", () => {
       bundlePath: `${SCRATCH}/ca-bundle.crt`,
       jvmKeystores: [],
     });
+  });
+
+  // An earlier step's sandbox may have written to $HOME even when this one's
+  // writes are discarded.
+  it("pins keytool against persistent mode's paths even in ephemeral mode", () => {
+    const tools = { java: "/usr/bin/java", keytool: "/usr/bin/keytool" };
+    mocks.jvmTools.mockReturnValue(tools);
+    const opts = options({
+      proxyEngine: "inspect",
+      filesystemMode: "ephemeral",
+      writeThroughPaths: ["/opt/out"],
+    });
+
+    runSandboxedCommand(opts, deps);
+
+    expect(mocks.jvmTools).toHaveBeenCalledWith(opts.env, [
+      "/home/runner/work/repo/repo",
+      "/home/runner",
+      "/tmp",
+      "/opt/out",
+    ]);
+    expect(mocks.writeJvmKeystoreFiles).toHaveBeenCalledWith(
+      `${SCRATCH}/ca.crt`,
+      SCRATCH,
+      opts.env,
+      tools,
+      { warn: mocks.warn },
+    );
   });
 
   it("extracts no CA under an engine that does not terminate TLS", () => {

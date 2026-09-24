@@ -16,6 +16,7 @@ import {
   type CaTrustFiles,
 } from "./ca-trust.ts";
 import {
+  jvmTools,
   persistingWritablePaths,
   renameGuardDirs as renameGuards,
   sandboxReadonlyHostDirs,
@@ -51,6 +52,7 @@ export interface RunSandboxedCommandDeps {
   extractCaCert: typeof extractCaCert;
   writeCaTrustFiles: typeof writeCaTrustFiles;
   writeJvmKeystoreFiles: typeof writeJvmKeystoreFiles;
+  jvmTools: typeof jvmTools;
   createOverlayScratchDirs: typeof createOverlayScratchDirs;
   writeResolvConf: typeof writeResolvConf;
   writeRunScript: typeof writeRunScript;
@@ -72,6 +74,7 @@ const realDeps: RunSandboxedCommandDeps = {
   extractCaCert,
   writeCaTrustFiles,
   writeJvmKeystoreFiles,
+  jvmTools,
   createOverlayScratchDirs,
   writeResolvConf,
   writeRunScript,
@@ -146,15 +149,16 @@ function extractBootstrap(
 function extractCaTrust(
   containerName: string,
   dir: string,
-  env: NodeJS.ProcessEnv,
-  warn: Warn,
-  { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles }: RunSandboxedCommandDeps,
+  { env, writeThroughPaths, warn }: AssembleBundleOptions,
+  { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles, jvmTools }: RunSandboxedCommandDeps,
 ): CaTrustFiles {
   try {
     const caCertPath = extractCaCert(containerName, dir);
+    // Persistent mode's paths in either mode; see pinningPaths.
+    const tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env));
     return {
       ...writeCaTrustFiles(caCertPath, dir),
-      jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, { warn }),
+      jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn }),
     };
   } catch (e) {
     if (e instanceof SandboxError) throw e;
@@ -236,12 +240,12 @@ export function assembleBundle(
   options: AssembleBundleOptions,
   deps: RunSandboxedCommandDeps,
 ): AssembledBundle {
-  const { containerName, writeThroughPaths, env, proxyEngine, filesystemMode, warn } = options;
+  const { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options;
   const { listHostMounts, buildOciConfig } = deps;
 
   const { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps);
   const caTrust =
-    proxyEngine === "inspect" ? extractCaTrust(containerName, dir, env, warn, deps) : undefined;
+    proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, deps) : undefined;
 
   const netnsName = netnsNameFor(containerName);
   const rootfsBindDir = join(dir, "rootfs");

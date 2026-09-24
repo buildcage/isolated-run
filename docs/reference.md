@@ -288,8 +288,8 @@ work. Comments follow the same rule as [`allowed_url_rules`](#url-rules-allowed_
 the start of a line, or after whitespace, runs to the end of the line, and a `#` with no space
 before it is reported as a mistake rather than silently trimmed, since `#` is part of no host. The
 second rule above is the shape to use for a JVM build whose keystore Buildcage cannot inject into (a
-keystore under a non-default password, or a runner with no `keytool`); a JVM already on the runner
-otherwise trusts the injected CA without a passthrough.
+keystore under a non-default password, or a runner with no `keytool` outside the writable paths); a
+JVM already on the runner otherwise trusts the injected CA without a passthrough.
 
 ### Regular expressions
 

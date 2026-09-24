@@ -534,9 +534,13 @@ reported as blocked; see
   not accept the re-signed certificate.
 - The JVM (Java, Kotlin, Scala) reads only its own keystore rather than the CA-trust variables, and
   a JVM already on the runner is handled: the CA is added to a copy of its
-  `$JAVA_HOME/lib/security/cacerts` for the step. Two cases fall back to `proxy_engine: universal`: a
-  keystore sealed with a non-default password, which the runner's `keytool` cannot rewrite, and a
-  runner with no `keytool` at all.
+  `$JAVA_HOME/lib/security/cacerts` for the step. The `keytool` that does this runs outside the
+  sandbox, so it must live outside `$HOME`, `$GITHUB_WORKSPACE`, `/tmp`, `$RUNNER_TEMP` and
+  `write_through:`. GitHub-hosted runners have one in `/usr/lib/jvm`. A self-hosted runner whose only
+  JDKs are under `$HOME` (mise, sdkman, coursier, or `setup-java` with the runner in a home
+  directory) needs a system JDK or a `RUNNER_TOOL_CACHE` outside `$HOME`. Without one, or with a
+  keystore sealed under a non-default password, the step warns and a JVM build needs
+  `proxy_engine: universal`.
 - `audit` terminates TLS as well. It drops the rules, not the interception, so a tool that cannot
   accept the CA fails in `audit` exactly as it would in `restrict`. `universal`'s audit mode
   decrypts nothing and breaks nothing.
