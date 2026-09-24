@@ -35,6 +35,13 @@ describe("passthrough", () => {
     expect(config.includes("set-var(txn.sni) req.ssl_sni,regsub([^A-Za-z0-9._-],_,g)")).toBe(true);
   });
 
+  it("logs the SNI only for a connection a tls rule passed", () => {
+    const capture = "set-var(txn.sni) req.ssl_sni,regsub([^A-Za-z0-9._-],_,g)";
+    expect(config.includes(`${capture} if tls0_sni tls0_port`)).toBe(true);
+    expect(config.split(capture).length).toBe(2);
+    expect(detect({ ipRules: ["10.0.0.5:5432"] }).includes("set-var(txn.sni)")).toBe(false);
+  });
+
   it("routes tls rules by SNI, and by the port the rule names", () => {
     expect(config.includes("acl tls0_sni req.ssl_sni -m reg -i ^db\\\\.example\\\\.com$")).toBe(
       true,

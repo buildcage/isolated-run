@@ -43,11 +43,7 @@ export function detectFrontend(spec: DetectFrontendSpec): string[] {
     "",
   );
   if (hasPassthrough) {
-    l.push(
-      // req.ssl_sni is attacker-controlled; reduced to a safe charset for logging.
-      "    # Captured now, since the request buffer is gone by log time.",
-      "    tcp-request content set-var(txn.sni) req.ssl_sni,regsub([^A-Za-z0-9._-],_,g)",
-    );
+    l.push("    # Passed through untouched: judged before anything is decrypted.");
     if (ipRules.some((rule) => rule.hostMatch === "hostPort")) {
       // dst is IP-typed; a ~ rule's own regex covers address and port
       // together, so dst is stringified with the real port to match it.
@@ -56,7 +52,6 @@ export function detectFrontend(spec: DetectFrontendSpec): string[] {
     if (tlsHosts.some((host) => host.hostMatch === "hostPort")) {
       l.push("    tcp-request content set-var-fmt(txn.sni_port) %[req.ssl_sni]:%[dst_port]");
     }
-    l.push("", "    # Passed through untouched: judged before anything is decrypted.");
     if (excludeDnsRouted) {
       l.push(
         "    # dst is the proxy only when the name went through this container's DNS.",
@@ -81,9 +76,10 @@ export function detectFrontend(spec: DetectFrontendSpec): string[] {
       );
       if (host.port) l.push(`    acl ${host.id}_port dst_port ${host.port}`);
     }
+    const tlsConds = tlsHosts.map((h) => `${h.id}_sni${h.port ? ` ${h.id}_port` : ""}`);
     const conds = [
       ...ipRules.map((r) => `${r.id}_dst${r.port ? ` ${r.id}_port` : ""}${notDnsRouted}`),
-      ...tlsHosts.map((h) => `${h.id}_sni${h.port ? ` ${h.id}_port` : ""}`),
+      ...tlsConds,
     ];
 
     // A passthrough is never decrypted and so has no request line; this line
@@ -94,6 +90,13 @@ export function detectFrontend(spec: DetectFrontendSpec): string[] {
       "",
       // One line per rule, for the same word-limit reason as ruleBlock's deny.
       ...conds.map((cond) => `    tcp-request content set-var(txn.pass) int(1) if ${cond}`),
+      // Logged only when a tls rule judged the name: under an ip rule the SNI
+      // is whatever the client claims, and the address is the identity.
+      // Reduced to a safe charset, being attacker-controlled.
+      ...tlsConds.map(
+        (cond) =>
+          `    tcp-request content set-var(txn.sni) req.ssl_sni,regsub([^A-Za-z0-9._-],_,g) if ${cond}`,
+      ),
       "    tcp-request content set-var(txn.proto) str(tls) if { req.ssl_hello_type 1 }",
       "    tcp-request content set-var(txn.proto) str(tcp) unless { req.ssl_hello_type 1 }",
     );
