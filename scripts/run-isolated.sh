@@ -195,25 +195,26 @@ ip link set "$VETH_P" netns "$PROXY_NETNS_NAME"
 # sandbox/env-loader.ts). These nested shells are the only commands here
 # that could plausibly consume any of it, hence the /dev/null redirects.
 echo "Configuring sandbox namespace network..." >&2
-ip netns exec "$NETNS_NAME" sh -c "
+# Positional arguments, so a value can never become shell syntax.
+ip netns exec "$NETNS_NAME" sh -c '
   set -e
-  ip link set '${VETH_T}' name eth0
-  ip addr add '${TARGET_IP}/24' dev eth0
+  ip link set "$1" name eth0
+  ip addr add "$2/24" dev eth0
   ip link set eth0 up
   ip link set lo up
-  ip route add default via '${GATEWAY}'
-" </dev/null
+  ip route add default via "$3"
+' sh "$VETH_T" "$TARGET_IP" "$GATEWAY" </dev/null
 
 echo "Configuring proxy-side veth as buildcage0..." >&2
 # The name is fixed because init-iptables's "-i buildcage0" rule is added at
 # container startup, before this device exists, and matches on the name
 # whenever it appears.
-nsenter --net="$PROXY_NETNS" -- sh -c "
+nsenter --net="$PROXY_NETNS" -- sh -c '
   set -e
-  ip link set '${VETH_P}' name buildcage0
-  ip addr add '${GATEWAY}/24' dev buildcage0
+  ip link set "$1" name buildcage0
+  ip addr add "$2/24" dev buildcage0
   ip link set buildcage0 up
-" </dev/null
+' sh "$VETH_P" "$GATEWAY" </dev/null
 
 echo "Executing isolated command via runc..." >&2
 group_end
