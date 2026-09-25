@@ -101,10 +101,19 @@ const CONTENT_DIGEST_ALGORITHMS: Record<string, { subtle: string; hexLength: num
   sha512: { subtle: "SHA-512", hexLength: 128 },
 };
 
-/** A registry-supplied digest goes into request paths, so only this shape passes. */
-function isOciDigest(digest: string): boolean {
+/** A registry-supplied digest goes into request paths, so only the OCI shape passes. */
+export function isOciDigest(digest: unknown): digest is string {
+  if (typeof digest !== "string") return false;
   const match = /^([a-z0-9]+):([0-9a-f]+)$/.exec(digest);
   return match !== null && CONTENT_DIGEST_ALGORITHMS[match[1]]?.hexLength === match[2].length;
+}
+
+export function assertOciDigest(digest: unknown, where: string): string {
+  if (isOciDigest(digest)) return digest;
+  throw new VerifyImageError(
+    `Malformed digest in ${where}: ${JSON.stringify(digest)}`,
+    "VERIFY_FAILED",
+  );
 }
 
 /**
@@ -265,13 +274,7 @@ export async function fetchManifestDigest(
     if (!digest) {
       throw new VerifyImageError(`No digest in manifest response for ${image}`, "TRANSIENT");
     }
-    if (!isOciDigest(digest)) {
-      throw new VerifyImageError(
-        `Malformed digest in manifest response for ${image}: ${JSON.stringify(digest)}`,
-        "VERIFY_FAILED",
-      );
-    }
-    return digest;
+    return assertOciDigest(digest, `manifest response for ${image}`);
   });
 }
 
@@ -308,17 +311,18 @@ export async function fetchImageConfigLabels(
     if (!platform) {
       throw new VerifyImageError(`No platform manifest in image index ${image}`, "NOT_FOUND");
     }
+    const platformDigest = assertOciDigest(platform.digest, `image index ${image}`);
     manifest = await client.getJson(
-      `/manifests/${platform.digest}`,
+      `/manifests/${platformDigest}`,
       `platform manifest for ${image}`,
-      { accept: MANIFEST_MEDIA_TYPES.join(", "), verifyDigest: platform.digest },
+      { accept: MANIFEST_MEDIA_TYPES.join(", "), verifyDigest: platformDigest },
     );
   }
 
-  const configDigest = manifest.config?.digest;
-  if (!configDigest) {
+  if (!manifest.config?.digest) {
     throw new VerifyImageError(`No image config in manifest for ${image}`, "NOT_FOUND");
   }
+  const configDigest = assertOciDigest(manifest.config.digest, `manifest for ${image}`);
   const config = await client.getJson(`/blobs/${configDigest}`, `image config for ${image}`, {
     verifyDigest: configDigest,
   });

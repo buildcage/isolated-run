@@ -10781,8 +10781,13 @@ const CONTENT_DIGEST_ALGORITHMS = {
 	}
 };
 function isOciDigest(digest) {
+	if (typeof digest != "string") return !1;
 	let match = /^([a-z0-9]+):([0-9a-f]+)$/.exec(digest);
 	return match !== null && CONTENT_DIGEST_ALGORITHMS[match[1]]?.hexLength === match[2].length;
+}
+function assertOciDigest(digest, where) {
+	if (isOciDigest(digest)) return digest;
+	throw new VerifyImageError(`Malformed digest in ${where}: ${JSON.stringify(digest)}`, "VERIFY_FAILED");
 }
 async function assertContentDigest(bytes, expected, what) {
 	let [algorithm] = expected.split(":", 1), subtleName = CONTENT_DIGEST_ALGORITHMS[algorithm]?.subtle;
@@ -10822,8 +10827,7 @@ async function fetchManifestDigest(registry, repo, tag, token, _fetch = fetch) {
 		assertRegistryOk(resp, `manifest for ${image}`, "TRANSIENT");
 		let digest = resp.headers.get("Docker-Content-Digest");
 		if (!digest) throw new VerifyImageError(`No digest in manifest response for ${image}`, "TRANSIENT");
-		if (!isOciDigest(digest)) throw new VerifyImageError(`Malformed digest in manifest response for ${image}: ${JSON.stringify(digest)}`, "VERIFY_FAILED");
-		return digest;
+		return assertOciDigest(digest, `manifest response for ${image}`);
 	});
 }
 async function fetchImageConfigLabels(registry, repo, digest, token, _fetch = fetch) {
@@ -10834,13 +10838,14 @@ async function fetchImageConfigLabels(registry, repo, digest, token, _fetch = fe
 	if (Array.isArray(root.manifests)) {
 		let platform = root.manifests.find((m) => m.platform?.os && m.platform.os !== "unknown");
 		if (!platform) throw new VerifyImageError(`No platform manifest in image index ${image}`, "NOT_FOUND");
-		manifest = await client.getJson(`/manifests/${platform.digest}`, `platform manifest for ${image}`, {
+		let platformDigest = assertOciDigest(platform.digest, `image index ${image}`);
+		manifest = await client.getJson(`/manifests/${platformDigest}`, `platform manifest for ${image}`, {
 			accept: MANIFEST_MEDIA_TYPES.join(", "),
-			verifyDigest: platform.digest
+			verifyDigest: platformDigest
 		});
 	}
-	let configDigest = manifest.config?.digest;
-	if (!configDigest) throw new VerifyImageError(`No image config in manifest for ${image}`, "NOT_FOUND");
+	if (!manifest.config?.digest) throw new VerifyImageError(`No image config in manifest for ${image}`, "NOT_FOUND");
+	let configDigest = assertOciDigest(manifest.config.digest, `manifest for ${image}`);
 	return (await client.getJson(`/blobs/${configDigest}`, `image config for ${image}`, { verifyDigest: configDigest })).config?.Labels ?? {};
 }
 async function fetchRegistryToken(registry, repo, basicAuth, _fetch = fetch) {
@@ -10868,7 +10873,7 @@ async function bundleFromReferrers(client, digest) {
 		if (resp.status >= 500) throw new VerifyImageError(`Transient error from referrers API: HTTP ${resp.status}`, "TRANSIENT");
 		if (!resp.ok) return;
 		let manifest = ((await resp.json()).manifests ?? []).find((m) => m.artifactType === BUNDLE_MEDIA_TYPE);
-		if (manifest) return { bundle: await bundleFromManifest(client, manifest.digest) };
+		if (manifest) return { bundle: await bundleFromManifest(client, assertOciDigest(manifest.digest, "referrers response")) };
 	});
 }
 async function bundleFromFallbackTag(client, digest) {
@@ -10879,7 +10884,7 @@ async function bundleFromFallbackTag(client, digest) {
 		let tagManifest = await resp.json();
 		if (Array.isArray(tagManifest.manifests)) {
 			for (let m of tagManifest.manifests) {
-				if (m.mediaType !== IMAGE_MANIFEST_MEDIA_TYPE) continue;
+				if (m.mediaType !== IMAGE_MANIFEST_MEDIA_TYPE || !isOciDigest(m.digest)) continue;
 				if (m.artifactType === BUNDLE_MEDIA_TYPE) return bundleFromManifest(client, m.digest);
 				let subResp = await client.request(`/manifests/${m.digest}`, { accept: IMAGE_MANIFEST_MEDIA_TYPE });
 				if (!subResp.ok) continue;
@@ -10903,8 +10908,8 @@ async function bundleFromManifest(client, manifestDigest) {
 	if (!layer) throw new VerifyImageError("No Sigstore bundle layer found in bundle manifest", "NOT_FOUND");
 	return bundleBlob(client, layer.digest);
 }
-function bundleBlob(client, blobDigest) {
-	return client.getJson(`/blobs/${blobDigest}`, "bundle blob", {
+async function bundleBlob(client, blobDigest) {
+	return client.getJson(`/blobs/${assertOciDigest(blobDigest, "bundle manifest")}`, "bundle blob", {
 		onFailure: "NOT_FOUND",
 		absentOn404: !1
 	});

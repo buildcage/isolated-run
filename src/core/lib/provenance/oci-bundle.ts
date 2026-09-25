@@ -8,7 +8,9 @@
 
 import { VerifyImageError } from "./errors.ts";
 import {
+  assertOciDigest,
   assertRegistryOk,
+  isOciDigest,
   registryClient,
   withRegistryErrors,
   type FetchLike,
@@ -82,7 +84,8 @@ async function bundleFromReferrers(
     // Awaiting here relabels nothing: bundleFromManifest reads through the
     // client, so it only ever rejects with a VerifyImageError, which passes
     // through.
-    return { bundle: await bundleFromManifest(client, manifest.digest) };
+    const manifestDigest = assertOciDigest(manifest.digest, "referrers response");
+    return { bundle: await bundleFromManifest(client, manifestDigest) };
   });
 }
 
@@ -110,7 +113,9 @@ async function bundleFromFallbackTag(client: RegistryClient, digest: string): Pr
 
     if (Array.isArray(tagManifest.manifests)) {
       for (const m of tagManifest.manifests as OciDescriptor[]) {
-        if (m.mediaType !== IMAGE_MANIFEST_MEDIA_TYPE) continue;
+        // Other referrers share this index, so one this module cannot address
+        // is skipped rather than ending the search for the bundle.
+        if (m.mediaType !== IMAGE_MANIFEST_MEDIA_TYPE || !isOciDigest(m.digest)) continue;
         if (m.artifactType === BUNDLE_MEDIA_TYPE) {
           return bundleFromManifest(client, m.digest);
         }
@@ -168,8 +173,8 @@ async function bundleFromManifest(
 }
 
 /** A blob the bundle manifest named, so a 404 means the bundle itself is missing. */
-function bundleBlob(client: RegistryClient, blobDigest: string): Promise<unknown> {
-  return client.getJson(`/blobs/${blobDigest}`, "bundle blob", {
+async function bundleBlob(client: RegistryClient, blobDigest: unknown): Promise<unknown> {
+  return client.getJson(`/blobs/${assertOciDigest(blobDigest, "bundle manifest")}`, "bundle blob", {
     onFailure: "NOT_FOUND",
     absentOn404: false,
   });

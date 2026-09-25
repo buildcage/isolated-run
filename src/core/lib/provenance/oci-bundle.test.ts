@@ -263,3 +263,47 @@ describe("fetchBundle: bundle blob refusals", () => {
     await expectVerifyError(bundle(blobIs(failsWith(404))), "NOT_FOUND");
   });
 });
+
+describe("fetchBundle: descriptor digests", () => {
+  const BAD = "sha256:../../blobs/x";
+
+  it("refuses a malformed referrers descriptor digest before requesting it", async () => {
+    const registry = stubRegistry({
+      [REFERRERS_PATH]: okJson({
+        manifests: [{ artifactType: BUNDLE_TYPE, mediaType: IMAGE_MANIFEST, digest: BAD }],
+      }),
+    });
+    await expectVerifyError(bundle(registry), "VERIFY_FAILED", /Malformed digest/);
+    expect(registry.urls).toHaveLength(1);
+  });
+
+  it("skips a tag index descriptor with a malformed digest and reaches the bundle after it", async () => {
+    const bundleObj = { mediaType: BUNDLE_TYPE };
+    const registry = stubRegistry({
+      [REFERRERS_PATH]: REFERRERS_MISS,
+      [TAG_PATH]: okJson({
+        manifests: [
+          { mediaType: IMAGE_MANIFEST, artifactType: EMPTY_CONFIG, digest: BAD },
+          { mediaType: IMAGE_MANIFEST, artifactType: BUNDLE_TYPE, digest: MANIFEST_DIGEST },
+        ],
+      }),
+      [`/manifests/${MANIFEST_DIGEST}`]: okJson({
+        layers: [{ mediaType: BUNDLE_TYPE, digest: BLOB_DIGEST }],
+      }),
+      [`/blobs/${BLOB_DIGEST}`]: okJson(bundleObj),
+    });
+    expect(await bundle(registry)).toStrictEqual(bundleObj);
+    expect(registry.urls.join("\n")).not.toContain(BAD);
+  });
+
+  it("refuses a malformed bundle layer digest before requesting it", async () => {
+    const registry = stubRegistry({
+      [REFERRERS_PATH]: REFERRERS_HIT,
+      [`/manifests/${MANIFEST_DIGEST}`]: okJson({
+        layers: [{ mediaType: BUNDLE_TYPE, digest: BAD }],
+      }),
+    });
+    await expectVerifyError(bundle(registry), "VERIFY_FAILED", /Malformed digest/);
+    expect(registry.urls).toHaveLength(2);
+  });
+});
