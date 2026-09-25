@@ -408,7 +408,7 @@ export function ensureWriteThroughTargetsExist(
       const modeOctal = (mode & 0o7777).toString(8);
       execFile("sudo", [...asOwner({ uid, gid }), "mkdir", "-p", "-m", modeOctal, "--", path]);
       // The later rmdir runs as this owner, so record only its own directories,
-      // each as soon as it checks out: a failure further down still rolls back
+      // each as soon as it passes, so that a deeper failure still rolls back
       // the shallower ones.
       for (const segment of pathSegmentsBetween(ancestor, path)) {
         const s = stat(segment);
