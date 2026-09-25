@@ -225,8 +225,8 @@ function resolveIdentity(
   const { gid, substitutedFrom, nssError } = resolveSandboxGid(process.getgid!(), env);
   if (nssError !== undefined) {
     warn(
-      `buildcage: could not look up groups through NSS (${nssError}); the primary group was ` +
-        "checked against /etc/group and the runtime sockets' owners only",
+      `buildcage: could not look up groups through NSS (${nssError}); the primary group ` +
+        "couldn't be verified and is treated as privileged",
     );
   }
   if (substitutedFrom !== undefined) {

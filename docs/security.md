@@ -100,7 +100,9 @@ invocation, so no step inherits anything another one left behind.
   `libvirt`, `kvm`, `sudo`, `wheel` and a few more), looked up in `/etc/group` and through NSS so
   a group from LDAP or SSSD counts too, and against the owning GID of any runtime socket
   actually present, and the command runs under `nogroup`/`nobody`/65534 instead when it matches. If
-  none of those is safe either, the sandbox refuses to start.
+  NSS cannot answer (an LDAP or SSSD outage, say), the primary GID is substituted the same way with a
+  warning, since a group only NSS knows about can't be ruled out. If none of those substitutes is
+  safe either, the sandbox refuses to start.
 - **A root runner is refused.** The sandbox keeps the runner's own uid so tools and caches that
   assume its identity keep working, but that leaves no user-namespace remapping: as uid 0 the dropped
   capabilities still don't help, because the kernel's DAC is what guards root-owned host sockets like

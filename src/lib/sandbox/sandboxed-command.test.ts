@@ -265,11 +265,16 @@ describe("runSandboxedCommand", () => {
   });
 
   it("warns when NSS could not answer the primary group check", () => {
-    mocks.resolveSandboxGid.mockReturnValue({ gid: 1001, nssError: "timed out" });
+    mocks.resolveSandboxGid.mockReturnValue({
+      gid: 65534,
+      substitutedFrom: 1001,
+      nssError: "timed out",
+    });
 
     runSandboxedCommand(options(), deps);
 
     expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("NSS (timed out)"));
+    expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("treated as privileged"));
   });
 
   function failureFrom(

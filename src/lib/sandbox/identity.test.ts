@@ -205,19 +205,42 @@ describe("resolveSandboxGid: groups served through NSS", () => {
     expect(asked[0]).toEqual(expect.arrayContaining(["1000", "docker", "nogroup", "65534"]));
   });
 
-  it("reports why NSS could not answer, deciding on /etc/group alone", () => {
-    const failing: HostGroups = {
-      ...host("docker:x:999:\nnogroup:x:65534:\n"),
+  describe("when NSS cannot answer", () => {
+    const failing = (groupFile: string, socketOwners: Record<string, number> = {}): HostGroups => ({
+      ...host(groupFile, socketOwners),
       lookupGroups: () => ({ error: "timed out" }),
-    };
-    expect(resolveSandboxGid(999, {}, { host: failing, runtimeSocketPaths: [] })).toStrictEqual({
-      gid: 65534,
-      substitutedFrom: 999,
-      nssError: "timed out",
     });
-    expect(resolveSandboxGid(1000, {}, { host: failing, runtimeSocketPaths: [] })).toStrictEqual({
-      gid: 1000,
-      nssError: "timed out",
+
+    it("substitutes even a primary GID /etc/group calls unprivileged, and reports why", () => {
+      // runner's GID may be named docker in LDAP, which only NSS could have said.
+      const result = resolveSandboxGid(
+        1000,
+        {},
+        { host: failing("runner:x:1000:\nnogroup:x:65534:\n"), runtimeSocketPaths: [] },
+      );
+      expect(result).toStrictEqual({ gid: 65534, substitutedFrom: 1000, nssError: "timed out" });
+    });
+
+    it("keeps a primary GID that is already the substitute, without calling it substituted", () => {
+      const result = resolveSandboxGid(
+        65534,
+        {},
+        { host: failing("nogroup:x:65534:\n"), runtimeSocketPaths: [] },
+      );
+      expect(result).toStrictEqual({ gid: 65534, nssError: "timed out" });
+    });
+
+    it("refuses when no substitute is safe, naming NSS as the reason the GID was in doubt", () => {
+      expect(() =>
+        resolveSandboxGid(
+          1000,
+          {},
+          {
+            host: failing("runner:x:1000:\n", { "/sock": 65534 }),
+            runtimeSocketPaths: ["/sock"],
+          },
+        ),
+      ).toThrow(/privileged group or couldn't be verified through NSS/);
     });
   });
 });
