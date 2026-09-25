@@ -225,15 +225,16 @@ function resolveIdentity(
   const { gid, substitutedFrom, nssError } = resolveSandboxGid(process.getgid!(), env);
   if (nssError !== undefined) {
     warn(
-      `buildcage: could not look up groups through NSS (${nssError}); the primary group was ` +
-        "checked against /etc/group and the runtime sockets' owners only",
+      `buildcage: could not look up groups through NSS (${nssError}); the primary group ` +
+        "couldn't be verified and is treated as privileged",
     );
   }
   if (substitutedFrom !== undefined) {
-    info(
-      `buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's ` +
-        "primary group grants container/VM runtime access",
-    );
+    const reason =
+      nssError === undefined
+        ? "the runner's primary group grants container/VM runtime access"
+        : "the runner's primary group couldn't be verified through NSS";
+    info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- ${reason}`);
   }
   return { uid: process.getuid!(), gid };
 }

@@ -260,16 +260,26 @@ describe("runSandboxedCommand", () => {
 
     runSandboxedCommand(options(), deps);
 
-    expect(mocks.info).toHaveBeenCalledWith(expect.stringContaining("(118 -> 65534)"));
+    expect(mocks.info).toHaveBeenCalledWith(
+      expect.stringContaining("(118 -> 65534) -- the runner's primary group grants"),
+    );
     expect(mocks.buildOciConfig.mock.calls[0][1].identity.gid).toBe(65534);
   });
 
   it("warns when NSS could not answer the primary group check", () => {
-    mocks.resolveSandboxGid.mockReturnValue({ gid: 1001, nssError: "timed out" });
+    mocks.resolveSandboxGid.mockReturnValue({
+      gid: 65534,
+      substitutedFrom: 1001,
+      nssError: "timed out",
+    });
 
     runSandboxedCommand(options(), deps);
 
     expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("NSS (timed out)"));
+    expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("treated as privileged"));
+    expect(mocks.info).toHaveBeenCalledWith(
+      expect.stringContaining("(1001 -> 65534) -- the runner's primary group couldn't be verified"),
+    );
   });
 
   function failureFrom(

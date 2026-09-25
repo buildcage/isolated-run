@@ -132,8 +132,7 @@ export interface ResolvedSandboxGid {
   gid: number;
   /** Present only when `gid` differs from the GID passed in. */
   substitutedFrom?: number;
-  /** Set when NSS could not answer, leaving /etc/group and the runtime
-   *  sockets' owners to decide. */
+  /** Set when NSS could not answer, which substitutes the primary GID too. */
   nssError?: string;
 }
 
@@ -152,6 +151,9 @@ export interface ResolveSandboxGidOptions {
  * group that grants container/VM runtime access, substitutes a safe GID
  * instead. Complements the socket masking in runtime-sockets.ts: that
  * closes specific paths; this closes the GID-membership route itself.
+ * When NSS cannot answer, the primary GID is substituted too: a group only NSS
+ * knows about can't be ruled out, and refusing would stop every step while
+ * LDAP or SSSD is down.
  */
 export function resolveSandboxGid(
   primaryGid: number,
@@ -191,7 +193,10 @@ export function resolveSandboxGid(
   };
 
   const reported = nssError === undefined ? {} : { nssError };
-  if (!isPrivileged(primaryGid)) return { gid: primaryGid, ...reported };
+  if (nssError === undefined && !isPrivileged(primaryGid)) return { gid: primaryGid };
+  // Without NSS the primary GID may already be the substitute itself.
+  const substitute = (gid: number): ResolvedSandboxGid =>
+    gid === primaryGid ? { gid, ...reported } : { gid, substitutedFrom: primaryGid, ...reported };
 
   const gidForName = (name: string): number | undefined => {
     if (!groupNamesByGid) return undefined;
@@ -203,16 +208,14 @@ export function resolveSandboxGid(
 
   for (const name of FALLBACK_GROUP_NAMES) {
     const gid = gidForName(name);
-    if (gid !== undefined && !isPrivileged(gid)) {
-      return { gid, substitutedFrom: primaryGid, ...reported };
-    }
+    if (gid !== undefined && !isPrivileged(gid)) return substitute(gid);
   }
-  if (!isPrivileged(FALLBACK_GID)) {
-    return { gid: FALLBACK_GID, substitutedFrom: primaryGid, ...reported };
-  }
+  if (!isPrivileged(FALLBACK_GID)) return substitute(FALLBACK_GID);
 
   throw new SandboxError(
-    `The runner's primary GID (${primaryGid}) is a privileged group, and no safe substitute GID ` +
+    `The runner's primary GID (${primaryGid}) is a privileged group${
+      nssError === undefined ? "" : " or couldn't be verified through NSS"
+    }, and no safe substitute GID ` +
       "was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start " +
       "the sandbox rather than run it under a privileged primary GID.",
     "UNSAFE_PRIMARY_GID",

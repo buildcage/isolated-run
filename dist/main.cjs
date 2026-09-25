@@ -19484,29 +19484,25 @@ function resolveSandboxGid(primaryGid, env, options = {}) {
 		...FALLBACK_GROUP_NAMES,
 		"65534"
 	]), nssError = "error" in nss ? nss.error : void 0, groupNamesByGid = readGroupNamesByGid(groupFile, "lines" in nss ? nss.lines : void 0, host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1, reported = nssError === void 0 ? {} : { nssError };
-	if (!isPrivileged(primaryGid)) return {
-		gid: primaryGid,
+	if (nssError === void 0 && !isPrivileged(primaryGid)) return { gid: primaryGid };
+	let substitute = (gid) => gid === primaryGid ? {
+		gid,
 		...reported
-	};
-	let gidForName = (name) => {
+	} : {
+		gid,
+		substitutedFrom: primaryGid,
+		...reported
+	}, gidForName = (name) => {
 		if (groupNamesByGid) {
 			for (let [gid, names] of groupNamesByGid) if (names.includes(name)) return gid;
 		}
 	};
 	for (let name of FALLBACK_GROUP_NAMES) {
 		let gid = gidForName(name);
-		if (gid !== void 0 && !isPrivileged(gid)) return {
-			gid,
-			substitutedFrom: primaryGid,
-			...reported
-		};
+		if (gid !== void 0 && !isPrivileged(gid)) return substitute(gid);
 	}
-	if (!isPrivileged(FALLBACK_GID)) return {
-		gid: FALLBACK_GID,
-		substitutedFrom: primaryGid,
-		...reported
-	};
-	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
+	if (!isPrivileged(FALLBACK_GID)) return substitute(FALLBACK_GID);
+	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group${nssError === void 0 ? "" : " or couldn't be verified through NSS"}, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
 }
 //#endregion
 //#region src/lib/sandbox/host-commands.ts
@@ -19939,7 +19935,7 @@ function writeBundleFiles(dir, { runInput, filesystemMode, overlayRoots }, { cre
 }
 function resolveIdentity(env, warn, { resolveSandboxGid, info }) {
 	let { gid, substitutedFrom, nssError } = resolveSandboxGid(process.getgid(), env);
-	return nssError !== void 0 && warn(`buildcage: could not look up groups through NSS (${nssError}); the primary group was checked against /etc/group and the runtime sockets' owners only`), substitutedFrom !== void 0 && info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's primary group grants container/VM runtime access`), {
+	return nssError !== void 0 && warn(`buildcage: could not look up groups through NSS (${nssError}); the primary group couldn't be verified and is treated as privileged`), substitutedFrom !== void 0 && info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- ${nssError === void 0 ? "the runner's primary group grants container/VM runtime access" : "the runner's primary group couldn't be verified through NSS"}`), {
 		uid: process.getuid(),
 		gid
 	};
