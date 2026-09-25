@@ -19,7 +19,7 @@ util-linux (pipesz only, at /usr/bin/pipesz)
   License : GNU General Public License (GPL); pipesz.c names no version
   Source  : https://git.kernel.org/pub/scm/utils/util-linux/util-linux.git
             or via Alpine Linux source packages
-  Note    : The one binary, copied from Alpine Linux's util-linux-misc
+  Note    : Only this binary, copied from Alpine Linux's util-linux-misc
             package.
 
 ------------------------------------------------------------------------------

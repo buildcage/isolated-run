@@ -11,9 +11,8 @@ export const PREAMBLE: readonly string[] = [
   // cut line matches nothing at all, taking its event out of the report.
   // `len` must precede `format`, or the config is rejected.
   "    log stdout len 16384 format raw local0",
-  // Threads writing to the one stdout fd contend for HAProxy's per-fd lock,
-  // and a writer that loses drops its line (fd_write_frag_line). One thread
-  // never contends, and still serves every connection concurrently.
+  // Threads sharing the stdout fd contend for its lock, and the loser drops
+  // its line (fd_write_frag_line).
   "    nbthread 1",
   // This process parses traffic the workload controls, so it must not be root.
   "    user haproxy",

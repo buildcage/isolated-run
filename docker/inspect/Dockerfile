@@ -99,9 +99,8 @@ ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2
 ENV S6_KILL_GRACETIME=500
 
 COPY --from=deps /usr/local/bin/coredns /usr/local/bin/coredns
-# Widens haproxy's log pipe before it starts (s6-rc.d/haproxy/run). The one
-# binary rather than util-linux-misc, which pulls in ~6MB for it; it needs only
-# musl.
+# For s6-rc.d/haproxy/run. The binary alone needs only musl; the package
+# would pull in ~6MB.
 COPY --from=deps /bin/pipesz /usr/bin/pipesz
 
 # CoreDNS answers queries the step controls, so it must not run as root.

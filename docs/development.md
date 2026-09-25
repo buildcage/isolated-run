@@ -215,13 +215,12 @@ because a later part of the same run pushed the log past a rotation. Reading `cu
 above, only shows what has accumulated since the most recent one.
 
 HAProxy writes to s6-log through a pipe without blocking, so a line it cannot write at once is
-dropped rather than delayed, and nothing in the log marks where. With several threads, the main
-cause is not a full pipe but a thread that finds another one mid-write on the same pipe, so HAProxy
-runs one thread (`nbthread 1`). That leaves a full pipe as the only cause, and `pipesz` widens the
-pipe to 1MB before HAProxy starts, enough to ride out s6-log stalling for several seconds under
-heavy traffic. HAProxy counts the lines it drops itself: its `health` socket serves the Prometheus
-exporter, and the report reads `haproxy_process_dropped_logs_total` from it. A nonzero count, or one
-the report cannot read, marks the report incomplete. To read it by hand:
+dropped rather than delayed, and nothing in the log marks where. A thread that keeps finding another
+mid-write on the pipe drops its line, so HAProxy runs one thread (`nbthread 1`). A stalled s6-log
+can still fill the pipe, so `pipesz` widens it from 64KB to 1MB before HAProxy starts. HAProxy
+counts the lines it drops itself: its `health` socket serves the Prometheus exporter, and the report
+reads `haproxy_process_dropped_logs_total` from it. A nonzero count, or one the report cannot read,
+marks the report incomplete. To read it by hand:
 
 ```bash
 docker compose exec proxy curl -s --unix-socket /var/run/haproxy-health.sock \

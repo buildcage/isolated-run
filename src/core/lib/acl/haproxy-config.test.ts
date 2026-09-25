@@ -365,8 +365,8 @@ describe("what a log line records", () => {
   });
 
   it("writes every line from one thread", () => {
-    // Threads contending for the one stdout fd drop lines, and a dropped line
-    // marks the whole report incomplete.
+    // Threads sharing the stdout fd drop lines, and one dropped line marks the
+    // report incomplete.
     expect(FULL_CONFIG.split("\n").filter((l) => l.trim().startsWith("nbthread"))).toStrictEqual([
       "    nbthread 1",
     ]);
