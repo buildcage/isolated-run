@@ -102,16 +102,19 @@ export function resolveProtectedPaths({
 }: ProtectedPathsInput): { maskedPaths: string[]; readonlyPaths: string[] } {
   // runc applies maskedPaths after every mount, so a still-listed mask would
   // bind /dev/null back over a path a write_through entry re-exposed on top of
-  // the /run tmpfs. Lift the host-path mask so the opt-in wins, but only for a
-  // writable path that names the masked path itself, re-exposes part of /run,
-  // or is `/`: $XDG_RUNTIME_DIR can sit under /tmp or $HOME on a self-hosted
-  // runner, and those default writable dirs must not unmask it. Only the /run
-  // masks below are filtered; the /proc masks are not in this set, so the
-  // kernel-memory guard (e.g. /proc/kcore) holds even under `write_through: /`.
-  const liftsMaskUnder = (w: string): boolean =>
-    w === "/" || RUN_DIRS.some((run) => isAtOrUnder(w, run));
+  // the /run tmpfs. Lift the host-path mask so the opt-in wins, but outside
+  // /run only for a writable path that names the masked path itself or is `/`:
+  // $XDG_RUNTIME_DIR can sit under /tmp or $HOME on a self-hosted runner, and
+  // those default writable dirs must not unmask it. Only the /run masks below
+  // are filtered; the /proc masks are not in this set, so the kernel-memory
+  // guard (e.g. /proc/kcore) holds even under `write_through: /`.
   const reExposed = (p: string): boolean =>
-    [...writablePaths].some((w) => p === w || (liftsMaskUnder(w) && isAtOrUnder(p, w)));
+    [...writablePaths].some(
+      (w) =>
+        isAtOrUnder(p, w) &&
+        // $XDG_RUNTIME_DIR comes unnormalized, so a trailing slash must not defeat the match.
+        (w === "/" || p.replace(/\/+$/, "") === w || RUN_DIRS.some((run) => isAtOrUnder(p, run))),
+    );
   const extraMaskedHostPaths = [
     ...EXTRA_MASKED_RUNTIME_PATHS,
     ...rootlessRuntimeSocketPaths(env),

@@ -163,6 +163,22 @@ describe("resolveProtectedPaths", () => {
     expect(maskedPaths).toContain("/run/netns");
   });
 
+  it("lifts a /var/run mask under a writable ancestor of /var/run", () => {
+    // /var/run is a real directory on a few hosts, where /var re-exposes it.
+    const { maskedPaths } = resolveProtectedPaths({ ...base, writablePaths: new Set(["/var"]) });
+    expect(maskedPaths).not.toContain("/var/run/netns");
+    expect(maskedPaths).toContain("/run/netns");
+  });
+
+  it("matches an $XDG_RUNTIME_DIR given with a trailing slash to the writable path naming it", () => {
+    const { maskedPaths } = resolveProtectedPaths({
+      ...base,
+      env: { XDG_RUNTIME_DIR: "/tmp/runtime-runner/" },
+      writablePaths: new Set(["/tmp/runtime-runner"]),
+    });
+    expect(maskedPaths).not.toContain("/tmp/runtime-runner/");
+  });
+
   it("lifts every host-path mask under `write_through: /`, wherever it sits", () => {
     const { maskedPaths } = resolveProtectedPaths({
       ...base,
