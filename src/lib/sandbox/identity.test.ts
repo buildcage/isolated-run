@@ -212,7 +212,7 @@ describe("resolveSandboxGid: groups served through NSS", () => {
     });
 
     it("substitutes even a primary GID /etc/group calls unprivileged, and reports why", () => {
-      // runner's GID may be named docker in LDAP, which only NSS could have said.
+      // LDAP may call GID 1000 docker; only NSS could tell.
       const result = resolveSandboxGid(
         1000,
         {},
@@ -230,7 +230,7 @@ describe("resolveSandboxGid: groups served through NSS", () => {
       expect(result).toStrictEqual({ gid: 65534, nssError: "timed out" });
     });
 
-    it("refuses when no substitute is safe, naming NSS as the reason the GID was in doubt", () => {
+    it("refuses when no substitute is safe, and names NSS in the error", () => {
       expect(() =>
         resolveSandboxGid(
           1000,

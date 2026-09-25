@@ -132,8 +132,7 @@ export interface ResolvedSandboxGid {
   gid: number;
   /** Present only when `gid` differs from the GID passed in. */
   substitutedFrom?: number;
-  /** Set when NSS could not answer. The primary GID is then substituted as if
-   *  privileged, since a group only NSS knows about could not be ruled out. */
+  /** Set when NSS could not answer, which substitutes the primary GID too. */
   nssError?: string;
 }
 
@@ -152,8 +151,9 @@ export interface ResolveSandboxGidOptions {
  * group that grants container/VM runtime access, substitutes a safe GID
  * instead. Complements the socket masking in runtime-sockets.ts: that
  * closes specific paths; this closes the GID-membership route itself.
- * When NSS cannot answer, the primary GID is substituted too rather than the
- * step refused: an LDAP or SSSD outage then costs group access, not the run.
+ * When NSS cannot answer, the primary GID is substituted too: a group only NSS
+ * knows about can't be ruled out, and refusing would stop every step while
+ * LDAP or SSSD is down.
  */
 export function resolveSandboxGid(
   primaryGid: number,
