@@ -130,6 +130,50 @@ describe("resolveProtectedPaths", () => {
     expect(maskedPaths).toContain("/run/user/1000/docker.sock");
   });
 
+  it("keeps masking an $XDG_RUNTIME_DIR that sits under a default writable dir", () => {
+    const { maskedPaths } = resolveProtectedPaths({
+      ...base,
+      env: { XDG_RUNTIME_DIR: "/tmp/runtime-runner" },
+      writablePaths: new Set(["/tmp", "/home/runner"]),
+    });
+    expect(maskedPaths).toContain("/tmp/runtime-runner");
+    expect(maskedPaths).toContain("/tmp/runtime-runner/docker.sock");
+  });
+
+  it("lifts the mask on an $XDG_RUNTIME_DIR outside /run only when a writable path names it", () => {
+    const { maskedPaths } = resolveProtectedPaths({
+      ...base,
+      env: { XDG_RUNTIME_DIR: "/tmp/runtime-runner" },
+      writablePaths: new Set(["/tmp", "/tmp/runtime-runner"]),
+    });
+    expect(maskedPaths).not.toContain("/tmp/runtime-runner");
+    // Naming the directory is not naming the sockets inside it.
+    expect(maskedPaths).toContain("/tmp/runtime-runner/docker.sock");
+  });
+
+  it("lifts every mask under a writable path within /run or /var/run", () => {
+    const { maskedPaths } = resolveProtectedPaths({
+      ...base,
+      env: { XDG_RUNTIME_DIR: "/run/user/1000" },
+      writablePaths: new Set(["/run/user", "/var/run"]),
+    });
+    expect(maskedPaths).not.toContain("/run/user/1000");
+    expect(maskedPaths).not.toContain("/run/user/1000/docker.sock");
+    expect(maskedPaths).not.toContain("/var/run/netns");
+    expect(maskedPaths).toContain("/run/netns");
+  });
+
+  it("lifts every host-path mask under `write_through: /`, wherever it sits", () => {
+    const { maskedPaths } = resolveProtectedPaths({
+      ...base,
+      env: { XDG_RUNTIME_DIR: "/tmp/runtime-runner" },
+      writablePaths: new Set(["/"]),
+    });
+    expect(maskedPaths).not.toContain("/tmp/runtime-runner");
+    expect(maskedPaths).not.toContain("/run/user/1000");
+    expect(maskedPaths).toContain("/proc/kallsyms");
+  });
+
   it("skips the host-mount sweep under `writable: /`, still masking what it masks", () => {
     const { maskedPaths, readonlyPaths } = resolveProtectedPaths({
       ...base,

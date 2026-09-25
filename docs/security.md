@@ -127,8 +127,10 @@ invocation, so no step inherits anything another one left behind.
   `$XDG_RUNTIME_DIR` equivalents map to `/dev/null`, and the D-Bus system bus and `/run/user/<uid>`
   (a `systemd --user` session bus, reaching which lets a compromised command start a unit outside
   every namespace) to an empty directory. A `write_through:` entry naming one of these lifts its mask
-  too, so an explicit opt-in is not silently undone. A socket a workflow places outside `/run` stays
-  reachable (an `ssh-agent` under `$TMPDIR`, say); see
+  too, so an explicit opt-in is not silently undone. Outside `/run`, only an entry naming the path
+  itself (or `write_through: /`) does: an `$XDG_RUNTIME_DIR` a self-hosted runner places under `/tmp`
+  or `$HOME` stays masked even though those directories are writable. A socket a workflow places
+  outside `/run` stays reachable (an `ssh-agent` under `$TMPDIR`, say); see
   [What the sandbox does not stop](#what-the-sandbox-does-not-stop).
 
 ### What it can see
@@ -664,9 +666,10 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   than its post step, because handing the list to the post step would mean `GITHUB_STATE`, which the
   command can rewrite, and that would turn cleanup into a way to `rmdir` any empty directory as
   root. A step killed outright therefore leaves an empty directory behind.
-- **`$XDG_RUNTIME_DIR` does not exist inside the sandbox**, since `/run` is an empty tmpfs there. A
-  tool expecting a session keyring or its own scratch state there finds nothing and fails
-  outright rather than silently landing on the host's real directory. There is no opt-out input.
+- **`$XDG_RUNTIME_DIR` does not exist inside the sandbox**, since `/run` is an empty tmpfs there;
+  one outside `/run` is masked with an empty directory instead. A tool expecting a session keyring
+  or its own scratch state there finds nothing and fails outright rather than silently landing on the
+  host's real directory. There is no opt-out input.
 - **The post step validates `$GITHUB_STATE` rather than trusting it.** That file lives under
   `$RUNNER_TEMP`, writable in `persistent` mode, so the command can overwrite what this action wrote
   there. The post step checks that the container name it reads back is shaped like one this action

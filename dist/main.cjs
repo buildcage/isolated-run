@@ -19644,12 +19644,12 @@ var extra_masked_proc_paths_default = [
 ];
 //#endregion
 //#region src/lib/sandbox/oci-protected-paths.ts
-const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"];
+const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"], RUN_DIRS = ["/run", "/var/run"];
 function computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinations) {
 	return hostMounts.filter(({ mountPoint }) => mountPoint !== "/" && !freshMountDestinations.has(mountPoint) && ![...protectedPaths].some((p) => isAtOrUnder(mountPoint, p))).map(({ mountPoint }) => mountPoint);
 }
 function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, uid, env, hostMounts, writablePaths, freshMountDestinations, disableReadonly }) {
-	let reExposed = (p) => [...writablePaths].some((w) => isAtOrUnder(p, w)), extraMaskedHostPaths = [
+	let liftsMaskUnder = (w) => w === "/" || RUN_DIRS.some((run) => isAtOrUnder(w, run)), reExposed = (p) => [...writablePaths].some((w) => p === w || liftsMaskUnder(w) && isAtOrUnder(p, w)), extraMaskedHostPaths = [
 		...extra_masked_runtime_paths_default,
 		...rootlessRuntimeSocketPaths(env),
 		...perUserRuntimeDirs(uid, env),
