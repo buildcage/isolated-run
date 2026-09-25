@@ -3,6 +3,10 @@ global
     # at all, taking the decision it carried out of the report. len must
     # precede format, or the config is rejected.
     log stdout len 16384 format raw local0
+    # Threads writing to the one stdout fd contend for HAProxy's per-fd lock,
+    # and a writer that loses drops its line (fd_write_frag_line). One thread
+    # never contends, and still serves every connection concurrently.
+    nbthread 1
     maxconn 2048
     user haproxy
     group haproxy
@@ -39,8 +43,8 @@ frontend health
     mode http
     no log
     monitor-uri /health
-    # A line that finds the pipe to s6-log full is dropped without a trace in
-    # the log itself; only this counter says one went missing.
+    # A line HAProxy cannot write at once is dropped without a trace in the
+    # log itself; only this counter says one went missing.
     http-request use-service prometheus-exporter if { path /metrics }
 
 # --- Frontend ---

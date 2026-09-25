@@ -2,8 +2,8 @@
  * How many lines the proxy failed to write to its own log, read from its own
  * counter when the report runs.
  *
- * haproxy writes each line to a pipe without blocking, and a line that finds
- * the pipe full is dropped with nothing left in the log to mark where. Neither
+ * haproxy writes each line to a pipe without blocking, and a line it cannot
+ * write at once is dropped with nothing left in the log to mark where. Neither
  * the startup marker nor an unreadable line can reveal that, so a build that
  * floods the pipe could otherwise hide a connection among the lines it lost.
  */

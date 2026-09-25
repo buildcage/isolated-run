@@ -364,6 +364,14 @@ describe("what a log line records", () => {
     expect(FULL_CONFIG.includes("log stdout len 16384 format raw local0")).toBe(true);
   });
 
+  it("writes every line from one thread", () => {
+    // Threads contending for the one stdout fd drop lines, and a dropped line
+    // marks the whole report incomplete.
+    expect(FULL_CONFIG.split("\n").filter((l) => l.trim().startsWith("nbthread"))).toStrictEqual([
+      "    nbthread 1",
+    ]);
+  });
+
   it("puts the one field the build sizes at the end of every line it logs", () => {
     // Whatever cuts a line then costs the target's tail, not the decision.
     const formats = FULL_CONFIG.split("\n").filter((line) =>

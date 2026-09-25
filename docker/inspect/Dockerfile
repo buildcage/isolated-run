@@ -23,7 +23,7 @@ ARG RUNC_SHA256_ARM64
 ARG COREDNS_VERSION
 ARG COREDNS_SHA256_AMD64
 ARG COREDNS_SHA256_ARM64
-RUN apk add --no-cache curl && \
+RUN apk add --no-cache curl util-linux-misc && \
     mkdir -p /opt/buildcage/bin && \
     ARCH=$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/') && \
     RUNC_SHA=$([ "$ARCH" = "amd64" ] && echo "$RUNC_SHA256_AMD64" || echo "$RUNC_SHA256_ARM64") && \
@@ -99,6 +99,10 @@ ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2
 ENV S6_KILL_GRACETIME=500
 
 COPY --from=deps /usr/local/bin/coredns /usr/local/bin/coredns
+# Widens haproxy's log pipe before it starts (s6-rc.d/haproxy/run). The one
+# binary rather than util-linux-misc, which pulls in ~6MB for it; it needs only
+# musl.
+COPY --from=deps /bin/pipesz /usr/bin/pipesz
 
 # CoreDNS answers queries the step controls, so it must not run as root.
 # setcap keeps :53 bindable once it has dropped privileges.

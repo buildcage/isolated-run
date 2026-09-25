@@ -11,6 +11,10 @@ export const PREAMBLE: readonly string[] = [
   // cut line matches nothing at all, taking its event out of the report.
   // `len` must precede `format`, or the config is rejected.
   "    log stdout len 16384 format raw local0",
+  // Threads writing to the one stdout fd contend for HAProxy's per-fd lock,
+  // and a writer that loses drops its line (fd_write_frag_line). One thread
+  // never contends, and still serves every connection concurrently.
+  "    nbthread 1",
   // This process parses traffic the workload controls, so it must not be root.
   "    user haproxy",
   "    group haproxy",
@@ -37,8 +41,8 @@ export const PREAMBLE: readonly string[] = [
   "    mode http",
   "    no log",
   "    monitor-uri /health",
-  // A line that finds the pipe to s6-log full is dropped without a trace in
-  // the log itself; only this counter says one went missing.
+  // A line HAProxy cannot write at once is dropped without a trace in the log
+  // itself; only this counter says one went missing.
   "    http-request use-service prometheus-exporter if { path /metrics }",
   "",
 ];
