@@ -407,15 +407,16 @@ export function ensureWriteThroughTargetsExist(
       // on the way gets mkdir's own permissions, which the ancestor still gates.
       const modeOctal = (mode & 0o7777).toString(8);
       execFile("sudo", [...asOwner({ uid, gid }), "mkdir", "-p", "-m", modeOctal, "--", path]);
-      // The later rmdir runs as this owner, so record only its own directories.
-      const segments = pathSegmentsBetween(ancestor, path);
-      for (const segment of segments) {
+      // The later rmdir runs as this owner, so record only its own directories,
+      // each as soon as it passes: a deeper failure then still rolls back the
+      // shallower ones.
+      for (const segment of pathSegmentsBetween(ancestor, path)) {
         const s = stat(segment);
         if ((s.mode & S_IFMT) !== S_IFDIR || s.uid !== uid) {
           throw new Error(`${JSON.stringify(segment)} is not a directory owned by uid ${uid}.`);
         }
+        created.push({ path: segment, uid, gid });
       }
-      created.push(...segments.map((segment) => ({ path: segment, uid, gid })));
     } catch (e) {
       // Neither WriteThroughTargetMissingError nor WriteThroughTargetUncreatableError
       // can originate here: both are only ever thrown above, outside this
