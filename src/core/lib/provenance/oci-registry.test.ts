@@ -371,7 +371,7 @@ describe("fetchImageConfigLabels", () => {
     );
   });
 
-  it("refuses a malformed platform digest before putting it in a request path", async () => {
+  it("refuses a malformed platform digest before requesting it", async () => {
     const indexBody = {
       manifests: [{ digest: "sha256:../../blobs/x", platform: { os: "linux" } }],
     };
@@ -381,7 +381,7 @@ describe("fetchImageConfigLabels", () => {
     expect(registry.urls).toHaveLength(1);
   });
 
-  it("refuses a malformed config digest before putting it in a request path", async () => {
+  it("refuses a malformed config digest before requesting it", async () => {
     for (const bad of ["sha256:../../manifests/x", 42]) {
       const manifestBody = { config: { digest: bad } };
       const manifestDig = digestOf(manifestBody);

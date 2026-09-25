@@ -101,15 +101,15 @@ const CONTENT_DIGEST_ALGORITHMS: Record<string, { subtle: string; hexLength: num
   sha512: { subtle: "SHA-512", hexLength: 128 },
 };
 
-/**
- * Return a registry-supplied digest once it has the OCI shape. It goes into
- * request paths, so anything else is refused before it can reach one.
- */
+/** A registry-supplied digest goes into request paths, so only the OCI shape passes. */
+export function isOciDigest(digest: unknown): digest is string {
+  if (typeof digest !== "string") return false;
+  const match = /^([a-z0-9]+):([0-9a-f]+)$/.exec(digest);
+  return match !== null && CONTENT_DIGEST_ALGORITHMS[match[1]]?.hexLength === match[2].length;
+}
+
 export function assertOciDigest(digest: unknown, where: string): string {
-  if (typeof digest === "string") {
-    const match = /^([a-z0-9]+):([0-9a-f]+)$/.exec(digest);
-    if (match && CONTENT_DIGEST_ALGORITHMS[match[1]]?.hexLength === match[2].length) return digest;
-  }
+  if (isOciDigest(digest)) return digest;
   throw new VerifyImageError(
     `Malformed digest in ${where}: ${JSON.stringify(digest)}`,
     "VERIFY_FAILED",

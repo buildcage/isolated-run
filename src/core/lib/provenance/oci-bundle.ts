@@ -10,6 +10,7 @@ import { VerifyImageError } from "./errors.ts";
 import {
   assertOciDigest,
   assertRegistryOk,
+  isOciDigest,
   registryClient,
   withRegistryErrors,
   type FetchLike,
@@ -112,17 +113,18 @@ async function bundleFromFallbackTag(client: RegistryClient, digest: string): Pr
 
     if (Array.isArray(tagManifest.manifests)) {
       for (const m of tagManifest.manifests as OciDescriptor[]) {
-        if (m.mediaType !== IMAGE_MANIFEST_MEDIA_TYPE) continue;
-        const manifestDigest = assertOciDigest(m.digest, "fallback tag index");
+        // Other referrers share this index, so one this module cannot address
+        // is skipped rather than ending the search for the bundle.
+        if (m.mediaType !== IMAGE_MANIFEST_MEDIA_TYPE || !isOciDigest(m.digest)) continue;
         if (m.artifactType === BUNDLE_MEDIA_TYPE) {
-          return bundleFromManifest(client, manifestDigest);
+          return bundleFromManifest(client, m.digest);
         }
         // Per the OCI Distribution Spec, a referrer descriptor's artifactType falls back to the
         // manifest's config.mediaType when the manifest has no top-level artifactType. As a result
         // the descriptor may carry the empty-config type ("application/vnd.oci.empty.v1+json")
         // rather than the bundle type (observed with GHCR). This is a spec-valid fallback, so resolve
         // the real type by inspecting the sub-manifest's own artifactType / layer mediaType.
-        const subResp = await client.request(`/manifests/${manifestDigest}`, {
+        const subResp = await client.request(`/manifests/${m.digest}`, {
           accept: IMAGE_MANIFEST_MEDIA_TYPE,
         });
         if (!subResp.ok) continue;

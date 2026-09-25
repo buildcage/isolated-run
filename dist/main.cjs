@@ -10780,11 +10780,13 @@ const CONTENT_DIGEST_ALGORITHMS = {
 		hexLength: 128
 	}
 };
+function isOciDigest(digest) {
+	if (typeof digest != "string") return !1;
+	let match = /^([a-z0-9]+):([0-9a-f]+)$/.exec(digest);
+	return match !== null && CONTENT_DIGEST_ALGORITHMS[match[1]]?.hexLength === match[2].length;
+}
 function assertOciDigest(digest, where) {
-	if (typeof digest == "string") {
-		let match = /^([a-z0-9]+):([0-9a-f]+)$/.exec(digest);
-		if (match && CONTENT_DIGEST_ALGORITHMS[match[1]]?.hexLength === match[2].length) return digest;
-	}
+	if (isOciDigest(digest)) return digest;
 	throw new VerifyImageError(`Malformed digest in ${where}: ${JSON.stringify(digest)}`, "VERIFY_FAILED");
 }
 async function assertContentDigest(bytes, expected, what) {
@@ -10882,10 +10884,9 @@ async function bundleFromFallbackTag(client, digest) {
 		let tagManifest = await resp.json();
 		if (Array.isArray(tagManifest.manifests)) {
 			for (let m of tagManifest.manifests) {
-				if (m.mediaType !== IMAGE_MANIFEST_MEDIA_TYPE) continue;
-				let manifestDigest = assertOciDigest(m.digest, "fallback tag index");
-				if (m.artifactType === BUNDLE_MEDIA_TYPE) return bundleFromManifest(client, manifestDigest);
-				let subResp = await client.request(`/manifests/${manifestDigest}`, { accept: IMAGE_MANIFEST_MEDIA_TYPE });
+				if (m.mediaType !== IMAGE_MANIFEST_MEDIA_TYPE || !isOciDigest(m.digest)) continue;
+				if (m.artifactType === BUNDLE_MEDIA_TYPE) return bundleFromManifest(client, m.digest);
+				let subResp = await client.request(`/manifests/${m.digest}`, { accept: IMAGE_MANIFEST_MEDIA_TYPE });
 				if (!subResp.ok) continue;
 				let sub = await subResp.json();
 				if (sub.artifactType !== BUNDLE_MEDIA_TYPE) continue;
