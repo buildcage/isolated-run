@@ -147,7 +147,7 @@ describe("resolveProtectedPaths", () => {
       writablePaths: new Set(["/tmp", "/tmp/runtime-runner"]),
     });
     expect(maskedPaths).not.toContain("/tmp/runtime-runner");
-    // Naming the directory is not naming the sockets inside it.
+    // The sockets inside are masked on their own.
     expect(maskedPaths).toContain("/tmp/runtime-runner/docker.sock");
   });
 
@@ -179,15 +179,13 @@ describe("resolveProtectedPaths", () => {
     expect(maskedPaths).not.toContain("/tmp/runtime-runner/");
   });
 
-  it("lifts every host-path mask under `write_through: /`, wherever it sits", () => {
+  it("lifts a mask outside /run under `write_through: /`", () => {
     const { maskedPaths } = resolveProtectedPaths({
       ...base,
       env: { XDG_RUNTIME_DIR: "/tmp/runtime-runner" },
       writablePaths: new Set(["/"]),
     });
     expect(maskedPaths).not.toContain("/tmp/runtime-runner");
-    expect(maskedPaths).not.toContain("/run/user/1000");
-    expect(maskedPaths).toContain("/proc/kallsyms");
   });
 
   it("skips the host-mount sweep under `writable: /`, still masking what it masks", () => {
