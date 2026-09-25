@@ -14,6 +14,16 @@ HAProxy
 
 ------------------------------------------------------------------------------
 
+util-linux (pipesz only, at /usr/bin/pipesz)
+  Website : https://github.com/util-linux/util-linux
+  License : GNU General Public License (GPL); pipesz.c names no version
+  Source  : https://git.kernel.org/pub/scm/utils/util-linux/util-linux.git
+            or via Alpine Linux source packages
+  Note    : Only this binary, copied from Alpine Linux's util-linux-misc
+            package.
+
+------------------------------------------------------------------------------
+
 CoreDNS
   Website : https://coredns.io/
   License : Apache License 2.0 (Apache-2.0)
@@ -64,10 +74,11 @@ gen-seccomp-profile Go module dependencies (docker/gen-seccomp-profile/)
 
 ------------------------------------------------------------------------------
 
-Note on GPL components (HAProxy):
+Note on GPL components (HAProxy, util-linux):
 
-These components are installed from the Alpine Linux official package
-repository. Their source code is available through:
+These components come from the Alpine Linux official package repository:
+HAProxy is installed as a package, and pipesz is copied out of the
+util-linux-misc package. Their source code is available through:
 
   1. The upstream project repositories listed above
   2. Alpine Linux source packages:

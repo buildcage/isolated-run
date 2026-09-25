@@ -143,6 +143,14 @@ describe("universal engine's log line is sized like the inspect engine's", () =>
     // nothing about this file. A cut line matches nothing the report knows.
     expect(TEMPLATE.includes("log stdout len 16384 format raw local0")).toBe(true);
   });
+
+  it("writes every line from one thread", () => {
+    // Threads sharing the stdout fd drop lines, and one dropped line marks the
+    // report incomplete.
+    expect(TEMPLATE.split("\n").filter((l) => l.trim().startsWith("nbthread"))).toStrictEqual([
+      "    nbthread 1",
+    ]);
+  });
 });
 
 describe("universal engine counts the log lines it drops like the inspect engine", () => {
