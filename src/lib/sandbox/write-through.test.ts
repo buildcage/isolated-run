@@ -444,7 +444,7 @@ describe("ensureWriteThroughTargetsExist: the path changing under it", () => {
     expect(execFile).not.toHaveBeenCalled();
   });
 
-  it("does not record a segment that isn't the owner's directory, and rolls back the rest", () => {
+  it("does not record a segment that isn't the owner's directory, and rolls back the verified ones", () => {
     const calls: string[][] = [];
     const stat = (p: string) => (p === "/a/x/y" ? { ...DIR, mode: 0o120777 } : DIR);
     expect(() =>
@@ -455,6 +455,7 @@ describe("ensureWriteThroughTargetsExist: the path changing under it", () => {
       }),
     ).toThrow(/"\/a\/x\/y" is not a directory owned by uid 1000/);
     expect(calls.filter((c) => c.includes("rmdir"))).toStrictEqual([
+      ["sudo", "-u", "#1000", "-g", "#1000", "rmdir", "--", "/a/x"],
       ["sudo", "-u", "#1000", "-g", "#1000", "rmdir", "--", "/a/ok"],
     ]);
   });

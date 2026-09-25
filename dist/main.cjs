@@ -18898,16 +18898,15 @@ function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultEx
 				"--",
 				path
 			]);
-			let segments = pathSegmentsBetween(ancestor, path);
-			for (let segment of segments) {
+			for (let segment of pathSegmentsBetween(ancestor, path)) {
 				let s = stat(segment);
 				if ((s.mode & S_IFMT) != S_IFDIR || s.uid !== uid) throw Error(`${JSON.stringify(segment)} is not a directory owned by uid ${uid}.`);
+				created.push({
+					path: segment,
+					uid,
+					gid
+				});
 			}
-			created.push(...segments.map((segment) => ({
-				path: segment,
-				uid,
-				gid
-			})));
 		} catch (e) {
 			throw rollback(), new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
 		}
