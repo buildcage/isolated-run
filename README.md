@@ -73,7 +73,7 @@ examples below use the default `inspect` engine; [Engines](#engines) covers the 
 
 ```yaml
 - name: Discover what the command reaches
-  uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
+  uses: buildcage/isolated-run@81e97f727bda18d4fca560cd9d732a2e28464dda # v2.0.0
   with:
     proxy_mode: audit # Log every destination, block nothing
     run: |
@@ -95,7 +95,7 @@ Paste that allowlist into the step and switch the mode:
 
 ```yaml
 - name: Run tests with outbound network isolation
-  uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
+  uses: buildcage/isolated-run@81e97f727bda18d4fca560cd9d732a2e28464dda # v2.0.0
   with:
     proxy_mode: restrict
     allowed_url_rules: |
@@ -282,7 +282,7 @@ interpreter, start `run` with a shebang line; the script is then run as written,
 added:
 
 ```yaml
-- uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
+- uses: buildcage/isolated-run@81e97f727bda18d4fca560cd9d732a2e28464dda # v2.0.0
   with:
     run: |
       #!/usr/bin/env python3
@@ -299,7 +299,7 @@ Use the step's own `env:` (not a `with:` input) to pass values into `run`, exact
 via `env:` is available there too:
 
 ```yaml
-- uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
+- uses: buildcage/isolated-run@81e97f727bda18d4fca560cd9d732a2e28464dda # v2.0.0
   env:
     PR_TITLE: ${{ github.event.pull_request.title }}
   with:
@@ -367,7 +367,7 @@ something a later, non-isolated step in the same job would pick up: a rewritten 
 to run code once the sandbox is gone.
 
 ```yaml
-- uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
+- uses: buildcage/isolated-run@81e97f727bda18d4fca560cd9d732a2e28464dda # v2.0.0
   with:
     filesystem_mode: ephemeral
     write_through: |
@@ -398,7 +398,7 @@ If `run` needs to write somewhere else in `persistent` mode, a build output or a
 directory for example, list it under `write_through:`:
 
 ```yaml
-- uses: buildcage/isolated-run@430838ca8673c47824189ad3fef38808f0fadaf1 # v1.2.2
+- uses: buildcage/isolated-run@81e97f727bda18d4fca560cd9d732a2e28464dda # v2.0.0
   with:
     write_through: |
       /opt/some-tool/cache
