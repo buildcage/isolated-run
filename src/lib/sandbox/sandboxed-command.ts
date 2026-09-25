@@ -230,10 +230,11 @@ function resolveIdentity(
     );
   }
   if (substitutedFrom !== undefined) {
-    info(
-      `buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's ` +
-        "primary group grants container/VM runtime access",
-    );
+    const reason =
+      nssError === undefined
+        ? "the runner's primary group grants container/VM runtime access"
+        : "the runner's primary group couldn't be verified through NSS";
+    info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- ${reason}`);
   }
   return { uid: process.getuid!(), gid };
 }

@@ -19936,7 +19936,7 @@ function writeBundleFiles(dir, { runInput, filesystemMode, overlayRoots }, { cre
 }
 function resolveIdentity(env, warn, { resolveSandboxGid, info }) {
 	let { gid, substitutedFrom, nssError } = resolveSandboxGid(process.getgid(), env);
-	return nssError !== void 0 && warn(`buildcage: could not look up groups through NSS (${nssError}); the primary group couldn't be verified and is treated as privileged`), substitutedFrom !== void 0 && info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- the runner's primary group grants container/VM runtime access`), {
+	return nssError !== void 0 && warn(`buildcage: could not look up groups through NSS (${nssError}); the primary group couldn't be verified and is treated as privileged`), substitutedFrom !== void 0 && info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- ${nssError === void 0 ? "the runner's primary group grants container/VM runtime access" : "the runner's primary group couldn't be verified through NSS"}`), {
 		uid: process.getuid(),
 		gid
 	};
