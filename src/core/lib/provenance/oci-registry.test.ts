@@ -371,6 +371,26 @@ describe("fetchImageConfigLabels", () => {
     );
   });
 
+  it("refuses a malformed platform digest before putting it in a request path", async () => {
+    const indexBody = {
+      manifests: [{ digest: "sha256:../../blobs/x", platform: { os: "linux" } }],
+    };
+    const indexDig = digestOf(indexBody);
+    const registry = stubRegistry({ [`/manifests/${indexDig}`]: okJson(indexBody) });
+    await expectVerifyError(callWith(indexDig, registry), "VERIFY_FAILED", /Malformed digest/);
+    expect(registry.urls).toHaveLength(1);
+  });
+
+  it("refuses a malformed config digest before putting it in a request path", async () => {
+    for (const bad of ["sha256:../../manifests/x", 42]) {
+      const manifestBody = { config: { digest: bad } };
+      const manifestDig = digestOf(manifestBody);
+      const registry = stubRegistry({ [`/manifests/${manifestDig}`]: okJson(manifestBody) });
+      await expectVerifyError(callWith(manifestDig, registry), "VERIFY_FAILED", /Malformed digest/);
+      expect(registry.urls).toHaveLength(1);
+    }
+  });
+
   it("throws TRANSIENT for a non-ok status the registry JSON reader does not name", async () => {
     await expectVerifyError(
       call(stubRegistry({ [`/manifests/${DIGEST}`]: failsWith(418) })),
