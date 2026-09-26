@@ -870,7 +870,7 @@ var DecodedURL, init_proxy = __esmMin((() => {
 		return body && !!(body.destroyed || body[kDestroyed] || stream$3.isDestroyed?.(body));
 	}
 	function destroy(stream, err) {
-		stream == null || !isStream(stream) || isDestroyed(stream) || (typeof stream.destroy == "function" ? (Object.getPrototypeOf(stream).constructor === IncomingMessage && (stream.socket = null), stream.destroy(err)) : err && queueMicrotask(() => {
+		stream != null && isStream(stream) && !isDestroyed(stream) && (typeof stream.destroy == "function" ? (Object.getPrototypeOf(stream).constructor === IncomingMessage && (stream.socket = null), stream.destroy(err)) : err && queueMicrotask(() => {
 			stream.emit("error", err);
 		}), stream.destroyed !== !0 && (stream[kDestroyed] = !0));
 	}
@@ -2530,9 +2530,7 @@ var DecodedURL, init_proxy = __esmMin((() => {
 		return assert$23(url instanceof URL), url = new URL(url), url.protocol === "file:" || url.protocol === "about:" || url.protocol === "blank:" ? "no-referrer" : (url.username = "", url.password = "", url.hash = "", originOnly && (url.pathname = "", url.search = ""), url);
 	}
 	function isURLPotentiallyTrustworthy(url) {
-		if (!(url instanceof URL)) return !1;
-		if (url.href === "about:blank" || url.href === "about:srcdoc" || url.protocol === "data:" || url.protocol === "file:") return !0;
-		return isOriginPotentiallyTrustworthy(url.origin);
+		return url instanceof URL ? url.href === "about:blank" || url.href === "about:srcdoc" || url.protocol === "data:" || url.protocol === "file:" || isOriginPotentiallyTrustworthy(url.origin) : !1;
 		function isOriginPotentiallyTrustworthy(origin) {
 			if (origin == null || origin === "null") return !1;
 			let originAsURL = new URL(origin);
@@ -3371,7 +3369,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 			delay !== this.timeoutValue || type & 1 ^ this.timeoutType & 1 ? (this.timeout &&= (timers.clearTimeout(this.timeout), null), delay && (type & 1 ? this.timeout = timers.setFastTimeout(onParserTimeout, delay, new WeakRef(this)) : (this.timeout = setTimeout(onParserTimeout, delay, new WeakRef(this)), this.timeout.unref())), this.timeoutValue = delay) : this.timeout && this.timeout.refresh && this.timeout.refresh(), this.timeoutType = type;
 		}
 		resume() {
-			this.socket.destroyed || !this.paused || (assert$20(this.ptr != null), assert$20(currentParser == null), this.llhttp.llhttp_resume(this.ptr), assert$20(this.timeoutType === 5), this.timeout && this.timeout.refresh && this.timeout.refresh(), this.paused = !1, this.execute(this.socket.read() || EMPTY_BUF), this.readMore());
+			!this.socket.destroyed && this.paused && (assert$20(this.ptr != null), assert$20(currentParser == null), this.llhttp.llhttp_resume(this.ptr), assert$20(this.timeoutType === 5), this.timeout && this.timeout.refresh && this.timeout.refresh(), this.paused = !1, this.execute(this.socket.read() || EMPTY_BUF), this.readMore());
 		}
 		readMore() {
 			for (; !this.paused && this.ptr;) {
@@ -3588,8 +3586,14 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 		let socket = client[kSocket];
 		if (socket && !socket.destroyed) {
 			if (client[kSize] === 0 ? !socket[kNoRef] && socket.unref && (socket.unref(), socket[kNoRef] = !0) : socket[kNoRef] && socket.ref && (socket.ref(), socket[kNoRef] = !1), client[kRunning] === 0 && client[kPending] > 0 && socket[kSocketUsed]) {
-				if (socket[kIdleSocketValidation] === 0) return scheduleIdleSocketValidation(client, socket), socket[kParser].readMore(), socket.destroyed, void 0;
-				if (socket[kIdleSocketValidation] === 1) return socket[kParser].readMore(), socket.destroyed, void 0;
+				if (socket[kIdleSocketValidation] === 0) {
+					scheduleIdleSocketValidation(client, socket), socket[kParser].readMore(), socket.destroyed;
+					return;
+				}
+				if (socket[kIdleSocketValidation] === 1) {
+					socket[kParser].readMore(), socket.destroyed;
+					return;
+				}
 			}
 			if (client[kRunning] === 0 && (socket[kParser].readMore(), socket.destroyed)) return;
 			if (client[kSize] === 0) socket[kParser].timeoutType !== 8 && socket[kParser].setTimeout(client[kKeepAliveTimeoutValue], 8);
@@ -5805,7 +5809,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 	}
 	function checkNetConnect(netConnect, origin) {
 		let url = new URL(origin);
-		return netConnect === !0 || !!(Array.isArray(netConnect) && netConnect.some((matcher) => matchValue(matcher, url.host)));
+		return !!(netConnect === !0 || Array.isArray(netConnect) && netConnect.some((matcher) => matchValue(matcher, url.host)));
 	}
 	function buildMockOptions(opts) {
 		if (opts) {
@@ -9656,7 +9660,7 @@ ${pendingInterceptorsFormatter.format(pending)}
 			webidl.brandCheck(this, WebSocket);
 			let prefix = "WebSocket.send";
 			if (webidl.argumentLengthCheck(arguments, 1, prefix), data = webidl.converters.WebSocketSendData(data, prefix, "data"), isConnecting(this)) throw new DOMException("Sent before connected.", "InvalidStateError");
-			if (!(!isEstablished(this) || isClosing(this))) {
+			if (isEstablished(this) && !isClosing(this)) {
 				if (typeof data == "string") {
 					let length = Buffer.byteLength(data);
 					this.#bufferedAmount += length, this.#sendQueue.add(data, () => {
@@ -10926,7 +10930,7 @@ function readGhcrBasicAuth(_env = process.env, _readFileSync = node_fs.readFileS
 	}
 }
 //#endregion
-//#region node_modules/.pnpm/@sigstore+protobuf-specs@0.5.1/node_modules/@sigstore/protobuf-specs/dist/__generated__/envelope.js
+//#region node_modules/.pnpm/@sigstore+protobuf-specs@0.5.2/node_modules/@sigstore/protobuf-specs/dist/__generated__/envelope.js
 var require_envelope = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.Signature = exports.Envelope = void 0, exports.Envelope = {
 		fromJSON(object) {
@@ -11673,7 +11677,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	function isSet(value) {
 		return value != null;
 	}
-})), require_dist$11 = __commonJSMin(((exports) => {
+})), require_dist$10 = __commonJSMin(((exports) => {
 	var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
 		k2 === void 0 && (k2 = k);
 		var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -11705,7 +11709,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	}
 })), require_build = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.toMessageSignatureBundle = toMessageSignatureBundle, exports.toDSSEBundle = toDSSEBundle;
-	let protobuf_specs_1 = require_dist$11(), bundle_1 = require_bundle$1();
+	let protobuf_specs_1 = require_dist$10(), bundle_1 = require_bundle$1();
 	function toMessageSignatureBundle(options) {
 		return {
 			mediaType: options.certificateChain ? bundle_1.BUNDLE_V02_MEDIA_TYPE : bundle_1.BUNDLE_V03_MEDIA_TYPE,
@@ -11841,7 +11845,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	}
 })), require_serialized = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.envelopeToJSON = exports.envelopeFromJSON = exports.bundleToJSON = exports.bundleFromJSON = void 0;
-	let protobuf_specs_1 = require_dist$11(), bundle_1 = require_bundle$1(), validate_1 = require_validate();
+	let protobuf_specs_1 = require_dist$10(), bundle_1 = require_bundle$1(), validate_1 = require_validate();
 	exports.bundleFromJSON = (obj) => {
 		let bundle = protobuf_specs_1.Bundle.fromJSON(obj);
 		switch (bundle.mediaType) {
@@ -11855,7 +11859,7 @@ var require_envelope = __commonJSMin(((exports) => {
 		}
 		return bundle;
 	}, exports.bundleToJSON = (bundle) => protobuf_specs_1.Bundle.toJSON(bundle), exports.envelopeFromJSON = (obj) => protobuf_specs_1.Envelope.fromJSON(obj), exports.envelopeToJSON = (envelope) => protobuf_specs_1.Envelope.toJSON(envelope);
-})), require_dist$10 = __commonJSMin(((exports) => {
+})), require_dist$9 = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.isBundleV01 = exports.assertBundleV02 = exports.assertBundleV01 = exports.assertBundleLatest = exports.assertBundle = exports.envelopeToJSON = exports.envelopeFromJSON = exports.bundleToJSON = exports.bundleFromJSON = exports.ValidationError = exports.isBundleWithPublicKey = exports.isBundleWithMessageSignature = exports.isBundleWithDsseEnvelope = exports.isBundleWithCertificateChain = exports.BUNDLE_V03_MEDIA_TYPE = exports.BUNDLE_V03_LEGACY_MEDIA_TYPE = exports.BUNDLE_V02_MEDIA_TYPE = exports.BUNDLE_V01_MEDIA_TYPE = exports.toMessageSignatureBundle = exports.toDSSEBundle = void 0;
 	var build_1 = require_build();
 	Object.defineProperty(exports, "toDSSEBundle", {
@@ -12484,7 +12488,7 @@ var require_envelope = __commonJSMin(((exports) => {
 		for (let a = 0; a < acc.length; a++) for (let v = 0; v < values.length; v++) {
 			if (out.length >= max) return out;
 			let expansion = acc[a] + pre + values[v];
-			if (!(dropEmpties && !expansion)) {
+			if (!dropEmpties || expansion) {
 				if (length + expansion.length > maxLength) return out;
 				out.push(expansion), length += expansion.length;
 			}
@@ -12549,7 +12553,7 @@ var require_envelope = __commonJSMin(((exports) => {
 					let expanded = expand_(n[j], max, maxLength, !1);
 					for (let k = 0; k < expanded.length; k++) {
 						let v = expanded[k];
-						if (!(dropsEmpties && !v)) {
+						if (!dropsEmpties || v) {
 							if (values.length >= max || valuesLength + v.length > maxLength) break outer;
 							values.push(v), valuesLength += v.length;
 						}
@@ -14004,7 +14008,7 @@ var require_envelope = __commonJSMin(((exports) => {
 			}), new Metadata(signedObj, sigMap, rest);
 		}
 	};
-})), require_dist$9 = __commonJSMin(((exports) => {
+})), require_dist$8 = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.Timestamp = exports.Targets = exports.Snapshot = exports.Signature = exports.Root = exports.Metadata = exports.Key = exports.TargetFile = exports.MetaFile = exports.ValueError = exports.MetadataKind = void 0;
 	var base_1 = require_base();
 	Object.defineProperty(exports, "MetadataKind", {
@@ -14707,7 +14711,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	};
 })), require_store = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.TrustedMetadataStore = void 0;
-	let models_1 = require_dist$9(), error_1 = require_error$5();
+	let models_1 = require_dist$8(), error_1 = require_error$5();
 	exports.TrustedMetadataStore = class {
 		trustedSet = {};
 		referenceTime;
@@ -14845,7 +14849,7 @@ var require_envelope = __commonJSMin(((exports) => {
 		return mod && mod.__esModule ? mod : { default: mod };
 	};
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.Updater = void 0;
-	let models_1 = require_dist$9(), debug_1 = __importDefault(require_src()), fs$8 = __importStar(require("fs")), path$6 = __importStar(require("path")), package_json_1 = require_package$2(), config_1 = require_config(), error_1 = require_error$5(), fetcher_1 = require_fetcher(), store_1 = require_store(), url = __importStar(require_url()), log = (0, debug_1.default)("tuf:cache");
+	let models_1 = require_dist$8(), debug_1 = __importDefault(require_src()), fs$8 = __importStar(require("fs")), path$6 = __importStar(require("path")), package_json_1 = require_package$2(), config_1 = require_config(), error_1 = require_error$5(), fetcher_1 = require_fetcher(), store_1 = require_store(), url = __importStar(require_url()), log = (0, debug_1.default)("tuf:cache");
 	exports.Updater = class {
 		dir;
 		metadataBaseUrl;
@@ -15009,9 +15013,9 @@ var require_envelope = __commonJSMin(((exports) => {
 			}
 		}
 	};
-})), require_dist$8 = __commonJSMin(((exports) => {
+})), require_dist$7 = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.Updater = exports.BaseFetcher = exports.TargetFile = void 0;
-	var models_1 = require_dist$9();
+	var models_1 = require_dist$8();
 	Object.defineProperty(exports, "TargetFile", {
 		enumerable: !0,
 		get: function() {
@@ -15131,7 +15135,7 @@ var require_envelope = __commonJSMin(((exports) => {
 		return mod && mod.__esModule ? mod : { default: mod };
 	};
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.TUFClient = void 0;
-	let fs_1$1 = __importDefault(require("fs")), path_1 = __importDefault(require("path")), tuf_js_1 = require_dist$8(), _1 = require_dist$7(), package_json_1 = require_package$1(), target_1 = require_target(), TARGETS_DIR_NAME = "targets";
+	let fs_1$1 = __importDefault(require("fs")), path_1 = __importDefault(require("path")), tuf_js_1 = require_dist$7(), _1 = require_dist$6(), package_json_1 = require_package$1(), target_1 = require_target(), TARGETS_DIR_NAME = "targets";
 	exports.TUFClient = class {
 		updater;
 		constructor(options) {
@@ -15191,9 +15195,9 @@ var require_envelope = __commonJSMin(((exports) => {
 			config
 		});
 	}
-})), require_dist$7 = __commonJSMin(((exports) => {
+})), require_dist$6 = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.TUFError = exports.DEFAULT_MIRROR_URL = void 0, exports.getTrustedRoot = getTrustedRoot, exports.initTUF = initTUF;
-	let protobuf_specs_1 = require_dist$11(), appdata_1 = require_appdata(), client_1 = require_client();
+	let protobuf_specs_1 = require_dist$10(), appdata_1 = require_appdata(), client_1 = require_client();
 	exports.DEFAULT_MIRROR_URL = "https://tuf-repo-cdn.sigstore.dev";
 	let DEFAULT_RETRY = { retries: 2 };
 	async function getTrustedRoot(options = {}) {
@@ -16174,7 +16178,7 @@ var require_envelope = __commonJSMin(((exports) => {
 			return ext_1.X509SCTExtension;
 		}
 	});
-})), require_dist$6 = __commonJSMin(((exports) => {
+})), require_dist$5 = __commonJSMin(((exports) => {
 	var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
 		k2 === void 0 && (k2 = k);
 		var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -16249,7 +16253,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	});
 })), require_dsse$2 = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.DSSESignatureContent = void 0;
-	let core_1 = require_dist$6();
+	let core_1 = require_dist$5();
 	exports.DSSESignatureContent = class {
 		env;
 		constructor(env) {
@@ -16276,7 +16280,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	};
 })), require_message = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.MessageSignatureContent = void 0;
-	let core_1 = require_dist$6(), protobuf_specs_1 = require_dist$11(), HASH_ALGORITHM_MAP = {
+	let core_1 = require_dist$5(), protobuf_specs_1 = require_dist$10(), HASH_ALGORITHM_MAP = {
 		[protobuf_specs_1.HashAlgorithm.HASH_ALGORITHM_UNSPECIFIED]: "sha256",
 		[protobuf_specs_1.HashAlgorithm.SHA2_256]: "sha256",
 		[protobuf_specs_1.HashAlgorithm.SHA2_384]: "sha384",
@@ -16307,7 +16311,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	};
 })), require_bundle = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.toSignedEntity = toSignedEntity, exports.signatureContent = signatureContent;
-	let core_1 = require_dist$6(), dsse_1 = require_dsse$2(), message_1 = require_message();
+	let core_1 = require_dist$5(), dsse_1 = require_dsse$2(), message_1 = require_message();
 	function toSignedEntity(bundle, artifact) {
 		let { tlogEntries, timestampVerificationData } = bundle.verificationMaterial, timestamps = [];
 		for (let entry of tlogEntries) entry.integratedTime && entry.integratedTime !== "0" && timestamps.push({
@@ -16367,7 +16371,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	}
 })), require_trust = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.filterTLogAuthorities = exports.filterCertAuthorities = void 0, exports.toTrustMaterial = toTrustMaterial;
-	let core_1 = require_dist$6(), protobuf_specs_1 = require_dist$11(), error_1 = require_error$1(), BEGINNING_OF_TIME = new Date(0), END_OF_TIME = new Date(864e13);
+	let core_1 = require_dist$5(), protobuf_specs_1 = require_dist$10(), error_1 = require_error$1(), BEGINNING_OF_TIME = new Date(0), END_OF_TIME = new Date(864e13);
 	var filter_1 = require_filter();
 	Object.defineProperty(exports, "filterCertAuthorities", {
 		enumerable: !0,
@@ -16533,7 +16537,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	}
 })), require_sct = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.verifySCTs = verifySCTs;
-	let core_1 = require_dist$6(), error_1 = require_error$1(), trust_1 = require_trust();
+	let core_1 = require_dist$5(), error_1 = require_error$1(), trust_1 = require_trust();
 	function verifySCTs(cert, issuer, ctlogs) {
 		let extSCT, clone = cert.clone();
 		for (let i = 0; i < clone.extensions.length; i++) {
@@ -16560,7 +16564,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	}
 })), require_key = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.verifyPublicKey = verifyPublicKey, exports.verifyCertificate = verifyCertificate;
-	let core_1 = require_dist$6(), error_1 = require_error$1(), certificate_1 = require_certificate(), sct_1 = require_sct();
+	let core_1 = require_dist$5(), error_1 = require_error$1(), certificate_1 = require_certificate(), sct_1 = require_sct();
 	function verifyPublicKey(hint, timestamps, trustMaterial) {
 		let key = trustMaterial.publicKey(hint);
 		return timestamps.forEach((timestamp) => {
@@ -16625,7 +16629,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	}
 })), require_tsa = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.verifyRFC3161Timestamp = verifyRFC3161Timestamp;
-	let core_1 = require_dist$6(), error_1 = require_error$1(), certificate_1 = require_certificate(), trust_1 = require_trust();
+	let core_1 = require_dist$5(), error_1 = require_error$1(), certificate_1 = require_certificate(), trust_1 = require_trust();
 	function verifyRFC3161Timestamp(timestamp, data, timestampAuthorities) {
 		let signingTime = timestamp.signingTime;
 		if (timestampAuthorities = (0, trust_1.filterCertAuthorities)(timestampAuthorities, signingTime), timestampAuthorities = filterCAsBySerialAndIssuer(timestampAuthorities, {
@@ -16997,7 +17001,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	}
 })), require_checkpoint = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.LogCheckpoint = void 0, exports.verifyCheckpoint = verifyCheckpoint;
-	let core_1 = require_dist$6(), error_1 = require_error$1(), SIGNATURE_REGEX = /\u2014 (\S+) (\S+)\n/g;
+	let core_1 = require_dist$5(), error_1 = require_error$1(), SIGNATURE_REGEX = /\u2014 (\S+) (\S+)\n/g;
 	function verifyCheckpoint(entry, tlogs) {
 		let inclusionProof = entry.inclusionProof, signedNote = SignedNote.fromString(inclusionProof.checkpoint.envelope), checkpoint = LogCheckpoint.fromString(signedNote.note);
 		if (!verifySignedNote(signedNote, tlogs)) throw new error_1.VerificationError({
@@ -17072,7 +17076,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	exports.LogCheckpoint = LogCheckpoint;
 })), require_merkle = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.verifyMerkleInclusion = verifyMerkleInclusion;
-	let core_1 = require_dist$6(), error_1 = require_error$1(), RFC6962_LEAF_HASH_PREFIX = Buffer.from([0]), RFC6962_NODE_HASH_PREFIX = Buffer.from([1]);
+	let core_1 = require_dist$5(), error_1 = require_error$1(), RFC6962_LEAF_HASH_PREFIX = Buffer.from([0]), RFC6962_NODE_HASH_PREFIX = Buffer.from([1]);
 	function verifyMerkleInclusion(entry, checkpoint) {
 		let inclusionProof = entry.inclusionProof, logIndex;
 		try {
@@ -17129,7 +17133,7 @@ var require_envelope = __commonJSMin(((exports) => {
 	}
 })), require_set = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.verifyTLogSET = verifyTLogSET;
-	let core_1 = require_dist$6(), error_1 = require_error$1(), trust_1 = require_trust();
+	let core_1 = require_dist$5(), error_1 = require_error$1(), trust_1 = require_trust();
 	function verifyTLogSET(entry, tlogs) {
 		if (!(0, trust_1.filterTLogAuthorities)(tlogs, {
 			logID: entry.logId.keyId,
@@ -17292,7 +17296,7 @@ var require_envelope = __commonJSMin(((exports) => {
 		for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) if ((0, util_1.isDeepStrictEqual)(arr[i], arr[j])) return !0;
 		return !1;
 	}
-})), require_dist$5 = __commonJSMin(((exports) => {
+})), require_dist$4 = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.Verifier = exports.toTrustMaterial = exports.VerificationError = exports.PolicyError = exports.toSignedEntity = void 0;
 	var bundle_1 = require_bundle();
 	Object.defineProperty(exports, "toSignedEntity", {
@@ -17327,7 +17331,7 @@ var require_envelope = __commonJSMin(((exports) => {
 			return verifier_1.Verifier;
 		}
 	});
-})), import_dist$3 = require_dist$10(), import_dist$4 = require_dist$7(), import_dist$5 = require_dist$5();
+})), import_dist$2 = require_dist$9(), import_dist$3 = require_dist$6(), import_dist$4 = require_dist$4();
 const derUtf8 = (s) => String.fromCharCode(12, s.length) + s;
 function assertSignedDigest(bundleJson, expectedDigest) {
 	let dsse = bundleJson?.dsseEnvelope, payload = dsse?.payload;
@@ -17350,7 +17354,7 @@ function assertSignedDigest(bundleJson, expectedDigest) {
 async function fetchTrustedRoot() {
 	let cachePath = await (0, node_fs_promises.mkdtemp)((0, node_path.join)(process.env.RUNNER_TEMP || (0, node_os.tmpdir)(), "buildcage-tuf-"));
 	try {
-		return await (0, import_dist$4.getTrustedRoot)({ cachePath });
+		return await (0, import_dist$3.getTrustedRoot)({ cachePath });
 	} finally {
 		await (0, node_fs_promises.rm)(cachePath, {
 			recursive: !0,
@@ -17359,7 +17363,7 @@ async function fetchTrustedRoot() {
 	}
 }
 async function verifyBundle(bundleJson, options, expectedDigest) {
-	let trustedRoot = await fetchTrustedRoot(), verifier = new import_dist$5.Verifier((0, import_dist$5.toTrustMaterial)(trustedRoot), {
+	let trustedRoot = await fetchTrustedRoot(), verifier = new import_dist$4.Verifier((0, import_dist$4.toTrustMaterial)(trustedRoot), {
 		ctlogThreshold: options.ctLogThreshold,
 		tlogThreshold: options.tlogThreshold
 	}), policy = {};
@@ -17367,7 +17371,7 @@ async function verifyBundle(bundleJson, options, expectedDigest) {
 		oid: { id: oid.split(".").map(Number) },
 		value: Buffer.from(value)
 	})));
-	let signedEntity = (0, import_dist$5.toSignedEntity)((0, import_dist$3.bundleFromJSON)(bundleJson));
+	let signedEntity = (0, import_dist$4.toSignedEntity)((0, import_dist$2.bundleFromJSON)(bundleJson));
 	try {
 		verifier.verify(signedEntity, policy);
 	} catch (err) {
@@ -22401,7 +22405,7 @@ var init_config = __esmMin((() => {
 				assert_1.assert(optional);
 				return;
 			}
-			if (!(value === 0 && !emitDefaultValues && !optional)) return assert_1.assert(typeof value == "number"), assert_1.assert(Number.isInteger(value)), enumAsInteger || !type[1].hasOwnProperty(value) ? value : type[2] ? type[2] + type[1][value] : type[1][value];
+			if (value !== 0 || emitDefaultValues || optional) return assert_1.assert(typeof value == "number"), assert_1.assert(Number.isInteger(value)), enumAsInteger || !type[1].hasOwnProperty(value) ? value : type[2] ? type[2] + type[1][value] : type[1][value];
 		}
 		message(type, value, fieldName, options) {
 			return value === void 0 ? options.emitDefaultValues ? null : void 0 : type.internalJsonWrite(value, options);
@@ -25636,13 +25640,13 @@ var init_upload_zip_specification = __esmMin((() => {
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/logger/log.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/logger/log.js
 function log(message, ...args) {
 	node_process.default.stderr.write(`${node_util.default.format(message, ...args)}${node_os.EOL}`);
 }
 var init_log$6 = __esmMin((() => {}));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/env.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/env.js
 function getEnvironmentVariable(name) {
 	return node_process.default.env[name];
 }
@@ -25650,7 +25654,7 @@ var init_env = __esmMin((() => {
 	typeof node_process.default.versions.deno == "string" && node_process.default.versions.deno.length, typeof node_process.default.versions.bun == "string" && node_process.default.versions.bun.length;
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/logger/debug.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/logger/debug.js
 function enable(namespaces) {
 	enabledString = namespaces, enabledNamespaces = [], skippedNamespaces = [];
 	let namespaceList = namespaces.split(",").map((ns) => ns.trim());
@@ -25722,7 +25726,7 @@ var debugEnvVariable, enabledString, enabledNamespaces, skippedNamespaces, debug
 	});
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/logger/logger.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/logger/logger.js
 function patchLogMethod(parent, child) {
 	child.log = (...args) => {
 		parent.log(...args);
@@ -25794,7 +25798,7 @@ var TYPESPEC_RUNTIME_LOG_LEVELS, levelMap, context$3, init_logger = __esmMin((()
 	}), context$3.logger;
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/httpHeaders.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/httpHeaders.js
 function normalizeName(name) {
 	return name.toLowerCase();
 }
@@ -25843,13 +25847,13 @@ var HttpHeadersImpl, init_httpHeaders$1 = __esmMin((() => {
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/uuidUtils.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/uuidUtils.js
 function randomUUID$1() {
 	return globalThis.crypto.randomUUID();
 }
 var init_uuidUtils = __esmMin((() => {}));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/pipelineRequest.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/pipelineRequest.js
 function createPipelineRequest$1(options) {
 	return new PipelineRequestImpl(options);
 }
@@ -25880,7 +25884,7 @@ var PipelineRequestImpl, init_pipelineRequest$1 = __esmMin((() => {
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/pipeline.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/pipeline.js
 function createEmptyPipeline$1() {
 	return HttpPipeline.create();
 }
@@ -25965,7 +25969,7 @@ var ValidPhaseNames, HttpPipeline, init_pipeline$2 = __esmMin((() => {
 			}
 			function walkPhase(phase) {
 				phase.hasRun = !0;
-				for (let node of phase.policies) if (!(node.afterPhase && (!node.afterPhase.hasRun || node.afterPhase.policies.size)) && node.dependsOn.size === 0) {
+				for (let node of phase.policies) if ((!node.afterPhase || node.afterPhase.hasRun && !node.afterPhase.policies.size) && node.dependsOn.size === 0) {
 					result.push(node.policy);
 					for (let dependant of node.dependants) dependant.dependsOn.delete(node);
 					policyMap.delete(node.policy.name), phase.policies.delete(node);
@@ -25991,13 +25995,13 @@ var ValidPhaseNames, HttpPipeline, init_pipeline$2 = __esmMin((() => {
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/object.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/object.js
 function isObject(input) {
 	return typeof input == "object" && !!input && !Array.isArray(input) && !(input instanceof RegExp) && !(input instanceof Date);
 }
 var init_object = __esmMin((() => {}));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/error.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/error.js
 function isError$1(e) {
 	if (isObject(e)) {
 		let hasName = typeof e.name == "string", hasMessage = typeof e.message == "string";
@@ -26057,7 +26061,7 @@ var init_error$1 = __esmMin((() => {
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/restError.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/restError.js
 function isRestError$1(e) {
 	return e instanceof RestError$1 || isError$1(e) && e.name === "RestError";
 }
@@ -26097,7 +26101,7 @@ var errorSanitizer, RestError$1, init_restError$1 = __esmMin((() => {
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/bytesEncoding.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/bytesEncoding.js
 function uint8ArrayToString$1(bytes, format) {
 	return Buffer.from(bytes).toString(format);
 }
@@ -26108,7 +26112,7 @@ var init_bytesEncoding = __esmMin((() => {})), logger$4, init_log$5 = __esmMin((
 	init_logger(), logger$4 = createClientLogger$1("ts-http-runtime");
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/nodeHttpClient.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/nodeHttpClient.js
 function isReadableStream(body) {
 	return body && typeof body.pipe == "function";
 }
@@ -26205,9 +26209,7 @@ var DEFAULT_TLS_SETTINGS, ReportTransform, NodeHttpClient, init_nodeHttpClient =
 						logger$4.error("Error in upload progress", e);
 					}), isReadableStream(body) ? body.pipe(uploadReportStream) : uploadReportStream.end(body), body = uploadReportStream;
 				}
-				let res = await this.makeRequest(request, abortController, body);
-				timeoutId !== void 0 && clearTimeout(timeoutId);
-				let headers = getResponseHeaders(res), response = {
+				let res = await this.makeRequest(request, abortController, body), headers = getResponseHeaders(res), response = {
 					status: res.statusCode ?? 0,
 					headers,
 					request
@@ -26223,7 +26225,7 @@ var DEFAULT_TLS_SETTINGS, ReportTransform, NodeHttpClient, init_nodeHttpClient =
 				}
 				return request.streamResponseStatusCodes?.has(Infinity) || request.streamResponseStatusCodes?.has(response.status) ? response.readableStreamBody = responseStream : response.bodyAsText = await streamToText(responseStream), response;
 			} finally {
-				if (request.abortSignal && abortListener) {
+				if (timeoutId !== void 0 && clearTimeout(timeoutId), request.abortSignal && abortListener) {
 					let uploadStreamDone = Promise.resolve();
 					isReadableStream(body) && (uploadStreamDone = isStreamComplete(body));
 					let downloadStreamDone = Promise.resolve();
@@ -26275,7 +26277,7 @@ var DEFAULT_TLS_SETTINGS, ReportTransform, NodeHttpClient, init_nodeHttpClient =
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/defaultHttpClient.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/defaultHttpClient.js
 function createDefaultHttpClient$1() {
 	return createNodeHttpClient();
 }
@@ -26283,7 +26285,7 @@ var init_defaultHttpClient$1 = __esmMin((() => {
 	init_nodeHttpClient();
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/logPolicy.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/logPolicy.js
 function logPolicy$1(options = {}) {
 	let logger = options.logger ?? logger$4.info, sanitizer = new Sanitizer({
 		additionalAllowedHeaderNames: options.additionalAllowedHeaderNames,
@@ -26303,13 +26305,13 @@ var logPolicyName, init_logPolicy$1 = __esmMin((() => {
 	init_log$5(), init_sanitizer(), logPolicyName = "logPolicy";
 })), init_constants$3 = __esmMin((() => {}));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/random.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/random.js
 function getRandomIntegerInclusive(min, max) {
 	return min = Math.ceil(min), max = Math.floor(max), Math.floor(Math.random() * (max - min + 1)) + min;
 }
 var init_random = __esmMin((() => {}));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/delay.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/delay.js
 function calculateRetryDelay(retryAttempt, config) {
 	let exponentialDelay = config.retryDelayInMs * 2 ** retryAttempt, clampedDelay = Math.min(config.maxRetryDelayInMs, exponentialDelay);
 	return { retryAfterInMs: clampedDelay / 2 + getRandomIntegerInclusive(0, clampedDelay / 2) };
@@ -26318,7 +26320,7 @@ var init_delay$1 = __esmMin((() => {
 	init_random();
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/helpers.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/helpers.js
 function delay$2(delayInMs, value, options) {
 	return new Promise((resolve, reject) => {
 		let timer, onAborted, rejectOnAbort = () => reject(new AbortError$1(options?.abortErrorMsg ? options?.abortErrorMsg : StandardAbortMessage$1)), removeListeners = () => {
@@ -26340,7 +26342,7 @@ var StandardAbortMessage$1, init_helpers = __esmMin((() => {
 	init_AbortError$1(), StandardAbortMessage$1 = "The operation was aborted.";
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/retryStrategies/throttlingRetryStrategy.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/retryStrategies/throttlingRetryStrategy.js
 function getRetryAfterInMs(response) {
 	if (response && [429, 503].includes(response.status)) try {
 		for (let header of AllRetryAfterHeaders) {
@@ -26375,7 +26377,7 @@ var RetryAfterHeader, AllRetryAfterHeaders, init_throttlingRetryStrategy = __esm
 	];
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/retryStrategies/exponentialRetryStrategy.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/retryStrategies/exponentialRetryStrategy.js
 function exponentialRetryStrategy(options = {}) {
 	let retryInterval = options.retryDelayInMs ?? DEFAULT_CLIENT_RETRY_INTERVAL, maxRetryInterval = options.maxRetryDelayInMs ?? DEFAULT_CLIENT_MAX_RETRY_INTERVAL;
 	return {
@@ -26399,7 +26401,7 @@ var DEFAULT_CLIENT_RETRY_INTERVAL, DEFAULT_CLIENT_MAX_RETRY_INTERVAL, init_expon
 	init_delay$1(), init_throttlingRetryStrategy(), DEFAULT_CLIENT_RETRY_INTERVAL = 1e3, DEFAULT_CLIENT_MAX_RETRY_INTERVAL = 64e3;
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/retryPolicy.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/retryPolicy.js
 function retryPolicy(strategies, options = { maxRetries: 3 }) {
 	let logger = options.logger || retryPolicyLogger;
 	return {
@@ -26407,7 +26409,7 @@ function retryPolicy(strategies, options = { maxRetries: 3 }) {
 		async sendRequest(request, next) {
 			let response, responseError, retryCount = -1;
 			retryRequest: for (;;) {
-				retryCount += 1, response = void 0, responseError = void 0;
+				retryCount += 1, responseError = void 0;
 				try {
 					logger.info(`Retry ${retryCount}: Attempting to send request`, request.requestId), response = await next(request), logger.info(`Retry ${retryCount}: Received a response from request`, request.requestId);
 				} catch (e) {
@@ -26454,7 +26456,7 @@ var retryPolicyLogger, retryPolicyName, init_retryPolicy = __esmMin((() => {
 	init_helpers(), init_restError$1(), init_AbortError$1(), init_logger(), init_constants$3(), retryPolicyLogger = createClientLogger$1("ts-http-runtime retryPolicy"), retryPolicyName = "retryPolicy";
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/defaultRetryPolicy.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/defaultRetryPolicy.js
 function defaultRetryPolicy$1(options = {}) {
 	return {
 		name: defaultRetryPolicyName,
@@ -26465,7 +26467,7 @@ var defaultRetryPolicyName, init_defaultRetryPolicy$1 = __esmMin((() => {
 	init_exponentialRetryStrategy(), init_throttlingRetryStrategy(), init_retryPolicy(), init_constants$3(), defaultRetryPolicyName = "defaultRetryPolicy";
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/formData.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/formData.js
 function convertBodyToFormDataMap(body) {
 	if (typeof FormData < "u" && body instanceof FormData) {
 		let formDataMap = {};
@@ -26478,7 +26480,7 @@ function convertBodyToFormDataMap(body) {
 }
 var init_formData = __esmMin((() => {}));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/formDataPolicy.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/formDataPolicy.js
 function formDataPolicy$1() {
 	return {
 		name: formDataPolicyName,
@@ -26521,7 +26523,7 @@ var formDataPolicyName, init_formDataPolicy$1 = __esmMin((() => {
 	init_bytesEncoding(), init_formData(), init_httpHeaders$1(), formDataPolicyName = "formDataPolicy";
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/agentPolicy.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/agentPolicy.js
 function agentPolicy$1(agent) {
 	return {
 		name: agentPolicyName,
@@ -26532,7 +26534,7 @@ var agentPolicyName, init_agentPolicy$1 = __esmMin((() => {
 	agentPolicyName = "agentPolicy";
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/tlsPolicy.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/tlsPolicy.js
 function tlsPolicy$1(tlsSettings) {
 	return {
 		name: tlsPolicyName,
@@ -26591,7 +26593,7 @@ var tlsPolicyName, init_tlsPolicy$1 = __esmMin((() => {
 		return req.then = promise.then.bind(promise), req;
 	}
 	exports.req = req;
-})), require_dist$4 = __commonJSMin(((exports) => {
+})), require_dist$3 = __commonJSMin(((exports) => {
 	var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
 		k2 === void 0 && (k2 = k);
 		var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -26734,7 +26736,7 @@ var tlsPolicyName, init_tlsPolicy$1 = __esmMin((() => {
 		});
 	}
 	exports.parseProxyResponse = parseProxyResponse;
-})), require_dist$3 = __commonJSMin(((exports) => {
+})), require_dist$2 = __commonJSMin(((exports) => {
 	var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
 		k2 === void 0 && (k2 = k);
 		var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -26762,7 +26764,7 @@ var tlsPolicyName, init_tlsPolicy$1 = __esmMin((() => {
 		return mod && mod.__esModule ? mod : { default: mod };
 	};
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.HttpsProxyAgent = void 0;
-	let net$1 = __importStar(require("net")), tls$1 = __importStar(require("tls")), assert_1 = __importDefault(require("assert")), debug_1 = __importDefault(require_src()), agent_base_1 = require_dist$4(), url_1$1 = require("url"), parse_proxy_response_1 = require_parse_proxy_response(), debug = (0, debug_1.default)("https-proxy-agent"), setServernameFromNonIpHost = (options) => options.servername === void 0 && options.host && !net$1.isIP(options.host) ? {
+	let net$1 = __importStar(require("net")), tls$1 = __importStar(require("tls")), assert_1 = __importDefault(require("assert")), debug_1 = __importDefault(require_src()), agent_base_1 = require_dist$3(), url_1$1 = require("url"), parse_proxy_response_1 = require_parse_proxy_response(), debug = (0, debug_1.default)("https-proxy-agent"), setServernameFromNonIpHost = (options) => options.servername === void 0 && options.host && !net$1.isIP(options.host) ? {
 		...options,
 		servername: options.host
 	} : options;
@@ -26812,7 +26814,7 @@ var tlsPolicyName, init_tlsPolicy$1 = __esmMin((() => {
 		for (key in obj) keys.includes(key) || (ret[key] = obj[key]);
 		return ret;
 	}
-})), require_dist$2 = __commonJSMin(((exports) => {
+})), require_dist$1 = __commonJSMin(((exports) => {
 	var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
 		k2 === void 0 && (k2 = k);
 		var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -26840,7 +26842,7 @@ var tlsPolicyName, init_tlsPolicy$1 = __esmMin((() => {
 		return mod && mod.__esModule ? mod : { default: mod };
 	};
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.HttpProxyAgent = void 0;
-	let net = __importStar(require("net")), tls = __importStar(require("tls")), debug_1 = __importDefault(require_src()), events_1 = require("events"), agent_base_1 = require_dist$4(), url_1 = require("url"), debug = (0, debug_1.default)("http-proxy-agent");
+	let net = __importStar(require("net")), tls = __importStar(require("tls")), debug_1 = __importDefault(require_src()), events_1 = require("events"), agent_base_1 = require_dist$3(), url_1 = require("url"), debug = (0, debug_1.default)("http-proxy-agent");
 	var HttpProxyAgent = class extends agent_base_1.Agent {
 		constructor(proxy, opts) {
 			super(opts), this.proxy = typeof proxy == "string" ? new url_1.URL(proxy) : proxy, this.proxyHeaders = opts?.headers ?? {}, debug("Creating new HttpProxyAgent instance: %o", this.proxy.href);
@@ -26884,7 +26886,7 @@ var tlsPolicyName, init_tlsPolicy$1 = __esmMin((() => {
 	}
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/proxyPolicy.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/proxyPolicy.js
 function getEnvironmentValue(name) {
 	if (process.env[name]) return process.env[name];
 	if (process.env[name.toLowerCase()]) return process.env[name.toLowerCase()];
@@ -26932,7 +26934,7 @@ function getUrlFromProxySettings(settings) {
 function setProxyAgentOnRequest(request, cachedAgents, proxyUrl) {
 	if (request.agent) return;
 	let isInsecure = new URL(request.url).protocol !== "https:";
-	request.tlsSettings && logger$4.warning("TLS settings are not supported in combination with custom Proxy, certificates provided to the client will be ignored."), isInsecure ? (cachedAgents.httpProxyAgent ||= new import_dist$2.HttpProxyAgent(proxyUrl), request.agent = cachedAgents.httpProxyAgent) : (cachedAgents.httpsProxyAgent ||= new import_dist$1.HttpsProxyAgent(proxyUrl), request.agent = cachedAgents.httpsProxyAgent);
+	request.tlsSettings && logger$4.warning("TLS settings are not supported in combination with custom Proxy, certificates provided to the client will be ignored."), isInsecure ? (cachedAgents.httpProxyAgent ||= new import_dist$1.HttpProxyAgent(proxyUrl), request.agent = cachedAgents.httpProxyAgent) : (cachedAgents.httpsProxyAgent ||= new import_dist.HttpsProxyAgent(proxyUrl), request.agent = cachedAgents.httpsProxyAgent);
 }
 function proxyPolicy$1(proxySettings, options) {
 	noProxyListLoaded || globalNoProxyList.push(...loadNoProxy());
@@ -26944,11 +26946,11 @@ function proxyPolicy$1(proxySettings, options) {
 		}
 	};
 }
-var import_dist$1, import_dist$2, HTTPS_PROXY, HTTP_PROXY, ALL_PROXY, NO_PROXY, proxyPolicyName, globalNoProxyList, noProxyListLoaded, globalBypassedMap, init_proxyPolicy$1 = __esmMin((() => {
-	import_dist$1 = require_dist$3(), import_dist$2 = require_dist$2(), init_log$5(), HTTPS_PROXY = "HTTPS_PROXY", HTTP_PROXY = "HTTP_PROXY", ALL_PROXY = "ALL_PROXY", NO_PROXY = "NO_PROXY", proxyPolicyName = "proxyPolicy", globalNoProxyList = [], noProxyListLoaded = !1, globalBypassedMap = new Map();
+var import_dist, import_dist$1, HTTPS_PROXY, HTTP_PROXY, ALL_PROXY, NO_PROXY, proxyPolicyName, globalNoProxyList, noProxyListLoaded, globalBypassedMap, init_proxyPolicy$1 = __esmMin((() => {
+	import_dist = require_dist$2(), import_dist$1 = require_dist$1(), init_log$5(), HTTPS_PROXY = "HTTPS_PROXY", HTTP_PROXY = "HTTP_PROXY", ALL_PROXY = "ALL_PROXY", NO_PROXY = "NO_PROXY", proxyPolicyName = "proxyPolicy", globalNoProxyList = [], noProxyListLoaded = !1, globalBypassedMap = new Map();
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/decompressResponsePolicy.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/decompressResponsePolicy.js
 function decompressResponsePolicy$1() {
 	return {
 		name: decompressResponsePolicyName$1,
@@ -26961,7 +26963,7 @@ var decompressResponsePolicyName$1, init_decompressResponsePolicy$1 = __esmMin((
 	decompressResponsePolicyName$1 = "decompressResponsePolicy";
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/redirectPolicy.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/redirectPolicy.js
 function redirectPolicy$1(options = {}) {
 	let { maxRetries = 20, allowCrossOriginRedirects = !1 } = options;
 	return {
@@ -26987,13 +26989,13 @@ var redirectPolicyName$1, allowedRedirect, init_redirectPolicy$1 = __esmMin((() 
 	init_log$5(), redirectPolicyName$1 = "redirectPolicy", allowedRedirect = ["GET", "HEAD"];
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/typeGuards.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/typeGuards.js
 function isBlob(x) {
 	return x instanceof Blob;
 }
 var init_typeGuards = __esmMin((() => {}));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/concat.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/concat.js
 async function* streamAsyncIterator() {
 	let reader = this.getReader();
 	try {
@@ -27027,7 +27029,7 @@ var init_concat = __esmMin((() => {
 	init_typeGuards();
 }));
 //#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.8_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/multipartPolicy.js
+//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/multipartPolicy.js
 function generateBoundary() {
 	return `----AzSDKFormBoundary${randomUUID$1()}`;
 }
@@ -27816,7 +27818,7 @@ var init_tokenCredential = __esmMin((() => {})), init_esm$6 = __esmMin((() => {
 	init_esm$9(), init_tokenCredential();
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__@azure+co_d787bc7df786cb651d567e8aaf5a6964/node_modules/@azure/core-http-compat/dist/esm/policies/disableKeepAlivePolicy.js
+//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/policies/disableKeepAlivePolicy.js
 function createDisableKeepAlivePolicy() {
 	return {
 		name: disableKeepAlivePolicyName,
@@ -27832,7 +27834,7 @@ var disableKeepAlivePolicyName, init_disableKeepAlivePolicy = __esmMin((() => {
 	disableKeepAlivePolicyName = "DisableKeepAlivePolicy";
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.0_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/base64.js
+//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/base64.js
 function encodeByteArray(value) {
 	return uint8ArrayToString(value, "base64");
 }
@@ -27843,7 +27845,7 @@ var init_base64 = __esmMin((() => {
 	init_esm$9();
 })), init_interfaces$1 = __esmMin((() => {}));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.0_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/utils.js
+//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/utils.js
 function isPrimitiveBody(value, mapperTypeName) {
 	return mapperTypeName !== "Composite" && mapperTypeName !== "Dictionary" && (typeof value == "string" || typeof value == "number" || typeof value == "boolean" || mapperTypeName?.match(/^(Date|DateTime|DateTimeRfc1123|UnixTime|ByteArray|Base64Url)$/i) !== null || value == null);
 }
@@ -27893,7 +27895,7 @@ var validateISODuration, validUuidRegex, init_utils$3 = __esmMin((() => {
 	validateISODuration = /^(-|\+)?P(?:([-+]?[0-9,.]*)Y)?(?:([-+]?[0-9,.]*)M)?(?:([-+]?[0-9,.]*)W)?(?:([-+]?[0-9,.]*)D)?(?:T(?:([-+]?[0-9,.]*)H)?(?:([-+]?[0-9,.]*)M)?(?:([-+]?[0-9,.]*)S)?)?$/, validUuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/i;
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.0_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/serializer.js
+//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/serializer.js
 function createSerializer(modelMappers = {}, isXML = !1) {
 	return new SerializerImpl(modelMappers, isXML);
 }
@@ -28288,7 +28290,7 @@ var SerializerImpl, MapperTypeNames, init_serializer = __esmMin((() => {
 	import_state_cjs = require_state_cjs(), state = import_state_cjs.state;
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.0_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/operationHelpers.js
+//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/operationHelpers.js
 function getOperationArgumentValueFromParameter(operationArguments, parameter, fallbackObject) {
 	let parameterPath = parameter.parameterPath, parameterMapper = parameter.mapper, value;
 	if (typeof parameterPath == "string" && (parameterPath = [parameterPath]), Array.isArray(parameterPath)) {
@@ -28339,7 +28341,7 @@ var originalRequestSymbol$1, init_operationHelpers = __esmMin((() => {
 	init_state(), originalRequestSymbol$1 = Symbol.for("@azure/core-client original request");
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.0_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/deserializationPolicy.js
+//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/deserializationPolicy.js
 function deserializationPolicy(options = {}) {
 	let jsonContentTypes = options.expectedContentTypes?.json ?? defaultJsonContentTypes, xmlContentTypes = options.expectedContentTypes?.xml ?? defaultXmlContentTypes, parseXML = options.parseXML, serializerOptions = options.serializerOptions, updatedOptions = { xml: {
 		rootName: serializerOptions?.xml.rootName ?? "",
@@ -28464,7 +28466,7 @@ var defaultJsonContentTypes, defaultXmlContentTypes, deserializationPolicyName, 
 	init_interfaces$1(), init_esm$7(), init_serializer(), init_operationHelpers(), defaultJsonContentTypes = ["application/json", "text/json"], defaultXmlContentTypes = ["application/xml", "application/atom+xml"], deserializationPolicyName = "deserializationPolicy";
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.0_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/interfaceHelpers.js
+//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/interfaceHelpers.js
 function getStreamingResponseStatusCodes(operationSpec) {
 	let result = new Set();
 	for (let [statusCode, operationResponse] of Object.entries(operationSpec.responses)) operationResponse.bodyMapper && operationResponse.bodyMapper.type.name === MapperTypeNames.Stream && result.add(Number(statusCode));
@@ -28478,7 +28480,7 @@ var init_interfaceHelpers = __esmMin((() => {
 	init_serializer();
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.0_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/serializationPolicy.js
+//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/serializationPolicy.js
 function serializationPolicy(options = {}) {
 	let stringifyXML = options.stringifyXML;
 	return {
@@ -28531,7 +28533,7 @@ function serializeRequestBody(request, operationArguments, operationSpec, string
 				else isStream || (request.body = JSON.stringify(request.body));
 			}
 		} catch (error) {
-			throw Error(`Error "${error.message}" occurred in serializing the payload - ${JSON.stringify(serializedName, void 0, "  ")}.`);
+			throw Error(`Error "${error.message}" occurred in serializing the payload - ${JSON.stringify(serializedName, void 0, "  ")}.`, { cause: error });
 		}
 	} else if (operationSpec.formDataParameters && operationSpec.formDataParameters.length > 0) {
 		request.formData = {};
@@ -28564,7 +28566,7 @@ var serializationPolicyName, init_serializationPolicy = __esmMin((() => {
 	init_interfaces$1(), init_operationHelpers(), init_serializer(), init_interfaceHelpers(), serializationPolicyName = "serializationPolicy";
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.0_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/pipeline.js
+//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/pipeline.js
 function createClientPipeline(options = {}) {
 	let pipeline = createPipelineFromOptions(options ?? {});
 	return options.credentialOptions && pipeline.addPolicy(bearerTokenAuthenticationPolicy({
@@ -28576,7 +28578,7 @@ var init_pipeline = __esmMin((() => {
 	init_deserializationPolicy(), init_esm$7(), init_serializationPolicy();
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.0_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/httpClientCache.js
+//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/httpClientCache.js
 function getCachedDefaultHttpClient$1() {
 	return cachedHttpClient ||= createDefaultHttpClient(), cachedHttpClient;
 }
@@ -28584,7 +28586,7 @@ var cachedHttpClient, init_httpClientCache = __esmMin((() => {
 	init_esm$7();
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.0_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/urlHelpers.js
+//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/urlHelpers.js
 function getRequestUrl(baseUri, operationSpec, operationArguments, fallbackObject) {
 	let urlReplacements = calculateUrlReplacements(operationSpec, operationArguments, fallbackObject), isAbsolutePath = !1, requestUrl = replaceAll(baseUri, urlReplacements);
 	if (operationSpec.path) {
@@ -28680,7 +28682,7 @@ var CollectionFormatToDelimiterMap, init_urlHelpers = __esmMin((() => {
 	init_esm$11(), logger$2 = createClientLogger("core-client");
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.0_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/serviceClient.js
+//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/serviceClient.js
 function createDefaultPipeline(options) {
 	let credentialScopes = getCredentialScopes(options), credentialOptions = options.credential && credentialScopes ? {
 		credentialScopes,
@@ -28742,7 +28744,7 @@ var ServiceClient, init_serviceClient = __esmMin((() => {
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.0_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/authorizeRequestOnTenantChallenge.js
+//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/authorizeRequestOnTenantChallenge.js
 function isUuid(text) {
 	return /^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$/.test(text);
 }
@@ -28793,7 +28795,7 @@ var Constants, authorizeRequestOnTenantChallenge, init_authorizeRequestOnTenantC
 	init_serializer(), init_serviceClient(), init_pipeline(), init_interfaces$1(), init_deserializationPolicy(), init_serializationPolicy(), init_log$3(), init_base64(), init_authorizeRequestOnTenantChallenge();
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__@azure+co_d787bc7df786cb651d567e8aaf5a6964/node_modules/@azure/core-http-compat/dist/esm/util.js
+//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/util.js
 function toPipelineRequest(webResource, options = {}) {
 	let request = webResource[originalRequestSymbol], headers = createHttpHeaders(webResource.headers.toJson({ preserveCase: !0 }));
 	if (request) return request.headers = headers, request;
@@ -28945,7 +28947,7 @@ var originalRequestSymbol, originalClientRequestSymbol, passThroughProps, HttpHe
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__@azure+co_d787bc7df786cb651d567e8aaf5a6964/node_modules/@azure/core-http-compat/dist/esm/response.js
+//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/response.js
 function toCompatResponse(response, options) {
 	let request = toWebResourceLike(response.request), headers = toHttpHeadersLike(response.headers);
 	return options?.createProxy ? new Proxy(response, {
@@ -28991,7 +28993,7 @@ var originalResponse, init_response = __esmMin((() => {
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__@azure+co_d787bc7df786cb651d567e8aaf5a6964/node_modules/@azure/core-http-compat/dist/esm/policies/requestPolicyFactoryPolicy.js
+//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/policies/requestPolicyFactoryPolicy.js
 function createRequestPolicyFactoryPolicy(factories) {
 	let orderedFactories = factories.slice().reverse();
 	return {
@@ -29017,7 +29019,7 @@ var HttpPipelineLogLevel, mockRequestPolicyOptions, requestPolicyFactoryPolicyNa
 	}, requestPolicyFactoryPolicyName = "RequestPolicyFactoryPolicy";
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__@azure+co_d787bc7df786cb651d567e8aaf5a6964/node_modules/@azure/core-http-compat/dist/esm/httpClientAdapter.js
+//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/httpClientAdapter.js
 function convertHttpClient(requestPolicyClient) {
 	return { sendRequest: async (request) => toPipelineResponse(await requestPolicyClient.sendRequest(toWebResourceLike(request, { createProxy: !0 }))) };
 }
@@ -29027,7 +29029,7 @@ var init_httpClientAdapter = __esmMin((() => {
 	init_extendedClient(), init_response(), init_requestPolicyFactoryPolicy(), init_disableKeepAlivePolicy(), init_httpClientAdapter(), init_util$2();
 }));
 //#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.0/node_modules/fast-xml-parser/src/util.js
+//#region node_modules/.pnpm/fast-xml-parser@5.11.1/node_modules/fast-xml-parser/src/util.js
 function getAllMatches(string, regex) {
 	let matches = [], match = regex.exec(string);
 	for (; match;) {
@@ -29060,7 +29062,7 @@ var nameStartChar, nameChar, regexName, isName, DANGEROUS_PROPERTY_NAMES, critic
 	];
 }));
 //#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.0/node_modules/fast-xml-parser/src/validator.js
+//#region node_modules/.pnpm/fast-xml-parser@5.11.1/node_modules/fast-xml-parser/src/validator.js
 function validate(xmlData, options) {
 	options = Object.assign({}, defaultOptions$2, options);
 	let tags = [], tagFound = !1, reachedRoot = !1;
@@ -29186,8 +29188,34 @@ function readAttributeStr(xmlData, i) {
 		tagClosed
 	};
 }
+function scanAttributeTokens(attrStr) {
+	let tokens = [], len = attrStr.length, i = 0;
+	for (; i < len;) {
+		let tokenStart = i;
+		for (; i < len && isWhiteSpace(attrStr[i]);) i++;
+		if (i >= len) break;
+		if (attrStr[i] === "=") {
+			i = tokenStart + 1;
+			continue;
+		}
+		let leadingWs = attrStr.slice(tokenStart, i), nameStart = i;
+		for (; i < len && !isWhiteSpace(attrStr[i]) && attrStr[i] !== "=";) i++;
+		let name = attrStr.slice(nameStart, i), equalsGroup, j = i;
+		for (; j < len && isWhiteSpace(attrStr[j]);) j++;
+		j < len && attrStr[j] === "=" && (equalsGroup = attrStr.slice(i, j + 1), i = j + 1);
+		let quoteChar, value, k = i;
+		for (; k < len && isWhiteSpace(attrStr[k]);) k++;
+		if (k < len && (attrStr[k] === "\"" || attrStr[k] === "'")) {
+			let valueStart = k + 1, closeIdx = attrStr.indexOf(attrStr[k], valueStart);
+			closeIdx !== -1 && (quoteChar = attrStr[k], value = attrStr.slice(valueStart, closeIdx), i = closeIdx + 1);
+		}
+		let token = { startIndex: tokenStart };
+		token[1] = leadingWs, token[2] = name, token[3] = equalsGroup, token[4] = quoteChar !== void 0 || void 0, token[5] = quoteChar, token[6] = value, tokens.push(token);
+	}
+	return tokens;
+}
 function validateAttributeString(attrStr, options) {
-	let matches = getAllMatches(attrStr, validAttrStrRegxp), attrNames = {};
+	let matches = scanAttributeTokens(attrStr), attrNames = {};
 	for (let i = 0; i < matches.length; i++) {
 		if (matches[i][1].length === 0) return getErrorObject("InvalidAttr", "Attribute '" + matches[i][2] + "' has no space in starting.", getPositionFromMatch(matches[i]));
 		if (matches[i][3] !== void 0 && matches[i][4] === void 0) return getErrorObject("InvalidAttr", "Attribute '" + matches[i][2] + "' is without value.", getPositionFromMatch(matches[i]));
@@ -29241,11 +29269,11 @@ function getLineNumberForPosition(xmlData, index) {
 function getPositionFromMatch(match) {
 	return match.startIndex + match[1].length;
 }
-var defaultOptions$2, doubleQuote, singleQuote, validAttrStrRegxp, init_validator = __esmMin((() => {
+var defaultOptions$2, doubleQuote, singleQuote, init_validator = __esmMin((() => {
 	init_util$1(), defaultOptions$2 = {
 		allowBooleanAttributes: !1,
 		unpairedTags: []
-	}, doubleQuote = "\"", singleQuote = "'", validAttrStrRegxp = RegExp("(\\s*)([^\\s=]+)(\\s*=)?(\\s*(['\"])(([\\s\\S])*?)\\5)?", "g");
+	}, doubleQuote = "\"", singleQuote = "'";
 })), CURRENCY, XML, COMMON_HTML, init_entities = __esmMin((() => {
 	CURRENCY = {
 		cent: "¢",
@@ -29475,7 +29503,7 @@ var ENTITY_ACTION, SPECIAL_CHARS, LIMIT_TIER_EXTERNAL, LIMIT_TIER_BASE, LIMIT_TI
 	init_EntityDecoder(), init_entities();
 }));
 //#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.0/node_modules/fast-xml-parser/src/xmlparser/OptionsBuilder.js
+//#region node_modules/.pnpm/fast-xml-parser@5.11.1/node_modules/fast-xml-parser/src/xmlparser/OptionsBuilder.js
 function validatePropertyName(propertyName, optionName) {
 	if (typeof propertyName != "string") return;
 	let normalized = propertyName.toLowerCase();
@@ -29630,7 +29658,7 @@ var defaultOnDangerousProperty, defaultOptions$1, buildOptions, init_OptionsBuil
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.0/node_modules/fast-xml-parser/src/xmlparser/DocTypeReader.js
+//#region node_modules/.pnpm/fast-xml-parser@5.11.1/node_modules/fast-xml-parser/src/xmlparser/DocTypeReader.js
 function hasSeq(data, seq, i) {
 	for (let j = 0; j < seq.length; j++) if (seq[j] !== data[i + j + 1]) return !1;
 	return !0;
@@ -30033,7 +30061,7 @@ var hexRegex, binRegex, octRegex, numRegex, consider, eNotationRegx, init_strnum
 	}, eNotationRegx = /^([-+])?(0*)(\d*(\.\d*)?[eE][-\+]?\d+)$/;
 }));
 //#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.0/node_modules/fast-xml-parser/src/ignoreAttributes.js
+//#region node_modules/.pnpm/fast-xml-parser@5.11.1/node_modules/fast-xml-parser/src/ignoreAttributes.js
 function getIgnoreAttributesFn$1(ignoreAttributes) {
 	return typeof ignoreAttributes == "function" ? ignoreAttributes : Array.isArray(ignoreAttributes) ? (attrName) => {
 		for (let pattern of ignoreAttributes) if (typeof pattern == "string" && attrName === pattern || pattern instanceof RegExp && pattern.test(attrName)) return !0;
@@ -30506,7 +30534,7 @@ var init_ignoreAttributes$1 = __esmMin((() => {})), Expression, init_Expression 
 		{
 			id: "xml-namespace-confusion",
 			description: "xmlns: attribute injection — can redefine namespaces to confuse parsers",
-			pattern: /\bxmlns\s*(?::\w{1,40})?\s*=/i
+			pattern: /\bxmlns(?::\w{1,40})?\s*=/i
 		},
 		{
 			id: "xml-comment-injection",
@@ -30972,7 +31000,7 @@ var init_ignoreAttributes$1 = __esmMin((() => {})), Expression, init_Expression 
 	], SQL_STRICT_PATTERNS = [...SQL_PATTERNS, ...SQL_STRICT_EXTRA];
 }));
 //#endregion
-//#region node_modules/.pnpm/is-unsafe@2.0.0/node_modules/is-unsafe/src/index.js
+//#region node_modules/.pnpm/is-unsafe@2.0.2/node_modules/is-unsafe/src/index.js
 function assertString(value) {
 	if (typeof value != "string") throw TypeError(`is-unsafe: first argument must be a string, got ${typeof value}`);
 }
@@ -31031,7 +31059,7 @@ var init_src$1 = __esmMin((() => {
 	});
 }));
 //#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.0/node_modules/fast-xml-parser/src/xmlparser/OrderedObjParser.js
+//#region node_modules/.pnpm/fast-xml-parser@5.11.1/node_modules/fast-xml-parser/src/xmlparser/OrderedObjParser.js
 function extractRawAttributes(prefixedAttrs, options) {
 	if (!prefixedAttrs) return {};
 	let attrs = options.attributesGroupName ? prefixedAttrs[options.attributesGroupName] : prefixedAttrs;
@@ -31338,7 +31366,7 @@ var OrderedObjParser, attrsRegx, parseXml, init_OrderedObjParser = __esmMin((() 
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.0/node_modules/fast-xml-parser/src/xmlparser/node2json.js
+//#region node_modules/.pnpm/fast-xml-parser@5.11.1/node_modules/fast-xml-parser/src/xmlparser/node2json.js
 function stripAttributePrefix(attrs, prefix) {
 	if (!attrs || typeof attrs != "object") return {};
 	if (!prefix) return attrs;
@@ -32569,7 +32597,7 @@ var init_xml = __esmMin((() => {
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/streamHelpers.js
+//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/streamHelpers.js
 function signalStreamEnd(pushData) {
 	pushData(null);
 }
@@ -32631,7 +32659,7 @@ var init_streamHelpers = __esmMin((() => {})), MAX_SEGMENT_CONTENT_LENGTH, SMReg
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/StructuredMessageEncodingStream.js
+//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/StructuredMessageEncodingStream.js
 function isNodeReadableStream(source) {
 	return source !== null && source instanceof node_stream.default && typeof source._read == "function" && typeof source._readableState == "object" && typeof source.pipe == "function";
 }
@@ -32838,7 +32866,7 @@ var StructuredMessageEncodingStream, init_StructuredMessageEncodingStream = __es
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/StructuredMessageDecodingStream.js
+//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/StructuredMessageDecodingStream.js
 async function structuredMessageDecodingBrowser(source) {
 	throw Error("structuredMessageDecodingBrowser is only for Browser");
 }
@@ -32887,7 +32915,7 @@ var StructuredMessageDecodingStream, init_StructuredMessageDecodingStream = __es
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/cache.js
+//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/cache.js
 function getCachedDefaultHttpClient() {
 	return _defaultHttpClient ||= createDefaultHttpClient(), _defaultHttpClient;
 }
@@ -32984,7 +33012,7 @@ var _defaultHttpClient, init_cache = __esmMin((() => {
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/utils/utils.common.js
+//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/utils/utils.common.js
 function setURLParameter$1(url, name, value) {
 	let urlParsed = new URL(url), encodedName = encodeURIComponent(name), encodedValue = value ? encodeURIComponent(value) : void 0, searchString = urlParsed.search === "" ? "?" : urlParsed.search, searchPieces = [];
 	for (let pair of searchString.slice(1).split("&")) if (pair) {
@@ -33032,7 +33060,7 @@ async function delay(timeInMs, aborter, abortError) {
 }
 var init_utils_common$2 = __esmMin((() => {}));
 //#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/utils/SharedKeyComparator.js
+//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/utils/SharedKeyComparator.js
 function compareHeader(lhs, rhs) {
 	return isLessThan(lhs, rhs) ? -1 : 1;
 }
@@ -33604,7 +33632,7 @@ var table_lv0, table_lv2, table_lv4, init_SharedKeyComparator = __esmMin((() => 
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageBrowserPolicyV2.js
+//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageBrowserPolicyV2.js
 function storageBrowserPolicy() {
 	return {
 		name: storageBrowserPolicyName,
@@ -33617,7 +33645,7 @@ var storageBrowserPolicyName, init_StorageBrowserPolicyV2 = __esmMin((() => {
 	storageBrowserPolicyName = "storageBrowserPolicy";
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageCorrectContentLengthPolicy.js
+//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageCorrectContentLengthPolicy.js
 function storageCorrectContentLengthPolicy() {
 	function correctContentLength(request) {
 		request.body && (typeof request.body == "string" || Buffer.isBuffer(request.body)) && request.body.length > 0 && request.headers.set(HeaderConstants.CONTENT_LENGTH, Buffer.byteLength(request.body));
@@ -33633,7 +33661,7 @@ var storageCorrectContentLengthPolicyName, init_StorageCorrectContentLengthPolic
 	init_constants$1(), storageCorrectContentLengthPolicyName = "StorageCorrectContentLengthPolicy";
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageRetryPolicyV2.js
+//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageRetryPolicyV2.js
 function storageRetryPolicy(options = {}) {
 	let retryPolicyType = options.retryPolicyType ?? DEFAULT_RETRY_OPTIONS.retryPolicyType, maxTries = options.maxTries ?? DEFAULT_RETRY_OPTIONS.maxTries, retryDelayInMs = options.retryDelayInMs ?? DEFAULT_RETRY_OPTIONS.retryDelayInMs, maxRetryDelayInMs = options.maxRetryDelayInMs ?? DEFAULT_RETRY_OPTIONS.maxRetryDelayInMs, secondaryHost = options.secondaryHost ?? DEFAULT_RETRY_OPTIONS.secondaryHost, tryTimeoutInMs = options.tryTimeoutInMs ?? DEFAULT_RETRY_OPTIONS.tryTimeoutInMs;
 	function shouldRetry({ isPrimaryRetry, attempt, response, error }) {
@@ -33719,7 +33747,7 @@ var storageRetryPolicyName, DEFAULT_RETRY_OPTIONS, retriableErrors, RETRY_ABORT_
 	], RETRY_ABORT_ERROR = new AbortError("The operation was aborted.");
 }));
 //#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageSharedKeyCredentialPolicyV2.js
+//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageSharedKeyCredentialPolicyV2.js
 function storageSharedKeyCredentialPolicy(options) {
 	function signRequest(request) {
 		request.headers.set(HeaderConstants.X_MS_DATE, new Date().toUTCString()), request.body && (typeof request.body == "string" || Buffer.isBuffer(request.body)) && request.body.length > 0 && request.headers.set(HeaderConstants.CONTENT_LENGTH, Buffer.byteLength(request.body));
@@ -33781,7 +33809,7 @@ var storageSharedKeyCredentialPolicyName, init_StorageSharedKeyCredentialPolicyV
 	init_constants$1(), init_utils_common$2(), init_SharedKeyComparator(), storageSharedKeyCredentialPolicyName = "storageSharedKeyCredentialPolicy";
 })), init_StorageRedirectRangeHeaderPolicy = __esmMin((() => {}));
 //#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.0_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageRequestFailureDetailsParserPolicy.js
+//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageRequestFailureDetailsParserPolicy.js
 function storageRequestFailureDetailsParserPolicy() {
 	return {
 		name: storageRequestFailureDetailsParserPolicyName,
@@ -47886,7 +47914,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		for (var out = [], length = 0, a = 0; a < acc.length; a++) for (var v = 0; v < values.length; v++) {
 			if (out.length >= max) return out;
 			var expansion = acc[a] + pre + values[v];
-			if (!(dropEmpties && !expansion)) {
+			if (!dropEmpties || expansion) {
 				if (length + expansion.length > maxLength) return out;
 				out.push(expansion), length += expansion.length;
 			}
@@ -47946,7 +47974,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 				var valuesLength = 0;
 				outer: for (var j = 0; j < n.length; j++) for (var expanded = expand(n[j], max, maxLength, !1), k = 0; k < expanded.length; k++) {
 					var v = expanded[k];
-					if (!(dropsEmpties && !v)) {
+					if (!dropsEmpties || v) {
 						if (values.length >= max || valuesLength + v.length > maxLength) break outer;
 						values.push(v), valuesLength += v.length;
 					}
@@ -49819,7 +49847,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 			};
 		}
 		function chownErOk(er) {
-			return !er || er.code === "ENOSYS" || (!process.getuid || process.getuid() !== 0) && (er.code === "EINVAL" || er.code === "EPERM");
+			return !(er && er.code !== "ENOSYS" && (process.getuid && process.getuid() === 0 || er.code !== "EINVAL" && er.code !== "EPERM"));
 		}
 	}
 })), require_legacy_streams = __commonJSMin(((exports, module) => {
@@ -50964,7 +50992,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 			}
 			_this.push(null);
 		}), stream.on("data", function(chunk) {
-			debug("wrapped data"), state.decoder && (chunk = state.decoder.write(chunk)), !(state.objectMode && chunk == null) && (!state.objectMode && (!chunk || !chunk.length) || _this.push(chunk) || (paused = !0, stream.pause()));
+			debug("wrapped data"), state.decoder && (chunk = state.decoder.write(chunk)), !(state.objectMode && chunk == null) && (state.objectMode || chunk && chunk.length) && (_this.push(chunk) || (paused = !0, stream.pause()));
 		}), stream) this[i] === void 0 && typeof stream[i] == "function" && (this[i] = function(method) {
 			return function() {
 				return stream[method].apply(stream, arguments);
@@ -51413,7 +51441,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 	function baseKeysIn(object) {
 		if (!isObject(object)) return nativeKeysIn(object);
 		var isProto = isPrototype(object), result = [];
-		for (var key in object) key == "constructor" && (isProto || !hasOwnProperty.call(object, key)) || result.push(key);
+		for (var key in object) (key != "constructor" || !isProto && hasOwnProperty.call(object, key)) && result.push(key);
 		return result;
 	}
 	module.exports = baseKeysIn;
@@ -52321,10 +52349,10 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 })), require_utils = __commonJSMin(((exports, module) => {
 	let { SymbolAsyncIterator, SymbolIterator, SymbolFor } = require_primordials(), kIsDestroyed = SymbolFor("nodejs.stream.destroyed"), kIsErrored = SymbolFor("nodejs.stream.errored"), kIsReadable = SymbolFor("nodejs.stream.readable"), kIsWritable = SymbolFor("nodejs.stream.writable"), kIsDisturbed = SymbolFor("nodejs.stream.disturbed"), kIsClosedPromise = SymbolFor("nodejs.webstream.isClosedPromise"), kControllerErrorFunction = SymbolFor("nodejs.webstream.controllerErrorFunction");
 	function isReadableNodeStream(obj, strict = !1) {
-		return !!(obj && typeof obj.pipe == "function" && typeof obj.on == "function" && (!strict || typeof obj.pause == "function" && typeof obj.resume == "function") && (!obj._writableState || obj._readableState?.readable !== !1) && (!obj._writableState || obj._readableState));
+		return !(!obj || typeof obj.pipe != "function" || typeof obj.on != "function" || strict && (typeof obj.pause != "function" || typeof obj.resume != "function") || obj._writableState && obj._readableState?.readable === !1 || obj._writableState && !obj._readableState);
 	}
 	function isWritableNodeStream(obj) {
-		return !!(obj && typeof obj.write == "function" && typeof obj.on == "function" && (!obj._readableState || obj._writableState?.writable !== !1));
+		return !(!obj || typeof obj.write != "function" || typeof obj.on != "function" || obj._readableState && obj._writableState?.writable === !1);
 	}
 	function isDuplexNodeStream(obj) {
 		return !!(obj && typeof obj.pipe == "function" && obj._readableState && typeof obj.on == "function" && typeof obj.write == "function");
@@ -52333,13 +52361,13 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		return obj && (obj._readableState || obj._writableState || typeof obj.write == "function" && typeof obj.on == "function" || typeof obj.pipe == "function" && typeof obj.on == "function");
 	}
 	function isReadableStream(obj) {
-		return !!(obj && !isNodeStream(obj) && typeof obj.pipeThrough == "function" && typeof obj.getReader == "function" && typeof obj.cancel == "function");
+		return !(!obj || isNodeStream(obj) || typeof obj.pipeThrough != "function" || typeof obj.getReader != "function" || typeof obj.cancel != "function");
 	}
 	function isWritableStream(obj) {
-		return !!(obj && !isNodeStream(obj) && typeof obj.getWriter == "function" && typeof obj.abort == "function");
+		return !(!obj || isNodeStream(obj) || typeof obj.getWriter != "function" || typeof obj.abort != "function");
 	}
 	function isTransformStream(obj) {
-		return !!(obj && !isNodeStream(obj) && typeof obj.readable == "object" && typeof obj.writable == "object");
+		return !(!obj || isNodeStream(obj) || typeof obj.readable != "object" || typeof obj.writable != "object");
 	}
 	function isWebStream(obj) {
 		return isReadableStream(obj) || isWritableStream(obj) || isTransformStream(obj);
@@ -52466,9 +52494,9 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		let readable = options.readable ?? isReadableNodeStream(stream), writable = options.writable ?? isWritableNodeStream(stream), wState = stream._writableState, rState = stream._readableState, onlegacyfinish = () => {
 			stream.writable || onfinish();
 		}, willEmitClose = _willEmitClose(stream) && isReadableNodeStream(stream) === readable && isWritableNodeStream(stream) === writable, writableFinished = isWritableFinished(stream, !1), onfinish = () => {
-			writableFinished = !0, stream.destroyed && (willEmitClose = !1), !(willEmitClose && (!stream.readable || readable)) && (!readable || readableFinished) && callback.call(stream);
+			writableFinished = !0, stream.destroyed && (willEmitClose = !1), (!willEmitClose || stream.readable && !readable) && (!readable || readableFinished) && callback.call(stream);
 		}, readableFinished = isReadableFinished(stream, !1), onend = () => {
-			readableFinished = !0, stream.destroyed && (willEmitClose = !1), !(willEmitClose && (!stream.writable || writable)) && (!writable || writableFinished) && callback.call(stream);
+			readableFinished = !0, stream.destroyed && (willEmitClose = !1), (!willEmitClose || stream.writable && !writable) && (!writable || writableFinished) && callback.call(stream);
 		}, onerror = (err) => {
 			callback.call(stream, err);
 		}, closed = isClosed(stream), onclose = () => {
@@ -52616,7 +52644,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		stream.emit("error", err), process.nextTick(emitCloseLegacy, stream);
 	}
 	function destroyer(stream, err) {
-		!stream || isDestroyed(stream) || (!err && !isFinished(stream) && (err = new AbortError()), isServerRequest(stream) ? (stream.socket = null, stream.destroy(err)) : isRequest(stream) ? stream.abort() : isRequest(stream.req) ? stream.req.abort() : typeof stream.destroy == "function" ? stream.destroy(err) : typeof stream.close == "function" ? stream.close() : err ? process.nextTick(emitErrorCloseLegacy, stream, err) : process.nextTick(emitCloseLegacy, stream), stream.destroyed || (stream[kIsDestroyed] = !0));
+		stream && !isDestroyed(stream) && (!err && !isFinished(stream) && (err = new AbortError()), isServerRequest(stream) ? (stream.socket = null, stream.destroy(err)) : isRequest(stream) ? stream.abort() : isRequest(stream.req) ? stream.req.abort() : typeof stream.destroy == "function" ? stream.destroy(err) : typeof stream.close == "function" ? stream.close() : err ? process.nextTick(emitErrorCloseLegacy, stream, err) : process.nextTick(emitCloseLegacy, stream), stream.destroyed || (stream[kIsDestroyed] = !0));
 	}
 	module.exports = {
 		construct,
@@ -53344,7 +53372,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 			__proto__: null,
 			enumerable: !1,
 			get: function() {
-				return !!(this._readableState.readable !== !1 && (this._readableState.destroyed || this._readableState.errored) && !this._readableState.endEmitted);
+				return !(this._readableState.readable === !1 || !this._readableState.destroyed && !this._readableState.errored || this._readableState.endEmitted);
 			}
 		},
 		readableHighWaterMark: {
@@ -53761,7 +53789,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 			__proto__: null,
 			enumerable: !1,
 			get: function() {
-				return !!(this._writableState.writable !== !1 && (this._writableState.destroyed || this._writableState.errored) && !this._writableState.finished);
+				return !(this._writableState.writable === !1 || !this._writableState.destroyed && !this._writableState.errored || this._writableState.finished);
 			}
 		}
 	});
@@ -54176,7 +54204,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		}
 		function finishImpl(err, final) {
 			var _disposable;
-			if (err && (!error || error.code === "ERR_STREAM_PREMATURE_CLOSE") && (error = err), !(!error && !final)) {
+			if (err && (!error || error.code === "ERR_STREAM_PREMATURE_CLOSE") && (error = err), error || final) {
 				for (; destroys.length;) destroys.shift()(error);
 				(_disposable = disposable) == null || _disposable[SymbolDispose](), ac.abort(), final && (error || lastStreamCleanup.forEach((fn) => fn()), process.nextTick(callback, error, value));
 			}
@@ -54288,7 +54316,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 			let idx = streams.length - 1;
 			streams[idx] = Duplex.from(streams[idx]);
 		}
-		for (let n = 0; n < streams.length; ++n) if (!(!isNodeStream(streams[n]) && !isWebStream(streams[n]))) {
+		for (let n = 0; n < streams.length; ++n) if (isNodeStream(streams[n]) || isWebStream(streams[n])) {
 			if (n < streams.length - 1 && !(isReadable(streams[n]) || isReadableStream(streams[n]) || isTransformStream(streams[n]))) throw new ERR_INVALID_ARG_VALUE(`streams[${n}]`, orgStreams[n], "must be readable");
 			if (n > 0 && !(isWritable(streams[n]) || isWritableStream(streams[n]) || isTransformStream(streams[n]))) throw new ERR_INVALID_ARG_VALUE(`streams[${n}]`, orgStreams[n], "must be writable");
 		}
@@ -56558,7 +56586,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 				else if (isArrayBufferLike(chunk)) chunk = Buffer.from(chunk);
 				else if (typeof chunk != "string") throw Error("Non-contiguous data written to non-objectMode stream");
 			}
-			return this[OBJECTMODE] ? (this[FLOWING] && this[BUFFERLENGTH] !== 0 && this[FLUSH](!0), this[FLOWING] ? this.emit("data", chunk) : this[BUFFERPUSH](chunk), this[BUFFERLENGTH] !== 0 && this.emit("readable"), cb && fn(cb), this[FLOWING]) : chunk.length ? (typeof chunk == "string" && !(encoding === this[ENCODING] && !this[DECODER]?.lastNeed) && (chunk = Buffer.from(chunk, encoding)), Buffer.isBuffer(chunk) && this[ENCODING] && (chunk = this[DECODER].write(chunk)), this[FLOWING] && this[BUFFERLENGTH] !== 0 && this[FLUSH](!0), this[FLOWING] ? this.emit("data", chunk) : this[BUFFERPUSH](chunk), this[BUFFERLENGTH] !== 0 && this.emit("readable"), cb && fn(cb), this[FLOWING]) : (this[BUFFERLENGTH] !== 0 && this.emit("readable"), cb && fn(cb), this[FLOWING]);
+			return this[OBJECTMODE] ? (this[FLOWING] && this[BUFFERLENGTH] !== 0 && this[FLUSH](!0), this[FLOWING] ? this.emit("data", chunk) : this[BUFFERPUSH](chunk), this[BUFFERLENGTH] !== 0 && this.emit("readable"), cb && fn(cb), this[FLOWING]) : chunk.length ? (typeof chunk == "string" && (encoding !== this[ENCODING] || this[DECODER]?.lastNeed) && (chunk = Buffer.from(chunk, encoding)), Buffer.isBuffer(chunk) && this[ENCODING] && (chunk = this[DECODER].write(chunk)), this[FLOWING] && this[BUFFERLENGTH] !== 0 && this[FLUSH](!0), this[FLOWING] ? this.emit("data", chunk) : this[BUFFERPUSH](chunk), this[BUFFERLENGTH] !== 0 && this.emit("readable"), cb && fn(cb), this[FLOWING]) : (this[BUFFERLENGTH] !== 0 && this.emit("readable"), cb && fn(cb), this[FLOWING]);
 		}
 		read(n) {
 			if (this[DESTROYED]) return null;
@@ -57353,7 +57381,7 @@ while (this[FLUSHCHUNK](this[BUFFERSHIFT]()) && this[BUFFER].length);
 			let r = "";
 			for (let i = paths.length - 1; i >= 0; i--) {
 				let p = paths[i];
-				if (!(!p || p === ".") && (r = r ? `${p}/${r}` : p, this.isAbsolute(p))) break;
+				if (p && p !== "." && (r = r ? `${p}/${r}` : p, this.isAbsolute(p))) break;
 			}
 			let cached = this.#resolveCache.get(r);
 			if (cached !== void 0) return cached;
@@ -57364,7 +57392,7 @@ while (this[FLUSHCHUNK](this[BUFFERSHIFT]()) && this[BUFFER].length);
 			let r = "";
 			for (let i = paths.length - 1; i >= 0; i--) {
 				let p = paths[i];
-				if (!(!p || p === ".") && (r = r ? `${p}/${r}` : p, this.isAbsolute(p))) break;
+				if (p && p !== "." && (r = r ? `${p}/${r}` : p, this.isAbsolute(p))) break;
 			}
 			let cached = this.#resolvePosixCache.get(r);
 			if (cached !== void 0) return cached;
@@ -58337,7 +58365,7 @@ while (this[FLUSHCHUNK](this[BUFFERSHIFT]()) && this[BUFFER].length);
 		return data.forEach(function(obj) {
 			("src" in obj || "dest" in obj) && files.push(obj);
 		}), files.length === 0 ? [] : (files = _(files).chain().forEach(function(obj) {
-			!("src" in obj) || !obj.src || (obj.src = Array.isArray(obj.src) ? flatten(obj.src) : [obj.src]);
+			"src" in obj && obj.src && (obj.src = Array.isArray(obj.src) ? flatten(obj.src) : [obj.src]);
 		}).map(function(obj) {
 			var expandOptions = Object.assign({}, obj);
 			if (delete expandOptions.src, delete expandOptions.dest, obj.expand) return file.expandMapping(obj.src, obj.dest, expandOptions).map(function(mapObj) {
@@ -60055,7 +60083,7 @@ while (this[FLUSHCHUNK](this[BUFFERSHIFT]()) && this[BUFFER].length);
 			}
 		}
 		function onerror(err) {
-			if (!(!err || error)) {
+			if (err && !error) {
 				error = err;
 				for (let s of all) s.destroy(err);
 			}
@@ -60691,7 +60719,7 @@ while (this[FLUSHCHUNK](this[BUFFERSHIFT]()) && this[BUFFER].length);
 	}, Tar.prototype.unpipe = function() {
 		return this.compressor ? this.compressor.unpipe.apply(this.compressor, arguments) : this.engine.unpipe.apply(this.engine, arguments);
 	}, module.exports = Tar;
-})), require_dist$1 = __commonJSMin(((exports, module) => {
+})), require_dist = __commonJSMin(((exports, module) => {
 	function getDefaultExportFromCjs(x) {
 		return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, "default") ? x.default : x;
 	}
@@ -60978,7 +61006,7 @@ while (this[FLUSHCHUNK](this[BUFFERSHIFT]()) && this[BUFFER].length);
 		return _crc32.apply(null, arguments) >>> 0;
 	}, module.exports = getDefaultExportFromCjs(crc32);
 })), require_json = __commonJSMin(((exports, module) => {
-	var inherits$1 = require("util").inherits, Transform = require_ours().Transform, crc32 = require_dist$1(), util = require_archiver_utils(), Json = function(options) {
+	var inherits$1 = require("util").inherits, Transform = require_ours().Transform, crc32 = require_dist(), util = require_archiver_utils(), Json = function(options) {
 		if (!(this instanceof Json)) return new Json(options);
 		options = this.options = util.defaults(options, {}), Transform.call(this, options), this.supports = {
 			directory: !0,
@@ -61836,7 +61864,7 @@ var bind, bindable, before_after_hook_default, init_before_after_hook = __esmMin
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@octokit+endpoint@11.0.4/node_modules/@octokit/endpoint/dist-bundle/index.js
+//#region node_modules/.pnpm/@octokit+endpoint@11.0.5/node_modules/@octokit/endpoint/dist-bundle/index.js
 function lowercaseKeys(object) {
 	return object ? Object.keys(object).reduce((newObj, key) => (newObj[key.toLowerCase()] = object[key], newObj), {}) : {};
 }
@@ -61991,91 +62019,109 @@ var DEFAULTS, urlVariableRegex, endpoint, init_dist_bundle$5 = __esmMin((() => {
 		},
 		mediaType: { format: "" }
 	}, urlVariableRegex = /\{[^{}}]+\}/g, endpoint = withDefaults$2(null, DEFAULTS);
-})), require_dist = __commonJSMin(((exports) => {
-	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.parse = parse;
-	let NullObject = (() => {
-		let C = function() {};
-		return C.prototype = Object.create(null), C;
-	})();
-	function parse(header, options) {
-		let stopChar = options?.comma === !0 ? COMMA : 65536, len = header.length, index = skipOWS(header, options?.start ?? 0, len), valueStart = index;
-		index = skipValue(header, index, len, stopChar);
-		let valueEnd = trailingOWS(header, valueStart, index), type = header.slice(valueStart, valueEnd).toLowerCase();
-		return options?.parameters === !1 ? {
-			type,
-			index,
-			parameters: new NullObject()
-		} : parseParameters(header, type, index, len, stopChar);
+}));
+//#endregion
+//#region node_modules/.pnpm/content-type@3.1.0/node_modules/content-type/dist/index.js
+function parse(header, options) {
+	let stopFlags = SEMI_FLAG | (options?.comma === !0 ? COMMA_FLAG : 0), len = header.length, valueStart = options?.start ?? 0;
+	for (; (CHAR_MAP[header.charCodeAt(valueStart)] & OWS) !== 0;) valueStart++;
+	let index = valueStart, typeFlags = 0, whitespace = -1, stop = options?.parameters === !1 ? COMMA_FLAG : 0;
+	for (; index < len;) {
+		let code = header.charCodeAt(index), flags = CHAR_MAP[code];
+		if ((flags & stopFlags) !== 0) {
+			stop |= flags & COMMA_FLAG;
+			break;
+		}
+		(flags & OWS) === 0 ? whitespace = -1 : whitespace === -1 && (whitespace = index), typeFlags |= code & NON_ASCII | flags, index++;
 	}
-	let COMMA = 44;
-	function parseParameters(header, type, index, len, stopChar) {
-		let parameters = new NullObject();
-		parameter: for (; index < len && header.charCodeAt(index) !== stopChar;) {
-			index = skipOWS(header, index + 1, len);
-			let keyStart = index;
-			for (; index < len;) {
-				let code = header.charCodeAt(index);
-				if (code === stopChar) break parameter;
-				if (code === 59) continue parameter;
-				if (code === 61) {
-					let keyEnd = trailingOWS(header, keyStart, index), key = header.slice(keyStart, keyEnd).toLowerCase();
-					if (index = skipOWS(header, index + 1, len), index < len && header.charCodeAt(index) === 34) {
-						index++;
-						let value = "";
-						for (; index < len;) {
-							let code = header.charCodeAt(index++);
-							if (code === 34) {
-								index = skipValue(header, index, len, stopChar), parameters[key] === void 0 && (parameters[key] = value);
-								break;
+	let valueEnd = whitespace === -1 ? index : whitespace, value = header.slice(valueStart, valueEnd), type = (typeFlags & CASE_FLAGS) === 0 ? value : value.toLowerCase();
+	return index === len || stop !== 0 ? {
+		type,
+		index,
+		parameters: new NullObject()
+	} : parseParameters(header, type, index, len, stopFlags);
+}
+function parseParameters(header, type, index, len, stopFlags) {
+	let parameters = new NullObject();
+	parameter: for (; index < len;) {
+		for (index++; (CHAR_MAP[header.charCodeAt(index)] & OWS) !== 0;) index++;
+		let keyStart = index, keyFlags = 0, keyWhitespace = -1;
+		for (; index < len;) {
+			let code = header.charCodeAt(index), flags = CHAR_MAP[code];
+			if ((flags & stopFlags) !== 0) {
+				if ((flags & COMMA_FLAG) !== 0) break parameter;
+				continue parameter;
+			}
+			if (code === EQ) {
+				let keyEnd = keyWhitespace === -1 ? index : keyWhitespace, value = header.slice(keyStart, keyEnd), key = (keyFlags & CASE_FLAGS) === 0 ? value : value.toLowerCase();
+				for (index++; (CHAR_MAP[header.charCodeAt(index)] & OWS) !== 0;) index++;
+				if (index < len && header.charCodeAt(index) === DQUOTE) {
+					let quotedStart = ++index, escaped = !1;
+					for (; index < len;) {
+						let code = header.charCodeAt(index);
+						if (code === DQUOTE) {
+							parameters[key] === void 0 && (parameters[key] = escaped ? unescapeQuotedPairs(header, quotedStart, index) : header.slice(quotedStart, index)), index++;
+							let stop = 0;
+							for (; index < len;) {
+								let code = header.charCodeAt(index), flags = CHAR_MAP[code];
+								if ((flags & stopFlags) !== 0) {
+									stop = flags & COMMA_FLAG;
+									break;
+								}
+								index++;
 							}
-							if (code === 92 && index < len) {
-								value += header[index++];
-								continue;
-							}
-							value += String.fromCharCode(code);
+							if (stop !== 0) break parameter;
+							continue parameter;
 						}
-						continue parameter;
-					}
-					let valueStart = index;
-					if (index = skipValue(header, index, len, stopChar), parameters[key] === void 0) {
-						let valueEnd = trailingOWS(header, valueStart, index);
-						parameters[key] = header.slice(valueStart, valueEnd);
+						if (code === BSLASH && index + 1 < len) {
+							escaped = !0, index += 2;
+							continue;
+						}
+						index++;
 					}
 					continue parameter;
 				}
-				index++;
+				let valueStart = index, stop = 0, valueWhitespace = -1;
+				for (; index < len;) {
+					let code = header.charCodeAt(index), flags = CHAR_MAP[code];
+					if ((flags & stopFlags) !== 0) {
+						stop = flags & COMMA_FLAG;
+						break;
+					}
+					(flags & OWS) === 0 ? valueWhitespace = -1 : valueWhitespace === -1 && (valueWhitespace = index), index++;
+				}
+				if (parameters[key] === void 0) {
+					let valueEnd = valueWhitespace === -1 ? index : valueWhitespace;
+					parameters[key] = header.slice(valueStart, valueEnd);
+				}
+				if (stop !== 0) break parameter;
+				continue parameter;
 			}
+			(flags & OWS) === 0 ? keyWhitespace = -1 : keyWhitespace === -1 && (keyWhitespace = index), keyFlags |= code & NON_ASCII | flags, index++;
 		}
-		return {
-			type,
-			index,
-			parameters
-		};
 	}
-	function skipValue(str, index, len, stopChar) {
-		for (; index < len;) {
-			let code = str.charCodeAt(index);
-			if (code === 59 || code === stopChar) break;
-			index++;
-		}
-		return index;
-	}
-	function skipOWS(header, index, len) {
-		for (; index < len;) {
-			let char = header.charCodeAt(index);
-			if (char !== 32 && char !== 9) break;
-			index++;
-		}
-		return index;
-	}
-	function trailingOWS(header, start, end) {
-		for (; end > start;) {
-			let char = header.charCodeAt(end - 1);
-			if (char !== 32 && char !== 9) break;
-			end--;
-		}
-		return end;
-	}
+	return {
+		type,
+		index,
+		parameters
+	};
+}
+function unescapeQuotedPairs(str, start, end) {
+	let result = "";
+	for (let index = start; index < end; index++) str.charCodeAt(index) === BSLASH && (result += str.slice(start, index), start = ++index);
+	return result + str.slice(start, end);
+}
+var SP, HTAB, SEMI, EQ, DQUOTE, BSLASH, COMMA, LOWER_CASE, OWS, SEMI_FLAG, COMMA_FLAG, TOKEN_FLAG, NON_ASCII, CASE_FLAGS, CHAR_MAP, NullObject, init_dist = __esmMin((() => {
+	SP = 32, HTAB = 9, SEMI = 59, EQ = 61, DQUOTE = 34, BSLASH = 92, COMMA = 44, LOWER_CASE = 1, OWS = 2, SEMI_FLAG = 4, COMMA_FLAG = 8, TOKEN_FLAG = 16, NON_ASCII = 65280, CASE_FLAGS = 65281, CHAR_MAP = new Uint8Array(256), CHAR_MAP[HTAB] |= OWS, CHAR_MAP[SP] |= OWS, CHAR_MAP[SEMI] |= SEMI_FLAG, CHAR_MAP[COMMA] |= COMMA_FLAG;
+	for (let code = 128; code <= 255; code++) CHAR_MAP[code] |= LOWER_CASE;
+	for (let char of "!#$%&'*+-.^_`|~") CHAR_MAP[char.charCodeAt(0)] |= TOKEN_FLAG;
+	for (let code = 48; code <= 57; code++) CHAR_MAP[code] |= TOKEN_FLAG;
+	for (let code = 65; code <= 90; code++) CHAR_MAP[code] |= 17;
+	for (let code = 97; code <= 122; code++) CHAR_MAP[code] |= TOKEN_FLAG;
+	NullObject = (() => {
+		let C = function() {};
+		return C.prototype = Object.create(null), C;
+	})();
 })), intRegex, noiseValue, originalStringify, originalParse, customFormat, bigIntsStringify, noiseStringify, isUnstringifiable, isRawJSON, stringifyIteratively, JSONStringify, featureCache, isContextSourceSupported, convertMarkedBigIntsReviver, JSONParseV2, MAX_INT, MAX_DIGITS, stringsOrLargeNumbers, noiseValueWithQuotes, applyReviverIteratively, serializeBigInts, JSONParse, init_json_with_bigint = __esmMin((() => {
 	intRegex = /^-?\d+$/, noiseValue = /^-?\d+n+$/, originalStringify = JSON.stringify, originalParse = JSON.parse, customFormat = /^-?\d+n$/, bigIntsStringify = /([\[:])?"(-?\d+)n"($|\s*[,\}\]])/g, noiseStringify = /([\[:])?("-?\d+n+)n("$|"\s*[,\}\]])/g, isUnstringifiable = (val) => val === void 0 || typeof val == "function" || typeof val == "symbol", isRawJSON = (val) => typeof val == "object" && !!val && val.constructor && val.constructor.name === "RawJSON", stringifyIteratively = (rootValue, replacer, spaceParam) => {
 		let space = "";
@@ -62226,7 +62272,7 @@ var DEFAULTS, urlVariableRegex, endpoint, init_dist_bundle$5 = __esmMin((() => {
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@octokit+request@10.0.13/node_modules/@octokit/request/dist-bundle/index.js
+//#region node_modules/.pnpm/@octokit+request@10.0.16/node_modules/@octokit/request/dist-bundle/index.js
 function isPlainObject(value) {
 	if (typeof value != "object" || !value || Object.prototype.toString.call(value) !== "[object Object]") return !1;
 	let proto = Object.getPrototypeOf(value);
@@ -62289,7 +62335,7 @@ async function fetchWrapper(requestOptions) {
 async function getResponseData(response) {
 	let contentType = response.headers.get("content-type");
 	if (!contentType) return response.text().catch(noop$1);
-	let mimetype = (0, import_dist.parse)(contentType);
+	let mimetype = parse(contentType);
 	if (isJSONResponse(mimetype)) {
 		let text = "";
 		try {
@@ -62327,11 +62373,11 @@ function withDefaults$1(oldEndpoint, newDefaults) {
 		defaults: withDefaults$1.bind(null, endpoint2)
 	});
 }
-var import_dist, defaults_default, noop$1, request, init_dist_bundle$4 = __esmMin((() => {
-	init_dist_bundle$5(), init_universal_user_agent(), import_dist = require_dist(), init_json_with_bigint(), init_dist_src$3(), defaults_default = { headers: { "user-agent": `octokit-request.js/10.0.13 ${getUserAgent()}` } }, noop$1 = () => "", request = withDefaults$1(endpoint, defaults_default);
+var defaults_default, noop$1, request, init_dist_bundle$4 = __esmMin((() => {
+	init_dist_bundle$5(), init_universal_user_agent(), init_dist(), init_json_with_bigint(), init_dist_src$3(), defaults_default = { headers: { "user-agent": `octokit-request.js/10.0.16 ${getUserAgent()}` } }, noop$1 = () => "", request = withDefaults$1(endpoint, defaults_default);
 }));
 //#endregion
-//#region node_modules/.pnpm/@octokit+graphql@9.0.4/node_modules/@octokit/graphql/dist-bundle/index.js
+//#region node_modules/.pnpm/@octokit+graphql@9.0.5/node_modules/@octokit/graphql/dist-bundle/index.js
 function _buildMessageForResponseErrors(data) {
 	return "Request failed due to following response errors:\n" + data.errors.map((e) => ` - ${e.message}`).join("\n");
 }
@@ -62417,10 +62463,10 @@ var b64url, sep, jwtRE, isJWT, createTokenAuth, init_dist_bundle$2 = __esmMin(((
 		return token = token.replace(/^(token|bearer) +/i, ""), Object.assign(auth.bind(null, token), { hook: hook.bind(null, token) });
 	};
 })), VERSION$4, init_version$2 = __esmMin((() => {
-	VERSION$4 = "7.0.7";
+	VERSION$4 = "7.0.8";
 }));
 //#endregion
-//#region node_modules/.pnpm/@octokit+core@7.0.7/node_modules/@octokit/core/dist-src/index.js
+//#region node_modules/.pnpm/@octokit+core@7.0.8/node_modules/@octokit/core/dist-src/index.js
 function createLogger(logger = {}) {
 	return typeof logger.debug != "function" && (logger.debug = noop), typeof logger.info != "function" && (logger.info = noop), typeof logger.warn != "function" && (logger.warn = consoleWarn), typeof logger.error != "function" && (logger.error = consoleError), logger;
 }
@@ -63775,7 +63821,7 @@ var noop, consoleWarn, consoleError, userAgentTrail, Octokit, init_dist_src$2 = 
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@octokit+plugin-rest-endpoint-methods@17.0.0_@octokit+core@7.0.7/node_modules/@octokit/plugin-rest-endpoint-methods/dist-src/endpoints-to-methods.js
+//#region node_modules/.pnpm/@octokit+plugin-rest-endpoint-methods@17.0.0_@octokit+core@7.0.8/node_modules/@octokit/plugin-rest-endpoint-methods/dist-src/endpoints-to-methods.js
 function endpointsToMethods(octokit) {
 	let newMethods = {};
 	for (let scope of endpointMethodsMap.keys()) newMethods[scope] = new Proxy({
@@ -63854,7 +63900,7 @@ var endpointMethodsMap, handler, init_endpoints_to_methods = __esmMin((() => {
 	};
 }));
 //#endregion
-//#region node_modules/.pnpm/@octokit+plugin-rest-endpoint-methods@17.0.0_@octokit+core@7.0.7/node_modules/@octokit/plugin-rest-endpoint-methods/dist-src/index.js
+//#region node_modules/.pnpm/@octokit+plugin-rest-endpoint-methods@17.0.0_@octokit+core@7.0.8/node_modules/@octokit/plugin-rest-endpoint-methods/dist-src/index.js
 function restEndpointMethods(octokit) {
 	return { rest: endpointsToMethods(octokit) };
 }
@@ -63862,7 +63908,7 @@ var init_dist_src$1 = __esmMin((() => {
 	init_version$1(), init_endpoints_to_methods(), restEndpointMethods.VERSION = VERSION$3;
 }));
 //#endregion
-//#region node_modules/.pnpm/@octokit+plugin-paginate-rest@14.0.0_@octokit+core@7.0.7/node_modules/@octokit/plugin-paginate-rest/dist-bundle/index.js
+//#region node_modules/.pnpm/@octokit+plugin-paginate-rest@14.0.0_@octokit+core@7.0.8/node_modules/@octokit/plugin-paginate-rest/dist-bundle/index.js
 function normalizePaginatedListResponse(response) {
 	if (!response.data) return {
 		...response,
@@ -65165,7 +65211,7 @@ var defaultMaxRetryNumber, defaultExemptStatusCodes, init_retry_options = __esmM
 	VERSION$1 = "6.0.0";
 }));
 //#endregion
-//#region node_modules/.pnpm/@octokit+plugin-request-log@6.0.0_@octokit+core@7.0.7/node_modules/@octokit/plugin-request-log/dist-src/index.js
+//#region node_modules/.pnpm/@octokit+plugin-request-log@6.0.0_@octokit+core@7.0.8/node_modules/@octokit/plugin-request-log/dist-src/index.js
 function requestLog(octokit) {
 	octokit.hook.wrap("request", (request, options) => {
 		octokit.log.debug("request", options);
@@ -65298,8 +65344,7 @@ var init_dist_src = __esmMin((() => {
 				});
 			}
 			getFirst(arr = this._lists) {
-				var j, len, list;
-				for (j = 0, len = arr.length; j < len; j++) if (list = arr[j], list.length > 0) return list;
+				for (var j = 0, len = arr.length, list; j < len; j++) if (list = arr[j], list.length > 0) return list;
 				return [];
 			}
 			shiftLastFrom(priority) {
@@ -65887,7 +65932,7 @@ var init_dist_src = __esmMin((() => {
 	}));
 }));
 //#endregion
-//#region node_modules/.pnpm/@octokit+plugin-retry@8.1.1_@octokit+core@7.0.7/node_modules/@octokit/plugin-retry/dist-bundle/index.js
+//#region node_modules/.pnpm/@octokit+plugin-retry@8.1.1_@octokit+core@7.0.8/node_modules/@octokit/plugin-retry/dist-bundle/index.js
 function isRequestError(error) {
 	return error.request !== void 0;
 }
