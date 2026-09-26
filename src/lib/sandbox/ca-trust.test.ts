@@ -108,6 +108,30 @@ describe("writeCaTrustFiles", () => {
 });
 
 describe("caTrustAdditions", () => {
+  it("mounts Chromium's NSS database after everything else", () => {
+    const { mounts } = caTrustAdditions(
+      {
+        ownCaPath: "/scratch/buildcage-ca.pem",
+        systemCa: undefined,
+        jvmKeystores: [],
+        nssDb: {
+          path: "/scratch/nssdb",
+          template: "/scratch/nssdb-template",
+          destination: "/home/runner/.pki/nssdb",
+          createdDirs: [],
+        },
+      },
+      {},
+    );
+
+    expect(mounts.at(-1)).toStrictEqual({
+      destination: "/home/runner/.pki/nssdb",
+      type: "none",
+      source: "/scratch/nssdb",
+      options: ["rbind", "rw"],
+    });
+  });
+
   it("mounts the CA-only file and points the additive variables at it, when unset", () => {
     const { mounts, env } = caTrustAdditions(
       { ownCaPath: "/scratch/buildcage-ca.pem", systemCa: undefined, jvmKeystores: [] },

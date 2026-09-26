@@ -28,6 +28,7 @@ import { buildOciConfig, type SandboxIdentity } from "./oci-config.ts";
 import { WritablePathConflictError } from "./paths.ts";
 import { writeRunScript, writeResolvConf, writeOciConfig } from "./oci-files.ts";
 import { buildEnvBlob, resolveSandboxEnv, writeEnvLoader } from "./env-loader.ts";
+import { nssDbChange, prepareNssDb, removeNssDbDirs } from "./nss-db.ts";
 import { runIsolated } from "./run.ts";
 import { withScratchDir, type Warn } from "./scratch-dir.ts";
 import type { BuiltOciSpec, OverlayDirs } from "./types.ts";
@@ -53,6 +54,9 @@ export interface RunSandboxedCommandDeps {
   writeCaTrustFiles: typeof writeCaTrustFiles;
   writeJvmKeystoreFiles: typeof writeJvmKeystoreFiles;
   jvmTools: typeof jvmTools;
+  prepareNssDb: typeof prepareNssDb;
+  nssDbChange: typeof nssDbChange;
+  removeNssDbDirs: typeof removeNssDbDirs;
   createOverlayScratchDirs: typeof createOverlayScratchDirs;
   writeResolvConf: typeof writeResolvConf;
   writeRunScript: typeof writeRunScript;
@@ -75,6 +79,9 @@ const realDeps: RunSandboxedCommandDeps = {
   writeCaTrustFiles,
   writeJvmKeystoreFiles,
   jvmTools,
+  prepareNssDb,
+  nssDbChange,
+  removeNssDbDirs,
   createOverlayScratchDirs,
   writeResolvConf,
   writeRunScript,
@@ -104,6 +111,8 @@ export interface RunSandboxedCommandOptions {
   filesystemMode: FilesystemMode;
   /** filesystem_mode: ephemeral only; already folded (determineOverlayRoots), not raw candidates. */
   overlayRoots: string[];
+  /** inspect only: whether a write to the NSS database fails the step. */
+  failOnCaResidue: boolean;
   /** Where this module's own warnings go: a scratch dir that would not
    *  unmount, the environment variables a shell cannot export, and NSS not
    *  answering the primary group check. Passed in
@@ -151,7 +160,13 @@ function extractCaTrust(
   containerName: string,
   dir: string,
   { env, writeThroughPaths, warn }: AssembleBundleOptions,
-  { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles, jvmTools }: RunSandboxedCommandDeps,
+  {
+    extractCaCert,
+    writeCaTrustFiles,
+    writeJvmKeystoreFiles,
+    jvmTools,
+    prepareNssDb,
+  }: RunSandboxedCommandDeps,
 ): CaTrustFiles {
   try {
     const caCertPath = extractCaCert(containerName, dir);
@@ -160,6 +175,7 @@ function extractCaTrust(
     return {
       ...writeCaTrustFiles(caCertPath, dir),
       jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn }),
+      nssDb: prepareNssDb(containerName, dir, env.HOME, { warn }),
     };
   } catch (e) {
     if (e instanceof SandboxError) throw e;
@@ -307,6 +323,7 @@ export function assembleBundle(
       renameGuardDirs,
     });
   } catch (e) {
+    if (caTrust?.nssDb) deps.removeNssDbDirs(caTrust.nssDb);
     // A step in here that already speaks to the user keeps its own words:
     // resolveSandboxGid's UNSAFE_PRIMARY_GID, and the writable-path guards
     // buildOciConfig runs, which resolveFilesystemPlan reports under the
@@ -322,6 +339,29 @@ export function assembleBundle(
   }
 
   return { config, runcPath, caTrust, netnsName, rootfsBindDir };
+}
+
+export const CA_RESIDUE_HINT =
+  "To let the step carry on with only a warning, set fail_on_ca_residue: false " +
+  "(a write to the NSS database is then discarded).";
+
+/** Fails the step, or only warns under fail_on_ca_residue: false, when the
+ *  command wrote to the NSS database, since that write cannot be kept. */
+function finishNssDb(
+  caTrust: CaTrustFiles | undefined,
+  { failOnCaResidue, warn }: Pick<RunSandboxedCommandOptions, "failOnCaResidue" | "warn">,
+  { nssDbChange, removeNssDbDirs }: RunSandboxedCommandDeps,
+): void {
+  const nssDb = caTrust?.nssDb;
+  if (!nssDb) return;
+  removeNssDbDirs(nssDb);
+  const change = nssDbChange(nssDb);
+  if (change === undefined) return;
+  if (!failOnCaResidue) {
+    warn(`buildcage: ${change} (fail_on_ca_residue is false, so the step carries on)`);
+    return;
+  }
+  throw new SandboxError(`${change}. ${CA_RESIDUE_HINT}`, "NSS_DATABASE_CHANGED");
 }
 
 /**
@@ -344,20 +384,28 @@ export function runSandboxedCommand(
         options,
         deps,
       );
-      writeOciConfig(config, dir);
-
-      return runIsolated({
-        envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
-        runcPath,
-        proxyNetns,
-        bundleDir: dir,
-        containerId: containerName,
-        netnsName,
-        rootfsBindDir,
-        gateway: PROXY_ADDRESS,
-        dns: PROXY_ADDRESS,
-        targetIp: SANDBOX_IP,
-      });
+      let exitCode: number;
+      try {
+        writeOciConfig(config, dir);
+        exitCode = runIsolated({
+          envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
+          runcPath,
+          proxyNetns,
+          bundleDir: dir,
+          containerId: containerName,
+          netnsName,
+          rootfsBindDir,
+          gateway: PROXY_ADDRESS,
+          dns: PROXY_ADDRESS,
+          targetIp: SANDBOX_IP,
+        });
+      } catch (e) {
+        // The command did not run to the end, so only the directories are removed.
+        if (caTrust?.nssDb) deps.removeNssDbDirs(caTrust.nssDb);
+        throw e;
+      }
+      finishNssDb(caTrust, options, deps);
+      return exitCode;
     },
     {
       containerName,

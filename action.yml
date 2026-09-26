@@ -48,6 +48,10 @@ inputs:
     description: "Fail the step if any connection was blocked (restrict mode only)"
     required: false
     default: "true"
+  fail_on_ca_residue:
+    description: "proxy_engine: inspect only. Whether a command that writes to the NSS database Chromium reads fails the step (true, default) or only warns and discards the write (false)."
+    required: false
+    default: "true"
   known_blocked_rules:
     description: "Domains expected to be blocked intentionally (wildcard or ~regex), separated by whitespace. A rule that names no port matches any port, a refused name having none. Blocked connections matching these rules don't fail the step even when fail_on_blocked is true; only unmatched (unexpected) blocked connections do. e.g., 'known-noisy.example.com:443'"
     required: false

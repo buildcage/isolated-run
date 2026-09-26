@@ -47,6 +47,14 @@ QuickJS
 
 ------------------------------------------------------------------------------
 
+NSS tools (certutil, via Alpine Linux's nss-tools package)
+  Website : https://firefox-source-docs.mozilla.org/security/nss/
+  License : Mozilla Public License 2.0 (MPL-2.0)
+  Source  : https://hg.mozilla.org/projects/nss or via Alpine Linux source
+            packages
+
+------------------------------------------------------------------------------
+
 runc
   Website : https://github.com/opencontainers/runc
   License : Apache License 2.0 (Apache-2.0)

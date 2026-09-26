@@ -18364,6 +18364,13 @@ function readRuleInputs(getInput$3 = getInput) {
 function readStepLabel(getInput$5 = getInput) {
 	return getInput$5("label") || void 0;
 }
+function readFailOnCaResidue(getBooleanInput$2 = getBooleanInput) {
+	try {
+		return getBooleanInput$2("fail_on_ca_residue");
+	} catch {
+		return !0;
+	}
+}
 function readFailOnBlocked(getBooleanInput$1 = getBooleanInput) {
 	try {
 		return getBooleanInput$1("fail_on_blocked");
@@ -18609,7 +18616,7 @@ function defaultRemove(path) {
 		force: !0
 	});
 }
-function defaultMkdir(path, mode) {
+function defaultMkdir$1(path, mode) {
 	(0, node_fs.mkdirSync)(path, { mode });
 }
 function unmountAllUnder(dir, deps, warn) {
@@ -18659,7 +18666,7 @@ function scratchDirFor(containerName) {
 	if (!isValidContainerName(containerName)) throw new SandboxError(`Refusing to derive a scratch dir from container name ${JSON.stringify(containerName)}.`, "CONTAINER_NAME_INVALID");
 	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchDirNameFor(containerName));
 }
-function ensureOwnScratchBase(base = SANDBOX_SCRATCH_BASE, { mkdir = defaultMkdir, lstat = node_fs.lstatSync } = {}) {
+function ensureOwnScratchBase(base = SANDBOX_SCRATCH_BASE, { mkdir = defaultMkdir$1, lstat = node_fs.lstatSync } = {}) {
 	try {
 		mkdir(base, 448);
 		return;
@@ -18798,7 +18805,7 @@ function defaultExists(path) {
 		return !1;
 	}
 }
-function defaultStat(path) {
+function defaultStat$1(path) {
 	let s = (0, node_fs.lstatSync)(path);
 	return {
 		uid: s.uid,
@@ -18819,7 +18826,7 @@ function defaultExecFile$1(command, args) {
 		env: hostCommandEnv(command)
 	});
 }
-function resolveWriteThroughOnHost(path, { exists = defaultExists, stat = defaultStat, readlink = defaultReadlink } = {}) {
+function resolveWriteThroughOnHost(path, { exists = defaultExists, stat = defaultStat$1, readlink = defaultReadlink } = {}) {
 	let pending = path.split("/").filter((c) => c !== ""), current = "/", hops = 0;
 	for (; pending.length > 0;) {
 		let name = pending.shift();
@@ -18863,7 +18870,7 @@ function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
 	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
 	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
 }
-function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultExists, stat = defaultStat, execFile = defaultExecFile$1 } = {}) {
+function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultExists, stat = defaultStat$1, execFile = defaultExecFile$1 } = {}) {
 	let created = [], rollback = () => {
 		for (let dir of [...created].reverse()) try {
 			execFile("sudo", [
@@ -19082,6 +19089,104 @@ function buildComposeDownArgs({ composeFile, projectName }) {
 		"down"
 	];
 }
+function defaultExec$2(command, args) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args);
+}
+function defaultLstat(path) {
+	try {
+		return (0, node_fs.lstatSync)(path);
+	} catch {
+		return;
+	}
+}
+function defaultStat(path) {
+	try {
+		return (0, node_fs.statSync)(path);
+	} catch {
+		return;
+	}
+}
+function defaultMkdir(path, mode) {
+	(0, node_fs.mkdirSync)(path, { mode });
+}
+function defaultCopyDir(source, destination) {
+	(0, node_fs.cpSync)(source, destination, { recursive: !0 });
+}
+function planNssDb(home, { lstat = defaultLstat } = {}) {
+	let dir = home, missing = [];
+	for (let component of ".pki/nssdb".split("/")) {
+		if (dir = (0, node_path.join)(dir, component), missing.length > 0) {
+			missing.push(dir);
+			continue;
+		}
+		let info = lstat(dir);
+		if (info === void 0) missing.push(dir);
+		else if (info.isSymbolicLink()) return `${dir} is a symlink`;
+		else if (!info.isDirectory()) return `${dir} is not a directory`;
+	}
+	return {
+		destination: dir,
+		missing
+	};
+}
+function prepareNssDb(containerName, dir, home, { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat, realpath = node_fs.realpathSync, mkdir = defaultMkdir, copyDir = defaultCopyDir, rmdir = node_fs.rmdirSync, warn } = {}) {
+	if (!home || stat(home)?.isDirectory() !== !0) {
+		warn?.(`could not add the proxy CA to Chromium's NSS database: HOME (${JSON.stringify(home ?? "")}) is not a directory. A Chromium step will not trust the proxy.`);
+		return;
+	}
+	let plan = planNssDb(realpath(home), { lstat });
+	if (typeof plan == "string") {
+		warn?.(`could not add the proxy CA to Chromium's NSS database: ${plan}. A Chromium step will not trust the proxy.`);
+		return;
+	}
+	let template = (0, node_path.join)(dir, "nssdb-template");
+	exec("docker", buildDockerCpArgs({
+		containerName,
+		containerPath: "/opt/buildcage/nssdb",
+		hostPath: template
+	}));
+	let path = (0, node_path.join)(dir, "nssdb");
+	copyDir(template, path);
+	let files = {
+		path,
+		template,
+		destination: plan.destination,
+		createdDirs: []
+	};
+	for (let missing of plan.missing) {
+		try {
+			mkdir(missing, 448);
+		} catch (e) {
+			removeNssDbDirs(files, { rmdir }), warn?.(`could not add the proxy CA to Chromium's NSS database: cannot create ${missing} (${errorMessage(e)}). A Chromium step will not trust the proxy.`);
+			return;
+		}
+		files.createdDirs.push(missing);
+	}
+	return files;
+}
+function nssDbMount(files) {
+	return {
+		destination: files.destination,
+		type: "none",
+		source: files.path,
+		options: ["rbind", "rw"]
+	};
+}
+function nssDbChange(files, { readDir = node_fs.readdirSync, readFile = node_fs.readFileSync } = {}) {
+	let changed;
+	try {
+		let names = readDir(files.template).sort(), current = readDir(files.path).sort();
+		changed = names.length !== current.length || names.some((name, i) => current[i] !== name || !readFile((0, node_path.join)(files.template, name)).equals(readFile((0, node_path.join)(files.path, name))));
+	} catch {
+		changed = !0;
+	}
+	if (changed) return `the command changed the NSS database at ${files.destination}, which the inspect engine replaces for the step with one trusting only its proxy CA; the write is discarded`;
+}
+function removeNssDbDirs(files, { rmdir = node_fs.rmdirSync } = {}) {
+	for (let dir of [...files.createdDirs].reverse()) try {
+		rmdir(dir);
+	} catch {}
+}
 //#endregion
 //#region src/lib/sandbox/ca-trust.ts
 const SYSTEM_CA_CANDIDATES = [
@@ -19204,7 +19309,7 @@ function caTrustAdditions(files, env) {
 		source: keystore.path,
 		options: ["rbind", "ro"]
 	});
-	return {
+	return files.nssDb && mounts.push(nssDbMount(files.nssDb)), {
 		mounts,
 		env: extraEnv
 	};
@@ -19782,6 +19887,7 @@ const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-
 	"upload_traffic_artifact",
 	"traffic_artifact_retention_days",
 	"fail_on_blocked",
+	"fail_on_ca_residue",
 	"known_blocked_rules",
 	"write_through",
 	"writable",
@@ -19893,6 +19999,9 @@ const realDeps$2 = {
 	writeCaTrustFiles,
 	writeJvmKeystoreFiles,
 	jvmTools,
+	prepareNssDb,
+	nssDbChange,
+	removeNssDbDirs,
 	createOverlayScratchDirs,
 	writeResolvConf,
 	writeRunScript,
@@ -19917,12 +20026,13 @@ function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`, "RUNC_EXTRACT_FAILED");
 	}
 }
-function extractCaTrust(containerName, dir, { env, writeThroughPaths, warn }, { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles, jvmTools }) {
+function extractCaTrust(containerName, dir, { env, writeThroughPaths, warn }, { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles, jvmTools, prepareNssDb }) {
 	try {
 		let caCertPath = extractCaCert(containerName, dir), tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env));
 		return {
 			...writeCaTrustFiles(caCertPath, dir),
-			jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn })
+			jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn }),
+			nssDb: prepareNssDb(containerName, dir, env.HOME, { warn })
 		};
 	} catch (e) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`, "CA_EXTRACT_FAILED");
@@ -19981,7 +20091,7 @@ function assembleBundle(dir, options, deps) {
 			renameGuardDirs: renameGuardDirs$1
 		});
 	} catch (e) {
-		throw e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
+		throw caTrust?.nssDb && deps.removeNssDbDirs(caTrust.nssDb), e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
 	}
 	return {
 		config,
@@ -19991,25 +20101,43 @@ function assembleBundle(dir, options, deps) {
 		rootfsBindDir
 	};
 }
+function finishNssDb(caTrust, { failOnCaResidue, warn }, { nssDbChange, removeNssDbDirs }) {
+	let nssDb = caTrust?.nssDb;
+	if (!nssDb) return;
+	removeNssDbDirs(nssDb);
+	let change = nssDbChange(nssDb);
+	if (change !== void 0) {
+		if (!failOnCaResidue) {
+			warn(`buildcage: ${change} (fail_on_ca_residue is false, so the step carries on)`);
+			return;
+		}
+		throw new SandboxError(`${change}. To let the step carry on with only a warning, set fail_on_ca_residue: false (a write to the NSS database is then discarded).`, "NSS_DATABASE_CHANGED");
+	}
+}
 function runSandboxedCommand(options, overrides = {}) {
 	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn } = options, deps = {
 		...realDeps$2,
 		...overrides
 	}, { withScratchDir, writeOciConfig, resolveSandboxEnv, buildEnvBlob, runIsolated } = deps;
 	return withScratchDir((dir) => {
-		let { config, runcPath, caTrust, netnsName, rootfsBindDir } = assembleBundle(dir, options, deps);
-		return writeOciConfig(config, dir), runIsolated({
-			envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
-			runcPath,
-			proxyNetns,
-			bundleDir: dir,
-			containerId: containerName,
-			netnsName,
-			rootfsBindDir,
-			gateway: PROXY_ADDRESS,
-			dns: PROXY_ADDRESS,
-			targetIp: "198.19.255.101"
-		});
+		let { config, runcPath, caTrust, netnsName, rootfsBindDir } = assembleBundle(dir, options, deps), exitCode;
+		try {
+			writeOciConfig(config, dir), exitCode = runIsolated({
+				envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
+				runcPath,
+				proxyNetns,
+				bundleDir: dir,
+				containerId: containerName,
+				netnsName,
+				rootfsBindDir,
+				gateway: PROXY_ADDRESS,
+				dns: PROXY_ADDRESS,
+				targetIp: "198.19.255.101"
+			});
+		} catch (e) {
+			throw caTrust?.nssDb && deps.removeNssDbDirs(caTrust.nssDb), e;
+		}
+		return finishNssDb(caTrust, options, deps), exitCode;
 	}, {
 		containerName,
 		ephemeralRoots: filesystemMode === "ephemeral" ? overlayRoots : void 0,
@@ -66267,6 +66395,7 @@ const realDeps = {
 	readEngineInputs,
 	readFilesystemInputs,
 	readRuleInputs,
+	readFailOnCaResidue,
 	validateFilesystemInputs,
 	checkPasswordlessSudo,
 	checkOverlayfsSupport,
@@ -66311,7 +66440,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, checkIpRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, removeCreatedDirsIfEmpty, saveState, info, log, notice, warn } = {
+	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, checkIpRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, removeCreatedDirsIfEmpty, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v1", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs();
@@ -66384,6 +66513,7 @@ async function runSandboxStep(env, overrides = {}) {
 				proxyEngine,
 				filesystemMode,
 				overlayRoots,
+				failOnCaResidue: readFailOnCaResidue(),
 				warn
 			});
 		} finally {

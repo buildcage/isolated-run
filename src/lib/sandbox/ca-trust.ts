@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 import type { MountEntry } from "./types.ts";
 import { hostCommand } from "./pinned-commands.ts";
+import { nssDbMount, type NssDbFiles } from "./nss-db.ts";
 
 /**
  * CA trust for the inspect engine, adapted for this sandbox's rootfs being
@@ -59,6 +60,8 @@ export interface CaTrustFiles {
    *  `mvn`/`gradle`/`java` under the inspect engine trust the CA only once it
    *  is in here. Empty when the runner has no JVM keystore this found. */
   jvmKeystores: { path: string; destination: string }[];
+  /** Undefined when there was nowhere to mount it. */
+  nssDb?: NssDbFiles;
 }
 
 export const SYSTEM_CA_CANDIDATES = [
@@ -138,7 +141,7 @@ export function writeCaTrustFiles(
     writeFile = defaultWriteFile,
     exists = existsSync,
   }: CaTrustDeps = {},
-): Omit<CaTrustFiles, "jvmKeystores"> {
+): Omit<CaTrustFiles, "jvmKeystores" | "nssDb"> {
   const ca = readFile(caCertPath).trimEnd();
 
   const ownCaPath = join(dir, "buildcage-ca.pem");
@@ -359,6 +362,9 @@ export function caTrustAdditions(files: CaTrustFiles, env: NodeJS.ProcessEnv): C
       options: ["rbind", "ro"],
     });
   }
+
+  // Chromium reads no variable either, only the NSS database in $HOME.
+  if (files.nssDb) mounts.push(nssDbMount(files.nssDb));
 
   return { mounts, env: extraEnv };
 }

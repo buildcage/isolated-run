@@ -54,6 +54,7 @@ export const ACTION_INPUT_ENV_KEYS = new Set(
     "upload_traffic_artifact",
     "traffic_artifact_retention_days",
     "fail_on_blocked",
+    "fail_on_ca_residue",
     "known_blocked_rules",
     "write_through",
     "writable",

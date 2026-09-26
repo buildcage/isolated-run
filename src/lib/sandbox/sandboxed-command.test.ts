@@ -19,6 +19,9 @@ const mocks = {
   writeCaTrustFiles: vi.fn(),
   writeJvmKeystoreFiles: vi.fn(),
   jvmTools: vi.fn(),
+  prepareNssDb: vi.fn(),
+  nssDbChange: vi.fn(),
+  removeNssDbDirs: vi.fn(),
   createOverlayScratchDirs: vi.fn(),
   writeRunScript: vi.fn(),
   writeResolvConf: vi.fn(),
@@ -58,6 +61,7 @@ function options(overrides: Partial<RunSandboxedCommandOptions> = {}): RunSandbo
     proxyEngine: "universal",
     filesystemMode: "persistent",
     overlayRoots: [],
+    failOnCaResidue: true,
     warn: mocks.warn,
     ...overrides,
   };
@@ -134,6 +138,113 @@ describe("runSandboxedCommand", () => {
     expect(mocks.buildOciConfig.mock.calls[0][1].caTrust).toStrictEqual({
       bundlePath: `${SCRATCH}/ca-bundle.crt`,
       jvmKeystores: [],
+      nssDb: undefined,
+    });
+    expect(mocks.prepareNssDb).toHaveBeenCalledWith(CONTAINER, SCRATCH, "/home/runner", {
+      warn: mocks.warn,
+    });
+  });
+
+  describe("Chromium's NSS database", () => {
+    const NSS_DB = {
+      path: `${SCRATCH}/nssdb`,
+      template: `${SCRATCH}/nssdb-template`,
+      destination: "/home/runner/.pki/nssdb",
+      createdDirs: ["/home/runner/.pki/nssdb"],
+    };
+
+    beforeEach(() => {
+      mocks.prepareNssDb.mockReturnValue(NSS_DB);
+    });
+
+    it("takes back the directories it made once the command has run", () => {
+      runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
+
+      expect(mocks.removeNssDbDirs).toHaveBeenCalledWith(NSS_DB);
+      expect(mocks.removeNssDbDirs.mock.invocationCallOrder[0]).toBeGreaterThan(
+        mocks.runIsolated.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("returns the command's exit code when it left the database alone", () => {
+      mocks.runIsolated.mockReturnValue(3);
+      mocks.nssDbChange.mockReturnValue(undefined);
+
+      expect(runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toBe(3);
+      expect(mocks.nssDbChange).toHaveBeenCalledWith(NSS_DB);
+    });
+
+    it("fails the step, pointing at fail_on_ca_residue, when the command wrote to it", () => {
+      mocks.nssDbChange.mockReturnValue("the command changed the NSS database at X");
+
+      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+        expect.objectContaining({
+          code: "NSS_DATABASE_CHANGED",
+          message: expect.stringMatching(
+            /changed the NSS database at X.*fail_on_ca_residue: false/,
+          ),
+        }),
+      );
+    });
+
+    it("only warns about the write under fail_on_ca_residue: false", () => {
+      mocks.runIsolated.mockReturnValue(0);
+      mocks.nssDbChange.mockReturnValue("the command changed the NSS database at X");
+
+      expect(
+        runSandboxedCommand(options({ proxyEngine: "inspect", failOnCaResidue: false }), deps),
+      ).toBe(0);
+      expect(mocks.warn).toHaveBeenCalledWith(
+        expect.stringMatching(/changed the NSS database at X.*fail_on_ca_residue is false/),
+      );
+    });
+
+    it("still takes the directories back when the sandbox fails to run", () => {
+      mocks.runIsolated.mockImplementation(() => {
+        throw new Error("runc failed");
+      });
+
+      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+        "runc failed",
+      );
+      expect(mocks.removeNssDbDirs).toHaveBeenCalledWith(NSS_DB);
+      expect(mocks.nssDbChange).not.toHaveBeenCalled();
+    });
+
+    it("takes the directories back when the bundle cannot be built", () => {
+      mocks.buildOciConfig.mockImplementation(() => {
+        throw new Error("bad spec");
+      });
+
+      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+        expect.objectContaining({ code: "OCI_CONFIG_BUILD_FAILED" }),
+      );
+      expect(mocks.removeNssDbDirs).toHaveBeenCalledWith(NSS_DB);
+      expect(mocks.runIsolated).not.toHaveBeenCalled();
+    });
+
+    it("takes the directories back when the OCI config cannot be written", () => {
+      mocks.writeOciConfig.mockImplementation(() => {
+        throw new Error("disk full");
+      });
+
+      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+        "disk full",
+      );
+      expect(mocks.removeNssDbDirs).toHaveBeenCalledOnce();
+      expect(mocks.runIsolated).not.toHaveBeenCalled();
+    });
+
+    it("has nothing to check when there was nowhere to mount it", () => {
+      mocks.prepareNssDb.mockReturnValue(undefined);
+      mocks.runIsolated.mockImplementation(() => {
+        throw new Error("runc failed");
+      });
+
+      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+        "runc failed",
+      );
+      expect(mocks.removeNssDbDirs).not.toHaveBeenCalled();
     });
   });
 
@@ -389,6 +500,7 @@ describe("assembleBundle", () => {
     expect(bundle.caTrust).toStrictEqual({
       bundlePath: `${SCRATCH}/ca-bundle.crt`,
       jvmKeystores: [],
+      nssDb: undefined,
     });
   });
 });
