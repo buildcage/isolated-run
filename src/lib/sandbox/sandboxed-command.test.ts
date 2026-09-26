@@ -149,8 +149,8 @@ describe("runSandboxedCommand", () => {
     const NSS_DB = {
       path: `${SCRATCH}/nssdb`,
       template: `${SCRATCH}/nssdb-template`,
-      destination: "/home/runner/.local/share/pki/nssdb",
-      createdDirs: ["/home/runner/.local/share/pki/nssdb"],
+      destination: "/home/runner/.pki/nssdb",
+      createdDirs: ["/home/runner/.pki/nssdb"],
     };
 
     beforeEach(() => {

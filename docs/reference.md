@@ -636,17 +636,15 @@ that already exists rather than creating one. Both are in
 
 ### Chromium
 
-Chromium reads none of these, only its compiled-in root store and the NSS database in `$HOME`:
-`~/.pki/nssdb` when that exists, even empty, and `~/.local/share/pki/nssdb` otherwise. The proxy
-image carries a database holding only this CA, made by its own `certutil` from the certificate
-alone, and a copy of it is mounted read-write over that path for the step. The runner's own database
-is covered, never read or written. Directories missing on the way to the XDG path are created 0700
-and removed again after the step if the command left them empty. A path on the way that is a symlink
-or not a directory leaves the database unmounted, with a warning.
+Chromium reads none of these, only its compiled-in root store and the NSS database in `$HOME`. A
+copy of a database holding only this CA is mounted read-write over `~/.pki/nssdb`, which every
+Chromium reads when it exists, even beside `~/.local/share/pki/nssdb`. The runner's own database is
+covered, never read or written. Missing directories are created 0700 and removed after the step if
+left empty. A symlink or non-directory on the path leaves the database unmounted, with a warning.
 
 A command that writes to the copy (`certutil -A`, `pk12util -i`) fails the step, naming the database
-and pointing at `fail_on_ca_residue`: the write has nowhere to go back to. With
-`fail_on_ca_residue: false` it only warns, and the write is discarded.
+and pointing at `fail_on_ca_residue`. With `fail_on_ca_residue: false` it only warns, and the write is
+discarded.
 
 ## `write_through` paths
 

@@ -19089,9 +19089,6 @@ function buildComposeDownArgs({ composeFile, projectName }) {
 		"down"
 	];
 }
-//#endregion
-//#region src/lib/sandbox/nss-db.ts
-const NSS_DB_PATHS = [".pki/nssdb", ".local/share/pki/nssdb"];
 function defaultExec$2(command, args) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args);
 }
@@ -19108,9 +19105,9 @@ function defaultMkdir(path, mode) {
 function defaultCopyDir(source, destination) {
 	(0, node_fs.cpSync)(source, destination, { recursive: !0 });
 }
-function walk(home, rel, lstat) {
+function planNssDb(home, { lstat = defaultLstat } = {}) {
 	let dir = home, missing = [];
-	for (let component of rel.split("/")) {
+	for (let component of ".pki/nssdb".split("/")) {
 		if (dir = (0, node_path.join)(dir, component), missing.length > 0) {
 			missing.push(dir);
 			continue;
@@ -19124,10 +19121,6 @@ function walk(home, rel, lstat) {
 		destination: dir,
 		missing
 	};
-}
-function planNssDb(home, { lstat = defaultLstat } = {}) {
-	let [legacy, xdg] = NSS_DB_PATHS, plan = walk(home, legacy, lstat);
-	return typeof plan == "string" || plan.missing.length === 0 ? plan : walk(home, xdg, lstat);
 }
 function prepareNssDb(containerName, dir, home, { exec = defaultExec$2, lstat = defaultLstat, realpath = node_fs.realpathSync, mkdir = defaultMkdir, copyDir = defaultCopyDir, rmdir = node_fs.rmdirSync, warn } = {}) {
 	if (!home || lstat(home)?.isDirectory() !== !0) {

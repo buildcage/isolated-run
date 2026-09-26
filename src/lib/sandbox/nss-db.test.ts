@@ -1,9 +1,11 @@
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  realpathSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -23,15 +25,15 @@ import {
 
 const CONTAINER = "buildcage-proxy-deadbeef";
 
-// A real directory per test: what is under test is which directories get made,
-// kept and taken back, which a fake filesystem would only restate.
+// A real directory per test, since which directories get made and removed is
+// what is under test.
 let root: string;
 let home: string;
 let scratch: string;
 let template: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "nss-db-test-"));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "nss-db-test-")));
   home = join(root, "home");
   scratch = join(root, "scratch");
   template = join(root, "template");
@@ -47,8 +49,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** `docker cp` from the proxy container, played by copying the template the
- *  test made to wherever the call asked for it. */
+/** Plays `docker cp` by copying the test's template. */
 function fakeDocker(): { deps: NssDbDeps; calls: string[][] } {
   const calls: string[][] = [];
   return {
@@ -63,37 +64,28 @@ function fakeDocker(): { deps: NssDbDeps; calls: string[][] } {
 }
 
 describe("planNssDb", () => {
-  it("takes the XDG path, and every directory on the way, when neither is there", () => {
+  it("takes ~/.pki/nssdb and every directory missing on the way", () => {
     expect(planNssDb(home)).toStrictEqual({
-      destination: join(home, ".local/share/pki/nssdb"),
-      missing: [
-        join(home, ".local"),
-        join(home, ".local/share"),
-        join(home, ".local/share/pki"),
-        join(home, ".local/share/pki/nssdb"),
-      ],
+      destination: join(home, ".pki/nssdb"),
+      missing: [join(home, ".pki"), join(home, ".pki/nssdb")],
     });
   });
 
-  // Chromium prefers it whenever it is there, even empty.
-  it("takes the legacy path when it is there, even beside an XDG one", () => {
-    mkdirSync(join(home, ".pki/nssdb"), { recursive: true });
+  it("takes ~/.pki/nssdb over an existing XDG database", () => {
     mkdirSync(join(home, ".local/share/pki/nssdb"), { recursive: true });
+
+    expect(planNssDb(home)).toStrictEqual({
+      destination: join(home, ".pki/nssdb"),
+      missing: [join(home, ".pki"), join(home, ".pki/nssdb")],
+    });
+  });
+
+  it("creates nothing when it is already there", () => {
+    mkdirSync(join(home, ".pki/nssdb"), { recursive: true });
 
     expect(planNssDb(home)).toStrictEqual({ destination: join(home, ".pki/nssdb"), missing: [] });
   });
 
-  it("goes past a legacy directory that holds no database", () => {
-    mkdirSync(join(home, ".pki"));
-    mkdirSync(join(home, ".local/share"), { recursive: true });
-
-    expect(planNssDb(home)).toStrictEqual({
-      destination: join(home, ".local/share/pki/nssdb"),
-      missing: [join(home, ".local/share/pki"), join(home, ".local/share/pki/nssdb")],
-    });
-  });
-
-  // An earlier step could have pointed it anywhere.
   it("refuses a symlink on the way", () => {
     symlinkSync("/etc", join(home, ".pki"));
 
@@ -101,10 +93,10 @@ describe("planNssDb", () => {
   });
 
   it("refuses a file where a directory would be", () => {
-    mkdirSync(join(home, ".local"));
-    writeFileSync(join(home, ".local/share"), "");
+    mkdirSync(join(home, ".pki"));
+    writeFileSync(join(home, ".pki/nssdb"), "");
 
-    expect(planNssDb(home)).toBe(`${join(home, ".local/share")} is not a directory`);
+    expect(planNssDb(home)).toBe(`${join(home, ".pki/nssdb")} is not a directory`);
   });
 });
 
@@ -120,13 +112,8 @@ describe("prepareNssDb", () => {
     expect(files).toStrictEqual({
       path: join(scratch, "nssdb"),
       template: join(scratch, "nssdb-template"),
-      destination: join(home, ".local/share/pki/nssdb"),
-      createdDirs: [
-        join(home, ".local"),
-        join(home, ".local/share"),
-        join(home, ".local/share/pki"),
-        join(home, ".local/share/pki/nssdb"),
-      ],
+      destination: join(home, ".pki/nssdb"),
+      createdDirs: [join(home, ".pki"), join(home, ".pki/nssdb")],
     });
     expect(readdirSync(join(scratch, "nssdb")).sort()).toStrictEqual([
       "cert9.db",
@@ -168,12 +155,11 @@ describe("prepareNssDb", () => {
     expect(calls).toStrictEqual([]);
   });
 
-  // A home the runner cannot write to leaves nothing half-made behind.
   it("takes back what it made when a directory cannot be created", () => {
     const warn = vi.fn();
     let made = 0;
     const mkdir = (path: string, mode: number) => {
-      if (++made === 3) throw new Error("EACCES");
+      if (++made === 2) throw new Error("EACCES");
       mkdirSync(path, { mode });
     };
 
@@ -181,7 +167,7 @@ describe("prepareNssDb", () => {
       prepareNssDb(CONTAINER, scratch, home, { ...fakeDocker().deps, mkdir, warn }),
     ).toBeUndefined();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("EACCES"));
-    expect(existsSync(join(home, ".local"))).toBe(false);
+    expect(existsSync(join(home, ".pki"))).toBe(false);
   });
 });
 
@@ -194,6 +180,13 @@ describe("nssDbChange", () => {
     expect(nssDbChange(prepared())).toBeUndefined();
   });
 
+  it("finds nothing when only the permissions changed", () => {
+    const files = prepared();
+    chmodSync(join(files.path, "cert9.db"), 0o400);
+
+    expect(nssDbChange(files)).toBeUndefined();
+  });
+
   it.each([
     ["rewritten", (dir: string) => writeFileSync(join(dir, "cert9.db"), "WITH A CA OF ITS OWN")],
     ["added to", (dir: string) => writeFileSync(join(dir, "cert9.db-journal"), "")],
@@ -202,21 +195,19 @@ describe("nssDbChange", () => {
     const files = prepared();
     change(files.path);
 
-    expect(nssDbChange(files)).toContain(
-      `changed the NSS database at ${join(home, ".local/share/pki/nssdb")}`,
-    );
+    expect(nssDbChange(files)).toContain(`changed the NSS database at ${join(home, ".pki/nssdb")}`);
   });
 });
 
 describe("removeNssDbDirs", () => {
   it("takes back the directories it made, leaving one the command used", () => {
     const files = prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps)!;
-    writeFileSync(join(home, ".local/share/app.db"), "the command's own");
+    writeFileSync(join(home, ".pki/app.db"), "the command's own");
 
     removeNssDbDirs(files);
 
-    expect(existsSync(join(home, ".local/share/pki"))).toBe(false);
-    expect(existsSync(join(home, ".local/share/app.db"))).toBe(true);
+    expect(existsSync(join(home, ".pki/nssdb"))).toBe(false);
+    expect(existsSync(join(home, ".pki/app.db"))).toBe(true);
   });
 });
 

@@ -553,15 +553,12 @@ reported as blocked; see
 - A CA-trust variable that is already set is left alone rather than appended to. Appending safely
   would mean resolving the path it points at against the sandbox rootfs without following a symlink
   back out to the host, which this engine does not do yet.
-- Chromium's NSS database (`~/.pki/nssdb`, or `~/.local/share/pki/nssdb` when that is absent) is
-  replaced for the step, not added to. Public sites still verify against Chromium's compiled-in
-  root store, and everything else `inspect` re-signs with its own CA, so what is lost is only what
-  the runner kept in that database, a private CA or a client certificate, and only on an
+- Chromium's NSS database is replaced for the step, not added to. Public sites still verify against
+  Chromium's compiled-in root store, and everything else `inspect` re-signs with its own CA, so what
+  is lost is only a private CA or client certificate the runner kept there, and only on an
   `allowed_tls_rules` or `allowed_ip_rules` passthrough. A command that writes to the database
-  (`certutil -A`, `pk12util -i`) fails the step, since the write has nowhere to go back to;
-  `fail_on_ca_residue: false` turns that into a warning and discards the write. Which path is
-  covered is decided as the step begins, so a command that creates `~/.pki/nssdb` itself leaves the
-  Chromium it then runs reading that one instead.
+  (`certutil -A`, `pk12util -i`) fails the step, since the write cannot be kept;
+  `fail_on_ca_residue: false` turns that into a warning and discards the write.
 - The CA is added to a store that already exists, never created. A command whose filesystem has
   nothing resembling a system CA bundle at a well-known path has nothing to add to, which matters
   only to a tool that needs TLS trust for something.
