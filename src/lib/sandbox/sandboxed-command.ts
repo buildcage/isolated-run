@@ -323,6 +323,7 @@ export function assembleBundle(
       renameGuardDirs,
     });
   } catch (e) {
+    if (caTrust?.nssDb) deps.removeNssDbDirs(caTrust.nssDb);
     // A step in here that already speaks to the user keeps its own words:
     // resolveSandboxGid's UNSAFE_PRIMARY_GID, and the writable-path guards
     // buildOciConfig runs, which resolveFilesystemPlan reports under the
@@ -383,10 +384,9 @@ export function runSandboxedCommand(
         options,
         deps,
       );
-      writeOciConfig(config, dir);
-
       let exitCode: number;
       try {
+        writeOciConfig(config, dir);
         exitCode = runIsolated({
           envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
           runcPath,
@@ -400,7 +400,7 @@ export function runSandboxedCommand(
           targetIp: SANDBOX_IP,
         });
       } catch (e) {
-        // The command did not finish, so only the directories are removed.
+        // The command did not run to the end, so only the directories are removed.
         if (caTrust?.nssDb) deps.removeNssDbDirs(caTrust.nssDb);
         throw e;
       }

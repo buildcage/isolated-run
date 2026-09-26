@@ -211,6 +211,30 @@ describe("runSandboxedCommand", () => {
       expect(mocks.nssDbChange).not.toHaveBeenCalled();
     });
 
+    it("takes the directories back when the bundle cannot be built", () => {
+      mocks.buildOciConfig.mockImplementation(() => {
+        throw new Error("bad spec");
+      });
+
+      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+        expect.objectContaining({ code: "OCI_CONFIG_BUILD_FAILED" }),
+      );
+      expect(mocks.removeNssDbDirs).toHaveBeenCalledWith(NSS_DB);
+      expect(mocks.runIsolated).not.toHaveBeenCalled();
+    });
+
+    it("takes the directories back when the OCI config cannot be written", () => {
+      mocks.writeOciConfig.mockImplementation(() => {
+        throw new Error("disk full");
+      });
+
+      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+        "disk full",
+      );
+      expect(mocks.removeNssDbDirs).toHaveBeenCalledOnce();
+      expect(mocks.runIsolated).not.toHaveBeenCalled();
+    });
+
     it("has nothing to check when there was nowhere to mount it", () => {
       mocks.prepareNssDb.mockReturnValue(undefined);
       mocks.runIsolated.mockImplementation(() => {
