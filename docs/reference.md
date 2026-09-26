@@ -29,6 +29,7 @@ details.
 | `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                               |
 | `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                |
 | `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                       |
+| `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a write to Chromium's NSS database into a warning. See [Chromium](#chromium).                   |
 | `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                         |
 | `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                      |
 | `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                     |
@@ -632,6 +633,20 @@ one points depends on what it means to the tool that reads it:
 A variable that is already set is left alone rather than appended to, and the CA is added to a store
 that already exists rather than creating one. Both are in
 [Limitations](../README.md#limitations), with what they mean for a command that needs TLS trust.
+
+### Chromium
+
+Chromium reads none of these, only its compiled-in root store and the NSS database in `$HOME`:
+`~/.pki/nssdb` when that exists, even empty, and `~/.local/share/pki/nssdb` otherwise. The proxy
+image carries a database holding only this CA, made by its own `certutil` from the certificate
+alone, and a copy of it is mounted read-write over that path for the step. The runner's own database
+is covered, never read or written. Directories missing on the way to the XDG path are created 0700
+and removed again after the step if the command left them empty. A path on the way that is a symlink
+or not a directory leaves the database unmounted, with a warning.
+
+A command that writes to the copy (`certutil -A`, `pk12util -i`) fails the step, naming the database
+and pointing at `fail_on_ca_residue`: the write has nowhere to go back to. With
+`fail_on_ca_residue: false` it only warns, and the write is discarded.
 
 ## `write_through` paths
 

@@ -193,6 +193,20 @@ export function readStepLabel(getInput: GetInput = core.getInput): string | unde
 }
 
 /**
+ * Read the same way as fail_on_blocked below, for the same reason, and to the
+ * same safe side: unset or unreadable is true.
+ */
+export function readFailOnCaResidue(
+  getBooleanInput: GetBooleanInput = core.getBooleanInput,
+): boolean {
+  try {
+    return getBooleanInput("fail_on_ca_residue");
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Several integration scripts invoke this action directly without setting
  * fail_on_blocked, unlike a real workflow where action.yml's own default
  * always supplies it. Fall back to that same default.

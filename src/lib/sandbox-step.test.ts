@@ -12,6 +12,7 @@ const mocks = {
   readEngineInputs: vi.fn(),
   readFilesystemInputs: vi.fn(),
   readRuleInputs: vi.fn(),
+  readFailOnCaResidue: vi.fn(),
   validateFilesystemInputs: vi.fn(),
   checkPasswordlessSudo: vi.fn(),
   checkOverlayfsSupport: vi.fn(),
@@ -113,6 +114,7 @@ describe("runSandboxStep", () => {
       writeThroughPaths: ["/home/runner/work/repo/repo/dist"],
       createdDirs: [],
     });
+    mocks.readFailOnCaResidue.mockReturnValue(false);
 
     await runSandboxStep(ENV, deps);
 
@@ -123,6 +125,7 @@ describe("runSandboxStep", () => {
       filesystemMode: "ephemeral",
       overlayRoots: ["/home/runner"],
       writeThroughPaths: ["/home/runner/work/repo/repo/dist"],
+      failOnCaResidue: false,
     });
   });
 

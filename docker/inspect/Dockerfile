@@ -71,7 +71,7 @@ FROM alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6ee
 
 LABEL org.opencontainers.image.title="isolated-run-inspect-proxy" \
       org.opencontainers.image.description="Network-isolated, method/path-inspecting proxy for arbitrary GitHub Actions commands" \
-      org.opencontainers.image.licenses="MIT AND GPL-2.0-or-later AND Apache-2.0 AND ISC" \
+      org.opencontainers.image.licenses="MIT AND GPL-2.0-or-later AND Apache-2.0 AND ISC AND MPL-2.0" \
       org.opencontainers.image.source="https://github.com/buildcage/isolated-run"
 
 # haproxy carries what this engine needs in one binary: it tells a TLS
@@ -79,11 +79,14 @@ LABEL org.opencontainers.image.title="isolated-run-inspect-proxy" \
 # for an SNI, resolves names itself, and normalises a path before matching
 # it. No dnsmasq, no gettext/envsubst: CoreDNS replaces dnsmasq, and
 # gen-configs.js generates haproxy.cfg directly instead of templating it.
+# nss-tools is for certutil, which init-inspect-cfg makes Chromium's NSS
+# database with.
 ARG HAPROXY_BRANCH
 RUN apk add --no-cache \
       s6-overlay \
       "haproxy~${HAPROXY_BRANCH}" \
       openssl \
+      nss-tools \
       iptables \
       curl \
       quickjs-ng

@@ -147,6 +147,7 @@ test_integration_sandbox_inspect: ## Run the inspect-engine integration tests (n
 	@./test/integration-test-inspect-restrict.sh
 	@./test/integration-test-inspect-audit.sh
 	@./test/integration-test-inspect-roundtrip.sh
+	@./test/integration-test-inspect-chromium.sh
 
 # Builds each engine's proxy image itself (docker compose build), unlike the
 # two groups above which reuse a pre-built BUILDCAGE_LOCAL_IMAGE_REF.

@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   readEngineInputs,
   readFailOnBlocked,
+  readFailOnCaResidue,
   readFilesystemInputs,
   readRuleInputs,
   readRunCommand,
@@ -237,6 +238,22 @@ describe("readStepLabel", () => {
 
   it("returns undefined rather than an empty string when unset", () => {
     expect(readStepLabel(inputs())).toBeUndefined();
+  });
+});
+
+describe("readFailOnCaResidue", () => {
+  it("returns the input's own value", () => {
+    expect(readFailOnCaResidue(() => false)).toBe(false);
+    expect(readFailOnCaResidue(() => true)).toBe(true);
+  });
+
+  // Unset, or not a boolean: the safe side, as for fail_on_blocked.
+  it("falls back to true when the input cannot be read", () => {
+    expect(
+      readFailOnCaResidue(() => {
+        throw new TypeError("Input does not meet YAML 1.2 Core Schema specification");
+      }),
+    ).toBe(true);
   });
 });
 

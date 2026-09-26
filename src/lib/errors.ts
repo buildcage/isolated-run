@@ -30,6 +30,8 @@ import { ActionError } from "#core/lib/errors.ts";
  *   CONTAINER_NAME_INVALID            a value read back from GITHUB_STATE isn't a name this action generates
  *   SCRATCH_DIR_UNSAFE                the sudo rm -rf fallback's target isn't owned by the runner uid
  *   HOST_COMMAND_UNPINNABLE           `docker` or `sudo` is only on PATH somewhere the sandboxed command can write
+ *   NSS_DATABASE_CHANGED              inspect engine only: the command wrote to the NSS database mounted over
+ *                                     Chromium's, under fail_on_ca_residue: true
  */
 export type SandboxErrorCode =
   | "MISSING_RUN"
@@ -57,6 +59,7 @@ export type SandboxErrorCode =
   | "CONTAINER_NAME_INVALID"
   | "SCRATCH_DIR_OUT_OF_BASE"
   | "SCRATCH_DIR_UNSAFE"
-  | "HOST_COMMAND_UNPINNABLE";
+  | "HOST_COMMAND_UNPINNABLE"
+  | "NSS_DATABASE_CHANGED";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}

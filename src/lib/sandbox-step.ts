@@ -23,6 +23,7 @@ import type { ProxyEngine } from "./engine.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   readEngineInputs,
+  readFailOnCaResidue,
   readFilesystemInputs,
   readRuleInputs,
   readRunCommand,
@@ -68,6 +69,7 @@ export interface SandboxStepDeps {
   readEngineInputs: typeof readEngineInputs;
   readFilesystemInputs: typeof readFilesystemInputs;
   readRuleInputs: typeof readRuleInputs;
+  readFailOnCaResidue: typeof readFailOnCaResidue;
   validateFilesystemInputs: typeof validateFilesystemInputs;
   checkPasswordlessSudo: typeof checkPasswordlessSudo;
   checkOverlayfsSupport: typeof checkOverlayfsSupport;
@@ -105,6 +107,7 @@ const realDeps: SandboxStepDeps = {
   readEngineInputs,
   readFilesystemInputs,
   readRuleInputs,
+  readFailOnCaResidue,
   validateFilesystemInputs,
   checkPasswordlessSudo,
   checkOverlayfsSupport,
@@ -182,6 +185,7 @@ export async function runSandboxStep(
     readEngineInputs,
     readFilesystemInputs,
     readRuleInputs,
+    readFailOnCaResidue,
     validateFilesystemInputs,
     checkPasswordlessSudo,
     checkOverlayfsSupport,
@@ -344,6 +348,7 @@ export async function runSandboxStep(
         proxyEngine,
         filesystemMode,
         overlayRoots,
+        failOnCaResidue: readFailOnCaResidue(),
         warn,
       });
     } finally {

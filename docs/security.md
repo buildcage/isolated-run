@@ -192,6 +192,11 @@ sandbox down, so what it runs is kept out of those paths:
   `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so the command's
   `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` stays inside the sandbox. Without one, the step skips the
   keystores and warns. `java` is never run: its keystore is found by following its symlinks.
+- Under `inspect`, Chromium's NSS database is covered by a copy of one the proxy's own `certutil`
+  made from the CA certificate alone. The runner's database, SQLite an earlier step may have
+  written, is never parsed. A path on the way to it that is a symlink leaves it unmounted, and the
+  directories created to mount it over are created and removed as the runner user, never through
+  `sudo`.
 - The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins,
   and this action's own checkout, which holds the post step's script, are read-only inside the
   sandbox, unless `write_through:` names the directory itself or `uses: ./` makes the checkout the
@@ -467,7 +472,9 @@ TLS is terminated, so a tool that pins a certificate, or ships a bundled trust s
 the system update, will not work. The JVM (Java, Kotlin, Scala) reads only its own keystore rather
 than the CA-trust variables; a JVM already on the runner is handled by injecting into a copy of that
 keystore with the runner's own `keytool`, but a keystore under a non-default password, or a runner
-whose only `keytool` is somewhere a sandboxed command can write, falls back to `universal`. See
+whose only `keytool` is somewhere a sandboxed command can write, falls back to `universal`.
+Chromium's NSS database is covered with one trusting the CA; a command that writes to it fails the
+step unless `fail_on_ca_residue` is false. See
 [Limitations](../README.md#limitations) for the rest of the compatibility picture.
 
 `audit` is not a passive observer here either. TLS is terminated in both modes, so a tool that
