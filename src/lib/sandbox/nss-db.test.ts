@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   realpathSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -145,6 +146,15 @@ describe("prepareNssDb", () => {
     expect(calls).toStrictEqual([]);
   });
 
+  it("follows a symlinked HOME", () => {
+    const link = join(root, "home-link");
+    symlinkSync(home, link);
+
+    expect(prepareNssDb(CONTAINER, scratch, link, fakeDocker().deps)?.destination).toBe(
+      join(home, ".pki/nssdb"),
+    );
+  });
+
   it("warns and mounts nothing past a symlink", () => {
     symlinkSync("/etc", join(home, ".pki"));
     const warn = vi.fn();
@@ -191,6 +201,14 @@ describe("nssDbChange", () => {
     ["rewritten", (dir: string) => writeFileSync(join(dir, "cert9.db"), "WITH A CA OF ITS OWN")],
     ["added to", (dir: string) => writeFileSync(join(dir, "cert9.db-journal"), "")],
     ["renamed", (dir: string) => cpSync(join(dir, "key4.db"), join(dir, "key5.db"))],
+    [
+      "replaced by a directory",
+      (dir: string) => {
+        rmSync(join(dir, "cert9.db"));
+        mkdirSync(join(dir, "cert9.db"));
+      },
+    ],
+    ["removed with its directory", (dir: string) => rmSync(dir, { recursive: true })],
   ])("names the database when a file was %s", (_label, change) => {
     const files = prepared();
     change(files.path);

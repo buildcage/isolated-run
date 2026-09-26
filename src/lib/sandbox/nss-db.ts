@@ -7,6 +7,7 @@ import {
   readdirSync,
   realpathSync,
   rmdirSync,
+  statSync,
 } from "node:fs";
 import { join } from "node:path";
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
@@ -41,6 +42,7 @@ export interface NssDbFiles {
 export interface NssDbDeps {
   exec?: (command: string, args: string[]) => void;
   lstat?: (path: string) => { isDirectory(): boolean; isSymbolicLink(): boolean } | undefined;
+  stat?: (path: string) => { isDirectory(): boolean } | undefined;
   realpath?: (path: string) => string;
   mkdir?: (path: string, mode: number) => void;
   copyDir?: (source: string, destination: string) => void;
@@ -60,6 +62,14 @@ function defaultExec(command: string, args: string[]): void {
 function defaultLstat(path: string) {
   try {
     return lstatSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+function defaultStat(path: string) {
+  try {
+    return statSync(path);
   } catch {
     return undefined;
   }
@@ -117,6 +127,7 @@ export function prepareNssDb(
   {
     exec = defaultExec,
     lstat = defaultLstat,
+    stat = defaultStat,
     realpath = realpathSync,
     mkdir = defaultMkdir,
     copyDir = defaultCopyDir,
@@ -124,7 +135,8 @@ export function prepareNssDb(
     warn,
   }: NssDbDeps = {},
 ): NssDbFiles | undefined {
-  if (!home || lstat(home)?.isDirectory() !== true) {
+  // HOME itself may be a symlink the runner was set up with; only what is below it is refused.
+  if (!home || stat(home)?.isDirectory() !== true) {
     warn?.(
       `could not add the proxy CA to Chromium's NSS database: HOME (${JSON.stringify(home ?? "")}) ` +
         "is not a directory. A Chromium step will not trust the proxy.",
@@ -181,21 +193,27 @@ export function nssDbMount(files: NssDbFiles): MountEntry {
 }
 
 /** Why the copy no longer matches the template, or undefined. Compares names
- *  and bytes only, so a chmod or chown of $HOME does not count. Chromium
- *  reading the database leaves it byte-identical. */
+ *  and bytes only, so a chmod or chown of $HOME does not count; a copy the
+ *  command made unreadable counts as changed. Chromium reading the database
+ *  leaves it byte-identical. */
 export function nssDbChange(
   files: NssDbFiles,
   { readDir = readdirSync, readFile = readFileSync }: Pick<NssDbDeps, "readDir" | "readFile"> = {},
 ): string | undefined {
-  const names = readDir(files.template).sort();
-  const current = readDir(files.path).sort();
-  const changed =
-    names.length !== current.length ||
-    names.some(
-      (name, i) =>
-        current[i] !== name ||
-        !readFile(join(files.template, name)).equals(readFile(join(files.path, name))),
-    );
+  let changed: boolean;
+  try {
+    const names = readDir(files.template).sort();
+    const current = readDir(files.path).sort();
+    changed =
+      names.length !== current.length ||
+      names.some(
+        (name, i) =>
+          current[i] !== name ||
+          !readFile(join(files.template, name)).equals(readFile(join(files.path, name))),
+      );
+  } catch {
+    changed = true;
+  }
   if (!changed) return undefined;
   return (
     `the command changed the NSS database at ${files.destination}, which the inspect engine ` +

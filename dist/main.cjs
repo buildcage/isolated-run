@@ -18805,7 +18805,7 @@ function defaultExists(path) {
 		return !1;
 	}
 }
-function defaultStat(path) {
+function defaultStat$1(path) {
 	let s = (0, node_fs.lstatSync)(path);
 	return {
 		uid: s.uid,
@@ -18826,7 +18826,7 @@ function defaultExecFile$1(command, args) {
 		env: hostCommandEnv(command)
 	});
 }
-function resolveWriteThroughOnHost(path, { exists = defaultExists, stat = defaultStat, readlink = defaultReadlink } = {}) {
+function resolveWriteThroughOnHost(path, { exists = defaultExists, stat = defaultStat$1, readlink = defaultReadlink } = {}) {
 	let pending = path.split("/").filter((c) => c !== ""), current = "/", hops = 0;
 	for (; pending.length > 0;) {
 		let name = pending.shift();
@@ -18870,7 +18870,7 @@ function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
 	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
 	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
 }
-function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultExists, stat = defaultStat, execFile = defaultExecFile$1 } = {}) {
+function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultExists, stat = defaultStat$1, execFile = defaultExecFile$1 } = {}) {
 	let created = [], rollback = () => {
 		for (let dir of [...created].reverse()) try {
 			execFile("sudo", [
@@ -19099,6 +19099,13 @@ function defaultLstat(path) {
 		return;
 	}
 }
+function defaultStat(path) {
+	try {
+		return (0, node_fs.statSync)(path);
+	} catch {
+		return;
+	}
+}
 function defaultMkdir(path, mode) {
 	(0, node_fs.mkdirSync)(path, { mode });
 }
@@ -19122,8 +19129,8 @@ function planNssDb(home, { lstat = defaultLstat } = {}) {
 		missing
 	};
 }
-function prepareNssDb(containerName, dir, home, { exec = defaultExec$2, lstat = defaultLstat, realpath = node_fs.realpathSync, mkdir = defaultMkdir, copyDir = defaultCopyDir, rmdir = node_fs.rmdirSync, warn } = {}) {
-	if (!home || lstat(home)?.isDirectory() !== !0) {
+function prepareNssDb(containerName, dir, home, { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat, realpath = node_fs.realpathSync, mkdir = defaultMkdir, copyDir = defaultCopyDir, rmdir = node_fs.rmdirSync, warn } = {}) {
+	if (!home || stat(home)?.isDirectory() !== !0) {
 		warn?.(`could not add the proxy CA to Chromium's NSS database: HOME (${JSON.stringify(home ?? "")}) is not a directory. A Chromium step will not trust the proxy.`);
 		return;
 	}
@@ -19166,8 +19173,14 @@ function nssDbMount(files) {
 	};
 }
 function nssDbChange(files, { readDir = node_fs.readdirSync, readFile = node_fs.readFileSync } = {}) {
-	let names = readDir(files.template).sort(), current = readDir(files.path).sort();
-	if (names.length !== current.length || names.some((name, i) => current[i] !== name || !readFile((0, node_path.join)(files.template, name)).equals(readFile((0, node_path.join)(files.path, name))))) return `the command changed the NSS database at ${files.destination}, which the inspect engine replaces for the step with one trusting only its proxy CA; the write is discarded`;
+	let changed;
+	try {
+		let names = readDir(files.template).sort(), current = readDir(files.path).sort();
+		changed = names.length !== current.length || names.some((name, i) => current[i] !== name || !readFile((0, node_path.join)(files.template, name)).equals(readFile((0, node_path.join)(files.path, name))));
+	} catch {
+		changed = !0;
+	}
+	if (changed) return `the command changed the NSS database at ${files.destination}, which the inspect engine replaces for the step with one trusting only its proxy CA; the write is discarded`;
 }
 function removeNssDbDirs(files, { rmdir = node_fs.rmdirSync } = {}) {
 	for (let dir of [...files.createdDirs].reverse()) try {
@@ -20078,7 +20091,7 @@ function assembleBundle(dir, options, deps) {
 			renameGuardDirs: renameGuardDirs$1
 		});
 	} catch (e) {
-		throw e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
+		throw caTrust?.nssDb && deps.removeNssDbDirs(caTrust.nssDb), e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
 	}
 	return {
 		config,
@@ -20107,11 +20120,9 @@ function runSandboxedCommand(options, overrides = {}) {
 		...overrides
 	}, { withScratchDir, writeOciConfig, resolveSandboxEnv, buildEnvBlob, runIsolated } = deps;
 	return withScratchDir((dir) => {
-		let { config, runcPath, caTrust, netnsName, rootfsBindDir } = assembleBundle(dir, options, deps);
-		writeOciConfig(config, dir);
-		let exitCode;
+		let { config, runcPath, caTrust, netnsName, rootfsBindDir } = assembleBundle(dir, options, deps), exitCode;
 		try {
-			exitCode = runIsolated({
+			writeOciConfig(config, dir), exitCode = runIsolated({
 				envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
 				runcPath,
 				proxyNetns,
