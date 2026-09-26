@@ -553,6 +553,26 @@ reported as blocked; see
 - The CA is added to a store that already exists, never created. A command whose filesystem has
   nothing resembling a system CA bundle at a well-known path has nothing to add to, which matters
   only to a tool that needs TLS trust for something.
+- A task runner that starts each command with a filtered environment drops the CA variables before
+  the command sees them. vite-plus does this for a cached `vp run` task, which keeps `NODE_OPTIONS`
+  but not `NODE_EXTRA_CA_CERTS`, so Node inside it fails with `SELF_SIGNED_CERT_IN_CHAIN`. The
+  system CA store the command sees holds the CA already, so have Node read that store:
+
+  ```yaml
+  - uses: buildcage/isolated-run@81e97f727bda18d4fca560cd9d732a2e28464dda # v2.0.0
+    env:
+      NODE_OPTIONS: --use-system-ca # Node 22.15+ (23.9+ on 23.x); older Node refuses to start
+    with:
+      run: vp run build
+  ```
+
+  Otherwise pass the variable through on the task itself, as `untrackedEnv` rather than `env`, which
+  would put its value in the cache key. A task with `cache: false` keeps the whole environment.
+
+  ```ts
+  // vite.config.ts
+  build: { command: "vp build", untrackedEnv: ["NODE_EXTRA_CA_CERTS"] },
+  ```
 
 ### The Job Summary size cap
 
