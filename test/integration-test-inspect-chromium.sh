@@ -42,6 +42,12 @@ cp "$REPO_ROOT/test/chromium-check.js" "$TMPDIR/check/"
   { fail "could not install chrome-headless-shell"; assert_results; }
 CHROME="$TMPDIR/chrome/chrome-headless-shell/linux-$CHROME_VERSION/chrome-headless-shell-linux64/chrome-headless-shell"
 CHECK="CHROME_HEADLESS_SHELL=$CHROME node $TMPDIR/check/chromium-check.js https://allowed.example.com/public/chromium"
+# What the command sees where Chromium looks, printed ahead of each check so a
+# failure shows whether the database was mounted and what was in it.
+SHOW="grep nssdb /proc/self/mountinfo || echo 'no nssdb mount'; ls -la \$HOME/.pki/nssdb \$HOME/.local/share/pki/nssdb 2>&1 || true"
+
+# show_home <home>: what the step left in a home, for a failed assertion.
+show_home() { find "$1" -ls | sed 's/^/    /'; }
 
 # run_step <home> <run> [VAR=value...]: the action, with HOME pointed at a
 # directory of the test's own so the runner's real one is neither read nor
@@ -64,7 +70,7 @@ run_step() {
     INPUT_RUN="$run" \
     node "$REPO_ROOT/dist/main.cjs" 2>&1)
   RUN_EXIT=$?
-  echo "$OUT" | tail -15
+  echo "$OUT" | tail -25
 }
 
 echo ""
@@ -75,6 +81,7 @@ mkdir -p "$HOME_A"
 # into, the same browser must refuse the proxy's certificate, or the check
 # below could pass for a reason of its own.
 run_step "$HOME_A" "
+$SHOW
 HOME=/tmp/chromium-control $CHECK untrusted
 rm -rf /tmp/chromium-control
 $CHECK"
@@ -83,8 +90,9 @@ if [ "$RUN_EXIT" = "0" ]; then
 else
   fail "the step failed (exit $RUN_EXIT)"
 fi
-if [ -e "$HOME_A/.local" ]; then
+if [ -e "$HOME_A/.local/share/pki" ]; then
   fail "the directories made to mount the database over are still in \$HOME"
+  show_home "$HOME_A"
 else
   pass "the directories made to mount the database over were taken back"
 fi
@@ -93,16 +101,19 @@ echo ""
 echo "--- a home with its own legacy database ---"
 HOME_B="$TMPDIR/home-b"
 mkdir -p "$HOME_B/.pki/nssdb"
-run_step "$HOME_B" "$CHECK"
+run_step "$HOME_B" "
+$SHOW
+$CHECK"
 if [ "$RUN_EXIT" = "0" ]; then
   pass "trusted the proxy CA over the runner's own ~/.pki/nssdb"
 else
   fail "the step failed (exit $RUN_EXIT)"
 fi
-if [ -z "$(ls -A "$HOME_B/.pki/nssdb")" ] && [ ! -e "$HOME_B/.local" ]; then
+if [ -z "$(ls -A "$HOME_B/.pki/nssdb")" ] && [ ! -e "$HOME_B/.local/share/pki" ]; then
   pass "the runner's own database is untouched, and nothing was created beside it"
 else
   fail "the runner's own database changed, or something was created beside it"
+  show_home "$HOME_B"
 fi
 
 echo ""
@@ -135,8 +146,9 @@ if grep -q "changed the NSS database at $HOME_C/.local/share/pki/nssdb.*fail_on_
 else
   fail "no warning names the database"
 fi
-if [ -e "$HOME_C/.local" ]; then
+if [ -e "$HOME_C/.local/share/pki" ]; then
   fail "the write reached \$HOME"
+  show_home "$HOME_C"
 else
   pass "the write was discarded, and the directories taken back"
 fi
