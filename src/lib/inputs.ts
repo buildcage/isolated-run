@@ -192,10 +192,7 @@ export function readStepLabel(getInput: GetInput = core.getInput): string | unde
   return getInput("label") || undefined;
 }
 
-/**
- * Read the same way as fail_on_blocked below, for the same reason, and to the
- * same safe side: unset or unreadable is true.
- */
+/** Unset or unreadable is true, as with fail_on_blocked below. */
 export function readFailOnCaResidue(
   getBooleanInput: GetBooleanInput = core.getBooleanInput,
 ): boolean {

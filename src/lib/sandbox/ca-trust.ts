@@ -60,9 +60,7 @@ export interface CaTrustFiles {
    *  `mvn`/`gradle`/`java` under the inspect engine trust the CA only once it
    *  is in here. Empty when the runner has no JVM keystore this found. */
   jvmKeystores: { path: string; destination: string }[];
-  /** A copy of the proxy's NSS database template, mounted over the one
-   *  Chromium reads (see nss-db.ts). Undefined when there was nowhere to mount
-   *  it. */
+  /** Undefined when there was nowhere to mount it. */
   nssDb?: NssDbFiles;
 }
 

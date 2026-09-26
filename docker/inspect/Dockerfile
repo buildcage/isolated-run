@@ -79,8 +79,7 @@ LABEL org.opencontainers.image.title="isolated-run-inspect-proxy" \
 # for an SNI, resolves names itself, and normalises a path before matching
 # it. No dnsmasq, no gettext/envsubst: CoreDNS replaces dnsmasq, and
 # gen-configs.js generates haproxy.cfg directly instead of templating it.
-# nss-tools is for certutil, which init-inspect-cfg makes Chromium's NSS
-# database with.
+# nss-tools provides certutil for init-inspect-cfg's NSS database.
 ARG HAPROXY_BRANCH
 RUN apk add --no-cache \
       s6-overlay \

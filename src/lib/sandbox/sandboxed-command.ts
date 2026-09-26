@@ -111,8 +111,7 @@ export interface RunSandboxedCommandOptions {
   filesystemMode: FilesystemMode;
   /** filesystem_mode: ephemeral only; already folded (determineOverlayRoots), not raw candidates. */
   overlayRoots: string[];
-  /** inspect only: whether a command that writes to the NSS database mounted
-   *  over Chromium's fails the step (true) or only warns (false). */
+  /** inspect only: whether a write to the NSS database fails the step. */
   failOnCaResidue: boolean;
   /** Where this module's own warnings go: a scratch dir that would not
    *  unmount, the environment variables a shell cannot export, and NSS not
@@ -341,16 +340,12 @@ export function assembleBundle(
   return { config, runcPath, caTrust, netnsName, rootfsBindDir };
 }
 
-/** What fail_on_ca_residue says about getting past a failure it governs. */
 export const CA_RESIDUE_HINT =
   "To let the step carry on with only a warning, set fail_on_ca_residue: false " +
   "(a write to the NSS database is then discarded).";
 
-/**
- * After the command: take back the directories made to mount the NSS database
- * over, and fail the step (or, under fail_on_ca_residue: false, warn) if the
- * command wrote to the database, whose change has nowhere to go back to.
- */
+/** Fails the step, or only warns under fail_on_ca_residue: false, when the
+ *  command wrote to the NSS database, since that write cannot be kept. */
 function finishNssDb(
   caTrust: CaTrustFiles | undefined,
   { failOnCaResidue, warn }: Pick<RunSandboxedCommandOptions, "failOnCaResidue" | "warn">,
@@ -405,8 +400,7 @@ export function runSandboxedCommand(
           targetIp: SANDBOX_IP,
         });
       } catch (e) {
-        // The command did not run to the end, so nothing is judged of what it
-        // wrote; only the directories go back.
+        // The command did not finish, so only the directories are removed.
         if (caTrust?.nssDb) deps.removeNssDbDirs(caTrust.nssDb);
         throw e;
       }
