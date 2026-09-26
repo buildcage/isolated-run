@@ -492,7 +492,7 @@ function reclaimCaPlaceholder(warn, { lstat = node_fs.lstatSync, exec = runPinne
 	} catch {
 		return;
 	}
-	if (!(!st.isFile() || st.size !== 0)) try {
+	if (st.isFile() && st.size === 0) try {
 		exec("sudo", [
 			"-n",
 			"rm",
