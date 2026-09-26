@@ -67,7 +67,7 @@ jobs:
         uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
 
       - name: Start Buildcage builder
-        uses: buildcage/docker@162377df103dc476d37619297fb4605388a44585 # v4.0.0-rc1
+        uses: buildcage/docker@394573f1a2982a2d65eebc19a58f5f2e11621d93 # v4.0.2
         with:
           proxy_mode: restrict
           proxy_engine: inspect
@@ -88,11 +88,6 @@ jobs:
 
             # npm registry: dev deps bundled into the qjs scripts
             GET|HEAD https://registry.npmjs.org/**
-
-          known_blocked_rules: |
-            # The runner appends its DNS search domain to every lookup, so each
-            # allowed host is first queried as <host>.<random>.<region>.internal.
-            **.internal.cloudapp.net
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -137,7 +132,7 @@ jobs:
 
       - name: Show proxy report
         if: always()
-        uses: buildcage/docker/report@162377df103dc476d37619297fb4605388a44585 # v4.0.0-rc1
+        uses: buildcage/docker/report@394573f1a2982a2d65eebc19a58f5f2e11621d93 # v4.0.2
         with:
           fail_on_blocked: true
 
