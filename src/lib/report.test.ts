@@ -16,7 +16,9 @@ import type { Docker } from "#core/lib/docker/client.ts";
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
 // readActionVersion's only external call is `docker inspect` via the shared
-// client, so the client is what gets handed in here.
+// client, so the client is what gets handed in here. The label parsing itself
+// is action-version.test.ts's; these only check the client and the engine
+// reach it.
 const readLabels = vi.fn();
 const docker = { readLabels } as unknown as Docker;
 
@@ -168,25 +170,6 @@ describe("readActionVersion", () => {
       "org.opencontainers.image.version": "3.1.4-inspect",
     });
     expect(readActionVersion(containerName, "inspect", docker)).toBe("v3.1.4");
-  });
-
-  it("leaves a label alone when it does not end in the engine being asked about", () => {
-    readLabels.mockReturnValueOnce({
-      "org.opencontainers.image.version": "3.1.4-inspect",
-    });
-    expect(readActionVersion(containerName, "universal", docker)).toBe("v3.1.4-inspect");
-  });
-
-  it("returns undefined when the image carries no version label", () => {
-    readLabels.mockReturnValueOnce({});
-    expect(readActionVersion(containerName, "universal", docker)).toBeUndefined();
-  });
-
-  it("returns undefined rather than throwing when docker inspect fails", () => {
-    readLabels.mockImplementationOnce(() => {
-      throw new Error("No such container");
-    });
-    expect(readActionVersion(containerName, "universal", docker)).toBeUndefined();
   });
 });
 

@@ -20626,6 +20626,18 @@ async function* readRotatedLog(docker, containerId, dir) {
 	for (let name of parseLogSegments(listing)) yield* docker.readFileLines(containerId, `${dir}/${name}`);
 }
 //#endregion
+//#region src/core/lib/report/action-version.ts
+function readActionVersion$1(docker, containerId, proxyEngine) {
+	try {
+		let label = docker.readLabels(containerId)["org.opencontainers.image.version"];
+		if (!label) return;
+		let suffix = `-${proxyEngine}`;
+		return `v${label.endsWith(suffix) ? label.slice(0, -suffix.length) : label}`;
+	} catch {
+		return;
+	}
+}
+//#endregion
 //#region src/core/lib/report/outcome/blocked-outcome.ts
 function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible }) {
 	if (!logLooksPlausible) return isAudit ? {
@@ -20836,6 +20848,14 @@ function toRow(group) {
 function usesLine(actionRepo, actionRef, actionVersion) {
 	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
 }
+function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", actionVersion, runCommand } = {}) {
+	let yaml = `- name: ${stepName}\n`;
+	if (yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", runCommand) {
+		yaml += "    run: |\n";
+		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
+	}
+	return yaml;
+}
 function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
 	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "\n<details>\n";
 	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
@@ -20847,7 +20867,7 @@ const ruleTypeToParam = {
 	HTTP: "allowed_http_rules",
 	IP: "allowed_ip_rules"
 };
-function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand, actionVersion } = {}) {
+function buildRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
 	if (!auditedRows || auditedRows.length === 0) return "";
 	let groups = new Map();
 	for (let r of auditedRows) {
@@ -20855,11 +20875,7 @@ function buildRestrictExample(auditedRows, actionRepo, actionRef, { runCommand, 
 		param && (groups.has(param) || groups.set(param, []), groups.get(param).push(`${r.host}:${r.port}`));
 	}
 	if (groups.size === 0) return "";
-	let yaml = "";
-	if (yaml += "- name: Start isolated-run\n", yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", runCommand) {
-		yaml += "    run: |\n";
-		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
-	}
+	let yaml = exampleStepHead(actionRepo, actionRef, step);
 	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: universal\n";
 	for (let [param, rules] of groups) {
 		yaml += `    ${param}: >-\n`;
@@ -21063,14 +21079,10 @@ function leftOutSection(leftOut) {
 		}
 	], shown.map((r) => ({ ...r }))), md += "\n\n", leftOut.length > shown.length && (md += `…and ${leftOut.length - shown.length} more, listed in Communication details.\n\n`), md;
 }
-function buildInspectRestrictExample(requests, actionRepo, actionRef, { runCommand, actionVersion, allowedIpRules = [], allowedTlsRules = [] } = {}) {
+function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedIpRules = [], allowedTlsRules = [], ...step } = {}) {
 	let { writable, leftOut } = partitionRequests(requests ?? []), lines = ruleLinesFrom(writable);
 	if (lines.length === 0 && leftOut.length === 0 && allowedIpRules.length === 0 && allowedTlsRules.length === 0) return "";
-	let yaml = "- name: Start isolated-run\n";
-	if (yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", runCommand) {
-		yaml += "    run: |\n";
-		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
-	}
+	let yaml = exampleStepHead(actionRepo, actionRef, step);
 	if (yaml += "    proxy_mode: restrict\n", lines.length > 0) {
 		yaml += "    allowed_url_rules: |\n";
 		for (let line of lines) yaml += `      ${line}\n`;
@@ -21090,17 +21102,13 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { runComma
 }
 //#endregion
 //#region src/core/lib/report/render/render-report-markdown.ts
-function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", runCommand, actionVersion } = {}) {
+function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", ...step } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
 	if (report.logLooksPlausible || (markdown += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
-		runCommand,
-		actionVersion,
+		...step,
 		allowedIpRules: report.parameters.allowedIpRules,
 		allowedTlsRules: report.parameters.allowedTlsRules
-	}) : buildRestrictExample(report.passed, actionRepo, actionRef, {
-		runCommand,
-		actionVersion
-	})), report.blocked.length > 0) {
+	}) : buildRestrictExample(report.passed, actionRepo, actionRef, step)), report.blocked.length > 0) {
 		report.passed.length > 0 && (markdown += "\n");
 		let blocked = foldExpectedBlockedRows(report.blocked);
 		markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(blocked, {
@@ -21501,15 +21509,7 @@ function fetchReport(containerName, parameters, proxyEngine) {
 	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName)) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName));
 }
 function readActionVersion(containerName, proxyEngine, docker) {
-	let client = docker ?? createHostDocker();
-	try {
-		let label = client.readLabels(containerName)["org.opencontainers.image.version"];
-		if (!label) return;
-		let suffix = `-${proxyEngine}`;
-		return `v${label.endsWith(suffix) ? label.slice(0, -suffix.length) : label}`;
-	} catch {
-		return;
-	}
+	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
 }
 function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
@@ -21519,6 +21519,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 	return {
 		markdown: renderReportMarkdown(report, actionRepo, actionRef, {
 			title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
+			stepName: "Start isolated-run",
 			runCommand,
 			actionVersion
 		}),

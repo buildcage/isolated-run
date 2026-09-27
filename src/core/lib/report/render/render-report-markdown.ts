@@ -4,31 +4,26 @@ import { buildRestrictExample } from "./build-example.ts";
 import { renderInspectDetails } from "./inspect-details.ts";
 import { buildInspectRestrictExample } from "./inspect-example.ts";
 import { escapeCell } from "./markdown-table.ts";
+import type { ExampleStepOptions } from "./restrict-example.ts";
 import type { ReportData } from "../types.ts";
 
-export interface RenderReportMarkdownOptions {
-  /** Full heading text, e.g. "Outbound Traffic Report — npm install" when a
-   *  `label` is set. Defaults to a bare "Outbound Traffic Report". The caller
-   *  may fold an untrusted `label` into it; the heading escapes it (see below),
-   *  so callers pass it through raw. */
+export interface RenderReportMarkdownOptions extends ExampleStepOptions {
+  /** Full heading text, e.g. "Outbound Traffic Report — npm install".
+   *  Defaults to a bare "Outbound Traffic Report". A caller may fold an
+   *  untrusted input (isolated-run's `label`) into it; the heading escapes it
+   *  (see below), so callers pass it through raw. */
   title?: string;
-  /** The `run:` input, included in the audit-mode restrict example. */
-  runCommand?: string;
-  /** Version to annotate the restrict-mode example's `uses:` line with. */
-  actionVersion?: string;
 }
 
-/** Branches on `report.engine` rather than being duplicated per engine. There
- *  is no explicit-engine branch (see ../types.ts). */
+/** Branches on `report.engine`/`report.parameters.mode` rather than being
+ *  duplicated per engine. actionRepo/actionRef are real values, not
+ *  placeholders: this runs on the runner, with process.env available. The
+ *  ExampleStepOptions are passed on to the audit-mode restrict example. */
 export function renderReportMarkdown(
   report: ReportData,
   actionRepo: string,
   actionRef: string,
-  {
-    title = "Outbound Traffic Report",
-    runCommand,
-    actionVersion,
-  }: RenderReportMarkdownOptions = {},
+  { title = "Outbound Traffic Report", ...step }: RenderReportMarkdownOptions = {},
 ): string {
   const isAudit = report.parameters.mode === "audit";
   const showExpected = report.parameters.knownBlockedRules.length > 0;
@@ -37,8 +32,8 @@ export function renderReportMarkdown(
   // restrict is what a real run normally uses day to day, so its heading
   // stays bare; audit is the occasional, deliberately different mode and
   // says so, the same way the heading below calls out "Audited" vs "Allowed".
-  // escapeCell because title may carry the untrusted `label` input: unescaped,
-  // it could inject Markdown or a newline into the heading.
+  // escapeCell because title may carry an untrusted input: unescaped, it could
+  // inject Markdown or a newline into the heading.
   let markdown = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
 
   // The tables would otherwise read as the whole story.
@@ -61,12 +56,11 @@ export function renderReportMarkdown(
     markdown +=
       report.engine === "inspect"
         ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
-            runCommand,
-            actionVersion,
+            ...step,
             allowedIpRules: report.parameters.allowedIpRules,
             allowedTlsRules: report.parameters.allowedTlsRules,
           })
-        : buildRestrictExample(report.passed, actionRepo, actionRef, { runCommand, actionVersion });
+        : buildRestrictExample(report.passed, actionRepo, actionRef, step);
   }
   if (report.blocked.length > 0) {
     if (report.passed.length > 0) markdown += "\n";

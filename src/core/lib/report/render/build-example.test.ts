@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildRestrictExample } from "./build-example.ts";
 import { restrictExampleBlock } from "./restrict-example.ts";
 
-const REPO = "buildcage/isolated-run";
+const REPO = "owner/repo";
 const REF = "v1";
 
 describe("buildRestrictExample", () => {
@@ -23,7 +23,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF)).toBe(
       restrictExampleBlock(
         [
-          "- name: Start isolated-run",
+          "- name: Start Buildcage",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    proxy_mode: restrict",
@@ -45,7 +45,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF)).toBe(
       restrictExampleBlock(
         [
-          "- name: Start isolated-run",
+          "- name: Start Buildcage",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    proxy_mode: restrict",
@@ -66,7 +66,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF, { runCommand: "npm install" })).toBe(
       restrictExampleBlock(
         [
-          "- name: Start isolated-run",
+          "- name: Start Buildcage",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    run: |",
@@ -85,7 +85,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF, { runCommand: "npm ci\nnpm test" })).toBe(
       restrictExampleBlock(
         [
-          "- name: Start isolated-run",
+          "- name: Start Buildcage",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    run: |",
@@ -105,7 +105,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF, { runCommand: "npm ci\nnpm test\n" })).toBe(
       restrictExampleBlock(
         [
-          "- name: Start isolated-run",
+          "- name: Start Buildcage",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    run: |",
@@ -125,7 +125,7 @@ describe("buildRestrictExample", () => {
     expect(buildRestrictExample(rows, REPO, REF)).toBe(
       restrictExampleBlock(
         [
-          "- name: Start isolated-run",
+          "- name: Start Buildcage",
           `  uses: ${REPO}@${REF}`,
           "  with:",
           "    proxy_mode: restrict",
@@ -134,6 +134,12 @@ describe("buildRestrictExample", () => {
           "      registry.npmjs.org:443",
         ].join("\n") + "\n",
       ),
+    );
+  });
+  it("names the step as the caller asks", () => {
+    const rows = [{ host: "registry.npmjs.org", port: "443", ruleType: "HTTPS", count: 1 }];
+    expect(buildRestrictExample(rows, REPO, REF, { stepName: "Start isolated-run" })).toMatch(
+      /^ {6}- name: Start isolated-run$/m,
     );
   });
 });

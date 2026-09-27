@@ -17,7 +17,7 @@
 
 | Host | Rule | Reason | Count |
 | --- | --- | --- | ---: |
-| c.example.com:443 | HTTPS | dns-failed | 1 |
+| a.example.com:443 | HTTPS | origin-aborted | 1 |
 
 <sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>
 
@@ -29,10 +29,11 @@
 🚫 00:07.000: GET https://bad.example.com/payload -> https-not-allowed
 🚫 00:08.000: DNS A unresolvable.example.net -> dns-not-allowed
 ⚠️ 00:09.123: HTTPS untrusted-ca.example.com:443 -> client-aborted
+⚠️ 00:11.000: GET https://a.example.com/pkg.json -> origin-aborted
 ```
 
 </details>
 
-*Reported by [buildcage/isolated-run](https://github.com/buildcage/isolated-run)*
+*Reported by [owner/repo](https://github.com/owner/repo)*
 
 <hr>
