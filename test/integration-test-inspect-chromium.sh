@@ -1,9 +1,10 @@
 #!/bin/bash
 # chrome-headless-shell must trust the proxy CA through the slot the action adds
 # to the runner's own NSS database. What the command writes to that database is
-# kept where filesystem_mode keeps writes, less the slot; a database the runner
-# user cannot write is covered instead, and a write to that, or a copy of the CA
-# left in the runner's own, fails the step unless fail_on_ca_residue is false.
+# kept where filesystem_mode keeps writes, below a write_through: entry under
+# ephemeral included, less the slot; a database the runner user cannot write is
+# covered instead, and a write to that, or a copy of the CA left in the
+# runner's own, fails the step unless fail_on_ca_residue is false.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 
@@ -147,6 +148,32 @@ if [ -e "$HOME_E/.pki" ]; then
   show_home "$HOME_E"
 else
   pass "the write was discarded, and the directories taken back"
+fi
+
+echo ""
+echo "--- the same under filesystem_mode: ephemeral, below a write_through: entry ---"
+HOME_H="$TMPDIR/home-h"
+mkdir -p "$HOME_H/.pki/nssdb"
+printf 'library=\nname=the runner'"'"'s own\n' >"$HOME_H/.pki/nssdb/pkcs11.txt"
+# The module is appended after the slot, as modutil does.
+run_step "$HOME_H" "
+$SHOW
+$CHECK
+touch \$HOME/.pki/nssdb/written-by-the-command
+printf 'library=added.so\nname=added\n\n' >>\$HOME/.pki/nssdb/pkcs11.txt" \
+  INPUT_FILESYSTEM_MODE=ephemeral INPUT_WRITE_THROUGH="$HOME_H/.pki"
+if [ "$RUN_EXIT" = "0" ]; then
+  pass "trusted the proxy CA through the slot under ephemeral"
+else
+  fail "the step failed (exit $RUN_EXIT)"
+fi
+if [ -e "$HOME_H/.pki/nssdb/written-by-the-command" ] &&
+  [ "$(cat "$HOME_H/.pki/nssdb/pkcs11.txt")" = "$(printf 'library=\nname=the runner'"'"'s own\n\nlibrary=added.so\nname=added')" ]; then
+  pass "the write reached \$HOME, and the added module is an entry of its own without the slot"
+else
+  fail "the write did not reach \$HOME, or pkcs11.txt is not the runner's plus the added module"
+  show_home "$HOME_H"
+  cat "$HOME_H/.pki/nssdb/pkcs11.txt"
 fi
 
 echo ""

@@ -563,9 +563,11 @@ reported as blocked; see
   `allowed_tls_rules` or `allowed_ip_rules` passthrough, and a command that writes to it fails the
   step. `fail_on_ca_residue: false` turns that into a warning and discards the write.
 - A command that changes the CA's own trust in the NSS database (`certutil -M`), or exports it and
-  imports it back, copies the CA into the runner's database, which fails the step rather than being
-  written back. A command cannot remove the database's directory (`rm -rf ~/.pki`) either, since it
-  is a mount point inside the sandbox.
+  imports it back, copies the CA into the runner's database. Where `filesystem_mode` would keep the
+  write, that fails the step and nothing is written back; `fail_on_ca_residue: false` makes it a
+  warning and writes the copy back. Where the write would be discarded, the copy goes with it. A
+  command cannot remove the database's directory (`rm -rf ~/.pki`) either, since it is a mount point
+  inside the sandbox.
 - The CA is added to a store that already exists, never created. A command whose filesystem has
   nothing resembling a system CA bundle at a well-known path has nothing to add to, which matters
   only to a tool that needs TLS trust for something.
