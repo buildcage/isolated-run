@@ -11,11 +11,9 @@
 <summary>🛡️ Switch to restrict mode</summary>
 
 ```yaml
-      - name: Start isolated-run
-        uses: buildcage/isolated-run@v1 # 1.0.0
+      - name: Start Buildcage
+        uses: owner/repo@v2 # 2.1.0
         with:
-          run: |
-            npm ci
           proxy_mode: restrict
           proxy_engine: universal
           allowed_https_rules: >-
@@ -54,6 +52,6 @@
 
 <sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>
 
-*Reported by [buildcage/isolated-run](https://github.com/buildcage/isolated-run)*
+*Reported by [owner/repo](https://github.com/owner/repo)*
 
 <hr>

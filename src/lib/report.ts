@@ -6,6 +6,7 @@ import { writeStepSummary } from "#core/lib/actions/write-step-summary.ts";
 import { createDocker, type Docker } from "#core/lib/docker/client.ts";
 import { readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
 import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
+import { readActionVersion as readImageActionVersion } from "#core/lib/report/action-version.ts";
 import { describeReportOutcomes } from "#core/lib/report/outcome/report-outcomes.ts";
 import { renderReportMarkdown } from "#core/lib/report/render/render-report-markdown.ts";
 import { truncateForStepSummary } from "#core/lib/report/render/truncate-communication-details.ts";
@@ -73,11 +74,8 @@ export function fetchReport(
 /* v8 ignore stop */
 
 /**
- * Best-effort `org.opencontainers.image.version` label read, converted back
- * into the `vX.Y.Z` git tag it was published from (the label itself is the
- * bare Docker tag, e.g. `3.1.4-inspect` for a non-universal engine; see
- * image-tag.ts). A `docker inspect` failure here must not fail the report
- * over one comment.
+ * Reads through this action's pinned host Docker client unless one is handed
+ * in.
  */
 export function readActionVersion(
   containerName: string,
@@ -88,15 +86,7 @@ export function readActionVersion(
   // client the tested caller would otherwise hand in.
   /* v8 ignore next */
   const client = docker ?? createHostDocker();
-  try {
-    const label = client.readLabels(containerName)["org.opencontainers.image.version"];
-    if (!label) return undefined;
-    const suffix = `-${proxyEngine}`;
-    const version = label.endsWith(suffix) ? label.slice(0, -suffix.length) : label;
-    return `v${version}`;
-  } catch {
-    return undefined;
-  }
+  return readImageActionVersion(client, containerName, proxyEngine);
 }
 
 export interface ComputeReportOutcomesOptions {
@@ -137,6 +127,7 @@ export function computeReportOutcomes(
     // stepLabel is the untrusted `label` input; the renderer escapes the whole
     // title, so it is folded in raw here rather than pre-sanitized twice.
     title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : undefined,
+    stepName: "Start isolated-run",
     runCommand,
     actionVersion,
   });

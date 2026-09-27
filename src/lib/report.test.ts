@@ -16,7 +16,8 @@ import type { Docker } from "#core/lib/docker/client.ts";
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
 // readActionVersion's only external call is `docker inspect` via the shared
-// client, so the client is what gets handed in here.
+// client, so the client is what gets handed in here. Label parsing is tested
+// in action-version.test.ts.
 const readLabels = vi.fn();
 const docker = { readLabels } as unknown as Docker;
 
@@ -120,7 +121,7 @@ describe("computeReportOutcomes", () => {
     expect(emissions[1].message).toContain("buildcage sandbox");
   });
 
-  it("passes stepLabel/runCommand through to the rendered markdown", () => {
+  it("passes stepLabel/runCommand through to the rendered markdown, under this action's step name", () => {
     const r = report({
       parameters: reportParams({ mode: "audit" }),
       passed: [
@@ -132,6 +133,7 @@ describe("computeReportOutcomes", () => {
       options({ stepLabel: "npm install", runCommand: "npm install" }),
     );
     expect(markdown).toMatch(/^## Outbound Traffic Report — npm install \(audit mode\)/);
+    expect(markdown).toMatch(/- name: Start isolated-run\n/);
     expect(markdown).toMatch(/uses: buildcage\/isolated-run@v1/);
     expect(markdown).toMatch(/run: \|\n\s+npm install/);
   });
@@ -168,25 +170,6 @@ describe("readActionVersion", () => {
       "org.opencontainers.image.version": "3.1.4-inspect",
     });
     expect(readActionVersion(containerName, "inspect", docker)).toBe("v3.1.4");
-  });
-
-  it("leaves a label alone when it does not end in the engine being asked about", () => {
-    readLabels.mockReturnValueOnce({
-      "org.opencontainers.image.version": "3.1.4-inspect",
-    });
-    expect(readActionVersion(containerName, "universal", docker)).toBe("v3.1.4-inspect");
-  });
-
-  it("returns undefined when the image carries no version label", () => {
-    readLabels.mockReturnValueOnce({});
-    expect(readActionVersion(containerName, "universal", docker)).toBeUndefined();
-  });
-
-  it("returns undefined rather than throwing when docker inspect fails", () => {
-    readLabels.mockImplementationOnce(() => {
-      throw new Error("No such container");
-    });
-    expect(readActionVersion(containerName, "universal", docker)).toBeUndefined();
   });
 });
 

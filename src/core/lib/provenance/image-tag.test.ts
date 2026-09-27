@@ -10,9 +10,9 @@ describe("imageTagFromRef", () => {
   });
 
   it("strips a leading 'v' from a version, prerelease or major-only tag", () => {
-    expect(imageTagFromRef("v1.1.0", "universal")).toBe("1.1.0-universal");
-    expect(imageTagFromRef("v1.1.0-rc1", "universal")).toBe("1.1.0-rc1-universal");
-    expect(imageTagFromRef("v1", "universal")).toBe("1-universal");
+    expect(imageTagFromRef("v2.1.0", "universal")).toBe("2.1.0-universal");
+    expect(imageTagFromRef("v3.1.6-rc1", "universal")).toBe("3.1.6-rc1-universal");
+    expect(imageTagFromRef("v2", "universal")).toBe("2-universal");
   });
 
   it("returns a branch name as-is", () => {
@@ -30,15 +30,15 @@ describe("imageTagFromRef", () => {
   });
 
   it("defaults to the inspect engine suffix when the engine is omitted", () => {
-    expect(imageTagFromRef("v1.1.0")).toBe("1.1.0-inspect");
-    expect(imageTagFromRef("v1.1.0", "inspect")).toBe("1.1.0-inspect");
+    expect(imageTagFromRef("v2.1.0")).toBe("2.1.0-inspect");
+    expect(imageTagFromRef("v2.1.0", "inspect")).toBe("2.1.0-inspect");
     expect(imageTagFromRef("a".repeat(40), "inspect")).toBe(`sha-${"a".repeat(40)}-inspect`);
   });
 
   it("gives every engine its own suffix, so no tag is engine-ambiguous", () => {
     // Each engine is a separately published image, so a tag always names the
     // engine it was built for.
-    expect(imageTagFromRef("v1.1.0", "universal")).toBe("1.1.0-universal");
-    expect(imageTagFromRef("v1.1.0", "proxy")).toBe("1.1.0-proxy");
+    expect(imageTagFromRef("v2.1.0", "universal")).toBe("2.1.0-universal");
+    expect(imageTagFromRef("v2.1.0", "proxy")).toBe("2.1.0-proxy");
   });
 });

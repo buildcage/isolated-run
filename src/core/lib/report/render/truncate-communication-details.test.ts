@@ -2,14 +2,8 @@ import { describe, it, expect } from "vitest";
 import { truncateForStepSummary } from "./truncate-communication-details.ts";
 import { COMMUNICATION_DETAILS_OPEN, wrapCommunicationDetails } from "./communication-section.ts";
 
-const HEADER = "## Outbound Traffic Report — sandbox (restrict mode)\n\n### ✅ Allowed Hosts\n\n";
-const FOOTER =
-  "\n*Reported by [buildcage/isolated-run](https://github.com/buildcage/isolated-run)*\n";
-
-function withCommunicationDetails(lines: string[]): string {
-  const body = "```\n" + lines.map((l) => `${l}\n`).join("") + "```\n\n";
-  return HEADER + wrapCommunicationDetails(body) + FOOTER;
-}
+const HEADER = "## Outbound Traffic Report (restrict mode)\n\n### ✅ Allowed Hosts\n\n";
+const FOOTER = "\n*Reported by [owner/repo](https://github.com/owner/repo)*\n";
 
 /**
  * A limit small enough that a few hundred lines exceed it, so a test that is
@@ -21,6 +15,11 @@ const SMALL_LIMIT = 12 * 1024;
 
 function logLines(count: number): string[] {
   return Array.from({ length: count }, (_, i) => `line ${i} ${"x".repeat(20)}`);
+}
+
+function withCommunicationDetails(lines: string[]): string {
+  const body = "```\n" + lines.map((l) => `${l}\n`).join("") + "```\n\n";
+  return HEADER + wrapCommunicationDetails(body) + FOOTER;
 }
 
 describe("truncateForStepSummary", () => {

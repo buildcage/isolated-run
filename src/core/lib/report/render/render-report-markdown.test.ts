@@ -14,7 +14,7 @@ const blockedRow = {
   expected: false,
 };
 
-describe("renderReportMarkdown", () => {
+describe("renderReportMarkdown: universal", () => {
   const base: UniversalReportData = {
     engine: "universal",
     parameters: reportParams(),
@@ -28,22 +28,19 @@ describe("renderReportMarkdown", () => {
   };
 
   it("renders a bare restrict-mode title, since that is the day-to-day mode", () => {
-    const md = renderReportMarkdown(
-      { ...base, passed: [allowedRow] },
-      "buildcage/isolated-run",
-      "v1",
-      { title: "Outbound Traffic Report" },
-    );
+    const md = renderReportMarkdown({ ...base, passed: [allowedRow] }, "owner/repo", "v1", {
+      title: "Outbound Traffic Report",
+    });
     expect(md).toMatch(/^## Outbound Traffic Report\n/);
     expect(md).not.toMatch(/restrict mode\)/);
     expect(md).toMatch(/### ✅ Allowed Hosts/);
     expect(md).toMatch(/good\.com/);
   });
 
-  it("escapes structural Markdown in the title, so a folded-in label can't inject", () => {
+  it("escapes structural Markdown in the title, so no caller can inject via it", () => {
     const md = renderReportMarkdown(
       { ...base, parameters: reportParams({ mode: "audit" }) },
-      "buildcage/isolated-run",
+      "owner/repo",
       "v1",
       {
         title: "Outbound Traffic Report — [x](javascript:alert(1))\n# owned <b>|*",
@@ -57,7 +54,7 @@ describe("renderReportMarkdown", () => {
   it("warns above the tables when the log is not a complete record", () => {
     const md = renderReportMarkdown(
       { ...base, passed: [allowedRow], logLooksPlausible: false },
-      "buildcage/isolated-run",
+      "owner/repo",
       "v1",
     );
     expect(md).toMatch(/This report is incomplete/);
@@ -72,18 +69,14 @@ describe("renderReportMarkdown", () => {
   });
 
   it("has no warning when the log is a complete record", () => {
-    const md = renderReportMarkdown(
-      { ...base, passed: [allowedRow] },
-      "buildcage/isolated-run",
-      "v1",
-    );
+    const md = renderReportMarkdown({ ...base, passed: [allowedRow] }, "owner/repo", "v1");
     expect(md).not.toMatch(/incomplete/);
   });
 
   it("renders the audit-mode heading and Audited Hosts table, plus a restrict-mode example", () => {
     const md = renderReportMarkdown(
       { ...base, parameters: reportParams({ mode: "audit" }), passed: [allowedRow] },
-      "buildcage/isolated-run",
+      "owner/repo",
       "v1",
     );
     expect(md).toMatch(/^## Outbound Traffic Report \(audit mode\)\n/);
@@ -91,45 +84,40 @@ describe("renderReportMarkdown", () => {
     expect(md).toMatch(/Switch to restrict mode/);
   });
 
-  it("renders Blocked Hosts and shows the SNI footnote", () => {
+  it("renders Blocked Hosts and shows the SNI footnote, not Communication details", () => {
     const md = renderReportMarkdown(
       { ...base, blocked: [blockedRow], blockedCount: 1 },
-      "buildcage/isolated-run",
+      "owner/repo",
       "v1",
     );
     expect(md).toMatch(/### 🚫 Blocked Hosts/);
     expect(md).toMatch(/based on the Host header/);
+    expect(md).not.toMatch(/Communication details/);
   });
 
   it("uses the real actionRepo in the footer, not a placeholder", () => {
-    const md = renderReportMarkdown(base, "buildcage/isolated-run", "v1");
-    expect(md).toMatch(
-      /Reported by \[buildcage\/isolated-run\]\(https:\/\/github\.com\/buildcage\/isolated-run\)/,
-    );
+    const md = renderReportMarkdown(base, "owner/repo", "v1");
+    expect(md).toMatch(/Reported by \[owner\/repo\]\(https:\/\/github\.com\/owner\/repo\)/);
     expect(md).not.toMatch(/GITHUB_ACTION_REPOSITORY/);
   });
 
   it("omits the Allowed Hosts table entirely when nothing passed", () => {
-    const md = renderReportMarkdown(base, "buildcage/isolated-run", "v1");
+    const md = renderReportMarkdown(base, "owner/repo", "v1");
     expect(md).not.toMatch(/### ✅ Allowed Hosts/);
   });
 
   it("shows a '(no communication)' note when nothing passed and nothing blocked", () => {
-    const md = renderReportMarkdown(base, "buildcage/isolated-run", "v1");
+    const md = renderReportMarkdown(base, "owner/repo", "v1");
     expect(md).toMatch(/_\(no communication\)_/);
   });
 
   it("omits the '(no communication)' note once anything passed or was blocked", () => {
-    const passedMd = renderReportMarkdown(
-      { ...base, passed: [allowedRow] },
-      "buildcage/isolated-run",
-      "v1",
-    );
+    const passedMd = renderReportMarkdown({ ...base, passed: [allowedRow] }, "owner/repo", "v1");
     expect(passedMd).not.toMatch(/_\(no communication\)_/);
 
     const blockedMd = renderReportMarkdown(
       { ...base, blocked: [blockedRow], blockedCount: 1 },
-      "buildcage/isolated-run",
+      "owner/repo",
       "v1",
     );
     expect(blockedMd).not.toMatch(/_\(no communication\)_/);
@@ -143,11 +131,7 @@ describe("renderReportMarkdown", () => {
       host: "_http._tcp.example.com",
       queryType: "SRV",
     };
-    const md = renderReportMarkdown(
-      { ...base, timeline: [discovery] },
-      "buildcage/isolated-run",
-      "v1",
-    );
+    const md = renderReportMarkdown({ ...base, timeline: [discovery] }, "owner/repo", "v1");
     expect(md).not.toMatch(/_\(no communication\)_/);
     expect(md).toMatch(/Communication details/);
   });
@@ -163,7 +147,7 @@ describe("renderReportMarkdown", () => {
   it("tables connections the origin broke under their own heading", () => {
     const md = renderReportMarkdown(
       { ...base, blocked: [blockedRow], blockedCount: 1, failed: [failedRow] },
-      "buildcage/isolated-run",
+      "owner/repo",
       "v1",
     );
     expect(md).toMatch(/### ⚠️ Failed Connections\n/);
@@ -173,29 +157,26 @@ describe("renderReportMarkdown", () => {
   });
 
   it("does not call a run that only failed connections no communication", () => {
-    const md = renderReportMarkdown(
-      { ...base, failed: [failedRow] },
-      "buildcage/isolated-run",
-      "v1",
-    );
+    const md = renderReportMarkdown({ ...base, failed: [failedRow] }, "owner/repo", "v1");
     expect(md.includes("_(no communication)_")).toBe(false);
   });
 
   it("uses the title option verbatim, e.g. a run step's em-dash label", () => {
-    const md = renderReportMarkdown(base, "buildcage/isolated-run", "v1", {
+    const md = renderReportMarkdown(base, "owner/repo", "v1", {
       title: "Outbound Traffic Report — npm install",
     });
     expect(md).toMatch(/^## Outbound Traffic Report — npm install\n/);
   });
 
-  it("shows a restrict-mode example including the run: command", () => {
+  it("shows a restrict-mode example including the step name and run: command", () => {
     const md = renderReportMarkdown(
       { ...base, parameters: reportParams({ mode: "audit" }), passed: [allowedRow] },
-      "buildcage/isolated-run",
+      "owner/repo",
       "v1",
-      { runCommand: "npm install" },
+      { stepName: "Start isolated-run", runCommand: "npm install" },
     );
-    expect(md).toMatch(/uses: buildcage\/isolated-run@v1/);
+    expect(md).toMatch(/- name: Start isolated-run\n/);
+    expect(md).toMatch(/uses: owner\/repo@v1/);
     expect(md).toMatch(/run: \|\n\s+npm install/);
   });
 
@@ -206,7 +187,7 @@ describe("renderReportMarkdown", () => {
         parameters: reportParams({ knownBlockedRules: ["bad.com:80"] }),
         blocked: [blockedRow],
       },
-      "buildcage/isolated-run",
+      "owner/repo",
       "v1",
     );
     expect(md).toMatch(/\| Host \| Rule \| Reason \| Count \| Expected \|/);
@@ -215,18 +196,14 @@ describe("renderReportMarkdown", () => {
   it("separates the two tables when a run has both allowed and blocked hosts", () => {
     const md = renderReportMarkdown(
       { ...base, passed: [allowedRow], blocked: [blockedRow], blockedCount: 1 },
-      "buildcage/isolated-run",
+      "owner/repo",
       "v1",
     );
     expect(md).toMatch(/good\.com[\s\S]*\n\n### 🚫 Blocked Hosts/);
   });
 
   it("omits the Expected column when known_blocked_rules is not set", () => {
-    const md = renderReportMarkdown(
-      { ...base, blocked: [blockedRow] },
-      "buildcage/isolated-run",
-      "v1",
-    );
+    const md = renderReportMarkdown({ ...base, blocked: [blockedRow] }, "owner/repo", "v1");
     expect(md).not.toMatch(/Expected/);
   });
 
@@ -237,7 +214,7 @@ describe("renderReportMarkdown", () => {
         parameters: reportParams({ knownBlockedRules: ["*.sury.org:*"] }),
         blocked: expectedRows,
       },
-      "buildcage/isolated-run",
+      "owner/repo",
       "v1",
     );
     expect(md).toMatch(/\(2 hosts\)/);
@@ -276,7 +253,7 @@ describe("renderReportMarkdown: inspect", () => {
   };
 
   it("renders Communication details instead of the SNI footnote", () => {
-    const md = renderReportMarkdown({ ...base, timeline }, "buildcage/isolated-run", "v1");
+    const md = renderReportMarkdown({ ...base, timeline }, "owner/repo", "v1");
     expect(md).toMatch(/Communication details/);
     expect(md).not.toMatch(/based on the Host header/);
   });
@@ -284,7 +261,7 @@ describe("renderReportMarkdown: inspect", () => {
   it("builds the audit-mode example from the timeline, method and path included", () => {
     const md = renderReportMarkdown(
       { ...base, parameters: reportParams({ mode: "audit" }), timeline },
-      "buildcage/isolated-run",
+      "owner/repo",
       "v1",
       { runCommand: "npm install" },
     );
@@ -301,7 +278,7 @@ describe("renderReportMarkdown: inspect", () => {
         parameters: reportParams({ knownBlockedRules: ["*.sury.org:*"] }),
         blocked: [blockedRow, ...expectedRows],
       },
-      "buildcage/isolated-run",
+      "owner/repo",
       "v1",
     );
     expect(md).toMatch(

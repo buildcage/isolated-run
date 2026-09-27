@@ -2,7 +2,7 @@
  * Full-text golden coverage of renderReportMarkdown.
  *
  * This is the Job Summary a user actually reads, assembled by one function
- * that branches on engine and mode and delegates to five renderers. The tests
+ * that branches on engine and mode and delegates to six renderers. The tests
  * next door assert that a given phrase appears; these pin the whole document,
  * so moving a section, reordering a table or losing a footnote is visible
  * even where nothing asserts on it.
@@ -136,6 +136,18 @@ const timeline: TrafficEvent[] = [
     reason: "client-aborted",
     destination: "198.19.255.1:443",
   },
+  // A host the rules allow, so its own table rather than the blocked one.
+  {
+    time: 1787471981,
+    action: "failed",
+    protocol: "https",
+    host: "a.example.com",
+    port: 443,
+    method: "GET",
+    url: "https://a.example.com/pkg.json",
+    reason: "origin-aborted",
+    destination: "93.184.216.34",
+  },
 ];
 
 const inspect: InspectReportData = {
@@ -143,7 +155,9 @@ const inspect: InspectReportData = {
   parameters: params(),
   passed,
   blocked,
-  failed,
+  failed: [
+    { host: "a.example.com", port: "443", ruleType: "HTTPS", reason: "origin-aborted", count: 1 },
+  ],
   blockedCount: 1,
   logLooksPlausible: true,
   timeline,
@@ -157,7 +171,7 @@ function audit<T extends ReportData>(report: T): T {
 const CASES: Record<string, ReportData> = {
   "universal-restrict": universal,
   "universal-audit": audit(universal),
-  // The incomplete-log banner sits above the tables and applies to either engine.
+  // The incomplete-log banner sits above the tables and applies to every engine.
   "universal-incomplete": { ...universal, logLooksPlausible: false },
   // Nothing happened at all: the "(no communication)" note, no tables, no
   // timeline (a discovery-only run keeps a timeline; see the unit tests).
@@ -184,12 +198,9 @@ describe("renderReportMarkdown golden files", () => {
   for (const [name, report] of Object.entries(CASES)) {
     it(`matches __fixtures__/${name}.md`, () => {
       expectMatchesGolden(
-        // Fixed values, so the restrict-mode example's `uses:` and `run:` lines
-        // do not drift with the repo's own version.
-        renderReportMarkdown(report, "buildcage/isolated-run", "v1", {
-          runCommand: "npm ci",
-          actionVersion: "1.0.0",
-        }),
+        // A fixed actionVersion keeps the restrict-mode example's `uses:` line
+        // from drifting with the repo's own version.
+        renderReportMarkdown(report, "owner/repo", "v2", { actionVersion: "2.1.0" }),
         new URL(`./__fixtures__/${name}.md`, import.meta.url),
       );
     });
