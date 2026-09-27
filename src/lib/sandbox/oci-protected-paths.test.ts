@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
-import { computeReadonlyHostMounts, resolveProtectedPaths } from "./oci-protected-paths.ts";
 import { parseMountinfo } from "./mountinfo.ts";
+import { computeReadonlyHostMounts, resolveProtectedPaths } from "./oci-protected-paths.ts";
 import type { HostMount } from "./types.ts";
 
 // Realistic /proc/self/mountinfo lines; only the mount points matter here.

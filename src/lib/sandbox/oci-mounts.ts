@@ -9,11 +9,11 @@
  * read-only.
  */
 
-import type { HasMounts, MountEntry, OverlayDirs } from "./types.ts";
-import { assertScratchBaseNotWritable, isAtOrUnder, WritablePathConflictError } from "./paths.ts";
-import { SHM_DESTINATION } from "./host-probes.ts";
-import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import { OWN_CA_DESTINATION, SYSTEM_CA_CANDIDATES } from "./ca-trust.ts";
+import { SHM_DESTINATION } from "./host-probes.ts";
+import { assertScratchBaseNotWritable, isAtOrUnder, WritablePathConflictError } from "./paths.ts";
+import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
+import type { HasMounts, MountEntry, OverlayDirs } from "./types.ts";
 
 /**
  * Pure: the set of destination paths `baseSpec.mounts` already declares a

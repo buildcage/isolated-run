@@ -1,13 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
 
-import { startSandboxProxy, stopSandboxProxy, type ProxyLifecycleDeps } from "./proxy-lifecycle.ts";
-import { SandboxError } from "./errors.ts";
 import { createAnnotation } from "#core/lib/actions/annotation.ts";
 import {
   buildComposeUpArgs,
   buildComposeDownArgs,
   buildComposeLogsArgs,
 } from "#core/lib/docker/args.ts";
+
+import { SandboxError } from "./errors.ts";
+import { startSandboxProxy, stopSandboxProxy, type ProxyLifecycleDeps } from "./proxy-lifecycle.ts";
 
 const CONTAINER = "buildcage-proxy-deadbeef";
 

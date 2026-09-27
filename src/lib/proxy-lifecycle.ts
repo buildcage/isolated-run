@@ -1,20 +1,21 @@
-import { withLogGroupAsync } from "#core/lib/actions/log.ts";
 import { execFileSync } from "node:child_process";
 
-import { capturedStderr, describeDockerFailure } from "#core/lib/actions/docker-error.ts";
 import type { Annotation } from "#core/lib/actions/annotation.ts";
-import type { RunDocker } from "#core/lib/docker/client.ts";
+import { capturedStderr, describeDockerFailure } from "#core/lib/actions/docker-error.ts";
+import { withLogGroupAsync } from "#core/lib/actions/log.ts";
 import {
   buildComposeUpArgs,
   buildComposeDownArgs,
   buildComposeLogsArgs,
 } from "#core/lib/docker/args.ts";
+import type { RunDocker } from "#core/lib/docker/client.ts";
 import {
   buildDockerInspectStateArgs,
   parseContainerState,
   describeContainerStartFailure,
   type ContainerState,
 } from "#core/lib/docker/health.ts";
+
 import { SandboxError } from "./errors.ts";
 import { hostCommand } from "./sandbox/pinned-commands.ts";
 

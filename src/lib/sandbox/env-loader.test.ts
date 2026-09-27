@@ -1,8 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { describe, it, expect, vi } from "vitest";
+
+import { OWN_CA_DESTINATION } from "./ca-trust.ts";
 import {
   resolveSandboxEnv,
   buildEnvBlob,
@@ -10,7 +12,6 @@ import {
   ACTION_INPUT_ENV_KEYS,
 } from "./env-loader.ts";
 import { withScratchDir } from "./scratch-dir.ts";
-import { OWN_CA_DESTINATION } from "./ca-trust.ts";
 
 /** Not the first candidate: the mount lands where the runner keeps its store. */
 const SYSTEM_STORE = "/etc/pki/tls/certs/ca-bundle.crt";

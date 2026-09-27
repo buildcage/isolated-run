@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+
 import { parseMountinfo } from "./mountinfo.ts";
 
 // Realistic /proc/self/mountinfo lines (see parseMountinfo's doc comment

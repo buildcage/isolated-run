@@ -10,6 +10,7 @@
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import type { GenReportParameters } from "#core/lib/report/types.ts";
+
 import type { ProxyEngine } from "./engine.ts";
 import { readFailOnBlocked, readStepLabel } from "./inputs.ts";
 import { fetchReport, readActionVersion, writeReportSummary } from "./report.ts";

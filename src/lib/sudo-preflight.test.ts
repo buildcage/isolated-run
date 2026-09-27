@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
-import { checkPasswordlessSudo, describeSudoFailure } from "./sudo-preflight.ts";
 import { SandboxError } from "./errors.ts";
+import { checkPasswordlessSudo, describeSudoFailure } from "./sudo-preflight.ts";
 
 describe("describeSudoFailure", () => {
   const noSlimRunner = { env: {}, exists: () => false };

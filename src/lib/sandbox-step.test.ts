@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import { runSandboxStep, type SandboxStepDeps } from "./sandbox-step.ts";
 import { SandboxError } from "./errors.ts";
+import { runSandboxStep, type SandboxStepDeps } from "./sandbox-step.ts";
 
 // What is left to check here is the order they run in, what each one is
 // handed, and which of them still run when an earlier step fails.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
-import { assertNonRootUid, resolveSandboxGid, type HostGroups } from "./identity.ts";
 import { SandboxError } from "../errors.ts";
+import { assertNonRootUid, resolveSandboxGid, type HostGroups } from "./identity.ts";
 
 // The host is supplied rather than read: a test must not depend on who owns a
 // file on the machine running it (a scratch file is wheel-owned on macOS and

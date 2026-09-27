@@ -1,8 +1,10 @@
 import { mkdtempSync, mkdirSync, lstatSync, readFileSync, rmSync } from "node:fs";
 import { join, dirname, basename, resolve } from "node:path";
+
 import { errorMessage } from "#core/lib/errors.ts";
-import { SandboxError } from "../errors.ts";
+
 import { isValidContainerName, scratchDirNameFor } from "../container.ts";
+import { SandboxError } from "../errors.ts";
 import { retryBriefly } from "../retry-briefly.ts";
 import { parseMountinfo } from "./mountinfo.ts";
 import { runPinnedHostCommand } from "./run-host-command.ts";

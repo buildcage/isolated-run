@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 
+import { OWN_CA_DESTINATION } from "./ca-trust.ts";
 import { parseNofileLimit, type HostProbes } from "./host-probes.ts";
 import type { BuildOciConfigOptions } from "./oci-config.ts";
-import type { OciSpec } from "./types.ts";
 import { buildOciConfig } from "./oci-config.ts";
 import { RESOLV_CONF_DESTINATION } from "./oci-mounts.ts";
-import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import { WritablePathConflictError } from "./paths.ts";
-import { OWN_CA_DESTINATION } from "./ca-trust.ts";
+import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
+import type { OciSpec } from "./types.ts";
 
 /** Not the first candidate: the mount lands where the runner keeps its store. */
 const SYSTEM_STORE = "/etc/pki/tls/certs/ca-bundle.crt";

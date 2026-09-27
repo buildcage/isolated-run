@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
-import { resolveFilesystemMode } from "./filesystem-mode.ts";
 import { SandboxError } from "./errors.ts";
+import { resolveFilesystemMode } from "./filesystem-mode.ts";
 
 describe("resolveFilesystemMode", () => {
   it("defaults to persistent for undefined", () => {

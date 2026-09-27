@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 
-import { resolvePostState } from "./post-state.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
+
+import { resolvePostState } from "./post-state.ts";
 
 describe("resolvePostState", () => {
   it("returns null targets and no problems when container_name is unset (the ordinary case)", () => {

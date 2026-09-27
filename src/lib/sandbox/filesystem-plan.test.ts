@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 
-import { resolveFilesystemPlan, validateFilesystemInputs } from "./filesystem-plan.ts";
 import { SandboxError } from "../errors.ts";
+import { resolveFilesystemPlan, validateFilesystemInputs } from "./filesystem-plan.ts";
 import { RESERVED_INTERNAL_DESTINATIONS } from "./oci-mounts.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 

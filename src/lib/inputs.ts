@@ -23,8 +23,9 @@ import {
   parseKnownBlockedRulesOrThrow,
   parseRulesOrThrow,
 } from "#core/lib/acl/rules.ts";
-import { SandboxError } from "./errors.ts";
+
 import { resolveProxyEngine, type ProxyEngine } from "./engine.ts";
+import { SandboxError } from "./errors.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
 
 /** Narrowed to what this module needs, so a test can pass a plain lookup. */

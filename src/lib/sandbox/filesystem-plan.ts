@@ -14,9 +14,12 @@
  * the mounts the sandbox makes for itself, not by how the input was spelled.
  */
 import { errorMessage } from "#core/lib/errors.ts";
+
 import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
 import { determineOverlayRoots } from "./ephemeral-fs.ts";
+import { RESERVED_INTERNAL_DESTINATIONS } from "./oci-mounts.ts";
+import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
 import {
   resolveWriteThroughPaths,
   resolveWriteThroughOnHost,
@@ -26,8 +29,6 @@ import {
   WRITE_THROUGH_ALL,
   type CreatedDir,
 } from "./write-through.ts";
-import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
-import { RESERVED_INTERNAL_DESTINATIONS } from "./oci-mounts.ts";
 
 /**
  * Validates write_through: paths against the filesystem mode. Pure, no I/O.

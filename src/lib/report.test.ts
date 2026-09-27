@@ -1,7 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+import { createAnnotation } from "#core/lib/actions/annotation.ts";
+import type { Docker } from "#core/lib/docker/client.ts";
+import { annotateKnownBlocked } from "#core/lib/report/build/aggregate.ts";
+import type { InspectReportData, UniversalReportData } from "#core/lib/report/types.ts";
+import { reportParams } from "#core/lib/test/report-data.node.ts";
 
 import {
   computeReportOutcomes,
@@ -9,11 +16,6 @@ import {
   writeReportSummary,
   type ComputeReportOutcomesOptions,
 } from "./report.ts";
-import { createAnnotation } from "#core/lib/actions/annotation.ts";
-import { annotateKnownBlocked } from "#core/lib/report/build/aggregate.ts";
-import type { InspectReportData, UniversalReportData } from "#core/lib/report/types.ts";
-import type { Docker } from "#core/lib/docker/client.ts";
-import { reportParams } from "#core/lib/test/report-data.node.ts";
 
 // readActionVersion's only external call is `docker inspect` via the shared
 // client, so the client is what gets handed in here. Label parsing is tested

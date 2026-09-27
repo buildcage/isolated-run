@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { reportStepTraffic, type ReportStepDeps, type ReportStepOptions } from "./step-report.ts";
 import { reportParams } from "#core/lib/test/report-data.node.ts";
+
+import { reportStepTraffic, type ReportStepDeps, type ReportStepOptions } from "./step-report.ts";
 
 // What is left to check here is the order they run in, what each one is
 // handed, and that a failure anywhere in the sequence still leaves the caller

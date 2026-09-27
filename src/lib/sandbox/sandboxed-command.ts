@@ -1,20 +1,23 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+
 import * as core from "@actions/core";
 
 import { errorMessage } from "#core/lib/errors.ts";
-import { SandboxError, type SandboxErrorCode } from "../errors.ts";
-import type { ProxyEngine } from "../engine.ts";
-import type { FilesystemMode } from "../filesystem-mode.ts";
+import { PROXY_ADDRESS } from "#core/lib/log/proxy-address.ts";
+
 import { netnsNameFor } from "../container.ts";
-import { createOverlayScratchDirs } from "./ephemeral-fs.ts";
-import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
+import type { ProxyEngine } from "../engine.ts";
+import { SandboxError, type SandboxErrorCode } from "../errors.ts";
+import type { FilesystemMode } from "../filesystem-mode.ts";
 import {
   extractCaCert,
   writeCaTrustFiles,
   writeJvmKeystoreFiles,
   type CaTrustFiles,
 } from "./ca-trust.ts";
+import { buildEnvBlob, resolveSandboxEnv, writeEnvLoader } from "./env-loader.ts";
+import { createOverlayScratchDirs } from "./ephemeral-fs.ts";
 import {
   jvmTools,
   persistingWritablePaths,
@@ -24,15 +27,14 @@ import {
 } from "./host-commands.ts";
 import { resolveSandboxGid } from "./identity.ts";
 import { listHostMounts } from "./mountinfo.ts";
-import { buildOciConfig, type SandboxIdentity } from "./oci-config.ts";
-import { WritablePathConflictError } from "./paths.ts";
-import { writeRunScript, writeResolvConf, writeOciConfig } from "./oci-files.ts";
-import { buildEnvBlob, resolveSandboxEnv, writeEnvLoader } from "./env-loader.ts";
 import { nssDbChange, prepareNssDb, removeNssDbDirs, settleNssDbSlot } from "./nss-db.ts";
+import { buildOciConfig, type SandboxIdentity } from "./oci-config.ts";
+import { writeRunScript, writeResolvConf, writeOciConfig } from "./oci-files.ts";
+import { WritablePathConflictError } from "./paths.ts";
 import { runIsolated } from "./run.ts";
+import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
 import { withScratchDir, type Warn } from "./scratch-dir.ts";
 import type { BuiltOciSpec, OverlayDirs } from "./types.ts";
-import { PROXY_ADDRESS } from "#core/lib/log/proxy-address.ts";
 
 /**
  * The sandbox's own end of the direct veth link to the proxy's buildcage0

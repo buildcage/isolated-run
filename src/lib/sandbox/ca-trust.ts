@@ -8,10 +8,12 @@ import {
   realpathSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
-import type { MountEntry } from "./types.ts";
-import { hostCommand } from "./pinned-commands.ts";
+
 import { nssDbMounts, type NssDbFiles } from "./nss-db.ts";
+import { hostCommand } from "./pinned-commands.ts";
+import type { MountEntry } from "./types.ts";
 
 /**
  * CA trust for the inspect engine, adapted for this sandbox's rootfs being
