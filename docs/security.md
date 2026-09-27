@@ -400,18 +400,20 @@ Three mechanisms make that enforceable:
   would resolve to are never touched. See [CA trust variables](./reference.md#ca-trust-variables)
   for which variables are set and what that does not cover.
 
-The CA and its key are generated fresh each time this step's proxy container starts. The CA is
-valid for two days, so a copy that escapes cleanup soon stops being trusted. Its private key never
-leaves the container: HAProxy signs each per-SNI certificate with it, and only the certificate is
-copied out, into this run's scratch directory. The step removes the container with
-`docker compose down` before it ends, and the key with it.
-
 A wide host rule paired with a narrow path or method does not narrow the DNS side. DNS has no notion
 of a path, so a name under an allowed `*.example.com` is logged as allowed the moment it is looked
 up, before any path is known. The request that follows is still refused and still never reaches an
 origin; only the log line reflects the host-only nature of that decision. See
 [Rule syntax](./reference.md#rule-syntax) for how to write a host pattern that doesn't widen this
 more than intended.
+
+#### The CA and its private key
+
+The CA and its key are generated fresh each time this step's proxy container starts. The CA is
+valid for two days, so a copy that escapes cleanup soon stops being trusted. Its private key never
+leaves the container: HAProxy signs each per-SNI certificate with it, and only the certificate is
+copied out, into this run's scratch directory. The step removes the container with
+`docker compose down` before it ends, and the key with it.
 
 ## Attempts to get around it
 
