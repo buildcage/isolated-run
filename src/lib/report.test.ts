@@ -122,7 +122,7 @@ describe("computeReportOutcomes", () => {
     expect(emissions[1].message).toContain("buildcage sandbox");
   });
 
-  it("passes stepLabel/runCommand through to the rendered markdown", () => {
+  it("passes stepLabel/runCommand through to the rendered markdown, under this action's step name", () => {
     const r = report({
       parameters: reportParams({ mode: "audit" }),
       passed: [
@@ -134,6 +134,7 @@ describe("computeReportOutcomes", () => {
       options({ stepLabel: "npm install", runCommand: "npm install" }),
     );
     expect(markdown).toMatch(/^## Outbound Traffic Report — npm install \(audit mode\)/);
+    expect(markdown).toMatch(/- name: Start isolated-run\n/);
     expect(markdown).toMatch(/uses: buildcage\/isolated-run@v1/);
     expect(markdown).toMatch(/run: \|\n\s+npm install/);
   });
