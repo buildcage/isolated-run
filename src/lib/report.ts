@@ -74,8 +74,8 @@ export function fetchReport(
 /* v8 ignore stop */
 
 /**
- * The shared version-label read (see action-version.ts), through this
- * action's pinned host docker unless a client is handed in.
+ * Reads through this action's pinned host Docker client unless one is handed
+ * in.
  */
 export function readActionVersion(
   containerName: string,
