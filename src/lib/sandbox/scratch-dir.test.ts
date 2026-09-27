@@ -1,4 +1,3 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   mkdirSync,
   rmSync,
@@ -12,6 +11,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { describe, it, expect, vi, afterEach } from "vitest";
+
+import { SandboxError } from "../errors.ts";
+import { writeRunScript } from "./oci-files.ts";
 import type { ScratchDirDeps } from "./scratch-dir.ts";
 import {
   withScratchDir,
@@ -21,8 +24,6 @@ import {
   ensureOwnScratchBase,
   SANDBOX_SCRATCH_BASE,
 } from "./scratch-dir.ts";
-import { writeRunScript } from "./oci-files.ts";
-import { SandboxError } from "../errors.ts";
 
 describe("scratchDirFor", () => {
   it("derives a path under SANDBOX_SCRATCH_BASE from the container name (not under a writable exception)", () => {

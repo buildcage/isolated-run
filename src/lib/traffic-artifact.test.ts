@@ -1,8 +1,14 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+import { createAnnotation } from "#core/lib/actions/annotation.ts";
+import type { InspectReportData } from "#core/lib/report/types.ts";
+import { reportParams } from "#core/lib/test/report-data.node.ts";
+
+import type { Report } from "./report.ts";
 import {
   setTrafficArtifactOutput,
   trafficArtifactName,
@@ -10,10 +16,6 @@ import {
   wantsTrafficArtifact,
   type UploadArtifact,
 } from "./traffic-artifact.ts";
-import { createAnnotation } from "#core/lib/actions/annotation.ts";
-import type { Report } from "./report.ts";
-import type { InspectReportData } from "#core/lib/report/types.ts";
-import { reportParams } from "#core/lib/test/report-data.node.ts";
 
 const CONTAINER = "buildcage-proxy-deadbeef";
 

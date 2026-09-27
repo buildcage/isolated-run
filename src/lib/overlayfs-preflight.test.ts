@@ -1,15 +1,16 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
 import { mkdirSync, rmSync, symlinkSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { describe, it, expect, vi, afterEach } from "vitest";
+
+import { SandboxError } from "./errors.ts";
 import {
   checkOverlayfsSupport,
   describeOverlayFailure,
   describeProbeCleanupFailure,
   type CheckOverlayfsSupportOptions,
 } from "./overlayfs-preflight.ts";
-import { SandboxError } from "./errors.ts";
 
 describe("describeOverlayFailure", () => {
   it("mentions SANDBOX_SCRATCH_BASE and the persistent-mode fallback", () => {

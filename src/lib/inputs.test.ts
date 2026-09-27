@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 
+import { SandboxError } from "./errors.ts";
 import {
   readEngineInputs,
   readFailOnBlocked,
@@ -11,7 +12,6 @@ import {
   resolveProxyMode,
   resolveWriteThroughInput,
 } from "./inputs.ts";
-import { SandboxError } from "./errors.ts";
 
 const silent = () => {};
 

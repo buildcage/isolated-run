@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 
+import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
+
 import {
   generateContainerName,
   getContainerNetns,
@@ -11,7 +13,6 @@ import {
   scratchDirNameFor,
   CONTAINER_NAME_PATTERN,
 } from "./container.ts";
-import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { SandboxError } from "./errors.ts";
 
 describe("generateContainerName", () => {

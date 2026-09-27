@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+
 import * as core from "@actions/core";
 
 import { annotate } from "#core/lib/actions/annotation.ts";
 import { buildComposeDownArgs } from "#core/lib/docker/args.ts";
+
 import { readLocalImageOverride, resolveComposeFile } from "./lib/compose-file.ts";
 import { readFilesystemInputs } from "./lib/inputs.ts";
 import { planPostCleanup } from "./lib/post-cleanup.ts";

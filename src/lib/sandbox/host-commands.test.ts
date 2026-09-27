@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 
+import { SandboxError } from "../errors.ts";
 import {
   dockerConfigDir,
   findPinnableCommand,
@@ -13,7 +14,6 @@ import {
   type FindCommandDeps,
 } from "./host-commands.ts";
 import { hostCommand } from "./pinned-commands.ts";
-import { SandboxError } from "../errors.ts";
 
 const HOME = "/home/runner";
 const WORKSPACE = "/home/runner/work/repo/repo";

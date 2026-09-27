@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+
 import { describe, it, expect } from "vitest";
 
 describe("PROXY_ADDRESS", () => {

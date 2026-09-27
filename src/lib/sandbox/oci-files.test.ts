@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { readFileSync, statSync } from "node:fs";
+
+import { describe, it, expect } from "vitest";
 
 import { writeRunScript, writeResolvConf, writeOciConfig } from "./oci-files.ts";
 import { withScratchDir } from "./scratch-dir.ts";

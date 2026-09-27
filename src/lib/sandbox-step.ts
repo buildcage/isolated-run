@@ -11,15 +11,25 @@
 
 import * as core from "@actions/core";
 
+import { isKnownBlockedUrlRule } from "#core/lib/acl/wildcard-rules.ts";
+import { annotate, createAnnotation } from "#core/lib/actions/annotation.ts";
+import { logRules, withLogGroup } from "#core/lib/actions/log.ts";
+import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
+import { errorMessage } from "#core/lib/errors.ts";
 import { resolveBuildcageImageRef } from "#core/lib/provenance/image-ref.ts";
 import { verifyImageDigestOrThrow, type ResolvedImage } from "#core/lib/provenance/verify-image.ts";
 import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts";
-import { annotate, createAnnotation } from "#core/lib/actions/annotation.ts";
-import { logRules, withLogGroup } from "#core/lib/actions/log.ts";
-import { errorMessage } from "#core/lib/errors.ts";
-import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
-import { SandboxError } from "./errors.ts";
+
+import { buildComposeEnv } from "./compose-env.ts";
+import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
+import { generateContainerName, getContainerNetns } from "./container.ts";
+import {
+  checkIpRuleSupport,
+  checkKnownBlockedUrlRuleSupport,
+  checkUrlAndTlsRuleSupport,
+} from "./engine-rule-support.ts";
 import type { ProxyEngine } from "./engine.ts";
+import { SandboxError } from "./errors.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   readEngineInputs,
@@ -28,25 +38,16 @@ import {
   readRuleInputs,
   readRunCommand,
 } from "./inputs.ts";
-import {
-  checkIpRuleSupport,
-  checkKnownBlockedUrlRuleSupport,
-  checkUrlAndTlsRuleSupport,
-} from "./engine-rule-support.ts";
-import { isKnownBlockedUrlRule } from "#core/lib/acl/wildcard-rules.ts";
-import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
-import { buildComposeEnv } from "./compose-env.ts";
-import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
-import { removeCreatedDirsIfEmpty, splitWriteThroughInput } from "./sandbox/write-through.ts";
-import { resolveFilesystemPlan, validateFilesystemInputs } from "./sandbox/filesystem-plan.ts";
-import { assertNonRootUid } from "./sandbox/identity.ts";
-import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
-import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
-import { generateContainerName, getContainerNetns } from "./container.ts";
-import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
+import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
+import { resolveFilesystemPlan, validateFilesystemInputs } from "./sandbox/filesystem-plan.ts";
+import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
+import { assertNonRootUid } from "./sandbox/identity.ts";
+import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
+import { removeCreatedDirsIfEmpty, splitWriteThroughInput } from "./sandbox/write-through.ts";
 import { reportStepTraffic } from "./step-report.ts";
+import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 
 /**
  * Display fallback for the report's `uses:` example when the runner names no

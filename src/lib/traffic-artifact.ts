@@ -1,10 +1,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
+
 import * as core from "@actions/core";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import { buildTrafficRecords, writeTrafficFile } from "#core/lib/report/outcome/traffic-output.ts";
+
 import type { Report } from "./report.ts";
 import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase } from "./sandbox/scratch-dir.ts";
 

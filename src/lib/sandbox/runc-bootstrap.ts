@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, chmodSync, rmSync } from "node:fs";
 import { join } from "node:path";
+
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
-import type { OciSpec } from "./types.ts";
+
 import { hostCommand } from "./pinned-commands.ts";
+import type { OciSpec } from "./types.ts";
 
 /**
  * Generate runc's own default OCI bundle config via `runc spec` (run in

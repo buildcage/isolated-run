@@ -1,5 +1,5 @@
-import type { OciSpec, BuiltOciSpec, HostMount, OverlayDirs } from "./types.ts";
-import { resolveProtectedPaths } from "./oci-protected-paths.ts";
+import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
+import { realHostProbes, type HostProbes, type NofileLimit } from "./host-probes.ts";
 import {
   ephemeralLayers,
   freshMountDestinationsFrom,
@@ -10,8 +10,8 @@ import {
   writableDirsOf,
   RESOLV_CONF_DESTINATION,
 } from "./oci-mounts.ts";
-import { realHostProbes, type HostProbes, type NofileLimit } from "./host-probes.ts";
-import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
+import { resolveProtectedPaths } from "./oci-protected-paths.ts";
+import type { OciSpec, BuiltOciSpec, HostMount, OverlayDirs } from "./types.ts";
 export interface SandboxIdentity {
   uid: number;
   gid: number;

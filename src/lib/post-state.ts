@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
+
 import { isValidContainerName } from "./container.ts";
 
 export interface PostCleanupTargets {

@@ -35,6 +35,7 @@ export default defineConfig({
     options: { typeAware: true },
   },
   fmt: {
+    sortImports: true,
     ignorePatterns: [...generatedOutputs, ...fixtures, "MAINTAINERS.md"],
   },
   staged: {

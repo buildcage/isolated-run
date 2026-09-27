@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
 import type { Warn } from "./scratch-dir.ts";
 

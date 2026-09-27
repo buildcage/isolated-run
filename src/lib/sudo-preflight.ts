@@ -1,12 +1,13 @@
 import { existsSync } from "node:fs";
 
-import { SandboxError } from "./errors.ts";
-import { runPinnedHostCommand } from "./sandbox/run-host-command.ts";
 import {
   SLIM_RUNNER_DETECTED_PREFIX,
   capturedStderr,
   isLikelySlimRunner,
 } from "#core/lib/actions/docker-error.ts";
+
+import { SandboxError } from "./errors.ts";
+import { runPinnedHostCommand } from "./sandbox/run-host-command.ts";
 
 const REQUIREMENT =
   "The run action requires a Linux runner with passwordless sudo for the isolation setup itself " +

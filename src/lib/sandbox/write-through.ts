@@ -1,5 +1,5 @@
-import { lstatSync, readlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { lstatSync, readlinkSync } from "node:fs";
 import { dirname, join, isAbsolute, normalize } from "node:path";
 
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";

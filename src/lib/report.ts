@@ -7,16 +7,17 @@ import { createDocker, type Docker } from "#core/lib/docker/client.ts";
 import { readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
 import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
 import { readActionVersion as readImageActionVersion } from "#core/lib/report/action-version.ts";
-import { describeReportOutcomes } from "#core/lib/report/outcome/report-outcomes.ts";
-import { renderReportMarkdown } from "#core/lib/report/render/render-report-markdown.ts";
-import { truncateForStepSummary } from "#core/lib/report/render/truncate-communication-details.ts";
-import { buildUniversalReportData } from "#core/lib/report/build/universal.ts";
 import { buildInspectReportData } from "#core/lib/report/build/inspect.ts";
+import { buildUniversalReportData } from "#core/lib/report/build/universal.ts";
 import {
   applyOutcomeAnnotations,
   type OutcomeEmission,
 } from "#core/lib/report/outcome/annotate.ts";
+import { describeReportOutcomes } from "#core/lib/report/outcome/report-outcomes.ts";
+import { renderReportMarkdown } from "#core/lib/report/render/render-report-markdown.ts";
+import { truncateForStepSummary } from "#core/lib/report/render/truncate-communication-details.ts";
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
+
 import type { ProxyEngine } from "./engine.ts";
 import { hostCommand } from "./sandbox/pinned-commands.ts";
 

@@ -8,8 +8,6 @@
  * be forced read-only here, which is what `writablePaths` carries across.
  */
 
-import type { HostMount } from "./types.ts";
-import { isAtOrUnder } from "./paths.ts";
 // Sensitive /proc paths masked with /dev/null. runc's own `runc spec`
 // default already masks /proc/kcore, /proc/keys, and /proc/timer_list
 // (among others) and leaves /proc/sysrq-trigger merely read-only.
@@ -21,6 +19,7 @@ import { isAtOrUnder } from "./paths.ts";
 // dev/build-test-bundle.sh (a bash/jq stand-in for this same function, used
 // by the Mac dev loop) reads the same list instead of hand-duplicating it.
 import EXTRA_MASKED_PROC_PATHS from "../../../scripts/extra-masked-proc-paths.json" with { type: "json" };
+import { isAtOrUnder } from "./paths.ts";
 // A read-only bind mount doesn't stop connect(2) on a still-live socket;
 // masking replaces the path with /dev/null in this mount namespace, so
 // there's no socket left to connect to. See identity.ts for the
@@ -30,6 +29,7 @@ import {
   rootlessRuntimeSocketPaths,
   perUserRuntimeDirs,
 } from "./runtime-sockets.ts";
+import type { HostMount } from "./types.ts";
 
 // `ip netns add` leaves its name as a real file under the host's own /run,
 // which the rootfs rbind carries into every sandbox, so a step could list

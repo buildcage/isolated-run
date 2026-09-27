@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+import { SandboxError } from "../errors.ts";
+import { WritablePathConflictError } from "./paths.ts";
 import {
   assembleBundle,
   runSandboxedCommand,
   type RunSandboxedCommandDeps,
   type RunSandboxedCommandOptions,
 } from "./sandboxed-command.ts";
-import { SandboxError } from "../errors.ts";
-import { WritablePathConflictError } from "./paths.ts";
 
 // Every collaborator is tested in its own file; what is left to check here is
 // the order they run in, what runSandboxedCommand hands each one, and which
