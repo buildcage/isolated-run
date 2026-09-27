@@ -430,20 +430,22 @@ mechanisms, with a diagram of what runs where.
 
 ## CA trust and compatibility
 
-`proxy_engine: inspect` terminates TLS and re-signs it with a CA generated for that step, so the
-command has to trust that CA. The CA, and where relevant an augmented copy of the system CA store,
-is mounted over the sandbox's own view of those paths, and the mount goes away with the sandbox when
-the step ends. Where the command's environment leaves them unset, Buildcage also points the
-variables the common toolchains read at a store that holds the CA: `NODE_EXTRA_CA_CERTS`,
-`DENO_CERT`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `PIP_CERT`. `CURL_CA_BUNDLE` is left unset,
-since curl reads the system store already. A JVM already on the runner reads none of those, only its
-own keystore, so the CA is added to a copy of `$JAVA_HOME/lib/security/cacerts` (and `jssecacerts`
-when present) with the runner's own `keytool` and mounted over it, letting `mvn`/`gradle`/`java`
-reach the proxy without `proxy_engine: universal`. Chromium, including the `chrome-headless-shell`
-that Puppeteer, Playwright and Remotion download, reads neither the store nor any variable, only its
-compiled-in root store and the NSS database in `$HOME`, so that database's `pkcs11.txt` gains, for
-the step, a read-only slot on a database holding only the CA. The database itself stays the
-runner's own, with whatever the command writes to it.
+`proxy_engine: inspect` terminates TLS and re-signs it with a CA generated for that step, whose
+private key never leaves the step's proxy container
+([details](docs/security.md#the-ca-and-its-private-key)), so the command has to trust that CA. The
+CA, and where relevant an augmented copy of the system CA store, is mounted over the sandbox's own
+view of those paths, and the mount goes away with the sandbox when the step ends. Where the
+command's environment leaves them unset, Buildcage also points the variables the common toolchains
+read at a store that holds the CA: `NODE_EXTRA_CA_CERTS`, `DENO_CERT`, `SSL_CERT_FILE`,
+`REQUESTS_CA_BUNDLE` and `PIP_CERT`. `CURL_CA_BUNDLE` is left unset, since curl reads the system
+store already. A JVM already on the runner reads none of those, only its own keystore, so the CA is
+added to a copy of `$JAVA_HOME/lib/security/cacerts` (and `jssecacerts` when present) with the
+runner's own `keytool` and mounted over it, letting `mvn`/`gradle`/`java` reach the proxy without
+`proxy_engine: universal`. Chromium, including the `chrome-headless-shell` that Puppeteer,
+Playwright and Remotion download, reads neither the store nor any variable, only its compiled-in
+root store and the NSS database in `$HOME`, so that database's `pkcs11.txt` gains, for the step, a
+read-only slot on a database holding only the CA. The database itself stays the runner's own, with
+whatever the command writes to it.
 
 The full table is in [Reference](./docs/reference.md#ca-trust-variables). What this cannot cover is
 in [Limitations](#limitations), below.
