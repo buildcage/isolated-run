@@ -374,7 +374,7 @@ function parseEphemeralRoots(raw) {
 	if (Array.isArray(parsed)) return parsed.every((p) => typeof p == "string" && (0, node_path.isAbsolute)(p) && !/[\x00-\x1f\x7f]/.test(p)) ? parsed : void 0;
 }
 //#endregion
-//#region src/lib/sandbox/ca-trust.ts
+//#region src/lib/sandbox/nss-db.ts
 const SYSTEM_CA_CANDIDATES = [
 	"/etc/ssl/certs/ca-certificates.crt",
 	"/etc/pki/tls/certs/ca-bundle.crt",

@@ -23,19 +23,19 @@ details.
 
 `run` is the only required input.
 
-| Input                             | Default      | Description                                                                                                                   |
-| --------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `run`                             | required     | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed). |
-| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                               |
-| `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                |
-| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                       |
-| `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a write to Chromium's NSS database into a warning. See [Chromium](#chromium).                   |
-| `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                         |
-| `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                      |
-| `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                     |
-| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                |
-| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact; both engines produce one. See [Traffic artifact](#traffic-artifact).          |
-| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, in days; empty uses the repository's own default                                              |
+| Input                             | Default      | Description                                                                                                                                        |
+| --------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`                             | required     | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed).                      |
+| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                                                    |
+| `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                                     |
+| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                                            |
+| `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database, or a write to a covered one, into a warning. See [Chromium](#chromium). |
+| `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                                              |
+| `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                                           |
+| `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                                          |
+| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                                     |
+| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact; both engines produce one. See [Traffic artifact](#traffic-artifact).                               |
+| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, in days; empty uses the repository's own default                                                                   |
 
 ### Rule inputs
 
@@ -636,15 +636,28 @@ that already exists rather than creating one. Both are in
 
 ### Chromium
 
-Chromium reads none of these, only its compiled-in root store and the NSS database in `$HOME`. A
-copy of a database holding only this CA is mounted read-write over `~/.pki/nssdb`, which every
-Chromium reads when it exists, even beside `~/.local/share/pki/nssdb`. The runner's own database is
-covered, never read or written. Missing directories are created 0700 and removed after the step if
-left empty. A symlink or non-directory on the path leaves the database unmounted, with a warning.
+Chromium reads none of these, only its compiled-in root store and the NSS database in `$HOME`.
+Every Chromium reads `~/.pki/nssdb` when it exists, and M146 and later read
+`~/.local/share/pki/nssdb` when it does not, so the database is the first of those that exists, or a
+new `~/.pki/nssdb` when neither does. It is copied into the step's scratch directory, the copy's
+`pkcs11.txt` gains a second, read-only softoken slot on a database holding only this CA, mounted at
+`/dev/buildcage-nssdb`, and the copy is mounted read-write over the database. NSS loads every module
+`pkcs11.txt` names, so Chromium trusts the CA through that slot while the runner's own certificates,
+keys and writes stay in its own database.
 
-A command that writes to the copy (`certutil -A`, `pk12util -i`) fails the step, naming the database
-and pointing at `fail_on_ca_residue`. With `fail_on_ca_residue: false` it only warns, and the write is
-discarded.
+After the command, if it changed the copy, the slot's bytes are taken back out of `pkcs11.txt` and
+the copy is written back over the database, where `filesystem_mode` keeps writes to that path: always
+under `persistent`, and under `ephemeral` only below a `write_through:` entry. Elsewhere the change is
+discarded. A copy that carries the CA itself, which a command changing the CA's trust (`certutil -M`)
+leaves, is not written back: it fails the step, naming the database and pointing at
+`fail_on_ca_residue`, or only warns under `fail_on_ca_residue: false`, which writes it back. Nor is a
+copy whose database path no longer resolves where it did.
+
+A database the runner user cannot write, or one too large to copy, is covered instead: a copy of a
+database holding only this CA is mounted over it, and a command that writes to that copy fails the
+step the same way, or only warns, discarding the write. Missing directories are created 0700 and
+removed after the step if left empty. A symlink or non-directory on the path leaves the database
+unmounted, with a warning.
 
 ## `write_through` paths
 

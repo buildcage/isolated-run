@@ -4,11 +4,14 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,15 +19,30 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  NSS_CA_DB_DESTINATION,
+  NSS_SLOT,
+  appendNssSlot,
+  certificateDer,
   nssDbChange,
-  nssDbMount,
+  nssDbMounts,
   planNssDb,
   prepareNssDb,
   removeNssDbDirs,
+  removeNssSlot,
+  settleNssDbSlot,
   type NssDbDeps,
+  type NssDbFiles,
+  type NssDbSlot,
 } from "./nss-db.ts";
 
 const CONTAINER = "buildcage-proxy-deadbeef";
+
+// A real certificate's worth of base64; only its DER is looked for.
+const CA_DER = Buffer.from("0\x82\x01\x0aTHE-PROXY-CA-DER-BYTES", "latin1");
+const CA_PEM =
+  "-----BEGIN CERTIFICATE-----\n" +
+  CA_DER.toString("base64").replace(/(.{64})/g, "$1\n") +
+  "\n-----END CERTIFICATE-----\n";
 
 // A real directory per test, since which directories get made and removed is
 // what is under test.
@@ -41,9 +59,9 @@ beforeEach(() => {
   mkdirSync(home);
   mkdirSync(scratch);
   mkdirSync(template);
-  writeFileSync(join(template, "cert9.db"), "CERT9-WITH-THE-PROXY-CA");
-  writeFileSync(join(template, "key4.db"), "KEY4-EMPTY");
-  writeFileSync(join(template, "pkcs11.txt"), "library=\n");
+  writeFileSync(join(template, "cert9.db"), "CERT9-WITH-THE-PROXY-CA", { mode: 0o600 });
+  writeFileSync(join(template, "key4.db"), "KEY4-EMPTY", { mode: 0o600 });
+  writeFileSync(join(template, "pkcs11.txt"), "library=\n", { mode: 0o600 });
 });
 
 afterEach(() => {
@@ -64,27 +82,59 @@ function fakeDocker(): { deps: NssDbDeps; calls: string[][] } {
   };
 }
 
+/** The runner's own legacy database, holding this pkcs11.txt. */
+function ownDb(pkcs11 = "library=\nname=internal\n\n"): string {
+  const dir = join(home, ".pki/nssdb");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "cert9.db"), "THE RUNNER'S OWN");
+  writeFileSync(join(dir, "pkcs11.txt"), pkcs11);
+  return dir;
+}
+
+function mode(path: string): number {
+  return statSync(path).mode & 0o777;
+}
+
+function prepareSlotted(deps: NssDbDeps = {}): NssDbFiles & { slot: NssDbSlot } {
+  const files = prepareNssDb(CONTAINER, scratch, home, { ...fakeDocker().deps, ...deps })!;
+  expect(files.slot).toBeDefined();
+  return files as NssDbFiles & { slot: NssDbSlot };
+}
+
 describe("planNssDb", () => {
-  it("takes ~/.pki/nssdb and every directory missing on the way", () => {
+  it("takes a new ~/.pki/nssdb and every directory missing on the way", () => {
     expect(planNssDb(home)).toStrictEqual({
       destination: join(home, ".pki/nssdb"),
       missing: [join(home, ".pki"), join(home, ".pki/nssdb")],
     });
   });
 
-  it("takes ~/.pki/nssdb over an existing XDG database", () => {
+  it("takes an XDG database when there is no ~/.pki/nssdb", () => {
     mkdirSync(join(home, ".local/share/pki/nssdb"), { recursive: true });
 
     expect(planNssDb(home)).toStrictEqual({
-      destination: join(home, ".pki/nssdb"),
-      missing: [join(home, ".pki"), join(home, ".pki/nssdb")],
+      destination: join(home, ".local/share/pki/nssdb"),
+      missing: [],
     });
   });
 
-  it("creates nothing when it is already there", () => {
+  it("takes ~/.pki/nssdb over an XDG database when both are there", () => {
     mkdirSync(join(home, ".pki/nssdb"), { recursive: true });
+    mkdirSync(join(home, ".local/share/pki/nssdb"), { recursive: true });
 
     expect(planNssDb(home)).toStrictEqual({ destination: join(home, ".pki/nssdb"), missing: [] });
+  });
+
+  it.each([
+    ["only partly there", () => mkdirSync(join(home, ".local/share"), { recursive: true })],
+    ["behind a symlink", () => symlinkSync("/etc", join(home, ".local"))],
+  ])("passes over an XDG path %s", (_label, arrange) => {
+    arrange();
+
+    expect(planNssDb(home)).toStrictEqual({
+      destination: join(home, ".pki/nssdb"),
+      missing: [join(home, ".pki"), join(home, ".pki/nssdb")],
+    });
   });
 
   it("refuses a symlink on the way", () => {
@@ -102,36 +152,107 @@ describe("planNssDb", () => {
 });
 
 describe("prepareNssDb", () => {
-  it("extracts the template, copies it, and makes the directories to mount it over", () => {
+  it("gives a new database the slot, and makes the directories to mount it over", () => {
     const { deps, calls } = fakeDocker();
 
-    const files = prepareNssDb(CONTAINER, scratch, home, deps);
+    const files = prepareNssDb(CONTAINER, scratch, home, deps)!;
 
     expect(calls).toStrictEqual([
       ["cp", `${CONTAINER}:/opt/buildcage/nssdb`, join(scratch, "nssdb-template")],
     ]);
-    expect(files).toStrictEqual({
+    expect(files).toMatchObject({
       path: join(scratch, "nssdb"),
       template: join(scratch, "nssdb-template"),
       destination: join(home, ".pki/nssdb"),
       createdDirs: [join(home, ".pki"), join(home, ".pki/nssdb")],
+      slot: { caDb: join(scratch, "nssdb-ca"), appended: NSS_SLOT, hadPkcs11: false },
     });
-    expect(readdirSync(join(scratch, "nssdb")).sort()).toStrictEqual([
-      "cert9.db",
-      "key4.db",
-      "pkcs11.txt",
-    ]);
-    for (const dir of files!.createdDirs) {
-      expect(statSync(dir).mode & 0o777).toBe(0o700);
+    expect(readdirSync(files.path)).toStrictEqual(["pkcs11.txt"]);
+    expect(readFileSync(join(files.path, "pkcs11.txt"), "utf8")).toBe(NSS_SLOT);
+    expect(mode(join(files.path, "pkcs11.txt"))).toBe(0o600);
+    expect(mode(files.path)).toBe(0o700);
+    expect(mode(files.slot!.caDb)).toBe(0o755);
+    for (const name of ["cert9.db", "key4.db", "pkcs11.txt"]) {
+      expect(mode(join(files.slot!.caDb, name))).toBe(0o644);
+    }
+    for (const dir of files.createdDirs) {
+      expect(mode(dir)).toBe(0o700);
     }
   });
 
-  it("creates nothing for a database that is already there", () => {
-    mkdirSync(join(home, ".pki/nssdb"), { recursive: true });
+  it("gives the runner's own database the slot, in a copy of it", () => {
+    ownDb();
 
-    expect(prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps)?.createdDirs).toStrictEqual(
-      [],
+    const files = prepareSlotted();
+
+    expect(files.createdDirs).toStrictEqual([]);
+    expect(files.slot.hadPkcs11).toBe(true);
+    expect(readFileSync(join(files.path, "cert9.db"), "utf8")).toBe("THE RUNNER'S OWN");
+    expect(readFileSync(join(files.path, "pkcs11.txt"), "utf8")).toBe(
+      `library=\nname=internal\n\n${NSS_SLOT}`,
     );
+  });
+
+  it.each([
+    ["the directory", (dir: string) => chmodSync(dir, 0o555), "the runner user cannot write"],
+    [
+      "cert9.db",
+      (dir: string) => chmodSync(join(dir, "cert9.db"), 0o444),
+      "the runner user cannot write",
+    ],
+    [
+      "a cert9.db that is a symlink",
+      (dir: string) => {
+        rmSync(join(dir, "cert9.db"));
+        symlinkSync("/etc/passwd", join(dir, "cert9.db"));
+      },
+      "is a symlink",
+    ],
+    [
+      "too many files",
+      (dir: string) => {
+        for (let i = 0; i < 513; i++) writeFileSync(join(dir, `f${i}`), "");
+      },
+      "too large to copy",
+    ],
+    [
+      "too many bytes",
+      (dir: string) => {
+        writeFileSync(join(dir, "big.db"), "");
+        truncateSync(join(dir, "big.db"), (20 << 20) + 1);
+      },
+      "too large to copy",
+    ],
+  ])("covers the database when it cannot take the slot: %s", (_label, arrange, reason) => {
+    const dir = ownDb();
+    arrange(dir);
+    const info = vi.fn();
+
+    const files = prepareNssDb(CONTAINER, scratch, home, { ...fakeDocker().deps, info })!;
+    chmodSync(dir, 0o755);
+
+    expect(files.slot).toBeUndefined();
+    expect(readdirSync(files.path).sort()).toStrictEqual(["cert9.db", "key4.db", "pkcs11.txt"]);
+    expect(info).toHaveBeenCalledWith(expect.stringContaining(reason));
+    expect(info).toHaveBeenCalledWith(expect.stringContaining("is covered for the command"));
+  });
+
+  it("covers the database when the slot cannot be added to its copy", () => {
+    ownDb();
+    const info = vi.fn();
+    const { deps } = fakeDocker();
+    let copies = 0;
+    const copyDir = (source: string, destination: string) => {
+      // The CA database copies, the runner's database does not.
+      if (++copies === 2) throw new Error("EIO");
+      cpSync(source, destination, { recursive: true });
+    };
+
+    const files = prepareNssDb(CONTAINER, scratch, home, { ...deps, copyDir, info })!;
+
+    expect(files.slot).toBeUndefined();
+    expect(info).toHaveBeenCalledWith(expect.stringContaining("could not be added (EIO)"));
+    expect(readFileSync(join(files.path, "cert9.db"), "utf8")).toBe("CERT9-WITH-THE-PROXY-CA");
   });
 
   it.each([
@@ -181,17 +302,246 @@ describe("prepareNssDb", () => {
   });
 });
 
+describe("appendNssSlot", () => {
+  it.each([
+    ["missing", undefined, ""],
+    ["empty", "", ""],
+    ["a lone newline", "\n", ""],
+    ["ending in a blank line", "library=\n\n", ""],
+    ["ending in a newline", "library=\n", "\n"],
+    ["ending mid-line", "library=", "\n\n"],
+  ])("adds the slot as an entry of its own to a pkcs11.txt %s", (_label, original, separator) => {
+    const path = join(root, "pkcs11.txt");
+    if (original !== undefined) writeFileSync(path, original);
+
+    expect(appendNssSlot(path)).toBe(separator + NSS_SLOT);
+    expect(readFileSync(path, "utf8")).toBe((original ?? "") + separator + NSS_SLOT);
+  });
+
+  it("refuses a symlink", () => {
+    const path = join(root, "pkcs11.txt");
+    symlinkSync(join(root, "elsewhere"), path);
+
+    expect(() => appendNssSlot(path)).toThrow(/ELOOP/);
+    expect(existsSync(join(root, "elsewhere"))).toBe(false);
+  });
+});
+
+describe("removeNssSlot", () => {
+  const path = () => join(root, "pkcs11.txt");
+
+  it.each([
+    ["where it was appended", `library=\n\n${NSS_SLOT}`, "\n" + NSS_SLOT, "library=\n"],
+    [
+      "with a module added after it",
+      `library=\n\n${NSS_SLOT}library=x\n\n`,
+      "\n" + NSS_SLOT,
+      "library=\nlibrary=x\n\n",
+    ],
+    ["without the separator it came with", `library=${NSS_SLOT}`, "\n" + NSS_SLOT, "library="],
+    ["not at all, when the command took it out", "library=\n", "\n" + NSS_SLOT, "library=\n"],
+  ])("takes the slot out %s", (_label, content, appended, want) => {
+    writeFileSync(path(), content);
+
+    removeNssSlot(path(), appended, false);
+
+    expect(readFileSync(path(), "utf8")).toBe(want);
+  });
+
+  it("removes a pkcs11.txt it created that holds nothing else", () => {
+    writeFileSync(path(), NSS_SLOT);
+
+    removeNssSlot(path(), NSS_SLOT, true);
+
+    expect(existsSync(path())).toBe(false);
+  });
+
+  it("keeps a pkcs11.txt the database had, even emptied", () => {
+    writeFileSync(path(), NSS_SLOT);
+
+    removeNssSlot(path(), NSS_SLOT, false);
+
+    expect(readFileSync(path(), "utf8")).toBe("");
+  });
+
+  it.each([
+    ["gone", () => {}],
+    ["a symlink", () => symlinkSync(join(root, "elsewhere"), path())],
+    ["a directory", () => mkdirSync(path())],
+  ])("leaves a pkcs11.txt that is %s", (_label, arrange) => {
+    arrange();
+
+    expect(() => removeNssSlot(path(), NSS_SLOT, true)).not.toThrow();
+  });
+
+  it("leaves something that opens but is not a file", () => {
+    expect(() => removeNssSlot("/dev/null", NSS_SLOT, true)).not.toThrow();
+  });
+
+  it("reports a pkcs11.txt it cannot open", () => {
+    writeFileSync(path(), NSS_SLOT, { mode: 0 });
+
+    expect(() => removeNssSlot(path(), NSS_SLOT, true)).toThrow(/EACCES/);
+  });
+
+  it("refuses a pkcs11.txt too large to read", () => {
+    writeFileSync(path(), "");
+    truncateSync(path(), (1 << 20) + 1);
+
+    expect(() => removeNssSlot(path(), NSS_SLOT, true)).toThrow(/too large/);
+  });
+});
+
+describe("certificateDer", () => {
+  it("decodes the first certificate", () => {
+    expect(certificateDer(CA_PEM).equals(CA_DER)).toBe(true);
+  });
+
+  it("is empty for text with no certificate", () => {
+    expect(certificateDer("nothing here")).toHaveLength(0);
+  });
+});
+
+describe("settleNssDbSlot", () => {
+  const settle = (
+    files: NssDbFiles & { slot: NssDbSlot },
+    overrides: Partial<Parameters<typeof settleNssDbSlot>[1]> = {},
+  ) => settleNssDbSlot(files, { persist: true, caPem: CA_PEM, onResidue: vi.fn(), ...overrides });
+
+  it("leaves the database alone when the command only read it", () => {
+    const dir = ownDb();
+    symlinkSync("cert9.db", join(dir, "link"));
+    mkdirSync(join(dir, "sub"));
+    const files = prepareSlotted();
+
+    expect(settle(files)).toBe("unchanged");
+    expect(readFileSync(join(dir, "pkcs11.txt"), "utf8")).toBe("library=\nname=internal\n\n");
+  });
+
+  it("writes back what the command changed, less the slot", () => {
+    const dir = ownDb();
+    writeFileSync(join(dir, "gone.db"), "REMOVED BY THE COMMAND");
+    symlinkSync("cert9.db", join(dir, "link"));
+    const files = prepareSlotted();
+    writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
+    rmSync(join(files.path, "gone.db"));
+
+    expect(settle(files)).toBe("written");
+    expect(readFileSync(join(dir, "cert9.db"), "utf8")).toBe("WRITTEN BY THE COMMAND");
+    expect(readFileSync(join(dir, "pkcs11.txt"), "utf8")).toBe("library=\nname=internal\n\n");
+    expect(existsSync(join(dir, "gone.db"))).toBe(false);
+    expect(readlinkSync(join(dir, "link"))).toBe("cert9.db");
+  });
+
+  it("writes back a database the command created, without the pkcs11.txt that held the slot", () => {
+    const files = prepareSlotted();
+    writeFileSync(join(files.path, "cert9.db"), "CREATED BY CHROMIUM");
+
+    expect(settle(files)).toBe("written");
+    expect(readdirSync(files.destination)).toStrictEqual(["cert9.db"]);
+  });
+
+  it.each([
+    [
+      "a symlink retargeted",
+      (dir: string) => {
+        rmSync(join(dir, "link"));
+        symlinkSync("key4.db", join(dir, "link"));
+      },
+    ],
+    [
+      "a directory where a symlink was",
+      (dir: string) => {
+        rmSync(join(dir, "link"));
+        mkdirSync(join(dir, "link"));
+      },
+    ],
+    [
+      "a file renamed",
+      (dir: string) => {
+        cpSync(join(dir, "cert9.db"), join(dir, "cert8.db"));
+        rmSync(join(dir, "cert9.db"));
+      },
+    ],
+    ["a file it cannot read back", (dir: string) => chmodSync(join(dir, "cert9.db"), 0)],
+  ])("counts %s as a change", (_label, change) => {
+    const dir = ownDb();
+    symlinkSync("cert9.db", join(dir, "link"));
+    const files = prepareSlotted();
+    change(files.path);
+
+    expect(settle(files, { persist: false })).toBe("discarded");
+    expect(readlinkSync(join(dir, "link"))).toBe("cert9.db");
+  });
+
+  it("discards what the command wrote where the filesystem mode discards writes", () => {
+    const dir = ownDb();
+    const files = prepareSlotted();
+    writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
+
+    expect(settle(files, { persist: false })).toBe("discarded");
+    expect(readFileSync(join(dir, "cert9.db"), "utf8")).toBe("THE RUNNER'S OWN");
+  });
+
+  it("reports a copy of the CA, and writes nothing back when that stops it", () => {
+    const dir = ownDb();
+    const files = prepareSlotted();
+    writeFileSync(join(files.path, "cert9.db"), Buffer.concat([Buffer.from("SQLite\0"), CA_DER]));
+    const onResidue = vi.fn(() => {
+      throw new Error("residue");
+    });
+
+    expect(() => settle(files, { onResidue })).toThrow("residue");
+    expect(onResidue).toHaveBeenCalledWith(
+      `the command copied the proxy CA into the NSS database at ${dir} (cert9.db)`,
+    );
+    expect(readFileSync(join(dir, "cert9.db"), "utf8")).toBe("THE RUNNER'S OWN");
+  });
+
+  it("writes a copy of the CA back when the residue is only warned about", () => {
+    const dir = ownDb();
+    const files = prepareSlotted();
+    writeFileSync(join(files.path, "cert9.db"), CA_DER);
+    const onResidue = vi.fn();
+
+    expect(settle(files, { onResidue })).toBe("written");
+    expect(onResidue).toHaveBeenCalledOnce();
+    expect(readFileSync(join(dir, "cert9.db")).equals(CA_DER)).toBe(true);
+  });
+
+  it.each([
+    ["resolves elsewhere", () => "/somewhere/else"],
+    [
+      "no longer resolves",
+      () => {
+        throw new Error("ENOENT");
+      },
+    ],
+  ])("writes nothing back to a database that %s", (_label, realpath) => {
+    const dir = ownDb();
+    const files = prepareSlotted();
+    writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
+
+    expect(() => settle(files, { realpath })).toThrow(/no longer resolves to itself/);
+    expect(readFileSync(join(dir, "cert9.db"), "utf8")).toBe("THE RUNNER'S OWN");
+  });
+});
+
 describe("nssDbChange", () => {
-  function prepared() {
-    return prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps)!;
+  function covered() {
+    chmodSync(ownDb(), 0o555);
+    const files = prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps)!;
+    chmodSync(files.destination, 0o755);
+    expect(files.slot).toBeUndefined();
+    return files;
   }
 
   it("finds nothing when the command only read it", () => {
-    expect(nssDbChange(prepared())).toBeUndefined();
+    expect(nssDbChange(covered())).toBeUndefined();
   });
 
   it("finds nothing when only the permissions changed", () => {
-    const files = prepared();
+    const files = covered();
     chmodSync(join(files.path, "cert9.db"), 0o400);
 
     expect(nssDbChange(files)).toBeUndefined();
@@ -210,7 +560,7 @@ describe("nssDbChange", () => {
     ],
     ["removed with its directory", (dir: string) => rmSync(dir, { recursive: true })],
   ])("names the database when a file was %s", (_label, change) => {
-    const files = prepared();
+    const files = covered();
     change(files.path);
 
     expect(nssDbChange(files)).toContain(`changed the NSS database at ${join(home, ".pki/nssdb")}`);
@@ -229,20 +579,31 @@ describe("removeNssDbDirs", () => {
   });
 });
 
-describe("nssDbMount", () => {
-  it("mounts the copy read-write over the database", () => {
-    expect(
-      nssDbMount({
-        path: "/s/nssdb",
-        template: "/s/t",
-        destination: "/h/.pki/nssdb",
-        createdDirs: [],
-      }),
-    ).toStrictEqual({
-      destination: "/h/.pki/nssdb",
-      type: "none",
-      source: "/s/nssdb",
-      options: ["rbind", "rw"],
-    });
+describe("nssDbMounts", () => {
+  const COVER = {
+    path: "/s/nssdb",
+    template: "/s/t",
+    destination: "/h/.pki/nssdb",
+    createdDirs: [],
+  };
+
+  it("mounts a covering copy read-write over the database", () => {
+    expect(nssDbMounts(COVER)).toStrictEqual([
+      { destination: "/h/.pki/nssdb", type: "none", source: "/s/nssdb", options: ["rbind", "rw"] },
+    ]);
+  });
+
+  it("mounts the CA-only database read-only beside a copy given the slot", () => {
+    const slot = { caDb: "/s/ca", appended: NSS_SLOT, hadPkcs11: true, snapshot: new Map() };
+
+    expect(nssDbMounts({ ...COVER, slot })).toStrictEqual([
+      { destination: "/h/.pki/nssdb", type: "none", source: "/s/nssdb", options: ["rbind", "rw"] },
+      {
+        destination: NSS_CA_DB_DESTINATION,
+        type: "none",
+        source: "/s/ca",
+        options: ["rbind", "ro", "nosuid", "nodev", "noexec"],
+      },
+    ]);
   });
 });

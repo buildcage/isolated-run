@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 import type { MountEntry } from "./types.ts";
 import { hostCommand } from "./pinned-commands.ts";
-import { nssDbMount, type NssDbFiles } from "./nss-db.ts";
+import { nssDbMounts, type NssDbFiles } from "./nss-db.ts";
 
 /**
  * CA trust for the inspect engine, adapted for this sandbox's rootfs being
@@ -364,7 +364,7 @@ export function caTrustAdditions(files: CaTrustFiles, env: NodeJS.ProcessEnv): C
   }
 
   // Chromium reads no variable either, only the NSS database in $HOME.
-  if (files.nssDb) mounts.push(nssDbMount(files.nssDb));
+  if (files.nssDb) mounts.push(...nssDbMounts(files.nssDb));
 
   return { mounts, env: extraEnv };
 }
