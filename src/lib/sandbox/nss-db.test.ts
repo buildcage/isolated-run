@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   cpSync,
@@ -223,6 +224,11 @@ describe("prepareNssDb", () => {
       },
       "too large to copy",
     ],
+    [
+      "a subdirectory it cannot read",
+      (dir: string) => mkdirSync(join(dir, "sub"), { mode: 0 }),
+      "cannot be read through (EACCES",
+    ],
   ])("covers the database when it cannot take the slot: %s", (_label, arrange, reason) => {
     const dir = ownDb();
     arrange(dir);
@@ -336,7 +342,13 @@ describe("removeNssSlot", () => {
       "with a module added after it",
       `library=\n\n${NSS_SLOT}library=x\n\n`,
       "\n" + NSS_SLOT,
-      "library=\nlibrary=x\n\n",
+      "library=\n\nlibrary=x\n\n",
+    ],
+    [
+      "with a module added after it, to a file that ended mid-line",
+      `library=\n\n${NSS_SLOT}library=x\n\n`,
+      "\n\n" + NSS_SLOT,
+      "library=\n\nlibrary=x\n\n",
     ],
     ["without the separator it came with", `library=${NSS_SLOT}`, "\n" + NSS_SLOT, "library="],
     ["not at all, when the command took it out", "library=\n", "\n" + NSS_SLOT, "library=\n"],
@@ -464,6 +476,7 @@ describe("settleNssDbSlot", () => {
       },
     ],
     ["a file it cannot read back", (dir: string) => chmodSync(join(dir, "cert9.db"), 0)],
+    ["a FIFO, without reading it", (dir: string) => execFileSync("mkfifo", [join(dir, "pipe")])],
   ])("counts %s as a change", (_label, change) => {
     const dir = ownDb();
     symlinkSync("cert9.db", join(dir, "link"));
@@ -507,6 +520,20 @@ describe("settleNssDbSlot", () => {
     expect(settle(files, { onResidue })).toBe("written");
     expect(onResidue).toHaveBeenCalledOnce();
     expect(readFileSync(join(dir, "cert9.db")).equals(CA_DER)).toBe(true);
+  });
+
+  it("leaves the database as it was when the copy back fails partway", () => {
+    const dir = ownDb();
+    const files = prepareSlotted();
+    writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
+    const copyDir = (source: string, destination: string) => {
+      cpSync(join(source, "cert9.db"), join(destination, "cert9.db"));
+      throw new Error("ENOSPC");
+    };
+
+    expect(() => settle(files, { copyDir })).toThrow("ENOSPC");
+    expect(readdirSync(dir).sort()).toStrictEqual(["cert9.db", "pkcs11.txt"]);
+    expect(readFileSync(join(dir, "cert9.db"), "utf8")).toBe("THE RUNNER'S OWN");
   });
 
   it.each([

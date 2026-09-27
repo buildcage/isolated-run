@@ -8,11 +8,13 @@ import {
   fstatSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readFileSync,
   readdirSync,
   readlinkSync,
   realpathSync,
+  renameSync,
   rmSync,
   rmdirSync,
   statSync,
@@ -80,8 +82,9 @@ const MAX_MIRROR_FILES = 512;
 const NSS_DB_FILES = ["cert9.db", "key4.db", "pkcs11.txt"];
 
 /** A directory's files by path relative to it: a file's bytes, a symlink's
- *  target, or null for a directory. */
-export type DirSnapshot = Map<string, Buffer | string | null>;
+ *  target, null for a directory, or false for anything else, such as a FIFO,
+ *  which is never read. */
+export type DirSnapshot = Map<string, Buffer | string | null | false>;
 
 export interface NssDbSlot {
   /** The CA-only database, mounted read-only at NSS_CA_DB_DESTINATION. */
@@ -314,12 +317,16 @@ function whyNotSlot(
   }
   let files = 0;
   let bytes = 0;
-  for (const entry of readdirSync(destination, { recursive: true, withFileTypes: true })) {
-    files++;
-    if (entry.isFile()) bytes += statSync(join(entry.parentPath, entry.name)).size;
-    if (files > MAX_MIRROR_FILES || bytes > MAX_MIRROR_BYTES) {
-      return `${destination} is too large to copy`;
+  try {
+    for (const entry of readdirSync(destination, { recursive: true, withFileTypes: true })) {
+      files++;
+      if (entry.isFile()) bytes += statSync(join(entry.parentPath, entry.name)).size;
+      if (files > MAX_MIRROR_FILES || bytes > MAX_MIRROR_BYTES) {
+        return `${destination} is too large to copy`;
+      }
     }
+  } catch (e) {
+    return `${destination} cannot be read through (${errorMessage(e)})`;
   }
   return undefined;
 }
@@ -380,9 +387,10 @@ export function appendNssSlot(path: string): string {
 
 /** Takes back what appendNssSlot added. NSS rewrites pkcs11.txt only by copying
  *  the entries it keeps byte for byte, so the slot is found where it was left
- *  unless the command itself took it out. A pkcs11.txt that is no longer a
- *  file carries no slot. One the injection created that holds nothing else
- *  goes. */
+ *  unless the command itself took it out. The separator goes too only when
+ *  nothing follows the slot: an entry after it would otherwise run into the
+ *  one before. A pkcs11.txt that is no longer a file carries no slot. One the
+ *  injection created is removed once it holds nothing else. */
 export function removeNssSlot(path: string, appended: string, created: boolean): void {
   let fd: number;
   try {
@@ -403,7 +411,7 @@ export function removeNssSlot(path: string, appended: string, created: boolean):
     const content = readFileSync(fd).toString("latin1");
     let cut = appended;
     let i = content.lastIndexOf(cut);
-    if (i < 0) {
+    if (i < 0 || i + cut.length < content.length) {
       cut = NSS_SLOT;
       i = content.lastIndexOf(cut);
     }
@@ -420,7 +428,7 @@ export function removeNssSlot(path: string, appended: string, created: boolean):
   }
 }
 
-/** Every file, symlink and directory under dir, by relative path. */
+/** Everything under dir, by relative path. */
 export function snapshotDir(dir: string): DirSnapshot {
   const snapshot: DirSnapshot = new Map();
   for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
@@ -428,7 +436,8 @@ export function snapshotDir(dir: string): DirSnapshot {
     const rel = relative(dir, path);
     if (entry.isSymbolicLink()) snapshot.set(rel, readlinkSync(path));
     else if (entry.isDirectory()) snapshot.set(rel, null);
-    else snapshot.set(rel, readFileSync(path));
+    else if (entry.isFile()) snapshot.set(rel, readFileSync(path));
+    else snapshot.set(rel, false);
   }
   return snapshot;
 }
@@ -461,6 +470,7 @@ export interface SettleNssDbSlotOptions {
   /** Called with why the write-back would carry the CA; throwing stops it. */
   onResidue: (message: string) => void;
   realpath?: (path: string) => string;
+  copyDir?: (source: string, destination: string) => void;
 }
 
 export type NssDbSlotOutcome = "unchanged" | "discarded" | "written";
@@ -473,7 +483,13 @@ export type NssDbSlotOutcome = "unchanged" | "discarded" | "written";
  */
 export function settleNssDbSlot(
   files: NssDbFiles & { slot: NssDbSlot },
-  { persist, caPem, onResidue, realpath = realpathSync }: SettleNssDbSlotOptions,
+  {
+    persist,
+    caPem,
+    onResidue,
+    realpath = realpathSync,
+    copyDir = defaultCopyDir,
+  }: SettleNssDbSlotOptions,
 ): NssDbSlotOutcome {
   let current: DirSnapshot;
   try {
@@ -506,15 +522,23 @@ export function settleNssDbSlot(
         "database there is not written back",
     );
   }
+  // Copied in beside the database first, so a copy that fails partway leaves
+  // it as it was.
+  const staging = mkdtempSync(join(files.destination, ".buildcage-"));
+  try {
+    copyDir(files.path, staging);
+  } catch (e) {
+    rmSync(staging, { recursive: true, force: true });
+    throw e;
+  }
   for (const name of readdirSync(files.destination)) {
+    if (join(files.destination, name) === staging) continue;
     rmSync(join(files.destination, name), { recursive: true, force: true });
   }
-  cpSync(files.path, files.destination, {
-    recursive: true,
-    force: true,
-    preserveTimestamps: true,
-    verbatimSymlinks: true,
-  });
+  for (const name of readdirSync(staging)) {
+    renameSync(join(staging, name), join(files.destination, name));
+  }
+  rmdirSync(staging);
   return "written";
 }
 

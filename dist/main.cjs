@@ -19213,10 +19213,14 @@ function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess 
 		}
 	}
 	let files = 0, bytes = 0;
-	for (let entry of (0, node_fs.readdirSync)(destination, {
-		recursive: !0,
-		withFileTypes: !0
-	})) if (files++, entry.isFile() && (bytes += (0, node_fs.statSync)((0, node_path.join)(entry.parentPath, entry.name)).size), files > 512 || bytes > 20971520) return `${destination} is too large to copy`;
+	try {
+		for (let entry of (0, node_fs.readdirSync)(destination, {
+			recursive: !0,
+			withFileTypes: !0
+		})) if (files++, entry.isFile() && (bytes += (0, node_fs.statSync)((0, node_path.join)(entry.parentPath, entry.name)).size), files > 512 || bytes > 20971520) return `${destination} is too large to copy`;
+	} catch (e) {
+		return `${destination} cannot be read through (${errorMessage(e)})`;
+	}
 }
 function prepareSlot(dir, files, template, exists, { copyDir = defaultCopyDir }) {
 	let caDb = (0, node_path.join)(dir, "nssdb-ca");
@@ -19260,7 +19264,7 @@ function removeNssSlot(path, appended, created) {
 		if (!info.isFile()) return;
 		if (info.size > 1048576) throw Error(`${path} is ${info.size} bytes, too large to take the proxy CA's slot back out of`);
 		let content = (0, node_fs.readFileSync)(fd).toString("latin1"), cut = appended, i = content.lastIndexOf(cut);
-		if (i < 0 && (cut = NSS_SLOT, i = content.lastIndexOf(cut)), i < 0) return;
+		if ((i < 0 || i + cut.length < content.length) && (cut = NSS_SLOT, i = content.lastIndexOf(cut)), i < 0) return;
 		let kept = content.slice(0, i) + content.slice(i + cut.length);
 		if (created && kept === "") {
 			(0, node_fs.rmSync)(path);
@@ -19278,7 +19282,7 @@ function snapshotDir(dir) {
 		withFileTypes: !0
 	})) {
 		let path = (0, node_path.join)(entry.parentPath, entry.name), rel = (0, node_path.relative)(dir, path);
-		entry.isSymbolicLink() ? snapshot.set(rel, (0, node_fs.readlinkSync)(path)) : entry.isDirectory() ? snapshot.set(rel, null) : snapshot.set(rel, (0, node_fs.readFileSync)(path));
+		entry.isSymbolicLink() ? snapshot.set(rel, (0, node_fs.readlinkSync)(path)) : entry.isDirectory() ? snapshot.set(rel, null) : entry.isFile() ? snapshot.set(rel, (0, node_fs.readFileSync)(path)) : snapshot.set(rel, !1);
 	}
 	return snapshot;
 }
@@ -19297,7 +19301,7 @@ function certificateDer(pem) {
 	let match = /-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/.exec(pem);
 	return Buffer.from(match?.[1]?.replace(/\s+/g, "") ?? "", "base64");
 }
-function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync }) {
+function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync, copyDir = defaultCopyDir }) {
 	let current;
 	try {
 		current = snapshotDir(files.path);
@@ -19316,16 +19320,21 @@ function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.
 		resolved = void 0;
 	}
 	if (resolved !== files.destination) throw Error(`${files.destination} no longer resolves to itself, so what the command wrote to the NSS database there is not written back`);
-	for (let name of (0, node_fs.readdirSync)(files.destination)) (0, node_fs.rmSync)((0, node_path.join)(files.destination, name), {
+	let staging = (0, node_fs.mkdtempSync)((0, node_path.join)(files.destination, ".buildcage-"));
+	try {
+		copyDir(files.path, staging);
+	} catch (e) {
+		throw (0, node_fs.rmSync)(staging, {
+			recursive: !0,
+			force: !0
+		}), e;
+	}
+	for (let name of (0, node_fs.readdirSync)(files.destination)) (0, node_path.join)(files.destination, name) !== staging && (0, node_fs.rmSync)((0, node_path.join)(files.destination, name), {
 		recursive: !0,
 		force: !0
 	});
-	return (0, node_fs.cpSync)(files.path, files.destination, {
-		recursive: !0,
-		force: !0,
-		preserveTimestamps: !0,
-		verbatimSymlinks: !0
-	}), "written";
+	for (let name of (0, node_fs.readdirSync)(staging)) (0, node_fs.renameSync)((0, node_path.join)(staging, name), (0, node_path.join)(files.destination, name));
+	return (0, node_fs.rmdirSync)(staging), "written";
 }
 function nssDbMounts(files) {
 	let mounts = [{
