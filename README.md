@@ -441,8 +441,9 @@ own keystore, so the CA is added to a copy of `$JAVA_HOME/lib/security/cacerts` 
 when present) with the runner's own `keytool` and mounted over it, letting `mvn`/`gradle`/`java`
 reach the proxy without `proxy_engine: universal`. Chromium, including the `chrome-headless-shell`
 that Puppeteer, Playwright and Remotion download, reads neither the store nor any variable, only its
-compiled-in root store and the NSS database in `$HOME`, so a database holding only the CA is mounted
-over that one for the step.
+compiled-in root store and the NSS database in `$HOME`, so that database's `pkcs11.txt` gains, for
+the step, a read-only slot on a database holding only the CA. The database itself stays the
+runner's own, with whatever the command writes to it.
 
 The full table is in [Reference](./docs/reference.md#ca-trust-variables). What this cannot cover is
 in [Limitations](#limitations), below.
@@ -553,12 +554,20 @@ reported as blocked; see
 - A CA-trust variable that is already set is left alone rather than appended to. Appending safely
   would mean resolving the path it points at against the sandbox rootfs without following a symlink
   back out to the host, which this engine does not do yet.
-- Chromium's NSS database is replaced for the step, not added to. Public sites still verify against
-  Chromium's compiled-in root store, and everything else `inspect` re-signs with its own CA, so what
-  is lost is only a private CA or client certificate the runner kept there, and only on an
-  `allowed_tls_rules` or `allowed_ip_rules` passthrough. A command that writes to the database
-  (`certutil -A`, `pk12util -i`) fails the step, since the write cannot be kept;
-  `fail_on_ca_residue: false` turns that into a warning and discards the write.
+- Chromium trusts the CA through a slot added to the NSS database it reads: `~/.pki/nssdb` when it
+  exists, else `~/.local/share/pki/nssdb`, else a new `~/.pki/nssdb`, which Chromium then fills. What
+  the command writes to the database is kept where `filesystem_mode` keeps writes to that path, and
+  discarded where it does not. A database the runner user cannot write cannot take the slot, since
+  Chromium would not open it either. It is covered for the step with one holding only the CA
+  instead: a private CA or client certificate kept there is lost, though only on an
+  `allowed_tls_rules` or `allowed_ip_rules` passthrough, and a command that writes to it fails the
+  step. `fail_on_ca_residue: false` turns that into a warning and discards the write.
+- A command that changes the CA's own trust in the NSS database (`certutil -M`), or exports it and
+  imports it back, copies the CA into the runner's database. Where `filesystem_mode` would keep the
+  write, that fails the step and nothing is written back; `fail_on_ca_residue: false` makes it a
+  warning and writes the copy back. Where the write would be discarded, the copy goes with it. A
+  command cannot remove the database's directory (`rm -rf ~/.pki`) either, since it is a mount point
+  inside the sandbox.
 - The CA is added to a store that already exists, never created. A command whose filesystem has
   nothing resembling a system CA bundle at a well-known path has nothing to add to, which matters
   only to a tool that needs TLS trust for something.

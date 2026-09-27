@@ -1,7 +1,10 @@
 #!/bin/bash
-# chrome-headless-shell must trust the proxy CA through the NSS database the
-# action mounts over ~/.pki/nssdb, leave $HOME as it found it, and fail the step
-# on a write to the database unless fail_on_ca_residue is false.
+# chrome-headless-shell must trust the proxy CA through the slot the action adds
+# to the runner's own NSS database. What the command writes to that database is
+# kept where filesystem_mode keeps writes, below a write_through: entry under
+# ephemeral included, less the slot; a database the runner user cannot write is
+# covered instead, and a write to that, or a copy of the CA left in the
+# runner's own, fails the step unless fail_on_ca_residue is false.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 
@@ -63,6 +66,11 @@ run_step() {
   echo "$OUT" | tail -25
 }
 
+# no_slot <dir>: the database holds nothing of the slot once the step is over.
+no_slot() {
+  ! grep -rqs buildcage "$1"
+}
+
 echo ""
 echo "--- a home with no database ---"
 HOME_A="$TMPDIR/home-a"
@@ -78,11 +86,11 @@ if [ "$RUN_EXIT" = "0" ]; then
 else
   fail "the step failed (exit $RUN_EXIT)"
 fi
-if [ -e "$HOME_A/.pki" ]; then
-  fail "the directories made to mount the database over are still in \$HOME"
-  show_home "$HOME_A"
+if [ -e "$HOME_A/.pki/nssdb/cert9.db" ] && no_slot "$HOME_A/.pki/nssdb"; then
+  pass "the database Chromium created is kept, without the slot"
 else
-  pass "the directories made to mount the database over were taken back"
+  fail "the database Chromium created is missing, or still holds the slot"
+  show_home "$HOME_A"
 fi
 
 echo ""
@@ -93,71 +101,125 @@ run_step "$HOME_B" "
 $SHOW
 $CHECK"
 if [ "$RUN_EXIT" = "0" ]; then
-  pass "trusted the proxy CA beside the runner's own XDG database"
+  pass "trusted the proxy CA through the runner's own XDG database"
 else
   fail "the step failed (exit $RUN_EXIT)"
 fi
-if [ -z "$(ls -A "$HOME_B/.local/share/pki/nssdb")" ] && [ ! -e "$HOME_B/.pki" ]; then
-  pass "the runner's own database is untouched, and ~/.pki was taken back"
+if no_slot "$HOME_B/.local/share/pki/nssdb" && [ ! -e "$HOME_B/.pki" ]; then
+  pass "the XDG database holds no slot, and no ~/.pki was made"
 else
-  fail "the runner's own database changed, or ~/.pki was left behind"
+  fail "the XDG database still holds the slot, or ~/.pki was made"
   show_home "$HOME_B"
-fi
-
-echo ""
-echo "--- a home with its own ~/.pki/nssdb ---"
-HOME_D="$TMPDIR/home-d"
-mkdir -p "$HOME_D/.pki/nssdb"
-run_step "$HOME_D" "
-$SHOW
-$CHECK"
-if [ "$RUN_EXIT" = "0" ]; then
-  pass "trusted the proxy CA over the runner's own ~/.pki/nssdb"
-else
-  fail "the step failed (exit $RUN_EXIT)"
-fi
-if [ -z "$(ls -A "$HOME_D/.pki/nssdb")" ]; then
-  pass "the runner's own database is untouched"
-else
-  fail "the runner's own database changed"
-  show_home "$HOME_D"
 fi
 
 echo ""
 echo "--- a command that writes to the database ---"
 HOME_C="$TMPDIR/home-c"
-mkdir -p "$HOME_C"
-run_step "$HOME_C" "touch \$HOME/.pki/nssdb/written-by-the-command"
-if [ "$RUN_EXIT" != "0" ]; then
-  pass "the step failed"
-else
-  fail "the step succeeded, so the write was dropped silently"
-fi
-if grep -q "changed the NSS database at $HOME_C/.pki/nssdb" <<<"$OUT" &&
-  grep -q "fail_on_ca_residue: false" <<<"$OUT"; then
-  pass "the failure names the database and points at fail_on_ca_residue"
-else
-  fail "the output does not name the database, or does not point at fail_on_ca_residue"
-fi
-
-echo ""
-echo "--- the same command under fail_on_ca_residue: false ---"
-run_step "$HOME_C" "touch \$HOME/.pki/nssdb/written-by-the-command" INPUT_FAIL_ON_CA_RESIDUE=false
+mkdir -p "$HOME_C/.pki/nssdb"
+printf 'library=\nname=the runner'"'"'s own\n' >"$HOME_C/.pki/nssdb/pkcs11.txt"
+run_step "$HOME_C" "
+grep -q buildcage \$HOME/.pki/nssdb/pkcs11.txt
+touch \$HOME/.pki/nssdb/written-by-the-command"
 if [ "$RUN_EXIT" = "0" ]; then
   pass "the step carried on"
 else
   fail "the step failed (exit $RUN_EXIT)"
 fi
-if grep -q "changed the NSS database at $HOME_C/.pki/nssdb.*fail_on_ca_residue is false" <<<"$OUT"; then
-  pass "a warning names the database"
+if [ -e "$HOME_C/.pki/nssdb/written-by-the-command" ] &&
+  [ "$(cat "$HOME_C/.pki/nssdb/pkcs11.txt")" = "$(printf 'library=\nname=the runner'"'"'s own')" ]; then
+  pass "the write reached \$HOME, and pkcs11.txt is as the runner left it"
 else
-  fail "no warning names the database"
-fi
-if [ -e "$HOME_C/.pki" ]; then
-  fail "the write reached \$HOME"
+  fail "the write did not reach \$HOME, or pkcs11.txt changed"
   show_home "$HOME_C"
+fi
+
+echo ""
+echo "--- the same command under filesystem_mode: ephemeral ---"
+HOME_E="$TMPDIR/home-e"
+mkdir -p "$HOME_E"
+run_step "$HOME_E" "touch \$HOME/.pki/nssdb/written-by-the-command" INPUT_FILESYSTEM_MODE=ephemeral
+if [ "$RUN_EXIT" = "0" ]; then
+  pass "the step carried on"
+else
+  fail "the step failed (exit $RUN_EXIT)"
+fi
+if [ -e "$HOME_E/.pki" ]; then
+  fail "the write reached \$HOME"
+  show_home "$HOME_E"
 else
   pass "the write was discarded, and the directories taken back"
+fi
+
+echo ""
+echo "--- the same under filesystem_mode: ephemeral, below a write_through: entry ---"
+HOME_H="$TMPDIR/home-h"
+mkdir -p "$HOME_H/.pki/nssdb"
+printf 'library=\nname=the runner'"'"'s own\n' >"$HOME_H/.pki/nssdb/pkcs11.txt"
+# The module is appended after the slot, as modutil does.
+run_step "$HOME_H" "
+$SHOW
+$CHECK
+touch \$HOME/.pki/nssdb/written-by-the-command
+printf 'library=added.so\nname=added\n\n' >>\$HOME/.pki/nssdb/pkcs11.txt" \
+  INPUT_FILESYSTEM_MODE=ephemeral INPUT_WRITE_THROUGH="$HOME_H/.pki"
+if [ "$RUN_EXIT" = "0" ]; then
+  pass "trusted the proxy CA through the slot under ephemeral"
+else
+  fail "the step failed (exit $RUN_EXIT)"
+fi
+if [ -e "$HOME_H/.pki/nssdb/written-by-the-command" ] &&
+  [ "$(cat "$HOME_H/.pki/nssdb/pkcs11.txt")" = "$(printf 'library=\nname=the runner'"'"'s own\n\nlibrary=added.so\nname=added')" ]; then
+  pass "the write reached \$HOME, and the added module is an entry of its own without the slot"
+else
+  fail "the write did not reach \$HOME, or pkcs11.txt is not the runner's plus the added module"
+  show_home "$HOME_H"
+  cat "$HOME_H/.pki/nssdb/pkcs11.txt"
+fi
+
+echo ""
+echo "--- a command that copies the CA into the database ---"
+HOME_F="$TMPDIR/home-f"
+mkdir -p "$HOME_F/.pki/nssdb"
+run_step "$HOME_F" "cp /dev/buildcage-nssdb/cert9.db \$HOME/.pki/nssdb/copy.db"
+if [ "$RUN_EXIT" != "0" ] && grep -q "copied the proxy CA into the NSS database at $HOME_F/.pki/nssdb" <<<"$OUT" &&
+  grep -q "fail_on_ca_residue: false" <<<"$OUT"; then
+  pass "the step failed, naming the database and pointing at fail_on_ca_residue"
+else
+  fail "the step did not fail on the copy (exit $RUN_EXIT)"
+fi
+if [ -e "$HOME_F/.pki/nssdb/copy.db" ]; then
+  fail "the copy of the CA reached \$HOME"
+else
+  pass "the copy of the CA was not written back"
+fi
+
+echo ""
+echo "--- a database the runner user cannot write ---"
+HOME_G="$TMPDIR/home-g"
+mkdir -p "$HOME_G/.pki/nssdb"
+chmod 555 "$HOME_G/.pki/nssdb"
+run_step "$HOME_G" "
+$SHOW
+$CHECK
+touch \$HOME/.pki/nssdb/written-by-the-command"
+if [ "$RUN_EXIT" != "0" ] && grep -q "changed the NSS database at $HOME_G/.pki/nssdb" <<<"$OUT" &&
+  grep -q "fail_on_ca_residue: false" <<<"$OUT"; then
+  pass "the step failed on the write, naming the database and pointing at fail_on_ca_residue"
+else
+  fail "the step did not fail on the write to the covered database (exit $RUN_EXIT)"
+fi
+run_step "$HOME_G" "touch \$HOME/.pki/nssdb/written-by-the-command" INPUT_FAIL_ON_CA_RESIDUE=false
+if [ "$RUN_EXIT" = "0" ] && grep -q "changed the NSS database at $HOME_G/.pki/nssdb.*fail_on_ca_residue is false" <<<"$OUT"; then
+  pass "under fail_on_ca_residue: false, a warning names the database and the step carries on"
+else
+  fail "under fail_on_ca_residue: false, the step failed or gave no warning (exit $RUN_EXIT)"
+fi
+chmod 755 "$HOME_G/.pki/nssdb"
+if [ -z "$(ls -A "$HOME_G/.pki/nssdb")" ]; then
+  pass "the covered database is untouched"
+else
+  fail "the covered database changed"
+  show_home "$HOME_G"
 fi
 
 rm -rf "$TMPDIR"

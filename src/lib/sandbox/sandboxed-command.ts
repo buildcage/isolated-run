@@ -1,9 +1,9 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as core from "@actions/core";
 
 import { errorMessage } from "#core/lib/errors.ts";
-import { SandboxError } from "../errors.ts";
+import { SandboxError, type SandboxErrorCode } from "../errors.ts";
 import type { ProxyEngine } from "../engine.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
 import { netnsNameFor } from "../container.ts";
@@ -28,7 +28,7 @@ import { buildOciConfig, type SandboxIdentity } from "./oci-config.ts";
 import { WritablePathConflictError } from "./paths.ts";
 import { writeRunScript, writeResolvConf, writeOciConfig } from "./oci-files.ts";
 import { buildEnvBlob, resolveSandboxEnv, writeEnvLoader } from "./env-loader.ts";
-import { nssDbChange, prepareNssDb, removeNssDbDirs } from "./nss-db.ts";
+import { nssDbChange, prepareNssDb, removeNssDbDirs, settleNssDbSlot } from "./nss-db.ts";
 import { runIsolated } from "./run.ts";
 import { withScratchDir, type Warn } from "./scratch-dir.ts";
 import type { BuiltOciSpec, OverlayDirs } from "./types.ts";
@@ -56,6 +56,7 @@ export interface RunSandboxedCommandDeps {
   jvmTools: typeof jvmTools;
   prepareNssDb: typeof prepareNssDb;
   nssDbChange: typeof nssDbChange;
+  settleNssDbSlot: typeof settleNssDbSlot;
   removeNssDbDirs: typeof removeNssDbDirs;
   createOverlayScratchDirs: typeof createOverlayScratchDirs;
   writeResolvConf: typeof writeResolvConf;
@@ -69,6 +70,7 @@ export interface RunSandboxedCommandDeps {
   buildEnvBlob: typeof buildEnvBlob;
   runIsolated: typeof runIsolated;
   mkdir: (path: string, options: { mode: number; recursive?: boolean }) => void;
+  readFile: (path: string) => string;
   info: (message: string) => void;
 }
 
@@ -81,6 +83,7 @@ const realDeps: RunSandboxedCommandDeps = {
   jvmTools,
   prepareNssDb,
   nssDbChange,
+  settleNssDbSlot,
   removeNssDbDirs,
   createOverlayScratchDirs,
   writeResolvConf,
@@ -94,6 +97,9 @@ const realDeps: RunSandboxedCommandDeps = {
   buildEnvBlob,
   runIsolated,
   mkdir: mkdirSync,
+  // Untested by design: readFileSync, handed the path the tested caller chose.
+  /* v8 ignore next */
+  readFile: (path) => readFileSync(path, "utf8"),
   info: core.info,
 };
 
@@ -166,6 +172,7 @@ function extractCaTrust(
     writeJvmKeystoreFiles,
     jvmTools,
     prepareNssDb,
+    info,
   }: RunSandboxedCommandDeps,
 ): CaTrustFiles {
   try {
@@ -175,7 +182,7 @@ function extractCaTrust(
     return {
       ...writeCaTrustFiles(caCertPath, dir),
       jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn }),
-      nssDb: prepareNssDb(containerName, dir, env.HOME, { warn }),
+      nssDb: prepareNssDb(containerName, dir, env.HOME, { warn, info }),
     };
   } catch (e) {
     if (e instanceof SandboxError) throw e;
@@ -343,25 +350,70 @@ export function assembleBundle(
 
 export const CA_RESIDUE_HINT =
   "To let the step carry on with only a warning, set fail_on_ca_residue: false " +
-  "(a write to the NSS database is then discarded).";
+  "(a copy of the CA is then written back, and a write to a covered NSS database discarded).";
 
-/** Fails the step, or only warns under fail_on_ca_residue: false, when the
- *  command wrote to the NSS database, since that write cannot be kept. */
+/** Whether a write to path would have outlived the command: whether it lies
+ *  under a path the filesystem mode keeps writes to. */
+function persists(
+  path: string,
+  { filesystemMode, writeThroughPaths, env }: RunSandboxedCommandOptions,
+): boolean {
+  return withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)).some(
+    (p) => p === "/" || path === p || path.startsWith(`${p}/`),
+  );
+}
+
+/** Settles the NSS database once the command has exited. The runner's own
+ *  database gets back what the command wrote, less the slot, where the
+ *  filesystem mode keeps writes. A covered one cannot keep a write, so one
+ *  fails the step, or only warns under fail_on_ca_residue: false. */
 function finishNssDb(
   caTrust: CaTrustFiles | undefined,
-  { failOnCaResidue, warn }: Pick<RunSandboxedCommandOptions, "failOnCaResidue" | "warn">,
-  { nssDbChange, removeNssDbDirs }: RunSandboxedCommandDeps,
+  options: RunSandboxedCommandOptions,
+  { nssDbChange, settleNssDbSlot, removeNssDbDirs, readFile, info }: RunSandboxedCommandDeps,
 ): void {
   const nssDb = caTrust?.nssDb;
   if (!nssDb) return;
-  removeNssDbDirs(nssDb);
-  const change = nssDbChange(nssDb);
-  if (change === undefined) return;
-  if (!failOnCaResidue) {
-    warn(`buildcage: ${change} (fail_on_ca_residue is false, so the step carries on)`);
+  const { failOnCaResidue, warn } = options;
+  const residue = (message: string, code: SandboxErrorCode): void => {
+    if (!failOnCaResidue) {
+      warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
+      return;
+    }
+    throw new SandboxError(`${message}. ${CA_RESIDUE_HINT}`, code);
+  };
+
+  if (!nssDb.slot) {
+    removeNssDbDirs(nssDb);
+    const change = nssDbChange(nssDb);
+    if (change !== undefined) residue(change, "NSS_DATABASE_CHANGED");
     return;
   }
-  throw new SandboxError(`${change}. ${CA_RESIDUE_HINT}`, "NSS_DATABASE_CHANGED");
+  try {
+    const outcome = settleNssDbSlot(
+      { ...nssDb, slot: nssDb.slot },
+      {
+        persist: persists(nssDb.destination, options),
+        caPem: readFile(caTrust.ownCaPath),
+        onResidue: (message) => residue(message, "NSS_DATABASE_CA_COPIED"),
+      },
+    );
+    if (outcome === "discarded") {
+      info(
+        `buildcage: what the command wrote to the NSS database at ${nssDb.destination} is ` +
+          "discarded, as the filesystem mode discards writes there",
+      );
+    }
+  } catch (e) {
+    if (e instanceof SandboxError) throw e;
+    throw new SandboxError(
+      `could not write back what the command wrote to the NSS database at ${nssDb.destination}: ` +
+        errorMessage(e),
+      "NSS_DATABASE_WRITE_BACK_FAILED",
+    );
+  } finally {
+    removeNssDbDirs(nssDb);
+  }
 }
 
 /**

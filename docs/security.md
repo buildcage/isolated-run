@@ -192,10 +192,13 @@ sandbox down, so what it runs is kept out of those paths:
   `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so the command's
   `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` stays inside the sandbox. Without one, the step skips the
   keystores and warns. `java` is never run: its keystore is found by following its symlinks.
-- Under `inspect`, Chromium's NSS database is covered by one the proxy's `certutil` made from the CA
-  certificate alone, so the runner's database, which an earlier step may have written, is never
-  parsed. A symlink on the path leaves it unmounted, and the mount point is created and removed as
-  the runner user, never through `sudo`.
+- Under `inspect`, Chromium's NSS database gets a read-only slot on one the proxy's `certutil` made
+  from the CA certificate alone, appended to a copy of its `pkcs11.txt`. The runner's database, which
+  an earlier step may have written, is never parsed: its files are copied, and the slot's bytes are
+  taken back out of `pkcs11.txt`, which is text, before the copy is written back as the runner user.
+  One the runner user cannot write is covered with the CA-only database instead. A symlink on the
+  path leaves it unmounted, the path is checked again before anything is written back, and the mount
+  point is created and removed as the runner user, never through `sudo`.
 - The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins,
   and this action's own checkout, which holds the post step's script, are read-only inside the
   sandbox, unless `write_through:` names the directory itself or `uses: ./` makes the checkout the
@@ -472,8 +475,9 @@ the system update, will not work. The JVM (Java, Kotlin, Scala) reads only its o
 than the CA-trust variables; a JVM already on the runner is handled by injecting into a copy of that
 keystore with the runner's own `keytool`, but a keystore under a non-default password, or a runner
 whose only `keytool` is somewhere a sandboxed command can write, falls back to `universal`.
-Chromium's NSS database is covered with one trusting the CA; a command that writes to it fails the
-step unless `fail_on_ca_residue` is false. See
+Chromium's NSS database is given a read-only slot trusting the CA; one the runner user cannot
+write is covered instead, and a command that writes to that fails the step unless
+`fail_on_ca_residue` is false. See
 [Limitations](../README.md#limitations) for the rest of the compatibility picture.
 
 `audit` is not a passive observer here either. TLS is terminated in both modes, so a tool that

@@ -49,7 +49,7 @@ inputs:
     required: false
     default: "true"
   fail_on_ca_residue:
-    description: "proxy_engine: inspect only. Whether a command that writes to the NSS database Chromium reads fails the step (true, default) or only warns and discards the write (false)."
+    description: "proxy_engine: inspect only. Whether a command that leaves a copy of the proxy CA in the NSS database Chromium reads, or writes to one covered because the runner user cannot write it, fails the step (true, default) or only warns (false). With false, the copy is written back and the write discarded."
     required: false
     default: "true"
   known_blocked_rules:

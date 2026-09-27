@@ -19093,6 +19093,17 @@ function buildComposeDownArgs({ composeFile, projectName }) {
 		"down"
 	];
 }
+//#endregion
+//#region src/lib/sandbox/nss-db.ts
+const NSS_CA_DB_DESTINATION = "/dev/buildcage-nssdb", NSS_SLOT = `library=libsoftokn3.so
+name="buildcage proxy CA"
+parameters="configdir='sql:${NSS_CA_DB_DESTINATION}' flags=readOnly"\nNSS=""
+
+`, NSS_DB_FILES = [
+	"cert9.db",
+	"key4.db",
+	"pkcs11.txt"
+];
 function defaultExec$2(command, args) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args);
 }
@@ -19114,11 +19125,24 @@ function defaultMkdir(path, mode) {
 	(0, node_fs.mkdirSync)(path, { mode });
 }
 function defaultCopyDir(source, destination) {
-	(0, node_fs.cpSync)(source, destination, { recursive: !0 });
+	(0, node_fs.cpSync)(source, destination, {
+		recursive: !0,
+		preserveTimestamps: !0,
+		verbatimSymlinks: !0
+	});
+}
+function defaultAccess(path) {
+	(0, node_fs.accessSync)(path, node_fs.constants.W_OK);
 }
 function planNssDb(home, { lstat = defaultLstat } = {}) {
+	let legacy = walkPlan(home, ".pki/nssdb", lstat);
+	if (typeof legacy == "string" || legacy.missing.length === 0) return legacy;
+	let xdg = walkPlan(home, ".local/share/pki/nssdb", lstat);
+	return typeof xdg != "string" && xdg.missing.length === 0 ? xdg : legacy;
+}
+function walkPlan(home, path, lstat) {
 	let dir = home, missing = [];
-	for (let component of ".pki/nssdb".split("/")) {
+	for (let component of path.split("/")) {
 		if (dir = (0, node_path.join)(dir, component), missing.length > 0) {
 			missing.push(dir);
 			continue;
@@ -19133,7 +19157,8 @@ function planNssDb(home, { lstat = defaultLstat } = {}) {
 		missing
 	};
 }
-function prepareNssDb(containerName, dir, home, { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat, realpath = node_fs.realpathSync, mkdir = defaultMkdir, copyDir = defaultCopyDir, rmdir = node_fs.rmdirSync, warn } = {}) {
+function prepareNssDb(containerName, dir, home, deps = {}) {
+	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat, realpath = node_fs.realpathSync, mkdir = defaultMkdir, copyDir = defaultCopyDir, rmdir = node_fs.rmdirSync, warn } = deps;
 	if (!home || stat(home)?.isDirectory() !== !0) {
 		warn?.(`could not add the proxy CA to Chromium's NSS database: HOME (${JSON.stringify(home ?? "")}) is not a directory. A Chromium step will not trust the proxy.`);
 		return;
@@ -19149,14 +19174,21 @@ function prepareNssDb(containerName, dir, home, { exec = defaultExec$2, lstat = 
 		containerPath: "/opt/buildcage/nssdb",
 		hostPath: template
 	}));
-	let path = (0, node_path.join)(dir, "nssdb");
-	copyDir(template, path);
-	let files = {
+	let path = (0, node_path.join)(dir, "nssdb"), files = {
 		path,
 		template,
 		destination: plan.destination,
 		createdDirs: []
-	};
+	}, exists = plan.missing.length === 0, refusal = exists ? whyNotSlot(plan.destination, deps) : void 0;
+	if (refusal === void 0) try {
+		files.slot = prepareSlot(dir, files, template, exists, deps);
+	} catch (e) {
+		refusal = `the slot could not be added (${errorMessage(e)})`, (0, node_fs.rmSync)(path, {
+			recursive: !0,
+			force: !0
+		});
+	}
+	refusal !== void 0 && (deps.info?.(`buildcage: ${refusal}, so the NSS database at ${plan.destination} is covered for the command with one trusting only the proxy CA`), copyDir(template, path));
 	for (let missing of plan.missing) {
 		try {
 			mkdir(missing, 448);
@@ -19168,13 +19200,161 @@ function prepareNssDb(containerName, dir, home, { exec = defaultExec$2, lstat = 
 	}
 	return files;
 }
-function nssDbMount(files) {
+function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess }) {
+	for (let path of [destination, ...NSS_DB_FILES.map((name) => (0, node_path.join)(destination, name))]) {
+		let info = lstat(path);
+		if (info !== void 0) {
+			if (info.isSymbolicLink()) return `${path} is a symlink`;
+			try {
+				access(path);
+			} catch {
+				return `the runner user cannot write ${path}`;
+			}
+		}
+	}
+	let files = 0, bytes = 0;
+	try {
+		for (let entry of (0, node_fs.readdirSync)(destination, {
+			recursive: !0,
+			withFileTypes: !0
+		})) if (files++, entry.isFile() && (bytes += (0, node_fs.statSync)((0, node_path.join)(entry.parentPath, entry.name)).size), files > 512 || bytes > 20971520) return `${destination} is too large to copy`;
+	} catch (e) {
+		return `${destination} cannot be read through (${errorMessage(e)})`;
+	}
+}
+function prepareSlot(dir, files, template, exists, { copyDir = defaultCopyDir }) {
+	let caDb = (0, node_path.join)(dir, "nssdb-ca");
+	copyDir(template, caDb), (0, node_fs.chmodSync)(caDb, 493);
+	for (let name of (0, node_fs.readdirSync)(caDb)) (0, node_fs.chmodSync)((0, node_path.join)(caDb, name), 420);
+	exists ? copyDir(files.destination, files.path) : (0, node_fs.mkdirSync)(files.path, { mode: 448 });
+	let pkcs11 = (0, node_path.join)(files.path, "pkcs11.txt"), hadPkcs11 = (0, node_fs.lstatSync)(pkcs11, { throwIfNoEntry: !1 }) !== void 0;
 	return {
+		caDb,
+		appended: appendNssSlot(pkcs11),
+		hadPkcs11,
+		snapshot: snapshotDir(files.path)
+	};
+}
+function appendNssSlot(path) {
+	let fd = (0, node_fs.openSync)(path, node_fs.constants.O_CREAT | node_fs.constants.O_RDWR | node_fs.constants.O_APPEND | node_fs.constants.O_NOFOLLOW, 384);
+	try {
+		let size = (0, node_fs.fstatSync)(fd).size, appended = "";
+		if (size > 0) {
+			let tail = Buffer.alloc(Math.min(size, 2));
+			(0, node_fs.readSync)(fd, tail, 0, tail.length, size - tail.length);
+			let text = tail.toString("latin1");
+			appended = text.endsWith("\n\n") || text === "\n" ? "" : text.endsWith("\n") ? "\n" : "\n\n";
+		}
+		return appended += NSS_SLOT, (0, node_fs.writeSync)(fd, appended), appended;
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function removeNssSlot(path, appended, created) {
+	let fd;
+	try {
+		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDWR | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
+	} catch (e) {
+		let code = e.code;
+		if (code === "ENOENT" || code === "ELOOP" || code === "EISDIR" || code === "ENXIO") return;
+		throw e;
+	}
+	try {
+		let info = (0, node_fs.fstatSync)(fd);
+		if (!info.isFile()) return;
+		if (info.size > 1048576) throw Error(`${path} is ${info.size} bytes, too large to take the proxy CA's slot back out of`);
+		let content = (0, node_fs.readFileSync)(fd).toString("latin1"), cut = appended, i = content.lastIndexOf(cut);
+		if ((i < 0 || i + cut.length < content.length) && (cut = NSS_SLOT, i = content.lastIndexOf(cut)), i < 0) return;
+		let kept = content.slice(0, i) + content.slice(i + cut.length);
+		if (created && kept === "") {
+			(0, node_fs.rmSync)(path);
+			return;
+		}
+		(0, node_fs.ftruncateSync)(fd, 0), (0, node_fs.writeSync)(fd, kept, 0, "latin1");
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function snapshotDir(dir) {
+	let snapshot = new Map();
+	for (let entry of (0, node_fs.readdirSync)(dir, {
+		recursive: !0,
+		withFileTypes: !0
+	})) {
+		let path = (0, node_path.join)(entry.parentPath, entry.name), rel = (0, node_path.relative)(dir, path);
+		entry.isSymbolicLink() ? snapshot.set(rel, (0, node_fs.readlinkSync)(path)) : entry.isDirectory() ? snapshot.set(rel, null) : entry.isFile() ? snapshot.set(rel, (0, node_fs.readFileSync)(path)) : snapshot.set(rel, !1);
+	}
+	return snapshot;
+}
+function sameSnapshot(a, b) {
+	if (a.size !== b.size) return !1;
+	for (let [rel, value] of a) {
+		if (!b.has(rel)) return !1;
+		let other = b.get(rel);
+		if (Buffer.isBuffer(value) && Buffer.isBuffer(other)) {
+			if (!value.equals(other)) return !1;
+		} else if (value !== other) return !1;
+	}
+	return !0;
+}
+function certificateDer(pem) {
+	let match = /-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/.exec(pem);
+	return Buffer.from(match?.[1]?.replace(/\s+/g, "") ?? "", "base64");
+}
+function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync, copyDir = defaultCopyDir }) {
+	let current;
+	try {
+		current = snapshotDir(files.path);
+	} catch {
+		current = new Map();
+	}
+	if (sameSnapshot(current, files.slot.snapshot)) return "unchanged";
+	if (!persist) return "discarded";
+	removeNssSlot((0, node_path.join)(files.path, "pkcs11.txt"), files.slot.appended, !files.slot.hadPkcs11);
+	let der = certificateDer(caPem);
+	for (let [rel, value] of snapshotDir(files.path)) Buffer.isBuffer(value) && der.length > 0 && value.includes(der) && onResidue(`the command copied the proxy CA into the NSS database at ${files.destination} (${rel})`);
+	let resolved;
+	try {
+		resolved = realpath(files.destination);
+	} catch {
+		resolved = void 0;
+	}
+	if (resolved !== files.destination) throw Error(`${files.destination} no longer resolves to itself, so what the command wrote to the NSS database there is not written back`);
+	let staging = (0, node_fs.mkdtempSync)((0, node_path.join)(files.destination, ".buildcage-"));
+	try {
+		copyDir(files.path, staging);
+	} catch (e) {
+		throw (0, node_fs.rmSync)(staging, {
+			recursive: !0,
+			force: !0
+		}), e;
+	}
+	for (let name of (0, node_fs.readdirSync)(files.destination)) (0, node_path.join)(files.destination, name) !== staging && (0, node_fs.rmSync)((0, node_path.join)(files.destination, name), {
+		recursive: !0,
+		force: !0
+	});
+	for (let name of (0, node_fs.readdirSync)(staging)) (0, node_fs.renameSync)((0, node_path.join)(staging, name), (0, node_path.join)(files.destination, name));
+	return (0, node_fs.rmdirSync)(staging), "written";
+}
+function nssDbMounts(files) {
+	let mounts = [{
 		destination: files.destination,
 		type: "none",
 		source: files.path,
 		options: ["rbind", "rw"]
-	};
+	}];
+	return files.slot && mounts.push({
+		destination: NSS_CA_DB_DESTINATION,
+		type: "none",
+		source: files.slot.caDb,
+		options: [
+			"rbind",
+			"ro",
+			"nosuid",
+			"nodev",
+			"noexec"
+		]
+	}), mounts;
 }
 function nssDbChange(files, { readDir = node_fs.readdirSync, readFile = node_fs.readFileSync } = {}) {
 	let changed;
@@ -19313,7 +19493,7 @@ function caTrustAdditions(files, env) {
 		source: keystore.path,
 		options: ["rbind", "ro"]
 	});
-	return files.nssDb && mounts.push(nssDbMount(files.nssDb)), {
+	return files.nssDb && mounts.push(...nssDbMounts(files.nssDb)), {
 		mounts,
 		env: extraEnv
 	};
@@ -20005,6 +20185,7 @@ const realDeps$2 = {
 	jvmTools,
 	prepareNssDb,
 	nssDbChange,
+	settleNssDbSlot,
 	removeNssDbDirs,
 	createOverlayScratchDirs,
 	writeResolvConf,
@@ -20018,6 +20199,7 @@ const realDeps$2 = {
 	buildEnvBlob,
 	runIsolated,
 	mkdir: node_fs.mkdirSync,
+	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
 	info
 };
 function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
@@ -20030,13 +20212,16 @@ function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`, "RUNC_EXTRACT_FAILED");
 	}
 }
-function extractCaTrust(containerName, dir, { env, writeThroughPaths, warn }, { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles, jvmTools, prepareNssDb }) {
+function extractCaTrust(containerName, dir, { env, writeThroughPaths, warn }, { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles, jvmTools, prepareNssDb, info }) {
 	try {
 		let caCertPath = extractCaCert(containerName, dir), tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env));
 		return {
 			...writeCaTrustFiles(caCertPath, dir),
 			jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn }),
-			nssDb: prepareNssDb(containerName, dir, env.HOME, { warn })
+			nssDb: prepareNssDb(containerName, dir, env.HOME, {
+				warn,
+				info
+			})
 		};
 	} catch (e) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`, "CA_EXTRACT_FAILED");
@@ -20105,17 +20290,38 @@ function assembleBundle(dir, options, deps) {
 		rootfsBindDir
 	};
 }
-function finishNssDb(caTrust, { failOnCaResidue, warn }, { nssDbChange, removeNssDbDirs }) {
+function persists(path, { filesystemMode, writeThroughPaths, env }) {
+	return withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)).some((p) => p === "/" || path === p || path.startsWith(`${p}/`));
+}
+function finishNssDb(caTrust, options, { nssDbChange, settleNssDbSlot, removeNssDbDirs, readFile, info }) {
 	let nssDb = caTrust?.nssDb;
 	if (!nssDb) return;
-	removeNssDbDirs(nssDb);
-	let change = nssDbChange(nssDb);
-	if (change !== void 0) {
+	let { failOnCaResidue, warn } = options, residue = (message, code) => {
 		if (!failOnCaResidue) {
-			warn(`buildcage: ${change} (fail_on_ca_residue is false, so the step carries on)`);
+			warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
 			return;
 		}
-		throw new SandboxError(`${change}. To let the step carry on with only a warning, set fail_on_ca_residue: false (a write to the NSS database is then discarded).`, "NSS_DATABASE_CHANGED");
+		throw new SandboxError(`${message}. To let the step carry on with only a warning, set fail_on_ca_residue: false (a copy of the CA is then written back, and a write to a covered NSS database discarded).`, code);
+	};
+	if (!nssDb.slot) {
+		removeNssDbDirs(nssDb);
+		let change = nssDbChange(nssDb);
+		change !== void 0 && residue(change, "NSS_DATABASE_CHANGED");
+		return;
+	}
+	try {
+		settleNssDbSlot({
+			...nssDb,
+			slot: nssDb.slot
+		}, {
+			persist: persists(nssDb.destination, options),
+			caPem: readFile(caTrust.ownCaPath),
+			onResidue: (message) => residue(message, "NSS_DATABASE_CA_COPIED")
+		}) === "discarded" && info(`buildcage: what the command wrote to the NSS database at ${nssDb.destination} is discarded, as the filesystem mode discards writes there`);
+	} catch (e) {
+		throw e instanceof SandboxError ? e : new SandboxError(`could not write back what the command wrote to the NSS database at ${nssDb.destination}: ` + errorMessage(e), "NSS_DATABASE_WRITE_BACK_FAILED");
+	} finally {
+		removeNssDbDirs(nssDb);
 	}
 }
 function runSandboxedCommand(options, overrides = {}) {
