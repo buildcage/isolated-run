@@ -242,10 +242,15 @@ payload for a later step. See [Filesystem access](../README.md#filesystem-access
   wrapping a step only ever narrows what it can reach. `ACTIONS_ID_TOKEN_REQUEST_URL` and anything
   else the runner sets still arrives: this is a named list rather than a sweep over `ACTIONS_*`,
   which would rest on guessing which of them a `run:` step legitimately sees.
+- **A command that is not PID 1.** The kernel drops any signal a PID namespace's PID 1 has no
+  handler for, SIGKILL from inside included, and hands it every orphan to reap. The loader below
+  stays PID 1 and runs the command as its child, so `kill -TERM $$` works and a python or node
+  shebang leaves no zombies. It forwards `SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGUSR1` and
+  `SIGUSR2` to the command and exits with its status, `128+n` if a signal killed it.
 
 What is left is piped to the sandboxed process over stdin as NUL-delimited `KEY=VALUE` records and
-applied by a small loader that execs the run script, rather than written into `config.json`, so an
-`env:` secret never reaches the runner's disk.
+applied by that loader before it starts the run script, rather than written into `config.json`, so
+an `env:` secret never reaches the runner's disk.
 
 ### When the step ends
 
