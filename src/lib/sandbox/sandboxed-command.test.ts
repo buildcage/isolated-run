@@ -37,6 +37,7 @@ const mocks = {
   runIsolated: vi.fn(),
   mkdir: vi.fn(),
   readFile: vi.fn(),
+  realpath: vi.fn(),
   info: vi.fn(),
   warn: vi.fn(),
 };
@@ -90,6 +91,7 @@ beforeEach(() => {
   mocks.resolveSandboxEnv.mockReturnValue({ PATH: "/usr/bin" });
   mocks.buildEnvBlob.mockReturnValue(Buffer.from(""));
   mocks.runIsolated.mockReturnValue(0);
+  mocks.realpath.mockImplementation((p: string) => p);
 });
 
 describe("runSandboxedCommand", () => {
@@ -483,9 +485,33 @@ describe("runSandboxedCommand", () => {
     runSandboxedCommand(options({ env: {} }), deps);
 
     expect(mocks.buildOciConfig.mock.calls[0][1].writable).toStrictEqual({
-      workdir: "",
-      home: "",
-      runnerTemp: "",
+      workdir: undefined,
+      home: undefined,
+      runnerTemp: undefined,
+      tmp: "/tmp",
+      writablePaths: [],
+    });
+  });
+
+  it("hands the config the writable paths as they really resolve", () => {
+    mocks.realpath.mockImplementation((p: string) => p.replace(/^\/home\//, "/var/home/"));
+
+    runSandboxedCommand(
+      options({
+        env: {
+          GITHUB_WORKSPACE: "/home/runner/work/repo/repo",
+          HOME: "/home/runner/",
+          RUNNER_TEMP: "/home/runner/work/_temp",
+        },
+      }),
+      deps,
+    );
+
+    expect(mocks.buildOciConfig.mock.calls[0][1].writable).toStrictEqual({
+      workdir: "/var/home/runner/work/repo/repo",
+      home: "/var/home/runner",
+      runnerTemp: "/var/home/runner/work/_temp",
+      tmp: "/tmp",
       writablePaths: [],
     });
   });

@@ -811,11 +811,11 @@ function isAtOrUnder(path, ancestor) {
 	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
 }
 [...SYSTEM_CA_CANDIDATES];
-function writableDirsOf({ workdir, home, runnerTemp, writablePaths = [] }) {
+function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths = [] }) {
 	return [...new Set([
 		workdir,
 		home,
-		"/tmp",
+		tmp,
 		runnerTemp,
 		...writablePaths
 	].filter((p) => !!p))];

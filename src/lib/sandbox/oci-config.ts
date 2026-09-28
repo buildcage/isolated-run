@@ -22,6 +22,7 @@ export interface SandboxIdentity {
 export interface WritablePolicy {
   workdir?: string;
   home?: string;
+  tmp?: string;
   runnerTemp?: string;
   writablePaths?: string[];
 }

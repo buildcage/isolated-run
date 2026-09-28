@@ -10,7 +10,7 @@
  */
 
 import { accessSync, constants, readlinkSync, realpathSync } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { SandboxError } from "../errors.ts";
@@ -59,7 +59,7 @@ const MAX_SYMLINK_HOPS = 40;
 // Untested by design: the defaults behind this module's seams, which only hand
 // node:fs what the tested caller decided.
 /* v8 ignore start */
-function realpathOrSelf(path: string): string {
+export function realpathOrSelf(path: string): string {
   try {
     return realpathSync(path);
   } catch {
@@ -88,6 +88,35 @@ const realFindCommandDeps: FindCommandDeps = {
   realpathDir: realpathOrSelf,
 };
 /* v8 ignore stop */
+
+export interface DefaultWritableDirs {
+  workdir?: string;
+  home?: string;
+  runnerTemp?: string;
+  tmp: string;
+}
+
+/**
+ * The directories persistent mode keeps writable, spelled as they really
+ * resolve: runc follows symlinks in a mount's destination, and the host mount
+ * table they are checked against names real paths.
+ */
+export function resolveDefaultWritableDirs(
+  env: NodeJS.ProcessEnv,
+  realpath: (path: string) => string = realpathOrSelf,
+): DefaultWritableDirs {
+  const real = (path: string) => {
+    const normalized = normalize(path);
+    // A path that doesn't exist comes back as given, so drop the slash here.
+    return realpath(normalized.length > 1 ? normalized.replace(/\/$/, "") : normalized);
+  };
+  return {
+    workdir: env.GITHUB_WORKSPACE ? real(env.GITHUB_WORKSPACE) : undefined,
+    home: env.HOME ? real(env.HOME) : undefined,
+    runnerTemp: env.RUNNER_TEMP ? real(env.RUNNER_TEMP) : undefined,
+    tmp: real("/tmp"),
+  };
+}
 
 /** `paths` plus their real spellings, since `$HOME` may itself be a symlink. */
 export function withRealPaths(

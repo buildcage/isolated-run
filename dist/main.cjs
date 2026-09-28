@@ -19856,11 +19856,11 @@ function persistentLayers(writableDirs, freshMountDestinations, { disableReadonl
 		writablePaths: protectedPaths
 	};
 }
-function writableDirsOf({ workdir, home, runnerTemp, writablePaths = [] }) {
+function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths = [] }) {
 	return [...new Set([
 		workdir,
 		home,
-		"/tmp",
+		tmp,
 		runnerTemp,
 		...writablePaths
 	].filter((p) => !!p))];
@@ -20048,69 +20048,6 @@ function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultEx
 	return created;
 }
 //#endregion
-//#region src/lib/sandbox/filesystem-plan.ts
-function validateFilesystemInputs(filesystemMode, writeThroughPaths) {
-	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
-	for (let path of writeThroughPaths) {
-		let reserved = RESERVED_INTERNAL_DESTINATIONS.find((r) => isAtOrUnder(path, r));
-		if (reserved) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
-	}
-}
-function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
-	let writeThroughPaths;
-	try {
-		writeThroughPaths = resolveWriteThroughPaths(writeThroughInput, env);
-	} catch (e) {
-		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
-	}
-	if (validateFilesystemInputs(filesystemMode, writeThroughPaths), writeThroughPaths.includes("/")) return {
-		overlayRoots: [],
-		writeThroughPaths,
-		createdDirs: []
-	};
-	try {
-		assertKnownFilesExist(writeThroughPaths, env, deps);
-	} catch (e) {
-		throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
-	}
-	try {
-		writeThroughPaths = [...new Set(writeThroughPaths.map((p) => resolveWriteThroughOnHost(p, deps)))];
-	} catch (e) {
-		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
-	}
-	validateFilesystemInputs(filesystemMode, writeThroughPaths);
-	try {
-		assertScratchBaseNotWritable(writeThroughPaths);
-	} catch (e) {
-		throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
-	}
-	let createdDirs;
-	try {
-		createdDirs = ensureWriteThroughTargetsExist(writeThroughPaths, env, deps);
-	} catch (e) {
-		throw e instanceof WriteThroughTargetUncreatableError ? new SandboxError(e.message, "WRITE_THROUGH_TARGET_UNCREATABLE") : new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
-	}
-	if (filesystemMode !== "ephemeral") return {
-		overlayRoots: [],
-		writeThroughPaths,
-		createdDirs
-	};
-	try {
-		return {
-			overlayRoots: determineOverlayRoots([
-				env.HOME,
-				env.RUNNER_TEMP,
-				"/tmp",
-				env.GITHUB_WORKSPACE
-			].filter((p) => !!p), writeThroughPaths, deps),
-			writeThroughPaths,
-			createdDirs
-		};
-	} catch (e) {
-		throw new SandboxError(`Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
-	}
-}
-//#endregion
 //#region src/lib/sandbox/host-commands.ts
 const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), ACTION_ROOT = (0, node_path.resolve)(__dirname$2, ".."), PINNED_COMMANDS = ["docker", "sudo"];
 function persistingWritablePaths(filesystemMode, writeThroughPaths, env) {
@@ -20146,6 +20083,18 @@ const realFindCommandDeps = {
 	},
 	realpathDir: realpathOrSelf
 };
+function resolveDefaultWritableDirs(env, realpath = realpathOrSelf) {
+	let real = (path) => {
+		let normalized = (0, node_path.normalize)(path);
+		return realpath(normalized.length > 1 ? normalized.replace(/\/$/, "") : normalized);
+	};
+	return {
+		workdir: env.GITHUB_WORKSPACE ? real(env.GITHUB_WORKSPACE) : void 0,
+		home: env.HOME ? real(env.HOME) : void 0,
+		runnerTemp: env.RUNNER_TEMP ? real(env.RUNNER_TEMP) : void 0,
+		tmp: real("/tmp")
+	};
+}
 function withRealPaths(paths, realpath = realpathOrSelf) {
 	return [...new Set([...paths, ...paths.map(realpath)])];
 }
@@ -20213,6 +20162,70 @@ function renameGuardDirs(readonlyDirs, persisting) {
 		if (root) for (let p = (0, node_path.dirname)(dir); p !== root && isAtOrUnder(p, root); p = (0, node_path.dirname)(p)) guards.add(p);
 	}
 	return [...guards].sort((a, b) => a.length - b.length || a.localeCompare(b));
+}
+//#endregion
+//#region src/lib/sandbox/filesystem-plan.ts
+function validateFilesystemInputs(filesystemMode, writeThroughPaths) {
+	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
+	for (let path of writeThroughPaths) {
+		let reserved = RESERVED_INTERNAL_DESTINATIONS.find((r) => isAtOrUnder(path, r));
+		if (reserved) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
+	}
+}
+function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
+	let writeThroughPaths;
+	try {
+		writeThroughPaths = resolveWriteThroughPaths(writeThroughInput, env);
+	} catch (e) {
+		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
+	}
+	if (validateFilesystemInputs(filesystemMode, writeThroughPaths), writeThroughPaths.includes("/")) return {
+		overlayRoots: [],
+		writeThroughPaths,
+		createdDirs: []
+	};
+	try {
+		assertKnownFilesExist(writeThroughPaths, env, deps);
+	} catch (e) {
+		throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
+	}
+	try {
+		writeThroughPaths = [...new Set(writeThroughPaths.map((p) => resolveWriteThroughOnHost(p, deps)))];
+	} catch (e) {
+		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
+	}
+	validateFilesystemInputs(filesystemMode, writeThroughPaths);
+	try {
+		assertScratchBaseNotWritable(writeThroughPaths);
+	} catch (e) {
+		throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
+	}
+	let createdDirs;
+	try {
+		createdDirs = ensureWriteThroughTargetsExist(writeThroughPaths, env, deps);
+	} catch (e) {
+		throw e instanceof WriteThroughTargetUncreatableError ? new SandboxError(e.message, "WRITE_THROUGH_TARGET_UNCREATABLE") : new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
+	}
+	if (filesystemMode !== "ephemeral") return {
+		overlayRoots: [],
+		writeThroughPaths,
+		createdDirs
+	};
+	try {
+		let { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath);
+		return {
+			overlayRoots: determineOverlayRoots([
+				home,
+				runnerTemp,
+				tmp,
+				workdir
+			].filter((p) => !!p), writeThroughPaths, deps),
+			writeThroughPaths,
+			createdDirs
+		};
+	} catch (e) {
+		throw new SandboxError(`Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
+	}
 }
 //#endregion
 //#region scripts/extra-masked-runtime-paths.json
@@ -20675,6 +20688,7 @@ const realDeps$2 = {
 	runIsolated,
 	mkdir: node_fs.mkdirSync,
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
+	realpath: realpathOrSelf,
 	info
 };
 function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
@@ -20735,9 +20749,7 @@ function assembleBundle(dir, options, deps) {
 		config = buildOciConfig(baseSpec, {
 			identity: resolveIdentity(env, options.warn, deps),
 			writable: {
-				workdir: env.GITHUB_WORKSPACE || "",
-				home: env.HOME || "",
-				runnerTemp: env.RUNNER_TEMP || "",
+				...resolveDefaultWritableDirs(env, deps.realpath),
 				writablePaths: writeThroughPaths
 			},
 			ephemeral: filesystemMode === "ephemeral" ? {

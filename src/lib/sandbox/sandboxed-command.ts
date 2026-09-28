@@ -21,7 +21,9 @@ import { createOverlayScratchDirs, overlayUpperFor } from "./ephemeral-fs.ts";
 import {
   jvmTools,
   persistingWritablePaths,
+  realpathOrSelf,
   renameGuardDirs as renameGuards,
+  resolveDefaultWritableDirs,
   sandboxReadonlyHostDirs,
   withRealPaths,
 } from "./host-commands.ts";
@@ -81,6 +83,7 @@ export interface RunSandboxedCommandDeps {
   runIsolated: typeof runIsolated;
   mkdir: (path: string, options: { mode: number; recursive?: boolean }) => void;
   readFile: (path: string) => string;
+  realpath: (path: string) => string;
   info: (message: string) => void;
 }
 
@@ -111,6 +114,7 @@ const realDeps: RunSandboxedCommandDeps = {
   // Untested by design: readFileSync, handed the path the tested caller chose.
   /* v8 ignore next */
   readFile: (path) => readFileSync(path, "utf8"),
+  realpath: realpathOrSelf,
   info: core.info,
 };
 
@@ -331,11 +335,7 @@ export function assembleBundle(
     config = buildOciConfig(baseSpec, {
       identity: resolveIdentity(env, options.warn, deps),
       writable: {
-        workdir: env.GITHUB_WORKSPACE || "",
-        home: env.HOME || "",
-        // Standard writable runner scratch; not always under $HOME on
-        // self-hosted runners, so covered explicitly (see buildOciConfig).
-        runnerTemp: env.RUNNER_TEMP || "",
+        ...resolveDefaultWritableDirs(env, deps.realpath),
         writablePaths: writeThroughPaths,
       },
       ephemeral:
