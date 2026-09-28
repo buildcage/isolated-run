@@ -252,10 +252,8 @@ function writeLedger(path: string, ledger: Ledger): void {
 /** An untrusted ledger is handed to fn as the reason and never rewritten:
  *  remaking it would drop other steps' uses. */
 function withLedger<T>(fn: (ledger: Ledger | string) => T, deps: NssDbLedgerDeps): T {
-  const base = baseOf(deps);
-  const path = join(base, NSS_DB_LEDGER_NAME);
-  const release = acquireLock(base, deps);
-  try {
+  const path = join(baseOf(deps), NSS_DB_LEDGER_NAME);
+  return withNssDbLock(() => {
     const ledger = readLedger(path);
     // Saved even when fn throws, since the undo it ran has taken effect.
     try {
@@ -263,6 +261,14 @@ function withLedger<T>(fn: (ledger: Ledger | string) => T, deps: NssDbLedgerDeps
     } finally {
       if (typeof ledger !== "string") writeLedger(path, ledger);
     }
+  }, deps);
+}
+
+/** Also held by write-backs, so parallel ones never interleave. */
+export function withNssDbLock<T>(fn: () => T, deps: NssDbLedgerDeps = {}): T {
+  const release = acquireLock(baseOf(deps), deps);
+  try {
+    return fn();
   } finally {
     release();
   }

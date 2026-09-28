@@ -590,14 +590,20 @@ function writeLedger(path, ledger) {
 	(0, node_fs.renameSync)(tmp, path);
 }
 function withLedger(fn, deps) {
-	let base = baseOf(deps), path = (0, node_path.join)(base, NSS_DB_LEDGER_NAME), release = acquireLock(base, deps);
-	try {
+	let path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
+	return withNssDbLock(() => {
 		let ledger = readLedger(path);
 		try {
 			return fn(ledger);
 		} finally {
 			typeof ledger != "string" && writeLedger(path, ledger);
 		}
+	}, deps);
+}
+function withNssDbLock(fn, deps = {}) {
+	let release = acquireLock(baseOf(deps), deps);
+	try {
+		return fn();
 	} finally {
 		release();
 	}

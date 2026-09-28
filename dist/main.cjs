@@ -19103,14 +19103,20 @@ function writeLedger(path, ledger) {
 	(0, node_fs.renameSync)(tmp, path);
 }
 function withLedger(fn, deps) {
-	let base = baseOf(deps), path = (0, node_path.join)(base, NSS_DB_LEDGER_NAME), release = acquireLock(base, deps);
-	try {
+	let path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
+	return withNssDbLock(() => {
 		let ledger = readLedger(path);
 		try {
 			return fn(ledger);
 		} finally {
 			typeof ledger != "string" && writeLedger(path, ledger);
 		}
+	}, deps);
+}
+function withNssDbLock(fn, deps = {}) {
+	let release = acquireLock(baseOf(deps), deps);
+	try {
+		return fn();
 	} finally {
 		release();
 	}
@@ -19442,7 +19448,7 @@ function certificateDer(pem) {
 	let match = /-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/.exec(pem);
 	return Buffer.from(match?.[1]?.replace(/\s+/g, "") ?? "", "base64");
 }
-function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync, copyDir = defaultCopyDir, pidAlive = defaultPidAlive }) {
+function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync, copyDir = defaultCopyDir, pidAlive = defaultPidAlive, lock = withNssDbLock }) {
 	let current;
 	try {
 		current = snapshotDir(files.path);
@@ -19470,14 +19476,25 @@ function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.
 			force: !0
 		}), e;
 	}
-	for (let name of (0, node_fs.readdirSync)(files.destination)) {
-		let path = (0, node_path.join)(files.destination, name);
-		(!isStaging(name) || path !== staging && !stagingOwnerAlive(name, pidAlive)) && (0, node_fs.rmSync)(path, {
+	let swapping = !1;
+	try {
+		lock(() => {
+			swapping = !0;
+			for (let name of (0, node_fs.readdirSync)(files.destination)) {
+				let path = (0, node_path.join)(files.destination, name);
+				(!isStaging(name) || path !== staging && !stagingOwnerAlive(name, pidAlive)) && (0, node_fs.rmSync)(path, {
+					recursive: !0,
+					force: !0
+				});
+			}
+			for (let name of (0, node_fs.readdirSync)(staging)) isStaging(name) || (0, node_fs.renameSync)((0, node_path.join)(staging, name), (0, node_path.join)(files.destination, name));
+		});
+	} catch (e) {
+		throw swapping || (0, node_fs.rmSync)(staging, {
 			recursive: !0,
 			force: !0
-		});
+		}), e;
 	}
-	for (let name of (0, node_fs.readdirSync)(staging)) isStaging(name) || (0, node_fs.renameSync)((0, node_path.join)(staging, name), (0, node_path.join)(files.destination, name));
 	return (0, node_fs.rmSync)(staging, {
 		recursive: !0,
 		force: !0

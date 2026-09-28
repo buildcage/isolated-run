@@ -32,6 +32,7 @@ import {
   claimNssDb,
   dirIdOf,
   releaseNssDb,
+  withNssDbLock,
   stillThere,
   useNameFor,
   type DirId,
@@ -581,6 +582,7 @@ export interface SettleNssDbSlotOptions {
   realpath?: (path: string) => string;
   copyDir?: (source: string, destination: string) => void;
   pidAlive?: (pid: number) => boolean;
+  lock?: <T>(fn: () => T) => T;
 }
 
 export type NssDbSlotOutcome = "unchanged" | "discarded" | "written";
@@ -600,6 +602,7 @@ export function settleNssDbSlot(
     realpath = realpathSync,
     copyDir = defaultCopyDir,
     pidAlive = defaultPidAlive,
+    lock = withNssDbLock,
   }: SettleNssDbSlotOptions,
 ): NssDbSlotOutcome {
   let current: DirSnapshot;
@@ -642,14 +645,24 @@ export function settleNssDbSlot(
     rmSync(staging, { recursive: true, force: true });
     throw e;
   }
-  for (const name of readdirSync(files.destination)) {
-    const path = join(files.destination, name);
-    if (isStaging(name) && (path === staging || stagingOwnerAlive(name, pidAlive))) continue;
-    rmSync(path, { recursive: true, force: true });
-  }
-  for (const name of readdirSync(staging)) {
-    if (isStaging(name)) continue;
-    renameSync(join(staging, name), join(files.destination, name));
+  let swapping = false;
+  try {
+    lock(() => {
+      swapping = true;
+      for (const name of readdirSync(files.destination)) {
+        const path = join(files.destination, name);
+        if (isStaging(name) && (path === staging || stagingOwnerAlive(name, pidAlive))) continue;
+        rmSync(path, { recursive: true, force: true });
+      }
+      for (const name of readdirSync(staging)) {
+        if (isStaging(name)) continue;
+        renameSync(join(staging, name), join(files.destination, name));
+      }
+    });
+  } catch (e) {
+    // A swap that failed partway leaves the staging copy as the only whole one.
+    if (!swapping) rmSync(staging, { recursive: true, force: true });
+    throw e;
   }
   rmSync(staging, { recursive: true, force: true });
   return "written";
