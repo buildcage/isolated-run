@@ -17,7 +17,7 @@ import {
   type CaTrustFiles,
 } from "./ca-trust.ts";
 import { buildEnvBlob, resolveSandboxEnv, writeEnvLoader } from "./env-loader.ts";
-import { createOverlayScratchDirs } from "./ephemeral-fs.ts";
+import { createOverlayScratchDirs, overlayUpperFor } from "./ephemeral-fs.ts";
 import {
   jvmTools,
   persistingWritablePaths,
@@ -33,6 +33,7 @@ import {
   prepareNssDb,
   releaseNssDbDirs,
   settleNssDbSlot,
+  NSS_DB_PATH,
 } from "./nss-db.ts";
 import { buildOciConfig, type SandboxIdentity } from "./oci-config.ts";
 import { writeRunScript, writeResolvConf, writeOciConfig } from "./oci-files.ts";
@@ -175,7 +176,7 @@ function extractBootstrap(
 function extractCaTrust(
   containerName: string,
   dir: string,
-  { env, writeThroughPaths, warn }: AssembleBundleOptions,
+  options: AssembleBundleOptions,
   {
     extractCaCert,
     writeCaTrustFiles,
@@ -185,6 +186,7 @@ function extractCaTrust(
     info,
   }: RunSandboxedCommandDeps,
 ): CaTrustFiles {
+  const { env, writeThroughPaths, warn } = options;
   try {
     const caCertPath = extractCaCert(containerName, dir);
     // Persistent mode's paths in either mode; see pinningPaths.
@@ -192,7 +194,13 @@ function extractCaTrust(
     return {
       ...writeCaTrustFiles(caCertPath, dir),
       jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn }),
-      nssDb: prepareNssDb(containerName, dir, env.HOME, { warn, info }),
+      nssDb: prepareNssDb(
+        containerName,
+        dir,
+        env.HOME,
+        { warn, info },
+        { homeUpper: homeUpperFor(dir, options) },
+      ),
     };
   } catch (e) {
     if (e instanceof SandboxError) throw e;
@@ -201,6 +209,16 @@ function extractCaTrust(
       "CA_EXTRACT_FAILED",
     );
   }
+}
+
+/** HOME's overlay upper dir, when HOME is itself an ephemeral overlay root and
+ *  a write to its NSS database would be discarded. */
+function homeUpperFor(dir: string, options: AssembleBundleOptions): string | undefined {
+  const { filesystemMode, overlayRoots, env } = options;
+  const home = env.HOME;
+  if (filesystemMode !== "ephemeral" || !home || !overlayRoots.includes(home)) return undefined;
+  if (persists(join(home, NSS_DB_PATH), options)) return undefined;
+  return overlayUpperFor(dir, home);
 }
 
 /** The paths buildOciConfig points the sandbox at, all of which have to exist
@@ -366,7 +384,11 @@ export const CA_RESIDUE_HINT =
  *  under a path the filesystem mode keeps writes to. */
 function persists(
   path: string,
-  { filesystemMode, writeThroughPaths, env }: RunSandboxedCommandOptions,
+  {
+    filesystemMode,
+    writeThroughPaths,
+    env,
+  }: Pick<RunSandboxedCommandOptions, "filesystemMode" | "writeThroughPaths" | "env">,
 ): boolean {
   return withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)).some(
     (p) => p === "/" || path === p || path.startsWith(`${p}/`),

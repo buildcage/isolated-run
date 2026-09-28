@@ -1,5 +1,5 @@
 import { existsSync, statSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { isAtOrUnder } from "./paths.ts";
 import type { OverlayDirs } from "./types.ts";
@@ -81,6 +81,11 @@ function slugify(path: string): string {
   return path.replace(/\//g, "_") || "_root";
 }
 
+/** The upper dir createOverlayScratchDirs makes for an overlay root. */
+export function overlayUpperFor(scratchDir: string, root: string): string {
+  return join(scratchDir, "ephemeral", slugify(root), "upper");
+}
+
 /**
  * Physical upper/work dirs for each overlay root: siblings of rootfsBindDir
  * under this run's own scratch dir (`<scratchDir>/ephemeral/<slug>/{upper,work}`),
@@ -95,9 +100,8 @@ export function createOverlayScratchDirs(
   { mkdir = mkdirSync }: { mkdir?: typeof mkdirSync } = {},
 ): OverlayDirs[] {
   return roots.map((path) => {
-    const base = join(scratchDir, "ephemeral", slugify(path));
-    const upper = join(base, "upper");
-    const work = join(base, "work");
+    const upper = overlayUpperFor(scratchDir, path);
+    const work = join(dirname(upper), "work");
     mkdir(upper, { recursive: true });
     mkdir(work, { recursive: true });
     return { path, upper, work };
