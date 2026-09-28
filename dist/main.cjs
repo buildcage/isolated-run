@@ -18991,7 +18991,7 @@ const NSS_CA_DB_DESTINATION = "/dev/buildcage-nssdb", NSS_SLOT = `library=libsof
 name="buildcage proxy CA"
 parameters="configdir='sql:${NSS_CA_DB_DESTINATION}' flags=readOnly"\nNSS=""
 
-`, NSS_DB_FILES = [
+`, STAGING_PREFIX = ".buildcage-", NSS_DB_FILES = [
 	"cert9.db",
 	"key4.db",
 	"pkcs11.txt"
@@ -19212,7 +19212,7 @@ function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.
 		resolved = void 0;
 	}
 	if (resolved !== files.destination) throw Error(`${files.destination} no longer resolves to itself, so what the command wrote to the NSS database there is not written back`);
-	let staging = (0, node_fs.mkdtempSync)((0, node_path.join)(files.destination, ".buildcage-"));
+	let staging = (0, node_fs.mkdtempSync)((0, node_path.join)(files.destination, STAGING_PREFIX));
 	try {
 		copyDir(files.path, staging);
 	} catch (e) {
@@ -19221,12 +19221,15 @@ function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.
 			force: !0
 		}), e;
 	}
-	for (let name of (0, node_fs.readdirSync)(files.destination)) (0, node_path.join)(files.destination, name) !== staging && (0, node_fs.rmSync)((0, node_path.join)(files.destination, name), {
+	for (let name of (0, node_fs.readdirSync)(files.destination)) name.startsWith(STAGING_PREFIX) || (0, node_fs.rmSync)((0, node_path.join)(files.destination, name), {
 		recursive: !0,
 		force: !0
 	});
-	for (let name of (0, node_fs.readdirSync)(staging)) (0, node_fs.renameSync)((0, node_path.join)(staging, name), (0, node_path.join)(files.destination, name));
-	return (0, node_fs.rmdirSync)(staging), "written";
+	for (let name of (0, node_fs.readdirSync)(staging)) name.startsWith(STAGING_PREFIX) || (0, node_fs.renameSync)((0, node_path.join)(staging, name), (0, node_path.join)(files.destination, name));
+	return (0, node_fs.rmSync)(staging, {
+		recursive: !0,
+		force: !0
+	}), "written";
 }
 function nssDbMounts(files) {
 	let mounts = [{

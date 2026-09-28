@@ -666,7 +666,9 @@ under `persistent`, and under `ephemeral` only below a `write_through:` entry. E
 discarded. A copy that carries the CA itself, which a command changing the CA's trust (`certutil -M`)
 leaves, is not written back: it fails the step, naming the database and pointing at
 `fail_on_ca_residue`, or only warns under `fail_on_ca_residue: false`, which writes it back. Nor is a
-copy whose database path no longer resolves where it did.
+copy whose database path no longer resolves where it did. When steps running in parallel each write
+back to the same database, the one that finishes last wins: each step's copy replaces the whole
+database, so what an earlier step wrote is lost.
 
 A database the runner user cannot write, or one too large to copy, is covered instead: a copy of a
 database holding only this CA is mounted over it, and a command that writes to that copy fails the

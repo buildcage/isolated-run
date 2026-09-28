@@ -454,6 +454,29 @@ describe("settleNssDbSlot", () => {
     expect(readdirSync(files.destination)).toStrictEqual(["cert9.db"]);
   });
 
+  it("leaves another step's staging beside the database alone", () => {
+    const dir = ownDb();
+    const files = prepareSlotted();
+    writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
+    mkdirSync(join(dir, ".buildcage-other"));
+    writeFileSync(join(dir, ".buildcage-other", "cert9.db"), "ANOTHER STEP'S");
+
+    expect(settle(files)).toBe("written");
+    expect(readdirSync(dir).sort()).toStrictEqual([".buildcage-other", "cert9.db", "pkcs11.txt"]);
+    expect(readFileSync(join(dir, ".buildcage-other", "cert9.db"), "utf8")).toBe("ANOTHER STEP'S");
+  });
+
+  it("does not write back another step's staging copied into the mirror", () => {
+    const dir = ownDb();
+    mkdirSync(join(dir, ".buildcage-other"));
+    const files = prepareSlotted();
+    writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
+    rmSync(join(dir, ".buildcage-other"), { recursive: true });
+
+    expect(settle(files)).toBe("written");
+    expect(readdirSync(dir).sort()).toStrictEqual(["cert9.db", "pkcs11.txt"]);
+  });
+
   it.each([
     [
       "a symlink retargeted",

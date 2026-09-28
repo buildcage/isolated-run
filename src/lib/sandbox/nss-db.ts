@@ -71,6 +71,9 @@ export const NSS_SLOT =
   `parameters="configdir='sql:${NSS_CA_DB_DESTINATION}' flags=readOnly"\n` +
   'NSS=""\n\n';
 
+/** Names the directory a write-back is staged in, beside the database. */
+const STAGING_PREFIX = ".buildcage-";
+
 /** A real pkcs11.txt is a few hundred bytes per module. */
 const MAX_PKCS11_TXT_BYTES = 1 << 20;
 
@@ -525,8 +528,9 @@ export function settleNssDbSlot(
     );
   }
   // Copied in beside the database first, so a copy that fails partway leaves
-  // it as it was.
-  const staging = mkdtempSync(join(files.destination, ".buildcage-"));
+  // it as it was. Another step's staging is left alone, whether it is beside
+  // this one or was copied into the mirror: that step is writing back too.
+  const staging = mkdtempSync(join(files.destination, STAGING_PREFIX));
   try {
     copyDir(files.path, staging);
   } catch (e) {
@@ -534,13 +538,14 @@ export function settleNssDbSlot(
     throw e;
   }
   for (const name of readdirSync(files.destination)) {
-    if (join(files.destination, name) === staging) continue;
+    if (name.startsWith(STAGING_PREFIX)) continue;
     rmSync(join(files.destination, name), { recursive: true, force: true });
   }
   for (const name of readdirSync(staging)) {
+    if (name.startsWith(STAGING_PREFIX)) continue;
     renameSync(join(staging, name), join(files.destination, name));
   }
-  rmdirSync(staging);
+  rmSync(staging, { recursive: true, force: true });
   return "written";
 }
 
