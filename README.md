@@ -442,9 +442,10 @@ command's environment leaves them unset, Buildcage also points the variables the
 read at a store that holds the CA: `NODE_EXTRA_CA_CERTS`, `DENO_CERT`, `SSL_CERT_FILE`,
 `REQUESTS_CA_BUNDLE` and `PIP_CERT`. `CURL_CA_BUNDLE` is left unset, since curl reads the system
 store already. A JVM already on the runner reads none of those, only its own keystore, so the CA is
-added to a copy of `$JAVA_HOME/lib/security/cacerts` (and `jssecacerts` when present) with the
-runner's own `keytool` and mounted over it, letting `mvn`/`gradle`/`java` reach the proxy without
-`proxy_engine: universal`. Chromium, including the `chrome-headless-shell` that Puppeteer,
+added to a copy of the `cacerts` (and `jssecacerts` when present) of the `java` on `PATH`, of
+`$JAVA_HOME` and of each `$JAVA_HOME_<major>_<arch>` (set by `setup-java` and the hosted runner
+images) with the runner's own `keytool` and mounted over it, letting `mvn`/`gradle`/`java` and a
+toolchain-selected JDK reach the proxy without `proxy_engine: universal`. Chromium, including the `chrome-headless-shell` that Puppeteer,
 Playwright and Remotion download, reads neither the store nor any variable, only its compiled-in
 root store and the NSS database in `$HOME`, so that database's `pkcs11.txt` gains, for the step, a
 read-only slot on a database holding only the CA. The database itself stays the runner's own, with
@@ -545,8 +546,14 @@ reported as blocked; see
   update, still needs `proxy_engine: universal` or an `allowed_tls_rules` passthrough, since it will
   not accept the re-signed certificate.
 - The JVM (Java, Kotlin, Scala) reads only its own keystore rather than the CA-trust variables, and
-  a JVM already on the runner is handled: the CA is added to a copy of its
-  `$JAVA_HOME/lib/security/cacerts` for the step. The `keytool` that does this runs outside the
+  a JVM already on the runner is handled: the CA is added, for the step, to a copy of the
+  `cacerts` of the `java` on `PATH`, of `$JAVA_HOME` and of each `$JAVA_HOME_<major>_<arch>` (set
+  by `setup-java` and the hosted runner images). These are found once, before the command starts,
+  so a JDK the step itself downloads or unpacks keeps its own keystore: Gradle's toolchain
+  auto-provisioning, `sdk install`, and Bazel's embedded JDK and `remotejdk`. Bazel can be pointed
+  at an injected copy with
+  `bazel --host_jvm_args=-Djavax.net.ssl.trustStore=$JAVA_HOME/lib/security/cacerts ...`, which
+  needs no `trustStorePassword`. The `keytool` that does this runs outside the
   sandbox, so it must live outside `$HOME`, `$GITHUB_WORKSPACE`, `/tmp`, `$RUNNER_TEMP` and
   `write_through:`. GitHub-hosted runners have one in `/usr/lib/jvm`. A self-hosted runner whose only
   JDKs are under `$HOME` (mise, sdkman, coursier, or `setup-java` with the runner in a home

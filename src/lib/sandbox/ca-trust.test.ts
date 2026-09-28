@@ -315,6 +315,72 @@ describe("discoverJvmKeystores", () => {
     ).toEqual([real]);
   });
 
+  // setup-java puts only its last JDK on JAVA_HOME; a toolchain or the script
+  // can switch to the others.
+  describe("JAVA_HOME_<major>_<arch>", () => {
+    const jdk17 = "/opt/hostedtoolcache/Java_Zulu_jdk/17.0.12-7/x64";
+    const jdk21 = "/opt/hostedtoolcache/Java_Zulu_jdk/21.0.4-7/x64";
+
+    it("finds the keystore of each JDK, in variable name order, after JAVA_HOME's", () => {
+      expect(
+        discoverJvmKeystores(
+          { JAVA_HOME_21_X64: jdk21, JAVA_HOME: "/opt/java", JAVA_HOME_17_X64: jdk17 },
+          undefined,
+          at([
+            `${jdk21}/lib/security/cacerts`,
+            `${jdk17}/lib/security/cacerts`,
+            "/opt/java/lib/security/cacerts",
+            "/etc/pki/java/cacerts",
+          ]),
+        ),
+      ).toEqual([
+        "/opt/java/lib/security/cacerts",
+        `${jdk17}/lib/security/cacerts`,
+        `${jdk21}/lib/security/cacerts`,
+        "/etc/pki/java/cacerts",
+      ]);
+    });
+
+    // The hosted images' preinstalled JDKs all link to one shared cacerts.
+    it("finds a keystore two JDKs share once", () => {
+      const shared = "/etc/ssl/certs/adoptium/cacerts";
+      expect(
+        discoverJvmKeystores(
+          { JAVA_HOME_17_X64: jdk17, JAVA_HOME_21_X64: jdk21 },
+          undefined,
+          at([`${jdk17}/lib/security/cacerts`, `${jdk21}/lib/security/cacerts`], {
+            [`${jdk17}/lib/security/cacerts`]: shared,
+            [`${jdk21}/lib/security/cacerts`]: shared,
+          }),
+        ),
+      ).toEqual([shared]);
+    });
+
+    it("finds a JDK 8's jre/lib/security cacerts", () => {
+      expect(
+        discoverJvmKeystores(
+          { JAVA_HOME_8_X64: "/opt/jdk8" },
+          undefined,
+          at(["/opt/jdk8/jre/lib/security/cacerts"]),
+        ),
+      ).toEqual(["/opt/jdk8/jre/lib/security/cacerts"]);
+    });
+
+    it("ignores a variable not of that form", () => {
+      expect(
+        discoverJvmKeystores(
+          { JAVA_HOME_FOO: "/opt/foo", JAVA_HOME_21: "/opt/bar", JAVA_HOME_21_x64: "/opt/baz" },
+          undefined,
+          at([
+            "/opt/foo/lib/security/cacerts",
+            "/opt/bar/lib/security/cacerts",
+            "/opt/baz/lib/security/cacerts",
+          ]),
+        ),
+      ).toEqual([]);
+    });
+  });
+
   it("finds nothing when there is no keystore", () => {
     expect(discoverJvmKeystores({ JAVA_HOME: "/opt/java" }, undefined, at([]))).toEqual([]);
   });
@@ -374,6 +440,29 @@ describe("writeJvmKeystoreFiles", () => {
       ],
     ]);
     expect(result).toEqual([{ path: "/scratch/jvm-keystore-0", destination: ks }]);
+  });
+
+  it("runs keytool once for each distinct keystore", () => {
+    const ks17 = "/opt/jdk17/lib/security/cacerts";
+    const ks21 = "/opt/jdk21/lib/security/cacerts";
+    const { deps, exec } = harness([ks17, ks21]);
+
+    const result = writeJvmKeystoreFiles(
+      CA,
+      "/scratch",
+      { JAVA_HOME: "/opt/jdk21", JAVA_HOME_17_X64: "/opt/jdk17", JAVA_HOME_21_X64: "/opt/jdk21" },
+      { java: undefined, keytool: KEYTOOL },
+      deps,
+    );
+
+    expect(exec.map(([, args]) => args[args.indexOf("-keystore") + 1])).toEqual([
+      "/scratch/jvm-keystore-0",
+      "/scratch/jvm-keystore-1",
+    ]);
+    expect(result).toEqual([
+      { path: "/scratch/jvm-keystore-0", destination: ks21 },
+      { path: "/scratch/jvm-keystore-1", destination: ks17 },
+    ]);
   });
 
   // JAVA_TOOL_OPTIONS=-javaagent:... would otherwise run outside the sandbox.

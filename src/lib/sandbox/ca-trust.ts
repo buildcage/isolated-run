@@ -161,14 +161,18 @@ export function writeCaTrustFiles(
 // overrides cacerts when present, so both get the CA.
 const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"];
 
-// Keystore directories tried when JAVA_HOME is unset, for a JVM at a fixed
-// location without it: Debian's ca-certificates-java output and RHEL's, each a
+// Keystore directories always tried, for a JVM at a fixed location that
+// neither PATH nor a JAVA_HOME variable names: Debian's ca-certificates-java output and RHEL's, each a
 // symlink realpath resolves to the real file.
 const KNOWN_JVM_KEYSTORE_DIRS = [
   "/etc/ssl/certs/java",
   "/etc/pki/java",
   "/etc/pki/ca-trust/extracted/java",
 ];
+
+// The per-JDK variables setup-java and the hosted runner images set, e.g.
+// JAVA_HOME_21_X64 (the images use _X64 on arm64 too).
+const JAVA_HOME_VAR = /^JAVA_HOME_\d+_[A-Z0-9]+$/;
 
 // The alias the injected trusted certificate carries; only has to not collide
 // with one the keystore already uses.
@@ -189,7 +193,8 @@ function keystoreDirsOf(home: string): string[] {
  * Find the JVM keystores on the runner: the keystore of the java PATH actually
  * resolves (which mvn/gradle/java read and which need not be the one JAVA_HOME
  * names), then JAVA_HOME's (for a tool that goes by JAVA_HOME instead), then
- * the known fixed directories. Each is resolved and deduplicated so a keystore
+ * each JAVA_HOME_<major>_<arch>'s in name order (a JDK a toolchain or the
+ * script switches to), then the known fixed directories. Each is resolved and deduplicated so a keystore
  * reachable by more than one path is injected into once.
  *
  * The java's home is read off its symlinks rather than asked of the java,
@@ -205,6 +210,12 @@ export function discoverJvmKeystores(
   const dirs: string[] = [];
   if (java) dirs.push(...keystoreDirsOf(dirname(dirname(realpath(java)))));
   if (env.JAVA_HOME) dirs.push(...keystoreDirsOf(env.JAVA_HOME));
+  for (const name of Object.keys(env)
+    .filter((key) => JAVA_HOME_VAR.test(key))
+    .sort()) {
+    const home = env[name];
+    if (home) dirs.push(...keystoreDirsOf(home));
+  }
   dirs.push(...KNOWN_JVM_KEYSTORE_DIRS);
 
   const found: string[] = [];
