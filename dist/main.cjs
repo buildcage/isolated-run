@@ -20069,25 +20069,67 @@ function buildEnvBlob(resolved) {
 	return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
 }
 const ENV_LOADER_SCRIPT = `#!/bin/bash
-# Applies the step environment from stdin, then execs the run script given
-# as $1. See sandbox/env-loader.ts for the wire format.
+# Applies the step environment from stdin, then runs $1 as a child: forwards
+# signals to it, reaps orphans, and exits with its status. See
+# sandbox/env-loader.ts for the wire format.
 #
 # No eval: \`export "K=V"\` expands the value once and never re-interprets
 # it, so a value containing $(...) or a backtick stays literal.
 set -u
 
+# Trapped before reading, as PID 1 drops untrapped signals. Any that arrive
+# before the child exists are held for it.
+child=
+pending=
+forward() {
+  if [ -n "$child" ]; then
+    kill -s "$1" "$child" 2>/dev/null
+  else
+    pending="$pending $1"
+  fi
+}
+for sig in TERM INT HUP QUIT USR1 USR2; do trap "forward $sig" "$sig"; done
+
+complete=
 while IFS= read -r -d '' record; do
   if [ "$record" = "${ENV_BLOB_TERMINATOR}" ]; then
-    # Never hand the run script the tail of this blob.
-    exec 0</dev/null
-    exec "$1"
+    complete=1
+    break
   fi
   [[ $record =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
   export "\${record%%=*}=\${record#*=}"
 done
 
-echo "buildcage: the sandbox environment ended before its terminator; refusing to run" >&2
-exit 1
+if [ -z "$complete" ]; then
+  echo "buildcage: the sandbox environment ended before its terminator; refusing to run" >&2
+  exit 1
+fi
+
+# Never hand the run script the tail of this blob.
+exec 0</dev/null
+
+# Without job control bash starts a background child with SIGINT and SIGQUIT
+# ignored; \`trap -\` restores them (bash 4.4+). Held signals are raised only
+# after that, from inside the child. A held SIGQUIT is still dropped, since bash
+# ignores it in itself.
+held=$pending
+{
+  trap - INT QUIT
+  for sig in $held; do kill -s "$sig" "$BASHPID"; done
+  exec "$1"
+} &
+child=$!
+# Signals that arrived during the fork. An INT or QUIT among them can still hit
+# the ignore.
+for sig in \${pending#"$held"}; do kill -s "$sig" "$child" 2>/dev/null; done
+# Keeps bash's "Killed" job notice out of the step's output. The child has its
+# own stderr.
+exec 2>/dev/null
+# A trapped signal interrupts \`wait\` with 128+n; the final \`wait\` returns the
+# child's own status, 128+n if a signal killed it, as runc reports for an init.
+while kill -0 "$child" 2>/dev/null; do wait "$child"; done
+wait "$child"
+exit $?
 `;
 function writeEnvLoader(execDir) {
 	let loaderPath = (0, node_path.join)(execDir, "env-loader.sh");

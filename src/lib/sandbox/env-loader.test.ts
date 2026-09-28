@@ -1,4 +1,6 @@
-import { readFileSync, statSync } from "node:fs";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -171,4 +173,154 @@ describe("writeEnvLoader", () => {
       expect(statSync(path).mode & 0o777).toBe(0o700);
     });
   });
+});
+
+/**
+ * Runs the written loader with `script` as the run script, the way the sandbox
+ * starts it. `onReady` fires once the script prints "ready".
+ */
+async function runLoader(
+  script: string,
+  {
+    blob = buildEnvBlob({}),
+    feed = (loader) => loader.stdin?.end(blob),
+    onReady,
+  }: {
+    blob?: Buffer;
+    feed?: (loader: ChildProcess) => void;
+    onReady?: (loader: ChildProcess) => void;
+  } = {},
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const dir = mkdtempSync(join(tmpdir(), "env-loader-test-"));
+  try {
+    const loaderPath = writeEnvLoader(dir);
+    const scriptPath = join(dir, "run-script.sh");
+    writeFileSync(scriptPath, `#!/bin/bash\n${script}\n`, { mode: 0o700 });
+    const loader = spawn("bash", [loaderPath, scriptPath]);
+    let stdout = "";
+    let stderr = "";
+    let ready = false;
+    loader.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    loader.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+      if (!ready && stdout.includes("ready\n")) {
+        ready = true;
+        onReady?.(loader);
+      }
+    });
+    feed(loader);
+    const code = await new Promise<number | null>((resolve) => loader.on("close", resolve));
+    return { code, stdout, stderr };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Short sleeps: bash runs a trap only after the foreground command returns.
+const WAIT_FOR_A_SIGNAL = "echo ready; while :; do sleep 0.1; done";
+
+const [bashMajor, bashMinor] = execFileSync("bash", [
+  "-c",
+  'echo "${BASH_VERSINFO[0]} ${BASH_VERSINFO[1]}"',
+])
+  .toString()
+  .trim()
+  .split(" ")
+  .map(Number);
+// The loader relies on `trap -` lifting bash's ignore of SIGINT in a background
+// child, and on $BASHPID. Runners ship 4.4+; macOS's /bin/bash is 3.2.
+const BASH_4_4_OR_LATER = bashMajor > 4 || (bashMajor === 4 && bashMinor >= 4);
+
+describe("the written loader", () => {
+  it("runs the script with the step environment, literally, and an empty stdin", async () => {
+    const { code, stdout } = await runLoader('echo "$A|$B"; cat', {
+      blob: buildEnvBlob({ A: "one", B: "$(echo two)" }),
+    });
+    expect(stdout).toBe("one|$(echo two)\n");
+    expect(code).toBe(0);
+  });
+
+  it("refuses to run the script when the environment ends before its terminator", async () => {
+    const blob = buildEnvBlob({ A: "one" });
+    const truncated = blob.subarray(0, blob.indexOf("__BUILDCAGE_ENV_END__"));
+    const { code, stdout, stderr } = await runLoader("echo ran", { blob: truncated });
+    expect(stdout).toBe("");
+    expect(stderr).toContain("ended before its terminator");
+    expect(code).toBe(1);
+  });
+
+  it("exits with the script's own status", async () => {
+    expect((await runLoader("exit 42")).code).toBe(42);
+  });
+
+  it("gives the script a $$ of its own, so kill -TERM $$ ends it with 143", async () => {
+    const { code, stdout } = await runLoader("kill -TERM $$; echo survived");
+    expect(stdout).toBe("");
+    expect(code).toBe(143);
+  });
+
+  it("forwards SIGTERM to the script and exits with the status its trap chose", async () => {
+    const { code, stdout } = await runLoader(
+      `trap 'echo got TERM; exit 0' TERM; ${WAIT_FOR_A_SIGNAL}`,
+      { onReady: (loader) => loader.kill("SIGTERM") },
+    );
+    expect(stdout).toBe("ready\ngot TERM\n");
+    expect(code).toBe(0);
+  });
+
+  it.skipIf(!BASH_4_4_OR_LATER)("forwards SIGINT to the script too", async () => {
+    const { code, stdout } = await runLoader(
+      `trap 'echo got INT; exit 7' INT; ${WAIT_FOR_A_SIGNAL}`,
+      { onReady: (loader) => loader.kill("SIGINT") },
+    );
+    expect(stdout).toBe("ready\ngot INT\n");
+    expect(code).toBe(7);
+  });
+
+  it("exits 128+n when a forwarded signal kills the script", async () => {
+    const { code } = await runLoader(WAIT_FOR_A_SIGNAL, {
+      onReady: (loader) => loader.kill("SIGTERM"),
+    });
+    expect(code).toBe(143);
+  });
+
+  it("adds nothing to stderr when a signal it doesn't trap kills the script", async () => {
+    const { code, stderr } = await runLoader("kill -KILL $$");
+    expect(stderr).toBe("");
+    expect(code).toBe(137);
+  });
+
+  // Signals the loader mid-read. The pause lets it install its traps first.
+  async function signalBeforeTheScriptStarts(signal: NodeJS.Signals) {
+    const blob = buildEnvBlob({ A: "one" });
+    return runLoader("sleep 5; echo ran", {
+      feed: (loader) => {
+        loader.stdin?.write(blob.subarray(0, 3));
+        setTimeout(() => {
+          loader.kill(signal);
+          setTimeout(() => loader.stdin?.end(blob.subarray(3)), 100);
+        }, 300);
+      },
+    });
+  }
+
+  it.skipIf(!BASH_4_4_OR_LATER)(
+    "holds a SIGTERM that arrives before the script starts and sends it on",
+    async () => {
+      const { code, stdout } = await signalBeforeTheScriptStarts("SIGTERM");
+      expect(stdout).toBe("");
+      expect(code).toBe(143);
+    },
+  );
+
+  it.skipIf(!BASH_4_4_OR_LATER)(
+    "holds a SIGINT that arrives before the script starts and sends it on",
+    async () => {
+      const { code, stdout } = await signalBeforeTheScriptStarts("SIGINT");
+      expect(stdout).toBe("");
+      expect(code).toBe(130);
+    },
+  );
 });
