@@ -32,32 +32,35 @@ jobs:
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
+            # Keep in step with what the engine Dockerfiles COPY.
+            image: &image
+              - 'src/**'
+              - 'docker/**'
+              - 'compose.yaml'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'rolldown.scripts.config.js'
+              - '.dockerignore'
+            harness: &harness
+              # Every job builds its own test-hook dist.
+              - 'rolldown.config.js'
+              - 'test/**'
+              - 'Makefile'
+              - '.github/actions/setup-vp/**'
+              - '.github/workflows/test-integration.yml'
+
             test_sandbox:
-              - 'src/core/**'
-              - 'docker/**'
-              - 'compose.yaml'
-              - 'src/**'
-              - 'test/**'
-              - 'Makefile'
-              - '.github/workflows/test-integration.yml'
+              - *image
+              - *harness
             test_sandbox_universal:
-              - 'src/core/**'
-              - 'docker/**'
-              - 'compose.yaml'
+              - *image
+              - *harness
               - 'compose.test-universal.yaml'
-              - 'src/**'
-              - 'test/**'
-              - 'Makefile'
-              - '.github/workflows/test-integration.yml'
             test_sandbox_inspect:
-              - 'src/core/**'
-              - 'docker/**'
-              - 'compose.yaml'
+              - *image
+              - *harness
               - 'compose.test-inspect.yaml'
-              - 'src/**'
-              - 'test/**'
-              - 'Makefile'
-              - '.github/workflows/test-integration.yml'
 
   # Drives dist/main.cjs directly (see test/integration-test-*.sh), not
   # through the real action; test-e2e.yml's test_sandbox_* jobs keep one
