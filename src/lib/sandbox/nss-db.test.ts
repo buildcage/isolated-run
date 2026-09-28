@@ -454,26 +454,55 @@ describe("settleNssDbSlot", () => {
     expect(readdirSync(files.destination)).toStrictEqual(["cert9.db"]);
   });
 
-  it("leaves another step's staging beside the database alone", () => {
+  it("leaves the staging of a step still writing back alone", () => {
     const dir = ownDb();
     const files = prepareSlotted();
     writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
-    mkdirSync(join(dir, ".buildcage-other"));
-    writeFileSync(join(dir, ".buildcage-other", "cert9.db"), "ANOTHER STEP'S");
+    mkdirSync(join(dir, ".buildcage-12345-other"));
+    writeFileSync(join(dir, ".buildcage-12345-other", "cert9.db"), "ANOTHER STEP'S");
+    const pidAlive = vi.fn(() => true);
 
-    expect(settle(files)).toBe("written");
-    expect(readdirSync(dir).sort()).toStrictEqual([".buildcage-other", "cert9.db", "pkcs11.txt"]);
-    expect(readFileSync(join(dir, ".buildcage-other", "cert9.db"), "utf8")).toBe("ANOTHER STEP'S");
+    expect(settle(files, { pidAlive })).toBe("written");
+    expect(pidAlive).toHaveBeenCalledWith(12345);
+    expect(readdirSync(dir).sort()).toStrictEqual([
+      ".buildcage-12345-other",
+      "cert9.db",
+      "pkcs11.txt",
+    ]);
+    expect(readFileSync(join(dir, ".buildcage-12345-other", "cert9.db"), "utf8")).toBe(
+      "ANOTHER STEP'S",
+    );
   });
 
-  it("does not write back another step's staging copied into the mirror", () => {
+  it.each([
+    ["whose step is gone", ".buildcage-12345-other"],
+    ["named without a pid, by an older version", ".buildcage-other"],
+  ])("removes a staging dir %s", (_label, name) => {
     const dir = ownDb();
-    mkdirSync(join(dir, ".buildcage-other"));
     const files = prepareSlotted();
     writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
-    rmSync(join(dir, ".buildcage-other"), { recursive: true });
+    mkdirSync(join(dir, name));
 
-    expect(settle(files)).toBe("written");
+    expect(settle(files, { pidAlive: () => false })).toBe("written");
+    expect(readdirSync(dir).sort()).toStrictEqual(["cert9.db", "pkcs11.txt"]);
+  });
+
+  it("leaves staging dirs out of the mirror, and out of its size", () => {
+    const dir = ownDb();
+    mkdirSync(join(dir, ".buildcage-12345-other"));
+    for (let i = 0; i < 513; i++) writeFileSync(join(dir, ".buildcage-12345-other", `f${i}`), "");
+
+    const files = prepareSlotted();
+
+    expect(readdirSync(files.path).sort()).toStrictEqual(["cert9.db", "pkcs11.txt"]);
+  });
+
+  it("does not write back a staging dir the command made in the database", () => {
+    const dir = ownDb();
+    const files = prepareSlotted();
+    mkdirSync(join(files.path, ".buildcage-12345-made"));
+
+    expect(settle(files, { pidAlive: () => false })).toBe("written");
     expect(readdirSync(dir).sort()).toStrictEqual(["cert9.db", "pkcs11.txt"]);
   });
 
