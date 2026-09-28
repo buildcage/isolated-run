@@ -446,7 +446,7 @@ function prepareSlot(
   files: NssDbFiles,
   template: string,
   exists: boolean,
-  { copyDir = defaultCopyDir }: NssDbDeps,
+  { copyDir = defaultCopyDir, ledger }: NssDbDeps,
 ): NssDbSlot {
   // Readable by the sandbox's user whatever the template's own modes: it holds
   // the CA's certificate and an empty key database, and is mounted read-only.
@@ -456,7 +456,11 @@ function prepareSlot(
   for (const name of readdirSync(caDb)) chmodSync(join(caDb, name), 0o644);
 
   if (exists) {
-    copyDir(files.destination, files.path, (path) => !inStaging(files.destination, path));
+    // A parallel step's write-back swaps the database under this lock.
+    withNssDbLock(
+      () => copyDir(files.destination, files.path, (path) => !inStaging(files.destination, path)),
+      ledger,
+    );
   } else {
     mkdirSync(files.path, { mode: 0o700 });
   }

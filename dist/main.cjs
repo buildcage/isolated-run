@@ -19379,11 +19379,11 @@ function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess 
 		return `${destination} cannot be read through (${errorMessage(e)})`;
 	}
 }
-function prepareSlot(dir, files, template, exists, { copyDir = defaultCopyDir }) {
+function prepareSlot(dir, files, template, exists, { copyDir = defaultCopyDir, ledger }) {
 	let caDb = (0, node_path.join)(dir, "nssdb-ca");
 	copyDir(template, caDb), (0, node_fs.chmodSync)(caDb, 493);
 	for (let name of (0, node_fs.readdirSync)(caDb)) (0, node_fs.chmodSync)((0, node_path.join)(caDb, name), 420);
-	exists ? copyDir(files.destination, files.path, (path) => !inStaging(files.destination, path)) : (0, node_fs.mkdirSync)(files.path, { mode: 448 });
+	exists ? withNssDbLock(() => copyDir(files.destination, files.path, (path) => !inStaging(files.destination, path)), ledger) : (0, node_fs.mkdirSync)(files.path, { mode: 448 });
 	let pkcs11 = (0, node_path.join)(files.path, "pkcs11.txt"), hadPkcs11 = (0, node_fs.lstatSync)(pkcs11, { throwIfNoEntry: !1 }) !== void 0;
 	return {
 		caDb,
