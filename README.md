@@ -445,11 +445,11 @@ store already. A JVM already on the runner reads none of those, only its own key
 added to a copy of the `cacerts` (and `jssecacerts` when present) of the `java` on `PATH`, of
 `$JAVA_HOME` and of each `$JAVA_HOME_<major>_<arch>` (set by `setup-java` and the hosted runner
 images) with the runner's own `keytool` and mounted over it, letting `mvn`/`gradle`/`java` and a
-toolchain-selected JDK reach the proxy without `proxy_engine: universal`. Chromium, including the `chrome-headless-shell` that Puppeteer,
-Playwright and Remotion download, reads neither the store nor any variable, only its compiled-in
-root store and the NSS database in `$HOME`, so that database's `pkcs11.txt` gains, for the step, a
-read-only slot on a database holding only the CA. The database itself stays the runner's own, with
-whatever the command writes to it.
+toolchain-selected JDK reach the proxy without `proxy_engine: universal`. Chromium, including the
+`chrome-headless-shell` that Puppeteer, Playwright and Remotion download, reads neither the store
+nor any variable, only its compiled-in root store and the NSS database in `$HOME`, so that
+database's `pkcs11.txt` gains, for the step, a read-only slot on a database holding only the CA. The
+database itself stays the runner's own, with whatever the command writes to it.
 
 The full table is in [Reference](./docs/reference.md#ca-trust-variables). What this cannot cover is
 in [Limitations](#limitations), below.

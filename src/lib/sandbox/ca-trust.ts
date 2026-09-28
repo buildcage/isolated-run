@@ -162,8 +162,8 @@ export function writeCaTrustFiles(
 const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"];
 
 // Keystore directories always tried, for a JVM at a fixed location that
-// neither PATH nor a JAVA_HOME variable names: Debian's ca-certificates-java output and RHEL's, each a
-// symlink realpath resolves to the real file.
+// neither PATH nor a JAVA_HOME variable names: Debian's ca-certificates-java
+// output and RHEL's, each a symlink realpath resolves to the real file.
 const KNOWN_JVM_KEYSTORE_DIRS = [
   "/etc/ssl/certs/java",
   "/etc/pki/java",
@@ -194,8 +194,9 @@ function keystoreDirsOf(home: string): string[] {
  * resolves (which mvn/gradle/java read and which need not be the one JAVA_HOME
  * names), then JAVA_HOME's (for a tool that goes by JAVA_HOME instead), then
  * each JAVA_HOME_<major>_<arch>'s in name order (a JDK a toolchain or the
- * script switches to), then the known fixed directories. Each is resolved and deduplicated so a keystore
- * reachable by more than one path is injected into once.
+ * script switches to), then the known fixed directories. Each is resolved and
+ * deduplicated so a keystore reachable by more than one path is injected into
+ * once.
  *
  * The java's home is read off its symlinks rather than asked of the java,
  * which may be a binary an earlier sandboxed step planted. A wrapper script

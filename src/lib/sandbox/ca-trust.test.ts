@@ -366,6 +366,13 @@ describe("discoverJvmKeystores", () => {
       ).toEqual(["/opt/jdk8/jre/lib/security/cacerts"]);
     });
 
+    // An empty one would otherwise name the relative lib/security.
+    it("ignores an empty variable", () => {
+      expect(
+        discoverJvmKeystores({ JAVA_HOME_17_X64: "" }, undefined, at(["lib/security/cacerts"])),
+      ).toEqual([]);
+    });
+
     it("ignores a variable not of that form", () => {
       expect(
         discoverJvmKeystores(
