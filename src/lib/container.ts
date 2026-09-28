@@ -5,7 +5,7 @@ import { describeDockerFailure, type DockerErrorLike } from "#core/lib/actions/d
 import type { RunDocker } from "#core/lib/docker/client.ts";
 
 import { SandboxError } from "./errors.ts";
-import { hostCommand } from "./sandbox/pinned-commands.ts";
+import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
 
 const CONTAINER_NAME_PREFIX = "buildcage-proxy-";
 
@@ -107,7 +107,7 @@ export interface ContainerInspectOptions {
 const captureDockerViaExec: RunDocker = (args, env) =>
   execFileSync(hostCommand("docker"), args, {
     encoding: "utf8",
-    env,
+    env: hostCommandEnv("docker", env),
     stdio: ["ignore", "pipe", "pipe"],
   });
 /* v8 ignore stop */

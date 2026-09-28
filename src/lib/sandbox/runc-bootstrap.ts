@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 
-import { hostCommand } from "./pinned-commands.ts";
+import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 import type { OciSpec } from "./types.ts";
 
 /**
@@ -42,11 +42,14 @@ export interface RuncBootstrapDeps {
 // node:fs and node:child_process what the tested caller decided.
 /* v8 ignore start */
 function defaultExec(command: string, args: string[]): string {
-  return execFileSync(hostCommand(command), args, { encoding: "utf8" });
+  return execFileSync(hostCommand(command), args, {
+    encoding: "utf8",
+    env: hostCommandEnv(command),
+  });
 }
 
 function defaultExecIn(command: string, args: string[], cwd: string): void {
-  execFileSync(hostCommand(command), args, { cwd });
+  execFileSync(hostCommand(command), args, { cwd, env: hostCommandEnv(command) });
 }
 
 function defaultReadFile(path: string): string {

@@ -5,6 +5,7 @@ import {
   dockerConfigDir,
   findPinnableCommand,
   jvmTools,
+  pathOutside,
   persistingWritablePaths,
   pinHostCommands,
   pinningPaths,
@@ -13,7 +14,7 @@ import {
   withRealPaths,
   type FindCommandDeps,
 } from "./host-commands.ts";
-import { hostCommand } from "./pinned-commands.ts";
+import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 const HOME = "/home/runner";
 const WORKSPACE = "/home/runner/work/repo/repo";
@@ -214,6 +215,38 @@ describe("jvmTools", () => {
   });
 });
 
+describe("pathOutside", () => {
+  it("drops the persisting paths a hosted runner puts on PATH", () => {
+    const path = `${HOME}/.local/bin:/opt/pipx_bin:${HOME}/.cargo/bin:/usr/local/bin:/usr/bin:/snap/bin`;
+
+    expect(pathOutside(path, PERSISTENT, (d) => d)).toBe(
+      "/opt/pipx_bin:/usr/local/bin:/usr/bin:/snap/bin",
+    );
+  });
+
+  it("drops an entry whose real directory is inside a persisting path", () => {
+    const realpath = (d: string) => (d === "/opt/tools" ? `${HOME}/tools` : d);
+
+    expect(pathOutside("/opt/tools:/usr/bin", PERSISTENT, realpath)).toBe("/usr/bin");
+  });
+
+  it("drops relative and empty entries, which resolve against the workspace", () => {
+    expect(pathOutside("bin::/usr/bin:./node_modules/.bin:", PERSISTENT, (d) => d)).toBe(
+      "/usr/bin",
+    );
+  });
+
+  it("drops a write_through path outside the persistent set", () => {
+    expect(pathOutside("/usr/local/bin:/usr/bin", ["/usr/local/bin"], (d) => d)).toBe("/usr/bin");
+  });
+
+  it("keeps PATH as is under write_through: /, the full opt-out", () => {
+    const path = `${HOME}/.local/bin:bin:/usr/bin`;
+
+    expect(pathOutside(path, [...PERSISTENT, "/"], (d) => d)).toBe(path);
+  });
+});
+
 describe("pinHostCommands", () => {
   it("makes hostCommand answer with the pinned path of docker and sudo only", () => {
     pinHostCommands(
@@ -225,6 +258,17 @@ describe("pinHostCommands", () => {
     expect(hostCommand("docker")).toBe("/usr/bin/docker");
     expect(hostCommand("sudo")).toBe("/usr/bin/sudo");
     expect(hostCommand("keytool")).toBe("keytool");
+  });
+
+  it("pins the PATH docker and sudo run with, without the persisting paths", () => {
+    pinHostCommands(
+      [...PERSISTENT, "/usr/local/bin"],
+      { PATH: `${HOME}/.local/bin:/opt/hostedtoolcache/node/bin:/usr/local/bin:/usr/bin` },
+      host(["/usr/bin/docker", "/usr/bin/sudo"]),
+    );
+
+    expect(hostCommandEnv("docker", {}).PATH).toBe("/opt/hostedtoolcache/node/bin:/usr/bin");
+    expect(hostCommandEnv("sudo", {}).PATH).toBe("/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin");
   });
 
   it("fails the step when one can only be found where the command can write", () => {

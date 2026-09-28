@@ -60,6 +60,10 @@ runner with passwordless `sudo` and a working Docker installation:
   - A non-root runner user. The sandbox keeps the runner's own uid, and as uid 0 it refuses to start:
     filesystem permissions alone can't separate the command from root-owned host sockets. Don't run
     the runner as root (`RUNNER_ALLOW_RUNASROOT`).
+  - Any `docker-credential-*` helper Docker needs installed outside `$GITHUB_WORKSPACE`, `$HOME`,
+    `/tmp`, `$RUNNER_TEMP` and `write_through:`. This action runs `docker` with those left off its
+    `PATH`, so the command can't plant one; see
+    [What it can write](./docs/security.md#what-it-can-write).
 
 A runner that falls short fails while the proxy starts, before the command runs.
 

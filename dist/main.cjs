@@ -17812,11 +17812,15 @@ function hostCommand(command) {
 function pinCommand(command, path) {
 	pinned.set(command, path);
 }
+const pinnedPathEnvs = new Map();
+function pinCommandPathEnv(command, pathEnv) {
+	pinnedPathEnvs.set(command, pathEnv);
+}
 function hostCommandEnv(command, env = process.env) {
-	return command === "sudo" ? {
+	return command !== "sudo" && command !== "docker" ? env : {
 		...env,
-		PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-	} : env;
+		PATH: pinnedPathEnvs.get(command) ?? "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	};
 }
 //#endregion
 //#region src/lib/container.ts
@@ -17851,7 +17855,7 @@ function isContainerNotFoundError(e) {
 }
 const captureDockerViaExec$1 = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 	encoding: "utf8",
-	env,
+	env: hostCommandEnv("docker", env),
 	stdio: [
 		"ignore",
 		"pipe",
@@ -18855,7 +18859,7 @@ function describeContainerStartFailure(state, { role, containerName }) {
 //#region src/lib/proxy-lifecycle.ts
 const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 	encoding: "utf8",
-	env,
+	env: hostCommandEnv("docker", env),
 	stdio: [
 		"ignore",
 		"pipe",
@@ -18864,7 +18868,7 @@ const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)
 }), printDockerViaExec = (args, env) => {
 	(0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 		stdio: "inherit",
-		env
+		env: hostCommandEnv("docker", env)
 	});
 };
 async function startSandboxProxy({ composeFile, projectName, containerName, pullPolicy, composeEnv }, deps = {}) {
@@ -18993,7 +18997,7 @@ parameters="configdir='sql:${NSS_CA_DB_DESTINATION}' flags=readOnly"\nNSS=""
 	"pkcs11.txt"
 ];
 function defaultExec$2(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args);
+	(0, node_child_process.execFileSync)(hostCommand(command), args, { env: hostCommandEnv(command) });
 }
 function defaultLstat(path) {
 	try {
@@ -19269,7 +19273,7 @@ const SYSTEM_CA_CANDIDATES = [
 	"/etc/ssl/cert.pem"
 ], OWN_CA_DESTINATION = "/etc/buildcage-ca.pem";
 function defaultExec$1(command, args, env) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, { env });
+	(0, node_child_process.execFileSync)(hostCommand(command), args, { env: hostCommandEnv(command, env) });
 }
 function defaultReadFile$1(path) {
 	return (0, node_fs.readFileSync)(path, "utf8");
@@ -19856,8 +19860,17 @@ function commandChain(candidate, readlink) {
 	}
 	return chain;
 }
+function insidePersisting(persisting, realpathDir) {
+	let writable = withRealPaths(persisting, realpathDir);
+	return (path) => writable.some((w) => isAtOrUnder(path, w));
+}
+function pathOutside(pathEnv, persisting, realpathDir = realFindCommandDeps.realpathDir) {
+	if (persisting.includes("/")) return pathEnv ?? "";
+	let inside = insidePersisting(persisting, realpathDir);
+	return (pathEnv ?? "").split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !inside(dir) && !inside(realpathDir(dir))).join(node_path.delimiter);
+}
 function findPinnableCommand(command, pathEnv, persisting, { isExecutable, readlink, realpathDir } = realFindCommandDeps) {
-	let optedOut = persisting.includes("/"), writable = withRealPaths(persisting, realpathDir), inside = (p) => writable.some((w) => isAtOrUnder(p, w)), reachable = (hop) => inside(hop) || inside((0, node_path.join)(realpathDir((0, node_path.dirname)(hop)), (0, node_path.basename)(hop)));
+	let optedOut = persisting.includes("/"), inside = insidePersisting(persisting, realpathDir), reachable = (hop) => inside(hop) || inside((0, node_path.join)(realpathDir((0, node_path.dirname)(hop)), (0, node_path.basename)(hop)));
 	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
 		if (!(0, node_path.isAbsolute)(dir)) continue;
 		let candidate = (0, node_path.join)(dir, command);
@@ -19873,6 +19886,7 @@ function pinHostCommands(paths, env, deps = realFindCommandDeps) {
 		}
 		if (findPinnableCommand(command, env.PATH, [], deps)) throw new SandboxError(`'${command}' is on PATH only under paths a sandboxed command can write to (${paths.join(", ")}). This action runs it outside the sandbox, so it has to live somewhere no sandboxed command can replace it, such as /usr/bin.`, "HOST_COMMAND_UNPINNABLE");
 	}
+	pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps.realpathDir)), pinCommandPathEnv("sudo", pathOutside("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", paths, deps.realpathDir));
 }
 function jvmTools(env, persisting, deps = realFindCommandDeps) {
 	let javaHomeBin = env.JAVA_HOME ? (0, node_path.join)(env.JAVA_HOME, "bin") : void 0;
@@ -20261,10 +20275,16 @@ function generateBaseOciSpec(runcPath, bundleDir, { execIn = defaultExecIn, read
 	return execIn(runcPath, ["spec"], bundleDir), JSON.parse(readFile((0, node_path.join)(bundleDir, "config.json")));
 }
 function defaultExec(command, args) {
-	return (0, node_child_process.execFileSync)(hostCommand(command), args, { encoding: "utf8" });
+	return (0, node_child_process.execFileSync)(hostCommand(command), args, {
+		encoding: "utf8",
+		env: hostCommandEnv(command)
+	});
 }
 function defaultExecIn(command, args, cwd) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, { cwd });
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		cwd,
+		env: hostCommandEnv(command)
+	});
 }
 function defaultReadFile(path) {
 	return (0, node_fs.readFileSync)(path, "utf8");
@@ -21521,12 +21541,16 @@ function createHostDocker() {
 			"pipe",
 			"pipe"
 		],
-		maxBuffer: 67108864
-	}), (args) => (0, node_child_process.spawn)(hostCommand("docker"), args, { stdio: [
-		"ignore",
-		"pipe",
-		"pipe"
-	] }));
+		maxBuffer: 67108864,
+		env: hostCommandEnv("docker")
+	}), (args) => (0, node_child_process.spawn)(hostCommand("docker"), args, {
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		env: hostCommandEnv("docker")
+	}));
 }
 function fetchReport(containerName, parameters, proxyEngine) {
 	let docker = createHostDocker();
