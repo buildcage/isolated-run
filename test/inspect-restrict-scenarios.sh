@@ -396,4 +396,14 @@ JAVA
   esac
 fi
 
+# Python 3.13+ verifies strictly by default and refuses a CA without keyUsage.
+# Older Pythons never check.
+echo "=== [Python strict verification - Python trusts the injected CA] ==="
+if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 13))' 2>/dev/null; then
+  pass "no Python 3.13 or later on this runner; strict verification is not exercised"
+else
+  POUT=$(python3 -c 'import ssl, urllib.request; assert ssl.create_default_context().verify_flags & ssl.VERIFY_X509_STRICT; print(urllib.request.urlopen("https://allowed.example.com/public/pkg.tgz", timeout=10).read().decode())' 2>&1 || true)
+  check_ok "Python urlopen under strict verification" "$POUT" "PUBLIC GET"
+fi
+
 scenario_results
