@@ -142,7 +142,7 @@ describe("caTrustAdditions", () => {
         destination: OWN_CA_DESTINATION,
         type: "none",
         source: "/scratch/buildcage-ca.pem",
-        options: ["rbind", "ro"],
+        options: ["rbind", "ro", "nosuid", "nodev", "noexec"],
       },
     ]);
     expect(env.NODE_EXTRA_CA_CERTS).toBe(OWN_CA_DESTINATION);

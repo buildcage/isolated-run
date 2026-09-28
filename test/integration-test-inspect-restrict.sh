@@ -218,6 +218,11 @@ if [ -e /etc/buildcage-ca.pem ]; then
 else
   pass "no /etc/buildcage-ca.pem left on the host"
 fi
+if [ -e /dev/buildcage-ca.pem ]; then
+  fail "/dev/buildcage-ca.pem exists on the host after the step"
+else
+  pass "no /dev/buildcage-ca.pem made on the host (its mount point is the sandbox's own /dev)"
+fi
 
 echo ""
 echo "--- CA trust survives a write_through: entry containing its mount points ---"
@@ -251,6 +256,11 @@ if [ -e /etc/buildcage-ca.pem ]; then
   fail "/etc/buildcage-ca.pem was left on the host by the write_through: /etc step"
 else
   pass "no /etc/buildcage-ca.pem left on the host after the write_through: /etc step"
+fi
+if [ -e /dev/buildcage-ca.pem ]; then
+  fail "/dev/buildcage-ca.pem was made on the host by the write_through: /etc step"
+else
+  pass "no /dev/buildcage-ca.pem made on the host by the write_through: /etc step"
 fi
 
 rm -rf "$TMPDIR" "$WT_TMPDIR"

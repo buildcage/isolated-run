@@ -9,7 +9,7 @@
  * read-only.
  */
 
-import { OWN_CA_DESTINATION, SYSTEM_CA_CANDIDATES } from "./ca-trust.ts";
+import { SYSTEM_CA_CANDIDATES } from "./ca-trust.ts";
 import { SHM_DESTINATION } from "./host-probes.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder, WritablePathConflictError } from "./paths.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
@@ -105,13 +105,10 @@ export function hostRunCoverageLayers(): WritableLayers {
  * same input isn't accepted under one engine and refused under another. Every
  * candidate store path is reserved for the same reason, not only the one this
  * runner happens to have: which one the mount lands on depends on the runner,
- * not on the caller.
+ * not on the caller. The CA-only file and the NSS CA database are not listed:
+ * they sit under /dev, which assertNoFreshMountDestinations already refuses.
  */
-export const RESERVED_INTERNAL_DESTINATIONS = [
-  RESOLV_CONF_DESTINATION,
-  OWN_CA_DESTINATION,
-  ...SYSTEM_CA_CANDIDATES,
-];
+export const RESERVED_INTERNAL_DESTINATIONS = [RESOLV_CONF_DESTINATION, ...SYSTEM_CA_CANDIDATES];
 
 /**
  * Fail closed if a writable bind would land on a destination runc mounts fresh
