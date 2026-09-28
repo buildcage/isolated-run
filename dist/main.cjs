@@ -20011,7 +20011,7 @@ function resolveSandboxGid(primaryGid, env, options = {}) {
 }
 //#endregion
 //#region src/core/lib/log/proxy-address.ts
-const PROXY_ADDRESS = "198.19.255.1", ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = new Set([
+const PROXY_ADDRESS = "198.19.255.1", UNKNOWN_HOST = "(unknown)", ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = new Set([
 	"ACTIONS_RUNTIME_URL",
 	"ACTIONS_RUNTIME_TOKEN",
 	"ACTIONS_CACHE_URL",
@@ -20703,7 +20703,7 @@ function hostBeforeRequest(sni, address) {
 		host: sni,
 		byAddress: !1
 	} : address === "198.19.255.1" ? {
-		host: "(unknown)",
+		host: UNKNOWN_HOST,
 		byAddress: !1
 	} : {
 		host: address,
@@ -20993,7 +20993,7 @@ async function scanHaproxyLog(lines, isAudit) {
 			headIntact ??= !1;
 			let [, ms, decision, ruleType, target, reason, bytes] = m;
 			if (decision !== passedDecision && decision !== "BLOCKED") continue;
-			let { host, port } = splitHostPort(target), failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), refused = decision === "BLOCKED" && !failed, event = {
+			let { host: address, port } = splitHostPort(target), host = address === "198.19.255.1" ? UNKNOWN_HOST : address, failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), refused = decision === "BLOCKED" && !failed, event = {
 				time: Number(ms) / 1e3,
 				action: failed ? "failed" : refused ? "block" : isAudit ? "audit" : "allow",
 				protocol: PROTOCOL[ruleType] ?? "tcp",
