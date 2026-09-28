@@ -491,6 +491,68 @@ jobs:
             exit 1
           fi
 
+      # Every step makes the same missing write_through targets. The short ones
+      # must not remove them from under the long one.
+      - parallel:
+          - name: sandbox-parallel-write-through-short-persistent
+            uses: ./
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+            with:
+              proxy_engine: universal
+              label: parallel-write-through-short-persistent
+              write_through: |
+                ./out
+                ./out-empty
+              run: "true"
+
+          - name: sandbox-parallel-write-through-short-ephemeral
+            uses: ./
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+            with:
+              proxy_engine: universal
+              filesystem_mode: ephemeral
+              label: parallel-write-through-short-ephemeral
+              write_through: |
+                ./out
+                ./out-empty
+              run: "true"
+
+          - name: sandbox-parallel-write-through-long
+            uses: ./
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+            with:
+              proxy_engine: universal
+              filesystem_mode: ephemeral
+              label: parallel-write-through-long
+              write_through: |
+                ./out
+                ./out-empty
+              run: |
+                sleep 15
+                echo written > ./out/file
+
+      - name: Verify the write_through targets were settled
+        if: always()
+        run: |
+          ledger="/var/tmp/buildcage-$(id -u)/write-through-ledger.json"
+          cat "$ledger"
+          if [ "$(cat out/file 2>/dev/null)" != "written" ]; then
+            echo "::error::the long step's write to ./out/file did not reach the runner"
+            exit 1
+          fi
+          if [ -e out-empty ]; then
+            echo "::error::./out-empty is still there after every step left it empty"
+            exit 1
+          fi
+          if [ "$(jq -c '[.dirs, .uses]' "$ledger")" != "[{},{}]" ]; then
+            echo "::error::$ledger still lists directories or uses after every step ended"
+            exit 1
+          fi
+          echo "OK: the write reached the runner, and only the empty target was removed"
+
   # A concurrent step ending must not detach an inspect step's CA mount,
   # whatever engine the ending step uses.
   test_sandbox_concurrency_inspect:
