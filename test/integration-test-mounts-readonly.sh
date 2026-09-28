@@ -16,9 +16,8 @@
 # location outside every writable exception.
 #
 # A second sandbox runs with $HOME spelled through a symlink and a trailing
-# slash, over a directory that is itself a mount with another mount under it,
-# as on a host whose /home links to /var/home on a separate disk. Both mounts
-# must stay writable: the host mount table names the real path.
+# slash, over a directory that is itself a mount with another under it, as
+# when /home links to /var/home on a separate disk. Both must stay writable.
 set -uo pipefail
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"

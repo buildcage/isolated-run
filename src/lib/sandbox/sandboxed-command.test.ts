@@ -493,8 +493,6 @@ describe("runSandboxedCommand", () => {
     });
   });
 
-  // The host mount table names real paths, so a mount under a symlinked or
-  // slash-suffixed $HOME only counts as under it once $HOME is spelled the same way.
   it("hands the config the writable paths as they really resolve", () => {
     mocks.realpath.mockImplementation((p: string) => p.replace(/^\/home\//, "/var/home/"));
 
