@@ -1,7 +1,8 @@
 #!/bin/bash
 # Verifies the sandbox hands the command the same process environment an
 # unwrapped `run:` step gets, rather than runc's container defaults (see
-# buildOciConfig). Drives dist/main.cjs directly, like integration-test-defaults.sh.
+# buildOciConfig), and that the command is not the sandbox's PID 1 (see
+# env-loader.ts). Drives dist/main.cjs directly, like integration-test-defaults.sh.
 set -uo pipefail
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
@@ -52,13 +53,77 @@ if [ "$CODE" = "0" ]; then
   CODE=$?
 fi
 
+PARITY_CODE=$CODE
+
+run_sandboxed() {
+  GITHUB_WORKSPACE="$WORKDIR" \
+  GITHUB_STATE="$WORKDIR/state.env" \
+  GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
+  BUILDCAGE_BUILD_TEST_HOOKS=1 \
+  BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
+  INPUT_RUN="$1" \
+    node dist/main.cjs
+}
+
+run_sandboxed '[ $$ -ne 1 ] || { echo "UNEXPECTED: the command is PID 1"; exit 1; }'
+NOT_PID1_CODE=$?
+
+START=$SECONDS
+run_sandboxed '( sleep 1; kill -TERM $$ ) & sleep 30'
+SELF_KILL_CODE=$?
+SELF_KILL_SECONDS=$((SECONDS - START))
+
+# The grandchild is orphaned onto PID 1, which python would never reap.
+run_sandboxed '#!/usr/bin/env python3
+import glob, os, sys, time
+child = os.fork()
+if child == 0:
+    if os.fork() == 0:
+        time.sleep(0.2)
+    os._exit(0)
+os.waitpid(child, 0)
+time.sleep(1)
+zombies = []
+for stat in glob.glob("/proc/[0-9]*/stat"):
+    try:
+        with open(stat) as f:
+            state = f.read().rsplit(")", 1)[1].split()[0]
+    except OSError:
+        continue
+    if state == "Z":
+        zombies.append(stat)
+if zombies:
+    print("UNEXPECTED: unreaped zombies:", zombies)
+    sys.exit(1)'
+ORPHAN_CODE=$?
+
+FAILED=0
 echo ""
 echo "=== Sandbox Host Environment Parity Assertions ==="
 echo ""
-if [ "$CODE" = "0" ]; then
+if [ "$PARITY_CODE" = "0" ]; then
   echo "  PASS  open-file limits, /dev/shm size and hostname match the runner's own"
 else
-  echo "  FAIL  sandbox environment diverges from the runner (exit $CODE)"
-  exit 1
+  echo "  FAIL  sandbox environment diverges from the runner (exit $PARITY_CODE)"
+  FAILED=1
+fi
+if [ "$NOT_PID1_CODE" = "0" ]; then
+  echo "  PASS  the command is not the sandbox's PID 1"
+else
+  echo "  FAIL  the command runs as the sandbox's PID 1 (exit $NOT_PID1_CODE)"
+  FAILED=1
+fi
+if [ "$SELF_KILL_CODE" = "143" ] && [ "$SELF_KILL_SECONDS" -lt 30 ]; then
+  echo "  PASS  kill -TERM \$\$ ends the command with 143"
+else
+  echo "  FAIL  kill -TERM \$\$ gave exit $SELF_KILL_CODE after ${SELF_KILL_SECONDS}s, expected 143 well under 30s"
+  FAILED=1
+fi
+if [ "$ORPHAN_CODE" = "0" ]; then
+  echo "  PASS  an orphan exiting under a python command is reaped"
+else
+  echo "  FAIL  an orphan was left a zombie (exit $ORPHAN_CODE)"
+  FAILED=1
 fi
 echo ""
+exit "$FAILED"
