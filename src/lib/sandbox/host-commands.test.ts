@@ -178,6 +178,10 @@ describe("resolveDefaultWritableDirs", () => {
       resolveDefaultWritableDirs({ HOME: "/home/runner/", RUNNER_TEMP: "/opt/temp//" }, (p) => p),
     ).toMatchObject({ home: "/home/runner", runnerTemp: "/opt/temp" });
   });
+
+  it("leaves / as it is", () => {
+    expect(resolveDefaultWritableDirs({ HOME: "/" }, (p) => p).home).toBe("/");
+  });
 });
 
 describe("withRealPaths", () => {
