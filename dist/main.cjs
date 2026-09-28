@@ -19864,10 +19864,10 @@ function insidePersisting(persisting, realpathDir) {
 	let writable = withRealPaths(persisting, realpathDir);
 	return (path) => writable.some((w) => isAtOrUnder(path, w));
 }
-function pathOutside(pathEnv, persisting, realpathDir = realFindCommandDeps.realpathDir) {
-	if (persisting.includes("/")) return pathEnv ?? "";
+function pathOutside(pathEnv = "", persisting, realpathDir) {
+	if (persisting.includes("/")) return pathEnv;
 	let inside = insidePersisting(persisting, realpathDir);
-	return (pathEnv ?? "").split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !inside(dir) && !inside(realpathDir(dir))).join(node_path.delimiter);
+	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !inside(dir) && !inside(realpathDir(dir))).join(node_path.delimiter);
 }
 function findPinnableCommand(command, pathEnv, persisting, { isExecutable, readlink, realpathDir } = realFindCommandDeps) {
 	let optedOut = persisting.includes("/"), inside = insidePersisting(persisting, realpathDir), reachable = (hop) => inside(hop) || inside((0, node_path.join)(realpathDir((0, node_path.dirname)(hop)), (0, node_path.basename)(hop)));

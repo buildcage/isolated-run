@@ -240,6 +240,10 @@ describe("pathOutside", () => {
     expect(pathOutside("/usr/local/bin:/usr/bin", ["/usr/local/bin"], (d) => d)).toBe("/usr/bin");
   });
 
+  it("is empty for an unset PATH", () => {
+    expect(pathOutside(undefined, PERSISTENT, (d) => d)).toBe("");
+  });
+
   it("keeps PATH as is under write_through: /, the full opt-out", () => {
     const path = `${HOME}/.local/bin:bin:/usr/bin`;
 

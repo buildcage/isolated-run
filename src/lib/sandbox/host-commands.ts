@@ -128,13 +128,13 @@ function insidePersisting(
  * helpers. `write_through: /` is the documented full opt-out.
  */
 export function pathOutside(
-  pathEnv: string | undefined,
+  pathEnv: string = "",
   persisting: string[],
-  realpathDir: FindCommandDeps["realpathDir"] = realFindCommandDeps.realpathDir,
+  realpathDir: FindCommandDeps["realpathDir"],
 ): string {
-  if (persisting.includes("/")) return pathEnv ?? "";
+  if (persisting.includes("/")) return pathEnv;
   const inside = insidePersisting(persisting, realpathDir);
-  return (pathEnv ?? "")
+  return pathEnv
     .split(delimiter)
     .filter((dir) => isAbsolute(dir) && !inside(dir) && !inside(realpathDir(dir)))
     .join(delimiter);
