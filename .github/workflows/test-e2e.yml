@@ -572,9 +572,8 @@ jobs:
           done
           echo "OK: no CA file on the host"
 
-      # The hosted image has no NSS database, so each step below makes
-      # ~/.pki/nssdb to mount one over. The steps that end first must leave it
-      # in place while the long one still has its database mounted there.
+      # The hosted image has no NSS database, so every step below makes
+      # ~/.pki/nssdb. The short steps must not remove it under the long one.
       - name: Start without an NSS database
         run: rm -rf ~/.pki ~/.local/share/pki
 
@@ -607,7 +606,6 @@ jobs:
               allowed_url_rules: "GET https://example.com/**"
               label: parallel-nssdb-long
               run: |
-                # Let the other steps finish and clean up first.
                 sleep 15
                 if ! grep -q nssdb /proc/self/mountinfo; then
                   echo "::error::the NSS database mount is gone after the concurrent steps ended"

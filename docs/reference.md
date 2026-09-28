@@ -675,17 +675,14 @@ database holding only this CA is mounted over it, and a command that writes to t
 step the same way, or only warns, discarding the write. A symlink or non-directory on the path leaves
 the database unmounted, with a warning.
 
-Missing directories are created 0700, and removed once they are left empty by the last step using
-them, so steps running in parallel, or other jobs of the same runner user, never remove one another
-step still has its database mounted on: removing a directory detaches every mount on it, in every
-sandbox. Which directories Buildcage made and which steps use them is kept in
-`/var/tmp/buildcage-<uid>/nssdb-ledger.json`, which a sandbox can neither see nor write; a
-directory made again since is not Buildcage's any more, and is left. A directory is told from one
-made again in its place by its birth time, so on a filesystem that keeps none (some NFS mounts, for
-one), the directories Buildcage makes are left in place, empty, after the step. Something else removing the
-directory while a step runs, such as a step running in parallel outside any sandbox, still detaches
-that step's database: the step then warns, naming the database, since Chromium in it stopped trusting
-the proxy CA from then on, and writes nothing back to it.
+Missing directories are created 0700 and removed, if empty, when the last step using them ends,
+including steps in other jobs of the same runner user. Removing a directory detaches every mount on
+it, so a directory another step still uses is never removed. The record of which directories
+Buildcage made and which steps use them is `/var/tmp/buildcage-<uid>/nssdb-ledger.json`, hidden from
+the sandbox. A directory is identified by its birth time, so on a filesystem without one (some NFS
+mounts), the directories are left in place. If something else, such as a parallel step outside any
+sandbox, removes the directory while a step runs, that step's Chromium stops trusting the proxy CA;
+the step warns, naming the database, and writes nothing back to it.
 
 ## `write_through` paths
 

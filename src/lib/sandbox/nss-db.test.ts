@@ -75,8 +75,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Plays `docker cp` by copying the test's template, and keeps the ledger
- *  in the test's own base. */
+/** Plays `docker cp` with the test's template, and keeps the ledger in the
+ *  test's base. */
 function fakeDocker(): { deps: NssDbDeps; calls: string[][] } {
   const calls: string[][] = [];
   return {

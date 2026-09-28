@@ -22,38 +22,32 @@ import { retryBriefly } from "../retry-briefly.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 
 /**
- * The directories made on the runner for Chromium's NSS database to be mounted
- * over, shared by every step of the runner user's, parallel ones and other
- * jobs' included.
+ * Ledger of the directories made for Chromium's NSS database mount, shared by
+ * every step of the runner user, across jobs too.
  *
- * Removing a directory detaches every mount on it, in every mount namespace, so
- * a step that removed the one it made while another step's sandbox still had
- * its mirror mounted there would take that database away from the other
- * command. Each step therefore registers its use of the database's directory
- * here, and the last one to leave removes the directories Buildcage made.
+ * rmdir detaches every mount on the directory in every mount namespace, so a
+ * step must not remove one another step's sandbox still has its database
+ * mounted on. Each step registers its use, and the last to leave removes what
+ * Buildcage made.
  *
- * It lives in SANDBOX_SCRATCH_BASE, which the sandbox cannot see or write, so
- * a command cannot mark a directory of the runner's for removal. A directory
- * is known by its device, inode and birth time together: a directory removed
- * and made again may get the inode back, never the birth time, so an entry
- * left behind by a killed run never matches a directory someone made since.
+ * It lives in SANDBOX_SCRATCH_BASE, hidden from the sandbox, so a command
+ * cannot mark a runner directory for removal. Directories are identified by
+ * device, inode and birth time: a recreated directory may reuse the inode but
+ * not the birth time, so a stale entry never matches it.
  */
 
 export const NSS_DB_LEDGER_NAME = "nssdb-ledger.json";
 const LOCK_NAME = "nssdb-ledger.lock";
 
-/** A few hundred bytes per entry, and a handful of entries at a time. */
 const MAX_LEDGER_BYTES = 64 << 10;
 
-/** Held for milliseconds, so one this old whose holder is gone is left over.
- *  Well inside how long acquireLock waits, so a step that starts waiting as
- *  the holder is killed still takes the lock over. */
+/** The lock is held for milliseconds. Kept well under acquireLock's wait so a
+ *  lock left by a killed holder is taken over within it. */
 const STALE_LOCK_MS = 2_000;
 
-/** A step's scratch dir name; see scratchDirNameFor. */
+/** scratchDirNameFor's shape. */
 const USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
 
-/** A directory's identity: device, inode and birth time, as decimal strings. */
 export interface DirId {
   dev: string;
   ino: string;
@@ -73,9 +67,9 @@ interface LedgerUse extends DirId {
 
 interface Ledger {
   version: 1;
-  /** The directories Buildcage made, by path. */
+  /** Directories Buildcage made, by path. */
   dirs: Record<string, LedgerDir>;
-  /** The steps with a database mounted, by scratch dir name. */
+  /** Steps with a database mounted, by scratch dir name. */
   uses: Record<string, LedgerUse>;
 }
 
@@ -85,12 +79,10 @@ type LstatShape = Pick<BigIntStats, "dev" | "ino" | "birthtimeNs"> & {
 };
 
 export interface NssDbLedgerDeps {
-  /** SANDBOX_SCRATCH_BASE, but for tests. */
   base?: string;
   lstat?: (path: string) => LstatShape | undefined;
   mkdir?: (path: string, mode: number) => void;
   rmdir?: (path: string) => void;
-  /** Whether a process with this pid is still there. */
   pidAlive?: (pid: number) => boolean;
   now?: () => Date;
   lockAttempts?: number;
@@ -131,7 +123,6 @@ function sameId(a: DirId, b: DirId): boolean {
   return a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
 }
 
-/** The identity of the directory at path, or undefined when there is none. */
 export function dirIdOf(
   path: string,
   { lstat = defaultLstat }: Pick<NssDbLedgerDeps, "lstat"> = {},
@@ -140,7 +131,6 @@ export function dirIdOf(
   return info?.isDirectory() ? idOf(info) : undefined;
 }
 
-/** Whether path still holds the directory that was there when id was taken. */
 export function stillThere(
   path: string,
   id: DirId,
@@ -150,12 +140,8 @@ export function stillThere(
   return current !== undefined && sameId(current, id);
 }
 
-/**
- * Takes the lock, by hard-linking a file holding this pid to the lock's name:
- * link fails when the name is taken, so the file appears whole or not at
- * all. A lock whose holder is gone and that is older than any holder keeps it
- * is taken over.
- */
+/** link(2) creates the lock with its pid already written, or fails with
+ *  EEXIST, so no reader sees an empty lock. */
 function acquireLock(
   base: string,
   { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 50 }: NssDbLedgerDeps,
@@ -181,11 +167,9 @@ function acquireLock(
   return () => rmSync(lock, { force: true });
 }
 
-/** Removes a lock left by a holder that is gone. Two steps that both find the
- *  same one left can still both remove it, the second taking away the lock
- *  the first has just taken; that needs a run killed while holding it, for a
- *  few milliseconds, and costs no more than two steps updating the ledger at
- *  once. */
+/** Two waiters can both take over the same stale lock, the second removing
+ *  the first's new one. That needs a holder killed within its milliseconds,
+ *  and costs at most one overlapping ledger update. */
 function takeOverStaleLock(
   lock: string,
   pidAlive: (pid: number) => boolean,
@@ -216,7 +200,7 @@ function isId(value: unknown): value is DirId {
   );
 }
 
-/** The ledger, or why it cannot be trusted. None at all is an empty one. */
+/** The ledger, or why it cannot be trusted. */
 function readLedger(path: string): Ledger | string {
   let fd: number;
   try {
@@ -227,8 +211,8 @@ function readLedger(path: string): Ledger | string {
   }
   try {
     const info = fstatSync(fd);
-    // Its owner is not checked: ensureOwnScratchBase keeps the base private
-    // to the runner user, so nobody else but root can have put it there.
+    // No owner check: ensureOwnScratchBase keeps the base private to the
+    // runner user.
     if (!info.isFile()) return `${path} is not a file`;
     if (info.size > MAX_LEDGER_BYTES) return `${path} is ${info.size} bytes, too large`;
     const parsed = JSON.parse(readFileSync(fd, "utf8")) as Partial<Ledger>;
@@ -248,7 +232,7 @@ function readLedger(path: string): Ledger | string {
   }
 }
 
-/** Written beside it and renamed over it, so a reader never sees half of it. */
+/** Renamed into place so a reader never sees a partial write. */
 function writeLedger(path: string, ledger: Ledger): void {
   const tmp = `${path}.${process.pid}.tmp`;
   rmSync(tmp, { force: true });
@@ -265,19 +249,15 @@ function writeLedger(path: string, ledger: Ledger): void {
   renameSync(tmp, path);
 }
 
-/**
- * Runs fn on the ledger under the lock and saves what it leaves. Throws when
- * the lock cannot be had; hands fn a reason instead of the ledger when the
- * ledger cannot be trusted, and then saves nothing: remaking it would drop
- * other steps' uses.
- */
+/** An untrusted ledger is handed to fn as the reason and never rewritten:
+ *  remaking it would drop other steps' uses. */
 function withLedger<T>(fn: (ledger: Ledger | string) => T, deps: NssDbLedgerDeps): T {
   const base = baseOf(deps);
   const path = join(base, NSS_DB_LEDGER_NAME);
   const release = acquireLock(base, deps);
   try {
     const ledger = readLedger(path);
-    // Saved even when fn throws, as what it undid on the way out is done.
+    // Saved even when fn throws, since the undo it ran has taken effect.
     try {
       return fn(ledger);
     } finally {
@@ -292,9 +272,8 @@ function baseOf({ base }: NssDbLedgerDeps): string {
   return base ?? SANDBOX_SCRATCH_BASE;
 }
 
-/** Drops the uses of steps whose scratch dir is gone: the mirror lives in it,
- *  and it goes only once every mount under it has, so nothing of theirs is
- *  mounted any more. */
+/** A scratch dir is removed only after every mount under it, so a use whose
+ *  scratch dir is gone has nothing mounted. */
 function dropStaleUses(ledger: Ledger, deps: NssDbLedgerDeps): void {
   const { lstat = defaultLstat } = deps;
   for (const name of Object.keys(ledger.uses)) {
@@ -302,12 +281,8 @@ function dropStaleUses(ledger: Ledger, deps: NssDbLedgerDeps): void {
   }
 }
 
-/**
- * Removes the directories Buildcage made once no step uses them, deepest
- * first, as the runner user: one the command filled is left, as it is the
- * runner's now. Each entry goes whatever happens to its directory, since one
- * that is gone or was made again is no longer Buildcage's to remove.
- */
+/** A directory that is gone, recreated or no longer empty is not Buildcage's
+ *  any more, so its entry is dropped either way. */
 function removeUnusedDirs(ledger: Ledger, deps: NssDbLedgerDeps): void {
   if (Object.keys(ledger.uses).length > 0) return;
   const { rmdir = rmdirSync, info } = deps;
@@ -326,31 +301,24 @@ function removeUnusedDirs(ledger: Ledger, deps: NssDbLedgerDeps): void {
     try {
       rmdir(path);
     } catch {
-      // Not empty: the command, or Chromium, put something in it.
+      // Not empty: now the runner's.
     }
   }
 }
 
 export interface NssDbClaim {
-  /** The database directory as it was once claimed, to tell afterwards
-   *  whether it was removed while the command ran. */
+  /** To tell afterwards whether it was removed while the command ran. */
   destinationId: DirId;
-  /** Whether the use went into the ledger, and so has to be released. */
   registered: boolean;
 }
 
 /**
- * Makes whichever of `dirs` (shallowest first, down to `destination`) are not
- * there, under the lock, marks the ones it made, and registers this step's use
- * of `destination` under `name`, its scratch dir's name. One already there,
- * whoever made it and whenever, is taken as it is, unless it is a symlink.
- * Throws, having undone what it did, when a directory cannot be made or the
- * lock cannot be had.
+ * Makes whichever of `dirs` (shallowest first) are missing, marks them, and
+ * registers this step's use of `destination`. An existing one is taken as it
+ * is, unless it is a symlink.
  *
- * With a ledger that cannot be trusted, the directories are made but neither
- * marked nor registered, so no step removes them: they are left behind. So are
- * they where the filesystem keeps no birth time, since a directory could not
- * then be told from one made again in its place.
+ * Directories are left unmarked, and so never removed, when the ledger cannot
+ * be trusted or the filesystem keeps no birth time.
  */
 export function claimNssDb(
   name: string,
@@ -400,11 +368,7 @@ export function claimNssDb(
   }, deps);
 }
 
-/**
- * Ends the use registered under `name` and, once no step uses them, removes
- * the directories Buildcage made. A lock that cannot be had leaves them in
- * place for a later step to remove.
- */
+/** Without the lock, the directories are left for a later step to remove. */
 export function releaseNssDb(name: string, deps: NssDbLedgerDeps = {}): void {
   const { lstat = defaultLstat, warn } = deps;
   const path = join(baseOf(deps), NSS_DB_LEDGER_NAME);
@@ -424,7 +388,6 @@ export function releaseNssDb(name: string, deps: NssDbLedgerDeps = {}): void {
   }
 }
 
-/** The name a step's use is registered under: its scratch dir's own name. */
 export function useNameFor(scratchDir: string): string {
   return basename(scratchDir);
 }

@@ -99,12 +99,9 @@ export function planPostCleanup(
     );
   }
 
-  // End this step's use of the directories made for Chromium's NSS database,
-  // which a hard kill left registered, so the last step to leave can remove
-  // them. Only once the scratch dir is gone: its mounts are what the use
-  // stands for, and one still there may hold the database mounted. A use left
-  // registered is dropped by a later step once the scratch dir goes. A no-op
-  // when the step ended normally, or never used the inspect engine.
+  // Ends an NSS database use a hard kill left registered. Only once the
+  // scratch dir is gone, since one still there may hold the database mounted;
+  // a later step drops the use once it goes.
   if (reclaimed) {
     releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning });
   }

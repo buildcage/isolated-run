@@ -28,8 +28,7 @@ import {
 } from "./nss-db-ledger.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 
-// Real directories, since which ones get made and removed is what is under
-// test; `base` stands in for SANDBOX_SCRATCH_BASE.
+// `base` stands in for SANDBOX_SCRATCH_BASE.
 let home: string;
 let base: string;
 let pki: string;
@@ -45,8 +44,7 @@ beforeEach(() => {
   mkdirSync(base, { mode: 0o700 });
 });
 
-/** A step with a live scratch dir, which is what keeps its use from being
- *  taken for a dead run's. */
+/** A live scratch dir keeps the step's use from being taken as stale. */
 function step(name: string): string {
   mkdirSync(join(base, name), { recursive: true });
   return name;

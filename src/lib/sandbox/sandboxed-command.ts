@@ -373,9 +373,6 @@ function persists(
   );
 }
 
-/** Where releasing the NSS database's directories reports: a directory
- *  already gone is only noted, and a ledger that could not be updated warned
- *  about. */
 function releaseDeps(
   { warn }: Pick<RunSandboxedCommandOptions, "warn">,
   { info }: Pick<RunSandboxedCommandDeps, "info">,
@@ -386,9 +383,8 @@ function releaseDeps(
 /** Settles the NSS database once the command has exited. The runner's own
  *  database gets back what the command wrote, less the slot, where the
  *  filesystem mode keeps writes. A covered one cannot keep a write, so one
- *  fails the step, or only warns under fail_on_ca_residue: false. A database
- *  whose mount went away while the command ran is warned about, and nothing is
- *  written back to it. */
+ *  fails the step, or only warns under fail_on_ca_residue: false. A detached
+ *  database is warned about and not written back. */
 function finishNssDb(
   caTrust: CaTrustFiles | undefined,
   options: RunSandboxedCommandOptions,
@@ -407,8 +403,8 @@ function finishNssDb(
     throw new SandboxError(`${message}. ${CA_RESIDUE_HINT}`, code);
   };
 
-  // Only a mount on the runner's own directory can be detached from it: under
-  // ephemeral, the mount sits on the overlay's copy.
+  // Under ephemeral the mount sits on the overlay, which a host rmdir cannot
+  // detach.
   const persist = persists(nssDb.destination, options);
   const detached = persist ? nssDbDetached(nssDb) : undefined;
   if (detached !== undefined) warn(detached);

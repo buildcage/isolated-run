@@ -131,15 +131,14 @@ export interface NssDbFiles {
   /** The template as extracted, to compare a covering copy against afterwards. */
   template: string;
   destination: string;
-  /** This step's use of the destination, registered in the shared ledger
-   *  (see nss-db-ledger.ts) so no other step removes it while it is mounted. */
+  /** This step's use of the destination in the shared ledger. */
   claim?: {
     name: string;
     destinationId: DirId;
     registered: boolean;
   };
-  /** The XDG database's path when the destination is ~/.pki/nssdb and there
-   *  was none: where Chromium makes one of its own if the mount goes away. */
+  /** Set when the destination is ~/.pki/nssdb and no XDG database existed:
+   *  where Chromium makes its own if the mount goes away. */
   xdgPath?: string;
   /** Set when the runner's own database was given the slot; unset when it
    *  was covered. */
@@ -310,8 +309,8 @@ export function prepareNssDb(
   const xdgPath = join(realHome, NSS_XDG_DB_PATH);
   if (plan.destination !== xdgPath && lstat(xdgPath) === undefined) files.xdgPath = xdgPath;
 
-  // Looked at again after the docker cp, which takes a while: a parallel step
-  // may have made the database's directory, or removed the one it made, since.
+  // Checked again after the slow docker cp: a parallel step may have made or
+  // removed it since planning.
   const exists = lstat(plan.destination)?.isDirectory() === true;
   let refusal = exists ? whyNotSlot(plan.destination, deps) : undefined;
   if (refusal === undefined) {
@@ -331,8 +330,8 @@ export function prepareNssDb(
   }
 
   // Created here because runc would create them as root in the runner's home.
-  // Every directory on the way is passed, not only those missing when planned:
-  // a parallel step may have removed one it made since, and it is made again.
+  // Every directory on the way, not only those missing when planned: a
+  // parallel step may have removed one since.
   const name = useNameFor(dir);
   try {
     const claim = claimNssDb(name, plan.destination, dirsDownTo(realHome, plan.destination), {
@@ -350,7 +349,6 @@ export function prepareNssDb(
   return files;
 }
 
-/** The directories below home down to destination, shallowest first. */
 function dirsDownTo(home: string, destination: string): string[] {
   let dir = home;
   return relative(home, destination)
@@ -665,12 +663,10 @@ export function nssDbChange(
 }
 
 /**
- * Why the mount over the database is known to have gone while the command
- * ran, or undefined. Removing the directory on the runner detaches whatever is
- * mounted on it in every namespace, and nothing Buildcage does removes one a
- * step still uses, so something else did: another step running in parallel,
- * most likely. Chromium then found no database there and, since M146, made one
- * of its own in the XDG path, which trusts no proxy CA.
+ * Why the database mount is known to have been detached while the command
+ * ran, or undefined. Buildcage never removes a directory in use, so something
+ * else removed it. Chromium since M146 then makes its own database in the XDG
+ * path, which trusts no proxy CA.
  */
 export function nssDbDetached(
   files: NssDbFiles,
@@ -690,8 +686,6 @@ export function nssDbDetached(
   return message;
 }
 
-/** Ends this step's use of the database's directory, removing the directories
- *  Buildcage made once no step uses them. */
 export function releaseNssDbDirs(files: NssDbFiles, deps: NssDbLedgerDeps = {}): void {
   if (files.claim?.registered) releaseNssDb(files.claim.name, deps);
 }

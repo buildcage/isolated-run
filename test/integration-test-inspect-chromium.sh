@@ -4,9 +4,9 @@
 # kept where filesystem_mode keeps writes, below a write_through: entry under
 # ephemeral included, less the slot; a database the runner user cannot write is
 # covered instead, and a write to that, or a copy of the CA left in the
-# runner's own, fails the step unless fail_on_ca_residue is false. The
-# directories made to mount a new database over are taken back, and a step
-# whose database's directory is removed on the host while it runs warns.
+# runner's own, fails the step unless fail_on_ca_residue is false. Directories
+# made for a new database are removed afterwards, and removing one on the host
+# mid-command gives a warning.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 
