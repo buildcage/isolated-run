@@ -148,6 +148,7 @@ describe("nestedMountRoots", () => {
         ["/home/runner", "/tmp"],
         ["/", "/home/runner", "/home/runner/_tool", "/home/runner/_tool/node", "/tmp/x", "/opt"],
         [],
+        { isDirectory: () => true },
       ),
     ).toStrictEqual(["/home/runner/_tool", "/home/runner/_tool/node", "/tmp/x"]);
   });
@@ -164,7 +165,17 @@ describe("nestedMountRoots", () => {
 
   it("lists a mount point stacked more than once only once", () => {
     expect(
-      nestedMountRoots(["/home/runner"], ["/home/runner/_tool", "/home/runner/_tool"], []),
+      nestedMountRoots(["/home/runner"], ["/home/runner/_tool", "/home/runner/_tool"], [], {
+        isDirectory: () => true,
+      }),
+    ).toStrictEqual(["/home/runner/_tool"]);
+  });
+
+  it("leaves a file mount hidden, since overlayfs cannot overlay one", () => {
+    expect(
+      nestedMountRoots(["/home/runner"], ["/home/runner/.gitconfig", "/home/runner/_tool"], [], {
+        isDirectory: (p) => p !== "/home/runner/.gitconfig",
+      }),
     ).toStrictEqual(["/home/runner/_tool"]);
   });
 });

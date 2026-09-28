@@ -10,6 +10,15 @@ import type { OverlayDirs } from "./types.ts";
 function defaultDeviceOf(path: string): number {
   return statSync(path).dev;
 }
+
+function defaultIsDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    // Left to runc, which mounts as root and reports the path if it fails.
+    return true;
+  }
+}
 /* v8 ignore stop */
 
 export interface DetermineOverlayRootsOptions {
@@ -81,18 +90,21 @@ export function determineOverlayRoots(
  * each of which needs an overlay of its own: overlayfs shows a mount inside
  * its lowerdir as the empty directory beneath it. Not folded by device, since
  * a bind mount of the same filesystem is hidden too. A mount under a
- * write_through path is left to that path's rbind, which carries it.
+ * write_through path is left to that path's rbind, which carries it. A file
+ * mount is left hidden: overlayfs takes only a directory as its lowerdir.
  */
 export function nestedMountRoots(
   overlayRoots: string[],
   hostMountPoints: string[],
   writeThroughPaths: string[],
+  { isDirectory = defaultIsDirectory }: { isDirectory?: (path: string) => boolean } = {},
 ): string[] {
   return [...new Set(hostMountPoints)].filter(
     (m) =>
       !overlayRoots.includes(m) &&
       overlayRoots.some((r) => isAtOrUnder(m, r)) &&
-      !writeThroughPaths.some((w) => isAtOrUnder(m, w)),
+      !writeThroughPaths.some((w) => isAtOrUnder(m, w)) &&
+      isDirectory(m),
   );
 }
 

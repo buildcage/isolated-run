@@ -194,6 +194,7 @@ describe("resolveFilesystemPlan", () => {
         ["/", "/home/runner", "/home/runner/_tool", "/home/runner/out/cache", "/opt/data"].map(
           (mountPoint) => ({ mountPoint, fsType: "ext4" }),
         ),
+      isDirectory: () => true,
     });
     expect(plan.overlayRoots.sort()).toStrictEqual(["/home/runner", "/home/runner/_tool", "/tmp"]);
   });
