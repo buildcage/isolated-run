@@ -667,8 +667,7 @@ discarded. A copy that carries the CA itself, which a command changing the CA's 
 leaves, is not written back: it fails the step, naming the database and pointing at
 `fail_on_ca_residue`, or only warns under `fail_on_ca_residue: false`, which writes it back. Nor is a
 copy whose database path no longer resolves where it did. Parallel write-backs to the same database
-are not serialized: the later one replaces the earlier, and overlapping ones can mix files from both,
-such as one step's `cert9.db` with another's `key4.db`.
+take turns, so the later one replaces the earlier as a whole.
 
 A database the runner user cannot write, or one too large to copy, is covered instead: a copy of a
 database holding only this CA is mounted over it, and a command that writes to that copy fails the

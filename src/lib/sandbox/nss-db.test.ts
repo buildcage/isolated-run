@@ -20,6 +20,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { withNssDbLock } from "./nss-db-ledger.ts";
 import {
   NSS_CA_DB_DESTINATION,
   NSS_SLOT,
@@ -493,7 +494,43 @@ describe("settleNssDbSlot", () => {
   const settle = (
     files: NssDbFiles & { slot: NssDbSlot },
     overrides: Partial<Parameters<typeof settleNssDbSlot>[1]> = {},
-  ) => settleNssDbSlot(files, { persist: true, caPem: CA_PEM, onResidue: vi.fn(), ...overrides });
+  ) =>
+    settleNssDbSlot(files, {
+      persist: true,
+      caPem: CA_PEM,
+      onResidue: vi.fn(),
+      lock: (fn) => withNssDbLock(fn, { base }),
+      ...overrides,
+    });
+
+  it("swaps the copy in under the ledger's lock", () => {
+    const dir = ownDb();
+    const files = prepareSlotted();
+    writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
+    let seen: string | undefined;
+    const lock = <T>(fn: () => T): T => {
+      seen = readFileSync(join(dir, "cert9.db"), "utf8");
+      const result = fn();
+      expect(readFileSync(join(dir, "cert9.db"), "utf8")).toBe("WRITTEN BY THE COMMAND");
+      return result;
+    };
+
+    expect(settle(files, { lock })).toBe("written");
+    expect(seen).toBe("THE RUNNER'S OWN");
+  });
+
+  it("writes nothing back when the lock cannot be had", () => {
+    const dir = ownDb();
+    const files = prepareSlotted();
+    writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
+    writeFileSync(join(base, "nssdb-ledger.lock"), String(process.pid));
+
+    expect(() =>
+      settle(files, { lock: (fn) => withNssDbLock(fn, { base, lockAttempts: 1 }) }),
+    ).toThrow(/EEXIST/);
+    expect(readFileSync(join(dir, "cert9.db"), "utf8")).toBe("THE RUNNER'S OWN");
+    expect(readdirSync(dir).sort()).toStrictEqual(["cert9.db", "pkcs11.txt"]);
+  });
 
   it("leaves the database alone when the command only read it", () => {
     const dir = ownDb();
