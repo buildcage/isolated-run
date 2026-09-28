@@ -71,6 +71,23 @@ export const NSS_SLOT =
   `parameters="configdir='sql:${NSS_CA_DB_DESTINATION}' flags=readOnly"\n` +
   'NSS=""\n\n';
 
+/** Write-back staging dirs, beside the database: `<prefix><pid>-XXXXXX`. */
+const STAGING_PREFIX = ".buildcage-";
+
+function isStaging(name: string): boolean {
+  return name.startsWith(STAGING_PREFIX);
+}
+
+/** A name without a pid is an older version's leftover. */
+function stagingOwnerAlive(name: string, pidAlive: (pid: number) => boolean): boolean {
+  const pid = /^\.buildcage-(\d+)-/.exec(name)?.[1];
+  return pid !== undefined && pidAlive(Number(pid));
+}
+
+function inStaging(dir: string, path: string): boolean {
+  return isStaging(relative(dir, path).split("/")[0]!);
+}
+
 /** A real pkcs11.txt is a few hundred bytes per module. */
 const MAX_PKCS11_TXT_BYTES = 1 << 20;
 
@@ -124,7 +141,7 @@ export interface NssDbDeps {
   stat?: (path: string) => { isDirectory(): boolean } | undefined;
   realpath?: (path: string) => string;
   mkdir?: (path: string, mode: number) => void;
-  copyDir?: (source: string, destination: string) => void;
+  copyDir?: (source: string, destination: string, filter?: (path: string) => boolean) => void;
   readDir?: (path: string) => string[];
   readFile?: (path: string) => Buffer;
   rmdir?: (path: string) => void;
@@ -161,12 +178,26 @@ function defaultMkdir(path: string, mode: number): void {
   mkdirSync(path, { mode });
 }
 
-function defaultCopyDir(source: string, destination: string): void {
+function defaultCopyDir(
+  source: string,
+  destination: string,
+  filter?: (path: string) => boolean,
+): void {
   cpSync(source, destination, {
     recursive: true,
     preserveTimestamps: true,
     verbatimSymlinks: true,
+    filter,
   });
+}
+
+function defaultPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== "ESRCH";
+  }
 }
 
 function defaultAccess(path: string): void {
@@ -320,11 +351,19 @@ function whyNotSlot(
   let files = 0;
   let bytes = 0;
   try {
-    for (const entry of readdirSync(destination, { recursive: true, withFileTypes: true })) {
-      files++;
-      if (entry.isFile()) bytes += statSync(join(entry.parentPath, entry.name)).size;
-      if (files > MAX_MIRROR_FILES || bytes > MAX_MIRROR_BYTES) {
-        return `${destination} is too large to copy`;
+    // Staging dirs are skipped before being read: another step may remove its
+    // own mid-walk.
+    for (const top of readdirSync(destination, { withFileTypes: true })) {
+      if (isStaging(top.name)) continue;
+      const below = top.isDirectory()
+        ? readdirSync(join(destination, top.name), { recursive: true, withFileTypes: true })
+        : [];
+      for (const entry of [top, ...below]) {
+        files++;
+        if (entry.isFile()) bytes += statSync(join(entry.parentPath, entry.name)).size;
+        if (files > MAX_MIRROR_FILES || bytes > MAX_MIRROR_BYTES) {
+          return `${destination} is too large to copy`;
+        }
       }
     }
   } catch (e) {
@@ -348,7 +387,7 @@ function prepareSlot(
   for (const name of readdirSync(caDb)) chmodSync(join(caDb, name), 0o644);
 
   if (exists) {
-    copyDir(files.destination, files.path);
+    copyDir(files.destination, files.path, (path) => !inStaging(files.destination, path));
   } else {
     mkdirSync(files.path, { mode: 0o700 });
   }
@@ -473,6 +512,7 @@ export interface SettleNssDbSlotOptions {
   onResidue: (message: string) => void;
   realpath?: (path: string) => string;
   copyDir?: (source: string, destination: string) => void;
+  pidAlive?: (pid: number) => boolean;
 }
 
 export type NssDbSlotOutcome = "unchanged" | "discarded" | "written";
@@ -491,6 +531,7 @@ export function settleNssDbSlot(
     onResidue,
     realpath = realpathSync,
     copyDir = defaultCopyDir,
+    pidAlive = defaultPidAlive,
   }: SettleNssDbSlotOptions,
 ): NssDbSlotOutcome {
   let current: DirSnapshot;
@@ -524,9 +565,9 @@ export function settleNssDbSlot(
         "database there is not written back",
     );
   }
-  // Copied in beside the database first, so a copy that fails partway leaves
-  // it as it was.
-  const staging = mkdtempSync(join(files.destination, ".buildcage-"));
+  // Staged beside the database so a failed copy leaves it intact. Another
+  // step's staging is kept while its process lives.
+  const staging = mkdtempSync(join(files.destination, `${STAGING_PREFIX}${process.pid}-`));
   try {
     copyDir(files.path, staging);
   } catch (e) {
@@ -534,13 +575,15 @@ export function settleNssDbSlot(
     throw e;
   }
   for (const name of readdirSync(files.destination)) {
-    if (join(files.destination, name) === staging) continue;
-    rmSync(join(files.destination, name), { recursive: true, force: true });
+    const path = join(files.destination, name);
+    if (isStaging(name) && (path === staging || stagingOwnerAlive(name, pidAlive))) continue;
+    rmSync(path, { recursive: true, force: true });
   }
   for (const name of readdirSync(staging)) {
+    if (isStaging(name)) continue;
     renameSync(join(staging, name), join(files.destination, name));
   }
-  rmdirSync(staging);
+  rmSync(staging, { recursive: true, force: true });
   return "written";
 }
 

@@ -18991,7 +18991,18 @@ const NSS_CA_DB_DESTINATION = "/dev/buildcage-nssdb", NSS_SLOT = `library=libsof
 name="buildcage proxy CA"
 parameters="configdir='sql:${NSS_CA_DB_DESTINATION}' flags=readOnly"\nNSS=""
 
-`, NSS_DB_FILES = [
+`, STAGING_PREFIX = ".buildcage-";
+function isStaging(name) {
+	return name.startsWith(STAGING_PREFIX);
+}
+function stagingOwnerAlive(name, pidAlive) {
+	let pid = /^\.buildcage-(\d+)-/.exec(name)?.[1];
+	return pid !== void 0 && pidAlive(Number(pid));
+}
+function inStaging(dir, path) {
+	return isStaging((0, node_path.relative)(dir, path).split("/")[0]);
+}
+const NSS_DB_FILES = [
 	"cert9.db",
 	"key4.db",
 	"pkcs11.txt"
@@ -19016,12 +19027,20 @@ function defaultStat$1(path) {
 function defaultMkdir(path, mode) {
 	(0, node_fs.mkdirSync)(path, { mode });
 }
-function defaultCopyDir(source, destination) {
+function defaultCopyDir(source, destination, filter) {
 	(0, node_fs.cpSync)(source, destination, {
 		recursive: !0,
 		preserveTimestamps: !0,
-		verbatimSymlinks: !0
+		verbatimSymlinks: !0,
+		filter
 	});
+}
+function defaultPidAlive(pid) {
+	try {
+		return process.kill(pid, 0), !0;
+	} catch (e) {
+		return e.code !== "ESRCH";
+	}
 }
 function defaultAccess(path) {
 	(0, node_fs.accessSync)(path, node_fs.constants.W_OK);
@@ -19106,10 +19125,14 @@ function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess 
 	}
 	let files = 0, bytes = 0;
 	try {
-		for (let entry of (0, node_fs.readdirSync)(destination, {
-			recursive: !0,
-			withFileTypes: !0
-		})) if (files++, entry.isFile() && (bytes += (0, node_fs.statSync)((0, node_path.join)(entry.parentPath, entry.name)).size), files > 512 || bytes > 20971520) return `${destination} is too large to copy`;
+		for (let top of (0, node_fs.readdirSync)(destination, { withFileTypes: !0 })) {
+			if (isStaging(top.name)) continue;
+			let below = top.isDirectory() ? (0, node_fs.readdirSync)((0, node_path.join)(destination, top.name), {
+				recursive: !0,
+				withFileTypes: !0
+			}) : [];
+			for (let entry of [top, ...below]) if (files++, entry.isFile() && (bytes += (0, node_fs.statSync)((0, node_path.join)(entry.parentPath, entry.name)).size), files > 512 || bytes > 20971520) return `${destination} is too large to copy`;
+		}
 	} catch (e) {
 		return `${destination} cannot be read through (${errorMessage(e)})`;
 	}
@@ -19118,7 +19141,7 @@ function prepareSlot(dir, files, template, exists, { copyDir = defaultCopyDir })
 	let caDb = (0, node_path.join)(dir, "nssdb-ca");
 	copyDir(template, caDb), (0, node_fs.chmodSync)(caDb, 493);
 	for (let name of (0, node_fs.readdirSync)(caDb)) (0, node_fs.chmodSync)((0, node_path.join)(caDb, name), 420);
-	exists ? copyDir(files.destination, files.path) : (0, node_fs.mkdirSync)(files.path, { mode: 448 });
+	exists ? copyDir(files.destination, files.path, (path) => !inStaging(files.destination, path)) : (0, node_fs.mkdirSync)(files.path, { mode: 448 });
 	let pkcs11 = (0, node_path.join)(files.path, "pkcs11.txt"), hadPkcs11 = (0, node_fs.lstatSync)(pkcs11, { throwIfNoEntry: !1 }) !== void 0;
 	return {
 		caDb,
@@ -19193,7 +19216,7 @@ function certificateDer(pem) {
 	let match = /-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/.exec(pem);
 	return Buffer.from(match?.[1]?.replace(/\s+/g, "") ?? "", "base64");
 }
-function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync, copyDir = defaultCopyDir }) {
+function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync, copyDir = defaultCopyDir, pidAlive = defaultPidAlive }) {
 	let current;
 	try {
 		current = snapshotDir(files.path);
@@ -19212,7 +19235,7 @@ function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.
 		resolved = void 0;
 	}
 	if (resolved !== files.destination) throw Error(`${files.destination} no longer resolves to itself, so what the command wrote to the NSS database there is not written back`);
-	let staging = (0, node_fs.mkdtempSync)((0, node_path.join)(files.destination, ".buildcage-"));
+	let staging = (0, node_fs.mkdtempSync)((0, node_path.join)(files.destination, `${STAGING_PREFIX}${process.pid}-`));
 	try {
 		copyDir(files.path, staging);
 	} catch (e) {
@@ -19221,12 +19244,18 @@ function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.
 			force: !0
 		}), e;
 	}
-	for (let name of (0, node_fs.readdirSync)(files.destination)) (0, node_path.join)(files.destination, name) !== staging && (0, node_fs.rmSync)((0, node_path.join)(files.destination, name), {
+	for (let name of (0, node_fs.readdirSync)(files.destination)) {
+		let path = (0, node_path.join)(files.destination, name);
+		(!isStaging(name) || path !== staging && !stagingOwnerAlive(name, pidAlive)) && (0, node_fs.rmSync)(path, {
+			recursive: !0,
+			force: !0
+		});
+	}
+	for (let name of (0, node_fs.readdirSync)(staging)) isStaging(name) || (0, node_fs.renameSync)((0, node_path.join)(staging, name), (0, node_path.join)(files.destination, name));
+	return (0, node_fs.rmSync)(staging, {
 		recursive: !0,
 		force: !0
-	});
-	for (let name of (0, node_fs.readdirSync)(staging)) (0, node_fs.renameSync)((0, node_path.join)(staging, name), (0, node_path.join)(files.destination, name));
-	return (0, node_fs.rmdirSync)(staging), "written";
+	}), "written";
 }
 function nssDbMounts(files) {
 	let mounts = [{
