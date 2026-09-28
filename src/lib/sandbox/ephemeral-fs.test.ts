@@ -4,6 +4,7 @@ import {
   determineOverlayRoots,
   createOverlayScratchDirs,
   formatFilesystemPlanLog,
+  nestedMountRoots,
 } from "./ephemeral-fs.ts";
 
 const ENV = {
@@ -140,6 +141,34 @@ describe("createOverlayScratchDirs", () => {
   });
 });
 
+describe("nestedMountRoots", () => {
+  it("returns every mount under a root, nested ones included, but not the roots themselves", () => {
+    expect(
+      nestedMountRoots(
+        ["/home/runner", "/tmp"],
+        ["/", "/home/runner", "/home/runner/_tool", "/home/runner/_tool/node", "/tmp/x", "/opt"],
+        [],
+      ),
+    ).toStrictEqual(["/home/runner/_tool", "/home/runner/_tool/node", "/tmp/x"]);
+  });
+
+  it("leaves a mount under write_through to that path's own rbind", () => {
+    expect(
+      nestedMountRoots(
+        ["/home/runner"],
+        ["/home/runner/out", "/home/runner/out/cache"],
+        ["/home/runner/out"],
+      ),
+    ).toStrictEqual([]);
+  });
+
+  it("lists a mount point stacked more than once only once", () => {
+    expect(
+      nestedMountRoots(["/home/runner"], ["/home/runner/_tool", "/home/runner/_tool"], []),
+    ).toStrictEqual(["/home/runner/_tool"]);
+  });
+});
+
 describe("formatFilesystemPlanLog", () => {
   it("returns [] for persistent mode", () => {
     expect(formatFilesystemPlanLog("persistent", ["/home/runner"], ["/tmp/x"])).toStrictEqual([]);
@@ -159,6 +188,19 @@ describe("formatFilesystemPlanLog", () => {
   it("emits only the mode line when there is nothing to fold either way", () => {
     expect(formatFilesystemPlanLog("ephemeral", [], [])).toStrictEqual([
       "Filesystem mode: ephemeral",
+    ]);
+  });
+});
+
+describe("createOverlayScratchDirs: roots that differ only in / and _", () => {
+  it("gives each its own directory", () => {
+    const dirs = createOverlayScratchDirs("/scratch", ["/a/b_c", "/a/b/c", "/a/b%5Fc"], {
+      mkdir: () => undefined,
+    });
+    expect(dirs.map((d) => d.upper)).toStrictEqual([
+      "/scratch/ephemeral/_a_b%5Fc/upper",
+      "/scratch/ephemeral/_a_b_c/upper",
+      "/scratch/ephemeral/_a_b%255Fc/upper",
     ]);
   });
 });

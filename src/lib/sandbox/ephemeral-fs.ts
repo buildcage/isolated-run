@@ -76,9 +76,30 @@ export function determineOverlayRoots(
   return notNested;
 }
 
-/** Filesystem-safe subdirectory name for a host path. */
+/**
+ * Host mount points under an overlay root, other than the roots themselves,
+ * each of which needs an overlay of its own: overlayfs shows a mount inside
+ * its lowerdir as the empty directory beneath it. Not folded by device, since
+ * a bind mount of the same filesystem is hidden too. A mount under a
+ * write_through path is left to that path's rbind, which carries it.
+ */
+export function nestedMountRoots(
+  overlayRoots: string[],
+  hostMountPoints: string[],
+  writeThroughPaths: string[],
+): string[] {
+  return [...new Set(hostMountPoints)].filter(
+    (m) =>
+      !overlayRoots.includes(m) &&
+      overlayRoots.some((r) => isAtOrUnder(m, r)) &&
+      !writeThroughPaths.some((w) => isAtOrUnder(m, w)),
+  );
+}
+
+/** Filesystem-safe subdirectory name for a host path. `%` and `_` are escaped
+ *  before `/` becomes `_`, so two roots never share one. */
 function slugify(path: string): string {
-  return path.replace(/\//g, "_") || "_root";
+  return path.replace(/%/g, "%25").replace(/_/g, "%5F").replace(/\//g, "_") || "_root";
 }
 
 export function overlayUpperFor(scratchDir: string, root: string): string {

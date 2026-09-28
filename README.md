@@ -333,10 +333,10 @@ writable path, so a `write_through:` entry cannot take the sandbox's CA trust wi
 
 `filesystem_mode` controls what happens to those writes once the step ends:
 
-| `filesystem_mode`          | What it does                                                                                                                                      |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, exactly as today. Everything else is read-only. |
-| `ephemeral` (experimental) | Every writable path is discarded when the step ends (via an overlay).                                                                             |
+| `filesystem_mode`          | What it does                                                                                                                                                    |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, exactly as today. Everything else is read-only.               |
+| `ephemeral` (experimental) | Every writable path is discarded when the step ends (via an overlay). A separate host mount under one gets an overlay of its own, so its contents stay visible. |
 
 `write_through:` names the paths whose writes reach the real host filesystem in either mode, the
 paths that opt out of whichever default applies:

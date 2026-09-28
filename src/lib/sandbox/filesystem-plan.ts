@@ -17,8 +17,9 @@ import { errorMessage } from "#core/lib/errors.ts";
 
 import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
-import { determineOverlayRoots } from "./ephemeral-fs.ts";
+import { determineOverlayRoots, nestedMountRoots } from "./ephemeral-fs.ts";
 import { resolveDefaultWritableDirs } from "./host-commands.ts";
+import { listHostMounts } from "./mountinfo.ts";
 import { RESERVED_INTERNAL_DESTINATIONS } from "./oci-mounts.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
 import {
@@ -70,7 +71,8 @@ export function validateFilesystemInputs(
 }
 
 export interface FilesystemPlan {
-  /** filesystem_mode: ephemeral only; already folded (determineOverlayRoots). [] in persistent mode. */
+  /** filesystem_mode: ephemeral only; already folded (determineOverlayRoots), plus the host
+   *  mounts nested under them (nestedMountRoots). [] in persistent mode. */
   overlayRoots: string[];
   /** Already resolved (resolveWriteThroughPaths, then resolveWriteThroughOnHost) and pre-created
    *  (ensureWriteThroughTargetsExist), in either filesystem mode. */
@@ -90,6 +92,7 @@ export interface ResolveFilesystemPlanDeps {
   execFile?: (command: string, args: string[]) => void;
   deviceOf?: (path: string) => number;
   realpath?: (path: string) => string;
+  listHostMounts?: typeof listHostMounts;
 }
 
 /**
@@ -172,8 +175,8 @@ export function resolveFilesystemPlan(
   if (filesystemMode !== "ephemeral") return { overlayRoots: [], writeThroughPaths, createdDirs };
 
   // Separate try/catch from the above: this only touches the fixed
-  // $HOME, $RUNNER_TEMP, /tmp and $GITHUB_WORKSPACE candidates, not write_through's
-  // own input, so a failure here (e.g. a permissions error reading one of
+  // $HOME, $RUNNER_TEMP, /tmp and $GITHUB_WORKSPACE candidates and the host
+  // mount table, not write_through's own input, so a failure here (e.g. a permissions error reading one of
   // those paths) must not be mislabeled as a write_through syntax problem.
   try {
     // Real paths, as write_through's are, so the two compare.
@@ -181,7 +184,12 @@ export function resolveFilesystemPlan(
     const overlayCandidates = [home, runnerTemp, tmp, workdir].filter((p): p is string =>
       Boolean(p),
     );
-    const overlayRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, deps);
+    const candidateRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, deps);
+    const mountPoints = (deps.listHostMounts ?? listHostMounts)().map((m) => m.mountPoint);
+    const overlayRoots = [
+      ...candidateRoots,
+      ...nestedMountRoots(candidateRoots, mountPoints, writeThroughPaths),
+    ];
     return { overlayRoots, writeThroughPaths, createdDirs };
   } catch (e) {
     throw new SandboxError(

@@ -18977,8 +18977,11 @@ function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs
 		}
 	});
 }
+function nestedMountRoots(overlayRoots, hostMountPoints, writeThroughPaths) {
+	return [...new Set(hostMountPoints)].filter((m) => !overlayRoots.includes(m) && overlayRoots.some((r) => isAtOrUnder(m, r)) && !writeThroughPaths.some((w) => isAtOrUnder(m, w)));
+}
 function slugify(path) {
-	return path.replace(/\//g, "_") || "_root";
+	return path.replace(/%/g, "%25").replace(/_/g, "%5F").replace(/\//g, "_") || "_root";
 }
 function overlayUpperFor(scratchDir, root) {
 	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
@@ -20212,14 +20215,14 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 		createdDirs
 	};
 	try {
-		let { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath);
+		let { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath), candidateRoots = determineOverlayRoots([
+			home,
+			runnerTemp,
+			tmp,
+			workdir
+		].filter((p) => !!p), writeThroughPaths, deps), mountPoints = (deps.listHostMounts ?? listHostMounts)().map((m) => m.mountPoint);
 		return {
-			overlayRoots: determineOverlayRoots([
-				home,
-				runnerTemp,
-				tmp,
-				workdir
-			].filter((p) => !!p), writeThroughPaths, deps),
+			overlayRoots: [...candidateRoots, ...nestedMountRoots(candidateRoots, mountPoints, writeThroughPaths)],
 			writeThroughPaths,
 			createdDirs
 		};
