@@ -13,16 +13,23 @@ export function pinCommand(command: string, path: string): void {
 }
 
 // Debian's default secure_path, without /snap/bin.
-const SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+export const SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+const pinnedPathEnvs = new Map<string, string>();
+
+export function pinCommandPathEnv(command: string, pathEnv: string): void {
+  pinnedPathEnvs.set(command, pathEnv);
+}
 
 /**
- * The environment to run `command` with. sudo looks up what it runs on the
- * caller's PATH when sudoers sets no secure_path, so it gets the system dirs
- * only; that PATH also reaches run-isolated.sh.
+ * sudo resolves what it runs on PATH when sudoers sets no secure_path, and
+ * that PATH reaches run-isolated.sh. docker execs its credential helpers (and
+ * ssh, for an ssh context) from PATH.
  */
 export function hostCommandEnv(
   command: string,
   env: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  return command === "sudo" ? { ...env, PATH: SYSTEM_PATH } : env;
+  if (command !== "sudo" && command !== "docker") return env;
+  return { ...env, PATH: pinnedPathEnvs.get(command) ?? SYSTEM_PATH };
 }

@@ -3,7 +3,8 @@
  * command, whose writes to some host paths outlive it. `docker`, `sudo` and
  * the inspect engine's `keytool` are pinned to binaries outside those paths,
  * since a lookup through `$PATH` could pick one the command planted
- * (`~/.local/bin` precedes `/usr/bin` on hosted runners). The docker CLI's
+ * (`~/.local/bin` precedes `/usr/bin` on hosted runners). For the same reason
+ * docker and sudo run with those paths left off PATH. The docker CLI's
  * config directory and this action's own checkout, which hold its plugins and
  * the post step's script, are made read-only inside the sandbox.
  */
@@ -17,7 +18,7 @@ import type { FilesystemMode } from "../filesystem-mode.ts";
 import type { JvmTools } from "./ca-trust.ts";
 import { writableDirsOf } from "./oci-mounts.ts";
 import { isAtOrUnder } from "./paths.ts";
-import { pinCommand } from "./pinned-commands.ts";
+import { pinCommand, pinCommandPathEnv, SYSTEM_PATH } from "./pinned-commands.ts";
 import { resolveWriteThroughPaths } from "./write-through.ts";
 
 // rollup's cjs output doesn't convert import.meta.dirname (it silently
@@ -110,6 +111,32 @@ function commandChain(candidate: string, readlink: FindCommandDeps["readlink"]):
   return chain;
 }
 
+function insidePersisting(
+  persisting: string[],
+  realpathDir: FindCommandDeps["realpathDir"],
+): (path: string) => boolean {
+  const writable = withRealPaths(persisting, realpathDir);
+  return (path) => writable.some((w) => isAtOrUnder(path, w));
+}
+
+/**
+ * `pathEnv` without the entries inside `persisting`, judged like
+ * findPinnableCommand. Relative and empty entries resolve against the
+ * workspace, so they go too.
+ */
+export function pathOutside(
+  pathEnv: string = "",
+  persisting: string[],
+  realpathDir: FindCommandDeps["realpathDir"],
+): string {
+  if (persisting.includes("/")) return pathEnv;
+  const inside = insidePersisting(persisting, realpathDir);
+  return pathEnv
+    .split(delimiter)
+    .filter((dir) => isAbsolute(dir) && !inside(dir) && !inside(realpathDir(dir)))
+    .join(delimiter);
+}
+
 /**
  * The first `command` on `pathEnv` with no hop inside `persisting`, judged by
  * both its spelling and its real directory (a self-hosted `/opt/tools` may
@@ -125,8 +152,7 @@ export function findPinnableCommand(
   { isExecutable, readlink, realpathDir }: FindCommandDeps = realFindCommandDeps,
 ): string | undefined {
   const optedOut = persisting.includes("/");
-  const writable = withRealPaths(persisting, realpathDir);
-  const inside = (p: string): boolean => writable.some((w) => isAtOrUnder(p, w));
+  const inside = insidePersisting(persisting, realpathDir);
   const reachable = (hop: string): boolean =>
     inside(hop) || inside(join(realpathDir(dirname(hop)), basename(hop)));
   for (const dir of (pathEnv ?? "").split(delimiter)) {
@@ -139,9 +165,10 @@ export function findPinnableCommand(
 }
 
 /**
- * Pins `docker` and `sudo` for the rest of this process. A command missing
- * from PATH altogether is left unpinned, so the sudo preflight or docker's
- * ENOENT reports a runner without them in clearer terms than this would.
+ * Pins `docker` and `sudo`, and the PATH each runs with, for the rest of this
+ * process. A command missing from PATH altogether is
+ * left unpinned, so the sudo preflight or docker's ENOENT reports a runner
+ * without them in clearer terms than this would.
  */
 export function pinHostCommands(
   paths: string[],
@@ -162,6 +189,8 @@ export function pinHostCommands(
       "HOST_COMMAND_UNPINNABLE",
     );
   }
+  pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps.realpathDir));
+  pinCommandPathEnv("sudo", pathOutside(SYSTEM_PATH, paths, deps.realpathDir));
 }
 
 /**

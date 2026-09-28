@@ -27,7 +27,7 @@ import { join, relative } from "node:path";
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
-import { hostCommand } from "./pinned-commands.ts";
+import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 import type { MountEntry } from "./types.ts";
 
 /**
@@ -138,7 +138,7 @@ export interface NssDbDeps {
 // node:fs and node:child_process what the tested caller decided.
 /* v8 ignore start */
 function defaultExec(command: string, args: string[]): void {
-  execFileSync(hostCommand(command), args);
+  execFileSync(hostCommand(command), args, { env: hostCommandEnv(command) });
 }
 
 function defaultLstat(path: string) {

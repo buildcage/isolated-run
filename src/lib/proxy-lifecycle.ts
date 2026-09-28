@@ -17,7 +17,7 @@ import {
 } from "#core/lib/docker/health.ts";
 
 import { SandboxError } from "./errors.ts";
-import { hostCommand } from "./sandbox/pinned-commands.ts";
+import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
 
 /** Lines of container log printed when the proxy fails to come up. */
 const LOG_TAIL = 100;
@@ -37,14 +37,17 @@ export interface ProxyLifecycleDeps {
 const captureDockerViaExec: RunDocker = (args, env) =>
   execFileSync(hostCommand("docker"), args, {
     encoding: "utf8",
-    env,
+    env: hostCommandEnv("docker", env),
     // Captured, not inherited: no container is the expected outcome here,
     // and the daemon's "no such object" would read as the cause.
     stdio: ["ignore", "pipe", "pipe"],
   });
 
 const printDockerViaExec = (args: string[], env: NodeJS.ProcessEnv): void => {
-  execFileSync(hostCommand("docker"), args, { stdio: "inherit", env });
+  execFileSync(hostCommand("docker"), args, {
+    stdio: "inherit",
+    env: hostCommandEnv("docker", env),
+  });
 };
 /* v8 ignore stop */
 

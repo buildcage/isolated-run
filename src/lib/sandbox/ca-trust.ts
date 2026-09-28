@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 
 import { nssDbMounts, type NssDbFiles } from "./nss-db.ts";
-import { hostCommand } from "./pinned-commands.ts";
+import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 import type { MountEntry } from "./types.ts";
 
 /**
@@ -90,7 +90,7 @@ export interface CaTrustDeps {
 // node:fs and node:child_process what the tested caller decided.
 /* v8 ignore start */
 function defaultExec(command: string, args: string[], env?: NodeJS.ProcessEnv): void {
-  execFileSync(hostCommand(command), args, { env });
+  execFileSync(hostCommand(command), args, { env: hostCommandEnv(command, env) });
 }
 
 function defaultReadFile(path: string): string {

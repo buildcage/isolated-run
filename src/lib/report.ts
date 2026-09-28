@@ -19,7 +19,7 @@ import { truncateForStepSummary } from "#core/lib/report/render/truncate-communi
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
 import type { ProxyEngine } from "./engine.ts";
-import { hostCommand } from "./sandbox/pinned-commands.ts";
+import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
 
 export type Report = ReportData;
 export type { ProxyEngine };
@@ -46,8 +46,13 @@ function createHostDocker(): Docker {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         maxBuffer: 64 * 1024 * 1024,
+        env: hostCommandEnv("docker"),
       }),
-    (args) => spawn(hostCommand("docker"), args, { stdio: ["ignore", "pipe", "pipe"] }),
+    (args) =>
+      spawn(hostCommand("docker"), args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: hostCommandEnv("docker"),
+      }),
   );
 }
 

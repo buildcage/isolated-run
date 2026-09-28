@@ -11,7 +11,7 @@ import { readFilesystemInputs } from "./lib/inputs.ts";
 import { planPostCleanup } from "./lib/post-cleanup.ts";
 import type { PostCleanupTargets } from "./lib/post-state.ts";
 import { pinHostCommands, pinningPaths } from "./lib/sandbox/host-commands.ts";
-import { hostCommand } from "./lib/sandbox/pinned-commands.ts";
+import { hostCommand, hostCommandEnv } from "./lib/sandbox/pinned-commands.ts";
 
 // Untested by design, down to the end of the file: planPostCleanup decides
 // what may be torn down, and tearing it down is one `docker compose down`.
@@ -26,7 +26,7 @@ async function stopProxyContainer({ containerName, projectName }: PostCleanupTar
 
   execFileSync(hostCommand("docker"), buildComposeDownArgs({ composeFile, projectName }), {
     stdio: "inherit",
-    env: { ...process.env, PROXY_CONTAINER_NAME: containerName },
+    env: hostCommandEnv("docker", { ...process.env, PROXY_CONTAINER_NAME: containerName }),
   });
 }
 

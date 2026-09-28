@@ -185,9 +185,11 @@ sandbox down, so what it runs is kept out of those paths:
 - `docker` and `sudo` are pinned, before either first runs, to a binary outside
   `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, `$RUNNER_TEMP` and `write_through:`. This applies in
   `ephemeral` mode too, since an earlier step's writes there survive. The step fails if either is on
-  `$PATH` only inside those paths. The post step pins them again. `sudo` runs with only the system
-  directories on its `PATH`, which is what it resolves the commands it runs against when sudoers
-  sets no `secure_path`.
+  `$PATH` only inside those paths. The post step pins them again. Both also run with those paths
+  left off `PATH`: `sudo` resolves what it runs there when sudoers sets no `secure_path`, and
+  `docker` finds its `docker-credential-*` helpers there. `sudo` gets the system directories and
+  `docker` the step's own `$PATH`, so a helper installed only under those paths is not found. A
+  helper that is a symlink into them is not caught.
 - Under `inspect`, the `keytool` that adds the CA to the JVM keystores is pinned the same way,
   `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so the command's
   `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` stays inside the sandbox. Without one, the step skips the
