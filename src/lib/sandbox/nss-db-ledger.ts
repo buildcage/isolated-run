@@ -45,8 +45,10 @@ const LOCK_NAME = "nssdb-ledger.lock";
 /** A few hundred bytes per entry, and a handful of entries at a time. */
 const MAX_LEDGER_BYTES = 64 << 10;
 
-/** Held for milliseconds, so one this old whose holder is gone is left over. */
-const STALE_LOCK_MS = 10_000;
+/** Held for milliseconds, so one this old whose holder is gone is left over.
+ *  Well inside how long acquireLock waits, so a step that starts waiting as
+ *  the holder is killed still takes the lock over. */
+const STALE_LOCK_MS = 2_000;
 
 /** A step's scratch dir name; see scratchDirNameFor. */
 const USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;

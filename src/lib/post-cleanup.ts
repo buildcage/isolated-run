@@ -83,6 +83,7 @@ export function planPostCleanup(
   // this can't walk into the host filesystem even if a mount somehow survived.
   // Independent of the container teardown, so a failure in one still leaves
   // the other to run.
+  let reclaimed = false;
   try {
     const scratchDir = scratchDirFor(targets.containerName);
     if (fileExists(scratchDir)) {
@@ -91,6 +92,7 @@ export function planPostCleanup(
         warn: annotation.warning,
       });
     }
+    reclaimed = !fileExists(scratchDir);
   } catch (e) {
     annotation.warning(
       `run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`,
@@ -99,9 +101,13 @@ export function planPostCleanup(
 
   // End this step's use of the directories made for Chromium's NSS database,
   // which a hard kill left registered, so the last step to leave can remove
-  // them. After the scratch dir, since its mounts are what the use stood for.
-  // A no-op when the step ended normally, or never used the inspect engine.
-  releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning });
+  // them. Only once the scratch dir is gone: its mounts are what the use
+  // stands for, and one still there may hold the database mounted. A use left
+  // registered is dropped by a later step once the scratch dir goes. A no-op
+  // when the step ended normally, or never used the inspect engine.
+  if (reclaimed) {
+    releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning });
+  }
 
   return targets;
 }

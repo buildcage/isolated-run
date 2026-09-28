@@ -19052,7 +19052,7 @@ function takeOverStaleLock(lock, pidAlive, now) {
 	} catch {
 		return;
 	}
-	age < 1e4 || Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
+	age < 2e3 || Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
 }
 function emptyLedger() {
 	return {

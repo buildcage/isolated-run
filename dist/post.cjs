@@ -542,7 +542,7 @@ function takeOverStaleLock(lock, pidAlive, now) {
 	} catch {
 		return;
 	}
-	age < 1e4 || Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
+	age < 2e3 || Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
 }
 function emptyLedger() {
 	return {
@@ -646,16 +646,17 @@ function planPostCleanup(state, env, annotation, { readOwner = readContainerOwne
 	for (let problem of problems) annotation.error(`run post-cleanup: ${problem}`);
 	if (!targets) return null;
 	if (!startedByThisStep(targets.containerName, env, readOwner)) return annotation.error("run post-cleanup: the proxy container named in GITHUB_STATE was started by a different step. Skipping all post-step cleanup: tearing it down would stop that step's proxy and delete its sandbox scratch directory."), null;
+	let reclaimed = !1;
 	try {
 		let scratchDir = scratchDirFor(targets.containerName);
 		fileExists(scratchDir) && removeScratchDir(scratchDir, {
 			ephemeralRoots: targets.ephemeralRoots,
 			warn: annotation.warning
-		});
+		}), reclaimed = !fileExists(scratchDir);
 	} catch (e) {
 		annotation.warning(`run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
 	}
-	return releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning }), targets;
+	return reclaimed && releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning }), targets;
 }
 //#endregion
 //#region src/lib/sandbox/nss-db.ts

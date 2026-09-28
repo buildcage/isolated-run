@@ -35,7 +35,7 @@ function deps(overrides: PostCleanupDeps = {}): {
     released,
     deps: {
       readOwner: () => OWNER,
-      fileExists: () => true,
+      fileExists: (dir) => !removed.some((r) => r.dir === dir),
       removeScratchDir: (dir, { ephemeralRoots }) => {
         removed.push({ dir, ephemeralRoots });
         released.push("after the scratch dir");
@@ -68,12 +68,28 @@ describe("planPostCleanup", () => {
     expect(released).toStrictEqual(["after the scratch dir", "sandbox-deadbeef"]);
   });
 
-  it("ends the use even when the scratch dir cannot be removed", () => {
+  it("leaves the use registered when the scratch dir cannot be removed", () => {
     const { deps: d, released } = deps({
       removeScratchDir: () => {
         throw new Error("device or resource busy");
       },
     });
+
+    planPostCleanup(STATE, ENV, annotation(), d);
+
+    expect(released).toStrictEqual([]);
+  });
+
+  it("leaves the use registered when the scratch dir is still there after its removal", () => {
+    const { deps: d, released } = deps({ fileExists: () => true });
+
+    planPostCleanup(STATE, ENV, annotation(), d);
+
+    expect(released).toStrictEqual(["after the scratch dir"]);
+  });
+
+  it("ends the use when the scratch dir was already gone", () => {
+    const { deps: d, released } = deps({ fileExists: () => false });
 
     planPostCleanup(STATE, ENV, annotation(), d);
 
