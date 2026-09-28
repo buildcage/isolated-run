@@ -497,6 +497,16 @@ describe("settleNssDbSlot", () => {
     expect(readdirSync(files.path).sort()).toStrictEqual(["cert9.db", "pkcs11.txt"]);
   });
 
+  // One another step removes mid-walk would fail the walk the same way.
+  it("does not read into a staging dir when sizing the database", () => {
+    const dir = ownDb();
+    mkdirSync(join(dir, ".buildcage-12345-other"), { mode: 0 });
+
+    const files = prepareSlotted();
+
+    expect(files.slot).toBeDefined();
+  });
+
   it("does not write back a staging dir the command made in the database", () => {
     const dir = ownDb();
     const files = prepareSlotted();

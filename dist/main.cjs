@@ -19125,10 +19125,14 @@ function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess 
 	}
 	let files = 0, bytes = 0;
 	try {
-		for (let entry of (0, node_fs.readdirSync)(destination, {
-			recursive: !0,
-			withFileTypes: !0
-		})) if (!inStaging(destination, (0, node_path.join)(entry.parentPath, entry.name)) && (files++, entry.isFile() && (bytes += (0, node_fs.statSync)((0, node_path.join)(entry.parentPath, entry.name)).size), files > 512 || bytes > 20971520)) return `${destination} is too large to copy`;
+		for (let top of (0, node_fs.readdirSync)(destination, { withFileTypes: !0 })) {
+			if (isStaging(top.name)) continue;
+			let below = top.isDirectory() ? (0, node_fs.readdirSync)((0, node_path.join)(destination, top.name), {
+				recursive: !0,
+				withFileTypes: !0
+			}) : [];
+			for (let entry of [top, ...below]) if (files++, entry.isFile() && (bytes += (0, node_fs.statSync)((0, node_path.join)(entry.parentPath, entry.name)).size), files > 512 || bytes > 20971520) return `${destination} is too large to copy`;
+		}
 	} catch (e) {
 		return `${destination} cannot be read through (${errorMessage(e)})`;
 	}

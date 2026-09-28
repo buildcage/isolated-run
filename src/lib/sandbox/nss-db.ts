@@ -354,12 +354,19 @@ function whyNotSlot(
   let files = 0;
   let bytes = 0;
   try {
-    for (const entry of readdirSync(destination, { recursive: true, withFileTypes: true })) {
-      if (inStaging(destination, join(entry.parentPath, entry.name))) continue;
-      files++;
-      if (entry.isFile()) bytes += statSync(join(entry.parentPath, entry.name)).size;
-      if (files > MAX_MIRROR_FILES || bytes > MAX_MIRROR_BYTES) {
-        return `${destination} is too large to copy`;
+    // Staging dirs are passed over before they are read into: another step
+    // may remove its own while this walks.
+    for (const top of readdirSync(destination, { withFileTypes: true })) {
+      if (isStaging(top.name)) continue;
+      const below = top.isDirectory()
+        ? readdirSync(join(destination, top.name), { recursive: true, withFileTypes: true })
+        : [];
+      for (const entry of [top, ...below]) {
+        files++;
+        if (entry.isFile()) bytes += statSync(join(entry.parentPath, entry.name)).size;
+        if (files > MAX_MIRROR_FILES || bytes > MAX_MIRROR_BYTES) {
+          return `${destination} is too large to copy`;
+        }
       }
     }
   } catch (e) {
