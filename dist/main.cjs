@@ -20656,7 +20656,14 @@ function splitHostPort(authority) {
 }
 //#endregion
 //#region src/core/lib/log/start-marker.ts
-const PROXY_START_MARKER = "buildcage haproxy starting", REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
+const PROXY_START_MARKER = "buildcage haproxy starting", BAD_REQUEST_METHOD = "<BADREQ>";
+function incompleteReason(terminationState, method) {
+	let cause = terminationState[0];
+	if (cause !== "P") return terminationState[1] === "R" ? cause === "C" ? "client-aborted" : cause === "c" ? "client-timeout" : "no-request" : method === "<BADREQ>" ? "no-request" : void 0;
+}
+//#endregion
+//#region src/core/lib/log/inspect.ts
+const REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
 function timeOf(stamp) {
 	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
 	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
@@ -20670,7 +20677,7 @@ function isRefusal(terminationState) {
 function reasonFor(logged, terminationState, tlsError, method) {
 	if (logged !== "-") return logged;
 	let cause = terminationState[0];
-	if (cause !== "S" && cause !== "s") return method === BAD_REQUEST_METHOD ? "bad-request" : "not-allowed";
+	if (cause !== "S" && cause !== "s") return method === "<BADREQ>" ? "bad-request" : "not-allowed";
 	switch (terminationState[1]) {
 		case "H": return "origin-no-response";
 		case "D":
@@ -20678,12 +20685,7 @@ function reasonFor(logged, terminationState, tlsError, method) {
 		default: return tlsError === void 0 ? "origin-unreachable" : cause === "S" && tlsError !== "-" && tlsError !== "0" ? "origin-untrusted" : "origin-connect-failed";
 	}
 }
-const BAD_REQUEST_METHOD = "<BADREQ>", REQUESTLESS_REASONS = new Set(["bad-request", "missing-host-header"]);
-function incompleteReason(terminationState, method) {
-	let cause = terminationState[0];
-	if (cause !== "P") return terminationState[1] === "R" ? cause === "C" ? "client-aborted" : cause === "c" ? "client-timeout" : "no-request" : method === BAD_REQUEST_METHOD ? "no-request" : void 0;
-}
-const FAILURE_REASONS$1 = new Set([
+const REQUESTLESS_REASONS = new Set(["bad-request", "missing-host-header"]), FAILURE_REASONS$1 = new Set([
 	"origin-unreachable",
 	"origin-no-response",
 	"origin-aborted",
@@ -20857,7 +20859,7 @@ function aggregate(filtered) {
 const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
 function clientEndedNoise(timeline) {
 	let completed = new Set();
-	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && completed.add(event.host.toLowerCase());
+	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(event.host.toLowerCase());
 	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "") && completed.has(event.host.toLowerCase());
 }
 function connectedHosts(timeline) {
@@ -20980,11 +20982,14 @@ async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedL
 }
 //#endregion
 //#region src/core/lib/log/haproxy.ts
-const DECISION = /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za-z0-9._:-]+)" ([A-Za-z0-9-]+) (\d+|-)$/, START = RegExp(`^${PROXY_START_MARKER} (\\d+)$`), PROTOCOL = {
+const DECISION = /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za-z0-9._:-]+)" ([A-Za-z0-9-]+) (\d+|-)(?: ts=[A-Za-z-]{2} dst=[0-9.]+:\d+)?$/, NO_REQUEST = /^buildcage (\d+) \[-\] \(HTTP\) "-" - (?:\d+|-) ts=([A-Za-z-]{2}) dst=([0-9.]+):(\d+)$/, START = RegExp(`^${PROXY_START_MARKER} (\\d+)$`), PROTOCOL = {
 	HTTPS: "https",
 	HTTP: "http",
 	IP: "tcp"
 }, FAILURE_REASONS = new Set(["dns-failed"]);
+function hostOf(address) {
+	return address === "198.19.255.1" ? UNKNOWN_HOST : address;
+}
 async function scanHaproxyLog(lines, isAudit) {
 	let events = [], passedDecision = isAudit ? "AUDIT" : "ALLOWED", startedAt, headIntact, unparsed = 0;
 	for await (let line of lines) {
@@ -20993,13 +20998,27 @@ async function scanHaproxyLog(lines, isAudit) {
 			headIntact ??= !1;
 			let [, ms, decision, ruleType, target, reason, bytes] = m;
 			if (decision !== passedDecision && decision !== "BLOCKED") continue;
-			let { host: address, port } = splitHostPort(target), host = address === "198.19.255.1" ? UNKNOWN_HOST : address, failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), refused = decision === "BLOCKED" && !failed, event = {
+			let { host: address, port } = splitHostPort(target), host = hostOf(address), failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), refused = decision === "BLOCKED" && !failed, event = {
 				time: Number(ms) / 1e3,
 				action: failed ? "failed" : refused ? "block" : isAudit ? "audit" : "allow",
 				protocol: PROTOCOL[ruleType] ?? "tcp",
 				host
 			};
 			port !== void 0 && (event.port = Number(port)), refused || failed ? event.reason = reason : bytes !== "-" && (event.bytes = Number(bytes)), events.push(event);
+			continue;
+		}
+		let none = NO_REQUEST.exec(line);
+		if (none) {
+			headIntact ??= !1;
+			let [, ms, terminationState, address, port] = none, ended = incompleteReason(terminationState, BAD_REQUEST_METHOD);
+			events.push({
+				time: Number(ms) / 1e3,
+				action: ended === void 0 ? "block" : "incomplete",
+				protocol: "http",
+				host: hostOf(address),
+				port: Number(port),
+				reason: ended ?? "bad-request"
+			});
 			continue;
 		}
 		let trimmed = line.trim();
@@ -21116,7 +21135,6 @@ function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 	return failed && emissions.push(failed), emissions;
 }
 function describeUndecidedRequests(report, engineLabel) {
-	if (report.engine !== "inspect") return;
 	let isNoise = clientEndedNoise(report.timeline), count = report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
 	if (count !== 0) return {
 		level: "warning",
