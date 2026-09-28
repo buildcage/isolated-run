@@ -642,7 +642,7 @@ describe("settleNssDbSlot", () => {
 
     expect(() =>
       settle(files, { lock: (fn) => withNssDbLock(fn, { base, lockAttempts: 1 }) }),
-    ).toThrow(/EEXIST/);
+    ).toThrow(/could not take .*nssdb-ledger\.lock: another step held it for over 0s/);
     expect(readFileSync(join(dir, "cert9.db"), "utf8")).toBe("THE RUNNER'S OWN");
     expect(readdirSync(dir).sort()).toStrictEqual(["cert9.db", "pkcs11.txt"]);
   });

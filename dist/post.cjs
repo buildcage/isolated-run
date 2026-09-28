@@ -430,7 +430,7 @@ function dirIdOf(path, { lstat = defaultLstat } = {}) {
 	let info = lstat(path);
 	return info?.isDirectory() ? idOf(info) : void 0;
 }
-function acquireLock(lock, { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 50 }) {
+function acquireLock(lock, { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 50, lockDelayMs = 100 }) {
 	let mine = `${lock}.${process.pid}`;
 	(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
 	try {
@@ -442,9 +442,13 @@ function acquireLock(lock, { pidAlive = defaultPidAlive, now = () => new Date(),
 			}
 		}, {
 			attempts: lockAttempts,
-			delayMs: 100,
+			delayMs: lockDelayMs,
 			retryOn: (e) => errnoCode(e) === "EEXIST"
 		});
+	} catch (e) {
+		if (errnoCode(e) !== "EEXIST") throw e;
+		let waited = (lockAttempts - 1) * lockDelayMs / 1e3;
+		throw Error(`could not take ${lock}: another step held it for over ${waited}s`, { cause: e });
 	} finally {
 		(0, node_fs.rmSync)(mine, { force: !0 });
 	}
@@ -723,7 +727,10 @@ function baseOf({ base }) {
 	return base ?? SANDBOX_SCRATCH_BASE;
 }
 function withLedger(fn, deps) {
-	return withLedgerFile(baseOf(deps), WRITE_THROUGH_LEDGER_NAME, "write-through-ledger.lock", (path) => readLedgerFile(path, emptyLedger, isLedger), fn, deps);
+	return withLedgerFile(baseOf(deps), WRITE_THROUGH_LEDGER_NAME, "write-through-ledger.lock", (path) => readLedgerFile(path, emptyLedger, isLedger), fn, {
+		lockAttempts: 300,
+		...deps
+	});
 }
 function dropStaleUses(ledger, deps) {
 	let { lstat = defaultLstat, pidAlive = defaultPidAlive } = deps;
