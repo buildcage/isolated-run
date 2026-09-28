@@ -313,7 +313,7 @@ fall back, such as a `mongodb+srv://` connection string, does not work inside th
 
 An allowlisted name that resolves to loopback, link-local (AWS/GCP/Azure IMDS), CGNAT (Alibaba
 IMDS), the IETF protocol block (Oracle IMDS), Azure's WireServer (`168.63.129.16`), the proxy's own
-address, or **an address the runner itself holds** is refused, reported as `internal-address`, in `audit` too. A name under an
+network (`198.19.255.0/24`, the proxy's and the step's own link), or **an address the runner itself holds** is refused, reported as `internal-address`, in `audit` too. A name under an
 attacker's control, or DNS for an allowlisted domain that has been compromised, therefore cannot
 turn the proxy into a route to cloud metadata or back into the runner. The rest of RFC1918 is
 deliberately exempt: a name pointing at an internal mirror is a real, intended setup.
