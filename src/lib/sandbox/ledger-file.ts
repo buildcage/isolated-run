@@ -134,11 +134,13 @@ function acquireLock(
       { attempts: lockAttempts, delayMs: lockDelayMs, retryOn: (e) => errnoCode(e) === "EEXIST" },
     );
   } catch (e) {
-    // EEXIST alone reads as a bug rather than a step holding the lock too long.
-    throw new Error(
-      `could not take ${lock} within ${(lockAttempts * lockDelayMs) / 1000}s (${errorMessage(e)})`,
-      { cause: e },
-    );
+    // link(2) fails otherwise only on a broken scratch base, which no test builds.
+    /* v8 ignore next */
+    if (errnoCode(e) !== "EEXIST") throw e;
+    const waited = ((lockAttempts - 1) * lockDelayMs) / 1000;
+    throw new Error(`could not take ${lock}: another step held it for over ${waited}s`, {
+      cause: e,
+    });
   } finally {
     rmSync(mine, { force: true });
   }

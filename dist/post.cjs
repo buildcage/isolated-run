@@ -446,7 +446,9 @@ function acquireLock(lock, { pidAlive = defaultPidAlive, now = () => new Date(),
 			retryOn: (e) => errnoCode(e) === "EEXIST"
 		});
 	} catch (e) {
-		throw Error(`could not take ${lock} within ${lockAttempts * lockDelayMs / 1e3}s (${errorMessage(e)})`, { cause: e });
+		if (errnoCode(e) !== "EEXIST") throw e;
+		let waited = (lockAttempts - 1) * lockDelayMs / 1e3;
+		throw Error(`could not take ${lock}: another step held it for over ${waited}s`, { cause: e });
 	} finally {
 		(0, node_fs.rmSync)(mine, { force: !0 });
 	}
