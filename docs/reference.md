@@ -680,7 +680,9 @@ them, so steps running in parallel, or other jobs of the same runner user, never
 step still has its database mounted on: removing a directory detaches every mount on it, in every
 sandbox. Which directories Buildcage made and which steps use them is kept in
 `/var/tmp/buildcage-<uid>/nssdb-ledger.json`, which a sandbox can neither see nor write; a
-directory made again since is not Buildcage's any more, and is left. Something else removing the
+directory made again since is not Buildcage's any more, and is left. A directory is told from one
+made again in its place by its birth time, so on a filesystem that keeps none (some NFS mounts, for
+one), the directories Buildcage makes are left in place, empty, after the step. Something else removing the
 directory while a step runs, such as a step running in parallel outside any sandbox, still detaches
 that step's database: the step then warns, naming the database, since Chromium in it stopped trusting
 the proxy CA from then on, and writes nothing back to it.

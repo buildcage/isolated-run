@@ -346,6 +346,36 @@ describe("prepareNssDb", () => {
     expect(Object.keys(ledger.dirs)).toStrictEqual([join(home, ".pki")]);
   });
 
+  it("makes again the directories a parallel step removed while the template was copied", () => {
+    mkdirSync(join(home, ".pki/nssdb"), { recursive: true });
+    const { deps } = fakeDocker();
+    const exec: NssDbDeps["exec"] = (command, args) => {
+      deps.exec!(command, args);
+      rmSync(join(home, ".pki"), { recursive: true });
+    };
+
+    const files = prepareNssDb(CONTAINER, scratch, home, { ...deps, exec })!;
+
+    expect(files.slot).toBeDefined();
+    expect(existsSync(join(home, ".pki/nssdb"))).toBe(true);
+    const ledger = JSON.parse(readFileSync(join(base, "nssdb-ledger.json"), "utf8"));
+    expect(Object.keys(ledger.dirs)).toStrictEqual([join(home, ".pki"), join(home, ".pki/nssdb")]);
+  });
+
+  it("copies a database a parallel step made while the template was copied", () => {
+    const { deps } = fakeDocker();
+    const exec: NssDbDeps["exec"] = (command, args) => {
+      deps.exec!(command, args);
+      ownDb();
+    };
+
+    const files = prepareNssDb(CONTAINER, scratch, home, { ...deps, exec })!;
+
+    expect(readFileSync(join(files.path, "cert9.db"), "utf8")).toBe("THE RUNNER'S OWN");
+    const ledger = JSON.parse(readFileSync(join(base, "nssdb-ledger.json"), "utf8"));
+    expect(ledger.dirs).toStrictEqual({});
+  });
+
   it("names no XDG path when the database is the XDG one", () => {
     mkdirSync(join(home, ".local/share/pki/nssdb"), { recursive: true });
 

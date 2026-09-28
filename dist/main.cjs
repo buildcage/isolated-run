@@ -19135,7 +19135,7 @@ function removeUnusedDirs(ledger, deps) {
 		} catch {}
 	}
 }
-function claimNssDb(name, destination, missing, deps = {}) {
+function claimNssDb(name, destination, dirs, deps = {}) {
 	let { mkdir = defaultMkdir, lstat = defaultLstat$1, now = () => new Date(), warn } = deps;
 	return withLedger((ledger) => {
 		let undo = () => {
@@ -19143,7 +19143,7 @@ function claimNssDb(name, destination, missing, deps = {}) {
 		};
 		typeof ledger != "string" && dropStaleUses(ledger, deps);
 		try {
-			for (let path of missing) {
+			for (let path of dirs) {
 				try {
 					mkdir(path, 448);
 				} catch (e) {
@@ -19293,7 +19293,7 @@ function prepareNssDb(containerName, dir, home, deps = {}) {
 		destination: plan.destination
 	}, xdgPath = (0, node_path.join)(realHome, NSS_XDG_DB_PATH);
 	plan.destination !== xdgPath && lstat(xdgPath) === void 0 && (files.xdgPath = xdgPath);
-	let exists = plan.missing.length === 0, refusal = exists ? whyNotSlot(plan.destination, deps) : void 0;
+	let exists = lstat(plan.destination)?.isDirectory() === !0, refusal = exists ? whyNotSlot(plan.destination, deps) : void 0;
 	if (refusal === void 0) try {
 		files.slot = prepareSlot(dir, files, template, exists, deps);
 	} catch (e) {
@@ -19307,7 +19307,7 @@ function prepareNssDb(containerName, dir, home, deps = {}) {
 	try {
 		files.claim = {
 			name,
-			...claimNssDb(name, plan.destination, plan.missing, {
+			...claimNssDb(name, plan.destination, dirsDownTo(realHome, plan.destination), {
 				warn,
 				...deps.ledger
 			})
@@ -19317,6 +19317,10 @@ function prepareNssDb(containerName, dir, home, deps = {}) {
 		return;
 	}
 	return files;
+}
+function dirsDownTo(home, destination) {
+	let dir = home;
+	return (0, node_path.relative)(home, destination).split("/").map((component) => dir = (0, node_path.join)(dir, component));
 }
 function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess }) {
 	for (let path of [destination, ...NSS_DB_FILES.map((name) => (0, node_path.join)(destination, name))]) {

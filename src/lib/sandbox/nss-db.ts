@@ -310,7 +310,9 @@ export function prepareNssDb(
   const xdgPath = join(realHome, NSS_XDG_DB_PATH);
   if (plan.destination !== xdgPath && lstat(xdgPath) === undefined) files.xdgPath = xdgPath;
 
-  const exists = plan.missing.length === 0;
+  // Looked at again after the docker cp, which takes a while: a parallel step
+  // may have made the database's directory, or removed the one it made, since.
+  const exists = lstat(plan.destination)?.isDirectory() === true;
   let refusal = exists ? whyNotSlot(plan.destination, deps) : undefined;
   if (refusal === undefined) {
     try {
@@ -329,9 +331,14 @@ export function prepareNssDb(
   }
 
   // Created here because runc would create them as root in the runner's home.
+  // Every directory on the way is passed, not only those missing when planned:
+  // a parallel step may have removed one it made since, and it is made again.
   const name = useNameFor(dir);
   try {
-    const claim = claimNssDb(name, plan.destination, plan.missing, { warn, ...deps.ledger });
+    const claim = claimNssDb(name, plan.destination, dirsDownTo(realHome, plan.destination), {
+      warn,
+      ...deps.ledger,
+    });
     files.claim = { name, ...claim };
   } catch (e) {
     warn?.(
@@ -341,6 +348,14 @@ export function prepareNssDb(
     return undefined;
   }
   return files;
+}
+
+/** The directories below home down to destination, shallowest first. */
+function dirsDownTo(home: string, destination: string): string[] {
+  let dir = home;
+  return relative(home, destination)
+    .split("/")
+    .map((component) => (dir = join(dir, component)));
 }
 
 /** Why the runner's own database cannot take the slot, or undefined. Judged

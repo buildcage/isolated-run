@@ -340,19 +340,22 @@ export interface NssDbClaim {
 }
 
 /**
- * Makes the directories `missing` (shallowest first) under the lock, marks
- * the ones it made, and registers this step's use of `destination` under
- * `name`, its scratch dir's name. A directory another step made meanwhile is
- * taken as it is, unless it is a symlink. Throws, having undone what it did,
- * when a directory cannot be made or the lock cannot be had.
+ * Makes whichever of `dirs` (shallowest first, down to `destination`) are not
+ * there, under the lock, marks the ones it made, and registers this step's use
+ * of `destination` under `name`, its scratch dir's name. One already there,
+ * whoever made it and whenever, is taken as it is, unless it is a symlink.
+ * Throws, having undone what it did, when a directory cannot be made or the
+ * lock cannot be had.
  *
  * With a ledger that cannot be trusted, the directories are made but neither
- * marked nor registered, so no step removes them: they are left behind.
+ * marked nor registered, so no step removes them: they are left behind. So are
+ * they where the filesystem keeps no birth time, since a directory could not
+ * then be told from one made again in its place.
  */
 export function claimNssDb(
   name: string,
   destination: string,
-  missing: string[],
+  dirs: string[],
   deps: NssDbLedgerDeps = {},
 ): NssDbClaim {
   const { mkdir = defaultMkdir, lstat = defaultLstat, now = () => new Date(), warn } = deps;
@@ -362,7 +365,7 @@ export function claimNssDb(
     };
     if (typeof ledger !== "string") dropStaleUses(ledger, deps);
     try {
-      for (const path of missing) {
+      for (const path of dirs) {
         try {
           mkdir(path, 0o700);
         } catch (e) {
