@@ -20656,7 +20656,7 @@ function splitHostPort(authority) {
 }
 //#endregion
 //#region src/core/lib/log/start-marker.ts
-const PROXY_START_MARKER = "buildcage haproxy starting", REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS = /^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=(\S+?)\.?$/, DNS_DISCOVERY = /^(\S+ \S+)\s+.*buildcage dns discovery name=(\S+?)\.? type=(\S+)$/, DNS_SERVICE_DENIED = /^(\S+ \S+)\s+.*buildcage dns service-denied name=(\S+?)\.? type=(\S+)$/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
+const PROXY_START_MARKER = "buildcage haproxy starting", REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
 function timeOf(stamp) {
 	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
 	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
@@ -20763,7 +20763,7 @@ async function scanInspectLog(lines, isAudit = !1) {
 	};
 }
 async function scanInspectDnsLog(lines, isAudit = !1) {
-	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact;
+	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
 	for await (let line of lines) {
 		let trimmed = line.trim();
 		trimmed !== "" && (headIntact ??= trimmed.endsWith("buildcage coredns starting"));
@@ -20787,11 +20787,15 @@ async function scanInspectDnsLog(lines, isAudit = !1) {
 			continue;
 		}
 		let refused = DNS_SERVICE_DENIED.exec(trimmed);
-		refused && (service.has(refused[2]) || service.set(refused[2], {
+		if (!refused) {
+			DNS_LINE.test(trimmed) && unparsed++;
+			continue;
+		}
+		service.has(refused[2]) || service.set(refused[2], {
 			time: timeOf(refused[1]),
 			host: refused[2],
 			queryType: refused[3]
-		}));
+		});
 	}
 	let events = [...seen.entries()].map(([host, { time, allowed }]) => {
 		let reason = allowed ? void 0 : "dns-not-allowed", event = {
@@ -20819,7 +20823,8 @@ async function scanInspectDnsLog(lines, isAudit = !1) {
 	});
 	return {
 		events,
-		headIntact: headIntact ?? !1
+		headIntact: headIntact ?? !1,
+		unparsed
 	};
 }
 //#endregion
@@ -20963,12 +20968,12 @@ function reduceTimeline(timeline, knownBlockedRules) {
 //#endregion
 //#region src/core/lib/report/build/inspect.ts
 async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedLogs) {
-	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact }] = await Promise.all([scanInspectLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanInspectLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
 	return {
 		engine: "inspect",
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && droppedLogs === 0,
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
 		startedAt,
 		timeline
 	};
@@ -21012,12 +21017,12 @@ async function scanHaproxyLog(lines, isAudit) {
 //#endregion
 //#region src/core/lib/report/build/universal.ts
 async function buildUniversalReportData(proxyLines, dnsLines, parameters, droppedLogs) {
-	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact }] = await Promise.all([scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
 	return {
 		engine: "universal",
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && droppedLogs === 0,
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
 		startedAt,
 		timeline
 	};

@@ -566,6 +566,9 @@ already uploaded. See [Known Limitations](./security.md#known-limitations).
 | `reason`      |        | only when `action` is `block`, `incomplete` or `failed`                                  |
 | `destination` |        | the address it actually resolved to; absent for `dns`                                    |
 
+A `dns` row's `host` is the name as the resolver logged it: lowercased, with escapes such as `\ `
+and `\DDD` kept.
+
 A field is absent because it does not apply, never because it was zero: a refusal has no status
 because nothing answered, and a passthrough none because nothing was decrypted. Filter on `action`.
 The artifact is uploaded even when the step fails, since a failing run is when it is most wanted.
