@@ -221,7 +221,7 @@ fi
 if [ -e /dev/buildcage-ca.pem ]; then
   fail "/dev/buildcage-ca.pem exists on the host after the step"
 else
-  pass "no /dev/buildcage-ca.pem made on the host (its mount point is the sandbox's own /dev)"
+  pass "no /dev/buildcage-ca.pem made on the host"
 fi
 
 echo ""

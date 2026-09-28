@@ -915,8 +915,7 @@ describe("buildOciConfig: caTrust", () => {
     expect(destinations.indexOf(SYSTEM_STORE)).toBeGreaterThan(destinations.indexOf("/etc"));
   });
 
-  // Its mount point is made in that tmpfs, never on the host. Mounted before
-  // it, the file would also be buried.
+  // Mounted before the tmpfs, the file would be hidden under it.
   it("mounts the CA-only file after runc's /dev tmpfs, which it sits under", () => {
     const spec = fakeBaseSpec();
     spec.mounts.unshift({ destination: "/dev", type: "tmpfs", source: "tmpfs" });

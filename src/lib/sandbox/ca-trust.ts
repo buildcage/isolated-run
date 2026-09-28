@@ -35,9 +35,8 @@ import type { MountEntry } from "./types.ts";
  * the step ends, and the real host store is never touched (the augmented copy
  * goes back over the path it was read from, so there is always a file there).
  *
- * OWN_CA_DESTINATION is the one path with nothing there ahead of time, so runc
- * creates the file it mounts onto. It sits under runc's own /dev tmpfs, so that
- * file is made in the sandbox's private /dev and never on the host.
+ * OWN_CA_DESTINATION is the one path with nothing there ahead of time. runc
+ * creates its mount point in the container's own /dev tmpfs, not on the host.
  */
 export interface CaTrustFiles {
   /** A CA-only file, mounted at OWN_CA_DESTINATION, for variables that add
@@ -72,10 +71,8 @@ export const SYSTEM_CA_CANDIDATES = [
   "/etc/ssl/cert.pem", // Alpine
 ];
 
-/** Where ownCaPath is mounted inside the sandbox: under runc's own /dev tmpfs,
- *  so its mount point is never made on the host (see the module doc comment).
- *  Not under /run: `write_through: /` skips the tmpfs covering it, and an entry
- *  naming /run re-exposes the host's, so the mount point would be a host write. */
+/** Not under /run: `write_through` can put the host's /run back, and the mount
+ *  point would then be created on the host. */
 export const OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
 
 export interface CaTrustDeps {

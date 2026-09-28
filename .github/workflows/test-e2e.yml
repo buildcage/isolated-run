@@ -491,10 +491,8 @@ jobs:
             exit 1
           fi
 
-  # A step ending must not pull the CA out from under a concurrent inspect
-  # step: the CA-only file's mount point lives in each sandbox's own /dev, so
-  # no host-side cleanup of another step can detach it. The step that ends
-  # first is universal, which never mounts a CA at all.
+  # A concurrent step ending must not detach an inspect step's CA mount,
+  # whatever engine the ending step uses.
   test_sandbox_concurrency_inspect:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
@@ -545,7 +543,7 @@ jobs:
               allowed_url_rules: "GET https://example.com/**"
               label: parallel-long
               run: |
-                # Outlasts the other step, so its cleanup has run by now.
+                # Let the other step finish and clean up first.
                 sleep 15
                 if ! test -s "$NODE_EXTRA_CA_CERTS"; then
                   echo "::error::NODE_EXTRA_CA_CERTS ($NODE_EXTRA_CA_CERTS) is gone after the concurrent step ended"
