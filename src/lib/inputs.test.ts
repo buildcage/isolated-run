@@ -259,7 +259,6 @@ describe.each([
     expect(read(inputs({ [name]: value }))).toBe(false);
   });
 
-  // Unset only when an integration script runs the action without action.yml.
   it("takes action.yml's own default when unset", () => {
     expect(read(inputs())).toBe(unset);
   });
@@ -287,7 +286,6 @@ describe("readTrafficArtifactInputs", () => {
     ).toStrictEqual({ upload: false, retentionDays: 7 });
   });
 
-  // Checked with the upload off too: the value is a mistake either way.
   it.each(["0", "-3", "1.5", "1e3", "7d", "abc", "0x10"])("rejects %o", (value) => {
     expect(() =>
       readTrafficArtifactInputs(inputs({ traffic_artifact_retention_days: value })),

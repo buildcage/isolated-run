@@ -192,11 +192,8 @@ export function readStepLabel(getInput: GetInput = core.getInput): string | unde
   return getInput("label") || undefined;
 }
 
-/**
- * `getBooleanInput` cannot tell an unset input from a misspelled one. Unset
- * happens only when an integration script invokes this action directly,
- * without action.yml's defaults, so that alone takes the default.
- */
+/** Not `getBooleanInput`, which cannot tell unset from misspelled. Only unset,
+ *  as when an integration script skips action.yml's defaults, takes the default. */
 function readBooleanInput(name: string, fallback: boolean, getInput: GetInput): boolean {
   const value = getInput(name);
   if (value === "") return fallback;
