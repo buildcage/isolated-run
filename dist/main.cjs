@@ -18212,6 +18212,9 @@ function generateCorednsConfig(rules, options) {
 	};
 }
 //#endregion
+//#region src/core/lib/log/proxy-address.ts
+const PROXY_ADDRESS = "198.19.255.1", UNKNOWN_HOST = "(unknown)";
+//#endregion
 //#region src/core/lib/acl/haproxy-internal-dst.ts
 function internalDstAcl(name, opts) {
 	return [`    acl ${name} var(txn.dst) -m ip ${opts.internalAddrs.join(" ")}`, ...opts.hostAddressFile ? [`    acl ${name} var(txn.dst) -m ip -f ${opts.hostAddressFile}`] : []];
@@ -18381,7 +18384,11 @@ function generateHaproxyConfig(options = {}) {
 	if (hasResolver && !opts.proxyAddress) throw Error("proxyAddress is required whenever a resolver is configured");
 	let shared = {
 		hasResolver,
-		internalAddrs: [...INTERNAL_RANGES, ...opts.proxyAddress ? [opts.proxyAddress] : []],
+		internalAddrs: [
+			...INTERNAL_RANGES,
+			"198.19.255.0/24",
+			...opts.proxyAddress ? [opts.proxyAddress] : []
+		],
 		hostAddressFile: opts.hostAddressFile
 	};
 	return {
@@ -20335,8 +20342,8 @@ function resolveSandboxGid(primaryGid, env, options = {}) {
 	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group${nssError === void 0 ? "" : " or couldn't be verified through NSS"}, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
 }
 //#endregion
-//#region src/core/lib/log/proxy-address.ts
-const PROXY_ADDRESS = "198.19.255.1", UNKNOWN_HOST = "(unknown)", ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = new Set([
+//#region src/lib/sandbox/env-loader.ts
+const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = new Set([
 	"ACTIONS_RUNTIME_URL",
 	"ACTIONS_RUNTIME_TOKEN",
 	"ACTIONS_CACHE_URL",
