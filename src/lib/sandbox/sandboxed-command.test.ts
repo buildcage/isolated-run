@@ -143,10 +143,31 @@ describe("runSandboxedCommand", () => {
       jvmKeystores: [],
       nssDb: undefined,
     });
-    expect(mocks.prepareNssDb).toHaveBeenCalledWith(CONTAINER, SCRATCH, "/home/runner", {
-      warn: mocks.warn,
-      info: mocks.info,
-    });
+    expect(mocks.prepareNssDb).toHaveBeenCalledWith(
+      CONTAINER,
+      SCRATCH,
+      "/home/runner",
+      { warn: mocks.warn, info: mocks.info },
+      { homeUpper: undefined },
+    );
+  });
+
+  it.each([
+    ["HOME is an ephemeral overlay root", {}, `${SCRATCH}/ephemeral/_home_runner/upper`],
+    ["HOME is not an overlay root", { overlayRoots: ["/tmp"] }, undefined],
+    ["the database is written through", { writeThroughPaths: ["/home/runner/.pki"] }, undefined],
+  ])("makes the database's directories in HOME's overlay when %s", (_label, overrides, upper) => {
+    runSandboxedCommand(
+      options({
+        proxyEngine: "inspect",
+        filesystemMode: "ephemeral",
+        overlayRoots: ["/home/runner", "/tmp"],
+        ...overrides,
+      }),
+      deps,
+    );
+
+    expect(mocks.prepareNssDb.mock.calls[0][4]).toStrictEqual({ homeUpper: upper });
   });
 
   describe("Chromium's NSS database", () => {

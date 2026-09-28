@@ -575,7 +575,27 @@ jobs:
       # The hosted image has no NSS database, so every step below makes
       # ~/.pki/nssdb. The short steps must not remove it under the long one.
       - name: Start without an NSS database
-        run: rm -rf ~/.pki ~/.local/share/pki
+        run: rm -rf ~/.pki ~/.local/share/pki "/var/tmp/buildcage-$(id -u)/nssdb-ledger.json"
+
+      - name: sandbox-ephemeral-inspect-home-overlay
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: buildcage-e2e-proxy:inspect
+        with:
+          proxy_engine: inspect
+          filesystem_mode: ephemeral
+          label: ephemeral-nssdb
+          run: grep -q nssdb /proc/self/mountinfo && test -d ~/.pki/nssdb
+
+      # Made in HOME's overlay, so neither the runner nor the ledger is touched.
+      - name: Verify the ephemeral step made nothing on the runner
+        run: |
+          for f in ~/.pki "/var/tmp/buildcage-$(id -u)/nssdb-ledger.json"; do
+            if [ -e "$f" ]; then
+              echo "::error::$f exists after an ephemeral step"
+              exit 1
+            fi
+          done
 
       - parallel:
           - name: sandbox-parallel-short-inspect-persistent

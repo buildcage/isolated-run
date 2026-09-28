@@ -682,7 +682,9 @@ Buildcage made and which steps use them is `/var/tmp/buildcage-<uid>/nssdb-ledge
 the sandbox. A directory is identified by its birth time, so on a filesystem without one (some NFS
 mounts), the directories are left in place. If something else, such as a parallel step outside any
 sandbox, removes the directory while a step runs, that step's Chromium stops trusting the proxy CA;
-the step warns, naming the database, and writes nothing back to it.
+the step warns, naming the database, and writes nothing back to it. Under `filesystem_mode:
+ephemeral`, when `$HOME` is an overlay of its own and `~/.pki/nssdb` is not written through, a
+missing `~/.pki/nssdb` is made in that overlay, not on the runner.
 
 ## `write_through` paths
 

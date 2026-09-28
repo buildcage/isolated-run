@@ -13,6 +13,7 @@ import {
   statSync,
   symlinkSync,
   truncateSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -374,6 +375,103 @@ describe("prepareNssDb", () => {
     expect(readFileSync(join(files.path, "cert9.db"), "utf8")).toBe("THE RUNNER'S OWN");
     const ledger = JSON.parse(readFileSync(join(base, "nssdb-ledger.json"), "utf8"));
     expect(ledger.dirs).toStrictEqual({});
+  });
+
+  describe("given HOME's ephemeral overlay", () => {
+    let upper: string;
+
+    beforeEach(() => {
+      upper = join(scratch, "ephemeral/_home/upper");
+      mkdirSync(upper, { recursive: true });
+    });
+
+    it("makes the directories there, and nothing on the runner", () => {
+      const files = prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps, {
+        homeUpper: upper,
+      })!;
+
+      expect(files.slot).toBeDefined();
+      expect(files.claim).toBeUndefined();
+      expect(existsSync(join(home, ".pki"))).toBe(false);
+      expect(mode(join(upper, ".pki"))).toBe(0o700);
+      expect(mode(join(upper, ".pki/nssdb"))).toBe(0o700);
+      expect(existsSync(join(base, "nssdb-ledger.json"))).toBe(false);
+    });
+
+    it("gives a directory the runner already has the runner's mode and times", () => {
+      mkdirSync(join(home, ".pki"), { mode: 0o750 });
+      chmodSync(join(home, ".pki"), 0o750);
+      utimesSync(join(home, ".pki"), new Date(1_000_000), new Date(2_000_000));
+
+      prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps, { homeUpper: upper });
+
+      expect(mode(join(upper, ".pki"))).toBe(0o750);
+      expect(statSync(join(upper, ".pki")).mtimeMs).toBe(2_000_000);
+      expect(existsSync(join(home, ".pki/nssdb"))).toBe(false);
+    });
+
+    it("claims a database the runner already has, making nothing", () => {
+      ownDb();
+
+      const files = prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps, {
+        homeUpper: upper,
+      })!;
+
+      expect(files.claim?.registered).toBe(true);
+      expect(existsSync(join(upper, ".pki"))).toBe(false);
+    });
+
+    it("makes an XDG database on the runner, removed while the template was copied", () => {
+      mkdirSync(join(home, ".local/share/pki/nssdb"), { recursive: true });
+      const { deps } = fakeDocker();
+      const exec: NssDbDeps["exec"] = (command, args) => {
+        deps.exec!(command, args);
+        rmSync(join(home, ".local/share/pki/nssdb"), { recursive: true });
+      };
+
+      const files = prepareNssDb(
+        CONTAINER,
+        scratch,
+        home,
+        { ...deps, exec },
+        { homeUpper: upper },
+      )!;
+
+      expect(files.claim?.registered).toBe(true);
+      expect(existsSync(join(home, ".local/share/pki/nssdb"))).toBe(true);
+      expect(readdirSync(upper)).toStrictEqual([]);
+    });
+
+    it("makes them on the runner under a symlinked HOME", () => {
+      const link = join(root, "home-link");
+      symlinkSync(home, link);
+
+      const files = prepareNssDb(CONTAINER, scratch, link, fakeDocker().deps, {
+        homeUpper: upper,
+      })!;
+
+      expect(files.claim?.registered).toBe(true);
+      expect(existsSync(join(home, ".pki/nssdb"))).toBe(true);
+    });
+
+    it("makes them on the runner when they cannot be made there", () => {
+      writeFileSync(join(upper, ".pki"), "");
+      const info = vi.fn();
+
+      const files = prepareNssDb(
+        CONTAINER,
+        scratch,
+        home,
+        { ...fakeDocker().deps, info },
+        {
+          homeUpper: upper,
+        },
+      )!;
+
+      expect(files.claim?.registered).toBe(true);
+      expect(existsSync(join(home, ".pki/nssdb"))).toBe(true);
+      expect(info).toHaveBeenCalledWith(expect.stringContaining("is made on the runner instead"));
+    });
   });
 
   it("names no XDG path when the database is the XDG one", () => {

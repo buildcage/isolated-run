@@ -18968,9 +18968,12 @@ function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs
 function slugify(path) {
 	return path.replace(/\//g, "_") || "_root";
 }
+function overlayUpperFor(scratchDir, root) {
+	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
+}
 function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync } = {}) {
 	return roots.map((path) => {
-		let base = (0, node_path.join)(scratchDir, "ephemeral", slugify(path)), upper = (0, node_path.join)(base, "upper"), work = (0, node_path.join)(base, "work");
+		let upper = overlayUpperFor(scratchDir, path), work = (0, node_path.join)((0, node_path.dirname)(upper), "work");
 		return mkdir(upper, { recursive: !0 }), mkdir(work, { recursive: !0 }), {
 			path,
 			upper,
@@ -19270,7 +19273,7 @@ function walkPlan(home, path, lstat) {
 		missing
 	};
 }
-function prepareNssDb(containerName, dir, home, deps = {}) {
+function prepareNssDb(containerName, dir, home, deps = {}, { homeUpper } = {}) {
 	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat$1, realpath = node_fs.realpathSync, copyDir = defaultCopyDir, warn } = deps;
 	if (!home || stat(home)?.isDirectory() !== !0) {
 		warn?.(`could not add the proxy CA to Chromium's NSS database: HOME (${JSON.stringify(home ?? "")}) is not a directory. A Chromium step will not trust the proxy.`);
@@ -19302,7 +19305,11 @@ function prepareNssDb(containerName, dir, home, deps = {}) {
 			force: !0
 		});
 	}
-	refusal !== void 0 && (deps.info?.(`buildcage: ${refusal}, so the NSS database at ${plan.destination} is covered for the command with one trusting only the proxy CA`), copyDir(template, path));
+	if (refusal !== void 0 && (deps.info?.(`buildcage: ${refusal}, so the NSS database at ${plan.destination} is covered for the command with one trusting only the proxy CA`), copyDir(template, path)), !exists && homeUpper !== void 0 && realHome === home && plan.destination === (0, node_path.join)(home, ".pki/nssdb")) try {
+		return makeInUpper(realHome, plan.destination, homeUpper), files;
+	} catch (e) {
+		deps.info?.(`buildcage: could not make ${plan.destination} in the ephemeral overlay (${errorMessage(e)}), so it is made on the runner instead`);
+	}
 	let name = useNameFor(dir);
 	try {
 		files.claim = {
@@ -19317,6 +19324,14 @@ function prepareNssDb(containerName, dir, home, deps = {}) {
 		return;
 	}
 	return files;
+}
+function makeInUpper(home, destination, upper) {
+	let made = [];
+	for (let path of dirsDownTo(home, destination)) {
+		let inUpper = (0, node_path.join)(upper, (0, node_path.relative)(home, path)), host = (0, node_fs.lstatSync)(path, { throwIfNoEntry: !1 });
+		(0, node_fs.mkdirSync)(inUpper, { recursive: !0 }), (0, node_fs.chmodSync)(inUpper, host ? host.mode & 4095 : 448), made.push([inUpper, host]);
+	}
+	for (let [inUpper, host] of made.reverse()) host && (0, node_fs.utimesSync)(inUpper, host.atime, host.mtime);
 }
 function dirsDownTo(home, destination) {
 	let dir = home;
@@ -20634,7 +20649,8 @@ function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`, "RUNC_EXTRACT_FAILED");
 	}
 }
-function extractCaTrust(containerName, dir, { env, writeThroughPaths, warn }, { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles, jvmTools, prepareNssDb, info }) {
+function extractCaTrust(containerName, dir, options, { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles, jvmTools, prepareNssDb, info }) {
+	let { env, writeThroughPaths, warn } = options;
 	try {
 		let caCertPath = extractCaCert(containerName, dir), tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env));
 		return {
@@ -20643,11 +20659,15 @@ function extractCaTrust(containerName, dir, { env, writeThroughPaths, warn }, { 
 			nssDb: prepareNssDb(containerName, dir, env.HOME, {
 				warn,
 				info
-			})
+			}, { homeUpper: homeUpperFor(dir, options) })
 		};
 	} catch (e) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`, "CA_EXTRACT_FAILED");
 	}
+}
+function homeUpperFor(dir, options) {
+	let { filesystemMode, overlayRoots, env } = options, home = env.HOME;
+	if (filesystemMode === "ephemeral" && home && overlayRoots.includes(home) && !persists((0, node_path.join)(home, ".pki/nssdb"), options)) return overlayUpperFor(dir, home);
 }
 function writeBundleFiles(dir, { runInput, filesystemMode, overlayRoots }, { createOverlayScratchDirs, writeResolvConf, writeRunScript, writeEnvLoader, mkdir }) {
 	let overlayScratchPaths = filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [], resolvConfPath = writeResolvConf(PROXY_ADDRESS, dir), execDir = (0, node_path.join)(dir, "exec");

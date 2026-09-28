@@ -17,9 +17,11 @@ import {
   renameSync,
   rmSync,
   statSync,
+  utimesSync,
   writeSync,
   ftruncateSync,
   readSync,
+  type Stats,
 } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -256,6 +258,12 @@ function walkPlan(home: string, path: string, lstat: NonNullable<NssDbDeps["lsta
   return { destination: dir, missing };
 }
 
+export interface PrepareNssDbOptions {
+  /** Upper dir of HOME's ephemeral overlay: a missing ~/.pki/nssdb is made
+   *  there instead of on the runner. */
+  homeUpper?: string;
+}
+
 /**
  * Extracts the CA-only template, then gives the runner's database the slot, or
  * covers it when the runner user cannot write it or it is too large to copy,
@@ -267,6 +275,7 @@ export function prepareNssDb(
   dir: string,
   home: string | undefined,
   deps: NssDbDeps = {},
+  { homeUpper }: PrepareNssDbOptions = {},
 ): NssDbFiles | undefined {
   const {
     exec = defaultExec,
@@ -328,6 +337,23 @@ export function prepareNssDb(
     copyDir(template, path);
   }
 
+  if (
+    !exists &&
+    homeUpper !== undefined &&
+    realHome === home &&
+    plan.destination === join(home, NSS_DB_PATH)
+  ) {
+    try {
+      makeInUpper(realHome, plan.destination, homeUpper);
+      return files;
+    } catch (e) {
+      deps.info?.(
+        `buildcage: could not make ${plan.destination} in the ephemeral overlay ` +
+          `(${errorMessage(e)}), so it is made on the runner instead`,
+      );
+    }
+  }
+
   // Created here because runc would create them as root in the runner's home.
   // Every directory on the way, not only those missing when planned: a
   // parallel step may have removed one since.
@@ -346,6 +372,25 @@ export function prepareNssDb(
     return undefined;
   }
   return files;
+}
+
+/** Existing directories are made in the upper dir too, with the runner's mode
+ *  and times, since the upper dir's attributes are what the sandbox sees. */
+function makeInUpper(home: string, destination: string, upper: string): void {
+  const made: [string, Stats | undefined][] = [];
+  for (const path of dirsDownTo(home, destination)) {
+    const inUpper = join(upper, relative(home, path));
+    // Owned by the runner user regardless, which only affects the discarded
+    // overlay.
+    const host = lstatSync(path, { throwIfNoEntry: false });
+    mkdirSync(inUpper, { recursive: true });
+    chmodSync(inUpper, host ? host.mode & 0o7777 : 0o700);
+    made.push([inUpper, host]);
+  }
+  // Deepest first, since making a child moves its parent's mtime.
+  for (const [inUpper, host] of made.reverse()) {
+    if (host) utimesSync(inUpper, host.atime, host.mtime);
+  }
 }
 
 function dirsDownTo(home: string, destination: string): string[] {
