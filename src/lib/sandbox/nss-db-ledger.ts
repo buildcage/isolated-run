@@ -264,8 +264,7 @@ function withLedger<T>(fn: (ledger: Ledger | string) => T, deps: NssDbLedgerDeps
   }, deps);
 }
 
-/** The ledger's lock, also held by NSS database write-backs so parallel ones
- *  never interleave. */
+/** Also held by write-backs, so parallel ones never interleave. */
 export function withNssDbLock<T>(fn: () => T, deps: NssDbLedgerDeps = {}): T {
   const release = acquireLock(baseOf(deps), deps);
   try {
