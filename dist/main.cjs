@@ -19461,8 +19461,10 @@ function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.
 			force: !0
 		}), e;
 	}
+	let swapping = !1;
 	try {
 		lock(() => {
+			swapping = !0;
 			for (let name of (0, node_fs.readdirSync)(files.destination)) {
 				let path = (0, node_path.join)(files.destination, name);
 				(!isStaging(name) || path !== staging && !stagingOwnerAlive(name, pidAlive)) && (0, node_fs.rmSync)(path, {
@@ -19472,13 +19474,16 @@ function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.
 			}
 			for (let name of (0, node_fs.readdirSync)(staging)) isStaging(name) || (0, node_fs.renameSync)((0, node_path.join)(staging, name), (0, node_path.join)(files.destination, name));
 		});
-	} finally {
-		(0, node_fs.rmSync)(staging, {
+	} catch (e) {
+		throw swapping || (0, node_fs.rmSync)(staging, {
 			recursive: !0,
 			force: !0
-		});
+		}), e;
 	}
-	return "written";
+	return (0, node_fs.rmSync)(staging, {
+		recursive: !0,
+		force: !0
+	}), "written";
 }
 function nssDbMounts(files) {
 	let mounts = [{

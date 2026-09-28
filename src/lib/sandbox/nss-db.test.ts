@@ -532,6 +532,21 @@ describe("settleNssDbSlot", () => {
     expect(readdirSync(dir).sort()).toStrictEqual(["cert9.db", "pkcs11.txt"]);
   });
 
+  it("keeps the staging copy when the swap fails partway", () => {
+    const dir = ownDb();
+    mkdirSync(join(dir, "sub"));
+    writeFileSync(join(dir, "sub", "kept"), "");
+    const files = prepareSlotted();
+    writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
+    // Its file cannot be removed, so clearing the database fails partway.
+    chmodSync(join(dir, "sub"), 0o555);
+
+    expect(() => settle(files)).toThrow();
+    chmodSync(join(dir, "sub"), 0o755);
+    const staging = readdirSync(dir).find((name) => name.startsWith(".buildcage-"))!;
+    expect(readFileSync(join(dir, staging, "cert9.db"), "utf8")).toBe("WRITTEN BY THE COMMAND");
+  });
+
   it("leaves the database alone when the command only read it", () => {
     const dir = ownDb();
     symlinkSync("cert9.db", join(dir, "link"));

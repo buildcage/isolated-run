@@ -600,8 +600,10 @@ export function settleNssDbSlot(
     rmSync(staging, { recursive: true, force: true });
     throw e;
   }
+  let swapping = false;
   try {
     lock(() => {
+      swapping = true;
       for (const name of readdirSync(files.destination)) {
         const path = join(files.destination, name);
         if (isStaging(name) && (path === staging || stagingOwnerAlive(name, pidAlive))) continue;
@@ -612,9 +614,12 @@ export function settleNssDbSlot(
         renameSync(join(staging, name), join(files.destination, name));
       }
     });
-  } finally {
-    rmSync(staging, { recursive: true, force: true });
+  } catch (e) {
+    // A swap that failed partway leaves the staging copy as the only whole one.
+    if (!swapping) rmSync(staging, { recursive: true, force: true });
+    throw e;
   }
+  rmSync(staging, { recursive: true, force: true });
   return "written";
 }
 
