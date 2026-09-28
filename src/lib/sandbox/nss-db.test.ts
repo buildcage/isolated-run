@@ -264,6 +264,23 @@ describe("prepareNssDb", () => {
     expect(info).toHaveBeenCalledWith(expect.stringContaining("is covered for the command"));
   });
 
+  it("copies the runner's database under the ledger's lock", () => {
+    ownDb();
+    const lock = join(base, "nssdb-ledger.lock");
+    const held: boolean[] = [];
+    const copyDir = (source: string, destination: string) => {
+      held.push(existsSync(lock));
+      cpSync(source, destination, { recursive: true });
+    };
+
+    const files = prepareNssDb(CONTAINER, scratch, home, { ...fakeDocker().deps, copyDir })!;
+
+    expect(files.slot).toBeDefined();
+    // The CA database, then the runner's.
+    expect(held).toStrictEqual([false, true]);
+    expect(existsSync(lock)).toBe(false);
+  });
+
   it("covers the database when the slot cannot be added to its copy", () => {
     ownDb();
     const info = vi.fn();
