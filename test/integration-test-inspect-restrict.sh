@@ -49,7 +49,7 @@ INPUT_PROXY_ENGINE="inspect" \
 INPUT_PROXY_MODE="restrict" \
 INPUT_ALLOWED_HTTPS_RULES="sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443 deadend.example.com:443" \
 INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80 deadend.example.com:80" \
-INPUT_ALLOWED_TLS_RULES="tlspass.example.com:443 ~^tlspass\.example\.com:8443$" \
+INPUT_ALLOWED_TLS_RULES="tlspass.example.com:443 ~^tlspass\.example\.com:8443$ ~^tlsany\.example\.com:.*$" \
 INPUT_ALLOWED_IP_RULES="~^10\.200\.0\.\d+:9080$ 10.200.0.53:53" \
 INPUT_ALLOWED_URL_RULES="GET https://allowed.example.com/public/**
 GET https://allowed.example.com:9443/public/**
@@ -60,6 +60,9 @@ GET ~^https://blocked\.example\.com:9443/public/.*$
 GET ~^https://blocked\.example\.com/defaultport/.*$
 GET ~https://ok\.wildcard\.example\.com/regexpub/
 GET ~^https://ok\.wildcard\.example\.com/regexexact$
+# Its port half matches any text, so a Host of
+# anyport.example.com:x.evil.example.net:80 would match it.
+GET ~^https?://anyport\.example\.com:.*/.*$
 # Never requested: this puts a character haproxy's own config parser
 # folds in front of real haproxy. Unescaped, the ' would open a quoted
 # string, so haproxy refuses the config and this test fails, which is the
@@ -122,6 +125,12 @@ fi
 # proves nothing was cut.
 assert_summary_contains "end=TAIL-MARKER -> not-allowed" "the ~1.3KB refused URL was recorded whole"
 assert_summary_contains "TLS tlspass.example.com:443" "the TLS passthrough is in the timeline, never decrypted"
+if grep -qF "TLS tlsany" <<< "$SUMMARY"; then
+  fail "an SNI holding a colon was passed through"
+else
+  pass "an SNI holding a colon was not passed through"
+fi
+assert_summary_contains "-> invalid-host" "a Host holding a colon was refused as invalid-host"
 assert_summary_contains "DNS secret-in-a-name.attacker.example -> dns-not-allowed" "the DNS-only exfiltration attempt was refused and recorded"
 # No rule can name an address backwards, so a row for one could never be taken
 # away by writing a rule. The resolver records it under a verb of its own

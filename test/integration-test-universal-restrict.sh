@@ -36,7 +36,7 @@ BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-universal.yaml" \
 INPUT_PROXY_ENGINE="universal" \
 INPUT_PROXY_MODE="restrict" \
-INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443 allowed.example.com:8443 *.wildcard.example.com:443 *.wildcard.example.com:8443 ~ok\\.regex\\.example\\.com:443 ~^ports\\.regex\\.example\\.com:(443|8443)\$" \
+INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443 allowed.example.com:8443 *.wildcard.example.com:443 *.wildcard.example.com:8443 ~ok\\.regex\\.example\\.com:443 ~^ports\\.regex\\.example\\.com:(443|8443)\$ ~^tlsany\\.example\\.com:.*\$" \
 INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80 allowed.example.com:8080 *.wildcard.example.com:80 *.wildcard.example.com:8080" \
 INPUT_ALLOWED_IP_RULES="10.200.0.100:8443" \
 INPUT_FAIL_ON_BLOCKED="false" \
@@ -97,8 +97,10 @@ assert_summary_contains "| runner.wildcard.example.com:80 | HTTP | internal-addr
 assert_summary_contains "| HTTPS | missing-sni |" "a TLS ClientHello with no SNI recorded as blocked, reason missing-sni"
 assert_summary_contains "| HTTP | missing-host-header |" "an HTTP request with no Host header recorded as blocked, reason missing-host-header"
 # The crafted SNI arrives as one row whose host cell is the sanitized name.
-assert_summary_contains "x__-__T__buildcage__ALLOWED___HTTPS___forged.example.com:443" \
+assert_summary_contains "x__-__T__buildcage__ALLOWED___HTTPS___forged.example.com:443 | HTTPS | invalid-sni |" \
   "the forged SNI was sanitized into a single blocked row"
+assert_summary_contains "| tlsany.example.com_x.evil.example.net:443 | HTTPS | invalid-sni |" \
+  "an SNI holding a colon was refused before a ~ rule's port pattern could match it"
 
 # The Allowed Hosts table never shows a reason column, so a plain substring
 # search for "| blocked.example.com:80 | HTTP |" would also match the start
