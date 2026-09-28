@@ -259,9 +259,8 @@ function walkPlan(home: string, path: string, lstat: NonNullable<NssDbDeps["lsta
 }
 
 export interface PrepareNssDbOptions {
-  /** Upper dir of an ephemeral overlay rooted at HOME, where writes to
-   *  ~/.pki/nssdb are discarded: when that is the database to make, its
-   *  missing directories are made there instead of on the runner. */
+  /** Upper dir of HOME's ephemeral overlay: a missing ~/.pki/nssdb is made
+   *  there instead of on the runner. */
   homeUpper?: string;
 }
 
@@ -375,17 +374,14 @@ export function prepareNssDb(
   return files;
 }
 
-/**
- * A directory the runner already has is made in the upper dir too, to hold
- * the rest, with the runner's mode and times: an upper dir's own attributes
- * are what the sandbox sees.
- */
+/** Existing directories are made in the upper dir too, with the runner's mode
+ *  and times, since the upper dir's attributes are what the sandbox sees. */
 function makeInUpper(home: string, destination: string, upper: string): void {
   const made: [string, Stats | undefined][] = [];
   for (const path of dirsDownTo(home, destination)) {
     const inUpper = join(upper, relative(home, path));
-    // Owned by the runner user whoever owns the runner's: that only opens it
-    // to writes the overlay discards.
+    // Owned by the runner user regardless, which only affects the discarded
+    // overlay.
     const host = lstatSync(path, { throwIfNoEntry: false });
     mkdirSync(inUpper, { recursive: true });
     chmodSync(inUpper, host ? host.mode & 0o7777 : 0o700);

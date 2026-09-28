@@ -211,8 +211,8 @@ function extractCaTrust(
   }
 }
 
-/** HOME's overlay upper dir, when HOME is itself an ephemeral overlay root and
- *  a write to its NSS database would be discarded. */
+/** Set only when HOME is its own ephemeral overlay root and ~/.pki/nssdb is
+ *  not written through. */
 function homeUpperFor(dir: string, options: AssembleBundleOptions): string | undefined {
   const { filesystemMode, overlayRoots, env } = options;
   const home = env.HOME;

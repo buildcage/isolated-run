@@ -81,7 +81,6 @@ function slugify(path: string): string {
   return path.replace(/\//g, "_") || "_root";
 }
 
-/** The upper dir createOverlayScratchDirs makes for an overlay root. */
 export function overlayUpperFor(scratchDir: string, root: string): string {
   return join(scratchDir, "ephemeral", slugify(root), "upper");
 }

@@ -683,8 +683,8 @@ the sandbox. A directory is identified by its birth time, so on a filesystem wit
 mounts), the directories are left in place. If something else, such as a parallel step outside any
 sandbox, removes the directory while a step runs, that step's Chromium stops trusting the proxy CA;
 the step warns, naming the database, and writes nothing back to it. Under `filesystem_mode:
-ephemeral`, when `$HOME` is an overlay of its own and the database is not below a `write_through:`
-entry, the missing directories are made in that overlay instead, and nothing is made on the runner.
+ephemeral`, when `$HOME` is an overlay of its own and `~/.pki/nssdb` is not written through, a
+missing `~/.pki/nssdb` is made in that overlay, not on the runner.
 
 ## `write_through` paths
 
