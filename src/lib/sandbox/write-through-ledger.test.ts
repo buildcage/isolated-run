@@ -5,6 +5,7 @@ import {
   readFileSync,
   realpathSync,
   rmdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -314,6 +315,29 @@ describe("releaseWriteThrough", () => {
     finish("sandbox-a", 101);
 
     expect(existsSync(out)).toBe(true);
+  });
+
+  it("waits out a holder longer than the NSS ledger would, since holders run sudo", () => {
+    const lock = join(base, "write-through-ledger.lock");
+    writeFileSync(lock, "999");
+    alive.add(999);
+    let attempts = 0;
+    alive.add(101);
+
+    // The NSS ledger gives up after 50 tries.
+    claimWriteThrough(
+      "sandbox-a",
+      create([out]),
+      deps(101, {
+        lockDelayMs: 1,
+        now: () => {
+          if (++attempts === 100) rmSync(lock);
+          return new Date();
+        },
+      }),
+    );
+
+    expect(Object.keys(ledger().uses)).toStrictEqual(["sandbox-a"]);
   });
 
   it("leaves the directories in place when the lock cannot be had", () => {

@@ -34,6 +34,10 @@ import { asOwner, type CreatedDir } from "./write-through.ts";
 export const WRITE_THROUGH_LEDGER_NAME = "write-through-ledger.json";
 const LOCK_NAME = "write-through-ledger.lock";
 
+/** 30s: a holder runs a sudo per write_through target, where the NSS
+ *  ledger's holders only touch files. */
+const LOCK_ATTEMPTS = 300;
+
 /** scratchDirNameFor's shape. */
 const USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
 
@@ -122,7 +126,7 @@ function withLedger<T>(fn: (ledger: Ledger | string) => T, deps: WriteThroughLed
     LOCK_NAME,
     (path) => readLedgerFile(path, emptyLedger, isLedger),
     fn,
-    deps,
+    { lockAttempts: LOCK_ATTEMPTS, ...deps },
   );
 }
 

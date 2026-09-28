@@ -30,8 +30,8 @@ import { retryBriefly } from "../retry-briefly.ts";
 
 const MAX_LEDGER_BYTES = 64 << 10;
 
-/** The lock is held for milliseconds. Kept well under acquireLock's wait so a
- *  lock left by a killed holder is taken over within it. */
+/** Kept well under acquireLock's wait so a lock left by a killed holder is
+ *  taken over within it. */
 const STALE_LOCK_MS = 2_000;
 
 export interface DirId {
@@ -50,6 +50,7 @@ export interface LockDeps {
   pidAlive?: (pid: number) => boolean;
   now?: () => Date;
   lockAttempts?: number;
+  lockDelayMs?: number;
 }
 
 // Untested by design: the defaults behind this module's seams, which only hand
@@ -111,7 +112,12 @@ export function stillThere(
  *  EEXIST, so no reader sees an empty lock. */
 function acquireLock(
   lock: string,
-  { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 50 }: LockDeps,
+  {
+    pidAlive = defaultPidAlive,
+    now = () => new Date(),
+    lockAttempts = 50,
+    lockDelayMs = 100,
+  }: LockDeps,
 ): () => void {
   const mine = `${lock}.${process.pid}`;
   writeFileSync(mine, String(process.pid), { mode: 0o600 });
@@ -125,7 +131,13 @@ function acquireLock(
           throw e;
         }
       },
-      { attempts: lockAttempts, delayMs: 100, retryOn: (e) => errnoCode(e) === "EEXIST" },
+      { attempts: lockAttempts, delayMs: lockDelayMs, retryOn: (e) => errnoCode(e) === "EEXIST" },
+    );
+  } catch (e) {
+    // EEXIST alone reads as a bug rather than a step holding the lock too long.
+    throw new Error(
+      `could not take ${lock} within ${(lockAttempts * lockDelayMs) / 1000}s (${errorMessage(e)})`,
+      { cause: e },
     );
   } finally {
     rmSync(mine, { force: true });

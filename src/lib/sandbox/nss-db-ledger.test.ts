@@ -381,7 +381,7 @@ describe("the lock", () => {
     holdLock(999_999, age);
 
     expect(() => claim(step("sandbox-a"), { pidAlive: () => alive, lockAttempts: 2 })).toThrow(
-      /EEXIST/,
+      /could not take .*nssdb-ledger\.lock within 0\.2s \(EEXIST/,
     );
     expect(existsSync(nssdb)).toBe(false);
   });
