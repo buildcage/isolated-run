@@ -456,8 +456,7 @@ function prepareSlot(
   for (const name of readdirSync(caDb)) chmodSync(join(caDb, name), 0o644);
 
   if (exists) {
-    // Under the lock write-backs swap under, so a parallel step's swap is never
-    // copied halfway.
+    // A parallel step's write-back swaps the database under this lock.
     withNssDbLock(
       () => copyDir(files.destination, files.path, (path) => !inStaging(files.destination, path)),
       ledger,
