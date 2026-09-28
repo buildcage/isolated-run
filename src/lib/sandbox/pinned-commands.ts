@@ -17,17 +17,14 @@ export const SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/s
 
 const pinnedPathEnvs = new Map<string, string>();
 
-/** The `$PATH` that `command` runs with from now on. */
 export function pinCommandPathEnv(command: string, pathEnv: string): void {
   pinnedPathEnvs.set(command, pathEnv);
 }
 
 /**
- * The environment to run `command` with. sudo looks up what it runs on the
- * caller's PATH when sudoers sets no secure_path, and that PATH also reaches
- * run-isolated.sh; docker looks up its credential helpers there (and ssh, for
- * an ssh context). Both get the PATH pinned for them, or the system dirs until
- * then.
+ * sudo resolves what it runs on PATH when sudoers sets no secure_path, and
+ * that PATH reaches run-isolated.sh. docker execs its credential helpers (and
+ * ssh, for an ssh context) from PATH.
  */
 export function hostCommandEnv(
   command: string,

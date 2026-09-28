@@ -3,9 +3,8 @@
  * command, whose writes to some host paths outlive it. `docker`, `sudo` and
  * the inspect engine's `keytool` are pinned to binaries outside those paths,
  * since a lookup through `$PATH` could pick one the command planted
- * (`~/.local/bin` precedes `/usr/bin` on hosted runners). The PATH docker and
- * sudo run with leaves those paths out too, since docker execs the
- * `docker-credential-*` helper it finds there. The docker CLI's
+ * (`~/.local/bin` precedes `/usr/bin` on hosted runners). For the same reason
+ * docker and sudo run with those paths left off PATH. The docker CLI's
  * config directory and this action's own checkout, which hold its plugins and
  * the post step's script, are made read-only inside the sandbox.
  */
@@ -122,10 +121,8 @@ function insidePersisting(
 
 /**
  * `pathEnv` without the entries inside `persisting`, judged like
- * findPinnableCommand's hops, by both spelling and real directory, and without
- * the relative and empty ones, which resolve against the workspace. For what
- * a pinned command looks up on PATH itself, such as docker's credential
- * helpers. `write_through: /` is the documented full opt-out.
+ * findPinnableCommand. Relative and empty entries resolve against the
+ * workspace, so they go too.
  */
 export function pathOutside(
   pathEnv: string = "",
@@ -168,8 +165,8 @@ export function findPinnableCommand(
 }
 
 /**
- * Pins `docker` and `sudo` for the rest of this process, along with the PATH
- * each looks up what it runs on. A command missing from PATH altogether is
+ * Pins `docker` and `sudo`, and the PATH each runs with, for the rest of this
+ * process. A command missing from PATH altogether is
  * left unpinned, so the sudo preflight or docker's ENOENT reports a runner
  * without them in clearer terms than this would.
  */
