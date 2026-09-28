@@ -75,7 +75,8 @@ export interface FilesystemPlan {
    *  (ensureWriteThroughTargetsExist), in either filesystem mode. */
   writeThroughPaths: string[];
   /** The directory segments pre-creating those paths actually created, for
-   *  removeCreatedDirsIfEmpty to give back once the step is done. */
+   *  the write_through ledger (write-through-ledger.ts) to remove once no step
+   *  binds them. */
   createdDirs: CreatedDir[];
 }
 

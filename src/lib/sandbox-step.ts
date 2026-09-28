@@ -15,14 +15,13 @@ import { isKnownBlockedUrlRule } from "#core/lib/acl/wildcard-rules.ts";
 import { annotate, createAnnotation } from "#core/lib/actions/annotation.ts";
 import { logRules, withLogGroup } from "#core/lib/actions/log.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
-import { errorMessage } from "#core/lib/errors.ts";
 import { resolveBuildcageImageRef } from "#core/lib/provenance/image-ref.ts";
 import { verifyImageDigestOrThrow, type ResolvedImage } from "#core/lib/provenance/verify-image.ts";
 import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts";
 
 import { buildComposeEnv } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
-import { generateContainerName, getContainerNetns } from "./container.ts";
+import { generateContainerName, getContainerNetns, scratchDirNameFor } from "./container.ts";
 import {
   checkIpRuleSupport,
   checkKnownBlockedUrlRuleSupport,
@@ -45,7 +44,13 @@ import { resolveFilesystemPlan, validateFilesystemInputs } from "./sandbox/files
 import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
-import { removeCreatedDirsIfEmpty, splitWriteThroughInput } from "./sandbox/write-through.ts";
+import {
+  claimWriteThrough,
+  releaseWriteThrough,
+  writeThroughDetached,
+  type WriteThroughClaim,
+} from "./sandbox/write-through-ledger.ts";
+import { splitWriteThroughInput } from "./sandbox/write-through.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 
@@ -90,7 +95,9 @@ export interface SandboxStepDeps {
   stopSandboxProxy: typeof stopSandboxProxy;
   runSandboxedCommand: typeof runSandboxedCommand;
   reportStepTraffic: typeof reportStepTraffic;
-  removeCreatedDirsIfEmpty: typeof removeCreatedDirsIfEmpty;
+  claimWriteThrough: typeof claimWriteThrough;
+  releaseWriteThrough: typeof releaseWriteThrough;
+  writeThroughDetached: typeof writeThroughDetached;
   saveState: (name: string, value: string) => void;
   info: (message: string) => void;
   log: (message: string) => void;
@@ -128,7 +135,9 @@ const realDeps: SandboxStepDeps = {
   stopSandboxProxy,
   runSandboxedCommand,
   reportStepTraffic,
-  removeCreatedDirsIfEmpty,
+  claimWriteThrough,
+  releaseWriteThrough,
+  writeThroughDetached,
   saveState: core.saveState,
   info: core.info,
   log: console.log,
@@ -206,7 +215,9 @@ export async function runSandboxStep(
     stopSandboxProxy,
     runSandboxedCommand,
     reportStepTraffic,
-    removeCreatedDirsIfEmpty,
+    claimWriteThrough,
+    releaseWriteThrough,
+    writeThroughDetached,
     saveState,
     info,
     log,
@@ -259,15 +270,27 @@ export async function runSandboxStep(
   // script isn't running as the real action.
   const annotation = createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
 
+  // Named before anything is created: the write_through ledger records this
+  // step's use under its scratch dir's name.
+  const containerName = generateContainerName();
+
   // Resolved/pre-created here (not inside runSandboxedCommand) so a bad
   // write_through entry, or a target that can't be created, fails before the
   // proxy container ever starts, same reasoning as checkPasswordlessSudo
   // above.
-  const { overlayRoots, writeThroughPaths, createdDirs } = resolveFilesystemPlan(
-    filesystemMode,
-    writeThroughInput,
-    env,
-  );
+  let plan!: ReturnType<typeof resolveFilesystemPlan>;
+  const createPlan = () => {
+    plan = resolveFilesystemPlan(filesystemMode, writeThroughInput, env);
+    return { paths: plan.writeThroughPaths, created: plan.createdDirs };
+  };
+  // Without write_through the shared ledger is left alone.
+  let writeThroughClaim: WriteThroughClaim | undefined;
+  if (splitWriteThroughInput(writeThroughInput).length > 0) {
+    writeThroughClaim = claimWriteThrough(scratchDirNameFor(containerName), createPlan, { warn });
+  } else {
+    createPlan();
+  }
+  const { overlayRoots, writeThroughPaths } = plan;
   if (filesystemMode === "ephemeral") {
     for (const line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) {
       info(line);
@@ -307,7 +330,6 @@ export async function runSandboxStep(
       logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
     });
 
-    const containerName = generateContainerName();
     const projectName = deriveProjectName(containerName);
     saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, saveState);
 
@@ -352,6 +374,14 @@ export async function runSandboxStep(
         failOnCaResidue: readFailOnCaResidue(),
         warn,
       });
+      for (const path of writeThroughClaim ? writeThroughDetached(writeThroughClaim) : []) {
+        warn(
+          `buildcage: write_through target ${path} was removed or replaced on the runner while ` +
+            "the command ran, which detached it from the sandbox: what the command wrote there " +
+            "afterwards may not have reached the runner. Something outside this step removed " +
+            "it, such as another step running in parallel.",
+        );
+      }
     } finally {
       // Never throws, so the teardown below is always reached.
       await reportStepTraffic({
@@ -376,19 +406,10 @@ export async function runSandboxStep(
 
     return exitCode;
   } finally {
-    // Give back the directories pre-creating write_through targets made, if
-    // the command left them empty. Covers every way out of the step, not just
-    // the ones that reach the proxy teardown: image verification or a rule
-    // typo can throw after they were created. Deliberately not mirrored in
-    // post.ts: the only way to hand this list to the post step is GITHUB_STATE,
-    // which the sandboxed command can rewrite (see post-state.ts), and that
-    // would turn the cleanup into a way to rmdir any empty directory belonging
-    // to whoever each entry claimed as its owner. A hard kill therefore leaves
-    // an empty directory behind, which the next run reuses.
-    try {
-      removeCreatedDirsIfEmpty(createdDirs);
-    } catch (e) {
-      annotation.warning(`Failed to remove created write_through directories: ${errorMessage(e)}`);
+    // Here rather than with the proxy teardown: image verification or a rule
+    // typo can throw after the targets were made.
+    if (writeThroughClaim?.registered) {
+      releaseWriteThrough(writeThroughClaim.name, { info, warn });
     }
   }
 }

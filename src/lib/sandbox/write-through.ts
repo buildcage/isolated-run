@@ -275,7 +275,7 @@ export function resolveWriteThroughOnHost(
 /** The sudo flags that run a command as uid/gid rather than as root. Numeric
  *  (`#1000`) so no passwd/group name is needed for the identity itself, though
  *  sudo does still require the uid to resolve to an account. */
-function asOwner({ uid, gid }: { uid: number; gid: number }): string[] {
+export function asOwner({ uid, gid }: { uid: number; gid: number }): string[] {
   return ["-u", `#${uid}`, "-g", `#${gid}`];
 }
 
@@ -357,8 +357,8 @@ export function ensureWriteThroughTargetsExist(
   const rollback = () => {
     for (const dir of [...created].reverse()) {
       try {
-        // `rmdir`, like removeCreatedDirsIfEmpty: only directories are created
-        // here, and the step hasn't run yet, so every one of them is empty.
+        // Only directories are created here, and the step hasn't run yet, so
+        // every one of them is empty.
         execFile("sudo", [...asOwner(dir), "rmdir", "--", dir.path]);
       } catch {
         // Best-effort: the original error is what matters here, not a
@@ -431,27 +431,4 @@ export function ensureWriteThroughTargetsExist(
   }
 
   return created;
-}
-
-/**
- * Give back the directories ensureWriteThroughTargetsExist created, once the
- * step is done with them. Deepest first, and `rmdir` rather than `rm`: a
- * directory the command actually wrote to is non-empty, so the removal fails
- * and the content stays, which is the whole point of having asked for the
- * path. Failures are therefore expected and ignored.
- * Runs as each directory's own owner, like the mkdir that made it: the isolated
- * command has just been running with these paths writable, so a root rmdir by
- * name here would be a way to remove any empty directory on the host.
- */
-export function removeCreatedDirsIfEmpty(
-  created: CreatedDir[],
-  { execFile = defaultExecFile }: { execFile?: (command: string, args: string[]) => void } = {},
-): void {
-  for (const dir of [...created].reverse()) {
-    try {
-      execFile("sudo", [...asOwner(dir), "rmdir", "--", dir.path]);
-    } catch {
-      // Non-empty (the command wrote something here) or already gone.
-    }
-  }
 }

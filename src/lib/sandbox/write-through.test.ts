@@ -5,7 +5,6 @@ import {
   resolveWriteThroughPaths,
   resolveWriteThroughOnHost,
   ensureWriteThroughTargetsExist,
-  removeCreatedDirsIfEmpty,
   splitWriteThroughInput,
   WriteThroughTargetMissingError,
   WriteThroughTargetUncreatableError,
@@ -278,42 +277,6 @@ describe("ensureWriteThroughTargetsExist", () => {
       { path: "/a/b", uid: 1000, gid: 1000 },
       { path: "/a/b/c", uid: 1000, gid: 1000 },
     ]);
-  });
-});
-
-describe("removeCreatedDirsIfEmpty", () => {
-  const dirs = [
-    { path: "/a/b", uid: 1000, gid: 1000 },
-    { path: "/a/b/c", uid: 1000, gid: 1000 },
-  ];
-  const asOwner = ["-u", "#1000", "-g", "#1000"];
-
-  it("rmdirs deepest first as the owner, so a nested set unwinds in the order it was created", () => {
-    const calls: string[][] = [];
-    removeCreatedDirsIfEmpty(dirs, { execFile: (cmd, args) => calls.push([cmd, ...args]) });
-    expect(calls).toStrictEqual([
-      ["sudo", ...asOwner, "rmdir", "--", "/a/b/c"],
-      ["sudo", ...asOwner, "rmdir", "--", "/a/b"],
-    ]);
-  });
-
-  it("keeps going when a directory isn't empty (the command wrote there, so it stays)", () => {
-    const calls: string[][] = [];
-    const execFile = (cmd: string, args: string[]) => {
-      calls.push([cmd, ...args]);
-      if (args[6] === "/a/b/c") throw new Error("rmdir: failed to remove: Directory not empty");
-    };
-    expect(() => removeCreatedDirsIfEmpty(dirs, { execFile })).not.toThrow();
-    expect(calls).toStrictEqual([
-      ["sudo", ...asOwner, "rmdir", "--", "/a/b/c"],
-      ["sudo", ...asOwner, "rmdir", "--", "/a/b"],
-    ]);
-  });
-
-  it("does nothing when nothing was created", () => {
-    const execFile = vi.fn();
-    removeCreatedDirsIfEmpty([], { execFile });
-    expect(execFile).not.toHaveBeenCalled();
   });
 });
 
