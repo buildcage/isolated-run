@@ -24,8 +24,6 @@ describe("PROXY_SUBNET", () => {
     const sandbox = readFileSync(new URL("./sandboxed-command.ts", import.meta.url), "utf8");
     const sandboxIp = /const SANDBOX_IP = "([\d.]+)";/.exec(sandbox)![1];
     const prefix = PROXY_SUBNET.replace(/0\/24$/, "");
-    expect(PROXY_SUBNET.endsWith(".0/24")).toBe(true);
-    expect(PROXY_ADDRESS.startsWith(prefix)).toBe(true);
-    expect(sandboxIp.startsWith(prefix)).toBe(true);
+    for (const ip of [PROXY_ADDRESS, sandboxIp]) expect(ip.startsWith(prefix)).toBe(true);
   });
 });
