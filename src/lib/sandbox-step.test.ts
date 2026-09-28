@@ -13,6 +13,8 @@ const mocks = {
   readFilesystemInputs: vi.fn(),
   readRuleInputs: vi.fn(),
   readFailOnCaResidue: vi.fn(),
+  readFailOnBlocked: vi.fn(),
+  readTrafficArtifactInputs: vi.fn(),
   validateFilesystemInputs: vi.fn(),
   checkPasswordlessSudo: vi.fn(),
   checkOverlayfsSupport: vi.fn(),
@@ -74,6 +76,9 @@ beforeEach(() => {
     tlsRules: [],
     knownBlockedRules: [],
   });
+  mocks.readFailOnCaResidue.mockReturnValue(true);
+  mocks.readFailOnBlocked.mockReturnValue(true);
+  mocks.readTrafficArtifactInputs.mockReturnValue({ upload: false });
   mocks.createAnnotation.mockReturnValue(annotation);
   mocks.resolveFilesystemPlan.mockReturnValue({
     overlayRoots: [],
@@ -136,6 +141,31 @@ describe("runSandboxStep", () => {
       failOnCaResidue: false,
     });
   });
+
+  it("hands the report the inputs read up front", async () => {
+    mocks.readFailOnBlocked.mockReturnValue(false);
+    mocks.readTrafficArtifactInputs.mockReturnValue({ upload: true, retentionDays: 7 });
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.reportStepTraffic.mock.calls[0][0]).toMatchObject({
+      failOnBlocked: false,
+      trafficArtifact: { upload: true, retentionDays: 7 },
+    });
+  });
+
+  it.each(["readFailOnCaResidue", "readFailOnBlocked", "readTrafficArtifactInputs"] as const)(
+    "fails on a bad value from %s before any setup",
+    async (reader) => {
+      mocks[reader].mockImplementation(() => {
+        throw new SandboxError("Invalid input", "INVALID_BOOLEAN_INPUT");
+      });
+
+      await expect(runSandboxStep(ENV, deps)).rejects.toThrow("Invalid input");
+      expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
+      expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+    },
+  );
 
   it("pins docker and sudo outside what any sandboxed command can write, before the preflights", async () => {
     await runSandboxStep(ENV, deps);

@@ -10708,20 +10708,6 @@ function getInput(name, options) {
 	if (options && options.required && !val) throw Error(`Input required and not supplied: ${name}`);
 	return options && options.trimWhitespace === !1 ? val : val.trim();
 }
-function getBooleanInput(name, options) {
-	let trueValue = [
-		"true",
-		"True",
-		"TRUE"
-	], falseValue = [
-		"false",
-		"False",
-		"FALSE"
-	], val = getInput(name, options);
-	if (trueValue.includes(val)) return !0;
-	if (falseValue.includes(val)) return !1;
-	throw TypeError(`Input does not meet YAML 1.2 "Core Schema" specification: ${name}\nSupport boolean input list: \`true | True | TRUE | false | False | FALSE\``);
-}
 function setOutput(name, value) {
 	if (process.env.GITHUB_OUTPUT) return issueFileCommand("OUTPUT", prepareKeyValueMessage(name, value));
 	process.stdout.write(os.EOL), issueCommand("set-output", { name }, toCommandValue(value));
@@ -18508,21 +18494,21 @@ function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice
 	if (writeThrough.trim() && writable.trim()) throw new SandboxError("write_through: and writable: are the same input under two names. Set only write_through:.", "FILESYSTEM_INPUT_CONFLICT");
 	return !writeThrough.trim() && writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writable) : writeThrough;
 }
-function readRunCommand(getInput$1 = getInput) {
-	let runInput = getInput$1("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$2 = getInput) {
+	let runInput = getInput$2("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readEngineInputs(getInput$2 = getInput) {
-	return { proxyEngine: resolveProxyEngine(getInput$2("proxy_engine")) };
+function readEngineInputs(getInput$3 = getInput) {
+	return { proxyEngine: resolveProxyEngine(getInput$3("proxy_engine")) };
 }
-function readFilesystemInputs(notice, getInput$4 = getInput) {
+function readFilesystemInputs(notice, getInput$8 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$4("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$8("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput({
-			writeThrough: getInput$4("write_through"),
-			writable: getInput$4("writable"),
-			allowWrite: getInput$4("allow_write")
+			writeThrough: getInput$8("write_through"),
+			writable: getInput$8("writable"),
+			allowWrite: getInput$8("allow_write")
 		}, notice)
 	};
 }
@@ -18532,12 +18518,12 @@ function resolveProxyMode(input) {
 	if (!PROXY_MODES.includes(trimmed)) throw new SandboxError(`Invalid proxy_mode: ${JSON.stringify(input)}. Must be one of ${PROXY_MODES.join(", ")}.`, "INVALID_PROXY_MODE");
 	return trimmed;
 }
-function readRuleInputs(getInput$3 = getInput) {
-	let proxyMode = resolveProxyMode(getInput$3("proxy_mode")), rules = buildACLRules({
-		httpsRulesInput: getInput$3("allowed_https_rules"),
-		httpRulesInput: getInput$3("allowed_http_rules"),
-		ipRulesInput: getInput$3("allowed_ip_rules")
-	}), knownBlockedRules = readKnownBlockedRules(getInput$3("known_blocked_rules")), urlRulesInput = getInput$3("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$3("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
+function readRuleInputs(getInput$4 = getInput) {
+	let proxyMode = resolveProxyMode(getInput$4("proxy_mode")), rules = buildACLRules({
+		httpsRulesInput: getInput$4("allowed_https_rules"),
+		httpRulesInput: getInput$4("allowed_http_rules"),
+		ipRulesInput: getInput$4("allowed_ip_rules")
+	}), knownBlockedRules = readKnownBlockedRules(getInput$4("known_blocked_rules")), urlRulesInput = getInput$4("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$4("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
 	checkRulesCompileOrThrow({
 		...rules,
 		tlsRules,
@@ -18557,19 +18543,35 @@ function readRuleInputs(getInput$3 = getInput) {
 function readStepLabel(getInput$5 = getInput) {
 	return getInput$5("label") || void 0;
 }
-function readFailOnCaResidue(getBooleanInput$2 = getBooleanInput) {
-	try {
-		return getBooleanInput$2("fail_on_ca_residue");
-	} catch {
-		return !0;
-	}
+function readBooleanInput(name, fallback, getInput) {
+	let value = getInput(name);
+	if (value === "") return fallback;
+	if ([
+		"true",
+		"True",
+		"TRUE"
+	].includes(value)) return !0;
+	if ([
+		"false",
+		"False",
+		"FALSE"
+	].includes(value)) return !1;
+	throw new SandboxError(`Invalid ${name}: ${JSON.stringify(value)}. Must be true or false.`, "INVALID_BOOLEAN_INPUT");
 }
-function readFailOnBlocked(getBooleanInput$1 = getBooleanInput) {
-	try {
-		return getBooleanInput$1("fail_on_blocked");
-	} catch {
-		return !0;
-	}
+function readFailOnCaResidue(getInput$7 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$7);
+}
+function readFailOnBlocked(getInput$1 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$1);
+}
+function readTrafficArtifactInputs(getInput$6 = getInput) {
+	let upload = readBooleanInput("upload_traffic_artifact", !1, getInput$6), days = getInput$6("traffic_artifact_retention_days");
+	if (days === "") return { upload };
+	if (!/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid traffic_artifact_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_TRAFFIC_ARTIFACT_RETENTION_DAYS");
+	return {
+		upload,
+		retentionDays: Number(days)
+	};
 }
 //#endregion
 //#region src/lib/retry-briefly.ts
@@ -67069,13 +67071,6 @@ If the error persists, please check whether Actions and API requests are operati
 //#endregion
 //#region src/lib/traffic-artifact.ts
 init_core();
-function wantsTrafficArtifact() {
-	try {
-		return getBooleanInput("upload_traffic_artifact");
-	} catch {
-		return !1;
-	}
-}
 function trafficArtifactName(containerName) {
 	return `buildcage-traffic-${containerName.split("-").at(-1)}`;
 }
@@ -67083,14 +67078,14 @@ const uploadViaActionsArtifact = async (name, files, rootDirectory, options) => 
 	let { DefaultArtifactClient } = await Promise.resolve().then(() => (init_artifact(), artifact_exports));
 	return new DefaultArtifactClient().uploadArtifact(name, files, rootDirectory, options);
 };
-async function uploadTrafficArtifact(report, containerName, annotation, { upload = uploadViaActionsArtifact, scratchBase = SANDBOX_SCRATCH_BASE } = {}) {
+async function uploadTrafficArtifact(report, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact, scratchBase = SANDBOX_SCRATCH_BASE } = {}) {
 	ensureOwnScratchBase(scratchBase);
 	let scratchDir = (0, node_fs.mkdtempSync)((0, node_path.join)(scratchBase, "traffic-"));
 	try {
 		let file = (0, node_path.join)(scratchDir, "traffic.json");
 		writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));
-		let days = Number(getInput("traffic_artifact_retention_days") || ""), name = trafficArtifactName(containerName);
-		return await upload(name, [file], scratchDir, { retentionDays: Number.isFinite(days) && days > 0 ? days : void 0 }), console.log(`Uploaded the traffic JSON as ${name}`), name;
+		let name = trafficArtifactName(containerName);
+		return await upload(name, [file], scratchDir, { retentionDays }), console.log(`Uploaded the traffic JSON as ${name}`), name;
 	} catch (e) {
 		annotation.warning(`Could not upload the traffic artifact: ${errorMessage(e)}`);
 		return;
@@ -67110,31 +67105,27 @@ const realDeps$1 = {
 	fetchReport,
 	readActionVersion,
 	writeReportSummary,
-	wantsTrafficArtifact,
 	uploadTrafficArtifact,
 	setTrafficArtifactOutput,
-	readFailOnBlocked,
 	readStepLabel
 };
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, env }, overrides = {}) {
-	let { fetchReport, readActionVersion, writeReportSummary, wantsTrafficArtifact, uploadTrafficArtifact, setTrafficArtifactOutput, readFailOnBlocked, readStepLabel } = {
+async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, failOnBlocked, trafficArtifact, env }, overrides = {}) {
+	let { fetchReport, readActionVersion, writeReportSummary, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
 		...realDeps$1,
 		...overrides
-	}, failOnBlocked = readFailOnBlocked(), failClosed = parameters.mode !== "audit" && failOnBlocked, fail = (message) => {
+	}, failClosed = parameters.mode !== "audit" && failOnBlocked, fail = (message) => {
 		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail_on_blocked`), process.exitCode = 1) : annotation.warning(message);
 	}, phase = "fetch sandbox report", artifactName = "";
 	try {
 		let report = await fetchReport(containerName, parameters, proxyEngine);
-		phase = "write the report summary";
-		let wantsArtifact = wantsTrafficArtifact();
-		await writeReportSummary(report, annotation, {
+		phase = "write the report summary", await writeReportSummary(report, annotation, {
 			actionRepo,
 			actionRef,
 			runCommand,
 			actionVersion: readActionVersion(containerName, proxyEngine),
 			stepLabel: readStepLabel(),
 			failOnBlocked
-		}, wantsArtifact, env), wantsArtifact && (phase = "upload the traffic artifact", artifactName = await uploadTrafficArtifact(report, containerName, annotation) ?? "");
+		}, trafficArtifact.upload, env), trafficArtifact.upload && (phase = "upload the traffic artifact", artifactName = await uploadTrafficArtifact(report, containerName, trafficArtifact.retentionDays, annotation) ?? "");
 	} catch (e) {
 		let message = `Failed to ${phase}: ${errorMessage(e)}`;
 		phase === "upload the traffic artifact" ? annotation.warning(message) : fail(message);
@@ -67168,6 +67159,8 @@ const realDeps = {
 	readFilesystemInputs,
 	readRuleInputs,
 	readFailOnCaResidue,
+	readFailOnBlocked,
+	readTrafficArtifactInputs,
 	validateFilesystemInputs,
 	checkPasswordlessSudo,
 	checkOverlayfsSupport,
@@ -67214,12 +67207,12 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, checkIpRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, claimWriteThrough, releaseWriteThrough, writeThroughDetached, saveState, info, log, notice, warn } = {
+	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, checkIpRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, claimWriteThrough, releaseWriteThrough, writeThroughDetached, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v1", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
+	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs();
 	assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
 	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), containerName = generateContainerName(), plan, createPlan = () => (plan = resolveFilesystemPlan(filesystemMode, writeThroughInput, env), {
 		paths: plan.writeThroughPaths,
@@ -67301,7 +67294,7 @@ async function runSandboxStep(env, overrides = {}) {
 				proxyEngine,
 				filesystemMode,
 				overlayRoots,
-				failOnCaResidue: readFailOnCaResidue(),
+				failOnCaResidue,
 				warn
 			});
 			for (let path of writeThroughClaim ? writeThroughDetached(writeThroughClaim) : []) warn(`buildcage: write_through target ${path} was removed or replaced on the runner while the command ran, which detached it from the sandbox: what the command wrote there afterwards may not have reached the runner. Something outside this step removed it, such as another step running in parallel.`);
@@ -67321,6 +67314,8 @@ async function runSandboxStep(env, overrides = {}) {
 				actionRepo,
 				actionRef: reportActionRef,
 				runCommand: runInput,
+				failOnBlocked,
+				trafficArtifact,
 				env
 			}), await stopSandboxProxy({
 				composeFile,

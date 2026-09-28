@@ -9,6 +9,7 @@ import {
   readRuleInputs,
   readRunCommand,
   readStepLabel,
+  readTrafficArtifactInputs,
   resolveProxyMode,
   resolveWriteThroughInput,
 } from "./inputs.ts";
@@ -241,35 +242,60 @@ describe("readStepLabel", () => {
   });
 });
 
-describe("readFailOnCaResidue", () => {
-  it("returns the input's own value", () => {
-    expect(readFailOnCaResidue(() => false)).toBe(false);
-    expect(readFailOnCaResidue(() => true)).toBe(true);
+describe.each([
+  { name: "fail_on_ca_residue", read: readFailOnCaResidue, unset: true },
+  { name: "fail_on_blocked", read: readFailOnBlocked, unset: true },
+  {
+    name: "upload_traffic_artifact",
+    read: (getInput: (name: string) => string) => readTrafficArtifactInputs(getInput).upload,
+    unset: false,
+  },
+])("$name", ({ name, read, unset }) => {
+  it.each(["true", "True", "TRUE"])("reads %o as true", (value) => {
+    expect(read(inputs({ [name]: value }))).toBe(true);
   });
 
-  // Unset, or not a boolean: the safe side, as for fail_on_blocked.
-  it("falls back to true when the input cannot be read", () => {
-    expect(
-      readFailOnCaResidue(() => {
-        throw new TypeError("Input does not meet YAML 1.2 Core Schema specification");
+  it.each(["false", "False", "FALSE"])("reads %o as false", (value) => {
+    expect(read(inputs({ [name]: value }))).toBe(false);
+  });
+
+  // Unset only when an integration script runs the action without action.yml.
+  it("takes action.yml's own default when unset", () => {
+    expect(read(inputs())).toBe(unset);
+  });
+
+  it.each(["no", "0", "off", "yes", "1"])("rejects %o, naming the input", (value) => {
+    expect(() => read(inputs({ [name]: value }))).toThrow(
+      expect.objectContaining({
+        code: "INVALID_BOOLEAN_INPUT",
+        message: `Invalid ${name}: "${value}". Must be true or false.`,
       }),
-    ).toBe(true);
+    );
   });
 });
 
-describe("readFailOnBlocked", () => {
-  it("returns what the input says", () => {
-    expect(readFailOnBlocked(() => false)).toBe(false);
-    expect(readFailOnBlocked(() => true)).toBe(true);
+describe("readTrafficArtifactInputs", () => {
+  it("leaves the retention to the repository's default when unset", () => {
+    expect(readTrafficArtifactInputs(inputs({ upload_traffic_artifact: "true" }))).toStrictEqual({
+      upload: true,
+    });
   });
 
-  // The integration scripts run this action without action.yml's defaults, so
-  // getBooleanInput throws on the unset input rather than returning one.
-  it("falls back to action.yml's own default when the input is absent", () => {
+  it("reads a whole number of days", () => {
     expect(
-      readFailOnBlocked(() => {
-        throw new Error("Input required and not supplied: fail_on_blocked");
+      readTrafficArtifactInputs(inputs({ traffic_artifact_retention_days: "7" })),
+    ).toStrictEqual({ upload: false, retentionDays: 7 });
+  });
+
+  // Checked with the upload off too: the value is a mistake either way.
+  it.each(["0", "-3", "1.5", "1e3", "7d", "abc", "0x10"])("rejects %o", (value) => {
+    expect(() =>
+      readTrafficArtifactInputs(inputs({ traffic_artifact_retention_days: value })),
+    ).toThrow(
+      expect.objectContaining({
+        code: "INVALID_TRAFFIC_ARTIFACT_RETENTION_DAYS",
+        message: `Invalid traffic_artifact_retention_days: "${value}". Must be a whole number of days above zero.`,
       }),
-    ).toBe(true);
+    );
   });
 });

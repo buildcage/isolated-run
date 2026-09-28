@@ -13,16 +13,10 @@ import {
   setTrafficArtifactOutput,
   trafficArtifactName,
   uploadTrafficArtifact,
-  wantsTrafficArtifact,
   type UploadArtifact,
 } from "./traffic-artifact.ts";
 
 const CONTAINER = "buildcage-proxy-deadbeef";
-
-/** @actions/core reads its inputs and writes its outputs through the environment. */
-function setInput(name: string, value: string): void {
-  vi.stubEnv(`INPUT_${name.toUpperCase()}`, value);
-}
 
 function inspectReport(overrides: Partial<InspectReportData> = {}): Report {
   return {
@@ -61,24 +55,6 @@ function fakeUpload(fail?: Error): {
 
 afterEach(() => {
   vi.unstubAllEnvs();
-});
-
-describe("wantsTrafficArtifact", () => {
-  it("reads the upload_traffic_artifact input", () => {
-    setInput("upload_traffic_artifact", "true");
-    expect(wantsTrafficArtifact()).toBe(true);
-    setInput("upload_traffic_artifact", "false");
-    expect(wantsTrafficArtifact()).toBe(false);
-  });
-
-  it("is false when the input is unset, as when run from source", () => {
-    expect(wantsTrafficArtifact()).toBe(false);
-  });
-
-  it("is false for a value getBooleanInput refuses", () => {
-    setInput("upload_traffic_artifact", "yes");
-    expect(wantsTrafficArtifact()).toBe(false);
-  });
 });
 
 describe("trafficArtifactName", () => {
@@ -141,10 +117,16 @@ describe("uploadTrafficArtifact", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { upload, calls } = fakeUpload();
 
-    const name = await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(true), {
-      upload,
-      scratchBase,
-    });
+    const name = await uploadTrafficArtifact(
+      inspectReport(),
+      CONTAINER,
+      undefined,
+      createAnnotation(true),
+      {
+        upload,
+        scratchBase,
+      },
+    );
 
     expect(calls).toHaveLength(1);
     expect(calls[0].name).toBe("buildcage-traffic-deadbeef");
@@ -157,7 +139,7 @@ describe("uploadTrafficArtifact", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { upload, calls } = fakeUpload();
 
-    await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(false), {
+    await uploadTrafficArtifact(inspectReport(), CONTAINER, undefined, createAnnotation(false), {
       upload,
       scratchBase,
     });
@@ -165,41 +147,30 @@ describe("uploadTrafficArtifact", () => {
     expect(() => readFileSync(calls[0].files[0], "utf8")).toThrow();
   });
 
-  it("passes a positive traffic_artifact_retention_days through", async () => {
+  it.each([7, undefined])("passes the retention of %o through", async (retentionDays) => {
     vi.spyOn(console, "log").mockImplementation(() => {});
-    setInput("traffic_artifact_retention_days", "7");
     const { upload, calls } = fakeUpload();
 
-    await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(false), {
-      upload,
-      scratchBase,
-    });
-
-    expect(calls[0].options).toStrictEqual({ retentionDays: 7 });
-  });
-
-  it.each(["", "0", "-1", "forever"])(
-    "leaves the retention to the repository's own default for %o",
-    async (input) => {
-      vi.spyOn(console, "log").mockImplementation(() => {});
-      setInput("traffic_artifact_retention_days", input);
-      const { upload, calls } = fakeUpload();
-
-      await uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(false), {
+    await uploadTrafficArtifact(
+      inspectReport(),
+      CONTAINER,
+      retentionDays,
+      createAnnotation(false),
+      {
         upload,
         scratchBase,
-      });
+      },
+    );
 
-      expect(calls[0].options).toStrictEqual({ retentionDays: undefined });
-    },
-  );
+    expect(calls[0].options).toStrictEqual({ retentionDays });
+  });
 
   it("uploads the traffic JSON for the universal engine too", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const { upload, calls } = fakeUpload();
     const universal = { ...inspectReport(), engine: "universal" } as Report;
 
-    await uploadTrafficArtifact(universal, CONTAINER, createAnnotation(true), {
+    await uploadTrafficArtifact(universal, CONTAINER, undefined, createAnnotation(true), {
       upload,
       scratchBase,
     });
@@ -212,7 +183,7 @@ describe("uploadTrafficArtifact", () => {
     const { upload } = fakeUpload(new Error("artifact service unavailable"));
 
     await expect(
-      uploadTrafficArtifact(inspectReport(), CONTAINER, createAnnotation(true), {
+      uploadTrafficArtifact(inspectReport(), CONTAINER, undefined, createAnnotation(true), {
         upload,
         scratchBase,
       }),

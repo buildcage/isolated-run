@@ -30,7 +30,6 @@ import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts
 
 /** Narrowed to what this module needs, so a test can pass a plain lookup. */
 export type GetInput = (name: string, options?: { trimWhitespace?: boolean }) => string;
-export type GetBooleanInput = (name: string) => boolean;
 
 /** Where a renamed input's migration message goes; the entry point supplies it. */
 export type Notice = (message: string) => void;
@@ -193,28 +192,50 @@ export function readStepLabel(getInput: GetInput = core.getInput): string | unde
   return getInput("label") || undefined;
 }
 
-/** Unset or unreadable is true, as with fail_on_blocked below. */
-export function readFailOnCaResidue(
-  getBooleanInput: GetBooleanInput = core.getBooleanInput,
-): boolean {
-  try {
-    return getBooleanInput("fail_on_ca_residue");
-  } catch {
-    return true;
-  }
+/**
+ * `getBooleanInput` cannot tell an unset input from a misspelled one. Unset
+ * happens only when an integration script invokes this action directly,
+ * without action.yml's defaults, so that alone takes the default.
+ */
+function readBooleanInput(name: string, fallback: boolean, getInput: GetInput): boolean {
+  const value = getInput(name);
+  if (value === "") return fallback;
+  if (["true", "True", "TRUE"].includes(value)) return true;
+  if (["false", "False", "FALSE"].includes(value)) return false;
+  throw new SandboxError(
+    `Invalid ${name}: ${JSON.stringify(value)}. Must be true or false.`,
+    "INVALID_BOOLEAN_INPUT",
+  );
 }
 
-/**
- * Several integration scripts invoke this action directly without setting
- * fail_on_blocked, unlike a real workflow where action.yml's own default
- * always supplies it. Fall back to that same default.
- */
-export function readFailOnBlocked(
-  getBooleanInput: GetBooleanInput = core.getBooleanInput,
-): boolean {
-  try {
-    return getBooleanInput("fail_on_blocked");
-  } catch {
-    return true;
+export function readFailOnCaResidue(getInput: GetInput = core.getInput): boolean {
+  return readBooleanInput("fail_on_ca_residue", true, getInput);
+}
+
+export function readFailOnBlocked(getInput: GetInput = core.getInput): boolean {
+  return readBooleanInput("fail_on_blocked", true, getInput);
+}
+
+export interface TrafficArtifactInputs {
+  upload: boolean;
+  /** Undefined takes the repository's own default. */
+  retentionDays?: number;
+}
+
+/** The retention is checked even when nothing is uploaded: a bad value is a
+ *  mistake either way. */
+export function readTrafficArtifactInputs(
+  getInput: GetInput = core.getInput,
+): TrafficArtifactInputs {
+  const upload = readBooleanInput("upload_traffic_artifact", false, getInput);
+  const days = getInput("traffic_artifact_retention_days");
+  if (days === "") return { upload };
+  if (!/^[1-9]\d*$/.test(days)) {
+    throw new SandboxError(
+      `Invalid traffic_artifact_retention_days: ${JSON.stringify(days)}. ` +
+        "Must be a whole number of days above zero.",
+      "INVALID_TRAFFIC_ARTIFACT_RETENTION_DAYS",
+    );
   }
+  return { upload, retentionDays: Number(days) };
 }
