@@ -32,7 +32,9 @@ const mocks = {
   stopSandboxProxy: vi.fn(),
   runSandboxedCommand: vi.fn(),
   reportStepTraffic: vi.fn(),
-  removeCreatedDirsIfEmpty: vi.fn(),
+  claimWriteThrough: vi.fn(),
+  releaseWriteThrough: vi.fn(),
+  writeThroughDetached: vi.fn(),
   saveState: vi.fn(),
   info: vi.fn(),
   log: vi.fn(),
@@ -88,6 +90,12 @@ beforeEach(() => {
   mocks.stopSandboxProxy.mockResolvedValue(undefined);
   mocks.runSandboxedCommand.mockReturnValue(0);
   mocks.reportStepTraffic.mockResolvedValue(undefined);
+  // The real one makes the targets under the ledger's lock.
+  mocks.claimWriteThrough.mockImplementation((name: string, create: () => unknown) => {
+    create();
+    return { name, registered: true, targets: [] };
+  });
+  mocks.writeThroughDetached.mockReturnValue([]);
 });
 
 /** Call order of a step that ran, for comparing two steps against each other. */
@@ -410,18 +418,58 @@ describe("runSandboxStep", () => {
       expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
     });
 
-    it("gives back the directories it created for write_through targets", async () => {
-      await runSandboxStep(ENV, deps);
+    describe("write_through targets", () => {
+      beforeEach(() => {
+        mocks.readFilesystemInputs.mockReturnValue({
+          filesystemMode: "persistent",
+          writeThroughInput: "./out",
+        });
+      });
 
-      expect(mocks.removeCreatedDirsIfEmpty).toHaveBeenCalledWith(CREATED_DIRS);
+      it("are made under the ledger, as this step's scratch dir, and released after", async () => {
+        await runSandboxStep(ENV, deps);
+
+        expect(mocks.claimWriteThrough.mock.calls[0]![0]).toBe("sandbox-deadbeef");
+        expect(mocks.resolveFilesystemPlan).toHaveBeenCalledTimes(1);
+        expect(mocks.releaseWriteThrough.mock.calls[0]![0]).toBe("sandbox-deadbeef");
+      });
+
+      it("are released even when the step fails before the proxy starts", async () => {
+        mocks.verifyImageDigestOrThrow.mockRejectedValue(new Error("no signature found"));
+
+        await expect(runSandboxStep(ENV, deps)).rejects.toThrow("no signature found");
+        expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+        expect(mocks.releaseWriteThrough).toHaveBeenCalledTimes(1);
+      });
+
+      it("are not released when the ledger did not register them", async () => {
+        mocks.claimWriteThrough.mockImplementation((name: string, create: () => unknown) => {
+          create();
+          return { name, registered: false, targets: [] };
+        });
+
+        await runSandboxStep(ENV, deps);
+
+        expect(mocks.releaseWriteThrough).not.toHaveBeenCalled();
+      });
+
+      it("that were removed while the command ran are warned about", async () => {
+        mocks.writeThroughDetached.mockReturnValue(["/home/runner/work/repo/repo/out"]);
+
+        await runSandboxStep(ENV, deps);
+
+        expect(mocks.warn.mock.calls[0]![0]).toMatch(
+          /write_through target \/home\/runner\/work\/repo\/repo\/out was removed or replaced/,
+        );
+      });
     });
 
-    it("gives them back even when the step fails before the proxy starts", async () => {
-      mocks.verifyImageDigestOrThrow.mockRejectedValue(new Error("no signature found"));
+    it("leaves the ledger alone when there is no write_through", async () => {
+      await runSandboxStep(ENV, deps);
 
-      await expect(runSandboxStep(ENV, deps)).rejects.toThrow("no signature found");
-      expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
-      expect(mocks.removeCreatedDirsIfEmpty).toHaveBeenCalledWith(CREATED_DIRS);
+      expect(mocks.resolveFilesystemPlan).toHaveBeenCalledTimes(1);
+      expect(mocks.claimWriteThrough).not.toHaveBeenCalled();
+      expect(mocks.releaseWriteThrough).not.toHaveBeenCalled();
     });
 
     it("creates nothing when docker or sudo cannot be pinned", async () => {
@@ -432,16 +480,6 @@ describe("runSandboxStep", () => {
       await expect(runSandboxStep(ENV, deps)).rejects.toThrow("no docker");
       expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
       expect(mocks.resolveFilesystemPlan).not.toHaveBeenCalled();
-    });
-
-    it("warns rather than failing the step when they cannot be removed", async () => {
-      mocks.runSandboxedCommand.mockReturnValue(7);
-      mocks.removeCreatedDirsIfEmpty.mockImplementation(() => {
-        throw new Error("EACCES: permission denied");
-      });
-
-      expect(await runSandboxStep(ENV, deps)).toBe(7);
-      expect(annotation.warning.mock.calls[0][0]).toContain("EACCES: permission denied");
     });
   });
 });

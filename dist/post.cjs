@@ -392,6 +392,122 @@ function retryBriefly(fn, options = {}) {
 		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
 	}
 }
+function defaultLstat(path) {
+	return (0, node_fs.lstatSync)(path, {
+		bigint: !0,
+		throwIfNoEntry: !1
+	});
+}
+function defaultPidAlive(pid) {
+	try {
+		return process.kill(pid, 0), !0;
+	} catch (e) {
+		return e.code !== "ESRCH";
+	}
+}
+function errnoCode(e) {
+	return e.code;
+}
+function idOf(info) {
+	return {
+		dev: String(info.dev),
+		ino: String(info.ino),
+		birthtimeNs: String(info.birthtimeNs)
+	};
+}
+function sameId(a, b) {
+	return a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
+}
+function isId(value) {
+	let v = value;
+	return typeof v == "object" && !!v && [
+		v.dev,
+		v.ino,
+		v.birthtimeNs
+	].every((s) => typeof s == "string" && /^\d+$/.test(s));
+}
+function dirIdOf(path, { lstat = defaultLstat } = {}) {
+	let info = lstat(path);
+	return info?.isDirectory() ? idOf(info) : void 0;
+}
+function acquireLock(lock, { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 50 }) {
+	let mine = `${lock}.${process.pid}`;
+	(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
+	try {
+		retryBriefly(() => {
+			try {
+				(0, node_fs.linkSync)(mine, lock);
+			} catch (e) {
+				throw takeOverStaleLock(lock, pidAlive, now), e;
+			}
+		}, {
+			attempts: lockAttempts,
+			delayMs: 100,
+			retryOn: (e) => errnoCode(e) === "EEXIST"
+		});
+	} finally {
+		(0, node_fs.rmSync)(mine, { force: !0 });
+	}
+	return () => (0, node_fs.rmSync)(lock, { force: !0 });
+}
+function takeOverStaleLock(lock, pidAlive, now) {
+	let pid, age;
+	try {
+		pid = Number((0, node_fs.readFileSync)(lock, "utf8")), age = now().getTime() - (0, node_fs.lstatSync)(lock).mtimeMs;
+	} catch {
+		return;
+	}
+	age < 2e3 || Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
+}
+function withLock(base, lockName, fn, deps) {
+	let release = acquireLock((0, node_path.join)(base, lockName), deps);
+	try {
+		return fn();
+	} finally {
+		release();
+	}
+}
+function readLedgerFile(path, empty, valid) {
+	let fd;
+	try {
+		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
+	} catch (e) {
+		return errnoCode(e) === "ENOENT" ? empty() : `${path} cannot be opened (${errorMessage(e)})`;
+	}
+	try {
+		let info = (0, node_fs.fstatSync)(fd);
+		if (!info.isFile()) return `${path} is not a file`;
+		if (info.size > 65536) return `${path} is ${info.size} bytes, too large`;
+		let parsed = JSON.parse((0, node_fs.readFileSync)(fd, "utf8"));
+		return valid(parsed) ? parsed : `${path} is not a ledger this version can read`;
+	} catch (e) {
+		return `${path} cannot be read (${errorMessage(e)})`;
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function writeLedgerFile(path, ledger) {
+	let tmp = `${path}.${process.pid}.tmp`;
+	(0, node_fs.rmSync)(tmp, { force: !0 });
+	let fd = (0, node_fs.openSync)(tmp, node_fs.constants.O_WRONLY | node_fs.constants.O_CREAT | node_fs.constants.O_EXCL | node_fs.constants.O_NOFOLLOW, 384);
+	try {
+		(0, node_fs.writeSync)(fd, `${JSON.stringify(ledger, null, 2)}\n`);
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+	(0, node_fs.renameSync)(tmp, path);
+}
+function withLedgerFile(base, fileName, lockName, read, fn, deps) {
+	let path = (0, node_path.join)(base, fileName);
+	return withLock(base, lockName, () => {
+		let ledger = read(path);
+		try {
+			return fn(ledger);
+		} finally {
+			typeof ledger != "string" && writeLedgerFile(path, ledger);
+		}
+	}, deps);
+}
 //#endregion
 //#region src/lib/sandbox/mountinfo.ts
 function parseMountinfo(mountinfoContent) {
@@ -484,138 +600,29 @@ function scratchDirFor(containerName) {
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
-const NSS_DB_LEDGER_NAME = "nssdb-ledger.json", LOCK_NAME = "nssdb-ledger.lock", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
-function defaultLstat(path) {
-	return (0, node_fs.lstatSync)(path, {
-		bigint: !0,
-		throwIfNoEntry: !1
-	});
-}
-function defaultPidAlive(pid) {
-	try {
-		return process.kill(pid, 0), !0;
-	} catch (e) {
-		return e.code !== "ESRCH";
-	}
-}
-function code(e) {
-	return e.code;
-}
-function idOf(info) {
-	return {
-		dev: String(info.dev),
-		ino: String(info.ino),
-		birthtimeNs: String(info.birthtimeNs)
-	};
-}
-function sameId(a, b) {
-	return a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
-}
-function dirIdOf(path, { lstat = defaultLstat } = {}) {
-	let info = lstat(path);
-	return info?.isDirectory() ? idOf(info) : void 0;
-}
-function acquireLock(base, { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 50 }) {
-	let lock = (0, node_path.join)(base, LOCK_NAME), mine = (0, node_path.join)(base, `${LOCK_NAME}.${process.pid}`);
-	(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
-	try {
-		retryBriefly(() => {
-			try {
-				(0, node_fs.linkSync)(mine, lock);
-			} catch (e) {
-				throw takeOverStaleLock(lock, pidAlive, now), e;
-			}
-		}, {
-			attempts: lockAttempts,
-			delayMs: 100,
-			retryOn: (e) => code(e) === "EEXIST"
-		});
-	} finally {
-		(0, node_fs.rmSync)(mine, { force: !0 });
-	}
-	return () => (0, node_fs.rmSync)(lock, { force: !0 });
-}
-function takeOverStaleLock(lock, pidAlive, now) {
-	let pid, age;
-	try {
-		pid = Number((0, node_fs.readFileSync)(lock, "utf8")), age = now().getTime() - (0, node_fs.lstatSync)(lock).mtimeMs;
-	} catch {
-		return;
-	}
-	age < 2e3 || Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
-}
-function emptyLedger() {
+const NSS_DB_LEDGER_NAME = "nssdb-ledger.json", USE_NAME_RE$1 = /^sandbox-[A-Za-z0-9]+$/;
+function emptyLedger$1() {
 	return {
 		version: 1,
 		dirs: {},
 		uses: {}
 	};
 }
-function isId(value) {
-	let v = value;
-	return typeof v == "object" && !!v && [
-		v.dev,
-		v.ino,
-		v.birthtimeNs
-	].every((s) => typeof s == "string" && /^\d+$/.test(s));
+function isLedger$1(parsed) {
+	let l = parsed;
+	return l?.version === 1 && typeof l.dirs == "object" && l.dirs !== null && typeof l.uses == "object" && l.uses !== null && Object.entries(l.dirs).every(([p, d]) => p.startsWith("/") && isId(d)) && Object.entries(l.uses).every(([n, u]) => USE_NAME_RE$1.test(n) && isId(u));
 }
-function readLedger(path) {
-	let fd;
-	try {
-		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
-	} catch (e) {
-		return code(e) === "ENOENT" ? emptyLedger() : `${path} cannot be opened (${errorMessage(e)})`;
-	}
-	try {
-		let info = (0, node_fs.fstatSync)(fd);
-		if (!info.isFile()) return `${path} is not a file`;
-		if (info.size > 65536) return `${path} is ${info.size} bytes, too large`;
-		let parsed = JSON.parse((0, node_fs.readFileSync)(fd, "utf8"));
-		return parsed?.version === 1 && typeof parsed.dirs == "object" && parsed.dirs !== null && typeof parsed.uses == "object" && parsed.uses !== null && Object.entries(parsed.dirs).every(([p, d]) => p.startsWith("/") && isId(d)) && Object.entries(parsed.uses).every(([n, u]) => USE_NAME_RE.test(n) && isId(u)) ? parsed : `${path} is not a ledger this version can read`;
-	} catch (e) {
-		return `${path} cannot be read (${errorMessage(e)})`;
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
+function withLedger$1(fn, deps) {
+	return withLedgerFile(baseOf$1(deps), NSS_DB_LEDGER_NAME, "nssdb-ledger.lock", (path) => readLedgerFile(path, emptyLedger$1, isLedger$1), fn, deps);
 }
-function writeLedger(path, ledger) {
-	let tmp = `${path}.${process.pid}.tmp`;
-	(0, node_fs.rmSync)(tmp, { force: !0 });
-	let fd = (0, node_fs.openSync)(tmp, node_fs.constants.O_WRONLY | node_fs.constants.O_CREAT | node_fs.constants.O_EXCL | node_fs.constants.O_NOFOLLOW, 384);
-	try {
-		(0, node_fs.writeSync)(fd, `${JSON.stringify(ledger, null, 2)}\n`);
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-	(0, node_fs.renameSync)(tmp, path);
-}
-function withLedger(fn, deps) {
-	let path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
-	return withNssDbLock(() => {
-		let ledger = readLedger(path);
-		try {
-			return fn(ledger);
-		} finally {
-			typeof ledger != "string" && writeLedger(path, ledger);
-		}
-	}, deps);
-}
-function withNssDbLock(fn, deps = {}) {
-	let release = acquireLock(baseOf(deps), deps);
-	try {
-		return fn();
-	} finally {
-		release();
-	}
-}
-function baseOf({ base }) {
+function baseOf$1({ base }) {
 	return base ?? SANDBOX_SCRATCH_BASE;
 }
-function dropStaleUses(ledger, deps) {
+function dropStaleUses$1(ledger, deps) {
 	let { lstat = defaultLstat } = deps;
-	for (let name of Object.keys(ledger.uses)) lstat((0, node_path.join)(baseOf(deps), name)) === void 0 && delete ledger.uses[name];
+	for (let name of Object.keys(ledger.uses)) lstat((0, node_path.join)(baseOf$1(deps), name)) === void 0 && delete ledger.uses[name];
 }
-function removeUnusedDirs(ledger, deps) {
+function removeUnusedDirs$1(ledger, deps) {
 	if (Object.keys(ledger.uses).length > 0) return;
 	let { rmdir = node_fs.rmdirSync, info } = deps;
 	for (let path of Object.keys(ledger.dirs).sort((a, b) => b.length - a.length)) {
@@ -632,61 +639,14 @@ function removeUnusedDirs(ledger, deps) {
 	}
 }
 function releaseNssDb(name, deps = {}) {
-	let { lstat = defaultLstat, warn } = deps, path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
+	let { lstat = defaultLstat, warn } = deps, path = (0, node_path.join)(baseOf$1(deps), NSS_DB_LEDGER_NAME);
 	if (lstat(path) !== void 0) try {
-		withLedger((ledger) => {
-			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses(ledger, deps), removeUnusedDirs(ledger, deps));
+		withLedger$1((ledger) => {
+			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses$1(ledger, deps), removeUnusedDirs$1(ledger, deps));
 		}, deps);
 	} catch (e) {
 		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for Chromium's NSS database are left in place for a later step to remove`);
 	}
-}
-//#endregion
-//#region src/lib/post-cleanup.ts
-function startedByThisStep(containerName, env, readOwner) {
-	let owner = readOwner(containerName);
-	return owner === null || owner === ownerToken(env);
-}
-function planPostCleanup(state, env, annotation, { readOwner = readContainerOwner, fileExists = node_fs.existsSync, removeScratchDir = cleanupScratchDir, releaseNssDb: releaseNssDbUse = releaseNssDb } = {}) {
-	let { targets, problems } = resolvePostState(state);
-	for (let problem of problems) annotation.error(`run post-cleanup: ${problem}`);
-	if (!targets) return null;
-	if (!startedByThisStep(targets.containerName, env, readOwner)) return annotation.error("run post-cleanup: the proxy container named in GITHUB_STATE was started by a different step. Skipping all post-step cleanup: tearing it down would stop that step's proxy and delete its sandbox scratch directory."), null;
-	let reclaimed = !1;
-	try {
-		let scratchDir = scratchDirFor(targets.containerName);
-		fileExists(scratchDir) && removeScratchDir(scratchDir, {
-			ephemeralRoots: targets.ephemeralRoots,
-			warn: annotation.warning
-		}), reclaimed = !fileExists(scratchDir);
-	} catch (e) {
-		annotation.warning(`run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
-	}
-	return reclaimed && releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning }), targets;
-}
-//#endregion
-//#region src/lib/sandbox/nss-db.ts
-const SYSTEM_CA_CANDIDATES = [
-	"/etc/ssl/certs/ca-certificates.crt",
-	"/etc/pki/tls/certs/ca-bundle.crt",
-	"/etc/ssl/ca-bundle.pem",
-	"/etc/pki/tls/cacert.pem",
-	"/etc/ssl/cert.pem"
-];
-//#endregion
-//#region src/lib/sandbox/paths.ts
-function isAtOrUnder(path, ancestor) {
-	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
-}
-[...SYSTEM_CA_CANDIDATES];
-function writableDirsOf({ workdir, home, runnerTemp, writablePaths = [] }) {
-	return [...new Set([
-		workdir,
-		home,
-		"/tmp",
-		runnerTemp,
-		...writablePaths
-	].filter((p) => !!p))];
 }
 //#endregion
 //#region src/lib/sandbox/write-through.ts
@@ -718,6 +678,140 @@ function splitWriteThroughInput(input) {
 function resolveWriteThroughPaths(input, env) {
 	let lines = splitWriteThroughInput(input);
 	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
+}
+function asOwner({ uid, gid }) {
+	return [
+		"-u",
+		`#${uid}`,
+		"-g",
+		`#${gid}`
+	];
+}
+//#endregion
+//#region src/lib/sandbox/write-through-ledger.ts
+const WRITE_THROUGH_LEDGER_NAME = "write-through-ledger.json", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
+function defaultRmdir(dir) {
+	(0, node_child_process.execFileSync)(hostCommand("sudo"), [
+		...asOwner(dir),
+		"rmdir",
+		"--",
+		dir.path
+	], {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv("sudo")
+	});
+}
+function emptyLedger() {
+	return {
+		version: 1,
+		dirs: {},
+		uses: {}
+	};
+}
+function isOwner(value) {
+	return Number.isInteger(value) && value >= 0;
+}
+function isLedger(parsed) {
+	let l = parsed;
+	return l?.version === 1 && typeof l.dirs == "object" && l.dirs !== null && typeof l.uses == "object" && l.uses !== null && Object.entries(l.dirs).every(([p, d]) => p.startsWith("/") && isId(d) && isOwner(d.uid) && isOwner(d.gid)) && Object.entries(l.uses).every(([n, u]) => USE_NAME_RE.test(n) && Number.isInteger(u?.pid) && Array.isArray(u.destinations) && u.destinations.every((d) => typeof d == "string"));
+}
+function baseOf({ base }) {
+	return base ?? SANDBOX_SCRATCH_BASE;
+}
+function withLedger(fn, deps) {
+	return withLedgerFile(baseOf(deps), WRITE_THROUGH_LEDGER_NAME, "write-through-ledger.lock", (path) => readLedgerFile(path, emptyLedger, isLedger), fn, deps);
+}
+function dropStaleUses(ledger, deps) {
+	let { lstat = defaultLstat, pidAlive = defaultPidAlive } = deps;
+	for (let [name, use] of Object.entries(ledger.uses)) !pidAlive(use.pid) && lstat((0, node_path.join)(baseOf(deps), name)) === void 0 && delete ledger.uses[name];
+}
+function inUse(ledger, path) {
+	return Object.values(ledger.uses).some((use) => use.destinations.some((d) => d === path || d.startsWith(`${path}/`)));
+}
+function removeUnusedDirs(ledger, deps) {
+	let { rmdir = defaultRmdir, info } = deps;
+	for (let path of Object.keys(ledger.dirs).sort((a, b) => b.length - a.length)) {
+		if (inUse(ledger, path)) continue;
+		let entry = ledger.dirs[path];
+		delete ledger.dirs[path];
+		let current = dirIdOf(path, deps);
+		if (current === void 0) {
+			info?.(`buildcage: ${path}, made for write_through by ${entry.createdBy}, had already been removed by something else`);
+			continue;
+		}
+		if (sameId(current, entry)) try {
+			rmdir({
+				path,
+				uid: entry.uid,
+				gid: entry.gid
+			});
+		} catch {}
+	}
+}
+function releaseWriteThrough(name, deps = {}) {
+	let { lstat = defaultLstat, warn } = deps, path = (0, node_path.join)(baseOf(deps), WRITE_THROUGH_LEDGER_NAME);
+	if (lstat(path) !== void 0) try {
+		withLedger((ledger) => {
+			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses(ledger, deps), removeUnusedDirs(ledger, deps));
+		}, deps);
+	} catch (e) {
+		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for write_through are left in place for a later step to remove`);
+	}
+}
+//#endregion
+//#region src/lib/post-cleanup.ts
+function startedByThisStep(containerName, env, readOwner) {
+	let owner = readOwner(containerName);
+	return owner === null || owner === ownerToken(env);
+}
+function planPostCleanup(state, env, annotation, { readOwner = readContainerOwner, fileExists = node_fs.existsSync, removeScratchDir = cleanupScratchDir, releaseNssDb: releaseNssDbUse = releaseNssDb, releaseWriteThrough: releaseWriteThroughUse = releaseWriteThrough } = {}) {
+	let { targets, problems } = resolvePostState(state);
+	for (let problem of problems) annotation.error(`run post-cleanup: ${problem}`);
+	if (!targets) return null;
+	if (!startedByThisStep(targets.containerName, env, readOwner)) return annotation.error("run post-cleanup: the proxy container named in GITHUB_STATE was started by a different step. Skipping all post-step cleanup: tearing it down would stop that step's proxy and delete its sandbox scratch directory."), null;
+	let reclaimed = !1;
+	try {
+		let scratchDir = scratchDirFor(targets.containerName);
+		fileExists(scratchDir) && removeScratchDir(scratchDir, {
+			ephemeralRoots: targets.ephemeralRoots,
+			warn: annotation.warning
+		}), reclaimed = !fileExists(scratchDir);
+	} catch (e) {
+		annotation.warning(`run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
+	}
+	if (reclaimed) {
+		let name = scratchDirNameFor(targets.containerName);
+		releaseNssDbUse(name, { warn: annotation.warning }), releaseWriteThroughUse(name, { warn: annotation.warning });
+	}
+	return targets;
+}
+//#endregion
+//#region src/lib/sandbox/nss-db.ts
+const SYSTEM_CA_CANDIDATES = [
+	"/etc/ssl/certs/ca-certificates.crt",
+	"/etc/pki/tls/certs/ca-bundle.crt",
+	"/etc/ssl/ca-bundle.pem",
+	"/etc/pki/tls/cacert.pem",
+	"/etc/ssl/cert.pem"
+];
+//#endregion
+//#region src/lib/sandbox/paths.ts
+function isAtOrUnder(path, ancestor) {
+	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
+}
+[...SYSTEM_CA_CANDIDATES];
+function writableDirsOf({ workdir, home, runnerTemp, writablePaths = [] }) {
+	return [...new Set([
+		workdir,
+		home,
+		"/tmp",
+		runnerTemp,
+		...writablePaths
+	].filter((p) => !!p))];
 }
 //#endregion
 //#region src/lib/sandbox/host-commands.ts

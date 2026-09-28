@@ -715,9 +715,14 @@ this:
   under a tree it doesn't own (`/etc/something`, for instance) is created yet stays exactly as
   unwritable to the sandboxed command as naming that existing parent directly would be. Nothing here
   grants access beyond what the surrounding filesystem already implies.
-- A directory created that way is removed again when the step ends, but only if the command left it
-  empty (`rmdir`, never `rm -r`), so a build output directory that actually received output stays.
-  A step killed outright skips this and leaves the empty directory behind; the next run reuses it.
+- A directory created that way is removed, as its owner and only if empty (`rmdir`, never
+  `rm -r`), once no step writes through it or anything under it, including steps in other jobs of
+  the same runner user. Removing a directory detaches every mount on it, so it waits for the last
+  such step. The record is `/var/tmp/buildcage-<uid>/write-through-ledger.json`, hidden from the
+  sandbox. On a filesystem without birth times the directory is left in place, and a step killed
+  outright leaves it to its post step or a later step. If something else, such as a parallel step
+  outside any sandbox, removes a `write_through:` directory while a step runs, what the step writes
+  there afterwards may not reach the host; the step warns, naming the path.
 - `write_through:` accepts files as well as directories, but only a path that's **already** a file
   when the step starts; a missing target is always created as a directory (see above), never a file.
   A file entry is bind-mounted file-to-file (the same technique the `inspect` engine already uses to

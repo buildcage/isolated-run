@@ -40,7 +40,8 @@ function deps(overrides: PostCleanupDeps = {}): {
         removed.push({ dir, ephemeralRoots });
         released.push("after the scratch dir");
       },
-      releaseNssDb: (name) => released.push(name),
+      releaseNssDb: (name) => released.push(`nssdb:${name}`),
+      releaseWriteThrough: (name) => released.push(`write_through:${name}`),
       ...overrides,
     },
   };
@@ -60,15 +61,19 @@ describe("planPostCleanup", () => {
     expect(removed).toStrictEqual([{ dir: scratchDirFor(CONTAINER), ephemeralRoots: undefined }]);
   });
 
-  it("ends the step's use of the NSS database's directories, after the scratch dir", () => {
+  it("ends the step's uses of the directories Buildcage made, after the scratch dir", () => {
     const { deps: d, released } = deps();
 
     planPostCleanup(STATE, ENV, annotation(), d);
 
-    expect(released).toStrictEqual(["after the scratch dir", "sandbox-deadbeef"]);
+    expect(released).toStrictEqual([
+      "after the scratch dir",
+      "nssdb:sandbox-deadbeef",
+      "write_through:sandbox-deadbeef",
+    ]);
   });
 
-  it("leaves the use registered when the scratch dir cannot be removed", () => {
+  it("leaves the uses registered when the scratch dir cannot be removed", () => {
     const { deps: d, released } = deps({
       removeScratchDir: () => {
         throw new Error("device or resource busy");
@@ -80,7 +85,7 @@ describe("planPostCleanup", () => {
     expect(released).toStrictEqual([]);
   });
 
-  it("leaves the use registered when the scratch dir is still there after its removal", () => {
+  it("leaves the uses registered when the scratch dir is still there after its removal", () => {
     const { deps: d, released } = deps({ fileExists: () => true });
 
     planPostCleanup(STATE, ENV, annotation(), d);
@@ -88,12 +93,12 @@ describe("planPostCleanup", () => {
     expect(released).toStrictEqual(["after the scratch dir"]);
   });
 
-  it("ends the use when the scratch dir was already gone", () => {
+  it("ends the uses when the scratch dir was already gone", () => {
     const { deps: d, released } = deps({ fileExists: () => false });
 
     planPostCleanup(STATE, ENV, annotation(), d);
 
-    expect(released).toStrictEqual(["sandbox-deadbeef"]);
+    expect(released).toStrictEqual(["nssdb:sandbox-deadbeef", "write_through:sandbox-deadbeef"]);
   });
 
   it("releases nothing when the container belongs to a different step", () => {
