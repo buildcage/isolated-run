@@ -605,6 +605,8 @@ jobs:
               proxy_engine: inspect
               allowed_url_rules: "GET https://example.com/**"
               label: parallel-nssdb-long
+              # Chrome's own background requests are blocked, and are not what this checks.
+              fail_on_blocked: false
               run: |
                 sleep 15
                 if ! grep -q nssdb /proc/self/mountinfo; then
