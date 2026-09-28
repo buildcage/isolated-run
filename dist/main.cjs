@@ -19584,13 +19584,18 @@ const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"], KNOWN_JVM_KEYSTORE_DIRS =
 	"/etc/ssl/certs/java",
 	"/etc/pki/java",
 	"/etc/pki/ca-trust/extracted/java"
-];
+], JAVA_HOME_VAR = /^JAVA_HOME_\d+_[A-Z0-9]+$/;
 function keystoreDirsOf(home) {
 	return [(0, node_path.join)(home, "lib", "security"), (0, node_path.join)(home, "jre", "lib", "security")];
 }
 function discoverJvmKeystores(env, java, { exists = node_fs.existsSync, realpath = node_fs.realpathSync } = {}) {
 	let dirs = [];
-	java && dirs.push(...keystoreDirsOf((0, node_path.dirname)((0, node_path.dirname)(realpath(java))))), env.JAVA_HOME && dirs.push(...keystoreDirsOf(env.JAVA_HOME)), dirs.push(...KNOWN_JVM_KEYSTORE_DIRS);
+	java && dirs.push(...keystoreDirsOf((0, node_path.dirname)((0, node_path.dirname)(realpath(java))))), env.JAVA_HOME && dirs.push(...keystoreDirsOf(env.JAVA_HOME));
+	for (let name of Object.keys(env).filter((key) => JAVA_HOME_VAR.test(key)).sort()) {
+		let home = env[name];
+		home && dirs.push(...keystoreDirsOf(home));
+	}
+	dirs.push(...KNOWN_JVM_KEYSTORE_DIRS);
 	let found = [], seen = new Set();
 	for (let dir of dirs) for (let name of JVM_KEYSTORE_NAMES) {
 		let candidate = (0, node_path.join)(dir, name);

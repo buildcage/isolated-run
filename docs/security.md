@@ -490,9 +490,10 @@ port, so the method and the path are neither enforced nor reported.
 
 TLS is terminated, so a tool that pins a certificate, or ships a bundled trust store it never lets
 the system update, will not work. The JVM (Java, Kotlin, Scala) reads only its own keystore rather
-than the CA-trust variables; a JVM already on the runner is handled by injecting into a copy of that
-keystore with the runner's own `keytool`, but a keystore under a non-default password, or a runner
-whose only `keytool` is somewhere a sandboxed command can write, falls back to `universal`.
+than the CA-trust variables; a JVM already on the runner (the `java` on `PATH`, `$JAVA_HOME`, or a
+`$JAVA_HOME_<major>_<arch>`) is handled by injecting into a copy of that keystore with the runner's
+own `keytool`, but a JDK the step itself downloads, a keystore under a non-default password, or a
+runner whose only `keytool` is somewhere a sandboxed command can write, falls back to `universal`.
 Chromium's NSS database is given a read-only slot trusting the CA; one the runner user cannot
 write is covered instead, and a command that writes to that fails the step unless
 `fail_on_ca_residue` is false. See
