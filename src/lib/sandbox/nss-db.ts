@@ -16,7 +16,6 @@ import {
   realpathSync,
   renameSync,
   rmSync,
-  rmdirSync,
   statSync,
   writeSync,
   ftruncateSync,
