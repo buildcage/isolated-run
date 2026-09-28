@@ -19305,7 +19305,7 @@ function prepareNssDb(containerName, dir, home, deps = {}, { homeUpper } = {}) {
 			force: !0
 		});
 	}
-	if (refusal !== void 0 && (deps.info?.(`buildcage: ${refusal}, so the NSS database at ${plan.destination} is covered for the command with one trusting only the proxy CA`), copyDir(template, path)), !exists && homeUpper !== void 0 && realHome === home) try {
+	if (refusal !== void 0 && (deps.info?.(`buildcage: ${refusal}, so the NSS database at ${plan.destination} is covered for the command with one trusting only the proxy CA`), copyDir(template, path)), !exists && homeUpper !== void 0 && realHome === home && plan.destination === (0, node_path.join)(home, ".pki/nssdb")) try {
 		return makeInUpper(realHome, plan.destination, homeUpper), files;
 	} catch (e) {
 		deps.info?.(`buildcage: could not make ${plan.destination} in the ephemeral overlay (${errorMessage(e)}), so it is made on the runner instead`);

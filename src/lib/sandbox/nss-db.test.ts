@@ -421,6 +421,27 @@ describe("prepareNssDb", () => {
       expect(existsSync(join(upper, ".pki"))).toBe(false);
     });
 
+    it("makes an XDG database on the runner, removed while the template was copied", () => {
+      mkdirSync(join(home, ".local/share/pki/nssdb"), { recursive: true });
+      const { deps } = fakeDocker();
+      const exec: NssDbDeps["exec"] = (command, args) => {
+        deps.exec!(command, args);
+        rmSync(join(home, ".local/share/pki/nssdb"), { recursive: true });
+      };
+
+      const files = prepareNssDb(
+        CONTAINER,
+        scratch,
+        home,
+        { ...deps, exec },
+        { homeUpper: upper },
+      )!;
+
+      expect(files.claim?.registered).toBe(true);
+      expect(existsSync(join(home, ".local/share/pki/nssdb"))).toBe(true);
+      expect(readdirSync(upper)).toStrictEqual([]);
+    });
+
     it("makes them on the runner under a symlinked HOME", () => {
       const link = join(root, "home-link");
       symlinkSync(home, link);

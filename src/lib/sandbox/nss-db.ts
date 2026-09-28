@@ -259,9 +259,9 @@ function walkPlan(home: string, path: string, lstat: NonNullable<NssDbDeps["lsta
 }
 
 export interface PrepareNssDbOptions {
-  /** Upper dir of an ephemeral overlay rooted at HOME, where writes to the
-   *  database are discarded: missing directories are made there instead of on
-   *  the runner. */
+  /** Upper dir of an ephemeral overlay rooted at HOME, where writes to
+   *  ~/.pki/nssdb are discarded: when that is the database to make, its
+   *  missing directories are made there instead of on the runner. */
   homeUpper?: string;
 }
 
@@ -338,7 +338,12 @@ export function prepareNssDb(
     copyDir(template, path);
   }
 
-  if (!exists && homeUpper !== undefined && realHome === home) {
+  if (
+    !exists &&
+    homeUpper !== undefined &&
+    realHome === home &&
+    plan.destination === join(home, NSS_DB_PATH)
+  ) {
     try {
       makeInUpper(realHome, plan.destination, homeUpper);
       return files;
