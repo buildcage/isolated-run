@@ -199,6 +199,16 @@ describe("resolveFilesystemPlan", () => {
     expect(plan.overlayRoots.sort()).toStrictEqual(["/home/runner", "/home/runner/_tool", "/tmp"]);
   });
 
+  // /proc/self/mountinfo is Linux-only.
+  it.skipIf(process.platform !== "linux")("reads the real host mount table by default", () => {
+    const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
+      exists: alwaysExists,
+      deviceOf: () => 1,
+      realpath: (p) => p,
+    });
+    expect(plan.overlayRoots).toContain("/tmp");
+  });
+
   it("resolves and pre-creates write_through targets, then excludes only what's actually covered by them", () => {
     // Self-hosted-style ENV: GITHUB_WORKSPACE isn't nested under HOME here, so
     // its own overlay survives folding. That is what lets this exercise, end to
