@@ -43,8 +43,7 @@ jobs:
               - 'rolldown.scripts.config.js'
               - '.dockerignore'
             harness: &harness
-              # Every job builds its own test-hook dist.
-              - 'rolldown.config.js'
+              - 'rolldown.config.js' # each job builds a test-hook dist
               - 'test/**'
               - 'Makefile'
               - '.github/actions/setup-vp/**'
