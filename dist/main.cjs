@@ -67272,13 +67272,22 @@ async function runSandboxStep(env, overrides = {}) {
 			urlRules,
 			tlsRules
 		}, env);
-		await startSandboxProxy({
-			composeFile,
-			projectName,
-			containerName,
-			pullPolicy,
-			composeEnv
-		});
+		try {
+			await startSandboxProxy({
+				composeFile,
+				projectName,
+				containerName,
+				pullPolicy,
+				composeEnv
+			});
+		} catch (e) {
+			throw await stopSandboxProxy({
+				composeFile,
+				projectName,
+				composeEnv,
+				annotation
+			}), e;
+		}
 		let exitCode = 1;
 		try {
 			let proxyNetns = getContainerNetns(containerName);
