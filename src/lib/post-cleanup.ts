@@ -3,8 +3,9 @@ import { existsSync } from "node:fs";
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
-import { ownerToken, readContainerOwner } from "./container.ts";
+import { ownerToken, readContainerOwner, scratchDirNameFor } from "./container.ts";
 import { resolvePostState, type PostCleanupTargets } from "./post-state.ts";
+import { releaseNssDb } from "./sandbox/nss-db-ledger.ts";
 import {
   cleanupScratchDir,
   scratchDirFor,
@@ -15,6 +16,7 @@ export interface PostCleanupDeps {
   readOwner?: (containerName: string) => string | null;
   fileExists?: (path: string) => boolean;
   removeScratchDir?: (dir: string, options: CleanupScratchDirOptions) => void;
+  releaseNssDb?: typeof releaseNssDb;
 }
 
 /**
@@ -56,6 +58,7 @@ export function planPostCleanup(
     readOwner = readContainerOwner,
     fileExists = existsSync,
     removeScratchDir = cleanupScratchDir,
+    releaseNssDb: releaseNssDbUse = releaseNssDb,
   }: PostCleanupDeps = {},
 ): PostCleanupTargets | null {
   const { targets, problems } = resolvePostState(state);
@@ -93,6 +96,12 @@ export function planPostCleanup(
       `run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`,
     );
   }
+
+  // End this step's use of the directories made for Chromium's NSS database,
+  // which a hard kill left registered, so the last step to leave can remove
+  // them. After the scratch dir, since its mounts are what the use stood for.
+  // A no-op when the step ended normally, or never used the inspect engine.
+  releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning });
 
   return targets;
 }

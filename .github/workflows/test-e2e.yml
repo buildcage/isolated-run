@@ -572,6 +572,69 @@ jobs:
           done
           echo "OK: no CA file on the host"
 
+      # The hosted image has no NSS database, so each step below makes
+      # ~/.pki/nssdb to mount one over. The steps that end first must leave it
+      # in place while the long one still has its database mounted there.
+      - name: Start without an NSS database
+        run: rm -rf ~/.pki ~/.local/share/pki
+
+      - parallel:
+          - name: sandbox-parallel-short-inspect-persistent
+            uses: ./
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: buildcage-e2e-proxy:inspect
+            with:
+              proxy_engine: inspect
+              label: parallel-nssdb-short-persistent
+              run: "true"
+
+          - name: sandbox-parallel-short-inspect-ephemeral
+            uses: ./
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: buildcage-e2e-proxy:inspect
+            with:
+              proxy_engine: inspect
+              filesystem_mode: ephemeral
+              label: parallel-nssdb-short-ephemeral
+              run: "true"
+
+          - name: sandbox-parallel-long-inspect-chrome
+            uses: ./
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: buildcage-e2e-proxy:inspect
+            with:
+              proxy_engine: inspect
+              allowed_url_rules: "GET https://example.com/**"
+              label: parallel-nssdb-long
+              run: |
+                # Let the other steps finish and clean up first.
+                sleep 15
+                if ! grep -q nssdb /proc/self/mountinfo; then
+                  echo "::error::the NSS database mount is gone after the concurrent steps ended"
+                  exit 1
+                fi
+                dom=$(google-chrome --headless=new --no-sandbox --dump-dom https://example.com/ 2>/dev/null)
+                if ! grep -q "Example Domain" <<<"$dom"; then
+                  echo "::error::Chrome did not trust the proxy CA"
+                  exit 1
+                fi
+
+      - name: Verify the NSS database's directories were settled
+        if: always()
+        run: |
+          ledger="/var/tmp/buildcage-$(id -u)/nssdb-ledger.json"
+          cat "$ledger"
+          if [ "$(jq -c '[.dirs, .uses]' "$ledger")" != "[{},{}]" ]; then
+            echo "::error::$ledger still lists directories or uses after every step ended"
+            exit 1
+          fi
+          if [ ! -e ~/.pki/nssdb/cert9.db ] || grep -rqs buildcage ~/.pki/nssdb; then
+            echo "::error::the database Chrome made is missing, or still holds the slot"
+            ls -laR ~/.pki || true
+            exit 1
+          fi
+          echo "OK: every step's use ended, and Chrome's database was kept without the slot"
+
   # Single, stably-named required status check for branch protection: the
   # jobs above vary their own names by matrix entry, so branch protection
   # can't target them directly without listing every combination.

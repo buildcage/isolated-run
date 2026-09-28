@@ -26,14 +26,21 @@ function annotation(): Annotation & { error: Mock; warning: Mock } {
 function deps(overrides: PostCleanupDeps = {}): {
   deps: PostCleanupDeps;
   removed: { dir: string; ephemeralRoots?: string[] }[];
+  released: string[];
 } {
   const removed: { dir: string; ephemeralRoots?: string[] }[] = [];
+  const released: string[] = [];
   return {
     removed,
+    released,
     deps: {
       readOwner: () => OWNER,
       fileExists: () => true,
-      removeScratchDir: (dir, { ephemeralRoots }) => removed.push({ dir, ephemeralRoots }),
+      removeScratchDir: (dir, { ephemeralRoots }) => {
+        removed.push({ dir, ephemeralRoots });
+        released.push("after the scratch dir");
+      },
+      releaseNssDb: (name) => released.push(name),
       ...overrides,
     },
   };
@@ -51,6 +58,34 @@ describe("planPostCleanup", () => {
       projectName: expect.any(String) as string,
     });
     expect(removed).toStrictEqual([{ dir: scratchDirFor(CONTAINER), ephemeralRoots: undefined }]);
+  });
+
+  it("ends the step's use of the NSS database's directories, after the scratch dir", () => {
+    const { deps: d, released } = deps();
+
+    planPostCleanup(STATE, ENV, annotation(), d);
+
+    expect(released).toStrictEqual(["after the scratch dir", "sandbox-deadbeef"]);
+  });
+
+  it("ends the use even when the scratch dir cannot be removed", () => {
+    const { deps: d, released } = deps({
+      removeScratchDir: () => {
+        throw new Error("device or resource busy");
+      },
+    });
+
+    planPostCleanup(STATE, ENV, annotation(), d);
+
+    expect(released).toStrictEqual(["sandbox-deadbeef"]);
+  });
+
+  it("releases nothing when the container belongs to a different step", () => {
+    const { deps: d, released } = deps({ readOwner: () => "9/1/other/buildcage" });
+
+    planPostCleanup(STATE, ENV, annotation(), d);
+
+    expect(released).toStrictEqual([]);
   });
 
   it("passes the ephemeral roots on, so the discarded writes can be logged", () => {

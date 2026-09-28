@@ -22,7 +22,8 @@ const mocks = {
   prepareNssDb: vi.fn(),
   nssDbChange: vi.fn(),
   settleNssDbSlot: vi.fn(),
-  removeNssDbDirs: vi.fn(),
+  nssDbDetached: vi.fn(),
+  releaseNssDbDirs: vi.fn(),
   createOverlayScratchDirs: vi.fn(),
   writeRunScript: vi.fn(),
   writeResolvConf: vi.fn(),
@@ -153,8 +154,8 @@ describe("runSandboxedCommand", () => {
       path: `${SCRATCH}/nssdb`,
       template: `${SCRATCH}/nssdb-template`,
       destination: "/home/runner/.pki/nssdb",
-      createdDirs: ["/home/runner/.pki/nssdb"],
     };
+    const RELEASE = { info: mocks.info, warn: mocks.warn };
 
     beforeEach(() => {
       mocks.prepareNssDb.mockReturnValue(NSS_DB);
@@ -163,10 +164,28 @@ describe("runSandboxedCommand", () => {
     it("takes back the directories it made once the command has run", () => {
       runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
 
-      expect(mocks.removeNssDbDirs).toHaveBeenCalledWith(NSS_DB);
-      expect(mocks.removeNssDbDirs.mock.invocationCallOrder[0]).toBeGreaterThan(
+      expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
+      expect(mocks.releaseNssDbDirs.mock.invocationCallOrder[0]).toBeGreaterThan(
         mocks.runIsolated.mock.invocationCallOrder[0],
       );
+    });
+
+    it("warns when the database's directory was removed while the command ran", () => {
+      mocks.nssDbDetached.mockReturnValue("DETACHED");
+
+      runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
+
+      expect(mocks.nssDbDetached).toHaveBeenCalledWith(NSS_DB);
+      expect(mocks.warn).toHaveBeenCalledWith("DETACHED");
+      expect(mocks.nssDbDetached.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.releaseNssDbDirs.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("does not look for a detached mount where writes are discarded", () => {
+      runSandboxedCommand(options({ proxyEngine: "inspect", filesystemMode: "ephemeral" }), deps);
+
+      expect(mocks.nssDbDetached).not.toHaveBeenCalled();
     });
 
     it("returns the command's exit code when it left the database alone", () => {
@@ -210,7 +229,7 @@ describe("runSandboxedCommand", () => {
       expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
         "runc failed",
       );
-      expect(mocks.removeNssDbDirs).toHaveBeenCalledWith(NSS_DB);
+      expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
       expect(mocks.nssDbChange).not.toHaveBeenCalled();
     });
 
@@ -222,7 +241,7 @@ describe("runSandboxedCommand", () => {
       expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
         expect.objectContaining({ code: "OCI_CONFIG_BUILD_FAILED" }),
       );
-      expect(mocks.removeNssDbDirs).toHaveBeenCalledWith(NSS_DB);
+      expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
       expect(mocks.runIsolated).not.toHaveBeenCalled();
     });
 
@@ -234,7 +253,7 @@ describe("runSandboxedCommand", () => {
       expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
         "disk full",
       );
-      expect(mocks.removeNssDbDirs).toHaveBeenCalledOnce();
+      expect(mocks.releaseNssDbDirs).toHaveBeenCalledOnce();
       expect(mocks.runIsolated).not.toHaveBeenCalled();
     });
 
@@ -247,7 +266,7 @@ describe("runSandboxedCommand", () => {
       expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
         "runc failed",
       );
-      expect(mocks.removeNssDbDirs).not.toHaveBeenCalled();
+      expect(mocks.releaseNssDbDirs).not.toHaveBeenCalled();
     });
 
     describe("given the slot", () => {
@@ -301,9 +320,19 @@ describe("runSandboxedCommand", () => {
           expect.objectContaining({ persist, caPem: "THE CA PEM" }),
         );
         expect(mocks.nssDbChange).not.toHaveBeenCalled();
-        expect(mocks.removeNssDbDirs.mock.invocationCallOrder[0]).toBeGreaterThan(
+        expect(mocks.releaseNssDbDirs.mock.invocationCallOrder[0]).toBeGreaterThan(
           mocks.settleNssDbSlot.mock.invocationCallOrder[0],
         );
+      });
+
+      it("writes nothing back to a database whose mount went away", () => {
+        mocks.nssDbDetached.mockReturnValue("DETACHED");
+
+        runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
+
+        expect(mocks.warn).toHaveBeenCalledWith("DETACHED");
+        expect(mocks.settleNssDbSlot).not.toHaveBeenCalled();
+        expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(SLOTTED, RELEASE);
       });
 
       it("says so when what the command wrote is discarded", () => {
@@ -325,7 +354,7 @@ describe("runSandboxedCommand", () => {
             message: expect.stringMatching(/COPIED.*fail_on_ca_residue: false/),
           }),
         );
-        expect(mocks.removeNssDbDirs).toHaveBeenCalledWith(SLOTTED);
+        expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(SLOTTED, RELEASE);
       });
 
       it("only warns about a copy of the CA under fail_on_ca_residue: false", () => {
@@ -352,7 +381,7 @@ describe("runSandboxedCommand", () => {
             message: expect.stringContaining("/home/runner/.pki/nssdb: EIO"),
           }),
         );
-        expect(mocks.removeNssDbDirs).toHaveBeenCalledWith(SLOTTED);
+        expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(SLOTTED, RELEASE);
       });
     });
   });

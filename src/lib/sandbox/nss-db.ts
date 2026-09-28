@@ -27,6 +27,15 @@ import { join, relative } from "node:path";
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
+import {
+  claimNssDb,
+  dirIdOf,
+  releaseNssDb,
+  stillThere,
+  useNameFor,
+  type DirId,
+  type NssDbLedgerDeps,
+} from "./nss-db-ledger.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 import type { MountEntry } from "./types.ts";
 
@@ -122,8 +131,16 @@ export interface NssDbFiles {
   /** The template as extracted, to compare a covering copy against afterwards. */
   template: string;
   destination: string;
-  /** Directories created for the mount point, shallowest first. */
-  createdDirs: string[];
+  /** This step's use of the destination, registered in the shared ledger
+   *  (see nss-db-ledger.ts) so no other step removes it while it is mounted. */
+  claim?: {
+    name: string;
+    destinationId: DirId;
+    registered: boolean;
+  };
+  /** The XDG database's path when the destination is ~/.pki/nssdb and there
+   *  was none: where Chromium makes one of its own if the mount goes away. */
+  xdgPath?: string;
   /** Set when the runner's own database was given the slot; unset when it
    *  was covered. */
   slot?: NssDbSlot;
@@ -140,11 +157,10 @@ export interface NssDbDeps {
   lstat?: (path: string) => StatShape | undefined;
   stat?: (path: string) => { isDirectory(): boolean } | undefined;
   realpath?: (path: string) => string;
-  mkdir?: (path: string, mode: number) => void;
   copyDir?: (source: string, destination: string, filter?: (path: string) => boolean) => void;
   readDir?: (path: string) => string[];
   readFile?: (path: string) => Buffer;
-  rmdir?: (path: string) => void;
+  ledger?: NssDbLedgerDeps;
   /** Throws when the runner user cannot write path. */
   access?: (path: string) => void;
   warn?: (message: string) => void;
@@ -172,10 +188,6 @@ function defaultStat(path: string) {
   } catch {
     return undefined;
   }
-}
-
-function defaultMkdir(path: string, mode: number): void {
-  mkdirSync(path, { mode });
 }
 
 function defaultCopyDir(
@@ -263,9 +275,7 @@ export function prepareNssDb(
     lstat = defaultLstat,
     stat = defaultStat,
     realpath = realpathSync,
-    mkdir = defaultMkdir,
     copyDir = defaultCopyDir,
-    rmdir = rmdirSync,
     warn,
   } = deps;
   // HOME itself may be a symlink the runner was set up with; only what is below it is refused.
@@ -276,7 +286,8 @@ export function prepareNssDb(
     );
     return undefined;
   }
-  const plan = planNssDb(realpath(home), { lstat });
+  const realHome = realpath(home);
+  const plan = planNssDb(realHome, { lstat });
   if (typeof plan === "string") {
     warn?.(
       `could not add the proxy CA to Chromium's NSS database: ${plan}. A Chromium step ` +
@@ -295,7 +306,9 @@ export function prepareNssDb(
     }),
   );
   const path = join(dir, "nssdb");
-  const files: NssDbFiles = { path, template, destination: plan.destination, createdDirs: [] };
+  const files: NssDbFiles = { path, template, destination: plan.destination };
+  const xdgPath = join(realHome, NSS_XDG_DB_PATH);
+  if (plan.destination !== xdgPath && lstat(xdgPath) === undefined) files.xdgPath = xdgPath;
 
   const exists = plan.missing.length === 0;
   let refusal = exists ? whyNotSlot(plan.destination, deps) : undefined;
@@ -316,18 +329,16 @@ export function prepareNssDb(
   }
 
   // Created here because runc would create them as root in the runner's home.
-  for (const missing of plan.missing) {
-    try {
-      mkdir(missing, 0o700);
-    } catch (e) {
-      removeNssDbDirs(files, { rmdir });
-      warn?.(
-        `could not add the proxy CA to Chromium's NSS database: cannot create ${missing} ` +
-          `(${errorMessage(e)}). A Chromium step will not trust the proxy.`,
-      );
-      return undefined;
-    }
-    files.createdDirs.push(missing);
+  const name = useNameFor(dir);
+  try {
+    const claim = claimNssDb(name, plan.destination, plan.missing, { warn, ...deps.ledger });
+    files.claim = { name, ...claim };
+  } catch (e) {
+    warn?.(
+      `could not add the proxy CA to Chromium's NSS database: cannot create or claim ` +
+        `${plan.destination} (${errorMessage(e)}). A Chromium step will not trust the proxy.`,
+    );
+    return undefined;
   }
   return files;
 }
@@ -638,16 +649,34 @@ export function nssDbChange(
   );
 }
 
-/** Removes the directories prepareNssDb created, leaving any that are not empty. */
-export function removeNssDbDirs(
+/**
+ * Why the mount over the database is known to have gone while the command
+ * ran, or undefined. Removing the directory on the runner detaches whatever is
+ * mounted on it in every namespace, and nothing Buildcage does removes one a
+ * step still uses, so something else did: another step running in parallel,
+ * most likely. Chromium then found no database there and, since M146, made one
+ * of its own in the XDG path, which trusts no proxy CA.
+ */
+export function nssDbDetached(
   files: NssDbFiles,
-  { rmdir = rmdirSync }: Pick<NssDbDeps, "rmdir"> = {},
-): void {
-  for (const dir of [...files.createdDirs].reverse()) {
-    try {
-      rmdir(dir);
-    } catch {
-      // Not empty, or already gone.
-    }
+  deps: Pick<NssDbLedgerDeps, "lstat"> = {},
+): string | undefined {
+  if (!files.claim || stillThere(files.destination, files.claim.destinationId, deps)) {
+    return undefined;
   }
+  let message =
+    `buildcage: ${files.destination} was removed or replaced on the runner while the command ran, ` +
+    "which detached the NSS database Buildcage had mounted there: Chromium in this step did not " +
+    "trust the proxy CA from then on, and what the command wrote to that database is discarded. " +
+    "Something outside this step removed it, such as another step running in parallel.";
+  if (files.xdgPath && dirIdOf(files.xdgPath, deps) !== undefined) {
+    message += ` Chromium may have made a database of its own at ${files.xdgPath}.`;
+  }
+  return message;
+}
+
+/** Ends this step's use of the database's directory, removing the directories
+ *  Buildcage made once no step uses them. */
+export function releaseNssDbDirs(files: NssDbFiles, deps: NssDbLedgerDeps = {}): void {
+  if (files.claim?.registered) releaseNssDb(files.claim.name, deps);
 }
