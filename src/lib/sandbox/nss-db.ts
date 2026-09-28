@@ -71,22 +71,19 @@ export const NSS_SLOT =
   `parameters="configdir='sql:${NSS_CA_DB_DESTINATION}' flags=readOnly"\n` +
   'NSS=""\n\n';
 
-/** Names the directory a write-back is staged in, beside the database,
- *  followed by the staging process's pid. */
+/** Write-back staging dirs, beside the database: `<prefix><pid>-XXXXXX`. */
 const STAGING_PREFIX = ".buildcage-";
 
 function isStaging(name: string): boolean {
   return name.startsWith(STAGING_PREFIX);
 }
 
-/** Whether the step that made this staging dir may still be writing back into
- *  it. One named without a pid is an older version's, left over. */
+/** A name without a pid is an older version's leftover. */
 function stagingOwnerAlive(name: string, pidAlive: (pid: number) => boolean): boolean {
   const pid = /^\.buildcage-(\d+)-/.exec(name)?.[1];
   return pid !== undefined && pidAlive(Number(pid));
 }
 
-/** Whether a path under dir lies in a staging dir directly inside it. */
 function inStaging(dir: string, path: string): boolean {
   return isStaging(relative(dir, path).split("/")[0]!);
 }
@@ -354,8 +351,8 @@ function whyNotSlot(
   let files = 0;
   let bytes = 0;
   try {
-    // Staging dirs are passed over before they are read into: another step
-    // may remove its own while this walks.
+    // Staging dirs are skipped before being read: another step may remove its
+    // own mid-walk.
     for (const top of readdirSync(destination, { withFileTypes: true })) {
       if (isStaging(top.name)) continue;
       const below = top.isDirectory()
@@ -390,7 +387,6 @@ function prepareSlot(
   for (const name of readdirSync(caDb)) chmodSync(join(caDb, name), 0o644);
 
   if (exists) {
-    // Not another step's write-back in flight, nor one a killed step left.
     copyDir(files.destination, files.path, (path) => !inStaging(files.destination, path));
   } else {
     mkdirSync(files.path, { mode: 0o700 });
@@ -516,7 +512,6 @@ export interface SettleNssDbSlotOptions {
   onResidue: (message: string) => void;
   realpath?: (path: string) => string;
   copyDir?: (source: string, destination: string) => void;
-  /** Whether a process with this pid is still there. */
   pidAlive?: (pid: number) => boolean;
 }
 
@@ -570,9 +565,8 @@ export function settleNssDbSlot(
         "database there is not written back",
     );
   }
-  // Copied in beside the database first, so a copy that fails partway leaves
-  // it as it was. Another step's staging is left alone while that step is
-  // still there to finish its own write-back, and removed once it is not.
+  // Staged beside the database so a failed copy leaves it intact. Another
+  // step's staging is kept while its process lives.
   const staging = mkdtempSync(join(files.destination, `${STAGING_PREFIX}${process.pid}-`));
   try {
     copyDir(files.path, staging);
