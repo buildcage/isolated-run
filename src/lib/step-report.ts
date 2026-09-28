@@ -2,9 +2,9 @@
  * The step's report phase: everything between the isolated command finishing
  * and the proxy being stopped.
  *
- * Its own module rather than part of report.ts because it spans three
- * concerns: the report itself, the traffic artifact, and the inputs that
- * decide whether either is wanted. None of the three owns the order.
+ * Its own module rather than part of report.ts because it spans two
+ * concerns, the report itself and the traffic artifact, and neither owns the
+ * order.
  */
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
@@ -12,13 +12,9 @@ import { errorMessage } from "#core/lib/errors.ts";
 import type { GenReportParameters } from "#core/lib/report/types.ts";
 
 import type { ProxyEngine } from "./engine.ts";
-import { readFailOnBlocked, readStepLabel } from "./inputs.ts";
+import { readStepLabel, type TrafficArtifactInputs } from "./inputs.ts";
 import { fetchReport, readActionVersion, writeReportSummary } from "./report.ts";
-import {
-  setTrafficArtifactOutput,
-  uploadTrafficArtifact,
-  wantsTrafficArtifact,
-} from "./traffic-artifact.ts";
+import { setTrafficArtifactOutput, uploadTrafficArtifact } from "./traffic-artifact.ts";
 
 /**
  * The steps this function sequences. Declared rather than imported straight
@@ -29,10 +25,8 @@ export interface ReportStepDeps {
   fetchReport: typeof fetchReport;
   readActionVersion: typeof readActionVersion;
   writeReportSummary: typeof writeReportSummary;
-  wantsTrafficArtifact: typeof wantsTrafficArtifact;
   uploadTrafficArtifact: typeof uploadTrafficArtifact;
   setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
-  readFailOnBlocked: typeof readFailOnBlocked;
   readStepLabel: typeof readStepLabel;
 }
 
@@ -40,10 +34,8 @@ const realDeps: ReportStepDeps = {
   fetchReport,
   readActionVersion,
   writeReportSummary,
-  wantsTrafficArtifact,
   uploadTrafficArtifact,
   setTrafficArtifactOutput,
-  readFailOnBlocked,
   readStepLabel,
 };
 
@@ -56,6 +48,8 @@ export interface ReportStepOptions {
   actionRepo: string;
   actionRef: string;
   runCommand: string;
+  failOnBlocked: boolean;
+  trafficArtifact: TrafficArtifactInputs;
   /** The step's own environment, which is where the summary's destinations
    *  come from; see writeReportSummary. */
   env: NodeJS.ProcessEnv;
@@ -79,6 +73,8 @@ export async function reportStepTraffic(
     actionRepo,
     actionRef,
     runCommand,
+    failOnBlocked,
+    trafficArtifact,
     env,
   }: ReportStepOptions,
   overrides: Partial<ReportStepDeps> = {},
@@ -87,14 +83,11 @@ export async function reportStepTraffic(
     fetchReport,
     readActionVersion,
     writeReportSummary,
-    wantsTrafficArtifact,
     uploadTrafficArtifact,
     setTrafficArtifactOutput,
-    readFailOnBlocked,
     readStepLabel,
   } = { ...realDeps, ...overrides };
 
-  const failOnBlocked = readFailOnBlocked();
   const failClosed = parameters.mode !== "audit" && failOnBlocked;
   const fail = (message: string): void => {
     if (failClosed) {
@@ -112,7 +105,6 @@ export async function reportStepTraffic(
   try {
     const report = await fetchReport(containerName, parameters, proxyEngine);
     phase = "write the report summary";
-    const wantsArtifact = wantsTrafficArtifact();
     await writeReportSummary(
       report,
       annotation,
@@ -126,12 +118,18 @@ export async function reportStepTraffic(
       },
       // Both engines produce a traffic JSON now, so either summary may point at
       // the artifact when one was asked for.
-      wantsArtifact,
+      trafficArtifact.upload,
       env,
     );
-    if (wantsArtifact) {
+    if (trafficArtifact.upload) {
       phase = "upload the traffic artifact";
-      artifactName = (await uploadTrafficArtifact(report, containerName, annotation)) ?? "";
+      artifactName =
+        (await uploadTrafficArtifact(
+          report,
+          containerName,
+          trafficArtifact.retentionDays,
+          annotation,
+        )) ?? "";
     }
   } catch (e) {
     const message = `Failed to ${phase}: ${errorMessage(e)}`;

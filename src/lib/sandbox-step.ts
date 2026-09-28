@@ -32,10 +32,12 @@ import { SandboxError } from "./errors.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   readEngineInputs,
+  readFailOnBlocked,
   readFailOnCaResidue,
   readFilesystemInputs,
   readRuleInputs,
   readRunCommand,
+  readTrafficArtifactInputs,
 } from "./inputs.ts";
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
@@ -76,6 +78,8 @@ export interface SandboxStepDeps {
   readFilesystemInputs: typeof readFilesystemInputs;
   readRuleInputs: typeof readRuleInputs;
   readFailOnCaResidue: typeof readFailOnCaResidue;
+  readFailOnBlocked: typeof readFailOnBlocked;
+  readTrafficArtifactInputs: typeof readTrafficArtifactInputs;
   validateFilesystemInputs: typeof validateFilesystemInputs;
   checkPasswordlessSudo: typeof checkPasswordlessSudo;
   checkOverlayfsSupport: typeof checkOverlayfsSupport;
@@ -116,6 +120,8 @@ const realDeps: SandboxStepDeps = {
   readFilesystemInputs,
   readRuleInputs,
   readFailOnCaResidue,
+  readFailOnBlocked,
+  readTrafficArtifactInputs,
   validateFilesystemInputs,
   checkPasswordlessSudo,
   checkOverlayfsSupport,
@@ -196,6 +202,8 @@ export async function runSandboxStep(
     readFilesystemInputs,
     readRuleInputs,
     readFailOnCaResidue,
+    readFailOnBlocked,
+    readTrafficArtifactInputs,
     validateFilesystemInputs,
     checkPasswordlessSudo,
     checkOverlayfsSupport,
@@ -240,6 +248,10 @@ export async function runSandboxStep(
   // `notice`, not `annotation`: readFilesystemInputs reads a renamed input (see
   // SandboxStepDeps).
   const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
+  // Needed only once the command runs, but read here so a typo fails before any setup.
+  const failOnCaResidue = readFailOnCaResidue();
+  const failOnBlocked = readFailOnBlocked();
+  const trafficArtifact = readTrafficArtifactInputs();
 
   // Before any privileged setup; see assertNonRootUid.
   assertNonRootUid(process.getuid!());
@@ -377,7 +389,7 @@ export async function runSandboxStep(
         proxyEngine,
         filesystemMode,
         overlayRoots,
-        failOnCaResidue: readFailOnCaResidue(),
+        failOnCaResidue,
         warn,
       });
       for (const path of writeThroughClaim ? writeThroughDetached(writeThroughClaim) : []) {
@@ -405,6 +417,8 @@ export async function runSandboxStep(
         actionRepo,
         actionRef: reportActionRef,
         runCommand: runInput,
+        failOnBlocked,
+        trafficArtifact,
         env,
       });
       await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });

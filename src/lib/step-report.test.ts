@@ -11,10 +11,8 @@ const mocks = {
   fetchReport: vi.fn(),
   readActionVersion: vi.fn(),
   writeReportSummary: vi.fn(),
-  wantsTrafficArtifact: vi.fn(),
   uploadTrafficArtifact: vi.fn(),
   setTrafficArtifactOutput: vi.fn(),
-  readFailOnBlocked: vi.fn(),
   readStepLabel: vi.fn(),
 };
 
@@ -35,6 +33,8 @@ function options(overrides: Partial<ReportStepOptions> = {}): ReportStepOptions 
     actionRepo: "buildcage/isolated-run",
     actionRef: "v1",
     runCommand: "npm ci",
+    failOnBlocked: true,
+    trafficArtifact: { upload: false },
     ...overrides,
   };
 }
@@ -47,8 +47,6 @@ beforeEach(() => {
   mocks.fetchReport.mockResolvedValue({ engine: "inspect" });
   mocks.readActionVersion.mockReturnValue("1.2.3");
   mocks.readStepLabel.mockReturnValue("build");
-  mocks.readFailOnBlocked.mockReturnValue(true);
-  mocks.wantsTrafficArtifact.mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -83,18 +81,17 @@ describe("reportStepTraffic", () => {
     await reportStepTraffic(options(), deps);
     expect(mocks.uploadTrafficArtifact).not.toHaveBeenCalled();
 
-    mocks.wantsTrafficArtifact.mockReturnValue(true);
-    await reportStepTraffic(options(), deps);
+    await reportStepTraffic(options({ trafficArtifact: { upload: true, retentionDays: 7 } }), deps);
     expect(mocks.uploadTrafficArtifact).toHaveBeenCalledWith(
       { engine: "inspect" },
       CONTAINER,
+      7,
       annotation,
     );
   });
 
   it("uploads after the summary, so a failed upload cannot lose the summary", async () => {
-    mocks.wantsTrafficArtifact.mockReturnValue(true);
-    await reportStepTraffic(options(), deps);
+    await reportStepTraffic(options({ trafficArtifact: { upload: true } }), deps);
 
     expect(mocks.uploadTrafficArtifact.mock.invocationCallOrder[0]).toBeGreaterThan(
       mocks.writeReportSummary.mock.invocationCallOrder[0],
@@ -111,10 +108,9 @@ describe("reportStepTraffic", () => {
   ])(
     "tells the summary an artifact is available for either engine, only when wanted ($engine, wants=$wants)",
     async ({ wants, engine, available }) => {
-      mocks.wantsTrafficArtifact.mockReturnValue(wants);
       mocks.fetchReport.mockResolvedValue({ engine });
 
-      await reportStepTraffic(options(), deps);
+      await reportStepTraffic(options({ trafficArtifact: { upload: wants } }), deps);
 
       expect(mocks.writeReportSummary.mock.calls[0][3]).toBe(available);
     },
@@ -127,11 +123,10 @@ describe("reportStepTraffic", () => {
   ])(
     "fails the step when the report cannot be fetched only under restrict with fail_on_blocked ($mode, fail_on_blocked=$failOnBlocked)",
     async ({ mode, failOnBlocked, fails }) => {
-      mocks.readFailOnBlocked.mockReturnValue(failOnBlocked);
       mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
 
       await expect(
-        reportStepTraffic(options({ parameters: reportParams({ mode }) }), deps),
+        reportStepTraffic(options({ parameters: reportParams({ mode }), failOnBlocked }), deps),
       ).resolves.toBeUndefined();
 
       expect(mocks.writeReportSummary).not.toHaveBeenCalled();
@@ -164,10 +159,11 @@ describe("reportStepTraffic", () => {
   // this function still returns, and the step is not failed over a copy of what
   // the summary already recorded.
   it("only warns when the artifact upload fails", async () => {
-    mocks.wantsTrafficArtifact.mockReturnValue(true);
     mocks.uploadTrafficArtifact.mockRejectedValue(new Error("artifact service down"));
 
-    await expect(reportStepTraffic(options(), deps)).resolves.toBeUndefined();
+    await expect(
+      reportStepTraffic(options({ trafficArtifact: { upload: true } }), deps),
+    ).resolves.toBeUndefined();
     expect(annotation.warning).toHaveBeenCalledWith(
       "Failed to upload the traffic artifact: artifact service down",
     );
@@ -190,11 +186,10 @@ describe("reportStepTraffic", () => {
   ])(
     "sets traffic_artifact_name on every path ($case)",
     async ({ wants, uploaded, fetchFails, name }) => {
-      mocks.wantsTrafficArtifact.mockReturnValue(wants);
       mocks.uploadTrafficArtifact.mockResolvedValue(uploaded);
       if (fetchFails) mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
 
-      await reportStepTraffic(options(), deps);
+      await reportStepTraffic(options({ trafficArtifact: { upload: wants } }), deps);
 
       expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledExactlyOnceWith(name);
     },

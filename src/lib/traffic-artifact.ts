@@ -10,16 +10,6 @@ import { buildTrafficRecords, writeTrafficFile } from "#core/lib/report/outcome/
 import type { Report } from "./report.ts";
 import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase } from "./sandbox/scratch-dir.ts";
 
-export function wantsTrafficArtifact(): boolean {
-  try {
-    return core.getBooleanInput("upload_traffic_artifact");
-  } catch {
-    // Unset, as in the integration/unit invocations that run this from
-    // source rather than through action.yml's own defaults.
-    return false;
-  }
-}
-
 /** Guaranteed collision-free across concurrent invocations of this action in
  *  the same job, since containerName's own random suffix already is (see
  *  generateContainerName). Unlike buildcage/docker, there is no stable
@@ -63,6 +53,7 @@ export interface UploadTrafficArtifactDeps {
 export async function uploadTrafficArtifact(
   report: Report,
   containerName: string,
+  retentionDays: number | undefined,
   annotation: Annotation,
   {
     upload = uploadViaActionsArtifact,
@@ -76,11 +67,8 @@ export async function uploadTrafficArtifact(
   try {
     const file = join(scratchDir, "traffic.json");
     writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));
-    const days = Number(core.getInput("traffic_artifact_retention_days") || "");
     const name = trafficArtifactName(containerName);
-    await upload(name, [file], scratchDir, {
-      retentionDays: Number.isFinite(days) && days > 0 ? days : undefined,
-    });
+    await upload(name, [file], scratchDir, { retentionDays });
     console.log(`Uploaded the traffic JSON as ${name}`);
     return name;
   } catch (e) {
