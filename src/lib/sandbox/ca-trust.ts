@@ -161,9 +161,9 @@ export function writeCaTrustFiles(
 // overrides cacerts when present, so both get the CA.
 const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"];
 
-// Keystore directories always tried, for a JVM at a fixed location that
-// neither PATH nor a JAVA_HOME variable names: Debian's ca-certificates-java
-// output and RHEL's, each a symlink realpath resolves to the real file.
+// Keystore directories for a JVM at a fixed location that neither PATH nor a
+// JAVA_HOME variable names: Debian's ca-certificates-java output and RHEL's,
+// each a symlink realpath resolves to the real file.
 const KNOWN_JVM_KEYSTORE_DIRS = [
   "/etc/ssl/certs/java",
   "/etc/pki/java",

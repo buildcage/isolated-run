@@ -546,16 +546,15 @@ reported as blocked; see
   update, still needs `proxy_engine: universal` or an `allowed_tls_rules` passthrough, since it will
   not accept the re-signed certificate.
 - The JVM (Java, Kotlin, Scala) reads only its own keystore rather than the CA-trust variables, and
-  a JVM already on the runner is handled: the CA is added, for the step, to a copy of the
-  `cacerts` of the `java` on `PATH`, of `$JAVA_HOME` and of each `$JAVA_HOME_<major>_<arch>` (set
-  by `setup-java` and the hosted runner images). These are found once, before the command starts,
-  so a JDK the step itself downloads or unpacks keeps its own keystore: Gradle's toolchain
-  auto-provisioning, `sdk install`, and Bazel's embedded JDK and `remotejdk`. Bazel can be pointed
-  at an injected copy with
-  `bazel --host_jvm_args=-Djavax.net.ssl.trustStore=$JAVA_HOME/lib/security/cacerts ...`, which
-  needs no `trustStorePassword`. The `keytool` that does this runs outside the
-  sandbox, so it must live outside `$HOME`, `$GITHUB_WORKSPACE`, `/tmp`, `$RUNNER_TEMP` and
-  `write_through:`. GitHub-hosted runners have one in `/usr/lib/jvm`. A self-hosted runner whose only
+  a JVM already on the runner is handled: for the step, the CA is added to a copy of the `cacerts`
+  of the `java` on `PATH`, of `$JAVA_HOME` and of each `$JAVA_HOME_<major>_<arch>` (set by
+  `setup-java` and the hosted runner images). A JDK the step itself fetches (Gradle's toolchain
+  auto-provisioning, `sdk install`, Bazel's embedded JDK or `remotejdk`) keeps its own keystore;
+  Bazel can be pointed at an injected copy with
+  `bazel --host_jvm_args=-Djavax.net.ssl.trustStore=$JAVA_HOME/lib/security/cacerts ...`.
+  The `keytool` that injects the CA runs outside the sandbox, so it must live outside `$HOME`,
+  `$GITHUB_WORKSPACE`, `/tmp`, `$RUNNER_TEMP` and `write_through:`. GitHub-hosted runners have one
+  in `/usr/lib/jvm`. A self-hosted runner whose only
   JDKs are under `$HOME` (mise, sdkman, coursier, or `setup-java` with the runner in a home
   directory) needs a system JDK or a `RUNNER_TOOL_CACHE` outside `$HOME`. Without one, or with a
   keystore sealed under a non-default password, the step warns and a JVM build needs
