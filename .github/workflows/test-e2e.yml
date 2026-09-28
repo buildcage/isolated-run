@@ -564,6 +564,7 @@ jobs:
                 '
 
       - name: Verify no CA file was left on the host
+        if: always()
         run: |
           for f in /etc/buildcage-ca.pem /dev/buildcage-ca.pem; do
             if [ -e "$f" ]; then
