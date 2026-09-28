@@ -348,7 +348,13 @@ export async function runSandboxStep(
       env,
     );
 
-    await startSandboxProxy({ composeFile, projectName, containerName, pullPolicy, composeEnv });
+    try {
+      await startSandboxProxy({ composeFile, projectName, containerName, pullPolicy, composeEnv });
+    } catch (e) {
+      // compose up --wait leaves a container that never became ready, and its network, in place.
+      await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
+      throw e;
+    }
 
     // 1 unless the isolated command itself reports otherwise: every way out of
     // the block below that isn't the command's own exit code is a failure.

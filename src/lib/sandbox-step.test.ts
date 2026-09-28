@@ -418,6 +418,18 @@ describe("runSandboxStep", () => {
       expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
     });
 
+    it("stops the proxy that failed to start, without reporting or running anything", async () => {
+      mocks.startSandboxProxy.mockRejectedValue(
+        new SandboxError("sandbox proxy is unhealthy", "PROXY_NOT_READY"),
+      );
+
+      await expect(runSandboxStep(ENV, deps)).rejects.toThrow("sandbox proxy is unhealthy");
+      expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
+      expect(orderOf(mocks.startSandboxProxy)).toBeLessThan(orderOf(mocks.stopSandboxProxy));
+      expect(mocks.reportStepTraffic).not.toHaveBeenCalled();
+      expect(mocks.runSandboxedCommand).not.toHaveBeenCalled();
+    });
+
     describe("write_through targets", () => {
       beforeEach(() => {
         mocks.readFilesystemInputs.mockReturnValue({
@@ -439,6 +451,15 @@ describe("runSandboxStep", () => {
 
         await expect(runSandboxStep(ENV, deps)).rejects.toThrow("no signature found");
         expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+        expect(mocks.releaseWriteThrough).toHaveBeenCalledTimes(1);
+      });
+
+      it("are released when the proxy fails to start", async () => {
+        mocks.startSandboxProxy.mockRejectedValue(
+          new SandboxError("sandbox proxy is unhealthy", "PROXY_NOT_READY"),
+        );
+
+        await expect(runSandboxStep(ENV, deps)).rejects.toThrow("sandbox proxy is unhealthy");
         expect(mocks.releaseWriteThrough).toHaveBeenCalledTimes(1);
       });
 
