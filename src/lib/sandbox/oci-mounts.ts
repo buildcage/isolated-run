@@ -227,17 +227,19 @@ export function persistentLayers(
 export function writableDirsOf({
   workdir,
   home,
+  tmp = "/tmp",
   runnerTemp,
   writablePaths = [],
 }: {
   workdir?: string;
   home?: string;
+  tmp?: string;
   runnerTemp?: string;
   writablePaths?: string[];
 }): string[] {
   return [
     ...new Set(
-      [workdir, home, "/tmp", runnerTemp, ...writablePaths].filter((p): p is string => Boolean(p)),
+      [workdir, home, tmp, runnerTemp, ...writablePaths].filter((p): p is string => Boolean(p)),
     ),
   ];
 }

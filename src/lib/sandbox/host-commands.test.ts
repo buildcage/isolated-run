@@ -7,6 +7,7 @@ import {
   jvmTools,
   pathOutside,
   persistingWritablePaths,
+  resolveDefaultWritableDirs,
   pinHostCommands,
   pinningPaths,
   renameGuardDirs,
@@ -157,6 +158,25 @@ describe("findPinnableCommand", () => {
     expect(findPinnableCommand("docker", `${HOME}/.local/bin:/usr/bin`, ["/"], deps)).toBe(
       `${HOME}/.local/bin/docker`,
     );
+  });
+});
+
+describe("resolveDefaultWritableDirs", () => {
+  it("follows a symlinked $HOME to the directory it names", () => {
+    const real = (p: string) => p.replace(/^\/home\//, "/var/home/");
+
+    expect(resolveDefaultWritableDirs({ HOME, GITHUB_WORKSPACE: WORKSPACE }, real)).toStrictEqual({
+      workdir: "/var/home/runner/work/repo/repo",
+      home: "/var/home/runner",
+      runnerTemp: undefined,
+      tmp: "/tmp",
+    });
+  });
+
+  it("drops a trailing slash even when the path doesn't exist to resolve", () => {
+    expect(
+      resolveDefaultWritableDirs({ HOME: "/home/runner/", RUNNER_TEMP: "/opt/temp//" }, (p) => p),
+    ).toMatchObject({ home: "/home/runner", runnerTemp: "/opt/temp" });
   });
 });
 

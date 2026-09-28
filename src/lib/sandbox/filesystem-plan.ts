@@ -18,6 +18,7 @@ import { errorMessage } from "#core/lib/errors.ts";
 import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
 import { determineOverlayRoots } from "./ephemeral-fs.ts";
+import { resolveDefaultWritableDirs } from "./host-commands.ts";
 import { RESERVED_INTERNAL_DESTINATIONS } from "./oci-mounts.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
 import {
@@ -88,6 +89,7 @@ export interface ResolveFilesystemPlanDeps {
   readlink?: (path: string) => string;
   execFile?: (command: string, args: string[]) => void;
   deviceOf?: (path: string) => number;
+  realpath?: (path: string) => string;
 }
 
 /**
@@ -174,8 +176,10 @@ export function resolveFilesystemPlan(
   // own input, so a failure here (e.g. a permissions error reading one of
   // those paths) must not be mislabeled as a write_through syntax problem.
   try {
-    const overlayCandidates = [env.HOME, env.RUNNER_TEMP, "/tmp", env.GITHUB_WORKSPACE].filter(
-      (p): p is string => Boolean(p),
+    // Real paths, as write_through's are, so the two compare.
+    const { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath);
+    const overlayCandidates = [home, runnerTemp, tmp, workdir].filter((p): p is string =>
+      Boolean(p),
     );
     const overlayRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, deps);
     return { overlayRoots, writeThroughPaths, createdDirs };

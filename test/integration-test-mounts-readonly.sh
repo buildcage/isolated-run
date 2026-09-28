@@ -14,6 +14,11 @@
 # for AppArmor, and runc's default spec never declares it. Remounting the real
 # one from a test is not safe, so this mounts an equivalent at a throwaway
 # location outside every writable exception.
+#
+# A second sandbox runs with $HOME spelled through a symlink and a trailing
+# slash, over a directory that is itself a mount with another mount under it,
+# as on a host whose /home links to /var/home on a separate disk. Both mounts
+# must stay writable: the host mount table names the real path.
 set -uo pipefail
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
@@ -28,16 +33,29 @@ mkdir -p "$NESTED_MOUNT"
 SECURITYFS_MOUNT="/var/tmp/buildcage-securityfs-test-$$"
 mkdir -p "$SECURITYFS_MOUNT"
 
+# Outside /tmp and the workspace for the same reason.
+HOME_BASE="/var/tmp/buildcage-home-test-$$"
+HOME_REAL="$HOME_BASE/home-real"
+HOME_LINK="$HOME_BASE/home-link"
+HOME_SRC=$(mktemp -d)
+HOME_SUB_SRC=$(mktemp -d)
+mkdir -p "$HOME_REAL" "$HOME_SRC/sub"
+ln -s home-real "$HOME_LINK"
+
 cleanup() {
   sudo -n umount "$NESTED_MOUNT" >/dev/null 2>&1
   sudo -n umount "$SECURITYFS_MOUNT" >/dev/null 2>&1
+  sudo -n umount "$HOME_REAL/sub" >/dev/null 2>&1
+  sudo -n umount "$HOME_REAL" >/dev/null 2>&1
   rmdir "$SECURITYFS_MOUNT" 2>/dev/null
-  rm -rf "$WORKDIR" "$NESTED_SRC"
+  rm -rf "$WORKDIR" "$NESTED_SRC" "$HOME_BASE" "$HOME_SRC" "$HOME_SUB_SRC"
 }
 trap cleanup EXIT
 
 sudo -n mount --bind "$NESTED_SRC" "$NESTED_MOUNT"
 sudo -n mount -t securityfs securityfs "$SECURITYFS_MOUNT"
+sudo -n mount --bind "$HOME_SRC" "$HOME_REAL"
+sudo -n mount --bind "$HOME_SUB_SRC" "$HOME_REAL/sub"
 touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 
 # Both checks run whatever the other one did, so one failure does not hide the
@@ -84,6 +102,26 @@ exit \$rc
   node dist/main.cjs
 CODE=$?
 
+GITHUB_WORKSPACE="$WORKDIR" \
+GITHUB_STATE="$WORKDIR/state.env" \
+GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
+HOME="$HOME_LINK/" \
+BUILDCAGE_BUILD_TEST_HOOKS=1 \
+BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
+INPUT_RUN="rc=0
+for dir in \"\$HOME\" \"\$HOME/sub\"; do
+  if echo x > \"\$dir/.buildcage-home-test\" 2>/dev/null; then
+    echo \"OK: \$dir is writable\"
+  else
+    echo \"UNEXPECTED: \$dir was not writable\"
+    rc=1
+  fi
+done
+exit \$rc
+" \
+  node dist/main.cjs
+HOME_CODE=$?
+
 echo ""
 echo "=== Sandbox Read-Only Mount Assertions ==="
 echo ""
@@ -94,6 +132,11 @@ if [ "$CODE" = "0" ]; then
   echo "  PASS  a real securityfs mount not among runc's own default mounts is forced read-only"
 else
   echo "  FAIL  a nested mount was not writable, or a mount outside every writable path was not read-only (exit $CODE)"
-  exit 1
+fi
+if [ "$HOME_CODE" = "0" ]; then
+  echo "  PASS  a mounted \$HOME spelled through a symlink, and a mount under it, are writable"
+else
+  echo "  FAIL  a mounted \$HOME spelled through a symlink, or a mount under it, was not writable (exit $HOME_CODE)"
 fi
 echo ""
+[ "$CODE" = "0" ] && [ "$HOME_CODE" = "0" ]

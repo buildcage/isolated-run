@@ -161,7 +161,8 @@ those paths, such as rewriting a binary earlier on `$PATH` to plant a payload fo
 un-sandboxed step. The rest of the host filesystem stays fully _visible_ so existing tools keep
 working; only writes are restricted. The writable exceptions are recursive bind-mounts, so a
 separate host mount under one stays writable too, and every other host mount is forced read-only.
-The sandbox's own rootfs staging directory is never one of them, so that recursion cannot re-expose
+The four are taken as the directories they really resolve to, which is how the host's mount table
+names them, so a symlinked `$HOME` does not turn a mount under it read-only. The sandbox's own rootfs staging directory is never one of them, so that recursion cannot re-expose
 the host `/` as a writable copy.
 
 `write_through:` adds further paths for tools that need to write elsewhere, and `/` disables the
