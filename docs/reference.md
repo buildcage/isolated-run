@@ -672,9 +672,17 @@ such as one step's `cert9.db` with another's `key4.db`.
 
 A database the runner user cannot write, or one too large to copy, is covered instead: a copy of a
 database holding only this CA is mounted over it, and a command that writes to that copy fails the
-step the same way, or only warns, discarding the write. Missing directories are created 0700 and
-removed after the step if left empty. A symlink or non-directory on the path leaves the database
-unmounted, with a warning.
+step the same way, or only warns, discarding the write. A symlink or non-directory on the path leaves
+the database unmounted, with a warning.
+
+Missing directories are created 0700 and removed, if empty, when the last step using them ends,
+including steps in other jobs of the same runner user. Removing a directory detaches every mount on
+it, so a directory another step still uses is never removed. The record of which directories
+Buildcage made and which steps use them is `/var/tmp/buildcage-<uid>/nssdb-ledger.json`, hidden from
+the sandbox. A directory is identified by its birth time, so on a filesystem without one (some NFS
+mounts), the directories are left in place. If something else, such as a parallel step outside any
+sandbox, removes the directory while a step runs, that step's Chromium stops trusting the proxy CA;
+the step warns, naming the database, and writes nothing back to it.
 
 ## `write_through` paths
 

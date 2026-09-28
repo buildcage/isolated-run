@@ -572,7 +572,9 @@ reported as blocked; see
   write, that fails the step and nothing is written back; `fail_on_ca_residue: false` makes it a
   warning and writes the copy back. Where the write would be discarded, the copy goes with it. A
   command cannot remove the database's directory (`rm -rf ~/.pki`) either, since it is a mount point
-  inside the sandbox.
+  inside the sandbox. A parallel step outside any sandbox can, under
+  `filesystem_mode: persistent`; Chromium in the Buildcage step then stops trusting the CA, and the
+  step warns.
 - The CA is added to a store that already exists, never created. A command whose filesystem has
   nothing resembling a system CA bundle at a well-known path has nothing to add to, which matters
   only to a tool that needs TLS trust for something.

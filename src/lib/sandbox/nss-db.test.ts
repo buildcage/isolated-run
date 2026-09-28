@@ -27,9 +27,10 @@ import {
   certificateDer,
   nssDbChange,
   nssDbMounts,
+  nssDbDetached,
   planNssDb,
   prepareNssDb,
-  removeNssDbDirs,
+  releaseNssDbDirs,
   removeNssSlot,
   settleNssDbSlot,
   type NssDbDeps,
@@ -50,15 +51,19 @@ const CA_PEM =
 // what is under test.
 let root: string;
 let home: string;
+/** Stands in for SANDBOX_SCRATCH_BASE, which holds the ledger. */
+let base: string;
 let scratch: string;
 let template: string;
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), "nss-db-test-")));
   home = join(root, "home");
-  scratch = join(root, "scratch");
+  base = join(root, "base");
+  scratch = join(base, "sandbox-test");
   template = join(root, "template");
   mkdirSync(home);
+  mkdirSync(base, { mode: 0o700 });
   mkdirSync(scratch);
   mkdirSync(template);
   writeFileSync(join(template, "cert9.db"), "CERT9-WITH-THE-PROXY-CA", { mode: 0o600 });
@@ -70,7 +75,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Plays `docker cp` by copying the test's template. */
+/** Plays `docker cp` with the test's template, and keeps the ledger in the
+ *  test's base. */
 function fakeDocker(): { deps: NssDbDeps; calls: string[][] } {
   const calls: string[][] = [];
   return {
@@ -80,6 +86,7 @@ function fakeDocker(): { deps: NssDbDeps; calls: string[][] } {
         calls.push(args);
         cpSync(template, args[args.length - 1]!, { recursive: true });
       },
+      ledger: { base },
     },
   };
 }
@@ -166,7 +173,8 @@ describe("prepareNssDb", () => {
       path: join(scratch, "nssdb"),
       template: join(scratch, "nssdb-template"),
       destination: join(home, ".pki/nssdb"),
-      createdDirs: [join(home, ".pki"), join(home, ".pki/nssdb")],
+      claim: { name: "sandbox-test", registered: true },
+      xdgPath: join(home, ".local/share/pki/nssdb"),
       slot: { caDb: join(scratch, "nssdb-ca"), appended: NSS_SLOT, hadPkcs11: false },
     });
     expect(readdirSync(files.path)).toStrictEqual(["pkcs11.txt"]);
@@ -177,9 +185,17 @@ describe("prepareNssDb", () => {
     for (const name of ["cert9.db", "key4.db", "pkcs11.txt"]) {
       expect(mode(join(files.slot!.caDb, name))).toBe(0o644);
     }
-    for (const dir of files.createdDirs) {
-      expect(mode(dir)).toBe(0o700);
+    for (const dir of [".pki", ".pki/nssdb"]) {
+      expect(mode(join(home, dir))).toBe(0o700);
     }
+  });
+
+  it("marks the directories it made, and registers the step's use", () => {
+    prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps);
+
+    const ledger = JSON.parse(readFileSync(join(base, "nssdb-ledger.json"), "utf8"));
+    expect(Object.keys(ledger.dirs)).toStrictEqual([join(home, ".pki"), join(home, ".pki/nssdb")]);
+    expect(ledger.uses["sandbox-test"].destination).toBe(join(home, ".pki/nssdb"));
   });
 
   it("gives the runner's own database the slot, in a copy of it", () => {
@@ -187,7 +203,9 @@ describe("prepareNssDb", () => {
 
     const files = prepareSlotted();
 
-    expect(files.createdDirs).toStrictEqual([]);
+    const ledger = JSON.parse(readFileSync(join(base, "nssdb-ledger.json"), "utf8"));
+    expect(ledger.dirs).toStrictEqual({});
+    expect(Object.keys(ledger.uses)).toStrictEqual(["sandbox-test"]);
     expect(files.slot.hadPkcs11).toBe(true);
     expect(readFileSync(join(files.path, "cert9.db"), "utf8")).toBe("THE RUNNER'S OWN");
     expect(readFileSync(join(files.path, "pkcs11.txt"), "utf8")).toBe(
@@ -302,10 +320,66 @@ describe("prepareNssDb", () => {
     };
 
     expect(
-      prepareNssDb(CONTAINER, scratch, home, { ...fakeDocker().deps, mkdir, warn }),
+      prepareNssDb(CONTAINER, scratch, home, {
+        ...fakeDocker().deps,
+        ledger: { base, mkdir },
+        warn,
+      }),
     ).toBeUndefined();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("EACCES"));
     expect(existsSync(join(home, ".pki"))).toBe(false);
+  });
+
+  it("takes a directory another step made meanwhile as it is", () => {
+    const mkdir = (path: string, mode: number) => {
+      mkdirSync(path, { mode });
+      if (path.endsWith("nssdb")) throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+    };
+
+    const files = prepareNssDb(CONTAINER, scratch, home, {
+      ...fakeDocker().deps,
+      ledger: { base, mkdir },
+    });
+
+    expect(files?.destination).toBe(join(home, ".pki/nssdb"));
+    const ledger = JSON.parse(readFileSync(join(base, "nssdb-ledger.json"), "utf8"));
+    expect(Object.keys(ledger.dirs)).toStrictEqual([join(home, ".pki")]);
+  });
+
+  it("makes again the directories a parallel step removed while the template was copied", () => {
+    mkdirSync(join(home, ".pki/nssdb"), { recursive: true });
+    const { deps } = fakeDocker();
+    const exec: NssDbDeps["exec"] = (command, args) => {
+      deps.exec!(command, args);
+      rmSync(join(home, ".pki"), { recursive: true });
+    };
+
+    const files = prepareNssDb(CONTAINER, scratch, home, { ...deps, exec })!;
+
+    expect(files.slot).toBeDefined();
+    expect(existsSync(join(home, ".pki/nssdb"))).toBe(true);
+    const ledger = JSON.parse(readFileSync(join(base, "nssdb-ledger.json"), "utf8"));
+    expect(Object.keys(ledger.dirs)).toStrictEqual([join(home, ".pki"), join(home, ".pki/nssdb")]);
+  });
+
+  it("copies a database a parallel step made while the template was copied", () => {
+    const { deps } = fakeDocker();
+    const exec: NssDbDeps["exec"] = (command, args) => {
+      deps.exec!(command, args);
+      ownDb();
+    };
+
+    const files = prepareNssDb(CONTAINER, scratch, home, { ...deps, exec })!;
+
+    expect(readFileSync(join(files.path, "cert9.db"), "utf8")).toBe("THE RUNNER'S OWN");
+    const ledger = JSON.parse(readFileSync(join(base, "nssdb-ledger.json"), "utf8"));
+    expect(ledger.dirs).toStrictEqual({});
+  });
+
+  it("names no XDG path when the database is the XDG one", () => {
+    mkdirSync(join(home, ".local/share/pki/nssdb"), { recursive: true });
+
+    expect(prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps)?.xdgPath).toBeUndefined();
   });
 });
 
@@ -657,15 +731,78 @@ describe("nssDbChange", () => {
   });
 });
 
-describe("removeNssDbDirs", () => {
+describe("releaseNssDbDirs", () => {
   it("takes back the directories it made, leaving one the command used", () => {
     const files = prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps)!;
     writeFileSync(join(home, ".pki/app.db"), "the command's own");
 
-    removeNssDbDirs(files);
+    releaseNssDbDirs(files, { base });
 
     expect(existsSync(join(home, ".pki/nssdb"))).toBe(false);
     expect(existsSync(join(home, ".pki/app.db"))).toBe(true);
+  });
+
+  it("leaves them while another step still uses them", () => {
+    const files = prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps)!;
+    const other = join(base, "sandbox-other");
+    mkdirSync(other);
+    prepareNssDb(CONTAINER, other, home, fakeDocker().deps);
+
+    releaseNssDbDirs(files, { base });
+
+    expect(existsSync(join(home, ".pki/nssdb"))).toBe(true);
+  });
+
+  it("releases nothing for a use that never went into the ledger", () => {
+    const files = prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps)!;
+
+    releaseNssDbDirs({ ...files, claim: { ...files.claim!, registered: false } }, { base });
+
+    expect(existsSync(join(home, ".pki/nssdb"))).toBe(true);
+  });
+});
+
+describe("nssDbDetached", () => {
+  it("is quiet while the database's directory is the one mounted over", () => {
+    const files = prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps)!;
+
+    expect(nssDbDetached(files)).toBeUndefined();
+  });
+
+  it.each([
+    ["removed", () => rmSync(join(home, ".pki"), { recursive: true })],
+    [
+      "made again",
+      () => {
+        rmSync(join(home, ".pki/nssdb"), { recursive: true });
+        mkdirSync(join(home, ".pki/nssdb"));
+      },
+    ],
+  ])("names the database when its directory was %s", (_label, change) => {
+    const files = prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps)!;
+    change();
+
+    const message = nssDbDetached(files);
+    expect(message).toContain(`${join(home, ".pki/nssdb")} was removed or replaced on the runner`);
+    expect(message).toContain("such as another step running in parallel");
+    expect(message).not.toContain("a database of its own");
+  });
+
+  it("names the XDG database Chromium made in its place", () => {
+    const files = prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps)!;
+    rmSync(join(home, ".pki"), { recursive: true });
+    mkdirSync(join(home, ".local/share/pki/nssdb"), { recursive: true });
+
+    expect(nssDbDetached(files)).toContain(
+      `Chromium may have made a database of its own at ${join(home, ".local/share/pki/nssdb")}`,
+    );
+  });
+
+  it("is quiet without a claim", () => {
+    const files = prepareNssDb(CONTAINER, scratch, home, fakeDocker().deps)!;
+    rmSync(join(home, ".pki"), { recursive: true });
+
+    expect(nssDbDetached({ ...files, claim: undefined })).toBeUndefined();
   });
 });
 
@@ -674,7 +811,6 @@ describe("nssDbMounts", () => {
     path: "/s/nssdb",
     template: "/s/t",
     destination: "/h/.pki/nssdb",
-    createdDirs: [],
   };
 
   it("mounts a covering copy read-write over the database", () => {

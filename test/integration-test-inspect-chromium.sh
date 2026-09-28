@@ -4,7 +4,9 @@
 # kept where filesystem_mode keeps writes, below a write_through: entry under
 # ephemeral included, less the slot; a database the runner user cannot write is
 # covered instead, and a write to that, or a copy of the CA left in the
-# runner's own, fails the step unless fail_on_ca_residue is false.
+# runner's own, fails the step unless fail_on_ca_residue is false. Directories
+# made for a new database are removed afterwards, and removing one on the host
+# mid-command gives a warning.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 
@@ -148,6 +150,40 @@ if [ -e "$HOME_E/.pki" ]; then
   show_home "$HOME_E"
 else
   pass "the write was discarded, and the directories taken back"
+fi
+
+echo ""
+echo "--- a command that leaves the database alone ---"
+HOME_I="$TMPDIR/home-i"
+mkdir -p "$HOME_I"
+run_step "$HOME_I" "true"
+if [ "$RUN_EXIT" = "0" ] && [ ! -e "$HOME_I/.pki" ]; then
+  pass "the directories made for the database were taken back"
+else
+  fail "the step failed, or left ~/.pki behind (exit $RUN_EXIT)"
+  show_home "$HOME_I"
+fi
+
+echo ""
+echo "--- the database's directory removed outside the sandbox while the command runs ---"
+HOME_J="$TMPDIR/home-j"
+mkdir -p "$HOME_J"
+rm -f "$TMPDIR/started-j"
+(
+  for _ in $(seq 600); do
+    [ -e "$TMPDIR/started-j" ] && break
+    sleep 0.1
+  done
+  rm -rf "$HOME_J/.pki"
+) &
+REMOVER=$!
+run_step "$HOME_J" "touch $TMPDIR/started-j; sleep 3"
+wait "$REMOVER"
+if [ "$RUN_EXIT" = "0" ] &&
+  grep -q "$HOME_J/.pki/nssdb was removed or replaced on the runner while the command ran" <<<"$OUT"; then
+  pass "the step warned, naming the database, and carried on"
+else
+  fail "the step failed, or gave no warning (exit $RUN_EXIT)"
 fi
 
 echo ""

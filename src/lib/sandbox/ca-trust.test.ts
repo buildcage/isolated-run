@@ -118,7 +118,6 @@ describe("caTrustAdditions", () => {
           path: "/scratch/nssdb",
           template: "/scratch/nssdb-template",
           destination: "/home/runner/.pki/nssdb",
-          createdDirs: [],
         },
       },
       {},

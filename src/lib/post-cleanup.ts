@@ -3,8 +3,9 @@ import { existsSync } from "node:fs";
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
-import { ownerToken, readContainerOwner } from "./container.ts";
+import { ownerToken, readContainerOwner, scratchDirNameFor } from "./container.ts";
 import { resolvePostState, type PostCleanupTargets } from "./post-state.ts";
+import { releaseNssDb } from "./sandbox/nss-db-ledger.ts";
 import {
   cleanupScratchDir,
   scratchDirFor,
@@ -15,6 +16,7 @@ export interface PostCleanupDeps {
   readOwner?: (containerName: string) => string | null;
   fileExists?: (path: string) => boolean;
   removeScratchDir?: (dir: string, options: CleanupScratchDirOptions) => void;
+  releaseNssDb?: typeof releaseNssDb;
 }
 
 /**
@@ -56,6 +58,7 @@ export function planPostCleanup(
     readOwner = readContainerOwner,
     fileExists = existsSync,
     removeScratchDir = cleanupScratchDir,
+    releaseNssDb: releaseNssDbUse = releaseNssDb,
   }: PostCleanupDeps = {},
 ): PostCleanupTargets | null {
   const { targets, problems } = resolvePostState(state);
@@ -80,6 +83,7 @@ export function planPostCleanup(
   // this can't walk into the host filesystem even if a mount somehow survived.
   // Independent of the container teardown, so a failure in one still leaves
   // the other to run.
+  let reclaimed = false;
   try {
     const scratchDir = scratchDirFor(targets.containerName);
     if (fileExists(scratchDir)) {
@@ -88,10 +92,18 @@ export function planPostCleanup(
         warn: annotation.warning,
       });
     }
+    reclaimed = !fileExists(scratchDir);
   } catch (e) {
     annotation.warning(
       `run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`,
     );
+  }
+
+  // Ends an NSS database use a hard kill left registered. Only once the
+  // scratch dir is gone, since one still there may hold the database mounted;
+  // a later step drops the use once it goes.
+  if (reclaimed) {
+    releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning });
   }
 
   return targets;

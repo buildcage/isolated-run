@@ -27,7 +27,13 @@ import {
 } from "./host-commands.ts";
 import { resolveSandboxGid } from "./identity.ts";
 import { listHostMounts } from "./mountinfo.ts";
-import { nssDbChange, prepareNssDb, removeNssDbDirs, settleNssDbSlot } from "./nss-db.ts";
+import {
+  nssDbChange,
+  nssDbDetached,
+  prepareNssDb,
+  releaseNssDbDirs,
+  settleNssDbSlot,
+} from "./nss-db.ts";
 import { buildOciConfig, type SandboxIdentity } from "./oci-config.ts";
 import { writeRunScript, writeResolvConf, writeOciConfig } from "./oci-files.ts";
 import { WritablePathConflictError } from "./paths.ts";
@@ -59,7 +65,8 @@ export interface RunSandboxedCommandDeps {
   prepareNssDb: typeof prepareNssDb;
   nssDbChange: typeof nssDbChange;
   settleNssDbSlot: typeof settleNssDbSlot;
-  removeNssDbDirs: typeof removeNssDbDirs;
+  nssDbDetached: typeof nssDbDetached;
+  releaseNssDbDirs: typeof releaseNssDbDirs;
   createOverlayScratchDirs: typeof createOverlayScratchDirs;
   writeResolvConf: typeof writeResolvConf;
   writeRunScript: typeof writeRunScript;
@@ -86,7 +93,8 @@ const realDeps: RunSandboxedCommandDeps = {
   prepareNssDb,
   nssDbChange,
   settleNssDbSlot,
-  removeNssDbDirs,
+  nssDbDetached,
+  releaseNssDbDirs,
   createOverlayScratchDirs,
   writeResolvConf,
   writeRunScript,
@@ -332,7 +340,7 @@ export function assembleBundle(
       renameGuardDirs,
     });
   } catch (e) {
-    if (caTrust?.nssDb) deps.removeNssDbDirs(caTrust.nssDb);
+    if (caTrust?.nssDb) deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps));
     // A step in here that already speaks to the user keeps its own words:
     // resolveSandboxGid's UNSAFE_PRIMARY_GID, and the writable-path guards
     // buildOciConfig runs, which resolveFilesystemPlan reports under the
@@ -365,18 +373,28 @@ function persists(
   );
 }
 
+function releaseDeps(
+  { warn }: Pick<RunSandboxedCommandOptions, "warn">,
+  { info }: Pick<RunSandboxedCommandDeps, "info">,
+) {
+  return { info, warn };
+}
+
 /** Settles the NSS database once the command has exited. The runner's own
  *  database gets back what the command wrote, less the slot, where the
  *  filesystem mode keeps writes. A covered one cannot keep a write, so one
- *  fails the step, or only warns under fail_on_ca_residue: false. */
+ *  fails the step, or only warns under fail_on_ca_residue: false. A detached
+ *  database is warned about and not written back. */
 function finishNssDb(
   caTrust: CaTrustFiles | undefined,
   options: RunSandboxedCommandOptions,
-  { nssDbChange, settleNssDbSlot, removeNssDbDirs, readFile, info }: RunSandboxedCommandDeps,
+  deps: RunSandboxedCommandDeps,
 ): void {
+  const { nssDbChange, nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info } = deps;
   const nssDb = caTrust?.nssDb;
   if (!nssDb) return;
   const { failOnCaResidue, warn } = options;
+  const release = () => releaseNssDbDirs(nssDb, releaseDeps(options, deps));
   const residue = (message: string, code: SandboxErrorCode): void => {
     if (!failOnCaResidue) {
       warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
@@ -385,17 +403,27 @@ function finishNssDb(
     throw new SandboxError(`${message}. ${CA_RESIDUE_HINT}`, code);
   };
 
+  // Under ephemeral the mount sits on the overlay, which a host rmdir cannot
+  // detach.
+  const persist = persists(nssDb.destination, options);
+  const detached = persist ? nssDbDetached(nssDb) : undefined;
+  if (detached !== undefined) warn(detached);
+
   if (!nssDb.slot) {
-    removeNssDbDirs(nssDb);
+    release();
     const change = nssDbChange(nssDb);
     if (change !== undefined) residue(change, "NSS_DATABASE_CHANGED");
+    return;
+  }
+  if (detached !== undefined) {
+    release();
     return;
   }
   try {
     const outcome = settleNssDbSlot(
       { ...nssDb, slot: nssDb.slot },
       {
-        persist: persists(nssDb.destination, options),
+        persist,
         caPem: readFile(caTrust.ownCaPath),
         onResidue: (message) => residue(message, "NSS_DATABASE_CA_COPIED"),
       },
@@ -414,7 +442,7 @@ function finishNssDb(
       "NSS_DATABASE_WRITE_BACK_FAILED",
     );
   } finally {
-    removeNssDbDirs(nssDb);
+    release();
   }
 }
 
@@ -455,7 +483,7 @@ export function runSandboxedCommand(
         });
       } catch (e) {
         // The command did not run to the end, so only the directories are removed.
-        if (caTrust?.nssDb) deps.removeNssDbDirs(caTrust.nssDb);
+        if (caTrust?.nssDb) deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps));
         throw e;
       }
       finishNssDb(caTrust, options, deps);

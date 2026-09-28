@@ -483,26 +483,180 @@ function scratchDirFor(containerName) {
 	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchDirNameFor(containerName));
 }
 //#endregion
+//#region src/lib/sandbox/nss-db-ledger.ts
+const NSS_DB_LEDGER_NAME = "nssdb-ledger.json", LOCK_NAME = "nssdb-ledger.lock", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
+function defaultLstat(path) {
+	return (0, node_fs.lstatSync)(path, {
+		bigint: !0,
+		throwIfNoEntry: !1
+	});
+}
+function defaultPidAlive(pid) {
+	try {
+		return process.kill(pid, 0), !0;
+	} catch (e) {
+		return e.code !== "ESRCH";
+	}
+}
+function code(e) {
+	return e.code;
+}
+function idOf(info) {
+	return {
+		dev: String(info.dev),
+		ino: String(info.ino),
+		birthtimeNs: String(info.birthtimeNs)
+	};
+}
+function sameId(a, b) {
+	return a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
+}
+function dirIdOf(path, { lstat = defaultLstat } = {}) {
+	let info = lstat(path);
+	return info?.isDirectory() ? idOf(info) : void 0;
+}
+function acquireLock(base, { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 50 }) {
+	let lock = (0, node_path.join)(base, LOCK_NAME), mine = (0, node_path.join)(base, `${LOCK_NAME}.${process.pid}`);
+	(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
+	try {
+		retryBriefly(() => {
+			try {
+				(0, node_fs.linkSync)(mine, lock);
+			} catch (e) {
+				throw takeOverStaleLock(lock, pidAlive, now), e;
+			}
+		}, {
+			attempts: lockAttempts,
+			delayMs: 100,
+			retryOn: (e) => code(e) === "EEXIST"
+		});
+	} finally {
+		(0, node_fs.rmSync)(mine, { force: !0 });
+	}
+	return () => (0, node_fs.rmSync)(lock, { force: !0 });
+}
+function takeOverStaleLock(lock, pidAlive, now) {
+	let pid, age;
+	try {
+		pid = Number((0, node_fs.readFileSync)(lock, "utf8")), age = now().getTime() - (0, node_fs.lstatSync)(lock).mtimeMs;
+	} catch {
+		return;
+	}
+	age < 2e3 || Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
+}
+function emptyLedger() {
+	return {
+		version: 1,
+		dirs: {},
+		uses: {}
+	};
+}
+function isId(value) {
+	let v = value;
+	return typeof v == "object" && !!v && [
+		v.dev,
+		v.ino,
+		v.birthtimeNs
+	].every((s) => typeof s == "string" && /^\d+$/.test(s));
+}
+function readLedger(path) {
+	let fd;
+	try {
+		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
+	} catch (e) {
+		return code(e) === "ENOENT" ? emptyLedger() : `${path} cannot be opened (${errorMessage(e)})`;
+	}
+	try {
+		let info = (0, node_fs.fstatSync)(fd);
+		if (!info.isFile()) return `${path} is not a file`;
+		if (info.size > 65536) return `${path} is ${info.size} bytes, too large`;
+		let parsed = JSON.parse((0, node_fs.readFileSync)(fd, "utf8"));
+		return parsed?.version === 1 && typeof parsed.dirs == "object" && parsed.dirs !== null && typeof parsed.uses == "object" && parsed.uses !== null && Object.entries(parsed.dirs).every(([p, d]) => p.startsWith("/") && isId(d)) && Object.entries(parsed.uses).every(([n, u]) => USE_NAME_RE.test(n) && isId(u)) ? parsed : `${path} is not a ledger this version can read`;
+	} catch (e) {
+		return `${path} cannot be read (${errorMessage(e)})`;
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function writeLedger(path, ledger) {
+	let tmp = `${path}.${process.pid}.tmp`;
+	(0, node_fs.rmSync)(tmp, { force: !0 });
+	let fd = (0, node_fs.openSync)(tmp, node_fs.constants.O_WRONLY | node_fs.constants.O_CREAT | node_fs.constants.O_EXCL | node_fs.constants.O_NOFOLLOW, 384);
+	try {
+		(0, node_fs.writeSync)(fd, `${JSON.stringify(ledger, null, 2)}\n`);
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+	(0, node_fs.renameSync)(tmp, path);
+}
+function withLedger(fn, deps) {
+	let base = baseOf(deps), path = (0, node_path.join)(base, NSS_DB_LEDGER_NAME), release = acquireLock(base, deps);
+	try {
+		let ledger = readLedger(path);
+		try {
+			return fn(ledger);
+		} finally {
+			typeof ledger != "string" && writeLedger(path, ledger);
+		}
+	} finally {
+		release();
+	}
+}
+function baseOf({ base }) {
+	return base ?? SANDBOX_SCRATCH_BASE;
+}
+function dropStaleUses(ledger, deps) {
+	let { lstat = defaultLstat } = deps;
+	for (let name of Object.keys(ledger.uses)) lstat((0, node_path.join)(baseOf(deps), name)) === void 0 && delete ledger.uses[name];
+}
+function removeUnusedDirs(ledger, deps) {
+	if (Object.keys(ledger.uses).length > 0) return;
+	let { rmdir = node_fs.rmdirSync, info } = deps;
+	for (let path of Object.keys(ledger.dirs).sort((a, b) => b.length - a.length)) {
+		let entry = ledger.dirs[path];
+		delete ledger.dirs[path];
+		let current = dirIdOf(path, deps);
+		if (current === void 0) {
+			info?.(`buildcage: ${path}, made for Chromium's NSS database by ${entry.createdBy}, had already been removed by something else`);
+			continue;
+		}
+		if (sameId(current, entry)) try {
+			rmdir(path);
+		} catch {}
+	}
+}
+function releaseNssDb(name, deps = {}) {
+	let { lstat = defaultLstat, warn } = deps, path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
+	if (lstat(path) !== void 0) try {
+		withLedger((ledger) => {
+			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses(ledger, deps), removeUnusedDirs(ledger, deps));
+		}, deps);
+	} catch (e) {
+		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for Chromium's NSS database are left in place for a later step to remove`);
+	}
+}
+//#endregion
 //#region src/lib/post-cleanup.ts
 function startedByThisStep(containerName, env, readOwner) {
 	let owner = readOwner(containerName);
 	return owner === null || owner === ownerToken(env);
 }
-function planPostCleanup(state, env, annotation, { readOwner = readContainerOwner, fileExists = node_fs.existsSync, removeScratchDir = cleanupScratchDir } = {}) {
+function planPostCleanup(state, env, annotation, { readOwner = readContainerOwner, fileExists = node_fs.existsSync, removeScratchDir = cleanupScratchDir, releaseNssDb: releaseNssDbUse = releaseNssDb } = {}) {
 	let { targets, problems } = resolvePostState(state);
 	for (let problem of problems) annotation.error(`run post-cleanup: ${problem}`);
 	if (!targets) return null;
 	if (!startedByThisStep(targets.containerName, env, readOwner)) return annotation.error("run post-cleanup: the proxy container named in GITHUB_STATE was started by a different step. Skipping all post-step cleanup: tearing it down would stop that step's proxy and delete its sandbox scratch directory."), null;
+	let reclaimed = !1;
 	try {
 		let scratchDir = scratchDirFor(targets.containerName);
 		fileExists(scratchDir) && removeScratchDir(scratchDir, {
 			ephemeralRoots: targets.ephemeralRoots,
 			warn: annotation.warning
-		});
+		}), reclaimed = !fileExists(scratchDir);
 	} catch (e) {
 		annotation.warning(`run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
 	}
-	return targets;
+	return reclaimed && releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning }), targets;
 }
 //#endregion
 //#region src/lib/sandbox/nss-db.ts

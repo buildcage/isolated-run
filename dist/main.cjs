@@ -18986,8 +18986,213 @@ function formatFilesystemPlanLog(mode, overlayRoots, writeThrough) {
 	return lines;
 }
 //#endregion
+//#region src/lib/sandbox/nss-db-ledger.ts
+const NSS_DB_LEDGER_NAME = "nssdb-ledger.json", LOCK_NAME = "nssdb-ledger.lock", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
+function defaultLstat$1(path) {
+	return (0, node_fs.lstatSync)(path, {
+		bigint: !0,
+		throwIfNoEntry: !1
+	});
+}
+function defaultMkdir(path, mode) {
+	(0, node_fs.mkdirSync)(path, { mode });
+}
+function defaultPidAlive$1(pid) {
+	try {
+		return process.kill(pid, 0), !0;
+	} catch (e) {
+		return e.code !== "ESRCH";
+	}
+}
+function code(e) {
+	return e.code;
+}
+function idOf(info) {
+	return {
+		dev: String(info.dev),
+		ino: String(info.ino),
+		birthtimeNs: String(info.birthtimeNs)
+	};
+}
+function sameId(a, b) {
+	return a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
+}
+function dirIdOf(path, { lstat = defaultLstat$1 } = {}) {
+	let info = lstat(path);
+	return info?.isDirectory() ? idOf(info) : void 0;
+}
+function stillThere(path, id, deps = {}) {
+	let current = dirIdOf(path, deps);
+	return current !== void 0 && sameId(current, id);
+}
+function acquireLock(base, { pidAlive = defaultPidAlive$1, now = () => new Date(), lockAttempts = 50 }) {
+	let lock = (0, node_path.join)(base, LOCK_NAME), mine = (0, node_path.join)(base, `${LOCK_NAME}.${process.pid}`);
+	(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
+	try {
+		retryBriefly(() => {
+			try {
+				(0, node_fs.linkSync)(mine, lock);
+			} catch (e) {
+				throw takeOverStaleLock(lock, pidAlive, now), e;
+			}
+		}, {
+			attempts: lockAttempts,
+			delayMs: 100,
+			retryOn: (e) => code(e) === "EEXIST"
+		});
+	} finally {
+		(0, node_fs.rmSync)(mine, { force: !0 });
+	}
+	return () => (0, node_fs.rmSync)(lock, { force: !0 });
+}
+function takeOverStaleLock(lock, pidAlive, now) {
+	let pid, age;
+	try {
+		pid = Number((0, node_fs.readFileSync)(lock, "utf8")), age = now().getTime() - (0, node_fs.lstatSync)(lock).mtimeMs;
+	} catch {
+		return;
+	}
+	age < 2e3 || Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
+}
+function emptyLedger() {
+	return {
+		version: 1,
+		dirs: {},
+		uses: {}
+	};
+}
+function isId(value) {
+	let v = value;
+	return typeof v == "object" && !!v && [
+		v.dev,
+		v.ino,
+		v.birthtimeNs
+	].every((s) => typeof s == "string" && /^\d+$/.test(s));
+}
+function readLedger(path) {
+	let fd;
+	try {
+		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
+	} catch (e) {
+		return code(e) === "ENOENT" ? emptyLedger() : `${path} cannot be opened (${errorMessage(e)})`;
+	}
+	try {
+		let info = (0, node_fs.fstatSync)(fd);
+		if (!info.isFile()) return `${path} is not a file`;
+		if (info.size > 65536) return `${path} is ${info.size} bytes, too large`;
+		let parsed = JSON.parse((0, node_fs.readFileSync)(fd, "utf8"));
+		return parsed?.version === 1 && typeof parsed.dirs == "object" && parsed.dirs !== null && typeof parsed.uses == "object" && parsed.uses !== null && Object.entries(parsed.dirs).every(([p, d]) => p.startsWith("/") && isId(d)) && Object.entries(parsed.uses).every(([n, u]) => USE_NAME_RE.test(n) && isId(u)) ? parsed : `${path} is not a ledger this version can read`;
+	} catch (e) {
+		return `${path} cannot be read (${errorMessage(e)})`;
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function writeLedger(path, ledger) {
+	let tmp = `${path}.${process.pid}.tmp`;
+	(0, node_fs.rmSync)(tmp, { force: !0 });
+	let fd = (0, node_fs.openSync)(tmp, node_fs.constants.O_WRONLY | node_fs.constants.O_CREAT | node_fs.constants.O_EXCL | node_fs.constants.O_NOFOLLOW, 384);
+	try {
+		(0, node_fs.writeSync)(fd, `${JSON.stringify(ledger, null, 2)}\n`);
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+	(0, node_fs.renameSync)(tmp, path);
+}
+function withLedger(fn, deps) {
+	let base = baseOf(deps), path = (0, node_path.join)(base, NSS_DB_LEDGER_NAME), release = acquireLock(base, deps);
+	try {
+		let ledger = readLedger(path);
+		try {
+			return fn(ledger);
+		} finally {
+			typeof ledger != "string" && writeLedger(path, ledger);
+		}
+	} finally {
+		release();
+	}
+}
+function baseOf({ base }) {
+	return base ?? SANDBOX_SCRATCH_BASE;
+}
+function dropStaleUses(ledger, deps) {
+	let { lstat = defaultLstat$1 } = deps;
+	for (let name of Object.keys(ledger.uses)) lstat((0, node_path.join)(baseOf(deps), name)) === void 0 && delete ledger.uses[name];
+}
+function removeUnusedDirs(ledger, deps) {
+	if (Object.keys(ledger.uses).length > 0) return;
+	let { rmdir = node_fs.rmdirSync, info } = deps;
+	for (let path of Object.keys(ledger.dirs).sort((a, b) => b.length - a.length)) {
+		let entry = ledger.dirs[path];
+		delete ledger.dirs[path];
+		let current = dirIdOf(path, deps);
+		if (current === void 0) {
+			info?.(`buildcage: ${path}, made for Chromium's NSS database by ${entry.createdBy}, had already been removed by something else`);
+			continue;
+		}
+		if (sameId(current, entry)) try {
+			rmdir(path);
+		} catch {}
+	}
+}
+function claimNssDb(name, destination, dirs, deps = {}) {
+	let { mkdir = defaultMkdir, lstat = defaultLstat$1, now = () => new Date(), warn } = deps;
+	return withLedger((ledger) => {
+		let undo = () => {
+			typeof ledger != "string" && removeUnusedDirs(ledger, deps);
+		};
+		typeof ledger != "string" && dropStaleUses(ledger, deps);
+		try {
+			for (let path of dirs) {
+				try {
+					mkdir(path, 448);
+				} catch (e) {
+					let info = code(e) === "EEXIST" ? lstat(path) : void 0;
+					if (!info?.isDirectory() || info.isSymbolicLink()) throw e;
+					continue;
+				}
+				let made = lstat(path);
+				typeof ledger != "string" && made && made.birthtimeNs !== 0n && (ledger.dirs[path] = {
+					...idOf(made),
+					createdBy: name,
+					createdAt: now().toISOString()
+				});
+			}
+		} catch (e) {
+			throw undo(), e;
+		}
+		let current = lstat(destination);
+		if (!current?.isDirectory()) throw undo(), Error(`${destination} is not a directory`);
+		let destinationId = idOf(current);
+		return typeof ledger == "string" ? (warn?.(`buildcage: ${ledger}, so the directories made for Chromium's NSS database are left in place after the step`), {
+			destinationId,
+			registered: !1
+		}) : (ledger.uses[name] = {
+			destination,
+			...destinationId,
+			startedAt: now().toISOString()
+		}, {
+			destinationId,
+			registered: !0
+		});
+	}, deps);
+}
+function releaseNssDb(name, deps = {}) {
+	let { lstat = defaultLstat$1, warn } = deps, path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
+	if (lstat(path) !== void 0) try {
+		withLedger((ledger) => {
+			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses(ledger, deps), removeUnusedDirs(ledger, deps));
+		}, deps);
+	} catch (e) {
+		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for Chromium's NSS database are left in place for a later step to remove`);
+	}
+}
+function useNameFor(scratchDir) {
+	return (0, node_path.basename)(scratchDir);
+}
+//#endregion
 //#region src/lib/sandbox/nss-db.ts
-const NSS_CA_DB_DESTINATION = "/dev/buildcage-nssdb", NSS_SLOT = `library=libsoftokn3.so
+const NSS_XDG_DB_PATH = ".local/share/pki/nssdb", NSS_CA_DB_DESTINATION = "/dev/buildcage-nssdb", NSS_SLOT = `library=libsoftokn3.so
 name="buildcage proxy CA"
 parameters="configdir='sql:${NSS_CA_DB_DESTINATION}' flags=readOnly"\nNSS=""
 
@@ -19024,9 +19229,6 @@ function defaultStat$1(path) {
 		return;
 	}
 }
-function defaultMkdir(path, mode) {
-	(0, node_fs.mkdirSync)(path, { mode });
-}
 function defaultCopyDir(source, destination, filter) {
 	(0, node_fs.cpSync)(source, destination, {
 		recursive: !0,
@@ -19048,7 +19250,7 @@ function defaultAccess(path) {
 function planNssDb(home, { lstat = defaultLstat } = {}) {
 	let legacy = walkPlan(home, ".pki/nssdb", lstat);
 	if (typeof legacy == "string" || legacy.missing.length === 0) return legacy;
-	let xdg = walkPlan(home, ".local/share/pki/nssdb", lstat);
+	let xdg = walkPlan(home, NSS_XDG_DB_PATH, lstat);
 	return typeof xdg != "string" && xdg.missing.length === 0 ? xdg : legacy;
 }
 function walkPlan(home, path, lstat) {
@@ -19069,12 +19271,12 @@ function walkPlan(home, path, lstat) {
 	};
 }
 function prepareNssDb(containerName, dir, home, deps = {}) {
-	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat$1, realpath = node_fs.realpathSync, mkdir = defaultMkdir, copyDir = defaultCopyDir, rmdir = node_fs.rmdirSync, warn } = deps;
+	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat$1, realpath = node_fs.realpathSync, copyDir = defaultCopyDir, warn } = deps;
 	if (!home || stat(home)?.isDirectory() !== !0) {
 		warn?.(`could not add the proxy CA to Chromium's NSS database: HOME (${JSON.stringify(home ?? "")}) is not a directory. A Chromium step will not trust the proxy.`);
 		return;
 	}
-	let plan = planNssDb(realpath(home), { lstat });
+	let realHome = realpath(home), plan = planNssDb(realHome, { lstat });
 	if (typeof plan == "string") {
 		warn?.(`could not add the proxy CA to Chromium's NSS database: ${plan}. A Chromium step will not trust the proxy.`);
 		return;
@@ -19088,9 +19290,10 @@ function prepareNssDb(containerName, dir, home, deps = {}) {
 	let path = (0, node_path.join)(dir, "nssdb"), files = {
 		path,
 		template,
-		destination: plan.destination,
-		createdDirs: []
-	}, exists = plan.missing.length === 0, refusal = exists ? whyNotSlot(plan.destination, deps) : void 0;
+		destination: plan.destination
+	}, xdgPath = (0, node_path.join)(realHome, NSS_XDG_DB_PATH);
+	plan.destination !== xdgPath && lstat(xdgPath) === void 0 && (files.xdgPath = xdgPath);
+	let exists = lstat(plan.destination)?.isDirectory() === !0, refusal = exists ? whyNotSlot(plan.destination, deps) : void 0;
 	if (refusal === void 0) try {
 		files.slot = prepareSlot(dir, files, template, exists, deps);
 	} catch (e) {
@@ -19100,16 +19303,24 @@ function prepareNssDb(containerName, dir, home, deps = {}) {
 		});
 	}
 	refusal !== void 0 && (deps.info?.(`buildcage: ${refusal}, so the NSS database at ${plan.destination} is covered for the command with one trusting only the proxy CA`), copyDir(template, path));
-	for (let missing of plan.missing) {
-		try {
-			mkdir(missing, 448);
-		} catch (e) {
-			removeNssDbDirs(files, { rmdir }), warn?.(`could not add the proxy CA to Chromium's NSS database: cannot create ${missing} (${errorMessage(e)}). A Chromium step will not trust the proxy.`);
-			return;
-		}
-		files.createdDirs.push(missing);
+	let name = useNameFor(dir);
+	try {
+		files.claim = {
+			name,
+			...claimNssDb(name, plan.destination, dirsDownTo(realHome, plan.destination), {
+				warn,
+				...deps.ledger
+			})
+		};
+	} catch (e) {
+		warn?.(`could not add the proxy CA to Chromium's NSS database: cannot create or claim ${plan.destination} (${errorMessage(e)}). A Chromium step will not trust the proxy.`);
+		return;
 	}
 	return files;
+}
+function dirsDownTo(home, destination) {
+	let dir = home;
+	return (0, node_path.relative)(home, destination).split("/").map((component) => dir = (0, node_path.join)(dir, component));
 }
 function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess }) {
 	for (let path of [destination, ...NSS_DB_FILES.map((name) => (0, node_path.join)(destination, name))]) {
@@ -19287,10 +19498,13 @@ function nssDbChange(files, { readDir = node_fs.readdirSync, readFile = node_fs.
 	}
 	if (changed) return `the command changed the NSS database at ${files.destination}, which the inspect engine replaces for the step with one trusting only its proxy CA; the write is discarded`;
 }
-function removeNssDbDirs(files, { rmdir = node_fs.rmdirSync } = {}) {
-	for (let dir of [...files.createdDirs].reverse()) try {
-		rmdir(dir);
-	} catch {}
+function nssDbDetached(files, deps = {}) {
+	if (!files.claim || stillThere(files.destination, files.claim.destinationId, deps)) return;
+	let message = `buildcage: ${files.destination} was removed or replaced on the runner while the command ran, which detached the NSS database Buildcage had mounted there: Chromium in this step did not trust the proxy CA from then on, and what the command wrote to that database is discarded. Something outside this step removed it, such as another step running in parallel.`;
+	return files.xdgPath && dirIdOf(files.xdgPath, deps) !== void 0 && (message += ` Chromium may have made a database of its own at ${files.xdgPath}.`), message;
+}
+function releaseNssDbDirs(files, deps = {}) {
+	files.claim?.registered && releaseNssDb(files.claim.name, deps);
 }
 //#endregion
 //#region src/lib/sandbox/ca-trust.ts
@@ -20351,7 +20565,8 @@ const realDeps$2 = {
 	prepareNssDb,
 	nssDbChange,
 	settleNssDbSlot,
-	removeNssDbDirs,
+	nssDbDetached,
+	releaseNssDbDirs,
 	createOverlayScratchDirs,
 	writeResolvConf,
 	writeRunScript,
@@ -20445,7 +20660,7 @@ function assembleBundle(dir, options, deps) {
 			renameGuardDirs: renameGuardDirs$1
 		});
 	} catch (e) {
-		throw caTrust?.nssDb && deps.removeNssDbDirs(caTrust.nssDb), e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
+		throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
 	}
 	return {
 		config,
@@ -20458,20 +20673,30 @@ function assembleBundle(dir, options, deps) {
 function persists(path, { filesystemMode, writeThroughPaths, env }) {
 	return withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)).some((p) => p === "/" || path === p || path.startsWith(`${p}/`));
 }
-function finishNssDb(caTrust, options, { nssDbChange, settleNssDbSlot, removeNssDbDirs, readFile, info }) {
-	let nssDb = caTrust?.nssDb;
+function releaseDeps({ warn }, { info }) {
+	return {
+		info,
+		warn
+	};
+}
+function finishNssDb(caTrust, options, deps) {
+	let { nssDbChange, nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info } = deps, nssDb = caTrust?.nssDb;
 	if (!nssDb) return;
-	let { failOnCaResidue, warn } = options, residue = (message, code) => {
+	let { failOnCaResidue, warn } = options, release = () => releaseNssDbDirs(nssDb, releaseDeps(options, deps)), residue = (message, code) => {
 		if (!failOnCaResidue) {
 			warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
 			return;
 		}
 		throw new SandboxError(`${message}. To let the step carry on with only a warning, set fail_on_ca_residue: false (a copy of the CA is then written back, and a write to a covered NSS database discarded).`, code);
-	};
-	if (!nssDb.slot) {
-		removeNssDbDirs(nssDb);
+	}, persist = persists(nssDb.destination, options), detached = persist ? nssDbDetached(nssDb) : void 0;
+	if (detached !== void 0 && warn(detached), !nssDb.slot) {
+		release();
 		let change = nssDbChange(nssDb);
 		change !== void 0 && residue(change, "NSS_DATABASE_CHANGED");
+		return;
+	}
+	if (detached !== void 0) {
+		release();
 		return;
 	}
 	try {
@@ -20479,14 +20704,14 @@ function finishNssDb(caTrust, options, { nssDbChange, settleNssDbSlot, removeNss
 			...nssDb,
 			slot: nssDb.slot
 		}, {
-			persist: persists(nssDb.destination, options),
+			persist,
 			caPem: readFile(caTrust.ownCaPath),
 			onResidue: (message) => residue(message, "NSS_DATABASE_CA_COPIED")
 		}) === "discarded" && info(`buildcage: what the command wrote to the NSS database at ${nssDb.destination} is discarded, as the filesystem mode discards writes there`);
 	} catch (e) {
 		throw e instanceof SandboxError ? e : new SandboxError(`could not write back what the command wrote to the NSS database at ${nssDb.destination}: ` + errorMessage(e), "NSS_DATABASE_WRITE_BACK_FAILED");
 	} finally {
-		removeNssDbDirs(nssDb);
+		release();
 	}
 }
 function runSandboxedCommand(options, overrides = {}) {
@@ -20510,7 +20735,7 @@ function runSandboxedCommand(options, overrides = {}) {
 				targetIp: "198.19.255.101"
 			});
 		} catch (e) {
-			throw caTrust?.nssDb && deps.removeNssDbDirs(caTrust.nssDb), e;
+			throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e;
 		}
 		return finishNssDb(caTrust, options, deps), exitCode;
 	}, {
