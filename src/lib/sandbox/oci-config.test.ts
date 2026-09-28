@@ -895,7 +895,7 @@ describe("buildOciConfig: caTrust", () => {
       destination: OWN_CA_DESTINATION,
       type: "none",
       source: caTrust.ownCaPath,
-      options: ["rbind", "ro"],
+      options: ["rbind", "ro", "nosuid", "nodev", "noexec"],
     });
     expect(config.mounts).toContainEqual({
       destination: SYSTEM_STORE,
@@ -905,15 +905,22 @@ describe("buildOciConfig: caTrust", () => {
     });
   });
 
-  it("keeps the CA mounts after a write_through entry containing them", () => {
+  it("keeps the system store mount after a write_through entry containing it", () => {
     const config = build(fakeBaseSpec(), {
       ...baseArgs,
       writable: { ...baseArgs.writable, writablePaths: ["/etc"] },
       caTrust,
     });
     const destinations = config.mounts.map((m) => m.destination);
-    for (const ca of [OWN_CA_DESTINATION, SYSTEM_STORE]) {
-      expect(destinations.indexOf(ca)).toBeGreaterThan(destinations.indexOf("/etc"));
-    }
+    expect(destinations.indexOf(SYSTEM_STORE)).toBeGreaterThan(destinations.indexOf("/etc"));
+  });
+
+  // Mounted before the tmpfs, the file would be hidden under it.
+  it("mounts the CA-only file after runc's /dev tmpfs, which it sits under", () => {
+    const spec = fakeBaseSpec();
+    spec.mounts.unshift({ destination: "/dev", type: "tmpfs", source: "tmpfs" });
+    const destinations = build(spec, { ...baseArgs, caTrust }).mounts.map((m) => m.destination);
+    expect(OWN_CA_DESTINATION.startsWith("/dev/")).toBe(true);
+    expect(destinations.indexOf(OWN_CA_DESTINATION)).toBeGreaterThan(destinations.indexOf("/dev"));
   });
 });

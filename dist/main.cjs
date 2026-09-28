@@ -19267,7 +19267,7 @@ const SYSTEM_CA_CANDIDATES = [
 	"/etc/ssl/ca-bundle.pem",
 	"/etc/pki/tls/cacert.pem",
 	"/etc/ssl/cert.pem"
-], OWN_CA_DESTINATION = "/etc/buildcage-ca.pem";
+], OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
 function defaultExec$1(command, args, env) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args, { env });
 }
@@ -19363,7 +19363,13 @@ function caTrustAdditions(files, env) {
 		destination: OWN_CA_DESTINATION,
 		type: "none",
 		source: files.ownCaPath,
-		options: ["rbind", "ro"]
+		options: [
+			"rbind",
+			"ro",
+			"nosuid",
+			"nodev",
+			"noexec"
+		]
 	}], extraEnv = {};
 	for (let name of POINT_AT_OWN_CA) env[name] || (extraEnv[name] = OWN_CA_DESTINATION);
 	if (files.systemCa) {
@@ -19482,11 +19488,7 @@ function hostRunCoverageLayers() {
 		writablePaths: new Set([HOST_RUN_LOCK_DIR])
 	};
 }
-const RESERVED_INTERNAL_DESTINATIONS = [
-	RESOLV_CONF_DESTINATION,
-	OWN_CA_DESTINATION,
-	...SYSTEM_CA_CANDIDATES
-];
+const RESERVED_INTERNAL_DESTINATIONS = [RESOLV_CONF_DESTINATION, ...SYSTEM_CA_CANDIDATES];
 function assertNoFreshMountDestinations(writableDirs, freshMountDestinations) {
 	for (let dir of writableDirs) {
 		let shadowed = [...freshMountDestinations].find((d) => isAtOrUnder(dir, d));

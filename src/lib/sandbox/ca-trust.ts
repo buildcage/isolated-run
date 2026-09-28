@@ -35,11 +35,8 @@ import type { MountEntry } from "./types.ts";
  * the step ends, and the real host store is never touched (the augmented copy
  * goes back over the path it was read from, so there is always a file there).
  *
- * OWN_CA_DESTINATION is the one exception: nothing exists at that path
- * ahead of time, so runc creates an empty placeholder file to mount onto,
- * which on this rootfs is a real write to the host filesystem. It is
- * removed by run-isolated.sh's cleanup(), whose comment gives the ordering
- * and the guard it removes it under.
+ * OWN_CA_DESTINATION is the one path with nothing there ahead of time. runc
+ * creates its mount point in the container's own /dev tmpfs, not on the host.
  */
 export interface CaTrustFiles {
   /** A CA-only file, mounted at OWN_CA_DESTINATION, for variables that add
@@ -74,10 +71,9 @@ export const SYSTEM_CA_CANDIDATES = [
   "/etc/ssl/cert.pem", // Alpine
 ];
 
-/** Where the two files above are mounted inside the sandbox. Changing this
- *  value must stay in sync with run-isolated.sh's own BUILDCAGE_CA_PLACEHOLDER
- *  (its cleanup() targets this exact path; see the module doc comment). */
-export const OWN_CA_DESTINATION = "/etc/buildcage-ca.pem";
+/** Not under /run: `write_through` can put the host's /run back, and the mount
+ *  point would then be created on the host. */
+export const OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
 
 export interface CaTrustDeps {
   exec?: (command: string, args: string[], env?: NodeJS.ProcessEnv) => void;
@@ -334,7 +330,7 @@ export function caTrustAdditions(files: CaTrustFiles, env: NodeJS.ProcessEnv): C
       destination: OWN_CA_DESTINATION,
       type: "none",
       source: files.ownCaPath,
-      options: ["rbind", "ro"],
+      options: ["rbind", "ro", "nosuid", "nodev", "noexec"],
     },
   ];
   const extraEnv: Record<string, string> = {};

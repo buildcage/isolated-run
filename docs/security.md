@@ -166,11 +166,11 @@ the host `/` as a writable copy.
 
 `write_through:` adds further paths for tools that need to write elsewhere, and `/` disables the
 restriction entirely. The sandbox's own mounts outrank it: `/etc/resolv.conf` and, under `inspect`,
-the two CA files are mounted after every writable exception, so `write_through: /etc` cannot take
-the sandbox's DNS or CA trust with it. Naming one of those three paths directly, or a filesystem
-runc mounts fresh such as `/proc`, fails the step rather than being silently overridden; without
-that, `write_through: /proc` would shadow the sandbox's procfs with the host's and undo the
-PID-namespace separation above.
+the augmented system CA store are mounted after every writable exception, so `write_through: /etc`
+cannot take the sandbox's DNS or CA trust with it. The CA-only file sits under the sandbox's own
+`/dev`. Naming one of those paths directly, or a filesystem runc mounts fresh such as `/proc` or
+`/dev`, fails the step rather than being silently overridden; without that, `write_through: /proc`
+would shadow the sandbox's procfs with the host's and undo the PID-namespace separation above.
 
 These checks and the mount use the directory an entry really resolves to, since runc follows
 symlinks in a mount's source and destination. Only root-owned symlinks are followed. An entry
