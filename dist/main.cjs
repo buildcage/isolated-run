@@ -18987,6 +18987,24 @@ function defaultIsDirectory(path) {
 		return !0;
 	}
 }
+function defaultStat$2(path) {
+	let { uid, gid, mode } = (0, node_fs.statSync)(path);
+	return {
+		uid,
+		gid,
+		mode
+	};
+}
+function defaultExecFile$2(command, args) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
+}
 function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs.existsSync, deviceOf = defaultDeviceOf } = {}) {
 	let notCoveredByWriteThrough = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !writeThroughPaths.some((a) => isAtOrUnder(c, a)));
 	return notCoveredByWriteThrough.filter((c) => {
@@ -19008,10 +19026,26 @@ function slugify(path) {
 function overlayUpperFor(scratchDir, root) {
 	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
 }
-function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync } = {}) {
+function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat$2, execFile = defaultExecFile$2, self = {
+	uid: process.getuid(),
+	gid: process.getgid()
+} } = {}) {
 	return roots.map((path) => {
 		let upper = overlayUpperFor(scratchDir, path), work = (0, node_path.join)((0, node_path.dirname)(upper), "work");
-		return mkdir(upper, { recursive: !0 }), mkdir(work, { recursive: !0 }), {
+		mkdir(work, { recursive: !0 });
+		let { uid, gid, mode } = stat(path), perm = mode & 4095;
+		return uid === self.uid && gid === self.gid ? (mkdir(upper, { recursive: !0 }), chmod(upper, perm)) : execFile("sudo", [
+			"install",
+			"-d",
+			"-o",
+			String(uid),
+			"-g",
+			String(gid),
+			"-m",
+			perm.toString(8),
+			"--",
+			upper
+		]), {
 			path,
 			upper,
 			work

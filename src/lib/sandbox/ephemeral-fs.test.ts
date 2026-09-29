@@ -112,32 +112,103 @@ describe("determineOverlayRoots", () => {
   });
 });
 
-describe("createOverlayScratchDirs", () => {
-  it("creates upper/work as siblings of rootfs under <scratchDir>/ephemeral/<slug>", () => {
-    const created: string[] = [];
-    const mkdir = ((p: string) => {
-      created.push(p);
-    }) as unknown as typeof import("node:fs").mkdirSync;
+const RUNNER = { uid: 1001, gid: 1001 };
 
-    const result = createOverlayScratchDirs("/var/tmp/buildcage/sandbox-xyz", ["/home/runner"], {
-      mkdir,
-    });
+/** Records what createOverlayScratchDirs does, with `stat` as the lower root's owner and mode. */
+function scratchDeps(
+  stat: { uid: number; gid: number; mode: number } = { ...RUNNER, mode: 0o40755 },
+) {
+  const calls: string[][] = [];
+  return {
+    calls,
+    deps: {
+      mkdir: ((p: string) => {
+        calls.push(["mkdir", p]);
+      }) as unknown as typeof import("node:fs").mkdirSync,
+      chmod: (p: string, mode: number) => calls.push(["chmod", p, mode.toString(8)]),
+      stat: () => stat,
+      execFile: (command: string, args: string[]) => calls.push([command, ...args]),
+      self: RUNNER,
+    },
+  };
+}
+
+describe("createOverlayScratchDirs", () => {
+  const SCRATCH = "/var/tmp/buildcage/sandbox-xyz";
+  const SLUG_DIR = `${SCRATCH}/ephemeral/_home_runner`;
+
+  it("creates upper/work as siblings of rootfs under <scratchDir>/ephemeral/<slug>", () => {
+    const { deps } = scratchDeps();
+
+    const result = createOverlayScratchDirs(SCRATCH, ["/home/runner"], deps);
 
     expect(result).toStrictEqual([
-      {
-        path: "/home/runner",
-        upper: "/var/tmp/buildcage/sandbox-xyz/ephemeral/_home_runner/upper",
-        work: "/var/tmp/buildcage/sandbox-xyz/ephemeral/_home_runner/work",
-      },
-    ]);
-    expect(created).toStrictEqual([
-      "/var/tmp/buildcage/sandbox-xyz/ephemeral/_home_runner/upper",
-      "/var/tmp/buildcage/sandbox-xyz/ephemeral/_home_runner/work",
+      { path: "/home/runner", upper: `${SLUG_DIR}/upper`, work: `${SLUG_DIR}/work` },
     ]);
     // Never nested under the rootfs bind dir itself (a sibling, not a child).
     for (const p of [result[0]!.upper, result[0]!.work]) {
-      expect(p.startsWith("/var/tmp/buildcage/sandbox-xyz/rootfs/")).toBe(false);
+      expect(p.startsWith(`${SCRATCH}/rootfs/`)).toBe(false);
     }
+  });
+
+  it("gives upper the mode of a root the runner owns, without sudo", () => {
+    const { calls, deps } = scratchDeps({ ...RUNNER, mode: 0o40750 });
+
+    createOverlayScratchDirs(SCRATCH, ["/home/runner"], deps);
+
+    expect(calls).toStrictEqual([
+      ["mkdir", `${SLUG_DIR}/work`],
+      ["mkdir", `${SLUG_DIR}/upper`],
+      ["chmod", `${SLUG_DIR}/upper`, "750"],
+    ]);
+  });
+
+  it("keeps an upper that already exists, as prepareNssDb makes $HOME's", () => {
+    const { deps } = scratchDeps();
+    const mkdir = ((p: string, options?: { recursive?: boolean }) => {
+      if (p === `${SLUG_DIR}/upper` && !options?.recursive) throw new Error("EEXIST");
+    }) as unknown as typeof import("node:fs").mkdirSync;
+
+    expect(() =>
+      createOverlayScratchDirs(SCRATCH, ["/home/runner"], { ...deps, mkdir }),
+    ).not.toThrow();
+  });
+
+  it.each([
+    { mode: 0o41777, octal: "1777" },
+    { mode: 0o42775, octal: "2775" },
+  ])(
+    "makes upper through sudo with the owner and mode $octal of a root owned by another",
+    ({ mode, octal }) => {
+      const { calls, deps } = scratchDeps({ uid: 0, gid: 0, mode });
+
+      createOverlayScratchDirs(SCRATCH, ["/home/runner"], deps);
+
+      expect(calls).toStrictEqual([
+        ["mkdir", `${SLUG_DIR}/work`],
+        ["sudo", "install", "-d", "-o", "0", "-g", "0", "-m", octal, "--", `${SLUG_DIR}/upper`],
+      ]);
+    },
+  );
+
+  it("uses sudo when only the group differs", () => {
+    const { calls, deps } = scratchDeps({ uid: RUNNER.uid, gid: 0, mode: 0o40775 });
+
+    createOverlayScratchDirs(SCRATCH, ["/home/runner"], deps);
+
+    expect(calls.at(-1)).toStrictEqual([
+      "sudo",
+      "install",
+      "-d",
+      "-o",
+      "1001",
+      "-g",
+      "0",
+      "-m",
+      "775",
+      "--",
+      `${SLUG_DIR}/upper`,
+    ]);
   });
 });
 
@@ -205,9 +276,11 @@ describe("formatFilesystemPlanLog", () => {
 
 describe("createOverlayScratchDirs: roots that differ only in / and _", () => {
   it("gives each its own directory", () => {
-    const dirs = createOverlayScratchDirs("/scratch", ["/a/b_c", "/a/b/c", "/a/b%5Fc"], {
-      mkdir: () => undefined,
-    });
+    const dirs = createOverlayScratchDirs(
+      "/scratch",
+      ["/a/b_c", "/a/b/c", "/a/b%5Fc"],
+      scratchDeps().deps,
+    );
     expect(dirs.map((d) => d.upper)).toStrictEqual([
       "/scratch/ephemeral/_a_b%5Fc/upper",
       "/scratch/ephemeral/_a_b_c/upper",
@@ -218,7 +291,7 @@ describe("createOverlayScratchDirs: roots that differ only in / and _", () => {
 
 describe("createOverlayScratchDirs: a root that slugifies to nothing", () => {
   it("falls back to _root so the directory still has a name", () => {
-    const dirs = createOverlayScratchDirs("/scratch", [""], { mkdir: () => undefined });
+    const dirs = createOverlayScratchDirs("/scratch", [""], scratchDeps().deps);
     expect(dirs[0].upper).toBe("/scratch/ephemeral/_root/upper");
   });
 });

@@ -1,11 +1,13 @@
-import { existsSync, statSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, existsSync, statSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { isAtOrUnder } from "./paths.ts";
+import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 import type { OverlayDirs } from "./types.ts";
 
-// Untested by design: the default behind determineOverlayRoots' deviceOf
-// seam, which only hands node:fs what the tested caller decided.
+// Untested by design: the defaults behind this module's seams, which only
+// hand node:fs and sudo what the tested caller decided.
 /* v8 ignore start */
 function defaultDeviceOf(path: string): number {
   return statSync(path).dev;
@@ -19,7 +21,25 @@ function defaultIsDirectory(path: string): boolean {
     return true;
   }
 }
+
+function defaultStat(path: string): OwnerAndMode {
+  const { uid, gid, mode } = statSync(path);
+  return { uid, gid, mode };
+}
+
+function defaultExecFile(command: string, args: string[]): void {
+  execFileSync(hostCommand(command), args, {
+    stdio: ["ignore", "ignore", "pipe"],
+    env: hostCommandEnv(command),
+  });
+}
 /* v8 ignore stop */
+
+interface OwnerAndMode {
+  uid: number;
+  gid: number;
+  mode: number;
+}
 
 export interface DetermineOverlayRootsOptions {
   exists?: (path: string) => boolean;
@@ -129,13 +149,46 @@ export function overlayUpperFor(scratchDir: string, root: string): string {
 export function createOverlayScratchDirs(
   scratchDir: string,
   roots: string[],
-  { mkdir = mkdirSync }: { mkdir?: typeof mkdirSync } = {},
+  {
+    mkdir = mkdirSync,
+    chmod = chmodSync,
+    stat = defaultStat,
+    execFile = defaultExecFile,
+    self = { uid: process.getuid!(), gid: process.getgid!() },
+  }: {
+    mkdir?: typeof mkdirSync;
+    chmod?: (path: string, mode: number) => void;
+    stat?: (path: string) => OwnerAndMode;
+    execFile?: (command: string, args: string[]) => void;
+    self?: { uid: number; gid: number };
+  } = {},
 ): OverlayDirs[] {
   return roots.map((path) => {
     const upper = overlayUpperFor(scratchDir, path);
     const work = join(dirname(upper), "work");
-    mkdir(upper, { recursive: true });
     mkdir(work, { recursive: true });
+    // The merged root takes upper's owner and mode, so upper takes the host's.
+    const { uid, gid, mode } = stat(path);
+    const perm = mode & 0o7777;
+    if (uid === self.uid && gid === self.gid) {
+      // prepareNssDb may already have made $HOME's.
+      mkdir(upper, { recursive: true });
+      chmod(upper, perm);
+    } else {
+      // install chowns before it chmods, so setgid survives the chown.
+      execFile("sudo", [
+        "install",
+        "-d",
+        "-o",
+        String(uid),
+        "-g",
+        String(gid),
+        "-m",
+        perm.toString(8),
+        "--",
+        upper,
+      ]);
+    }
     return { path, upper, work };
   });
 }
