@@ -18981,11 +18981,7 @@ function defaultDeviceOf(path) {
 	return (0, node_fs.statSync)(path).dev;
 }
 function defaultIsDirectory$1(path) {
-	try {
-		return (0, node_fs.statSync)(path).isDirectory();
-	} catch {
-		return !0;
-	}
+	return (0, node_fs.statSync)(path).isDirectory();
 }
 function defaultStat$2(path) {
 	let { uid, gid, mode } = (0, node_fs.statSync)(path);
@@ -19017,8 +19013,28 @@ function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs
 		}
 	});
 }
-function nestedMountRoots(overlayRoots, hostMountPoints, writeThroughPaths, { isDirectory = defaultIsDirectory$1 } = {}) {
-	return [...new Set(hostMountPoints)].filter((m) => !overlayRoots.includes(m) && overlayRoots.some((r) => isAtOrUnder(m, r)) && !writeThroughPaths.some((w) => isAtOrUnder(m, w)) && isDirectory(m));
+function isFuse(fsType) {
+	return fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.");
+}
+function nestedMountRoots(overlayRoots, hostMounts, writeThroughPaths, { isDirectory = defaultIsDirectory$1, warn } = {}) {
+	let fsTypes = new Map(hostMounts.map((m) => [m.mountPoint, m.fsType])), roots = [];
+	for (let [path, fsType] of fsTypes) {
+		if (overlayRoots.includes(path) || !overlayRoots.some((r) => isAtOrUnder(path, r)) || writeThroughPaths.some((w) => isAtOrUnder(path, w))) continue;
+		let reason;
+		if (path.includes(",") || path.includes(":")) reason = "an overlay mount option cannot contain \",\" or \":\"";
+		else if (isFuse(fsType)) reason = `it is a FUSE mount (${fsType}), which root may not be allowed to read`;
+		else try {
+			if (!isDirectory(path)) continue;
+		} catch (e) {
+			reason = `the runner cannot stat it (${errorMessage(e)})`;
+		}
+		if (reason !== void 0) {
+			warn?.(`filesystem_mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the command sees the empty directory beneath it: ${reason}. Use filesystem_mode: persistent if the command needs its contents.`);
+			continue;
+		}
+		roots.push(path);
+	}
+	return roots;
 }
 function slugify(path) {
 	return path.replace(/%/g, "%25").replace(/_/g, "%5F").replace(/\//g, "_") || "_root";
@@ -20370,9 +20386,9 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 			runnerTemp,
 			tmp,
 			workdir
-		].filter((p) => !!p), writeThroughPaths, deps), mountPoints = (deps.listHostMounts ?? listHostMounts)().map((m) => m.mountPoint);
+		].filter((p) => !!p), writeThroughPaths, deps), hostMounts = (deps.listHostMounts ?? listHostMounts)();
 		return {
-			overlayRoots: [...candidateRoots, ...nestedMountRoots(candidateRoots, mountPoints, writeThroughPaths, deps)],
+			overlayRoots: [...candidateRoots, ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps)],
 			writeThroughPaths,
 			createdDirs
 		};
@@ -67386,7 +67402,7 @@ async function runSandboxStep(env, overrides = {}) {
 	log(`Proxy engine: ${proxyEngine}`);
 	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs();
 	assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
-	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), containerName = generateContainerName(), plan, createPlan = () => (plan = resolveFilesystemPlan(filesystemMode, writeThroughInput, env), {
+	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), containerName = generateContainerName(), plan, createPlan = () => (plan = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn }), {
 		paths: plan.writeThroughPaths,
 		created: plan.createdDirs
 	}), writeThroughClaim;

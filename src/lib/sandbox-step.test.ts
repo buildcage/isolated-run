@@ -320,6 +320,7 @@ describe("runSandboxStep", () => {
 
     expect(mocks.runSandboxedCommand.mock.calls[0][0].warn).toBe(mocks.warn);
     expect(mocks.runSandboxedCommand.mock.calls[0][0].warn).not.toBe(annotation.warning);
+    expect(mocks.resolveFilesystemPlan.mock.calls[0][3]).toStrictEqual({ warn: mocks.warn });
   });
 
   it("suppresses annotations when this is not a real action run", async () => {

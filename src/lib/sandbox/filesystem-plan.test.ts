@@ -225,6 +225,19 @@ describe("resolveFilesystemPlan", () => {
     expect(plan.overlayRoots.sort()).toStrictEqual(["/home/runner", "/home/runner/_tool", "/tmp"]);
   });
 
+  it("warns about a host mount it leaves out rather than failing", () => {
+    const warn = vi.fn();
+    const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
+      exists: alwaysExists,
+      deviceOf: () => 1,
+      realpath: (p) => p,
+      listHostMounts: () => [{ mountPoint: "/home/runner/remote", fsType: "fuse.sshfs" }],
+      warn,
+    });
+    expect(plan.overlayRoots.sort()).toStrictEqual(["/home/runner", "/tmp"]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"/home/runner/remote"'));
+  });
+
   // /proc/self/mountinfo is Linux-only.
   it.skipIf(process.platform !== "linux")("reads the real host mount table by default", () => {
     const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
