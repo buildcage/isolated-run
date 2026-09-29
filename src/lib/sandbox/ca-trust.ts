@@ -201,8 +201,9 @@ export function writeCaTrustFiles(
       // The copy runs as the runner user, so an entry only root can read fails it.
       warn?.(
         `could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); ` +
-          "a tool that reads it (GnuTLS on RHEL or SUSE, such as wget) will not trust the " +
-          "proxy. Make it readable by the runner user, or use proxy_engine: universal.",
+          "a tool that reads it through GnuTLS or p11-kit (such as wget on RHEL or SUSE) will " +
+          "not trust the proxy. Check that the runner user can read it, or use " +
+          "proxy_engine: universal.",
       );
       return [];
     }

@@ -152,9 +152,9 @@ describe("writeCaTrustFiles with CA directories", () => {
     expect(written["/scratch/ca-dir0/buildcage-proxy-ca.pem"]).toBeUndefined();
     expect(warnings).toEqual([
       `could not add the proxy CA to the CA directory ${SUSE_ANCHORS} ` +
-        `(EACCES: permission denied, ${SUSE_ANCHORS}/private); a tool that reads it (GnuTLS on ` +
-        "RHEL or SUSE, such as wget) will not trust the proxy. Make it readable by the runner " +
-        "user, or use proxy_engine: universal.",
+        `(EACCES: permission denied, ${SUSE_ANCHORS}/private); a tool that reads it through ` +
+        "GnuTLS or p11-kit (such as wget on RHEL or SUSE) will not trust the proxy. Check that " +
+        "the runner user can read it, or use proxy_engine: universal.",
     ]);
   });
 

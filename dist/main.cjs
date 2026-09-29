@@ -19678,7 +19678,7 @@ function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writ
 		try {
 			copyDir(realpath(destination), path), writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420);
 		} catch (e) {
-			return warn?.(`could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); a tool that reads it (GnuTLS on RHEL or SUSE, such as wget) will not trust the proxy. Make it readable by the runner user, or use proxy_engine: universal.`), [];
+			return warn?.(`could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); a tool that reads it through GnuTLS or p11-kit (such as wget on RHEL or SUSE) will not trust the proxy. Check that the runner user can read it, or use proxy_engine: universal.`), [];
 		}
 		return [{
 			path,
