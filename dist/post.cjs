@@ -516,10 +516,11 @@ function withLedgerFile(base, fileName, lockName, read, fn, deps) {
 //#region src/lib/sandbox/mountinfo.ts
 function parseMountinfo(mountinfoContent) {
 	return mountinfoContent.split("\n").filter(Boolean).map((line) => {
-		let fields = line.split(" "), dashIndex = fields.indexOf("-");
+		let fields = line.split(" "), dashIndex = fields.indexOf("-"), superOptions = unescapeField(fields[dashIndex + 3]);
 		return {
 			mountPoint: unescapeField(fields[4]),
-			fsType: unescapeField(fields[dashIndex + 1])
+			fsType: unescapeField(fields[dashIndex + 1]),
+			superOptions: superOptions ? superOptions.split(",") : []
 		};
 	});
 }

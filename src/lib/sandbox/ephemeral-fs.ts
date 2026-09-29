@@ -108,10 +108,11 @@ export interface NestedMountRootsDeps {
   warn?: (message: string) => void;
 }
 
-// runc mounts as root, which a FUSE mount refuses unless it was made with
-// allow_other or allow_root.
-function isFuse(fsType: string): boolean {
-  return fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.");
+// The overlay reads its lowerdir as root, which a FUSE mount refuses unless it
+// was made with allow_other (allow_root sets that option in the kernel too).
+function rootCannotRead({ fsType, superOptions = [] }: HostMount): boolean {
+  const fuse = fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.");
+  return fuse && !superOptions.includes("allow_other");
 }
 
 /**
@@ -131,9 +132,9 @@ export function nestedMountRoots(
   { isDirectory = defaultIsDirectory, warn }: NestedMountRootsDeps = {},
 ): string[] {
   // The last mount stacked on a point is the one visible there.
-  const fsTypes = new Map(hostMounts.map((m) => [m.mountPoint, m.fsType]));
+  const visible = new Map(hostMounts.map((m) => [m.mountPoint, m]));
   const roots: string[] = [];
-  for (const [path, fsType] of fsTypes) {
+  for (const [path, mount] of visible) {
     if (
       overlayRoots.includes(path) ||
       !overlayRoots.some((r) => isAtOrUnder(path, r)) ||
@@ -144,8 +145,8 @@ export function nestedMountRoots(
     let reason: string | undefined;
     if (path.includes(",") || path.includes(":")) {
       reason = 'an overlay mount option cannot contain "," or ":"';
-    } else if (isFuse(fsType)) {
-      reason = `it is a FUSE mount (${fsType}), which root may not be allowed to read`;
+    } else if (rootCannotRead(mount)) {
+      reason = `it is a FUSE mount (${mount.fsType}) without allow_other, which root cannot read`;
     } else {
       try {
         if (!isDirectory(path)) continue;

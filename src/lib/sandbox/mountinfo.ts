@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import type { HostMount } from "./types.ts";
 
 /**
- * Pure: extract {mountPoint, fsType} for every line of raw
+ * Pure: extract {mountPoint, fsType, superOptions} for every line of raw
  * /proc/self/mountinfo content. Format (space-separated fields):
  *   ID PARENT-ID MAJOR:MINOR ROOT MOUNT-POINT OPTIONS [OPT-FIELDS...] - FSTYPE SOURCE SUPER-OPTIONS
- * The mount point is always field 5 (index 4); the filesystem type is
- * always the field right after the literal "-" separator, regardless of
- * how many optional fields precede it.
+ * The mount point is always field 5 (index 4); the filesystem type and
+ * super options are always the first and third fields after the literal "-"
+ * separator, regardless of how many optional fields precede it.
  */
 export function parseMountinfo(mountinfoContent: string): HostMount[] {
   return mountinfoContent
@@ -17,7 +17,12 @@ export function parseMountinfo(mountinfoContent: string): HostMount[] {
     .map((line) => {
       const fields = line.split(" ");
       const dashIndex = fields.indexOf("-");
-      return { mountPoint: unescapeField(fields[4]), fsType: unescapeField(fields[dashIndex + 1]) };
+      const superOptions = unescapeField(fields[dashIndex + 3]);
+      return {
+        mountPoint: unescapeField(fields[4]),
+        fsType: unescapeField(fields[dashIndex + 1]),
+        superOptions: superOptions ? superOptions.split(",") : [],
+      };
     });
 }
 

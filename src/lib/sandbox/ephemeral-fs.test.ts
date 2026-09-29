@@ -6,6 +6,7 @@ import {
   formatFilesystemPlanLog,
   nestedMountRoots,
 } from "./ephemeral-fs.ts";
+import type { HostMount } from "./types.ts";
 
 const ENV = {
   HOME: "/home/runner",
@@ -216,10 +217,7 @@ describe("nestedMountRoots", () => {
   const ext4 = (...mountPoints: string[]) =>
     mountPoints.map((mountPoint) => ({ mountPoint, fsType: "ext4" }));
 
-  function warned(
-    hostMounts: { mountPoint: string; fsType: string }[],
-    isDirectory: (path: string) => boolean = () => true,
-  ) {
+  function warned(hostMounts: HostMount[], isDirectory: (path: string) => boolean = () => true) {
     const warnings: string[] = [];
     const roots = nestedMountRoots(["/home/runner"], hostMounts, [], {
       isDirectory,
@@ -271,10 +269,11 @@ describe("nestedMountRoots", () => {
     ).toStrictEqual({ roots: ["/home/runner/_tool"], warnings: [] });
   });
 
-  it("warns and leaves hidden a FUSE mount, which root may be refused", () => {
+  it("warns and leaves hidden a FUSE mount without allow_other, which root cannot read", () => {
+    const user = ["rw", "user_id=1001", "group_id=1001"];
     const { roots, warnings } = warned([
-      { mountPoint: "/home/runner/remote", fsType: "fuse.sshfs" },
-      { mountPoint: "/home/runner/ntfs", fsType: "fuseblk" },
+      { mountPoint: "/home/runner/remote", fsType: "fuse.sshfs", superOptions: user },
+      { mountPoint: "/home/runner/ntfs", fsType: "fuseblk", superOptions: user },
       { mountPoint: "/home/runner/plain", fsType: "fuse" },
       { mountPoint: "/home/runner/_tool", fsType: "fusectl" },
     ]);
@@ -282,11 +281,24 @@ describe("nestedMountRoots", () => {
     expect(roots).toStrictEqual(["/home/runner/_tool"]);
     expect(warnings).toStrictEqual([
       'filesystem_mode: ephemeral cannot overlay the host mount "/home/runner/remote", so the ' +
-        "command sees the empty directory beneath it: it is a FUSE mount (fuse.sshfs), which root " +
-        "may not be allowed to read. Use filesystem_mode: persistent if the command needs its contents.",
+        "command sees the empty directory beneath it: it is a FUSE mount (fuse.sshfs) without " +
+        "allow_other, which root cannot read. Use filesystem_mode: persistent if the command " +
+        "needs its contents.",
       expect.stringContaining('"/home/runner/ntfs"'),
       expect.stringContaining('"/home/runner/plain"'),
     ]);
+  });
+
+  it("overlays a FUSE mount made with allow_other", () => {
+    expect(
+      warned([
+        {
+          mountPoint: "/home/runner/remote",
+          fsType: "fuse.sshfs",
+          superOptions: ["rw", "user_id=1001", "group_id=1001", "allow_other"],
+        },
+      ]),
+    ).toStrictEqual({ roots: ["/home/runner/remote"], warnings: [] });
   });
 
   it("judges a stacked mount point by the mount on top", () => {

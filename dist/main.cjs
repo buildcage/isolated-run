@@ -18613,10 +18613,11 @@ function retryBriefly(fn, options = {}) {
 //#region src/lib/sandbox/mountinfo.ts
 function parseMountinfo(mountinfoContent) {
 	return mountinfoContent.split("\n").filter(Boolean).map((line) => {
-		let fields = line.split(" "), dashIndex = fields.indexOf("-");
+		let fields = line.split(" "), dashIndex = fields.indexOf("-"), superOptions = unescapeField(fields[dashIndex + 3]);
 		return {
 			mountPoint: unescapeField(fields[4]),
-			fsType: unescapeField(fields[dashIndex + 1])
+			fsType: unescapeField(fields[dashIndex + 1]),
+			superOptions: superOptions ? superOptions.split(",") : []
 		};
 	});
 }
@@ -19013,16 +19014,16 @@ function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs
 		}
 	});
 }
-function isFuse(fsType) {
-	return fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.");
+function rootCannotRead({ fsType, superOptions = [] }) {
+	return (fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.")) && !superOptions.includes("allow_other");
 }
 function nestedMountRoots(overlayRoots, hostMounts, writeThroughPaths, { isDirectory = defaultIsDirectory$1, warn } = {}) {
-	let fsTypes = new Map(hostMounts.map((m) => [m.mountPoint, m.fsType])), roots = [];
-	for (let [path, fsType] of fsTypes) {
+	let visible = new Map(hostMounts.map((m) => [m.mountPoint, m])), roots = [];
+	for (let [path, mount] of visible) {
 		if (overlayRoots.includes(path) || !overlayRoots.some((r) => isAtOrUnder(path, r)) || writeThroughPaths.some((w) => isAtOrUnder(path, w))) continue;
 		let reason;
 		if (path.includes(",") || path.includes(":")) reason = "an overlay mount option cannot contain \",\" or \":\"";
-		else if (isFuse(fsType)) reason = `it is a FUSE mount (${fsType}), which root may not be allowed to read`;
+		else if (rootCannotRead(mount)) reason = `it is a FUSE mount (${mount.fsType}) without allow_other, which root cannot read`;
 		else try {
 			if (!isDirectory(path)) continue;
 		} catch (e) {
