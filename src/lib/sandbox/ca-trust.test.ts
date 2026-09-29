@@ -5,6 +5,7 @@ import {
   extractCaCert,
   writeCaTrustFiles,
   caTrustAdditions,
+  presetCaVariables,
   discoverJvmKeystores,
   writeJvmKeystoreFiles,
   OWN_CA_DESTINATION,
@@ -598,5 +599,52 @@ describe("assertWriteThroughClearOfCaTrust", () => {
     expect(() =>
       assertWriteThroughClearOfCaTrust({ ...files, nssDb: undefined }, [`${NSS_DB}/cert9.db`]),
     ).not.toThrow();
+  });
+});
+
+describe("presetCaVariables", () => {
+  const files = {
+    ownCaPath: "/scratch/buildcage-ca.pem",
+    systemCa: { path: "/scratch/system-ca-bundle.pem", destination: RHEL_STORE },
+    jvmKeystores: [],
+  };
+  // /usr/lib/ssl/cert.pem stands for a symlink to the store.
+  const realpath = (path: string) => (path === "/usr/lib/ssl/cert.pem" ? RHEL_STORE : path);
+
+  it("names a variable set to a file other than the store or the CA-only file", () => {
+    expect(
+      presetCaVariables(
+        files,
+        {
+          NODE_EXTRA_CA_CERTS: "/opt/corp-ca.pem",
+          GIT_SSL_CAINFO: "/opt/corp-ca.pem",
+          Npm_Config_Cafile: "/opt/corp-ca.pem",
+          SSL_CERT_FILE: "/not/there.pem",
+        },
+        realpath,
+      ),
+    ).toEqual(["NODE_EXTRA_CA_CERTS", "GIT_SSL_CAINFO", "Npm_Config_Cafile", "SSL_CERT_FILE"]);
+  });
+
+  it("leaves out one that carries the proxy CA, or is unset or empty", () => {
+    expect(
+      presetCaVariables(
+        files,
+        {
+          REQUESTS_CA_BUNDLE: RHEL_STORE,
+          PIP_CERT: "/usr/lib/ssl/cert.pem",
+          DENO_CERT: OWN_CA_DESTINATION,
+          CURL_CA_BUNDLE: "",
+          PATH: "/usr/bin",
+        },
+        realpath,
+      ),
+    ).toEqual([]);
+  });
+
+  it("names one set to the store's path when the runner has no store", () => {
+    expect(
+      presetCaVariables({ ...files, systemCa: undefined }, { SSL_CERT_FILE: RHEL_STORE }, realpath),
+    ).toEqual(["SSL_CERT_FILE"]);
   });
 });

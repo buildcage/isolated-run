@@ -14,6 +14,7 @@ import {
   extractCaCert,
   writeCaTrustFiles,
   writeJvmKeystoreFiles,
+  presetCaVariables,
   type CaTrustFiles,
 } from "./ca-trust.ts";
 import { buildEnvBlob, resolveSandboxEnv, writeEnvLoader } from "./env-loader.ts";
@@ -188,6 +189,7 @@ function extractCaTrust(
     jvmTools,
     prepareNssDb,
     info,
+    realpath,
   }: RunSandboxedCommandDeps,
 ): CaTrustFiles {
   const { env, writeThroughPaths, warn } = options;
@@ -195,7 +197,7 @@ function extractCaTrust(
     const caCertPath = extractCaCert(containerName, dir);
     // Persistent mode's paths in either mode; see pinningPaths.
     const tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env));
-    return {
+    const files: CaTrustFiles = {
       ...writeCaTrustFiles(caCertPath, dir),
       jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn }),
       nssDb: prepareNssDb(
@@ -206,6 +208,15 @@ function extractCaTrust(
         { homeUpper: homeUpperFor(dir, options) },
       ),
     };
+    const preset = presetCaVariables(files, env, realpath);
+    if (preset.length > 0) {
+      warn(
+        `these CA variables are already set and do not point at the proxy CA: ` +
+          `${preset.map((name) => `${name} (${env[name]})`).join(", ")}. A tool reading one fails ` +
+          "TLS under proxy_engine: inspect; unset them for this step, or use proxy_engine: universal.",
+      );
+    }
+    return files;
   } catch (e) {
     if (e instanceof SandboxError) throw e;
     throw new SandboxError(

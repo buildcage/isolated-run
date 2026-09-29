@@ -437,6 +437,24 @@ describe("runSandboxedCommand", () => {
     );
   });
 
+  it("warns once about a CA variable the step set elsewhere, under inspect only", () => {
+    const env = {
+      HOME: "/home/runner",
+      GIT_SSL_CAINFO: "/opt/corp-ca.pem",
+      PIP_CERT: "/opt/pip.pem",
+    };
+
+    runSandboxedCommand(options({ proxyEngine: "inspect", env }), deps);
+    expect(mocks.warn).toHaveBeenCalledTimes(1);
+    expect(mocks.warn).toHaveBeenCalledWith(
+      expect.stringContaining("GIT_SSL_CAINFO (/opt/corp-ca.pem), PIP_CERT (/opt/pip.pem)"),
+    );
+
+    mocks.warn.mockClear();
+    runSandboxedCommand(options({ env }), deps);
+    expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
   it("extracts no CA under an engine that does not terminate TLS", () => {
     runSandboxedCommand(options(), deps);
 

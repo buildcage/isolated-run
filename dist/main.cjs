@@ -19726,7 +19726,24 @@ const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_ST
 	"REQUESTS_CA_BUNDLE",
 	"PIP_CERT",
 	"SSL_CERT_FILE"
-];
+], REPLACING_WHEN_SET = [
+	"CURL_CA_BUNDLE",
+	"GIT_SSL_CAINFO",
+	"AWS_CA_BUNDLE",
+	"CARGO_HTTP_CAINFO",
+	"BUNDLE_SSL_CA_CERT"
+], REPLACING_WHEN_SET_ANY_CASE = ["npm_config_cafile"];
+function presetCaVariables(files, env, realpath) {
+	let store = files.systemCa && realpath(files.systemCa.destination), exact = [
+		...POINT_AT_OWN_CA,
+		...POINT_AT_SYSTEM_STORE,
+		...REPLACING_WHEN_SET
+	];
+	return Object.keys(env).filter((name) => {
+		let value = env[name];
+		return !value || value === "/dev/buildcage-ca.pem" || realpath(value) === store ? !1 : exact.includes(name) || REPLACING_WHEN_SET_ANY_CASE.some((v) => v.toLowerCase() === name.toLowerCase());
+	});
+}
 function assertWriteThroughClearOfCaTrust(files, writeThroughPaths) {
 	for (let path of writeThroughPaths) {
 		if (files.jvmKeystores.find((k) => path === k.destination)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is a JVM keystore the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it.`);
@@ -20809,18 +20826,18 @@ function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`, "RUNC_EXTRACT_FAILED");
 	}
 }
-function extractCaTrust(containerName, dir, options, { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles, jvmTools, prepareNssDb, info }) {
+function extractCaTrust(containerName, dir, options, { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles, jvmTools, prepareNssDb, info, realpath }) {
 	let { env, writeThroughPaths, warn } = options;
 	try {
-		let caCertPath = extractCaCert(containerName, dir), tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env));
-		return {
+		let caCertPath = extractCaCert(containerName, dir), tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env)), files = {
 			...writeCaTrustFiles(caCertPath, dir),
 			jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn }),
 			nssDb: prepareNssDb(containerName, dir, env.HOME, {
 				warn,
 				info
 			}, { homeUpper: homeUpperFor(dir, options) })
-		};
+		}, preset = presetCaVariables(files, env, realpath);
+		return preset.length > 0 && warn(`these CA variables are already set and do not point at the proxy CA: ${preset.map((name) => `${name} (${env[name]})`).join(", ")}. A tool reading one fails TLS under proxy_engine: inspect; unset them for this step, or use proxy_engine: universal.`), files;
 	} catch (e) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`, "CA_EXTRACT_FAILED");
 	}
