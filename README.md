@@ -592,7 +592,9 @@ reported as blocked; see
   own profile's database and does not trust the CA; use `proxy_engine: universal` or an
   `allowed_tls_rules` passthrough for it. Firefox keeps copies of the CA in its profile, in the
   certificate database and the page cache, so a profile kept with `launchPersistentContext` goes on
-  holding them where `filesystem_mode` keeps writes to that path.
+  holding them where `filesystem_mode` keeps writes to that path. The policy installs the CA even
+  when every connection is an `allowed_tls_rules` passthrough; to keep it out of such a profile,
+  point `PLAYWRIGHT_FIREFOX_POLICIES_JSON` at a policies file of your own.
 - A command that changes the CA's own trust in the NSS database (`certutil -M`), or exports it and
   imports it back, copies the CA into the runner's database. Where `filesystem_mode` would keep the
   write, that fails the step and nothing is written back; `fail_on_ca_residue: false` makes it a
