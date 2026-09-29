@@ -590,9 +590,9 @@ reported as blocked; see
 - Playwright's Firefox reads `PLAYWRIGHT_FIREFOX_POLICIES_JSON` from 1.54 on. An earlier one, and
   any other Firefox carrying Mozilla's own root list, such as the one Selenium drives, reads only its
   own profile's database and does not trust the CA; use `proxy_engine: universal` or an
-  `allowed_tls_rules` passthrough for it. The policy copies the CA into the profile, so a profile
-  kept with `launchPersistentContext` goes on holding it where `filesystem_mode` keeps writes to
-  that path.
+  `allowed_tls_rules` passthrough for it. Firefox keeps copies of the CA in its profile, in the
+  certificate database and the page cache, so a profile kept with `launchPersistentContext` goes on
+  holding them where `filesystem_mode` keeps writes to that path.
 - A command that changes the CA's own trust in the NSS database (`certutil -M`), or exports it and
   imports it back, copies the CA into the runner's database. Where `filesystem_mode` would keep the
   write, that fails the step and nothing is written back; `fail_on_ca_residue: false` makes it a
