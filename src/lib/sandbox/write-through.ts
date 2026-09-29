@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { lstatSync, readlinkSync } from "node:fs";
+import { accessSync, constants, lstatSync, mkdirSync, readlinkSync, rmdirSync } from "node:fs";
 import { dirname, join, isAbsolute, normalize } from "node:path";
 
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
@@ -167,11 +167,26 @@ export interface CreatedDir {
   gid: number;
 }
 
-export interface EnsureWriteThroughTargetsExistOptions {
+/** Where a directory is made or removed as this process rather than through
+ *  sudo; see asIdentity. */
+export interface OwnDirOps {
+  execFile?: (command: string, args: string[]) => void;
+  mkdir?: (path: string) => void;
+  rmdir?: (path: string) => void;
+  self?: Identity;
+}
+
+export interface Identity {
+  uid: number;
+  gid: number;
+}
+
+export interface EnsureWriteThroughTargetsExistOptions extends OwnDirOps {
   /** A dangling symlink counts as existing. */
   exists?: (path: string) => boolean;
   stat?: (path: string) => StatShape;
-  execFile?: (command: string, args: string[]) => void;
+  /** Whether this process can make entries in `path`. */
+  canWrite?: (path: string) => boolean;
 }
 
 export interface ResolveWriteThroughOnHostOptions {
@@ -207,6 +222,33 @@ function defaultExecFile(command: string, args: string[]): void {
     stdio: ["ignore", "ignore", "pipe"],
     env: hostCommandEnv(command),
   });
+}
+
+function defaultCanWrite(path: string): boolean {
+  try {
+    accessSync(path, constants.W_OK | constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function defaultMkdir(path: string): void {
+  mkdirSync(path, { recursive: true });
+}
+
+function currentIdentity(): Identity {
+  return { uid: process.getuid!(), gid: process.getgid!() };
+}
+
+/** The real filesystem and sudo, for a caller outside this module. */
+export function hostDirOps(): Required<OwnDirOps> {
+  return {
+    execFile: defaultExecFile,
+    mkdir: defaultMkdir,
+    rmdir: rmdirSync,
+    self: currentIdentity(),
+  };
 }
 /* v8 ignore stop */
 
@@ -279,6 +321,17 @@ export function asOwner({ uid, gid }: { uid: number; gid: number }): string[] {
   return ["-u", `#${uid}`, "-g", `#${gid}`];
 }
 
+/** Removes a directory made here as the identity that made it. As this
+ *  process, directly: sudoers may not allow `sudo -u` to the runner's own
+ *  account, and nothing is borrowed. */
+export function rmdirAsOwner(
+  dir: CreatedDir,
+  { execFile, rmdir, self }: Pick<Required<OwnDirOps>, "execFile" | "rmdir" | "self">,
+): void {
+  if (dir.uid === self.uid && dir.gid === self.gid) rmdir(dir.path);
+  else execFile("sudo", [...asOwner(dir), "rmdir", "--", dir.path]);
+}
+
 /** Every path from (but not including) `ancestor` down to (and including)
  *  `descendant`, shallowest first, e.g. ("/a", "/a/b/c") -> ["/a/b", "/a/b/c"]. */
 function pathSegmentsBetween(ancestor: string, descendant: string): string[] {
@@ -319,13 +372,15 @@ export function assertKnownFilesExist(
  * - if it equals the current value of one of KNOWN_FILE_VARS, the runner was
  *   supposed to have already created it; throw rather than paper over a
  *   broken assumption.
- * - otherwise, walk up to the nearest existing ancestor and `mkdir -p` the
- *   missing path *as that ancestor's owner*, using sudo only to become it
- *   (this action's isolation setup already requires passwordless sudo; see
- *   checkPasswordlessSudo), with that ancestor's mode. Ownership is never handed
- *   to the runner's own uid unconditionally: a target under an
- *   already-restricted, non-runner-writable tree (e.g. /etc/test) ends up
- *   exactly as restricted as naming the existing /etc directly would have.
+ * - otherwise, walk up to the nearest existing ancestor. If the runner can
+ *   write it (its own directory, or a 1777 one like /tmp), make the missing
+ *   path as the runner, every directory on the way included, just as the
+ *   runner could by itself. If not, `mkdir -p` it *as that ancestor's owner*,
+ *   using sudo only to become it (this action's isolation setup already
+ *   requires passwordless sudo; see checkPasswordlessSudo), with that
+ *   ancestor's mode: a target under an already-restricted tree (e.g.
+ *   /etc/test) ends up exactly as restricted as naming the existing /etc
+ *   directly would have.
  * Must run before the scratch dir's `mount --rbind /` snapshot (i.e. before
  * runIsolated()), same timing constraint as the overlay upper/work dirs.
  * Takes paths from resolveWriteThroughOnHost: a symlinked ancestor would lend
@@ -345,7 +400,11 @@ export function ensureWriteThroughTargetsExist(
   {
     exists = defaultExists,
     stat = defaultStat,
+    canWrite = defaultCanWrite,
     execFile = defaultExecFile,
+    mkdir = defaultMkdir,
+    rmdir = rmdirSync,
+    self = currentIdentity(),
   }: EnsureWriteThroughTargetsExistOptions = {},
 ): CreatedDir[] {
   // Every path segment newly created by this call (across every
@@ -359,7 +418,7 @@ export function ensureWriteThroughTargetsExist(
       try {
         // Only directories are created here, and the step hasn't run yet, so
         // every one of them is empty.
-        execFile("sudo", [...asOwner(dir), "rmdir", "--", dir.path]);
+        rmdirAsOwner(dir, { execFile, rmdir, self });
       } catch {
         // Best-effort: the original error is what matters here, not a
         // failed cleanup attempt on top of it.
@@ -390,23 +449,27 @@ export function ensureWriteThroughTargetsExist(
     }
 
     try {
-      const { uid, gid, mode } = stat(ancestor);
+      const ancestorStat = stat(ancestor);
+      const { mode } = ancestorStat;
       // Not a directory means the path changed after resolveWriteThroughOnHost.
       if ((mode & S_IFMT) !== S_IFDIR) {
         throw new Error(`${JSON.stringify(ancestor)} is not a directory.`);
       }
-      // One mkdir -p, not one call per segment: only within a single run does
-      // it descend with O_NOFOLLOW, and only names it created itself are
-      // protected that way. Re-entering per segment would hand the names it
-      // already made back to ordinary path resolution.
-      // -m, because being under the ancestor is not on its own what makes the
-      // target reachable: an ancestor that is writable through its group or
-      // world bits rather than its owner (/tmp and /var/tmp are 1777) would
-      // otherwise leave the sandboxed command unable to write the very path it
-      // asked for. With -p, -m applies to the target; anything created above it
-      // on the way gets mkdir's own permissions, which the ancestor still gates.
-      const modeOctal = (mode & 0o7777).toString(8);
-      execFile("sudo", [...asOwner({ uid, gid }), "mkdir", "-p", "-m", modeOctal, "--", path]);
+      const asSelf =
+        (ancestorStat.uid === self.uid && ancestorStat.gid === self.gid) || canWrite(ancestor);
+      const { uid, gid } = asSelf ? self : ancestorStat;
+      if (asSelf) {
+        mkdir(path);
+      } else {
+        // One mkdir -p, not one call per segment: only within a single run does
+        // it descend with O_NOFOLLOW, and only names it created itself are
+        // protected that way. Re-entering per segment would hand the names it
+        // already made back to ordinary path resolution. -m gives the target the
+        // ancestor's mode; anything created above it on the way gets mkdir's
+        // own, which the ancestor still gates.
+        const modeOctal = (mode & 0o7777).toString(8);
+        execFile("sudo", [...asOwner({ uid, gid }), "mkdir", "-p", "-m", modeOctal, "--", path]);
+      }
       // The later rmdir runs as this owner, so record only its own directories,
       // each as soon as it passes: a deeper failure then still rolls back the
       // shallower ones.

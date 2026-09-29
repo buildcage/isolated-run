@@ -713,11 +713,12 @@ this:
   (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and
   `$GITHUB_STEP_SUMMARY` are the runner's own generated files and must already exist: a missing one
   is an error, not something this action creates. Anything else missing (`./dist`, say) is created
-  for you as a directory, with the same owner and permissions as its nearest already-existing parent
-  directory: a path under a tree the runner already owns becomes writable, same as today, but a path
-  under a tree it doesn't own (`/etc/something`, for instance) is created yet stays exactly as
-  unwritable to the sandboxed command as naming that existing parent directly would be. Nothing here
-  grants access beyond what the surrounding filesystem already implies.
+  for you as a directory. Under a parent the runner can already write (a tree it owns, or `/tmp`),
+  the runner creates it, every directory on the way included, just as it could by itself. Under one
+  it can't (`/etc/something`, for instance), it is created as that parent's owner with the parent's
+  permissions, directories on the way with `mkdir`'s default 0755, so it stays exactly as unwritable
+  to the sandboxed command as naming that existing parent directly would be. Nothing here grants
+  access beyond what the surrounding filesystem already implies.
 - A directory created that way is removed, as its owner and only if empty (`rmdir`, never
   `rm -r`), once no step writes through it or anything under it, including steps in other jobs of
   the same runner user. Removing a directory detaches every mount on it, so it waits for the last
@@ -735,14 +736,14 @@ this:
   you need a file that doesn't exist yet to persist, either have an earlier step create it first, or
   list its (already-existing) parent directory instead.
 
-Creating a missing path as that nearest existing parent's owner rather than as root means the
-`mkdir` runs under `sudo -u '#uid' -g '#gid'`, and sudoers only lets you pick a group the target
-user already belongs to. The `runner:docker` parent on a GitHub-hosted runner qualifies, since
-`runner` is in `docker`; a parent carrying a group its own owner is not in (a setgid directory, say)
-does not, and neither does a self-hosted runner whose sudoers names a single user to run commands
-as. The step then fails with `write_through: <path> doesn't exist and couldn't be created`, carrying
-`sudo`'s own refusal, before your command runs. It never falls back to creating the path as root.
-Entries that already exist are never created and so never reach any of this.
+Under a parent the runner cannot write, the missing path is created as the parent's owner rather
+than as root, so the `mkdir` runs under `sudo -u '#uid' -g '#gid'`, and sudoers only lets you pick a
+group the target user already belongs to. A parent carrying a group its own owner is not in (a
+setgid directory, say) does not qualify, and neither does a self-hosted runner whose sudoers names a
+single user to run commands as. The step then fails with
+`write_through: <path> doesn't exist and couldn't be created`, carrying `sudo`'s own refusal, before
+your command runs. It never falls back to creating the path as root. Entries that already exist, or
+sit under a parent the runner can write, never reach any of this.
 
 `write_through:` changes how a path is mounted, not who owns it, so pointing it at a system
 directory the runner user cannot write (`/usr`, most of `/etc`) gains nothing. It is meant for paths

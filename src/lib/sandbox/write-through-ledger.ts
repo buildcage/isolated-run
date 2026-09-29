@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
 import { errorMessage } from "#core/lib/errors.ts";
@@ -17,9 +16,8 @@ import {
   type LockDeps,
   type LstatShape,
 } from "./ledger-file.ts";
-import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 import { ensureOwnScratchBase, SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
-import { asOwner, type CreatedDir } from "./write-through.ts";
+import { hostDirOps, rmdirAsOwner, type CreatedDir } from "./write-through.ts";
 
 /**
  * Ledger of the directories made for missing write_through targets, shared by
@@ -75,15 +73,9 @@ export interface WriteThroughLedgerDeps extends LockDeps {
 // As the directory's owner, like the mkdir that made it: the command has had
 // these paths writable, so a root rmdir by name would remove any empty
 // directory on the host. `rmdir`, so one the command wrote to stays.
-// Untested by design: hands sudo what the tested caller decided.
-/* v8 ignore start */
-function defaultRmdir(dir: CreatedDir): void {
-  execFileSync(hostCommand("sudo"), [...asOwner(dir), "rmdir", "--", dir.path], {
-    stdio: ["ignore", "ignore", "pipe"],
-    env: hostCommandEnv("sudo"),
-  });
-}
-/* v8 ignore stop */
+// Untested by design: hands rmdirAsOwner the real filesystem and sudo.
+/* v8 ignore next */
+const defaultRmdir = (dir: CreatedDir): void => rmdirAsOwner(dir, hostDirOps());
 
 function emptyLedger(): Ledger {
   return { version: 1, dirs: {}, uses: {} };

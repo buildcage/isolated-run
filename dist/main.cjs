@@ -18655,7 +18655,7 @@ function defaultRemove(path) {
 		force: !0
 	});
 }
-function defaultMkdir$1(path, mode) {
+function defaultMkdir$2(path, mode) {
 	(0, node_fs.mkdirSync)(path, { mode });
 }
 function unmountAllUnder(dir, deps, warn) {
@@ -18705,7 +18705,7 @@ function scratchDirFor(containerName) {
 	if (!isValidContainerName(containerName)) throw new SandboxError(`Refusing to derive a scratch dir from container name ${JSON.stringify(containerName)}.`, "CONTAINER_NAME_INVALID");
 	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchDirNameFor(containerName));
 }
-function ensureOwnScratchBase(base = SANDBOX_SCRATCH_BASE, { mkdir = defaultMkdir$1, lstat = node_fs.lstatSync } = {}) {
+function ensureOwnScratchBase(base = SANDBOX_SCRATCH_BASE, { mkdir = defaultMkdir$2, lstat = node_fs.lstatSync } = {}) {
 	try {
 		mkdir(base, 448);
 		return;
@@ -19186,7 +19186,7 @@ function withLedgerFile(base, fileName, lockName, read, fn, deps) {
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
 const NSS_DB_LEDGER_NAME = "nssdb-ledger.json", LOCK_NAME$1 = "nssdb-ledger.lock", USE_NAME_RE$1 = /^sandbox-[A-Za-z0-9]+$/;
-function defaultMkdir(path, mode) {
+function defaultMkdir$1(path, mode) {
 	(0, node_fs.mkdirSync)(path, { mode });
 }
 function emptyLedger$1() {
@@ -19230,7 +19230,7 @@ function removeUnusedDirs$1(ledger, deps) {
 	}
 }
 function claimNssDb(name, destination, dirs, deps = {}) {
-	let { mkdir = defaultMkdir, lstat = defaultLstat$1, now = () => new Date(), warn } = deps;
+	let { mkdir = defaultMkdir$1, lstat = defaultLstat$1, now = () => new Date(), warn } = deps;
 	return withLedger$1((ledger) => {
 		let undo = () => {
 			typeof ledger != "string" && removeUnusedDirs$1(ledger, deps);
@@ -20007,6 +20007,30 @@ function defaultExecFile$1(command, args) {
 		env: hostCommandEnv(command)
 	});
 }
+function defaultCanWrite(path) {
+	try {
+		return (0, node_fs.accessSync)(path, node_fs.constants.W_OK | node_fs.constants.X_OK), !0;
+	} catch {
+		return !1;
+	}
+}
+function defaultMkdir(path) {
+	(0, node_fs.mkdirSync)(path, { recursive: !0 });
+}
+function currentIdentity() {
+	return {
+		uid: process.getuid(),
+		gid: process.getgid()
+	};
+}
+function hostDirOps() {
+	return {
+		execFile: defaultExecFile$1,
+		mkdir: defaultMkdir,
+		rmdir: node_fs.rmdirSync,
+		self: currentIdentity()
+	};
+}
 function resolveWriteThroughOnHost(path, { exists = defaultExists, stat = defaultStat, readlink = defaultReadlink } = {}) {
 	let pending = path.split("/").filter((c) => c !== ""), current = "/", hops = 0;
 	for (; pending.length > 0;) {
@@ -20042,6 +20066,14 @@ function asOwner({ uid, gid }) {
 		`#${gid}`
 	];
 }
+function rmdirAsOwner(dir, { execFile, rmdir, self }) {
+	dir.uid === self.uid && dir.gid === self.gid ? rmdir(dir.path) : execFile("sudo", [
+		...asOwner(dir),
+		"rmdir",
+		"--",
+		dir.path
+	]);
+}
 function pathSegmentsBetween(ancestor, descendant) {
 	let segments = [], current = descendant;
 	for (; current !== ancestor;) segments.unshift(current), current = (0, node_path.dirname)(current);
@@ -20051,15 +20083,14 @@ function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
 	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
 	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
 }
-function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultExists, stat = defaultStat, execFile = defaultExecFile$1 } = {}) {
+function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultExists, stat = defaultStat, canWrite = defaultCanWrite, execFile = defaultExecFile$1, mkdir = defaultMkdir, rmdir = node_fs.rmdirSync, self = currentIdentity() } = {}) {
 	let created = [], rollback = () => {
 		for (let dir of [...created].reverse()) try {
-			execFile("sudo", [
-				...asOwner(dir),
-				"rmdir",
-				"--",
-				dir.path
-			]);
+			rmdirAsOwner(dir, {
+				execFile,
+				rmdir,
+				self
+			});
 		} catch {}
 	};
 	for (let path of resolvedPaths) {
@@ -20076,21 +20107,25 @@ function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultEx
 			ancestor = parent;
 		}
 		try {
-			let { uid, gid, mode } = stat(ancestor);
+			let ancestorStat = stat(ancestor), { mode } = ancestorStat;
 			if ((mode & S_IFMT) != S_IFDIR) throw Error(`${JSON.stringify(ancestor)} is not a directory.`);
-			let modeOctal = (mode & 4095).toString(8);
-			execFile("sudo", [
-				...asOwner({
-					uid,
-					gid
-				}),
-				"mkdir",
-				"-p",
-				"-m",
-				modeOctal,
-				"--",
-				path
-			]);
+			let asSelf = ancestorStat.uid === self.uid && ancestorStat.gid === self.gid || canWrite(ancestor), { uid, gid } = asSelf ? self : ancestorStat;
+			if (asSelf) mkdir(path);
+			else {
+				let modeOctal = (mode & 4095).toString(8);
+				execFile("sudo", [
+					...asOwner({
+						uid,
+						gid
+					}),
+					"mkdir",
+					"-p",
+					"-m",
+					modeOctal,
+					"--",
+					path
+				]);
+			}
 			for (let segment of pathSegmentsBetween(ancestor, path)) {
 				let s = stat(segment);
 				if ((s.mode & S_IFMT) != S_IFDIR || s.uid !== uid) throw Error(`${JSON.stringify(segment)} is not a directory owned by uid ${uid}.`);
@@ -20917,22 +20952,7 @@ function runSandboxedCommand(options, overrides = {}) {
 }
 //#endregion
 //#region src/lib/sandbox/write-through-ledger.ts
-const WRITE_THROUGH_LEDGER_NAME = "write-through-ledger.json", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
-function defaultRmdir(dir) {
-	(0, node_child_process.execFileSync)(hostCommand("sudo"), [
-		...asOwner(dir),
-		"rmdir",
-		"--",
-		dir.path
-	], {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv("sudo")
-	});
-}
+const WRITE_THROUGH_LEDGER_NAME = "write-through-ledger.json", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/, defaultRmdir = (dir) => rmdirAsOwner(dir, hostDirOps());
 function emptyLedger() {
 	return {
 		version: 1,
