@@ -50,7 +50,9 @@ exact workflow rejects a signature from any other workflow, ref or repository.
 
 The Sigstore bundle for each release is also attached as a downloadable asset
 (`isolated-run-container-universal.sigstore.json` and `isolated-run-container-inspect.sigstore.json`)
-on the corresponding [GitHub Release](https://github.com/buildcage/isolated-run/releases).
+on the corresponding [GitHub Release](https://github.com/buildcage/isolated-run/releases). They are
+attached before the release is published; an image rebuilt after that has only its registry
+attestation.
 
 ## Dependency Management
 
