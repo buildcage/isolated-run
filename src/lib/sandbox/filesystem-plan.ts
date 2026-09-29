@@ -17,8 +17,9 @@ import { errorMessage } from "#core/lib/errors.ts";
 
 import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
+import { SYSTEM_CA_CANDIDATES } from "./ca-trust.ts";
 import { determineOverlayRoots, nestedMountRoots } from "./ephemeral-fs.ts";
-import { resolveDefaultWritableDirs } from "./host-commands.ts";
+import { realpathOrSelf, resolveDefaultWritableDirs } from "./host-commands.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import { RESERVED_INTERNAL_DESTINATIONS } from "./oci-mounts.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
@@ -46,6 +47,7 @@ import {
 export function validateFilesystemInputs(
   filesystemMode: FilesystemMode,
   writeThroughPaths: string[],
+  reservedRealPaths: string[] = [],
 ): void {
   if (filesystemMode === "ephemeral" && writeThroughPaths.includes(WRITE_THROUGH_ALL)) {
     throw new SandboxError(
@@ -57,7 +59,9 @@ export function validateFilesystemInputs(
   }
 
   for (const path of writeThroughPaths) {
-    const reserved = RESERVED_INTERNAL_DESTINATIONS.find((r) => isAtOrUnder(path, r));
+    const reserved = [...RESERVED_INTERNAL_DESTINATIONS, ...reservedRealPaths].find((r) =>
+      isAtOrUnder(path, r),
+    );
     if (reserved) {
       throw new SandboxError(
         `write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS ` +
@@ -149,7 +153,9 @@ export function resolveFilesystemPlan(
       "INVALID_WRITE_THROUGH_PATH",
     );
   }
-  validateFilesystemInputs(filesystemMode, writeThroughPaths);
+  // The CA mount lands where a candidate's symlinks lead, so that file is reserved too.
+  const realpath = deps.realpath ?? realpathOrSelf;
+  validateFilesystemInputs(filesystemMode, writeThroughPaths, SYSTEM_CA_CANDIDATES.map(realpath));
 
   // Before anything is created: buildOciConfig rejects a path overlapping the
   // sandbox's own scratch base outright, so checking it here keeps a doomed

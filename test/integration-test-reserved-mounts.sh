@@ -21,8 +21,12 @@ WORKDIR=$(mktemp -d)
 TESTDIR=/etc/buildcage-reserved-test
 sudo -n mkdir -p "$TESTDIR"
 sudo -n chown "$(id -u):$(id -g)" "$TESTDIR"
+# A CA store candidate this runner lacks, made a symlink for case 4.
+CA_LINK=/etc/ssl/cert.pem
+[ -e "$CA_LINK" ] && CA_LINK=/etc/ssl/ca-bundle.pem
 cleanup() {
   docker compose -f "$REPO_ROOT/compose.test-universal.yaml" down -v >/dev/null 2>&1 || true
+  sudo -n rm -f "$CA_LINK"
   sudo -n rm -rf "$TESTDIR"
   rm -rf "$WORKDIR"
 }
@@ -112,6 +116,19 @@ if [ "$CODE" != "0" ]; then
   pass "write_through: /proc is refused"
 else
   fail "write_through: /proc was accepted"
+fi
+
+# Case 4: the file a CA store candidate is a symlink to, as on RHEL, is
+# reserved too: the CA mount lands on it.
+touch "$TESTDIR/bundle.pem"
+sudo -n ln -s "$TESTDIR/bundle.pem" "$CA_LINK"
+run_instance "$TESTDIR/bundle.pem" "true"
+CODE=$(cat "$WORKDIR/exit_code")
+
+if [ "$CODE" != "0" ] && grep -q "reserved" "$WORKDIR/out.log"; then
+  pass "write_through: the file $CA_LINK links to is refused"
+else
+  fail "write_through: the file $CA_LINK links to was accepted (exit $CODE)"
 fi
 
 assert_results

@@ -817,20 +817,10 @@ function planPostCleanup(state, env, annotation, { readOwner = readContainerOwne
 	return targets;
 }
 //#endregion
-//#region src/lib/sandbox/nss-db.ts
-const SYSTEM_CA_CANDIDATES = [
-	"/etc/ssl/certs/ca-certificates.crt",
-	"/etc/pki/tls/certs/ca-bundle.crt",
-	"/etc/ssl/ca-bundle.pem",
-	"/etc/pki/tls/cacert.pem",
-	"/etc/ssl/cert.pem"
-];
-//#endregion
 //#region src/lib/sandbox/paths.ts
 function isAtOrUnder(path, ancestor) {
 	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
 }
-[...SYSTEM_CA_CANDIDATES];
 function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths = [] }) {
 	return [...new Set([
 		workdir,

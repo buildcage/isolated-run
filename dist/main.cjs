@@ -19727,6 +19727,13 @@ const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_ST
 	"PIP_CERT",
 	"SSL_CERT_FILE"
 ];
+function assertWriteThroughClearOfCaTrust(files, writeThroughPaths) {
+	for (let path of writeThroughPaths) {
+		if (files.jvmKeystores.find((k) => path === k.destination)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is a JVM keystore the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it.`);
+		let nssDb = files.nssDb?.destination;
+		if (nssDb !== void 0 && path !== nssDb && isAtOrUnder(path, nssDb)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is inside the NSS database at ${JSON.stringify(nssDb)}, which the inspect engine covers for the step. Name ${JSON.stringify(nssDb)} itself to have the command's changes written back.`);
+	}
+}
 function caTrustAdditions(files, env) {
 	let mounts = [{
 		destination: OWN_CA_DESTINATION,
@@ -20259,10 +20266,10 @@ function renameGuardDirs(readonlyDirs, persisting) {
 }
 //#endregion
 //#region src/lib/sandbox/filesystem-plan.ts
-function validateFilesystemInputs(filesystemMode, writeThroughPaths) {
+function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRealPaths = []) {
 	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
 	for (let path of writeThroughPaths) {
-		let reserved = RESERVED_INTERNAL_DESTINATIONS.find((r) => isAtOrUnder(path, r));
+		let reserved = [...RESERVED_INTERNAL_DESTINATIONS, ...reservedRealPaths].find((r) => isAtOrUnder(path, r));
 		if (reserved) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 }
@@ -20288,7 +20295,8 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	} catch (e) {
 		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
-	validateFilesystemInputs(filesystemMode, writeThroughPaths);
+	let realpath = deps.realpath ?? realpathOrSelf;
+	validateFilesystemInputs(filesystemMode, writeThroughPaths, SYSTEM_CA_CANDIDATES.map(realpath));
 	try {
 		assertScratchBaseNotWritable(writeThroughPaths);
 	} catch (e) {
@@ -20570,7 +20578,9 @@ function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, uid, env, h
 //#endregion
 //#region src/lib/sandbox/oci-config.ts
 function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostDirs = [], renameGuardDirs = [] }, probes = realHostProbes) {
-	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/"), caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
+	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
+	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths);
+	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
 		destination: RESOLV_CONF_DESTINATION,
 		type: "none",
 		source: resolvConfPath,

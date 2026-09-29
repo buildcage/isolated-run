@@ -1,4 +1,8 @@
-import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
+import {
+  assertWriteThroughClearOfCaTrust,
+  caTrustAdditions,
+  type CaTrustFiles,
+} from "./ca-trust.ts";
 import { realHostProbes, type HostProbes, type NofileLimit } from "./host-probes.ts";
 import {
   ephemeralLayers,
@@ -115,6 +119,9 @@ export function buildOciConfig(
   } = runtime;
   const disableReadonly = !ephemeral && writablePaths.includes("/");
 
+  if (caTrust) {
+    assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths);
+  }
   const caAdditions = caTrust ? caTrustAdditions(caTrust, env) : undefined;
   // Pushed after the writable layers below: a write_through entry naming a
   // directory that contains these (write_through: /etc) would otherwise shadow
