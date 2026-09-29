@@ -766,6 +766,10 @@ Two assertions then run against the verified bundle, both fail-closed:
 | `@v2` (major-floating)         | SAN matches `...@refs/tags/v2(\.\|$)`                       | `certificateIdentityURI` regexp                                        |
 | A branch name, or a local path | **Hard fail**: pin to a version tag or commit SHA           |                                                                        |
 
+The SAN's owner and repository are matched without regard to case, as GitHub resolves them in
+`uses:`, while the workflow path and the tag must match exactly. A bundle that is not a DSSE
+envelope is refused, and the signed digest is read from the envelope that was verified.
+
 For the strongest guarantee, pin to a **commit SHA**:
 
 ```yaml
