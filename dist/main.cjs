@@ -21261,9 +21261,12 @@ function urlOf(scheme, authority, target) {
 function authorityOf(host, port, scheme) {
 	return port === DEFAULT_PORT$1[scheme] ? host : `${host}:${port}`;
 }
+function ruleHost(host) {
+	return host.replace(/[A-Z]/g, (c) => c.toLowerCase()).replace(/\.$/, "");
+}
 function hostBeforeRequest(sni, address) {
 	return sni !== void 0 && sni !== "-" ? {
-		host: sni,
+		host: ruleHost(sni),
 		byAddress: !1
 	} : address === "198.19.255.1" ? {
 		host: UNKNOWN_HOST,
@@ -21276,11 +21279,11 @@ function hostBeforeRequest(sni, address) {
 function parseProxyLine(line, isAudit) {
 	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
 	if (request) {
-		let incomplete = incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], authority = request[12], unnamed = namedByHandshake ? hostBeforeRequest(request[11], request[9]) : void 0, event = {
+		let incomplete = incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[12]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[11], request[9]) : void 0, event = {
 			time: Number(request[1]) / 1e3,
 			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
 			protocol: unnamed?.byAddress ? "tcp" : scheme,
-			host: unnamed?.host ?? splitHostPort(authority).host,
+			host: unnamed?.host ?? host,
 			port: Number(request[10]),
 			destination: `${request[9]}:${request[10]}`
 		};
@@ -21297,7 +21300,7 @@ function parseProxyLine(line, isAudit) {
 			time: Number(pass[1]) / 1e3,
 			action: actionFor(reason, isAudit),
 			protocol: pass[2],
-			host: sni === "-" ? pass[6] : sni,
+			host: sni === "-" ? pass[6] : ruleHost(sni),
 			port: Number(pass[7]),
 			destination: `${pass[6]}:${pass[7]}`
 		};
