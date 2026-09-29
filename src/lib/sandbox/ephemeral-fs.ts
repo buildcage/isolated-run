@@ -2,9 +2,11 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, statSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { errorMessage } from "#core/lib/errors.ts";
+
 import { isAtOrUnder } from "./paths.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
-import type { OverlayDirs } from "./types.ts";
+import type { HostMount, OverlayDirs } from "./types.ts";
 
 // Untested by design: the defaults behind this module's seams, which only
 // hand node:fs and sudo what the tested caller decided.
@@ -14,12 +16,7 @@ function defaultDeviceOf(path: string): number {
 }
 
 function defaultIsDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    // Left to runc, which mounts as root and reports the path if it fails.
-    return true;
-  }
+  return statSync(path).isDirectory();
 }
 
 function defaultStat(path: string): OwnerAndMode {
@@ -105,27 +102,69 @@ export function determineOverlayRoots(
   return notNested;
 }
 
+export interface NestedMountRootsDeps {
+  /** Throws when the path cannot be stat'd. */
+  isDirectory?: (path: string) => boolean;
+  warn?: (message: string) => void;
+}
+
+// The overlay reads its lowerdir as root, which a FUSE mount refuses unless it
+// was made with allow_other (allow_root sets that option in the kernel too).
+function rootCannotRead({ fsType, superOptions = [] }: HostMount): boolean {
+  const fuse = fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.");
+  return fuse && !superOptions.includes("allow_other");
+}
+
 /**
  * Host mount points under an overlay root, other than the roots themselves,
  * each of which needs an overlay of its own: overlayfs shows a mount inside
  * its lowerdir as the empty directory beneath it. Not folded by device, since
  * a bind mount of the same filesystem is hidden too. A mount under a
  * write_through path is left to that path's rbind, which carries it. A file
- * mount is left hidden: overlayfs takes only a directory as its lowerdir.
+ * mount is left hidden: overlayfs takes only a directory as its lowerdir. A
+ * mount the overlay would or might fail on is left hidden too, with a warning,
+ * rather than failing the step.
  */
 export function nestedMountRoots(
   overlayRoots: string[],
-  hostMountPoints: string[],
+  hostMounts: HostMount[],
   writeThroughPaths: string[],
-  { isDirectory = defaultIsDirectory }: { isDirectory?: (path: string) => boolean } = {},
+  { isDirectory = defaultIsDirectory, warn }: NestedMountRootsDeps = {},
 ): string[] {
-  return [...new Set(hostMountPoints)].filter(
-    (m) =>
-      !overlayRoots.includes(m) &&
-      overlayRoots.some((r) => isAtOrUnder(m, r)) &&
-      !writeThroughPaths.some((w) => isAtOrUnder(m, w)) &&
-      isDirectory(m),
-  );
+  // The last mount stacked on a point is the one visible there.
+  const visible = new Map(hostMounts.map((m) => [m.mountPoint, m]));
+  const roots: string[] = [];
+  for (const [path, mount] of visible) {
+    if (
+      overlayRoots.includes(path) ||
+      !overlayRoots.some((r) => isAtOrUnder(path, r)) ||
+      writeThroughPaths.some((w) => isAtOrUnder(path, w))
+    ) {
+      continue;
+    }
+    let reason: string | undefined;
+    if (path.includes(",") || path.includes(":")) {
+      reason = 'an overlay mount option cannot contain "," or ":"';
+    } else if (rootCannotRead(mount)) {
+      reason = `it is a FUSE mount (${mount.fsType}) without allow_other, which root cannot read`;
+    } else {
+      try {
+        if (!isDirectory(path)) continue;
+      } catch (e) {
+        reason = `the runner cannot stat it (${errorMessage(e)})`;
+      }
+    }
+    if (reason !== undefined) {
+      warn?.(
+        `filesystem_mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the ` +
+          `command sees the empty directory beneath it: ${reason}. Use filesystem_mode: ` +
+          "persistent if the command needs its contents.",
+      );
+      continue;
+    }
+    roots.push(path);
+  }
+  return roots;
 }
 
 /** Filesystem-safe subdirectory name for a host path. `%` and `_` are escaped

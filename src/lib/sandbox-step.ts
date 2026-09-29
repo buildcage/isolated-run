@@ -292,7 +292,7 @@ export async function runSandboxStep(
   // above.
   let plan!: ReturnType<typeof resolveFilesystemPlan>;
   const createPlan = () => {
-    plan = resolveFilesystemPlan(filesystemMode, writeThroughInput, env);
+    plan = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
     return { paths: plan.writeThroughPaths, created: plan.createdDirs };
   };
   // Without write_through the shared ledger is left alone.

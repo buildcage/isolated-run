@@ -38,6 +38,8 @@ export interface BuiltOciSpec extends OciSpec {
 export interface HostMount {
   mountPoint: string;
   fsType: string;
+  /** The filesystem's own options (the last mountinfo field). */
+  superOptions?: string[];
 }
 
 export interface HasMounts {

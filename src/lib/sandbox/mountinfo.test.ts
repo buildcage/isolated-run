@@ -14,18 +14,36 @@ const SAMPLE_MOUNTINFO = [
 ].join("\n");
 
 describe("parseMountinfo", () => {
-  // No "-" separator, so the fsType lookup lands on fields[0].
+  // No "-" separator, so the lookups after it land on fields[0] and fields[2].
   it("yields empty strings for a line too malformed to have the fields", () => {
-    expect(parseMountinfo("1 0 0:1 /")).toStrictEqual([{ mountPoint: "", fsType: "1" }]);
+    expect(parseMountinfo("1 0 0:1 /")).toStrictEqual([
+      { mountPoint: "", fsType: "1", superOptions: ["0:1"] },
+    ]);
+    expect(parseMountinfo("1 0 0:1 / /x rw - ext4")[0].superOptions).toStrictEqual([]);
   });
 
-  it("extracts the mount point and filesystem type of every line", () => {
+  it("extracts the mount point, filesystem type and super options of every line", () => {
     expect(parseMountinfo(SAMPLE_MOUNTINFO)).toStrictEqual([
-      { mountPoint: "/", fsType: "ext4" },
-      { mountPoint: "/proc", fsType: "proc" },
-      { mountPoint: "/run", fsType: "tmpfs" },
-      { mountPoint: "/run/user/1000", fsType: "tmpfs" },
-      { mountPoint: "/mnt", fsType: "ext4" },
+      { mountPoint: "/", fsType: "ext4", superOptions: ["rw"] },
+      { mountPoint: "/proc", fsType: "proc", superOptions: ["rw"] },
+      { mountPoint: "/run", fsType: "tmpfs", superOptions: ["rw", "size=100k"] },
+      { mountPoint: "/run/user/1000", fsType: "tmpfs", superOptions: ["rw"] },
+      { mountPoint: "/mnt", fsType: "ext4", superOptions: ["rw"] },
+    ]);
+  });
+
+  it("reads a FUSE mount's allow_other from its super options", () => {
+    expect(
+      parseMountinfo(
+        "10 1 0:60 / /home/runner/remote rw,nosuid,nodev,relatime shared:10 - fuse.sshfs " +
+          "localhost:/usr/share/doc rw,user_id=1001,group_id=1001,allow_other",
+      ),
+    ).toStrictEqual([
+      {
+        mountPoint: "/home/runner/remote",
+        fsType: "fuse.sshfs",
+        superOptions: ["rw", "user_id=1001", "group_id=1001", "allow_other"],
+      },
     ]);
   });
 

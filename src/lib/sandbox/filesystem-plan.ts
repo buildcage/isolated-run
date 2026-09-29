@@ -87,9 +87,10 @@ export interface FilesystemPlan {
   createdDirs: CreatedDir[];
 }
 
-/** Test-only seam onto ensureWriteThroughTargetsExist/determineOverlayRoots's
+/** `warn` aside, a test-only seam onto ensureWriteThroughTargetsExist/determineOverlayRoots's
  *  own filesystem/sudo dependencies; see write-through.ts / ephemeral-fs.ts. */
 export interface ResolveFilesystemPlanDeps {
+  warn?: (message: string) => void;
   exists?: (path: string) => boolean;
   stat?: (path: string) => { uid: number; gid: number; mode: number };
   readlink?: (path: string) => string;
@@ -193,10 +194,10 @@ export function resolveFilesystemPlan(
       Boolean(p),
     );
     const candidateRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, deps);
-    const mountPoints = (deps.listHostMounts ?? listHostMounts)().map((m) => m.mountPoint);
+    const hostMounts = (deps.listHostMounts ?? listHostMounts)();
     const overlayRoots = [
       ...candidateRoots,
-      ...nestedMountRoots(candidateRoots, mountPoints, writeThroughPaths, deps),
+      ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps),
     ];
     return { overlayRoots, writeThroughPaths, createdDirs };
   } catch (e) {

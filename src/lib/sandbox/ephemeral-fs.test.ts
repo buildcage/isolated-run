@@ -6,6 +6,7 @@ import {
   formatFilesystemPlanLog,
   nestedMountRoots,
 } from "./ephemeral-fs.ts";
+import type { HostMount } from "./types.ts";
 
 const ENV = {
   HOME: "/home/runner",
@@ -213,11 +214,30 @@ describe("createOverlayScratchDirs", () => {
 });
 
 describe("nestedMountRoots", () => {
+  const ext4 = (...mountPoints: string[]) =>
+    mountPoints.map((mountPoint) => ({ mountPoint, fsType: "ext4" }));
+
+  function warned(hostMounts: HostMount[], isDirectory: (path: string) => boolean = () => true) {
+    const warnings: string[] = [];
+    const roots = nestedMountRoots(["/home/runner"], hostMounts, [], {
+      isDirectory,
+      warn: (message) => warnings.push(message),
+    });
+    return { roots, warnings };
+  }
+
   it("returns every mount under a root, nested ones included, but not the roots themselves", () => {
     expect(
       nestedMountRoots(
         ["/home/runner", "/tmp"],
-        ["/", "/home/runner", "/home/runner/_tool", "/home/runner/_tool/node", "/tmp/x", "/opt"],
+        ext4(
+          "/",
+          "/home/runner",
+          "/home/runner/_tool",
+          "/home/runner/_tool/node",
+          "/tmp/x",
+          "/opt",
+        ),
         [],
         { isDirectory: () => true },
       ),
@@ -226,28 +246,95 @@ describe("nestedMountRoots", () => {
 
   it("leaves a mount under write_through to that path's own rbind", () => {
     expect(
-      nestedMountRoots(
-        ["/home/runner"],
-        ["/home/runner/out", "/home/runner/out/cache"],
-        ["/home/runner/out"],
-      ),
+      nestedMountRoots(["/home/runner"], ext4("/home/runner/out", "/home/runner/out/cache"), [
+        "/home/runner/out",
+      ]),
     ).toStrictEqual([]);
   });
 
   it("lists a mount point stacked more than once only once", () => {
     expect(
-      nestedMountRoots(["/home/runner"], ["/home/runner/_tool", "/home/runner/_tool"], [], {
+      nestedMountRoots(["/home/runner"], ext4("/home/runner/_tool", "/home/runner/_tool"), [], {
         isDirectory: () => true,
       }),
     ).toStrictEqual(["/home/runner/_tool"]);
   });
 
-  it("leaves a file mount hidden, since overlayfs cannot overlay one", () => {
+  it("leaves a file mount hidden without a warning, since overlayfs cannot overlay one", () => {
     expect(
-      nestedMountRoots(["/home/runner"], ["/home/runner/.gitconfig", "/home/runner/_tool"], [], {
-        isDirectory: (p) => p !== "/home/runner/.gitconfig",
-      }),
-    ).toStrictEqual(["/home/runner/_tool"]);
+      warned(
+        ext4("/home/runner/.gitconfig", "/home/runner/_tool"),
+        (p) => p !== "/home/runner/.gitconfig",
+      ),
+    ).toStrictEqual({ roots: ["/home/runner/_tool"], warnings: [] });
+  });
+
+  it("warns and leaves hidden a FUSE mount without allow_other, which root cannot read", () => {
+    const user = ["rw", "user_id=1001", "group_id=1001"];
+    const { roots, warnings } = warned([
+      { mountPoint: "/home/runner/remote", fsType: "fuse.sshfs", superOptions: user },
+      { mountPoint: "/home/runner/ntfs", fsType: "fuseblk", superOptions: user },
+      { mountPoint: "/home/runner/plain", fsType: "fuse" },
+      { mountPoint: "/home/runner/_tool", fsType: "fusectl" },
+    ]);
+
+    expect(roots).toStrictEqual(["/home/runner/_tool"]);
+    expect(warnings).toStrictEqual([
+      'filesystem_mode: ephemeral cannot overlay the host mount "/home/runner/remote", so the ' +
+        "command sees the empty directory beneath it: it is a FUSE mount (fuse.sshfs) without " +
+        "allow_other, which root cannot read. Use filesystem_mode: persistent if the command " +
+        "needs its contents.",
+      expect.stringContaining('"/home/runner/ntfs"'),
+      expect.stringContaining('"/home/runner/plain"'),
+    ]);
+  });
+
+  it("overlays a FUSE mount made with allow_other", () => {
+    expect(
+      warned([
+        {
+          mountPoint: "/home/runner/remote",
+          fsType: "fuse.sshfs",
+          superOptions: ["rw", "user_id=1001", "group_id=1001", "allow_other"],
+        },
+      ]),
+    ).toStrictEqual({ roots: ["/home/runner/remote"], warnings: [] });
+  });
+
+  it("judges a stacked mount point by the mount on top", () => {
+    expect(
+      warned([
+        { mountPoint: "/home/runner/remote", fsType: "ext4" },
+        { mountPoint: "/home/runner/remote", fsType: "fuse.rclone" },
+      ]).roots,
+    ).toStrictEqual([]);
+  });
+
+  it("warns and leaves hidden a mount whose path an overlay option cannot carry", () => {
+    const { roots, warnings } = warned(ext4("/home/runner/a,b", "/home/runner/c:d"));
+
+    expect(roots).toStrictEqual([]);
+    expect(warnings).toStrictEqual([
+      expect.stringContaining(
+        '"/home/runner/a,b", so the command sees the empty directory ' +
+          'beneath it: an overlay mount option cannot contain "," or ":".',
+      ),
+      expect.stringContaining('"/home/runner/c:d"'),
+    ]);
+  });
+
+  // A mount point covered by a later mount, or one mountinfo marks //deleted.
+  it("warns and leaves hidden a mount point it cannot stat", () => {
+    const { roots, warnings } = warned(ext4("/home/runner/gone//deleted"), () => {
+      throw new Error("ENOENT: no such file or directory");
+    });
+
+    expect(roots).toStrictEqual([]);
+    expect(warnings).toStrictEqual([
+      expect.stringContaining(
+        "empty directory beneath it: the runner cannot stat it (ENOENT: no such file or directory).",
+      ),
+    ]);
   });
 });
 
