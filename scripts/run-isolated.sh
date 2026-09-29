@@ -119,11 +119,15 @@ group_end() {
 }
 
 cleanup() {
+  # Once only: a signal during the teardown, or the exit below, would
+  # otherwise run it again and warn about mounts it already removed.
+  trap '' INT TERM
+  trap - EXIT
   set +e
   [ "$IN_GROUP" = "1" ] && group_end
-  # -f/--force also kills the container's process tree if it's still
-  # running (e.g. this trap fired from INT/TERM mid-run), so it must run
-  # before the network/mount resources below are torn out from under it.
+  # -f/--force also kills the container's process tree if `runc run` ended
+  # abnormally and left it behind, so it must run before the network/mount
+  # resources below are torn out from under it.
   "$RUNC_PATH" delete -f "$CONTAINER_ID" >/dev/null 2>&1
   # Not silenced: a failed unmount here (e.g. EBUSY from a lingering
   # process) leaves ROOTFS_BIND_DIR, a bind-mount of the entire host
@@ -148,7 +152,9 @@ cleanup() {
   rm -f "/var/run/netns/${PROXY_NETNS_NAME}" >/dev/null 2>&1
   exit "$CODE"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'CODE=130; exit' INT
+trap 'CODE=143; exit' TERM
 
 # Bind-mounted first, before any of the network setup below: it has no
 # dependency on the netns/veth work that follows, and doing it first
@@ -223,6 +229,11 @@ set +e
 # still alive. Low-severity (an orphaned but still-fully-sandboxed
 # process, not a security boundary issue; see docs/security.md), and
 # not addressed here.
+#
+# bash runs a trap only once its foreground child returns, so a signal here
+# waits for the command either way; `runc run` forwards any it receives to
+# the container itself. Kept from exiting, so the command's own status wins.
+trap : INT TERM
 setpriv --pdeathsig=KILL -- "$RUNC_PATH" run --bundle "$BUNDLE_DIR" "$CONTAINER_ID"
 CODE=$?
 set -e
