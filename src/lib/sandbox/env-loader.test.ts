@@ -168,7 +168,6 @@ describe("writeEnvLoader", () => {
         .filter((line) => !line.trimStart().startsWith("#"))
         .join("\n");
       expect(code).not.toMatch(/\beval\b/);
-      expect(content).toContain('export "${record%%=*}=${record#*=}"');
       expect(content).toContain(records(buildEnvBlob({})).at(-1));
       expect(statSync(path).mode & 0o777).toBe(0o700);
     });
@@ -239,6 +238,29 @@ describe("the written loader", () => {
       blob: buildEnvBlob({ A: "one", B: "$(echo two)" }),
     });
     expect(stdout).toBe("one|$(echo two)\n");
+    expect(code).toBe(0);
+  });
+
+  // Exported by the loader instead, these came out as its own values: the loop
+  // variable's last record, bash's real uid, its own clock.
+  it("hands the script exactly the step environment, names bash or the loader uses included", async () => {
+    const env = { record: "mine", UID: "12345", SECONDS: "100", sig: "USR2" };
+    const { code, stdout } = await runLoader("exec /usr/bin/env", { blob: buildEnvBlob(env) });
+    const received = Object.fromEntries(
+      stdout
+        .trimEnd()
+        .split("\n")
+        .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
+    );
+    // bash adds these to the environment of any script it runs.
+    for (const own of ["PWD", "SHLVL", "_", "OLDPWD"]) delete received[own];
+    expect(received).toStrictEqual(env);
+    expect(code).toBe(0);
+  });
+
+  it("runs the script with an empty step environment", async () => {
+    const { code, stdout } = await runLoader('echo "${HOME-unset}"');
+    expect(stdout).toBe("unset\n");
     expect(code).toBe(0);
   });
 
