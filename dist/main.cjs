@@ -21228,7 +21228,7 @@ function authorityOf(host, port, scheme) {
 	return port === DEFAULT_PORT$1[scheme] ? host : `${host}:${port}`;
 }
 function ruleHost(host) {
-	return host.toLowerCase().replace(/\.$/, "");
+	return host.replace(/[A-Z]/g, (c) => c.toLowerCase()).replace(/\.$/, "");
 }
 function hostBeforeRequest(sni, address) {
 	return sni !== void 0 && sni !== "-" ? {
@@ -21266,7 +21266,7 @@ function parseProxyLine(line, isAudit) {
 			time: Number(pass[1]) / 1e3,
 			action: actionFor(reason, isAudit),
 			protocol: pass[2],
-			host: sni === "-" ? pass[6] : sni,
+			host: sni === "-" ? pass[6] : ruleHost(sni),
 			port: Number(pass[7]),
 			destination: `${pass[6]}:${pass[7]}`
 		};
