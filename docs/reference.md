@@ -648,8 +648,11 @@ one points depends on what it means to the tool that reads it:
 | `PIP_CERT`            | pip                                                                                                                                                          | Replaces the bundle: pointed at the system store                          |
 | `SSL_CERT_FILE`       | OpenSSL, and anything linked against it (Go's `crypto/x509` on Unix, Ruby, Rust's `rustls-native-certs`). Not GnuTLS, so Debian's wget and git never read it | Replaces the bundle: pointed at the system store                          |
 
-A variable that is already set is left alone rather than appended to, and the CA is added to a store
-that already exists rather than creating one. Both are in
+A variable that is already set is left alone rather than appended to, and the step warns about it
+unless it points at the system store. `GIT_SSL_CAINFO`, `npm_config_cafile` (in any case),
+`AWS_CA_BUNDLE`, `CARGO_HTTP_CAINFO` and `BUNDLE_SSL_CA_CERT` are never set, but warned about the
+same way when the step sets them. The CA is added to a store that already exists rather than
+creating one. Both are in
 [Limitations](../README.md#limitations), with what they mean for a command that needs TLS trust.
 
 ### Chromium

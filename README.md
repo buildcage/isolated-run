@@ -565,7 +565,10 @@ reported as blocked; see
   decrypts nothing and breaks nothing.
 - A CA-trust variable that is already set is left alone rather than appended to. Appending safely
   would mean resolving the path it points at against the sandbox rootfs without following a symlink
-  back out to the host, which this engine does not do yet.
+  back out to the host, which this engine does not do yet. The step warns when one points anywhere
+  but the system store, since a tool reading it then fails TLS, and warns the same way about
+  `GIT_SSL_CAINFO`, `npm_config_cafile`, `AWS_CA_BUNDLE`, `CARGO_HTTP_CAINFO` and
+  `BUNDLE_SSL_CA_CERT`.
 - Chromium trusts the CA through a slot added to the NSS database it reads: `~/.pki/nssdb` when it
   exists, else `~/.local/share/pki/nssdb`, else a new `~/.pki/nssdb`, which Chromium then fills. What
   the command writes to the database is kept where `filesystem_mode` keeps writes to that path, and

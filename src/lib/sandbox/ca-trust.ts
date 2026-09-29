@@ -327,6 +327,39 @@ export function writeJvmKeystoreFiles(
 const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"];
 const POINT_AT_SYSTEM_STORE = ["REQUESTS_CA_BUNDLE", "PIP_CERT", "SSL_CERT_FILE"];
 
+// Variables this never sets, each replacing its tool's bundle when the step
+// does. npm reads npm_config_* in any case.
+const REPLACING_WHEN_SET = [
+  "CURL_CA_BUNDLE",
+  "GIT_SSL_CAINFO",
+  "AWS_CA_BUNDLE",
+  "CARGO_HTTP_CAINFO",
+  "BUNDLE_SSL_CA_CERT",
+];
+const REPLACING_WHEN_SET_ANY_CASE = ["npm_config_cafile"];
+
+/**
+ * The CA variables the step set to a file other than the system store or
+ * OWN_CA_DESTINATION. They stay as set, so a tool reading one does not trust
+ * the proxy CA.
+ */
+export function presetCaVariables(
+  files: CaTrustFiles,
+  env: NodeJS.ProcessEnv,
+  realpath: (path: string) => string,
+): string[] {
+  const store = files.systemCa && realpath(files.systemCa.destination);
+  const exact = [...POINT_AT_OWN_CA, ...POINT_AT_SYSTEM_STORE, ...REPLACING_WHEN_SET];
+  return Object.keys(env).filter((name) => {
+    const value = env[name];
+    if (!value || value === OWN_CA_DESTINATION || realpath(value) === store) return false;
+    return (
+      exact.includes(name) ||
+      REPLACING_WHEN_SET_ANY_CASE.some((v) => v.toLowerCase() === name.toLowerCase())
+    );
+  });
+}
+
 /**
  * The JVM keystores and the NSS database are mounted after every write_through
  * entry, so an entry naming a keystore, or something inside the database,
