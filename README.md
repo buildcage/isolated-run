@@ -572,7 +572,9 @@ reported as blocked; see
   `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `npm_config_cafile`, `AWS_CA_BUNDLE`, `CARGO_HTTP_CAINFO` and
   `BUNDLE_SSL_CA_CERT`.
 - Chromium trusts the CA through a slot added to the NSS database it reads: `~/.pki/nssdb` when it
-  exists, else `~/.local/share/pki/nssdb`, else a new `~/.pki/nssdb`, which Chromium then fills. What
+  exists, else `~/.local/share/pki/nssdb`, else a new `~/.pki/nssdb`, which Chromium then fills. A
+  Chromium before M146 does not read `~/.local/share/pki/nssdb`, so use M146 or later where that is
+  the database. What
   the command writes to the database is kept where `filesystem_mode` keeps writes to that path, and
   discarded where it does not. A database the runner user cannot write cannot take the slot, since
   Chromium would not open it either. It is covered for the step with one holding only the CA
