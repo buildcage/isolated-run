@@ -642,6 +642,9 @@ is also covered by a copy holding the CA as well:
 - `/etc/pki/trust/anchors`, p11-kit's anchors on SUSE, read by what uses p11-kit directly
 - `/var/lib/ca-certificates/pem`, read by GnuTLS on SUSE
 
+The directory is copied as the runner user, so one holding an entry the runner cannot read is left
+uncovered: the step warns and goes on, and a tool reading that directory fails TLS.
+
 Nothing is written to the runner's filesystem, and the mount goes away with the sandbox when the step
 ends.
 
