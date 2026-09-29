@@ -90,6 +90,7 @@ export interface ResolveFilesystemPlanDeps {
   stat?: (path: string) => { uid: number; gid: number; mode: number };
   readlink?: (path: string) => string;
   execFile?: (command: string, args: string[]) => void;
+  canWrite?: (path: string) => boolean;
   deviceOf?: (path: string) => number;
   realpath?: (path: string) => string;
   listHostMounts?: typeof listHostMounts;

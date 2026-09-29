@@ -38,6 +38,7 @@ describe("resolveFilesystemPlan", () => {
       exists: (p) => p !== "/opt/build-output",
       stat: () => ({ uid: 1000, gid: 1000, mode: 0o40755 }),
       execFile: (cmd, args) => execFileCalls.push([cmd, ...args]),
+      canWrite: () => false,
     });
     expect(execFileCalls[0]).toStrictEqual([
       "sudo",
@@ -219,6 +220,7 @@ describe("resolveFilesystemPlan", () => {
       exists: (p) => p !== "/workspace/dist",
       stat: () => ({ uid: 1000, gid: 1000, mode: 0o40755 }),
       execFile: (cmd, args) => execFileCalls.push([cmd, ...args]),
+      canWrite: () => false,
       deviceOf: () => 1,
       listHostMounts: () => [],
       realpath: (p) => p,
@@ -283,6 +285,7 @@ describe("resolveFilesystemPlan", () => {
         execFile: () => {
           throw new Error("sudo: a password is required");
         },
+        canWrite: () => false,
       });
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
