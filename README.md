@@ -574,6 +574,11 @@ reported as blocked; see
   instead: a private CA or client certificate kept there is lost, though only on an
   `allowed_tls_rules` or `allowed_ip_rules` passthrough, and a command that writes to it fails the
   step. `fail_on_ca_residue: false` turns that into a warning and discards the write.
+- Only the NSS database under the step's own `HOME` carries the slot. Chromium started under another
+  `HOME` inside the command (`HOME=/tmp chromium`, `export HOME=...`) does not trust the CA, so
+  leave `HOME` alone within the command. Firefox, including Playwright's and the one Selenium
+  drives, reads a per-profile database and does not trust the CA; use `proxy_engine: universal` or
+  an `allowed_tls_rules` passthrough for it.
 - A command that changes the CA's own trust in the NSS database (`certutil -M`), or exports it and
   imports it back, copies the CA into the runner's database. Where `filesystem_mode` would keep the
   write, that fails the step and nothing is written back; `fail_on_ca_residue: false` makes it a
