@@ -750,6 +750,14 @@ directory the runner user cannot write (`/usr`, most of `/etc`) gains nothing. I
 outside `$HOME` that the workflow has already arranged for the runner user to write, in an earlier,
 non-isolated step.
 
+### Paths under `/run`
+
+The sandbox covers the host's `/run` with an empty tmpfs to keep host service sockets out of reach.
+Naming a path under `/run`, or `/run` itself, re-exposes it, for a service socket a later step
+needs, say. That reopens an outbound path through the daemon behind it, and all of `/run` leaves the
+outbound restriction nearly pointless, so do it deliberately. See
+[Isolation Mechanisms](./security.md#isolation-mechanisms).
+
 ### Reserved paths
 
 `/etc/resolv.conf` is mounted by the sandbox itself to reach the proxy's DNS, and the runner's own

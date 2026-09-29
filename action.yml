@@ -57,7 +57,7 @@ inputs:
     required: false
     default: ""
   write_through:
-    description: "Paths whose writes reach the real host filesystem (newline-separated), in either filesystem mode: on top of the always-writable $GITHUB_WORKSPACE/$HOME/tmp/$RUNNER_TEMP under persistent, and exempt from the discard under ephemeral. Relative paths resolve against $GITHUB_WORKSPACE; $HOME, $GITHUB_WORKSPACE, $RUNNER_TEMP, $GITHUB_OUTPUT, $GITHUB_ENV, $GITHUB_PATH, $GITHUB_STEP_SUMMARY and a leading ~/ are supported. A missing path is created by the runner when it can write the nearest existing parent directory, and otherwise (via sudo) with that parent's owner and permissions, and removed again, if empty, once the last step writing through it ends. Use '/' to drop the read-only restriction entirely (persistent only). A few paths the sandbox mounts itself (/etc/resolv.conf, /etc/ssl/certs/ca-certificates.crt, and filesystems like /proc and /dev) are reserved and rejected here; naming a directory that contains them is fine. The sandbox covers the host's /run with an empty tmpfs to keep host service sockets out of reach; name a path under /run (or /run itself) here to re-expose it, e.g. a service socket a later step needs. Re-exposing a host daemon's socket reopens an outbound path through that daemon, and re-exposing all of /run leaves the outbound restriction nearly pointless, so do it deliberately."
+    description: "Paths whose writes reach the real host filesystem, one per line: made writable under persistent, exempt from the discard under ephemeral. Relative paths resolve against $GITHUB_WORKSPACE. See docs/reference.md#write_through-paths."
     required: false
     default: ""
   writable:
