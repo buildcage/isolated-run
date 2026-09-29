@@ -62,11 +62,9 @@ export interface CaTrustFiles {
    *  `mvn`/`gradle`/`java` under the inspect engine trust the CA only once it
    *  is in here. Empty when the runner has no JVM keystore this found. */
   jvmKeystores: { path: string; destination: string }[];
-  /** Copies of the p11-kit anchor directories this runner has, each with the
-   *  CA added and mounted over the one it was copied from. RHEL's GnuTLS
-   *  (wget, git) reads its trust through p11-kit, which reads these rather
-   *  than the bundle above. */
-  anchorDirs: { path: string; destination: string }[];
+  /** Copies of the CA_DIR_CANDIDATES this runner has, each with the CA added
+   *  and mounted over the one it was copied from. */
+  caDirs: { path: string; destination: string }[];
   /** Undefined when there was nowhere to mount it. */
   nssDb?: NssDbFiles;
 }
@@ -79,8 +77,15 @@ export const SYSTEM_CA_CANDIDATES = [
   "/etc/ssl/cert.pem", // Alpine
 ];
 
-/** The p11-kit anchor directories: RHEL/Fedora's, then SUSE's. */
-export const ANCHOR_DIR_CANDIDATES = ["/etc/pki/ca-trust/source/anchors", "/etc/pki/trust/anchors"];
+/** Certificate directories some tools read in place of the system bundle. */
+export const CA_DIR_CANDIDATES = [
+  // p11-kit's anchors on RHEL/Fedora, which GnuTLS (wget) reads through p11-kit.
+  "/etc/pki/ca-trust/source/anchors",
+  // p11-kit's anchors on SUSE, for what reads p11-kit directly.
+  "/etc/pki/trust/anchors",
+  // SUSE's GnuTLS reads this directory, not p11-kit.
+  "/var/lib/ca-certificates/pem",
+];
 
 /** Not under /run: `write_through` can put the host's /run back, and the mount
  *  point would then be created on the host. */
@@ -181,8 +186,8 @@ export function writeCaTrustFiles(
   }
 
   // Only a directory the runner already has: one is never created.
-  const anchorDirs = ANCHOR_DIR_CANDIDATES.filter((d) => isDirectory(d)).map((destination, i) => {
-    const path = join(dir, `anchors${i}`);
+  const caDirs = CA_DIR_CANDIDATES.filter((d) => isDirectory(d)).map((destination, i) => {
+    const path = join(dir, `ca-dir${i}`);
     // Copied from where it resolves: a symlinked directory copied verbatim
     // would make the copy a link back to it, and the CA would land in the
     // runner's own store.
@@ -191,7 +196,7 @@ export function writeCaTrustFiles(
     return { path, destination };
   });
 
-  return { ownCaPath, systemCa, anchorDirs };
+  return { ownCaPath, systemCa, caDirs };
 }
 
 // The keystore file names a JVM's default trust manager reads: jssecacerts
@@ -355,7 +360,7 @@ export function writeJvmKeystoreFiles(
 // leave the tool trusting nothing else. CURL_CA_BUNDLE is left unset: curl
 // already reads the system store by default, which is also how Debian's
 // GnuTLS-linked tools (wget, git) reach it, since they read none of these.
-// RHEL's read p11-kit's anchor directories instead; see anchorDirs.
+// RHEL's and SUSE's read a directory instead; see CA_DIR_CANDIDATES.
 //
 // Only applied when a variable is unset. A step that already points one of
 // these somewhere keeps doing so unmodified: safely appending to an
@@ -398,8 +403,8 @@ export function presetCaVariables(
 }
 
 /**
- * The anchor directories, the JVM keystores and the NSS database are mounted
- * after every write_through entry, so an entry in an anchor directory, naming a
+ * The CA directories, the JVM keystores and the NSS database are mounted
+ * after every write_through entry, so an entry in a CA directory, naming a
  * keystore, or inside the database, would be silently shadowed. Only what this
  * step mounts is refused: which keystores exist depends on the JDKs installed.
  * An ancestor stays allowed.
@@ -409,11 +414,11 @@ export function assertWriteThroughClearOfCaTrust(
   writeThroughPaths: string[],
 ): void {
   for (const path of writeThroughPaths) {
-    const anchors = files.anchorDirs.find((a) => isAtOrUnder(path, a.destination));
-    if (anchors) {
+    const caDir = files.caDirs.find((a) => isAtOrUnder(path, a.destination));
+    if (caDir) {
       throw new WritablePathConflictError(
-        `write_through entry ${JSON.stringify(path)} is in the p11-kit anchor directory ` +
-          `${JSON.stringify(anchors.destination)}, which the inspect engine covers with a ` +
+        `write_through entry ${JSON.stringify(path)} is in the CA directory ` +
+          `${JSON.stringify(caDir.destination)}, which the inspect engine covers with a ` +
           "read-only copy carrying the proxy CA for the step. Name a containing directory " +
           "instead to persist writes around it.",
       );
@@ -473,11 +478,11 @@ export function caTrustAdditions(files: CaTrustFiles, env: NodeJS.ProcessEnv): C
     }
   }
 
-  for (const anchors of files.anchorDirs) {
+  for (const caDir of files.caDirs) {
     mounts.push({
-      destination: anchors.destination,
+      destination: caDir.destination,
       type: "none",
-      source: anchors.path,
+      source: caDir.path,
       options: ["rbind", "ro"],
     });
   }

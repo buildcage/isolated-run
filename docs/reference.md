@@ -634,10 +634,16 @@ random `serialNumber` in its subject, so no two runs share one. The CA, and wher
 augmented copy of the system CA store, is mounted over the sandbox's own view of those paths. The
 store copy goes back over the path it was read from, which is what the tools going by their own
 compiled-in path read, so it is whichever of the well-known store paths this runner actually has.
-On a runner with p11-kit's anchor directory (`/etc/pki/ca-trust/source/anchors` on RHEL and Fedora,
-`/etc/pki/trust/anchors` on SUSE), a copy of it holding the CA as well is mounted over it, since
-GnuTLS and anything else reading trust through p11-kit read that rather than the bundle. Nothing is
-written to the runner's filesystem, and the mount goes away with the sandbox when the step ends.
+Some tools read a directory of certificates rather than the bundle, so each of these the runner has
+is also covered by a copy holding the CA as well:
+
+- `/etc/pki/ca-trust/source/anchors`, p11-kit's anchors on RHEL and Fedora, read by GnuTLS there
+  through p11-kit
+- `/etc/pki/trust/anchors`, p11-kit's anchors on SUSE, read by what uses p11-kit directly
+- `/var/lib/ca-certificates/pem`, read by GnuTLS on SUSE
+
+Nothing is written to the runner's filesystem, and the mount goes away with the sandbox when the step
+ends.
 
 The variables below are set only when the command's environment leaves them unset, and where each
 one points depends on what it means to the tool that reads it:

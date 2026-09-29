@@ -115,18 +115,19 @@ describe("writeCaTrustFiles", () => {
   });
 });
 
-describe("writeCaTrustFiles with p11-kit anchor directories", () => {
+describe("writeCaTrustFiles with CA directories", () => {
   const CA_INPUT = "/scratch/input-ca.pem";
   const RHEL_ANCHORS = "/etc/pki/ca-trust/source/anchors";
   const SUSE_ANCHORS = "/etc/pki/trust/anchors";
+  const SUSE_GNUTLS = "/var/lib/ca-certificates/pem";
 
-  for (const dirs of [[], [RHEL_ANCHORS], [RHEL_ANCHORS, SUSE_ANCHORS]]) {
-    it(`copies each of ${dirs.length} anchor directories and adds the CA to the copy`, () => {
+  for (const dirs of [[], [RHEL_ANCHORS], [SUSE_ANCHORS, SUSE_GNUTLS]]) {
+    it(`copies each of ${dirs.length} CA directories and adds the CA to the copy`, () => {
       const { deps, written, copied } = fakeHost({ [CA_INPUT]: `${FAKE_CA}\n` }, dirs);
-      const { anchorDirs } = writeCaTrustFiles(CA_INPUT, "/scratch", deps);
+      const { caDirs } = writeCaTrustFiles(CA_INPUT, "/scratch", deps);
 
-      const want = dirs.map((destination, i) => ({ path: `/scratch/anchors${i}`, destination }));
-      expect(anchorDirs).toEqual(want);
+      const want = dirs.map((destination, i) => ({ path: `/scratch/ca-dir${i}`, destination }));
+      expect(caDirs).toEqual(want);
       expect(copied).toEqual(want.map((a) => [a.destination, a.path]));
       for (const { path } of want) {
         expect(written[`${path}/buildcage-proxy-ca.pem`]).toEqual({
@@ -145,7 +146,7 @@ describe("caTrustAdditions", () => {
         ownCaPath: "/scratch/buildcage-ca.pem",
         systemCa: undefined,
         jvmKeystores: [],
-        anchorDirs: [],
+        caDirs: [],
         nssDb: {
           path: "/scratch/nssdb",
           template: "/scratch/nssdb-template",
@@ -169,7 +170,7 @@ describe("caTrustAdditions", () => {
         ownCaPath: "/scratch/buildcage-ca.pem",
         systemCa: undefined,
         jvmKeystores: [],
-        anchorDirs: [],
+        caDirs: [],
       },
       {},
     );
@@ -191,7 +192,7 @@ describe("caTrustAdditions", () => {
         ownCaPath: "/scratch/buildcage-ca.pem",
         systemCa: undefined,
         jvmKeystores: [],
-        anchorDirs: [],
+        caDirs: [],
       },
       { NODE_EXTRA_CA_CERTS: "/my/own/bundle.pem" },
     );
@@ -205,7 +206,7 @@ describe("caTrustAdditions", () => {
         ownCaPath: "/scratch/buildcage-ca.pem",
         systemCa: { path: "/scratch/system-ca-bundle.pem", destination: RHEL_STORE },
         jvmKeystores: [],
-        anchorDirs: [],
+        caDirs: [],
       },
       {},
     );
@@ -226,7 +227,7 @@ describe("caTrustAdditions", () => {
         ownCaPath: "/scratch/buildcage-ca.pem",
         systemCa: { path: "/scratch/system-ca-bundle.pem", destination: RHEL_STORE },
         jvmKeystores: [],
-        anchorDirs: [],
+        caDirs: [],
       },
       {},
     );
@@ -239,7 +240,7 @@ describe("caTrustAdditions", () => {
         ownCaPath: "/scratch/buildcage-ca.pem",
         systemCa: { path: "/scratch/system-ca-bundle.pem", destination: RHEL_STORE },
         jvmKeystores: [],
-        anchorDirs: [],
+        caDirs: [],
       },
       { REQUESTS_CA_BUNDLE: "/my/own/bundle.pem" },
     );
@@ -253,7 +254,7 @@ describe("caTrustAdditions", () => {
         ownCaPath: "/scratch/buildcage-ca.pem",
         systemCa: undefined,
         jvmKeystores: [],
-        anchorDirs: [],
+        caDirs: [],
       },
       {},
     );
@@ -588,36 +589,34 @@ describe("writeJvmKeystoreFiles", () => {
   });
 });
 
-describe("writeCaTrustFiles with an anchor directory that is a symlink", () => {
+describe("writeCaTrustFiles with a CA directory that is a symlink", () => {
   it("copies the directory it resolves to, not the link", () => {
     const anchors = "/etc/pki/ca-trust/source/anchors";
     const { deps, copied } = fakeHost({ "/scratch/input-ca.pem": `${FAKE_CA}\n` }, [anchors]);
     deps.realpath = (path) => (path === anchors ? "/usr/share/pki/anchors" : path);
 
-    const { anchorDirs } = writeCaTrustFiles("/scratch/input-ca.pem", "/scratch", deps);
+    const { caDirs } = writeCaTrustFiles("/scratch/input-ca.pem", "/scratch", deps);
 
-    expect(copied).toEqual([["/usr/share/pki/anchors", "/scratch/anchors0"]]);
-    expect(anchorDirs).toEqual([{ path: "/scratch/anchors0", destination: anchors }]);
+    expect(copied).toEqual([["/usr/share/pki/anchors", "/scratch/ca-dir0"]]);
+    expect(caDirs).toEqual([{ path: "/scratch/ca-dir0", destination: anchors }]);
   });
 });
 
-describe("caTrustAdditions with p11-kit anchor directories", () => {
+describe("caTrustAdditions with CA directories", () => {
   it("mounts each copy read-only over the directory it came from, adding no env", () => {
     const { mounts, env } = caTrustAdditions(
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
         systemCa: undefined,
         jvmKeystores: [],
-        anchorDirs: [
-          { path: "/scratch/anchors0", destination: "/etc/pki/ca-trust/source/anchors" },
-        ],
+        caDirs: [{ path: "/scratch/ca-dir0", destination: "/etc/pki/ca-trust/source/anchors" }],
       },
       { NODE_EXTRA_CA_CERTS: "/set", DENO_CERT: "/set" },
     );
     expect(mounts).toContainEqual({
       destination: "/etc/pki/ca-trust/source/anchors",
       type: "none",
-      source: "/scratch/anchors0",
+      source: "/scratch/ca-dir0",
       options: ["rbind", "ro"],
     });
     expect(env).toEqual({});
@@ -634,7 +633,7 @@ describe("caTrustAdditions with JVM keystores", () => {
           { path: "/scratch/jvm-keystore-0", destination: "/opt/java/lib/security/cacerts" },
           { path: "/scratch/jvm-keystore-1", destination: "/opt/java/lib/security/jssecacerts" },
         ],
-        anchorDirs: [],
+        caDirs: [],
       },
       {},
     );
@@ -663,15 +662,15 @@ describe("assertWriteThroughClearOfCaTrust", () => {
     ownCaPath: "/scratch/buildcage-ca.pem",
     systemCa: undefined,
     jvmKeystores: [{ path: "/scratch/jvm-0/cacerts", destination: KEYSTORE }],
-    anchorDirs: [{ path: "/scratch/anchors0", destination: ANCHORS }],
+    caDirs: [{ path: "/scratch/ca-dir0", destination: ANCHORS }],
     nssDb: { path: "/scratch/nssdb", template: "/scratch/nssdb-template", destination: NSS_DB },
   };
 
   it.each([
     [KEYSTORE, /is a JVM keystore/],
     [`${NSS_DB}/cert9.db`, /is inside the NSS database/],
-    [ANCHORS, /is in the p11-kit anchor directory/],
-    [`${ANCHORS}/corp.pem`, /is in the p11-kit anchor directory/],
+    [ANCHORS, /is in the CA directory/],
+    [`${ANCHORS}/corp.pem`, /is in the CA directory/],
   ])("refuses %s, which a CA mount would shadow", (path, message) => {
     expect(() => assertWriteThroughClearOfCaTrust(files, [path])).toThrow(message);
   });
@@ -697,7 +696,7 @@ describe("presetCaVariables", () => {
     ownCaPath: "/scratch/buildcage-ca.pem",
     systemCa: { path: "/scratch/system-ca-bundle.pem", destination: RHEL_STORE },
     jvmKeystores: [],
-    anchorDirs: [],
+    caDirs: [],
   };
   // /usr/lib/ssl/cert.pem stands for a symlink to the store.
   const realpath = (path: string) => (path === "/usr/lib/ssl/cert.pem" ? RHEL_STORE : path);

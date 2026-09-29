@@ -19631,7 +19631,11 @@ const SYSTEM_CA_CANDIDATES = [
 	"/etc/ssl/ca-bundle.pem",
 	"/etc/pki/tls/cacert.pem",
 	"/etc/ssl/cert.pem"
-], ANCHOR_DIR_CANDIDATES = ["/etc/pki/ca-trust/source/anchors", "/etc/pki/trust/anchors"], OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
+], CA_DIR_CANDIDATES = [
+	"/etc/pki/ca-trust/source/anchors",
+	"/etc/pki/trust/anchors",
+	"/var/lib/ca-certificates/pem"
+], OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
 function defaultExec$1(command, args, env) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args, { env: hostCommandEnv(command, env) });
 }
@@ -19669,8 +19673,8 @@ function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writ
 			destination
 		};
 	}
-	let anchorDirs = ANCHOR_DIR_CANDIDATES.filter((d) => isDirectory(d)).map((destination, i) => {
-		let path = (0, node_path.join)(dir, `anchors${i}`);
+	let caDirs = CA_DIR_CANDIDATES.filter((d) => isDirectory(d)).map((destination, i) => {
+		let path = (0, node_path.join)(dir, `ca-dir${i}`);
 		return copyDir(realpath(destination), path), writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420), {
 			path,
 			destination
@@ -19679,7 +19683,7 @@ function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writ
 	return {
 		ownCaPath,
 		systemCa,
-		anchorDirs
+		caDirs
 	};
 }
 const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"], KNOWN_JVM_KEYSTORE_DIRS = [
@@ -19763,8 +19767,8 @@ function presetCaVariables(files, env, realpath) {
 }
 function assertWriteThroughClearOfCaTrust(files, writeThroughPaths) {
 	for (let path of writeThroughPaths) {
-		let anchors = files.anchorDirs.find((a) => isAtOrUnder(path, a.destination));
-		if (anchors) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is in the p11-kit anchor directory ${JSON.stringify(anchors.destination)}, which the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it.`);
+		let caDir = files.caDirs.find((a) => isAtOrUnder(path, a.destination));
+		if (caDir) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is in the CA directory ${JSON.stringify(caDir.destination)}, which the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it.`);
 		if (files.jvmKeystores.find((k) => path === k.destination)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is a JVM keystore the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it.`);
 		let nssDb = files.nssDb?.destination;
 		if (nssDb !== void 0 && path !== nssDb && isAtOrUnder(path, nssDb)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is inside the NSS database at ${JSON.stringify(nssDb)}, which the inspect engine covers for the step. Name ${JSON.stringify(nssDb)} itself to have the command's changes written back.`);
@@ -19793,10 +19797,10 @@ function caTrustAdditions(files, env) {
 		});
 		for (let name of POINT_AT_SYSTEM_STORE) env[name] || (extraEnv[name] = files.systemCa.destination);
 	}
-	for (let anchors of files.anchorDirs) mounts.push({
-		destination: anchors.destination,
+	for (let caDir of files.caDirs) mounts.push({
+		destination: caDir.destination,
 		type: "none",
-		source: anchors.path,
+		source: caDir.path,
 		options: ["rbind", "ro"]
 	});
 	for (let keystore of files.jvmKeystores) mounts.push({
