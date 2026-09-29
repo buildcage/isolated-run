@@ -879,6 +879,7 @@ describe("buildOciConfig: caTrust", () => {
     ownCaPath: "/scratch/buildcage-ca.pem",
     systemCa: { path: "/scratch/system-ca-bundle.pem", destination: SYSTEM_STORE },
     jvmKeystores: [],
+    anchorDirs: [],
   };
 
   it("refuses a write_through entry naming a keystore it mounts, in either mode", () => {
@@ -886,6 +887,7 @@ describe("buildOciConfig: caTrust", () => {
     const withKeystore = {
       ...caTrust,
       jvmKeystores: [{ path: "/scratch/jvm-0/cacerts", destination: keystore }],
+      anchorDirs: [],
     };
     expect(() =>
       build(fakeBaseSpec(), {
@@ -927,14 +929,16 @@ describe("buildOciConfig: caTrust", () => {
     });
   });
 
-  it("keeps the system store mount after a write_through entry containing it", () => {
+  it("keeps the system store and anchor mounts after a write_through entry containing them", () => {
+    const anchors = "/etc/pki/ca-trust/source/anchors";
     const config = build(fakeBaseSpec(), {
       ...baseArgs,
       writable: { ...baseArgs.writable, writablePaths: ["/etc"] },
-      caTrust,
+      caTrust: { ...caTrust, anchorDirs: [{ path: "/scratch/anchors0", destination: anchors }] },
     });
     const destinations = config.mounts.map((m) => m.destination);
     expect(destinations.indexOf(SYSTEM_STORE)).toBeGreaterThan(destinations.indexOf("/etc"));
+    expect(destinations.indexOf(anchors)).toBeGreaterThan(destinations.indexOf("/etc"));
   });
 
   // Mounted before the tmpfs, the file would be hidden under it.

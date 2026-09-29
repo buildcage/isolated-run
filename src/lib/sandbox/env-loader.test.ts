@@ -22,6 +22,7 @@ const caTrust = {
   ownCaPath: "/scratch/buildcage-ca.pem",
   systemCa: { path: "/scratch/system-ca-bundle.pem", destination: SYSTEM_STORE },
   jvmKeystores: [],
+  anchorDirs: [],
 };
 
 /** The KEY=VALUE records of a blob, terminator excluded. */
