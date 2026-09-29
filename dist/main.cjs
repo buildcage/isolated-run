@@ -21898,7 +21898,10 @@ const MARK = {
 function renderEvent(event, startedAt) {
 	return `${MARK[event.action] ?? "✅"} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}`;
 }
-const CREDENTIAL_PARAMS = new Set("access_key.access_token.api_key.api_token.apikey.auth.auth_token.client_secret.code.id_token.jwt.key.passwd.password.private-token.private_token.pwd.refresh_token.secret.session_token.sig.signature.token.x-amz-security-token.x-amz-signature.x-goog-signature".split("."));
+const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authtoken.clientsecret.code.idtoken.jwt.key.passwd.password.privatetoken.pwd.refreshtoken.secret.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
+function credentialName(name) {
+	return name.toLowerCase().replace(/[-_]/g, "");
+}
 function redactCredentialQuery(url) {
 	let start = url.indexOf("?");
 	if (start === -1) return url;
@@ -21906,7 +21909,7 @@ function redactCredentialQuery(url) {
 		let eq = param.indexOf("=");
 		if (eq === -1 || eq === param.length - 1) return param;
 		let name = param.slice(0, eq);
-		return CREDENTIAL_PARAMS.has(name.toLowerCase()) ? `${name}=***` : param;
+		return CREDENTIAL_PARAMS.has(credentialName(name)) ? `${name}=***` : param;
 	}).join("&");
 	return url.slice(0, start + 1) + query + url.slice(end);
 }
