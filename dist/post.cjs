@@ -683,6 +683,33 @@ function resolveWriteThroughPaths(input, env) {
 	let lines = splitWriteThroughInput(input);
 	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
 }
+function defaultExecFile(command, args) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
+}
+function defaultMkdir(path) {
+	(0, node_fs.mkdirSync)(path, { recursive: !0 });
+}
+function currentIdentity() {
+	return {
+		uid: process.getuid(),
+		gid: process.getgid()
+	};
+}
+function hostDirOps() {
+	return {
+		execFile: defaultExecFile,
+		mkdir: defaultMkdir,
+		rmdir: node_fs.rmdirSync,
+		self: currentIdentity()
+	};
+}
 function asOwner({ uid, gid }) {
 	return [
 		"-u",
@@ -691,24 +718,17 @@ function asOwner({ uid, gid }) {
 		`#${gid}`
 	];
 }
-//#endregion
-//#region src/lib/sandbox/write-through-ledger.ts
-const WRITE_THROUGH_LEDGER_NAME = "write-through-ledger.json", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
-function defaultRmdir(dir) {
-	(0, node_child_process.execFileSync)(hostCommand("sudo"), [
+function rmdirAsOwner(dir, { execFile, rmdir, self }) {
+	dir.uid === self.uid && dir.gid === self.gid ? rmdir(dir.path) : execFile("sudo", [
 		...asOwner(dir),
 		"rmdir",
 		"--",
 		dir.path
-	], {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv("sudo")
-	});
+	]);
 }
+//#endregion
+//#region src/lib/sandbox/write-through-ledger.ts
+const WRITE_THROUGH_LEDGER_NAME = "write-through-ledger.json", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/, defaultRmdir = (dir) => rmdirAsOwner(dir, hostDirOps());
 function emptyLedger() {
 	return {
 		version: 1,

@@ -5,6 +5,7 @@ import {
   resolveWriteThroughPaths,
   resolveWriteThroughOnHost,
   ensureWriteThroughTargetsExist,
+  rmdirAsOwner,
   splitWriteThroughInput,
   WriteThroughTargetMissingError,
   WriteThroughTargetUncreatableError,
@@ -277,6 +278,101 @@ describe("ensureWriteThroughTargetsExist", () => {
       { path: "/a/b", uid: 1000, gid: 1000 },
       { path: "/a/b/c", uid: 1000, gid: 1000 },
     ]);
+  });
+});
+
+describe("ensureWriteThroughTargetsExist, as the runner itself", () => {
+  const SELF = { uid: 1001, gid: 1001 };
+
+  /** Records every call; the ancestor /tmp takes `owner`, anything made under it the runner. */
+  function ops(owner: { uid: number; gid: number; mode: number }) {
+    const calls: string[][] = [];
+    return {
+      calls,
+      deps: {
+        stat: (p: string) => (p === "/tmp" ? owner : { ...SELF, mode: 0o40755 }),
+        execFile: (cmd: string, args: string[]) => calls.push([cmd, ...args]),
+        mkdir: (p: string) => calls.push(["mkdir", p]),
+        rmdir: (p: string) => calls.push(["rmdir", p]),
+        self: SELF,
+      },
+    };
+  }
+
+  // A root-owned 0755 /tmp/build would be left on the host, unwritable by the
+  // sandbox and by later steps.
+  it("makes the whole path as the runner under an ancestor it can write, like /tmp", () => {
+    const { calls, deps } = ops({ uid: 0, gid: 0, mode: 0o41777 });
+
+    const created = ensureWriteThroughTargetsExist(["/tmp/build/out"], ENV, {
+      ...deps,
+      exists: (p) => p === "/tmp",
+      canWrite: () => true,
+    });
+
+    expect(calls).toStrictEqual([["mkdir", "/tmp/build/out"]]);
+    expect(created).toStrictEqual([
+      { path: "/tmp/build", ...SELF },
+      { path: "/tmp/build/out", ...SELF },
+    ]);
+  });
+
+  it("makes the path without sudo under the runner's own directory", () => {
+    const { calls, deps } = ops({ ...SELF, mode: 0o40700 });
+
+    ensureWriteThroughTargetsExist(["/tmp/out"], ENV, {
+      ...deps,
+      exists: (p) => p === "/tmp",
+      canWrite: () => false,
+    });
+
+    expect(calls).toStrictEqual([["mkdir", "/tmp/out"]]);
+  });
+
+  it("rolls back what it made as the runner without sudo", () => {
+    const { calls, deps } = ops({ uid: 0, gid: 0, mode: 0o41777 });
+
+    expect(() =>
+      ensureWriteThroughTargetsExist(["/tmp/ok", "/tmp/fail"], ENV, {
+        ...deps,
+        exists: (p) => p === "/tmp",
+        canWrite: () => true,
+        mkdir: (p) => {
+          calls.push(["mkdir", p]);
+          if (p === "/tmp/fail") throw new Error("EACCES");
+        },
+      }),
+    ).toThrow(WriteThroughTargetUncreatableError);
+
+    expect(calls).toStrictEqual([
+      ["mkdir", "/tmp/ok"],
+      ["mkdir", "/tmp/fail"],
+      ["rmdir", "/tmp/ok"],
+    ]);
+  });
+});
+
+describe("rmdirAsOwner", () => {
+  const SELF = { uid: 1001, gid: 1001 };
+
+  it.each([
+    { owner: SELF, call: ["rmdir", "/x"] },
+    { owner: { uid: 0, gid: 0 }, call: ["sudo", "-u", "#0", "-g", "#0", "rmdir", "--", "/x"] },
+    {
+      owner: { uid: 1001, gid: 0 },
+      call: ["sudo", "-u", "#1001", "-g", "#0", "rmdir", "--", "/x"],
+    },
+  ])("removes a directory owned by $owner.uid:$owner.gid as that owner", ({ owner, call }) => {
+    const calls: string[][] = [];
+    rmdirAsOwner(
+      { path: "/x", ...owner },
+      {
+        execFile: (cmd, args) => calls.push([cmd, ...args]),
+        rmdir: (p) => calls.push(["rmdir", p]),
+        self: SELF,
+      },
+    );
+    expect(calls).toStrictEqual([call]);
   });
 });
 
