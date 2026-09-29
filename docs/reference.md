@@ -660,7 +660,8 @@ new `~/.pki/nssdb` when neither does. It is copied into the step's scratch direc
 `pkcs11.txt` gains a second, read-only softoken slot on a database holding only this CA, mounted at
 `/dev/buildcage-nssdb`, and the copy is mounted read-write over the database. NSS loads every module
 `pkcs11.txt` names, so Chromium trusts the CA through that slot while the runner's own certificates,
-keys and writes stay in its own database.
+keys and writes stay in its own database. `$HOME` is the step's, read before the command starts: a
+`HOME` the command changes gets no slot.
 
 After the command, if it changed the copy, the slot's bytes are taken back out of `pkcs11.txt` and
 the copy is written back over the database, where `filesystem_mode` keeps writes to that path: always
