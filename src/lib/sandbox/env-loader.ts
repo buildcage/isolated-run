@@ -114,10 +114,10 @@ const ENV_LOADER_SCRIPT = `#!/bin/bash
 # signals to it, reaps orphans, and exits with its status. See
 # sandbox/env-loader.ts for the wire format.
 #
-# The records are handed to env(1) rather than exported, so none of this
-# script's own names, bash's readonly or dynamic variables (UID, SECONDS)
-# included, can stand in for the step's. No eval: each record is one argument,
-# never re-interpreted, so a value containing $(...) or a backtick stays literal.
+# The records go to env(1) rather than being exported, so a step variable
+# named like one of this script's, or like a bash readonly or dynamic variable
+# (UID, SECONDS), arrives as set. No eval: each record is one argument, never
+# re-interpreted, so a value containing $(...) or a backtick stays literal.
 set -u
 
 # Trapped before reading, as PID 1 drops untrapped signals. Any that arrive
