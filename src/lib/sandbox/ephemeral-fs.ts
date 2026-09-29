@@ -171,11 +171,11 @@ export function createOverlayScratchDirs(
     const { uid, gid, mode } = stat(path);
     const perm = mode & 0o7777;
     if (uid === self.uid && gid === self.gid) {
-      // Recursive for an upper prepareNssDb already made $HOME's.
+      // prepareNssDb may already have made $HOME's.
       mkdir(upper, { recursive: true });
       chmod(upper, perm);
     } else {
-      // install sets the mode after the owner, which would otherwise clear setgid.
+      // install chowns before it chmods, so setgid survives the chown.
       execFile("sudo", [
         "install",
         "-d",
