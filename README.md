@@ -276,7 +276,7 @@ means, is in [Reference](./docs/reference.md#report-details).
 `upload_traffic_artifact: true` uploads the whole timeline as a `traffic.json`, one row per request
 and per name lookup, with the method, URL, status, size and the address it resolved to. It is
 uploaded even when the step fails. Both engines produce one; under `universal` it omits the method,
-URL and status that only `inspect` sees. The fields are listed in
+URL, status and resolved address that only `inspect` sees. The fields are listed in
 [Reference](./docs/reference.md#traffic-artifact).
 
 ## How `run` is executed
