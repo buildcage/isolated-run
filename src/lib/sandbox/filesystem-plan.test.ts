@@ -113,6 +113,7 @@ describe("resolveFilesystemPlan", () => {
       readlink: (p: string) => links[p]!.target,
       execFile: () => {},
       deviceOf: () => 1,
+      listHostMounts: () => [],
     });
 
     it("refuses one the runner's uid owns as INVALID_WRITE_THROUGH_PATH, before creating anything", () => {
@@ -162,6 +163,7 @@ describe("resolveFilesystemPlan", () => {
     const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
       exists: alwaysExists,
       deviceOf: () => 1,
+      listHostMounts: () => [],
       realpath: (p) => p,
     });
     expect(plan.writeThroughPaths).toStrictEqual([]);
@@ -176,9 +178,35 @@ describe("resolveFilesystemPlan", () => {
     const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
       exists: alwaysExists,
       deviceOf: () => 1,
+      listHostMounts: () => [],
       realpath: (p) => p.replace(/^\/home\//, "/var/home/"),
     });
     expect(plan.overlayRoots.sort()).toStrictEqual(["/tmp", "/var/home/runner"]);
+  });
+
+  it("adds an overlay for each host mount under an overlay root, but not under write_through", () => {
+    const plan = resolveFilesystemPlan("ephemeral", "/home/runner/out", ENV, {
+      exists: alwaysExists,
+      stat: dirStat,
+      deviceOf: () => 1,
+      realpath: (p) => p,
+      listHostMounts: () =>
+        ["/", "/home/runner", "/home/runner/_tool", "/home/runner/out/cache", "/opt/data"].map(
+          (mountPoint) => ({ mountPoint, fsType: "ext4" }),
+        ),
+      isDirectory: () => true,
+    });
+    expect(plan.overlayRoots.sort()).toStrictEqual(["/home/runner", "/home/runner/_tool", "/tmp"]);
+  });
+
+  // /proc/self/mountinfo is Linux-only.
+  it.skipIf(process.platform !== "linux")("reads the real host mount table by default", () => {
+    const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
+      exists: alwaysExists,
+      deviceOf: () => 1,
+      realpath: (p) => p,
+    });
+    expect(plan.overlayRoots).toContain("/tmp");
   });
 
   it("resolves and pre-creates write_through targets, then excludes only what's actually covered by them", () => {
@@ -192,6 +220,7 @@ describe("resolveFilesystemPlan", () => {
       stat: () => ({ uid: 1000, gid: 1000, mode: 0o40755 }),
       execFile: (cmd, args) => execFileCalls.push([cmd, ...args]),
       deviceOf: () => 1,
+      listHostMounts: () => [],
       realpath: (p) => p,
     });
     expect(plan.writeThroughPaths).toStrictEqual(["/workspace/dist"]);

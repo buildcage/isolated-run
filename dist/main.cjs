@@ -18972,6 +18972,13 @@ function assertScratchBaseNotWritable(writableDirs) {
 function defaultDeviceOf(path) {
 	return (0, node_fs.statSync)(path).dev;
 }
+function defaultIsDirectory(path) {
+	try {
+		return (0, node_fs.statSync)(path).isDirectory();
+	} catch {
+		return !0;
+	}
+}
 function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs.existsSync, deviceOf = defaultDeviceOf } = {}) {
 	let notCoveredByWriteThrough = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !writeThroughPaths.some((a) => isAtOrUnder(c, a)));
 	return notCoveredByWriteThrough.filter((c) => {
@@ -18984,8 +18991,11 @@ function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs
 		}
 	});
 }
+function nestedMountRoots(overlayRoots, hostMountPoints, writeThroughPaths, { isDirectory = defaultIsDirectory } = {}) {
+	return [...new Set(hostMountPoints)].filter((m) => !overlayRoots.includes(m) && overlayRoots.some((r) => isAtOrUnder(m, r)) && !writeThroughPaths.some((w) => isAtOrUnder(m, w)) && isDirectory(m));
+}
 function slugify(path) {
-	return path.replace(/\//g, "_") || "_root";
+	return path.replace(/%/g, "%25").replace(/_/g, "%5F").replace(/\//g, "_") || "_root";
 }
 function overlayUpperFor(scratchDir, root) {
 	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
@@ -20219,14 +20229,14 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 		createdDirs
 	};
 	try {
-		let { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath);
+		let { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath), candidateRoots = determineOverlayRoots([
+			home,
+			runnerTemp,
+			tmp,
+			workdir
+		].filter((p) => !!p), writeThroughPaths, deps), mountPoints = (deps.listHostMounts ?? listHostMounts)().map((m) => m.mountPoint);
 		return {
-			overlayRoots: determineOverlayRoots([
-				home,
-				runnerTemp,
-				tmp,
-				workdir
-			].filter((p) => !!p), writeThroughPaths, deps),
+			overlayRoots: [...candidateRoots, ...nestedMountRoots(candidateRoots, mountPoints, writeThroughPaths, deps)],
 			writeThroughPaths,
 			createdDirs
 		};
