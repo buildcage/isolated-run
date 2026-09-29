@@ -21962,7 +21962,7 @@ function parseRequest(request) {
 	};
 }
 function commonPrefixSegments(paths) {
-	let split = paths.map((p) => p.split("/").filter((s) => s !== "")), prefix = split[0];
+	let split = paths.map((p) => p.split("/").slice(1)), prefix = split[0];
 	for (let segments of split.slice(1)) {
 		let i = 0;
 		for (; i < prefix.length && i < segments.length && prefix[i] === segments[i];) i++;
