@@ -442,7 +442,9 @@ view of those paths, and the mount goes away with the sandbox when the step ends
 command's environment leaves them unset, Buildcage also points the variables the common toolchains
 read at a store that holds the CA: `NODE_EXTRA_CA_CERTS`, `DENO_CERT`, `SSL_CERT_FILE`,
 `REQUESTS_CA_BUNDLE` and `PIP_CERT`. `CURL_CA_BUNDLE` is left unset, since curl reads the system
-store already. A JVM already on the runner reads none of those, only its own keystore, so the CA is
+store already. On a RHEL, Fedora or SUSE runner, where GnuTLS tools such as `wget` read p11-kit's
+anchor directory instead of the store, the CA also goes into a copy of that directory mounted over
+it. A JVM already on the runner reads none of those, only its own keystore, so the CA is
 added to a copy of the `cacerts` (and `jssecacerts` when present) of the `java` on `PATH`, of
 `$JAVA_HOME` and of each `$JAVA_HOME_<major>_<arch>` (set by `setup-java` and the hosted runner
 images) with the runner's own `keytool` and mounted over it, letting `mvn`/`gradle`/`java` and a

@@ -18980,7 +18980,7 @@ function assertScratchBaseNotWritable(writableDirs) {
 function defaultDeviceOf(path) {
 	return (0, node_fs.statSync)(path).dev;
 }
-function defaultIsDirectory(path) {
+function defaultIsDirectory$1(path) {
 	try {
 		return (0, node_fs.statSync)(path).isDirectory();
 	} catch {
@@ -19017,7 +19017,7 @@ function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs
 		}
 	});
 }
-function nestedMountRoots(overlayRoots, hostMountPoints, writeThroughPaths, { isDirectory = defaultIsDirectory } = {}) {
+function nestedMountRoots(overlayRoots, hostMountPoints, writeThroughPaths, { isDirectory = defaultIsDirectory$1 } = {}) {
 	return [...new Set(hostMountPoints)].filter((m) => !overlayRoots.includes(m) && overlayRoots.some((r) => isAtOrUnder(m, r)) && !writeThroughPaths.some((w) => isAtOrUnder(m, w)) && isDirectory(m));
 }
 function slugify(path) {
@@ -19323,7 +19323,7 @@ function defaultStat$1(path) {
 		return;
 	}
 }
-function defaultCopyDir(source, destination, filter) {
+function defaultCopyDir$1(source, destination, filter) {
 	(0, node_fs.cpSync)(source, destination, {
 		recursive: !0,
 		preserveTimestamps: !0,
@@ -19365,7 +19365,7 @@ function walkPlan(home, path, lstat) {
 	};
 }
 function prepareNssDb(containerName, dir, home, deps = {}, { homeUpper } = {}) {
-	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat$1, realpath = node_fs.realpathSync, copyDir = defaultCopyDir, warn } = deps;
+	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat$1, realpath = node_fs.realpathSync, copyDir = defaultCopyDir$1, warn } = deps;
 	if (!home || stat(home)?.isDirectory() !== !0) {
 		warn?.(`could not add the proxy CA to Chromium's NSS database: HOME (${JSON.stringify(home ?? "")}) is not a directory. A Chromium step will not trust the proxy.`);
 		return;
@@ -19454,7 +19454,7 @@ function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess 
 		return `${destination} cannot be read through (${errorMessage(e)})`;
 	}
 }
-function prepareSlot(dir, files, template, exists, { copyDir = defaultCopyDir, ledger }) {
+function prepareSlot(dir, files, template, exists, { copyDir = defaultCopyDir$1, ledger }) {
 	let caDb = (0, node_path.join)(dir, "nssdb-ca");
 	copyDir(template, caDb), (0, node_fs.chmodSync)(caDb, 493);
 	for (let name of (0, node_fs.readdirSync)(caDb)) (0, node_fs.chmodSync)((0, node_path.join)(caDb, name), 420);
@@ -19533,7 +19533,7 @@ function certificateDer(pem) {
 	let match = /-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/.exec(pem);
 	return Buffer.from(match?.[1]?.replace(/\s+/g, "") ?? "", "base64");
 }
-function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync, copyDir = defaultCopyDir, pidAlive = defaultPidAlive, lock = withNssDbLock }) {
+function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync, copyDir = defaultCopyDir$1, pidAlive = defaultPidAlive, lock = withNssDbLock }) {
 	let current;
 	try {
 		current = snapshotDir(files.path);
@@ -19631,7 +19631,7 @@ const SYSTEM_CA_CANDIDATES = [
 	"/etc/ssl/ca-bundle.pem",
 	"/etc/pki/tls/cacert.pem",
 	"/etc/ssl/cert.pem"
-], OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
+], ANCHOR_DIR_CANDIDATES = ["/etc/pki/ca-trust/source/anchors", "/etc/pki/trust/anchors"], OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
 function defaultExec$1(command, args, env) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args, { env: hostCommandEnv(command, env) });
 }
@@ -19641,6 +19641,15 @@ function defaultReadFile$1(path) {
 function defaultWriteFile(path, contents, mode) {
 	(0, node_fs.writeFileSync)(path, contents, { mode });
 }
+function defaultIsDirectory(path) {
+	return (0, node_fs.statSync)(path, { throwIfNoEntry: !1 })?.isDirectory() === !0;
+}
+function defaultCopyDir(source, destination) {
+	(0, node_fs.cpSync)(source, destination, {
+		recursive: !0,
+		verbatimSymlinks: !0
+	});
+}
 function extractCaCert(containerName, destDir, { exec = defaultExec$1, chmod = node_fs.chmodSync } = {}) {
 	let caCertPath = (0, node_path.join)(destDir, "proxy-ca.pem");
 	return exec("docker", buildDockerCpArgs({
@@ -19649,7 +19658,7 @@ function extractCaCert(containerName, destDir, { exec = defaultExec$1, chmod = n
 		hostPath: caCertPath
 	})), chmod(caCertPath, 420), caCertPath;
 }
-function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writeFile = defaultWriteFile, exists = node_fs.existsSync } = {}) {
+function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writeFile = defaultWriteFile, exists = node_fs.existsSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir, realpath = node_fs.realpathSync } = {}) {
 	let ca = readFile(caCertPath).trimEnd(), ownCaPath = (0, node_path.join)(dir, "buildcage-ca.pem");
 	writeFile(ownCaPath, `${ca}\n`, 420);
 	let destination = SYSTEM_CA_CANDIDATES.find((p) => exists(p)), systemCa;
@@ -19660,9 +19669,17 @@ function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writ
 			destination
 		};
 	}
+	let anchorDirs = ANCHOR_DIR_CANDIDATES.filter((d) => isDirectory(d)).map((destination, i) => {
+		let path = (0, node_path.join)(dir, `anchors${i}`);
+		return copyDir(realpath(destination), path), writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420), {
+			path,
+			destination
+		};
+	});
 	return {
 		ownCaPath,
-		systemCa
+		systemCa,
+		anchorDirs
 	};
 }
 const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"], KNOWN_JVM_KEYSTORE_DIRS = [
@@ -19746,6 +19763,8 @@ function presetCaVariables(files, env, realpath) {
 }
 function assertWriteThroughClearOfCaTrust(files, writeThroughPaths) {
 	for (let path of writeThroughPaths) {
+		let anchors = files.anchorDirs.find((a) => isAtOrUnder(path, a.destination));
+		if (anchors) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is in the p11-kit anchor directory ${JSON.stringify(anchors.destination)}, which the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it.`);
 		if (files.jvmKeystores.find((k) => path === k.destination)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is a JVM keystore the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it.`);
 		let nssDb = files.nssDb?.destination;
 		if (nssDb !== void 0 && path !== nssDb && isAtOrUnder(path, nssDb)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is inside the NSS database at ${JSON.stringify(nssDb)}, which the inspect engine covers for the step. Name ${JSON.stringify(nssDb)} itself to have the command's changes written back.`);
@@ -19774,6 +19793,12 @@ function caTrustAdditions(files, env) {
 		});
 		for (let name of POINT_AT_SYSTEM_STORE) env[name] || (extraEnv[name] = files.systemCa.destination);
 	}
+	for (let anchors of files.anchorDirs) mounts.push({
+		destination: anchors.destination,
+		type: "none",
+		source: anchors.path,
+		options: ["rbind", "ro"]
+	});
 	for (let keystore of files.jvmKeystores) mounts.push({
 		destination: keystore.destination,
 		type: "none",

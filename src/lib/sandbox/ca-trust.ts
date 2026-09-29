@@ -5,7 +5,9 @@ import {
   existsSync,
   chmodSync,
   copyFileSync,
+  cpSync,
   realpathSync,
+  statSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -27,7 +29,7 @@ import type { MountEntry } from "./types.ts";
  * the live host `/`, so both the write and the delete land on the host
  * filesystem itself.
  *
- * Instead, the two files below are written into this run's own scratch
+ * Instead, the files below are written into this run's own scratch
  * directory and mounted over the sandbox's own view of the relevant
  * paths (see caTrustAdditions / buildOciConfig), a mount-namespace-scoped
  * overlay, not a host write. The mount needs nothing undone
@@ -60,6 +62,11 @@ export interface CaTrustFiles {
    *  `mvn`/`gradle`/`java` under the inspect engine trust the CA only once it
    *  is in here. Empty when the runner has no JVM keystore this found. */
   jvmKeystores: { path: string; destination: string }[];
+  /** Copies of the p11-kit anchor directories this runner has, each with the
+   *  CA added and mounted over the one it was copied from. RHEL's GnuTLS
+   *  (wget, git) reads its trust through p11-kit, which reads these rather
+   *  than the bundle above. */
+  anchorDirs: { path: string; destination: string }[];
   /** Undefined when there was nowhere to mount it. */
   nssDb?: NssDbFiles;
 }
@@ -71,6 +78,9 @@ export const SYSTEM_CA_CANDIDATES = [
   "/etc/pki/tls/cacert.pem", // OpenELEC
   "/etc/ssl/cert.pem", // Alpine
 ];
+
+/** The p11-kit anchor directories: RHEL/Fedora's, then SUSE's. */
+export const ANCHOR_DIR_CANDIDATES = ["/etc/pki/ca-trust/source/anchors", "/etc/pki/trust/anchors"];
 
 /** Not under /run: `write_through` can put the host's /run back, and the mount
  *  point would then be created on the host. */
@@ -84,6 +94,8 @@ export interface CaTrustDeps {
   chmod?: (path: string, mode: number) => void;
   copyFile?: (source: string, destination: string) => void;
   realpath?: (path: string) => string;
+  isDirectory?: (path: string) => boolean;
+  copyDir?: (source: string, destination: string) => void;
   warn?: (message: string) => void;
 }
 
@@ -100,6 +112,16 @@ function defaultReadFile(path: string): string {
 
 function defaultWriteFile(path: string, contents: string, mode: number): void {
   writeFileSync(path, contents, { mode });
+}
+
+function defaultIsDirectory(path: string): boolean {
+  return statSync(path, { throwIfNoEntry: false })?.isDirectory() === true;
+}
+
+// A symlink in the directory is copied as the link it is, so the mirror never
+// reads through one to somewhere else.
+function defaultCopyDir(source: string, destination: string): void {
+  cpSync(source, destination, { recursive: true, verbatimSymlinks: true });
 }
 /* v8 ignore stop */
 
@@ -139,6 +161,9 @@ export function writeCaTrustFiles(
     readFile = defaultReadFile,
     writeFile = defaultWriteFile,
     exists = existsSync,
+    isDirectory = defaultIsDirectory,
+    copyDir = defaultCopyDir,
+    realpath = realpathSync,
   }: CaTrustDeps = {},
 ): Omit<CaTrustFiles, "jvmKeystores" | "nssDb"> {
   const ca = readFile(caCertPath).trimEnd();
@@ -155,7 +180,18 @@ export function writeCaTrustFiles(
     systemCa = { path, destination };
   }
 
-  return { ownCaPath, systemCa };
+  // Only a directory the runner already has: one is never created.
+  const anchorDirs = ANCHOR_DIR_CANDIDATES.filter((d) => isDirectory(d)).map((destination, i) => {
+    const path = join(dir, `anchors${i}`);
+    // Copied from where it resolves: a symlinked directory copied verbatim
+    // would make the copy a link back to it, and the CA would land in the
+    // runner's own store.
+    copyDir(realpath(destination), path);
+    writeFile(join(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 0o644);
+    return { path, destination };
+  });
+
+  return { ownCaPath, systemCa, anchorDirs };
 }
 
 // The keystore file names a JVM's default trust manager reads: jssecacerts
@@ -317,8 +353,9 @@ export function writeJvmKeystoreFiles(
 // SSL_CERT_FILE replace a tool's bundle outright, so they're pointed at the
 // (augmented) system store instead, never a CA-only file: doing so would
 // leave the tool trusting nothing else. CURL_CA_BUNDLE is left unset: curl
-// already reads the system store by default, which is also how GnuTLS-linked
-// tools (Debian's wget and git) reach it, since they read none of these.
+// already reads the system store by default, which is also how Debian's
+// GnuTLS-linked tools (wget, git) reach it, since they read none of these.
+// RHEL's read p11-kit's anchor directories instead; see anchorDirs.
 //
 // Only applied when a variable is unset. A step that already points one of
 // these somewhere keeps doing so unmodified: safely appending to an
@@ -361,16 +398,26 @@ export function presetCaVariables(
 }
 
 /**
- * The JVM keystores and the NSS database are mounted after every write_through
- * entry, so an entry naming a keystore, or something inside the database,
- * would be silently shadowed. Only what this step mounts is refused: which
- * keystores exist depends on the JDKs installed. An ancestor stays allowed.
+ * The anchor directories, the JVM keystores and the NSS database are mounted
+ * after every write_through entry, so an entry in an anchor directory, naming a
+ * keystore, or inside the database, would be silently shadowed. Only what this
+ * step mounts is refused: which keystores exist depends on the JDKs installed.
+ * An ancestor stays allowed.
  */
 export function assertWriteThroughClearOfCaTrust(
   files: CaTrustFiles,
   writeThroughPaths: string[],
 ): void {
   for (const path of writeThroughPaths) {
+    const anchors = files.anchorDirs.find((a) => isAtOrUnder(path, a.destination));
+    if (anchors) {
+      throw new WritablePathConflictError(
+        `write_through entry ${JSON.stringify(path)} is in the p11-kit anchor directory ` +
+          `${JSON.stringify(anchors.destination)}, which the inspect engine covers with a ` +
+          "read-only copy carrying the proxy CA for the step. Name a containing directory " +
+          "instead to persist writes around it.",
+      );
+    }
     const keystore = files.jvmKeystores.find((k) => path === k.destination);
     if (keystore) {
       throw new WritablePathConflictError(
@@ -424,6 +471,15 @@ export function caTrustAdditions(files: CaTrustFiles, env: NodeJS.ProcessEnv): C
     for (const name of POINT_AT_SYSTEM_STORE) {
       if (!env[name]) extraEnv[name] = files.systemCa.destination;
     }
+  }
+
+  for (const anchors of files.anchorDirs) {
+    mounts.push({
+      destination: anchors.destination,
+      type: "none",
+      source: anchors.path,
+      options: ["rbind", "ro"],
+    });
   }
 
   // The JVM reads no variable, only its own keystore, so these add no env, just
