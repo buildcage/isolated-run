@@ -293,4 +293,22 @@ fi
 sudo -n umount "$CASE10/tool" "$CASE10/bound"
 rm -rf "$CASE10" "$BIND_SRC"
 
+# --- Case 11: an overlay root keeps the host's owner and mode, /tmp's root
+# 1777 included, and a file made under it does not reach the host.
+CASE11=$(mktemp -d)
+TMP_MARKER="/tmp/.buildcage-ephemeral-tmp-marker-$$"
+HOST_ATTRS="$(stat -c '%u:%g %a' /tmp) $(stat -c '%u:%g %a' "$HOME")"
+run_ephemeral "$CASE11" "" "attrs=\"\$(stat -c '%u:%g %a' /tmp) \$(stat -c '%u:%g %a' \"\$HOME\")\"
+[ \"\$attrs\" = '$HOST_ATTRS' ] || { echo \"UNEXPECTED: \$attrs, host has $HOST_ATTRS\"; exit 1; }
+echo x >'$TMP_MARKER'"
+CODE11=$(cat "$CASE11/exit_code")
+if [ "$CODE11" = "0" ] && [ ! -e "$TMP_MARKER" ]; then
+  pass "/tmp and \$HOME keep the host's owner and mode, and a write to /tmp is discarded"
+else
+  fail "/tmp or \$HOME did not keep the host's owner and mode, or a write to /tmp reached the host (exit $CODE11) -- see $CASE11/out.log"
+  cat "$CASE11/out.log"
+fi
+rm -rf "$CASE11"
+rm -f "$TMP_MARKER"
+
 assert_results
