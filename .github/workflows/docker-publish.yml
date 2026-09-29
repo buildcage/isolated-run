@@ -207,10 +207,10 @@ jobs:
         run: vp run build
 
       - name: Run an isolated command via the real action
+        id: run
         uses: ./
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.image.outputs.ref }}
-          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/verify-summary.md
         with:
           proxy_engine: ${{ matrix.engine }}
           # Each engine gets the rule kind it actually enforces on.
@@ -218,6 +218,8 @@ jobs:
           allowed_url_rules: ${{ matrix.engine == 'inspect' && 'GET|HEAD https://example.com/**' || '' }}
           # The refusal below is the point, not a failure.
           fail_on_blocked: false
+          upload_traffic_artifact: true
+          traffic_artifact_retention_days: 1
           run: |
             echo "=== an allowed host must be reachable ==="
             # Retried because a release should not go unsigned over one bad
@@ -232,19 +234,25 @@ jobs:
               exit 1
             fi
 
-      # The engines refuse differently (a rejected connection, or a 403), so the
-      # command above only sees that the second request failed. The report says
-      # the proxy is why.
-      - name: Verify the report recorded both outcomes
-        env:
-          SUMMARY: ${{ runner.temp }}/verify-summary.md
+      # The command above only sees that the second request failed, which an
+      # outage would produce too, so the traffic record has to show the proxy
+      # refused it.
+      - name: Download the traffic artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ steps.run.outputs.traffic_artifact_name }}
+          path: /tmp/buildcage-traffic
+
+      - name: The proxy must have allowed example.com and refused neverssl.com
         run: |
-          for HOST in example.com:443 neverssl.com:443; do
-            if ! grep -qF "$HOST" "$SUMMARY"; then
-              echo "::error::$HOST is missing from the report"
-              exit 1
-            fi
-          done
+          node -e '
+            const rows = JSON.parse(require("node:fs").readFileSync("/tmp/buildcage-traffic/traffic.json", "utf8"));
+            const has = (action, host) => rows.some((r) => r.action === action && r.host === host);
+            if (!has("allow", "example.com") || !has("block", "neverssl.com")) {
+              console.log("::error::the traffic record does not show example.com allowed and neverssl.com blocked");
+              process.exit(1);
+            }
+          '
 
       # No cleanup step: the action stops its own proxy container in its
       # finally block.
