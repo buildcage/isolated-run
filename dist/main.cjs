@@ -19662,7 +19662,7 @@ function extractCaCert(containerName, destDir, { exec = defaultExec$1, chmod = n
 		hostPath: caCertPath
 	})), chmod(caCertPath, 420), caCertPath;
 }
-function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writeFile = defaultWriteFile, exists = node_fs.existsSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir, realpath = node_fs.realpathSync } = {}) {
+function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writeFile = defaultWriteFile, exists = node_fs.existsSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir, realpath = node_fs.realpathSync, warn } = {}) {
 	let ca = readFile(caCertPath).trimEnd(), ownCaPath = (0, node_path.join)(dir, "buildcage-ca.pem");
 	writeFile(ownCaPath, `${ca}\n`, 420);
 	let destination = SYSTEM_CA_CANDIDATES.find((p) => exists(p)), systemCa;
@@ -19673,12 +19673,17 @@ function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writ
 			destination
 		};
 	}
-	let caDirs = CA_DIR_CANDIDATES.filter((d) => isDirectory(d)).map((destination, i) => {
+	let caDirs = CA_DIR_CANDIDATES.filter((d) => isDirectory(d)).flatMap((destination, i) => {
 		let path = (0, node_path.join)(dir, `ca-dir${i}`);
-		return copyDir(realpath(destination), path), writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420), {
+		try {
+			copyDir(realpath(destination), path), writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420);
+		} catch (e) {
+			return warn?.(`could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); a tool that reads it (GnuTLS on RHEL or SUSE, such as wget) will not trust the proxy. Make it readable by the runner user, or use proxy_engine: universal.`), [];
+		}
+		return [{
 			path,
 			destination
-		};
+		}];
 	});
 	return {
 		ownCaPath,
@@ -20859,7 +20864,7 @@ function extractCaTrust(containerName, dir, options, { extractCaCert, writeCaTru
 	let { env, writeThroughPaths, warn } = options;
 	try {
 		let caCertPath = extractCaCert(containerName, dir), tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env)), files = {
-			...writeCaTrustFiles(caCertPath, dir),
+			...writeCaTrustFiles(caCertPath, dir, { warn }),
 			jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn }),
 			nssDb: prepareNssDb(containerName, dir, env.HOME, {
 				warn,

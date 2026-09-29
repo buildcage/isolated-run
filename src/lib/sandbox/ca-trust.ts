@@ -12,6 +12,7 @@ import {
 import { dirname, join } from "node:path";
 
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
+import { errorMessage } from "#core/lib/errors.ts";
 
 import { nssDbMounts, type NssDbFiles } from "./nss-db.ts";
 import { isAtOrUnder, WritablePathConflictError } from "./paths.ts";
@@ -157,7 +158,8 @@ export function extractCaCert(
 /**
  * Write the CA trust files a step's env vars will point at, into `dir`
  * (this run's own scratch directory). `caCertPath` is the proxy's own CA,
- * already `docker cp`'d onto the host; see extractCaCert.
+ * already `docker cp`'d onto the host; see extractCaCert. A CA directory that
+ * cannot be copied is left uncovered with a warning rather than failing the step.
  */
 export function writeCaTrustFiles(
   caCertPath: string,
@@ -169,6 +171,7 @@ export function writeCaTrustFiles(
     isDirectory = defaultIsDirectory,
     copyDir = defaultCopyDir,
     realpath = realpathSync,
+    warn,
   }: CaTrustDeps = {},
 ): Omit<CaTrustFiles, "jvmKeystores" | "nssDb"> {
   const ca = readFile(caCertPath).trimEnd();
@@ -186,14 +189,24 @@ export function writeCaTrustFiles(
   }
 
   // Only a directory the runner already has: one is never created.
-  const caDirs = CA_DIR_CANDIDATES.filter((d) => isDirectory(d)).map((destination, i) => {
+  const caDirs = CA_DIR_CANDIDATES.filter((d) => isDirectory(d)).flatMap((destination, i) => {
     const path = join(dir, `ca-dir${i}`);
-    // Copied from where it resolves: a symlinked directory copied verbatim
-    // would make the copy a link back to it, and the CA would land in the
-    // runner's own store.
-    copyDir(realpath(destination), path);
-    writeFile(join(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 0o644);
-    return { path, destination };
+    try {
+      // Copied from where it resolves: a symlinked directory copied verbatim
+      // would make the copy a link back to it, and the CA would land in the
+      // runner's own store.
+      copyDir(realpath(destination), path);
+      writeFile(join(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 0o644);
+    } catch (e) {
+      // The copy runs as the runner user, so an entry only root can read fails it.
+      warn?.(
+        `could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); ` +
+          "a tool that reads it (GnuTLS on RHEL or SUSE, such as wget) will not trust the " +
+          "proxy. Make it readable by the runner user, or use proxy_engine: universal.",
+      );
+      return [];
+    }
+    return [{ path, destination }];
   });
 
   return { ownCaPath, systemCa, caDirs };

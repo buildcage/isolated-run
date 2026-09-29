@@ -198,7 +198,7 @@ function extractCaTrust(
     // Persistent mode's paths in either mode; see pinningPaths.
     const tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env));
     const files: CaTrustFiles = {
-      ...writeCaTrustFiles(caCertPath, dir),
+      ...writeCaTrustFiles(caCertPath, dir, { warn }),
       jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn }),
       nssDb: prepareNssDb(
         containerName,

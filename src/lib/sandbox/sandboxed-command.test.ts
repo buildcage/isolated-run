@@ -428,6 +428,9 @@ describe("runSandboxedCommand", () => {
       "/tmp",
       "/opt/out",
     ]);
+    expect(mocks.writeCaTrustFiles).toHaveBeenCalledWith(`${SCRATCH}/ca.crt`, SCRATCH, {
+      warn: mocks.warn,
+    });
     expect(mocks.writeJvmKeystoreFiles).toHaveBeenCalledWith(
       `${SCRATCH}/ca.crt`,
       SCRATCH,

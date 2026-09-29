@@ -137,6 +137,35 @@ describe("writeCaTrustFiles with CA directories", () => {
       }
     });
   }
+
+  it("warns and leaves out a directory it cannot copy, keeping the rest", () => {
+    const { deps, written } = fakeHost({ [CA_INPUT]: `${FAKE_CA}\n` }, [SUSE_ANCHORS, SUSE_GNUTLS]);
+    deps.copyDir = (source) => {
+      if (source === SUSE_ANCHORS) throw new Error(`EACCES: permission denied, ${source}/private`);
+    };
+    const warnings: string[] = [];
+    deps.warn = (message) => warnings.push(message);
+
+    const { caDirs } = writeCaTrustFiles(CA_INPUT, "/scratch", deps);
+
+    expect(caDirs).toEqual([{ path: "/scratch/ca-dir1", destination: SUSE_GNUTLS }]);
+    expect(written["/scratch/ca-dir0/buildcage-proxy-ca.pem"]).toBeUndefined();
+    expect(warnings).toEqual([
+      `could not add the proxy CA to the CA directory ${SUSE_ANCHORS} ` +
+        `(EACCES: permission denied, ${SUSE_ANCHORS}/private); a tool that reads it (GnuTLS on ` +
+        "RHEL or SUSE, such as wget) will not trust the proxy. Make it readable by the runner " +
+        "user, or use proxy_engine: universal.",
+    ]);
+  });
+
+  it("leaves out a directory whose copy the CA cannot be written into", () => {
+    const { deps } = fakeHost({ [CA_INPUT]: `${FAKE_CA}\n` }, [RHEL_ANCHORS]);
+    deps.writeFile = (path) => {
+      if (path.startsWith("/scratch/ca-dir0/")) throw new Error("EACCES");
+    };
+
+    expect(writeCaTrustFiles(CA_INPUT, "/scratch", deps).caDirs).toEqual([]);
+  });
 });
 
 describe("caTrustAdditions", () => {
