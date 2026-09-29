@@ -881,6 +881,28 @@ describe("buildOciConfig: caTrust", () => {
     jvmKeystores: [],
   };
 
+  it("refuses a write_through entry naming a keystore it mounts, in either mode", () => {
+    const keystore = "/usr/lib/jvm/jdk/lib/security/cacerts";
+    const withKeystore = {
+      ...caTrust,
+      jvmKeystores: [{ path: "/scratch/jvm-0/cacerts", destination: keystore }],
+    };
+    expect(() =>
+      build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: [keystore] },
+        caTrust: withKeystore,
+      }),
+    ).toThrow(WritablePathConflictError);
+    expect(() =>
+      build(fakeBaseSpec(), {
+        ...baseArgs,
+        ephemeral: { overlayRoots: [], allowWrite: [keystore] },
+        caTrust: withKeystore,
+      }),
+    ).toThrow(WritablePathConflictError);
+  });
+
   it("adds no CA mounts when caTrust is omitted", () => {
     const config = build(fakeBaseSpec(), baseArgs);
     expect(config.mounts.some((m) => m.destination === OWN_CA_DESTINATION)).toBe(false);

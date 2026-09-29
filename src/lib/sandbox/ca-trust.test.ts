@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  assertWriteThroughClearOfCaTrust,
   extractCaCert,
   writeCaTrustFiles,
   caTrustAdditions,
@@ -565,5 +566,37 @@ describe("caTrustAdditions with JVM keystores", () => {
     });
     // The JVM reads no variable.
     expect(Object.keys(env)).toEqual(["NODE_EXTRA_CA_CERTS", "DENO_CERT"]);
+  });
+});
+
+describe("assertWriteThroughClearOfCaTrust", () => {
+  const KEYSTORE = "/usr/lib/jvm/temurin-21-jdk-amd64/lib/security/cacerts";
+  const NSS_DB = "/home/runner/.pki/nssdb";
+  const files = {
+    ownCaPath: "/scratch/buildcage-ca.pem",
+    systemCa: undefined,
+    jvmKeystores: [{ path: "/scratch/jvm-0/cacerts", destination: KEYSTORE }],
+    nssDb: { path: "/scratch/nssdb", template: "/scratch/nssdb-template", destination: NSS_DB },
+  };
+
+  it.each([
+    [KEYSTORE, /is a JVM keystore/],
+    [`${NSS_DB}/cert9.db`, /is inside the NSS database/],
+  ])("refuses %s, which a CA mount would shadow", (path, message) => {
+    expect(() => assertWriteThroughClearOfCaTrust(files, [path])).toThrow(message);
+  });
+
+  it.each([
+    ["the directory holding a keystore", "/usr/lib/jvm/temurin-21-jdk-amd64/lib/security"],
+    ["the NSS database itself, which is written back", NSS_DB],
+    ["an unrelated path", "/opt/cache"],
+  ])("allows %s", (_, path) => {
+    expect(() => assertWriteThroughClearOfCaTrust(files, [path])).not.toThrow();
+  });
+
+  it("allows anything when there is no NSS database to cover", () => {
+    expect(() =>
+      assertWriteThroughClearOfCaTrust({ ...files, nssDb: undefined }, [`${NSS_DB}/cert9.db`]),
+    ).not.toThrow();
   });
 });

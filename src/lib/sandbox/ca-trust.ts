@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 
 import { nssDbMounts, type NssDbFiles } from "./nss-db.ts";
+import { isAtOrUnder, WritablePathConflictError } from "./paths.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 import type { MountEntry } from "./types.ts";
 
@@ -325,6 +326,36 @@ export function writeJvmKeystoreFiles(
 // resolution.
 const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"];
 const POINT_AT_SYSTEM_STORE = ["REQUESTS_CA_BUNDLE", "PIP_CERT", "SSL_CERT_FILE"];
+
+/**
+ * The JVM keystores and the NSS database are mounted after every write_through
+ * entry, so an entry naming a keystore, or something inside the database,
+ * would be silently shadowed. Only what this step mounts is refused: which
+ * keystores exist depends on the JDKs installed. An ancestor stays allowed.
+ */
+export function assertWriteThroughClearOfCaTrust(
+  files: CaTrustFiles,
+  writeThroughPaths: string[],
+): void {
+  for (const path of writeThroughPaths) {
+    const keystore = files.jvmKeystores.find((k) => path === k.destination);
+    if (keystore) {
+      throw new WritablePathConflictError(
+        `write_through entry ${JSON.stringify(path)} is a JVM keystore the inspect engine covers ` +
+          "with a read-only copy carrying the proxy CA for the step. Name a containing directory " +
+          "instead to persist writes around it.",
+      );
+    }
+    const nssDb = files.nssDb?.destination;
+    if (nssDb !== undefined && path !== nssDb && isAtOrUnder(path, nssDb)) {
+      throw new WritablePathConflictError(
+        `write_through entry ${JSON.stringify(path)} is inside the NSS database at ` +
+          `${JSON.stringify(nssDb)}, which the inspect engine covers for the step. Name ` +
+          `${JSON.stringify(nssDb)} itself to have the command's changes written back.`,
+      );
+    }
+  }
+}
 
 export interface CaTrustAdditions {
   mounts: MountEntry[];

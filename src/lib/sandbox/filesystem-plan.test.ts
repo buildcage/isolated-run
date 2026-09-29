@@ -106,6 +106,31 @@ describe("resolveFilesystemPlan", () => {
     expect(execFile).not.toHaveBeenCalled();
   });
 
+  describe("the file a CA store candidate really is", () => {
+    const REAL_STORE = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem";
+    // As on Fedora, where the candidates are symlinks into ca-trust.
+    const realpath = (p: string) => (p === "/etc/ssl/cert.pem" ? REAL_STORE : p);
+
+    it("is reserved like the candidate itself", () => {
+      expect(() =>
+        resolveFilesystemPlan("persistent", REAL_STORE, ENV, {
+          exists: alwaysExists,
+          stat: (p) => (p === REAL_STORE ? { ...dirStat(), mode: 0o100644 } : dirStat()),
+          realpath,
+        }),
+      ).toThrow(expect.objectContaining({ code: "FILESYSTEM_INPUT_CONFLICT" }));
+    });
+
+    it("leaves a directory containing it allowed", () => {
+      const plan = resolveFilesystemPlan("persistent", "/etc/pki/ca-trust", ENV, {
+        exists: alwaysExists,
+        stat: dirStat,
+        realpath,
+      });
+      expect(plan.writeThroughPaths).toStrictEqual(["/etc/pki/ca-trust"]);
+    });
+  });
+
   describe("an entry that passes through a symlink", () => {
     const link = (links: Record<string, { target: string; uid: number }>) => ({
       exists: alwaysExists,

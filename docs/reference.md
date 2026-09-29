@@ -766,7 +766,14 @@ CA store to carry the proxy's CA. Which path that store is depends on the runner
 CA store is looked for at is reserved, whether or not this runner keeps one there:
 `/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt`, `/etc/ssl/ca-bundle.pem`,
 `/etc/pki/tls/cacert.pem` and `/etc/ssl/cert.pem`. An entry that worked on
-one runner and failed on the next would be worse than one that is refused everywhere.
+one runner and failed on the next would be worse than one that is refused everywhere. The file a
+candidate is a symlink to is reserved as well, since that is where the mount lands
+(`/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` on RHEL, say).
+
+Under `inspect`, a JVM keystore the step covers with its CA-carrying copy, and anything inside the
+NSS database it covers (`~/.pki/nssdb/cert9.db`), are refused too. Which keystores exist depends
+on the JDKs installed, so only the ones the step actually mounts count. Naming the directory holding
+a keystore is fine, and naming `~/.pki/nssdb` itself has the command's changes to it written back.
 
 Naming a reserved path, or anything under one, fails the step rather than being quietly ignored.
 Naming a directory that contains them (`write_through: /etc`) is fine: writes elsewhere under it
