@@ -22,11 +22,17 @@ TESTDIR=/etc/buildcage-reserved-test
 sudo -n mkdir -p "$TESTDIR"
 sudo -n chown "$(id -u):$(id -g)" "$TESTDIR"
 # A CA store candidate this runner lacks, made a symlink for case 4.
-CA_LINK=/etc/ssl/cert.pem
-[ -e "$CA_LINK" ] && CA_LINK=/etc/ssl/ca-bundle.pem
+CA_LINK=""
+for candidate in /etc/ssl/cert.pem /etc/ssl/ca-bundle.pem; do
+  if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then
+    CA_LINK="$candidate"
+    break
+  fi
+done
+CA_LINK_MADE=false
 cleanup() {
   docker compose -f "$REPO_ROOT/compose.test-universal.yaml" down -v >/dev/null 2>&1 || true
-  sudo -n rm -f "$CA_LINK"
+  if [ "$CA_LINK_MADE" = true ]; then sudo -n rm -f "$CA_LINK"; fi
   sudo -n rm -rf "$TESTDIR"
   rm -rf "$WORKDIR"
 }
@@ -120,15 +126,20 @@ fi
 
 # Case 4: the file a CA store candidate is a symlink to, as on RHEL, is
 # reserved too: the CA mount lands on it.
-touch "$TESTDIR/bundle.pem"
-sudo -n ln -s "$TESTDIR/bundle.pem" "$CA_LINK"
-run_instance "$TESTDIR/bundle.pem" "true"
-CODE=$(cat "$WORKDIR/exit_code")
-
-if [ "$CODE" != "0" ] && grep -q "reserved" "$WORKDIR/out.log"; then
-  pass "write_through: the file $CA_LINK links to is refused"
+if [ -z "$CA_LINK" ]; then
+  echo "  SKIP  every candidate a symlink could stand in for already exists"
+elif ! touch "$TESTDIR/bundle.pem" || ! sudo -n ln -s "$TESTDIR/bundle.pem" "$CA_LINK"; then
+  fail "could not link $CA_LINK to $TESTDIR/bundle.pem"
 else
-  fail "write_through: the file $CA_LINK links to was accepted (exit $CODE)"
+  CA_LINK_MADE=true
+  run_instance "$TESTDIR/bundle.pem" "true"
+  CODE=$(cat "$WORKDIR/exit_code")
+
+  if [ "$CODE" != "0" ] && grep -q "reserved" "$WORKDIR/out.log"; then
+    pass "write_through: the file $CA_LINK links to is refused"
+  else
+    fail "write_through: the file $CA_LINK links to was accepted (exit $CODE)"
+  fi
 fi
 
 assert_results
