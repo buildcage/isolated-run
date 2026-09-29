@@ -376,13 +376,13 @@ fi
 
 # A JVM already on the runner reads only its own keystore, so without the CA
 # injected there (ca-trust.ts's writeJvmKeystoreFiles) a Java client meeting the
-# proxy's re-signed certificate fails the handshake with a PKIX error. A status
-# coming back proves the injected CA was trusted; a compiler-less runner (no
-# javac for the single-file launcher) leaves the check inconclusive rather than
-# failing, since only a real handshake failure should.
+# proxy's re-signed certificate fails the handshake. Only a status coming back
+# passes: a keystore the JVM cannot read fails differently (an empty
+# trustAnchors, a trust store it cannot access), and that has to fail too. The
+# check is skipped only when the single-file launcher cannot run.
 echo "=== [JVM keystore - the JVM trusts the injected CA] ==="
-if ! command -v java >/dev/null 2>&1; then
-  pass "no JVM on this runner; keystore injection is not exercised"
+if ! command -v java >/dev/null 2>&1 || ! command -v javac >/dev/null 2>&1; then
+  pass "no JDK on this runner; keystore injection is not exercised"
 else
   JDIR=$(mktemp -d)
   cat >"$JDIR/HttpsCheck.java" <<'JAVA'
@@ -402,8 +402,10 @@ JAVA
   JOUT=$(java "$JDIR/HttpsCheck.java" https://allowed.example.com/public/pkg.tgz 2>&1 || true)
   case "$JOUT" in
   *"handshake ok"*) pass "the JVM trusted the injected proxy CA" ;;
-  *PKIX* | *SSLHandshake*) fail "the JVM did not trust the proxy CA: $JOUT" ;;
-  *) pass "the JVM check was inconclusive (no compiler for the launcher?): $JOUT" ;;
+  *"Could not find or load main class"* | *jdk.compiler*)
+    pass "this JDK cannot run a single source file; keystore injection is not exercised: $JOUT"
+    ;;
+  *) fail "the JVM's HTTPS request through the proxy failed: $JOUT" ;;
   esac
 fi
 
