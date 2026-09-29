@@ -167,8 +167,7 @@ export interface CreatedDir {
   gid: number;
 }
 
-/** Where a directory is made or removed as this process rather than through
- *  sudo; see asIdentity. */
+/** How a directory is made or removed: directly as this process, or through sudo. */
 export interface OwnDirOps {
   execFile?: (command: string, args: string[]) => void;
   mkdir?: (path: string) => void;
@@ -321,9 +320,9 @@ export function asOwner({ uid, gid }: { uid: number; gid: number }): string[] {
   return ["-u", `#${uid}`, "-g", `#${gid}`];
 }
 
-/** Removes a directory made here as the identity that made it. As this
- *  process, directly: sudoers may not allow `sudo -u` to the runner's own
- *  account, and nothing is borrowed. */
+/** Removes a directory made here as the identity that made it: directly when
+ *  that is this process, since sudoers may not allow `sudo -u` to the runner
+ *  itself, and through sudo otherwise. */
 export function rmdirAsOwner(
   dir: CreatedDir,
   { execFile, rmdir, self }: Pick<Required<OwnDirOps>, "execFile" | "rmdir" | "self">,
