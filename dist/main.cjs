@@ -17677,12 +17677,11 @@ var require_envelope = __commonJSMin(((exports) => {
 	});
 })), import_dist$2 = require_dist$9(), import_dist$3 = require_dist$6(), import_dist$4 = require_dist$4();
 const derUtf8 = (s) => String.fromCharCode(12, s.length) + s;
-function assertSignedDigest(bundleJson, expectedDigest) {
-	let dsse = bundleJson?.dsseEnvelope, payload = dsse?.payload;
-	if (!payload) throw new VerifyImageError("Bundle is not a DSSE envelope or is missing a signed payload", "VERIFY_FAILED");
+function assertSignedDigest(envelope, expectedDigest) {
+	if (envelope.payload.length === 0) throw new VerifyImageError("Bundle is missing a signed payload", "VERIFY_FAILED");
 	try {
-		let sl = JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
-		if (dsse.payloadType === "application/vnd.in-toto+json") {
+		let sl = JSON.parse(envelope.payload.toString("utf8"));
+		if (envelope.payloadType === "application/vnd.in-toto+json") {
 			let subjects = sl?.subject ?? [];
 			if (!subjects.some((s) => s?.digest?.sha256 && `sha256:${s.digest.sha256}` === expectedDigest)) throw new VerifyImageError(`Signed digest (${subjects.map((s) => s?.digest?.sha256 ? `sha256:${s.digest.sha256}` : null).filter(Boolean).join(", ") || "missing"}) does not match fetched digest (${expectedDigest}). The bundle may have been re-attached to a different image.`, "VERIFY_FAILED");
 		} else {
@@ -17715,13 +17714,14 @@ async function verifyBundle(bundleJson, options, expectedDigest) {
 		oid: { id: oid.split(".").map(Number) },
 		value: Buffer.from(value)
 	})));
-	let signedEntity = (0, import_dist$4.toSignedEntity)((0, import_dist$2.bundleFromJSON)(bundleJson));
+	let bundle = (0, import_dist$2.bundleFromJSON)(bundleJson);
+	if (bundle.content.$case !== "dsseEnvelope") throw new VerifyImageError("Bundle is not a DSSE envelope", "VERIFY_FAILED");
 	try {
-		verifier.verify(signedEntity, policy);
+		verifier.verify((0, import_dist$4.toSignedEntity)(bundle), policy);
 	} catch (err) {
 		throw new VerifyImageError(`Image provenance verification failed: ${errorMessage(err)}`, "VERIFY_FAILED");
 	}
-	assertSignedDigest(bundleJson, expectedDigest);
+	assertSignedDigest(bundle.content.dsseEnvelope, expectedDigest);
 }
 //#endregion
 //#region src/core/lib/provenance/verify-policy.ts
