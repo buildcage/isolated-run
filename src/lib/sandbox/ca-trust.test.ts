@@ -39,6 +39,7 @@ function fakeHost(files: Record<string, string>, dirs: string[] = []) {
       chmod.push([path, mode]);
     },
     exists: (path) => path in files,
+    realpath: (path) => path,
     isDirectory: (path) => dirs.includes(path),
     copyDir: (source, destination) => {
       copied.push([source, destination]);
@@ -584,6 +585,19 @@ describe("writeJvmKeystoreFiles", () => {
       ).toEqual([]);
       expect(warnings).toEqual([]);
     }
+  });
+});
+
+describe("writeCaTrustFiles with an anchor directory that is a symlink", () => {
+  it("copies the directory it resolves to, not the link", () => {
+    const anchors = "/etc/pki/ca-trust/source/anchors";
+    const { deps, copied } = fakeHost({ "/scratch/input-ca.pem": `${FAKE_CA}\n` }, [anchors]);
+    deps.realpath = (path) => (path === anchors ? "/usr/share/pki/anchors" : path);
+
+    const { anchorDirs } = writeCaTrustFiles("/scratch/input-ca.pem", "/scratch", deps);
+
+    expect(copied).toEqual([["/usr/share/pki/anchors", "/scratch/anchors0"]]);
+    expect(anchorDirs).toEqual([{ path: "/scratch/anchors0", destination: anchors }]);
   });
 });
 

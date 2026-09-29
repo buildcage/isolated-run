@@ -19658,7 +19658,7 @@ function extractCaCert(containerName, destDir, { exec = defaultExec$1, chmod = n
 		hostPath: caCertPath
 	})), chmod(caCertPath, 420), caCertPath;
 }
-function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writeFile = defaultWriteFile, exists = node_fs.existsSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir } = {}) {
+function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writeFile = defaultWriteFile, exists = node_fs.existsSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir, realpath = node_fs.realpathSync } = {}) {
 	let ca = readFile(caCertPath).trimEnd(), ownCaPath = (0, node_path.join)(dir, "buildcage-ca.pem");
 	writeFile(ownCaPath, `${ca}\n`, 420);
 	let destination = SYSTEM_CA_CANDIDATES.find((p) => exists(p)), systemCa;
@@ -19671,7 +19671,7 @@ function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writ
 	}
 	let anchorDirs = ANCHOR_DIR_CANDIDATES.filter((d) => isDirectory(d)).map((destination, i) => {
 		let path = (0, node_path.join)(dir, `anchors${i}`);
-		return copyDir(destination, path), writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420), {
+		return copyDir(realpath(destination), path), writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420), {
 			path,
 			destination
 		};

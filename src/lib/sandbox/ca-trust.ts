@@ -163,6 +163,7 @@ export function writeCaTrustFiles(
     exists = existsSync,
     isDirectory = defaultIsDirectory,
     copyDir = defaultCopyDir,
+    realpath = realpathSync,
   }: CaTrustDeps = {},
 ): Omit<CaTrustFiles, "jvmKeystores" | "nssDb"> {
   const ca = readFile(caCertPath).trimEnd();
@@ -182,7 +183,10 @@ export function writeCaTrustFiles(
   // Only a directory the runner already has: one is never created.
   const anchorDirs = ANCHOR_DIR_CANDIDATES.filter((d) => isDirectory(d)).map((destination, i) => {
     const path = join(dir, `anchors${i}`);
-    copyDir(destination, path);
+    // Copied from where it resolves: a symlinked directory copied verbatim
+    // would make the copy a link back to it, and the CA would land in the
+    // runner's own store.
+    copyDir(realpath(destination), path);
     writeFile(join(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 0o644);
     return { path, destination };
   });
