@@ -21775,7 +21775,7 @@ function buildRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
 	let groups = new Map();
 	for (let r of auditedRows) {
 		let param = ruleTypeToParam[r.ruleType];
-		param && (groups.has(param) || groups.set(param, []), groups.get(param).push(`${r.host}:${r.port}`));
+		param && (groups.has(param) || groups.set(param, new Set()), groups.get(param).add(`${r.host}:${r.port}`));
 	}
 	if (groups.size === 0) return "";
 	let yaml = exampleStepHead(actionRepo, actionRef, step);
@@ -22081,7 +22081,7 @@ function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound
 		...step,
 		allowedIpRules: report.parameters.allowedIpRules,
 		allowedTlsRules: report.parameters.allowedTlsRules
-	}) : buildRestrictExample(report.passed, actionRepo, actionRef, step)), report.blocked.length > 0) {
+	}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step)), report.blocked.length > 0) {
 		report.passed.length > 0 && (markdown += "\n");
 		let blocked = foldExpectedBlockedRows(report.blocked);
 		markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(blocked, {
