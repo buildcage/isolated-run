@@ -402,7 +402,7 @@ JAVA
   JOUT=$(java "$JDIR/HttpsCheck.java" https://allowed.example.com/public/pkg.tgz 2>&1 || true)
   case "$JOUT" in
   *"handshake ok"*) pass "the JVM trusted the injected proxy CA" ;;
-  *"Could not find or load main class"* | *jdk.compiler*)
+  *"Could not find or load main class"* | *"Module jdk.compiler not in boot Layer"*)
     pass "this JDK cannot run a single source file; keystore injection is not exercised: $JOUT"
     ;;
   *) fail "the JVM's HTTPS request through the proxy failed: $JOUT" ;;
