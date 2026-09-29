@@ -38,13 +38,17 @@ import type { MountEntry } from "./types.ts";
  * the step ends, and the real host store is never touched (the augmented copy
  * goes back over the path it was read from, so there is always a file there).
  *
- * OWN_CA_DESTINATION is the one path with nothing there ahead of time. runc
- * creates its mount point in the container's own /dev tmpfs, not on the host.
+ * OWN_CA_DESTINATION and FIREFOX_POLICIES_DESTINATION are the paths with
+ * nothing there ahead of time. runc creates their mount points in the
+ * container's own /dev tmpfs, not on the host.
  */
 export interface CaTrustFiles {
   /** A CA-only file, mounted at OWN_CA_DESTINATION, for variables that add
    *  to a tool's built-in trust set (NODE_EXTRA_CA_CERTS, DENO_CERT). */
   ownCaPath: string;
+  /** A Firefox policies.json installing the CA from OWN_CA_DESTINATION,
+   *  mounted at FIREFOX_POLICIES_DESTINATION for PLAYWRIGHT_FIREFOX_POLICIES_JSON. */
+  firefoxPoliciesPath: string;
   /** The runner's own system CA store with this CA appended, and the path it
    *  was read from, which is where the copy is mounted; it is no use anywhere
    *  else, so the two are one value. Undefined if the runner has no system
@@ -90,6 +94,8 @@ export const CA_DIR_CANDIDATES = [
 /** Not under /run: `write_through` can put the host's /run back, and the mount
  *  point would then be created on the host. */
 export const OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
+
+export const FIREFOX_POLICIES_DESTINATION = "/dev/buildcage-firefox-policies.json";
 
 export interface CaTrustDeps {
   exec?: (command: string, args: string[], env?: NodeJS.ProcessEnv) => void;
@@ -176,6 +182,10 @@ export function writeCaTrustFiles(
   const ownCaPath = join(dir, "buildcage-ca.pem");
   writeFile(ownCaPath, `${ca}\n`, 0o644);
 
+  const firefoxPoliciesPath = join(dir, "firefox-policies.json");
+  const policies = { policies: { Certificates: { Install: [OWN_CA_DESTINATION] } } };
+  writeFile(firefoxPoliciesPath, `${JSON.stringify(policies)}\n`, 0o644);
+
   const destination = SYSTEM_CA_CANDIDATES.find((p) => exists(p));
   let systemCa: CaTrustFiles["systemCa"];
   if (destination) {
@@ -196,7 +206,7 @@ export function writeCaTrustFiles(
     return { path, destination };
   });
 
-  return { ownCaPath, systemCa, caDirs };
+  return { ownCaPath, firefoxPoliciesPath, systemCa, caDirs };
 }
 
 // The keystore file names a JVM's default trust manager reads: jssecacerts
@@ -361,6 +371,8 @@ export function writeJvmKeystoreFiles(
 // already reads the system store by default, which is also how Debian's
 // GnuTLS-linked tools (wget, git) reach it, since they read none of these.
 // RHEL's and SUSE's read a directory instead; see CA_DIR_CANDIDATES.
+// Playwright's Firefox reads no store, only the policies file its variable
+// names, whose Certificates.Install copies the CA into the fresh profile.
 //
 // Only applied when a variable is unset. A step that already points one of
 // these somewhere keeps doing so unmodified: safely appending to an
@@ -368,6 +380,7 @@ export function writeJvmKeystoreFiles(
 // resolution.
 const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"];
 const POINT_AT_SYSTEM_STORE = ["REQUESTS_CA_BUNDLE", "PIP_CERT", "SSL_CERT_FILE"];
+const FIREFOX_POLICIES_VARIABLE = "PLAYWRIGHT_FIREFOX_POLICIES_JSON";
 
 // Variables this never sets, each replacing its tool's bundle when the step
 // does. npm reads npm_config_* in any case.
@@ -391,10 +404,18 @@ export function presetCaVariables(
   realpath: (path: string) => string,
 ): string[] {
   const store = files.systemCa && realpath(files.systemCa.destination);
-  const exact = [...POINT_AT_OWN_CA, ...POINT_AT_SYSTEM_STORE, ...REPLACING_WHEN_SET];
+  const exact = [
+    ...POINT_AT_OWN_CA,
+    ...POINT_AT_SYSTEM_STORE,
+    FIREFOX_POLICIES_VARIABLE,
+    ...REPLACING_WHEN_SET,
+  ];
   return Object.keys(env).filter((name) => {
     const value = env[name];
-    if (!value || value === OWN_CA_DESTINATION || realpath(value) === store) return false;
+    if (!value || value === OWN_CA_DESTINATION || value === FIREFOX_POLICIES_DESTINATION) {
+      return false;
+    }
+    if (realpath(value) === store) return false;
     return (
       exact.includes(name) ||
       REPLACING_WHEN_SET_ANY_CASE.some((v) => v.toLowerCase() === name.toLowerCase())
@@ -464,6 +485,15 @@ export function caTrustAdditions(files: CaTrustFiles, env: NodeJS.ProcessEnv): C
   const extraEnv: Record<string, string> = {};
   for (const name of POINT_AT_OWN_CA) {
     if (!env[name]) extraEnv[name] = OWN_CA_DESTINATION;
+  }
+  mounts.push({
+    destination: FIREFOX_POLICIES_DESTINATION,
+    type: "none",
+    source: files.firefoxPoliciesPath,
+    options: ["rbind", "ro", "nosuid", "nodev", "noexec"],
+  });
+  if (!env[FIREFOX_POLICIES_VARIABLE]) {
+    extraEnv[FIREFOX_POLICIES_VARIABLE] = FIREFOX_POLICIES_DESTINATION;
   }
 
   if (files.systemCa) {

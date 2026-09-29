@@ -628,7 +628,7 @@ jobs:
       - name: Verify no CA file was left on the host
         if: always()
         run: |
-          for f in /etc/buildcage-ca.pem /dev/buildcage-ca.pem; do
+          for f in /etc/buildcage-ca.pem /dev/buildcage-ca.pem /dev/buildcage-firefox-policies.json; do
             if [ -e "$f" ]; then
               echo "::error::$f exists on the host after the sandbox steps"
               exit 1

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 
-import { OWN_CA_DESTINATION } from "./ca-trust.ts";
+import { FIREFOX_POLICIES_DESTINATION, OWN_CA_DESTINATION } from "./ca-trust.ts";
 import { parseNofileLimit, type HostProbes } from "./host-probes.ts";
 import type { BuildOciConfigOptions } from "./oci-config.ts";
 import { buildOciConfig } from "./oci-config.ts";
@@ -877,6 +877,7 @@ describe("buildOciConfig: caTrust", () => {
   };
   const caTrust = {
     ownCaPath: "/scratch/buildcage-ca.pem",
+    firefoxPoliciesPath: "/scratch/firefox-policies.json",
     systemCa: { path: "/scratch/system-ca-bundle.pem", destination: SYSTEM_STORE },
     jvmKeystores: [],
     caDirs: [],
@@ -942,11 +943,13 @@ describe("buildOciConfig: caTrust", () => {
   });
 
   // Mounted before the tmpfs, the file would be hidden under it.
-  it("mounts the CA-only file after runc's /dev tmpfs, which it sits under", () => {
+  it("mounts the files it places under /dev after runc's /dev tmpfs", () => {
     const spec = fakeBaseSpec();
     spec.mounts.unshift({ destination: "/dev", type: "tmpfs", source: "tmpfs" });
     const destinations = build(spec, { ...baseArgs, caTrust }).mounts.map((m) => m.destination);
-    expect(OWN_CA_DESTINATION.startsWith("/dev/")).toBe(true);
-    expect(destinations.indexOf(OWN_CA_DESTINATION)).toBeGreaterThan(destinations.indexOf("/dev"));
+    for (const file of [OWN_CA_DESTINATION, FIREFOX_POLICIES_DESTINATION]) {
+      expect(file.startsWith("/dev/")).toBe(true);
+      expect(destinations.indexOf(file)).toBeGreaterThan(destinations.indexOf("/dev"));
+    }
   });
 });

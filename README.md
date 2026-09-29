@@ -452,7 +452,10 @@ toolchain-selected JDK reach the proxy without `proxy_engine: universal`. Chromi
 `chrome-headless-shell` that Puppeteer, Playwright and Remotion download, reads neither the store
 nor any variable, only its compiled-in root store and the NSS database in `$HOME`, so that
 database's `pkcs11.txt` gains, for the step, a read-only slot on a database holding only the CA. The
-database itself stays the runner's own, with whatever the command writes to it.
+database itself stays the runner's own, with whatever the command writes to it. Playwright's Firefox
+reads no store either, only the policies file `PLAYWRIGHT_FIREFOX_POLICIES_JSON` names, so where the
+command leaves it unset it is pointed at one that installs the CA into the fresh profile Playwright
+makes for each launch.
 
 The full table is in [Reference](./docs/reference.md#ca-trust-variables). What this cannot cover is
 in [Limitations](#limitations), below.
@@ -583,9 +586,13 @@ reported as blocked; see
   step. `fail_on_ca_residue: false` turns that into a warning and discards the write.
 - Only the NSS database under the step's own `HOME` carries the slot. Chromium started under another
   `HOME` inside the command (`HOME=/tmp chromium`, `export HOME=...`) does not trust the CA, so
-  leave `HOME` alone within the command. A Firefox carrying Mozilla's own root list, such as
-  Playwright's or the one Selenium drives, reads a per-profile database and does not trust the CA;
-  use `proxy_engine: universal` or an `allowed_tls_rules` passthrough for it.
+  leave `HOME` alone within the command.
+- Playwright's Firefox reads `PLAYWRIGHT_FIREFOX_POLICIES_JSON` from 1.54 on. An earlier one, and
+  any other Firefox carrying Mozilla's own root list, such as the one Selenium drives, reads only its
+  own profile's database and does not trust the CA; use `proxy_engine: universal` or an
+  `allowed_tls_rules` passthrough for it. The policy copies the CA into the profile, so a profile
+  kept with `launchPersistentContext` goes on holding it where `filesystem_mode` keeps writes to
+  that path.
 - A command that changes the CA's own trust in the NSS database (`certutil -M`), or exports it and
   imports it back, copies the CA into the runner's database. Where `filesystem_mode` would keep the
   write, that fails the step and nothing is written back; `fail_on_ca_residue: false` makes it a

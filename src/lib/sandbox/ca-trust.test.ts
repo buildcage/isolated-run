@@ -9,6 +9,7 @@ import {
   discoverJvmKeystores,
   writeJvmKeystoreFiles,
   OWN_CA_DESTINATION,
+  FIREFOX_POLICIES_DESTINATION,
   type CaTrustDeps,
 } from "./ca-trust.ts";
 
@@ -66,6 +67,17 @@ describe("writeCaTrustFiles", () => {
     expect(ownCaPath).toBe("/scratch/buildcage-ca.pem");
     expect(written[ownCaPath].contents).toBe(`${FAKE_CA}\n`);
     expect(written[ownCaPath].mode).toBe(0o644);
+  });
+
+  it("writes a Firefox policies file installing the CA from where it is mounted", () => {
+    const { deps, written } = fakeHost({ [CA_INPUT]: `${FAKE_CA}\n` });
+    const { firefoxPoliciesPath } = writeCaTrustFiles(CA_INPUT, "/scratch", deps);
+
+    expect(firefoxPoliciesPath).toBe("/scratch/firefox-policies.json");
+    expect(JSON.parse(written[firefoxPoliciesPath].contents)).toEqual({
+      policies: { Certificates: { Install: [OWN_CA_DESTINATION] } },
+    });
+    expect(written[firefoxPoliciesPath].mode).toBe(0o644);
   });
 
   it("appends the CA to the host's system store when the runner has one", () => {
@@ -144,6 +156,7 @@ describe("caTrustAdditions", () => {
     const { mounts } = caTrustAdditions(
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
+        firefoxPoliciesPath: "/scratch/firefox-policies.json",
         systemCa: undefined,
         jvmKeystores: [],
         caDirs: [],
@@ -168,6 +181,7 @@ describe("caTrustAdditions", () => {
     const { mounts, env } = caTrustAdditions(
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
+        firefoxPoliciesPath: "/scratch/firefox-policies.json",
         systemCa: undefined,
         jvmKeystores: [],
         caDirs: [],
@@ -181,15 +195,37 @@ describe("caTrustAdditions", () => {
         source: "/scratch/buildcage-ca.pem",
         options: ["rbind", "ro", "nosuid", "nodev", "noexec"],
       },
+      {
+        destination: FIREFOX_POLICIES_DESTINATION,
+        type: "none",
+        source: "/scratch/firefox-policies.json",
+        options: ["rbind", "ro", "nosuid", "nodev", "noexec"],
+      },
     ]);
     expect(env.NODE_EXTRA_CA_CERTS).toBe(OWN_CA_DESTINATION);
     expect(env.DENO_CERT).toBe(OWN_CA_DESTINATION);
+    expect(env.PLAYWRIGHT_FIREFOX_POLICIES_JSON).toBe(FIREFOX_POLICIES_DESTINATION);
+  });
+
+  it("leaves a Firefox policies file the step already named alone", () => {
+    const { env } = caTrustAdditions(
+      {
+        ownCaPath: "/scratch/buildcage-ca.pem",
+        firefoxPoliciesPath: "/scratch/firefox-policies.json",
+        systemCa: undefined,
+        jvmKeystores: [],
+        caDirs: [],
+      },
+      { PLAYWRIGHT_FIREFOX_POLICIES_JSON: "/my/own/policies.json" },
+    );
+    expect(env.PLAYWRIGHT_FIREFOX_POLICIES_JSON).toBeUndefined();
   });
 
   it("does not override a variable the step already set", () => {
     const { env } = caTrustAdditions(
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
+        firefoxPoliciesPath: "/scratch/firefox-policies.json",
         systemCa: undefined,
         jvmKeystores: [],
         caDirs: [],
@@ -204,6 +240,7 @@ describe("caTrustAdditions", () => {
     const { mounts, env } = caTrustAdditions(
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
+        firefoxPoliciesPath: "/scratch/firefox-policies.json",
         systemCa: { path: "/scratch/system-ca-bundle.pem", destination: RHEL_STORE },
         jvmKeystores: [],
         caDirs: [],
@@ -225,6 +262,7 @@ describe("caTrustAdditions", () => {
     const { env } = caTrustAdditions(
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
+        firefoxPoliciesPath: "/scratch/firefox-policies.json",
         systemCa: { path: "/scratch/system-ca-bundle.pem", destination: RHEL_STORE },
         jvmKeystores: [],
         caDirs: [],
@@ -238,6 +276,7 @@ describe("caTrustAdditions", () => {
     const { env } = caTrustAdditions(
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
+        firefoxPoliciesPath: "/scratch/firefox-policies.json",
         systemCa: { path: "/scratch/system-ca-bundle.pem", destination: RHEL_STORE },
         jvmKeystores: [],
         caDirs: [],
@@ -252,6 +291,7 @@ describe("caTrustAdditions", () => {
     const { mounts, env } = caTrustAdditions(
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
+        firefoxPoliciesPath: "/scratch/firefox-policies.json",
         systemCa: undefined,
         jvmKeystores: [],
         caDirs: [],
@@ -607,11 +647,12 @@ describe("caTrustAdditions with CA directories", () => {
     const { mounts, env } = caTrustAdditions(
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
+        firefoxPoliciesPath: "/scratch/firefox-policies.json",
         systemCa: undefined,
         jvmKeystores: [],
         caDirs: [{ path: "/scratch/ca-dir0", destination: "/etc/pki/ca-trust/source/anchors" }],
       },
-      { NODE_EXTRA_CA_CERTS: "/set", DENO_CERT: "/set" },
+      { NODE_EXTRA_CA_CERTS: "/set", DENO_CERT: "/set", PLAYWRIGHT_FIREFOX_POLICIES_JSON: "/set" },
     );
     expect(mounts).toContainEqual({
       destination: "/etc/pki/ca-trust/source/anchors",
@@ -628,6 +669,7 @@ describe("caTrustAdditions with JVM keystores", () => {
     const { mounts, env } = caTrustAdditions(
       {
         ownCaPath: "/scratch/buildcage-ca.pem",
+        firefoxPoliciesPath: "/scratch/firefox-policies.json",
         systemCa: undefined,
         jvmKeystores: [
           { path: "/scratch/jvm-keystore-0", destination: "/opt/java/lib/security/cacerts" },
@@ -650,7 +692,11 @@ describe("caTrustAdditions with JVM keystores", () => {
       options: ["rbind", "ro"],
     });
     // The JVM reads no variable.
-    expect(Object.keys(env)).toEqual(["NODE_EXTRA_CA_CERTS", "DENO_CERT"]);
+    expect(Object.keys(env)).toEqual([
+      "NODE_EXTRA_CA_CERTS",
+      "DENO_CERT",
+      "PLAYWRIGHT_FIREFOX_POLICIES_JSON",
+    ]);
   });
 });
 
@@ -660,6 +706,7 @@ describe("assertWriteThroughClearOfCaTrust", () => {
   const ANCHORS = "/etc/pki/ca-trust/source/anchors";
   const files = {
     ownCaPath: "/scratch/buildcage-ca.pem",
+    firefoxPoliciesPath: "/scratch/firefox-policies.json",
     systemCa: undefined,
     jvmKeystores: [{ path: "/scratch/jvm-0/cacerts", destination: KEYSTORE }],
     caDirs: [{ path: "/scratch/ca-dir0", destination: ANCHORS }],
@@ -694,6 +741,7 @@ describe("assertWriteThroughClearOfCaTrust", () => {
 describe("presetCaVariables", () => {
   const files = {
     ownCaPath: "/scratch/buildcage-ca.pem",
+    firefoxPoliciesPath: "/scratch/firefox-policies.json",
     systemCa: { path: "/scratch/system-ca-bundle.pem", destination: RHEL_STORE },
     jvmKeystores: [],
     caDirs: [],
@@ -710,10 +758,17 @@ describe("presetCaVariables", () => {
           GIT_SSL_CAINFO: "/opt/corp-ca.pem",
           Npm_Config_Cafile: "/opt/corp-ca.pem",
           SSL_CERT_FILE: "/not/there.pem",
+          PLAYWRIGHT_FIREFOX_POLICIES_JSON: "/opt/policies.json",
         },
         realpath,
       ),
-    ).toEqual(["NODE_EXTRA_CA_CERTS", "GIT_SSL_CAINFO", "Npm_Config_Cafile", "SSL_CERT_FILE"]);
+    ).toEqual([
+      "NODE_EXTRA_CA_CERTS",
+      "GIT_SSL_CAINFO",
+      "Npm_Config_Cafile",
+      "SSL_CERT_FILE",
+      "PLAYWRIGHT_FIREFOX_POLICIES_JSON",
+    ]);
   });
 
   it("leaves out one that carries the proxy CA, or is unset or empty", () => {
@@ -724,6 +779,7 @@ describe("presetCaVariables", () => {
           REQUESTS_CA_BUNDLE: RHEL_STORE,
           PIP_CERT: "/usr/lib/ssl/cert.pem",
           DENO_CERT: OWN_CA_DESTINATION,
+          PLAYWRIGHT_FIREFOX_POLICIES_JSON: FIREFOX_POLICIES_DESTINATION,
           CURL_CA_BUNDLE: "",
           PATH: "/usr/bin",
         },

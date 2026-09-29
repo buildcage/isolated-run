@@ -19635,7 +19635,7 @@ const SYSTEM_CA_CANDIDATES = [
 	"/etc/pki/ca-trust/source/anchors",
 	"/etc/pki/trust/anchors",
 	"/var/lib/ca-certificates/pem"
-], OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
+], OWN_CA_DESTINATION = "/dev/buildcage-ca.pem", FIREFOX_POLICIES_DESTINATION = "/dev/buildcage-firefox-policies.json";
 function defaultExec$1(command, args, env) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args, { env: hostCommandEnv(command, env) });
 }
@@ -19665,6 +19665,8 @@ function extractCaCert(containerName, destDir, { exec = defaultExec$1, chmod = n
 function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writeFile = defaultWriteFile, exists = node_fs.existsSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir, realpath = node_fs.realpathSync } = {}) {
 	let ca = readFile(caCertPath).trimEnd(), ownCaPath = (0, node_path.join)(dir, "buildcage-ca.pem");
 	writeFile(ownCaPath, `${ca}\n`, 420);
+	let firefoxPoliciesPath = (0, node_path.join)(dir, "firefox-policies.json");
+	writeFile(firefoxPoliciesPath, `${JSON.stringify({ policies: { Certificates: { Install: [OWN_CA_DESTINATION] } } })}\n`, 420);
 	let destination = SYSTEM_CA_CANDIDATES.find((p) => exists(p)), systemCa;
 	if (destination) {
 		let existing = readFile(destination).trimEnd(), path = (0, node_path.join)(dir, "system-ca-bundle.pem");
@@ -19682,6 +19684,7 @@ function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writ
 	});
 	return {
 		ownCaPath,
+		firefoxPoliciesPath,
 		systemCa,
 		caDirs
 	};
@@ -19747,7 +19750,7 @@ const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_ST
 	"REQUESTS_CA_BUNDLE",
 	"PIP_CERT",
 	"SSL_CERT_FILE"
-], REPLACING_WHEN_SET = [
+], FIREFOX_POLICIES_VARIABLE = "PLAYWRIGHT_FIREFOX_POLICIES_JSON", REPLACING_WHEN_SET = [
 	"CURL_CA_BUNDLE",
 	"GIT_SSL_CAINFO",
 	"AWS_CA_BUNDLE",
@@ -19758,11 +19761,12 @@ function presetCaVariables(files, env, realpath) {
 	let store = files.systemCa && realpath(files.systemCa.destination), exact = [
 		...POINT_AT_OWN_CA,
 		...POINT_AT_SYSTEM_STORE,
+		FIREFOX_POLICIES_VARIABLE,
 		...REPLACING_WHEN_SET
 	];
 	return Object.keys(env).filter((name) => {
 		let value = env[name];
-		return !value || value === "/dev/buildcage-ca.pem" || realpath(value) === store ? !1 : exact.includes(name) || REPLACING_WHEN_SET_ANY_CASE.some((v) => v.toLowerCase() === name.toLowerCase());
+		return !value || value === "/dev/buildcage-ca.pem" || value === "/dev/buildcage-firefox-policies.json" || realpath(value) === store ? !1 : exact.includes(name) || REPLACING_WHEN_SET_ANY_CASE.some((v) => v.toLowerCase() === name.toLowerCase());
 	});
 }
 function assertWriteThroughClearOfCaTrust(files, writeThroughPaths) {
@@ -19788,7 +19792,18 @@ function caTrustAdditions(files, env) {
 		]
 	}], extraEnv = {};
 	for (let name of POINT_AT_OWN_CA) env[name] || (extraEnv[name] = OWN_CA_DESTINATION);
-	if (files.systemCa) {
+	if (mounts.push({
+		destination: FIREFOX_POLICIES_DESTINATION,
+		type: "none",
+		source: files.firefoxPoliciesPath,
+		options: [
+			"rbind",
+			"ro",
+			"nosuid",
+			"nodev",
+			"noexec"
+		]
+	}), env[FIREFOX_POLICIES_VARIABLE] || (extraEnv[FIREFOX_POLICIES_VARIABLE] = FIREFOX_POLICIES_DESTINATION), files.systemCa) {
 		mounts.push({
 			destination: files.systemCa.destination,
 			type: "none",
