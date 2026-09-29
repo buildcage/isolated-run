@@ -751,8 +751,9 @@ signing workflow and its ref or version, and the source commit SHA carried in Fu
 
 Two assertions then run against the verified bundle, both fail-closed:
 
-- **The signed digest must equal the digest the tag resolved to.** This closes the attribution gap
-  the Referrers API leaves open.
+- **The signed digest must equal the digest the tag resolved to.** It is read from the verified
+  DSSE envelope, and a bundle that is not a DSSE envelope is rejected. This closes the attribution
+  gap the Referrers API leaves open.
 - **The image's `org.opencontainers.image.version` must name the engine this run asked for.** The
   signature covers a digest, not a tag, so without this an `-inspect` tag repointed at the same
   release's `universal` image would run without URL and TLS enforcement.
@@ -766,9 +767,8 @@ Two assertions then run against the verified bundle, both fail-closed:
 | `@v2` (major-floating)         | SAN matches `...@refs/tags/v2(\.\|$)`                       | `certificateIdentityURI` regexp                                        |
 | A branch name, or a local path | **Hard fail**: pin to a version tag or commit SHA           |                                                                        |
 
-The SAN's owner and repository are matched without regard to case, as GitHub resolves them in
-`uses:`, while the workflow path and the tag must match exactly. A bundle that is not a DSSE
-envelope is refused, and the signed digest is read from the envelope that was verified.
+The owner and repository in the SAN are matched ignoring case, since GitHub resolves `uses:` that
+way and passes the name on as written. The workflow path and the tag must match exactly.
 
 For the strongest guarantee, pin to a **commit SHA**:
 
