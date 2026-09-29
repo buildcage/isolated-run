@@ -251,9 +251,10 @@ payload for a later step. See [Filesystem access](../README.md#filesystem-access
   shebang leaves no zombies. It forwards `SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGUSR1` and
   `SIGUSR2` to the command and exits with its status, `128+n` if a signal killed it.
 
-What is left is piped to the sandboxed process over stdin as NUL-delimited `KEY=VALUE` records and
-applied by that loader before it starts the run script, rather than written into `config.json`, so
-an `env:` secret never reaches the runner's disk.
+What is left is piped to the sandboxed process over stdin as NUL-delimited `KEY=VALUE` records,
+rather than written into `config.json`, so an `env:` secret never reaches the runner's disk. The
+loader hands them to the run script through `env -i` instead of exporting them itself, so a name
+bash reserves (`UID`, `SECONDS`) arrives as set, as it does in an unwrapped `run:` step.
 
 ### When the step ends
 

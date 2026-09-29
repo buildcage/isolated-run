@@ -68,6 +68,18 @@ run_sandboxed() {
 run_sandboxed '[ $$ -ne 1 ] || { echo "UNEXPECTED: the command is PID 1"; exit 1; }'
 NOT_PID1_CODE=$?
 
+# Names the loader or bash itself uses, which the step's env: may set too.
+# `env` because UID is readonly in this script's own bash.
+GITHUB_WORKSPACE="$WORKDIR" \
+GITHUB_STATE="$WORKDIR/state.env" \
+GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
+BUILDCAGE_BUILD_TEST_HOOKS=1 \
+BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
+INPUT_RUN='/usr/bin/env | grep -qx record=mine && /usr/bin/env | grep -qx UID=12345 ||
+  { echo "UNEXPECTED: record or UID did not reach the command as set"; exit 1; }' \
+  env record=mine UID=12345 node dist/main.cjs
+ENV_NAMES_CODE=$?
+
 START=$SECONDS
 run_sandboxed '( sleep 1; kill -TERM $$ ) & sleep 30'
 SELF_KILL_CODE=$?
@@ -111,6 +123,12 @@ if [ "$NOT_PID1_CODE" = "0" ]; then
   echo "  PASS  the command is not the sandbox's PID 1"
 else
   echo "  FAIL  the command runs as the sandbox's PID 1 (exit $NOT_PID1_CODE)"
+  FAILED=1
+fi
+if [ "$ENV_NAMES_CODE" = "0" ]; then
+  echo "  PASS  env: record and UID reach the command as set"
+else
+  echo "  FAIL  env: record or UID did not reach the command as set (exit $ENV_NAMES_CODE)"
   FAILED=1
 fi
 if [ "$SELF_KILL_CODE" = "143" ] && [ "$SELF_KILL_SECONDS" -lt 30 ]; then

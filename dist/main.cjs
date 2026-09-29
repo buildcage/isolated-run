@@ -20484,8 +20484,10 @@ const ENV_LOADER_SCRIPT = `#!/bin/bash
 # signals to it, reaps orphans, and exits with its status. See
 # sandbox/env-loader.ts for the wire format.
 #
-# No eval: \`export "K=V"\` expands the value once and never re-interprets
-# it, so a value containing $(...) or a backtick stays literal.
+# The records are handed to env(1) rather than exported, so none of this
+# script's own names, bash's readonly or dynamic variables (UID, SECONDS)
+# included, can stand in for the step's. No eval: each record is one argument,
+# never re-interpreted, so a value containing $(...) or a backtick stays literal.
 set -u
 
 # Trapped before reading, as PID 1 drops untrapped signals. Any that arrive
@@ -20502,13 +20504,14 @@ forward() {
 for sig in TERM INT HUP QUIT USR1 USR2; do trap "forward $sig" "$sig"; done
 
 complete=
+records=()
 while IFS= read -r -d '' record; do
   if [ "$record" = "${ENV_BLOB_TERMINATOR}" ]; then
     complete=1
     break
   fi
   [[ $record =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
-  export "\${record%%=*}=\${record#*=}"
+  records+=("$record")
 done
 
 if [ -z "$complete" ]; then
@@ -20527,7 +20530,8 @@ held=$pending
 {
   trap - INT QUIT
   for sig in $held; do kill -s "$sig" "$BASHPID"; done
-  exec "$1"
+  # $1 is this run's script, whose path holds no "=" for env to read as a record.
+  exec /usr/bin/env -i -- \${records[@]+"\${records[@]}"} "$1"
 } &
 child=$!
 # Signals that arrived during the fork. An INT or QUIT among them can still hit
