@@ -163,6 +163,17 @@ describe("createOverlayScratchDirs", () => {
     ]);
   });
 
+  it("keeps an upper that already exists, as prepareNssDb makes $HOME's", () => {
+    const { deps } = scratchDeps();
+    const mkdir = ((p: string, options?: { recursive?: boolean }) => {
+      if (p === `${SLUG_DIR}/upper` && !options?.recursive) throw new Error("EEXIST");
+    }) as unknown as typeof import("node:fs").mkdirSync;
+
+    expect(() =>
+      createOverlayScratchDirs(SCRATCH, ["/home/runner"], { ...deps, mkdir }),
+    ).not.toThrow();
+  });
+
   it.each([
     { mode: 0o41777, octal: "1777" },
     { mode: 0o42775, octal: "2775" },

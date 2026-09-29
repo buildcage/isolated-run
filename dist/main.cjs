@@ -19026,7 +19026,7 @@ function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync
 		let upper = overlayUpperFor(scratchDir, path), work = (0, node_path.join)((0, node_path.dirname)(upper), "work");
 		mkdir(work, { recursive: !0 });
 		let { uid, gid, mode } = stat(path), perm = mode & 4095;
-		return uid === self.uid && gid === self.gid ? (mkdir(upper), chmod(upper, perm)) : execFile("sudo", [
+		return uid === self.uid && gid === self.gid ? (mkdir(upper, { recursive: !0 }), chmod(upper, perm)) : execFile("sudo", [
 			"install",
 			"-d",
 			"-o",
