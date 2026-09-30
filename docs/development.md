@@ -44,10 +44,6 @@ make setup_sandbox_dev  # start the proxy + dev-loop runner container
 make test_sandbox_dev   # run a sample isolated command and verify allow/block + capability drop
 ```
 
-`EXTERNAL_RESOLVER` is the one variable here with no action input behind it: locally it takes a
-comma-separated list of IPv4 addresses for HAProxy to resolve against in place of the container's own
-`/etc/resolv.conf`. The integration tests set it to reach their own fixture resolver.
-
 ## Testing
 
 ```bash

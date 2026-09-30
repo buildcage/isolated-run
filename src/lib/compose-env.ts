@@ -49,10 +49,6 @@ export function buildComposeEnv(
     ALLOWED_URL_RULES: urlRules.join("\n"),
     ALLOWED_TLS_RULES: tlsRules.join("\n"),
     BUILDCAGE_PROXY_IMAGE_REF: imageRef,
-    // Pinned rather than inherited: in persistent mode an isolated command can
-    // write $GITHUB_ENV, so a resolver left to the step environment would be a
-    // previous step's choice, not the action's.
-    EXTERNAL_RESOLVER: "",
     // The compose network's gateway is added engine-side; see
     // lib/host-addresses.ts.
     HOST_ADDRESSES: hostAddresses().join(" "),
