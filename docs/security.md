@@ -117,13 +117,14 @@ invocation, so no step inherits anything another one left behind.
   enumerating each. A read-only bind would not do: `connect(2)`'s permission check reads the write
   bits, which `mount -o ro` leaves untouched. Only `/run/lock` (writable, where tools lock via
   `/var/lock`) and the proxy's own `resolv.conf` (which `/etc/resolv.conf` symlinks into `/run`) are
-  added back. `/var/run` is a symlink to `/run` on every distribution that can run the action, so
-  it is covered too; a host where it resolves anywhere else is refused. A `write_through:` entry
-  re-exposes what it names on top: `/run/<x>` one path, `/run` the whole directory,
-  `write_through: /` the whole host. Re-exposing a daemon socket reopens egress through it, and
-  re-exposing all of `/run` leaves the outbound restriction nearly pointless, so it is the caller's
-  deliberate call; by default none of it is reachable. The `/proc` masks below are separate: they
-  guard kernel-memory reads, not filesystem access, and hold even under `write_through: /`.
+  added back. `/var/run` is a symlink to `/run` on every mainstream distribution, so it is covered
+  too; on a host where it is a separate directory, that directory gets the same empty tmpfs. A
+  `write_through:` entry re-exposes what it names on top: `/run/<x>` one path, `/run` the whole
+  directory, `write_through: /` the whole host. Re-exposing a daemon socket reopens egress through
+  it, and re-exposing all of `/run` leaves the outbound restriction nearly pointless, so it is the
+  caller's deliberate call; by default none of it is reachable. The `/proc` masks below are
+  separate: they guard kernel-memory reads, not filesystem access, and hold even under
+  `write_through: /`.
 - **`$XDG_RUNTIME_DIR` is masked when it sits outside `/run`**, which a self-hosted runner may point
   under `/tmp` or `$HOME`. Rootless Docker and Podman and a `systemd --user` session bus keep their
   sockets there, and reaching that bus lets a compromised command start a unit outside every

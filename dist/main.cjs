@@ -19948,34 +19948,39 @@ function withHostShmSize(mounts, hostShmBytes) {
 		};
 	});
 }
-const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", HOST_RUN_DIR = "/run", HOST_RUN_LOCK_DIR = "/run/lock", HOST_VAR_RUN_DIR = "/var/run";
-function assertVarRunIsRun(resolved) {
-	if (resolved !== void 0 && resolved !== "/run") throw new SandboxError(`${HOST_VAR_RUN_DIR} resolves to ${JSON.stringify(resolved)} rather than ${HOST_RUN_DIR}, so covering ${HOST_RUN_DIR} would leave the host service sockets under it reachable. Buildcage needs ${HOST_VAR_RUN_DIR} to be a symlink to ${HOST_RUN_DIR}.`, "VAR_RUN_NOT_RUN");
-}
-function hostRunCoverageLayers() {
+const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", HOST_RUN_LOCK_DIR = "/run/lock";
+function hostRunCoverageLayers(varRunRealPath) {
+	let varRun = varRunRealPath === void 0 || isAtOrUnder(varRunRealPath, "/run") ? [] : [emptyRunTmpfs(varRunRealPath)];
 	return {
-		mounts: [{
-			destination: HOST_RUN_DIR,
-			type: "tmpfs",
-			source: "tmpfs",
-			options: [
-				"nosuid",
-				"nodev",
-				"mode=0755"
-			]
-		}, {
-			destination: HOST_RUN_LOCK_DIR,
-			type: "tmpfs",
-			source: "tmpfs",
-			options: [
-				"nosuid",
-				"nodev",
-				"noexec",
-				"mode=1777",
-				"size=5242880"
-			]
-		}],
+		mounts: [
+			emptyRunTmpfs("/run"),
+			{
+				destination: HOST_RUN_LOCK_DIR,
+				type: "tmpfs",
+				source: "tmpfs",
+				options: [
+					"nosuid",
+					"nodev",
+					"noexec",
+					"mode=1777",
+					"size=5242880"
+				]
+			},
+			...varRun
+		],
 		writablePaths: new Set([HOST_RUN_LOCK_DIR])
+	};
+}
+function emptyRunTmpfs(destination) {
+	return {
+		destination,
+		type: "tmpfs",
+		source: "tmpfs",
+		options: [
+			"nosuid",
+			"nodev",
+			"mode=0755"
+		]
 	};
 }
 function reservedInternalDestinations() {
@@ -20607,12 +20612,10 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		type: "none",
 		source: p,
 		options: ["rbind", "rw"]
-	}));
-	disableReadonly || assertVarRunIsRun(probes.varRunRealPath());
-	let runCoverage = disableReadonly ? {
+	})), runCoverage = disableReadonly ? {
 		mounts: [],
 		writablePaths: new Set()
-	} : hostRunCoverageLayers(), mounts = [
+	} : hostRunCoverageLayers(probes.varRunRealPath()), mounts = [
 		...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
 		...runCoverage.mounts,
 		...layers.mounts,

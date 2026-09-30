@@ -295,26 +295,25 @@ describe("buildOciConfig", () => {
       expect(config.linux.readonlyPaths).not.toContain("/tmp/runtime-runner");
     });
 
-    it("refuses a host whose /var/run is not /run, where the tmpfs would leave it exposed", () => {
+    it("covers a /var/run that isn't a link to /run with its own tmpfs, before the writable layers", () => {
       probes = { ...pinnedProbes(), varRunRealPath: () => "/var/run" };
-      expect(() => build(fakeBaseSpec(), baseArgs)).toThrow(
-        expect.objectContaining({ code: "VAR_RUN_NOT_RUN" }),
-      );
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/var/run/docker.sock"] },
+      });
+      const destinations = config.mounts.map((m) => m.destination);
+      const varRun = destinations.indexOf("/var/run");
+      expect(config.mounts[varRun]).toMatchObject({ type: "tmpfs" });
+      expect(varRun).toBeLessThan(destinations.indexOf("/var/run/docker.sock"));
     });
 
-    it("accepts a host without /var/run, where there is nothing to reach", () => {
-      probes = { ...pinnedProbes(), varRunRealPath: () => undefined };
-      expect(() => build(fakeBaseSpec(), baseArgs)).not.toThrow();
-    });
-
-    it("doesn't check /var/run under writable: /, which covers nothing", () => {
+    it("leaves /var/run uncovered under writable: /, like /run", () => {
       probes = { ...pinnedProbes(), varRunRealPath: () => "/var/run" };
-      expect(() =>
-        build(fakeBaseSpec(), {
-          ...baseArgs,
-          writable: { ...baseArgs.writable, writablePaths: ["/"] },
-        }),
-      ).not.toThrow();
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/"] },
+      });
+      expect(config.mounts.map((m) => m.destination)).not.toContain("/var/run");
     });
 
     it("drops the /run coverage tmpfs under writable: /, the documented full opt-out", () => {
