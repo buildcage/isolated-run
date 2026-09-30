@@ -628,9 +628,9 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   `GITHUB_OUTPUT`, `GITHUB_ENV` and `GITHUB_PATH` live under `$RUNNER_TEMP`, so the command can set
   an output, an env var or `$PATH` for later steps exactly as an un-sandboxed one could, and the
   same goes for `~/.bashrc`, `~/.npmrc` and anything else under a writable exception.
-  `filesystem_mode: ephemeral` closes this off for everything except what `write_through:` names,
-  which in practice has to include `$GITHUB_WORKSPACE`, so that path stays as exposed as it is in
-  `persistent` mode.
+  `filesystem_mode: ephemeral` closes this off for everything except what `write_through:` names.
+  Naming only the outputs a later step needs, such as `./dist`, discards a payload planted anywhere
+  else in `$GITHUB_WORKSPACE` too. A named path stays as exposed as it is in `persistent` mode.
 
   That decides how the step is set up. Wrapping every untrusted step is not the way out: a payload
   left in `$GITHUB_ENV`, `$GITHUB_PATH` or `$HOME` runs in the next step before its sandbox does.
@@ -638,8 +638,8 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   every process inherits the environment, this action's own included. Making it the last step in the
   job does not close it off either: every action's post step, this one's included, runs after the last
   step, with whatever it left in `$GITHUB_ENV`, `$GITHUB_PATH` and `$HOME`. What holds is
-  `filesystem_mode: ephemeral` with `write_through:` narrowed to `$GITHUB_WORKSPACE` and the output
-  files the step really has to produce, leaving out `$GITHUB_ENV`, `$GITHUB_PATH` and `$HOME`.
+  `filesystem_mode: ephemeral` with `write_through:` narrowed to the outputs the step really has to
+  produce, leaving out `$GITHUB_ENV`, `$GITHUB_PATH` and `$HOME`.
 
 - **Appending to the Job Summary.** The report is rendered from the runner host after the command
   has exited, and a name or URL is escaped before it is written into a table, so the command cannot
