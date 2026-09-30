@@ -280,8 +280,6 @@ describe("ensureWriteThroughTargetsExist", () => {
     expect(made).toStrictEqual([]);
   });
 
-  // mkdir can still fail after the check, e.g. on a read-only filesystem, and
-  // not always with an Error.
   it.each([new Error("EROFS: read-only file system"), "EROFS: read-only file system"])(
     "wraps a mkdir failure (%s)",
     (thrown) => {

@@ -702,9 +702,9 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   documented opt-out from the read-only restriction and skips the guard by design; an entry that
   only _resolves_ to `/` is rejected rather than read as that opt-out.
 - **A `write_through:` directory removed on the runner is detached from every sandbox binding it.**
-  Buildcage never removes one, including one it created. Something else removing it, such as a
-  parallel step outside any sandbox or a `persistent` sandbox that can write the parent, is not
-  prevented, and what the affected step writes there afterwards may not reach the runner.
+  Buildcage never removes one, even one it created. Nothing stops a parallel step outside any
+  sandbox, or a `persistent` sandbox that can write the parent, from removing it; the affected
+  step's later writes there may then not reach the runner.
 - **`$XDG_RUNTIME_DIR` is missing or empty inside the sandbox**: under `/run` it does not exist,
   since `/run` is an empty tmpfs there, and anywhere else it is masked with an empty directory. A
   tool expecting a session keyring or its own scratch state there finds nothing and fails outright

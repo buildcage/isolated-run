@@ -291,13 +291,10 @@ export function assertKnownFilesExist(
 }
 
 /**
- * Makes each missing write_through path as the runner, every directory on the
- * way included, under the nearest existing ancestor the runner can write. Under
- * one it can't, the sandbox couldn't write the new directory either: it has no
- * sudo and no capabilities. Runs after assertKnownFilesExist, so nothing missing
- * here is one of the runner's own files.
- * Every path is checked before any is made, so a rejected input leaves nothing
- * behind. What is made stays after the step, as with `docker run -v`.
+ * Creates missing paths only under an ancestor the runner can write: the
+ * sandbox has no sudo or capabilities, so it couldn't write one made anywhere
+ * else. Every path is checked before any is made. What is made stays after the
+ * step, as with `docker run -v`. Expects assertKnownFilesExist to have run.
  * Must run before the scratch dir's `mount --rbind /` snapshot (i.e. before
  * runIsolated()), same timing constraint as the overlay upper/work dirs.
  */

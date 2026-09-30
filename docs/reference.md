@@ -736,14 +736,12 @@ this:
   (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and
   `$GITHUB_STEP_SUMMARY` are the runner's own generated files and must already exist: a missing one
   is an error, not something this action creates. Anything else missing (`./dist`, say) is created
-  for you as a directory, by the runner user, every directory on the way included, just as it could
-  by itself. That needs the nearest existing parent to be writable by the runner (a tree it owns, or
-  `/tmp`). Under one it can't write (`/etc/something`, for instance), the step fails before your
-  command runs: the sandboxed command couldn't write a directory created there either. Create it in
-  an earlier, non-isolated step and hand it to the runner user, e.g.
+  as a directory by the runner user, parents included, which needs the nearest existing parent to
+  be writable by it (a tree it owns, or `/tmp`). Under any other parent the step fails before your
+  command runs, since the command couldn't write there either. Create such a path in an earlier,
+  non-isolated step and give it to the runner user:
   `sudo install -d -o "$(id -u)" -g "$(id -g)" /etc/something`.
-- A directory created that way stays after the step, as with `docker run -v`. If the step fails
-  before your command runs, whatever was already created stays too.
+- A created directory stays after the step, as with `docker run -v`, even if the step fails.
 - `write_through:` accepts files as well as directories, but only a path that's **already** a file
   when the step starts; a missing target is always created as a directory (see above), never a file.
   A file entry is bind-mounted file-to-file (the same technique the `inspect` engine already uses to
