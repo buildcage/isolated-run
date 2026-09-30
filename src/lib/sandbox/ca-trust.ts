@@ -149,15 +149,6 @@ export function extractCaCert(
 // overrides cacerts when present, so both get the CA.
 const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"];
 
-// Keystore directories for a JVM at a fixed location that neither PATH nor
-// JAVA_HOME names: Debian's ca-certificates-java output and RHEL's,
-// each a symlink realpath resolves to the real file.
-const KNOWN_JVM_KEYSTORE_DIRS = [
-  "/etc/ssl/certs/java",
-  "/etc/pki/java",
-  "/etc/pki/ca-trust/extracted/java",
-];
-
 // The alias the injected trusted certificate carries; only has to not collide
 // with one the keystore already uses.
 const JVM_KEYSTORE_ALIAS = "buildcage-proxy-ca";
@@ -176,14 +167,13 @@ function keystoreDirsOf(home: string): string[] {
 /**
  * Find the JVM keystores on the runner: the keystore of the java PATH actually
  * resolves (which mvn/gradle/java read and which need not be the one JAVA_HOME
- * names), then JAVA_HOME's (for a tool that goes by JAVA_HOME instead), then
- * the known fixed directories. Each is resolved and deduplicated so a keystore
- * reachable by more than one path is injected into once.
+ * names), then JAVA_HOME's (for a tool that goes by JAVA_HOME instead). Each
+ * is resolved and deduplicated so a keystore reachable by more than one path is
+ * injected into once.
  *
  * The java's home is read off its symlinks rather than asked of the java,
  * which may be a binary an earlier sandboxed step planted. A wrapper script
- * (an asdf or jenv shim) resolves to the wrong place, leaving JAVA_HOME and
- * the fixed paths.
+ * (an asdf or jenv shim) resolves to the wrong place, leaving JAVA_HOME.
  */
 export function discoverJvmKeystores(
   env: NodeJS.ProcessEnv,
@@ -193,7 +183,6 @@ export function discoverJvmKeystores(
   const dirs: string[] = [];
   if (java) dirs.push(...keystoreDirsOf(dirname(dirname(realpath(java)))));
   if (env.JAVA_HOME) dirs.push(...keystoreDirsOf(env.JAVA_HOME));
-  dirs.push(...KNOWN_JVM_KEYSTORE_DIRS);
 
   const found: string[] = [];
   const seen = new Set<string>();
