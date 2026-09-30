@@ -20,9 +20,13 @@ const SYSTEM_STORE = "/etc/pki/tls/certs/ca-bundle.crt";
 
 const caTrust = {
   ownCaPath: "/scratch/buildcage-ca.pem",
-  systemCa: { path: "/scratch/system-ca-bundle.pem", destination: SYSTEM_STORE },
-  jvmKeystores: [],
-  caDirs: [],
+  stores: [
+    {
+      kind: "systemStore" as const,
+      path: "/scratch/system-ca-bundle.pem",
+      destination: SYSTEM_STORE,
+    },
+  ],
 };
 
 /** The KEY=VALUE records of a blob, terminator excluded. */

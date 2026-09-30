@@ -46,28 +46,18 @@ export interface CaTrustFiles {
   /** A CA-only file, mounted at OWN_CA_DESTINATION, for variables that add
    *  to a tool's built-in trust set (NODE_EXTRA_CA_CERTS, DENO_CERT). */
   ownCaPath: string;
-  /** The runner's own system CA store with this CA appended, and the path it
-   *  was read from, which is where the copy is mounted; it is no use anywhere
-   *  else, so the two are one value. Undefined if the runner has no system
-   *  store at any of the well-known candidate paths. For the variables that
-   *  replace a tool's trust bundle outright (REQUESTS_CA_BUNDLE, PIP_CERT,
-   *  SSL_CERT_FILE), and for every other tool (curl, ...) that already reads
-   *  the system store by default. SYSTEM_CA_CANDIDATES[0] is the only
-   *  candidate a GitHub-hosted (passwordless-sudo) Linux runner has; the rest
-   *  are what a self-hosted RHEL or SUSE runner is reached by.
-   */
-  systemCa: { path: string; destination: string } | undefined;
-  /** Injected copies of the JVM's own keystores (see writeJvmKeystoreFiles),
-   *  each mounted over the keystore it was copied from. A JVM already on the
-   *  runner reads only these, not the system store or the variables above, so
-   *  `mvn`/`gradle`/`java` under the inspect engine trust the CA only once it
-   *  is in here. Empty when the runner has no JVM keystore this found. */
-  jvmKeystores: { path: string; destination: string }[];
-  /** Copies of the CA_DIR_CANDIDATES this runner has, each with the CA added
-   *  and mounted over the one it was copied from. */
-  caDirs: { path: string; destination: string }[];
+  /** The runner's CA stores this covers, in CA_STORES order. */
+  stores: CaStoreCopy[];
   /** Undefined when there was nowhere to mount it. */
   nssDb?: NssDbFiles;
+}
+
+/** A copy of one of the runner's CA stores with the CA added, mounted over the
+ *  store it was copied from. */
+export interface CaStoreCopy {
+  kind: CaStoreKind;
+  path: string;
+  destination: string;
 }
 
 export const SYSTEM_CA_CANDIDATES = [
@@ -155,64 +145,6 @@ export function extractCaCert(
   return caCertPath;
 }
 
-/**
- * Write the CA trust files a step's env vars will point at, into `dir`
- * (this run's own scratch directory). `caCertPath` is the proxy's own CA,
- * already `docker cp`'d onto the host; see extractCaCert. A CA directory that
- * cannot be copied is left uncovered with a warning rather than failing the step.
- */
-export function writeCaTrustFiles(
-  caCertPath: string,
-  dir: string,
-  {
-    readFile = defaultReadFile,
-    writeFile = defaultWriteFile,
-    exists = existsSync,
-    isDirectory = defaultIsDirectory,
-    copyDir = defaultCopyDir,
-    realpath = realpathSync,
-    warn,
-  }: CaTrustDeps = {},
-): Omit<CaTrustFiles, "jvmKeystores" | "nssDb"> {
-  const ca = readFile(caCertPath).trimEnd();
-
-  const ownCaPath = join(dir, "buildcage-ca.pem");
-  writeFile(ownCaPath, `${ca}\n`, 0o644);
-
-  const destination = SYSTEM_CA_CANDIDATES.find((p) => exists(p));
-  let systemCa: CaTrustFiles["systemCa"];
-  if (destination) {
-    const existing = readFile(destination).trimEnd();
-    const path = join(dir, "system-ca-bundle.pem");
-    writeFile(path, `${existing}\n${ca}\n`, 0o644);
-    systemCa = { path, destination };
-  }
-
-  // Only a directory the runner already has: one is never created.
-  const caDirs = CA_DIR_CANDIDATES.filter((d) => isDirectory(d)).flatMap((destination, i) => {
-    const path = join(dir, `ca-dir${i}`);
-    try {
-      // Copied from where it resolves: a symlinked directory copied verbatim
-      // would make the copy a link back to it, and the CA would land in the
-      // runner's own store.
-      copyDir(realpath(destination), path);
-      writeFile(join(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 0o644);
-    } catch (e) {
-      // The copy runs as the runner user, so an entry only root can read fails it.
-      warn?.(
-        `could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); ` +
-          "a tool that reads it through GnuTLS or p11-kit (such as wget on RHEL or SUSE) will " +
-          "not trust the proxy. Check that the runner user can read it, or use " +
-          "proxy_engine: universal.",
-      );
-      return [];
-    }
-    return [{ path, destination }];
-  });
-
-  return { ownCaPath, systemCa, caDirs };
-}
-
 // The keystore file names a JVM's default trust manager reads: jssecacerts
 // overrides cacerts when present, so both get the CA.
 const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"];
@@ -230,7 +162,7 @@ const KNOWN_JVM_KEYSTORE_DIRS = [
 // with one the keystore already uses.
 const JVM_KEYSTORE_ALIAS = "buildcage-proxy-ca";
 
-/** The host binaries writeJvmKeystoreFiles uses; see jvmTools. */
+/** The host binaries the JVM keystore injection uses; see jvmTools. */
 export interface JvmTools {
   java: string | undefined;
   keytool: string | undefined;
@@ -278,82 +210,6 @@ export function discoverJvmKeystores(
   return found;
 }
 
-/**
- * Inject the proxy CA into a copy of each JVM keystore, in `dir` (this run's own
- * scratch directory), and return each copy with the keystore it stands in for,
- * for caTrustAdditions to mount over. The copy is made and rewritten with the
- * runner's own keytool, so its output is one that JVM will trust as its cacerts;
- * the real keystore is only read, never written. keytool gets an empty
- * environment, so the step's JAVA_TOOL_OPTIONS or LD_PRELOAD stays inside the
- * sandbox. A keystore that cannot be rewritten (an unusual password, or no
- * pinnable keytool) is skipped with a warning rather than failing the step.
- */
-export function writeJvmKeystoreFiles(
-  caCertPath: string,
-  dir: string,
-  env: NodeJS.ProcessEnv,
-  { java, keytool }: JvmTools,
-  {
-    exec = defaultExec,
-    exists = existsSync,
-    realpath = realpathSync,
-    copyFile = copyFileSync,
-    chmod = chmodSync,
-    warn,
-  }: CaTrustDeps = {},
-): CaTrustFiles["jvmKeystores"] {
-  const keystores = discoverJvmKeystores(env, java, { exists, realpath });
-  if (!keytool) {
-    if (keystores.length > 0) {
-      warn?.(
-        `could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no ` +
-          "keytool outside the paths a sandboxed command can write to ($HOME, $GITHUB_WORKSPACE, " +
-          "/tmp, $RUNNER_TEMP, write_through:). A Java step will not trust the proxy. Install a " +
-          "JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside $HOME), or " +
-          "use proxy_engine: universal.",
-      );
-    }
-    return [];
-  }
-
-  const injected: CaTrustFiles["jvmKeystores"] = [];
-  keystores.forEach((keystore, i) => {
-    const copy = join(dir, `jvm-keystore-${i}`);
-    try {
-      copyFile(keystore, copy);
-      chmod(copy, 0o644);
-      exec(
-        keytool,
-        [
-          "-importcert",
-          "-noprompt",
-          "-alias",
-          JVM_KEYSTORE_ALIAS,
-          "-file",
-          caCertPath,
-          "-keystore",
-          copy,
-          "-storepass",
-          "changeit",
-        ],
-        {},
-      );
-    } catch {
-      // The copy or keytool failed (a non-default store password, say). Say so,
-      // since the only other sign is an opaque TLS error from the step's JVM.
-      warn?.(
-        `could not add the proxy CA to the JVM keystore ${keystore}; a Java step ` +
-          `will not trust it. Use proxy_engine: universal for a JVM build whose ` +
-          `keystore cannot be rewritten.`,
-      );
-      return;
-    }
-    injected.push({ path: copy, destination: keystore });
-  });
-
-  return injected;
-}
-
 // Mirrors buildcage/docker's inspect-engine CA-injection policy table (see
 // docs/security.md): NODE_EXTRA_CA_CERTS/DENO_CERT add to a built-in trust
 // set, so they're pointed at a CA-only file; REQUESTS_CA_BUNDLE/PIP_CERT/
@@ -371,6 +227,240 @@ export function writeJvmKeystoreFiles(
 const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"];
 const POINT_AT_SYSTEM_STORE = ["REQUESTS_CA_BUNDLE", "PIP_CERT", "SSL_CERT_FILE"];
 
+/** What a CaStore's find and inject work from. */
+interface CaStoreContext {
+  /** The proxy CA, PEM, trailing whitespace trimmed. */
+  ca: string;
+  caCertPath: string;
+  env: NodeJS.ProcessEnv;
+  tools: JvmTools;
+  deps: Required<Omit<CaTrustDeps, "warn">> & Pick<CaTrustDeps, "warn">;
+}
+
+/** Which write_through entries a store's mount refuses, since it is mounted
+ *  after every write_through entry and would silently shadow them. */
+type CaStoreReservation =
+  /** Every candidate, and where each resolves, in every engine, whether or
+   *  not the runner has it: which one the mount lands on depends on the
+   *  runner, so an input is refused on every machine or on none. */
+  | { candidates: readonly string[] }
+  /** Only the store this step covers under inspect: which exist depends on
+   *  what is installed. */
+  | {
+      refuses: (entry: string, destination: string) => boolean;
+      refusal: (destination: string) => string;
+    };
+
+/** A kind of CA store on the runner, covered with a copy carrying the proxy CA. */
+interface CaStore {
+  /** The stores of this kind on this runner. */
+  find: (context: CaStoreContext) => string[];
+  /** The copy's file name in the scratch directory, for the i-th store found. */
+  copyName: (i: number) => string;
+  /** Copies `destination` to `path` and adds the CA to the copy. */
+  inject: (context: CaStoreContext, destination: string, path: string) => void;
+  /** The warning for a store inject fails on, which is then left uncovered.
+   *  Without one, the failure fails the step. */
+  notAdded?: (destination: string, error: unknown) => string;
+  mountOptions: string[];
+  /** Pointed at the store when the step left them unset. */
+  variables?: string[];
+  reserve: CaStoreReservation;
+}
+
+export type CaStoreKind = "systemStore" | "caDir" | "jvmKeystore";
+
+const READ_ONLY = ["rbind", "ro"];
+
+/**
+ * The CA stores the inspect engine covers, in mount order. Supporting another
+ * store is a row here: where it is found, how the CA goes into a copy, how the
+ * copy is mounted, and which write_through entries that mount refuses.
+ */
+export const CA_STORES: Record<CaStoreKind, CaStore> = {
+  // The runner's own system CA store with the CA appended. The replacing
+  // variables point here, and every other tool (curl, ...) already reads it
+  // by default. Only the first candidate the runner has: the copy goes back
+  // over the path it was read from, and is no use anywhere else.
+  // SYSTEM_CA_CANDIDATES[0] is the only candidate a GitHub-hosted
+  // (passwordless-sudo) Linux runner has; the rest are what a self-hosted RHEL
+  // or SUSE runner is reached by.
+  systemStore: {
+    find: ({ deps }) => {
+      const found = SYSTEM_CA_CANDIDATES.find((p) => deps.exists(p));
+      return found ? [found] : [];
+    },
+    copyName: () => "system-ca-bundle.pem",
+    inject: ({ ca, deps }, destination, path) => {
+      const existing = deps.readFile(destination).trimEnd();
+      deps.writeFile(path, `${existing}\n${ca}\n`, 0o644);
+    },
+    mountOptions: READ_ONLY,
+    variables: POINT_AT_SYSTEM_STORE,
+    reserve: { candidates: SYSTEM_CA_CANDIDATES },
+  },
+
+  // Only a directory the runner already has: one is never created.
+  caDir: {
+    find: ({ deps }) => CA_DIR_CANDIDATES.filter((d) => deps.isDirectory(d)),
+    copyName: (i) => `ca-dir${i}`,
+    inject: ({ ca, deps }, destination, path) => {
+      // Copied from where it resolves: a symlinked directory copied verbatim
+      // would make the copy a link back to it, and the CA would land in the
+      // runner's own store.
+      deps.copyDir(deps.realpath(destination), path);
+      deps.writeFile(join(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 0o644);
+    },
+    // The copy runs as the runner user, so an entry only root can read fails it.
+    notAdded: (destination, e) =>
+      `could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); ` +
+      "a tool that reads it through GnuTLS or p11-kit (such as wget on RHEL or SUSE) will " +
+      "not trust the proxy. Check that the runner user can read it, or use " +
+      "proxy_engine: universal.",
+    mountOptions: READ_ONLY,
+    reserve: {
+      refuses: (entry, destination) => isAtOrUnder(entry, destination),
+      refusal: (destination) =>
+        `is in the CA directory ${JSON.stringify(destination)}, which the inspect engine ` +
+        "covers with a read-only copy carrying the proxy CA for the step. Name a containing " +
+        "directory instead to persist writes around it.",
+    },
+  },
+
+  // A JVM already on the runner reads only its own keystores, not the system
+  // store or any variable, so `mvn`/`gradle`/`java` trust the CA only once it
+  // is in there. The copy is rewritten with the runner's own keytool, so its
+  // output is one that JVM will trust as its cacerts; the real keystore is
+  // only read. keytool gets an empty environment, so the step's
+  // JAVA_TOOL_OPTIONS or LD_PRELOAD stays inside the sandbox.
+  jvmKeystore: {
+    find: ({ env, tools, deps }) => {
+      const keystores = discoverJvmKeystores(env, tools.java, deps);
+      if (!tools.keytool && keystores.length > 0) {
+        deps.warn?.(
+          `could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no ` +
+            "keytool outside the paths a sandboxed command can write to ($HOME, $GITHUB_WORKSPACE, " +
+            "/tmp, $RUNNER_TEMP, write_through:). A Java step will not trust the proxy. Install a " +
+            "JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside $HOME), or " +
+            "use proxy_engine: universal.",
+        );
+        return [];
+      }
+      return keystores;
+    },
+    copyName: (i) => `jvm-keystore-${i}`,
+    inject: ({ caCertPath, tools, deps }, destination, path) => {
+      deps.copyFile(destination, path);
+      deps.chmod(path, 0o644);
+      deps.exec(
+        tools.keytool!,
+        [
+          "-importcert",
+          "-noprompt",
+          "-alias",
+          JVM_KEYSTORE_ALIAS,
+          "-file",
+          caCertPath,
+          "-keystore",
+          path,
+          "-storepass",
+          "changeit",
+        ],
+        {},
+      );
+    },
+    // Warned, since a non-default store password otherwise shows only as an
+    // opaque TLS error from the step's JVM.
+    notAdded: (destination) =>
+      `could not add the proxy CA to the JVM keystore ${destination}; a Java step ` +
+      `will not trust it. Use proxy_engine: universal for a JVM build whose ` +
+      `keystore cannot be rewritten.`,
+    mountOptions: READ_ONLY,
+    reserve: {
+      refuses: (entry, destination) => entry === destination,
+      refusal: () =>
+        "is a JVM keystore the inspect engine covers with a read-only copy carrying the " +
+        "proxy CA for the step. Name a containing directory instead to persist writes around it.",
+    },
+  },
+};
+
+/** The paths write_through: refuses in every engine; see CaStoreReservation. */
+export const RESERVED_CA_STORE_PATHS = Object.values(CA_STORES).flatMap(({ reserve }) =>
+  "candidates" in reserve ? reserve.candidates : [],
+);
+
+// The NSS database is prepared apart from CA_STORES (see prepareNssDb): it is
+// claimed, written back and released. Its mount refuses the same way.
+const NSS_DB_RESERVATION = {
+  refuses: (entry: string, destination: string) =>
+    entry !== destination && isAtOrUnder(entry, destination),
+  refusal: (destination: string) =>
+    `is inside the NSS database at ${JSON.stringify(destination)}, which the inspect engine ` +
+    `covers for the step. Name ${JSON.stringify(destination)} itself to have the command's ` +
+    "changes written back.",
+};
+
+/**
+ * Write the CA trust files a step's env vars will point at, into `dir`
+ * (this run's own scratch directory), and a copy of each store in CA_STORES
+ * with the CA added. `caCertPath` is the proxy's own CA, already `docker cp`'d
+ * onto the host; see extractCaCert.
+ */
+export function writeCaTrustFiles(
+  caCertPath: string,
+  dir: string,
+  env: NodeJS.ProcessEnv,
+  tools: JvmTools,
+  {
+    exec = defaultExec,
+    readFile = defaultReadFile,
+    writeFile = defaultWriteFile,
+    exists = existsSync,
+    chmod = chmodSync,
+    copyFile = copyFileSync,
+    realpath = realpathSync,
+    isDirectory = defaultIsDirectory,
+    copyDir = defaultCopyDir,
+    warn,
+  }: CaTrustDeps = {},
+): Omit<CaTrustFiles, "nssDb"> {
+  const deps = {
+    exec,
+    readFile,
+    writeFile,
+    exists,
+    chmod,
+    copyFile,
+    realpath,
+    isDirectory,
+    copyDir,
+    warn,
+  };
+  const ca = readFile(caCertPath).trimEnd();
+
+  const ownCaPath = join(dir, "buildcage-ca.pem");
+  writeFile(ownCaPath, `${ca}\n`, 0o644);
+
+  const context: CaStoreContext = { ca, caCertPath, env, tools, deps };
+  const stores: CaStoreCopy[] = [];
+  for (const [kind, store] of Object.entries(CA_STORES) as [CaStoreKind, CaStore][]) {
+    store.find(context).forEach((destination, i) => {
+      const path = join(dir, store.copyName(i));
+      try {
+        store.inject(context, destination, path);
+      } catch (e) {
+        if (!store.notAdded) throw e;
+        warn?.(store.notAdded(destination, e));
+        return;
+      }
+      stores.push({ kind, path, destination });
+    });
+  }
+
+  return { ownCaPath, stores };
+}
+
 // Variables this never sets, each replacing its tool's bundle when the step
 // does. npm reads npm_config_* in any case.
 const REPLACING_WHEN_SET = [
@@ -383,20 +473,22 @@ const REPLACING_WHEN_SET = [
 const REPLACING_WHEN_SET_ANY_CASE = ["npm_config_cafile"];
 
 /**
- * The CA variables the step set to a file other than the system store or
- * OWN_CA_DESTINATION. They stay as set, so a tool reading one does not trust
- * the proxy CA.
+ * The CA variables the step set to a file other than a store they would point
+ * at or OWN_CA_DESTINATION. They stay as set, so a tool reading one does not
+ * trust the proxy CA.
  */
 export function presetCaVariables(
   files: CaTrustFiles,
   env: NodeJS.ProcessEnv,
   realpath: (path: string) => string,
 ): string[] {
-  const store = files.systemCa && realpath(files.systemCa.destination);
+  const stores = files.stores
+    .filter((s) => CA_STORES[s.kind].variables)
+    .map((s) => realpath(s.destination));
   const exact = [...POINT_AT_OWN_CA, ...POINT_AT_SYSTEM_STORE, ...REPLACING_WHEN_SET];
   return Object.keys(env).filter((name) => {
     const value = env[name];
-    if (!value || value === OWN_CA_DESTINATION || realpath(value) === store) return false;
+    if (!value || value === OWN_CA_DESTINATION || stores.includes(realpath(value))) return false;
     return (
       exact.includes(name) ||
       REPLACING_WHEN_SET_ANY_CASE.some((v) => v.toLowerCase() === name.toLowerCase())
@@ -405,41 +497,27 @@ export function presetCaVariables(
 }
 
 /**
- * The CA directories, the JVM keystores and the NSS database are mounted
- * after every write_through entry, so an entry in a CA directory, naming a
- * keystore, or inside the database, would be silently shadowed. Only what this
- * step mounts is refused: which keystores exist depends on the JDKs installed.
- * An ancestor stays allowed.
+ * Refuse a write_through entry the CA mounts would silently shadow, as each
+ * store's reservation says; see CaStoreReservation. An ancestor stays allowed.
  */
 export function assertWriteThroughClearOfCaTrust(
   files: CaTrustFiles,
   writeThroughPaths: string[],
 ): void {
+  const covered = files.stores.map(({ kind, destination }) => ({
+    reserve: CA_STORES[kind].reserve,
+    destination,
+  }));
+  if (files.nssDb) {
+    covered.push({ reserve: NSS_DB_RESERVATION, destination: files.nssDb.destination });
+  }
   for (const path of writeThroughPaths) {
-    const caDir = files.caDirs.find((a) => isAtOrUnder(path, a.destination));
-    if (caDir) {
-      throw new WritablePathConflictError(
-        `write_through entry ${JSON.stringify(path)} is in the CA directory ` +
-          `${JSON.stringify(caDir.destination)}, which the inspect engine covers with a ` +
-          "read-only copy carrying the proxy CA for the step. Name a containing directory " +
-          "instead to persist writes around it.",
-      );
-    }
-    const keystore = files.jvmKeystores.find((k) => path === k.destination);
-    if (keystore) {
-      throw new WritablePathConflictError(
-        `write_through entry ${JSON.stringify(path)} is a JVM keystore the inspect engine covers ` +
-          "with a read-only copy carrying the proxy CA for the step. Name a containing directory " +
-          "instead to persist writes around it.",
-      );
-    }
-    const nssDb = files.nssDb?.destination;
-    if (nssDb !== undefined && path !== nssDb && isAtOrUnder(path, nssDb)) {
-      throw new WritablePathConflictError(
-        `write_through entry ${JSON.stringify(path)} is inside the NSS database at ` +
-          `${JSON.stringify(nssDb)}, which the inspect engine covers for the step. Name ` +
-          `${JSON.stringify(nssDb)} itself to have the command's changes written back.`,
-      );
+    for (const { reserve, destination } of covered) {
+      if ("refuses" in reserve && reserve.refuses(path, destination)) {
+        throw new WritablePathConflictError(
+          `write_through entry ${JSON.stringify(path)} ${reserve.refusal(destination)}`,
+        );
+      }
     }
   }
 }
@@ -468,39 +546,15 @@ export function caTrustAdditions(files: CaTrustFiles, env: NodeJS.ProcessEnv): C
     if (!env[name]) extraEnv[name] = OWN_CA_DESTINATION;
   }
 
-  if (files.systemCa) {
-    mounts.push({
-      destination: files.systemCa.destination,
-      type: "none",
-      source: files.systemCa.path,
-      options: ["rbind", "ro"],
-    });
-    for (const name of POINT_AT_SYSTEM_STORE) {
-      if (!env[name]) extraEnv[name] = files.systemCa.destination;
+  for (const { kind, path, destination } of files.stores) {
+    const { mountOptions, variables = [] } = CA_STORES[kind];
+    mounts.push({ destination, type: "none", source: path, options: [...mountOptions] });
+    for (const name of variables) {
+      if (!env[name]) extraEnv[name] = destination;
     }
   }
 
-  for (const caDir of files.caDirs) {
-    mounts.push({
-      destination: caDir.destination,
-      type: "none",
-      source: caDir.path,
-      options: ["rbind", "ro"],
-    });
-  }
-
-  // The JVM reads no variable, only its own keystore, so these add no env, just
-  // the injected copy mounted over each keystore it stands in for.
-  for (const keystore of files.jvmKeystores) {
-    mounts.push({
-      destination: keystore.destination,
-      type: "none",
-      source: keystore.path,
-      options: ["rbind", "ro"],
-    });
-  }
-
-  // Chromium reads no variable either, only the NSS database in $HOME.
+  // Chromium reads no variable, only the NSS database in $HOME.
   if (files.nssDb) mounts.push(...nssDbMounts(files.nssDb));
 
   return { mounts, env: extraEnv };

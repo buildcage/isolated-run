@@ -681,6 +681,99 @@ function planPostCleanup(state, env, annotation, { readOwner = readContainerOwne
 function isAtOrUnder(path, ancestor) {
 	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
 }
+//#endregion
+//#region src/lib/sandbox/ca-trust.ts
+const SYSTEM_CA_CANDIDATES = [
+	"/etc/ssl/certs/ca-certificates.crt",
+	"/etc/pki/tls/certs/ca-bundle.crt",
+	"/etc/ssl/ca-bundle.pem",
+	"/etc/pki/tls/cacert.pem",
+	"/etc/ssl/cert.pem"
+], CA_DIR_CANDIDATES = [
+	"/etc/pki/ca-trust/source/anchors",
+	"/etc/pki/trust/anchors",
+	"/var/lib/ca-certificates/pem"
+], JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"], KNOWN_JVM_KEYSTORE_DIRS = [
+	"/etc/ssl/certs/java",
+	"/etc/pki/java",
+	"/etc/pki/ca-trust/extracted/java"
+];
+function keystoreDirsOf(home) {
+	return [(0, node_path.join)(home, "lib", "security"), (0, node_path.join)(home, "jre", "lib", "security")];
+}
+function discoverJvmKeystores(env, java, { exists = node_fs.existsSync, realpath = node_fs.realpathSync } = {}) {
+	let dirs = [];
+	java && dirs.push(...keystoreDirsOf((0, node_path.dirname)((0, node_path.dirname)(realpath(java))))), env.JAVA_HOME && dirs.push(...keystoreDirsOf(env.JAVA_HOME)), dirs.push(...KNOWN_JVM_KEYSTORE_DIRS);
+	let found = [], seen = new Set();
+	for (let dir of dirs) for (let name of JVM_KEYSTORE_NAMES) {
+		let candidate = (0, node_path.join)(dir, name);
+		if (!exists(candidate)) continue;
+		let real = realpath(candidate);
+		seen.has(real) || (seen.add(real), found.push(real));
+	}
+	return found;
+}
+const POINT_AT_SYSTEM_STORE = [
+	"REQUESTS_CA_BUNDLE",
+	"PIP_CERT",
+	"SSL_CERT_FILE"
+], READ_ONLY = ["rbind", "ro"];
+[...Object.values({
+	systemStore: {
+		find: ({ deps }) => {
+			let found = SYSTEM_CA_CANDIDATES.find((p) => deps.exists(p));
+			return found ? [found] : [];
+		},
+		copyName: () => "system-ca-bundle.pem",
+		inject: ({ ca, deps }, destination, path) => {
+			let existing = deps.readFile(destination).trimEnd();
+			deps.writeFile(path, `${existing}\n${ca}\n`, 420);
+		},
+		mountOptions: READ_ONLY,
+		variables: POINT_AT_SYSTEM_STORE,
+		reserve: { candidates: SYSTEM_CA_CANDIDATES }
+	},
+	caDir: {
+		find: ({ deps }) => CA_DIR_CANDIDATES.filter((d) => deps.isDirectory(d)),
+		copyName: (i) => `ca-dir${i}`,
+		inject: ({ ca, deps }, destination, path) => {
+			deps.copyDir(deps.realpath(destination), path), deps.writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420);
+		},
+		notAdded: (destination, e) => `could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); a tool that reads it through GnuTLS or p11-kit (such as wget on RHEL or SUSE) will not trust the proxy. Check that the runner user can read it, or use proxy_engine: universal.`,
+		mountOptions: READ_ONLY,
+		reserve: {
+			refuses: (entry, destination) => isAtOrUnder(entry, destination),
+			refusal: (destination) => `is in the CA directory ${JSON.stringify(destination)}, which the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it.`
+		}
+	},
+	jvmKeystore: {
+		find: ({ env, tools, deps }) => {
+			let keystores = discoverJvmKeystores(env, tools.java, deps);
+			return !tools.keytool && keystores.length > 0 ? (deps.warn?.(`could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no keytool outside the paths a sandboxed command can write to (\$HOME, \$GITHUB_WORKSPACE, /tmp, \$RUNNER_TEMP, write_through:). A Java step will not trust the proxy. Install a JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside \$HOME), or use proxy_engine: universal.`), []) : keystores;
+		},
+		copyName: (i) => `jvm-keystore-${i}`,
+		inject: ({ caCertPath, tools, deps }, destination, path) => {
+			deps.copyFile(destination, path), deps.chmod(path, 420), deps.exec(tools.keytool, [
+				"-importcert",
+				"-noprompt",
+				"-alias",
+				"buildcage-proxy-ca",
+				"-file",
+				caCertPath,
+				"-keystore",
+				path,
+				"-storepass",
+				"changeit"
+			], {});
+		},
+		notAdded: (destination) => `could not add the proxy CA to the JVM keystore ${destination}; a Java step will not trust it. Use proxy_engine: universal for a JVM build whose keystore cannot be rewritten.`,
+		mountOptions: READ_ONLY,
+		reserve: {
+			refuses: (entry, destination) => entry === destination,
+			refusal: () => "is a JVM keystore the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it."
+		}
+	}
+}).flatMap(({ reserve }) => "candidates" in reserve ? reserve.candidates : [])];
 function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths = [] }) {
 	return [...new Set([
 		workdir,
