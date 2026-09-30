@@ -875,19 +875,20 @@ describe("buildOciConfig: caTrust", () => {
     },
     env: { FOO: "bar", UNSET: undefined },
   };
-  const caTrust = {
-    ownCaPath: "/scratch/buildcage-ca.pem",
-    systemCa: { path: "/scratch/system-ca-bundle.pem", destination: SYSTEM_STORE },
-    jvmKeystores: [],
-    caDirs: [],
+  const systemStore = {
+    kind: "systemStore" as const,
+    path: "/scratch/system-ca-bundle.pem",
+    destination: SYSTEM_STORE,
   };
+  const caTrust = { ownCaPath: "/scratch/buildcage-ca.pem", stores: [systemStore] };
 
   it("refuses a write_through entry naming a keystore it mounts, in either mode", () => {
     const keystore = "/usr/lib/jvm/jdk/lib/security/cacerts";
     const withKeystore = {
       ...caTrust,
-      jvmKeystores: [{ path: "/scratch/jvm-0/cacerts", destination: keystore }],
-      caDirs: [],
+      stores: [
+        { kind: "jvmKeystore" as const, path: "/scratch/jvm-0/cacerts", destination: keystore },
+      ],
     };
     expect(() =>
       build(fakeBaseSpec(), {
@@ -924,7 +925,7 @@ describe("buildOciConfig: caTrust", () => {
     expect(config.mounts).toContainEqual({
       destination: SYSTEM_STORE,
       type: "none",
-      source: caTrust.systemCa.path,
+      source: systemStore.path,
       options: ["rbind", "ro"],
     });
   });
@@ -934,7 +935,13 @@ describe("buildOciConfig: caTrust", () => {
     const config = build(fakeBaseSpec(), {
       ...baseArgs,
       writable: { ...baseArgs.writable, writablePaths: ["/etc"] },
-      caTrust: { ...caTrust, caDirs: [{ path: "/scratch/ca-dir0", destination: anchors }] },
+      caTrust: {
+        ...caTrust,
+        stores: [
+          systemStore,
+          { kind: "caDir" as const, path: "/scratch/ca-dir0", destination: anchors },
+        ],
+      },
     });
     const destinations = config.mounts.map((m) => m.destination);
     expect(destinations.indexOf(SYSTEM_STORE)).toBeGreaterThan(destinations.indexOf("/etc"));

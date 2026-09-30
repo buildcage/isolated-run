@@ -17,7 +17,6 @@ const mocks = {
   extractRuncBootstrap: vi.fn(),
   extractCaCert: vi.fn(),
   writeCaTrustFiles: vi.fn(),
-  writeJvmKeystoreFiles: vi.fn(),
   jvmTools: vi.fn(),
   prepareNssDb: vi.fn(),
   settleNssDbSlot: vi.fn(),
@@ -77,8 +76,7 @@ beforeEach(() => {
   mocks.withScratchDir.mockImplementation((fn: (dir: string) => unknown) => fn(SCRATCH));
   mocks.extractRuncBootstrap.mockReturnValue(BOOTSTRAP);
   mocks.extractCaCert.mockReturnValue(`${SCRATCH}/ca.crt`);
-  mocks.writeCaTrustFiles.mockReturnValue({ bundlePath: `${SCRATCH}/ca-bundle.crt` });
-  mocks.writeJvmKeystoreFiles.mockReturnValue([]);
+  mocks.writeCaTrustFiles.mockReturnValue({ ownCaPath: `${SCRATCH}/buildcage-ca.pem`, stores: [] });
   mocks.jvmTools.mockReturnValue({ java: undefined, keytool: undefined });
   mocks.createOverlayScratchDirs.mockReturnValue([]);
   mocks.writeResolvConf.mockReturnValue(`${SCRATCH}/resolv.conf`);
@@ -140,8 +138,8 @@ describe("runSandboxedCommand", () => {
 
     expect(mocks.extractCaCert).toHaveBeenCalledWith(CONTAINER, SCRATCH);
     expect(mocks.buildOciConfig.mock.calls[0][1].caTrust).toStrictEqual({
-      bundlePath: `${SCRATCH}/ca-bundle.crt`,
-      jvmKeystores: [],
+      ownCaPath: `${SCRATCH}/buildcage-ca.pem`,
+      stores: [],
       nssDb: undefined,
     });
     expect(mocks.prepareNssDb).toHaveBeenCalledWith(
@@ -187,7 +185,7 @@ describe("runSandboxedCommand", () => {
 
     beforeEach(() => {
       mocks.prepareNssDb.mockReturnValue(NSS_DB);
-      mocks.writeCaTrustFiles.mockReturnValue({ ownCaPath: OWN_CA });
+      mocks.writeCaTrustFiles.mockReturnValue({ ownCaPath: OWN_CA, stores: [] });
       mocks.readFile.mockReturnValue("THE CA PEM");
       mocks.settleNssDbSlot.mockReturnValue("written");
     });
@@ -382,10 +380,7 @@ describe("runSandboxedCommand", () => {
       "/tmp",
       "/opt/out",
     ]);
-    expect(mocks.writeCaTrustFiles).toHaveBeenCalledWith(`${SCRATCH}/ca.crt`, SCRATCH, {
-      warn: mocks.warn,
-    });
-    expect(mocks.writeJvmKeystoreFiles).toHaveBeenCalledWith(
+    expect(mocks.writeCaTrustFiles).toHaveBeenCalledWith(
       `${SCRATCH}/ca.crt`,
       SCRATCH,
       opts.env,
@@ -658,8 +653,8 @@ describe("assembleBundle", () => {
     const bundle = assembleBundle(SCRATCH, options({ proxyEngine: "inspect" }), deps);
 
     expect(bundle.caTrust).toStrictEqual({
-      bundlePath: `${SCRATCH}/ca-bundle.crt`,
-      jvmKeystores: [],
+      ownCaPath: `${SCRATCH}/buildcage-ca.pem`,
+      stores: [],
       nssDb: undefined,
     });
   });

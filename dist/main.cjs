@@ -19686,35 +19686,6 @@ function extractCaCert(containerName, destDir, { exec = defaultExec$1, chmod = n
 		hostPath: caCertPath
 	})), chmod(caCertPath, 420), caCertPath;
 }
-function writeCaTrustFiles(caCertPath, dir, { readFile = defaultReadFile$1, writeFile = defaultWriteFile, exists = node_fs.existsSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir, realpath = node_fs.realpathSync, warn } = {}) {
-	let ca = readFile(caCertPath).trimEnd(), ownCaPath = (0, node_path.join)(dir, "buildcage-ca.pem");
-	writeFile(ownCaPath, `${ca}\n`, 420);
-	let destination = SYSTEM_CA_CANDIDATES.find((p) => exists(p)), systemCa;
-	if (destination) {
-		let existing = readFile(destination).trimEnd(), path = (0, node_path.join)(dir, "system-ca-bundle.pem");
-		writeFile(path, `${existing}\n${ca}\n`, 420), systemCa = {
-			path,
-			destination
-		};
-	}
-	let caDirs = CA_DIR_CANDIDATES.filter((d) => isDirectory(d)).flatMap((destination, i) => {
-		let path = (0, node_path.join)(dir, `ca-dir${i}`);
-		try {
-			copyDir(realpath(destination), path), writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420);
-		} catch (e) {
-			return warn?.(`could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); a tool that reads it through GnuTLS or p11-kit (such as wget on RHEL or SUSE) will not trust the proxy. Check that the runner user can read it, or use proxy_engine: universal.`), [];
-		}
-		return [{
-			path,
-			destination
-		}];
-	});
-	return {
-		ownCaPath,
-		systemCa,
-		caDirs
-	};
-}
 const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"], KNOWN_JVM_KEYSTORE_DIRS = [
 	"/etc/ssl/certs/java",
 	"/etc/pki/java",
@@ -19735,17 +19706,46 @@ function discoverJvmKeystores(env, java, { exists = node_fs.existsSync, realpath
 	}
 	return found;
 }
-function writeJvmKeystoreFiles(caCertPath, dir, env, { java, keytool }, { exec = defaultExec$1, exists = node_fs.existsSync, realpath = node_fs.realpathSync, copyFile = node_fs.copyFileSync, chmod = node_fs.chmodSync, warn } = {}) {
-	let keystores = discoverJvmKeystores(env, java, {
-		exists,
-		realpath
-	});
-	if (!keytool) return keystores.length > 0 && warn?.(`could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no keytool outside the paths a sandboxed command can write to (\$HOME, \$GITHUB_WORKSPACE, /tmp, \$RUNNER_TEMP, write_through:). A Java step will not trust the proxy. Install a JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside \$HOME), or use proxy_engine: universal.`), [];
-	let injected = [];
-	return keystores.forEach((keystore, i) => {
-		let copy = (0, node_path.join)(dir, `jvm-keystore-${i}`);
-		try {
-			copyFile(keystore, copy), chmod(copy, 420), exec(keytool, [
+const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_STORE = [
+	"REQUESTS_CA_BUNDLE",
+	"PIP_CERT",
+	"SSL_CERT_FILE"
+], READ_ONLY = ["rbind", "ro"], CA_STORES = {
+	systemStore: {
+		find: ({ deps }) => {
+			let found = SYSTEM_CA_CANDIDATES.find((p) => deps.exists(p));
+			return found ? [found] : [];
+		},
+		copyName: () => "system-ca-bundle.pem",
+		inject: ({ ca, deps }, destination, path) => {
+			let existing = deps.readFile(destination).trimEnd();
+			deps.writeFile(path, `${existing}\n${ca}\n`, 420);
+		},
+		mountOptions: READ_ONLY,
+		variables: POINT_AT_SYSTEM_STORE,
+		reserve: { candidates: SYSTEM_CA_CANDIDATES }
+	},
+	caDir: {
+		find: ({ deps }) => CA_DIR_CANDIDATES.filter((d) => deps.isDirectory(d)),
+		copyName: (i) => `ca-dir${i}`,
+		inject: ({ ca, deps }, destination, path) => {
+			deps.copyDir(deps.realpath(destination), path), deps.writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420);
+		},
+		notAdded: (destination, e) => `could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); a tool that reads it through GnuTLS or p11-kit (such as wget on RHEL or SUSE) will not trust the proxy. Check that the runner user can read it, or use proxy_engine: universal.`,
+		mountOptions: READ_ONLY,
+		reserve: {
+			refuses: (entry, destination) => isAtOrUnder(entry, destination),
+			refusal: (destination) => `is in the CA directory ${JSON.stringify(destination)}, which the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it.`
+		}
+	},
+	jvmKeystore: {
+		find: ({ env, tools, deps }) => {
+			let keystores = discoverJvmKeystores(env, tools.java, deps);
+			return !tools.keytool && keystores.length > 0 ? (deps.warn?.(`could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no keytool outside the paths a sandboxed command can write to (\$HOME, \$GITHUB_WORKSPACE, /tmp, \$RUNNER_TEMP, write_through:). A Java step will not trust the proxy. Install a JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside \$HOME), or use proxy_engine: universal.`), []) : keystores;
+		},
+		copyName: (i) => `jvm-keystore-${i}`,
+		inject: ({ caCertPath, tools, deps }, destination, path) => {
+			deps.copyFile(destination, path), deps.chmod(path, 420), deps.exec(tools.keytool, [
 				"-importcert",
 				"-noprompt",
 				"-alias",
@@ -19753,25 +19753,68 @@ function writeJvmKeystoreFiles(caCertPath, dir, env, { java, keytool }, { exec =
 				"-file",
 				caCertPath,
 				"-keystore",
-				copy,
+				path,
 				"-storepass",
 				"changeit"
 			], {});
-		} catch {
-			warn?.(`could not add the proxy CA to the JVM keystore ${keystore}; a Java step will not trust it. Use proxy_engine: universal for a JVM build whose keystore cannot be rewritten.`);
+		},
+		notAdded: (destination) => `could not add the proxy CA to the JVM keystore ${destination}; a Java step will not trust it. Use proxy_engine: universal for a JVM build whose keystore cannot be rewritten.`,
+		mountOptions: READ_ONLY,
+		reserve: {
+			refuses: (entry, destination) => entry === destination,
+			refusal: () => "is a JVM keystore the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it."
+		}
+	}
+};
+function reservedCaStorePaths() {
+	return Object.values(CA_STORES).flatMap(({ reserve }) => "candidates" in reserve ? reserve.candidates : []);
+}
+const NSS_DB_RESERVATION = {
+	refuses: (entry, destination) => entry !== destination && isAtOrUnder(entry, destination),
+	refusal: (destination) => `is inside the NSS database at ${JSON.stringify(destination)}, which the inspect engine covers for the step. Name ${JSON.stringify(destination)} itself to have the command's changes written back.`
+};
+function writeCaTrustFiles(caCertPath, dir, env, tools, { exec = defaultExec$1, readFile = defaultReadFile$1, writeFile = defaultWriteFile, exists = node_fs.existsSync, chmod = node_fs.chmodSync, copyFile = node_fs.copyFileSync, realpath = node_fs.realpathSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir, warn } = {}) {
+	let deps = {
+		exec,
+		readFile,
+		writeFile,
+		exists,
+		chmod,
+		copyFile,
+		realpath,
+		isDirectory,
+		copyDir,
+		warn
+	}, ca = readFile(caCertPath).trimEnd(), ownCaPath = (0, node_path.join)(dir, "buildcage-ca.pem");
+	writeFile(ownCaPath, `${ca}\n`, 420);
+	let context = {
+		ca,
+		caCertPath,
+		env,
+		tools,
+		deps
+	}, stores = [];
+	for (let [kind, store] of Object.entries(CA_STORES)) store.find(context).forEach((destination, i) => {
+		let path = (0, node_path.join)(dir, store.copyName(i));
+		try {
+			store.inject(context, destination, path);
+		} catch (e) {
+			if (!store.notAdded) throw e;
+			warn?.(store.notAdded(destination, e));
 			return;
 		}
-		injected.push({
-			path: copy,
-			destination: keystore
+		stores.push({
+			kind,
+			path,
+			destination
 		});
-	}), injected;
+	});
+	return {
+		ownCaPath,
+		stores
+	};
 }
-const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_STORE = [
-	"REQUESTS_CA_BUNDLE",
-	"PIP_CERT",
-	"SSL_CERT_FILE"
-], REPLACING_WHEN_SET = [
+const REPLACING_WHEN_SET = [
 	"CURL_CA_BUNDLE",
 	"GIT_SSL_CAINFO",
 	"AWS_CA_BUNDLE",
@@ -19779,24 +19822,26 @@ const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_ST
 	"BUNDLE_SSL_CA_CERT"
 ], REPLACING_WHEN_SET_ANY_CASE = ["npm_config_cafile"];
 function presetCaVariables(files, env, realpath) {
-	let store = files.systemCa && realpath(files.systemCa.destination), exact = [
+	let stores = files.stores.filter((s) => CA_STORES[s.kind].variables).map((s) => realpath(s.destination)), exact = [
 		...POINT_AT_OWN_CA,
 		...POINT_AT_SYSTEM_STORE,
 		...REPLACING_WHEN_SET
 	];
 	return Object.keys(env).filter((name) => {
 		let value = env[name];
-		return !value || value === "/dev/buildcage-ca.pem" || realpath(value) === store ? !1 : exact.includes(name) || REPLACING_WHEN_SET_ANY_CASE.some((v) => v.toLowerCase() === name.toLowerCase());
+		return !value || value === "/dev/buildcage-ca.pem" || stores.includes(realpath(value)) ? !1 : exact.includes(name) || REPLACING_WHEN_SET_ANY_CASE.some((v) => v.toLowerCase() === name.toLowerCase());
 	});
 }
 function assertWriteThroughClearOfCaTrust(files, writeThroughPaths) {
-	for (let path of writeThroughPaths) {
-		let caDir = files.caDirs.find((a) => isAtOrUnder(path, a.destination));
-		if (caDir) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is in the CA directory ${JSON.stringify(caDir.destination)}, which the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it.`);
-		if (files.jvmKeystores.find((k) => path === k.destination)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is a JVM keystore the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it.`);
-		let nssDb = files.nssDb?.destination;
-		if (nssDb !== void 0 && path !== nssDb && isAtOrUnder(path, nssDb)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} is inside the NSS database at ${JSON.stringify(nssDb)}, which the inspect engine covers for the step. Name ${JSON.stringify(nssDb)} itself to have the command's changes written back.`);
-	}
+	let covered = files.stores.map(({ kind, destination }) => ({
+		reserve: CA_STORES[kind].reserve,
+		destination
+	}));
+	files.nssDb && covered.push({
+		reserve: NSS_DB_RESERVATION,
+		destination: files.nssDb.destination
+	});
+	for (let path of writeThroughPaths) for (let { reserve, destination } of covered) if ("refuses" in reserve && reserve.refuses(path, destination)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} ${reserve.refusal(destination)}`);
 }
 function caTrustAdditions(files, env) {
 	let mounts = [{
@@ -19812,27 +19857,16 @@ function caTrustAdditions(files, env) {
 		]
 	}], extraEnv = {};
 	for (let name of POINT_AT_OWN_CA) env[name] || (extraEnv[name] = OWN_CA_DESTINATION);
-	if (files.systemCa) {
+	for (let { kind, path, destination } of files.stores) {
+		let { mountOptions, variables = [] } = CA_STORES[kind];
 		mounts.push({
-			destination: files.systemCa.destination,
+			destination,
 			type: "none",
-			source: files.systemCa.path,
-			options: ["rbind", "ro"]
+			source: path,
+			options: [...mountOptions]
 		});
-		for (let name of POINT_AT_SYSTEM_STORE) env[name] || (extraEnv[name] = files.systemCa.destination);
+		for (let name of variables) env[name] || (extraEnv[name] = destination);
 	}
-	for (let caDir of files.caDirs) mounts.push({
-		destination: caDir.destination,
-		type: "none",
-		source: caDir.path,
-		options: ["rbind", "ro"]
-	});
-	for (let keystore of files.jvmKeystores) mounts.push({
-		destination: keystore.destination,
-		type: "none",
-		source: keystore.path,
-		options: ["rbind", "ro"]
-	});
 	return files.nssDb && mounts.push(...nssDbMounts(files.nssDb)), {
 		mounts,
 		env: extraEnv
@@ -19934,7 +19968,9 @@ function hostRunCoverageLayers() {
 		writablePaths: new Set([HOST_RUN_LOCK_DIR])
 	};
 }
-const RESERVED_INTERNAL_DESTINATIONS = [RESOLV_CONF_DESTINATION, ...SYSTEM_CA_CANDIDATES];
+function reservedInternalDestinations() {
+	return [RESOLV_CONF_DESTINATION, ...reservedCaStorePaths()];
+}
 function assertNoFreshMountDestinations(writableDirs, freshMountDestinations) {
 	for (let dir of writableDirs) {
 		let shadowed = [...freshMountDestinations].find((d) => isAtOrUnder(dir, d));
@@ -20248,7 +20284,7 @@ function renameGuardDirs(readonlyDirs, persisting) {
 function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRealPaths = []) {
 	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
 	for (let path of writeThroughPaths) {
-		let reserved = [...RESERVED_INTERNAL_DESTINATIONS, ...reservedRealPaths].find((r) => isAtOrUnder(path, r));
+		let reserved = [...reservedInternalDestinations(), ...reservedRealPaths].find((r) => isAtOrUnder(path, r));
 		if (reserved) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 }
@@ -20274,7 +20310,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
 	let realpath = deps.realpath ?? realpathOrSelf;
-	validateFilesystemInputs(filesystemMode, writeThroughPaths, SYSTEM_CA_CANDIDATES.map(realpath));
+	validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map(realpath));
 	try {
 		assertScratchBaseNotWritable(writeThroughPaths);
 	} catch (e) {
@@ -20751,7 +20787,6 @@ const realDeps$2 = {
 	extractRuncBootstrap,
 	extractCaCert,
 	writeCaTrustFiles,
-	writeJvmKeystoreFiles,
 	jvmTools,
 	prepareNssDb,
 	settleNssDbSlot,
@@ -20783,12 +20818,11 @@ function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`, "RUNC_EXTRACT_FAILED");
 	}
 }
-function extractCaTrust(containerName, dir, options, { extractCaCert, writeCaTrustFiles, writeJvmKeystoreFiles, jvmTools, prepareNssDb, info, realpath }) {
+function extractCaTrust(containerName, dir, options, { extractCaCert, writeCaTrustFiles, jvmTools, prepareNssDb, info, realpath }) {
 	let { env, writeThroughPaths, warn } = options;
 	try {
-		let caCertPath = extractCaCert(containerName, dir), tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env)), files = {
-			...writeCaTrustFiles(caCertPath, dir, { warn }),
-			jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn }),
+		let files = {
+			...writeCaTrustFiles(extractCaCert(containerName, dir), dir, env, jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env)), { warn }),
 			nssDb: prepareNssDb(containerName, dir, env.HOME, {
 				warn,
 				info

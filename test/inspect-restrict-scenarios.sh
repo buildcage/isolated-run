@@ -375,7 +375,7 @@ else
 fi
 
 # A JVM already on the runner reads only its own keystore, so without the CA
-# injected there (ca-trust.ts's writeJvmKeystoreFiles) a Java client meeting the
+# injected there (ca-trust.ts's CA_STORES.jvmKeystore) a Java client meeting the
 # proxy's re-signed certificate fails the handshake. Only a status coming back
 # passes: a keystore the JVM cannot read fails differently (an empty
 # trustAnchors, a trust store it cannot access), and that has to fail too. The

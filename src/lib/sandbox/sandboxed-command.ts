@@ -13,7 +13,6 @@ import type { FilesystemMode } from "../filesystem-mode.ts";
 import {
   extractCaCert,
   writeCaTrustFiles,
-  writeJvmKeystoreFiles,
   presetCaVariables,
   type CaTrustFiles,
 } from "./ca-trust.ts";
@@ -63,7 +62,6 @@ export interface RunSandboxedCommandDeps {
   extractRuncBootstrap: typeof extractRuncBootstrap;
   extractCaCert: typeof extractCaCert;
   writeCaTrustFiles: typeof writeCaTrustFiles;
-  writeJvmKeystoreFiles: typeof writeJvmKeystoreFiles;
   jvmTools: typeof jvmTools;
   prepareNssDb: typeof prepareNssDb;
   settleNssDbSlot: typeof settleNssDbSlot;
@@ -91,7 +89,6 @@ const realDeps: RunSandboxedCommandDeps = {
   extractRuncBootstrap,
   extractCaCert,
   writeCaTrustFiles,
-  writeJvmKeystoreFiles,
   jvmTools,
   prepareNssDb,
   settleNssDbSlot,
@@ -182,7 +179,6 @@ function extractCaTrust(
   {
     extractCaCert,
     writeCaTrustFiles,
-    writeJvmKeystoreFiles,
     jvmTools,
     prepareNssDb,
     info,
@@ -195,8 +191,7 @@ function extractCaTrust(
     // Persistent mode's paths in either mode; see pinningPaths.
     const tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env));
     const files: CaTrustFiles = {
-      ...writeCaTrustFiles(caCertPath, dir, { warn }),
-      jvmKeystores: writeJvmKeystoreFiles(caCertPath, dir, env, tools, { warn }),
+      ...writeCaTrustFiles(caCertPath, dir, env, tools, { warn }),
       nssDb: prepareNssDb(
         containerName,
         dir,
