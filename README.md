@@ -443,10 +443,9 @@ read at a store that holds the CA: `NODE_EXTRA_CA_CERTS`, `DENO_CERT`, `SSL_CERT
 store already. On a RHEL, Fedora or SUSE runner, where GnuTLS reads a directory of certificates
 instead of the store (`wget` on RHEL uses GnuTLS), the CA also goes into a copy of that directory
 mounted over it. A JVM already on the runner reads none of those, only its own keystore, so the CA
-is added to a copy of the `cacerts` (and `jssecacerts` when present) of the `java` on `PATH`, of
-`$JAVA_HOME` and of each `$JAVA_HOME_<major>_<arch>` (set by `setup-java` and the hosted runner
-images) with the runner's own `keytool` and mounted over it, letting `mvn`/`gradle`/`java` and a
-toolchain-selected JDK reach the proxy without `proxy_engine: universal`. Chromium, including the
+is added to a copy of the `cacerts` (and `jssecacerts` when present) of the `java` on `PATH` and
+of `$JAVA_HOME` with the runner's own `keytool` and mounted over it, letting `mvn`/`gradle`/`java`
+reach the proxy without `proxy_engine: universal`. Chromium, including the
 `chrome-headless-shell` that Puppeteer, Playwright and Remotion download, reads neither the store
 nor any variable, only its compiled-in root store and the NSS database in `$HOME`, so that
 database's `pkcs11.txt` gains, for the step, a read-only slot on a database holding only the CA. The
@@ -548,9 +547,11 @@ reported as blocked; see
   not accept the re-signed certificate.
 - The JVM (Java, Kotlin, Scala) reads only its own keystore rather than the CA-trust variables, and
   a JVM already on the runner is handled: for the step, the CA is added to a copy of the `cacerts`
-  of the `java` on `PATH`, of `$JAVA_HOME` and of each `$JAVA_HOME_<major>_<arch>` (set by
-  `setup-java` and the hosted runner images). A JDK the step itself fetches (Gradle's toolchain
-  auto-provisioning, `sdk install`, Bazel's embedded JDK or `remotejdk`) keeps its own keystore;
+  of the `java` on `PATH` and of `$JAVA_HOME`. Any other JDK keeps its own keystore. For one on the
+  runner, such as the JDK a Maven or Gradle toolchain forks tests into, set `JAVA_HOME` to it in the
+  step's `env:` or use `proxy_engine: universal` for that step. A JDK the step itself fetches
+  (Gradle's toolchain auto-provisioning, `sdk install`, Bazel's embedded JDK or `remotejdk`) is not
+  covered either;
   Bazel can be pointed at an injected copy with
   `bazel --host_jvm_args=-Djavax.net.ssl.trustStore=$JAVA_HOME/lib/security/cacerts ...`.
   The `keytool` that injects the CA runs outside the sandbox, so it must live outside `$HOME`,
