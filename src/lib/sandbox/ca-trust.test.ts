@@ -63,7 +63,6 @@ function fakeHost(files: Record<string, string>, dirs: string[] = []) {
 
 const NO_JVM = { java: undefined, keytool: undefined };
 
-/** The copies of one kind, as the path and the store it covers. */
 function ofKind({ stores }: { stores: CaStoreCopy[] }, kind: CaStoreKind) {
   return stores
     .filter((s) => s.kind === kind)

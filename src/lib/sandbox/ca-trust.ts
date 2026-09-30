@@ -227,7 +227,6 @@ export function discoverJvmKeystores(
 const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"];
 const POINT_AT_SYSTEM_STORE = ["REQUESTS_CA_BUNDLE", "PIP_CERT", "SSL_CERT_FILE"];
 
-/** What a CaStore's find and inject work from. */
 interface CaStoreContext {
   /** The proxy CA, PEM, trailing whitespace trimmed. */
   ca: string;
@@ -253,14 +252,10 @@ type CaStoreReservation =
 
 /** A kind of CA store on the runner, covered with a copy carrying the proxy CA. */
 interface CaStore {
-  /** The stores of this kind on this runner. */
   find: (context: CaStoreContext) => string[];
-  /** The copy's file name in the scratch directory, for the i-th store found. */
   copyName: (i: number) => string;
-  /** Copies `destination` to `path` and adds the CA to the copy. */
   inject: (context: CaStoreContext, destination: string, path: string) => void;
-  /** The warning for a store inject fails on, which is then left uncovered.
-   *  Without one, the failure fails the step. */
+  /** Warns and leaves the store uncovered; without it, a failure fails the step. */
   notAdded?: (destination: string, error: unknown) => string;
   mountOptions: string[];
   /** Pointed at the store when the step left them unset. */
@@ -272,11 +267,7 @@ export type CaStoreKind = "systemStore" | "caDir" | "jvmKeystore";
 
 const READ_ONLY = ["rbind", "ro"];
 
-/**
- * The CA stores the inspect engine covers, in mount order. Supporting another
- * store is a row here: where it is found, how the CA goes into a copy, how the
- * copy is mounted, and which write_through entries that mount refuses.
- */
+/** The CA stores the inspect engine covers, in mount order. A new store is a new row. */
 export const CA_STORES: Record<CaStoreKind, CaStore> = {
   // The runner's own system CA store with the CA appended. The replacing
   // variables point here, and every other tool (curl, ...) already reads it
@@ -369,8 +360,7 @@ export const CA_STORES: Record<CaStoreKind, CaStore> = {
         {},
       );
     },
-    // Warned, since a non-default store password otherwise shows only as an
-    // opaque TLS error from the step's JVM.
+    // A non-default store password otherwise shows only as an opaque TLS error.
     notAdded: (destination) =>
       `could not add the proxy CA to the JVM keystore ${destination}; a Java step ` +
       `will not trust it. Use proxy_engine: universal for a JVM build whose ` +
@@ -392,8 +382,7 @@ export function reservedCaStorePaths(): string[] {
   );
 }
 
-// The NSS database is prepared apart from CA_STORES (see prepareNssDb): it is
-// claimed, written back and released. Its mount refuses the same way.
+// Not in CA_STORES: the NSS database is claimed, written back and released (see prepareNssDb).
 const NSS_DB_RESERVATION = {
   refuses: (entry: string, destination: string) =>
     entry !== destination && isAtOrUnder(entry, destination),
@@ -498,10 +487,7 @@ export function presetCaVariables(
   });
 }
 
-/**
- * Refuse a write_through entry the CA mounts would silently shadow, as each
- * store's reservation says; see CaStoreReservation. An ancestor stays allowed.
- */
+/** Refuse a write_through entry a CA mount would shadow. An ancestor stays allowed. */
 export function assertWriteThroughClearOfCaTrust(
   files: CaTrustFiles,
   writeThroughPaths: string[],
