@@ -491,7 +491,6 @@ export function runSandboxedCommand(
           netnsName,
           rootfsBindDir,
           gateway: PROXY_ADDRESS,
-          dns: PROXY_ADDRESS,
           targetIp: SANDBOX_IP,
         });
       } catch (e) {

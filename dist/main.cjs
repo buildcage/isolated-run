@@ -20701,7 +20701,7 @@ function defaultExecFile(command, args, options) {
 function defaultCopyScript(from, to) {
 	(0, node_fs.copyFileSync)(from, to), (0, node_fs.chmodSync)(to, 320);
 }
-function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, dns, targetIp, envBlob }, { execFile = defaultExecFile, copyScript = defaultCopyScript } = {}) {
+function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, targetIp, envBlob }, { execFile = defaultExecFile, copyScript = defaultCopyScript } = {}) {
 	let runIsolatedShPath = (0, node_path.join)(bundleDir, "run-isolated.sh");
 	copyScript((0, node_path.join)(__dirname$1, "..", "scripts", "run-isolated.sh"), runIsolatedShPath);
 	let args = [
@@ -20722,8 +20722,6 @@ function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, 
 		rootfsBindDir,
 		"--gateway",
 		gateway,
-		"--dns",
-		dns,
 		"--target-ip",
 		targetIp
 	];
@@ -20950,7 +20948,6 @@ function runSandboxedCommand(options, overrides = {}) {
 				netnsName,
 				rootfsBindDir,
 				gateway: PROXY_ADDRESS,
-				dns: PROXY_ADDRESS,
 				targetIp: "198.19.255.101"
 			});
 		} catch (e) {

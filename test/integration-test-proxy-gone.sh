@@ -53,7 +53,6 @@ sudo -n ./scripts/run-isolated.sh \
   --netns-name "$NETNS_NAME" \
   --rootfs-bind-dir "$ROOTFS_BIND_DIR" \
   --gateway 198.19.255.1 \
-  --dns 198.19.255.1 \
   --target-ip 198.19.255.101 \
   >"$WORKDIR/out.log" 2>&1
 CODE=$?

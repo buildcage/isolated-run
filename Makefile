@@ -85,7 +85,7 @@ test_sandbox_dev: ## Run a sample isolated command in the dev loop and verify is
 	    build-test-bundle.sh --netns-name buildcage-sandbox-dev --script /usr/local/bin/smoke-test.sh --bundle /var/tmp/buildcage/dev-bundle; \
 	    run-isolated.sh --proxy-netns $$PROXY_NETNS --runc /usr/local/bin/runc --bundle /var/tmp/buildcage/dev-bundle \
 	      --container-id buildcage-sandbox-dev --netns-name buildcage-sandbox-dev --rootfs-bind-dir /var/tmp/buildcage/dev-bundle/rootfs \
-	      --gateway 198.19.255.1 --dns 198.19.255.1 --target-ip 198.19.255.101"
+	      --gateway 198.19.255.1 --target-ip 198.19.255.101"
 	@$(MAKE) clean_sandbox_dev
 
 .PHONY: clean_sandbox_dev

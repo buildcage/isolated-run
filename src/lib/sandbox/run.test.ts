@@ -34,7 +34,6 @@ function options(overrides: Partial<RunIsolatedOptions> = {}): RunIsolatedOption
     netnsName: "buildcage-abcd1234",
     rootfsBindDir: "/var/tmp/scratch/rootfs",
     gateway: "10.0.0.1",
-    dns: "10.0.0.2",
     targetIp: "10.0.0.3",
     envBlob: Buffer.from("PATH=/usr/bin\0"),
     ...overrides,
@@ -85,7 +84,6 @@ describe("runIsolated", () => {
       "--netns-name": "buildcage-abcd1234",
       "--rootfs-bind-dir": "/var/tmp/scratch/rootfs",
       "--gateway": "10.0.0.1",
-      "--dns": "10.0.0.2",
       "--target-ip": "10.0.0.3",
     });
   });
