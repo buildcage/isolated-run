@@ -37,6 +37,9 @@ details.
 | `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact; both engines produce one. See [Traffic artifact](#traffic-artifact).                               |
 | `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                                                 |
 
+`fail_on_blocked` and `fail_on_ca_residue` take `true` or `false`. Any other value fails the step
+before the sandbox is set up.
+
 ### Rule inputs
 
 All of these are empty by default, and all of them are additive: a connection is allowed when any
