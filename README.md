@@ -549,11 +549,11 @@ reported as blocked; see
   not accept the re-signed certificate.
 - The JVM (Java, Kotlin, Scala) reads only its own keystore rather than the CA-trust variables, and
   a JVM already on the runner is handled: for the step, the CA is added to a copy of the `cacerts`
-  of the `java` on `PATH` and of `$JAVA_HOME`. Another JDK on the runner, such as one a Maven or
-  Gradle toolchain forks tests into, keeps its own keystore; set `JAVA_HOME` to it in the step's
-  `env:`, or use `proxy_engine: universal` for that step. A JDK the step itself fetches (Gradle's
-  toolchain auto-provisioning, `sdk install`, Bazel's embedded JDK or `remotejdk`) keeps its own
-  keystore too;
+  of the `java` on `PATH` and of `$JAVA_HOME`. Any other JDK keeps its own keystore. For one on the
+  runner, such as the JDK a Maven or Gradle toolchain forks tests into, set `JAVA_HOME` to it in the
+  step's `env:` or use `proxy_engine: universal` for that step. A JDK the step itself fetches
+  (Gradle's toolchain auto-provisioning, `sdk install`, Bazel's embedded JDK or `remotejdk`) is not
+  covered either;
   Bazel can be pointed at an injected copy with
   `bazel --host_jvm_args=-Djavax.net.ssl.trustStore=$JAVA_HOME/lib/security/cacerts ...`.
   The `keytool` that injects the CA runs outside the sandbox, so it must live outside `$HOME`,
