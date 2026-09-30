@@ -392,10 +392,9 @@ to run code once the sandbox is gone.
 Name only what a later step needs, usually the build output. Everything else the command writes is
 discarded, the rest of `$GITHUB_WORKSPACE` included: an edited `package.json` script, a new
 `.git/hooks` entry, a patched file under `node_modules`. If a later step needs `node_modules` or
-another part of the workspace, name it too. A named path stays as exposed as it is in `persistent`
-mode, since a later step may run or ship whatever lands there, so treat its contents as untrusted.
-The same goes for `write_through: $GITHUB_OUTPUT`: handle every output it sets as in
-[Passing values to `run`](#passing-values-to-run) above.
+another part of the workspace, name it too. A named path is as exposed as in `persistent` mode,
+since a later step may run or ship what lands there, and an output set through `$GITHUB_OUTPUT` is
+untrusted as in [Passing values to `run`](#passing-values-to-run) above.
 
 If `run` needs to write somewhere else in `persistent` mode, a build output or a tool-specific cache
 directory for example, list it under `write_through:`:

@@ -629,8 +629,8 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   an output, an env var or `$PATH` for later steps exactly as an un-sandboxed one could, and the
   same goes for `~/.bashrc`, `~/.npmrc` and anything else under a writable exception.
   `filesystem_mode: ephemeral` closes this off for everything except what `write_through:` names.
-  Naming only the outputs a later step needs, such as `./dist`, discards a payload planted anywhere
-  else in `$GITHUB_WORKSPACE` too. A named path stays as exposed as it is in `persistent` mode.
+  Naming only the outputs a later step needs, such as `./dist`, also discards a payload planted
+  elsewhere in `$GITHUB_WORKSPACE`. A named path is as exposed as in `persistent` mode.
 
   That decides how the step is set up. Wrapping every untrusted step is not the way out: a payload
   left in `$GITHUB_ENV`, `$GITHUB_PATH` or `$HOME` runs in the next step before its sandbox does.
