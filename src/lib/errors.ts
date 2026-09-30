@@ -18,7 +18,7 @@ import { ActionError } from "#core/lib/errors.ts";
  *                                     writable path that collides with a mount the sandbox needs itself
  *   INVALID_WRITE_THROUGH_PATH        a write_through entry failed path-resolution rules (unknown $VAR, etc.)
  *   WRITE_THROUGH_TARGET_MISSING      a write_through entry resolves to a well-known GITHUB_* file that doesn't exist
- *   WRITE_THROUGH_TARGET_UNCREATABLE  a write_through entry doesn't exist and couldn't be created (sudo mkdir/chown failed)
+ *   WRITE_THROUGH_TARGET_UNCREATABLE  a write_through entry doesn't exist and the runner couldn't create it
  *   ALLOW_WRITE_REMOVED               the removed allow_write input was supplied (renamed to write_through)
  *   OVERLAYFS_UNSUPPORTED             filesystem_mode: ephemeral's overlayfs preflight probe failed
  *   OVERLAY_PROBE_CLEANUP_FAILED      that probe mounted fine, but its root-owned leftovers could not be removed,

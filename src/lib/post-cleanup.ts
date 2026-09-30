@@ -11,14 +11,12 @@ import {
   scratchDirFor,
   type CleanupScratchDirOptions,
 } from "./sandbox/scratch-dir.ts";
-import { releaseWriteThrough } from "./sandbox/write-through-ledger.ts";
 
 export interface PostCleanupDeps {
   readOwner?: (containerName: string) => string | null;
   fileExists?: (path: string) => boolean;
   removeScratchDir?: (dir: string, options: CleanupScratchDirOptions) => void;
   releaseNssDb?: typeof releaseNssDb;
-  releaseWriteThrough?: typeof releaseWriteThrough;
 }
 
 /**
@@ -61,7 +59,6 @@ export function planPostCleanup(
     fileExists = existsSync,
     removeScratchDir = cleanupScratchDir,
     releaseNssDb: releaseNssDbUse = releaseNssDb,
-    releaseWriteThrough: releaseWriteThroughUse = releaseWriteThrough,
   }: PostCleanupDeps = {},
 ): PostCleanupTargets | null {
   const { targets, problems } = resolvePostState(state);
@@ -102,13 +99,11 @@ export function planPostCleanup(
     );
   }
 
-  // Ends the NSS database and write_through uses a hard kill left registered.
-  // Only once the scratch dir is gone, since one still there may hold them
-  // mounted; a later step drops the uses once it goes.
+  // Ends an NSS database use a hard kill left registered. Only once the
+  // scratch dir is gone, since one still there may hold the database mounted;
+  // a later step drops the use once it goes.
   if (reclaimed) {
-    const name = scratchDirNameFor(targets.containerName);
-    releaseNssDbUse(name, { warn: annotation.warning });
-    releaseWriteThroughUse(name, { warn: annotation.warning });
+    releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning });
   }
 
   return targets;

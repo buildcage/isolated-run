@@ -177,26 +177,19 @@ else
 fi
 rm -rf "$CASE4"
 
-# --- Case 4b: a missing write_through target under a root-owned, non-runner
-# tree is still created (via sudo mkdir -p), but mirrors its nearest
-# existing ancestor's owner/mode, so it stays unwritable by the
-# (non-root) sandboxed process, exactly as naming the existing ancestor
-# directly would. The denied write is what proves that ownership; the
-# directory is then empty, so the end-of-step cleanup gives it back.
+# --- Case 4b: a missing write_through target under a tree the runner can't
+# write fails the step before the command runs, and nothing is created.
 # Uses a throwaway /etc subdirectory; needs sudo to clean up in case a
 # failure leaves it behind.
 ETC_TARGET="/etc/buildcage-ephemeral-test-$$"
 sudo -n rm -rf "$ETC_TARGET" 2>/dev/null
 CASE4B=$(mktemp -d)
-run_ephemeral "$CASE4B" "$ETC_TARGET" '
-if echo x > "'"$ETC_TARGET"'/should-fail.txt" 2>/dev/null; then
-  echo "UNEXPECTED: write into a root-owned write_through target succeeded"
-  exit 1
-fi
-'
+run_ephemeral "$CASE4B" "$ETC_TARGET" 'echo UNEXPECTED: the command ran'
 CODE4B=$(cat "$CASE4B/exit_code")
-if [ "$CODE4B" = "0" ] && [ ! -e "$ETC_TARGET" ]; then
-  pass "write_through: a missing target under a root-owned tree stays unwritable by the sandbox, and is given back empty"
+if [ "$CODE4B" != "0" ] && [ ! -e "$ETC_TARGET" ] &&
+  grep -q "the runner can't create it under \"/etc\"" "$CASE4B/out.log" &&
+  ! grep -q "UNEXPECTED" "$CASE4B/out.log"; then
+  pass "write_through: a missing target under a tree the runner can't write fails the step and creates nothing"
 else
   fail "write_through: a root-owned missing target did not behave as expected (exit $CODE4B) -- see $CASE4B/out.log"
   cat "$CASE4B/out.log"

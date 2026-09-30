@@ -28,9 +28,7 @@ import {
   resolveWriteThroughOnHost,
   assertKnownFilesExist,
   ensureWriteThroughTargetsExist,
-  WriteThroughTargetUncreatableError,
   WRITE_THROUGH_ALL,
-  type CreatedDir,
 } from "./write-through.ts";
 
 /**
@@ -81,21 +79,17 @@ export interface FilesystemPlan {
   /** Already resolved (resolveWriteThroughPaths, then resolveWriteThroughOnHost) and pre-created
    *  (ensureWriteThroughTargetsExist), in either filesystem mode. */
   writeThroughPaths: string[];
-  /** The directory segments pre-creating those paths actually created, for
-   *  the write_through ledger (write-through-ledger.ts) to remove once no step
-   *  binds them. */
-  createdDirs: CreatedDir[];
 }
 
 /** `warn` aside, a test-only seam onto ensureWriteThroughTargetsExist/determineOverlayRoots's
- *  own filesystem/sudo dependencies; see write-through.ts / ephemeral-fs.ts. */
+ *  own filesystem dependencies; see write-through.ts / ephemeral-fs.ts. */
 export interface ResolveFilesystemPlanDeps {
   warn?: (message: string) => void;
   exists?: (path: string) => boolean;
   stat?: (path: string) => { uid: number; gid: number; mode: number };
   readlink?: (path: string) => string;
-  execFile?: (command: string, args: string[]) => void;
   canWrite?: (path: string) => boolean;
+  mkdir?: (path: string) => void;
   deviceOf?: (path: string) => number;
   realpath?: (path: string) => string;
   listHostMounts?: typeof listHostMounts;
@@ -133,7 +127,7 @@ export function resolveFilesystemPlan(
   // nothing to create, and buildOciConfig skips the scratch-base guard for
   // the same reason.
   if (writeThroughPaths.includes(WRITE_THROUGH_ALL)) {
-    return { overlayRoots: [], writeThroughPaths, createdDirs: [] };
+    return { overlayRoots: [], writeThroughPaths };
   }
 
   try {
@@ -168,20 +162,13 @@ export function resolveFilesystemPlan(
     throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
   }
 
-  let createdDirs: CreatedDir[];
   try {
-    createdDirs = ensureWriteThroughTargetsExist(writeThroughPaths, env, deps);
+    ensureWriteThroughTargetsExist(writeThroughPaths, deps);
   } catch (e) {
-    if (e instanceof WriteThroughTargetUncreatableError) {
-      throw new SandboxError(e.message, "WRITE_THROUGH_TARGET_UNCREATABLE");
-    }
-    throw new SandboxError(
-      `Invalid write_through: ${errorMessage(e)}`,
-      "INVALID_WRITE_THROUGH_PATH",
-    );
+    throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_UNCREATABLE");
   }
 
-  if (filesystemMode !== "ephemeral") return { overlayRoots: [], writeThroughPaths, createdDirs };
+  if (filesystemMode !== "ephemeral") return { overlayRoots: [], writeThroughPaths };
 
   // Separate try/catch from the above: this only touches the fixed
   // $HOME, $RUNNER_TEMP, /tmp and $GITHUB_WORKSPACE candidates and the host
@@ -199,7 +186,7 @@ export function resolveFilesystemPlan(
       ...candidateRoots,
       ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps),
     ];
-    return { overlayRoots, writeThroughPaths, createdDirs };
+    return { overlayRoots, writeThroughPaths };
   } catch (e) {
     throw new SandboxError(
       `Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`,

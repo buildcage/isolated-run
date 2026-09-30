@@ -736,20 +736,14 @@ this:
   (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and
   `$GITHUB_STEP_SUMMARY` are the runner's own generated files and must already exist: a missing one
   is an error, not something this action creates. Anything else missing (`./dist`, say) is created
-  for you as a directory. Under a parent the runner can already write (a tree it owns, or `/tmp`),
-  the runner creates it, every directory on the way included, just as it could by itself. Under one
-  it can't (`/etc/something`, for instance), it is created as that parent's owner with the parent's
-  permissions, directories on the way with `mkdir`'s default 0755, so it stays exactly as unwritable
-  to the sandboxed command as naming that existing parent directly would be. Nothing here grants
-  access beyond what the surrounding filesystem already implies.
-- A directory created that way is removed, as its owner and only if empty (`rmdir`, never
-  `rm -r`), once no step writes through it or anything under it, including steps in other jobs of
-  the same runner user. Removing a directory detaches every mount on it, so it waits for the last
-  such step. The record is `/var/tmp/buildcage-<uid>/write-through-ledger.json`, hidden from the
-  sandbox. On a filesystem without birth times the directory is left in place, and a step killed
-  outright leaves it to its post step or a later step. If something else, such as a parallel step
-  outside any sandbox, removes a `write_through:` directory while a step runs, what the step writes
-  there afterwards may not reach the host; the step warns, naming the path.
+  for you as a directory, by the runner user, every directory on the way included, just as it could
+  by itself. That needs the nearest existing parent to be writable by the runner (a tree it owns, or
+  `/tmp`). Under one it can't write (`/etc/something`, for instance), the step fails before your
+  command runs: the sandboxed command couldn't write a directory created there either. Create it in
+  an earlier, non-isolated step and hand it to the runner user, e.g.
+  `sudo install -d -o "$(id -u)" -g "$(id -g)" /etc/something`.
+- A directory created that way stays after the step, as with `docker run -v`. If the step fails
+  before your command runs, whatever was already created stays too.
 - `write_through:` accepts files as well as directories, but only a path that's **already** a file
   when the step starts; a missing target is always created as a directory (see above), never a file.
   A file entry is bind-mounted file-to-file (the same technique the `inspect` engine already uses to
@@ -758,15 +752,6 @@ this:
   `$GITHUB_STEP_SUMMARY`'s own contract is append-only, so this doesn't affect them in practice. If
   you need a file that doesn't exist yet to persist, either have an earlier step create it first, or
   list its (already-existing) parent directory instead.
-
-Under a parent the runner cannot write, the missing path is created as the parent's owner rather
-than as root, so the `mkdir` runs under `sudo -u '#uid' -g '#gid'`, and sudoers only lets you pick a
-group the target user already belongs to. A parent carrying a group its own owner is not in (a
-setgid directory, say) does not qualify, and neither does a self-hosted runner whose sudoers names a
-single user to run commands as. The step then fails with
-`write_through: <path> doesn't exist and couldn't be created`, carrying `sudo`'s own refusal, before
-your command runs. It never falls back to creating the path as root. Entries that already exist, or
-sit under a parent the runner can write, never reach any of this.
 
 `write_through:` changes how a path is mounted, not who owns it, so pointing it at a system
 directory the runner user cannot write (`/usr`, most of `/etc`) gains nothing. It is meant for paths

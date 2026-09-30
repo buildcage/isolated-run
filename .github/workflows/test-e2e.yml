@@ -493,8 +493,8 @@ jobs:
             exit 1
           fi
 
-      # Every step makes the same missing write_through targets. The short ones
-      # must not remove them from under the long one.
+      # Every step makes the same missing write_through targets at once, and
+      # the targets stay after each of them ends.
       - parallel:
           - name: sandbox-parallel-write-through-short-persistent
             uses: ./
@@ -536,24 +536,18 @@ jobs:
                 sleep 15
                 echo written > ./out/file
 
-      - name: Verify the write_through targets were settled
+      - name: Verify the write_through targets were kept
         if: always()
         run: |
-          ledger="/var/tmp/buildcage-$(id -u)/write-through-ledger.json"
-          cat "$ledger"
           if [ "$(cat out/file 2>/dev/null)" != "written" ]; then
             echo "::error::the long step's write to ./out/file did not reach the runner"
             exit 1
           fi
-          if [ -e out-empty ]; then
-            echo "::error::./out-empty is still there after every step left it empty"
+          if [ ! -d out-empty ]; then
+            echo "::error::./out-empty was removed after the steps ended"
             exit 1
           fi
-          if [ "$(jq -c '[.dirs, .uses]' "$ledger")" != "[{},{}]" ]; then
-            echo "::error::$ledger still lists directories or uses after every step ended"
-            exit 1
-          fi
-          echo "OK: the write reached the runner, and only the empty target was removed"
+          echo "OK: the write reached the runner, and both targets were kept"
 
   # A concurrent step ending must not detach an inspect step's CA mount,
   # whatever engine the ending step uses.

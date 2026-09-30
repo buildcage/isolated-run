@@ -54,9 +54,6 @@ runner with passwordless `sudo` and a working Docker installation:
     daemon
 - **Self-hosted**
   - Docker Engine 25.0 or later, with Compose v2.20.2 or later
-  - A sudoers policy that lets `sudo` pick the user and group to run as. One naming a single user
-    can't create a missing `write_through:` path; see
-    [`write_through` paths](./docs/reference.md#write_through-paths)
   - A non-root runner user. The sandbox keeps the runner's own uid, and as uid 0 it refuses to start:
     filesystem permissions alone can't separate the command from root-owned host sockets. Don't run
     the runner as root (`RUNNER_ALLOW_RUNASROOT`).

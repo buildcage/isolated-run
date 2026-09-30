@@ -21,7 +21,7 @@ import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts"
 
 import { buildComposeEnv } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
-import { generateContainerName, getContainerNetns, scratchDirNameFor } from "./container.ts";
+import { generateContainerName, getContainerNetns } from "./container.ts";
 import {
   checkIpRuleSupport,
   checkKnownBlockedUrlRuleSupport,
@@ -46,12 +46,6 @@ import { resolveFilesystemPlan, validateFilesystemInputs } from "./sandbox/files
 import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
-import {
-  claimWriteThrough,
-  releaseWriteThrough,
-  writeThroughDetached,
-  type WriteThroughClaim,
-} from "./sandbox/write-through-ledger.ts";
 import { splitWriteThroughInput } from "./sandbox/write-through.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
@@ -99,9 +93,6 @@ export interface SandboxStepDeps {
   stopSandboxProxy: typeof stopSandboxProxy;
   runSandboxedCommand: typeof runSandboxedCommand;
   reportStepTraffic: typeof reportStepTraffic;
-  claimWriteThrough: typeof claimWriteThrough;
-  releaseWriteThrough: typeof releaseWriteThrough;
-  writeThroughDetached: typeof writeThroughDetached;
   saveState: (name: string, value: string) => void;
   info: (message: string) => void;
   log: (message: string) => void;
@@ -141,9 +132,6 @@ const realDeps: SandboxStepDeps = {
   stopSandboxProxy,
   runSandboxedCommand,
   reportStepTraffic,
-  claimWriteThrough,
-  releaseWriteThrough,
-  writeThroughDetached,
   saveState: core.saveState,
   info: core.info,
   log: console.log,
@@ -223,9 +211,6 @@ export async function runSandboxStep(
     stopSandboxProxy,
     runSandboxedCommand,
     reportStepTraffic,
-    claimWriteThrough,
-    releaseWriteThrough,
-    writeThroughDetached,
     saveState,
     info,
     log,
@@ -270,11 +255,7 @@ export async function runSandboxStep(
   );
 
   // Fail fast, before image verification or starting the proxy container, if
-  // the runner can't support the isolation setup at all. Deliberately
-  // ahead of resolveFilesystemPlan below: ensureWriteThroughTargetsExist (part
-  // of that call) itself shells out to sudo, and doing that before this check
-  // risks a confusing WRITE_THROUGH_TARGET_UNCREATABLE in place of this more
-  // specific, better-diagnosed error.
+  // the runner can't support the isolation setup at all.
   checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") checkOverlayfsSupport();
 
@@ -282,154 +263,128 @@ export async function runSandboxStep(
   // script isn't running as the real action.
   const annotation = createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
 
-  // Named before anything is created: the write_through ledger records this
-  // step's use under its scratch dir's name.
-  const containerName = generateContainerName();
-
   // Resolved/pre-created here (not inside runSandboxedCommand) so a bad
   // write_through entry, or a target that can't be created, fails before the
   // proxy container ever starts, same reasoning as checkPasswordlessSudo
   // above.
-  let plan!: ReturnType<typeof resolveFilesystemPlan>;
-  const createPlan = () => {
-    plan = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
-    return { paths: plan.writeThroughPaths, created: plan.createdDirs };
-  };
-  // Without write_through the shared ledger is left alone.
-  let writeThroughClaim: WriteThroughClaim | undefined;
-  if (splitWriteThroughInput(writeThroughInput).length > 0) {
-    writeThroughClaim = claimWriteThrough(scratchDirNameFor(containerName), createPlan, { warn });
-  } else {
-    createPlan();
-  }
-  const { overlayRoots, writeThroughPaths } = plan;
+  const { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(
+    filesystemMode,
+    writeThroughInput,
+    env,
+    { warn },
+  );
   if (filesystemMode === "ephemeral") {
     for (const line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) {
       info(line);
     }
   }
 
+  const localOverride = await readLocalImageOverride(env);
+  const { imageRef, pullPolicy } =
+    localOverride ??
+    (await resolveVerifiedImage(
+      { actionRef, actionRepo, proxyEngine },
+      { verifyImageDigestOrThrow, log },
+    ));
+  log(`buildcage: proxy image: ${imageRef}`);
+  const composeFile = resolveComposeFile(localOverride);
+
+  const { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } =
+    readRuleInputs();
+  checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, annotation.warning);
+  checkKnownBlockedUrlRuleSupport(
+    {
+      proxyEngine,
+      proxyMode,
+      knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule),
+    },
+    annotation.warning,
+  );
+  checkIpRuleSupport({ proxyEngine, proxyMode, ipRules }, annotation.warning);
+
+  withLogGroup("buildcage: Configured ACL Rules", () => {
+    logRules("HTTPS", httpsRules);
+    logRules("HTTP", httpRules);
+    logRules("IP", ipRules);
+    logRules("URL", urlRules);
+    logRules("TLS", tlsRules);
+    logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
+  });
+
+  const containerName = generateContainerName();
+  const projectName = deriveProjectName(containerName);
+  saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, saveState);
+
+  const composeEnv = buildComposeEnv(
+    {
+      containerName,
+      proxyMode,
+      proxyEngine,
+      imageRef,
+      httpsRules: httpsRules,
+      httpRules: httpRules,
+      ipRules: ipRules,
+      urlRules,
+      tlsRules,
+    },
+    env,
+  );
+
   try {
-    const localOverride = await readLocalImageOverride(env);
-    const { imageRef, pullPolicy } =
-      localOverride ??
-      (await resolveVerifiedImage(
-        { actionRef, actionRepo, proxyEngine },
-        { verifyImageDigestOrThrow, log },
-      ));
-    log(`buildcage: proxy image: ${imageRef}`);
-    const composeFile = resolveComposeFile(localOverride);
-
-    const { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } =
-      readRuleInputs();
-    checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, annotation.warning);
-    checkKnownBlockedUrlRuleSupport(
-      {
-        proxyEngine,
-        proxyMode,
-        knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule),
-      },
-      annotation.warning,
-    );
-    checkIpRuleSupport({ proxyEngine, proxyMode, ipRules }, annotation.warning);
-
-    withLogGroup("buildcage: Configured ACL Rules", () => {
-      logRules("HTTPS", httpsRules);
-      logRules("HTTP", httpRules);
-      logRules("IP", ipRules);
-      logRules("URL", urlRules);
-      logRules("TLS", tlsRules);
-      logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
-    });
-
-    const projectName = deriveProjectName(containerName);
-    saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, saveState);
-
-    const composeEnv = buildComposeEnv(
-      {
-        containerName,
-        proxyMode,
-        proxyEngine,
-        imageRef,
-        httpsRules: httpsRules,
-        httpRules: httpRules,
-        ipRules: ipRules,
-        urlRules,
-        tlsRules,
-      },
-      env,
-    );
-
-    try {
-      await startSandboxProxy({ composeFile, projectName, containerName, pullPolicy, composeEnv });
-    } catch (e) {
-      // compose up --wait leaves a container that never became ready, and its network, in place.
-      await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
-      throw e;
-    }
-
-    // 1 unless the isolated command itself reports otherwise: every way out of
-    // the block below that isn't the command's own exit code is a failure.
-    let exitCode = 1;
-    try {
-      const proxyNetns = getContainerNetns(containerName);
-      if (proxyNetns === null) {
-        throw new SandboxError(
-          `Sandbox proxy container ${containerName} is not running.`,
-          "PROXY_NOT_RUNNING",
-        );
-      }
-
-      exitCode = runSandboxedCommand({
-        containerName,
-        proxyNetns,
-        runInput,
-        writeThroughPaths,
-        env,
-        proxyEngine,
-        filesystemMode,
-        overlayRoots,
-        failOnCaResidue,
-        warn,
-      });
-      for (const path of writeThroughClaim ? writeThroughDetached(writeThroughClaim) : []) {
-        warn(
-          `buildcage: write_through target ${path} was removed or replaced on the runner while ` +
-            "the command ran, which detached it from the sandbox: what the command wrote there " +
-            "afterwards may not have reached the runner. Something outside this step removed " +
-            "it, such as another step running in parallel.",
-        );
-      }
-    } finally {
-      // Never throws, so the teardown below is always reached.
-      await reportStepTraffic({
-        containerName,
-        proxyEngine,
-        parameters: {
-          mode: proxyMode,
-          allowedHttpsRules: httpsRules,
-          allowedHttpRules: httpRules,
-          allowedIpRules: ipRules,
-          allowedTlsRules: tlsRules,
-          knownBlockedRules,
-        },
-        annotation,
-        actionRepo,
-        actionRef: reportActionRef,
-        runCommand: runInput,
-        failOnBlocked,
-        trafficArtifact,
-        env,
-      });
-      await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
-    }
-
-    return exitCode;
-  } finally {
-    // Here rather than with the proxy teardown: image verification or a rule
-    // typo can throw after the targets were made.
-    if (writeThroughClaim?.registered) {
-      releaseWriteThrough(writeThroughClaim.name, { info, warn });
-    }
+    await startSandboxProxy({ composeFile, projectName, containerName, pullPolicy, composeEnv });
+  } catch (e) {
+    // compose up --wait leaves a container that never became ready, and its network, in place.
+    await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
+    throw e;
   }
+
+  // 1 unless the isolated command itself reports otherwise: every way out of
+  // the block below that isn't the command's own exit code is a failure.
+  let exitCode = 1;
+  try {
+    const proxyNetns = getContainerNetns(containerName);
+    if (proxyNetns === null) {
+      throw new SandboxError(
+        `Sandbox proxy container ${containerName} is not running.`,
+        "PROXY_NOT_RUNNING",
+      );
+    }
+
+    exitCode = runSandboxedCommand({
+      containerName,
+      proxyNetns,
+      runInput,
+      writeThroughPaths,
+      env,
+      proxyEngine,
+      filesystemMode,
+      overlayRoots,
+      failOnCaResidue,
+      warn,
+    });
+  } finally {
+    // Never throws, so the teardown below is always reached.
+    await reportStepTraffic({
+      containerName,
+      proxyEngine,
+      parameters: {
+        mode: proxyMode,
+        allowedHttpsRules: httpsRules,
+        allowedHttpRules: httpRules,
+        allowedIpRules: ipRules,
+        allowedTlsRules: tlsRules,
+        knownBlockedRules,
+      },
+      annotation,
+      actionRepo,
+      actionRef: reportActionRef,
+      runCommand: runInput,
+      failOnBlocked,
+      trafficArtifact,
+      env,
+    });
+    await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
+  }
+
+  return exitCode;
 }

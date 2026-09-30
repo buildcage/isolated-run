@@ -19,8 +19,8 @@ import { errorMessage } from "#core/lib/errors.ts";
 import { retryBriefly } from "../retry-briefly.ts";
 
 /**
- * The file, lock and directory identity shared by the ledgers of directories
- * Buildcage makes on the runner (nss-db-ledger.ts, write-through-ledger.ts).
+ * The file, lock and directory identity behind the ledger of directories
+ * Buildcage makes on the runner (nss-db-ledger.ts).
  *
  * A ledger lives in SANDBOX_SCRATCH_BASE, hidden from the sandbox, so a command
  * cannot mark a runner directory for removal. Directories are identified by

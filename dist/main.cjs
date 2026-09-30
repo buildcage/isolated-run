@@ -19014,7 +19014,7 @@ function defaultStat$2(path) {
 		mode
 	};
 }
-function defaultExecFile$2(command, args) {
+function defaultExecFile$1(command, args) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args, {
 		stdio: [
 			"ignore",
@@ -19065,7 +19065,7 @@ function slugify(path) {
 function overlayUpperFor(scratchDir, root) {
 	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
 }
-function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat$2, execFile = defaultExecFile$2, self = {
+function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat$2, execFile = defaultExecFile$1, self = {
 	uid: process.getuid(),
 	gid: process.getgid()
 } } = {}) {
@@ -19224,35 +19224,35 @@ function withLedgerFile(base, fileName, lockName, read, fn, deps) {
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
-const NSS_DB_LEDGER_NAME = "nssdb-ledger.json", LOCK_NAME$1 = "nssdb-ledger.lock", USE_NAME_RE$1 = /^sandbox-[A-Za-z0-9]+$/;
+const NSS_DB_LEDGER_NAME = "nssdb-ledger.json", LOCK_NAME = "nssdb-ledger.lock", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
 function defaultMkdir$1(path, mode) {
 	(0, node_fs.mkdirSync)(path, { mode });
 }
-function emptyLedger$1() {
+function emptyLedger() {
 	return {
 		version: 1,
 		dirs: {},
 		uses: {}
 	};
 }
-function isLedger$1(parsed) {
+function isLedger(parsed) {
 	let l = parsed;
-	return l?.version === 1 && typeof l.dirs == "object" && l.dirs !== null && typeof l.uses == "object" && l.uses !== null && Object.entries(l.dirs).every(([p, d]) => p.startsWith("/") && isId(d)) && Object.entries(l.uses).every(([n, u]) => USE_NAME_RE$1.test(n) && isId(u));
+	return l?.version === 1 && typeof l.dirs == "object" && l.dirs !== null && typeof l.uses == "object" && l.uses !== null && Object.entries(l.dirs).every(([p, d]) => p.startsWith("/") && isId(d)) && Object.entries(l.uses).every(([n, u]) => USE_NAME_RE.test(n) && isId(u));
 }
-function withLedger$1(fn, deps) {
-	return withLedgerFile(baseOf$1(deps), NSS_DB_LEDGER_NAME, LOCK_NAME$1, (path) => readLedgerFile(path, emptyLedger$1, isLedger$1), fn, deps);
+function withLedger(fn, deps) {
+	return withLedgerFile(baseOf(deps), NSS_DB_LEDGER_NAME, LOCK_NAME, (path) => readLedgerFile(path, emptyLedger, isLedger), fn, deps);
 }
 function withNssDbLock(fn, deps = {}) {
-	return withLock(baseOf$1(deps), LOCK_NAME$1, fn, deps);
+	return withLock(baseOf(deps), LOCK_NAME, fn, deps);
 }
-function baseOf$1({ base }) {
+function baseOf({ base }) {
 	return base ?? SANDBOX_SCRATCH_BASE;
 }
-function dropStaleUses$1(ledger, deps) {
+function dropStaleUses(ledger, deps) {
 	let { lstat = defaultLstat$1 } = deps;
-	for (let name of Object.keys(ledger.uses)) lstat((0, node_path.join)(baseOf$1(deps), name)) === void 0 && delete ledger.uses[name];
+	for (let name of Object.keys(ledger.uses)) lstat((0, node_path.join)(baseOf(deps), name)) === void 0 && delete ledger.uses[name];
 }
-function removeUnusedDirs$1(ledger, deps) {
+function removeUnusedDirs(ledger, deps) {
 	if (Object.keys(ledger.uses).length > 0) return;
 	let { rmdir = node_fs.rmdirSync, info } = deps;
 	for (let path of Object.keys(ledger.dirs).sort((a, b) => b.length - a.length)) {
@@ -19270,11 +19270,11 @@ function removeUnusedDirs$1(ledger, deps) {
 }
 function claimNssDb(name, destination, dirs, deps = {}) {
 	let { mkdir = defaultMkdir$1, lstat = defaultLstat$1, now = () => new Date(), warn } = deps;
-	return withLedger$1((ledger) => {
+	return withLedger((ledger) => {
 		let undo = () => {
-			typeof ledger != "string" && removeUnusedDirs$1(ledger, deps);
+			typeof ledger != "string" && removeUnusedDirs(ledger, deps);
 		};
-		typeof ledger != "string" && dropStaleUses$1(ledger, deps);
+		typeof ledger != "string" && dropStaleUses(ledger, deps);
 		try {
 			for (let path of dirs) {
 				try {
@@ -19311,10 +19311,10 @@ function claimNssDb(name, destination, dirs, deps = {}) {
 	}, deps);
 }
 function releaseNssDb(name, deps = {}) {
-	let { lstat = defaultLstat$1, warn } = deps, path = (0, node_path.join)(baseOf$1(deps), NSS_DB_LEDGER_NAME);
+	let { lstat = defaultLstat$1, warn } = deps, path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
 	if (lstat(path) !== void 0) try {
-		withLedger$1((ledger) => {
-			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses$1(ledger, deps), removeUnusedDirs$1(ledger, deps));
+		withLedger((ledger) => {
+			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses(ledger, deps), removeUnusedDirs(ledger, deps));
 		}, deps);
 	} catch (e) {
 		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for Chromium's NSS database are left in place for a later step to remove`);
@@ -20075,7 +20075,6 @@ function resolveWriteThroughPaths(input, env) {
 	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
 }
 var WriteThroughTargetMissingError = class extends Error {}, WriteThroughTargetUncreatableError = class extends Error {};
-const S_IFMT = 61440, S_IFDIR = 16384;
 function defaultExists(path) {
 	try {
 		return (0, node_fs.lstatSync)(path), !0;
@@ -20094,16 +20093,6 @@ function defaultStat(path) {
 function defaultReadlink(path) {
 	return (0, node_fs.readlinkSync)(path);
 }
-function defaultExecFile$1(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv(command)
-	});
-}
 function defaultCanWrite(path) {
 	try {
 		return (0, node_fs.accessSync)(path, node_fs.constants.W_OK | node_fs.constants.X_OK), !0;
@@ -20113,20 +20102,6 @@ function defaultCanWrite(path) {
 }
 function defaultMkdir(path) {
 	(0, node_fs.mkdirSync)(path, { recursive: !0 });
-}
-function currentIdentity() {
-	return {
-		uid: process.getuid(),
-		gid: process.getgid()
-	};
-}
-function hostDirOps() {
-	return {
-		execFile: defaultExecFile$1,
-		mkdir: defaultMkdir,
-		rmdir: node_fs.rmdirSync,
-		self: currentIdentity()
-	};
 }
 function resolveWriteThroughOnHost(path, { exists = defaultExists, stat = defaultStat, readlink = defaultReadlink } = {}) {
 	let pending = path.split("/").filter((c) => c !== ""), current = "/", hops = 0;
@@ -20143,7 +20118,7 @@ function resolveWriteThroughOnHost(path, { exists = defaultExists, stat = defaul
 			continue;
 		}
 		let { uid, mode } = stat(next);
-		if ((mode & S_IFMT) != 40960) {
+		if ((mode & 61440) != 40960) {
 			current = next;
 			continue;
 		}
@@ -20155,88 +20130,22 @@ function resolveWriteThroughOnHost(path, { exists = defaultExists, stat = defaul
 	if (current === "/") throw Error(`write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a literal "/" if dropping the read-only restriction entirely is what you meant.`);
 	return current;
 }
-function asOwner({ uid, gid }) {
-	return [
-		"-u",
-		`#${uid}`,
-		"-g",
-		`#${gid}`
-	];
-}
-function rmdirAsOwner(dir, { execFile, rmdir, self }) {
-	dir.uid === self.uid && dir.gid === self.gid ? rmdir(dir.path) : execFile("sudo", [
-		...asOwner(dir),
-		"rmdir",
-		"--",
-		dir.path
-	]);
-}
-function pathSegmentsBetween(ancestor, descendant) {
-	let segments = [], current = descendant;
-	for (; current !== ancestor;) segments.unshift(current), current = (0, node_path.dirname)(current);
-	return segments;
-}
 function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
 	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
 	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
 }
-function ensureWriteThroughTargetsExist(resolvedPaths, env, { exists = defaultExists, stat = defaultStat, canWrite = defaultCanWrite, execFile = defaultExecFile$1, mkdir = defaultMkdir, rmdir = node_fs.rmdirSync, self = currentIdentity() } = {}) {
-	let created = [], rollback = () => {
-		for (let dir of [...created].reverse()) try {
-			rmdirAsOwner(dir, {
-				execFile,
-				rmdir,
-				self
-			});
-		} catch {}
-	};
-	for (let path of resolvedPaths) {
-		if (exists(path)) continue;
-		try {
-			assertKnownFilesExist([path], env, { exists });
-		} catch (e) {
-			throw rollback(), e;
-		}
+function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists, canWrite = defaultCanWrite, mkdir = defaultMkdir } = {}) {
+	let missing = resolvedPaths.filter((path) => !exists(path));
+	for (let path of missing) {
 		let ancestor = (0, node_path.dirname)(path);
-		for (; !exists(ancestor);) {
-			let parent = (0, node_path.dirname)(ancestor);
-			if (parent === ancestor) throw rollback(), new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} has no existing ancestor directory to create it under.`);
-			ancestor = parent;
-		}
-		try {
-			let ancestorStat = stat(ancestor), { mode } = ancestorStat;
-			if ((mode & S_IFMT) != S_IFDIR) throw Error(`${JSON.stringify(ancestor)} is not a directory.`);
-			let asSelf = ancestorStat.uid === self.uid && ancestorStat.gid === self.gid || canWrite(ancestor), { uid, gid } = asSelf ? self : ancestorStat;
-			if (asSelf) mkdir(path);
-			else {
-				let modeOctal = (mode & 4095).toString(8);
-				execFile("sudo", [
-					...asOwner({
-						uid,
-						gid
-					}),
-					"mkdir",
-					"-p",
-					"-m",
-					modeOctal,
-					"--",
-					path
-				]);
-			}
-			for (let segment of pathSegmentsBetween(ancestor, path)) {
-				let s = stat(segment);
-				if ((s.mode & S_IFMT) != S_IFDIR || s.uid !== uid) throw Error(`${JSON.stringify(segment)} is not a directory owned by uid ${uid}.`);
-				created.push({
-					path: segment,
-					uid,
-					gid
-				});
-			}
-		} catch (e) {
-			throw rollback(), new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
-		}
+		for (; ancestor !== "/" && !exists(ancestor);) ancestor = (0, node_path.dirname)(ancestor);
+		if (!canWrite(ancestor)) throw new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it under ${JSON.stringify(ancestor)}. Create it in an earlier step and make it writable by the runner, e.g. sudo install -d -o "$(id -u)" -g "$(id -g)" ${JSON.stringify(path)}`);
 	}
-	return created;
+	for (let path of missing) try {
+		mkdir(path);
+	} catch (e) {
+		throw new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
+	}
 }
 //#endregion
 //#region src/lib/sandbox/host-commands.ts
@@ -20372,8 +20281,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	}
 	if (validateFilesystemInputs(filesystemMode, writeThroughPaths), writeThroughPaths.includes("/")) return {
 		overlayRoots: [],
-		writeThroughPaths,
-		createdDirs: []
+		writeThroughPaths
 	};
 	try {
 		assertKnownFilesExist(writeThroughPaths, env, deps);
@@ -20392,16 +20300,14 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	} catch (e) {
 		throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
 	}
-	let createdDirs;
 	try {
-		createdDirs = ensureWriteThroughTargetsExist(writeThroughPaths, env, deps);
+		ensureWriteThroughTargetsExist(writeThroughPaths, deps);
 	} catch (e) {
-		throw e instanceof WriteThroughTargetUncreatableError ? new SandboxError(e.message, "WRITE_THROUGH_TARGET_UNCREATABLE") : new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
+		throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_UNCREATABLE");
 	}
 	if (filesystemMode !== "ephemeral") return {
 		overlayRoots: [],
-		writeThroughPaths,
-		createdDirs
+		writeThroughPaths
 	};
 	try {
 		let { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath), candidateRoots = determineOverlayRoots([
@@ -20412,8 +20318,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 		].filter((p) => !!p), writeThroughPaths, deps), hostMounts = (deps.listHostMounts ?? listHostMounts)();
 		return {
 			overlayRoots: [...candidateRoots, ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps)],
-			writeThroughPaths,
-			createdDirs
+			writeThroughPaths
 		};
 	} catch (e) {
 		throw new SandboxError(`Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
@@ -21053,105 +20958,6 @@ function runSandboxedCommand(options, overrides = {}) {
 		ephemeralRoots: filesystemMode === "ephemeral" ? overlayRoots : void 0,
 		warn
 	});
-}
-//#endregion
-//#region src/lib/sandbox/write-through-ledger.ts
-const WRITE_THROUGH_LEDGER_NAME = "write-through-ledger.json", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/, defaultRmdir = (dir) => rmdirAsOwner(dir, hostDirOps());
-function emptyLedger() {
-	return {
-		version: 1,
-		dirs: {},
-		uses: {}
-	};
-}
-function isOwner(value) {
-	return Number.isInteger(value) && value >= 0;
-}
-function isLedger(parsed) {
-	let l = parsed;
-	return l?.version === 1 && typeof l.dirs == "object" && l.dirs !== null && typeof l.uses == "object" && l.uses !== null && Object.entries(l.dirs).every(([p, d]) => p.startsWith("/") && isId(d) && isOwner(d.uid) && isOwner(d.gid)) && Object.entries(l.uses).every(([n, u]) => USE_NAME_RE.test(n) && Number.isInteger(u?.pid) && Array.isArray(u.destinations) && u.destinations.every((d) => typeof d == "string"));
-}
-function baseOf({ base }) {
-	return base ?? SANDBOX_SCRATCH_BASE;
-}
-function withLedger(fn, deps) {
-	return withLedgerFile(baseOf(deps), WRITE_THROUGH_LEDGER_NAME, "write-through-ledger.lock", (path) => readLedgerFile(path, emptyLedger, isLedger), fn, {
-		lockAttempts: 300,
-		...deps
-	});
-}
-function dropStaleUses(ledger, deps) {
-	let { lstat = defaultLstat$1, pidAlive = defaultPidAlive$1 } = deps;
-	for (let [name, use] of Object.entries(ledger.uses)) !pidAlive(use.pid) && lstat((0, node_path.join)(baseOf(deps), name)) === void 0 && delete ledger.uses[name];
-}
-function inUse(ledger, path) {
-	return Object.values(ledger.uses).some((use) => use.destinations.some((d) => d === path || d.startsWith(`${path}/`)));
-}
-function removeUnusedDirs(ledger, deps) {
-	let { rmdir = defaultRmdir, info } = deps;
-	for (let path of Object.keys(ledger.dirs).sort((a, b) => b.length - a.length)) {
-		if (inUse(ledger, path)) continue;
-		let entry = ledger.dirs[path];
-		delete ledger.dirs[path];
-		let current = dirIdOf(path, deps);
-		if (current === void 0) {
-			info?.(`buildcage: ${path}, made for write_through by ${entry.createdBy}, had already been removed by something else`);
-			continue;
-		}
-		if (sameId(current, entry)) try {
-			rmdir({
-				path,
-				uid: entry.uid,
-				gid: entry.gid
-			});
-		} catch {}
-	}
-}
-function claimWriteThrough(name, create, deps = {}) {
-	let { lstat = defaultLstat$1, now = () => new Date(), pid = process.pid, warn } = deps;
-	return ensureOwnScratchBase(baseOf(deps)), withLedger((ledger) => {
-		typeof ledger != "string" && dropStaleUses(ledger, deps);
-		let { paths, created } = create(), targets = paths.flatMap((path) => {
-			let id = dirIdOf(path, deps);
-			return id ? [{
-				path,
-				id
-			}] : [];
-		}), claim = {
-			name,
-			registered: !1,
-			targets
-		};
-		if (typeof ledger == "string") return created.length > 0 && warn?.(`buildcage: ${ledger}, so the directories made for write_through are left in place after the step`), claim;
-		for (let { path, uid, gid } of created) {
-			let made = lstat(path);
-			made?.isDirectory() && made.birthtimeNs !== 0n && (ledger.dirs[path] = {
-				...idOf(made),
-				uid,
-				gid,
-				createdBy: name,
-				createdAt: now().toISOString()
-			});
-		}
-		return targets.length > 0 && (ledger.uses[name] = {
-			pid,
-			destinations: targets.map((t) => t.path),
-			startedAt: now().toISOString()
-		}, claim.registered = !0), claim;
-	}, deps);
-}
-function releaseWriteThrough(name, deps = {}) {
-	let { lstat = defaultLstat$1, warn } = deps, path = (0, node_path.join)(baseOf(deps), WRITE_THROUGH_LEDGER_NAME);
-	if (lstat(path) !== void 0) try {
-		withLedger((ledger) => {
-			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses(ledger, deps), removeUnusedDirs(ledger, deps));
-		}, deps);
-	} catch (e) {
-		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for write_through are left in place for a later step to remove`);
-	}
-}
-function writeThroughDetached(claim, deps = {}) {
-	return claim.targets.filter(({ path, id }) => !stillThere(path, id, deps)).map((t) => t.path);
 }
 //#endregion
 //#region src/core/lib/actions/write-step-summary.ts
@@ -67391,9 +67197,6 @@ const realDeps = {
 	stopSandboxProxy,
 	runSandboxedCommand,
 	reportStepTraffic,
-	claimWriteThrough,
-	releaseWriteThrough,
-	writeThroughDetached,
 	saveState,
 	info,
 	log: console.log,
@@ -67418,130 +67221,117 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, checkIpRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, claimWriteThrough, releaseWriteThrough, writeThroughDetached, saveState, info, log, notice, warn } = {
+	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, checkIpRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v1", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs();
 	log(`Proxy engine: ${proxyEngine}`);
 	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs();
 	assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
-	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), containerName = generateContainerName(), plan, createPlan = () => (plan = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn }), {
-		paths: plan.writeThroughPaths,
-		created: plan.createdDirs
-	}), writeThroughClaim;
-	splitWriteThroughInput(writeThroughInput).length > 0 ? writeThroughClaim = claimWriteThrough(scratchDirNameFor(containerName), createPlan, { warn }) : createPlan();
-	let { overlayRoots, writeThroughPaths } = plan;
+	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
+	let localOverride = await readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
+		actionRef,
+		actionRepo,
+		proxyEngine
+	}, {
+		verifyImageDigestOrThrow,
+		log
+	});
+	log(`buildcage: proxy image: ${imageRef}`);
+	let composeFile = resolveComposeFile(localOverride), { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs();
+	checkUrlAndTlsRuleSupport({
+		proxyEngine,
+		proxyMode,
+		urlRules,
+		tlsRules
+	}, annotation.warning), checkKnownBlockedUrlRuleSupport({
+		proxyEngine,
+		proxyMode,
+		knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
+	}, annotation.warning), checkIpRuleSupport({
+		proxyEngine,
+		proxyMode,
+		ipRules
+	}, annotation.warning), withLogGroup("buildcage: Configured ACL Rules", () => {
+		logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
+	});
+	let containerName = generateContainerName(), projectName = deriveProjectName(containerName);
+	saveCleanupState(env, {
+		containerName,
+		filesystemMode,
+		overlayRoots
+	}, saveState);
+	let composeEnv = buildComposeEnv({
+		containerName,
+		proxyMode,
+		proxyEngine,
+		imageRef,
+		httpsRules,
+		httpRules,
+		ipRules,
+		urlRules,
+		tlsRules
+	}, env);
 	try {
-		let localOverride = await readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
-			actionRef,
-			actionRepo,
-			proxyEngine
-		}, {
-			verifyImageDigestOrThrow,
-			log
-		});
-		log(`buildcage: proxy image: ${imageRef}`);
-		let composeFile = resolveComposeFile(localOverride), { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs();
-		checkUrlAndTlsRuleSupport({
-			proxyEngine,
-			proxyMode,
-			urlRules,
-			tlsRules
-		}, annotation.warning), checkKnownBlockedUrlRuleSupport({
-			proxyEngine,
-			proxyMode,
-			knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
-		}, annotation.warning), checkIpRuleSupport({
-			proxyEngine,
-			proxyMode,
-			ipRules
-		}, annotation.warning), withLogGroup("buildcage: Configured ACL Rules", () => {
-			logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
-		});
-		let projectName = deriveProjectName(containerName);
-		saveCleanupState(env, {
+		await startSandboxProxy({
+			composeFile,
+			projectName,
 			containerName,
+			pullPolicy,
+			composeEnv
+		});
+	} catch (e) {
+		throw await stopSandboxProxy({
+			composeFile,
+			projectName,
+			composeEnv,
+			annotation
+		}), e;
+	}
+	let exitCode = 1;
+	try {
+		let proxyNetns = getContainerNetns(containerName);
+		if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
+		exitCode = runSandboxedCommand({
+			containerName,
+			proxyNetns,
+			runInput,
+			writeThroughPaths,
+			env,
+			proxyEngine,
 			filesystemMode,
-			overlayRoots
-		}, saveState);
-		let composeEnv = buildComposeEnv({
-			containerName,
-			proxyMode,
-			proxyEngine,
-			imageRef,
-			httpsRules,
-			httpRules,
-			ipRules,
-			urlRules,
-			tlsRules
-		}, env);
-		try {
-			await startSandboxProxy({
-				composeFile,
-				projectName,
-				containerName,
-				pullPolicy,
-				composeEnv
-			});
-		} catch (e) {
-			throw await stopSandboxProxy({
-				composeFile,
-				projectName,
-				composeEnv,
-				annotation
-			}), e;
-		}
-		let exitCode = 1;
-		try {
-			let proxyNetns = getContainerNetns(containerName);
-			if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
-			exitCode = runSandboxedCommand({
-				containerName,
-				proxyNetns,
-				runInput,
-				writeThroughPaths,
-				env,
-				proxyEngine,
-				filesystemMode,
-				overlayRoots,
-				failOnCaResidue,
-				warn
-			});
-			for (let path of writeThroughClaim ? writeThroughDetached(writeThroughClaim) : []) warn(`buildcage: write_through target ${path} was removed or replaced on the runner while the command ran, which detached it from the sandbox: what the command wrote there afterwards may not have reached the runner. Something outside this step removed it, such as another step running in parallel.`);
-		} finally {
-			await reportStepTraffic({
-				containerName,
-				proxyEngine,
-				parameters: {
-					mode: proxyMode,
-					allowedHttpsRules: httpsRules,
-					allowedHttpRules: httpRules,
-					allowedIpRules: ipRules,
-					allowedTlsRules: tlsRules,
-					knownBlockedRules
-				},
-				annotation,
-				actionRepo,
-				actionRef: reportActionRef,
-				runCommand: runInput,
-				failOnBlocked,
-				trafficArtifact,
-				env
-			}), await stopSandboxProxy({
-				composeFile,
-				projectName,
-				composeEnv,
-				annotation
-			});
-		}
-		return exitCode;
-	} finally {
-		writeThroughClaim?.registered && releaseWriteThrough(writeThroughClaim.name, {
-			info,
+			overlayRoots,
+			failOnCaResidue,
 			warn
 		});
+	} finally {
+		await reportStepTraffic({
+			containerName,
+			proxyEngine,
+			parameters: {
+				mode: proxyMode,
+				allowedHttpsRules: httpsRules,
+				allowedHttpRules: httpRules,
+				allowedIpRules: ipRules,
+				allowedTlsRules: tlsRules,
+				knownBlockedRules
+			},
+			annotation,
+			actionRepo,
+			actionRef: reportActionRef,
+			runCommand: runInput,
+			failOnBlocked,
+			trafficArtifact,
+			env
+		}), await stopSandboxProxy({
+			composeFile,
+			projectName,
+			composeEnv,
+			annotation
+		});
 	}
+	return exitCode;
 }
 //#endregion
 //#region src/main.ts
