@@ -112,7 +112,6 @@ describe("runSandboxedCommand", () => {
 
     expect(mocks.runIsolated.mock.calls[0][0]).toMatchObject({
       gateway: "198.19.255.1",
-      dns: "198.19.255.1",
       targetIp: "198.19.255.101",
     });
   });

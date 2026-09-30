@@ -44,14 +44,13 @@ CONTAINER_ID=""
 NETNS_NAME=""
 ROOTFS_BIND_DIR=""
 GATEWAY=""
-DNS=""
 TARGET_IP=""
 
 usage() {
   cat >&2 <<'EOF'
 Usage: run-isolated.sh --proxy-netns <PATH> --runc <PATH> --bundle <DIR>
          --container-id <ID> --netns-name <NAME> --rootfs-bind-dir <DIR>
-         --gateway <IP> --dns <IP> --target-ip <IP>
+         --gateway <IP> --target-ip <IP>
 EOF
 }
 
@@ -64,7 +63,6 @@ while [ $# -gt 0 ]; do
     --netns-name) NETNS_NAME="$2"; shift 2 ;;
     --rootfs-bind-dir) ROOTFS_BIND_DIR="$2"; shift 2 ;;
     --gateway) GATEWAY="$2"; shift 2 ;;
-    --dns) DNS="$2"; shift 2 ;;
     --target-ip) TARGET_IP="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "ERROR: unknown argument: $1" >&2; usage; exit 1 ;;
@@ -78,7 +76,6 @@ done
 [ -z "$NETNS_NAME" ] && { echo "ERROR: --netns-name is required" >&2; usage; exit 1; }
 [ -z "$ROOTFS_BIND_DIR" ] && { echo "ERROR: --rootfs-bind-dir is required" >&2; usage; exit 1; }
 [ -z "$GATEWAY" ] && { echo "ERROR: --gateway is required" >&2; usage; exit 1; }
-[ -z "$DNS" ] && { echo "ERROR: --dns is required" >&2; usage; exit 1; }
 [ -z "$TARGET_IP" ] && { echo "ERROR: --target-ip is required" >&2; usage; exit 1; }
 
 if [ "$(id -u)" != "0" ]; then

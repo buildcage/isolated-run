@@ -17,7 +17,6 @@ export interface RunIsolatedOptions {
   netnsName: string;
   rootfsBindDir: string;
   gateway: string;
-  dns: string;
   targetIp: string;
   envBlob: Buffer;
 }
@@ -74,7 +73,6 @@ export function runIsolated(
     netnsName,
     rootfsBindDir,
     gateway,
-    dns,
     targetIp,
     envBlob,
   }: RunIsolatedOptions,
@@ -103,8 +101,6 @@ export function runIsolated(
     rootfsBindDir,
     "--gateway",
     gateway,
-    "--dns",
-    dns,
     "--target-ip",
     targetIp,
   ];
