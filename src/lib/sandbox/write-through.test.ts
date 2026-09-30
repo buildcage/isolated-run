@@ -1,13 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
 import {
   resolveWriteThroughEntry,
   resolveWriteThroughPaths,
   resolveWriteThroughOnHost,
   ensureWriteThroughTargetsExist,
-  rmdirAsOwner,
   splitWriteThroughInput,
-  WriteThroughTargetMissingError,
   WriteThroughTargetUncreatableError,
 } from "./write-through.ts";
 
@@ -146,262 +144,6 @@ describe("resolveWriteThroughPaths", () => {
   });
 });
 
-describe("ensureWriteThroughTargetsExist", () => {
-  const DIR = { uid: 1000, gid: 1000, mode: 0o40755 };
-  const asOwner = ["-u", "#1000", "-g", "#1000"];
-
-  it("does nothing for an already-existing path", () => {
-    const execFile = vi.fn();
-    ensureWriteThroughTargetsExist(["/usr/local/bin"], ENV, { exists: () => true, execFile });
-    expect(execFile).not.toHaveBeenCalled();
-  });
-
-  it("throws WriteThroughTargetMissingError when a missing entry equals a KNOWN_FILE_VARS value", () => {
-    const execFile = vi.fn();
-    expect(() =>
-      ensureWriteThroughTargetsExist([ENV.GITHUB_OUTPUT], ENV, { exists: () => false, execFile }),
-    ).toThrow(WriteThroughTargetMissingError);
-    expect(execFile).not.toHaveBeenCalled();
-  });
-
-  it("creates a missing directory with one mkdir -p, run as the nearest existing ancestor's owner", () => {
-    const calls: string[][] = [];
-    // /a exists; /a/b and /a/b/c do not.
-    const statted: string[] = [];
-    const stat = (p: string) => {
-      statted.push(p);
-      return DIR;
-    };
-
-    ensureWriteThroughTargetsExist(["/a/b/c"], ENV, {
-      exists: (p) => p === "/a",
-      stat,
-      execFile: (cmd, args) => calls.push([cmd, ...args]),
-    });
-
-    expect(calls).toStrictEqual([["sudo", ...asOwner, "mkdir", "-p", "-m", "755", "--", "/a/b/c"]]);
-    expect(statted).toStrictEqual(["/a", "/a/b", "/a/b/c"]);
-  });
-
-  it("carries an ancestor that is writable through its group or world bits, not its owner", () => {
-    const calls: string[][] = [];
-    // /tmp and /var/tmp are root-owned and 1777: the runner can write a target
-    // under one only if those bits come down with it.
-    ensureWriteThroughTargetsExist(["/sticky/cache"], ENV, {
-      exists: (p) => p === "/sticky",
-      stat: () => ({ uid: 0, gid: 0, mode: 0o41777 }),
-      execFile: (cmd, args) => calls.push([cmd, ...args]),
-    });
-    expect(calls).toStrictEqual([
-      ["sudo", "-u", "#0", "-g", "#0", "mkdir", "-p", "-m", "1777", "--", "/sticky/cache"],
-    ]);
-  });
-
-  it("mirrors a restrictive ancestor's ownership, ending up unwritable by a non-root uid (e.g. /etc/test)", () => {
-    const calls: string[][] = [];
-
-    ensureWriteThroughTargetsExist(["/etc/test"], ENV, {
-      exists: (p) => p === "/etc",
-      stat: () => ({ uid: 0, gid: 0, mode: 0o40755 }), // root:root
-      execFile: (cmd, args) => calls.push([cmd, ...args]),
-    });
-
-    expect(calls).toStrictEqual([
-      ["sudo", "-u", "#0", "-g", "#0", "mkdir", "-p", "-m", "755", "--", "/etc/test"],
-    ]);
-  });
-
-  it("throws WriteThroughTargetUncreatableError when the sudo sequence itself fails", () => {
-    const execFile = vi.fn(() => {
-      throw new Error("sudo: a password is required");
-    });
-    const run = () =>
-      ensureWriteThroughTargetsExist(["/a/b"], ENV, {
-        exists: (p) => p === "/a",
-        stat: () => DIR,
-        execFile,
-      });
-    // The class is what resolveFilesystemPlan branches on to pick an error
-    // code, so it matters as much as the message reaching the user does.
-    expect(run).toThrow(WriteThroughTargetUncreatableError);
-    expect(run).toThrow(/a password is required/);
-  });
-
-  it("rolls back everything it created so far when a later entry fails", () => {
-    const calls: string[][] = [];
-    const made = new Set(["/a"]); // pre-existing ancestor only
-    const execFile = (cmd: string, args: string[]) => {
-      calls.push([cmd, ...args]);
-      if (args.at(-1) === "/a/fail") throw new Error("sudo: permission denied");
-    };
-
-    expect(() =>
-      ensureWriteThroughTargetsExist(["/a/ok/x", "/a/fail"], ENV, {
-        exists: (p) => made.has(p),
-        stat: () => DIR,
-        execFile,
-      }),
-    ).toThrow(WriteThroughTargetUncreatableError);
-
-    // The first entry succeeded (created /a/ok and /a/ok/x) before the
-    // second entry failed: both must be rolled back, deepest first, and as
-    // the same identity that created them.
-    expect(calls).toStrictEqual([
-      ["sudo", ...asOwner, "mkdir", "-p", "-m", "755", "--", "/a/ok/x"],
-      ["sudo", ...asOwner, "mkdir", "-p", "-m", "755", "--", "/a/fail"],
-      ["sudo", ...asOwner, "rmdir", "--", "/a/ok/x"],
-      ["sudo", ...asOwner, "rmdir", "--", "/a/ok"],
-    ]);
-  });
-
-  it("does not let a rollback failure mask the original error", () => {
-    const execFile = (_cmd: string, args: string[]) => {
-      if (args.includes("rmdir")) throw new Error("sudo: rmdir also failed");
-      if (args.at(-1) === "/a/b/fail") throw new Error("sudo: mkdir failed");
-    };
-    expect(() =>
-      ensureWriteThroughTargetsExist(["/a", "/a/b/fail"], ENV, {
-        exists: (p) => p === "/",
-        stat: () => DIR,
-        execFile,
-      }),
-    ).toThrow(/mkdir failed/);
-  });
-
-  it("returns every segment it created with its owner, shallowest first, and nothing for pre-existing paths", () => {
-    const created = ensureWriteThroughTargetsExist(["/a/b/c", "/usr/local/bin"], ENV, {
-      exists: (p) => p === "/a" || p === "/usr/local/bin",
-      stat: () => DIR,
-      execFile: () => {},
-    });
-    expect(created).toStrictEqual([
-      { path: "/a/b", uid: 1000, gid: 1000 },
-      { path: "/a/b/c", uid: 1000, gid: 1000 },
-    ]);
-  });
-});
-
-describe("ensureWriteThroughTargetsExist, as the runner itself", () => {
-  const SELF = { uid: 1001, gid: 1001 };
-
-  /** Records every call; the ancestor /tmp takes `owner`, anything made under it the runner. */
-  function ops(owner: { uid: number; gid: number; mode: number }) {
-    const calls: string[][] = [];
-    return {
-      calls,
-      deps: {
-        stat: (p: string) => (p === "/tmp" ? owner : { ...SELF, mode: 0o40755 }),
-        execFile: (cmd: string, args: string[]) => calls.push([cmd, ...args]),
-        mkdir: (p: string) => calls.push(["mkdir", p]),
-        rmdir: (p: string) => calls.push(["rmdir", p]),
-        self: SELF,
-      },
-    };
-  }
-
-  // A root-owned 0755 /tmp/build would be left on the host, unwritable by the
-  // sandbox and by later steps.
-  it("makes the whole path as the runner under an ancestor it can write, like /tmp", () => {
-    const { calls, deps } = ops({ uid: 0, gid: 0, mode: 0o41777 });
-
-    const created = ensureWriteThroughTargetsExist(["/tmp/build/out"], ENV, {
-      ...deps,
-      exists: (p) => p === "/tmp",
-      canWrite: () => true,
-    });
-
-    expect(calls).toStrictEqual([["mkdir", "/tmp/build/out"]]);
-    expect(created).toStrictEqual([
-      { path: "/tmp/build", ...SELF },
-      { path: "/tmp/build/out", ...SELF },
-    ]);
-  });
-
-  it("makes the path without sudo under the runner's own directory", () => {
-    const { calls, deps } = ops({ ...SELF, mode: 0o40700 });
-
-    ensureWriteThroughTargetsExist(["/tmp/out"], ENV, {
-      ...deps,
-      exists: (p) => p === "/tmp",
-      canWrite: () => false,
-    });
-
-    expect(calls).toStrictEqual([["mkdir", "/tmp/out"]]);
-  });
-
-  it("rolls back what it made as the runner without sudo", () => {
-    const { calls, deps } = ops({ uid: 0, gid: 0, mode: 0o41777 });
-
-    expect(() =>
-      ensureWriteThroughTargetsExist(["/tmp/ok", "/tmp/fail"], ENV, {
-        ...deps,
-        exists: (p) => p === "/tmp",
-        canWrite: () => true,
-        mkdir: (p) => {
-          calls.push(["mkdir", p]);
-          if (p === "/tmp/fail") throw new Error("EACCES");
-        },
-      }),
-    ).toThrow(WriteThroughTargetUncreatableError);
-
-    expect(calls).toStrictEqual([
-      ["mkdir", "/tmp/ok"],
-      ["mkdir", "/tmp/fail"],
-      ["rmdir", "/tmp/ok"],
-    ]);
-  });
-});
-
-describe("rmdirAsOwner", () => {
-  const SELF = { uid: 1001, gid: 1001 };
-
-  it.each([
-    { owner: SELF, call: ["rmdir", "/x"] },
-    { owner: { uid: 0, gid: 0 }, call: ["sudo", "-u", "#0", "-g", "#0", "rmdir", "--", "/x"] },
-    {
-      owner: { uid: 1001, gid: 0 },
-      call: ["sudo", "-u", "#1001", "-g", "#0", "rmdir", "--", "/x"],
-    },
-  ])("removes a directory owned by $owner.uid:$owner.gid as that owner", ({ owner, call }) => {
-    const calls: string[][] = [];
-    rmdirAsOwner(
-      { path: "/x", ...owner },
-      {
-        execFile: (cmd, args) => calls.push([cmd, ...args]),
-        rmdir: (p) => calls.push(["rmdir", p]),
-        self: SELF,
-      },
-    );
-    expect(calls).toStrictEqual([call]);
-  });
-});
-
-describe("ensureWriteThroughTargetsExist: nothing to create it under", () => {
-  const OWNED_DIR = { uid: 1000, gid: 1000, mode: 0o40755 };
-
-  it("rolls back and refuses when no ancestor exists at all", () => {
-    const execFile = vi.fn();
-    expect(() =>
-      ensureWriteThroughTargetsExist(["/a/b/c"], ENV, { exists: () => false, execFile }),
-    ).toThrow(WriteThroughTargetUncreatableError);
-  });
-
-  // The message carries whatever mkdir failed with, and sudo can fail with
-  // something that is not an Error.
-  it("wraps a non-Error failure from mkdir", () => {
-    const execFile = vi.fn(() => {
-      throw "sudo: a password is required";
-    });
-    expect(() =>
-      ensureWriteThroughTargetsExist(["/a/b"], ENV, {
-        exists: (path) => path === "/a",
-        stat: () => OWNED_DIR,
-        execFile,
-      }),
-    ).toThrow(/a password is required/);
-  });
-});
-
 describe("resolveWriteThroughEntry: a tilde with no HOME to expand to", () => {
   // The empty fallback leaves a relative path, which then resolves against the
   // workspace like any other. What matters is that "undefined" never lands in it.
@@ -488,45 +230,69 @@ describe("resolveWriteThroughOnHost", () => {
   });
 });
 
-describe("ensureWriteThroughTargetsExist: the path changing under it", () => {
-  const DIR = { uid: 1000, gid: 1000, mode: 0o40755 };
+describe("ensureWriteThroughTargetsExist", () => {
+  /** Records every mkdir; `dirs` exist, and the runner can write `writable`. */
+  function host(dirs: string[], writable: string[] = dirs) {
+    const made: string[] = [];
+    return {
+      made,
+      deps: {
+        exists: (p: string) => p === "/" || dirs.includes(p),
+        canWrite: (p: string) => writable.includes(p),
+        mkdir: (p: string) => {
+          made.push(p);
+        },
+      },
+    };
+  }
 
-  it("refuses an ancestor that is no longer a directory", () => {
-    const execFile = vi.fn();
-    expect(() =>
-      ensureWriteThroughTargetsExist(["/a/b"], ENV, {
-        exists: (p) => p === "/a",
-        stat: () => ({ uid: 0, gid: 0, mode: 0o120777 }),
-        execFile,
-      }),
-    ).toThrow(/"\/a" is not a directory/);
-    expect(execFile).not.toHaveBeenCalled();
+  it("does nothing for an already-existing path", () => {
+    const { made, deps } = host(["/usr/local/bin"], []);
+    ensureWriteThroughTargetsExist(["/usr/local/bin"], deps);
+    expect(made).toStrictEqual([]);
   });
 
-  it("does not record a segment that isn't the owner's directory, and rolls back the verified ones", () => {
-    const calls: string[][] = [];
-    const stat = (p: string) => (p === "/a/x/y" ? { ...DIR, mode: 0o120777 } : DIR);
-    expect(() =>
-      ensureWriteThroughTargetsExist(["/a/ok", "/a/x/y"], ENV, {
-        exists: (p) => p === "/a",
-        stat,
-        execFile: (cmd, args) => calls.push([cmd, ...args]),
-      }),
-    ).toThrow(/"\/a\/x\/y" is not a directory owned by uid 1000/);
-    expect(calls.filter((c) => c.includes("rmdir"))).toStrictEqual([
-      ["sudo", "-u", "#1000", "-g", "#1000", "rmdir", "--", "/a/x"],
-      ["sudo", "-u", "#1000", "-g", "#1000", "rmdir", "--", "/a/ok"],
-    ]);
+  it("makes the whole path as the runner under the nearest ancestor it can write", () => {
+    const { made, deps } = host(["/tmp"]);
+    ensureWriteThroughTargetsExist(["/tmp/build/out"], deps);
+    expect(made).toStrictEqual(["/tmp/build/out"]);
   });
 
-  it("does not record a segment someone else owns", () => {
-    const stat = (p: string) => (p === "/a/b" ? { ...DIR, uid: 0 } : DIR);
-    expect(() =>
-      ensureWriteThroughTargetsExist(["/a/b"], ENV, {
-        exists: (p) => p === "/a",
-        stat,
-        execFile: () => {},
-      }),
-    ).toThrow(WriteThroughTargetUncreatableError);
+  it("refuses a path under an ancestor the runner can't write, naming both", () => {
+    const { deps } = host(["/etc"], []);
+    const run = () => ensureWriteThroughTargetsExist(["/etc/test/sub"], deps);
+    expect(run).toThrow(WriteThroughTargetUncreatableError);
+    expect(run).toThrow(
+      /"\/etc\/test\/sub" doesn't exist, and the runner can't create it under "\/etc"/,
+    );
   });
+
+  it("refuses a path with nothing but / above it", () => {
+    const { deps } = host([]);
+    expect(() => ensureWriteThroughTargetsExist(["/a/b"], deps)).toThrow(/under "\/"/);
+  });
+
+  it("makes nothing when any path is refused, even one listed earlier", () => {
+    const { made, deps } = host(["/tmp", "/etc"], ["/tmp"]);
+    expect(() => ensureWriteThroughTargetsExist(["/tmp/ok", "/etc/test"], deps)).toThrow(
+      WriteThroughTargetUncreatableError,
+    );
+    expect(made).toStrictEqual([]);
+  });
+
+  it.each([new Error("EROFS: read-only file system"), "EROFS: read-only file system"])(
+    "wraps a mkdir failure (%s)",
+    (thrown) => {
+      const { deps } = host(["/tmp"]);
+      const run = () =>
+        ensureWriteThroughTargetsExist(["/tmp/out"], {
+          ...deps,
+          mkdir: () => {
+            throw thrown;
+          },
+        });
+      expect(run).toThrow(WriteThroughTargetUncreatableError);
+      expect(run).toThrow(/"\/tmp\/out" doesn't exist and couldn't be created: EROFS/);
+    },
+  );
 });

@@ -19,7 +19,7 @@ describe("resolveFilesystemPlan", () => {
   it("returns an empty plan for persistent mode with no write_through:, without touching the filesystem", () => {
     const exists = vi.fn(alwaysExists);
     const plan = resolveFilesystemPlan("persistent", "", ENV, { exists });
-    expect(plan).toStrictEqual({ overlayRoots: [], writeThroughPaths: [], createdDirs: [] });
+    expect(plan).toStrictEqual({ overlayRoots: [], writeThroughPaths: [] });
     expect(exists).not.toHaveBeenCalled();
   });
 
@@ -32,34 +32,21 @@ describe("resolveFilesystemPlan", () => {
     expect(plan.overlayRoots).toStrictEqual([]);
   });
 
-  it("pre-creates a missing write_through target in persistent mode and reports what it created", () => {
-    const execFileCalls: string[][] = [];
-    const plan = resolveFilesystemPlan("persistent", "/opt/build-output", ENV, {
+  it("pre-creates a missing write_through target in persistent mode", () => {
+    const mkdir = vi.fn();
+    resolveFilesystemPlan("persistent", "/opt/build-output", ENV, {
       exists: (p) => p !== "/opt/build-output",
-      stat: () => ({ uid: 1000, gid: 1000, mode: 0o40755 }),
-      execFile: (cmd, args) => execFileCalls.push([cmd, ...args]),
-      canWrite: () => false,
+      stat: dirStat,
+      canWrite: () => true,
+      mkdir,
     });
-    expect(execFileCalls[0]).toStrictEqual([
-      "sudo",
-      "-u",
-      "#1000",
-      "-g",
-      "#1000",
-      "mkdir",
-      "-p",
-      "-m",
-      "755",
-      "--",
-      "/opt/build-output",
-    ]);
-    expect(plan.createdDirs).toStrictEqual([{ path: "/opt/build-output", uid: 1000, gid: 1000 }]);
+    expect(mkdir.mock.calls).toStrictEqual([["/opt/build-output"]]);
   });
 
   it("skips the guard and creates nothing for the / sentinel", () => {
     const exists = vi.fn(alwaysExists);
     const plan = resolveFilesystemPlan("persistent", "/", ENV, { exists });
-    expect(plan).toStrictEqual({ overlayRoots: [], writeThroughPaths: ["/"], createdDirs: [] });
+    expect(plan).toStrictEqual({ overlayRoots: [], writeThroughPaths: ["/"] });
     expect(exists).not.toHaveBeenCalled();
   });
 
@@ -91,19 +78,19 @@ describe("resolveFilesystemPlan", () => {
   });
 
   it("rejects a path overlapping the sandbox's own scratch base before creating anything", () => {
-    const execFile = vi.fn();
+    const mkdir = vi.fn();
     expect.assertions(3);
     try {
       resolveFilesystemPlan("persistent", `${SANDBOX_SCRATCH_BASE}/x`, ENV, {
         exists: () => false,
         stat: () => ({ uid: 1000, gid: 1000, mode: 0o40755 }),
-        execFile,
+        mkdir,
       });
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
       expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
     }
-    expect(execFile).not.toHaveBeenCalled();
+    expect(mkdir).not.toHaveBeenCalled();
   });
 
   describe("the file a CA store candidate really is", () => {
@@ -137,7 +124,7 @@ describe("resolveFilesystemPlan", () => {
       stat: (p: string) =>
         p in links ? { uid: links[p]!.uid, gid: 0, mode: 0o120777 } : dirStat(),
       readlink: (p: string) => links[p]!.target,
-      execFile: () => {},
+      mkdir: () => {},
       deviceOf: () => 1,
       listHostMounts: () => [],
     });
@@ -146,15 +133,15 @@ describe("resolveFilesystemPlan", () => {
       const deps = link({
         [`${ENV.GITHUB_WORKSPACE}/cache`]: { target: ENV.RUNNER_TEMP, uid: 1000 },
       });
-      const execFile = vi.fn();
+      const mkdir = vi.fn();
       expect.assertions(3);
       try {
-        resolveFilesystemPlan("ephemeral", "./cache", ENV, { ...deps, execFile });
+        resolveFilesystemPlan("ephemeral", "./cache", ENV, { ...deps, mkdir });
       } catch (err) {
         expect(err).toBeInstanceOf(SandboxError);
         expect((err as SandboxError).code).toBe("INVALID_WRITE_THROUGH_PATH");
       }
-      expect(execFile).not.toHaveBeenCalled();
+      expect(mkdir).not.toHaveBeenCalled();
     });
 
     it("checks where a root-owned one leads, not how the entry was written", () => {
@@ -253,30 +240,18 @@ describe("resolveFilesystemPlan", () => {
     // its own overlay survives folding. That is what lets this exercise, end to
     // end, a candidate that merely contains a narrower write_through entry.
     const selfHostedEnv = { ...ENV, GITHUB_WORKSPACE: "/workspace" };
-    const execFileCalls: string[][] = [];
+    const mkdir = vi.fn();
     const plan = resolveFilesystemPlan("ephemeral", "./dist", selfHostedEnv, {
       exists: (p) => p !== "/workspace/dist",
-      stat: () => ({ uid: 1000, gid: 1000, mode: 0o40755 }),
-      execFile: (cmd, args) => execFileCalls.push([cmd, ...args]),
-      canWrite: () => false,
+      stat: dirStat,
+      canWrite: () => true,
+      mkdir,
       deviceOf: () => 1,
       listHostMounts: () => [],
       realpath: (p) => p,
     });
     expect(plan.writeThroughPaths).toStrictEqual(["/workspace/dist"]);
-    expect(execFileCalls[0]).toStrictEqual([
-      "sudo",
-      "-u",
-      "#1000",
-      "-g",
-      "#1000",
-      "mkdir",
-      "-p",
-      "-m",
-      "755",
-      "--",
-      "/workspace/dist",
-    ]);
+    expect(mkdir.mock.calls).toStrictEqual([["/workspace/dist"]]);
     // RUNNER_TEMP still folds away under HOME as usual; GITHUB_WORKSPACE
     // keeps its own overlay since it isn't nested under HOME here.
     expect(plan.overlayRoots.sort()).toStrictEqual([ENV.HOME, "/tmp", "/workspace"].sort());
@@ -297,7 +272,7 @@ describe("resolveFilesystemPlan", () => {
 
   it("still reports a missing runner file as missing when its directory sits behind a root-owned symlink", () => {
     const envBehindLink = { ...ENV, GITHUB_OUTPUT: "/work/_temp/set_output" };
-    const execFile = vi.fn();
+    const mkdir = vi.fn();
     expect.assertions(3);
     try {
       resolveFilesystemPlan("persistent", "$GITHUB_OUTPUT", envBehindLink, {
@@ -305,47 +280,26 @@ describe("resolveFilesystemPlan", () => {
           p === "/work" || p === "/mnt" || p === "/mnt/work" || p === "/mnt/work/_temp",
         stat: (p) => (p === "/work" ? { uid: 0, gid: 0, mode: 0o120777 } : dirStat()),
         readlink: () => "/mnt/work",
-        execFile,
+        mkdir,
       });
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
       expect((err as SandboxError).code).toBe("WRITE_THROUGH_TARGET_MISSING");
     }
-    expect(execFile).not.toHaveBeenCalled();
+    expect(mkdir).not.toHaveBeenCalled();
   });
 
-  it("wraps a sudo mkdir/chown/chmod failure as WRITE_THROUGH_TARGET_UNCREATABLE", () => {
+  it("wraps a target the runner can't create as WRITE_THROUGH_TARGET_UNCREATABLE", () => {
     expect.assertions(2);
     try {
       resolveFilesystemPlan("ephemeral", "./dist", ENV, {
         exists: (p) => p !== `${ENV.GITHUB_WORKSPACE}/dist`,
-        stat: () => ({ uid: 1000, gid: 1000, mode: 0o40755 }),
-        execFile: () => {
-          throw new Error("sudo: a password is required");
-        },
+        stat: dirStat,
         canWrite: () => false,
       });
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
       expect((err as SandboxError).code).toBe("WRITE_THROUGH_TARGET_UNCREATABLE");
-    }
-  });
-
-  it("wraps any other pre-creation failure as INVALID_WRITE_THROUGH_PATH", () => {
-    expect.assertions(2);
-    // Throws on a path's second lookup (pre-creation); the first is the symlink walk.
-    const seen = new Set<string>();
-    try {
-      resolveFilesystemPlan("ephemeral", "./dist", ENV, {
-        exists: (p) => {
-          if (seen.has(p)) throw new Error("EACCES: permission denied");
-          seen.add(p);
-          return false;
-        },
-      });
-    } catch (err) {
-      expect(err).toBeInstanceOf(SandboxError);
-      expect((err as SandboxError).code).toBe("INVALID_WRITE_THROUGH_PATH");
     }
   });
 

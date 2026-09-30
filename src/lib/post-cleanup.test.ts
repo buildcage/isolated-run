@@ -41,7 +41,6 @@ function deps(overrides: PostCleanupDeps = {}): {
         released.push("after the scratch dir");
       },
       releaseNssDb: (name) => released.push(`nssdb:${name}`),
-      releaseWriteThrough: (name) => released.push(`write_through:${name}`),
       ...overrides,
     },
   };
@@ -66,11 +65,7 @@ describe("planPostCleanup", () => {
 
     planPostCleanup(STATE, ENV, annotation(), d);
 
-    expect(released).toStrictEqual([
-      "after the scratch dir",
-      "nssdb:sandbox-deadbeef",
-      "write_through:sandbox-deadbeef",
-    ]);
+    expect(released).toStrictEqual(["after the scratch dir", "nssdb:sandbox-deadbeef"]);
   });
 
   it("leaves the uses registered when the scratch dir cannot be removed", () => {
@@ -98,7 +93,7 @@ describe("planPostCleanup", () => {
 
     planPostCleanup(STATE, ENV, annotation(), d);
 
-    expect(released).toStrictEqual(["nssdb:sandbox-deadbeef", "write_through:sandbox-deadbeef"]);
+    expect(released).toStrictEqual(["nssdb:sandbox-deadbeef"]);
   });
 
   it("releases nothing when the container belongs to a different step", () => {

@@ -189,9 +189,8 @@ export function ephemeralLayers(
     });
   }
   // Then the write_through entries, shallow-first. ensureWriteThroughTargetsExist
-  // has already guaranteed every one of these exists on the host before
-  // this runs, so runc never has to synthesize a root-owned placeholder
-  // for any of them (see that function's own doc comment for why).
+  // has already made every one of these on the host, so runc never has to
+  // synthesize a root-owned placeholder for any of them.
   for (const p of [...allowWrite].sort((a, b) => a.length - b.length))
     mounts.push({ destination: p, type: "none", source: p, options: ["rbind", "rw"] });
   return { mounts, writablePaths: protectedPaths };

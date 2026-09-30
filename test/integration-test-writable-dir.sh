@@ -2,10 +2,10 @@
 # Verifies write_through: by driving dist/main.cjs directly, without the real
 # action wrapper; see test-e2e.yml's test_sandbox_enforcement for the one
 # case that does exercise the real action. Covers an existing path, a missing
-# one (created with the parent's ownership, then given back only if the
-# command left it empty), a missing one two levels under a root-owned 1777
-# parent (created as the runner), `/` on its own (which disables the
-# read-only restriction entirely), and the deprecated writable: spelling.
+# one (created as the runner and kept, written to or not), a missing one two
+# levels under a root-owned 1777 parent (created as the runner), `/` on its
+# own (which disables the read-only restriction entirely), and the deprecated
+# writable: spelling.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 
@@ -14,7 +14,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 WORKDIR=$(mktemp -d)
 # Outside every always-writable path ($GITHUB_WORKSPACE/$HOME/tmp/$RUNNER_TEMP),
 # so writing under it proves write_through did something, but runner-owned,
-# so a directory created under it inherits an ownership the sandbox can use.
+# so the runner can create a missing directory under it.
 PARENT=/opt/buildcage-write-through-test
 sudo -n mkdir -p "$PARENT"
 sudo -n chown "$(id -u):$(id -g)" "$PARENT"
@@ -63,15 +63,15 @@ fi
 
 OWNER=$(stat -c '%u:%g' "${PARENT}/created-kept" 2>/dev/null)
 if [ "$OWNER" = "$(id -u):$(id -g)" ]; then
-  pass "the created directory inherited its parent's ownership"
+  pass "the created directory is the runner's"
 else
   fail "expected owner $(id -u):$(id -g) on ${PARENT}/created-kept, got ${OWNER:-<none>}"
 fi
 
-if [ -e "${PARENT}/created-empty" ]; then
-  fail "${PARENT}/created-empty was left behind despite being empty"
+if [ -d "${PARENT}/created-empty" ]; then
+  pass "a created directory left empty is kept too"
 else
-  pass "a created directory left empty is removed again"
+  fail "${PARENT}/created-empty was removed after the step"
 fi
 
 # Every directory made on the way to the target is the runner's, so a later

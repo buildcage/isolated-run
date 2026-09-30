@@ -605,29 +605,29 @@ function scratchDirFor(containerName) {
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
-const NSS_DB_LEDGER_NAME = "nssdb-ledger.json", USE_NAME_RE$1 = /^sandbox-[A-Za-z0-9]+$/;
-function emptyLedger$1() {
+const NSS_DB_LEDGER_NAME = "nssdb-ledger.json", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
+function emptyLedger() {
 	return {
 		version: 1,
 		dirs: {},
 		uses: {}
 	};
 }
-function isLedger$1(parsed) {
+function isLedger(parsed) {
 	let l = parsed;
-	return l?.version === 1 && typeof l.dirs == "object" && l.dirs !== null && typeof l.uses == "object" && l.uses !== null && Object.entries(l.dirs).every(([p, d]) => p.startsWith("/") && isId(d)) && Object.entries(l.uses).every(([n, u]) => USE_NAME_RE$1.test(n) && isId(u));
+	return l?.version === 1 && typeof l.dirs == "object" && l.dirs !== null && typeof l.uses == "object" && l.uses !== null && Object.entries(l.dirs).every(([p, d]) => p.startsWith("/") && isId(d)) && Object.entries(l.uses).every(([n, u]) => USE_NAME_RE.test(n) && isId(u));
 }
-function withLedger$1(fn, deps) {
-	return withLedgerFile(baseOf$1(deps), NSS_DB_LEDGER_NAME, "nssdb-ledger.lock", (path) => readLedgerFile(path, emptyLedger$1, isLedger$1), fn, deps);
+function withLedger(fn, deps) {
+	return withLedgerFile(baseOf(deps), NSS_DB_LEDGER_NAME, "nssdb-ledger.lock", (path) => readLedgerFile(path, emptyLedger, isLedger), fn, deps);
 }
-function baseOf$1({ base }) {
+function baseOf({ base }) {
 	return base ?? SANDBOX_SCRATCH_BASE;
 }
-function dropStaleUses$1(ledger, deps) {
+function dropStaleUses(ledger, deps) {
 	let { lstat = defaultLstat } = deps;
-	for (let name of Object.keys(ledger.uses)) lstat((0, node_path.join)(baseOf$1(deps), name)) === void 0 && delete ledger.uses[name];
+	for (let name of Object.keys(ledger.uses)) lstat((0, node_path.join)(baseOf(deps), name)) === void 0 && delete ledger.uses[name];
 }
-function removeUnusedDirs$1(ledger, deps) {
+function removeUnusedDirs(ledger, deps) {
 	if (Object.keys(ledger.uses).length > 0) return;
 	let { rmdir = node_fs.rmdirSync, info } = deps;
 	for (let path of Object.keys(ledger.dirs).sort((a, b) => b.length - a.length)) {
@@ -644,14 +644,51 @@ function removeUnusedDirs$1(ledger, deps) {
 	}
 }
 function releaseNssDb(name, deps = {}) {
-	let { lstat = defaultLstat, warn } = deps, path = (0, node_path.join)(baseOf$1(deps), NSS_DB_LEDGER_NAME);
+	let { lstat = defaultLstat, warn } = deps, path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
 	if (lstat(path) !== void 0) try {
-		withLedger$1((ledger) => {
-			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses$1(ledger, deps), removeUnusedDirs$1(ledger, deps));
+		withLedger((ledger) => {
+			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses(ledger, deps), removeUnusedDirs(ledger, deps));
 		}, deps);
 	} catch (e) {
 		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for Chromium's NSS database are left in place for a later step to remove`);
 	}
+}
+//#endregion
+//#region src/lib/post-cleanup.ts
+function startedByThisStep(containerName, env, readOwner) {
+	let owner = readOwner(containerName);
+	return owner === null || owner === ownerToken(env);
+}
+function planPostCleanup(state, env, annotation, { readOwner = readContainerOwner, fileExists = node_fs.existsSync, removeScratchDir = cleanupScratchDir, releaseNssDb: releaseNssDbUse = releaseNssDb } = {}) {
+	let { targets, problems } = resolvePostState(state);
+	for (let problem of problems) annotation.error(`run post-cleanup: ${problem}`);
+	if (!targets) return null;
+	if (!startedByThisStep(targets.containerName, env, readOwner)) return annotation.error("run post-cleanup: the proxy container named in GITHUB_STATE was started by a different step. Skipping all post-step cleanup: tearing it down would stop that step's proxy and delete its sandbox scratch directory."), null;
+	let reclaimed = !1;
+	try {
+		let scratchDir = scratchDirFor(targets.containerName);
+		fileExists(scratchDir) && removeScratchDir(scratchDir, {
+			ephemeralRoots: targets.ephemeralRoots,
+			warn: annotation.warning
+		}), reclaimed = !fileExists(scratchDir);
+	} catch (e) {
+		annotation.warning(`run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
+	}
+	return reclaimed && releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning }), targets;
+}
+//#endregion
+//#region src/lib/sandbox/paths.ts
+function isAtOrUnder(path, ancestor) {
+	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
+}
+function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths = [] }) {
+	return [...new Set([
+		workdir,
+		home,
+		tmp,
+		runnerTemp,
+		...writablePaths
+	].filter((p) => !!p))];
 }
 //#endregion
 //#region src/lib/sandbox/write-through.ts
@@ -683,153 +720,6 @@ function splitWriteThroughInput(input) {
 function resolveWriteThroughPaths(input, env) {
 	let lines = splitWriteThroughInput(input);
 	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
-}
-function defaultExecFile(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv(command)
-	});
-}
-function defaultMkdir(path) {
-	(0, node_fs.mkdirSync)(path, { recursive: !0 });
-}
-function currentIdentity() {
-	return {
-		uid: process.getuid(),
-		gid: process.getgid()
-	};
-}
-function hostDirOps() {
-	return {
-		execFile: defaultExecFile,
-		mkdir: defaultMkdir,
-		rmdir: node_fs.rmdirSync,
-		self: currentIdentity()
-	};
-}
-function asOwner({ uid, gid }) {
-	return [
-		"-u",
-		`#${uid}`,
-		"-g",
-		`#${gid}`
-	];
-}
-function rmdirAsOwner(dir, { execFile, rmdir, self }) {
-	dir.uid === self.uid && dir.gid === self.gid ? rmdir(dir.path) : execFile("sudo", [
-		...asOwner(dir),
-		"rmdir",
-		"--",
-		dir.path
-	]);
-}
-//#endregion
-//#region src/lib/sandbox/write-through-ledger.ts
-const WRITE_THROUGH_LEDGER_NAME = "write-through-ledger.json", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/, defaultRmdir = (dir) => rmdirAsOwner(dir, hostDirOps());
-function emptyLedger() {
-	return {
-		version: 1,
-		dirs: {},
-		uses: {}
-	};
-}
-function isOwner(value) {
-	return Number.isInteger(value) && value >= 0;
-}
-function isLedger(parsed) {
-	let l = parsed;
-	return l?.version === 1 && typeof l.dirs == "object" && l.dirs !== null && typeof l.uses == "object" && l.uses !== null && Object.entries(l.dirs).every(([p, d]) => p.startsWith("/") && isId(d) && isOwner(d.uid) && isOwner(d.gid)) && Object.entries(l.uses).every(([n, u]) => USE_NAME_RE.test(n) && Number.isInteger(u?.pid) && Array.isArray(u.destinations) && u.destinations.every((d) => typeof d == "string"));
-}
-function baseOf({ base }) {
-	return base ?? SANDBOX_SCRATCH_BASE;
-}
-function withLedger(fn, deps) {
-	return withLedgerFile(baseOf(deps), WRITE_THROUGH_LEDGER_NAME, "write-through-ledger.lock", (path) => readLedgerFile(path, emptyLedger, isLedger), fn, {
-		lockAttempts: 300,
-		...deps
-	});
-}
-function dropStaleUses(ledger, deps) {
-	let { lstat = defaultLstat, pidAlive = defaultPidAlive } = deps;
-	for (let [name, use] of Object.entries(ledger.uses)) !pidAlive(use.pid) && lstat((0, node_path.join)(baseOf(deps), name)) === void 0 && delete ledger.uses[name];
-}
-function inUse(ledger, path) {
-	return Object.values(ledger.uses).some((use) => use.destinations.some((d) => d === path || d.startsWith(`${path}/`)));
-}
-function removeUnusedDirs(ledger, deps) {
-	let { rmdir = defaultRmdir, info } = deps;
-	for (let path of Object.keys(ledger.dirs).sort((a, b) => b.length - a.length)) {
-		if (inUse(ledger, path)) continue;
-		let entry = ledger.dirs[path];
-		delete ledger.dirs[path];
-		let current = dirIdOf(path, deps);
-		if (current === void 0) {
-			info?.(`buildcage: ${path}, made for write_through by ${entry.createdBy}, had already been removed by something else`);
-			continue;
-		}
-		if (sameId(current, entry)) try {
-			rmdir({
-				path,
-				uid: entry.uid,
-				gid: entry.gid
-			});
-		} catch {}
-	}
-}
-function releaseWriteThrough(name, deps = {}) {
-	let { lstat = defaultLstat, warn } = deps, path = (0, node_path.join)(baseOf(deps), WRITE_THROUGH_LEDGER_NAME);
-	if (lstat(path) !== void 0) try {
-		withLedger((ledger) => {
-			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses(ledger, deps), removeUnusedDirs(ledger, deps));
-		}, deps);
-	} catch (e) {
-		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for write_through are left in place for a later step to remove`);
-	}
-}
-//#endregion
-//#region src/lib/post-cleanup.ts
-function startedByThisStep(containerName, env, readOwner) {
-	let owner = readOwner(containerName);
-	return owner === null || owner === ownerToken(env);
-}
-function planPostCleanup(state, env, annotation, { readOwner = readContainerOwner, fileExists = node_fs.existsSync, removeScratchDir = cleanupScratchDir, releaseNssDb: releaseNssDbUse = releaseNssDb, releaseWriteThrough: releaseWriteThroughUse = releaseWriteThrough } = {}) {
-	let { targets, problems } = resolvePostState(state);
-	for (let problem of problems) annotation.error(`run post-cleanup: ${problem}`);
-	if (!targets) return null;
-	if (!startedByThisStep(targets.containerName, env, readOwner)) return annotation.error("run post-cleanup: the proxy container named in GITHUB_STATE was started by a different step. Skipping all post-step cleanup: tearing it down would stop that step's proxy and delete its sandbox scratch directory."), null;
-	let reclaimed = !1;
-	try {
-		let scratchDir = scratchDirFor(targets.containerName);
-		fileExists(scratchDir) && removeScratchDir(scratchDir, {
-			ephemeralRoots: targets.ephemeralRoots,
-			warn: annotation.warning
-		}), reclaimed = !fileExists(scratchDir);
-	} catch (e) {
-		annotation.warning(`run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
-	}
-	if (reclaimed) {
-		let name = scratchDirNameFor(targets.containerName);
-		releaseNssDbUse(name, { warn: annotation.warning }), releaseWriteThroughUse(name, { warn: annotation.warning });
-	}
-	return targets;
-}
-//#endregion
-//#region src/lib/sandbox/paths.ts
-function isAtOrUnder(path, ancestor) {
-	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
-}
-function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths = [] }) {
-	return [...new Set([
-		workdir,
-		home,
-		tmp,
-		runnerTemp,
-		...writablePaths
-	].filter((p) => !!p))];
 }
 //#endregion
 //#region src/lib/sandbox/host-commands.ts
