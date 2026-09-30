@@ -259,8 +259,8 @@ describe("runSandboxStep", () => {
   });
 
   // A local-path `uses: ./` names no ref: verification takes it empty (and
-  // hard-fails on that), the report takes the v1 fallback for a valid `uses:`.
-  it("verifies against an empty ref but reports with the v1 fallback for a local-path invocation", async () => {
+  // hard-fails on that), the report takes the v2 fallback for a valid `uses:`.
+  it("verifies against an empty ref but reports with the v2 fallback for a local-path invocation", async () => {
     await runSandboxStep(
       { ...ENV, GITHUB_ACTION_REF: undefined, GITHUB_ACTION_REPOSITORY: undefined },
       deps,
@@ -271,7 +271,7 @@ describe("runSandboxStep", () => {
       actionRepo: "buildcage/isolated-run",
     });
     expect(mocks.reportStepTraffic.mock.calls[0][0]).toMatchObject({
-      actionRef: "v1",
+      actionRef: "v2",
       actionRepo: "buildcage/isolated-run",
     });
   });

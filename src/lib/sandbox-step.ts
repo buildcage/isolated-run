@@ -54,7 +54,7 @@ import { checkPasswordlessSudo } from "./sudo-preflight.ts";
  * Display fallback for the report's `uses:` example when the runner names no
  * ref. Never verified against; provenance hard-fails on the empty ref instead.
  */
-const DEFAULT_ACTION_REF = "v1";
+const DEFAULT_ACTION_REF = "v2";
 
 /**
  * The steps this function sequences. Declared rather than imported straight
@@ -219,8 +219,9 @@ export async function runSandboxStep(
   } = { ...realDeps, ...overrides };
 
   // A local-path `uses: ./` names no ref. Verification takes it empty so it
-  // hard-fails instead of pinning the floating v1 image, which can drift from
-  // the vendored code; the report keeps a valid `uses:` line via the fallback.
+  // hard-fails instead of pinning the floating major-version image, which can
+  // drift from the vendored code; the report keeps a valid `uses:` line via the
+  // fallback.
   const actionRef = env.GITHUB_ACTION_REF ?? "";
   const reportActionRef = env.GITHUB_ACTION_REF || DEFAULT_ACTION_REF;
   const actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
