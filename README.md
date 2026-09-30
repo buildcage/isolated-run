@@ -375,7 +375,6 @@ to run code once the sandbox is gone.
   with:
     filesystem_mode: ephemeral
     write_through: |
-      $GITHUB_WORKSPACE
       $GITHUB_OUTPUT
       ./dist
     run: npm ci && npm run build && npm test
@@ -390,13 +389,12 @@ to run code once the sandbox is gone.
 > `traffic_artifact_name` output are unaffected either way: both are written from the runner host
 > after the sandboxed command has exited, outside the overlay.
 
-`$GITHUB_WORKSPACE` has to persist for the job to do anything with it, and a later step routinely
-runs whatever ends up there, so `write_through: $GITHUB_WORKSPACE` is effectively required for any
-real build and is exactly as exposed to a planted payload as `persistent` mode is. What `ephemeral`
-buys you is closing off everything else: `$HOME`, `$RUNNER_TEMP`, and the runner's own generated
-files unless you name them explicitly. If you `write_through: $GITHUB_OUTPUT`, treat every output it
-sets the same as any other value from untrusted code, as in
-[Passing values to `run`](#passing-values-to-run) above.
+Name only what a later step needs, usually the build output. Everything else the command writes is
+discarded, the rest of `$GITHUB_WORKSPACE` included: an edited `package.json` script, a new
+`.git/hooks` entry, a patched file under `node_modules`. If a later step needs `node_modules` or
+another part of the workspace, name it too. A named path is as exposed as in `persistent` mode,
+since a later step may run or ship what lands there, and an output set through `$GITHUB_OUTPUT` is
+untrusted as in [Passing values to `run`](#passing-values-to-run) above.
 
 If `run` needs to write somewhere else in `persistent` mode, a build output or a tool-specific cache
 directory for example, list it under `write_through:`:
