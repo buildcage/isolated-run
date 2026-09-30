@@ -4,7 +4,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { errorMessage } from "#core/lib/errors.ts";
 
 import { SandboxError } from "../errors.ts";
-import { EXTRA_MASKED_RUNTIME_PATHS, rootlessRuntimeSocketPaths } from "./runtime-sockets.ts";
+import { RUNTIME_SOCKET_PATHS, rootlessRuntimeSocketPaths } from "./runtime-sockets.ts";
 
 /**
  * Refuse to run as uid 0. The sandbox keeps the runner's own uid (see
@@ -141,7 +141,7 @@ export interface ResolvedSandboxGid {
 export interface ResolveSandboxGidOptions {
   /** @default "/etc/group", overridable for tests. */
   groupFile?: string;
-  /** @default EXTRA_MASKED_RUNTIME_PATHS + rootlessRuntimeSocketPaths(env), overridable for tests. */
+  /** @default RUNTIME_SOCKET_PATHS + rootlessRuntimeSocketPaths(env), overridable for tests. */
   runtimeSocketPaths?: string[];
   /** @default the real host's /etc/group, getent and stat. */
   host?: HostGroups;
@@ -151,8 +151,8 @@ export interface ResolveSandboxGidOptions {
  * Only supplementary groups are dropped for the sandboxed process (see
  * oci-config.ts); the primary GID passes through unchanged. If it belongs to a
  * group that grants container/VM runtime access, substitutes a safe GID
- * instead. Complements the socket masking in runtime-sockets.ts: that
- * closes specific paths; this closes the GID-membership route itself.
+ * instead. Complements the /run tmpfs (oci-mounts.ts's hostRunCoverageLayers):
+ * that closes the socket paths; this closes the GID-membership route itself.
  * When NSS cannot answer, the primary GID is substituted too: a group only NSS
  * knows about can't be ruled out, and refusing would stop every step while
  * LDAP or SSSD is down.
@@ -164,7 +164,7 @@ export function resolveSandboxGid(
 ): ResolvedSandboxGid {
   const groupFile = options.groupFile ?? "/etc/group";
   const runtimeSocketPaths = options.runtimeSocketPaths ?? [
-    ...EXTRA_MASKED_RUNTIME_PATHS,
+    ...RUNTIME_SOCKET_PATHS,
     ...rootlessRuntimeSocketPaths(env),
   ];
   // Untested by design: the real host behind this seam. Reaching for it in a

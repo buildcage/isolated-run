@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 
 import { parseMountinfo } from "./mountinfo.ts";
-import { computeReadonlyHostMounts, resolveProtectedPaths } from "./oci-protected-paths.ts";
+import {
+  computeReadonlyHostMounts,
+  maskedRuntimeDir,
+  resolveProtectedPaths,
+} from "./oci-protected-paths.ts";
 import type { HostMount } from "./types.ts";
 
 // Realistic /proc/self/mountinfo lines; only the mount points matter here.
@@ -65,12 +69,28 @@ describe("computeReadonlyHostMounts", () => {
   });
 });
 
+describe("maskedRuntimeDir", () => {
+  it("names $XDG_RUNTIME_DIR outside /run", () => {
+    expect(maskedRuntimeDir({ XDG_RUNTIME_DIR: "/tmp/runtime-runner" })).toStrictEqual([
+      "/tmp/runtime-runner",
+    ]);
+  });
+
+  it("leaves one under /run or /var/run to the /run tmpfs", () => {
+    expect(maskedRuntimeDir({ XDG_RUNTIME_DIR: "/run/user/1000" })).toStrictEqual([]);
+    expect(maskedRuntimeDir({ XDG_RUNTIME_DIR: "/var/run/user/1000" })).toStrictEqual([]);
+  });
+
+  it("is empty when $XDG_RUNTIME_DIR is unset", () => {
+    expect(maskedRuntimeDir({})).toStrictEqual([]);
+  });
+});
+
 describe("resolveProtectedPaths", () => {
   const base = {
     baseMaskedPaths: ["/proc/kcore"],
     baseReadonlyPaths: ["/proc/bus", "/proc/sysrq-trigger"],
-    uid: 1000,
-    env: {} as NodeJS.ProcessEnv,
+    env: { XDG_RUNTIME_DIR: "/tmp/runtime-runner" } as NodeJS.ProcessEnv,
     hostMounts: [] as HostMount[],
     writablePaths: new Set<string>(),
     freshMountDestinations: new Set<string>(),
@@ -81,9 +101,7 @@ describe("resolveProtectedPaths", () => {
     const { maskedPaths } = resolveProtectedPaths(base);
     expect(maskedPaths).toContain("/proc/kcore"); // runc's own
     expect(maskedPaths).toContain("/proc/kallsyms"); // this action's
-    expect(maskedPaths).toContain("/run/docker.sock");
-    expect(maskedPaths).toContain("/run/netns");
-    expect(maskedPaths).toContain("/run/user/1000");
+    expect(maskedPaths).toContain("/tmp/runtime-runner");
   });
 
   // A path can reach readonlyPaths two ways; the next two cases cover both.
@@ -94,17 +112,15 @@ describe("resolveProtectedPaths", () => {
   });
 
   it("takes a path it masks out of the readonlyPaths the host-mount sweep produced", () => {
-    // /run/user/<uid> is a real tmpfs mount on the host, so the sweep would
-    // otherwise re-add what perUserRuntimeDirs just masked.
     const { maskedPaths, readonlyPaths } = resolveProtectedPaths({
       ...base,
       hostMounts: [
-        { mountPoint: "/run/user/1000", fsType: "tmpfs" },
+        { mountPoint: "/tmp/runtime-runner", fsType: "tmpfs" },
         { mountPoint: "/mnt", fsType: "ext4" },
       ],
     });
-    expect(maskedPaths).toContain("/run/user/1000");
-    expect(readonlyPaths).not.toContain("/run/user/1000");
+    expect(maskedPaths).toContain("/tmp/runtime-runner");
+    expect(readonlyPaths).not.toContain("/tmp/runtime-runner");
     expect(readonlyPaths).toContain("/mnt");
   });
 
@@ -121,53 +137,20 @@ describe("resolveProtectedPaths", () => {
     expect(readonlyPaths).toContain("/mnt");
   });
 
-  it("masks the rootless runtime sockets only once $XDG_RUNTIME_DIR names a directory", () => {
-    expect(resolveProtectedPaths(base).maskedPaths).not.toContain("/run/user/1000/docker.sock");
-    const { maskedPaths } = resolveProtectedPaths({
-      ...base,
-      env: { XDG_RUNTIME_DIR: "/run/user/1000" },
-    });
-    expect(maskedPaths).toContain("/run/user/1000/docker.sock");
-  });
-
   it("keeps masking an $XDG_RUNTIME_DIR that sits under a default writable dir", () => {
     const { maskedPaths } = resolveProtectedPaths({
       ...base,
-      env: { XDG_RUNTIME_DIR: "/tmp/runtime-runner" },
       writablePaths: new Set(["/tmp", "/home/runner"]),
     });
     expect(maskedPaths).toContain("/tmp/runtime-runner");
-    expect(maskedPaths).toContain("/tmp/runtime-runner/docker.sock");
   });
 
-  it("lifts the mask on an $XDG_RUNTIME_DIR outside /run only when a writable path names it", () => {
+  it("lifts the mask only when a writable path names $XDG_RUNTIME_DIR itself", () => {
     const { maskedPaths } = resolveProtectedPaths({
       ...base,
-      env: { XDG_RUNTIME_DIR: "/tmp/runtime-runner" },
       writablePaths: new Set(["/tmp", "/tmp/runtime-runner"]),
     });
     expect(maskedPaths).not.toContain("/tmp/runtime-runner");
-    // The sockets inside are masked on their own.
-    expect(maskedPaths).toContain("/tmp/runtime-runner/docker.sock");
-  });
-
-  it("lifts every mask under a writable path within /run or /var/run", () => {
-    const { maskedPaths } = resolveProtectedPaths({
-      ...base,
-      env: { XDG_RUNTIME_DIR: "/run/user/1000" },
-      writablePaths: new Set(["/run/user", "/var/run"]),
-    });
-    expect(maskedPaths).not.toContain("/run/user/1000");
-    expect(maskedPaths).not.toContain("/run/user/1000/docker.sock");
-    expect(maskedPaths).not.toContain("/var/run/netns");
-    expect(maskedPaths).toContain("/run/netns");
-  });
-
-  it("lifts a /var/run mask under a writable ancestor of /var/run", () => {
-    // /var/run is a real directory on a few hosts, where /var re-exposes it.
-    const { maskedPaths } = resolveProtectedPaths({ ...base, writablePaths: new Set(["/var"]) });
-    expect(maskedPaths).not.toContain("/var/run/netns");
-    expect(maskedPaths).toContain("/run/netns");
   });
 
   it("matches an $XDG_RUNTIME_DIR given with a trailing slash to the writable path naming it", () => {
@@ -179,12 +162,8 @@ describe("resolveProtectedPaths", () => {
     expect(maskedPaths).not.toContain("/tmp/runtime-runner/");
   });
 
-  it("lifts a mask outside /run under `write_through: /`", () => {
-    const { maskedPaths } = resolveProtectedPaths({
-      ...base,
-      env: { XDG_RUNTIME_DIR: "/tmp/runtime-runner" },
-      writablePaths: new Set(["/"]),
-    });
+  it("lifts the mask under `write_through: /`", () => {
+    const { maskedPaths } = resolveProtectedPaths({ ...base, writablePaths: new Set(["/"]) });
     expect(maskedPaths).not.toContain("/tmp/runtime-runner");
   });
 
@@ -196,6 +175,6 @@ describe("resolveProtectedPaths", () => {
     });
     expect(readonlyPaths).not.toContain("/mnt");
     expect(readonlyPaths).toContain("/proc/bus");
-    expect(maskedPaths).toContain("/run/user/1000");
+    expect(maskedPaths).toContain("/tmp/runtime-runner");
   });
 });

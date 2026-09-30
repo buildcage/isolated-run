@@ -9,6 +9,7 @@
  * read-only.
  */
 
+import { SandboxError } from "../errors.ts";
 import { reservedCaStorePaths } from "./ca-trust.ts";
 import { SHM_DESTINATION } from "./host-probes.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder, WritablePathConflictError } from "./paths.ts";
@@ -52,6 +53,25 @@ export const RESOLV_CONF_DESTINATION = "/etc/resolv.conf";
 export const HOST_RUN_DIR = "/run";
 /** Recreated writable over the empty /run tmpfs; see hostRunCoverageLayers. */
 export const HOST_RUN_LOCK_DIR = "/run/lock";
+/** A symlink to /run on every host that can run the action; see assertVarRunIsRun. */
+export const HOST_VAR_RUN_DIR = "/var/run";
+
+/**
+ * Refuse a host whose `/var/run` is not `/run`, where the `/run` tmpfs would
+ * leave the sockets under `/var/run` reachable. `resolved` is `/var/run`'s real
+ * path, undefined when it doesn't exist. Every distribution new enough to run
+ * the action links it to `/run`, so this guards an assumption rather than
+ * handling a host.
+ */
+export function assertVarRunIsRun(resolved: string | undefined): void {
+  if (resolved === undefined || resolved === HOST_RUN_DIR) return;
+  throw new SandboxError(
+    `${HOST_VAR_RUN_DIR} resolves to ${JSON.stringify(resolved)} rather than ${HOST_RUN_DIR}, ` +
+      `so covering ${HOST_RUN_DIR} would leave the host service sockets under it reachable. ` +
+      `Buildcage needs ${HOST_VAR_RUN_DIR} to be a symlink to ${HOST_RUN_DIR}.`,
+    "VAR_RUN_NOT_RUN",
+  );
+}
 
 /**
  * Cover the host's `/run` with an empty tmpfs so the `mount --rbind /` rootfs
@@ -65,9 +85,8 @@ export const HOST_RUN_LOCK_DIR = "/run/lock";
  * `/etc/resolv.conf` symlinks into `/run`, so buildOciConfig's resolv.conf mount,
  * ordered after this, recreates the target in the fresh tmpfs.
  *
- * `/var/run` is a symlink to `/run` on every supported runner, so covering `/run`
- * covers it; the `/var/run/...` masks in oci-protected-paths.ts are the fallback
- * for a host where it is instead a separate real directory.
+ * `/var/run` is a symlink to `/run` (assertVarRunIsRun), so covering `/run`
+ * covers it too.
  */
 export function hostRunCoverageLayers(): WritableLayers {
   return {

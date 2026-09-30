@@ -7,6 +7,7 @@ import { realHostProbes, type HostProbes, type NofileLimit } from "./host-probes
 import {
   ephemeralLayers,
   freshMountDestinationsFrom,
+  assertVarRunIsRun,
   hostRunCoverageLayers,
   persistentLayers,
   scratchBaseLayers,
@@ -156,6 +157,7 @@ export function buildOciConfig(
   // that path on top of the tmpfs instead of being buried by it. Skipped under
   // `write_through: /`, the documented full filesystem opt-out, so /run comes
   // back with the rest of the host.
+  if (!disableReadonly) assertVarRunIsRun(probes.varRunRealPath());
   const runCoverage = disableReadonly
     ? { mounts: [], writablePaths: new Set<string>() }
     : hostRunCoverageLayers();
@@ -172,7 +174,6 @@ export function buildOciConfig(
   const { maskedPaths, readonlyPaths } = resolveProtectedPaths({
     baseMaskedPaths: baseSpec.linux.maskedPaths ?? [],
     baseReadonlyPaths: baseSpec.linux.readonlyPaths ?? [],
-    uid,
     env,
     hostMounts,
     writablePaths: protectedWritablePaths,

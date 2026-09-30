@@ -44,12 +44,11 @@ jq \
   --arg scriptPath "$SCRIPT_PATH" \
   --slurpfile seccomp "$BUNDLE_DIR/seccomp.json" \
   --slurpfile extraMasked /etc/buildcage/extra-masked-proc-paths.json \
-  --slurpfile extraMaskedRuntime /etc/buildcage/extra-masked-runtime-paths.json \
-  --arg perUserRuntimeDir "/run/user/1000" \
   '
   .root.path = $rootfsBindDir | .root.readonly = true |
-  ($extraMasked[0] + $extraMaskedRuntime[0] + [$perUserRuntimeDir, "/run/netns", "/var/run/netns"]) as $allExtraMasked |
+  $extraMasked[0] as $allExtraMasked |
   .mounts += [
+    {"destination":"/run","type":"tmpfs","source":"tmpfs","options":["nosuid","nodev","mode=0755"]},
     {"destination":"/etc/resolv.conf","type":"none","source":$resolvConf,"options":["rbind","ro"]},
     {"destination":"/tmp","type":"none","source":"/tmp","options":["rbind","rw"]}
   ] |
