@@ -20,7 +20,6 @@ const mocks = {
   writeJvmKeystoreFiles: vi.fn(),
   jvmTools: vi.fn(),
   prepareNssDb: vi.fn(),
-  nssDbChange: vi.fn(),
   settleNssDbSlot: vi.fn(),
   nssDbDetached: vi.fn(),
   releaseNssDbDirs: vi.fn(),
@@ -175,13 +174,22 @@ describe("runSandboxedCommand", () => {
   describe("Chromium's NSS database", () => {
     const NSS_DB = {
       path: `${SCRATCH}/nssdb`,
-      template: `${SCRATCH}/nssdb-template`,
       destination: "/home/runner/.pki/nssdb",
+      slot: {
+        caDb: `${SCRATCH}/nssdb-ca`,
+        appended: "SLOT",
+        hadPkcs11: true,
+        snapshot: new Map(),
+      },
     };
     const RELEASE = { info: mocks.info, warn: mocks.warn };
+    const OWN_CA = `${SCRATCH}/buildcage-ca.pem`;
 
     beforeEach(() => {
       mocks.prepareNssDb.mockReturnValue(NSS_DB);
+      mocks.writeCaTrustFiles.mockReturnValue({ ownCaPath: OWN_CA });
+      mocks.readFile.mockReturnValue("THE CA PEM");
+      mocks.settleNssDbSlot.mockReturnValue("written");
     });
 
     it("takes back the directories it made once the command has run", () => {
@@ -211,39 +219,6 @@ describe("runSandboxedCommand", () => {
       expect(mocks.nssDbDetached).not.toHaveBeenCalled();
     });
 
-    it("returns the command's exit code when it left the database alone", () => {
-      mocks.runIsolated.mockReturnValue(3);
-      mocks.nssDbChange.mockReturnValue(undefined);
-
-      expect(runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toBe(3);
-      expect(mocks.nssDbChange).toHaveBeenCalledWith(NSS_DB);
-    });
-
-    it("fails the step, pointing at fail_on_ca_residue, when the command wrote to it", () => {
-      mocks.nssDbChange.mockReturnValue("the command changed the NSS database at X");
-
-      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
-        expect.objectContaining({
-          code: "NSS_DATABASE_CHANGED",
-          message: expect.stringMatching(
-            /changed the NSS database at X.*fail_on_ca_residue: false/,
-          ),
-        }),
-      );
-    });
-
-    it("only warns about the write under fail_on_ca_residue: false", () => {
-      mocks.runIsolated.mockReturnValue(0);
-      mocks.nssDbChange.mockReturnValue("the command changed the NSS database at X");
-
-      expect(
-        runSandboxedCommand(options({ proxyEngine: "inspect", failOnCaResidue: false }), deps),
-      ).toBe(0);
-      expect(mocks.warn).toHaveBeenCalledWith(
-        expect.stringMatching(/changed the NSS database at X.*fail_on_ca_residue is false/),
-      );
-    });
-
     it("still takes the directories back when the sandbox fails to run", () => {
       mocks.runIsolated.mockImplementation(() => {
         throw new Error("runc failed");
@@ -253,7 +228,7 @@ describe("runSandboxedCommand", () => {
         "runc failed",
       );
       expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
-      expect(mocks.nssDbChange).not.toHaveBeenCalled();
+      expect(mocks.settleNssDbSlot).not.toHaveBeenCalled();
     });
 
     it("takes the directories back when the bundle cannot be built", () => {
@@ -292,120 +267,99 @@ describe("runSandboxedCommand", () => {
       expect(mocks.releaseNssDbDirs).not.toHaveBeenCalled();
     });
 
-    describe("given the slot", () => {
-      const SLOTTED = {
-        ...NSS_DB,
-        slot: {
-          caDb: `${SCRATCH}/nssdb-ca`,
-          appended: "SLOT",
-          hadPkcs11: true,
-          snapshot: new Map(),
-        },
-      };
-      const OWN_CA = `${SCRATCH}/buildcage-ca.pem`;
+    it.each([
+      ["persistent mode, under $HOME", {}, true],
+      ["ephemeral mode", { filesystemMode: "ephemeral" as const }, false],
+      [
+        "ephemeral mode, under a write_through entry",
+        { filesystemMode: "ephemeral" as const, writeThroughPaths: ["/home/runner/.pki"] },
+        true,
+      ],
+      [
+        "ephemeral mode, under a write_through entry beside it",
+        { filesystemMode: "ephemeral" as const, writeThroughPaths: ["/home/runner/.pk"] },
+        false,
+      ],
+      [
+        "ephemeral mode, write_through: /",
+        { filesystemMode: "ephemeral" as const, writeThroughPaths: ["/"] },
+        true,
+      ],
+      [
+        "ephemeral mode, the database itself written through",
+        { filesystemMode: "ephemeral" as const, writeThroughPaths: ["/home/runner/.pki/nssdb"] },
+        true,
+      ],
+    ])("writes back in %s: %s", (_label, overrides, persist) => {
+      runSandboxedCommand(options({ proxyEngine: "inspect", ...overrides }), deps);
 
-      beforeEach(() => {
-        mocks.prepareNssDb.mockReturnValue(SLOTTED);
-        mocks.writeCaTrustFiles.mockReturnValue({ ownCaPath: OWN_CA });
-        mocks.readFile.mockReturnValue("THE CA PEM");
-        mocks.settleNssDbSlot.mockReturnValue("written");
+      expect(mocks.readFile).toHaveBeenCalledWith(OWN_CA);
+      expect(mocks.settleNssDbSlot).toHaveBeenCalledWith(
+        NSS_DB,
+        expect.objectContaining({ persist, caPem: "THE CA PEM" }),
+      );
+      expect(mocks.releaseNssDbDirs.mock.invocationCallOrder[0]).toBeGreaterThan(
+        mocks.settleNssDbSlot.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("writes nothing back to a database whose mount went away", () => {
+      mocks.nssDbDetached.mockReturnValue("DETACHED");
+
+      runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
+
+      expect(mocks.warn).toHaveBeenCalledWith("DETACHED");
+      expect(mocks.settleNssDbSlot).not.toHaveBeenCalled();
+      expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
+    });
+
+    it("says so when what the command wrote is discarded", () => {
+      mocks.settleNssDbSlot.mockReturnValue("discarded");
+
+      runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
+
+      expect(mocks.info).toHaveBeenCalledWith(
+        expect.stringContaining("NSS database at /home/runner/.pki/nssdb is discarded"),
+      );
+    });
+
+    it("fails the step on a copy of the CA, pointing at fail_on_ca_residue", () => {
+      mocks.settleNssDbSlot.mockImplementation((_files, { onResidue }) => onResidue("COPIED"));
+
+      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+        expect.objectContaining({
+          code: "NSS_DATABASE_CA_COPIED",
+          message: expect.stringMatching(/COPIED.*fail_on_ca_residue: false/),
+        }),
+      );
+      expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
+    });
+
+    it("only warns about a copy of the CA under fail_on_ca_residue: false", () => {
+      mocks.settleNssDbSlot.mockImplementation((_files, { onResidue }) => {
+        onResidue("COPIED");
+        return "written";
       });
 
-      it.each([
-        ["persistent mode, under $HOME", {}, true],
-        ["ephemeral mode", { filesystemMode: "ephemeral" as const }, false],
-        [
-          "ephemeral mode, under a write_through entry",
-          { filesystemMode: "ephemeral" as const, writeThroughPaths: ["/home/runner/.pki"] },
-          true,
-        ],
-        [
-          "ephemeral mode, under a write_through entry beside it",
-          { filesystemMode: "ephemeral" as const, writeThroughPaths: ["/home/runner/.pk"] },
-          false,
-        ],
-        [
-          "ephemeral mode, write_through: /",
-          { filesystemMode: "ephemeral" as const, writeThroughPaths: ["/"] },
-          true,
-        ],
-        [
-          "ephemeral mode, the database itself written through",
-          { filesystemMode: "ephemeral" as const, writeThroughPaths: ["/home/runner/.pki/nssdb"] },
-          true,
-        ],
-      ])("writes back in %s: %s", (_label, overrides, persist) => {
-        runSandboxedCommand(options({ proxyEngine: "inspect", ...overrides }), deps);
+      runSandboxedCommand(options({ proxyEngine: "inspect", failOnCaResidue: false }), deps);
 
-        expect(mocks.readFile).toHaveBeenCalledWith(OWN_CA);
-        expect(mocks.settleNssDbSlot).toHaveBeenCalledWith(
-          SLOTTED,
-          expect.objectContaining({ persist, caPem: "THE CA PEM" }),
-        );
-        expect(mocks.nssDbChange).not.toHaveBeenCalled();
-        expect(mocks.releaseNssDbDirs.mock.invocationCallOrder[0]).toBeGreaterThan(
-          mocks.settleNssDbSlot.mock.invocationCallOrder[0],
-        );
+      expect(mocks.warn).toHaveBeenCalledWith(
+        expect.stringMatching(/COPIED.*fail_on_ca_residue is false/),
+      );
+    });
+
+    it("fails the step when what the command wrote cannot be written back", () => {
+      mocks.settleNssDbSlot.mockImplementation(() => {
+        throw new Error("EIO");
       });
 
-      it("writes nothing back to a database whose mount went away", () => {
-        mocks.nssDbDetached.mockReturnValue("DETACHED");
-
-        runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
-
-        expect(mocks.warn).toHaveBeenCalledWith("DETACHED");
-        expect(mocks.settleNssDbSlot).not.toHaveBeenCalled();
-        expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(SLOTTED, RELEASE);
-      });
-
-      it("says so when what the command wrote is discarded", () => {
-        mocks.settleNssDbSlot.mockReturnValue("discarded");
-
-        runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
-
-        expect(mocks.info).toHaveBeenCalledWith(
-          expect.stringContaining("NSS database at /home/runner/.pki/nssdb is discarded"),
-        );
-      });
-
-      it("fails the step on a copy of the CA, pointing at fail_on_ca_residue", () => {
-        mocks.settleNssDbSlot.mockImplementation((_files, { onResidue }) => onResidue("COPIED"));
-
-        expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
-          expect.objectContaining({
-            code: "NSS_DATABASE_CA_COPIED",
-            message: expect.stringMatching(/COPIED.*fail_on_ca_residue: false/),
-          }),
-        );
-        expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(SLOTTED, RELEASE);
-      });
-
-      it("only warns about a copy of the CA under fail_on_ca_residue: false", () => {
-        mocks.settleNssDbSlot.mockImplementation((_files, { onResidue }) => {
-          onResidue("COPIED");
-          return "written";
-        });
-
-        runSandboxedCommand(options({ proxyEngine: "inspect", failOnCaResidue: false }), deps);
-
-        expect(mocks.warn).toHaveBeenCalledWith(
-          expect.stringMatching(/COPIED.*fail_on_ca_residue is false/),
-        );
-      });
-
-      it("fails the step when what the command wrote cannot be written back", () => {
-        mocks.settleNssDbSlot.mockImplementation(() => {
-          throw new Error("EIO");
-        });
-
-        expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
-          expect.objectContaining({
-            code: "NSS_DATABASE_WRITE_BACK_FAILED",
-            message: expect.stringContaining("/home/runner/.pki/nssdb: EIO"),
-          }),
-        );
-        expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(SLOTTED, RELEASE);
-      });
+      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+        expect.objectContaining({
+          code: "NSS_DATABASE_WRITE_BACK_FAILED",
+          message: expect.stringContaining("/home/runner/.pki/nssdb: EIO"),
+        }),
+      );
+      expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
     });
   });
 

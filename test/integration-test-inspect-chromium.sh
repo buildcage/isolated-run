@@ -2,11 +2,10 @@
 # chrome-headless-shell must trust the proxy CA through the slot the action adds
 # to the runner's own NSS database. What the command writes to that database is
 # kept where filesystem_mode keeps writes, below a write_through: entry under
-# ephemeral included, less the slot; a database the runner user cannot write is
-# covered instead, and a write to that, or a copy of the CA left in the
-# runner's own, fails the step unless fail_on_ca_residue is false. Directories
-# made for a new database are removed afterwards, and removing one on the host
-# mid-command gives a warning.
+# ephemeral included, less the slot; a copy of the CA left there fails the step
+# unless fail_on_ca_residue is false. A database the runner user cannot write
+# is left alone with a warning. Directories made for a new database are removed
+# afterwards, and removing one on the host mid-command gives a warning.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 
@@ -236,25 +235,18 @@ mkdir -p "$HOME_G/.pki/nssdb"
 chmod 555 "$HOME_G/.pki/nssdb"
 run_step "$HOME_G" "
 $SHOW
-$CHECK
-touch \$HOME/.pki/nssdb/written-by-the-command"
-if [ "$RUN_EXIT" != "0" ] && grep -q "changed the NSS database at $HOME_G/.pki/nssdb" <<<"$OUT" &&
-  grep -q "fail_on_ca_residue: false" <<<"$OUT"; then
-  pass "the step failed on the write, naming the database and pointing at fail_on_ca_residue"
+$CHECK untrusted"
+if [ "$RUN_EXIT" = "0" ] && grep -q "the runner user cannot write $HOME_G/.pki/nssdb" <<<"$OUT" &&
+  grep -q "use proxy_engine: universal" <<<"$OUT" && grep -q "no nssdb mount" <<<"$OUT"; then
+  pass "the step warned, naming the database and pointing at universal, and mounted nothing"
 else
-  fail "the step did not fail on the write to the covered database (exit $RUN_EXIT)"
-fi
-run_step "$HOME_G" "touch \$HOME/.pki/nssdb/written-by-the-command" INPUT_FAIL_ON_CA_RESIDUE=false
-if [ "$RUN_EXIT" = "0" ] && grep -q "changed the NSS database at $HOME_G/.pki/nssdb.*fail_on_ca_residue is false" <<<"$OUT"; then
-  pass "under fail_on_ca_residue: false, a warning names the database and the step carries on"
-else
-  fail "under fail_on_ca_residue: false, the step failed or gave no warning (exit $RUN_EXIT)"
+  fail "the step failed, gave no warning, or mounted over the database (exit $RUN_EXIT)"
 fi
 chmod 755 "$HOME_G/.pki/nssdb"
 if [ -z "$(ls -A "$HOME_G/.pki/nssdb")" ]; then
-  pass "the covered database is untouched"
+  pass "the database is untouched"
 else
-  fail "the covered database changed"
+  fail "the database changed"
   show_home "$HOME_G"
 fi
 
