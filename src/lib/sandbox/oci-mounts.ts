@@ -9,7 +9,7 @@
  * read-only.
  */
 
-import { RESERVED_CA_STORE_PATHS } from "./ca-trust.ts";
+import { reservedCaStorePaths } from "./ca-trust.ts";
 import { SHM_DESTINATION } from "./host-probes.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder, WritablePathConflictError } from "./paths.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
@@ -108,7 +108,9 @@ export function hostRunCoverageLayers(): WritableLayers {
  * not on the caller. The CA-only file and the NSS CA database are not listed:
  * they sit under /dev, which assertNoFreshMountDestinations already refuses.
  */
-export const RESERVED_INTERNAL_DESTINATIONS = [RESOLV_CONF_DESTINATION, ...RESERVED_CA_STORE_PATHS];
+export function reservedInternalDestinations(): string[] {
+  return [RESOLV_CONF_DESTINATION, ...reservedCaStorePaths()];
+}
 
 /**
  * Fail closed if a writable bind would land on a destination runc mounts fresh

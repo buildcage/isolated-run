@@ -386,9 +386,11 @@ export const CA_STORES: Record<CaStoreKind, CaStore> = {
 };
 
 /** The paths write_through: refuses in every engine; see CaStoreReservation. */
-export const RESERVED_CA_STORE_PATHS = Object.values(CA_STORES).flatMap(({ reserve }) =>
-  "candidates" in reserve ? reserve.candidates : [],
-);
+export function reservedCaStorePaths(): string[] {
+  return Object.values(CA_STORES).flatMap(({ reserve }) =>
+    "candidates" in reserve ? reserve.candidates : [],
+  );
+}
 
 // The NSS database is prepared apart from CA_STORES (see prepareNssDb): it is
 // claimed, written back and released. Its mount refuses the same way.

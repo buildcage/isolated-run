@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 
 import { SandboxError } from "../errors.ts";
 import { resolveFilesystemPlan, validateFilesystemInputs } from "./filesystem-plan.ts";
-import { RESERVED_INTERNAL_DESTINATIONS } from "./oci-mounts.ts";
+import { reservedInternalDestinations } from "./oci-mounts.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 
 describe("resolveFilesystemPlan", () => {
@@ -149,7 +149,7 @@ describe("resolveFilesystemPlan", () => {
       expect(() => resolveFilesystemPlan("persistent", "/opt/runc-view", ENV, deps)).toThrow(
         /overlaps/,
       );
-      const reserved = RESERVED_INTERNAL_DESTINATIONS[0]!;
+      const reserved = reservedInternalDestinations()[0]!;
       const toReserved = link({ "/opt/dns": { target: reserved, uid: 0 } });
       expect(() => resolveFilesystemPlan("persistent", "/opt/dns", ENV, toReserved)).toThrow(
         /is reserved/,
@@ -355,7 +355,7 @@ describe("validateFilesystemInputs", () => {
     expect(() => validateFilesystemInputs("ephemeral", [])).not.toThrow();
   });
 
-  it.each(RESERVED_INTERNAL_DESTINATIONS)("rejects the reserved path %s in either mode", (path) => {
+  it.each(reservedInternalDestinations())("rejects the reserved path %s in either mode", (path) => {
     expect(() => validateFilesystemInputs("persistent", [path])).toThrow(/reserved/);
     expect(() => validateFilesystemInputs("ephemeral", [path])).toThrow(/reserved/);
   });

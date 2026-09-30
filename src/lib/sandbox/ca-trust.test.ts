@@ -8,7 +8,7 @@ import {
   presetCaVariables,
   discoverJvmKeystores,
   OWN_CA_DESTINATION,
-  RESERVED_CA_STORE_PATHS,
+  reservedCaStorePaths,
   SYSTEM_CA_CANDIDATES,
   type CaStoreCopy,
   type CaStoreKind,
@@ -175,10 +175,10 @@ describe("writeCaTrustFiles", () => {
   });
 });
 
-describe("RESERVED_CA_STORE_PATHS", () => {
+describe("reservedCaStorePaths", () => {
   // Only the system store is reserved in every engine; the rest only where mounted.
   it("is every system store candidate", () => {
-    expect(RESERVED_CA_STORE_PATHS).toEqual(SYSTEM_CA_CANDIDATES);
+    expect(reservedCaStorePaths()).toEqual(SYSTEM_CA_CANDIDATES);
   });
 });
 

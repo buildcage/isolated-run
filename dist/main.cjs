@@ -19765,7 +19765,11 @@ const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_ST
 			refusal: () => "is a JVM keystore the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it."
 		}
 	}
-}, RESERVED_CA_STORE_PATHS = Object.values(CA_STORES).flatMap(({ reserve }) => "candidates" in reserve ? reserve.candidates : []), NSS_DB_RESERVATION = {
+};
+function reservedCaStorePaths() {
+	return Object.values(CA_STORES).flatMap(({ reserve }) => "candidates" in reserve ? reserve.candidates : []);
+}
+const NSS_DB_RESERVATION = {
 	refuses: (entry, destination) => entry !== destination && isAtOrUnder(entry, destination),
 	refusal: (destination) => `is inside the NSS database at ${JSON.stringify(destination)}, which the inspect engine covers for the step. Name ${JSON.stringify(destination)} itself to have the command's changes written back.`
 };
@@ -19964,7 +19968,9 @@ function hostRunCoverageLayers() {
 		writablePaths: new Set([HOST_RUN_LOCK_DIR])
 	};
 }
-const RESERVED_INTERNAL_DESTINATIONS = [RESOLV_CONF_DESTINATION, ...RESERVED_CA_STORE_PATHS];
+function reservedInternalDestinations() {
+	return [RESOLV_CONF_DESTINATION, ...reservedCaStorePaths()];
+}
 function assertNoFreshMountDestinations(writableDirs, freshMountDestinations) {
 	for (let dir of writableDirs) {
 		let shadowed = [...freshMountDestinations].find((d) => isAtOrUnder(dir, d));
@@ -20278,7 +20284,7 @@ function renameGuardDirs(readonlyDirs, persisting) {
 function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRealPaths = []) {
 	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
 	for (let path of writeThroughPaths) {
-		let reserved = [...RESERVED_INTERNAL_DESTINATIONS, ...reservedRealPaths].find((r) => isAtOrUnder(path, r));
+		let reserved = [...reservedInternalDestinations(), ...reservedRealPaths].find((r) => isAtOrUnder(path, r));
 		if (reserved) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 }
@@ -20304,7 +20310,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
 	let realpath = deps.realpath ?? realpathOrSelf;
-	validateFilesystemInputs(filesystemMode, writeThroughPaths, RESERVED_CA_STORE_PATHS.map(realpath));
+	validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map(realpath));
 	try {
 		assertScratchBaseNotWritable(writeThroughPaths);
 	} catch (e) {
