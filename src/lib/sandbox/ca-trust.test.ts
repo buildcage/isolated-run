@@ -11,6 +11,7 @@ import {
   OWN_CA_DESTINATION,
   type CaTrustDeps,
 } from "./ca-trust.ts";
+import { NSS_CA_DB_DESTINATION } from "./nss-db.ts";
 
 const FAKE_CA = "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----";
 
@@ -178,19 +179,17 @@ describe("caTrustAdditions", () => {
         caDirs: [],
         nssDb: {
           path: "/scratch/nssdb",
-          template: "/scratch/nssdb-template",
           destination: "/home/runner/.pki/nssdb",
+          slot: { caDb: "/scratch/nssdb-ca", appended: "", hadPkcs11: false, snapshot: new Map() },
         },
       },
       {},
     );
 
-    expect(mounts.at(-1)).toStrictEqual({
-      destination: "/home/runner/.pki/nssdb",
-      type: "none",
-      source: "/scratch/nssdb",
-      options: ["rbind", "rw"],
-    });
+    expect(mounts.slice(-2).map((m) => m.destination)).toStrictEqual([
+      "/home/runner/.pki/nssdb",
+      NSS_CA_DB_DESTINATION,
+    ]);
   });
 
   it("mounts the CA-only file and points the additive variables at it, when unset", () => {
@@ -692,7 +691,11 @@ describe("assertWriteThroughClearOfCaTrust", () => {
     systemCa: undefined,
     jvmKeystores: [{ path: "/scratch/jvm-0/cacerts", destination: KEYSTORE }],
     caDirs: [{ path: "/scratch/ca-dir0", destination: ANCHORS }],
-    nssDb: { path: "/scratch/nssdb", template: "/scratch/nssdb-template", destination: NSS_DB },
+    nssDb: {
+      path: "/scratch/nssdb",
+      destination: NSS_DB,
+      slot: { caDb: "/scratch/nssdb-ca", appended: "", hadPkcs11: false, snapshot: new Map() },
+    },
   };
 
   it.each([

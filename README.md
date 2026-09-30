@@ -576,11 +576,9 @@ reported as blocked; see
   Chromium before M146 does not read `~/.local/share/pki/nssdb`, so use M146 or later where that is
   the database. What
   the command writes to the database is kept where `filesystem_mode` keeps writes to that path, and
-  discarded where it does not. A database the runner user cannot write cannot take the slot, since
-  Chromium would not open it either. It is covered for the step with one holding only the CA
-  instead: a private CA or client certificate kept there is lost, though only on an
-  `allowed_tls_rules` or `allowed_ip_rules` passthrough, and a command that writes to it fails the
-  step. `fail_on_ca_residue: false` turns that into a warning and discards the write.
+  discarded where it does not. A database the runner user cannot write, or one too large to copy,
+  gets no slot, and the step warns; use `proxy_engine: universal` for Chromium there. Neither
+  happens on a GitHub-hosted runner.
 - Only the NSS database under the step's own `HOME` carries the slot. Chromium started under another
   `HOME` inside the command (`HOME=/tmp chromium`, `export HOME=...`) does not trust the CA, so
   leave `HOME` alone within the command. A Firefox carrying Mozilla's own root list, such as

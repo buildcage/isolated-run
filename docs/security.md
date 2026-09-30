@@ -503,8 +503,7 @@ than the CA-trust variables; a JVM already on the runner (the `java` on `PATH`, 
 own `keytool`, but a JDK the step itself downloads, a keystore under a non-default password, or a
 runner whose only `keytool` is somewhere a sandboxed command can write, falls back to `universal`.
 Chromium's NSS database is given a read-only slot trusting the CA; one the runner user cannot
-write is covered instead, and a command that writes to that fails the step unless
-`fail_on_ca_residue` is false. See
+write, or one too large to copy, gets none, and Chromium falls back to `universal`. See
 [Limitations](../README.md#limitations) for the rest of the compatibility picture.
 
 `audit` is not a passive observer here either. TLS is terminated in both modes, so a tool that

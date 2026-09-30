@@ -19403,39 +19403,37 @@ function walkPlan(home, path, lstat) {
 		missing
 	};
 }
+function warnNotAdded(warn, reason) {
+	warn?.(`could not add the proxy CA to Chromium's NSS database: ${reason}. Chromium in this step will not trust the proxy; use proxy_engine: universal for it.`);
+}
 function prepareNssDb(containerName, dir, home, deps = {}, { homeUpper } = {}) {
-	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat$1, realpath = node_fs.realpathSync, copyDir = defaultCopyDir$1, warn } = deps;
-	if (!home || stat(home)?.isDirectory() !== !0) {
-		warn?.(`could not add the proxy CA to Chromium's NSS database: HOME (${JSON.stringify(home ?? "")}) is not a directory. A Chromium step will not trust the proxy.`);
-		return;
-	}
+	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat$1, realpath = node_fs.realpathSync, warn } = deps;
+	if (!home || stat(home)?.isDirectory() !== !0) return warnNotAdded(warn, `HOME (${JSON.stringify(home ?? "")}) is not a directory`);
 	let realHome = realpath(home), plan = planNssDb(realHome, { lstat });
-	if (typeof plan == "string") {
-		warn?.(`could not add the proxy CA to Chromium's NSS database: ${plan}. A Chromium step will not trust the proxy.`);
-		return;
-	}
-	let template = (0, node_path.join)(dir, "nssdb-template");
+	if (typeof plan == "string") return warnNotAdded(warn, plan);
+	let caDb = (0, node_path.join)(dir, "nssdb-ca");
 	exec("docker", buildDockerCpArgs({
 		containerName,
 		containerPath: "/opt/buildcage/nssdb",
-		hostPath: template
+		hostPath: caDb
 	}));
-	let path = (0, node_path.join)(dir, "nssdb"), files = {
-		path,
-		template,
-		destination: plan.destination
-	}, xdgPath = (0, node_path.join)(realHome, NSS_XDG_DB_PATH);
-	plan.destination !== xdgPath && lstat(xdgPath) === void 0 && (files.xdgPath = xdgPath);
-	let exists = lstat(plan.destination)?.isDirectory() === !0, refusal = exists ? whyNotSlot(plan.destination, deps) : void 0;
-	if (refusal === void 0) try {
-		files.slot = prepareSlot(dir, files, template, exists, deps);
+	let path = (0, node_path.join)(dir, "nssdb"), exists = lstat(plan.destination)?.isDirectory() === !0, refusal = exists ? whyNotSlot(plan.destination, deps) : void 0;
+	if (refusal !== void 0) return warnNotAdded(warn, refusal);
+	let slot;
+	try {
+		slot = prepareSlot(caDb, path, plan.destination, exists, deps);
 	} catch (e) {
-		refusal = `the slot could not be added (${errorMessage(e)})`, (0, node_fs.rmSync)(path, {
+		return (0, node_fs.rmSync)(path, {
 			recursive: !0,
 			force: !0
-		});
+		}), warnNotAdded(warn, `the slot could not be added (${errorMessage(e)})`);
 	}
-	if (refusal !== void 0 && (deps.info?.(`buildcage: ${refusal}, so the NSS database at ${plan.destination} is covered for the command with one trusting only the proxy CA`), copyDir(template, path)), !exists && homeUpper !== void 0 && realHome === home && plan.destination === (0, node_path.join)(home, ".pki/nssdb")) try {
+	let files = {
+		path,
+		destination: plan.destination,
+		slot
+	}, xdgPath = (0, node_path.join)(realHome, NSS_XDG_DB_PATH);
+	if (plan.destination !== xdgPath && lstat(xdgPath) === void 0 && (files.xdgPath = xdgPath), !exists && homeUpper !== void 0 && realHome === home && plan.destination === (0, node_path.join)(home, ".pki/nssdb")) try {
 		return makeInUpper(realHome, plan.destination, homeUpper), files;
 	} catch (e) {
 		deps.info?.(`buildcage: could not make ${plan.destination} in the ephemeral overlay (${errorMessage(e)}), so it is made on the runner instead`);
@@ -19450,8 +19448,7 @@ function prepareNssDb(containerName, dir, home, deps = {}, { homeUpper } = {}) {
 			})
 		};
 	} catch (e) {
-		warn?.(`could not add the proxy CA to Chromium's NSS database: cannot create or claim ${plan.destination} (${errorMessage(e)}). A Chromium step will not trust the proxy.`);
-		return;
+		return warnNotAdded(warn, `cannot create or claim ${plan.destination} (${errorMessage(e)})`);
 	}
 	return files;
 }
@@ -19493,17 +19490,16 @@ function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess 
 		return `${destination} cannot be read through (${errorMessage(e)})`;
 	}
 }
-function prepareSlot(dir, files, template, exists, { copyDir = defaultCopyDir$1, ledger }) {
-	let caDb = (0, node_path.join)(dir, "nssdb-ca");
-	copyDir(template, caDb), (0, node_fs.chmodSync)(caDb, 493);
+function prepareSlot(caDb, path, destination, exists, { copyDir = defaultCopyDir$1, ledger }) {
+	(0, node_fs.chmodSync)(caDb, 493);
 	for (let name of (0, node_fs.readdirSync)(caDb)) (0, node_fs.chmodSync)((0, node_path.join)(caDb, name), 420);
-	exists ? withNssDbLock(() => copyDir(files.destination, files.path, (path) => !inStaging(files.destination, path)), ledger) : (0, node_fs.mkdirSync)(files.path, { mode: 448 });
-	let pkcs11 = (0, node_path.join)(files.path, "pkcs11.txt"), hadPkcs11 = (0, node_fs.lstatSync)(pkcs11, { throwIfNoEntry: !1 }) !== void 0;
+	exists ? withNssDbLock(() => copyDir(destination, path, (entry) => !inStaging(destination, entry)), ledger) : (0, node_fs.mkdirSync)(path, { mode: 448 });
+	let pkcs11 = (0, node_path.join)(path, "pkcs11.txt"), hadPkcs11 = (0, node_fs.lstatSync)(pkcs11, { throwIfNoEntry: !1 }) !== void 0;
 	return {
 		caDb,
 		appended: appendNssSlot(pkcs11),
 		hadPkcs11,
-		snapshot: snapshotDir(files.path)
+		snapshot: snapshotDir(path)
 	};
 }
 function appendNssSlot(path) {
@@ -19625,13 +19621,12 @@ function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.
 	}), "written";
 }
 function nssDbMounts(files) {
-	let mounts = [{
+	return [{
 		destination: files.destination,
 		type: "none",
 		source: files.path,
 		options: ["rbind", "rw"]
-	}];
-	return files.slot && mounts.push({
+	}, {
 		destination: NSS_CA_DB_DESTINATION,
 		type: "none",
 		source: files.slot.caDb,
@@ -19642,17 +19637,7 @@ function nssDbMounts(files) {
 			"nodev",
 			"noexec"
 		]
-	}), mounts;
-}
-function nssDbChange(files, { readDir = node_fs.readdirSync, readFile = node_fs.readFileSync } = {}) {
-	let changed;
-	try {
-		let names = readDir(files.template).sort(), current = readDir(files.path).sort();
-		changed = names.length !== current.length || names.some((name, i) => current[i] !== name || !readFile((0, node_path.join)(files.template, name)).equals(readFile((0, node_path.join)(files.path, name))));
-	} catch {
-		changed = !0;
-	}
-	if (changed) return `the command changed the NSS database at ${files.destination}, which the inspect engine replaces for the step with one trusting only its proxy CA; the write is discarded`;
+	}];
 }
 function nssDbDetached(files, deps = {}) {
 	if (!files.claim || stillThere(files.destination, files.claim.destinationId, deps)) return;
@@ -20869,7 +20854,6 @@ const realDeps$2 = {
 	writeJvmKeystoreFiles,
 	jvmTools,
 	prepareNssDb,
-	nssDbChange,
 	settleNssDbSlot,
 	nssDbDetached,
 	releaseNssDbDirs,
@@ -20990,33 +20974,24 @@ function releaseDeps({ warn }, { info }) {
 	};
 }
 function finishNssDb(caTrust, options, deps) {
-	let { nssDbChange, nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info } = deps, nssDb = caTrust?.nssDb;
+	let { nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info } = deps, nssDb = caTrust?.nssDb;
 	if (!nssDb) return;
-	let { failOnCaResidue, warn } = options, release = () => releaseNssDbDirs(nssDb, releaseDeps(options, deps)), residue = (message, code) => {
-		if (!failOnCaResidue) {
-			warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
-			return;
-		}
-		throw new SandboxError(`${message}. To let the step carry on with only a warning, set fail_on_ca_residue: false (a copy of the CA is then written back, and a write to a covered NSS database discarded).`, code);
-	}, persist = persists(nssDb.destination, options), detached = persist ? nssDbDetached(nssDb) : void 0;
-	if (detached !== void 0 && warn(detached), !nssDb.slot) {
-		release();
-		let change = nssDbChange(nssDb);
-		change !== void 0 && residue(change, "NSS_DATABASE_CHANGED");
-		return;
-	}
+	let { failOnCaResidue, warn } = options, release = () => releaseNssDbDirs(nssDb, releaseDeps(options, deps)), persist = persists(nssDb.destination, options), detached = persist ? nssDbDetached(nssDb) : void 0;
 	if (detached !== void 0) {
-		release();
+		warn(detached), release();
 		return;
 	}
 	try {
-		settleNssDbSlot({
-			...nssDb,
-			slot: nssDb.slot
-		}, {
+		settleNssDbSlot(nssDb, {
 			persist,
 			caPem: readFile(caTrust.ownCaPath),
-			onResidue: (message) => residue(message, "NSS_DATABASE_CA_COPIED")
+			onResidue: (message) => {
+				if (!failOnCaResidue) {
+					warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
+					return;
+				}
+				throw new SandboxError(`${message}. To let the step carry on with only a warning, set fail_on_ca_residue: false (a copy of the CA is then written back, and a write to a covered NSS database discarded).`, "NSS_DATABASE_CA_COPIED");
+			}
 		}) === "discarded" && info(`buildcage: what the command wrote to the NSS database at ${nssDb.destination} is discarded, as the filesystem mode discards writes there`);
 	} catch (e) {
 		throw e instanceof SandboxError ? e : new SandboxError(`could not write back what the command wrote to the NSS database at ${nssDb.destination}: ` + errorMessage(e), "NSS_DATABASE_WRITE_BACK_FAILED");

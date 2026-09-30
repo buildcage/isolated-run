@@ -23,19 +23,19 @@ details.
 
 `run` is the only required input.
 
-| Input                             | Default      | Description                                                                                                                                        |
-| --------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`                             | required     | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed).                      |
-| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                                                    |
-| `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                                     |
-| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                                            |
-| `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database, or a write to a covered one, into a warning. See [Chromium](#chromium). |
-| `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                                              |
-| `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                                           |
-| `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                                          |
-| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                                     |
-| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact; both engines produce one. See [Traffic artifact](#traffic-artifact).                               |
-| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                                                 |
+| Input                             | Default      | Description                                                                                                                   |
+| --------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `run`                             | required     | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed). |
+| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                               |
+| `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                |
+| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                       |
+| `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium).          |
+| `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                         |
+| `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                      |
+| `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                     |
+| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                |
+| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact; both engines produce one. See [Traffic artifact](#traffic-artifact).          |
+| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                            |
 
 `fail_on_blocked` and `fail_on_ca_residue` take `true` or `false`. Any other value fails the step
 before the sandbox is set up.
@@ -695,10 +695,10 @@ copy whose database path no longer resolves where it did. Parallel write-backs t
 take turns, so the later one replaces the earlier as a whole. A step never copies the database
 halfway through another's write-back.
 
-A database the runner user cannot write, or one too large to copy, is covered instead: a copy of a
-database holding only this CA is mounted over it, and a command that writes to that copy fails the
-step the same way, or only warns, discarding the write. A symlink or non-directory on the path leaves
-the database unmounted, with a warning.
+A database the runner user cannot write, one too large to copy (over 512 files or 20 MiB), or a
+symlink or non-directory on the path leaves the database as it is, with a warning: Chromium in that
+step does not trust the CA and fails TLS through the proxy, so use `proxy_engine: universal` for it.
+Chromium opens nothing it cannot open read-write, so an unwritable database cannot take the slot.
 
 Missing directories are created 0700 and removed, if empty, when the last step using them ends,
 including steps in other jobs of the same runner user. Removing a directory detaches every mount on

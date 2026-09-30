@@ -53,10 +53,9 @@ import type { MountEntry } from "./types.ts";
  * out of pkcs11.txt and the mirror written back, where the filesystem mode
  * would have kept a write there.
  *
- * A database the runner user cannot write is covered instead, with a copy of
- * a database holding only the proxy CA, and a command that changes that copy
- * fails the step: Chromium opens nothing it cannot open read-write, the slot
- * included.
+ * A database the runner user cannot write, or one too large to copy, is left
+ * as it is with a warning: Chromium opens nothing it cannot open read-write,
+ * the slot included.
  */
 
 /** Every Chromium reads this path when it exists, even empty; since M146 the
@@ -65,7 +64,7 @@ import type { MountEntry } from "./types.ts";
 export const NSS_DB_PATH = ".pki/nssdb";
 export const NSS_XDG_DB_PATH = ".local/share/pki/nssdb";
 
-/** Where init-inspect-cfg leaves the template in the proxy container. */
+/** Where init-inspect-cfg leaves the CA-only database in the proxy container. */
 export const NSS_DB_TEMPLATE_CONTAINER_PATH = "/opt/buildcage/nssdb";
 
 /** Where the database holding only the proxy CA is mounted in the sandbox:
@@ -103,7 +102,7 @@ function inStaging(dir: string, path: string): boolean {
 const MAX_PKCS11_TXT_BYTES = 1 << 20;
 
 /** Bounds on a database the runner's steps could have made as large as they
- *  like, before it is covered rather than copied. */
+ *  like, past which it is not given the slot. */
 const MAX_MIRROR_BYTES = 20 << 20;
 const MAX_MIRROR_FILES = 512;
 
@@ -130,8 +129,6 @@ export interface NssDbSlot {
 export interface NssDbFiles {
   /** The copy mounted over the database, in this run's scratch dir. */
   path: string;
-  /** The template as extracted, to compare a covering copy against afterwards. */
-  template: string;
   destination: string;
   /** This step's use of the destination in the shared ledger. */
   claim?: {
@@ -142,9 +139,7 @@ export interface NssDbFiles {
   /** Set when the destination is ~/.pki/nssdb and no XDG database existed:
    *  where Chromium makes its own if the mount goes away. */
   xdgPath?: string;
-  /** Set when the runner's own database was given the slot; unset when it
-   *  was covered. */
-  slot?: NssDbSlot;
+  slot: NssDbSlot;
 }
 
 interface StatShape {
@@ -159,8 +154,6 @@ export interface NssDbDeps {
   stat?: (path: string) => { isDirectory(): boolean } | undefined;
   realpath?: (path: string) => string;
   copyDir?: (source: string, destination: string, filter?: (path: string) => boolean) => void;
-  readDir?: (path: string) => string[];
-  readFile?: (path: string) => Buffer;
   ledger?: NssDbLedgerDeps;
   /** Throws when the runner user cannot write path. */
   access?: (path: string) => void;
@@ -265,11 +258,19 @@ export interface PrepareNssDbOptions {
   homeUpper?: string;
 }
 
+function warnNotAdded(warn: NssDbDeps["warn"], reason: string): undefined {
+  warn?.(
+    `could not add the proxy CA to Chromium's NSS database: ${reason}. Chromium in this step ` +
+      "will not trust the proxy; use proxy_engine: universal for it.",
+  );
+  return undefined;
+}
+
 /**
- * Extracts the CA-only template, then gives the runner's database the slot, or
- * covers it when the runner user cannot write it or it is too large to copy,
- * and creates the directories to mount over. Returns undefined, having warned,
- * when there is nowhere to mount either.
+ * Extracts the CA-only database, gives a copy of the runner's database the
+ * slot, and creates the directories to mount over. Returns undefined, having
+ * warned, when the runner's database cannot take the slot or there is nowhere
+ * to mount it.
  */
 export function prepareNssDb(
   containerName: string,
@@ -283,60 +284,42 @@ export function prepareNssDb(
     lstat = defaultLstat,
     stat = defaultStat,
     realpath = realpathSync,
-    copyDir = defaultCopyDir,
     warn,
   } = deps;
   // HOME itself may be a symlink the runner was set up with; only what is below it is refused.
   if (!home || stat(home)?.isDirectory() !== true) {
-    warn?.(
-      `could not add the proxy CA to Chromium's NSS database: HOME (${JSON.stringify(home ?? "")}) ` +
-        "is not a directory. A Chromium step will not trust the proxy.",
-    );
-    return undefined;
+    return warnNotAdded(warn, `HOME (${JSON.stringify(home ?? "")}) is not a directory`);
   }
   const realHome = realpath(home);
   const plan = planNssDb(realHome, { lstat });
-  if (typeof plan === "string") {
-    warn?.(
-      `could not add the proxy CA to Chromium's NSS database: ${plan}. A Chromium step ` +
-        "will not trust the proxy.",
-    );
-    return undefined;
-  }
+  if (typeof plan === "string") return warnNotAdded(warn, plan);
 
-  const template = join(dir, "nssdb-template");
+  const caDb = join(dir, "nssdb-ca");
   exec(
     "docker",
     buildDockerCpArgs({
       containerName,
       containerPath: NSS_DB_TEMPLATE_CONTAINER_PATH,
-      hostPath: template,
+      hostPath: caDb,
     }),
   );
   const path = join(dir, "nssdb");
-  const files: NssDbFiles = { path, template, destination: plan.destination };
-  const xdgPath = join(realHome, NSS_XDG_DB_PATH);
-  if (plan.destination !== xdgPath && lstat(xdgPath) === undefined) files.xdgPath = xdgPath;
 
   // Checked again after the slow docker cp: a parallel step may have made or
   // removed it since planning.
   const exists = lstat(plan.destination)?.isDirectory() === true;
-  let refusal = exists ? whyNotSlot(plan.destination, deps) : undefined;
-  if (refusal === undefined) {
-    try {
-      files.slot = prepareSlot(dir, files, template, exists, deps);
-    } catch (e) {
-      refusal = `the slot could not be added (${errorMessage(e)})`;
-      rmSync(path, { recursive: true, force: true });
-    }
+  const refusal = exists ? whyNotSlot(plan.destination, deps) : undefined;
+  if (refusal !== undefined) return warnNotAdded(warn, refusal);
+  let slot: NssDbSlot;
+  try {
+    slot = prepareSlot(caDb, path, plan.destination, exists, deps);
+  } catch (e) {
+    rmSync(path, { recursive: true, force: true });
+    return warnNotAdded(warn, `the slot could not be added (${errorMessage(e)})`);
   }
-  if (refusal !== undefined) {
-    deps.info?.(
-      `buildcage: ${refusal}, so the NSS database at ${plan.destination} is covered for the ` +
-        "command with one trusting only the proxy CA",
-    );
-    copyDir(template, path);
-  }
+  const files: NssDbFiles = { path, destination: plan.destination, slot };
+  const xdgPath = join(realHome, NSS_XDG_DB_PATH);
+  if (plan.destination !== xdgPath && lstat(xdgPath) === undefined) files.xdgPath = xdgPath;
 
   if (
     !exists &&
@@ -366,11 +349,7 @@ export function prepareNssDb(
     });
     files.claim = { name, ...claim };
   } catch (e) {
-    warn?.(
-      `could not add the proxy CA to Chromium's NSS database: cannot create or claim ` +
-        `${plan.destination} (${errorMessage(e)}). A Chromium step will not trust the proxy.`,
-    );
-    return undefined;
+    return warnNotAdded(warn, `cannot create or claim ${plan.destination} (${errorMessage(e)})`);
   }
   return files;
 }
@@ -442,32 +421,30 @@ function whyNotSlot(
 }
 
 function prepareSlot(
-  dir: string,
-  files: NssDbFiles,
-  template: string,
+  caDb: string,
+  path: string,
+  destination: string,
   exists: boolean,
   { copyDir = defaultCopyDir, ledger }: NssDbDeps,
 ): NssDbSlot {
-  // Readable by the sandbox's user whatever the template's own modes: it holds
-  // the CA's certificate and an empty key database, and is mounted read-only.
-  const caDb = join(dir, "nssdb-ca");
-  copyDir(template, caDb);
+  // Readable by the sandbox's user whatever the extracted modes: it holds the
+  // CA's certificate and an empty key database, and is mounted read-only.
   chmodSync(caDb, 0o755);
   for (const name of readdirSync(caDb)) chmodSync(join(caDb, name), 0o644);
 
   if (exists) {
     // A parallel step's write-back swaps the database under this lock.
     withNssDbLock(
-      () => copyDir(files.destination, files.path, (path) => !inStaging(files.destination, path)),
+      () => copyDir(destination, path, (entry) => !inStaging(destination, entry)),
       ledger,
     );
   } else {
-    mkdirSync(files.path, { mode: 0o700 });
+    mkdirSync(path, { mode: 0o700 });
   }
-  const pkcs11 = join(files.path, "pkcs11.txt");
+  const pkcs11 = join(path, "pkcs11.txt");
   const hadPkcs11 = lstatSync(pkcs11, { throwIfNoEntry: false }) !== undefined;
   const appended = appendNssSlot(pkcs11);
-  return { caDb, appended, hadPkcs11, snapshot: snapshotDir(files.path) };
+  return { caDb, appended, hadPkcs11, snapshot: snapshotDir(path) };
 }
 
 /** Adds the slot to pkcs11.txt, creating it when missing, and returns what it
@@ -592,13 +569,13 @@ export interface SettleNssDbSlotOptions {
 export type NssDbSlotOutcome = "unchanged" | "discarded" | "written";
 
 /**
- * Writes back what the command changed in a database given the slot, less the
- * slot, where the filesystem mode would have kept the write. A mirror whose
- * destination no longer resolves where it did is not written back: the
- * command may have swapped a directory above it for a symlink.
+ * Writes back what the command changed in the database, less the slot, where
+ * the filesystem mode would have kept the write. A mirror whose destination no
+ * longer resolves where it did is not written back: the command may have
+ * swapped a directory above it for a symlink.
  */
 export function settleNssDbSlot(
-  files: NssDbFiles & { slot: NssDbSlot },
+  files: NssDbFiles,
   {
     persist,
     caPem,
@@ -673,54 +650,22 @@ export function settleNssDbSlot(
 }
 
 /** The copy read-write over the database, since Chromium ignores a database it
- *  cannot open that way, and with the slot, the CA-only database beside it. */
+ *  cannot open that way, and the CA-only database beside it. */
 export function nssDbMounts(files: NssDbFiles): MountEntry[] {
-  const mounts: MountEntry[] = [
+  return [
     {
       destination: files.destination,
       type: "none",
       source: files.path,
       options: ["rbind", "rw"],
     },
-  ];
-  if (files.slot) {
-    mounts.push({
+    {
       destination: NSS_CA_DB_DESTINATION,
       type: "none",
       source: files.slot.caDb,
       options: ["rbind", "ro", "nosuid", "nodev", "noexec"],
-    });
-  }
-  return mounts;
-}
-
-/** Why a covering copy no longer matches the template, or undefined. Compares
- *  names and bytes only, so a chmod or chown of $HOME does not count; a copy
- *  the command made unreadable counts as changed. Chromium reading the
- *  database leaves it byte-identical. */
-export function nssDbChange(
-  files: NssDbFiles,
-  { readDir = readdirSync, readFile = readFileSync }: Pick<NssDbDeps, "readDir" | "readFile"> = {},
-): string | undefined {
-  let changed: boolean;
-  try {
-    const names = readDir(files.template).sort();
-    const current = readDir(files.path).sort();
-    changed =
-      names.length !== current.length ||
-      names.some(
-        (name, i) =>
-          current[i] !== name ||
-          !readFile(join(files.template, name)).equals(readFile(join(files.path, name))),
-      );
-  } catch {
-    changed = true;
-  }
-  if (!changed) return undefined;
-  return (
-    `the command changed the NSS database at ${files.destination}, which the inspect engine ` +
-    "replaces for the step with one trusting only its proxy CA; the write is discarded"
-  );
+    },
+  ];
 }
 
 /**

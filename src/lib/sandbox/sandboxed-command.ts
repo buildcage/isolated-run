@@ -8,7 +8,7 @@ import { PROXY_ADDRESS } from "#core/lib/log/proxy-address.ts";
 
 import { netnsNameFor } from "../container.ts";
 import type { ProxyEngine } from "../engine.ts";
-import { SandboxError, type SandboxErrorCode } from "../errors.ts";
+import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
 import {
   extractCaCert,
@@ -31,7 +31,6 @@ import {
 import { resolveSandboxGid } from "./identity.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import {
-  nssDbChange,
   nssDbDetached,
   prepareNssDb,
   releaseNssDbDirs,
@@ -67,7 +66,6 @@ export interface RunSandboxedCommandDeps {
   writeJvmKeystoreFiles: typeof writeJvmKeystoreFiles;
   jvmTools: typeof jvmTools;
   prepareNssDb: typeof prepareNssDb;
-  nssDbChange: typeof nssDbChange;
   settleNssDbSlot: typeof settleNssDbSlot;
   nssDbDetached: typeof nssDbDetached;
   releaseNssDbDirs: typeof releaseNssDbDirs;
@@ -96,7 +94,6 @@ const realDeps: RunSandboxedCommandDeps = {
   writeJvmKeystoreFiles,
   jvmTools,
   prepareNssDb,
-  nssDbChange,
   settleNssDbSlot,
   nssDbDetached,
   releaseNssDbDirs,
@@ -415,52 +412,40 @@ function releaseDeps(
 
 /** Settles the NSS database once the command has exited. The runner's own
  *  database gets back what the command wrote, less the slot, where the
- *  filesystem mode keeps writes. A covered one cannot keep a write, so one
- *  fails the step, or only warns under fail_on_ca_residue: false. A detached
- *  database is warned about and not written back. */
+ *  filesystem mode keeps writes. A detached database is warned about and not
+ *  written back. */
 function finishNssDb(
   caTrust: CaTrustFiles | undefined,
   options: RunSandboxedCommandOptions,
   deps: RunSandboxedCommandDeps,
 ): void {
-  const { nssDbChange, nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info } = deps;
+  const { nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info } = deps;
   const nssDb = caTrust?.nssDb;
   if (!nssDb) return;
   const { failOnCaResidue, warn } = options;
   const release = () => releaseNssDbDirs(nssDb, releaseDeps(options, deps));
-  const residue = (message: string, code: SandboxErrorCode): void => {
-    if (!failOnCaResidue) {
-      warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
-      return;
-    }
-    throw new SandboxError(`${message}. ${CA_RESIDUE_HINT}`, code);
-  };
 
   // Under ephemeral the mount sits on the overlay, which a host rmdir cannot
   // detach.
   const persist = persists(nssDb.destination, options);
   const detached = persist ? nssDbDetached(nssDb) : undefined;
-  if (detached !== undefined) warn(detached);
-
-  if (!nssDb.slot) {
-    release();
-    const change = nssDbChange(nssDb);
-    if (change !== undefined) residue(change, "NSS_DATABASE_CHANGED");
-    return;
-  }
   if (detached !== undefined) {
+    warn(detached);
     release();
     return;
   }
   try {
-    const outcome = settleNssDbSlot(
-      { ...nssDb, slot: nssDb.slot },
-      {
-        persist,
-        caPem: readFile(caTrust.ownCaPath),
-        onResidue: (message) => residue(message, "NSS_DATABASE_CA_COPIED"),
+    const outcome = settleNssDbSlot(nssDb, {
+      persist,
+      caPem: readFile(caTrust.ownCaPath),
+      onResidue: (message) => {
+        if (!failOnCaResidue) {
+          warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
+          return;
+        }
+        throw new SandboxError(`${message}. ${CA_RESIDUE_HINT}`, "NSS_DATABASE_CA_COPIED");
       },
-    );
+    });
     if (outcome === "discarded") {
       info(
         `buildcage: what the command wrote to the NSS database at ${nssDb.destination} is ` +
