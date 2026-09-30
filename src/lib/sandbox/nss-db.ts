@@ -53,9 +53,8 @@ import type { MountEntry } from "./types.ts";
  * out of pkcs11.txt and the mirror written back, where the filesystem mode
  * would have kept a write there.
  *
- * A database the runner user cannot write, or one too large to copy, is left
- * as it is with a warning: Chromium opens nothing it cannot open read-write,
- * the slot included.
+ * A database the runner user cannot write gets no slot: Chromium opens nothing
+ * it cannot open read-write, the slot included.
  */
 
 /** Every Chromium reads this path when it exists, even empty; since M146 the
@@ -266,12 +265,8 @@ function warnNotAdded(warn: NssDbDeps["warn"], reason: string): undefined {
   return undefined;
 }
 
-/**
- * Extracts the CA-only database, gives a copy of the runner's database the
- * slot, and creates the directories to mount over. Returns undefined, having
- * warned, when the runner's database cannot take the slot or there is nowhere
- * to mount it.
- */
+/** Returns undefined, having warned, when the runner's database cannot take
+ *  the slot or there is nowhere to mount it. */
 export function prepareNssDb(
   containerName: string,
   dir: string,
