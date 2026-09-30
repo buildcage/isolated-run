@@ -233,10 +233,12 @@ export async function runSandboxStep(
   // `notice`, not `annotation`: readFilesystemInputs reads a renamed input (see
   // SandboxStepDeps).
   const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
-  // Needed only once the command runs, but read here so a typo fails before any setup.
+  // Needed only later, but read here so a typo fails before any setup.
   const failOnCaResidue = readFailOnCaResidue();
   const failOnBlocked = readFailOnBlocked();
   const trafficArtifact = readTrafficArtifactInputs();
+  const { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } =
+    readRuleInputs();
 
   // Before any privileged setup; see assertNonRootUid.
   assertNonRootUid(process.getuid!());
@@ -289,8 +291,6 @@ export async function runSandboxStep(
   log(`buildcage: proxy image: ${imageRef}`);
   const composeFile = resolveComposeFile(localOverride);
 
-  const { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } =
-    readRuleInputs();
   checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, annotation.warning);
   checkKnownBlockedUrlRuleSupport(
     {

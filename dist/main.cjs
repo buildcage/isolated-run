@@ -67227,7 +67227,7 @@ async function runSandboxStep(env, overrides = {}) {
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v1", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs();
+	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs(), { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs();
 	assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
 	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
@@ -67240,7 +67240,7 @@ async function runSandboxStep(env, overrides = {}) {
 		log
 	});
 	log(`buildcage: proxy image: ${imageRef}`);
-	let composeFile = resolveComposeFile(localOverride), { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs();
+	let composeFile = resolveComposeFile(localOverride);
 	checkUrlAndTlsRuleSupport({
 		proxyEngine,
 		proxyMode,
