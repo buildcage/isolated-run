@@ -789,10 +789,13 @@ one runner and failed on the next would be worse than one that is refused everyw
 candidate is a symlink to is reserved as well, since that is where the mount lands
 (`/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` on RHEL, say).
 
-Under `inspect`, a JVM keystore the step covers with its CA-carrying copy, and anything inside the
-NSS database it covers (`~/.pki/nssdb/cert9.db`), are refused too. Which keystores exist depends
-on the JDKs installed, so only the ones the step actually mounts count. Naming the directory holding
-a keystore is fine, and naming `~/.pki/nssdb` itself has the command's changes to it written back.
+Under `inspect`, a CA directory the step covers (`/etc/pki/ca-trust/source/anchors`,
+`/etc/pki/trust/anchors` or `/var/lib/ca-certificates/pem`) and anything in it, a JVM keystore the
+step covers with its CA-carrying copy, and anything inside the NSS database it covers
+(`~/.pki/nssdb/cert9.db`) are refused too. Which of them exist depends on the runner and the JDKs
+installed, so only the ones the step actually mounts count. Naming a keystore's directory, or the
+parent of a CA directory, is fine, and naming `~/.pki/nssdb` itself has the command's changes to it
+written back.
 
 Naming a reserved path, or anything under one, fails the step rather than being quietly ignored.
 Naming a directory that contains them (`write_through: /etc`) is fine: writes elsewhere under it
