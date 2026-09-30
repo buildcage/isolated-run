@@ -386,7 +386,7 @@ export function assembleBundle(
 
 export const CA_RESIDUE_HINT =
   "To let the step carry on with only a warning, set fail_on_ca_residue: false " +
-  "(a copy of the CA is then written back, and a write to a covered NSS database discarded).";
+  "(a copy of the CA is then written back).";
 
 /** Whether a write to path would have outlived the command: whether it lies
  *  under a path the filesystem mode keeps writes to. */

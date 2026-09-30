@@ -20990,7 +20990,7 @@ function finishNssDb(caTrust, options, deps) {
 					warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
 					return;
 				}
-				throw new SandboxError(`${message}. To let the step carry on with only a warning, set fail_on_ca_residue: false (a copy of the CA is then written back, and a write to a covered NSS database discarded).`, "NSS_DATABASE_CA_COPIED");
+				throw new SandboxError(`${message}. To let the step carry on with only a warning, set fail_on_ca_residue: false (a copy of the CA is then written back).`, "NSS_DATABASE_CA_COPIED");
 			}
 		}) === "discarded" && info(`buildcage: what the command wrote to the NSS database at ${nssDb.destination} is discarded, as the filesystem mode discards writes there`);
 	} catch (e) {
