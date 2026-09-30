@@ -114,7 +114,6 @@ describe("runSandboxStep", () => {
     mocks.resolveFilesystemPlan.mockReturnValue({
       overlayRoots: ["/home/runner"],
       writeThroughPaths: ["/home/runner/work/repo/repo/dist"],
-      createdDirs: [],
     });
     mocks.readFailOnCaResidue.mockReturnValue(false);
 
@@ -232,7 +231,6 @@ describe("runSandboxStep", () => {
     mocks.resolveFilesystemPlan.mockReturnValue({
       overlayRoots: ["/home/runner"],
       writeThroughPaths: ["/opt/cache"],
-      createdDirs: [],
     });
     await runSandboxStep(ENV, deps);
 
@@ -380,7 +378,6 @@ describe("runSandboxStep", () => {
       mocks.resolveFilesystemPlan.mockReturnValue({
         overlayRoots: ["/home/runner", "/tmp"],
         writeThroughPaths: [],
-        createdDirs: [],
       });
 
       await runSandboxStep(ENV, deps);
