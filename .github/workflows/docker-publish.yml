@@ -67,7 +67,7 @@ jobs:
         uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
 
       - name: Start Buildcage builder
-        uses: buildcage/docker@394573f1a2982a2d65eebc19a58f5f2e11621d93 # v4.0.2
+        uses: buildcage/docker@b5459229d32c2aad72e4492fac98a192f85f75e0 # v4.0.4
         with:
           proxy_mode: restrict
           proxy_engine: inspect
@@ -132,7 +132,7 @@ jobs:
 
       - name: Show proxy report
         if: always()
-        uses: buildcage/docker/report@394573f1a2982a2d65eebc19a58f5f2e11621d93 # v4.0.2
+        uses: buildcage/docker/report@b5459229d32c2aad72e4492fac98a192f85f75e0 # v4.0.4
         with:
           fail_on_blocked: true
 
