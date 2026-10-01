@@ -497,14 +497,10 @@ port, so the method and the path are neither enforced nor reported.
 ### `inspect` cannot work with everything, in either mode
 
 TLS is terminated, so a tool that pins a certificate, or ships a bundled trust store it never lets
-the system update, will not work. The JVM (Java, Kotlin, Scala) reads only its own keystore rather
-than the CA-trust variables; a JVM already on the runner (the `java` on `PATH` or `$JAVA_HOME`) is
-handled by injecting into a copy of that keystore with the runner's own `keytool`, but any other
-JDK, one the step itself downloads, a keystore under a non-default password, or a
-runner whose only `keytool` is somewhere a sandboxed command can write, falls back to `universal`.
-Chromium's NSS database is given a read-only slot trusting the CA; one the runner user cannot
-write, or one too large to copy, gets none, so Chromium needs `universal`. See
-[Limitations](../README.md#limitations) for the rest of the compatibility picture.
+the system update, will not work. The JVM and Chromium read their own trust stores rather than the
+system one, and only some of those stores get the CA.
+[Limitations](../README.md#under-the-inspect-engine) says which, and has the rest of the
+compatibility picture.
 
 `audit` is not a passive observer here either. TLS is terminated in both modes, so a tool that
 cannot accept the CA fails under `audit` exactly as it would under `restrict`. What `audit` drops is

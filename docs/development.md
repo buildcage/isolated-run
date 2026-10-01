@@ -10,6 +10,7 @@ This document covers local development, testing, and the project structure of is
 - [Formatting & Linting](#formatting--linting)
 - [Viewing Logs](#viewing-logs)
 - [Makefile Commands](#makefile-commands)
+- [Chromium's NSS database](#chromiums-nss-database)
 - [Directory Structure](#directory-structure)
 - [Troubleshooting](#troubleshooting)
 
@@ -259,6 +260,24 @@ The first three integration groups need `BUILDCAGE_LOCAL_IMAGE_REF` and a test-h
 image: the inspect group needs one built from `docker/inspect`, and `test_integration_listener_scope`
 builds both images itself and wants the variable unset. So `make test_integration` records what CI
 runs rather than running it in one go; build the image a group needs, then run that group.
+
+## Chromium's NSS database
+
+Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What the user sees is in
+[Reference](./reference.md#chromium).
+
+- The database is copied into the step's scratch directory. The copy's `pkcs11.txt` gains a second,
+  read-only softoken slot on a database holding only the CA, mounted at `/dev/buildcage-nssdb`, and
+  the copy is mounted read-write over the database. NSS loads every module `pkcs11.txt` names.
+- After the command, if it changed the copy, the slot's bytes are taken back out of `pkcs11.txt` and
+  the copy is written back over the database. A copy whose database path no longer resolves where it
+  did is not written back.
+- Write-backs to the same database take turns under a lock, so a step never copies the database
+  halfway through another's write-back.
+- Which directories Buildcage made and which steps use them is recorded in
+  `/var/tmp/buildcage-<uid>/nssdb-ledger.json`, hidden from the sandbox. Removing a directory
+  detaches every mount on it, so a directory another step still uses is never removed. A directory
+  is identified by its birth time, so on a filesystem without one, created directories stay.
 
 ## Directory Structure
 

@@ -330,10 +330,10 @@ writable path, so a `write_through:` entry cannot take the sandbox's CA trust wi
 
 `filesystem_mode` controls what happens to those writes once the step ends:
 
-| `filesystem_mode`          | What it does                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, exactly as today. Everything else is read-only.                                                                                                                                                                                                                                                                                        |
-| `ephemeral` (experimental) | Every writable path is discarded when the step ends (via an overlay). A separate host mount under one gets an overlay of its own, so its contents stay visible. A FUSE mount without `allow_other`, one the runner cannot stat, or one whose path holds `,` or `:` shows as an empty directory instead, with a warning. A mount of a single file stays hidden too, without a warning: the command sees the file beneath the mount point. |
+| `filesystem_mode`          | What it does                                                                                                                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, exactly as today. Everything else is read-only.                                   |
+| `ephemeral` (experimental) | Every writable path is discarded when the step ends (via an overlay). A host mount under one gets an overlay of its own, with [exceptions](./docs/reference.md#ephemeral-overlays). |
 
 `write_through:` names the paths whose writes reach the real host filesystem in either mode, the
 paths that opt out of whichever default applies:
@@ -542,9 +542,8 @@ reported as blocked; see
 - A tool that pins a specific certificate, or ships a bundled trust store it never lets the system
   update, still needs `proxy_engine: universal` or an `allowed_tls_rules` passthrough, since it will
   not accept the re-signed certificate.
-- The JVM (Java, Kotlin, Scala) reads only its own keystore rather than the CA-trust variables, and
-  a JVM already on the runner is handled: for the step, the CA is added to a copy of the `cacerts`
-  of the `java` on `PATH` and of `$JAVA_HOME`. Any other JDK keeps its own keystore. For one on the
+- Only the JDKs of the `java` on `PATH` and of `$JAVA_HOME` get the CA in their keystore
+  ([above](#ca-trust-and-compatibility)). Any other JDK keeps its own keystore. For one on the
   runner, such as the JDK a Maven or Gradle toolchain forks tests into, set `JAVA_HOME` to it in the
   step's `env:` or use `proxy_engine: universal` for that step. A JDK the step itself fetches
   (Gradle's toolchain auto-provisioning, `sdk install`, Bazel's embedded JDK or `remotejdk`) is not
@@ -564,9 +563,8 @@ reported as blocked; see
 - A CA-trust variable that is already set is left alone rather than appended to. Appending safely
   would mean resolving the path it points at against the sandbox rootfs without following a symlink
   back out to the host, which this engine does not do yet. The step warns when one points anywhere
-  but the system store, since a tool reading it then fails TLS, and warns the same way about
-  `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `npm_config_cafile`, `AWS_CA_BUNDLE`, `CARGO_HTTP_CAINFO` and
-  `BUNDLE_SSL_CA_CERT`.
+  but the system store, since a tool reading it then fails TLS.
+  [Reference](./docs/reference.md#ca-trust-variables) lists the variables it checks.
 - Chromium trusts the CA through a slot added to the NSS database it reads: `~/.pki/nssdb` when it
   exists, else `~/.local/share/pki/nssdb`, else a new `~/.pki/nssdb`, which Chromium then fills. A
   Chromium before M146 does not read `~/.local/share/pki/nssdb`, so use M146 or later where that is

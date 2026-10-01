@@ -17,6 +17,7 @@ details.
 - [Connections that failed](#connections-that-failed)
 - [Traffic artifact](#traffic-artifact)
 - [CA trust variables](#ca-trust-variables)
+- [`ephemeral` overlays](#ephemeral-overlays)
 - [`write_through` paths](#write_through-paths)
 
 ## Action inputs
@@ -667,38 +668,46 @@ creating one. Both are in
 Chromium reads none of these, only its compiled-in root store and the NSS database in `$HOME`.
 Every Chromium reads `~/.pki/nssdb` when it exists, and M146 and later read
 `~/.local/share/pki/nssdb` when it does not, so the database is the first of those that exists, or a
-new `~/.pki/nssdb` when neither does. It is copied into the step's scratch directory, the copy's
-`pkcs11.txt` gains a second, read-only softoken slot on a database holding only this CA, mounted at
-`/dev/buildcage-nssdb`, and the copy is mounted read-write over the database. NSS loads every module
-`pkcs11.txt` names, so Chromium trusts the CA through that slot while the runner's own certificates,
-keys and writes stay in its own database. `$HOME` is the step's, read before the command starts: a
-`HOME` the command changes gets no slot.
+new `~/.pki/nssdb` when neither does. For the step, the database's `pkcs11.txt` gains a second,
+read-only slot on a database holding only this CA, so Chromium trusts the CA while the runner's own
+certificates, keys and writes stay in its own database. `$HOME` is the step's, read before the
+command starts: a `HOME` the command changes gets no slot.
 
-After the command, if it changed the copy, the slot's bytes are taken back out of `pkcs11.txt` and
-the copy is written back over the database, where `filesystem_mode` keeps writes to that path: always
-under `persistent`, and under `ephemeral` only below a `write_through:` entry. Elsewhere the change is
-discarded. A copy that carries the CA itself, which a command changing the CA's trust (`certutil -M`)
-leaves, is not written back: it fails the step, naming the database and pointing at
-`fail_on_ca_residue`, or only warns under `fail_on_ca_residue: false`, which writes it back. Nor is a
-copy whose database path no longer resolves where it did. Parallel write-backs to the same database
-take turns, so the later one replaces the earlier as a whole. A step never copies the database
-halfway through another's write-back.
+What the command writes to the database is kept where `filesystem_mode` keeps writes to that path:
+always under `persistent`, and under `ephemeral` only below a `write_through:` entry. Elsewhere it is
+discarded. The slot itself is never kept. A database that carries the CA itself, which a command
+changing the CA's trust (`certutil -M`) leaves, is not written back: it fails the step, naming the
+database and pointing at `fail_on_ca_residue`, or only warns under `fail_on_ca_residue: false`,
+which writes it back. When parallel steps change the same database, the one that ends later
+replaces the other's changes as a whole.
 
 A database the runner user cannot write, one too large to copy (over 512 files or 20 MiB), or a
 symlink or non-directory on the path leaves the database as it is, with a warning: Chromium in that
 step does not trust the CA and fails TLS through the proxy, so use `proxy_engine: universal` for it.
 Chromium opens nothing it cannot open read-write, so an unwritable database cannot take the slot.
 
-Missing directories are created 0700 and removed, if empty, when the last step using them ends,
-including steps in other jobs of the same runner user. Removing a directory detaches every mount on
-it, so a directory another step still uses is never removed. The record of which directories
-Buildcage made and which steps use them is `/var/tmp/buildcage-<uid>/nssdb-ledger.json`, hidden from
-the sandbox. A directory is identified by its birth time, so on a filesystem without one (some NFS
-mounts), the directories are left in place. If something else, such as a parallel step outside any
-sandbox, removes the directory while a step runs, that step's Chromium stops trusting the proxy CA;
-the step warns, naming the database, and writes nothing back to it. Under `filesystem_mode:
-ephemeral`, when `$HOME` is an overlay of its own and `~/.pki/nssdb` is not written through, a
-missing `~/.pki/nssdb` is made in that overlay, not on the runner.
+Missing directories are created 0700 and removed, if still empty, once no step of the same runner
+user uses them, including steps in other jobs. A database Chromium has filled is not empty, so it
+stays, as it would had Chromium created it. On a filesystem without file birth times (some NFS
+mounts), created directories are always left in place. If something else, such as a parallel step
+outside any sandbox, removes the directory while a step runs, that step's Chromium stops trusting
+the proxy CA; the step warns, naming the database, and writes nothing back to it. Under
+`filesystem_mode: ephemeral`, when `$HOME` is an overlay of its own and `~/.pki/nssdb` is not
+written through, a missing `~/.pki/nssdb` is made in that overlay, not on the runner.
+
+How the slot is added and taken back out is in
+[Development Guide](./development.md#chromiums-nss-database).
+
+## `ephemeral` overlays
+
+Under `filesystem_mode: ephemeral`, each writable path is an overlay whose writes are discarded when
+the step ends. A separate host mount below one of them gets an overlay of its own, so its contents
+stay visible, except in two cases:
+
+- A FUSE mount without `allow_other`, one the runner cannot stat, or one whose path holds `,` or `:`
+  shows as an empty directory, and the step warns.
+- A mount of a single file stays hidden without a warning: the command sees the file beneath the
+  mount point.
 
 ## `write_through` paths
 
