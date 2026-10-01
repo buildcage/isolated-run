@@ -106,7 +106,7 @@ RUN apk add --no-cache --virtual .setcap libcap-utils && \
     setcap cap_net_bind_service=+ep /usr/local/bin/coredns && \
     apk del .setcap
 
-# Writes haproxy.cfg and the Corefile at startup (see init-haproxy-cfg). No
+# Writes haproxy.cfg and the Corefile at startup (see init-cfg). No
 # report-action.js here: src/lib/report.ts builds its own report in-process
 # instead of fetching one from the container.
 COPY --from=qjs-build /build/dist/qjs/docker/universal/scripts/gen-configs.js /opt/buildcage/scripts/gen-configs.js
@@ -122,7 +122,9 @@ COPY --from=gen-seccomp-profile-build /out/gen-seccomp-profile /opt/buildcage/bi
 
 COPY docker/universal/files/THIRD_PARTY_LICENSES /opt/buildcage/THIRD_PARTY_LICENSES
 
-COPY docker/universal/files/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
+# The services both engines run, then this engine's own files on top.
+COPY docker/common/files/s6-rc.d/       /etc/s6-overlay/s6-rc.d/
+COPY docker/common/files/s6-scripts/    /etc/s6-overlay/scripts/
 COPY docker/universal/files/s6-scripts/ /etc/s6-overlay/scripts/
 
 ENTRYPOINT ["/init"]

@@ -2,7 +2,7 @@
 # HAProxy's single listener binds *:10024 (both engines' CoreDNS also binds
 # *:53), but only buildcage0, the veth end run-isolated.sh wires into the
 # sandbox once a step starts, may reach them (see
-# docker/{universal,inspect}/files/s6-scripts/init-iptables). This starts
+# docker/common/files/s6-scripts/init-iptables). This starts
 # each engine's proxy standalone, with no sandbox attached, so buildcage0
 # never exists: :10024/:53 must be unreachable both from another container
 # on the proxy's own compose network and from the runner host itself.

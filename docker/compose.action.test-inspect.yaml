@@ -29,7 +29,7 @@ services:
       # What the action computed, plus a fixture address nothing answers on so
       # the blocked-name scenario has a deterministic target.
       - HOST_ADDRESSES=${HOST_ADDRESSES:-} 10.200.0.199
-      # Test-only: init-inspect-cfg only honours this in an image built with
+      # Test-only: init-cfg only honours this in an image built with
       # BUILDCAGE_TEST_HOOKS=1 (see docker/inspect/Dockerfile's
       # /opt/buildcage/.test-hooks marker). The value below is a fixed
       # in-container path, regardless of where the host-side cert actually lives.

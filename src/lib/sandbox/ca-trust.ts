@@ -123,7 +123,7 @@ function defaultCopyDir(source: string, destination: string): void {
 
 /**
  * Pull the proxy's own CA (generated once per container by
- * init-inspect-cfg) out of the inspect proxy image, the same way
+ * init-cfg) out of the inspect proxy image, the same way
  * extractRuncBootstrap pulls runc and gen-seccomp-profile: `docker cp`, run
  * once per `run:` step, into this run's own scratch dir.
  */

@@ -294,8 +294,9 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 ├── dist/                      # Bundled output (rolldown → CommonJS), committed. dist/qjs and
 │                              # dist/qjs-test are gitignored scratch
 ├── docker/                    # Proxy image build contexts, one per proxy_engine
+│   ├── common/                # Image files both engines share: s6 services, init-iptables
 │   ├── universal/             # alpine + haproxy/CoreDNS/iptables/s6-overlay + pinned runc +
-│   │                          # gen-seccomp-profile, with their s6 service definitions
+│   │                          # gen-seccomp-profile
 │   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay
 │   ├── gen-seccomp-profile/   # Go module: derives a seccomp filter from Docker's default profile
 │   ├── compose.action.yaml    # Runtime compose file the action uses (verified, digest-pinned
@@ -321,6 +322,11 @@ proxy container starts and writes haproxy.cfg and the Corefile from the rules, t
 in `src/core/lib/acl/` (`haproxy-config.ts` for `inspect`, `haproxy-universal-config.ts` for
 `universal`). rolldown bundles it into `/opt/buildcage/scripts/` at image build time, and
 `tsconfig.qjs.json` type-checks it.
+
+Each Dockerfile copies `docker/common/files/` first and the engine's own `files/` on top. An engine
+keeps only what differs: `THIRD_PARTY_LICENSES` and the `init-cfg` script that generates its
+configs. A path in both would be settled silently by copy order, so
+`src/core/lib/docker/engine-files.test.ts` rejects one.
 
 ## Troubleshooting
 

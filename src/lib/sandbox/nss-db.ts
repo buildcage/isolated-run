@@ -63,7 +63,7 @@ import type { MountEntry } from "./types.ts";
 export const NSS_DB_PATH = ".pki/nssdb";
 export const NSS_XDG_DB_PATH = ".local/share/pki/nssdb";
 
-/** Where init-inspect-cfg leaves the CA-only database in the proxy container. */
+/** Where init-cfg leaves the CA-only database in the proxy container. */
 export const NSS_DB_TEMPLATE_CONTAINER_PATH = "/opt/buildcage/nssdb";
 
 /** Where the database holding only the proxy CA is mounted in the sandbox:
