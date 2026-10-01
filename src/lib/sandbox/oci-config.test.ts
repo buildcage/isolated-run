@@ -31,6 +31,7 @@ function pinnedProbes({ absent = [] }: { absent?: ("setpriv" | "nofile")[] } = {
       absent.includes("nofile") ? undefined : parseNofileLimit(PROC_LIMITS, 1073741816),
     shmSizeBytes: () => SHM_BYTES,
     hostname: () => HOSTNAME,
+    varRunRealPath: () => "/run",
   };
 }
 
@@ -231,52 +232,17 @@ describe("buildOciConfig", () => {
       expect(config.linux.readonlyPaths.includes("/proc/bus")).toBeTruthy();
     });
 
-    it("masks known container/VM runtime sockets", () => {
-      const config = build(fakeBaseSpec(), baseArgs);
-      for (const p of [
-        "/var/run/docker.sock",
-        "/run/docker.sock",
-        "/run/containerd/containerd.sock",
-        "/var/run/docker/containerd/containerd.sock",
-        "/run/buildkit/buildkitd.sock",
-        "/run/podman/podman.sock",
-        "/var/run/crio/crio.sock",
-        "/run/dbus/system_bus_socket",
-        "/var/run/dbus/system_bus_socket",
-      ]) {
-        expect(
-          config.linux.maskedPaths.includes(p),
-          `expected maskedPaths to include ${p}`,
-        ).toBeTruthy();
-      }
-    });
-
-    it("masks the named-netns directory, so a step can't list the sandboxes running beside it", () => {
-      const config = build(fakeBaseSpec(), baseArgs);
-      expect(config.linux.maskedPaths).toContain("/run/netns");
-      expect(config.linux.maskedPaths).toContain("/var/run/netns");
-    });
-
-    it("lifts a runtime-socket mask for the exact path a write_through re-exposes", () => {
-      // Otherwise runc's post-mount mask would bind /dev/null back over the
-      // socket the caller deliberately re-exposed (see oci-protected-paths.ts).
+    it("adds no mask under /run, which its tmpfs already covers", () => {
+      // A /var/run spelling would resolve back into /run and mask a path a
+      // write_through entry re-exposed there.
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
-        writable: { ...baseArgs.writable, writablePaths: ["/run/docker.sock"] },
+        env: { ...baseArgs.env, XDG_RUNTIME_DIR: "/run/user/1000" },
       });
-      expect(config.linux.maskedPaths).not.toContain("/run/docker.sock");
-      // Everything not named stays masked.
-      expect(config.linux.maskedPaths).toContain("/run/podman/podman.sock");
-    });
-
-    it("lifts every /run mask when write_through names /run as a whole", () => {
-      const config = build(fakeBaseSpec(), {
-        ...baseArgs,
-        writable: { ...baseArgs.writable, writablePaths: ["/run"] },
-      });
-      for (const p of ["/run/docker.sock", "/run/dbus/system_bus_socket", "/run/netns"]) {
-        expect(config.linux.maskedPaths).not.toContain(p);
-      }
+      const underRun = config.linux.maskedPaths.filter(
+        (p) => p.startsWith("/run/") || p.startsWith("/var/run/"),
+      );
+      expect(underRun).toStrictEqual([]);
     });
 
     it("never lifts the /proc info-leak masks, even under writable: /", () => {
@@ -287,17 +253,6 @@ describe("buildOciConfig", () => {
       for (const p of ["/proc/kcore", "/proc/kallsyms", "/proc/kmsg"]) {
         expect(config.linux.maskedPaths).toContain(p);
       }
-    });
-
-    it("doesn't leak the netns directory into readonlyPaths alongside masking it", () => {
-      const config = build(fakeBaseSpec(), {
-        ...baseArgs,
-        runtime: {
-          ...baseArgs.runtime,
-          hostMounts: [{ mountPoint: "/run/netns", fsType: "tmpfs" }],
-        },
-      });
-      expect(config.linux.readonlyPaths).not.toContain("/run/netns");
     });
 
     it("covers /run with an empty tmpfs so the host's sockets never reach the sandbox", () => {
@@ -319,58 +274,46 @@ describe("buildOciConfig", () => {
       expect(config.linux.readonlyPaths).not.toContain("/run/lock");
     });
 
-    it("also masks the rootless runtime sockets under $XDG_RUNTIME_DIR when set", () => {
+    it("masks an $XDG_RUNTIME_DIR outside /run, which the tmpfs doesn't reach", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
-        env: { ...baseArgs.env, XDG_RUNTIME_DIR: "/run/user/1000" },
+        env: { ...baseArgs.env, XDG_RUNTIME_DIR: "/tmp/runtime-runner" },
       });
-      expect(config.linux.maskedPaths).toContain("/run/user/1000/docker.sock");
-      expect(config.linux.maskedPaths).toContain("/run/user/1000/podman/podman.sock");
+      expect(config.linux.maskedPaths).toContain("/tmp/runtime-runner");
     });
 
-    it("doesn't add rootless runtime socket paths when $XDG_RUNTIME_DIR is unset", () => {
-      const config = build(fakeBaseSpec(), baseArgs);
-      expect(config.linux.maskedPaths).not.toContain("/run/user/1000/docker.sock");
-      expect(config.linux.maskedPaths).not.toContain("/run/user/1000/podman/podman.sock");
-    });
-
-    it("masks /run/user/<uid> (the systemd --user bus dir) built from identity.uid, even without $XDG_RUNTIME_DIR", () => {
-      const config = build(fakeBaseSpec(), baseArgs);
-      expect(config.linux.maskedPaths).toContain("/run/user/1000");
-    });
-
-    it("masks /run/user/<uid> and a different $XDG_RUNTIME_DIR when the two diverge", () => {
+    it("doesn't leak a masked $XDG_RUNTIME_DIR into readonlyPaths when the host mounts it", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
-        env: { ...baseArgs.env, XDG_RUNTIME_DIR: "/run/custom-xdg" },
-      });
-      expect(config.linux.maskedPaths).toContain("/run/user/1000");
-      expect(config.linux.maskedPaths).toContain("/run/custom-xdg");
-    });
-
-    it("doesn't leak /run/user/<uid> into readonlyPaths alongside masking it", () => {
-      const config = build(fakeBaseSpec(), {
-        ...baseArgs,
+        env: { ...baseArgs.env, XDG_RUNTIME_DIR: "/tmp/runtime-runner" },
         runtime: {
           ...baseArgs.runtime,
-          hostMounts: [{ mountPoint: "/run/user/1000", fsType: "tmpfs" }],
+          hostMounts: [{ mountPoint: "/tmp/runtime-runner", fsType: "tmpfs" }],
         },
       });
-      expect(config.linux.maskedPaths).toContain("/run/user/1000");
-      expect(config.linux.readonlyPaths).not.toContain("/run/user/1000");
+      expect(config.linux.maskedPaths).toContain("/tmp/runtime-runner");
+      expect(config.linux.readonlyPaths).not.toContain("/tmp/runtime-runner");
     });
 
-    it("lifts the /run masks under writable: /, the full filesystem opt-out", () => {
-      // write_through: / means "do nothing to the filesystem", so the /run
-      // socket masks come off too (the /proc info-leak masks are separate; see
-      // the test below). The runtime sockets themselves stay unreachable to a
-      // non-privileged GID via the GID substitution in identity.ts.
+    it("covers a /var/run that isn't a link to /run with its own tmpfs, before the writable layers", () => {
+      probes = { ...pinnedProbes(), varRunRealPath: () => "/var/run" };
+      const config = build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/var/run/docker.sock"] },
+      });
+      const destinations = config.mounts.map((m) => m.destination);
+      const varRun = destinations.indexOf("/var/run");
+      expect(config.mounts[varRun]).toMatchObject({ type: "tmpfs" });
+      expect(varRun).toBeLessThan(destinations.indexOf("/var/run/docker.sock"));
+    });
+
+    it("leaves /var/run uncovered under writable: /, like /run", () => {
+      probes = { ...pinnedProbes(), varRunRealPath: () => "/var/run" };
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
         writable: { ...baseArgs.writable, writablePaths: ["/"] },
       });
-      expect(config.linux.maskedPaths).not.toContain("/run/user/1000");
-      expect(config.linux.maskedPaths).not.toContain("/run/docker.sock");
+      expect(config.mounts.map((m) => m.destination)).not.toContain("/var/run");
     });
 
     it("drops the /run coverage tmpfs under writable: /, the documented full opt-out", () => {

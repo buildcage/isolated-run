@@ -19927,7 +19927,14 @@ const realHostProbes = {
 			return;
 		}
 	},
-	hostname: () => node_os.default.hostname()
+	hostname: () => node_os.default.hostname(),
+	varRunRealPath: () => {
+		try {
+			return (0, node_fs.realpathSync)("/var/run");
+		} catch {
+			return;
+		}
+	}
 };
 //#endregion
 //#region src/lib/sandbox/oci-mounts.ts
@@ -19945,30 +19952,38 @@ function withHostShmSize(mounts, hostShmBytes) {
 	});
 }
 const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", HOST_RUN_LOCK_DIR = "/run/lock";
-function hostRunCoverageLayers() {
+function hostRunCoverageLayers(varRunRealPath) {
+	let varRun = varRunRealPath === void 0 || isAtOrUnder(varRunRealPath, "/run") ? [] : [emptyRunTmpfs(varRunRealPath)];
 	return {
-		mounts: [{
-			destination: "/run",
-			type: "tmpfs",
-			source: "tmpfs",
-			options: [
-				"nosuid",
-				"nodev",
-				"mode=0755"
-			]
-		}, {
-			destination: HOST_RUN_LOCK_DIR,
-			type: "tmpfs",
-			source: "tmpfs",
-			options: [
-				"nosuid",
-				"nodev",
-				"noexec",
-				"mode=1777",
-				"size=5242880"
-			]
-		}],
+		mounts: [
+			emptyRunTmpfs("/run"),
+			{
+				destination: HOST_RUN_LOCK_DIR,
+				type: "tmpfs",
+				source: "tmpfs",
+				options: [
+					"nosuid",
+					"nodev",
+					"noexec",
+					"mode=1777",
+					"size=5242880"
+				]
+			},
+			...varRun
+		],
 		writablePaths: new Set([HOST_RUN_LOCK_DIR])
+	};
+}
+function emptyRunTmpfs(destination) {
+	return {
+		destination,
+		type: "tmpfs",
+		source: "tmpfs",
+		options: [
+			"nosuid",
+			"nodev",
+			"mode=0755"
+		]
 	};
 }
 function reservedInternalDestinations() {
@@ -20344,8 +20359,8 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	}
 }
 //#endregion
-//#region scripts/extra-masked-runtime-paths.json
-var extra_masked_runtime_paths_default = [
+//#region src/lib/sandbox/runtime-sockets.ts
+const RUNTIME_SOCKET_PATHS = [
 	"/var/run/docker.sock",
 	"/run/docker.sock",
 	"/run/containerd/containerd.sock",
@@ -20356,15 +20371,9 @@ var extra_masked_runtime_paths_default = [
 	"/run/dbus/system_bus_socket",
 	"/var/run/dbus/system_bus_socket"
 ];
-//#endregion
-//#region src/lib/sandbox/runtime-sockets.ts
 function rootlessRuntimeSocketPaths(env) {
 	let dir = env.XDG_RUNTIME_DIR;
 	return dir ? [`${dir}/docker.sock`, `${dir}/podman/podman.sock`] : [];
-}
-function perUserRuntimeDirs(uid, env) {
-	let xdg = env.XDG_RUNTIME_DIR;
-	return [...new Set([`/run/user/${uid}`, ...xdg ? [xdg] : []])];
 }
 //#endregion
 //#region src/lib/sandbox/identity.ts
@@ -20424,7 +20433,7 @@ function ownerGids(paths, host) {
 	return gids;
 }
 function resolveSandboxGid(primaryGid, env, options = {}) {
-	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...extra_masked_runtime_paths_default, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, nss = host.lookupGroups([
+	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...RUNTIME_SOCKET_PATHS, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, nss = host.lookupGroups([
 		String(primaryGid),
 		...PRIVILEGED_GROUP_NAMES,
 		...FALLBACK_GROUP_NAMES,
@@ -20573,17 +20582,15 @@ var extra_masked_proc_paths_default = [
 ];
 //#endregion
 //#region src/lib/sandbox/oci-protected-paths.ts
-const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"], RUN_DIRS = ["/run", "/var/run"];
+function maskedRuntimeDir(env) {
+	let dir = env.XDG_RUNTIME_DIR;
+	return !dir || ["/run", "/var/run"].some((run) => isAtOrUnder(dir, run)) ? [] : [dir];
+}
 function computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinations) {
 	return hostMounts.filter(({ mountPoint }) => mountPoint !== "/" && !freshMountDestinations.has(mountPoint) && ![...protectedPaths].some((p) => isAtOrUnder(mountPoint, p))).map(({ mountPoint }) => mountPoint);
 }
-function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, uid, env, hostMounts, writablePaths, freshMountDestinations, disableReadonly }) {
-	let reExposed = (p) => [...writablePaths].some((w) => isAtOrUnder(p, w) && (w === "/" || p.replace(/\/+$/, "") === w || RUN_DIRS.some((run) => isAtOrUnder(p, run)))), extraMaskedHostPaths = [
-		...extra_masked_runtime_paths_default,
-		...rootlessRuntimeSocketPaths(env),
-		...perUserRuntimeDirs(uid, env),
-		...EXTRA_MASKED_NETNS_PATHS
-	].filter((p) => !reExposed(p)), maskedPaths = [
+function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, env, hostMounts, writablePaths, freshMountDestinations, disableReadonly }) {
+	let extraMaskedHostPaths = maskedRuntimeDir(env).filter((p) => !writablePaths.has("/") && !writablePaths.has(p.replace(/\/+$/, ""))), maskedPaths = [
 		...baseMaskedPaths,
 		...extra_masked_proc_paths_default,
 		...extraMaskedHostPaths
@@ -20611,7 +20618,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 	})), runCoverage = disableReadonly ? {
 		mounts: [],
 		writablePaths: new Set()
-	} : hostRunCoverageLayers(), mounts = [
+	} : hostRunCoverageLayers(probes.varRunRealPath()), mounts = [
 		...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
 		...runCoverage.mounts,
 		...layers.mounts,
@@ -20621,7 +20628,6 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 	], protectedWritablePaths = new Set([...layers.writablePaths, ...runCoverage.writablePaths]), { maskedPaths, readonlyPaths } = resolveProtectedPaths({
 		baseMaskedPaths: baseSpec.linux.maskedPaths ?? [],
 		baseReadonlyPaths: baseSpec.linux.readonlyPaths ?? [],
-		uid,
 		env,
 		hostMounts,
 		writablePaths: protectedWritablePaths,

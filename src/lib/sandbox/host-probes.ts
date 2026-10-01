@@ -6,7 +6,7 @@
  * Every judgement they make is a pure function here; only the syscalls sit
  * behind the `v8 ignore` below.
  */
-import { existsSync, readFileSync, statfsSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statfsSync } from "node:fs";
 import os from "node:os";
 
 // runc resolves process.args[0] against the *sandbox's* PATH (the step's own
@@ -85,6 +85,8 @@ export interface HostProbes {
   nofileRlimit(): NofileLimit | undefined;
   shmSizeBytes(): number | undefined;
   hostname(): string;
+  /** /var/run's real path, undefined when it doesn't exist. */
+  varRunRealPath(): string | undefined;
 }
 
 // Untested by design, down to the end of the file: the syscalls behind the
@@ -134,5 +136,13 @@ export const realHostProbes: HostProbes = {
   },
 
   hostname: () => os.hostname(),
+
+  varRunRealPath: () => {
+    try {
+      return realpathSync("/var/run");
+    } catch {
+      return undefined;
+    }
+  },
 };
 /* v8 ignore stop */

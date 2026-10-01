@@ -52,6 +52,8 @@ export const RESOLV_CONF_DESTINATION = "/etc/resolv.conf";
 export const HOST_RUN_DIR = "/run";
 /** Recreated writable over the empty /run tmpfs; see hostRunCoverageLayers. */
 export const HOST_RUN_LOCK_DIR = "/run/lock";
+/** A symlink to /run on nearly every host; see hostRunCoverageLayers. */
+export const HOST_VAR_RUN_DIR = "/var/run";
 
 /**
  * Cover the host's `/run` with an empty tmpfs so the `mount --rbind /` rootfs
@@ -65,21 +67,19 @@ export const HOST_RUN_LOCK_DIR = "/run/lock";
  * `/etc/resolv.conf` symlinks into `/run`, so buildOciConfig's resolv.conf mount,
  * ordered after this, recreates the target in the fresh tmpfs.
  *
- * `/var/run` is a symlink to `/run` on every supported runner, so covering `/run`
- * covers it; the `/var/run/...` masks in oci-protected-paths.ts are the fallback
- * for a host where it is instead a separate real directory.
+ * `varRunRealPath` is `/var/run`'s real path, undefined when it doesn't exist.
+ * It is a symlink to `/run` on every mainstream distribution, so covering `/run`
+ * covers it. On a host where it resolves anywhere else, that directory gets the
+ * same empty tmpfs.
  */
-export function hostRunCoverageLayers(): WritableLayers {
+export function hostRunCoverageLayers(varRunRealPath: string | undefined): WritableLayers {
+  const varRun =
+    varRunRealPath === undefined || isAtOrUnder(varRunRealPath, HOST_RUN_DIR)
+      ? []
+      : [emptyRunTmpfs(varRunRealPath)];
   return {
     mounts: [
-      // No noexec/size, matching the host /run and moot regardless: the tmpfs
-      // stays empty, root-owned and force-remounted read-only.
-      {
-        destination: HOST_RUN_DIR,
-        type: "tmpfs",
-        source: "tmpfs",
-        options: ["nosuid", "nodev", "mode=0755"],
-      },
+      emptyRunTmpfs(HOST_RUN_DIR),
       // Writable (1777, like the host), so capped at systemd's 5 MiB default to
       // stop a step filling it (also via /var/lock) and OOMing the runner.
       {
@@ -88,9 +88,16 @@ export function hostRunCoverageLayers(): WritableLayers {
         source: "tmpfs",
         options: ["nosuid", "nodev", "noexec", "mode=1777", "size=5242880"],
       },
+      ...varRun,
     ],
     writablePaths: new Set([HOST_RUN_LOCK_DIR]),
   };
+}
+
+// No noexec/size, matching the host /run and moot regardless: the tmpfs stays
+// empty and root-owned.
+function emptyRunTmpfs(destination: string): MountEntry {
+  return { destination, type: "tmpfs", source: "tmpfs", options: ["nosuid", "nodev", "mode=0755"] };
 }
 
 /**

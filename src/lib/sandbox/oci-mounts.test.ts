@@ -236,7 +236,7 @@ describe("scratchBaseLayers", () => {
 
 describe("hostRunCoverageLayers", () => {
   it("covers /run with an empty tmpfs, then recreates a writable /run/lock", () => {
-    const { mounts } = hostRunCoverageLayers();
+    const { mounts } = hostRunCoverageLayers(HOST_RUN_DIR);
     expect(mounts).toStrictEqual([
       {
         destination: HOST_RUN_DIR,
@@ -254,12 +254,27 @@ describe("hostRunCoverageLayers", () => {
   });
 
   it("mounts /run before /run/lock, so the lock has its parent to mount onto", () => {
-    const { mounts } = hostRunCoverageLayers();
+    const { mounts } = hostRunCoverageLayers(HOST_RUN_DIR);
     expect(mounts.map((m) => m.destination)).toStrictEqual([HOST_RUN_DIR, HOST_RUN_LOCK_DIR]);
   });
 
+  for (const [label, resolved] of [
+    ["a link to /run", HOST_RUN_DIR],
+    ["a link under /run", "/run/legacy"],
+    ["absent", undefined],
+  ] as const) {
+    it(`adds nothing for /var/run when it is ${label}`, () => {
+      expect(hostRunCoverageLayers(resolved).mounts).toHaveLength(2);
+    });
+  }
+
+  it("covers /var/run with the same empty tmpfs when it resolves outside /run", () => {
+    const { mounts } = hostRunCoverageLayers("/var/run");
+    expect(mounts[2]).toStrictEqual({ ...mounts[0], destination: "/var/run" });
+  });
+
   it("reports /run/lock as writable so it isn't forced read-only again", () => {
-    const { writablePaths } = hostRunCoverageLayers();
+    const { writablePaths } = hostRunCoverageLayers(HOST_RUN_DIR);
     expect(writablePaths).toStrictEqual(new Set([HOST_RUN_LOCK_DIR]));
   });
 });

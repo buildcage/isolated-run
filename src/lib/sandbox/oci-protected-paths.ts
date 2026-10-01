@@ -19,30 +19,22 @@
 // dev/build-test-bundle.sh (a bash/jq stand-in for this same function, used
 // by the Mac dev loop) reads the same list instead of hand-duplicating it.
 import EXTRA_MASKED_PROC_PATHS from "../../../scripts/extra-masked-proc-paths.json" with { type: "json" };
+import { HOST_RUN_DIR, HOST_VAR_RUN_DIR } from "./oci-mounts.ts";
 import { isAtOrUnder } from "./paths.ts";
-// A read-only bind mount doesn't stop connect(2) on a still-live socket;
-// masking replaces the path with /dev/null in this mount namespace, so
-// there's no socket left to connect to. See identity.ts for the
-// complementary GID-based layer.
-import {
-  EXTRA_MASKED_RUNTIME_PATHS,
-  rootlessRuntimeSocketPaths,
-  perUserRuntimeDirs,
-} from "./runtime-sockets.ts";
 import type { HostMount } from "./types.ts";
 
-// `ip netns add` leaves its name as a real file under the host's own /run,
-// which the rootfs rbind carries into every sandbox, so a step could list
-// the netns names of the other steps running beside it, and with them the
-// proxy container name each one is derived from. Nothing inside the
-// sandbox has a reason to read them, and nothing here is built on their
-// staying unknown: this only removes an easy way to enumerate them.
-// Both spellings: /var/run is a symlink to /run on most hosts, a real
-// directory on a few. A path that doesn't exist is a no-op: runc's
-// maskPath ignores ENOENT.
-const EXTRA_MASKED_NETNS_PATHS = ["/run/netns", "/var/run/netns"];
-
-const RUN_DIRS = ["/run", "/var/run"];
+/**
+ * `$XDG_RUNTIME_DIR` when it sits outside `/run`, where the `/run` tmpfs does
+ * not reach it. Rootless Docker/Podman, a `systemd --user` bus and the like
+ * keep their sockets there, and a self-hosted runner may point it under the
+ * default-writable `/tmp` or `$HOME`. Masked whole (runc covers a directory
+ * with an empty read-only tmpfs) so no socket in it needs naming.
+ */
+export function maskedRuntimeDir(env: NodeJS.ProcessEnv): string[] {
+  const dir = env.XDG_RUNTIME_DIR;
+  if (!dir || [HOST_RUN_DIR, HOST_VAR_RUN_DIR].some((run) => isAtOrUnder(dir, run))) return [];
+  return [dir];
+}
 
 /**
  * Pure: given the host's real mount table, the set of paths that must stay
@@ -79,7 +71,6 @@ export interface ProtectedPathsInput {
   /** runc's own two lists, which this adds to rather than replaces. */
   baseMaskedPaths: string[];
   baseReadonlyPaths: string[];
-  uid: number;
   env: NodeJS.ProcessEnv;
   /** The host's real mount table, read before run-isolated.sh duplicated it. */
   hostMounts: HostMount[];
@@ -93,7 +84,6 @@ export interface ProtectedPathsInput {
 export function resolveProtectedPaths({
   baseMaskedPaths,
   baseReadonlyPaths,
-  uid,
   env,
   hostMounts,
   writablePaths,
@@ -101,34 +91,20 @@ export function resolveProtectedPaths({
   disableReadonly,
 }: ProtectedPathsInput): { maskedPaths: string[]; readonlyPaths: string[] } {
   // runc applies maskedPaths after every mount, so a still-listed mask would
-  // bind /dev/null back over a path a write_through entry re-exposed. Under /run
-  // any writable ancestor lifts the mask; elsewhere only an entry naming the path
-  // itself, or `/`, does, so an $XDG_RUNTIME_DIR a self-hosted runner puts under
-  // the default-writable /tmp or $HOME stays masked. The /proc masks are not in
+  // bind /dev/null back over a directory a write_through entry re-exposed. Only
+  // an entry naming the directory itself, or `/`, lifts it: one under the
+  // default-writable /tmp or $HOME stays masked. The /proc masks are not in
   // this set and hold even under `write_through: /`.
-  const reExposed = (p: string): boolean =>
-    [...writablePaths].some(
-      (w) =>
-        isAtOrUnder(p, w) &&
-        // $XDG_RUNTIME_DIR is used as given, trailing slash included.
-        (w === "/" || p.replace(/\/+$/, "") === w || RUN_DIRS.some((run) => isAtOrUnder(p, run))),
-    );
-  const extraMaskedHostPaths = [
-    ...EXTRA_MASKED_RUNTIME_PATHS,
-    ...rootlessRuntimeSocketPaths(env),
-    ...perUserRuntimeDirs(uid, env),
-    ...EXTRA_MASKED_NETNS_PATHS,
-  ].filter((p) => !reExposed(p));
+  const extraMaskedHostPaths = maskedRuntimeDir(env).filter(
+    // $XDG_RUNTIME_DIR is used as given, trailing slash included.
+    (p) => !writablePaths.has("/") && !writablePaths.has(p.replace(/\/+$/, "")),
+  );
   const maskedPaths = [...baseMaskedPaths, ...EXTRA_MASKED_PROC_PATHS, ...extraMaskedHostPaths];
   // EXTRA_MASKED_PROC_PATHS are files runc's base spec already lists in
-  // readonlyPaths (sysrq-trigger). The runtime-socket paths don't come from
-  // the base spec, but perUserRuntimeDirs's `/run/user/<uid>` is a real
-  // host mount point (a tmpfs), so computeReadonlyHostMounts above would
-  // otherwise re-add it: masked and readonly on the same path is
+  // readonlyPaths (sysrq-trigger), and $XDG_RUNTIME_DIR can be a host mount
+  // point the sweep below would add. Masked and readonly on the same path is
   // unnecessary and, in the order runc applies them, would make the mask
-  // pointless. Filtering both sources here (the base spec's own list, and
-  // the host-mount sweep) keeps every masked path out of readonlyPaths
-  // regardless of which of the two ways it could have entered it.
+  // pointless, so both sources are filtered.
   const isExtraMasked = (p: string): boolean =>
     EXTRA_MASKED_PROC_PATHS.includes(p) || extraMaskedHostPaths.includes(p);
   const keptReadonlyPaths = baseReadonlyPaths.filter((p) => !isExtraMasked(p));

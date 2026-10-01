@@ -117,21 +117,20 @@ invocation, so no step inherits anything another one left behind.
   enumerating each. A read-only bind would not do: `connect(2)`'s permission check reads the write
   bits, which `mount -o ro` leaves untouched. Only `/run/lock` (writable, where tools lock via
   `/var/lock`) and the proxy's own `resolv.conf` (which `/etc/resolv.conf` symlinks into `/run`) are
-  added back; `/var/run` is a symlink to `/run`, so it is covered too. A `write_through:` entry
-  re-exposes what it names on top, lifting that path's mask: `/run/<x>` one path, `/run` the whole
-  directory, `write_through: /` the whole host. Re-exposing a daemon socket reopens egress through it,
-  and re-exposing all of `/run` leaves the outbound restriction nearly pointless, so it is the
-  caller's deliberate call; by default none of it is reachable. The `/proc` masks below are separate:
-  they guard kernel-memory reads, not filesystem access, and hold even under `write_through: /`.
-- **The runtime-socket paths and per-user runtime directory are also masked**, a second layer for the
-  rare host where `/var/run` is a separate real directory the `/run` tmpfs does not reach:
-  `/var/run/docker.sock`, containerd's, podman's, buildkit's, crio's and their rootless
-  `$XDG_RUNTIME_DIR` equivalents map to `/dev/null`, and the D-Bus system bus and `/run/user/<uid>`
-  (a `systemd --user` session bus, reaching which lets a compromised command start a unit outside
-  every namespace) to an empty directory. A `write_through:` entry naming one of these lifts its mask
-  too, so an explicit opt-in is not silently undone. Outside `/run` the entry has to name the path
-  itself, or be `/`, so an `$XDG_RUNTIME_DIR` a self-hosted runner puts under `/tmp` or `$HOME` stays
-  masked although both are writable. A socket a workflow places outside `/run` stays reachable (an
+  added back. `/var/run` is a symlink to `/run` on every mainstream distribution, so it is covered
+  too; on a host where it is a separate directory, that directory gets the same empty tmpfs. A
+  `write_through:` entry re-exposes what it names on top: `/run/<x>` one path, `/run` the whole
+  directory, `write_through: /` the whole host. Re-exposing a daemon socket reopens egress through
+  it, and re-exposing all of `/run` leaves the outbound restriction nearly pointless, so it is the
+  caller's deliberate call; by default none of it is reachable. The `/proc` masks below are
+  separate: they guard kernel-memory reads, not filesystem access, and hold even under
+  `write_through: /`.
+- **`$XDG_RUNTIME_DIR` is masked when it sits outside `/run`**, which a self-hosted runner may point
+  under `/tmp` or `$HOME`. Rootless Docker and Podman and a `systemd --user` session bus keep their
+  sockets there, and reaching that bus lets a compromised command start a unit outside every
+  namespace, so the whole directory is replaced with an empty one. Only a `write_through:` entry
+  naming that directory itself, or `/`, lifts the mask, so it stays masked although `/tmp` and
+  `$HOME` are writable. A socket a workflow places elsewhere outside `/run` stays reachable (an
   `ssh-agent` under `$TMPDIR`, say); see
   [What the sandbox does not stop](#what-the-sandbox-does-not-stop).
 
@@ -150,8 +149,8 @@ invocation, so no step inherits anything another one left behind.
   on a runner shares one real UID. The reveal is a non-recursive `bind`, which keeps the
   `mount --rbind /` rootfs staged beside it from coming back in as a second, writable host root.
 - **No list of the sandboxes beside it.** `ip netns add` leaves each namespace's name under the
-  host's `/run/netns`, which the rootfs bind-mount would otherwise carry in, so that directory is
-  masked as well. Defense in depth rather than a boundary anything rests on.
+  host's `/run/netns`, which the `/run` tmpfs hides with the rest. Defense in depth rather than a
+  boundary anything rests on.
 
 ### What it can write
 
@@ -452,7 +451,7 @@ copied out, into this run's scratch directory. The step removes the container wi
 | Tunnels over ICMP, raw UDP or QUIC, or falls back to IPv6                                          | Dropped before the proxy; only TCP is redirected to it, and the proxy reaches allowed names over IPv4                                                                  |
 | Connects to a raw address                                                                          | Checked against `allowed_ip_rules`, and refused when nothing matches                                                                                                   |
 | Speaks something that is not HTTP to a port no rule covers                                         | Read as a request by the stage it is handed to and refused, on both engines, and the refusal is counted like any other                                                 |
-| Escalates privileges, or reaches a container runtime socket                                        | Nothing to escalate to: every capability set is empty, and the sockets are masked with `/dev/null`                                                                     |
+| Escalates privileges, or reaches a container runtime socket                                        | Nothing to escalate to: every capability set is empty, and the host's `/run`, where the sockets live, is an empty tmpfs                                                |
 | Reads another process's memory                                                                     | Structurally refused by the kernel across a PID namespace boundary, capabilities or not                                                                                |
 | Ignores the proxy variables entirely                                                               | No effect: interception is at the network level, not opt-in                                                                                                            |
 | Sends `*` as its method, `Host` or path in audit, to plant a wildcard in the suggested rules       | Left out of the suggested `allowed_url_rules` and listed beside it, so pasting them never permits more than the command sent                                           |
@@ -664,8 +663,8 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 - **Rootful Docker.** The isolation joins the proxy container's netns through Docker's own
   `NetworkSettings.SandboxKey` path, which under rootless Docker or `userns-remap` may live inside a
   mount namespace of its own and not be reachable from the host. Those setups are not supported.
-- **Not from inside the isolated command.** The primary GID substitution and the masked runtime
-  sockets together mean the command can neither reach a runtime socket through group membership nor
+- **Not from inside the isolated command.** The primary GID substitution and the empty `/run`
+  together mean the command can neither reach a runtime socket through group membership nor
   find one at its usual path, so a step that itself needs to invoke `docker` cannot be wrapped.
 - **`filesystem_mode: ephemeral` needs overlayfs support on the runner's own filesystem**, checked
   by a preflight probe so an unsupported runner fails with a clear error. It is known to fail where

@@ -4,11 +4,11 @@
 # under /run were left reachable, either would let it escape the isolation
 # (docker.sock -> a sibling privileged container; a systemd --user bus ->
 # a unit that runs entirely outside every namespace the sandbox creates).
-# See identity.ts (GID substitution) and runtime-sockets.ts with
-# oci-protected-paths.ts (the per-path and per-user-runtime-dir masking) for
-# the two independent layers that close this. Drives dist/main.cjs directly,
-# without the real action wrapper; see test-e2e.yml's test_sandbox_enforcement
-# for the one case that does exercise the real action.
+# See identity.ts (GID substitution) and oci-mounts.ts's hostRunCoverageLayers
+# (the empty /run tmpfs) for the two independent layers that close this.
+# Drives dist/main.cjs directly, without the real action wrapper; see
+# test-e2e.yml's test_sandbox_enforcement for the one case that does exercise
+# the real action.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 
@@ -66,8 +66,7 @@ echo "=== Runtime Socket Escape Assertions ==="
 echo ""
 
 # --- always run: sandbox must start regardless of what exists on the host
-# (in particular, /run/user/<uid> not existing at all, masking a path
-# runc can't find is a no-op, not a failure; see oci-protected-paths.ts)
+# (in particular, whether /run/user/<uid> exists at all)
 if grep -q '^SANDBOX_GID=' "$WORKDIR/out.log"; then
   pass "sandbox started successfully"
 else
@@ -83,7 +82,7 @@ if [ "$RUN_DOCKER_SOCKET_CHECKS" -eq 1 ]; then
   fi
 
   if grep -q '^SOCKET_IS_SOCKET=no$' "$WORKDIR/out.log"; then
-    pass "/var/run/docker.sock is not a socket inside the sandbox (masked)"
+    pass "/var/run/docker.sock is not a socket inside the sandbox"
   else
     fail "/var/run/docker.sock is still a live socket inside the sandbox -- see out.log"
   fi
@@ -106,20 +105,20 @@ else
 fi
 
 if grep -q '^SYSTEM_BUS_IS_SOCKET=no$' "$WORKDIR/out.log"; then
-  pass "/run/dbus/system_bus_socket is not a socket inside the sandbox (masked)"
+  pass "/run/dbus/system_bus_socket is not a socket inside the sandbox"
 else
   fail "/run/dbus/system_bus_socket is still a live socket inside the sandbox -- see out.log"
 fi
 
 if [ "$RUN_USER_RUNTIME_DIR_CHECKS" -eq 1 ]; then
   if grep -q '^RUNTIME_DIR_EMPTY=yes$' "$WORKDIR/out.log"; then
-    pass "/run/user/<uid> is an empty directory inside the sandbox (masked)"
+    pass "/run/user/<uid> is absent or empty inside the sandbox"
   else
     fail "/run/user/<uid> has content inside the sandbox -- see out.log"
   fi
 
   if grep -q '^USER_BUS_IS_SOCKET=no$' "$WORKDIR/out.log"; then
-    pass "/run/user/<uid>/bus is not a socket inside the sandbox (masked)"
+    pass "/run/user/<uid>/bus is not a socket inside the sandbox"
   else
     fail "/run/user/<uid>/bus is still a live socket inside the sandbox -- see out.log"
   fi
@@ -136,6 +135,27 @@ if [ "$RUN_SYSTEMD_USER_CHECK" -eq 1 ]; then
   fi
 else
   echo "  SKIP  systemd-run --user check (systemd-run not found on this host)"
+fi
+
+# write_through names a socket under /run: it comes back as named, with no
+# /var/run spelling of an old mask resolving into /run and undoing it.
+if [ -S /run/dbus/system_bus_socket ]; then
+  : > "$WORKDIR/state.env"
+  GITHUB_WORKSPACE="$WORKDIR" \
+  GITHUB_STATE="$WORKDIR/state.env" \
+  GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
+  BUILDCAGE_BUILD_TEST_HOOKS=1 \
+  BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
+  INPUT_WRITE_THROUGH="/run/dbus/system_bus_socket" \
+  INPUT_RUN='if [ -S /var/run/dbus/system_bus_socket ]; then echo "REEXPOSED_BUS_IS_SOCKET=yes"; else echo "REEXPOSED_BUS_IS_SOCKET=no"; fi' \
+    node dist/main.cjs >> "$WORKDIR/out.log" 2>&1
+  if grep -q '^REEXPOSED_BUS_IS_SOCKET=yes$' "$WORKDIR/out.log"; then
+    pass "write_through re-exposes /run/dbus/system_bus_socket as named"
+  else
+    fail "write_through: /run/dbus/system_bus_socket did not bring the socket back -- see out.log"
+  fi
+else
+  echo "  SKIP  re-exposure check (/run/dbus/system_bus_socket doesn't exist on this host)"
 fi
 
 if [ "$FAILURES" -gt 0 ]; then
