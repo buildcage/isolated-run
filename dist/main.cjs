@@ -21812,16 +21812,14 @@ function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blocked
 		shouldFail: !1
 	};
 }
-function countNoun(engine) {
-	return engine === "inspect" ? "connection(s) and lookup(s)" : "connection(s)";
-}
-function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, engine, isAudit }) {
-	let base = `${blockedCount} blocked ${countNoun(engine)} detected by buildcage ${engineLabel}`;
+const COUNT_NOUN = "connection(s) and lookup(s)";
+function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }) {
+	let base = `${blockedCount} blocked ${COUNT_NOUN} detected by buildcage ${engineLabel}`;
 	if (isAudit) return base;
 	let unexpected = blockedRows.filter((row) => !row.expected).length;
 	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known_blocked_rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known_blocked_rules)`;
 }
-function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, engineLabel, engine }) {
+function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, engineLabel }) {
 	let outcome = determineBlockedOutcome({
 		isAudit,
 		failOnBlocked,
@@ -21832,7 +21830,6 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 		blockedCount,
 		blockedRows,
 		engineLabel,
-		engine,
 		isAudit
 	});
 	if (logLooksPlausible) return {
@@ -21843,7 +21840,7 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 		...outcome,
 		message: `${base}, but the logs are incomplete and this is not a full record`
 	};
-	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${countNoun(engine)} still recorded)` : incomplete}. Either the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
+	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. Either the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
 	return {
 		...outcome,
 		message
@@ -21858,8 +21855,7 @@ function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 		blockedCount: report.blockedCount,
 		blockedRows: report.blocked,
 		logLooksPlausible: report.logLooksPlausible,
-		engineLabel,
-		engine: report.engine
+		engineLabel
 	})], undecided = describeUndecidedRequests(report, engineLabel);
 	undecided && emissions.push(undecided);
 	let failed = describeFailedConnections(report, engineLabel);
