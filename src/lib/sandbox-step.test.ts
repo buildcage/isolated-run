@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+import { InvalidInputError } from "#core/lib/actions/inputs.ts";
+
 import { SandboxError } from "./errors.ts";
 import { runSandboxStep, type SandboxStepDeps } from "./sandbox-step.ts";
 
@@ -148,7 +150,7 @@ describe("runSandboxStep", () => {
     "readRuleInputs",
   ] as const)("fails on a bad value from %s before any setup", async (reader) => {
     mocks[reader].mockImplementation(() => {
-      throw new SandboxError("Invalid input", "INVALID_BOOLEAN_INPUT");
+      throw new InvalidInputError("Invalid input", "INVALID_BOOLEAN_INPUT");
     });
 
     await expect(runSandboxStep(ENV, deps)).rejects.toThrow("Invalid input");

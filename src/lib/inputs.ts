@@ -21,6 +21,7 @@ import {
   parseKnownBlockedRulesOrThrow,
   parseRulesOrThrow,
 } from "#core/lib/acl/rules.ts";
+import { readBooleanInput, readRetentionDays } from "#core/lib/actions/inputs.ts";
 
 import { resolveProxyEngine, type ProxyEngine } from "./engine.ts";
 import { SandboxError } from "./errors.ts";
@@ -190,19 +191,6 @@ export function readStepLabel(getInput: GetInput = core.getInput): string | unde
   return getInput("label") || undefined;
 }
 
-/** Not `getBooleanInput`, which cannot tell unset from misspelled. Only unset,
- *  as when an integration script skips action.yml's defaults, takes the default. */
-function readBooleanInput(name: string, fallback: boolean, getInput: GetInput): boolean {
-  const value = getInput(name);
-  if (value === "") return fallback;
-  if (["true", "True", "TRUE"].includes(value)) return true;
-  if (["false", "False", "FALSE"].includes(value)) return false;
-  throw new SandboxError(
-    `Invalid ${name}: ${JSON.stringify(value)}. Must be true or false.`,
-    "INVALID_BOOLEAN_INPUT",
-  );
-}
-
 export function readFailOnCaResidue(getInput: GetInput = core.getInput): boolean {
   return readBooleanInput("fail_on_ca_residue", true, getInput);
 }
@@ -222,15 +210,8 @@ export interface TrafficArtifactInputs {
 export function readTrafficArtifactInputs(
   getInput: GetInput = core.getInput,
 ): TrafficArtifactInputs {
-  const upload = readBooleanInput("upload_traffic_artifact", false, getInput);
-  const days = getInput("traffic_artifact_retention_days");
-  if (days === "") return { upload };
-  if (!/^[1-9]\d*$/.test(days)) {
-    throw new SandboxError(
-      `Invalid traffic_artifact_retention_days: ${JSON.stringify(days)}. ` +
-        "Must be a whole number of days above zero.",
-      "INVALID_TRAFFIC_ARTIFACT_RETENTION_DAYS",
-    );
-  }
-  return { upload, retentionDays: Number(days) };
+  return {
+    upload: readBooleanInput("upload_traffic_artifact", false, getInput),
+    retentionDays: readRetentionDays(getInput),
+  };
 }
