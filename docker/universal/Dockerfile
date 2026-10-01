@@ -79,7 +79,6 @@ RUN apk add --no-cache \
       "haproxy~${HAPROXY_BRANCH}" \
       iptables \
       iproute2 \
-      gettext \
       curl \
       quickjs-ng
 
@@ -94,7 +93,6 @@ ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2
 ENV S6_KILL_GRACETIME=500
 
 RUN mkdir -p /etc/haproxy/rules /var/log/haproxy /etc/coredns /var/log/coredns
-COPY docker/universal/files/haproxy.cfg.template /etc/haproxy/haproxy.cfg.template
 
 # For s6-rc.d/haproxy/run. The binary alone needs only musl; the package
 # would pull in ~6MB.
@@ -108,12 +106,10 @@ RUN apk add --no-cache --virtual .setcap libcap-utils && \
     setcap cap_net_bind_service=+ep /usr/local/bin/coredns && \
     apk del .setcap
 
-# Tools (QuickJS scripts, rolldown-bundled by qjs-build above).
-# convert-rule.js and gen-coredns.js are used by init-haproxy-cfg. No
+# Writes haproxy.cfg and the Corefile at startup (see init-haproxy-cfg). No
 # report-action.js here: src/lib/report.ts builds its own report in-process
 # instead of fetching one from the container.
-COPY --from=qjs-build /build/dist/qjs/src/core/scripts/convert-rule.js /opt/buildcage/scripts/convert-rule.js
-COPY --from=qjs-build /build/dist/qjs/docker/universal/scripts/gen-coredns.js /opt/buildcage/scripts/gen-coredns.js
+COPY --from=qjs-build /build/dist/qjs/docker/universal/scripts/gen-configs.js /opt/buildcage/scripts/gen-configs.js
 
 # runc, extracted onto the runner host at action startup and used by
 # run-isolated.sh to execute the isolated command (see docs/development.md)

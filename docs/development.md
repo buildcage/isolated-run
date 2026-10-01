@@ -294,15 +294,13 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │       │                      # actions/, docker/, provenance/, report/ and log/ are Node-only,
 │       │                      # and test/test-shim.ts is the node:test-alike shim *.test.ts uses
 │       │                      # under either runtime
-│       └── scripts/           # QuickJS entry points, rolldown-bundled into
-│                              # /opt/buildcage/scripts/ at image build time
+│       └── scripts/           # The QuickJS test runner and qjs's type declarations
 ├── dist/                      # Bundled output (rolldown → CommonJS), committed. dist/qjs and
 │                              # dist/qjs-test are gitignored scratch
 ├── docker/                    # Proxy image build contexts, one per proxy_engine
 │   ├── universal/             # alpine + haproxy/CoreDNS/iptables/s6-overlay + pinned runc +
-│   │                          # gen-seccomp-profile, with their config and s6 service definitions
-│   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay, plus scripts/ (gen-configs
-│   │                          # runs under QuickJS at container startup)
+│   │                          # gen-seccomp-profile, with their s6 service definitions
+│   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay
 │   ├── gen-seccomp-profile/   # Go module: derives a seccomp filter from Docker's default profile
 │   ├── compose.action.yaml    # Runtime compose file the action uses (verified, digest-pinned
 │   │                          # image ref), distinct from the top-level compose.yaml below
@@ -321,6 +319,12 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │                              # also what CI's test_sandbox/test_sandbox_* jobs build from)
 └── Makefile                   # Operational commands
 ```
+
+Each engine directory carries a `scripts/gen-configs.qjs.ts`, which runs under QuickJS when the
+proxy container starts and writes haproxy.cfg and the Corefile from the rules, through the generators
+in `src/core/lib/acl/` (`haproxy-config.ts` for `inspect`, `haproxy-universal-config.ts` for
+`universal`). rolldown bundles it into `/opt/buildcage/scripts/` at image build time, and
+`tsconfig.qjs.json` type-checks it.
 
 ## Troubleshooting
 
