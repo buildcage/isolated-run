@@ -79,7 +79,7 @@ LABEL org.opencontainers.image.title="isolated-run-inspect-proxy" \
 # for an SNI, resolves names itself, and normalises a path before matching
 # it. No dnsmasq, no gettext/envsubst: CoreDNS replaces dnsmasq, and
 # gen-configs.js generates haproxy.cfg directly instead of templating it.
-# nss-tools provides certutil for init-inspect-cfg's NSS database.
+# nss-tools provides certutil for init-cfg's NSS database.
 ARG HAPROXY_BRANCH
 RUN apk add --no-cache \
       s6-overlay \
@@ -115,7 +115,7 @@ RUN apk add --no-cache --virtual .setcap libcap-utils && \
 RUN mkdir -p /etc/haproxy/rules /etc/coredns /var/log/haproxy /var/log/coredns
 
 # Tools (QuickJS scripts, rolldown-bundled by qjs-build above).
-# gen-configs.js is used by init-inspect-cfg to generate both haproxy.cfg
+# gen-configs.js is used by init-cfg to generate both haproxy.cfg
 # and the CoreDNS Corefile from one shared rule parse, so the two can't
 # describe different allowlists. No report-action.js here: src/lib/report.ts
 # builds its own report in-process instead of fetching one from the
@@ -133,14 +133,16 @@ COPY --from=gen-seccomp-profile-build /out/gen-seccomp-profile /opt/buildcage/bi
 
 COPY docker/inspect/files/THIRD_PARTY_LICENSES /opt/buildcage/THIRD_PARTY_LICENSES
 
-COPY docker/inspect/files/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
+# The services both engines run, then this engine's own files on top.
+COPY docker/common/files/s6-rc.d/     /etc/s6-overlay/s6-rc.d/
+COPY docker/common/files/s6-scripts/  /etc/s6-overlay/scripts/
 COPY docker/inspect/files/s6-scripts/ /etc/s6-overlay/scripts/
 
 # Test-only. The integration fixtures serve a self-signed certificate no
 # public store contains, so the proxy has to be told to trust it when it
 # verifies the origin. The marker exists only in an image built with this
 # arg set, so a released image has no way to be told the same thing: the
-# check in init-inspect-cfg finds nothing to act on. Never set for a real
+# check in init-cfg finds nothing to act on. Never set for a real
 # build.
 ARG BUILDCAGE_TEST_HOOKS=""
 RUN if [ -n "$BUILDCAGE_TEST_HOOKS" ]; then touch /opt/buildcage/.test-hooks; fi
