@@ -109,7 +109,8 @@ dynamic `import()` gated by that build-time flag. Without the flag (i.e. every n
 build), rolldown's own module-graph tree-shaking excludes that entire file from the bundle. It is
 physically absent, not just unreachable. A CI check (`unit_test` job) additionally confirms a
 normal build's `dist/` never mentions `BUILDCAGE_BUILD_TEST_HOOKS`,
-`BUILDCAGE_LOCAL_IMAGE_REF` or `BUILDCAGE_TEST_COMPOSE_FILE`.
+`BUILDCAGE_LOCAL_IMAGE_REF`, `BUILDCAGE_TEST_COMPOSE_FILE` or `BUILDCAGE_RUN_DEBUG_SUMMARY_FILE`
+(the copy of the step summary the integration assertions read).
 
 To exercise it locally:
 

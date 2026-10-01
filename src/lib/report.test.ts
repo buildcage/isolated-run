@@ -189,6 +189,7 @@ describe("writeReportSummary", () => {
   afterEach(() => {
     rmSync(scratchDir, { recursive: true, force: true });
     process.exitCode = exitCode;
+    vi.unstubAllEnvs();
   });
 
   // A blocked connection under restrict + fail_on_blocked is the one outcome
@@ -264,7 +265,8 @@ describe("writeReportSummary", () => {
     vi.unstubAllEnvs();
   });
 
-  it("mirrors the summary to BUILDCAGE_RUN_DEBUG_SUMMARY_FILE when it is set", async () => {
+  it("mirrors the summary to BUILDCAGE_RUN_DEBUG_SUMMARY_FILE in a test-hooks build", async () => {
+    vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "1");
     vi.spyOn(console, "log").mockImplementation(() => {});
     const appendFile = vi.fn();
 
@@ -281,7 +283,25 @@ describe("writeReportSummary", () => {
     expect(appendFile.mock.calls[0][1]).toContain("Outbound Traffic Report");
   });
 
+  it("writes no mirror in a normal build, whatever the runtime env says", async () => {
+    vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "");
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const appendFile = vi.fn();
+
+    await writeReportSummary(
+      report(),
+      createAnnotation(false),
+      options(),
+      false,
+      { BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: "/tmp/debug-summary.md" },
+      { appendFile },
+    );
+
+    expect(appendFile).not.toHaveBeenCalled();
+  });
+
   it("writes no mirror when the runner named no file for one", async () => {
+    vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "1");
     vi.spyOn(console, "log").mockImplementation(() => {});
     const appendFile = vi.fn();
 
