@@ -713,7 +713,7 @@ How the slot is added and taken back out is in
 
 Under `filesystem_mode: ephemeral`, each writable path is an overlay whose writes are discarded when
 the step ends. A separate host mount below one of them gets an overlay of its own, so its contents
-stay visible. These do not:
+stay visible, except in two cases:
 
 - A FUSE mount without `allow_other`, one the runner cannot stat, or one whose path holds `,` or `:`
   shows as an empty directory, and the step warns.

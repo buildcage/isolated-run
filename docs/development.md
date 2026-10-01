@@ -263,8 +263,8 @@ runs rather than running it in one go; build the image a group needs, then run t
 
 ## Chromium's NSS database
 
-Under `inspect`, the step gives Chromium a slot trusting the CA (behavior in
-[Reference](./reference.md#chromium)) like this:
+Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What the user sees is in
+[Reference](./reference.md#chromium).
 
 - The database is copied into the step's scratch directory. The copy's `pkcs11.txt` gains a second,
   read-only softoken slot on a database holding only the CA, mounted at `/dev/buildcage-nssdb`, and
@@ -277,7 +277,7 @@ Under `inspect`, the step gives Chromium a slot trusting the CA (behavior in
 - Which directories Buildcage made and which steps use them is recorded in
   `/var/tmp/buildcage-<uid>/nssdb-ledger.json`, hidden from the sandbox. Removing a directory
   detaches every mount on it, so a directory another step still uses is never removed. A directory
-  is identified by its birth time, which is why a filesystem without one keeps them.
+  is identified by its birth time, so on a filesystem without one, created directories stay.
 
 ## Directory Structure
 
