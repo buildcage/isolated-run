@@ -23,8 +23,6 @@ services:
       - ALLOWED_HTTPS_RULES=${ALLOWED_HTTPS_RULES:-}
       - ALLOWED_HTTP_RULES=${ALLOWED_HTTP_RULES:-}
       - ALLOWED_IP_RULES=${ALLOWED_IP_RULES:-}
-      # The test-dns fixture's address on test-net (../compose.test-universal.yaml).
-      - EXTERNAL_RESOLVER=10.200.0.53
       # Overridable because test/integration-test-concurrent.sh puts two
       # proxies on this network at once, and they cannot share an address.
       - TEST_NET_ADDR=${TEST_NET_ADDR:-10.200.0.2/24}
@@ -37,6 +35,9 @@ services:
     # Wrapped here rather than in the image: the proxy is the product image
     # and carries no test-only setup.
     entrypoint: ["/test-hooks/attach-test-net-addr.sh", "/init"]
+    # Docker's embedded DNS forwards here, so HAProxy reaches the fixture resolver
+    # through resolv.conf, as it reaches the runner's DNS in a job.
+    dns: [10.200.0.53]
     networks:
       default:
       test-net:

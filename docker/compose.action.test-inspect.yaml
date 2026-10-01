@@ -24,8 +24,6 @@ services:
       - ALLOWED_IP_RULES=${ALLOWED_IP_RULES:-}
       - ALLOWED_URL_RULES=${ALLOWED_URL_RULES:-}
       - ALLOWED_TLS_RULES=${ALLOWED_TLS_RULES:-}
-      # The test-dns fixture's address on test-net (../compose.test-inspect.yaml).
-      - EXTERNAL_RESOLVER=10.200.0.53
       - TEST_NET_ADDR=10.200.0.2/24
       - TEST_NET_SUBNET=${TEST_NET_SUBNET:-10.210.0.0/24}
       # What the action computed, plus a fixture address nothing answers on so
@@ -45,6 +43,9 @@ services:
     # Wrapped here rather than in the image: the proxy is the product image
     # and carries no test-only setup.
     entrypoint: ["/test-hooks/attach-test-net-addr.sh", "/init"]
+    # Docker's embedded DNS forwards here, so HAProxy reaches the fixture resolver
+    # through resolv.conf, as it reaches the runner's DNS in a job.
+    dns: [10.200.0.53]
     networks:
       default:
       test-net:

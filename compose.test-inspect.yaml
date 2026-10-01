@@ -43,9 +43,8 @@ services:
     networks:
       test-net:
 
-  # Upstream for the proxy's HAProxy, which resolves the real destination
-  # against it once a request has already passed the rules; CoreDNS itself
-  # never forwards here.
+  # Upstream for the proxy's HAProxy, through Docker's embedded DNS, once a
+  # request has already passed the rules; CoreDNS itself never forwards here.
   test-dns:
     build: test/test-dns-inspect
     cap_add:
