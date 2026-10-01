@@ -98,7 +98,9 @@ describe("computeReportOutcomes", () => {
     });
     const outcome = blockedOutcome(r);
     expect(outcome.level).toBe("notice");
-    expect(outcome.message).toBe("2 blocked connection(s) detected by buildcage sandbox");
+    expect(outcome.message).toBe(
+      "2 blocked connection(s) and lookup(s) detected by buildcage sandbox",
+    );
   });
 
   it("warns about a request no rule decided, naming this action", () => {
