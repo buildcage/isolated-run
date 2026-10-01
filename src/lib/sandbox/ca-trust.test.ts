@@ -151,7 +151,7 @@ describe("writeCaTrustFiles", () => {
 
   it("lists the copies of every kind in mount order", () => {
     const anchors = "/etc/pki/ca-trust/source/anchors";
-    const keystore = "/etc/pki/java/cacerts";
+    const keystore = "/opt/java/lib/security/cacerts";
     const { deps } = fakeHost(
       { [CA_INPUT]: `${FAKE_CA}\n`, [DEBIAN_STORE]: `${FAKE_SYSTEM_BUNDLE}\n`, [keystore]: "" },
       [anchors],
@@ -161,7 +161,7 @@ describe("writeCaTrustFiles", () => {
     const { stores } = writeCaTrustFiles(
       CA_INPUT,
       "/scratch",
-      {},
+      { JAVA_HOME: "/opt/java" },
       { java: undefined, keytool: "/usr/bin/keytool" },
       deps,
     );
@@ -412,10 +412,9 @@ describe("discoverJvmKeystores", () => {
     ).toEqual([`${dir}/jssecacerts`, `${dir}/cacerts`]);
   });
 
-  it("falls back to the known fixed directories when JAVA_HOME is unset", () => {
-    expect(discoverJvmKeystores({}, undefined, at(["/etc/pki/java/cacerts"]))).toEqual([
-      "/etc/pki/java/cacerts",
-    ]);
+  // RHEL's ca-certificates ships this keystore on a runner with no JDK at all.
+  it("ignores a keystore neither the java on PATH nor JAVA_HOME reaches", () => {
+    expect(discoverJvmKeystores({}, undefined, at(["/etc/pki/java/cacerts"]))).toEqual([]);
   });
 
   // The java PATH resolves need not be the one JAVA_HOME names.
@@ -439,14 +438,16 @@ describe("discoverJvmKeystores", () => {
     ).toEqual(["/opt/jdk8/jre/lib/security/cacerts"]);
   });
 
-  // JAVA_HOME's cacerts symlinked to a fixed path is one keystore, not two.
+  // A distribution's JDKs all link their cacerts to one shared keystore.
   it("resolves and deduplicates a keystore reachable by two paths", () => {
     const real = "/etc/pki/ca-trust/extracted/java/cacerts";
+    const jdk17 = "/usr/lib/jvm/java-17-openjdk/lib/security/cacerts";
+    const jdk21 = "/usr/lib/jvm/java-21-openjdk/lib/security/cacerts";
     expect(
       discoverJvmKeystores(
-        { JAVA_HOME: "/opt/java" },
-        undefined,
-        at(["/opt/java/lib/security/cacerts", real], { "/opt/java/lib/security/cacerts": real }),
+        { JAVA_HOME: "/usr/lib/jvm/java-17-openjdk" },
+        "/usr/lib/jvm/java-21-openjdk/bin/java",
+        at([jdk17, jdk21, real], { [jdk17]: real, [jdk21]: real }),
       ),
     ).toEqual([real]);
   });
@@ -513,13 +514,13 @@ describe("writeCaTrustFiles with JVM keystores", () => {
   });
 
   it("runs keytool once for each distinct keystore", () => {
+    const onPath = "/usr/lib/jvm/jdk-21/lib/security/cacerts";
     const ks = "/opt/java/lib/security/cacerts";
-    const fixed = "/etc/pki/java/cacerts";
-    const { deps, exec } = harness([ks, fixed]);
+    const { deps, exec } = harness([onPath, ks]);
 
     const result = inject(
       { JAVA_HOME: "/opt/java" },
-      { java: "/opt/java/bin/java", keytool: KEYTOOL },
+      { java: "/usr/lib/jvm/jdk-21/bin/java", keytool: KEYTOOL },
       deps,
     );
 
@@ -528,8 +529,8 @@ describe("writeCaTrustFiles with JVM keystores", () => {
       "/scratch/jvm-keystore-1",
     ]);
     expect(result).toEqual([
-      { path: "/scratch/jvm-keystore-0", destination: ks },
-      { path: "/scratch/jvm-keystore-1", destination: fixed },
+      { path: "/scratch/jvm-keystore-0", destination: onPath },
+      { path: "/scratch/jvm-keystore-1", destination: ks },
     ]);
   });
 
@@ -555,10 +556,17 @@ describe("writeCaTrustFiles with JVM keystores", () => {
   });
 
   it("skips every keystore and warns once when there is no pinnable keytool", () => {
-    const keystores = ["/opt/java/lib/security/cacerts", "/etc/pki/java/cacerts"];
+    const keystores = [
+      "/usr/lib/jvm/jdk-21/lib/security/cacerts",
+      "/opt/java/lib/security/cacerts",
+    ];
     const { deps, exec, copies, warnings } = harness(keystores);
     expect(
-      inject({ JAVA_HOME: "/opt/java" }, { java: undefined, keytool: undefined }, deps),
+      inject(
+        { JAVA_HOME: "/opt/java" },
+        { java: "/usr/lib/jvm/jdk-21/bin/java", keytool: undefined },
+        deps,
+      ),
     ).toEqual([]);
     expect(exec).toEqual([]);
     expect(copies).toEqual([]);

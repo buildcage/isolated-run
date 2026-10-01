@@ -19686,17 +19686,13 @@ function extractCaCert(containerName, destDir, { exec = defaultExec$1, chmod = n
 		hostPath: caCertPath
 	})), chmod(caCertPath, 420), caCertPath;
 }
-const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"], KNOWN_JVM_KEYSTORE_DIRS = [
-	"/etc/ssl/certs/java",
-	"/etc/pki/java",
-	"/etc/pki/ca-trust/extracted/java"
-];
+const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"];
 function keystoreDirsOf(home) {
 	return [(0, node_path.join)(home, "lib", "security"), (0, node_path.join)(home, "jre", "lib", "security")];
 }
 function discoverJvmKeystores(env, java, { exists = node_fs.existsSync, realpath = node_fs.realpathSync } = {}) {
 	let dirs = [];
-	java && dirs.push(...keystoreDirsOf((0, node_path.dirname)((0, node_path.dirname)(realpath(java))))), env.JAVA_HOME && dirs.push(...keystoreDirsOf(env.JAVA_HOME)), dirs.push(...KNOWN_JVM_KEYSTORE_DIRS);
+	java && dirs.push(...keystoreDirsOf((0, node_path.dirname)((0, node_path.dirname)(realpath(java))))), env.JAVA_HOME && dirs.push(...keystoreDirsOf(env.JAVA_HOME));
 	let found = [], seen = new Set();
 	for (let dir of dirs) for (let name of JVM_KEYSTORE_NAMES) {
 		let candidate = (0, node_path.join)(dir, name);
