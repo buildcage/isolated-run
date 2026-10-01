@@ -29,10 +29,10 @@ set -euo pipefail
 # recursively make every mount private" in one step. No `--fork`, so this
 # and the subsequent exec replace the current process in place: this
 # script's PID stays the same across the re-exec, and its
-# /proc/self/cmdline still matches the integration tests' pgrep pattern.
-# The re-exec is marked by a leading argument the run action never passes,
-# not an environment variable: sudo lets a caller's variable through under
-# `Defaults !env_reset`, which would skip the unshare.
+# /proc/self/cmdline keeps matching the integration tests' pgrep. The
+# re-exec is marked by a leading argument, not an environment variable,
+# because sudo passes the caller's variables through under
+# `Defaults !env_reset`.
 if [ "${1:-}" != "--unshared" ]; then
   command -v unshare >/dev/null 2>&1 || { echo "ERROR: required command not found: unshare" >&2; exit 1; }
   exec unshare --mount --propagation private -- "$0" --unshared "$@"
