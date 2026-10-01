@@ -21399,6 +21399,9 @@ function splitHostPort(authority) {
 		port: authority.slice(colon + 1)
 	};
 }
+function ruleHost(host) {
+	return host.replace(/[A-Z]/g, (c) => c.toLowerCase()).replace(/\.$/, "");
+}
 //#endregion
 //#region src/core/lib/log/start-marker.ts
 const PROXY_START_MARKER = "buildcage haproxy starting", BAD_REQUEST_METHOD = "<BADREQ>";
@@ -21444,9 +21447,6 @@ function urlOf(scheme, authority, target) {
 }
 function authorityOf(host, port, scheme) {
 	return port === DEFAULT_PORT$1[scheme] ? host : `${host}:${port}`;
-}
-function ruleHost(host) {
-	return host.replace(/[A-Z]/g, (c) => c.toLowerCase()).replace(/\.$/, "");
 }
 function hostBeforeRequest(sni, address) {
 	return sni !== void 0 && sni !== "-" ? {
@@ -21607,25 +21607,19 @@ function aggregate(filtered) {
 const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
 function clientEndedNoise(timeline) {
 	let completed = new Set();
-	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(event.host.toLowerCase());
-	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "") && completed.has(event.host.toLowerCase());
+	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(event.host);
+	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "") && completed.has(event.host);
 }
 function connectedHosts(timeline) {
 	let connected = {
 		any: new Set(),
 		blocked: new Set()
 	};
-	for (let event of timeline) {
-		if (event.protocol === "dns") continue;
-		let host = event.host.toLowerCase();
-		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
-	}
+	for (let event of timeline) event.protocol !== "dns" && (connected.any.add(event.host), event.action === "block" && connected.blocked.add(event.host));
 	return connected;
 }
 function isRedundantDns(event, connected) {
-	if (event.protocol !== "dns" || event.action === "discovery") return !1;
-	let host = event.host.toLowerCase();
-	return event.action === "block" ? connected.blocked.has(host) : connected.any.has(host);
+	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
 }
 //#endregion
 //#region src/core/lib/report/build/aggregate.ts
@@ -21736,7 +21730,7 @@ const DECISION = /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za
 	IP: "tcp"
 }, FAILURE_REASONS = new Set(["dns-failed"]);
 function hostOf(address) {
-	return address === "198.19.255.1" ? UNKNOWN_HOST : address;
+	return address === "198.19.255.1" ? UNKNOWN_HOST : ruleHost(address);
 }
 async function scanHaproxyLog(lines, isAudit) {
 	let events = [], passedDecision = isAudit ? "AUDIT" : "ALLOWED", startedAt, headIntact, unparsed = 0;
