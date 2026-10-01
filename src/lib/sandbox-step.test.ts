@@ -141,18 +141,22 @@ describe("runSandboxStep", () => {
     });
   });
 
-  it.each(["readFailOnCaResidue", "readFailOnBlocked", "readTrafficArtifactInputs"] as const)(
-    "fails on a bad value from %s before any setup",
-    async (reader) => {
-      mocks[reader].mockImplementation(() => {
-        throw new SandboxError("Invalid input", "INVALID_BOOLEAN_INPUT");
-      });
+  it.each([
+    "readFailOnCaResidue",
+    "readFailOnBlocked",
+    "readTrafficArtifactInputs",
+    "readRuleInputs",
+  ] as const)("fails on a bad value from %s before any setup", async (reader) => {
+    mocks[reader].mockImplementation(() => {
+      throw new SandboxError("Invalid input", "INVALID_BOOLEAN_INPUT");
+    });
 
-      await expect(runSandboxStep(ENV, deps)).rejects.toThrow("Invalid input");
-      expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
-      expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
-    },
-  );
+    await expect(runSandboxStep(ENV, deps)).rejects.toThrow("Invalid input");
+    expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
+    expect(mocks.readLocalImageOverride).not.toHaveBeenCalled();
+    expect(mocks.verifyImageDigestOrThrow).not.toHaveBeenCalled();
+    expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+  });
 
   it("pins docker and sudo outside what any sandboxed command can write, before the preflights", async () => {
     await runSandboxStep(ENV, deps);
