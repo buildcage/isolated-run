@@ -67233,7 +67233,7 @@ async function runSandboxStep(env, overrides = {}) {
 	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
-	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v1", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs();
+	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs();
 	log(`Proxy engine: ${proxyEngine}`);
 	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs();
 	assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
