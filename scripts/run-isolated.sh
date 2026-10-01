@@ -28,14 +28,16 @@ set -euo pipefail
 # created. `--propagation private` is `unshare`'s shortcut for "unshare +
 # recursively make every mount private" in one step. No `--fork`, so this
 # and the subsequent exec replace the current process in place: this
-# script's PID (and /proc/self/cmdline, matched by
-# integration-test-die-with-parent.sh's pgrep) stays the same across the
-# re-exec.
-if [ -z "${BUILDCAGE_UNSHARED:-}" ]; then
+# script's PID stays the same across the re-exec, and its
+# /proc/self/cmdline keeps matching the integration tests' pgrep. The
+# re-exec is marked by a leading argument, not an environment variable,
+# because sudo passes the caller's variables through under
+# `Defaults !env_reset`.
+if [ "${1:-}" != "--unshared" ]; then
   command -v unshare >/dev/null 2>&1 || { echo "ERROR: required command not found: unshare" >&2; exit 1; }
-  export BUILDCAGE_UNSHARED=1
-  exec unshare --mount --propagation private -- "$0" "$@"
+  exec unshare --mount --propagation private -- "$0" --unshared "$@"
 fi
+shift
 
 PROXY_NETNS=""
 RUNC_PATH=""
