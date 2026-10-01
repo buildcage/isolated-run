@@ -18741,6 +18741,31 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 	};
 }
 //#endregion
+//#region src/core/lib/actions/inputs.ts
+var InvalidInputError = class extends ActionError {};
+function readBooleanInput(name, fallback, getInput) {
+	let value = getInput(name);
+	if (value === "") return fallback;
+	if ([
+		"true",
+		"True",
+		"TRUE"
+	].includes(value)) return !0;
+	if ([
+		"false",
+		"False",
+		"FALSE"
+	].includes(value)) return !1;
+	throw new InvalidInputError(`Invalid ${name}: ${JSON.stringify(value)}. Must be true or false.`, "INVALID_BOOLEAN_INPUT");
+}
+function readRetentionDays(getInput) {
+	let days = getInput("traffic_artifact_retention_days");
+	if (days !== "") {
+		if (!/^[1-9]\d*$/.test(days)) throw new InvalidInputError(`Invalid traffic_artifact_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_TRAFFIC_ARTIFACT_RETENTION_DAYS");
+		return Number(days);
+	}
+}
+//#endregion
 //#region src/lib/engine.ts
 const ENGINES = ["universal", "inspect"];
 function resolveProxyEngine(input) {
@@ -18768,21 +18793,21 @@ function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice
 	if (writeThrough.trim() && writable.trim()) throw new SandboxError("write_through: and writable: are the same input under two names. Set only write_through:.", "FILESYSTEM_INPUT_CONFLICT");
 	return !writeThrough.trim() && writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writable) : writeThrough;
 }
-function readRunCommand(getInput$2 = getInput) {
-	let runInput = getInput$2("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$4 = getInput) {
+	let runInput = getInput$4("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
 function readEngineInputs(getInput$3 = getInput) {
 	return { proxyEngine: resolveProxyEngine(getInput$3("proxy_engine")) };
 }
-function readFilesystemInputs(notice, getInput$8 = getInput) {
+function readFilesystemInputs(notice, getInput$1 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$8("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput({
-			writeThrough: getInput$8("write_through"),
-			writable: getInput$8("writable"),
-			allowWrite: getInput$8("allow_write")
+			writeThrough: getInput$1("write_through"),
+			writable: getInput$1("writable"),
+			allowWrite: getInput$1("allow_write")
 		}, notice)
 	};
 }
@@ -18792,12 +18817,12 @@ function resolveProxyMode(input) {
 	if (!PROXY_MODES.includes(trimmed)) throw new SandboxError(`Invalid proxy_mode: ${JSON.stringify(input)}. Must be one of ${PROXY_MODES.join(", ")}.`, "INVALID_PROXY_MODE");
 	return trimmed;
 }
-function readRuleInputs(getInput$4 = getInput) {
-	let proxyMode = resolveProxyMode(getInput$4("proxy_mode")), rules = buildACLRules({
-		httpsRulesInput: getInput$4("allowed_https_rules"),
-		httpRulesInput: getInput$4("allowed_http_rules"),
-		ipRulesInput: getInput$4("allowed_ip_rules")
-	}), knownBlockedRules = readKnownBlockedRules(getInput$4("known_blocked_rules")), urlRulesInput = getInput$4("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$4("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
+function readRuleInputs(getInput$5 = getInput) {
+	let proxyMode = resolveProxyMode(getInput$5("proxy_mode")), rules = buildACLRules({
+		httpsRulesInput: getInput$5("allowed_https_rules"),
+		httpRulesInput: getInput$5("allowed_http_rules"),
+		ipRulesInput: getInput$5("allowed_ip_rules")
+	}), knownBlockedRules = readKnownBlockedRules(getInput$5("known_blocked_rules")), urlRulesInput = getInput$5("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$5("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
 	checkRulesCompileOrThrow({
 		...rules,
 		tlsRules,
@@ -18814,37 +18839,19 @@ function readRuleInputs(getInput$4 = getInput) {
 		knownBlockedRules
 	};
 }
-function readStepLabel(getInput$5 = getInput) {
-	return getInput$5("label") || void 0;
+function readStepLabel(getInput$7 = getInput) {
+	return getInput$7("label") || void 0;
 }
-function readBooleanInput(name, fallback, getInput) {
-	let value = getInput(name);
-	if (value === "") return fallback;
-	if ([
-		"true",
-		"True",
-		"TRUE"
-	].includes(value)) return !0;
-	if ([
-		"false",
-		"False",
-		"FALSE"
-	].includes(value)) return !1;
-	throw new SandboxError(`Invalid ${name}: ${JSON.stringify(value)}. Must be true or false.`, "INVALID_BOOLEAN_INPUT");
+function readFailOnCaResidue(getInput$2 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$2);
 }
-function readFailOnCaResidue(getInput$7 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$7);
+function readFailOnBlocked(getInput$6 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$6);
 }
-function readFailOnBlocked(getInput$1 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$1);
-}
-function readTrafficArtifactInputs(getInput$6 = getInput) {
-	let upload = readBooleanInput("upload_traffic_artifact", !1, getInput$6), days = getInput$6("traffic_artifact_retention_days");
-	if (days === "") return { upload };
-	if (!/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid traffic_artifact_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_TRAFFIC_ARTIFACT_RETENTION_DAYS");
+function readTrafficArtifactInputs(getInput$8 = getInput) {
 	return {
-		upload,
-		retentionDays: Number(days)
+		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$8),
+		retentionDays: readRetentionDays(getInput$8)
 	};
 }
 //#endregion
