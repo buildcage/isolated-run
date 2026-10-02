@@ -151,7 +151,7 @@ describe("runSandboxedCommand", () => {
   });
 
   it.each([
-    ["HOME is an ephemeral overlay root", {}, `${SCRATCH}/ephemeral/_home_runner/upper`],
+    ["HOME is an ephemeral overlay root", {}, `${SCRATCH}/ephemeral/b1cbc5f347543a03/upper`],
     ["HOME is not an overlay root", { overlayRoots: ["/tmp"] }, undefined],
     ["the database is written through", { writeThroughPaths: ["/home/runner/.pki"] }, undefined],
   ])("makes the database's directories in HOME's overlay when %s", (_label, overrides, upper) => {

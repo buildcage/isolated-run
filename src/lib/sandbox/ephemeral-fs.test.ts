@@ -136,7 +136,7 @@ function scratchDeps(
 
 describe("createOverlayScratchDirs", () => {
   const SCRATCH = "/var/tmp/buildcage/sandbox-xyz";
-  const SLUG_DIR = `${SCRATCH}/ephemeral/_home_runner`;
+  const SLUG_DIR = `${SCRATCH}/ephemeral/b1cbc5f347543a03`;
 
   it("creates upper/work as siblings of rootfs under <scratchDir>/ephemeral/<slug>", () => {
     const { deps } = scratchDeps();
@@ -361,24 +361,21 @@ describe("formatFilesystemPlanLog", () => {
   });
 });
 
-describe("createOverlayScratchDirs: roots that differ only in / and _", () => {
-  it("gives each its own directory", () => {
+describe("createOverlayScratchDirs: directory names", () => {
+  const name = (upper: string) => upper.split("/").at(-2)!;
+
+  it("gives roots that differ only in / and _ their own directories", () => {
     const dirs = createOverlayScratchDirs(
       "/scratch",
       ["/a/b_c", "/a/b/c", "/a/b%5Fc"],
       scratchDeps().deps,
     );
-    expect(dirs.map((d) => d.upper)).toStrictEqual([
-      "/scratch/ephemeral/_a_b%5Fc/upper",
-      "/scratch/ephemeral/_a_b_c/upper",
-      "/scratch/ephemeral/_a_b%255Fc/upper",
-    ]);
+    expect(new Set(dirs.map((d) => d.upper)).size).toBe(3);
   });
-});
 
-describe("createOverlayScratchDirs: a root that slugifies to nothing", () => {
-  it("falls back to _root so the directory still has a name", () => {
-    const dirs = createOverlayScratchDirs("/scratch", [""], scratchDeps().deps);
-    expect(dirs[0].upper).toBe("/scratch/ephemeral/_root/upper");
+  it("keeps the name short for a root past the 255-byte name limit", () => {
+    const roots = [`/mnt/${"d".repeat(300)}`, `/mnt/${"_".repeat(200)}`];
+    const dirs = createOverlayScratchDirs("/scratch", roots, scratchDeps().deps);
+    expect(dirs.map((d) => name(d.upper).length)).toStrictEqual([16, 16]);
   });
 });

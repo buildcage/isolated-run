@@ -262,28 +262,34 @@ rm -rf "$CASE9"
 # --- Case 10: a host mount nested under an overlay root, here the workspace
 # under /tmp, is seen with its contents and written to without the writes
 # reaching the host. Both a separate filesystem and a bind of the same one,
-# since overlayfs hides either.
+# since overlayfs hides either, plus a mount whose path is longer than one
+# file name may be.
 CASE10=$(mktemp -d)
 BIND_SRC=$(mktemp -d)
-mkdir -p "$CASE10/tool" "$CASE10/bound"
+DEEP=$(printf 'd%.0s' {1..100})
+DEEP="$DEEP/$DEEP/$DEEP/deep"
+mkdir -p "$CASE10/tool" "$CASE10/bound" "$CASE10/$DEEP"
 sudo -n mount -t tmpfs -o "mode=0777" tmpfs "$CASE10/tool"
+sudo -n mount -t tmpfs -o "mode=0777" tmpfs "$CASE10/$DEEP"
 echo tool >"$CASE10/tool/present"
+echo deep >"$CASE10/$DEEP/present"
 echo bound >"$BIND_SRC/present"
 sudo -n mount --bind "$BIND_SRC" "$CASE10/bound"
 run_ephemeral "$CASE10" "" 'rc=0
-for dir in "$GITHUB_WORKSPACE/tool" "$GITHUB_WORKSPACE/bound"; do
+for dir in "$GITHUB_WORKSPACE/tool" "$GITHUB_WORKSPACE/bound" "$GITHUB_WORKSPACE/'"$DEEP"'"; do
   [ -f "$dir/present" ] || { echo "UNEXPECTED: $dir/present not visible"; rc=1; }
   echo x >"$dir/written" || { echo "UNEXPECTED: $dir not writable"; rc=1; }
 done
 exit $rc'
 CODE10=$(cat "$CASE10/exit_code")
-if [ "$CODE10" = "0" ] && [ ! -e "$CASE10/tool/written" ] && [ ! -e "$BIND_SRC/written" ]; then
+if [ "$CODE10" = "0" ] && [ ! -e "$CASE10/tool/written" ] && [ ! -e "$BIND_SRC/written" ] &&
+  [ ! -e "$CASE10/$DEEP/written" ]; then
   pass "a host mount under an overlay root is visible and writable, and its writes are discarded"
 else
   fail "a host mount under an overlay root was hidden, unwritable, or kept its writes (exit $CODE10) -- see $CASE10/out.log"
   cat "$CASE10/out.log"
 fi
-sudo -n umount "$CASE10/tool" "$CASE10/bound"
+sudo -n umount "$CASE10/tool" "$CASE10/bound" "$CASE10/$DEEP"
 rm -rf "$CASE10" "$BIND_SRC"
 
 # --- Case 11: an overlay root keeps the host's owner and mode, /tmp's root
