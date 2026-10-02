@@ -10786,10 +10786,13 @@ function domainToRegexPartial(domain) {
 function pathToRegexPartial(path) {
 	return path === "" ? "" : path.split("/").map((segment) => atomToRegex(segment, PATH)).join("/");
 }
+function checkPort(port, rule) {
+	if (!(port === "*" || /^[1-9]\d{0,4}$/.test(port) && Number(port) <= 65535)) throw Error(`Invalid port in rule "${rule}": "${port}". Write a decimal from 1 to 65535 without a leading zero (443, not 0443), or "*" for any port`);
+}
 function wildcardToRegexPartial(pattern) {
 	if (!/^[^:]+:(?:\d+|\*)$/.test(pattern)) throw Error(`Invalid pattern "${pattern}"`);
 	let colonIndex = pattern.lastIndexOf(":"), domain = pattern.slice(0, colonIndex), port = pattern.slice(colonIndex + 1);
-	return `${domainToRegexPartial(domain)}:${port === "*" ? "\\d+" : port}`;
+	return checkPort(port, pattern), `${domainToRegexPartial(domain)}:${port === "*" ? "\\d+" : port}`;
 }
 function* regexChars(regex) {
 	let inClass = !1;
@@ -11010,7 +11013,7 @@ function compileUrl(url, rule) {
 	rejectUserinfo(authority, rule), rejectQuery(path, rule);
 	let colonIndex = authority.lastIndexOf(":"), hasPort = colonIndex !== -1 && !authority.slice(colonIndex + 1).includes("]"), host = hasPort ? authority.slice(0, colonIndex) : authority, port = hasPort ? authority.slice(colonIndex + 1) : "";
 	if (host === "") throw Error(`Invalid URL in rule "${rule}": missing host`);
-	if (port !== "" && !/^(?:\d+|\*)$/.test(port)) throw Error(`Invalid port in rule "${rule}": "${port}"`);
+	port !== "" && checkPort(port, rule);
 	let combined = wildcardToRegexPartial(`${host}:${port === "" ? DEFAULT_PORT$1[scheme] : port}`), hostRegex = combined.slice(0, combined.lastIndexOf(":")), pathRegex = path === "" ? "^/" : `^${pathToRegexPartial(path)}$`, authorityRegex = `^${hostRegex}:${port === "*" ? "[0-9]+" : port === "" ? DEFAULT_PORT$1[scheme] : port}$`;
 	return {
 		schemes: [scheme],
@@ -11098,7 +11101,9 @@ function domainToRegex(domain) {
 }
 function wildcardToRegex(pattern) {
 	if (!/^[^:]+:(?:\d+|\*)$/.test(pattern)) throw Error(`Invalid pattern "${pattern}"`);
-	let [domain, port] = pattern.split(":"), portRegex = port === "*" ? "\\d+" : port;
+	let [domain, port] = pattern.split(":");
+	checkPort(port, pattern);
+	let portRegex = port === "*" ? "\\d+" : port;
 	return `${domainToRegex(domain)}:${portRegex}`;
 }
 //#endregion
@@ -18208,7 +18213,7 @@ function splitHostRule(pattern) {
 	let colonIndex = pattern.lastIndexOf(":");
 	if (colonIndex === -1) throw Error(`Invalid rule "${pattern}": missing port`);
 	let port = pattern.slice(colonIndex + 1);
-	if (!/^(?:\d+|\*)$/.test(port)) throw Error(`Invalid port in rule "${pattern}": "${port}"`);
+	checkPort(port, pattern);
 	let host = pattern.slice(0, colonIndex);
 	if (host.includes(":")) throw Error(`Invalid host in rule "${pattern}": "${host}" holds a ":", so the one this rule was split at is not its port separator. An IPv6 address is not supported here.`);
 	return {
