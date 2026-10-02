@@ -221,12 +221,11 @@ set +e
 # without this outer hop, SIGKILL-ing this script would leave `runc run`
 # (and the sandboxed process under it) as a still-alive orphan.
 #
-# Known residual gap: killing `sudo -n`, this script's parent, in
-# isolation doesn't trigger this chain, since this script would merely
-# become its orphan, still alive. (With no terminal, as on a runner,
-# `use_pty` forks no monitor between the two.) Low-severity (an orphaned
-# but still-fully-sandboxed process, not a security boundary issue; see
-# docs/security.md), and not addressed here.
+# Known residual gap: killing `sudo -n`, this script's parent, on its own
+# leaves this script running as an orphan. With no terminal, as on a
+# runner, `use_pty` puts no monitor between the two. Low-severity, since
+# the orphan is still fully sandboxed (see docs/security.md), and not
+# addressed here.
 #
 # bash runs a trap only once its foreground child returns, so a signal here
 # waits for the command either way; `runc run` forwards any it receives to
