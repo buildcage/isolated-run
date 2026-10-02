@@ -232,13 +232,12 @@ echo "  request sent (a blocked row expected in the report)"
 
 echo "=== [Forged Host - the destination is not the client's to choose] ==="
 OUT=$($S --insecure -H 'Host: allowed.example.com' https://10.200.0.101/public/pkg.tgz)
+# The impostor's certificate is untrusted, so a proxy that connected where the
+# client aimed answers 503 rather than with the impostor's body.
 case "$OUT" in
   PUBLIC\ GET*) echo "  PASS  forged Host reached the resolved origin, not the impostor" ;;
-  IMPOSTOR*)
-    fail "forged Host reached the address the client chose (impostor)"
-    ;;
   *)
-    fail "forged Host -- unexpected body: $OUT"
+    fail "forged Host did not reach the resolved origin -- got: $OUT"
     ;;
 esac
 
