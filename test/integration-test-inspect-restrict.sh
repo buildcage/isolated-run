@@ -47,7 +47,7 @@ BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-inspect.yaml"
 BUILDCAGE_TEST_CERT_PATH="$REPO_ROOT/test/test-server-inspect/cert.pem" \
 INPUT_PROXY_ENGINE="inspect" \
 INPUT_PROXY_MODE="restrict" \
-INPUT_ALLOWED_HTTPS_RULES="sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443 deadend.example.com:443" \
+INPUT_ALLOWED_HTTPS_RULES="sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443 impostor.example.com:443 deadend.example.com:443" \
 INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80 deadend.example.com:80" \
 INPUT_ALLOWED_TLS_RULES="tlspass.example.com:443 ~^tlspass\.example\.com:8443$ ~^tlsany\.example\.com:.*$" \
 INPUT_ALLOWED_IP_RULES="~^10\.200\.0\.\d+:9080$ 10.200.0.53:53" \
@@ -102,6 +102,10 @@ assert_summary_contains "| absent.example.com:443 | HTTPS | dns-failed |" "absen
 # anyway.
 assert_summary_contains "| deadend.example.com:443 | HTTPS | origin-connect-failed |" \
   "a connection that never completed is in the blocked table, not the failed one"
+# Only a numeric tlserr on the log line makes this origin-untrusted rather than
+# origin-connect-failed, so the row also shows HAProxy logged the TLS error.
+assert_summary_contains "| impostor.example.com:443 | HTTPS | origin-untrusted |" \
+  "an origin whose certificate the proxy cannot verify is in the blocked table as untrusted"
 # The same host over plaintext, where no certificate was ever going to be
 # checked, so nothing was hidden by the connection failing.
 assert_summary_contains "| deadend.example.com:80 | HTTP | origin-unreachable |" \
