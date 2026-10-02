@@ -8,7 +8,6 @@ import {
   readFilesystemInputs,
   readRunCommand,
   readStepLabel,
-  readTrafficArtifactInputs,
   resolveWriteThroughInput,
 } from "./inputs.ts";
 
@@ -160,11 +159,6 @@ describe("readStepLabel", () => {
 describe.each([
   { name: "fail_on_ca_residue", read: readFailOnCaResidue, unset: true },
   { name: "fail_on_blocked", read: readFailOnBlocked, unset: true },
-  {
-    name: "upload_traffic_artifact",
-    read: (getInput: (name: string) => string) => readTrafficArtifactInputs(getInput).upload,
-    unset: false,
-  },
 ])("$name", ({ name, read, unset }) => {
   it("reads its own input", () => {
     expect(read(inputs({ [name]: String(!unset) }))).toBe(!unset);
@@ -178,28 +172,5 @@ describe.each([
     expect(() => read(inputs({ [name]: "yes" }))).toThrow(
       `Invalid ${name}: "yes". Must be true or false.`,
     );
-  });
-});
-
-describe("readTrafficArtifactInputs", () => {
-  it("leaves the retention to the repository's default when unset", () => {
-    expect(readTrafficArtifactInputs(inputs({ upload_traffic_artifact: "true" }))).toStrictEqual({
-      upload: true,
-      retentionDays: undefined,
-    });
-  });
-
-  it("reads a whole number of days", () => {
-    expect(
-      readTrafficArtifactInputs(inputs({ traffic_artifact_retention_days: "7" })),
-    ).toStrictEqual({ upload: false, retentionDays: 7 });
-  });
-
-  it("refuses a bad retention even when nothing is uploaded", () => {
-    expect(() =>
-      readTrafficArtifactInputs(
-        inputs({ upload_traffic_artifact: "false", traffic_artifact_retention_days: "0" }),
-      ),
-    ).toThrow(/Invalid traffic_artifact_retention_days/);
   });
 });

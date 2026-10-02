@@ -11108,6 +11108,7 @@ function wildcardToRegex(pattern) {
 }
 //#endregion
 //#region src/core/lib/actions/inputs.ts
+init_core();
 var InvalidInputError = class extends ActionError {};
 function readBooleanInput(name, fallback, getInput) {
 	let value = getInput(name);
@@ -11130,6 +11131,12 @@ function readRetentionDays(getInput) {
 		if (!/^[1-9]\d*$/.test(days)) throw new InvalidInputError(`Invalid traffic_artifact_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_TRAFFIC_ARTIFACT_RETENTION_DAYS");
 		return Number(days);
 	}
+}
+function readTrafficArtifactInputs(getInput$8 = getInput) {
+	return {
+		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$8),
+		retentionDays: readRetentionDays(getInput$8)
+	};
 }
 const ENGINES = ["universal", "inspect"];
 function resolveProxyEngine(input) {
@@ -11941,12 +11948,12 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 //#endregion
 //#region src/core/lib/actions/rule-inputs.ts
 init_core();
-function readRuleInputs(getInput$8 = getInput) {
+function readRuleInputs(getInput$7 = getInput) {
 	let rules = buildACLRules({
-		httpsRulesInput: getInput$8("allowed_https_rules"),
-		httpRulesInput: getInput$8("allowed_http_rules"),
-		ipRulesInput: getInput$8("allowed_ip_rules")
-	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$8("known_blocked_rules")), urlRulesInput = getInput$8("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$8("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
+		httpsRulesInput: getInput$7("allowed_https_rules"),
+		httpRulesInput: getInput$7("allowed_http_rules"),
+		ipRulesInput: getInput$7("allowed_ip_rules")
+	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$7("known_blocked_rules")), urlRulesInput = getInput$7("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$7("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
 	checkRulesCompileOrThrow({
 		...rules,
 		tlsRules,
@@ -18820,41 +18827,35 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (writeThrough.trim() && writable.trim()) throw new SandboxError("write_through: and writable: are the same input under two names. Set only write_through:.", "FILESYSTEM_INPUT_CONFLICT");
 	return !writeThrough.trim() && writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writable) : writeThrough;
 }
-function readRunCommand(getInput$4 = getInput) {
-	let runInput = getInput$4("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$2 = getInput) {
+	let runInput = getInput$2("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$5 = getInput) {
+function readProxyInputs(getInput$6 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$5("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$5("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$6("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$6("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$6 = getInput) {
+function readFilesystemInputs(notice, getInput$1 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$6("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$6("write_through"),
-			writable: getInput$6("writable"),
-			allowWrite: getInput$6("allow_write")
+			writeThrough: getInput$1("write_through"),
+			writable: getInput$1("writable"),
+			allowWrite: getInput$1("allow_write")
 		}, notice)
 	};
 }
-function readStepLabel(getInput$3 = getInput) {
-	return getInput$3("label") || void 0;
+function readStepLabel(getInput$5 = getInput) {
+	return getInput$5("label") || void 0;
 }
-function readFailOnCaResidue(getInput$7 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$7);
+function readFailOnCaResidue(getInput$3 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$3);
 }
-function readFailOnBlocked(getInput$2 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$2);
-}
-function readTrafficArtifactInputs(getInput$1 = getInput) {
-	return {
-		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$1),
-		retentionDays: readRetentionDays(getInput$1)
-	};
+function readFailOnBlocked(getInput$4 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$4);
 }
 //#endregion
 //#region src/lib/retry-briefly.ts
