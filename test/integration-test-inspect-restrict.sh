@@ -93,6 +93,7 @@ assert_summary_contains "| allowed.example.com:80 | HTTP |" "allowed.example.com
 assert_summary_contains "| blocked.example.com:443 | HTTPS |" "blocked.example.com:443 recorded as blocked"
 assert_summary_contains "| blocked.example.com:9443 | HTTPS |" "the ~regex rule's blocked.example.com:9443 recorded as allowed"
 assert_summary_contains "| 10.200.0.100:9080 | IP |" "the ~regex allowed_ip_rules entry recorded as allowed"
+assert_summary_contains "| 10.200.0.100:2525 | IP |" "an allowed address the client sent nothing on recorded as allowed"
 assert_summary_contains "| 10.200.0.53:53 | IP |" "DNS over TCP to a resolver an ip rule allows recorded as allowed"
 # No rule refused this one and none can clear it, so it is tabled apart.
 assert_summary_contains "### ⚠️ Failed Connections" "a name that resolved nowhere is tabled apart from what the rules refused"

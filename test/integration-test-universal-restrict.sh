@@ -80,6 +80,7 @@ assert_summary_contains "| blocked.example.com:8443 | HTTPS | not-allowed |" "bl
 assert_summary_contains "| blocked.example.com:8080 | HTTP | not-allowed |" "blocked.example.com:8080 recorded as blocked, reason not-allowed"
 assert_summary_contains "| 10.200.0.100:80 | IP | ip-not-allowed |" "direct IP recorded as blocked, reason ip-not-allowed"
 assert_summary_contains "| 10.200.0.100:8443 | IP |" "an allowed address recorded as allowed, whatever name its SNI carried"
+assert_summary_contains "| 10.200.0.100:2525 | IP |" "an allowed address the client sent nothing on recorded as allowed"
 assert_summary_contains "| 10.200.0.101:8443 | IP | ip-not-allowed |" "an address no rule allows recorded as blocked, though its SNI named an allowed one"
 # No rule refused these and none can clear them, so they are tabled apart.
 assert_summary_contains "### ⚠️ Failed Connections" "a name that resolved nowhere is tabled apart from what the rules refused"
