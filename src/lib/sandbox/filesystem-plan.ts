@@ -90,7 +90,6 @@ export interface ResolveFilesystemPlanDeps {
   readlink?: (path: string) => string;
   canWrite?: (path: string) => boolean;
   mkdir?: (path: string) => void;
-  deviceOf?: (path: string) => number;
   realpath?: (path: string) => string;
   listHostMounts?: typeof listHostMounts;
   isDirectory?: (path: string) => boolean;
@@ -191,7 +190,7 @@ export function resolveFilesystemPlan(
     const candidateRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, deps);
     const hostMounts = (deps.listHostMounts ?? listHostMounts)();
     const overlayRoots = [
-      ...candidateRoots,
+      ...candidateRoots.roots,
       ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps),
     ];
     return { overlayRoots, writeThroughPaths };

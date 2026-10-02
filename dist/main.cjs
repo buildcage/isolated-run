@@ -19244,9 +19244,6 @@ function assertScratchBaseNotWritable(writableDirs) {
 }
 //#endregion
 //#region src/lib/sandbox/ephemeral-fs.ts
-function defaultDeviceOf(path) {
-	return (0, node_fs.statSync)(path).dev;
-}
 function defaultIsDirectory$1(path) {
 	return (0, node_fs.statSync)(path).isDirectory();
 }
@@ -19268,25 +19265,20 @@ function defaultExecFile$1(command, args) {
 		env: hostCommandEnv(command)
 	});
 }
-function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs.existsSync, deviceOf = defaultDeviceOf } = {}) {
+function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs.existsSync } = {}) {
 	let notCoveredByWriteThrough = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !writeThroughPaths.some((a) => isAtOrUnder(c, a)));
-	return notCoveredByWriteThrough.filter((c) => {
-		let nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isAtOrUnder(c, p));
-		if (!nestingParent) return !0;
-		try {
-			return deviceOf(c) !== deviceOf(nestingParent);
-		} catch {
-			return !0;
-		}
-	});
+	return {
+		candidates: notCoveredByWriteThrough,
+		roots: notCoveredByWriteThrough.filter((c) => !notCoveredByWriteThrough.some((p) => p !== c && isAtOrUnder(c, p)))
+	};
 }
 function rootCannotRead({ fsType, superOptions = [] }) {
 	return (fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.")) && !superOptions.includes("allow_other");
 }
-function nestedMountRoots(overlayRoots, hostMounts, writeThroughPaths, { isDirectory = defaultIsDirectory$1, warn } = {}) {
+function nestedMountRoots({ candidates, roots: overlayRoots }, hostMounts, writeThroughPaths, { isDirectory = defaultIsDirectory$1, warn } = {}) {
 	let visible = new Map(hostMounts.map((m) => [m.mountPoint, m])), roots = [];
 	for (let [path, mount] of visible) {
-		if (overlayRoots.includes(path) || !overlayRoots.some((r) => isAtOrUnder(path, r)) || writeThroughPaths.some((w) => isAtOrUnder(path, w))) continue;
+		if (!overlayRoots.some((r) => isAtOrUnder(path, r)) || writeThroughPaths.some((w) => isAtOrUnder(path, w))) continue;
 		let reason;
 		if (path.includes(",") || path.includes(":")) reason = "an overlay mount option cannot contain \",\" or \":\"";
 		else if (rootCannotRead(mount)) reason = `it is a FUSE mount (${mount.fsType}) without allow_other, which root cannot read`;
@@ -19296,10 +19288,15 @@ function nestedMountRoots(overlayRoots, hostMounts, writeThroughPaths, { isDirec
 			reason = `the runner cannot stat it (${errorMessage(e)})`;
 		}
 		if (reason !== void 0) {
+			let held = candidates.find((c) => isAtOrUnder(c, path));
+			if (held !== void 0) {
+				let holds = held === path ? "" : `, which holds ${JSON.stringify(held)}`;
+				throw Error(`filesystem_mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}${holds}: ${reason}. Use filesystem_mode: persistent, or list ${JSON.stringify(held)} in write_through.`);
+			}
 			warn?.(`filesystem_mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the command sees the empty directory beneath it: ${reason}. Use filesystem_mode: persistent if the command needs its contents.`);
 			continue;
 		}
-		roots.push(path);
+		overlayRoots.includes(path) || roots.push(path);
 	}
 	return roots;
 }
@@ -20585,7 +20582,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 			workdir
 		].filter((p) => !!p), writeThroughPaths, deps), hostMounts = (deps.listHostMounts ?? listHostMounts)();
 		return {
-			overlayRoots: [...candidateRoots, ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps)],
+			overlayRoots: [...candidateRoots.roots, ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps)],
 			writeThroughPaths
 		};
 	} catch (e) {

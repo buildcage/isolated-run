@@ -16,15 +16,10 @@ const ENV = {
 
 describe("determineOverlayRoots", () => {
   const exists = () => true;
-  // Every test path here is fictional, so the real fs.statSync-backed
-  // default deviceOf would throw for all of them. Inject a fake that
-  // reports "same device" unconditionally, matching the common case these
-  // tests are about (a plain subdirectory, not a distinct mount).
-  const sameDevice = () => 1;
 
   it("folds RUNNER_TEMP and GITHUB_WORKSPACE into HOME when both are nested under it", () => {
     const candidates = [ENV.HOME, ENV.RUNNER_TEMP, "/tmp", ENV.GITHUB_WORKSPACE];
-    expect(determineOverlayRoots(candidates, [], { exists, deviceOf: sameDevice })).toStrictEqual([
+    expect(determineOverlayRoots(candidates, [], { exists }).roots).toStrictEqual([
       ENV.HOME,
       "/tmp",
     ]);
@@ -32,23 +27,19 @@ describe("determineOverlayRoots", () => {
 
   it("excludes a candidate that is itself named in write_through", () => {
     const candidates = [ENV.HOME, "/tmp"];
-    expect(
-      determineOverlayRoots(candidates, [ENV.HOME], { exists, deviceOf: sameDevice }),
-    ).toStrictEqual(["/tmp"]);
+    expect(determineOverlayRoots(candidates, [ENV.HOME], { exists }).roots).toStrictEqual(["/tmp"]);
   });
 
   it("keeps a candidate that is only an ancestor of a narrower write_through entry", () => {
     const candidates = [ENV.HOME, "/tmp"];
     expect(
-      determineOverlayRoots(candidates, [`${ENV.HOME}/.npmrc`], { exists, deviceOf: sameDevice }),
+      determineOverlayRoots(candidates, [`${ENV.HOME}/.npmrc`], { exists }).roots,
     ).toStrictEqual([ENV.HOME, "/tmp"]);
   });
 
   it("excludes a candidate that is a descendant of a broader write_through entry", () => {
     const candidates = [`${ENV.HOME}/.cache`, "/tmp"];
-    expect(
-      determineOverlayRoots(candidates, [ENV.HOME], { exists, deviceOf: sameDevice }),
-    ).toStrictEqual(["/tmp"]);
+    expect(determineOverlayRoots(candidates, [ENV.HOME], { exists }).roots).toStrictEqual(["/tmp"]);
   });
 
   it("drops a candidate that doesn't exist on disk", () => {
@@ -56,15 +47,14 @@ describe("determineOverlayRoots", () => {
     expect(
       determineOverlayRoots(candidates, [], {
         exists: (p) => p !== "/tmp",
-        deviceOf: sameDevice,
-      }),
+      }).roots,
     ).toStrictEqual([ENV.HOME]);
   });
 
   it("dedupes identical candidates (e.g. RUNNER_TEMP === HOME on some self-hosted setups)", () => {
-    expect(
-      determineOverlayRoots([ENV.HOME, ENV.HOME], [], { exists, deviceOf: sameDevice }),
-    ).toStrictEqual([ENV.HOME]);
+    expect(determineOverlayRoots([ENV.HOME, ENV.HOME], [], { exists }).roots).toStrictEqual([
+      ENV.HOME,
+    ]);
   });
 
   it("does not let a non-existent outer candidate drop an existing inner one's coverage", () => {
@@ -75,41 +65,16 @@ describe("determineOverlayRoots", () => {
     expect(
       determineOverlayRoots(candidates, [], {
         exists: (p) => p === ENV.RUNNER_TEMP,
-        deviceOf: sameDevice,
-      }),
+      }).roots,
     ).toStrictEqual([ENV.RUNNER_TEMP]);
   });
 
-  it("keeps a nested candidate that is actually a distinct mount instead of folding it into the outer one", () => {
-    // RUNNER_TEMP is nested under HOME by path, but reports a different
-    // device: a real (if unusual) self-hosted layout where RUNNER_TEMP is
-    // its own separate filesystem mounted inside $HOME. Folding it into
-    // HOME's overlay would leave it invisible rather than covered.
+  it("folds a nested candidate on a filesystem of its own too, leaving its mount to nestedMountRoots", () => {
     const candidates = [ENV.HOME, ENV.RUNNER_TEMP];
-    const deviceOf = (p: string) => (p === ENV.RUNNER_TEMP ? 2 : 1);
-    expect(determineOverlayRoots(candidates, [], { exists, deviceOf })).toStrictEqual([
-      ENV.HOME,
-      ENV.RUNNER_TEMP,
-    ]);
-  });
-
-  it("still folds a same-device nested candidate away even when deviceOf is given", () => {
-    const candidates = [ENV.HOME, ENV.RUNNER_TEMP];
-    expect(determineOverlayRoots(candidates, [], { exists, deviceOf: sameDevice })).toStrictEqual([
-      ENV.HOME,
-    ]);
-  });
-
-  it("keeps a nested candidate when deviceOf can't be determined for it (fails closed toward extra coverage)", () => {
-    const candidates = [ENV.HOME, ENV.RUNNER_TEMP];
-    const deviceOf = (p: string) => {
-      if (p === ENV.RUNNER_TEMP) throw new Error("EACCES");
-      return 1;
-    };
-    expect(determineOverlayRoots(candidates, [], { exists, deviceOf })).toStrictEqual([
-      ENV.HOME,
-      ENV.RUNNER_TEMP,
-    ]);
+    expect(determineOverlayRoots(candidates, [], { exists })).toStrictEqual({
+      candidates,
+      roots: [ENV.HOME],
+    });
   });
 });
 
@@ -216,10 +181,12 @@ describe("createOverlayScratchDirs", () => {
 describe("nestedMountRoots", () => {
   const ext4 = (...mountPoints: string[]) =>
     mountPoints.map((mountPoint) => ({ mountPoint, fsType: "ext4" }));
+  /** Roots that are also the only candidates, none nested in another. */
+  const only = (...roots: string[]) => ({ candidates: roots, roots });
 
   function warned(hostMounts: HostMount[], isDirectory: (path: string) => boolean = () => true) {
     const warnings: string[] = [];
-    const roots = nestedMountRoots(["/home/runner"], hostMounts, [], {
+    const roots = nestedMountRoots(only("/home/runner"), hostMounts, [], {
       isDirectory,
       warn: (message) => warnings.push(message),
     });
@@ -229,7 +196,7 @@ describe("nestedMountRoots", () => {
   it("returns every mount under a root, nested ones included, but not the roots themselves", () => {
     expect(
       nestedMountRoots(
-        ["/home/runner", "/tmp"],
+        only("/home/runner", "/tmp"),
         ext4(
           "/",
           "/home/runner",
@@ -246,7 +213,7 @@ describe("nestedMountRoots", () => {
 
   it("leaves a mount under write_through to that path's own rbind", () => {
     expect(
-      nestedMountRoots(["/home/runner"], ext4("/home/runner/out", "/home/runner/out/cache"), [
+      nestedMountRoots(only("/home/runner"), ext4("/home/runner/out", "/home/runner/out/cache"), [
         "/home/runner/out",
       ]),
     ).toStrictEqual([]);
@@ -254,7 +221,7 @@ describe("nestedMountRoots", () => {
 
   it("lists a mount point stacked more than once only once", () => {
     expect(
-      nestedMountRoots(["/home/runner"], ext4("/home/runner/_tool", "/home/runner/_tool"), [], {
+      nestedMountRoots(only("/home/runner"), ext4("/home/runner/_tool", "/home/runner/_tool"), [], {
         isDirectory: () => true,
       }),
     ).toStrictEqual(["/home/runner/_tool"]);
@@ -335,6 +302,33 @@ describe("nestedMountRoots", () => {
         "empty directory beneath it: the runner cannot stat it (ENOENT: no such file or directory).",
       ),
     ]);
+  });
+
+  describe("a mount it cannot overlay that is a candidate or holds one", () => {
+    const sshfs = (mountPoint: string) => [{ mountPoint, fsType: "fuse.sshfs" }];
+    const temp = ENV.RUNNER_TEMP;
+
+    it("fails rather than hide a nested candidate", () => {
+      const roots = { candidates: [ENV.HOME, temp], roots: [ENV.HOME] };
+      expect(() => nestedMountRoots(roots, sshfs(temp), [])).toThrow(
+        `cannot overlay the host mount "${temp}": it is a FUSE mount (fuse.sshfs) without ` +
+          `allow_other, which root cannot read. Use filesystem_mode: persistent, or list ` +
+          `"${temp}" in write_through.`,
+      );
+    });
+
+    it("fails rather than hide a candidate that is an overlay root itself", () => {
+      expect(() => nestedMountRoots(only("/tmp"), sshfs("/tmp"), [])).toThrow(
+        'cannot overlay the host mount "/tmp": it is a FUSE mount',
+      );
+    });
+
+    it("fails rather than hide a mount holding a candidate", () => {
+      const roots = { candidates: [ENV.HOME, temp], roots: [ENV.HOME] };
+      expect(() => nestedMountRoots(roots, sshfs("/home/runner/work"), [])).toThrow(
+        `cannot overlay the host mount "/home/runner/work", which holds "${temp}": it is a FUSE`,
+      );
+    });
   });
 });
 

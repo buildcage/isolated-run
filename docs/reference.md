@@ -714,7 +714,9 @@ the step ends. A separate host mount below one of them gets an overlay of its ow
 stay visible, except in two cases:
 
 - A FUSE mount without `allow_other`, one the runner cannot stat, or one whose path holds `,` or `:`
-  shows as an empty directory, and the step warns.
+  shows as an empty directory, and the step warns. If that mount is `$HOME`, `$RUNNER_TEMP`, `/tmp`
+  or `$GITHUB_WORKSPACE`, or holds one of them, the step fails instead, unless `write_through:`
+  covers that path.
 - A mount of a single file stays hidden without a warning: the command sees the file beneath the
   mount point.
 

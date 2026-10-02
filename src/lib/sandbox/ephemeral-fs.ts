@@ -12,10 +12,6 @@ import type { HostMount, OverlayDirs } from "./types.ts";
 // Untested by design: the defaults behind this module's seams, which only
 // hand node:fs and sudo what the tested caller decided.
 /* v8 ignore start */
-function defaultDeviceOf(path: string): number {
-  return statSync(path).dev;
-}
-
 function defaultIsDirectory(path: string): boolean {
   return statSync(path).isDirectory();
 }
@@ -41,11 +37,13 @@ interface OwnerAndMode {
 
 export interface DetermineOverlayRootsOptions {
   exists?: (path: string) => boolean;
-  /** Device id of the filesystem containing `path` (fs.statSync(path).dev
-   *  by default). Used only to tell a candidate nested under another
-   *  candidate apart from one that's actually a distinct mount nested
-   *  inside it; see the nesting-fold step below. */
-  deviceOf?: (path: string) => number;
+}
+
+export interface OverlayRoots {
+  /** The candidates left after steps 1 and 2 below. */
+  candidates: string[];
+  /** Those candidates with the nested ones folded away (step 3). */
+  roots: string[];
 }
 
 /**
@@ -68,39 +66,27 @@ export interface DetermineOverlayRootsOptions {
  *    too would make the rest of it read-only instead of ephemeral-writable,
  *    defeating the point of layering write_through over an overlay at all.
  * 3. Drop any remaining candidate nested under another remaining candidate
- *    (no nested overlays; the outer one wins), but only when they're on
- *    the same filesystem. A candidate on a filesystem of its own (an
- *    unusual but real self-hosted-runner layout) stays a candidate rather
- *    than being left to nestedMountRoots, which hides a mount it cannot
- *    overlay behind a warning: a $GITHUB_WORKSPACE that cannot be
- *    overlaid fails the step instead.
+ *    (no nested overlays; the outer one wins). One on a filesystem of its
+ *    own is a mount point, which nestedMountRoots overlays separately.
  * Candidates are deduped first (e.g. RUNNER_TEMP === HOME on some
  * self-hosted setups).
  */
 export function determineOverlayRoots(
   candidates: string[],
   writeThroughPaths: string[],
-  { exists = existsSync, deviceOf = defaultDeviceOf }: DetermineOverlayRootsOptions = {},
-): string[] {
+  { exists = existsSync }: DetermineOverlayRootsOptions = {},
+): OverlayRoots {
   const existing = [...new Set(candidates)].filter((c) => exists(c));
 
   const notCoveredByWriteThrough = existing.filter(
     (c) => !writeThroughPaths.some((a) => isAtOrUnder(c, a)),
   );
 
-  const notNested = notCoveredByWriteThrough.filter((c) => {
-    const nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isAtOrUnder(c, p));
-    if (!nestingParent) return true;
-    try {
-      return deviceOf(c) !== deviceOf(nestingParent);
-    } catch {
-      // Can't tell: keep it separate. An extra overlay root is harmless;
-      // silently dropping coverage for a path that turns out to matter isn't.
-      return true;
-    }
-  });
+  const roots = notCoveredByWriteThrough.filter(
+    (c) => !notCoveredByWriteThrough.some((p) => p !== c && isAtOrUnder(c, p)),
+  );
 
-  return notNested;
+  return { candidates: notCoveredByWriteThrough, roots };
 }
 
 export interface NestedMountRootsDeps {
@@ -124,10 +110,12 @@ function rootCannotRead({ fsType, superOptions = [] }: HostMount): boolean {
  * write_through path is left to that path's rbind, which carries it. A file
  * mount is left hidden: overlayfs takes only a directory as its lowerdir. A
  * mount the overlay would or might fail on is left hidden too, with a warning,
- * rather than failing the step.
+ * unless it is a candidate or holds one: hiding that would hide the candidate.
+ *
+ * @throws {Error} if a candidate, or a mount holding one, cannot be overlaid
  */
 export function nestedMountRoots(
-  overlayRoots: string[],
+  { candidates, roots: overlayRoots }: OverlayRoots,
   hostMounts: HostMount[],
   writeThroughPaths: string[],
   { isDirectory = defaultIsDirectory, warn }: NestedMountRootsDeps = {},
@@ -137,7 +125,6 @@ export function nestedMountRoots(
   const roots: string[] = [];
   for (const [path, mount] of visible) {
     if (
-      overlayRoots.includes(path) ||
       !overlayRoots.some((r) => isAtOrUnder(path, r)) ||
       writeThroughPaths.some((w) => isAtOrUnder(path, w))
     ) {
@@ -156,6 +143,15 @@ export function nestedMountRoots(
       }
     }
     if (reason !== undefined) {
+      const held = candidates.find((c) => isAtOrUnder(c, path));
+      if (held !== undefined) {
+        const holds = held === path ? "" : `, which holds ${JSON.stringify(held)}`;
+        throw new Error(
+          `filesystem_mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}` +
+            `${holds}: ${reason}. Use filesystem_mode: persistent, or list ` +
+            `${JSON.stringify(held)} in write_through.`,
+        );
+      }
       warn?.(
         `filesystem_mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the ` +
           `command sees the empty directory beneath it: ${reason}. Use filesystem_mode: ` +
@@ -163,7 +159,7 @@ export function nestedMountRoots(
       );
       continue;
     }
-    roots.push(path);
+    if (!overlayRoots.includes(path)) roots.push(path);
   }
   return roots;
 }

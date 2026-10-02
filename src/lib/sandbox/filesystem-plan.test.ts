@@ -125,7 +125,6 @@ describe("resolveFilesystemPlan", () => {
         p in links ? { uid: links[p]!.uid, gid: 0, mode: 0o120777 } : dirStat(),
       readlink: (p: string) => links[p]!.target,
       mkdir: () => {},
-      deviceOf: () => 1,
       listHostMounts: () => [],
     });
 
@@ -175,7 +174,6 @@ describe("resolveFilesystemPlan", () => {
   it("accepts an empty write_through: in ephemeral mode silently (maximum isolation is a valid choice)", () => {
     const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
       exists: alwaysExists,
-      deviceOf: () => 1,
       listHostMounts: () => [],
       realpath: (p) => p,
     });
@@ -190,7 +188,6 @@ describe("resolveFilesystemPlan", () => {
   it("takes the overlay candidates by their real paths, as write_through's are", () => {
     const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
       exists: alwaysExists,
-      deviceOf: () => 1,
       listHostMounts: () => [],
       realpath: (p) => p.replace(/^\/home\//, "/var/home/"),
     });
@@ -201,7 +198,6 @@ describe("resolveFilesystemPlan", () => {
     const plan = resolveFilesystemPlan("ephemeral", "/home/runner/out", ENV, {
       exists: alwaysExists,
       stat: dirStat,
-      deviceOf: () => 1,
       realpath: (p) => p,
       listHostMounts: () =>
         ["/", "/home/runner", "/home/runner/_tool", "/home/runner/out/cache", "/opt/data"].map(
@@ -216,7 +212,6 @@ describe("resolveFilesystemPlan", () => {
     const warn = vi.fn();
     const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
       exists: alwaysExists,
-      deviceOf: () => 1,
       realpath: (p) => p,
       listHostMounts: () => [{ mountPoint: "/home/runner/remote", fsType: "fuse.sshfs" }],
       warn,
@@ -225,11 +220,34 @@ describe("resolveFilesystemPlan", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('"/home/runner/remote"'));
   });
 
+  it("gives a nested candidate on a filesystem of its own an overlay through its mount", () => {
+    const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
+      exists: alwaysExists,
+      realpath: (p) => p,
+      listHostMounts: () => [{ mountPoint: ENV.RUNNER_TEMP, fsType: "ext4" }],
+      isDirectory: () => true,
+    });
+    expect(plan.overlayRoots.sort()).toStrictEqual([ENV.HOME, ENV.RUNNER_TEMP, "/tmp"].sort());
+  });
+
+  // write_through's own rbind shows the workspace, so hiding the mount under it costs nothing.
+  it("only warns about a mount holding nothing but a candidate write_through covers", () => {
+    const warn = vi.fn();
+    const plan = resolveFilesystemPlan("ephemeral", ENV.GITHUB_WORKSPACE, ENV, {
+      exists: alwaysExists,
+      stat: dirStat,
+      realpath: (p) => p,
+      listHostMounts: () => [{ mountPoint: "/home/runner/work/repo", fsType: "fuse.sshfs" }],
+      warn,
+    });
+    expect(plan.overlayRoots.sort()).toStrictEqual(["/home/runner", "/tmp"]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"/home/runner/work/repo"'));
+  });
+
   // /proc/self/mountinfo is Linux-only.
   it.skipIf(process.platform !== "linux")("reads the real host mount table by default", () => {
     const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
       exists: alwaysExists,
-      deviceOf: () => 1,
       realpath: (p) => p,
     });
     expect(plan.overlayRoots).toContain("/tmp");
@@ -246,7 +264,6 @@ describe("resolveFilesystemPlan", () => {
       stat: dirStat,
       canWrite: () => true,
       mkdir,
-      deviceOf: () => 1,
       listHostMounts: () => [],
       realpath: (p) => p,
     });
