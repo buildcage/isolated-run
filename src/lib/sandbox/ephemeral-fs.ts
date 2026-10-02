@@ -69,11 +69,11 @@ export interface DetermineOverlayRootsOptions {
  *    defeating the point of layering write_through over an overlay at all.
  * 3. Drop any remaining candidate nested under another remaining candidate
  *    (no nested overlays; the outer one wins), but only when they're on
- *    the same filesystem. A candidate that is its own separate mount
- *    nested inside another (an unusual but real self-hosted-runner layout)
- *    keeps its own overlay instead: overlayfs does not show a filesystem
- *    mounted inside its own lowerdir, so folding it away would leave that
- *    whole path invisible/stale in the sandbox rather than covered.
+ *    the same filesystem. A candidate on a filesystem of its own (an
+ *    unusual but real self-hosted-runner layout) stays a candidate rather
+ *    than being left to nestedMountRoots, which hides a mount it cannot
+ *    overlay behind a warning: a $GITHUB_WORKSPACE that cannot be
+ *    overlaid fails the step instead.
  * Candidates are deduped first (e.g. RUNNER_TEMP === HOME on some
  * self-hosted setups).
  */

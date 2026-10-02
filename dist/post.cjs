@@ -388,126 +388,6 @@ function retryBriefly(fn, options = {}) {
 		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
 	}
 }
-function defaultLstat(path) {
-	return (0, node_fs.lstatSync)(path, {
-		bigint: !0,
-		throwIfNoEntry: !1
-	});
-}
-function defaultPidAlive(pid) {
-	try {
-		return process.kill(pid, 0), !0;
-	} catch (e) {
-		return e.code !== "ESRCH";
-	}
-}
-function errnoCode(e) {
-	return e.code;
-}
-function idOf(info) {
-	return {
-		dev: String(info.dev),
-		ino: String(info.ino),
-		birthtimeNs: String(info.birthtimeNs)
-	};
-}
-function sameId(a, b) {
-	return a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
-}
-function isId(value) {
-	let v = value;
-	return typeof v == "object" && !!v && [
-		v.dev,
-		v.ino,
-		v.birthtimeNs
-	].every((s) => typeof s == "string" && /^\d+$/.test(s));
-}
-function dirIdOf(path, { lstat = defaultLstat } = {}) {
-	let info = lstat(path);
-	return info?.isDirectory() ? idOf(info) : void 0;
-}
-function acquireLock(lock, { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 50, lockDelayMs = 100 }) {
-	let mine = `${lock}.${process.pid}`;
-	(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
-	try {
-		retryBriefly(() => {
-			try {
-				(0, node_fs.linkSync)(mine, lock);
-			} catch (e) {
-				throw takeOverStaleLock(lock, pidAlive, now), e;
-			}
-		}, {
-			attempts: lockAttempts,
-			delayMs: lockDelayMs,
-			retryOn: (e) => errnoCode(e) === "EEXIST"
-		});
-	} catch (e) {
-		if (errnoCode(e) !== "EEXIST") throw e;
-		let waited = (lockAttempts - 1) * lockDelayMs / 1e3;
-		throw Error(`could not take ${lock}: another step held it for over ${waited}s`, { cause: e });
-	} finally {
-		(0, node_fs.rmSync)(mine, { force: !0 });
-	}
-	return () => (0, node_fs.rmSync)(lock, { force: !0 });
-}
-function takeOverStaleLock(lock, pidAlive, now) {
-	let pid, age;
-	try {
-		pid = Number((0, node_fs.readFileSync)(lock, "utf8")), age = now().getTime() - (0, node_fs.lstatSync)(lock).mtimeMs;
-	} catch {
-		return;
-	}
-	age < 2e3 || Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
-}
-function withLock(base, lockName, fn, deps) {
-	let release = acquireLock((0, node_path.join)(base, lockName), deps);
-	try {
-		return fn();
-	} finally {
-		release();
-	}
-}
-function readLedgerFile(path, empty, valid) {
-	let fd;
-	try {
-		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
-	} catch (e) {
-		return errnoCode(e) === "ENOENT" ? empty() : `${path} cannot be opened (${errorMessage(e)})`;
-	}
-	try {
-		let info = (0, node_fs.fstatSync)(fd);
-		if (!info.isFile()) return `${path} is not a file`;
-		if (info.size > 65536) return `${path} is ${info.size} bytes, too large`;
-		let parsed = JSON.parse((0, node_fs.readFileSync)(fd, "utf8"));
-		return valid(parsed) ? parsed : `${path} is not a ledger this version can read`;
-	} catch (e) {
-		return `${path} cannot be read (${errorMessage(e)})`;
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-}
-function writeLedgerFile(path, ledger) {
-	let tmp = `${path}.${process.pid}.tmp`;
-	(0, node_fs.rmSync)(tmp, { force: !0 });
-	let fd = (0, node_fs.openSync)(tmp, node_fs.constants.O_WRONLY | node_fs.constants.O_CREAT | node_fs.constants.O_EXCL | node_fs.constants.O_NOFOLLOW, 384);
-	try {
-		(0, node_fs.writeSync)(fd, `${JSON.stringify(ledger, null, 2)}\n`);
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-	(0, node_fs.renameSync)(tmp, path);
-}
-function withLedgerFile(base, fileName, lockName, read, fn, deps) {
-	let path = (0, node_path.join)(base, fileName);
-	return withLock(base, lockName, () => {
-		let ledger = read(path);
-		try {
-			return fn(ledger);
-		} finally {
-			typeof ledger != "string" && writeLedgerFile(path, ledger);
-		}
-	}, deps);
-}
 //#endregion
 //#region src/lib/sandbox/mountinfo.ts
 function parseMountinfo(mountinfoContent) {
@@ -601,7 +481,21 @@ function scratchDirFor(containerName) {
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
-const NSS_DB_LEDGER_NAME = "nssdb-ledger.json", USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
+const NSS_DB_LEDGER_NAME = "nssdb-ledger.json";
+function defaultLstat(path) {
+	return (0, node_fs.lstatSync)(path, {
+		bigint: !0,
+		throwIfNoEntry: !1
+	});
+}
+function defaultPidAlive(pid) {
+	try {
+		return process.kill(pid, 0), !0;
+	} catch (e) {
+		return e.code !== "ESRCH";
+	}
+}
+const USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
 function emptyLedger() {
 	return {
 		version: 1,
@@ -613,8 +507,112 @@ function isLedger(parsed) {
 	let l = parsed;
 	return l?.version === 1 && typeof l.dirs == "object" && l.dirs !== null && typeof l.uses == "object" && l.uses !== null && Object.entries(l.dirs).every(([p, d]) => p.startsWith("/") && isId(d)) && Object.entries(l.uses).every(([n, u]) => USE_NAME_RE.test(n) && isId(u));
 }
+function errnoCode(e) {
+	return e.code;
+}
+function idOf(info) {
+	return {
+		dev: String(info.dev),
+		ino: String(info.ino),
+		birthtimeNs: String(info.birthtimeNs)
+	};
+}
+function sameId(a, b) {
+	return a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
+}
+function isId(value) {
+	let v = value;
+	return typeof v == "object" && !!v && [
+		v.dev,
+		v.ino,
+		v.birthtimeNs
+	].every((s) => typeof s == "string" && /^\d+$/.test(s));
+}
+function dirIdOf(path, { lstat = defaultLstat } = {}) {
+	let info = lstat(path);
+	return info?.isDirectory() ? idOf(info) : void 0;
+}
+function acquireLock(lock, { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 50 }) {
+	let mine = `${lock}.${process.pid}`;
+	(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
+	try {
+		retryBriefly(() => {
+			try {
+				(0, node_fs.linkSync)(mine, lock);
+			} catch (e) {
+				throw takeOverStaleLock(lock, pidAlive, now), e;
+			}
+		}, {
+			attempts: lockAttempts,
+			delayMs: 100,
+			retryOn: (e) => errnoCode(e) === "EEXIST"
+		});
+	} catch (e) {
+		if (errnoCode(e) !== "EEXIST") throw e;
+		let waited = (lockAttempts - 1) * 100 / 1e3;
+		throw Error(`could not take ${lock}: another step held it for over ${waited}s`, { cause: e });
+	} finally {
+		(0, node_fs.rmSync)(mine, { force: !0 });
+	}
+	return () => (0, node_fs.rmSync)(lock, { force: !0 });
+}
+function takeOverStaleLock(lock, pidAlive, now) {
+	let pid, age;
+	try {
+		pid = Number((0, node_fs.readFileSync)(lock, "utf8")), age = now().getTime() - (0, node_fs.lstatSync)(lock).mtimeMs;
+	} catch {
+		return;
+	}
+	age < 2e3 || Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
+}
+function withLock(base, fn, deps) {
+	let release = acquireLock((0, node_path.join)(base, "nssdb-ledger.lock"), deps);
+	try {
+		return fn();
+	} finally {
+		release();
+	}
+}
+function readLedger(path) {
+	let fd;
+	try {
+		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
+	} catch (e) {
+		return errnoCode(e) === "ENOENT" ? emptyLedger() : `${path} cannot be opened (${errorMessage(e)})`;
+	}
+	try {
+		let info = (0, node_fs.fstatSync)(fd);
+		if (!info.isFile()) return `${path} is not a file`;
+		if (info.size > 65536) return `${path} is ${info.size} bytes, too large`;
+		let parsed = JSON.parse((0, node_fs.readFileSync)(fd, "utf8"));
+		return isLedger(parsed) ? parsed : `${path} is not a ledger this version can read`;
+	} catch (e) {
+		return `${path} cannot be read (${errorMessage(e)})`;
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function writeLedger(path, ledger) {
+	let tmp = `${path}.${process.pid}.tmp`;
+	(0, node_fs.rmSync)(tmp, { force: !0 });
+	let fd = (0, node_fs.openSync)(tmp, node_fs.constants.O_WRONLY | node_fs.constants.O_CREAT | node_fs.constants.O_EXCL | node_fs.constants.O_NOFOLLOW, 384);
+	try {
+		(0, node_fs.writeSync)(fd, `${JSON.stringify(ledger, null, 2)}\n`);
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+	(0, node_fs.renameSync)(tmp, path);
+}
 function withLedger(fn, deps) {
-	return withLedgerFile(baseOf(deps), NSS_DB_LEDGER_NAME, "nssdb-ledger.lock", (path) => readLedgerFile(path, emptyLedger, isLedger), fn, deps);
+	let path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
+	return withLock(baseOf(deps), () => {
+		let ledger = readLedger(path);
+		try {
+			return fn(ledger);
+		} finally {
+			typeof ledger != "string" && writeLedger(path, ledger);
+		}
+	}, deps);
 }
 function baseOf({ base }) {
 	return base ?? SANDBOX_SCRATCH_BASE;

@@ -41,8 +41,7 @@ if [ "$FOUND" != "1" ]; then
   assert_results
 fi
 
-# The real bash instance, not sudo's use_pty monitor; see
-# integration-test-die-with-parent.sh.
+# The bash running the script, not sudo, whose argv names it too.
 sudo -n kill -TERM "$(pgrep -f "/bin/bash .*/run-isolated.sh")"
 wait "$NODE_PID"
 CODE=$?

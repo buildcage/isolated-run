@@ -658,7 +658,7 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 ### Where it will not run
 
 - **Linux only**, with passwordless `sudo` for the isolation setup (network namespace, veth,
-  iptables) and a working Docker installation for the proxy container, on Docker Engine 25.0 or
+  runc) and a working Docker installation for the proxy container, on Docker Engine 25.0 or
   later with Compose v2.20.2 or later. All are the default on GitHub-hosted `ubuntu-*` runners, but
   not on lightweight images such as `ubuntu-slim`, which ships a client with no daemon.
 - **Rootful Docker.** The isolation joins the proxy container's netns through Docker's own
