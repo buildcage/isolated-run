@@ -22304,8 +22304,6 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 async function writeReportSummary(report, annotation, options, artifactAvailable, env, { appendFile = node_fs.appendFileSync } = {}) {
 	let outcomes = computeReportOutcomes(report, options);
 	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeStepSummary(truncateForStepSummary(outcomes.markdown, artifactAvailable), env.GITHUB_STEP_SUMMARY);
-	let debugSummaryFile = env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE;
-	debugSummaryFile && appendFile(debugSummaryFile, outcomes.markdown);
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts
