@@ -19,7 +19,7 @@
 #   allowed_https_rules: sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443 impostor.example.com:443 deadend.example.com:443
 #   allowed_http_rules:  allowed.example.com:80 deadend.example.com:80
 #   allowed_tls_rules:     tlspass.example.com:443 ~^tlspass\.example\.com:8443$
-#   allowed_ip_rules:    ~^10\.200\.0\.\d+:9080$ 10.200.0.53:53
+#   allowed_ip_rules:    ~^10\.200\.0\.\d+:9080$ 10.200.0.53:53 10.200.0.100:2525
 # ---------------------------------------------------------------------------
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
@@ -315,6 +315,16 @@ for H in 999.1.2.3 010.0.0.1 1.2.3.4.evil.example; do
          --resolve "$H:80:10.200.0.100" "http://$H/pub-by-addr/x")
   check_status "GET http://$H/pub-by-addr/x" "$CODE" "403"
 done
+
+# The client sends nothing and waits for the server to speak. The greeting
+# arrives within 3s only if the passthrough does not wait out inspect-delay
+# (5s) for the client's first bytes.
+echo "=== [Direct IP - allowed, server speaks first] ==="
+OUT=$(sleep 4 | timeout 3 nc 10.200.0.100 2525 || true)
+case "$OUT" in
+  220\ *) pass "10.200.0.100:2525 greeted without waiting for the client" ;;
+  *) fail "10.200.0.100:2525 sent no greeting within 3s -- got: $OUT" ;;
+esac
 
 # Port 9080, distinct from the :80 the URL rule above already allows, so
 # reaching it proves this ~regex allowed_ip_rules entry's own doing.
