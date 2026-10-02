@@ -237,6 +237,22 @@ export async function runSandboxStep(
   const { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } =
     readRuleInputs();
 
+  // Same gate as writeReportSummary(): suppresses annotations when this
+  // script isn't running as the real action.
+  const annotation = createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
+
+  // Pure checks, so a rule the engine cannot enforce fails (or, in audit,
+  // warns) before any privileged setup.
+  checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, annotation.warning);
+  checkKnownBlockedUrlRuleSupport(
+    {
+      proxyEngine,
+      proxyMode,
+      knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule),
+    },
+    annotation.warning,
+  );
+
   // Before any privileged setup; see assertNonRootUid.
   assertNonRootUid(process.getuid!());
 
@@ -257,10 +273,6 @@ export async function runSandboxStep(
   // the runner can't support the isolation setup at all.
   checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") checkOverlayfsSupport();
-
-  // Same gate as writeReportSummary(): suppresses annotations when this
-  // script isn't running as the real action.
-  const annotation = createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
 
   // Resolved/pre-created here (not inside runSandboxedCommand) so a bad
   // write_through entry, or a target that can't be created, fails before the
@@ -287,16 +299,6 @@ export async function runSandboxStep(
     ));
   log(`buildcage: proxy image: ${imageRef}`);
   const composeFile = resolveComposeFile(localOverride);
-
-  checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, annotation.warning);
-  checkKnownBlockedUrlRuleSupport(
-    {
-      proxyEngine,
-      proxyMode,
-      knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule),
-    },
-    annotation.warning,
-  );
 
   withLogGroup("buildcage: Configured ACL Rules", () => {
     logRules("HTTPS", httpsRules);

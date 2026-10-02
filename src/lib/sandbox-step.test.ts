@@ -160,6 +160,22 @@ describe("runSandboxStep", () => {
     expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });
 
+  it.each(["checkUrlAndTlsRuleSupport", "checkKnownBlockedUrlRuleSupport"] as const)(
+    "fails on a rule %s rejects before any setup",
+    async (check) => {
+      mocks[check].mockImplementation(() => {
+        throw new SandboxError("url rules need the inspect engine", "INVALID_PROXY_ENGINE");
+      });
+
+      await expect(runSandboxStep(ENV, deps)).rejects.toThrow("url rules need the inspect engine");
+      expect(mocks.pinHostCommands).not.toHaveBeenCalled();
+      expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
+      expect(mocks.resolveFilesystemPlan).not.toHaveBeenCalled();
+      expect(mocks.verifyImageDigestOrThrow).not.toHaveBeenCalled();
+      expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+    },
+  );
+
   it("pins docker and sudo outside what any sandboxed command can write, before the preflights", async () => {
     await runSandboxStep(ENV, deps);
 
@@ -330,6 +346,7 @@ describe("runSandboxStep", () => {
     );
 
     expect(await runSandboxStep(ENV, deps)).toBe(0);
+    expect(annotation.warning).toHaveBeenCalledOnce();
     expect(annotation.warning).toHaveBeenCalledWith("url rules need the inspect engine");
   });
 
