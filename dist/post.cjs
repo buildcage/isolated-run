@@ -682,6 +682,8 @@ function isAtOrUnder(path, ancestor) {
 	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
 }
 //#endregion
+//#region src/lib/sandbox/host-probes.ts
+//#endregion
 //#region src/lib/sandbox/oci-mounts.ts
 function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths = [] }) {
 	return [...new Set([

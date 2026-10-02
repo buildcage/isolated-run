@@ -9,6 +9,8 @@
 import { existsSync, readFileSync, realpathSync, statfsSync } from "node:fs";
 import os from "node:os";
 
+import { realpathOrSelf } from "./host-commands.ts";
+
 // runc resolves process.args[0] against the *sandbox's* PATH (the step's own
 // env, which a user could override to omit /usr/bin), so resolve setpriv to an
 // absolute path up front instead of relying on that lookup. The sandbox rootfs
@@ -147,12 +149,6 @@ export const realHostProbes: HostProbes = {
     }
   },
 
-  realpath: (path) => {
-    try {
-      return realpathSync(path);
-    } catch {
-      return path;
-    }
-  },
+  realpath: realpathOrSelf,
 };
 /* v8 ignore stop */

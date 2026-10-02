@@ -20182,13 +20182,7 @@ const realHostProbes = {
 			return;
 		}
 	},
-	realpath: (path) => {
-		try {
-			return (0, node_fs.realpathSync)(path);
-		} catch {
-			return path;
-		}
-	}
+	realpath: realpathOrSelf
 };
 //#endregion
 //#region src/lib/sandbox/oci-mounts.ts
