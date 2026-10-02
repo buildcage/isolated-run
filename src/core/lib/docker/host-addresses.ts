@@ -1,6 +1,6 @@
 import { networkInterfaces } from "node:os";
 
-export interface HostAddressOptions {
+interface HostAddressOptions {
   networkInterfaces?: typeof networkInterfaces;
 }
 

@@ -1,7 +1,7 @@
 import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
+import { listHostIpv4Addresses } from "#core/lib/docker/host-addresses.ts";
 
 import { ownerToken } from "./container.ts";
-import { listHostIpv4Addresses } from "./host-addresses.ts";
 
 export interface ComposeEnvOptions {
   containerName: string;
@@ -51,7 +51,7 @@ export function buildComposeEnv(
     ALLOWED_TLS_RULES: tlsRules.join("\n"),
     BUILDCAGE_PROXY_IMAGE_REF: imageRef,
     // The compose network's gateway is added engine-side; see
-    // lib/host-addresses.ts.
+    // core/lib/docker/host-addresses.ts.
     HOST_ADDRESSES: hostAddresses().join(" "),
   };
 }

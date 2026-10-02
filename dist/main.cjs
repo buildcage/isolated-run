@@ -18678,6 +18678,13 @@ async function verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine }) 
 	return requireDigest(digest, actionRef);
 }
 //#endregion
+//#region src/core/lib/docker/host-addresses.ts
+function listHostIpv4Addresses({ networkInterfaces: list = node_os.networkInterfaces } = {}) {
+	let found = new Set();
+	for (let infos of Object.values(list())) for (let info of infos ?? []) (info.family === "IPv4" || info.family === 4) && (info.internal || found.add(info.address));
+	return [...found].sort();
+}
+//#endregion
 //#region src/core/lib/actions/docker-error.ts
 const SLIM_RUNNER_DETECTED_PREFIX = " Detected a container-based GitHub-hosted runner image (e.g. \"ubuntu-slim\")", SLIM_RUNNER_NOTE$1 = `${SLIM_RUNNER_DETECTED_PREFIX}: these ship a Docker client with no daemon and are not supported for this action.`;
 function capturedStderr(e) {
@@ -18776,13 +18783,6 @@ function inspectFormat(containerName, format, exec) {
 }
 function getContainerNetns(containerName, { exec = captureDockerViaExec$1 } = {}) {
 	return inspectFormat(containerName, "{{.NetworkSettings.SandboxKey}}", exec) || null;
-}
-//#endregion
-//#region src/lib/host-addresses.ts
-function listHostIpv4Addresses({ networkInterfaces: list = node_os.networkInterfaces } = {}) {
-	let found = new Set();
-	for (let infos of Object.values(list())) for (let info of infos ?? []) (info.family === "IPv4" || info.family === 4) && (info.internal || found.add(info.address));
-	return [...found].sort();
 }
 //#endregion
 //#region src/lib/compose-env.ts
