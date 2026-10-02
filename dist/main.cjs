@@ -67467,9 +67467,18 @@ async function runSandboxStep(env, overrides = {}) {
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs(), { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs();
-	assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
-	let annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY), { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
+	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs(), { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs(), annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY);
+	checkUrlAndTlsRuleSupport({
+		proxyEngine,
+		proxyMode,
+		urlRules,
+		tlsRules
+	}, annotation.warning), checkKnownBlockedUrlRuleSupport({
+		proxyEngine,
+		proxyMode,
+		knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
+	}, annotation.warning), assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
+	let { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
 	let localOverride = await readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
 		actionRef,
@@ -67481,16 +67490,7 @@ async function runSandboxStep(env, overrides = {}) {
 	});
 	log(`buildcage: proxy image: ${imageRef}`);
 	let composeFile = resolveComposeFile(localOverride);
-	checkUrlAndTlsRuleSupport({
-		proxyEngine,
-		proxyMode,
-		urlRules,
-		tlsRules
-	}, annotation.warning), checkKnownBlockedUrlRuleSupport({
-		proxyEngine,
-		proxyMode,
-		knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
-	}, annotation.warning), withLogGroup("buildcage: Configured ACL Rules", () => {
+	withLogGroup("buildcage: Configured ACL Rules", () => {
 		logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
 	});
 	let containerName = generateContainerName(), projectName = deriveProjectName(containerName);
