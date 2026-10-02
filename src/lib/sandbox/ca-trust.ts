@@ -236,7 +236,8 @@ type CaStoreReservation =
    *  what is installed. */
   | {
       refuses: (entry: string, destination: string) => boolean;
-      refusal: (destination: string) => string;
+      /** `resolved` is where `destination`'s symlinks lead. */
+      refusal: (destination: string, resolved: string) => string;
     };
 
 /** A kind of CA store on the runner, covered with a copy carrying the proxy CA. */
@@ -300,8 +301,10 @@ export const CA_STORES: Record<CaStoreKind, CaStore> = {
     mountOptions: READ_ONLY,
     reserve: {
       refuses: (entry, destination) => isAtOrUnder(entry, destination),
-      refusal: (destination) =>
-        `is in the CA directory ${JSON.stringify(destination)}, which the inspect engine ` +
+      refusal: (destination, resolved) =>
+        `is in the CA directory ${JSON.stringify(destination)}` +
+        (resolved === destination ? "" : ` (a symlink to ${JSON.stringify(resolved)})`) +
+        ", which the inspect engine " +
         "covers with a read-only copy carrying the proxy CA for the step. Name a containing " +
         "directory instead to persist writes around it.",
     },
@@ -476,10 +479,15 @@ export function presetCaVariables(
   });
 }
 
-/** Refuse a write_through entry a CA mount would shadow. An ancestor stays allowed. */
+/**
+ * Refuse a write_through entry a CA mount would shadow. An ancestor stays
+ * allowed. The entries are real paths, and runc follows symlinks in a mount's
+ * destination, so each destination is compared where it resolves.
+ */
 export function assertWriteThroughClearOfCaTrust(
   files: CaTrustFiles,
   writeThroughPaths: string[],
+  realpath: (path: string) => string,
 ): void {
   const covered = files.stores.map(({ kind, destination }) => ({
     reserve: CA_STORES[kind].reserve,
@@ -490,9 +498,10 @@ export function assertWriteThroughClearOfCaTrust(
   }
   for (const path of writeThroughPaths) {
     for (const { reserve, destination } of covered) {
-      if ("refuses" in reserve && reserve.refuses(path, destination)) {
+      const resolved = realpath(destination);
+      if ("refuses" in reserve && reserve.refuses(path, resolved)) {
         throw new WritablePathConflictError(
-          `write_through entry ${JSON.stringify(path)} ${reserve.refusal(destination)}`,
+          `write_through entry ${JSON.stringify(path)} ${reserve.refusal(destination, resolved)}`,
         );
       }
     }

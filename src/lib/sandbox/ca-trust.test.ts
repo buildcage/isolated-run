@@ -667,6 +667,7 @@ describe("assertWriteThroughClearOfCaTrust", () => {
   const KEYSTORE = "/usr/lib/jvm/temurin-21-jdk-amd64/lib/security/cacerts";
   const NSS_DB = "/home/runner/.pki/nssdb";
   const ANCHORS = "/etc/pki/ca-trust/source/anchors";
+  const asIs = (path: string) => path;
   const files = {
     ownCaPath: "/scratch/buildcage-ca.pem",
     stores: [
@@ -686,7 +687,7 @@ describe("assertWriteThroughClearOfCaTrust", () => {
     [ANCHORS, /is in the CA directory/],
     [`${ANCHORS}/corp.pem`, /is in the CA directory/],
   ])("refuses %s, which a CA mount would shadow", (path, message) => {
-    expect(() => assertWriteThroughClearOfCaTrust(files, [path])).toThrow(message);
+    expect(() => assertWriteThroughClearOfCaTrust(files, [path], asIs)).toThrow(message);
   });
 
   it.each([
@@ -695,14 +696,30 @@ describe("assertWriteThroughClearOfCaTrust", () => {
     ["the directory holding the anchors", "/etc/pki/ca-trust/source"],
     ["an unrelated path", "/opt/cache"],
   ])("allows %s", (_, path) => {
-    expect(() => assertWriteThroughClearOfCaTrust(files, [path])).not.toThrow();
+    expect(() => assertWriteThroughClearOfCaTrust(files, [path], asIs)).not.toThrow();
   });
 
   it("allows anything when there is no NSS database to cover", () => {
     expect(() =>
-      assertWriteThroughClearOfCaTrust({ ...files, nssDb: undefined }, [`${NSS_DB}/cert9.db`]),
+      assertWriteThroughClearOfCaTrust(
+        { ...files, nssDb: undefined },
+        [`${NSS_DB}/cert9.db`],
+        asIs,
+      ),
     ).not.toThrow();
   });
+
+  // write_through entries arrive resolved, so naming the link or its target
+  // both reach here as the target.
+  it.each([["/opt/anchors"], ["/opt/anchors/corp.pem"]])(
+    "refuses %s when the CA directory is a symlink to /opt/anchors",
+    (path) => {
+      const realpath = (p: string) => (p === ANCHORS ? "/opt/anchors" : p);
+      expect(() => assertWriteThroughClearOfCaTrust(files, [path], realpath)).toThrow(
+        `is in the CA directory "${ANCHORS}" (a symlink to "/opt/anchors")`,
+      );
+    },
+  );
 });
 
 describe("presetCaVariables", () => {

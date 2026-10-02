@@ -785,7 +785,8 @@ Under `inspect`, a CA directory the step covers (`/etc/pki/ca-trust/source/ancho
 `/etc/pki/trust/anchors` or `/var/lib/ca-certificates/pem`) and anything in it, a JVM keystore the
 step covers with its CA-carrying copy, and anything inside the NSS database it covers
 (`~/.pki/nssdb/cert9.db`) are refused too. Which of them exist depends on the runner and the JDKs
-installed, so only the ones the step actually mounts count. Naming a keystore's directory, or the
+installed, so only the ones the step actually mounts count. A CA directory that is a symlink is
+reserved where it leads as well, as a CA store is. Naming a keystore's directory, or the
 parent of a CA directory, is fine, and naming `~/.pki/nssdb` itself has the command's changes to it
 written back.
 

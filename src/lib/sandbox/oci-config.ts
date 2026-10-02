@@ -120,7 +120,11 @@ export function buildOciConfig(
   const disableReadonly = !ephemeral && writablePaths.includes("/");
 
   if (caTrust) {
-    assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths);
+    assertWriteThroughClearOfCaTrust(
+      caTrust,
+      ephemeral ? ephemeral.allowWrite : writablePaths,
+      (path) => probes.realpath(path),
+    );
   }
   const caAdditions = caTrust ? caTrustAdditions(caTrust, env) : undefined;
   // Pushed after the writable layers below: a write_through entry naming a
