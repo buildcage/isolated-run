@@ -293,7 +293,8 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │       │                      # actions/, docker/, provenance/, report/ and log/ are Node-only,
 │       │                      # and test/test-shim.ts is the node:test-alike shim *.test.ts uses
 │       │                      # under either runtime
-│       └── scripts/           # The QuickJS test runner and qjs's type declarations
+│       └── scripts/           # QuickJS only: each engine's config generator, the test runner
+│                              # and qjs's type declarations
 ├── dist/                      # Bundled output (rolldown → CommonJS), committed. dist/qjs and
 │                              # dist/qjs-test are gitignored scratch
 ├── docker/                    # Proxy image build contexts, one per proxy_engine
@@ -320,11 +321,11 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 └── Makefile                   # Operational commands
 ```
 
-Each engine directory carries a `scripts/gen-configs.qjs.ts`, which runs under QuickJS when the
-proxy container starts and writes haproxy.cfg and the Corefile from the rules, through the generators
-in `src/core/lib/acl/` (`haproxy-config.ts` for `inspect`, `haproxy-universal-config.ts` for
-`universal`). rolldown bundles it into `/opt/buildcage/scripts/` at image build time, and
-`tsconfig.qjs.json` type-checks it.
+Each engine's config generator is `src/core/scripts/gen-configs-<engine>.qjs.ts`, which runs under
+QuickJS when the proxy container starts and writes haproxy.cfg and the Corefile from the rules,
+through the generators in `src/core/lib/acl/` (`haproxy-config.ts` for `inspect`,
+`haproxy-universal-config.ts` for `universal`). rolldown bundles it into
+`/opt/buildcage/scripts/gen-configs.js` at image build time, and `tsconfig.qjs.json` type-checks it.
 
 Each Dockerfile copies `docker/common/files/` first and the engine's own `files/` on top. An engine
 keeps only what differs: `THIRD_PARTY_LICENSES` and the `init-cfg` script that generates its

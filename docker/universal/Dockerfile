@@ -61,7 +61,6 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --ignore-scripts
 COPY rolldown.scripts.config.js ./
 COPY src/core/ ./src/core/
-COPY docker/universal/scripts/ ./docker/universal/scripts/
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm run build:qjs
 
@@ -109,7 +108,7 @@ RUN apk add --no-cache --virtual .setcap libcap-utils && \
 # Writes haproxy.cfg and the Corefile at startup (see init-cfg). No
 # report-action.js here: src/lib/report.ts builds its own report in-process
 # instead of fetching one from the container.
-COPY --from=qjs-build /build/dist/qjs/docker/universal/scripts/gen-configs.js /opt/buildcage/scripts/gen-configs.js
+COPY --from=qjs-build /build/dist/qjs/src/core/scripts/gen-configs-universal.js /opt/buildcage/scripts/gen-configs.js
 
 # runc, extracted onto the runner host at action startup and used by
 # run-isolated.sh to execute the isolated command (see docs/development.md)
