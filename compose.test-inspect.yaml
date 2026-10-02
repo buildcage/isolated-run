@@ -20,8 +20,9 @@ services:
     networks:
       test-net:
 
-  # A second origin nothing resolves to. Reaching it means the destination came
-  # from the client rather than from the proxy's own resolution.
+  # A second origin, with a certificate no CA the proxy holds signed. A request
+  # served here came from the client's own choice of destination rather than
+  # from the proxy's resolution.
   test-server-impostor:
     build: test/test-server-impostor
     cap_add:
