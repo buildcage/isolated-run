@@ -87,6 +87,8 @@ export interface HostProbes {
   hostname(): string;
   /** /var/run's real path, undefined when it doesn't exist. */
   varRunRealPath(): string | undefined;
+  /** `path` with its symlinks resolved, or `path` itself when that fails. */
+  realpath(path: string): string;
 }
 
 // Untested by design, down to the end of the file: the syscalls behind the
@@ -142,6 +144,14 @@ export const realHostProbes: HostProbes = {
       return realpathSync("/var/run");
     } catch {
       return undefined;
+    }
+  },
+
+  realpath: (path) => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return path;
     }
   },
 };

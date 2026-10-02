@@ -32,6 +32,7 @@ function pinnedProbes({ absent = [] }: { absent?: ("setpriv" | "nofile")[] } = {
     shmSizeBytes: () => SHM_BYTES,
     hostname: () => HOSTNAME,
     varRunRealPath: () => "/run",
+    realpath: (path) => path,
   };
 }
 
@@ -845,6 +846,21 @@ describe("buildOciConfig: caTrust", () => {
         ...baseArgs,
         ephemeral: { overlayRoots: [], allowWrite: [keystore] },
         caTrust: withKeystore,
+      }),
+    ).toThrow(WritablePathConflictError);
+  });
+
+  it("refuses a write_through entry where a symlinked CA directory leads", () => {
+    const anchors = "/etc/pki/ca-trust/source/anchors";
+    probes = { ...pinnedProbes(), realpath: (p) => (p === anchors ? "/opt/anchors" : p) };
+    expect(() =>
+      build(fakeBaseSpec(), {
+        ...baseArgs,
+        writable: { ...baseArgs.writable, writablePaths: ["/opt/anchors"] },
+        caTrust: {
+          ...caTrust,
+          stores: [{ kind: "caDir" as const, path: "/scratch/ca-dir0", destination: anchors }],
+        },
       }),
     ).toThrow(WritablePathConflictError);
   });

@@ -19982,7 +19982,7 @@ const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_ST
 		mountOptions: READ_ONLY,
 		reserve: {
 			refuses: (entry, destination) => isAtOrUnder(entry, destination),
-			refusal: (destination) => `is in the CA directory ${JSON.stringify(destination)}, which the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it.`
+			refusal: (destination, resolved) => `is in the CA directory ${JSON.stringify(destination)}` + (resolved === destination ? "" : ` (a symlink to ${JSON.stringify(resolved)})`) + ", which the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it."
 		}
 	},
 	jvmKeystore: {
@@ -20079,7 +20079,7 @@ function presetCaVariables(files, env, realpath) {
 		return !value || value === "/dev/buildcage-ca.pem" || stores.includes(realpath(value)) ? !1 : exact.includes(name) || REPLACING_WHEN_SET_ANY_CASE.some((v) => v.toLowerCase() === name.toLowerCase());
 	});
 }
-function assertWriteThroughClearOfCaTrust(files, writeThroughPaths) {
+function assertWriteThroughClearOfCaTrust(files, writeThroughPaths, realpath) {
 	let covered = files.stores.map(({ kind, destination }) => ({
 		reserve: CA_STORES[kind].reserve,
 		destination
@@ -20088,7 +20088,10 @@ function assertWriteThroughClearOfCaTrust(files, writeThroughPaths) {
 		reserve: NSS_DB_RESERVATION,
 		destination: files.nssDb.destination
 	});
-	for (let path of writeThroughPaths) for (let { reserve, destination } of covered) if ("refuses" in reserve && reserve.refuses(path, destination)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} ${reserve.refusal(destination)}`);
+	for (let path of writeThroughPaths) for (let { reserve, destination } of covered) {
+		let resolved = realpath(destination);
+		if ("refuses" in reserve && reserve.refuses(path, resolved)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} ${reserve.refusal(destination, resolved)}`);
+	}
 }
 function caTrustAdditions(files, env) {
 	let mounts = [{
@@ -20177,6 +20180,13 @@ const realHostProbes = {
 			return (0, node_fs.realpathSync)("/var/run");
 		} catch {
 			return;
+		}
+	},
+	realpath: (path) => {
+		try {
+			return (0, node_fs.realpathSync)(path);
+		} catch {
+			return path;
 		}
 	}
 };
@@ -20848,7 +20858,7 @@ function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, env, hostMo
 //#region src/lib/sandbox/oci-config.ts
 function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostDirs = [], renameGuardDirs = [] }, probes = realHostProbes) {
 	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
-	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths);
+	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths, (path) => probes.realpath(path));
 	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
 		destination: RESOLV_CONF_DESTINATION,
 		type: "none",
