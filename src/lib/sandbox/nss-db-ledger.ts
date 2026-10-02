@@ -1,25 +1,25 @@
-import { mkdirSync, rmdirSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  writeFileSync,
+  writeSync,
+  type BigIntStats,
+} from "node:fs";
 import { basename, join } from "node:path";
 
 import { errorMessage } from "#core/lib/errors.ts";
 
-import {
-  defaultLstat,
-  dirIdOf,
-  errnoCode,
-  idOf,
-  isId,
-  readLedgerFile,
-  sameId,
-  withLedgerFile,
-  withLock,
-  type DirId,
-  type LockDeps,
-  type LstatShape,
-} from "./ledger-file.ts";
+import { retryBriefly } from "../retry-briefly.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
-
-export { dirIdOf, stillThere, type DirId } from "./ledger-file.ts";
 
 /**
  * Ledger of the directories made for Chromium's NSS database mount, shared by
@@ -29,10 +29,54 @@ export { dirIdOf, stillThere, type DirId } from "./ledger-file.ts";
  * step must not remove one another step's sandbox still has its database
  * mounted on. Each step registers its use, and the last to leave removes what
  * Buildcage made.
+ *
+ * The ledger lives in SANDBOX_SCRATCH_BASE, hidden from the sandbox, so a
+ * command cannot mark a runner directory for removal. Directories are
+ * identified by device, inode and birth time: a recreated directory may reuse
+ * the inode but not the birth time, so a stale entry never matches it.
  */
 
 export const NSS_DB_LEDGER_NAME = "nssdb-ledger.json";
 const LOCK_NAME = "nssdb-ledger.lock";
+const MAX_LEDGER_BYTES = 64 << 10;
+const LOCK_DELAY_MS = 100;
+
+/** Kept well under acquireLock's wait so a lock left by a killed holder is
+ *  taken over within it. */
+const STALE_LOCK_MS = 2_000;
+
+export interface DirId {
+  dev: string;
+  ino: string;
+  /** "0" where the filesystem keeps no birth time. */
+  birthtimeNs: string;
+}
+
+type LstatShape = Pick<BigIntStats, "dev" | "ino" | "birthtimeNs"> & {
+  isDirectory(): boolean;
+  isSymbolicLink(): boolean;
+};
+
+// Untested by design: the defaults behind this module's seams, which only hand
+// node:fs and process.kill what the tested caller decided.
+/* v8 ignore start */
+function defaultMkdir(path: string, mode: number): void {
+  mkdirSync(path, { mode });
+}
+
+function defaultLstat(path: string): LstatShape | undefined {
+  return lstatSync(path, { bigint: true, throwIfNoEntry: false });
+}
+
+export function defaultPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+/* v8 ignore stop */
 
 /** scratchDirNameFor's shape. */
 const USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
@@ -55,21 +99,17 @@ interface Ledger {
   uses: Record<string, LedgerUse>;
 }
 
-export interface NssDbLedgerDeps extends LockDeps {
+export interface NssDbLedgerDeps {
   base?: string;
+  pidAlive?: (pid: number) => boolean;
+  now?: () => Date;
+  lockAttempts?: number;
   lstat?: (path: string) => LstatShape | undefined;
   mkdir?: (path: string, mode: number) => void;
   rmdir?: (path: string) => void;
   info?: (message: string) => void;
   warn?: (message: string) => void;
 }
-
-// Untested by design: hands node:fs what the tested caller decided.
-/* v8 ignore start */
-function defaultMkdir(path: string, mode: number): void {
-  mkdirSync(path, { mode });
-}
-/* v8 ignore stop */
 
 function emptyLedger(): Ledger {
   return { version: 1, dirs: {}, uses: {} };
@@ -88,20 +128,171 @@ function isLedger(parsed: unknown): parsed is Ledger {
   );
 }
 
+function errnoCode(e: unknown): string | undefined {
+  return (e as NodeJS.ErrnoException).code;
+}
+
+function idOf(info: LstatShape): DirId {
+  return { dev: String(info.dev), ino: String(info.ino), birthtimeNs: String(info.birthtimeNs) };
+}
+
+function sameId(a: DirId, b: DirId): boolean {
+  return a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
+}
+
+function isId(value: unknown): value is DirId {
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    [v.dev, v.ino, v.birthtimeNs].every((s) => typeof s === "string" && /^\d+$/.test(s))
+  );
+}
+
+export function dirIdOf(
+  path: string,
+  { lstat = defaultLstat }: { lstat?: (path: string) => LstatShape | undefined } = {},
+): DirId | undefined {
+  const info = lstat(path);
+  return info?.isDirectory() ? idOf(info) : undefined;
+}
+
+export function stillThere(
+  path: string,
+  id: DirId,
+  deps: { lstat?: (path: string) => LstatShape | undefined } = {},
+): boolean {
+  const current = dirIdOf(path, deps);
+  return current !== undefined && sameId(current, id);
+}
+
+/** link(2) creates the lock with its pid already written, or fails with
+ *  EEXIST, so no reader sees an empty lock. */
+function acquireLock(
+  lock: string,
+  { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 50 }: NssDbLedgerDeps,
+): () => void {
+  const mine = `${lock}.${process.pid}`;
+  writeFileSync(mine, String(process.pid), { mode: 0o600 });
+  try {
+    retryBriefly(
+      () => {
+        try {
+          linkSync(mine, lock);
+        } catch (e) {
+          takeOverStaleLock(lock, pidAlive, now);
+          throw e;
+        }
+      },
+      { attempts: lockAttempts, delayMs: LOCK_DELAY_MS, retryOn: (e) => errnoCode(e) === "EEXIST" },
+    );
+  } catch (e) {
+    // link(2) fails otherwise only on a broken scratch base, which no test builds.
+    /* v8 ignore next */
+    if (errnoCode(e) !== "EEXIST") throw e;
+    const waited = ((lockAttempts - 1) * LOCK_DELAY_MS) / 1000;
+    throw new Error(`could not take ${lock}: another step held it for over ${waited}s`, {
+      cause: e,
+    });
+  } finally {
+    rmSync(mine, { force: true });
+  }
+  return () => rmSync(lock, { force: true });
+}
+
+/** Two waiters can both take over the same stale lock, the second removing
+ *  the first's new one. That needs a holder killed within its milliseconds,
+ *  and costs at most one overlapping ledger update. */
+function takeOverStaleLock(
+  lock: string,
+  pidAlive: (pid: number) => boolean,
+  now: () => Date,
+): void {
+  let pid: number;
+  let age: number;
+  try {
+    pid = Number(readFileSync(lock, "utf8"));
+    age = now().getTime() - lstatSync(lock).mtimeMs;
+  } catch {
+    return;
+  }
+  if (age < STALE_LOCK_MS || (Number.isInteger(pid) && pid > 0 && pidAlive(pid))) return;
+  rmSync(lock, { force: true });
+}
+
+function withLock<T>(base: string, fn: () => T, deps: NssDbLedgerDeps): T {
+  const release = acquireLock(join(base, LOCK_NAME), deps);
+  try {
+    return fn();
+  } finally {
+    release();
+  }
+}
+
+/** The ledger, an empty one if there is none yet, or why it cannot be trusted. */
+function readLedger(path: string): Ledger | string {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (e) {
+    if (errnoCode(e) === "ENOENT") return emptyLedger();
+    return `${path} cannot be opened (${errorMessage(e)})`;
+  }
+  try {
+    const info = fstatSync(fd);
+    // No owner check: ensureOwnScratchBase keeps the base private to the
+    // runner user.
+    if (!info.isFile()) return `${path} is not a file`;
+    if (info.size > MAX_LEDGER_BYTES) return `${path} is ${info.size} bytes, too large`;
+    const parsed: unknown = JSON.parse(readFileSync(fd, "utf8"));
+    return isLedger(parsed) ? parsed : `${path} is not a ledger this version can read`;
+  } catch (e) {
+    return `${path} cannot be read (${errorMessage(e)})`;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Renamed into place so a reader never sees a partial write. */
+function writeLedger(path: string, ledger: Ledger): void {
+  const tmp = `${path}.${process.pid}.tmp`;
+  rmSync(tmp, { force: true });
+  const fd = openSync(
+    tmp,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    writeSync(fd, `${JSON.stringify(ledger, null, 2)}\n`);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(tmp, path);
+}
+
+/** Runs fn on the ledger under its lock and saves it afterwards, even when fn
+ *  throws, since the undo fn ran has taken effect. An untrusted ledger is
+ *  handed to fn as the reason and never rewritten: remaking it would drop
+ *  other steps' uses. */
 function withLedger<T>(fn: (ledger: Ledger | string) => T, deps: NssDbLedgerDeps): T {
-  return withLedgerFile(
+  const path = join(baseOf(deps), NSS_DB_LEDGER_NAME);
+  return withLock(
     baseOf(deps),
-    NSS_DB_LEDGER_NAME,
-    LOCK_NAME,
-    (path) => readLedgerFile(path, emptyLedger, isLedger),
-    fn,
+    () => {
+      const ledger = readLedger(path);
+      try {
+        return fn(ledger);
+      } finally {
+        if (typeof ledger !== "string") writeLedger(path, ledger);
+      }
+    },
     deps,
   );
 }
 
 /** Also held by write-backs, so parallel ones never interleave. */
 export function withNssDbLock<T>(fn: () => T, deps: NssDbLedgerDeps = {}): T {
-  return withLock(baseOf(deps), LOCK_NAME, fn, deps);
+  return withLock(baseOf(deps), fn, deps);
 }
 
 function baseOf({ base }: NssDbLedgerDeps): string {

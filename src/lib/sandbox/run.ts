@@ -49,8 +49,8 @@ function defaultCopyScript(from: string, to: string): void {
 
 /**
  * Run the user's command inside the isolated sandbox via run-isolated.sh
- * (invoked with `sudo -n`, since setting up namespaces/veth/iptables/the
- * rootfs bind-mount requires root). Returns the exit code of the isolated
+ * (invoked with `sudo -n`, since setting up namespaces/veth/the rootfs
+ * bind-mount requires root). Returns the exit code of the isolated
  * command, never throws for a non-zero exit, since that's the user's
  * command failing, not this function.
  *

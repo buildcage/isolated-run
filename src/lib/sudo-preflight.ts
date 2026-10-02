@@ -11,7 +11,7 @@ import { runPinnedHostCommand } from "./sandbox/run-host-command.ts";
 
 const REQUIREMENT =
   "The run action requires a Linux runner with passwordless sudo for the isolation setup itself " +
-  '(network namespace, veth, iptables). That is the default on GitHub-hosted "ubuntu-*" ' +
+  '(network namespace, veth, runc). That is the default on GitHub-hosted "ubuntu-*" ' +
   'runners, but not on lightweight images such as "ubuntu-slim" or many self-hosted or minimal ' +
   "runners. See README.md and docs/security.md for details.";
 

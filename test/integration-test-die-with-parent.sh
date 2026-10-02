@@ -59,10 +59,8 @@ if [ "$FOUND" != "1" ]; then
 fi
 sleep 0.5
 
-# Sudo's `use_pty` setting (common on Ubuntu) forks a monitor process ahead
-# of the actual script, which also matches "run-isolated.sh" in its argv, so
-# this must target the real bash instance, not sudo's monitor (see
-# run-isolated.sh's own comment on this same distinction).
+# sudo's own argv also names run-isolated.sh, so this must target the bash
+# running it, not sudo.
 mapfile -t BASH_PIDS < <(pgrep -f "/bin/bash .*/run-isolated.sh")
 if [ "${#BASH_PIDS[@]}" != "1" ]; then
   echo "  FAIL  expected exactly 1 run-isolated.sh bash process, found ${#BASH_PIDS[@]}: ${BASH_PIDS[*]:-<none>}"

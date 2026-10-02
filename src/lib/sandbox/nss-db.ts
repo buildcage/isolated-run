@@ -30,6 +30,7 @@ import { errorMessage } from "#core/lib/errors.ts";
 
 import {
   claimNssDb,
+  defaultPidAlive,
   dirIdOf,
   releaseNssDb,
   withNssDbLock,
@@ -194,15 +195,6 @@ function defaultCopyDir(
     verbatimSymlinks: true,
     filter,
   });
-}
-
-function defaultPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code !== "ESRCH";
-  }
 }
 
 function defaultAccess(path: string): void {
