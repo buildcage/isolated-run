@@ -36,11 +36,11 @@ import {
  * Deliberately called on its own, ahead of
  * checkPasswordlessSudo()/checkOverlayfsSupport() in the step, so a plain input
  * mistake is rejected immediately rather than only after those privileged
- * preflight checks have already run. That early call passes the raw lines;
- * resolveFilesystemPlan calls it again on the resolved paths, which is the
- * authoritative one. Both see the same sentinel: resolveWriteThroughEntry
- * rejects a spelling that merely normalizes to "/", so only a literal one
- * reaches either call.
+ * preflight checks have already run. That early call passes the paths as
+ * resolveWriteThroughInput spells them; resolveFilesystemPlan calls it again on
+ * their real paths on the host, which is the authoritative one. Both see the
+ * same sentinel: resolveWriteThroughEntry rejects a spelling that merely
+ * normalizes to "/", so only a literal one reaches either call.
  */
 export function validateFilesystemInputs(
   filesystemMode: FilesystemMode,
@@ -96,6 +96,22 @@ export interface ResolveFilesystemPlanDeps {
   isDirectory?: (path: string) => boolean;
 }
 
+/** Parse and resolve write_through: input, with no I/O, so the step can reject
+ *  a bad entry before its preflights. */
+export function resolveWriteThroughInput(
+  writeThroughInput: string,
+  env: NodeJS.ProcessEnv,
+): string[] {
+  try {
+    return resolveWriteThroughPaths(writeThroughInput, env);
+  } catch (e) {
+    throw new SandboxError(
+      `Invalid write_through: ${errorMessage(e)}`,
+      "INVALID_WRITE_THROUGH_PATH",
+    );
+  }
+}
+
 /**
  * Resolves + pre-creates the write_through targets (write-through.ts) and, in
  * ephemeral mode, folds the overlay-root candidates down to what's actually
@@ -108,15 +124,7 @@ export function resolveFilesystemPlan(
   env: NodeJS.ProcessEnv,
   deps: ResolveFilesystemPlanDeps = {},
 ): FilesystemPlan {
-  let writeThroughPaths: string[];
-  try {
-    writeThroughPaths = resolveWriteThroughPaths(writeThroughInput, env);
-  } catch (e) {
-    throw new SandboxError(
-      `Invalid write_through: ${errorMessage(e)}`,
-      "INVALID_WRITE_THROUGH_PATH",
-    );
-  }
+  let writeThroughPaths = resolveWriteThroughInput(writeThroughInput, env);
 
   // The authoritative call, ahead of the early return below: reaching that
   // with the sentinel under ephemeral would leave the run with no overlay.

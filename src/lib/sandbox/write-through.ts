@@ -113,10 +113,7 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
  *  contain spaces. A whole-line `#` comment (the first non-space character is
  *  `#`) and a blank line are dropped; a `#` anywhere else stays part of the
  *  path, unlike the rule inputs, since a path may legitimately contain one and
- *  an inline comment could not be told from it. Used on its own for the step's
- *  pre-resolution check, which runs before anything privileged; resolution
- *  proper (variables, ~/, relative paths) is resolveWriteThroughPaths' job
- *  below. */
+ *  an inline comment could not be told from it. */
 export function splitWriteThroughInput(input: string | undefined): string[] {
   return (
     input
