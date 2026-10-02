@@ -38,7 +38,7 @@ INPUT_PROXY_ENGINE="universal" \
 INPUT_PROXY_MODE="restrict" \
 INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443 allowed.example.com:8443 *.wildcard.example.com:443 *.wildcard.example.com:8443 ~ok\\.regex\\.example\\.com:443 ~^ports\\.regex\\.example\\.com:(443|8443)\$ ~^tlsany\\.example\\.com:.*\$" \
 INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80 allowed.example.com:8080 *.wildcard.example.com:80 *.wildcard.example.com:8080" \
-INPUT_ALLOWED_IP_RULES="10.200.0.100:8443" \
+INPUT_ALLOWED_IP_RULES="10.200.0.100:8443 10.200.0.100:2525" \
 INPUT_FAIL_ON_BLOCKED="false" \
 INPUT_RUN="bash $REPO_ROOT/test/universal-restrict-scenarios.sh" \
   node "$REPO_ROOT/dist/main.cjs" 2>&1 | tee "$TMPDIR/out.log"

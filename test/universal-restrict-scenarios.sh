@@ -10,7 +10,7 @@
 #                        ~^ports\.regex\.example\.com:(443|8443)$
 #   allowed_http_rules:  allowed.example.com:80 allowed.example.com:8080
 #                        *.wildcard.example.com:80 *.wildcard.example.com:8080
-#   allowed_ip_rules:    10.200.0.100:8443
+#   allowed_ip_rules:    10.200.0.100:8443 10.200.0.100:2525
 # ---------------------------------------------------------------------------
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
@@ -122,6 +122,16 @@ fi
 echo "=== [Direct IP - allowed, SNI names a host] ==="
 check_status "10.200.0.100:8443 with SNI allowed.example.com" \
   "$($C --resolve allowed.example.com:8443:10.200.0.100 https://allowed.example.com:8443/)" "200"
+
+# The client sends nothing and waits for the server to speak, so the greeting
+# arrives within the 3s allowed here only if the passthrough does not wait for
+# the client's first bytes, as inspect-delay (5s) would.
+echo "=== [Direct IP - allowed, server speaks first] ==="
+OUT=$(sleep 4 | timeout 3 nc 10.200.0.100 2525 || true)
+case "$OUT" in
+  220\ *) pass "10.200.0.100:2525 greeted without waiting for the client" ;;
+  *) fail "10.200.0.100:2525 sent no greeting within 3s -- got: $OUT" ;;
+esac
 
 echo "=== [Direct IP - blocked, SNI names an allowed address] ==="
 if timeout 10 openssl s_client -connect 10.200.0.101:8443 -servername 10.200.0.100 \
