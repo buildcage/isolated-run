@@ -6,11 +6,9 @@ import {
   readFailOnBlocked,
   readFailOnCaResidue,
   readFilesystemInputs,
-  readRuleInputs,
   readRunCommand,
   readStepLabel,
   readTrafficArtifactInputs,
-  resolveProxyMode,
   resolveWriteThroughInput,
 } from "./inputs.ts";
 
@@ -108,12 +106,6 @@ describe("readEngineInputs", () => {
       /Invalid proxy_engine/,
     );
   });
-
-  it("rejects the removed transparent alias", () => {
-    expect(() => readEngineInputs(inputs({ proxy_engine: "transparent" }))).toThrow(
-      /transparent has been renamed/,
-    );
-  });
 });
 
 describe("readFilesystemInputs", () => {
@@ -145,90 +137,6 @@ describe("readFilesystemInputs", () => {
     expect(() => readFilesystemInputs(silent, inputs({ allow_write: "/tmp/out" }))).toThrow(
       /allow_write: has been replaced/,
     );
-  });
-});
-
-describe("readRuleInputs", () => {
-  it("returns empty rule lists when nothing is set", () => {
-    expect(readRuleInputs(inputs())).toStrictEqual({
-      proxyMode: "restrict",
-      httpsRules: [],
-      httpRules: [],
-      ipRules: [],
-      urlRules: [],
-      tlsRules: [],
-      knownBlockedRules: [],
-    });
-  });
-
-  it("parses every rule kind", () => {
-    const parsed = readRuleInputs(
-      inputs({
-        proxy_mode: "audit",
-        allowed_https_rules: "a.example.com:443",
-        allowed_http_rules: "b.example.com:80",
-        allowed_ip_rules: "10.0.0.5:5432",
-        allowed_tls_rules: "db.example.com:443",
-        allowed_url_rules: "GET https://a.example.com/pkg.json",
-        known_blocked_rules: "*.sury.org:*",
-      }),
-    );
-    expect(parsed).toStrictEqual({
-      proxyMode: "audit",
-      httpsRules: ["a.example.com:443"],
-      httpRules: ["b.example.com:80"],
-      ipRules: ["10.0.0.5:5432"],
-      urlRules: ["GET https://a.example.com/pkg.json"],
-      tlsRules: ["db.example.com:443"],
-      knownBlockedRules: ["*.sury.org:*"],
-    });
-  });
-
-  it("rejects a malformed rule rather than passing it to the proxy", () => {
-    expect(() => readRuleInputs(inputs({ allowed_https_rules: "no-port" }))).toThrow();
-  });
-
-  it("rejects a malformed URL rule even though only inspect enforces one", () => {
-    expect(() => readRuleInputs(inputs({ allowed_url_rules: "GET not-a-url" }))).toThrow(
-      expect.objectContaining({ code: "INVALID_RULES" }),
-    );
-  });
-
-  it("rejects a rule the parser accepts but the proxy would refuse", () => {
-    expect(() => readRuleInputs(inputs({ allowed_https_rules: "10.0.0.0/8:443" }))).toThrow(
-      expect.objectContaining({ code: "INVALID_RULES" }),
-    );
-  });
-
-  it("keeps an explicit proxy_mode", () => {
-    expect(readRuleInputs(inputs({ proxy_mode: "audit" })).proxyMode).toBe("audit");
-  });
-
-  it("rejects an unknown proxy_mode before any rule", () => {
-    expect(() =>
-      readRuleInputs(inputs({ proxy_mode: "Audit", allowed_https_rules: "no-port" })),
-    ).toThrow(/Invalid proxy_mode/);
-  });
-});
-
-describe("resolveProxyMode", () => {
-  it("defaults to restrict when unset or blank", () => {
-    expect(resolveProxyMode(undefined)).toBe("restrict");
-    expect(resolveProxyMode("  ")).toBe("restrict");
-  });
-
-  it("accepts both modes", () => {
-    expect(resolveProxyMode("audit")).toBe("audit");
-    expect(resolveProxyMode("restrict")).toBe("restrict");
-  });
-
-  // Anything else would enforce a run meant only to record.
-  it("rejects anything else, a differently cased mode included", () => {
-    for (const mode of ["Audit", "RESTRICT", "enforce"]) {
-      expect(() => resolveProxyMode(mode)).toThrow(
-        expect.objectContaining({ code: "INVALID_PROXY_MODE" }),
-      );
-    }
   });
 });
 

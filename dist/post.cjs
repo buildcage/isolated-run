@@ -226,10 +226,6 @@ function errorMessage(e) {
 	return e instanceof Error ? e.message : String(e);
 }
 //#endregion
-//#region src/core/lib/acl/ipv4.ts
-const OCTET = "(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])", PREFIX = "(3[0-2]|[12]?[0-9])", IPV4 = `${OCTET}\\.${OCTET}\\.${OCTET}\\.${OCTET}`;
-RegExp(`^${OCTET}$`), RegExp(`^${IPV4}(?:/${PREFIX})?$`), RegExp(`^${IPV4}/${PREFIX}$`);
-//#endregion
 //#region src/lib/errors.ts
 var SandboxError = class extends ActionError {};
 //#endregion
@@ -247,13 +243,13 @@ function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice
 	if (writeThrough.trim() && writable.trim()) throw new SandboxError("write_through: and writable: are the same input under two names. Set only write_through:.", "FILESYSTEM_INPUT_CONFLICT");
 	return !writeThrough.trim() && writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writable) : writeThrough;
 }
-function readFilesystemInputs(notice, getInput$1 = getInput) {
+function readFilesystemInputs(notice, getInput$3 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$3("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput({
-			writeThrough: getInput$1("write_through"),
-			writable: getInput$1("writable"),
-			allowWrite: getInput$1("allow_write")
+			writeThrough: getInput$3("write_through"),
+			writable: getInput$3("writable"),
+			allowWrite: getInput$3("allow_write")
 		}, notice)
 	};
 }

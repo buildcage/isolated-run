@@ -2,6 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
+import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import { writeStepSummary } from "#core/lib/actions/write-step-summary.ts";
 import { createDocker, type Docker } from "#core/lib/docker/client.ts";
 import { readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
@@ -18,7 +19,6 @@ import { renderReportMarkdown } from "#core/lib/report/render/render-report-mark
 import { truncateForStepSummary } from "#core/lib/report/render/truncate-communication-details.ts";
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
-import type { ProxyEngine } from "./engine.ts";
 import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
 
 export type Report = ReportData;

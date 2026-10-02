@@ -164,7 +164,7 @@ describe("runSandboxStep", () => {
     "fails on a rule %s rejects before any setup",
     async (check) => {
       mocks[check].mockImplementation(() => {
-        throw new SandboxError("url rules need the inspect engine", "INVALID_PROXY_ENGINE");
+        throw new InvalidInputError("url rules need the inspect engine", "INVALID_PROXY_ENGINE");
       });
 
       await expect(runSandboxStep(ENV, deps)).rejects.toThrow("url rules need the inspect engine");

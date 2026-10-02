@@ -15,15 +15,12 @@
 import * as core from "@actions/core";
 
 import {
-  buildACLRules,
-  buildUrlRulesOrThrow,
-  checkRulesCompileOrThrow,
-  parseKnownBlockedRulesOrThrow,
-  parseRulesOrThrow,
-} from "#core/lib/acl/rules.ts";
-import { readBooleanInput, readRetentionDays } from "#core/lib/actions/inputs.ts";
+  readBooleanInput,
+  readRetentionDays,
+  resolveProxyEngine,
+  type ProxyEngine,
+} from "#core/lib/actions/inputs.ts";
 
-import { resolveProxyEngine, type ProxyEngine } from "./engine.ts";
 import { SandboxError } from "./errors.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
 
@@ -32,10 +29,6 @@ export type GetInput = (name: string, options?: { trimWhitespace?: boolean }) =>
 
 /** Where a renamed input's migration message goes; the entry point supplies it. */
 export type Notice = (message: string) => void;
-
-function readKnownBlockedRules(input: string | undefined): string[] {
-  return parseKnownBlockedRulesOrThrow(input);
-}
 
 export interface WriteThroughInputs {
   writeThrough: string;
@@ -114,75 +107,6 @@ export function readFilesystemInputs(
       },
       notice,
     ),
-  };
-}
-
-const PROXY_MODES = ["audit", "restrict"] as const;
-export type ProxyMode = (typeof PROXY_MODES)[number];
-
-/**
- * Anything but the two modes is refused rather than read as `restrict`, which
- * would enforce a run its author meant only to record.
- */
-export function resolveProxyMode(input: string | undefined): ProxyMode {
-  const trimmed = input?.trim() || "restrict";
-  if (!(PROXY_MODES as readonly string[]).includes(trimmed)) {
-    throw new SandboxError(
-      `Invalid proxy_mode: ${JSON.stringify(input)}. Must be one of ${PROXY_MODES.join(", ")}.`,
-      "INVALID_PROXY_MODE",
-    );
-  }
-  return trimmed as ProxyMode;
-}
-
-export interface ParsedRuleInputs {
-  proxyMode: ProxyMode;
-  httpsRules: string[];
-  httpRules: string[];
-  ipRules: string[];
-  /** The raw text of each compiled URL rule, not the compiled form: only the
-   *  proxy re-compiles them, and only inspect enforces them. */
-  urlRules: string[];
-  tlsRules: string[];
-  knownBlockedRules: string[];
-}
-
-/**
- * Parse and validate every rule input.
- *
- * URL and TLS rules are compiled here even on the engine that ignores them,
- * purely so a typo fails at startup rather than silently inside the sandbox.
- * Everything is then compiled once more the way the proxy does it, so a rule
- * this parser accepts but the proxy refuses fails here too.
- *
- * The statement order is the order a malformed-rule error surfaces in, so it
- * is deliberate rather than incidental.
- *
- * @throws {SandboxError} if proxy_mode is neither mode
- * @throws {InvalidRulesError} if any rule is malformed
- */
-export function readRuleInputs(getInput: GetInput = core.getInput): ParsedRuleInputs {
-  const proxyMode = resolveProxyMode(getInput("proxy_mode"));
-  const rules = buildACLRules({
-    httpsRulesInput: getInput("allowed_https_rules"),
-    httpRulesInput: getInput("allowed_http_rules"),
-    ipRulesInput: getInput("allowed_ip_rules"),
-  });
-  const knownBlockedRules = readKnownBlockedRules(getInput("known_blocked_rules"));
-  const urlRulesInput = getInput("allowed_url_rules");
-  const tlsRules = parseRulesOrThrow(getInput("allowed_tls_rules"));
-  const compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
-  checkRulesCompileOrThrow({ ...rules, tlsRules, urlRules: compiledUrlRules });
-  const urlRules = compiledUrlRules.map((r) => r.raw);
-
-  return {
-    proxyMode,
-    httpsRules: rules.httpsRules,
-    httpRules: rules.httpRules,
-    ipRules: rules.ipRules,
-    urlRules,
-    tlsRules,
-    knownBlockedRules,
   };
 }
 

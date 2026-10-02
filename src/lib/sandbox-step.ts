@@ -13,7 +13,13 @@ import * as core from "@actions/core";
 
 import { isKnownBlockedUrlRule } from "#core/lib/acl/wildcard-rules.ts";
 import { annotate, createAnnotation } from "#core/lib/actions/annotation.ts";
+import {
+  checkKnownBlockedUrlRuleSupport,
+  checkUrlAndTlsRuleSupport,
+} from "#core/lib/actions/engine-rule-support.ts";
+import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import { logRules, withLogGroup } from "#core/lib/actions/log.ts";
+import { readRuleInputs } from "#core/lib/actions/rule-inputs.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { resolveBuildcageImageRef } from "#core/lib/provenance/image-ref.ts";
 import { verifyImageDigestOrThrow, type ResolvedImage } from "#core/lib/provenance/verify-image.ts";
@@ -22,11 +28,6 @@ import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts"
 import { buildComposeEnv } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
-import {
-  checkKnownBlockedUrlRuleSupport,
-  checkUrlAndTlsRuleSupport,
-} from "./engine-rule-support.ts";
-import type { ProxyEngine } from "./engine.ts";
 import { SandboxError } from "./errors.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
@@ -34,7 +35,6 @@ import {
   readFailOnBlocked,
   readFailOnCaResidue,
   readFilesystemInputs,
-  readRuleInputs,
   readRunCommand,
   readTrafficArtifactInputs,
 } from "./inputs.ts";
