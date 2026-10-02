@@ -60,10 +60,9 @@ assert_report_complete
 assert_summary_contains "| allowed.example.com:443 | HTTPS |" "allowed.example.com:443 recorded as allowed"
 assert_summary_contains "| allowed.example.com:80 | HTTP |" "allowed.example.com:80 recorded as allowed"
 # Case and a trailing dot survive only on the Host-header path, so that is
-# where the scenarios ask for both forms. The row below is the uppercase one;
-# the trailing-dot request is normalized into the allowed.example.com:80 row
-# above, and the scenario's own 200 is what asserts it.
-assert_summary_contains "| ALLOWED.example.com:80 | HTTP |" "uppercase host (HTTP) recorded as allowed"
+# where the scenarios ask for both forms. The report folds both into the
+# allowed.example.com:80 row above (see the absence check below), and the
+# scenarios' own 200s assert that they passed.
 assert_summary_contains "| sub.wildcard.example.com:443 | HTTPS |" "wildcard-matched name recorded as allowed"
 # Each of these is the near miss for a rule the scenarios also request on its
 # matching side. From inside the sandbox every one of them looks the same,
@@ -97,7 +96,7 @@ assert_summary_contains "| runner.wildcard.example.com:80 | HTTP | internal-addr
 assert_summary_contains "| HTTPS | missing-sni |" "a TLS ClientHello with no SNI recorded as blocked, reason missing-sni"
 assert_summary_contains "| HTTP | missing-host-header |" "an HTTP request with no Host header recorded as blocked, reason missing-host-header"
 # The crafted SNI arrives as one row whose host cell is the sanitized name.
-assert_summary_contains "x__-__T__buildcage__ALLOWED___HTTPS___forged.example.com:443 | HTTPS | invalid-sni |" \
+assert_summary_contains "x__-__t__buildcage__allowed___https___forged.example.com:443 | HTTPS | invalid-sni |" \
   "the forged SNI was sanitized into a single blocked row"
 assert_summary_contains "| tlsany.example.com_x.evil.example.net:443 | HTTPS | invalid-sni |" \
   "an SNI holding a colon was refused before a ~ rule's port pattern could match it"
@@ -136,6 +135,8 @@ assert_absent_in_summary() {
 # of its log line and been read back as an ALLOWED entry of its own.
 assert_absent_in_summary "| forged.example.com:443 | HTTPS |" \
   "the forged SNI produced no unsanitized row of its own"
+
+assert_absent_in_summary "ALLOWED.example.com" "uppercase host (HTTP) folded into the lowercase row"
 
 assert_present_in_allowed() {
   local pattern="$1" label="$2"
