@@ -11,7 +11,7 @@ const annotation = { notice: vi.fn(), warning: vi.fn(), error: vi.fn() };
 
 const mocks = {
   readRunCommand: vi.fn(),
-  readEngineInputs: vi.fn(),
+  readProxyInputs: vi.fn(),
   readFilesystemInputs: vi.fn(),
   readRuleInputs: vi.fn(),
   readFailOnCaResidue: vi.fn(),
@@ -59,13 +59,12 @@ const ENV = {
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.readRunCommand.mockReturnValue("echo hello");
-  mocks.readEngineInputs.mockReturnValue({ proxyEngine: "universal" });
+  mocks.readProxyInputs.mockReturnValue({ proxyEngine: "universal", proxyMode: "restrict" });
   mocks.readFilesystemInputs.mockReturnValue({
     filesystemMode: "persistent",
     writeThroughInput: "",
   });
   mocks.readRuleInputs.mockReturnValue({
-    proxyMode: "restrict",
     httpsRules: ["example.com:443"],
     httpRules: [],
     ipRules: [],
@@ -371,7 +370,6 @@ describe("runSandboxStep", () => {
 
   it("checks known_blocked_rules URL lines against the engine, host lines excluded", async () => {
     mocks.readRuleInputs.mockReturnValue({
-      proxyMode: "restrict",
       httpsRules: [],
       httpRules: [],
       ipRules: [],

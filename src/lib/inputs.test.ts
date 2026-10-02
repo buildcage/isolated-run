@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 
 import { SandboxError } from "./errors.ts";
 import {
-  readEngineInputs,
+  readProxyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
   readFilesystemInputs,
@@ -90,21 +90,28 @@ describe("readRunCommand", () => {
   });
 });
 
-describe("readEngineInputs", () => {
-  it("defaults to inspect when unset", () => {
-    expect(readEngineInputs(inputs())).toStrictEqual({ proxyEngine: "inspect" });
-  });
-
-  it("passes the input through resolveProxyEngine", () => {
-    expect(readEngineInputs(inputs({ proxy_engine: "inspect" }))).toStrictEqual({
+describe("readProxyInputs", () => {
+  it("defaults to inspect and restrict when unset", () => {
+    expect(readProxyInputs(inputs())).toStrictEqual({
       proxyEngine: "inspect",
+      proxyMode: "restrict",
     });
   });
 
-  it("rejects an unknown engine", () => {
-    expect(() => readEngineInputs(inputs({ proxy_engine: "nope" }))).toThrow(
+  it("reads both inputs", () => {
+    expect(
+      readProxyInputs(inputs({ proxy_engine: "universal", proxy_mode: "audit" })),
+    ).toStrictEqual({ proxyEngine: "universal", proxyMode: "audit" });
+  });
+
+  it("rejects an unknown engine before an unknown mode", () => {
+    expect(() => readProxyInputs(inputs({ proxy_engine: "nope", proxy_mode: "Audit" }))).toThrow(
       /Invalid proxy_engine/,
     );
+  });
+
+  it("rejects an unknown mode", () => {
+    expect(() => readProxyInputs(inputs({ proxy_mode: "Audit" }))).toThrow(/Invalid proxy_mode/);
   });
 });
 

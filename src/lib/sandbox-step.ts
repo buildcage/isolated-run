@@ -31,7 +31,7 @@ import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
-  readEngineInputs,
+  readProxyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
   readFilesystemInputs,
@@ -70,7 +70,7 @@ const DEFAULT_ACTION_REF = "v2";
  */
 export interface SandboxStepDeps {
   readRunCommand: typeof readRunCommand;
-  readEngineInputs: typeof readEngineInputs;
+  readProxyInputs: typeof readProxyInputs;
   readFilesystemInputs: typeof readFilesystemInputs;
   readRuleInputs: typeof readRuleInputs;
   readFailOnCaResidue: typeof readFailOnCaResidue;
@@ -108,7 +108,7 @@ export interface SandboxStepDeps {
 
 const realDeps: SandboxStepDeps = {
   readRunCommand,
-  readEngineInputs,
+  readProxyInputs,
   readFilesystemInputs,
   readRuleInputs,
   readFailOnCaResidue,
@@ -186,7 +186,7 @@ export async function runSandboxStep(
 ): Promise<number> {
   const {
     readRunCommand,
-    readEngineInputs,
+    readProxyInputs,
     readFilesystemInputs,
     readRuleInputs,
     readFailOnCaResidue,
@@ -227,7 +227,7 @@ export async function runSandboxStep(
 
   const runInput = readRunCommand();
 
-  const { proxyEngine } = readEngineInputs();
+  const { proxyEngine, proxyMode } = readProxyInputs();
   log(`Proxy engine: ${proxyEngine}`);
 
   // `notice`, not `annotation`: readFilesystemInputs reads a renamed input (see
@@ -237,7 +237,7 @@ export async function runSandboxStep(
   const failOnCaResidue = readFailOnCaResidue();
   const failOnBlocked = readFailOnBlocked();
   const trafficArtifact = readTrafficArtifactInputs();
-  const { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } =
+  const { httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } =
     readRuleInputs();
 
   // Same gate as writeReportSummary(): suppresses annotations when this

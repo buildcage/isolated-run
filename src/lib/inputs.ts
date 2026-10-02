@@ -18,7 +18,9 @@ import {
   readBooleanInput,
   readRetentionDays,
   resolveProxyEngine,
+  resolveProxyMode,
   type ProxyEngine,
+  type ProxyMode,
 } from "#core/lib/actions/inputs.ts";
 
 import { SandboxError } from "./errors.ts";
@@ -79,12 +81,16 @@ export function readRunCommand(getInput: GetInput = core.getInput): string {
   return runInput;
 }
 
-export interface EngineInputs {
+export interface ProxyInputs {
   proxyEngine: ProxyEngine;
+  proxyMode: ProxyMode;
 }
 
-export function readEngineInputs(getInput: GetInput = core.getInput): EngineInputs {
-  return { proxyEngine: resolveProxyEngine(getInput("proxy_engine")) };
+export function readProxyInputs(getInput: GetInput = core.getInput): ProxyInputs {
+  return {
+    proxyEngine: resolveProxyEngine(getInput("proxy_engine")),
+    proxyMode: resolveProxyMode(getInput("proxy_mode")),
+  };
 }
 
 export interface FilesystemInputs {

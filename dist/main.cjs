@@ -11942,7 +11942,7 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 //#region src/core/lib/actions/rule-inputs.ts
 init_core();
 function readRuleInputs(getInput$8 = getInput) {
-	let proxyMode = resolveProxyMode(getInput$8("proxy_mode")), rules = buildACLRules({
+	let rules = buildACLRules({
 		httpsRulesInput: getInput$8("allowed_https_rules"),
 		httpRulesInput: getInput$8("allowed_http_rules"),
 		ipRulesInput: getInput$8("allowed_ip_rules")
@@ -11954,7 +11954,6 @@ function readRuleInputs(getInput$8 = getInput) {
 	});
 	let urlRules = compiledUrlRules.map((r) => r.raw);
 	return {
-		proxyMode,
 		httpsRules: rules.httpsRules,
 		httpRules: rules.httpRules,
 		ipRules: rules.ipRules,
@@ -18821,37 +18820,40 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (writeThrough.trim() && writable.trim()) throw new SandboxError("write_through: and writable: are the same input under two names. Set only write_through:.", "FILESYSTEM_INPUT_CONFLICT");
 	return !writeThrough.trim() && writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writable) : writeThrough;
 }
-function readRunCommand(getInput$1 = getInput) {
-	let runInput = getInput$1("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$4 = getInput) {
+	let runInput = getInput$4("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readEngineInputs(getInput$7 = getInput) {
-	return { proxyEngine: resolveProxyEngine(getInput$7("proxy_engine")) };
-}
-function readFilesystemInputs(notice, getInput$3 = getInput) {
+function readProxyInputs(getInput$5 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$3("filesystem_mode")),
+		proxyEngine: resolveProxyEngine(getInput$5("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$5("proxy_mode"))
+	};
+}
+function readFilesystemInputs(notice, getInput$6 = getInput) {
+	return {
+		filesystemMode: resolveFilesystemMode(getInput$6("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$3("write_through"),
-			writable: getInput$3("writable"),
-			allowWrite: getInput$3("allow_write")
+			writeThrough: getInput$6("write_through"),
+			writable: getInput$6("writable"),
+			allowWrite: getInput$6("allow_write")
 		}, notice)
 	};
 }
-function readStepLabel(getInput$2 = getInput) {
-	return getInput$2("label") || void 0;
+function readStepLabel(getInput$3 = getInput) {
+	return getInput$3("label") || void 0;
 }
-function readFailOnCaResidue(getInput$4 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$4);
+function readFailOnCaResidue(getInput$7 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$7);
 }
-function readFailOnBlocked(getInput$5 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$5);
+function readFailOnBlocked(getInput$2 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$2);
 }
-function readTrafficArtifactInputs(getInput$6 = getInput) {
+function readTrafficArtifactInputs(getInput$1 = getInput) {
 	return {
-		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$6),
-		retentionDays: readRetentionDays(getInput$6)
+		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$1),
+		retentionDays: readRetentionDays(getInput$1)
 	};
 }
 //#endregion
@@ -67403,7 +67405,7 @@ function checkPasswordlessSudo({ execFile = runPinnedHostCommand } = {}) {
 init_core();
 const realDeps = {
 	readRunCommand,
-	readEngineInputs,
+	readProxyInputs,
 	readFilesystemInputs,
 	readRuleInputs,
 	readFailOnCaResidue,
@@ -67451,12 +67453,12 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { readRunCommand, readEngineInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, saveState, info, log, notice, warn } = {
+	let { readRunCommand, readProxyInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
-	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine } = readEngineInputs();
+	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", runInput = readRunCommand(), { proxyEngine, proxyMode } = readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs(), { proxyMode, httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs(), annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY);
+	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs(), { httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs(), annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY);
 	checkUrlAndTlsRuleSupport({
 		proxyEngine,
 		proxyMode,
