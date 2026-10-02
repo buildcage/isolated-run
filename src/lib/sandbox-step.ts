@@ -18,6 +18,7 @@ import {
   checkUrlAndTlsRuleSupport,
 } from "#core/lib/actions/engine-rule-support.ts";
 import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
+import { readTrafficArtifactInputs } from "#core/lib/actions/inputs.ts";
 import { logRules, withLogGroup } from "#core/lib/actions/log.ts";
 import { readRuleInputs } from "#core/lib/actions/rule-inputs.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
@@ -36,7 +37,6 @@ import {
   readFailOnCaResidue,
   readFilesystemInputs,
   readRunCommand,
-  readTrafficArtifactInputs,
 } from "./inputs.ts";
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";

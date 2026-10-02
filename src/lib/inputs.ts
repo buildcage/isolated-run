@@ -16,7 +16,6 @@ import * as core from "@actions/core";
 
 import {
   readBooleanInput,
-  readRetentionDays,
   resolveProxyEngine,
   resolveProxyMode,
   type ProxyEngine,
@@ -127,21 +126,4 @@ export function readFailOnCaResidue(getInput: GetInput = core.getInput): boolean
 
 export function readFailOnBlocked(getInput: GetInput = core.getInput): boolean {
   return readBooleanInput("fail_on_blocked", true, getInput);
-}
-
-export interface TrafficArtifactInputs {
-  upload: boolean;
-  /** Undefined takes the repository's own default. */
-  retentionDays?: number;
-}
-
-/** The retention is checked even when nothing is uploaded: a bad value is a
- *  mistake either way. */
-export function readTrafficArtifactInputs(
-  getInput: GetInput = core.getInput,
-): TrafficArtifactInputs {
-  return {
-    upload: readBooleanInput("upload_traffic_artifact", false, getInput),
-    retentionDays: readRetentionDays(getInput),
-  };
 }
