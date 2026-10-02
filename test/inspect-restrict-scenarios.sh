@@ -316,9 +316,9 @@ for H in 999.1.2.3 010.0.0.1 1.2.3.4.evil.example; do
   check_status "GET http://$H/pub-by-addr/x" "$CODE" "403"
 done
 
-# The client sends nothing and waits for the server to speak, so the greeting
-# arrives within the 3s allowed here only if the passthrough does not wait for
-# the client's first bytes, as inspect-delay (5s) would.
+# The client sends nothing and waits for the server to speak. The greeting
+# arrives within 3s only if the passthrough does not wait out inspect-delay
+# (5s) for the client's first bytes.
 echo "=== [Direct IP - allowed, server speaks first] ==="
 OUT=$(sleep 4 | timeout 3 nc 10.200.0.100 2525 || true)
 case "$OUT" in

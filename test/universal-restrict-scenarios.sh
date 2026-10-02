@@ -123,9 +123,9 @@ echo "=== [Direct IP - allowed, SNI names a host] ==="
 check_status "10.200.0.100:8443 with SNI allowed.example.com" \
   "$($C --resolve allowed.example.com:8443:10.200.0.100 https://allowed.example.com:8443/)" "200"
 
-# The client sends nothing and waits for the server to speak, so the greeting
-# arrives within the 3s allowed here only if the passthrough does not wait for
-# the client's first bytes, as inspect-delay (5s) would.
+# The client sends nothing and waits for the server to speak. The greeting
+# arrives within 3s only if the passthrough does not wait out inspect-delay
+# (5s) for the client's first bytes.
 echo "=== [Direct IP - allowed, server speaks first] ==="
 OUT=$(sleep 4 | timeout 3 nc 10.200.0.100 2525 || true)
 case "$OUT" in
