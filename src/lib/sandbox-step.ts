@@ -41,11 +41,14 @@ import {
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
-import { resolveFilesystemPlan, validateFilesystemInputs } from "./sandbox/filesystem-plan.ts";
+import {
+  resolveFilesystemPlan,
+  resolveWriteThroughInput,
+  validateFilesystemInputs,
+} from "./sandbox/filesystem-plan.ts";
 import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
-import { splitWriteThroughInput } from "./sandbox/write-through.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 
@@ -60,7 +63,7 @@ const DEFAULT_ACTION_REF = "v2";
  * into the body so a test can watch the order and the arguments without
  * standing in for twenty modules at once; each one is tested in its own file.
  *
- * Pure steps are left out on purpose and run for real (splitWriteThroughInput,
+ * Pure steps are left out on purpose and run for real (resolveWriteThroughInput,
  * deriveProjectName, buildComposeEnv, resolveComposeFile,
  * formatFilesystemPlanLog, resolveBuildcageImageRef): what a test wants to see
  * of those is the value that reached the next step, not the call.
@@ -256,12 +259,12 @@ export async function runSandboxStep(
   // Before any privileged setup; see assertNonRootUid.
   assertNonRootUid(process.getuid!());
 
-  // Cheap, pure input check, so a plain mistake (e.g. write_through: /
-  // under filesystem_mode: ephemeral) is rejected immediately rather than only
-  // after the privileged preflight checks below have already run
-  // (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
-  // probe). resolveFilesystemPlan re-checks the resolved paths.
-  validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput));
+  // Cheap, pure input check, so a plain mistake (an unset variable, or
+  // write_through: / under filesystem_mode: ephemeral) is rejected immediately
+  // rather than only after the privileged preflight checks below have already
+  // run (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
+  // probe). resolveFilesystemPlan re-checks the real paths on the host.
+  validateFilesystemInputs(filesystemMode, resolveWriteThroughInput(writeThroughInput, env));
 
   // Before the preflights, which already run sudo.
   pinHostCommands(

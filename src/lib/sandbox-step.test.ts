@@ -218,15 +218,34 @@ describe("runSandboxStep", () => {
     expect(orderOf(mocks.verifyImageDigestOrThrow)).toBeLessThan(orderOf(mocks.startSandboxProxy));
   });
 
-  it("validates the raw write_through lines before anything resolves them", async () => {
+  it("validates the write_through lines, resolved without touching the host", async () => {
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "ephemeral",
-      writeThroughInput: " /opt/cache \n\n/\n",
+      writeThroughInput: " /opt/cache \n\n./dist\n/\n",
     });
 
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.validateFilesystemInputs).toHaveBeenCalledWith("ephemeral", ["/opt/cache", "/"]);
+    expect(mocks.validateFilesystemInputs).toHaveBeenCalledWith("ephemeral", [
+      "/opt/cache",
+      "/home/runner/work/repo/repo/dist",
+      "/",
+    ]);
+  });
+
+  it("fails on a write_through entry that does not parse before any setup", async () => {
+    mocks.readFilesystemInputs.mockReturnValue({
+      filesystemMode: "persistent",
+      writeThroughInput: "$UNSET_DIR/cache",
+    });
+
+    await expect(runSandboxStep(ENV, deps)).rejects.toMatchObject({
+      code: "INVALID_WRITE_THROUGH_PATH",
+    });
+    expect(mocks.validateFilesystemInputs).not.toHaveBeenCalled();
+    expect(mocks.pinHostCommands).not.toHaveBeenCalled();
+    expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
+    expect(mocks.resolveFilesystemPlan).not.toHaveBeenCalled();
   });
 
   it("probes overlayfs only in ephemeral mode", async () => {

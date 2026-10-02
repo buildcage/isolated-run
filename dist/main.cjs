@@ -18805,7 +18805,7 @@ init_core();
 function readKnownBlockedRules(input) {
 	return parseKnownBlockedRulesOrThrow(input);
 }
-function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice) {
+function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, notice) {
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	if (writeThrough.trim() && writable.trim()) throw new SandboxError("write_through: and writable: are the same input under two names. Set only write_through:.", "FILESYSTEM_INPUT_CONFLICT");
 	return !writeThrough.trim() && writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writable) : writeThrough;
@@ -18821,7 +18821,7 @@ function readEngineInputs(getInput$3 = getInput) {
 function readFilesystemInputs(notice, getInput$1 = getInput) {
 	return {
 		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
-		writeThroughInput: resolveWriteThroughInput({
+		writeThroughInput: resolveWriteThroughInput$1({
 			writeThrough: getInput$1("write_through"),
 			writable: getInput$1("writable"),
 			allowWrite: getInput$1("allow_write")
@@ -20550,13 +20550,15 @@ function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRea
 		if (reserved) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 }
-function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
-	let writeThroughPaths;
+function resolveWriteThroughInput(writeThroughInput, env) {
 	try {
-		writeThroughPaths = resolveWriteThroughPaths(writeThroughInput, env);
+		return resolveWriteThroughPaths(writeThroughInput, env);
 	} catch (e) {
 		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
+}
+function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
+	let writeThroughPaths = resolveWriteThroughInput(writeThroughInput, env);
 	if (validateFilesystemInputs(filesystemMode, writeThroughPaths), writeThroughPaths.includes("/")) return {
 		overlayRoots: [],
 		writeThroughPaths
@@ -67477,7 +67479,7 @@ async function runSandboxStep(env, overrides = {}) {
 		proxyEngine,
 		proxyMode,
 		knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
-	}, annotation.warning), assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, splitWriteThroughInput(writeThroughInput)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
+	}, annotation.warning), assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, resolveWriteThroughInput(writeThroughInput, env)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
 	let { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
 	let localOverride = await readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
