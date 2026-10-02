@@ -179,9 +179,9 @@ These checks and the mount use the directory an entry really resolves to, since 
 symlinks in a mount's source and destination. Only root-owned symlinks are followed. An entry
 through any other fails the step, since an earlier step running as the same user could have planted
 it to make `$RUNNER_TEMP`, `$HOME` or `/proc` writable. A missing entry is created by the runner
-under a nearest existing parent it can write, and as that parent's owner otherwise, the parent found
-the same way. A step running concurrently as the same user can still swap a directory for a symlink
-between the check and the mount.
+when it can write the nearest existing parent, and fails the step otherwise. A step running
+concurrently as the same user can still swap a directory for a symlink between the check and the
+mount.
 
 After the command exits, the step keeps running on the host to read the report and tear the
 sandbox down, so what it runs is kept out of those paths:
@@ -202,9 +202,9 @@ sandbox down, so what it runs is kept out of those paths:
   from the CA certificate alone, appended to a copy of its `pkcs11.txt`. The runner's database, which
   an earlier step may have written, is never parsed: its files are copied, and the slot's bytes are
   taken back out of `pkcs11.txt`, which is text, before the copy is written back as the runner user.
-  One the runner user cannot write is covered with the CA-only database instead. A symlink on the
-  path leaves it unmounted, the path is checked again before anything is written back, and the mount
-  point is created and removed as the runner user, never through `sudo`.
+  One the runner user cannot write gets no slot, and the step warns. A symlink on the path leaves it
+  unmounted, the path is checked again before anything is written back, and the mount point is
+  created and removed as the runner user, never through `sudo`.
 - The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins,
   and this action's own checkout, which holds the post step's script, are read-only inside the
   sandbox, unless `write_through:` names the directory itself or `uses: ./` makes the checkout the
@@ -338,14 +338,15 @@ Two consequences worth knowing:
 - The list is read once at startup, and on a containerised runner it holds that container's
   addresses rather than the real host's.
 
-This guard is about a _name_ landing somewhere it never should. A rule whose host is a literal
-address, such as `169.254.169.254:80`, exempts the requests it matches, in `audit` too, except
-in the proxy's own network (`198.19.255.0/24`) and on port `10024` of any internal address: a rule
-naming the proxy's listener would loop it into itself. A wildcard or regex that merely admits the
-address, `**:80` or `~^.*:80$`, is not. Reaching a cloud metadata endpoint directly, the way any
-AWS or GCP SDK does, is not what this is meant to stop, and `allowed_ip_rules` is the intended path
-for it. That path skips this guard except for the listener: a connection to port `10024` of an
-internal address is refused there too, whatever the IP rules say and in `audit` as well.
+This guard is about a _name_ landing somewhere it never should. Under `inspect`, a rule whose host
+is a literal address, such as `169.254.169.254:80`, exempts the requests it matches, in `audit` too,
+except in the proxy's own network (`198.19.255.0/24`) and on port `10024` of any internal address: a
+rule naming the proxy's listener would loop it into itself. A wildcard or regex that merely admits
+the address, `**:80` or `~^.*:80$`, is not. Under `universal`, no rule does. Reaching a cloud
+metadata endpoint directly, the way any AWS or GCP SDK does, is not what this is meant to stop, and
+`allowed_ip_rules` is the intended path for it. That path skips this guard except for the listener:
+a connection to port `10024` of an internal address is refused there too, whatever the IP rules say
+and in `audit` as well.
 
 ### Only TCP gets out
 
