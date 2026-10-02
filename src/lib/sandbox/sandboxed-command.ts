@@ -3,11 +3,11 @@ import { join } from "node:path";
 
 import * as core from "@actions/core";
 
+import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import { PROXY_ADDRESS } from "#core/lib/log/proxy-address.ts";
 
 import { netnsNameFor } from "../container.ts";
-import type { ProxyEngine } from "../engine.ts";
 import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
 import {

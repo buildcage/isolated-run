@@ -3,8 +3,9 @@ import { ActionError } from "#core/lib/errors.ts";
 /**
  * Intentional error in the run action's own logic. Image provenance failures throw
  * ProvenanceError instead (see core/lib/provenance/errors.ts); invalid ACL rule syntax
- * throws InvalidRulesError instead (see core/lib/acl/rules.ts); a malformed boolean or
- * retention input throws InvalidInputError (see core/lib/actions/inputs.ts).
+ * throws InvalidRulesError instead (see core/lib/acl/rules.ts); a malformed boolean,
+ * retention, proxy_engine or proxy_mode input throws InvalidInputError (see
+ * core/lib/actions/inputs.ts).
  *
  * Codes that carry more than their name says:
  *   PROXY_NOT_RUNNING                 the proxy container isn't running after `docker compose up`
@@ -38,8 +39,6 @@ import { ActionError } from "#core/lib/errors.ts";
  */
 export type SandboxErrorCode =
   | "MISSING_RUN"
-  | "INVALID_PROXY_ENGINE"
-  | "INVALID_PROXY_MODE"
   | "PROXY_NOT_RUNNING"
   | "PROXY_NOT_READY"
   | "RUNC_EXTRACT_FAILED"
