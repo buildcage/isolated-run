@@ -19311,7 +19311,7 @@ function nestedMountRoots(overlayRoots, hostMounts, writeThroughPaths, { isDirec
 	return roots;
 }
 function slugify(path) {
-	return path.replace(/%/g, "%25").replace(/_/g, "%5F").replace(/\//g, "_") || "_root";
+	return (0, node_crypto.createHash)("sha256").update(path).digest("hex").slice(0, 16);
 }
 function overlayUpperFor(scratchDir, root) {
 	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");

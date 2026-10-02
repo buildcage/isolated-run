@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, statSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -167,10 +168,10 @@ export function nestedMountRoots(
   return roots;
 }
 
-/** Filesystem-safe subdirectory name for a host path. `%` and `_` are escaped
- *  before `/` becomes `_`, so two roots never share one. */
+/** Subdirectory name for a host path. Hashed so a deep mount point never
+ *  exceeds the 255-byte name limit or lengthens the overlay's mount options. */
 function slugify(path: string): string {
-  return path.replace(/%/g, "%25").replace(/_/g, "%5F").replace(/\//g, "_") || "_root";
+  return createHash("sha256").update(path).digest("hex").slice(0, 16);
 }
 
 export function overlayUpperFor(scratchDir: string, root: string): string {
