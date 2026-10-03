@@ -14,7 +14,7 @@ import { errorMessage } from "#core/lib/errors.ts";
 import type { GenReportParameters } from "#core/lib/report/types.ts";
 
 import { readStepLabel } from "./inputs.ts";
-import { fetchReport, readActionVersion, writeReportSummary } from "./report.ts";
+import { fetchReport, readActionVersion, writeReportSummary, type Report } from "./report.ts";
 import { setTrafficArtifactOutput, uploadTrafficArtifact } from "./traffic-artifact.ts";
 
 /**
@@ -99,44 +99,49 @@ export async function reportStepTraffic(
     }
   };
 
-  // Named so the message below says which step failed. One catch, not three:
-  // every failure here has the same consequence, and only the wording differs.
-  let phase = "fetch sandbox report";
-  let artifactName = "";
+  let report: Report | undefined;
   try {
-    const report = await fetchReport(containerName, parameters, proxyEngine);
-    phase = "write the report summary";
-    await writeReportSummary(
-      report,
-      annotation,
-      {
-        actionRepo,
-        actionRef,
-        runCommand,
-        actionVersion: readActionVersion(containerName, proxyEngine),
-        stepLabel: readStepLabel(),
-        failOnBlocked,
-      },
-      // Both engines produce a traffic JSON now, so either summary may point at
-      // the artifact when one was asked for.
-      trafficArtifact.upload,
-      env,
-    );
-    if (trafficArtifact.upload) {
-      phase = "upload the traffic artifact";
-      artifactName =
-        (await uploadTrafficArtifact(
-          report,
-          containerName,
-          trafficArtifact.retentionDays,
-          annotation,
-        )) ?? "";
-    }
+    report = await fetchReport(containerName, parameters, proxyEngine);
   } catch (e) {
-    const message = `Failed to ${phase}: ${errorMessage(e)}`;
-    // The artifact is a copy of what the summary already recorded.
-    if (phase === "upload the traffic artifact") annotation.warning(message);
-    else fail(message);
+    fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
+  }
+
+  let artifactName = "";
+  if (report) {
+    try {
+      await writeReportSummary(
+        report,
+        annotation,
+        {
+          actionRepo,
+          actionRef,
+          runCommand,
+          actionVersion: readActionVersion(containerName, proxyEngine),
+          stepLabel: readStepLabel(),
+          failOnBlocked,
+        },
+        trafficArtifact.upload,
+        env,
+      );
+    } catch (e) {
+      fail(`Failed to write the report summary: ${errorMessage(e)}`);
+    }
+
+    // Uploaded even when the summary failed: the command can delete the
+    // summary file, and the artifact is then the only record left.
+    if (trafficArtifact.upload) {
+      try {
+        artifactName =
+          (await uploadTrafficArtifact(
+            report,
+            containerName,
+            trafficArtifact.retentionDays,
+            annotation,
+          )) ?? "";
+      } catch (e) {
+        annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
+      }
+    }
   }
 
   try {

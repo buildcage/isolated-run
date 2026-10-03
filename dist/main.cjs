@@ -71822,20 +71822,31 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 		...overrides
 	}, failClosed = parameters.mode !== "audit" && failOnBlocked, fail = (message) => {
 		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail_on_blocked`), process.exitCode = 1) : annotation.warning(message);
-	}, phase = "fetch sandbox report", artifactName = "";
+	}, report;
 	try {
-		let report = await fetchReport(containerName, parameters, proxyEngine);
-		phase = "write the report summary", await writeReportSummary(report, annotation, {
-			actionRepo,
-			actionRef,
-			runCommand,
-			actionVersion: readActionVersion(containerName, proxyEngine),
-			stepLabel: readStepLabel(),
-			failOnBlocked
-		}, trafficArtifact.upload, env), trafficArtifact.upload && (phase = "upload the traffic artifact", artifactName = await uploadTrafficArtifact(report, containerName, trafficArtifact.retentionDays, annotation) ?? "");
+		report = await fetchReport(containerName, parameters, proxyEngine);
 	} catch (e) {
-		let message = `Failed to ${phase}: ${errorMessage(e)}`;
-		phase === "upload the traffic artifact" ? annotation.warning(message) : fail(message);
+		fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
+	}
+	let artifactName = "";
+	if (report) {
+		try {
+			await writeReportSummary(report, annotation, {
+				actionRepo,
+				actionRef,
+				runCommand,
+				actionVersion: readActionVersion(containerName, proxyEngine),
+				stepLabel: readStepLabel(),
+				failOnBlocked
+			}, trafficArtifact.upload, env);
+		} catch (e) {
+			fail(`Failed to write the report summary: ${errorMessage(e)}`);
+		}
+		if (trafficArtifact.upload) try {
+			artifactName = await uploadTrafficArtifact(report, containerName, trafficArtifact.retentionDays, annotation) ?? "";
+		} catch (e) {
+			annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
+		}
 	}
 	try {
 		setTrafficArtifactOutput(artifactName);

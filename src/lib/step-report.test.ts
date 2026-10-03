@@ -154,10 +154,21 @@ describe("reportStepTraffic", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("still uploads the traffic artifact when writing the summary fails", async () => {
+    mocks.writeReportSummary.mockRejectedValue(new Error("summary file is gone"));
+    mocks.uploadTrafficArtifact.mockResolvedValue("buildcage-traffic-deadbeef");
+
+    await reportStepTraffic(options({ trafficArtifact: { upload: true } }), deps);
+
+    expect(mocks.uploadTrafficArtifact).toHaveBeenCalledOnce();
+    expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledExactlyOnceWith(
+      "buildcage-traffic-deadbeef",
+    );
+  });
+
   // The real uploadTrafficArtifact warns for itself and resolves, so this is
   // the outer guarantee rather than a path it takes: whatever the upload does,
-  // this function still returns, and the step is not failed over a copy of what
-  // the summary already recorded.
+  // this function still returns and the step is not failed over the upload.
   it("only warns when the artifact upload fails", async () => {
     mocks.uploadTrafficArtifact.mockRejectedValue(new Error("artifact service down"));
 
