@@ -1,7 +1,11 @@
+import { readFileSync } from "node:fs";
+
 import { describe, it, expect, vi } from "vitest";
+import { parse } from "yaml";
 
 import { SandboxError } from "./errors.ts";
 import {
+  CONFIG_FILE_INPUTS,
   readProxyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
@@ -12,6 +16,20 @@ import {
 } from "./inputs.ts";
 
 const silent = () => {};
+
+describe("CONFIG_FILE_INPUTS", () => {
+  it("names every action.yml input but run, writable and config_file itself", () => {
+    const actionYml = parse(readFileSync("action.yml", "utf8")) as { inputs: object };
+    const inputs = Object.keys(actionYml.inputs).filter(
+      (n) => !["run", "writable", "config_file"].includes(n),
+    );
+    expect([...CONFIG_FILE_INPUTS.known].sort()).toEqual(inputs.sort());
+  });
+
+  it("merges only inputs it knows", () => {
+    expect(CONFIG_FILE_INPUTS.known).toEqual(expect.arrayContaining([...CONFIG_FILE_INPUTS.lists]));
+  });
+});
 
 describe("resolveWriteThroughInput", () => {
   const inputs = (over: Partial<Parameters<typeof resolveWriteThroughInput>[0]> = {}) => ({
@@ -164,7 +182,7 @@ describe.each([
     expect(read(inputs({ [name]: String(!unset) }))).toBe(!unset);
   });
 
-  it("takes action.yml's own default when unset", () => {
+  it("takes the default when unset", () => {
     expect(read(inputs())).toBe(unset);
   });
 

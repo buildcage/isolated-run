@@ -45,6 +45,7 @@ const RUNNER_ONLY_ENV_KEYS = new Set([
 export const ACTION_INPUT_ENV_KEYS = new Set(
   [
     "run",
+    "config_file",
     "proxy_mode",
     "proxy_engine",
     "allowed_https_rules",

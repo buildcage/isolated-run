@@ -10,6 +10,7 @@ import { runSandboxStep, type SandboxStepDeps } from "./sandbox-step.ts";
 const annotation = { notice: vi.fn(), warning: vi.fn(), error: vi.fn() };
 
 const mocks = {
+  applyConfigFile: vi.fn(),
   readRunCommand: vi.fn(),
   readProxyInputs: vi.fn(),
   readFilesystemInputs: vi.fn(),
@@ -17,6 +18,7 @@ const mocks = {
   readFailOnCaResidue: vi.fn(),
   readFailOnBlocked: vi.fn(),
   readTrafficArtifactInputs: vi.fn(),
+  saveWriteThroughForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
   checkPasswordlessSudo: vi.fn(),
   checkOverlayfsSupport: vi.fn(),
@@ -100,6 +102,42 @@ function orderOf(mock: { mock: { invocationCallOrder: number[] } }): number {
 }
 
 describe("runSandboxStep", () => {
+  it("applies config_file to the step's env before reading any input, and logs it", async () => {
+    mocks.applyConfigFile.mockReturnValue({
+      path: "/home/runner/work/repo/repo/c.yml",
+      summary: ["Inputs read from config_file c.yml:", "  proxy_mode"],
+    });
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.applyConfigFile).toHaveBeenCalledWith(
+      ENV,
+      expect.objectContaining({ known: expect.arrayContaining(["proxy_mode"]) }),
+    );
+    expect(orderOf(mocks.applyConfigFile)).toBeLessThan(orderOf(mocks.readRunCommand));
+    expect(mocks.log).toHaveBeenCalledWith("Inputs read from config_file c.yml:");
+    expect(mocks.log).toHaveBeenCalledWith("  proxy_mode");
+  });
+
+  it("saves the merged write_through for the post step when config_file was read", async () => {
+    mocks.applyConfigFile.mockReturnValue({ path: "/w/c.yml", summary: [] });
+    mocks.readFilesystemInputs.mockReturnValue({
+      filesystemMode: "persistent",
+      writeThroughInput: "/opt/cache",
+    });
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.saveWriteThroughForPost).toHaveBeenCalledWith(ENV, "/opt/cache");
+    expect(orderOf(mocks.saveWriteThroughForPost)).toBeLessThan(orderOf(mocks.runSandboxedCommand));
+  });
+
+  it("saves nothing without config_file, leaving post the workflow's own input", async () => {
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.saveWriteThroughForPost).not.toHaveBeenCalled();
+  });
+
   it("returns the isolated command's own exit code", async () => {
     mocks.runSandboxedCommand.mockReturnValue(42);
 

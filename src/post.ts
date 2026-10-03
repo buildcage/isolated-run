@@ -10,6 +10,7 @@ import { readLocalImageOverride, resolveComposeFile } from "./lib/compose-file.t
 import { readFilesystemInputs } from "./lib/inputs.ts";
 import { planPostCleanup } from "./lib/post-cleanup.ts";
 import type { PostCleanupTargets } from "./lib/post-state.ts";
+import { takeWriteThroughForPost } from "./lib/post-write-through.ts";
 import { pinHostCommands, pinningPaths } from "./lib/sandbox/host-commands.ts";
 import { hostCommand, hostCommandEnv } from "./lib/sandbox/pinned-commands.ts";
 
@@ -37,10 +38,16 @@ async function stopProxyContainer({ containerName, projectName }: PostCleanupTar
 // here via core.getState; see
 // https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands#sending-values-to-the-pre-and-post-actions.
 function main(): void {
+  // The write_through the main step saved when it read config_file, which
+  // this step must not read again; the workflow's own input otherwise.
+  const savedWriteThrough = takeWriteThroughForPost(process.env);
   // Before planPostCleanup, which already runs docker and sudo. The main step
   // already reported any renamed input, hence the no-op notice.
   pinHostCommands(
-    pinningPaths(() => readFilesystemInputs(() => {}).writeThroughInput, process.env),
+    pinningPaths(
+      () => savedWriteThrough ?? readFilesystemInputs(() => {}).writeThroughInput,
+      process.env,
+    ),
     process.env,
   );
   const targets = planPostCleanup(

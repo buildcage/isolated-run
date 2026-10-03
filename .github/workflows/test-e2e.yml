@@ -202,6 +202,67 @@ jobs:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
         run: ./test/assert-sandbox.sh
 
+  # config_file through the real action: the engine, the rules and
+  # fail_on_blocked it sets all reach the step.
+  test_sandbox_config_file:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    name: "e2e: test (sandbox, config_file)"
+
+    # Builds the universal image the file asks for.
+    env:
+      PROXY_ENGINE: universal
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-vp
+
+      - name: Build local sandbox proxy image
+        run: docker compose build proxy
+
+      - name: Resolve local image ref
+        id: local_image
+        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild the action with the local-image test hook enabled
+        env:
+          BUILDCAGE_BUILD_TEST_HOOKS: "1"
+        run: vp run build
+
+      - name: Write the config file
+        run: |
+          mkdir -p e2e-config
+          cat > e2e-config/buildcage.yml <<'YAML'
+          proxy_engine: universal
+          # The blocked request below is expected.
+          fail_on_blocked: false
+          allowed_https_rules: |
+            example.com:443
+          YAML
+
+      - name: Run an isolated command configured by the file
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+        with:
+          config_file: e2e-config/buildcage.yml
+          run: |
+            echo "=== a host the file allows must be reachable ==="
+            wget -q -T 5 -O /dev/null https://example.com/
+
+            echo "=== a host the file does not allow must be blocked ==="
+            if wget -q -T 5 -O /dev/null https://example.org/ 2>&1; then
+              echo "UNEXPECTED: example.org was reachable"
+              exit 1
+            fi
+
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network), proves proxy_engine: inspect wiring
   # end-to-end: engine selection, method/path enforcement via
