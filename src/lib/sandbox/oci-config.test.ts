@@ -459,7 +459,7 @@ describe("buildOciConfig", () => {
     it("adds them to readonlyPaths, which runc applies over every writable layer", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
-        readonlyHostDirs: ["/home/runner/.docker", "/home/runner/work/_actions/x/y/v1"],
+        readonlyHostPaths: ["/home/runner/.docker", "/home/runner/work/_actions/x/y/v1"],
       });
       expect(config.linux.readonlyPaths).toEqual(
         expect.arrayContaining(["/home/runner/.docker", "/home/runner/work/_actions/x/y/v1"]),
@@ -639,7 +639,7 @@ describe("buildOciConfig", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
         writable: { ...baseArgs.writable, writablePaths: ["/"] },
-        readonlyHostDirs: ["/home/runner/.docker"],
+        readonlyHostPaths: ["/home/runner/.docker"],
       });
       expect(config.linux.readonlyPaths).toContain("/home/runner/.docker");
     });

@@ -34,6 +34,7 @@ const mocks = {
   listHostMounts: vi.fn(),
   runIsolated: vi.fn(),
   mkdir: vi.fn(),
+  touch: vi.fn(),
   readFile: vi.fn(),
   realpath: vi.fn(),
   info: vi.fn(),
@@ -502,7 +503,7 @@ describe("runSandboxedCommand", () => {
     await runSandboxedCommand(options(), deps);
 
     // On CI the checkout is under /home/runner and adds its own entry.
-    expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostDirs).toContain(
+    expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostPaths).toContain(
       "/home/runner/.docker",
     );
     expect(mocks.mkdir).toHaveBeenCalledWith("/home/runner/.docker", {
@@ -529,8 +530,51 @@ describe("runSandboxedCommand", () => {
       deps,
     );
 
-    expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostDirs).toStrictEqual([]);
+    expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostPaths).toStrictEqual([]);
     expect(mocks.mkdir).not.toHaveBeenCalledWith("/home/runner/.docker", expect.anything());
+  });
+
+  describe("the runner's file commands", () => {
+    const COMMANDS = "/home/runner/work/_temp/_runner_file_commands";
+    const env = {
+      HOME: "/home/runner",
+      RUNNER_TEMP: "/home/runner/work/_temp",
+      GITHUB_ENV: `${COMMANDS}/set_env_1`,
+      GITHUB_PATH: `${COMMANDS}/add_path_1`,
+      GITHUB_STATE: `${COMMANDS}/save_state_1`,
+    };
+
+    it("keeps them read-only and their directory unrenamable, making any that is missing", async () => {
+      await runSandboxedCommand(options({ env }), deps);
+
+      const config = mocks.buildOciConfig.mock.calls[0][1];
+      expect(config.readonlyHostPaths).toEqual(
+        expect.arrayContaining([env.GITHUB_ENV, env.GITHUB_PATH, env.GITHUB_STATE]),
+      );
+      expect(config.renameGuardDirs).toContain(COMMANDS);
+      expect(mocks.touch.mock.calls.map(([path]) => path)).toStrictEqual([
+        env.GITHUB_ENV,
+        env.GITHUB_PATH,
+        env.GITHUB_STATE,
+      ]);
+    });
+
+    it("keeps them read-only in ephemeral mode too, unless write_through names one", async () => {
+      await runSandboxedCommand(
+        options({
+          env,
+          filesystemMode: "ephemeral",
+          overlayRoots: ["/home/runner"],
+          writeThroughPaths: [env.GITHUB_ENV],
+        }),
+        deps,
+      );
+
+      expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostPaths).toStrictEqual([
+        env.GITHUB_PATH,
+        env.GITHUB_STATE,
+      ]);
+    });
   });
 
   it("says so when the runner's primary group forced a GID substitution", async () => {

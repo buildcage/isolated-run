@@ -73,8 +73,9 @@ export interface BuildOciConfigOptions {
    *  universal engine, which never terminates TLS and so has no CA to
    *  distribute. */
   caTrust?: CaTrustFiles;
-  /** See host-commands.ts's sandboxReadonlyHostDirs. */
-  readonlyHostDirs?: string[];
+  /** See host-commands.ts's sandboxReadonlyHostDirs and
+   *  sandboxReadonlyFileCommands. */
+  readonlyHostPaths?: string[];
   /** See host-commands.ts's renameGuardDirs. */
   renameGuardDirs?: string[];
 }
@@ -100,7 +101,7 @@ export function buildOciConfig(
     runtime,
     env,
     caTrust,
-    readonlyHostDirs = [],
+    readonlyHostPaths = [],
     renameGuardDirs = [],
   }: BuildOciConfigOptions,
   probes: HostProbes = realHostProbes,
@@ -234,7 +235,7 @@ export function buildOciConfig(
       seccomp: seccompProfile,
       maskedPaths,
       // runc applies these after every mount, so they win over any writable layer.
-      readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostDirs])],
+      readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostPaths])],
     },
   };
 }

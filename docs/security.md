@@ -631,22 +631,24 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   `env:` passes an empty value through, which `ssh` treats as no agent at all.
 - **Planting something for a later step.** The filesystem is read-only outside
   `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP`, which is also where it can persist.
-  `GITHUB_OUTPUT`, `GITHUB_ENV` and `GITHUB_PATH` live under `$RUNNER_TEMP`, so the command can set
-  an output, an env var or `$PATH` for later steps exactly as an un-sandboxed one could, and the
-  same goes for `~/.bashrc`, `~/.npmrc` and anything else under a writable exception, a later
-  step's `config_file` included.
+  `GITHUB_OUTPUT` lives under `$RUNNER_TEMP`, so the command can set an output for later steps
+  exactly as an un-sandboxed one could, and the same goes for `~/.bashrc`, `~/.npmrc` and anything
+  else under a writable exception, a later step's `config_file` included. `GITHUB_ENV`,
+  `GITHUB_PATH` and `GITHUB_STATE` are the exception: each is read-only inside the sandbox in either
+  mode, mounted over itself so it cannot be renamed or replaced, and the writable directories
+  between it and `$RUNNER_TEMP` are pinned the same way. What they set reaches every later step and
+  post step at once. `write_through:` can open `GITHUB_ENV` or `GITHUB_PATH` by naming it.
   `filesystem_mode: ephemeral` closes this off for everything except what `write_through:` names.
   Naming only the outputs a later step needs, such as `./dist`, also discards a payload planted
   elsewhere in `$GITHUB_WORKSPACE`. A named path is as exposed as in `persistent` mode.
 
   That decides how the step is set up. Wrapping every untrusted step is not the way out: a payload
-  left in `$GITHUB_ENV`, `$GITHUB_PATH` or `$HOME` runs in the next step before its sandbox does.
+  left in `$HOME` runs in the next step before its sandbox does.
   This action's own `sudo`, `docker` and `keytool` (under `inspect`) are pinned out of reach, but
   every process inherits the environment, this action's own included. Making it the last step in the
   job does not close it off either: every action's post step, this one's included, runs after the last
-  step, with whatever it left in `$GITHUB_ENV`, `$GITHUB_PATH` and `$HOME`. What holds is
-  `filesystem_mode: ephemeral` with `write_through:` narrowed to the outputs the step really has to
-  produce, leaving out `$GITHUB_ENV`, `$GITHUB_PATH` and `$HOME`.
+  step, with whatever it left in `$HOME`. What holds is `filesystem_mode: ephemeral` with
+  `write_through:` narrowed to the outputs the step really has to produce, leaving out `$HOME`.
 
 - **Appending to the Job Summary.** The report is rendered from the runner host after the command
   has exited, and a name or URL is escaped before it is written into a table, so the command cannot
@@ -717,15 +719,15 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   tool expecting a session keyring or its own scratch state there finds nothing and fails outright
   rather than silently landing on the host's real directory. Only naming it in `write_through:`
   brings it back.
-- **The post step validates `$GITHUB_STATE` rather than trusting it.** That file lives under
-  `$RUNNER_TEMP`, writable in `persistent` mode, so the command can overwrite what this action wrote
-  there. The post step checks that the container name it reads back is shaped like one this action
-  generates, computes its own Compose project name rather than trusting a stored value, and reads
-  back which step started that container, recorded as a label from environment the runner sets per
-  step and the command cannot forge. Another Buildcage step's container is left alone. A value that
-  fails either check is treated as absent: cleanup is skipped with an `::error::` rather than
-  guessed at, which leaves the proxy container and its scratch directory behind on a self-hosted
-  runner.
+- **The post step validates `$GITHUB_STATE` rather than trusting it.** The command cannot write
+  that file, but a process outside the sandbox, such as one an earlier step left running, can
+  overwrite what this action wrote there. The post step checks that the container name it reads back
+  is shaped like one this action generates, computes its own Compose project name rather than
+  trusting a stored value, and reads back which step started that container, recorded as a label
+  from environment the runner sets per step and the command cannot forge. Another Buildcage step's
+  container is left alone. A value that fails either check is treated as absent: cleanup is skipped
+  with an `::error::` rather than guessed at, which leaves the proxy container and its scratch
+  directory behind on a self-hosted runner.
 - **Per-step overhead.** Each step starts and stops its own proxy container rather than sharing one
   across the job, which keeps allowlists independently configurable and the report's
   step-to-container mapping unambiguous, at the cost of startup time on jobs with many isolated

@@ -25020,6 +25020,17 @@ function dockerConfigDir(env) {
 function sandboxReadonlyHostDirs(persisting, env, actionRoot = ACTION_ROOT) {
 	return [actionRoot, dockerConfigDir(env)].filter((p) => !!p).filter((dir) => persisting.some((p) => isAtOrUnder(dir, p)) && !persisting.includes(dir));
 }
+function sandboxReadonlyFileCommands(writeThroughPaths, env, realpath = realpathOrSelf) {
+	let named = new Set(withRealPaths(writeThroughPaths, realpath)), openable = (name, path) => name !== "GITHUB_STATE" && (named.has(path) || named.has(realpath(path)));
+	return [
+		"GITHUB_ENV",
+		"GITHUB_PATH",
+		"GITHUB_STATE"
+	].flatMap((name) => {
+		let path = env[name];
+		return path && !openable(name, path) ? [realpath(path)] : [];
+	});
+}
 function renameGuardDirs(readonlyDirs, persisting) {
 	let guards = new Set();
 	for (let dir of readonlyDirs) {
@@ -25348,7 +25359,7 @@ function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, env, hostMo
 }
 //#endregion
 //#region src/lib/sandbox/oci-config.ts
-function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostDirs = [], renameGuardDirs = [] }, probes = realHostProbes) {
+function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [] }, probes = realHostProbes) {
 	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
 	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths, (path) => probes.realpath(path));
 	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
@@ -25426,7 +25437,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 			namespaces,
 			seccomp: seccompProfile,
 			maskedPaths,
-			readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostDirs])]
+			readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostPaths])]
 		}
 	};
 }
@@ -25564,6 +25575,10 @@ const realDeps$2 = {
 	buildEnvBlob,
 	runIsolated,
 	mkdir: node_fs.mkdirSync,
+	touch: (path) => (0, node_fs.writeFileSync)(path, "", {
+		flag: "a",
+		mode: 384
+	}),
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
 	realpath: realpathOrSelf,
 	info
@@ -25617,11 +25632,12 @@ function resolveIdentity(env, warn, { resolveSandboxGid, info }) {
 function assembleBundle(dir, options, deps) {
 	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
-		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)), readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env), renameGuardDirs$1 = renameGuardDirs(readonlyHostDirs, persisting);
+		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)), readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, env, deps.realpath), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
 		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
 			mode: 448,
 			recursive: !0
 		});
+		for (let file of readonlyFiles) deps.touch(file);
 		config = buildOciConfig(baseSpec, {
 			identity: resolveIdentity(env, options.warn, deps),
 			writable: {
@@ -25644,7 +25660,7 @@ function assembleBundle(dir, options, deps) {
 			},
 			env,
 			caTrust,
-			readonlyHostDirs,
+			readonlyHostPaths: [...readonlyHostDirs, ...readonlyFiles],
 			renameGuardDirs: renameGuardDirs$1
 		});
 	} catch (e) {

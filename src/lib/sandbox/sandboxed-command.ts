@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import * as core from "@actions/core";
@@ -24,6 +24,7 @@ import {
   realpathOrSelf,
   renameGuardDirs as renameGuards,
   resolveDefaultWritableDirs,
+  sandboxReadonlyFileCommands,
   sandboxReadonlyHostDirs,
   withRealPaths,
 } from "./host-commands.ts";
@@ -79,6 +80,7 @@ export interface RunSandboxedCommandDeps {
   buildEnvBlob: typeof buildEnvBlob;
   runIsolated: typeof runIsolated;
   mkdir: (path: string, options: { mode: number; recursive?: boolean }) => void;
+  touch: (path: string) => void;
   readFile: (path: string) => string;
   realpath: (path: string) => string;
   info: (message: string) => void;
@@ -106,6 +108,9 @@ const realDeps: RunSandboxedCommandDeps = {
   buildEnvBlob,
   runIsolated,
   mkdir: mkdirSync,
+  // Untested by design: writeFileSync, appending nothing to the path chosen.
+  /* v8 ignore next */
+  touch: (path) => writeFileSync(path, "", { flag: "a", mode: 0o600 }),
   // Untested by design: readFileSync, handed the path the tested caller chose.
   /* v8 ignore next */
   readFile: (path) => readFileSync(path, "utf8"),
@@ -333,10 +338,12 @@ export function assembleBundle(
       persistingWritablePaths(filesystemMode, writeThroughPaths, env),
     );
     const readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env);
-    const renameGuardDirs = renameGuards(readonlyHostDirs, persisting);
+    const readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, env, deps.realpath);
+    const renameGuardDirs = renameGuards([...readonlyHostDirs, ...readonlyFiles], persisting);
     // runc skips a read-only path that doesn't exist, and the sandbox could
     // then create it.
     for (const dir of readonlyHostDirs) deps.mkdir(dir, { mode: 0o700, recursive: true });
+    for (const file of readonlyFiles) deps.touch(file);
     config = buildOciConfig(baseSpec, {
       identity: resolveIdentity(env, options.warn, deps),
       writable: {
@@ -359,7 +366,7 @@ export function assembleBundle(
       },
       env,
       caTrust,
-      readonlyHostDirs,
+      readonlyHostPaths: [...readonlyHostDirs, ...readonlyFiles],
       renameGuardDirs,
     });
   } catch (e) {
