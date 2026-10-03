@@ -106,6 +106,21 @@ if [ "$CODE" != "-1" ]; then
   assert_cancelled_cleanly handles "sleep 301"
 fi
 
+# The SIGTERM reaches what the run script started too, and the step waits for
+# it to finish its own cleanup after the script itself has died of the signal.
+cancel_step command \
+  "bash -c 'trap \"sleep 1; touch cleaned-up; exit 0\" TERM; sleep 303 & wait'" "sleep 303"
+if [ "$CODE" != "-1" ]; then
+  check_status "command: the run script died of the SIGTERM" "$CODE" 143
+  if [ -e "$WORKDIR/command/cleaned-up" ]; then
+    pass "command: the command the script ran finished its cleanup"
+  else
+    fail "command: the command the script ran was killed before its cleanup finished"
+    cat "$WORKDIR/command/out.log"
+  fi
+  assert_cancelled_cleanly command "sleep 303"
+fi
+
 cancel_step ignores "trap '' TERM; sleep 302" "sleep 302"
 if [ "$CODE" != "-1" ]; then
   check_status "ignores: a command that ignores SIGTERM is killed" "$CODE" 137

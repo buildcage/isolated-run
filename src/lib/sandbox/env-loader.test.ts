@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -189,10 +189,12 @@ async function runLoader(
     blob = buildEnvBlob({}),
     feed = (loader) => loader.stdin?.end(blob),
     onReady,
+    onExit,
   }: {
     blob?: Buffer;
     feed?: (loader: ChildProcess) => void;
     onReady?: (loader: ChildProcess) => void;
+    onExit?: () => void;
   } = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   const dir = mkdtempSync(join(tmpdir(), "env-loader-test-"));
@@ -214,6 +216,7 @@ async function runLoader(
         onReady?.(loader);
       }
     });
+    loader.on("exit", () => onExit?.());
     feed(loader);
     const code = await new Promise<number | null>((resolve) => loader.on("close", resolve));
     return { code, stdout, stderr };
@@ -233,8 +236,8 @@ const [bashMajor, bashMinor] = execFileSync("bash", [
   .trim()
   .split(" ")
   .map(Number);
-// The loader relies on `trap -` lifting bash's ignore of SIGINT in a background
-// child, and on $BASHPID. Runners ship 4.4+; macOS's /bin/bash is 3.2.
+// The loader relies on job control leaving SIGINT alone in a background child,
+// and on $BASHPID. Runners ship 4.4+; macOS's /bin/bash is 3.2.
 const BASH_4_4_OR_LATER = bashMajor > 4 || (bashMajor === 4 && bashMinor >= 4);
 
 describe("the written loader", () => {
@@ -304,6 +307,45 @@ describe("the written loader", () => {
     );
     expect(stdout).toBe("ready\ngot INT\n");
     expect(code).toBe(7);
+  });
+
+  it.skipIf(!BASH_4_4_OR_LATER)(
+    "forwards SIGTERM to the command the script runs, and waits for it to finish",
+    async () => {
+      const marker = join(mkdtempSync(join(tmpdir(), "env-loader-marker-")), "cleaned-up");
+      const command = `trap 'sleep 0.3; echo > ${marker}; exit 0' TERM; ${WAIT_FOR_A_SIGNAL}`;
+      let cleanedUpFirst: boolean | undefined;
+      const { code } = await runLoader(`bash -c "${command}"`, {
+        onReady: (loader) => loader.kill("SIGTERM"),
+        onExit: () => {
+          cleanedUpFirst = existsSync(marker);
+        },
+      });
+      rmSync(dirname(marker), { recursive: true, force: true });
+      expect(cleanedUpFirst).toBe(true);
+      // The script itself does not trap it.
+      expect(code).toBe(143);
+    },
+  );
+
+  it.skipIf(!BASH_4_4_OR_LATER)(
+    "does not wait for what the script left running after a signal that does not stop it",
+    async () => {
+      const started = Date.now();
+      const { code } = await runLoader(
+        `trap 'exit 0' USR1; (trap '' USR1; sleep 3) >/dev/null 2>&1 & ${WAIT_FOR_A_SIGNAL}`,
+        { onReady: (loader) => loader.kill("SIGUSR1") },
+      );
+      expect(code).toBe(0);
+      expect(Date.now() - started).toBeLessThan(2_000);
+    },
+  );
+
+  it("does not wait for what the script left running when it exits on its own", async () => {
+    const started = Date.now();
+    const { code } = await runLoader("sleep 3 >/dev/null 2>&1 & exit 0");
+    expect(code).toBe(0);
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 
   it("exits 128+n when a forwarded signal kills the script", async () => {
