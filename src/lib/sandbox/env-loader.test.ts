@@ -328,6 +328,19 @@ describe("the written loader", () => {
     },
   );
 
+  it.skipIf(!BASH_4_4_OR_LATER)(
+    "does not wait for what the script left running after a signal that does not stop it",
+    async () => {
+      const started = Date.now();
+      const { code } = await runLoader(
+        `trap 'exit 0' USR1; (trap '' USR1; sleep 3) >/dev/null 2>&1 & ${WAIT_FOR_A_SIGNAL}`,
+        { onReady: (loader) => loader.kill("SIGUSR1") },
+      );
+      expect(code).toBe(0);
+      expect(Date.now() - started).toBeLessThan(2_000);
+    },
+  );
+
   it("does not wait for what the script left running when it exits on its own", async () => {
     const started = Date.now();
     const { code } = await runLoader("sleep 3 >/dev/null 2>&1 & exit 0");

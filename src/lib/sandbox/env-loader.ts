@@ -127,10 +127,10 @@ set -u
 # terminal's Ctrl-C does.
 child=
 pending=
-forwarded=
+stopping=
 forward() {
   if [ -n "$child" ]; then
-    forwarded=1
+    case "$1" in TERM | INT) stopping=1 ;; esac
     kill -s "$1" -- "-$child" 2>/dev/null
   else
     pending="$pending $1"
@@ -179,9 +179,10 @@ exec 2>/dev/null
 while kill -0 "$child" 2>/dev/null; do wait "$child"; done
 wait "$child"
 status=$?
-# The script can exit on a signal while the command it ran is still winding
-# down, and this process exiting would kill it.
-if [ -n "$forwarded" ]; then
+# The script can exit on a SIGTERM or SIGINT while the command it ran is still
+# winding down, and this process exiting would kill it. Anything in the group
+# that ignores the signal holds the step until it is killed from outside.
+if [ -n "$stopping" ]; then
   nap=/usr/bin/sleep
   [ -x "$nap" ] || nap=/bin/sleep
   while kill -0 -- "-$child" 2>/dev/null; do "$nap" 0.1; done

@@ -254,7 +254,7 @@ payload for a later step. See [Filesystem access](../README.md#filesystem-access
   shebang leaves no zombies. It forwards `SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGUSR1` and
   `SIGUSR2` to the command's process group, as a terminal's Ctrl-C does, so what the command runs
   gets them too. It exits with the command's status, `128+n` if a signal killed it, but after
-  forwarding a signal not before the rest of that group has exited.
+  forwarding `SIGTERM` or `SIGINT` not before the rest of that group has exited.
 
 What is left is piped to the sandboxed process over stdin as NUL-delimited `KEY=VALUE` records,
 rather than written into `config.json`, so an `env:` secret never reaches the runner's disk. The
@@ -265,9 +265,9 @@ bash reserves (`UID`, `SECONDS`) arrives as set, as it does in an unwrapped `run
 
 An exit trap tears down the container, the rootfs bind-mount, the veth and the network namespace,
 and force-detaches anything still mounted under the run's scratch directory before deleting it. A
-cancelled step goes the same way: the action catches the runner's signal, sends the command
-`SIGTERM`, kills it if it is still running 5 seconds later, and then writes the traffic report and
-stops the proxy as usual. If the action is killed first, a fallback step reads the container's
+cancelled step goes the same way: the action catches the runner's signal, sends the command and
+what it started `SIGTERM`, kills them if any is still running 5 seconds later, and then writes the
+traffic report and stops the proxy as usual. If the action is killed first, a fallback step reads the container's
 identity back from job state, stops the proxy and deletes the scratch directory. The command's own
 life is tied to `run-isolated.sh`'s by a two-hop `setpriv --pdeathsig=KILL` chain, so an
 out-of-memory kill on the script takes the whole sandboxed process tree with it rather than leaving
