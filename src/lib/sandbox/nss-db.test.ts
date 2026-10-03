@@ -638,19 +638,95 @@ describe("settleNssDbSlot", () => {
     expect(readdirSync(dir).sort()).toStrictEqual(["cert9.db", "pkcs11.txt"]);
   });
 
-  it("keeps the staging copy when the swap fails partway", () => {
+  it("leaves alone what the command did not change, even where it cannot write", () => {
     const dir = ownDb();
     mkdirSync(join(dir, "sub"));
-    writeFileSync(join(dir, "sub", "kept"), "");
+    writeFileSync(join(dir, "sub", "kept"), "KEPT");
     const files = prepare();
     writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
-    // Its file cannot be removed, so clearing the database fails partway.
     chmodSync(join(dir, "sub"), 0o555);
 
-    expect(() => settle(files)).toThrow();
+    const outcome = settle(files);
     chmodSync(join(dir, "sub"), 0o755);
-    const staging = readdirSync(dir).find((name) => name.startsWith(".buildcage-"))!;
-    expect(readFileSync(join(dir, staging, "cert9.db"), "utf8")).toBe("WRITTEN BY THE COMMAND");
+
+    expect(outcome).toBe("written");
+    expect(readFileSync(join(dir, "cert9.db"), "utf8")).toBe("WRITTEN BY THE COMMAND");
+    expect(readFileSync(join(dir, "sub", "kept"), "utf8")).toBe("KEPT");
+  });
+
+  it("writes into a directory the database has rather than replacing it", () => {
+    const dir = ownDb();
+    mkdirSync(join(dir, "sub"), { mode: 0o750 });
+    writeFileSync(join(dir, "sub", "kept"), "KEPT");
+    const ino = statSync(join(dir, "sub")).ino;
+    const files = prepare();
+    writeFileSync(join(files.path, "sub", "added"), "ADDED BY THE COMMAND");
+
+    expect(settle(files)).toBe("written");
+    expect(statSync(join(dir, "sub")).ino).toBe(ino);
+    expect(mode(join(dir, "sub"))).toBe(0o750);
+    expect(readdirSync(join(dir, "sub")).sort()).toStrictEqual(["added", "kept"]);
+  });
+
+  it("adds a directory the command made, with the mode it gave it", () => {
+    const dir = ownDb();
+    const files = prepare();
+    mkdirSync(join(files.path, "made", "deeper"), { recursive: true });
+    writeFileSync(join(files.path, "made", "deeper", "file"), "MADE BY THE COMMAND");
+    chmodSync(join(files.path, "made"), 0o750);
+
+    expect(settle(files)).toBe("written");
+    expect(mode(join(dir, "made"))).toBe(0o750);
+    expect(readFileSync(join(dir, "made", "deeper", "file"), "utf8")).toBe("MADE BY THE COMMAND");
+  });
+
+  it("puts the copy in before removing what the command removed", () => {
+    const dir = ownDb();
+    mkdirSync(join(dir, "gone"));
+    writeFileSync(join(dir, "gone", "kept"), "");
+    const files = prepare();
+    rmSync(join(files.path, "gone"), { recursive: true });
+    writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
+    chmodSync(join(dir, "gone"), 0o555);
+
+    expect(() => settle(files)).toThrow();
+    chmodSync(join(dir, "gone"), 0o755);
+    expect(readFileSync(join(dir, "cert9.db"), "utf8")).toBe("WRITTEN BY THE COMMAND");
+  });
+
+  it("writes back an entry whose type the command changed", () => {
+    const dir = ownDb();
+    mkdirSync(join(dir, "was-dir"));
+    writeFileSync(join(dir, "was-dir", "inside"), "");
+    mkdirSync(join(dir, "was-dir-now-link"));
+    writeFileSync(join(dir, "was-file"), "");
+    const files = prepare();
+    rmSync(join(files.path, "was-dir"), { recursive: true });
+    writeFileSync(join(files.path, "was-dir"), "NOW A FILE");
+    rmSync(join(files.path, "was-dir-now-link"), { recursive: true });
+    symlinkSync("cert9.db", join(files.path, "was-dir-now-link"));
+    rmSync(join(files.path, "was-file"));
+    mkdirSync(join(files.path, "was-file"));
+
+    expect(settle(files)).toBe("written");
+    expect(readFileSync(join(dir, "was-dir"), "utf8")).toBe("NOW A FILE");
+    expect(readlinkSync(join(dir, "was-dir-now-link"))).toBe("cert9.db");
+    expect(statSync(join(dir, "was-file")).isDirectory()).toBe(true);
+  });
+
+  it("writes back past a dead step's staging it cannot remove", () => {
+    const dir = ownDb();
+    const files = prepare();
+    writeFileSync(join(files.path, "cert9.db"), "WRITTEN BY THE COMMAND");
+    mkdirSync(join(dir, ".buildcage-12345-other", "sub"), { recursive: true });
+    writeFileSync(join(dir, ".buildcage-12345-other", "sub", "kept"), "");
+    chmodSync(join(dir, ".buildcage-12345-other", "sub"), 0o555);
+
+    const outcome = settle(files, { pidAlive: () => false });
+    chmodSync(join(dir, ".buildcage-12345-other", "sub"), 0o755);
+
+    expect(outcome).toBe("written");
+    expect(readFileSync(join(dir, "cert9.db"), "utf8")).toBe("WRITTEN BY THE COMMAND");
   });
 
   it("leaves the database alone when the command only read it", () => {

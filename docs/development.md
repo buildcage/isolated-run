@@ -270,7 +270,12 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
   the copy is mounted read-write over the database. NSS loads every module `pkcs11.txt` names.
 - After the command, if it changed the copy, the slot's bytes are taken back out of `pkcs11.txt` and
   the copy is written back over the database. A copy whose database path no longer resolves where it
-  did is not written back.
+  did is not written back. The write-back syncs the tree: a directory the database already has is
+  entered rather than replaced, a changed file or symlink is renamed over the old one, a directory
+  the command made is created with its mode, and what the command removed is removed last. A file
+  the command left alone is not touched. Except for an entry whose type the command changed, which
+  is removed just before its replacement goes in, a write-back that fails partway leaves entries
+  behind rather than losing them.
 - Write-backs to the same database take turns under a lock, so a step never copies the database
   halfway through another's write-back.
 - Which directories Buildcage made and which steps use them is recorded in

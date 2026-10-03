@@ -733,7 +733,8 @@ discarded. The slot itself is never kept. A database that carries the CA itself,
 changing the CA's trust (`certutil -M`) leaves, is not written back: it fails the step, naming the
 database and pointing at `fail_on_ca_residue`, or only warns under `fail_on_ca_residue: false`,
 which writes it back. When parallel steps change the same database, the one that ends later
-replaces the other's changes as a whole.
+replaces the other's changes as a whole, as it does whatever else wrote to the database while the
+step ran.
 
 A database the runner user cannot write, one too large to copy (over 512 files or 20 MiB), or a
 symlink or non-directory on the path leaves the database as it is, with a warning: Chromium in that
