@@ -3,6 +3,9 @@ import { chmodSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { errorMessage } from "#core/lib/errors.ts";
+
+import { SandboxError } from "../errors.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 // rollup's cjs output doesn't convert import.meta.dirname (it silently
@@ -23,10 +26,13 @@ export interface RunIsolatedOptions {
   cancel?: AbortSignal;
 }
 
+/** How a started process ended: its exit status, the signal that ended it,
+ *  or why it never started. */
+export type Exit = { status: number } | { signal: NodeJS.Signals } | { error: Error };
+
 /** The part of a started process runIsolated needs. */
 export interface Child {
-  /** Its exit status, or null when a signal ended it or it never started. */
-  exited: Promise<number | null>;
+  exited: Promise<Exit>;
   kill: (signal: NodeJS.Signals) => void;
 }
 
@@ -54,12 +60,14 @@ function defaultSpawn(command: string, args: string[], input: Buffer): Child {
   // which says nothing about how it exited.
   child.stdin.on("error", () => {});
   child.stdin.end(input);
-  const exited = new Promise<number | null>((resolve) => {
+  const exited = new Promise<Exit>((resolve) => {
     // Also emitted when a kill fails, while the child still runs.
-    child.on("error", () => {
-      if (child.pid === undefined) resolve(null);
+    child.on("error", (error) => {
+      if (child.pid === undefined) resolve({ error });
     });
-    child.on("close", (code) => resolve(code));
+    child.on("close", (code, signal) =>
+      resolve(code === null ? { signal: signal! } : { status: code }),
+    );
   });
   return { exited, kill: (signal) => child.kill(signal) };
 }
@@ -75,7 +83,7 @@ function defaultCopyScript(from: string, to: string): void {
  * (invoked with `sudo -n`, since setting up namespaces/veth/the rootfs
  * bind-mount requires root). Resolves to the exit code of the isolated
  * command, never rejects for a non-zero exit, since that's the user's
- * command failing, not this function.
+ * command failing, not this function. Rejects when no exit code comes back.
  *
  * Once `cancel` aborts, sudo gets SIGTERM, and another CANCEL_GRACE_MS later.
  * It relays both to run-isolated.sh, which hands the first to the sandbox
@@ -141,11 +149,23 @@ export async function runIsolated(
   };
   if (cancel?.aborted) stop();
   else cancel?.addEventListener("abort", stop, { once: true });
+  let exit: Exit;
   try {
-    // A signal that ended run-isolated.sh leaves no exit code to report.
-    return (await child.exited) ?? 1;
+    exit = await child.exited;
   } finally {
     clearTimeout(escalation);
     cancel?.removeEventListener("abort", stop);
   }
+  if ("status" in exit) return exit.status;
+  // Thrown rather than returned as 1, which a command that exits 1 also gives.
+  if ("signal" in exit) {
+    throw new SandboxError(
+      `The sandbox was ended by ${exit.signal}, so the command's exit status is unknown.`,
+      "SANDBOX_TERMINATED",
+    );
+  }
+  throw new SandboxError(
+    `Failed to start the sandbox: ${errorMessage(exit.error)}`,
+    "SANDBOX_LAUNCH_FAILED",
+  );
 }
