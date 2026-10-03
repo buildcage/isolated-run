@@ -25232,8 +25232,7 @@ exec 0</dev/null
 
 # Job control puts the child in a process group of its own, and leaves SIGINT
 # and SIGQUIT as they are rather than ignoring them in it. Held signals are
-# raised from inside the child. A held SIGQUIT is still dropped, since bash
-# ignores it in itself.
+# raised from inside the child.
 held=$pending
 set -m
 {
