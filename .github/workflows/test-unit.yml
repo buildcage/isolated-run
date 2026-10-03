@@ -47,6 +47,7 @@ jobs:
               - '.github/actions/**'
               - '.github/workflows/test-unit.yml'
               - 'src/**'
+              - 'scripts/**'
               - 'docker/**'
               - 'licenses/**'
               - 'Makefile'
