@@ -25367,7 +25367,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		type: "none",
 		source: resolvConfPath,
 		options: ["rbind", "ro"]
-	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), renameGuards = renameGuardDirs.map((p) => ({
+	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), overlapsFresh = (p) => [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p)), renameGuards = renameGuardDirs.filter((p) => !overlapsFresh(p)).map((p) => ({
 		destination: p,
 		type: "none",
 		source: p,

@@ -15,6 +15,7 @@ import {
   RESOLV_CONF_DESTINATION,
 } from "./oci-mounts.ts";
 import { resolveProtectedPaths } from "./oci-protected-paths.ts";
+import { isAtOrUnder } from "./paths.ts";
 import type { OciSpec, BuiltOciSpec, HostMount, OverlayDirs } from "./types.ts";
 export interface SandboxIdentity {
   uid: number;
@@ -149,13 +150,18 @@ export function buildOciConfig(
     ? ephemeralLayers(ephemeral, freshMountDestinations)
     : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly });
   // After the writable layers, so rbind carries their submounts (workspace,
-  // RUNNER_TEMP) along.
-  const renameGuards = renameGuardDirs.map((p) => ({
-    destination: p,
-    type: "none",
-    source: p,
-    options: ["rbind", "rw"],
-  }));
+  // RUNNER_TEMP) along. Never on or around a path the sandbox mounts fresh
+  // (/dev, /proc), which under write_through: / would bring the host's back.
+  const overlapsFresh = (p: string) =>
+    [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p));
+  const renameGuards = renameGuardDirs
+    .filter((p) => !overlapsFresh(p))
+    .map((p) => ({
+      destination: p,
+      type: "none",
+      source: p,
+      options: ["rbind", "rw"],
+    }));
   // Covers the host's /run, and a /var/run that isn't a link to it, with an
   // empty tmpfs (see hostRunCoverageLayers). Before the writable layers, so a
   // write_through entry under either re-exposes
