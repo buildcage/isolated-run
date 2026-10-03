@@ -39,7 +39,9 @@ unmodified.
 Four things sit outside the model by design.
 
 - **Whoever writes the workflow.** The allowlist is configured alongside the command, by the same
-  people, so Buildcage is not a control against them.
+  people, so Buildcage is not a control against them. A `config_file` is no different. On
+  `pull_request_target`, and `workflow_run` triggered by a pull request, the workspace may hold the
+  pull request's own code, so `config_file` is refused there.
 - **Another step in the same job.** A compromised or untrustworthy action running as another step
   can use `docker exec` or `docker cp`, or the host root a passwordless-sudo runner grants by
   default, to tamper with the proxy container's state, most notably its traffic log. Sigstore proves
@@ -625,7 +627,8 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP`, which is also where it can persist.
   `GITHUB_OUTPUT`, `GITHUB_ENV` and `GITHUB_PATH` live under `$RUNNER_TEMP`, so the command can set
   an output, an env var or `$PATH` for later steps exactly as an un-sandboxed one could, and the
-  same goes for `~/.bashrc`, `~/.npmrc` and anything else under a writable exception.
+  same goes for `~/.bashrc`, `~/.npmrc` and anything else under a writable exception, a later
+  step's `config_file` included.
   `filesystem_mode: ephemeral` closes this off for everything except what `write_through:` names.
   Naming only the outputs a later step needs, such as `./dist`, also discards a payload planted
   elsewhere in `$GITHUB_WORKSPACE`. A named path is as exposed as in `persistent` mode.

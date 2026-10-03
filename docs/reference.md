@@ -27,6 +27,7 @@ details.
 | Input                             | Default      | Description                                                                                                                   |
 | --------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
 | `run`                             | required     | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed). |
+| `config_file`                     | empty        | A YAML file, relative to the workspace, that sets the other inputs. See [Config file](#config-file).                          |
 | `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                               |
 | `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                |
 | `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                       |
@@ -63,6 +64,38 @@ method and any path.
 Setting a rule the engine can't act on is caught before the command starts: `restrict` fails, since
 a rule that looks like it protects the step but cannot be enforced is worse than none, and `audit`
 warns and ignores it.
+
+### Config file
+
+`config_file` names a YAML file in the repository that sets any input but `run`, so the policy can
+sit beside the code that needs it:
+
+```yaml
+# ci/buildcage.yml
+proxy_engine: inspect
+allowed_url_rules: |
+  GET https://registry.npmjs.org/**
+known_blocked_rules: |
+  telemetry.example.com
+```
+
+```yaml
+- uses: actions/checkout@<sha>
+- uses: buildcage/isolated-run@<sha>
+  with:
+    config_file: ci/buildcage.yml
+    run: npm ci
+```
+
+- Each key is an input name and each value is written as it would be under `with:`. A key that is
+  not an input, `writable` (use `write_through`), a list or a nested mapping fails the step.
+- An input the workflow sets wins over the file. The rule inputs and `write_through` are the
+  exception: the file's lines are added to the workflow's.
+- The path is relative to `$GITHUB_WORKSPACE` and must stay inside it, through symlinks too. The
+  repository has to be checked out by an earlier step.
+- `config_file` fails the step on `pull_request_target`, and on `workflow_run` triggered by a pull
+  request event: the workspace there can hold the pull request's own code, which could rewrite the
+  file. Set the inputs in the workflow on those events.
 
 ## Outputs
 

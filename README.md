@@ -155,6 +155,9 @@ with defaults and the engines each input applies to, is in
 Use `label` to tell several steps' report sections apart when the action appears more than once in a
 job.
 
+The inputs can also live in a YAML file next to the code they are about, named by `config_file`. See
+[Config file](./docs/reference.md#config-file).
+
 ### Operation modes
 
 `proxy_mode: audit` logs every destination the command reaches and blocks nothing. `restrict`, the
