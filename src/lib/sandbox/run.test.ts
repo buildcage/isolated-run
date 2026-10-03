@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 
-import { CANCEL_GRACE_MS, runIsolated, type RunIsolatedOptions } from "./run.ts";
+import { CANCEL_GRACE_MS, runIsolated, type Exit, type RunIsolatedOptions } from "./run.ts";
 
 // run-isolated.sh is the process under `sudo` here, so what this module can be
 // held to is the argument list it builds, how it reads the child's exit, and
@@ -12,8 +12,8 @@ function recorder() {
   const calls: Call[] = [];
   const copies: [string, string][] = [];
   const signals: NodeJS.Signals[] = [];
-  let exit!: (status: number | null) => void;
-  const exited = new Promise<number | null>((resolve) => {
+  let exit!: (how: Exit) => void;
+  const exited = new Promise<Exit>((resolve) => {
     exit = resolve;
   });
   return {
@@ -68,7 +68,7 @@ afterEach(() => {
 describe("runIsolated", () => {
   it("runs a copy of run-isolated.sh in the bundle dir under non-interactive sudo", async () => {
     const { calls, copies, exit, deps } = recorder();
-    exit(0);
+    exit({ status: 0 });
     await runIsolated(options(), deps);
 
     const [command, args] = calls[0];
@@ -82,7 +82,7 @@ describe("runIsolated", () => {
 
   it("passes every namespace and address the script needs", async () => {
     const { calls, exit, deps } = recorder();
-    exit(0);
+    exit({ status: 0 });
     await runIsolated(options(), deps);
 
     expect(flagsOf(calls)).toStrictEqual({
@@ -99,7 +99,7 @@ describe("runIsolated", () => {
 
   it("hands the environment over on stdin rather than in argv", async () => {
     const { calls, exit, deps } = recorder();
-    exit(0);
+    exit({ status: 0 });
     const envBlob = Buffer.from("SECRET=value\0");
     await runIsolated(options({ envBlob }), deps);
 
@@ -110,27 +110,54 @@ describe("runIsolated", () => {
 
   it("returns the isolated command's own exit code rather than throwing", async () => {
     const { exit, deps } = recorder();
-    exit(42);
+    exit({ status: 42 });
     await expect(runIsolated(options(), deps)).resolves.toBe(42);
   });
 
   it("returns 0 when the isolated command succeeds", async () => {
     const { exit, deps } = recorder();
-    exit(0);
+    exit({ status: 0 });
     await expect(runIsolated(options(), deps)).resolves.toBe(0);
   });
 
-  it("falls back to 1 when the child has no status", async () => {
+  it("fails rather than report a status when a signal ended the sandbox", async () => {
     const { exit, deps } = recorder();
-    exit(null);
-    await expect(runIsolated(options(), deps)).resolves.toBe(1);
+    exit({ signal: "SIGKILL" });
+    await expect(runIsolated(options(), deps)).rejects.toThrow(
+      expect.objectContaining({
+        code: "SANDBOX_TERMINATED",
+        message: expect.stringContaining("SIGKILL"),
+      }),
+    );
+  });
+
+  it("fails rather than report a status when the sandbox never started", async () => {
+    const { exit, deps } = recorder();
+    exit({ error: new Error("spawn sudo ENOENT") });
+    await expect(runIsolated(options(), deps)).rejects.toThrow(
+      expect.objectContaining({
+        code: "SANDBOX_LAUNCH_FAILED",
+        message: expect.stringContaining("spawn sudo ENOENT"),
+      }),
+    );
+  });
+
+  it("stops listening for a cancel once the sandbox has failed", async () => {
+    vi.useFakeTimers();
+    const { signals, exit, deps } = recorder();
+    const cancel = new AbortController();
+    exit({ signal: "SIGKILL" });
+    await expect(runIsolated(options({ cancel: cancel.signal }), deps)).rejects.toThrow();
+    cancel.abort();
+
+    expect(signals).toStrictEqual([]);
   });
 
   it("sends nothing when the step is not cancelled", async () => {
     const { signals, exit, deps } = recorder();
     const cancel = new AbortController();
     const run = runIsolated(options({ cancel: cancel.signal }), deps);
-    exit(0);
+    exit({ status: 0 });
     await run;
     cancel.abort();
 
@@ -150,7 +177,7 @@ describe("runIsolated", () => {
     vi.advanceTimersByTime(1);
     expect(signals).toStrictEqual(["SIGTERM", "SIGTERM"]);
 
-    exit(137);
+    exit({ status: 137 });
     await expect(run).resolves.toBe(137);
   });
 
@@ -161,7 +188,7 @@ describe("runIsolated", () => {
     const run = runIsolated(options({ cancel: cancel.signal }), deps);
 
     cancel.abort();
-    exit(143);
+    exit({ status: 143 });
     await expect(run).resolves.toBe(143);
     vi.advanceTimersByTime(CANCEL_GRACE_MS);
 
@@ -175,7 +202,7 @@ describe("runIsolated", () => {
     const run = runIsolated(options({ cancel: cancel.signal }), deps);
 
     expect(signals).toStrictEqual(["SIGTERM"]);
-    exit(143);
+    exit({ status: 143 });
     await run;
   });
 });

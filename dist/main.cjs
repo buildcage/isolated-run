@@ -25458,9 +25458,9 @@ function defaultSpawn(command, args, input) {
 	});
 	return child.stdin.on("error", () => {}), child.stdin.end(input), {
 		exited: new Promise((resolve) => {
-			child.on("error", () => {
-				child.pid === void 0 && resolve(null);
-			}), child.on("close", (code) => resolve(code));
+			child.on("error", (error) => {
+				child.pid === void 0 && resolve({ error });
+			}), child.on("close", (code, signal) => resolve(code === null ? { signal } : { status: code }));
 		}),
 		kill: (signal) => child.kill(signal)
 	};
@@ -25495,11 +25495,14 @@ async function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netns
 		child.kill("SIGTERM"), escalation = setTimeout(() => child.kill("SIGTERM"), 5e3);
 	};
 	cancel?.aborted ? stop() : cancel?.addEventListener("abort", stop, { once: !0 });
+	let exit;
 	try {
-		return await child.exited ?? 1;
+		exit = await child.exited;
 	} finally {
 		clearTimeout(escalation), cancel?.removeEventListener("abort", stop);
 	}
+	if ("status" in exit) return exit.status;
+	throw "signal" in exit ? new SandboxError(`The sandbox was ended by ${exit.signal}, so the command's exit status is unknown.`, "SANDBOX_TERMINATED") : new SandboxError(`Failed to start the sandbox: ${errorMessage(exit.error)}`, "SANDBOX_LAUNCH_FAILED");
 }
 //#endregion
 //#region src/lib/sandbox/runc-bootstrap.ts

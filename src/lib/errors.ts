@@ -36,6 +36,8 @@ import { ActionError } from "#core/lib/errors.ts";
  *                                     carries a copy of the proxy CA, under fail_on_ca_residue: true
  *   NSS_DATABASE_WRITE_BACK_FAILED    inspect engine only: what the command wrote to the runner's NSS database
  *                                     could not be written back
+ *   SANDBOX_TERMINATED                a signal ended run-isolated.sh, so the command's exit status is unknown
+ *   SANDBOX_LAUNCH_FAILED             `sudo run-isolated.sh` could not be started at all
  */
 export type SandboxErrorCode =
   | "MISSING_RUN"
@@ -63,6 +65,8 @@ export type SandboxErrorCode =
   | "SCRATCH_DIR_UNSAFE"
   | "HOST_COMMAND_UNPINNABLE"
   | "NSS_DATABASE_CA_COPIED"
-  | "NSS_DATABASE_WRITE_BACK_FAILED";
+  | "NSS_DATABASE_WRITE_BACK_FAILED"
+  | "SANDBOX_TERMINATED"
+  | "SANDBOX_LAUNCH_FAILED";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}

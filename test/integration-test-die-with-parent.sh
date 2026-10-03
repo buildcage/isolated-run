@@ -82,4 +82,13 @@ else
   pass "entire sandbox process tree died with run-isolated.sh"
 fi
 
+wait "$NODE_PID"
+CODE=$?
+if [ "$CODE" != "0" ] && grep -q "The sandbox was ended by SIGKILL" "$WORKDIR/out.log"; then
+  pass "the step fails, saying the sandbox was killed (exit $CODE)"
+else
+  fail "the step did not report the sandbox being killed (exit $CODE)"
+  cat "$WORKDIR/out.log"
+fi
+
 assert_results
