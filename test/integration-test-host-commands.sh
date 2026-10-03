@@ -4,6 +4,10 @@
 # are read-only inside the sandbox and cannot be renamed away, while a
 # write_through entry inside the config directory stays writable. See
 # sandbox/host-commands.ts. The stand-in only leaves a marker file.
+#
+# A second sandbox puts the config directory inside a workspace nested in
+# $HOME, as on a hosted runner, where the directories between the workspace
+# and $HOME are writable through $HOME and must not be renamable either.
 set -uo pipefail
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
@@ -17,8 +21,11 @@ MARKER="$WORKDIR/standin-docker-ran"
 DOCKER_CONFIG_DIR="$HOME/.docker"
 NESTED_WRITABLE="$DOCKER_CONFIG_DIR/buildcage-test-$$"
 
+NESTED_BASE="$HOME/.buildcage-test-ws-$$"
+NESTED_WORKSPACE="$NESTED_BASE/repo/repo"
+
 cleanup() {
-  rm -rf "$WORKDIR" "$STANDIN_DIR" "$NESTED_WRITABLE"
+  rm -rf "$WORKDIR" "$STANDIN_DIR" "$NESTED_WRITABLE" "$NESTED_BASE" "$NESTED_BASE.moved"
   rm -f "$DOCKER_CONFIG_DIR/.buildcage-probe" "$ACTION_ROOT/.buildcage-probe"
 }
 trap cleanup EXIT
@@ -88,10 +95,33 @@ exit \$rc
   node dist/main.cjs
 CODE=$?
 
+mkdir -p "$NESTED_WORKSPACE/.docker-config"
+GITHUB_WORKSPACE="$NESTED_WORKSPACE" \
+GITHUB_STATE="$WORKDIR/state.env" \
+GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
+DOCKER_CONFIG="$NESTED_WORKSPACE/.docker-config" \
+BUILDCAGE_BUILD_TEST_HOOKS=1 \
+BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
+INPUT_RUN="rc=0
+for dir in '$NESTED_BASE/repo' '$NESTED_BASE'; do
+  if mv \"\$dir\" \"\$dir.moved\" 2>/dev/null; then
+    echo \"UNEXPECTED: \$dir, above the workspace, could be renamed\"
+    mv \"\$dir.moved\" \"\$dir\" 2>/dev/null || true
+    rc=1
+  else
+    echo \"OK: \$dir, above the workspace, cannot be renamed\"
+  fi
+done
+exit \$rc
+" \
+  node dist/main.cjs
+NESTED_CODE=$?
+
 echo ""
 echo "=== Sandbox Host Command Assertions ==="
 echo ""
 check_status "the step ran with the stand-in docker first on PATH" "$CODE" 0
+check_status "nothing between a nested workspace and \$HOME could be renamed" "$NESTED_CODE" 0
 if [ -e "$MARKER" ]; then
   fail "the stand-in docker under \$HOME was run in place of the real one"
 else
