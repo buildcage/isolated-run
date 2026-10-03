@@ -61,6 +61,11 @@
       "description": "@vitest/coverage-v8 must equal the vitest that vite-plus bundles, which Renovate cannot see, so pin it by hand when upgrading vite-plus instead of letting Renovate bump it.",
       "matchPackageNames": ["@vitest/coverage-v8"],
       "enabled": false
+    },
+    {
+      "description": "CoreDNS still publishes its 2016-2017 tags v001 to v011, which Renovate ranks as majors 1 to 11, so only x.y.z releases are candidates.",
+      "matchPackageNames": ["coredns/coredns"],
+      "allowedVersions": "/^v?\\d+\\.\\d+\\.\\d+$/"
     }
   ]
 }
