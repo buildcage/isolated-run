@@ -25034,7 +25034,7 @@ function sandboxReadonlyFileCommands(writeThroughPaths, env, realpath = realpath
 function renameGuardDirs(readonlyDirs, persisting) {
 	let guards = new Set();
 	for (let dir of readonlyDirs) {
-		let root = persisting.filter((p) => p !== "/" && isAtOrUnder(dir, p)).sort((a, b) => b.length - a.length)[0];
+		let root = persisting.filter((p) => p !== dir && isAtOrUnder(dir, p)).sort((a, b) => a.length - b.length)[0];
 		if (root) for (let p = (0, node_path.dirname)(dir); p !== root && isAtOrUnder(p, root); p = (0, node_path.dirname)(p)) guards.add(p);
 	}
 	return [...guards].sort((a, b) => a.length - b.length || a.localeCompare(b));
