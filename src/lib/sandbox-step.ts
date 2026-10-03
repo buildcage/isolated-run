@@ -13,6 +13,7 @@ import * as core from "@actions/core";
 
 import { isKnownBlockedUrlRule } from "#core/lib/acl/wildcard-rules.ts";
 import { annotate, createAnnotation } from "#core/lib/actions/annotation.ts";
+import { applyConfigFile } from "#core/lib/actions/config-file.ts";
 import {
   checkKnownBlockedUrlRuleSupport,
   checkUrlAndTlsRuleSupport,
@@ -32,6 +33,7 @@ import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
+  CONFIG_FILE_INPUTS,
   readProxyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
@@ -39,6 +41,7 @@ import {
   readRunCommand,
 } from "./inputs.ts";
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
+import { saveWriteThroughForPost } from "./post-write-through.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
 import {
@@ -69,6 +72,7 @@ const DEFAULT_ACTION_REF = "v2";
  * of those is the value that reached the next step, not the call.
  */
 export interface SandboxStepDeps {
+  applyConfigFile: typeof applyConfigFile;
   readRunCommand: typeof readRunCommand;
   readProxyInputs: typeof readProxyInputs;
   readFilesystemInputs: typeof readFilesystemInputs;
@@ -76,6 +80,7 @@ export interface SandboxStepDeps {
   readFailOnCaResidue: typeof readFailOnCaResidue;
   readFailOnBlocked: typeof readFailOnBlocked;
   readTrafficArtifactInputs: typeof readTrafficArtifactInputs;
+  saveWriteThroughForPost: typeof saveWriteThroughForPost;
   validateFilesystemInputs: typeof validateFilesystemInputs;
   checkPasswordlessSudo: typeof checkPasswordlessSudo;
   checkOverlayfsSupport: typeof checkOverlayfsSupport;
@@ -107,6 +112,7 @@ export interface SandboxStepDeps {
 }
 
 const realDeps: SandboxStepDeps = {
+  applyConfigFile,
   readRunCommand,
   readProxyInputs,
   readFilesystemInputs,
@@ -114,6 +120,7 @@ const realDeps: SandboxStepDeps = {
   readFailOnCaResidue,
   readFailOnBlocked,
   readTrafficArtifactInputs,
+  saveWriteThroughForPost,
   validateFilesystemInputs,
   checkPasswordlessSudo,
   checkOverlayfsSupport,
@@ -185,6 +192,7 @@ export async function runSandboxStep(
   overrides: Partial<SandboxStepDeps> = {},
 ): Promise<number> {
   const {
+    applyConfigFile,
     readRunCommand,
     readProxyInputs,
     readFilesystemInputs,
@@ -192,6 +200,7 @@ export async function runSandboxStep(
     readFailOnCaResidue,
     readFailOnBlocked,
     readTrafficArtifactInputs,
+    saveWriteThroughForPost,
     validateFilesystemInputs,
     checkPasswordlessSudo,
     checkOverlayfsSupport,
@@ -225,6 +234,10 @@ export async function runSandboxStep(
   const reportActionRef = env.GITHUB_ACTION_REF || DEFAULT_ACTION_REF;
   const actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
 
+  // Before any input is read: it rewrites what they all read.
+  const configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
+  for (const line of configFile?.summary ?? []) log(line);
+
   const runInput = readRunCommand();
 
   const { proxyEngine, proxyMode } = readProxyInputs();
@@ -233,6 +246,8 @@ export async function runSandboxStep(
   // `notice`, not `annotation`: readFilesystemInputs reads a renamed input (see
   // SandboxStepDeps).
   const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
+  // Before the command runs, for the post step's pinning; see post-write-through.ts.
+  if (configFile) saveWriteThroughForPost(env, writeThroughInput);
   // Needed only later, but read here so a typo fails before any setup.
   const failOnCaResidue = readFailOnCaResidue();
   const failOnBlocked = readFailOnBlocked();

@@ -14,6 +14,7 @@
  */
 import * as core from "@actions/core";
 
+import type { ConfigFileInputs } from "#core/lib/actions/config-file.ts";
 import {
   readBooleanInput,
   resolveProxyEngine,
@@ -24,6 +25,32 @@ import {
 
 import { SandboxError } from "./errors.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
+
+const LIST_INPUTS = [
+  "allowed_https_rules",
+  "allowed_http_rules",
+  "allowed_ip_rules",
+  "allowed_url_rules",
+  "allowed_tls_rules",
+  "known_blocked_rules",
+  "write_through",
+];
+
+/** Every input but `run`, the step itself, and the deprecated `writable`. */
+export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
+  known: [
+    "proxy_mode",
+    "proxy_engine",
+    ...LIST_INPUTS,
+    "upload_traffic_artifact",
+    "traffic_artifact_retention_days",
+    "fail_on_blocked",
+    "fail_on_ca_residue",
+    "filesystem_mode",
+    "label",
+  ],
+  lists: LIST_INPUTS,
+};
 
 /** Narrowed to what this module needs, so a test can pass a plain lookup. */
 export type GetInput = (name: string, options?: { trimWhitespace?: boolean }) => string;

@@ -236,20 +236,18 @@ function resolveFilesystemMode(input) {
 	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem_mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
 	return trimmed;
 }
-//#endregion
-//#region src/lib/inputs.ts
 function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice) {
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	if (writeThrough.trim() && writable.trim()) throw new SandboxError("write_through: and writable: are the same input under two names. Set only write_through:.", "FILESYSTEM_INPUT_CONFLICT");
 	return !writeThrough.trim() && writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writable) : writeThrough;
 }
-function readFilesystemInputs(notice, getInput$1 = getInput) {
+function readFilesystemInputs(notice, getInput$4 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$4("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput({
-			writeThrough: getInput$1("write_through"),
-			writable: getInput$1("writable"),
-			allowWrite: getInput$1("allow_write")
+			writeThrough: getInput$4("write_through"),
+			writable: getInput$4("writable"),
+			allowWrite: getInput$4("allow_write")
 		}, notice)
 	};
 }
@@ -671,6 +669,25 @@ function planPostCleanup(state, env, annotation, { readOwner = readContainerOwne
 	return reclaimed && releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning }), targets;
 }
 //#endregion
+//#region src/lib/post-write-through.ts
+function postWriteThroughPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
+	let owner = ownerToken(env);
+	if (!owner) return;
+	let id = (0, node_crypto.createHash)("sha256").update(owner).digest("hex").slice(0, 16);
+	return (0, node_path.join)(scratchBase, `write-through-${id}`);
+}
+function takeWriteThroughForPost(env, scratchBase = SANDBOX_SCRATCH_BASE) {
+	let path = postWriteThroughPath(env, scratchBase);
+	if (path) try {
+		return (0, node_fs.readFileSync)(path, "utf8");
+	} catch (e) {
+		if (e.code === "ENOENT") return;
+		throw e;
+	} finally {
+		(0, node_fs.rmSync)(path, { force: !0 });
+	}
+}
+//#endregion
 //#region src/lib/sandbox/paths.ts
 function isAtOrUnder(path, ancestor) {
 	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
@@ -820,7 +837,8 @@ async function stopProxyContainer({ containerName, projectName }) {
 	});
 }
 function main() {
-	pinHostCommands(pinningPaths(() => readFilesystemInputs(() => {}).writeThroughInput, process.env), process.env);
+	let savedWriteThrough = takeWriteThroughForPost(process.env);
+	pinHostCommands(pinningPaths(() => savedWriteThrough ?? readFilesystemInputs(() => {}).writeThroughInput, process.env), process.env);
 	let targets = planPostCleanup({
 		containerName: getState("container_name"),
 		ephemeralRoots: getState("ephemeral_overlay_roots")
