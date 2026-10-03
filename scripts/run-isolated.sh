@@ -227,11 +227,33 @@ set +e
 # the orphan is still fully sandboxed (see docs/security.md), and not
 # addressed here.
 #
-# bash runs a trap only once its foreground child returns, so a signal here
-# waits for the command either way; `runc run` forwards any it receives to
-# the container itself. Kept from exiting, so the command's own status wins.
-trap : INT TERM
-setpriv --pdeathsig=KILL -- "$RUNC_PATH" run --bundle "$BUNDLE_DIR" "$CONTAINER_ID"
+# A signal from here on means the step was cancelled (see sandbox/run.ts):
+# the first goes on to `runc run`, which forwards it to the container, and
+# any later one kills it. Either way the command's own status wins.
+STOPPING=0
+stop_sandbox() {
+  if [ "$STOPPING" = "0" ]; then
+    STOPPING=1
+    kill -TERM "$RUNC_PID" 2>/dev/null
+  else
+    # Through runc, so `runc run` exits with the container's status rather
+    # than being killed itself.
+    "$RUNC_PATH" kill "$CONTAINER_ID" KILL 2>/dev/null || kill -KILL "$RUNC_PID" 2>/dev/null
+  fi
+}
+# In the background so the trap runs as soon as a signal arrives: bash defers
+# it until a foreground child returns. An asynchronous command starts with
+# SIGINT and SIGQUIT ignored and stdin on /dev/null, which the command would
+# inherit, hence the reset and the explicit stdin.
+( trap - INT QUIT; exec setpriv --pdeathsig=KILL -- "$RUNC_PATH" run --bundle "$BUNDLE_DIR" "$CONTAINER_ID" ) <&0 &
+RUNC_PID=$!
+# A signal before this still exits through cleanup, whose `runc delete -f`
+# stops the container.
+trap stop_sandbox INT TERM
+# wait returns early when a trapped signal arrives; the last one returns the
+# status bash kept.
+while kill -0 "$RUNC_PID" 2>/dev/null; do wait "$RUNC_PID"; done
+wait "$RUNC_PID"
 CODE=$?
 set -e
 

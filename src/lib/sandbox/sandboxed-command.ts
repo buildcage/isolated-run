@@ -135,6 +135,8 @@ export interface RunSandboxedCommandOptions {
    *  rather than chosen here: which emitter those land on is the caller's
    *  decision, not the sandbox's. */
   warn: Warn;
+  /** Aborted when the step is cancelled; see runIsolated. */
+  cancel?: AbortSignal;
 }
 
 export type AssembleBundleOptions = Omit<RunSandboxedCommandOptions, "proxyNetns">;
@@ -462,18 +464,18 @@ function finishNssDb(
 /**
  * Extracts runc/gen-seccomp-profile from the proxy container, builds the
  * OCI bundle, and runs the user's command inside it via run-isolated.sh.
- * Returns the isolated command's exit code.
+ * Resolves to the isolated command's exit code.
  */
-export function runSandboxedCommand(
+export async function runSandboxedCommand(
   options: RunSandboxedCommandOptions,
   overrides: Partial<RunSandboxedCommandDeps> = {},
-): number {
-  const { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn } = options;
+): Promise<number> {
+  const { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options;
   const deps = { ...realDeps, ...overrides };
   const { withScratchDir, writeOciConfig, resolveSandboxEnv, buildEnvBlob, runIsolated } = deps;
 
   return withScratchDir(
-    (dir) => {
+    async (dir) => {
       const { config, runcPath, caTrust, netnsName, rootfsBindDir } = assembleBundle(
         dir,
         options,
@@ -482,7 +484,7 @@ export function runSandboxedCommand(
       let exitCode: number;
       try {
         writeOciConfig(config, dir);
-        exitCode = runIsolated({
+        exitCode = await runIsolated({
           envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
           runcPath,
           proxyNetns,
@@ -492,6 +494,7 @@ export function runSandboxedCommand(
           rootfsBindDir,
           gateway: PROXY_ADDRESS,
           targetIp: SANDBOX_IP,
+          cancel,
         });
       } catch (e) {
         // The command did not run to the end, so only the directories are removed.

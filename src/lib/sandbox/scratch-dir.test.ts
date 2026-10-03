@@ -139,46 +139,46 @@ describe("withScratchDir", () => {
     vi.restoreAllMocks();
   });
 
-  it("removes the directory after the callback returns", () => {
+  it("removes the directory after the callback returns", async () => {
     let capturedDir: string;
-    withScratchDir((dir) => {
+    await withScratchDir((dir) => {
       capturedDir = dir;
       writeRunScript("echo hi", dir);
     });
     expect(() => readFileSync(join(capturedDir, "run-script.sh"))).toThrow();
   });
 
-  it("removes the directory even if the callback throws", () => {
+  it("removes the directory even if the callback throws", async () => {
     let capturedDir: string;
-    expect(() => {
+    await expect(
       withScratchDir((dir) => {
         capturedDir = dir;
         throw new Error("boom");
-      });
-    }).toThrow();
+      }),
+    ).rejects.toThrow("boom");
     expect(() => readFileSync(join(capturedDir, "run-script.sh"))).toThrow();
   });
 
-  it("logs a discard line for ephemeralRoots on the way out, once", () => {
+  it("logs a discard line for ephemeralRoots on the way out, once", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    withScratchDir(() => {}, { ephemeralRoots: ["/home/runner", "/tmp"] });
+    await withScratchDir(() => {}, { ephemeralRoots: ["/home/runner", "/tmp"] });
     const discardCalls = log.mock.calls.filter((args) =>
       String(args[0]).startsWith("Discarded ephemeral writes under"),
     );
     expect(discardCalls).toStrictEqual([["Discarded ephemeral writes under /home/runner, /tmp"]]);
   });
 
-  it("logs nothing for a plain persistent-mode run (no ephemeralRoots)", () => {
+  it("logs nothing for a plain persistent-mode run (no ephemeralRoots)", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    withScratchDir(() => {});
+    await withScratchDir(() => {});
     expect(log.mock.calls.some((args) => String(args[0]).startsWith("Discarded"))).toBe(false);
   });
 });
 
 describe("cleanupScratchDir", () => {
-  it("does not log when ephemeralRoots is an empty array", () => {
+  it("does not log when ephemeralRoots is an empty array", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    withScratchDir(() => {}, { ephemeralRoots: [] });
+    await withScratchDir(() => {}, { ephemeralRoots: [] });
     expect(log.mock.calls.some((args) => String(args[0]).startsWith("Discarded"))).toBe(false);
     log.mockRestore();
   });
@@ -399,12 +399,12 @@ describe("ensureOwnScratchBase: mkdir failures other than EEXIST", () => {
 });
 
 describe("withScratchDir: deterministic naming", () => {
-  it("derives the dir from the container name and removes it on the way out", () => {
+  it("derives the dir from the container name and removes it on the way out", async () => {
     const containerName = "buildcage-proxy-abcd1234";
     const expected = scratchDirFor(containerName);
     let captured: string | undefined;
 
-    withScratchDir(
+    await withScratchDir(
       (dir) => {
         captured = dir;
         writeFileSync(join(dir, "marker"), "x");

@@ -283,10 +283,10 @@ export interface WithScratchDirOptions extends CleanupScratchDirOptions {
  * stale-remnant clear below (that dir, if any, is left over from a previous,
  * already-reported run).
  */
-export function withScratchDir<T>(
-  fn: (dir: string) => T,
+export async function withScratchDir<T>(
+  fn: (dir: string) => T | Promise<T>,
   { containerName, ephemeralRoots, warn }: WithScratchDirOptions = {},
-): T {
+): Promise<T> {
   let dir: string;
   ensureOwnScratchBase();
   if (containerName) {
@@ -298,7 +298,7 @@ export function withScratchDir<T>(
     dir = mkdtempSync(join(SANDBOX_SCRATCH_BASE, "sandbox-"));
   }
   try {
-    return fn(dir);
+    return await fn(dir);
   } finally {
     cleanupScratchDir(dir, { ephemeralRoots, warn });
   }

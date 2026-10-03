@@ -1,22 +1,30 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 
-import { runIsolated, type ExecFileOptions, type RunIsolatedOptions } from "./run.ts";
+import { CANCEL_GRACE_MS, runIsolated, type RunIsolatedOptions } from "./run.ts";
 
 // run-isolated.sh is the process under `sudo` here, so what this module can be
-// held to is the argument list it builds and how it reads the child's exit.
-type Call = [string, string[], ExecFileOptions];
+// held to is the argument list it builds, how it reads the child's exit, and
+// what it sends the child on a cancel.
+type Call = [string, string[], Buffer];
 
-/** Records what was asked to run and copied, and answers as execFileSync would. */
-function recorder(answer: () => void = () => {}) {
+/** Records what was asked to run, copied and sent, and exits as told to. */
+function recorder() {
   const calls: Call[] = [];
   const copies: [string, string][] = [];
+  const signals: NodeJS.Signals[] = [];
+  let exit!: (status: number | null) => void;
+  const exited = new Promise<number | null>((resolve) => {
+    exit = resolve;
+  });
   return {
     calls,
     copies,
+    signals,
+    exit,
     deps: {
-      execFile: (command: string, args: string[], options: ExecFileOptions) => {
-        calls.push([command, args, options]);
-        answer();
+      spawn: (command: string, args: string[], input: Buffer) => {
+        calls.push([command, args, input]);
+        return { exited, kill: (signal: NodeJS.Signals) => void signals.push(signal) };
       },
       copyScript: (from: string, to: string) => {
         copies.push([from, to]);
@@ -53,15 +61,15 @@ function flagsOf(calls: Call[]): Record<string, string> {
   return flags;
 }
 
-/** Builds the ExecException shape execFileSync throws on a non-zero exit. */
-function execFailure(status: number | null, extra: Record<string, unknown> = {}) {
-  return Object.assign(new Error("Command failed"), { status, ...extra });
-}
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("runIsolated", () => {
-  it("runs a copy of run-isolated.sh in the bundle dir under non-interactive sudo", () => {
-    const { calls, copies, deps } = recorder();
-    runIsolated(options(), deps);
+  it("runs a copy of run-isolated.sh in the bundle dir under non-interactive sudo", async () => {
+    const { calls, copies, exit, deps } = recorder();
+    exit(0);
+    await runIsolated(options(), deps);
 
     const [command, args] = calls[0];
     expect(command).toBe("sudo");
@@ -72,9 +80,10 @@ describe("runIsolated", () => {
     expect(copies[0][1]).toBe(args[2]);
   });
 
-  it("passes every namespace and address the script needs", () => {
-    const { calls, deps } = recorder();
-    runIsolated(options(), deps);
+  it("passes every namespace and address the script needs", async () => {
+    const { calls, exit, deps } = recorder();
+    exit(0);
+    await runIsolated(options(), deps);
 
     expect(flagsOf(calls)).toStrictEqual({
       "--proxy-netns": "buildcage-proxy-netns",
@@ -88,47 +97,85 @@ describe("runIsolated", () => {
     });
   });
 
-  it("hands the environment over on stdin rather than in argv", () => {
-    const { calls, deps } = recorder();
+  it("hands the environment over on stdin rather than in argv", async () => {
+    const { calls, exit, deps } = recorder();
+    exit(0);
     const envBlob = Buffer.from("SECRET=value\0");
-    runIsolated(options({ envBlob }), deps);
+    await runIsolated(options({ envBlob }), deps);
 
-    const [, args, opts] = calls[0];
-    expect(opts.input).toBe(envBlob);
-    expect(opts.stdio).toStrictEqual(["pipe", "inherit", "inherit"]);
+    const [, args, input] = calls[0];
+    expect(input).toBe(envBlob);
     expect(args.join(" ")).not.toContain("SECRET");
   });
 
-  it("returns 0 when the isolated command succeeds", () => {
-    const { deps } = recorder();
-    expect(runIsolated(options(), deps)).toBe(0);
+  it("returns the isolated command's own exit code rather than throwing", async () => {
+    const { exit, deps } = recorder();
+    exit(42);
+    await expect(runIsolated(options(), deps)).resolves.toBe(42);
   });
 
-  it("returns the isolated command's own exit code rather than throwing", () => {
-    const { deps } = recorder(() => {
-      throw execFailure(42);
-    });
-    expect(runIsolated(options(), deps)).toBe(42);
+  it("returns 0 when the isolated command succeeds", async () => {
+    const { exit, deps } = recorder();
+    exit(0);
+    await expect(runIsolated(options(), deps)).resolves.toBe(0);
   });
 
-  it("still reports the exit code when an EPIPE rides along with it", () => {
-    const { deps } = recorder(() => {
-      throw execFailure(3, { code: "EPIPE", errno: -32 });
-    });
-    expect(runIsolated(options(), deps)).toBe(3);
+  it("falls back to 1 when the child has no status", async () => {
+    const { exit, deps } = recorder();
+    exit(null);
+    await expect(runIsolated(options(), deps)).resolves.toBe(1);
   });
 
-  it("falls back to 1 when the child was killed by a signal and has no status", () => {
-    const { deps } = recorder(() => {
-      throw execFailure(null, { signal: "SIGKILL" });
-    });
-    expect(runIsolated(options(), deps)).toBe(1);
+  it("sends nothing when the step is not cancelled", async () => {
+    const { signals, exit, deps } = recorder();
+    const cancel = new AbortController();
+    const run = runIsolated(options({ cancel: cancel.signal }), deps);
+    exit(0);
+    await run;
+    cancel.abort();
+
+    expect(signals).toStrictEqual([]);
   });
 
-  it("falls back to 1 when the failure carries no status at all", () => {
-    const { deps } = recorder(() => {
-      throw new Error("spawn sudo ENOENT");
-    });
-    expect(runIsolated(options(), deps)).toBe(1);
+  it("sends SIGTERM on a cancel, and again once the grace period runs out", async () => {
+    vi.useFakeTimers();
+    const { signals, exit, deps } = recorder();
+    const cancel = new AbortController();
+    const run = runIsolated(options({ cancel: cancel.signal }), deps);
+
+    cancel.abort();
+    expect(signals).toStrictEqual(["SIGTERM"]);
+    vi.advanceTimersByTime(CANCEL_GRACE_MS - 1);
+    expect(signals).toStrictEqual(["SIGTERM"]);
+    vi.advanceTimersByTime(1);
+    expect(signals).toStrictEqual(["SIGTERM", "SIGTERM"]);
+
+    exit(137);
+    await expect(run).resolves.toBe(137);
+  });
+
+  it("sends no second signal to a child that exited within the grace period", async () => {
+    vi.useFakeTimers();
+    const { signals, exit, deps } = recorder();
+    const cancel = new AbortController();
+    const run = runIsolated(options({ cancel: cancel.signal }), deps);
+
+    cancel.abort();
+    exit(143);
+    await expect(run).resolves.toBe(143);
+    vi.advanceTimersByTime(CANCEL_GRACE_MS);
+
+    expect(signals).toStrictEqual(["SIGTERM"]);
+  });
+
+  it("stops the sandbox straight away when the step was cancelled before it started", async () => {
+    const { signals, exit, deps } = recorder();
+    const cancel = new AbortController();
+    cancel.abort();
+    const run = runIsolated(options({ cancel: cancel.signal }), deps);
+
+    expect(signals).toStrictEqual(["SIGTERM"]);
+    exit(143);
+    await run;
   });
 });

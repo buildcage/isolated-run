@@ -262,11 +262,14 @@ bash reserves (`UID`, `SECONDS`) arrives as set, as it does in an unwrapped `run
 ### When the step ends
 
 An exit trap tears down the container, the rootfs bind-mount, the veth and the network namespace,
-and force-detaches anything still mounted under the run's scratch directory before deleting it. If
-the action is killed first, a fallback step reads the container's identity back from job state and
-does the same. The command's own life is tied to `run-isolated.sh`'s by a two-hop
-`setpriv --pdeathsig=KILL` chain, so an out-of-memory kill on the script takes the whole sandboxed
-process tree with it rather than leaving orphans.
+and force-detaches anything still mounted under the run's scratch directory before deleting it. A
+cancelled step goes the same way: the action catches the runner's signal, sends the command
+`SIGTERM`, kills it if it is still running 5 seconds later, and then writes the traffic report and
+stops the proxy as usual. If the action is killed first, a fallback step reads the container's
+identity back from job state, stops the proxy and deletes the scratch directory. The command's own
+life is tied to `run-isolated.sh`'s by a two-hop `setpriv --pdeathsig=KILL` chain, so an
+out-of-memory kill on the script takes the whole sandboxed process tree with it rather than leaving
+orphans.
 
 ## The network boundary
 

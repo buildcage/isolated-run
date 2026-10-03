@@ -23416,14 +23416,14 @@ function ensureOwnScratchBase(base = SANDBOX_SCRATCH_BASE, { mkdir = defaultMkdi
 	let st = lstat(base), uid = process.getuid();
 	if (!st.isDirectory() || st.uid !== uid || st.mode & 63) throw new SandboxError(`${base} exists but is not a private directory owned by uid ${uid} (mode ${(st.mode & 4095).toString(8)}, uid ${st.uid}). Another user may have created it. Remove it and re-run.`, "SCRATCH_BASE_UNSAFE");
 }
-function withScratchDir(fn, { containerName, ephemeralRoots, warn } = {}) {
+async function withScratchDir(fn, { containerName, ephemeralRoots, warn } = {}) {
 	let dir;
 	ensureOwnScratchBase(), containerName ? (dir = scratchDirFor(containerName), cleanupScratchDir(dir, { warn }), (0, node_fs.mkdirSync)(dir, {
 		recursive: !0,
 		mode: 448
 	})) : dir = (0, node_fs.mkdtempSync)((0, node_path.join)(SANDBOX_SCRATCH_BASE, "sandbox-"));
 	try {
-		return fn(dir);
+		return await fn(dir);
 	} finally {
 		cleanupScratchDir(dir, {
 			ephemeralRoots,
@@ -23704,7 +23704,7 @@ function defaultStat$2(path) {
 		mode
 	};
 }
-function defaultExecFile$1(command, args) {
+function defaultExecFile(command, args) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args, {
 		stdio: [
 			"ignore",
@@ -23755,7 +23755,7 @@ function slugify(path) {
 function overlayUpperFor(scratchDir, root) {
 	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
 }
-function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat$2, execFile = defaultExecFile$1, self = {
+function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat$2, execFile = defaultExecFile, self = {
 	uid: process.getuid(),
 	gid: process.getgid()
 } } = {}) {
@@ -25382,19 +25382,29 @@ function writeResolvConf(dns, dir) {
 //#endregion
 //#region src/lib/sandbox/run.ts
 const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
-function defaultExecFile(command, args, options) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		...options,
+function defaultSpawn(command, args, input) {
+	let child = (0, node_child_process.spawn)(hostCommand(command), args, {
+		stdio: [
+			"pipe",
+			"inherit",
+			"inherit"
+		],
 		env: hostCommandEnv(command)
 	});
+	return child.stdin.on("error", () => {}), child.stdin.end(input), {
+		exited: new Promise((resolve) => {
+			child.on("error", () => resolve(null)), child.on("close", (code) => resolve(code));
+		}),
+		kill: (signal) => child.kill(signal)
+	};
 }
 function defaultCopyScript(from, to) {
 	(0, node_fs.copyFileSync)(from, to), (0, node_fs.chmodSync)(to, 320);
 }
-function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, targetIp, envBlob }, { execFile = defaultExecFile, copyScript = defaultCopyScript } = {}) {
+async function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, targetIp, envBlob, cancel }, { spawn = defaultSpawn, copyScript = defaultCopyScript } = {}) {
 	let runIsolatedShPath = (0, node_path.join)(bundleDir, "run-isolated.sh");
 	copyScript((0, node_path.join)(__dirname$1, "..", "scripts", "run-isolated.sh"), runIsolatedShPath);
-	let args = [
+	let child = spawn("sudo", [
 		"-n",
 		"--",
 		runIsolatedShPath,
@@ -25414,19 +25424,14 @@ function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, 
 		gateway,
 		"--target-ip",
 		targetIp
-	];
+	], envBlob), escalation, stop = () => {
+		child.kill("SIGTERM"), escalation = setTimeout(() => child.kill("SIGTERM"), 5e3);
+	};
+	cancel?.aborted ? stop() : cancel?.addEventListener("abort", stop, { once: !0 });
 	try {
-		return execFile("sudo", args, {
-			input: envBlob,
-			stdio: [
-				"pipe",
-				"inherit",
-				"inherit"
-			]
-		}), 0;
-	} catch (e) {
-		let status = e.status;
-		return typeof status == "number" ? status : 1;
+		return await child.exited ?? 1;
+	} finally {
+		clearTimeout(escalation), cancel?.removeEventListener("abort", stop);
 	}
 }
 //#endregion
@@ -25621,15 +25626,15 @@ function finishNssDb(caTrust, options, deps) {
 		release();
 	}
 }
-function runSandboxedCommand(options, overrides = {}) {
-	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn } = options, deps = {
+async function runSandboxedCommand(options, overrides = {}) {
+	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {
 		...realDeps$2,
 		...overrides
 	}, { withScratchDir, writeOciConfig, resolveSandboxEnv, buildEnvBlob, runIsolated } = deps;
-	return withScratchDir((dir) => {
+	return withScratchDir(async (dir) => {
 		let { config, runcPath, caTrust, netnsName, rootfsBindDir } = assembleBundle(dir, options, deps), exitCode;
 		try {
-			writeOciConfig(config, dir), exitCode = runIsolated({
+			writeOciConfig(config, dir), exitCode = await runIsolated({
 				envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
 				runcPath,
 				proxyNetns,
@@ -25638,7 +25643,8 @@ function runSandboxedCommand(options, overrides = {}) {
 				netnsName,
 				rootfsBindDir,
 				gateway: PROXY_ADDRESS,
-				targetIp: "198.19.255.101"
+				targetIp: "198.19.255.101",
+				cancel
 			});
 		} catch (e) {
 			throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e;
@@ -71860,6 +71866,13 @@ function checkPasswordlessSudo({ execFile = runPinnedHostCommand } = {}) {
 //#endregion
 //#region src/lib/sandbox-step.ts
 init_core();
+function onCancel(listener) {
+	let signals = ["SIGINT", "SIGTERM"];
+	for (let signal of signals) process.on(signal, listener);
+	return () => {
+		for (let signal of signals) process.off(signal, listener);
+	};
+}
 const realDeps = {
 	applyConfigFile,
 	readRunCommand,
@@ -71888,6 +71901,7 @@ const realDeps = {
 	stopSandboxProxy,
 	runSandboxedCommand,
 	reportStepTraffic,
+	onCancel,
 	saveState,
 	info,
 	log: console.log,
@@ -71912,7 +71926,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -71980,11 +71994,13 @@ async function runSandboxStep(env, overrides = {}) {
 			annotation
 		}), e;
 	}
-	let exitCode = 1;
+	let cancel = new AbortController(), stopListening = onCancel(() => {
+		cancel.signal.aborted || (info("buildcage: the step was cancelled; stopping the sandbox"), cancel.abort());
+	}), exitCode = 1;
 	try {
 		let proxyNetns = getContainerNetns(containerName);
 		if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
-		exitCode = runSandboxedCommand({
+		exitCode = await runSandboxedCommand({
 			containerName,
 			proxyNetns,
 			runInput,
@@ -71994,7 +72010,8 @@ async function runSandboxStep(env, overrides = {}) {
 			filesystemMode,
 			overlayRoots,
 			failOnCaResidue,
-			warn
+			warn,
+			cancel: cancel.signal
 		});
 	} finally {
 		await reportStepTraffic({
@@ -72020,7 +72037,7 @@ async function runSandboxStep(env, overrides = {}) {
 			projectName,
 			composeEnv,
 			annotation
-		});
+		}), stopListening();
 	}
 	return exitCode;
 }
