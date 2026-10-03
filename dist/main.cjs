@@ -15766,7 +15766,7 @@ function detectFrontend(spec) {
 			l.push("", ...ipRules.map((r) => `    tcp-request content set-var(txn.pass) int(1) if ${r.id}_dst${r.port ? ` ${r.id}_port` : ""} !dns_routed`), `    tcp-request content set-var(txn.proto) str(tcp) if ${pass}`, ...internalDstAcl("ip_dst_internal", spec, "dst"), `    tcp-request content set-var(txn.reason) str(internal-address) if ${self}`, `    tcp-request content reject if ${self}`, `    tcp-request content accept if ${pass}`);
 		}
 		if (tlsHosts.length > 0) {
-			tlsHosts.some((host) => host.hostMatch === "hostPort") && l.push("    tcp-request content set-var-fmt(txn.sni_port) %[req.ssl_sni]:%[dst_port]"), l.push("", `    acl sni_is_name req.ssl_sni -m reg ${HOSTNAME_CHARSET}`);
+			tlsHosts.some((host) => host.hostMatch === "hostPort") && l.push("    tcp-request content set-var-fmt(txn.sni_port) %[req.ssl_sni]:%[dst_port] if { req.ssl_sni -m found }"), l.push("", `    acl sni_is_name req.ssl_sni -m reg ${HOSTNAME_CHARSET}`);
 			for (let host of tlsHosts) l.push(`    # ${host.raw}`), l.push(host.hostMatch === "hostPort" ? `    acl ${host.id}_sni var(txn.sni_port) -m reg -i ${escapeForHaproxy(host.hostRegex)}` : `    acl ${host.id}_sni req.ssl_sni -m reg -i ${escapeForHaproxy(host.hostRegex)}`), host.port && l.push(`    acl ${host.id}_port dst_port ${host.port}`);
 			l.push("", ...tlsHosts.map((host) => `    tcp-request content set-var(txn.pass) int(1) if ${tlsCond(host)}`), `    tcp-request content set-var(txn.sni) req.ssl_sni,regsub([^A-Za-z0-9._-],_,g) if ${pass}`, `    tcp-request content set-var(txn.proto) str(tls) if ${pass}`, "", `    tcp-request content do-resolve(txn.dst,buildcage,ipv4) req.ssl_sni,lower if ${pass}`, `    tcp-request content set-var(txn.reason) str(dns-failed) if ${pass} !{ var(txn.dst) -m found }`, `    tcp-request content reject if ${pass} !{ var(txn.dst) -m found }`, "    tcp-request content set-dst var(txn.dst) if { var(txn.dst) -m found }", ...internalDstAcl("pass_dst_internal", spec), `    tcp-request content set-var(txn.reason) str(internal-address) if ${pass} pass_dst_internal`, `    tcp-request content reject if ${pass} pass_dst_internal`);
 		}
@@ -16192,7 +16192,7 @@ function generateUniversalHaproxyConfig(options) {
 		"    tcp-request content set-var(txn.reason) str(ip-not-allowed) if !is_dns_routed !is_ip_match",
 		"    tcp-request content reject if !is_dns_routed !is_ip_match",
 		"",
-		"    tcp-request content set-var(txn.sni) req_ssl_sni,regsub(\\.$,) if is_tls",
+		"    tcp-request content set-var(txn.sni) req_ssl_sni if is_tls",
 		"    tcp-request content set-var-fmt(txn.sni_port) %[var(txn.sni)]:%[dst_port] if is_tls",
 		"    tcp-request content set-var(txn.sni_log) var(txn.sni),regsub([^A-Za-z0-9._-],_,g) if is_tls has_sni",
 		"",
@@ -25845,7 +25845,10 @@ function splitHostPort(authority) {
 	};
 }
 function ruleHost(host) {
-	return host.replace(/[A-Z]/g, (c) => c.toLowerCase()).replace(/\.$/, "");
+	return sniHost(host).replace(/\.$/, "");
+}
+function sniHost(sni) {
+	return sni.replace(/[A-Z]/g, (c) => c.toLowerCase());
 }
 //#endregion
 //#region src/core/lib/log/start-marker.ts
@@ -25929,7 +25932,7 @@ function parseProxyLine(line, isAudit) {
 			time: Number(pass[1]) / 1e3,
 			action: actionFor(reason, isAudit),
 			protocol: pass[2],
-			host: sni === "-" ? pass[6] : ruleHost(sni),
+			host: sni === "-" ? pass[6] : sniHost(sni),
 			port: Number(pass[7]),
 			destination: `${pass[6]}:${pass[7]}`
 		};
@@ -26174,8 +26177,8 @@ const DECISION = /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za
 	HTTP: "http",
 	IP: "tcp"
 }, FAILURE_REASONS = new Set(["dns-failed"]);
-function hostOf(address) {
-	return address === "198.19.255.1" ? UNKNOWN_HOST : ruleHost(address);
+function hostOf(address, ruleType) {
+	return address === "198.19.255.1" ? UNKNOWN_HOST : ruleType === "HTTPS" ? sniHost(address) : ruleHost(address);
 }
 async function scanHaproxyLog(lines, isAudit) {
 	let events = [], passedDecision = isAudit ? "AUDIT" : "ALLOWED", startedAt, headIntact, unparsed = 0;
@@ -26185,7 +26188,7 @@ async function scanHaproxyLog(lines, isAudit) {
 			headIntact ??= !1;
 			let [, ms, decision, ruleType, target, reason, bytes] = m;
 			if (decision !== passedDecision && decision !== "BLOCKED") continue;
-			let { host: address, port } = splitHostPort(target), host = hostOf(address), failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), refused = decision === "BLOCKED" && !failed, event = {
+			let { host: address, port } = splitHostPort(target), host = hostOf(address, ruleType), failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), refused = decision === "BLOCKED" && !failed, event = {
 				time: Number(ms) / 1e3,
 				action: failed ? "failed" : refused ? "block" : isAudit ? "audit" : "allow",
 				protocol: PROTOCOL[ruleType] ?? "tcp",
