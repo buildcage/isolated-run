@@ -145,6 +145,8 @@ cleanup() {
   # just because its veth peer's namespace went away.
   nsenter --net="$PROXY_NETNS" -- ip link del buildcage0 >/dev/null 2>&1
   ip netns del "$NETNS_NAME" >/dev/null 2>&1
+  # A pair that failed to move out of this netns is still here, both ends.
+  ip link del "$VETH_T" >/dev/null 2>&1
   # The private mount namespace would drop this bind on exit anyway; explicit
   # for the same reason the rootfs unmount above is.
   umount "/var/run/netns/${PROXY_NETNS_NAME}" >/dev/null 2>&1
