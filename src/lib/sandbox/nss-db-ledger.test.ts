@@ -367,15 +367,24 @@ describe("the lock", () => {
   });
 
   it("is taken over from a holder long gone", () => {
-    holdLock(999_999, 60_000);
+    holdLock(999_999, 10_000);
 
     claim(step("sandbox-a"), { pidAlive: () => false });
 
     expect(Object.keys(ledger().uses)).toStrictEqual(["sandbox-a"]);
   });
 
+  // Its pid may since have gone to another process.
+  it("is taken over when held past any real holder's time, its pid alive or not", () => {
+    holdLock(999_999, 60_000);
+
+    claim(step("sandbox-a"), { pidAlive: () => true });
+
+    expect(Object.keys(ledger().uses)).toStrictEqual(["sandbox-a"]);
+  });
+
   it.each([
-    ["whose holder is still there", 60_000, true],
+    ["whose holder is still there", 59_000, true],
     ["taken only just now", 0, false],
   ])("is waited on, not taken over, when it is one %s", (_label, age, alive) => {
     holdLock(999_999, age);

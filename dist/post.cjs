@@ -561,7 +561,7 @@ function takeOverStaleLock(lock, pidAlive, now) {
 	} catch {
 		return;
 	}
-	age < 2e3 || Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
+	age < 2e3 || age < 6e4 && Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
 }
 function withLock(base, fn, deps) {
 	let release = acquireLock((0, node_path.join)(base, "nssdb-ledger.lock"), deps);

@@ -45,6 +45,11 @@ const LOCK_DELAY_MS = 100;
  *  taken over within it. */
 const STALE_LOCK_MS = 2_000;
 
+/** Past this a lock is taken over even from a live pid, which may be another
+ *  process's after a killed holder's pid was reused. Holders keep it for
+ *  milliseconds. */
+const MAX_LOCK_HOLD_MS = 60_000;
+
 export interface DirId {
   dev: string;
   ino: string;
@@ -216,7 +221,8 @@ function takeOverStaleLock(
   } catch {
     return;
   }
-  if (age < STALE_LOCK_MS || (Number.isInteger(pid) && pid > 0 && pidAlive(pid))) return;
+  if (age < STALE_LOCK_MS) return;
+  if (age < MAX_LOCK_HOLD_MS && Number.isInteger(pid) && pid > 0 && pidAlive(pid)) return;
   rmSync(lock, { force: true });
 }
 
