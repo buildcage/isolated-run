@@ -44,6 +44,7 @@ jobs:
               - '.dockerignore'
             harness: &harness
               - 'rolldown.config.js' # each job builds a test-hook dist
+              - 'scripts/**' # run by that dist, from the checkout
               - 'test/**'
               - 'Makefile'
               - '.github/actions/setup-vp/**'
