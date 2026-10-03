@@ -37,6 +37,7 @@ const mocks = {
   stopSandboxProxy: vi.fn(),
   runSandboxedCommand: vi.fn(),
   reportStepTraffic: vi.fn(),
+  onCancel: vi.fn(),
   saveState: vi.fn(),
   info: vi.fn(),
   log: vi.fn(),
@@ -46,6 +47,9 @@ const mocks = {
 
 // Every step is replaced, so the cast only says what the shape already is.
 const deps = mocks as unknown as SandboxStepDeps;
+
+// What onCancel hands back.
+const stopListening = vi.fn();
 
 const DIGEST = "sha256:" + "a".repeat(64);
 
@@ -90,8 +94,9 @@ beforeEach(() => {
   mocks.getContainerNetns.mockReturnValue("/var/run/docker/netns/abc123");
   mocks.startSandboxProxy.mockResolvedValue(undefined);
   mocks.stopSandboxProxy.mockResolvedValue(undefined);
-  mocks.runSandboxedCommand.mockReturnValue(0);
+  mocks.runSandboxedCommand.mockResolvedValue(0);
   mocks.reportStepTraffic.mockResolvedValue(undefined);
+  mocks.onCancel.mockReturnValue(stopListening);
 });
 
 /** Call order of a step that ran, for comparing two steps against each other. */
@@ -139,7 +144,7 @@ describe("runSandboxStep", () => {
   });
 
   it("returns the isolated command's own exit code", async () => {
-    mocks.runSandboxedCommand.mockReturnValue(42);
+    mocks.runSandboxedCommand.mockResolvedValue(42);
 
     expect(await runSandboxStep(ENV, deps)).toBe(42);
   });
@@ -503,6 +508,13 @@ describe("runSandboxStep", () => {
       expect(mocks.runSandboxedCommand).not.toHaveBeenCalled();
     });
 
+    it("does not catch a cancel while the proxy is still starting", async () => {
+      mocks.startSandboxProxy.mockRejectedValue(new Error("compose up failed"));
+
+      await expect(runSandboxStep(ENV, deps)).rejects.toThrow("compose up failed");
+      expect(mocks.onCancel).not.toHaveBeenCalled();
+    });
+
     it("creates nothing when docker or sudo cannot be pinned", async () => {
       mocks.pinHostCommands.mockImplementation(() => {
         throw new SandboxError("no docker", "HOST_COMMAND_UNPINNABLE");
@@ -511,6 +523,47 @@ describe("runSandboxStep", () => {
       await expect(runSandboxStep(ENV, deps)).rejects.toThrow("no docker");
       expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
       expect(mocks.resolveFilesystemPlan).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("cancellation", () => {
+    /** The listener the step handed onCancel. */
+    function cancelListener(): () => void {
+      return mocks.onCancel.mock.calls[0][0] as () => void;
+    }
+
+    it("listens from after the proxy starts until after it is stopped", async () => {
+      await runSandboxStep(ENV, deps);
+
+      expect(orderOf(mocks.startSandboxProxy)).toBeLessThan(orderOf(mocks.onCancel));
+      expect(orderOf(mocks.onCancel)).toBeLessThan(orderOf(mocks.runSandboxedCommand));
+      expect(orderOf(mocks.stopSandboxProxy)).toBeLessThan(orderOf(stopListening));
+    });
+
+    it("stops listening when the command fails", async () => {
+      mocks.runSandboxedCommand.mockRejectedValue(new Error("runc: exec failed"));
+
+      await expect(runSandboxStep(ENV, deps)).rejects.toThrow("runc: exec failed");
+      expect(stopListening).toHaveBeenCalledTimes(1);
+    });
+
+    it("aborts the sandbox's cancel signal, says so once, and still reports", async () => {
+      let cancel: AbortSignal | undefined;
+      mocks.runSandboxedCommand.mockImplementation(async (options: { cancel: AbortSignal }) => {
+        cancel = options.cancel;
+        expect(cancel.aborted).toBe(false);
+        cancelListener()();
+        cancelListener()();
+        return 143;
+      });
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(143);
+      expect(cancel?.aborted).toBe(true);
+      expect(
+        mocks.info.mock.calls.filter(([message]) => String(message).includes("cancelled")),
+      ).toStrictEqual([["buildcage: the step was cancelled; stopping the sandbox"]]);
+      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+      expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
     });
   });
 });

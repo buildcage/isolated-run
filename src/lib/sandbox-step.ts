@@ -99,6 +99,9 @@ export interface SandboxStepDeps {
   stopSandboxProxy: typeof stopSandboxProxy;
   runSandboxedCommand: typeof runSandboxedCommand;
   reportStepTraffic: typeof reportStepTraffic;
+  /** Calls listener on each signal a cancelled run sends this process, and
+   *  returns what stops listening. */
+  onCancel: (listener: () => void) => () => void;
   saveState: (name: string, value: string) => void;
   info: (message: string) => void;
   log: (message: string) => void;
@@ -110,6 +113,19 @@ export interface SandboxStepDeps {
    *  report still needs to hear about. */
   warn: (message: string) => void;
 }
+
+// Untested by design: process.on, handed the listener the tested caller chose.
+/* v8 ignore start */
+function onCancel(listener: () => void): () => void {
+  // The runner cancels a step with SIGINT to this process alone, then
+  // SIGTERM, then SIGKILL 10 seconds after the first.
+  const signals = ["SIGINT", "SIGTERM"] as const;
+  for (const signal of signals) process.on(signal, listener);
+  return () => {
+    for (const signal of signals) process.off(signal, listener);
+  };
+}
+/* v8 ignore stop */
 
 const realDeps: SandboxStepDeps = {
   applyConfigFile,
@@ -139,6 +155,7 @@ const realDeps: SandboxStepDeps = {
   stopSandboxProxy,
   runSandboxedCommand,
   reportStepTraffic,
+  onCancel,
   saveState: core.saveState,
   info: core.info,
   log: console.log,
@@ -219,6 +236,7 @@ export async function runSandboxStep(
     stopSandboxProxy,
     runSandboxedCommand,
     reportStepTraffic,
+    onCancel,
     saveState,
     info,
     log,
@@ -354,6 +372,15 @@ export async function runSandboxStep(
     throw e;
   }
 
+  // From here on a cancel stops the sandbox instead of this process, so the
+  // report below still goes out and the sandbox does not outlive the step.
+  const cancel = new AbortController();
+  const stopListening = onCancel(() => {
+    if (cancel.signal.aborted) return;
+    info("buildcage: the step was cancelled; stopping the sandbox");
+    cancel.abort();
+  });
+
   // 1 unless the isolated command itself reports otherwise: every way out of
   // the block below that isn't the command's own exit code is a failure.
   let exitCode = 1;
@@ -366,7 +393,7 @@ export async function runSandboxStep(
       );
     }
 
-    exitCode = runSandboxedCommand({
+    exitCode = await runSandboxedCommand({
       containerName,
       proxyNetns,
       runInput,
@@ -377,9 +404,10 @@ export async function runSandboxStep(
       overlayRoots,
       failOnCaResidue,
       warn,
+      cancel: cancel.signal,
     });
   } finally {
-    // Never throws, so the teardown below is always reached.
+    // Neither throws, so the teardown and stopListening are always reached.
     await reportStepTraffic({
       containerName,
       proxyEngine,
@@ -400,6 +428,7 @@ export async function runSandboxStep(
       env,
     });
     await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
+    stopListening();
   }
 
   return exitCode;

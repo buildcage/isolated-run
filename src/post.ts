@@ -33,8 +33,8 @@ async function stopProxyContainer({ containerName, projectName }: PostCleanupTar
 
 // Fallback-only cleanup: main.ts already stops the proxy container in its
 // own finally block on every normal exit path. This only matters if the
-// process was killed outright before reaching that finally (e.g. the
-// runner cancels the step). State saved by main.ts's core.saveState surfaces
+// process was killed outright before reaching that finally (e.g. a cancel
+// while the proxy was still starting). State saved by main.ts's core.saveState surfaces
 // here via core.getState; see
 // https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands#sending-values-to-the-pre-and-post-actions.
 function main(): void {

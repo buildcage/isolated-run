@@ -87,19 +87,19 @@ beforeEach(() => {
   mocks.buildOciConfig.mockReturnValue({ process: {} });
   mocks.resolveSandboxEnv.mockReturnValue({ PATH: "/usr/bin" });
   mocks.buildEnvBlob.mockReturnValue(Buffer.from(""));
-  mocks.runIsolated.mockReturnValue(0);
+  mocks.runIsolated.mockResolvedValue(0);
   mocks.realpath.mockImplementation((p: string) => p);
 });
 
 describe("runSandboxedCommand", () => {
-  it("returns the isolated command's own exit code", () => {
-    mocks.runIsolated.mockReturnValue(42);
+  it("returns the isolated command's own exit code", async () => {
+    mocks.runIsolated.mockResolvedValue(42);
 
-    expect(runSandboxedCommand(options(), deps)).toBe(42);
+    await expect(runSandboxedCommand(options(), deps)).resolves.toBe(42);
   });
 
-  it("writes the bundle before running it, into the scratch dir it was given", () => {
-    runSandboxedCommand(options(), deps);
+  it("writes the bundle before running it, into the scratch dir it was given", async () => {
+    await runSandboxedCommand(options(), deps);
 
     expect(mocks.writeOciConfig).toHaveBeenCalledWith({ process: {} }, SCRATCH);
     expect(mocks.writeOciConfig.mock.invocationCallOrder[0]).toBeLessThan(
@@ -107,8 +107,8 @@ describe("runSandboxedCommand", () => {
     );
   });
 
-  it("wires the sandbox to the proxy's fixed addresses", () => {
-    runSandboxedCommand(options(), deps);
+  it("wires the sandbox to the proxy's fixed addresses", async () => {
+    await runSandboxedCommand(options(), deps);
 
     expect(mocks.runIsolated.mock.calls[0][0]).toMatchObject({
       gateway: "198.19.255.1",
@@ -116,10 +116,17 @@ describe("runSandboxedCommand", () => {
     });
   });
 
+  it("hands the step's cancellation to the sandbox", async () => {
+    const cancel = new AbortController().signal;
+    await runSandboxedCommand(options({ cancel }), deps);
+
+    expect(mocks.runIsolated.mock.calls[0][0].cancel).toBe(cancel);
+  });
+
   // The netns is a different ID namespace from Docker's, but derived from the
   // container name so `ip netns` and `docker ps` stay correlated per step.
-  it("names the sandbox netns after the proxy container", () => {
-    runSandboxedCommand(options(), deps);
+  it("names the sandbox netns after the proxy container", async () => {
+    await runSandboxedCommand(options(), deps);
 
     expect(mocks.runIsolated.mock.calls[0][0]).toMatchObject({
       netnsName: "buildcage-sandbox-deadbeef",
@@ -132,8 +139,8 @@ describe("runSandboxedCommand", () => {
     );
   });
 
-  it("trusts the proxy's CA under the inspect engine", () => {
-    runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
+  it("trusts the proxy's CA under the inspect engine", async () => {
+    await runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
 
     expect(mocks.extractCaCert).toHaveBeenCalledWith(CONTAINER, SCRATCH);
     expect(mocks.buildOciConfig.mock.calls[0][1].caTrust).toStrictEqual({
@@ -154,19 +161,22 @@ describe("runSandboxedCommand", () => {
     ["HOME is an ephemeral overlay root", {}, `${SCRATCH}/ephemeral/b1cbc5f347543a03/upper`],
     ["HOME is not an overlay root", { overlayRoots: ["/tmp"] }, undefined],
     ["the database is written through", { writeThroughPaths: ["/home/runner/.pki"] }, undefined],
-  ])("makes the database's directories in HOME's overlay when %s", (_label, overrides, upper) => {
-    runSandboxedCommand(
-      options({
-        proxyEngine: "inspect",
-        filesystemMode: "ephemeral",
-        overlayRoots: ["/home/runner", "/tmp"],
-        ...overrides,
-      }),
-      deps,
-    );
+  ])(
+    "makes the database's directories in HOME's overlay when %s",
+    async (_label, overrides, upper) => {
+      await runSandboxedCommand(
+        options({
+          proxyEngine: "inspect",
+          filesystemMode: "ephemeral",
+          overlayRoots: ["/home/runner", "/tmp"],
+          ...overrides,
+        }),
+        deps,
+      );
 
-    expect(mocks.prepareNssDb.mock.calls[0][4]).toStrictEqual({ homeUpper: upper });
-  });
+      expect(mocks.prepareNssDb.mock.calls[0][4]).toStrictEqual({ homeUpper: upper });
+    },
+  );
 
   describe("Chromium's NSS database", () => {
     const NSS_DB = {
@@ -189,8 +199,8 @@ describe("runSandboxedCommand", () => {
       mocks.settleNssDbSlot.mockReturnValue("written");
     });
 
-    it("takes back the directories it made once the command has run", () => {
-      runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
+    it("takes back the directories it made once the command has run", async () => {
+      await runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
 
       expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
       expect(mocks.releaseNssDbDirs.mock.invocationCallOrder[0]).toBeGreaterThan(
@@ -198,10 +208,10 @@ describe("runSandboxedCommand", () => {
       );
     });
 
-    it("warns when the database's directory was removed while the command ran", () => {
+    it("warns when the database's directory was removed while the command ran", async () => {
       mocks.nssDbDetached.mockReturnValue("DETACHED");
 
-      runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
+      await runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
 
       expect(mocks.nssDbDetached).toHaveBeenCalledWith(NSS_DB);
       expect(mocks.warn).toHaveBeenCalledWith("DETACHED");
@@ -210,55 +220,58 @@ describe("runSandboxedCommand", () => {
       );
     });
 
-    it("does not look for a detached mount where writes are discarded", () => {
-      runSandboxedCommand(options({ proxyEngine: "inspect", filesystemMode: "ephemeral" }), deps);
+    it("does not look for a detached mount where writes are discarded", async () => {
+      await runSandboxedCommand(
+        options({ proxyEngine: "inspect", filesystemMode: "ephemeral" }),
+        deps,
+      );
 
       expect(mocks.nssDbDetached).not.toHaveBeenCalled();
     });
 
-    it("still takes the directories back when the sandbox fails to run", () => {
+    it("still takes the directories back when the sandbox fails to run", async () => {
       mocks.runIsolated.mockImplementation(() => {
         throw new Error("runc failed");
       });
 
-      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+      await expect(runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).rejects.toThrow(
         "runc failed",
       );
       expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
       expect(mocks.settleNssDbSlot).not.toHaveBeenCalled();
     });
 
-    it("takes the directories back when the bundle cannot be built", () => {
+    it("takes the directories back when the bundle cannot be built", async () => {
       mocks.buildOciConfig.mockImplementation(() => {
         throw new Error("bad spec");
       });
 
-      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+      await expect(runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).rejects.toThrow(
         expect.objectContaining({ code: "OCI_CONFIG_BUILD_FAILED" }),
       );
       expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
       expect(mocks.runIsolated).not.toHaveBeenCalled();
     });
 
-    it("takes the directories back when the OCI config cannot be written", () => {
+    it("takes the directories back when the OCI config cannot be written", async () => {
       mocks.writeOciConfig.mockImplementation(() => {
         throw new Error("disk full");
       });
 
-      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+      await expect(runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).rejects.toThrow(
         "disk full",
       );
       expect(mocks.releaseNssDbDirs).toHaveBeenCalledOnce();
       expect(mocks.runIsolated).not.toHaveBeenCalled();
     });
 
-    it("has nothing to check when there was nowhere to mount it", () => {
+    it("has nothing to check when there was nowhere to mount it", async () => {
       mocks.prepareNssDb.mockReturnValue(undefined);
       mocks.runIsolated.mockImplementation(() => {
         throw new Error("runc failed");
       });
 
-      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+      await expect(runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).rejects.toThrow(
         "runc failed",
       );
       expect(mocks.releaseNssDbDirs).not.toHaveBeenCalled();
@@ -287,8 +300,8 @@ describe("runSandboxedCommand", () => {
         { filesystemMode: "ephemeral" as const, writeThroughPaths: ["/home/runner/.pki/nssdb"] },
         true,
       ],
-    ])("writes back in %s: %s", (_label, overrides, persist) => {
-      runSandboxedCommand(options({ proxyEngine: "inspect", ...overrides }), deps);
+    ])("writes back in %s: %s", async (_label, overrides, persist) => {
+      await runSandboxedCommand(options({ proxyEngine: "inspect", ...overrides }), deps);
 
       expect(mocks.readFile).toHaveBeenCalledWith(OWN_CA);
       expect(mocks.settleNssDbSlot).toHaveBeenCalledWith(
@@ -300,30 +313,30 @@ describe("runSandboxedCommand", () => {
       );
     });
 
-    it("writes nothing back to a database whose mount went away", () => {
+    it("writes nothing back to a database whose mount went away", async () => {
       mocks.nssDbDetached.mockReturnValue("DETACHED");
 
-      runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
+      await runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
 
       expect(mocks.warn).toHaveBeenCalledWith("DETACHED");
       expect(mocks.settleNssDbSlot).not.toHaveBeenCalled();
       expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
     });
 
-    it("says so when what the command wrote is discarded", () => {
+    it("says so when what the command wrote is discarded", async () => {
       mocks.settleNssDbSlot.mockReturnValue("discarded");
 
-      runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
+      await runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
 
       expect(mocks.info).toHaveBeenCalledWith(
         expect.stringContaining("NSS database at /home/runner/.pki/nssdb is discarded"),
       );
     });
 
-    it("fails the step on a copy of the CA, pointing at fail_on_ca_residue", () => {
+    it("fails the step on a copy of the CA, pointing at fail_on_ca_residue", async () => {
       mocks.settleNssDbSlot.mockImplementation((_files, { onResidue }) => onResidue("COPIED"));
 
-      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+      await expect(runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).rejects.toThrow(
         expect.objectContaining({
           code: "NSS_DATABASE_CA_COPIED",
           message: expect.stringMatching(/COPIED.*fail_on_ca_residue: false/),
@@ -332,25 +345,25 @@ describe("runSandboxedCommand", () => {
       expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
     });
 
-    it("only warns about a copy of the CA under fail_on_ca_residue: false", () => {
+    it("only warns about a copy of the CA under fail_on_ca_residue: false", async () => {
       mocks.settleNssDbSlot.mockImplementation((_files, { onResidue }) => {
         onResidue("COPIED");
         return "written";
       });
 
-      runSandboxedCommand(options({ proxyEngine: "inspect", failOnCaResidue: false }), deps);
+      await runSandboxedCommand(options({ proxyEngine: "inspect", failOnCaResidue: false }), deps);
 
       expect(mocks.warn).toHaveBeenCalledWith(
         expect.stringMatching(/COPIED.*fail_on_ca_residue is false/),
       );
     });
 
-    it("fails the step when what the command wrote cannot be written back", () => {
+    it("fails the step when what the command wrote cannot be written back", async () => {
       mocks.settleNssDbSlot.mockImplementation(() => {
         throw new Error("EIO");
       });
 
-      expect(() => runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).toThrow(
+      await expect(runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).rejects.toThrow(
         expect.objectContaining({
           code: "NSS_DATABASE_WRITE_BACK_FAILED",
           message: expect.stringContaining("/home/runner/.pki/nssdb: EIO"),
@@ -362,7 +375,7 @@ describe("runSandboxedCommand", () => {
 
   // An earlier step's sandbox may have written to $HOME even when this one's
   // writes are discarded.
-  it("pins keytool against persistent mode's paths even in ephemeral mode", () => {
+  it("pins keytool against persistent mode's paths even in ephemeral mode", async () => {
     const tools = { java: "/usr/bin/java", keytool: "/usr/bin/keytool" };
     mocks.jvmTools.mockReturnValue(tools);
     const opts = options({
@@ -371,7 +384,7 @@ describe("runSandboxedCommand", () => {
       writeThroughPaths: ["/opt/out"],
     });
 
-    runSandboxedCommand(opts, deps);
+    await runSandboxedCommand(opts, deps);
 
     expect(mocks.jvmTools).toHaveBeenCalledWith(opts.env, [
       "/home/runner/work/repo/repo",
@@ -388,36 +401,36 @@ describe("runSandboxedCommand", () => {
     );
   });
 
-  it("warns once about a CA variable the step set elsewhere, under inspect only", () => {
+  it("warns once about a CA variable the step set elsewhere, under inspect only", async () => {
     const env = {
       HOME: "/home/runner",
       GIT_SSL_CAINFO: "/opt/corp-ca.pem",
       PIP_CERT: "/opt/pip.pem",
     };
 
-    runSandboxedCommand(options({ proxyEngine: "inspect", env }), deps);
+    await runSandboxedCommand(options({ proxyEngine: "inspect", env }), deps);
     expect(mocks.warn).toHaveBeenCalledTimes(1);
     expect(mocks.warn).toHaveBeenCalledWith(
       expect.stringContaining("GIT_SSL_CAINFO (/opt/corp-ca.pem), PIP_CERT (/opt/pip.pem)"),
     );
 
     mocks.warn.mockClear();
-    runSandboxedCommand(options({ env }), deps);
+    await runSandboxedCommand(options({ env }), deps);
     expect(mocks.warn).not.toHaveBeenCalled();
   });
 
-  it("extracts no CA under an engine that does not terminate TLS", () => {
-    runSandboxedCommand(options(), deps);
+  it("extracts no CA under an engine that does not terminate TLS", async () => {
+    await runSandboxedCommand(options(), deps);
 
     expect(mocks.extractCaCert).not.toHaveBeenCalled();
     expect(mocks.buildOciConfig.mock.calls[0][1].caTrust).toBeUndefined();
   });
 
-  it("builds the overlay only in ephemeral mode, from the already-folded roots", () => {
+  it("builds the overlay only in ephemeral mode, from the already-folded roots", async () => {
     const overlayRoots = ["/usr"];
     mocks.createOverlayScratchDirs.mockReturnValue([{ path: "/usr", upper: `${SCRATCH}/upper0` }]);
 
-    runSandboxedCommand(
+    await runSandboxedCommand(
       options({ filesystemMode: "ephemeral", overlayRoots, writeThroughPaths: ["/opt/cache"] }),
       deps,
     );
@@ -433,15 +446,15 @@ describe("runSandboxedCommand", () => {
 
   // Both of the sandbox's own warnings come from modules it calls, so the sink
   // has to reach each of them rather than being resolved here.
-  it("hands its warning sink to the scratch dir and the environment resolver", () => {
-    runSandboxedCommand(options(), deps);
+  it("hands its warning sink to the scratch dir and the environment resolver", async () => {
+    await runSandboxedCommand(options(), deps);
 
     expect(mocks.withScratchDir.mock.calls[0][1].warn).toBe(mocks.warn);
     expect(mocks.resolveSandboxEnv).toHaveBeenCalledWith(expect.anything(), undefined, mocks.warn);
   });
 
-  it("leaves persistent mode with no overlay at all", () => {
-    runSandboxedCommand(options(), deps);
+  it("leaves persistent mode with no overlay at all", async () => {
+    await runSandboxedCommand(options(), deps);
 
     expect(mocks.createOverlayScratchDirs).not.toHaveBeenCalled();
     expect(mocks.buildOciConfig.mock.calls[0][1].ephemeral).toBeUndefined();
@@ -450,8 +463,8 @@ describe("runSandboxedCommand", () => {
 
   // Every one of these is set by a real runner, but this action is also driven
   // directly by this repo's own integration scripts.
-  it("leaves the writable paths empty when the runner set none of them", () => {
-    runSandboxedCommand(options({ env: {} }), deps);
+  it("leaves the writable paths empty when the runner set none of them", async () => {
+    await runSandboxedCommand(options({ env: {} }), deps);
 
     expect(mocks.buildOciConfig.mock.calls[0][1].writable).toStrictEqual({
       workdir: undefined,
@@ -462,10 +475,10 @@ describe("runSandboxedCommand", () => {
     });
   });
 
-  it("hands the config the writable paths as they really resolve", () => {
+  it("hands the config the writable paths as they really resolve", async () => {
     mocks.realpath.mockImplementation((p: string) => p.replace(/^\/home\//, "/var/home/"));
 
-    runSandboxedCommand(
+    await runSandboxedCommand(
       options({
         env: {
           GITHUB_WORKSPACE: "/home/runner/work/repo/repo",
@@ -485,8 +498,8 @@ describe("runSandboxedCommand", () => {
     });
   });
 
-  it("keeps the docker CLI's config directory read-only, creating it first", () => {
-    runSandboxedCommand(options(), deps);
+  it("keeps the docker CLI's config directory read-only, creating it first", async () => {
+    await runSandboxedCommand(options(), deps);
 
     // On CI the checkout is under /home/runner and adds its own entry.
     expect(mocks.buildOciConfig.mock.calls[0][1].readonlyHostDirs).toContain(
@@ -498,8 +511,8 @@ describe("runSandboxedCommand", () => {
     });
   });
 
-  it("guards the writable dirs above a read-only dir so they cannot be renamed", () => {
-    runSandboxedCommand(
+  it("guards the writable dirs above a read-only dir so they cannot be renamed", async () => {
+    await runSandboxedCommand(
       options({ env: { HOME: "/home/runner", DOCKER_CONFIG: "/home/runner/a/b/cfg" } }),
       deps,
     );
@@ -510,8 +523,8 @@ describe("runSandboxedCommand", () => {
     );
   });
 
-  it("leaves it writable in ephemeral mode, where no write_through reaches it", () => {
-    runSandboxedCommand(
+  it("leaves it writable in ephemeral mode, where no write_through reaches it", async () => {
+    await runSandboxedCommand(
       options({ filesystemMode: "ephemeral", overlayRoots: ["/home/runner"] }),
       deps,
     );
@@ -520,10 +533,10 @@ describe("runSandboxedCommand", () => {
     expect(mocks.mkdir).not.toHaveBeenCalledWith("/home/runner/.docker", expect.anything());
   });
 
-  it("says so when the runner's primary group forced a GID substitution", () => {
+  it("says so when the runner's primary group forced a GID substitution", async () => {
     mocks.resolveSandboxGid.mockReturnValue({ gid: 65534, substitutedFrom: 118 });
 
-    runSandboxedCommand(options(), deps);
+    await runSandboxedCommand(options(), deps);
 
     expect(mocks.info).toHaveBeenCalledWith(
       expect.stringContaining("(118 -> 65534) -- the runner's primary group grants"),
@@ -531,14 +544,14 @@ describe("runSandboxedCommand", () => {
     expect(mocks.buildOciConfig.mock.calls[0][1].identity.gid).toBe(65534);
   });
 
-  it("warns when NSS could not answer the primary group check", () => {
+  it("warns when NSS could not answer the primary group check", async () => {
     mocks.resolveSandboxGid.mockReturnValue({
       gid: 65534,
       substitutedFrom: 1001,
       nssError: "timed out",
     });
 
-    runSandboxedCommand(options(), deps);
+    await runSandboxedCommand(options(), deps);
 
     expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("NSS (timed out)"));
     expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("treated as privileged"));
@@ -547,11 +560,11 @@ describe("runSandboxedCommand", () => {
     );
   });
 
-  function failureFrom(
+  async function failureFrom(
     overrides: Partial<RunSandboxedCommandOptions> = {},
-  ): SandboxError | undefined {
+  ): Promise<SandboxError | undefined> {
     try {
-      runSandboxedCommand(options(overrides), deps);
+      await runSandboxedCommand(options(overrides), deps);
     } catch (e) {
       return e as SandboxError;
     }
@@ -561,12 +574,12 @@ describe("runSandboxedCommand", () => {
     ["extractRuncBootstrap", () => mocks.extractRuncBootstrap, "RUNC_EXTRACT_FAILED", {}],
     ["extractCaCert", () => mocks.extractCaCert, "CA_EXTRACT_FAILED", { proxyEngine: "inspect" }],
     ["buildOciConfig", () => mocks.buildOciConfig, "OCI_CONFIG_BUILD_FAILED", {}],
-  ])("turns a %s failure into its own SandboxError", (_name, target, code, overrides) => {
+  ])("turns a %s failure into its own SandboxError", async (_name, target, code, overrides) => {
     target().mockImplementation(() => {
       throw new Error("boom");
     });
 
-    const error = failureFrom(overrides as Partial<RunSandboxedCommandOptions>);
+    const error = await failureFrom(overrides as Partial<RunSandboxedCommandOptions>);
 
     expect(error).toBeInstanceOf(SandboxError);
     expect(error!.code).toBe(code);
@@ -577,23 +590,23 @@ describe("runSandboxedCommand", () => {
     ["extractRuncBootstrap", () => mocks.extractRuncBootstrap, {}],
     ["extractCaCert", () => mocks.extractCaCert, { proxyEngine: "inspect" }],
     ["resolveSandboxGid", () => mocks.resolveSandboxGid, {}],
-  ])("lets a SandboxError from %s through untouched", (_name, target, overrides) => {
+  ])("lets a SandboxError from %s through untouched", async (_name, target, overrides) => {
     const thrown = new SandboxError("the primary group is privileged", "UNSAFE_PRIMARY_GID");
     target().mockImplementation(() => {
       throw thrown;
     });
 
-    expect(failureFrom(overrides as Partial<RunSandboxedCommandOptions>)).toBe(thrown);
+    expect(await failureFrom(overrides as Partial<RunSandboxedCommandOptions>)).toBe(thrown);
   });
 
   // Same misconfiguration, same code whichever check catches it first: the
   // early one in resolveFilesystemPlan, or buildOciConfig's authoritative one.
-  it("reports a writable-path conflict as FILESYSTEM_INPUT_CONFLICT", () => {
+  it("reports a writable-path conflict as FILESYSTEM_INPUT_CONFLICT", async () => {
     mocks.buildOciConfig.mockImplementation(() => {
       throw new WritablePathConflictError('writable path "/proc" is inside "/proc"');
     });
 
-    const error = failureFrom();
+    const error = await failureFrom();
 
     expect(error!.code).toBe("FILESYSTEM_INPUT_CONFLICT");
     expect(error!.message).toBe('writable path "/proc" is inside "/proc"');

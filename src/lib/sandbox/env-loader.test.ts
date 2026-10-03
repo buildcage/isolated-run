@@ -163,8 +163,8 @@ describe("buildEnvBlob", () => {
 });
 
 describe("writeEnvLoader", () => {
-  it("writes an executable bash script that never evals and matches the blob's terminator", () => {
-    withScratchDir((dir) => {
+  it("writes an executable bash script that never evals and matches the blob's terminator", async () => {
+    await withScratchDir((dir) => {
       const path = writeEnvLoader(dir);
       const content = readFileSync(path, "utf8");
       expect(content.startsWith("#!/bin/bash\n")).toBe(true);

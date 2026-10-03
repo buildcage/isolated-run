@@ -1,62 +1,115 @@
 #!/bin/bash
-# Verifies that a SIGTERM reaching run-isolated.sh's own process while the
-# command runs neither replaces the command's exit status nor runs the
-# teardown twice, which warned about unmounting the already-unmounted rootfs.
+# Verifies what a cancelled step does: the runner sends SIGINT to the action's
+# node process alone, and the action has to stop the sandbox, write the report
+# and tear everything down before the runner's SIGKILL 10 seconds later.
 # Drives dist/main.cjs directly, like integration-test-die-with-parent.sh,
-# so this script can reach in and signal run-isolated.sh mid-run.
+# so this script can send that SIGINT itself.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
 
 WORKDIR=$(mktemp -d)
-touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
-trap 'rm -rf "$WORKDIR"' EXIT
 
-GITHUB_WORKSPACE="$WORKDIR" \
-GITHUB_STATE="$WORKDIR/state.env" \
-GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_RUN='sleep 4.25; exit 5' \
-  node dist/main.cjs > "$WORKDIR/out.log" 2>&1 &
-NODE_PID=$!
+cleanup() {
+  sudo -n pkill -9 -f "sudo -n -- .*/run-isolated.sh" >/dev/null 2>&1
+  rm -rf "$WORKDIR"
+}
+trap cleanup EXIT
 
-FOUND=0
-for _ in $(seq 1 60); do
-  if pgrep -f "sleep 4.25" >/dev/null 2>&1; then
-    FOUND=1
-    break
+# Runs INPUT_RUN as a step, sends the step SIGINT once `marker` is running,
+# and leaves the step's exit code in CODE, how long it took to exit after the
+# SIGINT in ELAPSED, and its log and summary under WORKDIR/<name>.
+cancel_step() {
+  local name="$1" run="$2" marker="$3"
+  local dir="$WORKDIR/$name"
+  mkdir -p "$dir"
+  touch "$dir/state.env" "$dir/summary.md"
+
+  GITHUB_WORKSPACE="$dir" \
+  GITHUB_STATE="$dir/state.env" \
+  GITHUB_STEP_SUMMARY="$dir/summary.md" \
+  BUILDCAGE_BUILD_TEST_HOOKS=1 \
+  BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
+  INPUT_RUN="$run" \
+    node dist/main.cjs > "$dir/out.log" 2>&1 &
+  local node_pid=$!
+
+  local found=0
+  for _ in $(seq 1 60); do
+    if pgrep -f "$marker" >/dev/null 2>&1; then
+      found=1
+      break
+    fi
+    sleep 0.5
+  done
+  if [ "$found" != "1" ]; then
+    fail "$name: sandboxed process never started"
+    cat "$dir/out.log"
+    kill -9 "$node_pid" >/dev/null 2>&1
+    CODE=-1
+    return
   fi
-  sleep 0.5
-done
+
+  local start=$SECONDS
+  kill -INT "$node_pid"
+  wait "$node_pid"
+  CODE=$?
+  ELAPSED=$((SECONDS - start))
+}
+
+# What every cancelled step must leave behind, whatever its command did.
+assert_cancelled_cleanly() {
+  local name="$1" marker="$2"
+  local dir="$WORKDIR/$name"
+  if [ "$ELAPSED" -lt 10 ]; then
+    pass "$name: the step exited ${ELAPSED}s after the SIGINT, before the runner's SIGKILL"
+  else
+    fail "$name: the step took ${ELAPSED}s to exit after the SIGINT"
+  fi
+  if grep -q "Outbound Traffic Report" "$dir/summary.md"; then
+    pass "$name: the traffic report was written"
+  else
+    fail "$name: no traffic report in the summary"
+    cat "$dir/out.log"
+  fi
+  if pgrep -f "$marker" >/dev/null 2>&1; then
+    fail "$name: the sandboxed command outlived the step"
+  else
+    pass "$name: the sandboxed command did not outlive the step"
+  fi
+  if grep -q "WARNING: failed to unmount" "$dir/out.log"; then
+    fail "$name: the teardown ran twice and warned about an unmount"
+    cat "$dir/out.log"
+  else
+    pass "$name: the teardown ran once, without an unmount warning"
+  fi
+  local container
+  container=$(awk '/^container_name<</{getline; print; exit}' "$dir/state.env" 2>/dev/null)
+  if [ -n "$container" ] && docker inspect "$container" >/dev/null 2>&1; then
+    fail "$name: the proxy container $container is still there"
+    docker rm -f "$container" >/dev/null 2>&1
+  else
+    pass "$name: the proxy container was stopped"
+  fi
+}
 
 echo ""
-echo "=== Sandbox signal Assertions ==="
+echo "=== Cancelled step Assertions ==="
 echo ""
-if [ "$FOUND" != "1" ]; then
-  fail "sandboxed process never started"
-  cat "$WORKDIR/out.log"
-  wait "$NODE_PID"
-  assert_results
+
+# The run script is the process the sandbox forwards SIGTERM to, so its own
+# trap decides the exit code.
+cancel_step handles "trap 'exit 5' TERM; sleep 301 & wait" "sleep 301"
+if [ "$CODE" != "-1" ]; then
+  check_status "handles: the command's own exit status is the step's" "$CODE" 5
+  assert_cancelled_cleanly handles "sleep 301"
 fi
 
-# The bash running the script, not sudo, whose argv names it too.
-sudo -n kill -TERM "$(pgrep -f "/bin/bash .*/run-isolated.sh")"
-wait "$NODE_PID"
-CODE=$?
-
-if [ "$CODE" = "5" ]; then
-  pass "the command's own exit status survives a SIGTERM to run-isolated.sh"
-else
-  fail "the step exited $CODE after a SIGTERM to run-isolated.sh, not the command's 5"
-  cat "$WORKDIR/out.log"
-fi
-if grep -q "WARNING: failed to unmount" "$WORKDIR/out.log"; then
-  fail "the teardown ran twice and warned about an unmount"
-  cat "$WORKDIR/out.log"
-else
-  pass "the teardown ran once, without an unmount warning"
+cancel_step ignores "trap '' TERM; sleep 302" "sleep 302"
+if [ "$CODE" != "-1" ]; then
+  check_status "ignores: a command that ignores SIGTERM is killed" "$CODE" 137
+  assert_cancelled_cleanly ignores "sleep 302"
 fi
 
 assert_results
