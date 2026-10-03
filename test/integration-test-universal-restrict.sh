@@ -101,6 +101,8 @@ assert_summary_contains "x__-__t__buildcage__allowed___https___forged.example.co
   "the forged SNI was sanitized into a single blocked row"
 assert_summary_contains "| tlsany.example.com_x.evil.example.net:443 | HTTPS | invalid-sni |" \
   "an SNI holding a colon was refused before a ~ rule's port pattern could match it"
+assert_summary_contains "| tlsany.example.com_x.evil.example.net:80 | HTTP | invalid-host |" \
+  "a plaintext Host holding a colon was refused the same way"
 
 # The Allowed Hosts table never shows a reason column, so a plain substring
 # search for "| blocked.example.com:80 | HTTP |" would also match the start
