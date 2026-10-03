@@ -24145,6 +24145,22 @@ function dirsDownTo(home, destination) {
 	let dir = home;
 	return (0, node_path.relative)(home, destination).split("/").map((component) => dir = (0, node_path.join)(dir, component));
 }
+function overMirrorBounds(dir, { skip = () => !1, extraFiles = 0, extraBytes = 0 } = {}) {
+	let files = 0, bytes = 0, pending = [dir];
+	for (let next = pending.pop(); next !== void 0; next = pending.pop()) {
+		let handle = (0, node_fs.opendirSync)(next);
+		try {
+			for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
+				if (next === dir && skip(entry.name)) continue;
+				let path = (0, node_path.join)(next, entry.name);
+				if (files++, entry.isFile() ? bytes += (0, node_fs.lstatSync)(path).size : entry.isDirectory() && pending.push(path), files > 512 + extraFiles || bytes > 20971520 + extraBytes) return !0;
+			}
+		} finally {
+			handle.closeSync();
+		}
+	}
+	return !1;
+}
 function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess }) {
 	for (let path of [destination, ...NSS_DB_FILES.map((name) => (0, node_path.join)(destination, name))]) {
 		let info = lstat(path);
@@ -24157,16 +24173,8 @@ function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess 
 			}
 		}
 	}
-	let files = 0, bytes = 0;
 	try {
-		for (let top of (0, node_fs.readdirSync)(destination, { withFileTypes: !0 })) {
-			if (isStaging(top.name)) continue;
-			let below = top.isDirectory() ? (0, node_fs.readdirSync)((0, node_path.join)(destination, top.name), {
-				recursive: !0,
-				withFileTypes: !0
-			}) : [];
-			for (let entry of [top, ...below]) if (files++, entry.isFile() && (bytes += (0, node_fs.statSync)((0, node_path.join)(entry.parentPath, entry.name)).size), files > 512 || bytes > 20971520) return `${destination} is too large to copy`;
-		}
+		if (overMirrorBounds(destination, { skip: isStaging })) return `${destination} is too large to copy`;
 	} catch (e) {
 		return `${destination} cannot be read through (${errorMessage(e)})`;
 	}
@@ -24250,6 +24258,20 @@ function certificateDer(pem) {
 	return Buffer.from(match?.[1]?.replace(/\s+/g, "") ?? "", "base64");
 }
 function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync, copyDir = defaultCopyDir$1, pidAlive = defaultPidAlive, lock = withNssDbLock }) {
+	let overBounds;
+	try {
+		let slot = {
+			extraFiles: +!files.slot.hadPkcs11,
+			extraBytes: Buffer.byteLength(files.slot.appended)
+		};
+		overMirrorBounds(files.path, slot) && (overBounds = "over 512 files or 20 MiB");
+	} catch (e) {
+		overBounds = `unreadable (${errorMessage(e)})`;
+	}
+	if (overBounds !== void 0) {
+		if (!persist) return "discarded";
+		throw Error(`the command left the NSS database at ${files.destination} ${overBounds}, so it is not written back`);
+	}
 	let current;
 	try {
 		current = snapshotDir(files.path);

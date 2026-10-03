@@ -780,6 +780,65 @@ describe("settleNssDbSlot", () => {
     expect(readlinkSync(join(dir, "link"))).toBe("cert9.db");
   });
 
+  it.each([
+    [
+      "a sparse file far larger than memory",
+      (dir: string) => {
+        writeFileSync(join(dir, "big.db"), "");
+        // Past what readFileSync takes in one call, so reading it would throw.
+        truncateSync(join(dir, "big.db"), 4 * 2 ** 30);
+      },
+      "over 512 files or 20 MiB",
+    ],
+    [
+      "too many files, nested",
+      (dir: string) => {
+        mkdirSync(join(dir, "a/b"), { recursive: true });
+        for (let i = 0; i < 511; i++) writeFileSync(join(dir, "a/b", `f${i}`), "");
+      },
+      "over 512 files or 20 MiB",
+    ],
+    [
+      "a subdirectory it cannot read",
+      (dir: string) => mkdirSync(join(dir, "sub"), { mode: 0 }),
+      "unreadable (EACCES",
+    ],
+  ])("writes back nothing the command left with %s", (_label, change, reason) => {
+    const dir = ownDb();
+    const files = prepare();
+    change(files.path);
+
+    expect(settle(files, { persist: false })).toBe("discarded");
+    expect(() => settle(files)).toThrow(`the command left the NSS database at ${dir} ${reason}`);
+    expect(readdirSync(dir).sort()).toStrictEqual(["cert9.db", "pkcs11.txt"]);
+  });
+
+  // At the bound without a pkcs11.txt, so the mirror is over it by the one
+  // the slot was added in.
+  it("still writes back a database at the bound", () => {
+    const dir = ownDb();
+    rmSync(join(dir, "pkcs11.txt"));
+    for (let i = 0; i < 510; i++) writeFileSync(join(dir, `f${i}`), "");
+    writeFileSync(join(dir, "big.db"), "");
+    truncateSync(join(dir, "big.db"), (20 << 20) - statSync(join(dir, "cert9.db")).size);
+    const files = prepare();
+
+    expect(settle(files)).toBe("unchanged");
+
+    writeFileSync(join(files.path, "cert9.db"), "THE COMMAND'S!!!");
+    expect(settle(files)).toBe("written");
+    expect(readFileSync(join(dir, "cert9.db"), "utf8")).toBe("THE COMMAND'S!!!");
+  });
+
+  it("allows only for what the slot added", () => {
+    const dir = ownDb();
+    for (let i = 0; i < 510; i++) writeFileSync(join(dir, `f${i}`), "");
+    const files = prepare();
+    writeFileSync(join(files.path, "one-more"), "");
+
+    expect(() => settle(files)).toThrow("over 512 files or 20 MiB");
+  });
+
   it("discards what the command wrote where the filesystem mode discards writes", () => {
     const dir = ownDb();
     const files = prepare();
