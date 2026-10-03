@@ -9,6 +9,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  opendirSync,
   openSync,
   readFileSync,
   readdirSync,
@@ -367,6 +368,40 @@ function dirsDownTo(home: string, destination: string): string[] {
     .map((component) => (dir = join(dir, component)));
 }
 
+/** Whether dir holds more than MAX_MIRROR_FILES entries or MAX_MIRROR_BYTES in
+ *  files, plus the given allowance. Read one entry at a time and stopped at the
+ *  bound, so neither a huge listing nor a sparse file is ever held in memory. */
+function overMirrorBounds(
+  dir: string,
+  {
+    skip = () => false,
+    extraFiles = 0,
+    extraBytes = 0,
+  }: { skip?: (topName: string) => boolean; extraFiles?: number; extraBytes?: number } = {},
+): boolean {
+  let files = 0;
+  let bytes = 0;
+  const pending = [dir];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const handle = opendirSync(next);
+    try {
+      for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
+        if (next === dir && skip(entry.name)) continue;
+        const path = join(next, entry.name);
+        files++;
+        if (entry.isFile()) bytes += lstatSync(path).size;
+        else if (entry.isDirectory()) pending.push(path);
+        if (files > MAX_MIRROR_FILES + extraFiles || bytes > MAX_MIRROR_BYTES + extraBytes) {
+          return true;
+        }
+      }
+    } finally {
+      handle.closeSync();
+    }
+  }
+  return false;
+}
+
 /** Why the runner's own database cannot take the slot, or undefined. Judged
  *  from its modes and sizes alone, so nothing in it is opened. */
 function whyNotSlot(
@@ -383,23 +418,11 @@ function whyNotSlot(
       return `the runner user cannot write ${path}`;
     }
   }
-  let files = 0;
-  let bytes = 0;
   try {
     // Staging dirs are skipped before being read: another step may remove its
     // own mid-walk.
-    for (const top of readdirSync(destination, { withFileTypes: true })) {
-      if (isStaging(top.name)) continue;
-      const below = top.isDirectory()
-        ? readdirSync(join(destination, top.name), { recursive: true, withFileTypes: true })
-        : [];
-      for (const entry of [top, ...below]) {
-        files++;
-        if (entry.isFile()) bytes += statSync(join(entry.parentPath, entry.name)).size;
-        if (files > MAX_MIRROR_FILES || bytes > MAX_MIRROR_BYTES) {
-          return `${destination} is too large to copy`;
-        }
-      }
+    if (overMirrorBounds(destination, { skip: isStaging })) {
+      return `${destination} is too large to copy`;
     }
   } catch (e) {
     return `${destination} cannot be read through (${errorMessage(e)})`;
@@ -573,6 +596,29 @@ export function settleNssDbSlot(
     lock = withNssDbLock,
   }: SettleNssDbSlotOptions,
 ): NssDbSlotOutcome {
+  // Bounded before anything is read: the command can fill the mirror with
+  // sparse files far larger than the runner's memory. The slot it gained is
+  // allowed for, so a database at the bound that the command left alone passes.
+  let overBounds: string | undefined;
+  try {
+    const slot = {
+      extraFiles: files.slot.hadPkcs11 ? 0 : 1,
+      extraBytes: Buffer.byteLength(files.slot.appended),
+    };
+    if (overMirrorBounds(files.path, slot)) {
+      overBounds = `over ${MAX_MIRROR_FILES} files or ${MAX_MIRROR_BYTES >> 20} MiB`;
+    }
+  } catch (e) {
+    overBounds = `unreadable (${errorMessage(e)})`;
+  }
+  if (overBounds !== undefined) {
+    if (!persist) return "discarded";
+    throw new Error(
+      `the command left the NSS database at ${files.destination} ${overBounds}, so it is not ` +
+        "written back",
+    );
+  }
+
   let current: DirSnapshot;
   try {
     current = snapshotDir(files.path);
