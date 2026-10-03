@@ -40,8 +40,9 @@ Four things sit outside the model by design.
 
 - **Whoever writes the workflow.** The allowlist is configured alongside the command, by the same
   people, so Buildcage is not a control against them. A `config_file` is no different. On
-  `pull_request_target`, and `workflow_run` triggered by a pull request, the workspace may hold the
-  pull request's own code, so `config_file` is refused there.
+  `pull_request_target`, `issue_comment`, and a `workflow_run` triggered by a pull request, an issue
+  comment or another `workflow_run`, the workspace may hold the pull request's own code, so
+  `config_file` is refused there.
 - **Another step in the same job.** A compromised or untrustworthy action running as another step
   can use `docker exec` or `docker cp`, or the host root a passwordless-sudo runner grants by
   default, to tamper with the proxy container's state, most notably its traffic log. Sigstore proves
