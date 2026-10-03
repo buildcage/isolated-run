@@ -24257,6 +24257,33 @@ function certificateDer(pem) {
 	let match = /-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/.exec(pem);
 	return Buffer.from(match?.[1]?.replace(/\s+/g, "") ?? "", "base64");
 }
+function syncTree(staging, mirror, destination, removals, top = !1) {
+	let present = new Set();
+	for (let entry of (0, node_fs.readdirSync)(staging, { withFileTypes: !0 })) {
+		if (top && isStaging(entry.name)) continue;
+		present.add(entry.name);
+		let from = (0, node_path.join)(staging, entry.name), to = (0, node_path.join)(destination, entry.name), existing = (0, node_fs.lstatSync)(to, { throwIfNoEntry: !1 });
+		if (entry.isDirectory()) {
+			if (existing?.isDirectory()) {
+				syncTree(from, (0, node_path.join)(mirror, entry.name), to, removals);
+				continue;
+			}
+			existing !== void 0 && (0, node_fs.rmSync)(to, { force: !0 }), (0, node_fs.mkdirSync)(to, { mode: 448 }), syncTree(from, (0, node_path.join)(mirror, entry.name), to, removals), (0, node_fs.chmodSync)(to, (0, node_fs.lstatSync)((0, node_path.join)(mirror, entry.name)).mode & 4095);
+			continue;
+		}
+		if (existing?.isDirectory()) (0, node_fs.rmSync)(to, {
+			recursive: !0,
+			force: !0
+		});
+		else if (existing !== void 0 && sameEntry(from, to)) continue;
+		(0, node_fs.renameSync)(from, to);
+	}
+	for (let name of (0, node_fs.readdirSync)(destination)) !present.has(name) && !(top && isStaging(name)) && removals.push((0, node_path.join)(destination, name));
+}
+function sameEntry(a, b) {
+	let x = (0, node_fs.lstatSync)(a), y = (0, node_fs.lstatSync)(b);
+	return x.isSymbolicLink() && y.isSymbolicLink() ? (0, node_fs.readlinkSync)(a) === (0, node_fs.readlinkSync)(b) : x.isFile() && y.isFile() && x.mode === y.mode && x.size === y.size && (0, node_fs.readFileSync)(a).equals((0, node_fs.readFileSync)(b));
+}
 function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync, copyDir = defaultCopyDir$1, pidAlive = defaultPidAlive, lock = withNssDbLock }) {
 	let overBounds;
 	try {
@@ -24299,29 +24326,33 @@ function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.
 			force: !0
 		}), e;
 	}
-	let swapping = !1;
 	try {
 		lock(() => {
-			swapping = !0;
 			for (let name of (0, node_fs.readdirSync)(files.destination)) {
 				let path = (0, node_path.join)(files.destination, name);
-				(!isStaging(name) || path !== staging && !stagingOwnerAlive(name, pidAlive)) && (0, node_fs.rmSync)(path, {
-					recursive: !0,
-					force: !0
-				});
+				if (isStaging(name) && path !== staging && !stagingOwnerAlive(name, pidAlive)) try {
+					(0, node_fs.rmSync)(path, {
+						recursive: !0,
+						force: !0
+					});
+				} catch {}
 			}
-			for (let name of (0, node_fs.readdirSync)(staging)) isStaging(name) || (0, node_fs.renameSync)((0, node_path.join)(staging, name), (0, node_path.join)(files.destination, name));
+			let removals = [];
+			syncTree(staging, files.path, files.destination, removals, !0);
+			for (let path of removals) (0, node_fs.rmSync)(path, {
+				recursive: !0,
+				force: !0
+			});
 		});
-	} catch (e) {
-		throw swapping || (0, node_fs.rmSync)(staging, {
-			recursive: !0,
-			force: !0
-		}), e;
+	} finally {
+		try {
+			(0, node_fs.rmSync)(staging, {
+				recursive: !0,
+				force: !0
+			});
+		} catch {}
 	}
-	return (0, node_fs.rmSync)(staging, {
-		recursive: !0,
-		force: !0
-	}), "written";
+	return "written";
 }
 function nssDbMounts(files) {
 	return [{

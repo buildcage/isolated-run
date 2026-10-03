@@ -563,6 +563,61 @@ export function certificateDer(pem: string): Buffer {
   return Buffer.from(match?.[1]?.replace(/\s+/g, "") ?? "", "base64");
 }
 
+/**
+ * Makes destination's tree match staging's. A directory on both sides is
+ * entered, never replaced, and a file or symlink is renamed over its
+ * counterpart unless they are the same, so nothing the command left alone is
+ * touched. A directory the copy adds takes its mode from mirror, since the copy
+ * into staging drops directory modes. What staging lacks is collected in
+ * removals rather than removed here. Staging dirs at the top are left alone.
+ */
+function syncTree(
+  staging: string,
+  mirror: string,
+  destination: string,
+  removals: string[],
+  top = false,
+): void {
+  const present = new Set<string>();
+  for (const entry of readdirSync(staging, { withFileTypes: true })) {
+    if (top && isStaging(entry.name)) continue;
+    present.add(entry.name);
+    const from = join(staging, entry.name);
+    const to = join(destination, entry.name);
+    const existing = lstatSync(to, { throwIfNoEntry: false });
+    if (entry.isDirectory()) {
+      if (existing?.isDirectory()) {
+        syncTree(from, join(mirror, entry.name), to, removals);
+        continue;
+      }
+      if (existing !== undefined) rmSync(to, { force: true });
+      mkdirSync(to, { mode: 0o700 });
+      syncTree(from, join(mirror, entry.name), to, removals);
+      chmodSync(to, lstatSync(join(mirror, entry.name)).mode & 0o7777);
+      continue;
+    }
+    if (existing?.isDirectory()) rmSync(to, { recursive: true, force: true });
+    else if (existing !== undefined && sameEntry(from, to)) continue;
+    renameSync(from, to);
+  }
+  for (const name of readdirSync(destination)) {
+    if (!present.has(name) && !(top && isStaging(name))) removals.push(join(destination, name));
+  }
+}
+
+function sameEntry(a: string, b: string): boolean {
+  const x = lstatSync(a);
+  const y = lstatSync(b);
+  if (x.isSymbolicLink() && y.isSymbolicLink()) return readlinkSync(a) === readlinkSync(b);
+  return (
+    x.isFile() &&
+    y.isFile() &&
+    x.mode === y.mode &&
+    x.size === y.size &&
+    readFileSync(a).equals(readFileSync(b))
+  );
+}
+
 export interface SettleNssDbSlotOptions {
   /** Whether a write to the database's path would have outlived the command. */
   persist: boolean;
@@ -659,26 +714,30 @@ export function settleNssDbSlot(
     rmSync(staging, { recursive: true, force: true });
     throw e;
   }
-  let swapping = false;
   try {
     lock(() => {
-      swapping = true;
       for (const name of readdirSync(files.destination)) {
         const path = join(files.destination, name);
-        if (isStaging(name) && (path === staging || stagingOwnerAlive(name, pidAlive))) continue;
-        rmSync(path, { recursive: true, force: true });
+        if (!isStaging(name) || path === staging || stagingOwnerAlive(name, pidAlive)) continue;
+        try {
+          rmSync(path, { recursive: true, force: true });
+        } catch {
+          // Left for a later write-back; it does not block this one.
+        }
       }
-      for (const name of readdirSync(staging)) {
-        if (isStaging(name)) continue;
-        renameSync(join(staging, name), join(files.destination, name));
-      }
+      const removals: string[] = [];
+      syncTree(staging, files.path, files.destination, removals, true);
+      // Last, so a failure before here leaves an entry the command removed
+      // rather than losing one it wrote.
+      for (const path of removals) rmSync(path, { recursive: true, force: true });
     });
-  } catch (e) {
-    // A swap that failed partway leaves the staging copy as the only whole one.
-    if (!swapping) rmSync(staging, { recursive: true, force: true });
-    throw e;
+  } finally {
+    try {
+      rmSync(staging, { recursive: true, force: true });
+    } catch {
+      // Removed by a later write-back once this step is gone.
+    }
   }
-  rmSync(staging, { recursive: true, force: true });
   return "written";
 }
 
