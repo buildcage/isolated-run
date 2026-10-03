@@ -807,6 +807,9 @@ this:
   `$GITHUB_STEP_SUMMARY`'s own contract is append-only, so this doesn't affect them in practice. If
   you need a file that doesn't exist yet to persist, either have an earlier step create it first, or
   list its (already-existing) parent directory instead.
+- `$GITHUB_ENV` and `$GITHUB_PATH` are read-only inside the sandbox until named here, even under a
+  writable parent such as `$RUNNER_TEMP`, since what they set reaches every later step and post
+  step. `$GITHUB_STATE` cannot be named and stays read-only.
 
 `write_through:` changes how a path is mounted, not who owns it, so pointing it at a system
 directory the runner user cannot write (`/usr`, most of `/etc`) gains nothing. It is meant for paths

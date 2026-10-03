@@ -6,7 +6,8 @@
  * (`~/.local/bin` precedes `/usr/bin` on hosted runners). For the same reason
  * docker and sudo run with those paths left off PATH. The docker CLI's
  * config directory and this action's own checkout, which hold its plugins and
- * the post step's script, are made read-only inside the sandbox.
+ * the post step's script, are made read-only inside the sandbox, as are the
+ * runner's file commands that reach every later step.
  */
 
 import { accessSync, constants, readlinkSync, realpathSync } from "node:fs";
@@ -281,6 +282,28 @@ export function sandboxReadonlyHostDirs(
   return candidates.filter(
     (dir) => persisting.some((p) => isAtOrUnder(dir, p)) && !persisting.includes(dir),
   );
+}
+
+/**
+ * This step's GITHUB_ENV, GITHUB_PATH and GITHUB_STATE files, which the runner
+ * applies to every later step and the post step: LD_PRELOAD in GITHUB_ENV or a
+ * directory first in GITHUB_PATH would reach all of them. Read-only in either
+ * mode, whatever is writable around them, unless write_through names
+ * GITHUB_ENV or GITHUB_PATH itself. GITHUB_STATE, which only this action's
+ * post step reads, is never opened.
+ */
+export function sandboxReadonlyFileCommands(
+  writeThroughPaths: string[],
+  env: NodeJS.ProcessEnv,
+  realpath: (path: string) => string = realpathOrSelf,
+): string[] {
+  const named = new Set(withRealPaths(writeThroughPaths, realpath));
+  const openable = (name: string, path: string) =>
+    name !== "GITHUB_STATE" && (named.has(path) || named.has(realpath(path)));
+  return ["GITHUB_ENV", "GITHUB_PATH", "GITHUB_STATE"].flatMap((name) => {
+    const path = env[name];
+    return path && !openable(name, path) ? [realpath(path)] : [];
+  });
 }
 
 /**

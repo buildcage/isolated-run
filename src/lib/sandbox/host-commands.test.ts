@@ -11,6 +11,7 @@ import {
   pinHostCommands,
   pinningPaths,
   renameGuardDirs,
+  sandboxReadonlyFileCommands,
   sandboxReadonlyHostDirs,
   withRealPaths,
   type FindCommandDeps,
@@ -387,6 +388,54 @@ describe("sandboxReadonlyHostDirs", () => {
     expect(
       sandboxReadonlyHostDirs([...PERSISTENT, `${HOME}/.docker`], { HOME }, ACTION),
     ).toStrictEqual([ACTION]);
+  });
+});
+
+describe("sandboxReadonlyFileCommands", () => {
+  const COMMANDS = "/home/runner/work/_temp/_runner_file_commands";
+  const ENV = {
+    GITHUB_ENV: `${COMMANDS}/set_env_1`,
+    GITHUB_PATH: `${COMMANDS}/add_path_1`,
+    GITHUB_STATE: `${COMMANDS}/save_state_1`,
+    GITHUB_OUTPUT: `${COMMANDS}/set_output_1`,
+  };
+
+  it("is this step's GITHUB_ENV, GITHUB_PATH and GITHUB_STATE, and not GITHUB_OUTPUT", () => {
+    expect(sandboxReadonlyFileCommands([COMMANDS], ENV)).toStrictEqual([
+      ENV.GITHUB_ENV,
+      ENV.GITHUB_PATH,
+      ENV.GITHUB_STATE,
+    ]);
+  });
+
+  it("leaves out GITHUB_ENV or GITHUB_PATH when write_through names it", () => {
+    expect(sandboxReadonlyFileCommands([ENV.GITHUB_ENV], ENV)).toStrictEqual([
+      ENV.GITHUB_PATH,
+      ENV.GITHUB_STATE,
+    ]);
+  });
+
+  it("keeps GITHUB_STATE even when write_through names its path", () => {
+    expect(sandboxReadonlyFileCommands([ENV.GITHUB_STATE], ENV)).toStrictEqual([
+      ENV.GITHUB_ENV,
+      ENV.GITHUB_PATH,
+      ENV.GITHUB_STATE,
+    ]);
+  });
+
+  it("matches a write_through entry through a symlink, and names each by its real path", () => {
+    const realpath = (p: string) => p.replace(/^\/home\//, "/var/home/");
+
+    expect(sandboxReadonlyFileCommands([realpath(ENV.GITHUB_PATH)], ENV, realpath)).toStrictEqual([
+      realpath(ENV.GITHUB_ENV),
+      realpath(ENV.GITHUB_STATE),
+    ]);
+  });
+
+  it("skips one that is not set", () => {
+    expect(sandboxReadonlyFileCommands([], { GITHUB_ENV: ENV.GITHUB_ENV })).toStrictEqual([
+      ENV.GITHUB_ENV,
+    ]);
   });
 });
 

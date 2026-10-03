@@ -31,11 +31,9 @@ jobs:
             echo "built" > dist/artifact.txt
 
             # Discarded when the step ends: nothing else is exempt from the
-            # overlay, including $GITHUB_WORKSPACE outside ./dist, $HOME, and
-            # the runner's own $GITHUB_ENV.
+            # overlay, including $GITHUB_WORKSPACE outside ./dist and $HOME.
             echo "planted" > "$GITHUB_WORKSPACE/planted.txt"
             echo "planted" > "$HOME/.buildcage-example-planted"
-            echo "PLANTED=1" >> "$GITHUB_ENV"
 
       # An output the sandboxed command set is untrusted input, so it belongs in
       # an if: condition or an env: entry, never interpolated into a run: body.
@@ -56,4 +54,3 @@ jobs:
 
           test ! -e planted.txt || { echo "::error::planted.txt survived the step"; exit 1; }
           test ! -e "$HOME/.buildcage-example-planted" || { echo "::error::the \$HOME marker survived the step"; exit 1; }
-          test -z "$PLANTED" || { echo "::error::the \$GITHUB_ENV append survived the step"; exit 1; }

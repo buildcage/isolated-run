@@ -1,10 +1,10 @@
 #!/bin/bash
 # Verifies post.ts validates values read back from $GITHUB_STATE instead of
-# trusting them. In persistent mode, $RUNNER_TEMP (where $GITHUB_STATE
-# lives) stays writable inside the sandbox, and the runner keeps only the
-# last value written for a repeated key, so the sandboxed command itself can
-# overwrite container_name and ephemeral_overlay_roots before post.ts reads
-# them back.
+# trusting them. The sandboxed command cannot write the file (case 4), but a
+# process outside the sandbox, such as one an earlier step left running, can,
+# and the runner keeps only the last value written for a repeated key, so it
+# can overwrite container_name and ephemeral_overlay_roots before post.ts
+# reads them back.
 #
 # @actions/core's getState reads STATE_<name> env vars directly, which is
 # how the real runner invokes a post step, so this drives dist/post.cjs
@@ -152,7 +152,7 @@ run_hard_kill_and_post "plain"
 run_hard_kill_and_post "with-spoofed-project-name"
 
 echo ""
-echo "=== 4. premise check: a persistent-mode step can actually append to \$GITHUB_STATE ==="
+echo "=== 4. a persistent-mode step cannot append to \$GITHUB_STATE ==="
 WORKDIR=$(mktemp -d)
 touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 GITHUB_WORKSPACE="$WORKDIR" \
@@ -167,9 +167,9 @@ BUILDCAGE_EOF
 EOF' \
   node dist/main.cjs
 if grep -q "forged-from-inside-the-sandbox" "$WORKDIR/state.env"; then
-  pass "the sandboxed command was able to append to \$GITHUB_STATE (this is the premise the fix above defends against)"
+  fail "the sandboxed command appended to \$GITHUB_STATE"
 else
-  fail "the append never landed in \$GITHUB_STATE -- the premise for this whole test no longer holds; if that's expected, this test needs revisiting"
+  pass "the sandboxed command could not append to \$GITHUB_STATE"
 fi
 rm -rf "$WORKDIR"
 

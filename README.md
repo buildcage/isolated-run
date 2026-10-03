@@ -367,8 +367,8 @@ needs a step of its own.
 
 Use `filesystem_mode: ephemeral` when the command is untrusted and you want to stop it from planting
 something a later, non-isolated step in the same job would pick up: a rewritten `~/.bashrc`,
-`~/.npmrc`, `~/.docker/config.json`, or a `$GITHUB_ENV`/`$GITHUB_PATH`/`$GITHUB_OUTPUT` edit meant
-to run code once the sandbox is gone.
+`~/.npmrc`, `~/.docker/config.json`, or a `$GITHUB_OUTPUT` edit meant to run code once the sandbox
+is gone.
 
 ```yaml
 - uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
@@ -381,13 +381,13 @@ to run code once the sandbox is gone.
 ```
 
 > [!NOTE]
-> Discarding those writes is the point, but the same overlay also drops output the command was
-> meant to produce. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and `$GITHUB_STEP_SUMMARY` all
-> live under `$RUNNER_TEMP`, so whatever the command writes to them is gone once the step ends
-> unless you name that file in `write_through:`. Naming `$GITHUB_STEP_SUMMARY` puts the command's
-> markdown in the same Job Summary this action writes its own report to. That report and the
-> `traffic_artifact_name` output are unaffected either way: both are written from the runner host
-> after the sandboxed command has exited, outside the overlay.
+> Discarding those writes is the point, but the same overlay also drops output the command was meant
+> to produce. `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` live under `$RUNNER_TEMP`, so whatever the
+> command writes to them is gone once the step ends unless you name that file in `write_through:`.
+> Naming `$GITHUB_STEP_SUMMARY` puts the command's markdown in the same Job Summary this action
+> writes its own report to. That report and the `traffic_artifact_name` output are unaffected either
+> way: both are written from the runner host after the sandboxed command has exited, outside the
+> overlay.
 
 Name only what a later step needs, usually the build output. Everything else the command writes is
 discarded, the rest of `$GITHUB_WORKSPACE` included: an edited `package.json` script, a new
@@ -461,16 +461,16 @@ delivered through an allowed domain still runs. Treat it as one layer in a defen
 strategy, a last line of defense so that if something slips through your other measures, at least it
 can't call home.
 
-This action isolates the step it wraps, not the job. What the command sets in `$GITHUB_ENV`,
-`$GITHUB_PATH`, or an output reaches later steps unchanged, and so does anything it writes under
-`$HOME`, `/tmp`, `$RUNNER_TEMP`, or `$GITHUB_WORKSPACE`. The same is true of `$GITHUB_STATE`, which
-this action's own post step reads back after the step ends. Those steps run without this action's
-restrictions unless you wrap them too. If a step runs untrusted code, isolate the steps after it in
-the same job as well, or move them to a separate job, and don't treat an env var, `$PATH` entry, or
-output an isolated step set as trustworthy. Post steps cannot be wrapped and run after the last step.
-This action's own keeps `docker` and `sudo` out of the command's reach, but like any other it
-inherits `$GITHUB_ENV`, so in `persistent` mode an untrusted command can reach every post step.
-`filesystem_mode: ephemeral` with a narrow `write_through:` prevents that.
+This action isolates the step it wraps, not the job. An output the command sets reaches later steps
+unchanged, and so does anything it writes under `$HOME`, `/tmp`, `$RUNNER_TEMP`, or
+`$GITHUB_WORKSPACE`. Those steps run without this action's restrictions unless you wrap them too. If
+a step runs untrusted code, isolate the steps after it in the same job as well, or move them to a
+separate job, and don't treat an output an isolated step set as trustworthy. Post steps cannot be
+wrapped and run after the last step. `$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE`, which reach
+every later step and post step at once, are read-only inside the sandbox in either mode, and
+`write_through:` can open only the first two, by name. Other paths stay open in `persistent` mode:
+a `~/.npmrc` the command leaves still runs code in a later npm step. `filesystem_mode: ephemeral`
+with a narrow `write_through:` prevents that.
 
 An allowlist also cannot stop anything leaving through a service you had to allow anyway. That is a
 structural limit. What it does stop is traffic to a destination that is not on the list, and
@@ -643,9 +643,15 @@ generated allowlist already has them.
 
 **My step's outputs disappear under `filesystem_mode: ephemeral`.**
 
-`$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STEP_SUMMARY` live under
-`$RUNNER_TEMP`, which the overlay discards. Name the ones the command writes to in
-`write_through:`. See [Filesystem access](#filesystem-access).
+`$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` live under `$RUNNER_TEMP`, which the overlay discards.
+Name the ones the command writes to in `write_through:`. See
+[Filesystem access](#filesystem-access).
+
+**My step fails writing to `$GITHUB_ENV` or `$GITHUB_PATH` with `Read-only file system`.**
+
+Both are read-only inside the sandbox in either filesystem mode, since what they set reaches every
+later step and post step. Name the one the command writes to in `write_through:`, such as
+`$GITHUB_ENV`, or hand the value to the next step through `$GITHUB_OUTPUT` and that step's `env:`.
 
 ## GitHub's native egress firewall
 

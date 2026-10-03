@@ -84,31 +84,32 @@ rm -rf "$CASE1"
 # --- Case 2+3: the runner's own generated files are discarded by default
 # and persisted when named in write_through:. Placed under RUNNER_TEMP (as
 # they are for real) so they're covered by RUNNER_TEMP's own overlay in the
-# default case.
+# default case. GITHUB_ENV is read-only rather than discarded; see
+# integration-test-file-commands.sh.
 CASE2=$(mktemp -d)
-GITHUB_ENV_FILE2=$(mktemp)
+GITHUB_OUTPUT_FILE2=$(mktemp)
 touch "$CASE2/state.env" "$CASE2/summary.md"
-# Not via run_ephemeral: GITHUB_ENV/RUNNER_TEMP need to be set together
+# Not via run_ephemeral: GITHUB_OUTPUT/RUNNER_TEMP need to be set together
 # below, unlike its fixed default env.
-GITHUB_ENV="$GITHUB_ENV_FILE2" \
+GITHUB_OUTPUT="$GITHUB_OUTPUT_FILE2" \
 GITHUB_WORKSPACE="$CASE2" \
 GITHUB_STATE="$CASE2/state.env" \
 GITHUB_STEP_SUMMARY="$CASE2/summary.md" \
-RUNNER_TEMP="$(dirname "$GITHUB_ENV_FILE2")" \
+RUNNER_TEMP="$(dirname "$GITHUB_OUTPUT_FILE2")" \
 BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_FILESYSTEM_MODE="ephemeral" \
 INPUT_WRITE_THROUGH="" \
-INPUT_RUN='echo "SHOULD_NOT_PERSIST=1" >> "$GITHUB_ENV"' \
+INPUT_RUN='echo "SHOULD_NOT_PERSIST=1" >> "$GITHUB_OUTPUT"' \
   node "$REPO_ROOT/dist/main.cjs" >"$CASE2/out.log" 2>&1
 CODE2=$?
-if [ "$CODE2" = "0" ] && ! grep -q SHOULD_NOT_PERSIST "$GITHUB_ENV_FILE2"; then
-  pass "an append to \$GITHUB_ENV during the step is not reflected afterwards (default)"
+if [ "$CODE2" = "0" ] && ! grep -q SHOULD_NOT_PERSIST "$GITHUB_OUTPUT_FILE2"; then
+  pass "an append to \$GITHUB_OUTPUT during the step is not reflected afterwards (default)"
 else
-  fail "an append to \$GITHUB_ENV during the step was reflected afterwards despite no write_through: entry (exit $CODE2) -- see $CASE2/out.log"
+  fail "an append to \$GITHUB_OUTPUT during the step was reflected afterwards despite no write_through: entry (exit $CODE2) -- see $CASE2/out.log"
   cat "$CASE2/out.log"
 fi
-rm -rf "$CASE2" "$GITHUB_ENV_FILE2"
+rm -rf "$CASE2" "$GITHUB_OUTPUT_FILE2"
 
 # Case 3 covers all three files a step realistically produces output
 # through, since the README tells readers to name any of them.
