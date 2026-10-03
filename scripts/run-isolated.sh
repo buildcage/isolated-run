@@ -156,16 +156,17 @@ trap cleanup EXIT
 trap 'CODE=130; exit' INT
 trap 'CODE=143; exit' TERM
 
-# A failed setup command would otherwise end the step with exit 1 and no word
-# of its own, the same as a command that exits 1. Closes the group first so
-# the annotation is not folded away inside it.
+# A failed setup command would otherwise end the step with a bare exit 1, the
+# same as a command that exits 1. Closes the group first so the annotation is
+# not folded away inside it.
 setup_failed() {
-  # The first line names a multi-line command well enough.
-  local command=${3%%$'\n'*}
+  # The first line names a multi-line command well enough; $LINENO would
+  # give its last.
+  local command=${2%%$'\n'*}
   [ "$IN_GROUP" = "1" ] && group_end
-  echo "::error::buildcage: sandbox setup failed (exit $1 at line $2): ${command//'%'/'%25'}" >&2
+  echo "::error::buildcage: sandbox setup failed (exit $1): ${command//'%'/'%25'}" >&2
 }
-trap 'setup_failed "$?" "$LINENO" "$BASH_COMMAND"' ERR
+trap 'setup_failed "$?" "$BASH_COMMAND"' ERR
 
 # Bind-mounted first, before any of the network setup below: it has no
 # dependency on the netns/veth work that follows, and doing it first
