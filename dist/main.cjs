@@ -25393,7 +25393,9 @@ function defaultSpawn(command, args, input) {
 	});
 	return child.stdin.on("error", () => {}), child.stdin.end(input), {
 		exited: new Promise((resolve) => {
-			child.on("error", () => resolve(null)), child.on("close", (code) => resolve(code));
+			child.on("error", () => {
+				child.pid === void 0 && resolve(null);
+			}), child.on("close", (code) => resolve(code));
 		}),
 		kill: (signal) => child.kill(signal)
 	};

@@ -55,7 +55,10 @@ function defaultSpawn(command: string, args: string[], input: Buffer): Child {
   child.stdin.on("error", () => {});
   child.stdin.end(input);
   const exited = new Promise<number | null>((resolve) => {
-    child.on("error", () => resolve(null));
+    // Also emitted when a kill fails, while the child still runs.
+    child.on("error", () => {
+      if (child.pid === undefined) resolve(null);
+    });
     child.on("close", (code) => resolve(code));
   });
   return { exited, kill: (signal) => child.kill(signal) };

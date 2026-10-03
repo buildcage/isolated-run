@@ -229,7 +229,7 @@ set +e
 #
 # A signal from here on means the step was cancelled (see sandbox/run.ts):
 # the first goes on to `runc run`, which forwards it to the container, and
-# any later one kills it. Either way the command's own status wins.
+# any later one kills it. Either way CODE is what `runc run` exits with.
 STOPPING=0
 stop_sandbox() {
   if [ "$STOPPING" = "0" ]; then
