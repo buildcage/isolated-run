@@ -25185,7 +25185,7 @@ function buildEnvBlob(resolved) {
 }
 const ENV_LOADER_SCRIPT = `#!/bin/bash
 # Applies the step environment from stdin, then runs $1 as a child: forwards
-# signals to it, reaps orphans, and exits with its status. See
+# signals to its process group, reaps orphans, and exits with its status. See
 # sandbox/env-loader.ts for the wire format.
 #
 # The records go to env(1) rather than being exported, so a step variable
@@ -25195,12 +25195,16 @@ const ENV_LOADER_SCRIPT = `#!/bin/bash
 set -u
 
 # Trapped before reading, as PID 1 drops untrapped signals. Any that arrive
-# before the child exists are held for it.
+# before the child exists are held for it. A forwarded one goes to the
+# child's whole process group, which holds the command the script runs, as a
+# terminal's Ctrl-C does.
 child=
 pending=
+forwarded=
 forward() {
   if [ -n "$child" ]; then
-    kill -s "$1" "$child" 2>/dev/null
+    forwarded=1
+    kill -s "$1" -- "-$child" 2>/dev/null
   else
     pending="$pending $1"
   fi
@@ -25226,21 +25230,21 @@ fi
 # Never hand the run script the tail of this blob.
 exec 0</dev/null
 
-# Without job control bash starts a background child with SIGINT and SIGQUIT
-# ignored; \`trap -\` restores them (bash 4.4+). Held signals are raised only
-# after that, from inside the child. A held SIGQUIT is still dropped, since bash
+# Job control puts the child in a process group of its own, and leaves SIGINT
+# and SIGQUIT as they are rather than ignoring them in it. Held signals are
+# raised from inside the child. A held SIGQUIT is still dropped, since bash
 # ignores it in itself.
 held=$pending
+set -m
 {
-  trap - INT QUIT
   for sig in $held; do kill -s "$sig" "$BASHPID"; done
   # $1 is this run's script, whose path holds no "=" for env to read as a record.
   exec /usr/bin/env -i -- \${records[@]+"\${records[@]}"} "$1"
 } &
 child=$!
-# Signals that arrived during the fork. An INT or QUIT among them can still hit
-# the ignore.
-for sig in \${pending#"$held"}; do kill -s "$sig" "$child" 2>/dev/null; done
+set +m
+# Signals that arrived during the fork.
+for sig in \${pending#"$held"}; do forward "$sig"; done
 # Keeps bash's "Killed" job notice out of the step's output. The child has its
 # own stderr.
 exec 2>/dev/null
@@ -25248,7 +25252,15 @@ exec 2>/dev/null
 # child's own status, 128+n if a signal killed it, as runc reports for an init.
 while kill -0 "$child" 2>/dev/null; do wait "$child"; done
 wait "$child"
-exit $?
+status=$?
+# The script can exit on a signal while the command it ran is still winding
+# down, and this process exiting would kill it.
+if [ -n "$forwarded" ]; then
+  nap=/usr/bin/sleep
+  [ -x "$nap" ] || nap=/bin/sleep
+  while kill -0 -- "-$child" 2>/dev/null; do "$nap" 0.1; done
+fi
+exit $status
 `;
 function writeEnvLoader(execDir) {
 	let loaderPath = (0, node_path.join)(execDir, "env-loader.sh");
