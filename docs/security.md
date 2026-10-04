@@ -443,11 +443,11 @@ more than intended.
 
 #### The CA and its private key
 
-The CA and its key are generated fresh each time this step's proxy container starts. The CA is
-valid for two days, so a copy that escapes cleanup soon stops being trusted. Its private key never
-leaves the container: HAProxy signs each per-SNI certificate with it, and only the certificate is
-copied out, into this run's scratch directory. The step removes the container with
-`docker compose down` before it ends, and the key with it.
+The CA and its key are generated fresh when this step's proxy container is created. The CA is valid
+for two days, so a copy that escapes cleanup soon stops being trusted. Its private key never leaves
+the container: HAProxy signs each per-SNI certificate with it, and only the certificate is copied
+out, into this run's scratch directory. The step removes the container with `docker compose down`
+before it ends, and the key with it.
 
 ## Attempts to get around it
 
