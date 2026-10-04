@@ -327,11 +327,11 @@ idle ssh session or pooled database connection stays open until then.
 
 ### TLS passthrough: `allowed_tls_rules`
 
-For TLS traffic that isn't HTTPS, and for HTTPS that must not be decrypted, such as gRPC: `inspect`
-answers no ALPN, so a client that requires HTTP/2 fails. The SNI and port are
-checked and the connection passes through undecrypted, so the command validates the origin's own
-certificate. The name is still resolved by the proxy, so a passthrough goes where the proxy resolved
-it and not where the command aimed:
+Use this for TLS traffic that isn't HTTPS, and for HTTPS whose client requires HTTP/2, such as gRPC:
+`inspect` answers no ALPN, so such a client fails there. The SNI and port are checked and the
+connection passes through undecrypted, so the command validates the origin's own certificate. The
+name is still resolved by the proxy, so a passthrough goes where the proxy resolved it and not where
+the command aimed:
 
 ```yaml
 allowed_tls_rules: |
@@ -693,6 +693,10 @@ The artifact is uploaded even when the step fails, since a failing run is when i
 Query strings are kept verbatim here, since that is also where an exfiltration payload would go. The
 Job Summary is the exception: it replaces credential query parameters, see
 [Credentials in a URL](./security.md#credentials-in-a-url).
+
+Treat the artifact as sensitive: it keeps any credential a build put in a query or a path. A later
+job in the same run can fetch it with `actions/download-artifact`, and anyone who can read the
+repository can fetch it through the API, until it expires.
 
 ## CA trust variables
 

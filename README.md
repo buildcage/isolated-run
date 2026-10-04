@@ -155,7 +155,7 @@ with defaults and the engines each input applies to, is in
 Use `label` to tell several steps' report sections apart when the action appears more than once in a
 job.
 
-The inputs can also live in a YAML file next to the code they are about, named by `config_file`. See
+The inputs can also be kept in a YAML file in the repository, named by `config_file`. See
 [Config file](./docs/reference.md#config-file).
 
 ### Operation modes
@@ -333,10 +333,10 @@ writable path, so a `write_through:` entry cannot take the sandbox's CA trust wi
 
 `filesystem_mode` controls what happens to those writes once the step ends:
 
-| `filesystem_mode`          | What it does                                                                                                                                                                                             |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, exactly as today. Everything else is read-only, `$GITHUB_ENV`/`$GITHUB_PATH`/`$GITHUB_STATE` included. |
-| `ephemeral` (experimental) | Every writable path is discarded when the step ends (via an overlay). A host mount under one gets an overlay of its own, with [exceptions](./docs/reference.md#ephemeral-overlays).                      |
+| `filesystem_mode`          | What it does                                                                                                                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, as they would without the sandbox.                                                |
+| `ephemeral` (experimental) | Every writable path is discarded when the step ends (via an overlay). A host mount under one gets an overlay of its own, with [exceptions](./docs/reference.md#ephemeral-overlays). |
 
 `write_through:` names the paths whose writes reach the real host filesystem in either mode, the
 paths that opt out of whichever default applies:
@@ -351,6 +351,9 @@ never widens that set: `ephemeral` does not make a read-only path writable. Nor 
 change file ownership, and the sandboxed command runs as the runner's own user with every capability
 dropped and `no_new_privileges` set, so `sudo` and setuid binaries do nothing for it. A path the
 runner user could not write outside the sandbox stays unwritable inside it.
+
+`$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` stay read-only in either mode, although they sit
+under `$RUNNER_TEMP`; see [`write_through` paths](./docs/reference.md#write_through-paths).
 
 The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) and this action's own
 checkout stay read-only, since the action runs `docker` and its post script from them after the
@@ -470,9 +473,10 @@ unchanged, and so does anything it writes under `$HOME`, `/tmp`, `$RUNNER_TEMP`,
 `$GITHUB_WORKSPACE`. Those steps run without this action's restrictions unless you wrap them too. If
 a step runs untrusted code, isolate the steps after it in the same job as well, or move them to a
 separate job, and don't treat an output an isolated step set as trustworthy. Post steps cannot be
-wrapped and run after the last step. `$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE`, which reach
-every later step and post step at once, are read-only inside the sandbox in either mode, and
-`write_through:` can open only the first two, by name. Other paths stay open in `persistent` mode:
+wrapped and run after the last step. `$GITHUB_ENV` and `$GITHUB_PATH`, which reach every later step
+and post step at once, and `$GITHUB_STATE`, which this action's post step reads, are read-only
+inside the sandbox in either mode, and `write_through:` can open only the first two, by name. Other
+paths stay open in `persistent` mode:
 a `~/.npmrc` the command leaves still runs code in a later npm step. `filesystem_mode: ephemeral`
 with a narrow `write_through:` prevents that.
 
