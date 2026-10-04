@@ -12,7 +12,6 @@
 
 import { accessSync, constants, readlinkSync, realpathSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, normalize, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
@@ -22,12 +21,12 @@ import { isAtOrUnder } from "./paths.ts";
 import { pinCommand, pinCommandPathEnv, SYSTEM_PATH } from "./pinned-commands.ts";
 import { resolveWriteThroughPaths } from "./write-through.ts";
 
-// rollup's cjs output doesn't convert import.meta.dirname (it silently
-// becomes undefined), so use this form instead.
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-/** The bundle runs from `dist/`, one level below the checkout. */
-const ACTION_ROOT = resolve(__dirname, "..");
+/** The checkout as the runner spelled it, which is the path it runs the post
+ *  step from: the bundle runs from `dist/`, one level below it. Node resolves
+ *  symlinks in __filename but not in argv. */
+function runnerActionRoot(): string {
+  return resolve(dirname(process.argv[1]!), "..");
+}
 
 const PINNED_COMMANDS = ["docker", "sudo"] as const;
 
@@ -283,7 +282,7 @@ export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
 export function sandboxReadonlyHostDirs(
   persisting: string[],
   env: NodeJS.ProcessEnv,
-  actionRoot: string = ACTION_ROOT,
+  actionRoot: string = runnerActionRoot(),
   deps: Pick<FindCommandDeps, "readlink" | "realpathDir"> = realFindCommandDeps,
 ): string[] {
   const docker = dockerConfigDir(env);
@@ -309,6 +308,7 @@ export function sandboxReadonlyHostDirs(
   ];
   const roots = persisting.filter((p) => p !== "/");
   return candidates.flatMap(({ name, dir, fix }) => {
+    if (persisting.includes(dir) || persisting.includes(deps.realpathDir(dir))) return [];
     const resolved = resolveThroughFixedLinks(dir, roots, deps.readlink);
     if ("link" in resolved) {
       throw new SandboxError(
@@ -318,7 +318,7 @@ export function sandboxReadonlyHostDirs(
       );
     }
     const real = resolved.real;
-    return persisting.some((p) => isAtOrUnder(real, p)) && !persisting.includes(real) ? [real] : [];
+    return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
   });
 }
 

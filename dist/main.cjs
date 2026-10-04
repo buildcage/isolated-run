@@ -23235,7 +23235,7 @@ function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, http
 }
 //#endregion
 //#region src/lib/compose-file.ts
-const __dirname$3 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$3, "../docker/compose.action.yaml");
+const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$2, "../docker/compose.action.yaml");
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
 }
@@ -24927,7 +24927,10 @@ function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists,
 }
 //#endregion
 //#region src/lib/sandbox/host-commands.ts
-const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), ACTION_ROOT = (0, node_path.resolve)(__dirname$2, ".."), PINNED_COMMANDS = ["docker", "sudo"];
+function runnerActionRoot() {
+	return (0, node_path.resolve)((0, node_path.dirname)(process.argv[1]), "..");
+}
+const PINNED_COMMANDS = ["docker", "sudo"];
 function persistingWritablePaths(filesystemMode, writeThroughPaths, env) {
 	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
 		workdir: env.GITHUB_WORKSPACE,
@@ -25031,7 +25034,7 @@ function pinningPaths(readWriteThroughInput, env) {
 function dockerConfigDir(env) {
 	return env.DOCKER_CONFIG ? (0, node_path.resolve)(env.DOCKER_CONFIG) : env.HOME ? (0, node_path.join)(env.HOME, ".docker") : void 0;
 }
-function sandboxReadonlyHostDirs(persisting, env, actionRoot = ACTION_ROOT, deps = realFindCommandDeps) {
+function sandboxReadonlyHostDirs(persisting, env, actionRoot = runnerActionRoot(), deps = realFindCommandDeps) {
 	let docker = dockerConfigDir(env), candidates = [{
 		name: "This action's checkout",
 		dir: actionRoot,
@@ -25042,10 +25045,11 @@ function sandboxReadonlyHostDirs(persisting, env, actionRoot = ACTION_ROOT, deps
 		fix: () => `this action runs docker on the host after the command exits. Set DOCKER_CONFIG to its real path, ${JSON.stringify(deps.realpathDir(docker))}.`
 	}] : []], roots = persisting.filter((p) => p !== "/");
 	return candidates.flatMap(({ name, dir, fix }) => {
+		if (persisting.includes(dir) || persisting.includes(deps.realpathDir(dir))) return [];
 		let resolved = resolveThroughFixedLinks(dir, roots, deps.readlink);
 		if ("link" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and ${fix(resolved.link)}`, "HOST_DIR_UNPROTECTABLE");
 		let real = resolved.real;
-		return persisting.some((p) => isAtOrUnder(real, p)) && !persisting.includes(real) ? [real] : [];
+		return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
 	});
 }
 function resolveThroughFixedLinks(path, roots, readlink) {

@@ -479,6 +479,17 @@ describe("sandboxReadonlyHostDirs", () => {
     ).toStrictEqual([]);
   });
 
+  it("refuses nothing for a directory write_through names, even through a symlink", () => {
+    expect(
+      sandboxReadonlyHostDirs(
+        [...PERSISTENT, `${HOME}/.docker`],
+        { HOME },
+        ACTION,
+        withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),
+      ),
+    ).toStrictEqual([ACTION]);
+  });
+
   it("refuses a symlink loop", () => {
     expect(() =>
       sandboxReadonlyHostDirs(PERSISTENT, { HOME, DOCKER_CONFIG: "/opt/a" }, ACTION, {
