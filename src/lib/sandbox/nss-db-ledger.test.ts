@@ -24,6 +24,7 @@ import {
   releaseNssDb,
   stillThere,
   useNameFor,
+  withNssDbLock,
   type NssDbLedgerDeps,
 } from "./nss-db-ledger.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
@@ -383,8 +384,8 @@ describe("the lock", () => {
     expect(Object.keys(ledger().uses)).toStrictEqual(["sandbox-a"]);
   });
 
-  // A waiter that gave up first would fail its step while the lock still
-  // looked held. The clock moves a second per look.
+  // The clock moves a second per look, so the lock is taken over only if the
+  // waiter keeps trying past the hold limit.
   it("is taken over within the wait when a live pid holds it too long", () => {
     holdLock(999_999);
     let clock = Date.now();
@@ -392,6 +393,20 @@ describe("the lock", () => {
     claim(step("sandbox-a"), { pidAlive: () => true, now: () => new Date((clock += 1_000)) });
 
     expect(Object.keys(ledger().uses)).toStrictEqual(["sandbox-a"]);
+  });
+
+  // link(2) keeps the mtime, so a lock linked after a long wait would look as
+  // old as the wait, and the next waiter would take it from its live holder.
+  it("starts its age when it is taken, not when the wait began", () => {
+    holdLock(999_999);
+    let clock = Date.now();
+
+    const age = withNssDbLock(
+      () => Date.now() - lstatSync(join(base, "nssdb-ledger.lock")).mtimeMs,
+      { base, pidAlive: () => true, now: () => new Date((clock += 1_000)) },
+    );
+
+    expect(age).toBeLessThan(500);
   });
 
   it.each([

@@ -23889,9 +23889,9 @@ function stillThere(path, id, deps = {}) {
 }
 function acquireLock(lock, { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 150 }) {
 	let mine = `${lock}.${process.pid}`;
-	(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
 	try {
 		retryBriefly(() => {
+			(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
 			try {
 				(0, node_fs.linkSync)(mine, lock);
 			} catch (e) {
