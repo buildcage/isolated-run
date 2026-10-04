@@ -15,6 +15,9 @@ ARG COREDNS_SHA256_ARM64=bf26782d19b5340e3e6cb50f1ed6df72f58e4a30932c79d167f0f0a
 # Stated so a base image bump cannot move HAProxy quietly: apk fails rather than
 # installing whatever the new Alpine carries.
 ARG HAPROXY_BRANCH=3.4
+# Built from source by haproxy-build until a 3.4 release carries its patches.
+ARG HAPROXY_VERSION=3.4.6
+ARG HAPROXY_SHA512=04d20bca04dc6d5b18181c002997fc68e87dfdf2ff309753c7cf3383355ebcfce2d2b62a20f4d0e49bd75d25aa12da8d33f4b39a23b618199787cd1468fc0fe9
 
 # Prepare dependencies: runc's official release binaries are already
 # statically linked (including libseccomp), so no compilation is needed,
@@ -69,6 +72,22 @@ COPY src/core/ ./src/core/
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm run build:qjs
 
+# Alpine's package build flags, plus docker/inspect/haproxy/*.patch.
+FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS haproxy-build
+ARG HAPROXY_BRANCH
+ARG HAPROXY_VERSION
+ARG HAPROXY_SHA512
+RUN apk add --no-cache build-base curl patch linux-headers lua5.4-dev openssl-dev pcre2-dev zlib-dev
+COPY docker/inspect/haproxy/ /patches/
+RUN case "$HAPROXY_VERSION" in "$HAPROXY_BRANCH".*) ;; *) echo "HAPROXY_VERSION is not on $HAPROXY_BRANCH" >&2; exit 1 ;; esac && \
+    curl -fsSL -o /tmp/haproxy.tgz "https://www.haproxy.org/download/${HAPROXY_BRANCH}/src/haproxy-${HAPROXY_VERSION}.tar.gz" && \
+    echo "${HAPROXY_SHA512}  /tmp/haproxy.tgz" | sha512sum -c - && \
+    mkdir /src && tar -C /src --strip-components=1 -xzf /tmp/haproxy.tgz && \
+    cd /src && for p in /patches/*.patch; do patch -p1 --fuzz=0 < "$p" || exit 1; done && \
+    make -j"$(nproc)" TARGET=linux-musl USE_PCRE2=1 USE_PCRE2_JIT=1 USE_OPENSSL=1 USE_QUIC=1 \
+      USE_ZLIB=1 USE_LUA=1 USE_NS=1 USE_PROMEX=1 LUA_LIB=/usr/lib/lua5.4 LUA_INC=/usr/include/lua5.4 && \
+    install -D -m 755 haproxy /out/haproxy
+
 # Final image
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
@@ -91,6 +110,8 @@ RUN apk add --no-cache \
       iptables \
       curl \
       quickjs-ng
+# The package still provides the haproxy user and the libraries.
+COPY --from=haproxy-build /out/haproxy /usr/sbin/haproxy
 
 ENV S6_KEEP_ENV=1
 ENV S6_LOGGING=0

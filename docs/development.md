@@ -308,7 +308,8 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │   ├── common/                # Image files both engines share: s6 services, init-iptables
 │   ├── universal/             # alpine + haproxy/CoreDNS/iptables/s6-overlay + pinned runc +
 │   │                          # gen-seccomp-profile
-│   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay
+│   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay; haproxy/ holds the
+│   │                          # patches its HAProxy is built with
 │   ├── gen-seccomp-profile/   # Go module: derives a seccomp filter from Docker's default profile
 │   ├── compose.action.yaml    # Runtime compose file the action uses (verified, digest-pinned
 │   │                          # image ref), distinct from the top-level compose.yaml below
