@@ -2,7 +2,7 @@ Third-Party Licenses
 ====================
 
 The isolated-run proxy images (docker/{universal,inspect}/Dockerfile)
-includes the following third-party software. Each component retains its
+include the following third-party software. Each component retains its
 original license. The isolated-run source code itself is licensed under the
 MIT License (see LICENSE file).
 
