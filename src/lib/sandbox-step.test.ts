@@ -20,6 +20,7 @@ const mocks = {
   readTrafficArtifactInputs: vi.fn(),
   saveWriteThroughForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
+  checkScratchBaseParent: vi.fn(),
   checkPasswordlessSudo: vi.fn(),
   checkOverlayfsSupport: vi.fn(),
   createAnnotation: vi.fn(),
@@ -258,6 +259,19 @@ describe("runSandboxStep", () => {
       orderOf(mocks.verifyImageDigestOrThrow),
     );
     expect(orderOf(mocks.verifyImageDigestOrThrow)).toBeLessThan(orderOf(mocks.startSandboxProxy));
+  });
+
+  it("refuses a symlinked /var/tmp before any privileged setup", async () => {
+    mocks.checkScratchBaseParent.mockImplementation(() => {
+      throw new SandboxError("/var/tmp is a symlink to /tmp", "SCRATCH_BASE_SYMLINKED");
+    });
+
+    await expect(runSandboxStep(ENV, deps)).rejects.toMatchObject({
+      code: "SCRATCH_BASE_SYMLINKED",
+    });
+    expect(orderOf(mocks.pinHostCommands)).toBeLessThan(orderOf(mocks.checkScratchBaseParent));
+    expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
+    expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });
 
   it("validates the write_through lines, resolved without touching the host", async () => {

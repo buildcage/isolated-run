@@ -52,6 +52,7 @@ import {
 import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
+import { checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 
@@ -82,6 +83,7 @@ export interface SandboxStepDeps {
   readTrafficArtifactInputs: typeof readTrafficArtifactInputs;
   saveWriteThroughForPost: typeof saveWriteThroughForPost;
   validateFilesystemInputs: typeof validateFilesystemInputs;
+  checkScratchBaseParent: typeof checkScratchBaseParent;
   checkPasswordlessSudo: typeof checkPasswordlessSudo;
   checkOverlayfsSupport: typeof checkOverlayfsSupport;
   createAnnotation: typeof createAnnotation;
@@ -138,6 +140,7 @@ const realDeps: SandboxStepDeps = {
   readTrafficArtifactInputs,
   saveWriteThroughForPost,
   validateFilesystemInputs,
+  checkScratchBaseParent,
   checkPasswordlessSudo,
   checkOverlayfsSupport,
   createAnnotation,
@@ -219,6 +222,7 @@ export async function runSandboxStep(
     readTrafficArtifactInputs,
     saveWriteThroughForPost,
     validateFilesystemInputs,
+    checkScratchBaseParent,
     checkPasswordlessSudo,
     checkOverlayfsSupport,
     createAnnotation,
@@ -307,6 +311,7 @@ export async function runSandboxStep(
 
   // Fail fast, before image verification or starting the proxy container, if
   // the runner can't support the isolation setup at all.
+  checkScratchBaseParent();
   checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") checkOverlayfsSupport();
 

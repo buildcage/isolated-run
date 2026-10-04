@@ -694,6 +694,8 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   overlay mount's `upperdir` cannot sit on overlayfs. The probe's leftovers are removed with
   `sudo rm -rf`, which the mode's own cleanup needs later anyway, so a too-narrow sudoers scope
   fails the preflight as well. `persistent` remains available on any supported runner.
+- **`/var/tmp` must be a real directory**, not a symlink, since runc refuses a sandbox root whose
+  path goes through one. The step fails before any setup where it is.
 - **Not on a host shared with other local users**, ideally. `/var/tmp` is world-writable, so another
   unprivileged local account could pre-create `/var/tmp/buildcage-<uid>` as a symlink or a
   world-writable directory and redirect the OCI bundle, the root-run `mount --rbind /` and cleanup's

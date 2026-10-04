@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, lstatSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, lstatSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join, dirname, basename, resolve } from "node:path";
 
 import { errorMessage } from "#core/lib/errors.ts";
@@ -27,6 +27,29 @@ import { runPinnedHostCommand } from "./run-host-command.ts";
 // getuid is asserted rather than probed, as everywhere else this uid is read:
 // the isolation is Linux-only, so a platform without it has nothing to run.
 export const SANDBOX_SCRATCH_BASE = `/var/tmp/buildcage-${process.getuid!()}`;
+
+/**
+ * The scratch base's parent has to be a real directory: runc refuses a
+ * sandbox root whose path runs through a symlink, which would fail every step
+ * with a message naming neither. A missing parent is left to
+ * ensureOwnScratchBase's mkdir to report.
+ */
+export function checkScratchBaseParent(realpath: (path: string) => string = realpathSync): void {
+  const parent = dirname(SANDBOX_SCRATCH_BASE);
+  let real: string;
+  try {
+    real = realpath(parent);
+  } catch {
+    return;
+  }
+  if (real !== parent) {
+    throw new SandboxError(
+      `${parent} is a symlink to ${real}. runc will not run the sandbox under a path ` +
+        `that goes through a symlink, so this action needs ${parent} to be a real directory.`,
+      "SCRATCH_BASE_SYMLINKED",
+    );
+  }
+}
 
 /**
  * Pure: mount points from raw /proc/self/mountinfo content that are
