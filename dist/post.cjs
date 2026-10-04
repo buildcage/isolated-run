@@ -785,11 +785,15 @@ function resolveWriteThroughPaths(input, env) {
 //#region src/lib/sandbox/host-commands.ts
 const PINNED_COMMANDS = ["docker", "sudo"];
 function persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath = realPathOf) {
-	let paths = filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
-		...resolveDefaultWritableDirs(env, realpath),
-		writablePaths: writeThroughPaths
+	let realWriteThrough = writeThroughPaths.map((path) => {
+		let real = realpath(path);
+		if (real === "/" && path !== "/") throw new SandboxError(`write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink.`, "INVALID_WRITE_THROUGH_PATH");
+		return real;
 	});
-	return [...new Set(paths.map((p) => realpath(p)))];
+	return filesystemMode === "ephemeral" ? [...new Set(realWriteThrough)] : writableDirsOf({
+		...resolveDefaultWritableDirs(env, realpath),
+		writablePaths: realWriteThrough
+	});
 }
 const realFindCommandDeps = {
 	...realSymlinkDeps,
