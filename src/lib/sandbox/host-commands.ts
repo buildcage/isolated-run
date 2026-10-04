@@ -100,13 +100,18 @@ export function resolveDefaultWritableDirs(
   };
 }
 
-function insidePersisting(persisting: string[]): (path: string) => boolean {
-  return (path) => persisting.some((w) => isAtOrUnder(path, w));
+/** Whether a path resolves inside `persisting`, passes through a symlink there, or loops. */
+function reachableFrom(persisting: string[], deps: SymlinkDeps): (path: string) => boolean {
+  const inside = (path: string) => persisting.some((w) => isAtOrUnder(path, w));
+  return (path) => {
+    const resolved = resolveHostPath(path, deps);
+    return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
+  };
 }
 
 /**
- * `pathEnv` without the entries inside `persisting`, judged like
- * findPinnableCommand. Relative and empty entries resolve against the
+ * `pathEnv` without the entries inside `persisting` or through a symlink there,
+ * judged like findPinnableCommand. Relative and empty entries resolve against the
  * workspace, so they go too.
  */
 export function pathOutside(
@@ -115,10 +120,10 @@ export function pathOutside(
   deps: SymlinkDeps = realSymlinkDeps,
 ): string {
   if (persisting.includes("/")) return pathEnv;
-  const inside = insidePersisting(persisting);
+  const reachable = reachableFrom(persisting, deps);
   return pathEnv
     .split(delimiter)
-    .filter((dir) => isAbsolute(dir) && !inside(realPathOf(dir, deps)))
+    .filter((dir) => isAbsolute(dir) && !reachable(dir))
     .join(delimiter);
 }
 
@@ -138,11 +143,7 @@ export function findPinnableCommand(
   deps: FindCommandDeps = realFindCommandDeps,
 ): string | undefined {
   const optedOut = persisting.includes("/");
-  const inside = insidePersisting(persisting);
-  const reachable = (candidate: string): boolean => {
-    const resolved = resolveHostPath(candidate, deps);
-    return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
-  };
+  const reachable = reachableFrom(persisting, deps);
   for (const dir of (pathEnv ?? "").split(delimiter)) {
     if (!isAbsolute(dir)) continue;
     const candidate = join(dir, command);
@@ -234,8 +235,9 @@ export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
  *
  * Throws when one goes through a symlink in a persisting path: the mount
  * protects only the symlink's target, and the sandbox could replace the
- * symlink itself with a directory of its own. Under write_through: / every
- * symlink is replaceable, so none is refused.
+ * symlink itself with a directory of its own. `/` itself is not one of the
+ * paths checked: under write_through: / a symlink anywhere else is replaceable
+ * too, and only one in another persisting path is refused.
  */
 export function sandboxReadonlyHostDirs(
   persisting: string[],

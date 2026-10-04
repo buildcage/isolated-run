@@ -212,9 +212,10 @@ dot, as the rules do before matching it.
 `ts` is HAProxy's termination state and `reason` the refusal reason where the rule that refused
 knew one the line could not otherwise show. `tlserr` carries haproxy's own error from the handshake
 with the origin, which is what tells a connection the proxy would not make from one it could not
-make; the passthrough stage terminates no TLS and logs no such field. `fcerr` names a failed
-handshake with the client (`SSL_HANDSHAKE` and the like), which the report shows as
-`client-tls-failed`. What the report makes of the two is in
+make; the passthrough stage terminates no TLS and logs no such field. `fcerr` is haproxy's error
+on the client connection; an `SSL_*` one on a line with no request is shown as `client-tls-failed`.
+
+What the report makes of those is in
 [Requests that never arrived whole](./reference.md#requests-that-never-arrived-whole), for a
 connection that never delivered a whole request, and in
 [Connections that failed](./reference.md#connections-that-failed), for one the rules allowed that
@@ -275,9 +276,9 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
   did is not written back. The write-back syncs the tree: a directory the database already has is
   entered rather than replaced, a changed file or symlink is renamed over the old one, a directory
   the command made is created with its mode, and what the command removed is removed last. A file
-  the command left alone is not touched. Except for an entry whose type the command changed, which
-  is removed just before its replacement goes in, a write-back that fails partway leaves entries
-  behind rather than losing them.
+  that already matches the copy is not touched. Except for an entry whose type the command changed,
+  which is removed just before its replacement goes in, a write-back that fails partway leaves
+  entries behind rather than losing them.
 - Write-backs to the same database take turns under a lock, so a step never copies the database
   halfway through another's write-back.
 - Which directories Buildcage made and which steps use them is recorded in
@@ -340,11 +341,11 @@ keeps only what differs: `THIRD_PARTY_LICENSES` and the `init-cfg` script that g
 configs. A path in both would be settled silently by copy order, so
 `src/core/lib/docker/engine-files.test.ts` rejects one.
 
-runc and CoreDNS are downloaded at a pinned version and checked against one SHA256 per
-architecture, both set as `ARG`s in each engine's Dockerfile (runc also in `dev/Dockerfile`).
-Renovate updates the version and the SHA256 lines together, taking the digests from the release's
-own checksum files; each SHA256 line's `digestVersion` names the release its digest belongs to. A
-bump by hand changes all three lines.
+runc and CoreDNS are downloaded at a pinned version and checked against one SHA256 per architecture,
+both set as `ARG`s in each engine's Dockerfile (runc also in `dev/Dockerfile`). Renovate updates the
+version and the SHA256 lines together, taking the digests from the release's own checksum files; the
+`digestVersion` in the comment above each SHA256 line tells it which release that digest belongs to.
+A bump by hand changes all of them: the version line, each SHA256 line and each `digestVersion`.
 
 ## Troubleshooting
 

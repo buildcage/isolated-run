@@ -12,7 +12,8 @@
 # sandbox/env-loader.ts), and none of the runner-matching rlimit/shm/hostname
 # overrides (this loop runs inside a container, where they'd match nothing
 # useful). Just enough to run the smoke test with the same
-# namespaces/capabilities/seccomp policy production uses.
+# namespaces/capabilities/seccomp policy production uses, after writing to
+# fd 3 as the loader does.
 set -euo pipefail
 
 NETNS_NAME=""
@@ -58,7 +59,7 @@ jq \
   .linux.readonlyPaths -= $allExtraMasked |
   .process.terminal = false |
   .process.user = {"uid": 1000, "gid": 1000} |
-  .process.args = ["setpriv", "--pdeathsig=KILL", "--", $scriptPath] |
+  .process.args = ["setpriv", "--pdeathsig=KILL", "--", "/bin/sh", "-c", "printf 1 >&3; exec \"$0\" 3>&-", $scriptPath] |
   .process.capabilities = {"bounding":[],"effective":[],"permitted":[],"inheritable":[],"ambient":[]} |
   .process.noNewPrivileges = true
   ' "$BUNDLE_DIR/config.json" > "$BUNDLE_DIR/config.json.new"

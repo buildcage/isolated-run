@@ -4,9 +4,9 @@
  * The post step cannot read config_file again: by the end of the job a later
  * step's sandbox may have rewritten it, and pinning against a write_through
  * without the path a command wrote to could trust a binary planted there.
- * GITHUB_STATE is no better, since the command can write that too. The
- * scratch base is hidden from every sandbox, so the main step leaves the
- * value there instead.
+ * GITHUB_STATE is no better, since a process outside the sandbox can write
+ * that. The scratch base is hidden from every sandbox, so the main step
+ * leaves the value there instead.
  */
 import { createHash } from "node:crypto";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";

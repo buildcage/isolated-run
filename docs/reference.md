@@ -67,8 +67,8 @@ warns and ignores it.
 
 ### Config file
 
-`config_file` names a YAML file in the repository that sets any input but `run`, so the policy can
-sit beside the code that needs it:
+`config_file` names a YAML file in the repository that sets any input but `run` and the deprecated
+`writable`, so the policy can sit beside the code that needs it:
 
 ```yaml
 # ci/buildcage.yml
@@ -230,7 +230,8 @@ connection carries. A leading, trailing or doubled dot is refused.
 
 A `Host` header ending in a dot (`example.com.`) matches as the name without it. An SNI may not end
 in one (RFC 6066), so where a rule is judged on the SNI (`allowed_tls_rules`, and
-`allowed_https_rules` under `universal`), only `**` or a `~` rule matches such a name.
+`allowed_https_rules` under `universal`), only a rule whose name ends in `**`, or a `~` rule
+written to allow the dot, matches such a name.
 
 `**` alone matches an address too: under `**:443`, a request that reaches the proxy through a name
 with `Host: 10.0.0.5` goes to that private address (see
@@ -494,7 +495,7 @@ in neither host table. **Communication details** shows it with ⚠️ and how it
 | Reason              | What happened                                                                         |
 | ------------------- | ------------------------------------------------------------------------------------- |
 | `client-aborted`    | the client closed without sending a request, after the TLS handshake if there was one |
-| `client-tls-failed` | the client gave up the TLS handshake itself (`inspect` only)                          |
+| `client-tls-failed` | the TLS handshake with the client failed (`inspect` only)                             |
 | `client-timeout`    | it held the connection open instead, until the timeout expired                        |
 
 The commonest cause is a container with no `ca-certificates`: the client cannot verify the
@@ -828,7 +829,7 @@ this:
   list its (already-existing) parent directory instead.
 - `$GITHUB_ENV` and `$GITHUB_PATH` are read-only inside the sandbox until named here, even under a
   writable parent such as `$RUNNER_TEMP` or `write_through: /`, since what they set reaches every
-  later step and post step. `$GITHUB_STATE` cannot be named and stays read-only.
+  later step and post step. `$GITHUB_STATE` stays read-only, named or not.
 
 `write_through:` changes how a path is mounted, not who owns it, so pointing it at a system
 directory the runner user cannot write (`/usr`, most of `/etc`) gains nothing. It is meant for paths
@@ -871,10 +872,12 @@ and `/dev`, and to the sandbox's own scratch directory under `/var/tmp`; see
 
 ### The `/` opt-out
 
-`write_through: /` drops the read-only restriction wholesale, so it only means anything under
-`persistent` and is rejected under `ephemeral`, where it would persist every write, the one thing
-that mode exists to prevent. The sentinel is the literal `/` only: an entry that merely _resolves_
-to `/` (a miscounted `../`, say) is an error rather than a silent full opt-out.
+`write_through: /` makes every path writable but those that stay read-only under any writable
+parent: `$GITHUB_ENV`, `$GITHUB_PATH`, `$GITHUB_STATE`, the docker CLI's config directory, this
+action's checkout and the reserved paths above. It only means anything under `persistent` and is
+rejected under `ephemeral`, where it would persist every write, the one thing that mode exists to
+prevent. The sentinel is the literal `/` only: an entry that merely _resolves_ to `/` (a miscounted
+`../`, say) is an error rather than a silent full opt-out.
 
 ### The former input names
 
@@ -883,6 +886,5 @@ was its `filesystem_mode: ephemeral`-only counterpart. `writable:` still works a
 thing, with one change: its entries now go through the resolution above, so a relative entry
 resolves against `$GITHUB_WORKSPACE` rather than being passed through as-is, and a `$NAME` outside
 the seven supported variables is rejected instead of being treated as a literal path. Setting both
-joins their lines. `allow_write:`
-has been removed, and a step still passing it fails with a message saying so rather than silently
-discarding the writes it asked to keep.
+joins their lines. `allow_write:` has been removed, and a step still passing it fails with a message
+saying so rather than silently discarding the writes it asked to keep.
