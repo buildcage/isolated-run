@@ -27,7 +27,7 @@ import { realPathOf, type SymlinkDeps } from "./symlinks.ts";
 import type { HostMount } from "./types.ts";
 import {
   resolveWriteThroughPaths,
-  resolveWriteThroughOnHost,
+  assertNoSymlinkInWriteThrough,
   assertKnownFilesExist,
   ensureWriteThroughTargetsExist,
   WRITE_THROUGH_ALL,
@@ -78,13 +78,14 @@ export interface FilesystemPlan {
   /** filesystem_mode: ephemeral only; already folded (determineOverlayRoots), plus the host
    *  mounts nested under them (nestedMountRoots). [] in persistent mode. */
   overlayRoots: string[];
-  /** Already resolved (resolveWriteThroughPaths, then resolveWriteThroughOnHost) and pre-created
-   *  (ensureWriteThroughTargetsExist), in either filesystem mode. */
+  /** Already resolved (resolveWriteThroughPaths), free of symlinks
+   *  (assertNoSymlinkInWriteThrough) and pre-created (ensureWriteThroughTargetsExist), in
+   *  either filesystem mode. */
   writeThroughPaths: string[];
 }
 
 /** `warn` aside, a test-only seam onto the filesystem dependencies of
- *  resolveWriteThroughOnHost, ensureWriteThroughTargetsExist and determineOverlayRoots. */
+ *  assertNoSymlinkInWriteThrough, ensureWriteThroughTargetsExist and determineOverlayRoots. */
 export interface ResolveFilesystemPlanDeps {
   warn?: (message: string) => void;
   exists?: (path: string) => boolean;
@@ -126,7 +127,7 @@ export function resolveFilesystemPlan(
   env: NodeJS.ProcessEnv,
   deps: ResolveFilesystemPlanDeps = {},
 ): FilesystemPlan {
-  let writeThroughPaths = resolveWriteThroughInput(writeThroughInput, env);
+  const writeThroughPaths = resolveWriteThroughInput(writeThroughInput, env);
 
   // The authoritative call, ahead of the early return below: reaching that
   // with the sentinel under ephemeral would leave the run with no overlay.
@@ -146,12 +147,10 @@ export function resolveFilesystemPlan(
     throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
   }
 
-  // runc follows symlinks in a mount's source and destination, so everything
-  // below checks and mounts the real path.
+  // runc follows symlinks in a mount's source and destination, so an entry with
+  // none on it is the real path the checks below and the mount act on.
   try {
-    writeThroughPaths = [
-      ...new Set(writeThroughPaths.map((p) => resolveWriteThroughOnHost(p, deps))),
-    ];
+    for (const path of writeThroughPaths) assertNoSymlinkInWriteThrough(path, deps);
   } catch (e) {
     throw new SandboxError(
       `Invalid write_through: ${errorMessage(e)}`,

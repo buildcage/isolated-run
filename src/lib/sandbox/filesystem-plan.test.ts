@@ -14,7 +14,7 @@ describe("resolveFilesystemPlan", () => {
   // Everything "exists" by default (candidates + write_through targets) unless
   // a test narrows it, which keeps each test focused on the one thing it checks.
   const alwaysExists = () => true;
-  const notLink = () => ({ uid: 1000, isSymbolicLink: () => false });
+  const notLink = () => ({ isSymbolicLink: () => false });
 
   it("returns an empty plan for persistent mode with no write_through:, without touching the filesystem", () => {
     const exists = vi.fn(alwaysExists);
@@ -118,48 +118,21 @@ describe("resolveFilesystemPlan", () => {
     });
   });
 
-  describe("an entry that passes through a symlink", () => {
-    const link = (links: Record<string, { target: string; uid: number }>) => ({
-      exists: alwaysExists,
-      lstat: (p: string) => ({ uid: links[p]?.uid ?? 1000, isSymbolicLink: () => p in links }),
-      readlink: (p: string) => links[p]!.target,
-      mkdir: () => {},
-      deviceOf: () => 1,
-      listHostMounts: () => [],
-    });
-
-    it("refuses one the runner's uid owns as INVALID_WRITE_THROUGH_PATH, before creating anything", () => {
-      const deps = link({
-        [`${ENV.GITHUB_WORKSPACE}/cache`]: { target: ENV.RUNNER_TEMP, uid: 1000 },
+  it("refuses an entry through a symlink as INVALID_WRITE_THROUGH_PATH, before creating anything", () => {
+    const mkdir = vi.fn();
+    expect.assertions(3);
+    try {
+      resolveFilesystemPlan("ephemeral", "./cache", ENV, {
+        exists: alwaysExists,
+        lstat: (p) => ({ isSymbolicLink: () => p === `${ENV.GITHUB_WORKSPACE}/cache` }),
+        readlink: () => ENV.RUNNER_TEMP,
+        mkdir,
       });
-      const mkdir = vi.fn();
-      expect.assertions(3);
-      try {
-        resolveFilesystemPlan("ephemeral", "./cache", ENV, { ...deps, mkdir });
-      } catch (err) {
-        expect(err).toBeInstanceOf(SandboxError);
-        expect((err as SandboxError).code).toBe("INVALID_WRITE_THROUGH_PATH");
-      }
-      expect(mkdir).not.toHaveBeenCalled();
-    });
-
-    it("checks where a root-owned one leads, not how the entry was written", () => {
-      const deps = link({ "/opt/runc-view": { target: SANDBOX_SCRATCH_BASE, uid: 0 } });
-      expect(() => resolveFilesystemPlan("persistent", "/opt/runc-view", ENV, deps)).toThrow(
-        /overlaps/,
-      );
-      const reserved = reservedInternalDestinations()[0]!;
-      const toReserved = link({ "/opt/dns": { target: reserved, uid: 0 } });
-      expect(() => resolveFilesystemPlan("persistent", "/opt/dns", ENV, toReserved)).toThrow(
-        /is reserved/,
-      );
-    });
-
-    it("hands the real path on to the mounts and the overlay fold", () => {
-      const deps = link({ "/opt/cache": { target: "/data/cache", uid: 0 } });
-      const plan = resolveFilesystemPlan("persistent", "/opt/cache", ENV, deps);
-      expect(plan.writeThroughPaths).toStrictEqual(["/data/cache"]);
-    });
+    } catch (err) {
+      expect(err).toBeInstanceOf(SandboxError);
+      expect((err as SandboxError).code).toBe("INVALID_WRITE_THROUGH_PATH");
+    }
+    expect(mkdir).not.toHaveBeenCalled();
   });
 
   it("catches an overlap that only normalization reveals", () => {
@@ -269,7 +242,7 @@ describe("resolveFilesystemPlan", () => {
     }
   });
 
-  it("still reports a missing runner file as missing when its directory sits behind a root-owned symlink", () => {
+  it("still reports a missing runner file as missing when its directory sits behind a symlink", () => {
     const envBehindLink = { ...ENV, GITHUB_OUTPUT: "/work/_temp/set_output" };
     const mkdir = vi.fn();
     expect.assertions(3);
@@ -277,7 +250,7 @@ describe("resolveFilesystemPlan", () => {
       resolveFilesystemPlan("persistent", "$GITHUB_OUTPUT", envBehindLink, {
         exists: (p) =>
           p === "/work" || p === "/mnt" || p === "/mnt/work" || p === "/mnt/work/_temp",
-        lstat: (p) => ({ uid: p === "/work" ? 0 : 1000, isSymbolicLink: () => p === "/work" }),
+        lstat: (p) => ({ isSymbolicLink: () => p === "/work" }),
         readlink: () => "/mnt/work",
         mkdir,
       });

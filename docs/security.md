@@ -181,13 +181,14 @@ without that, `write_through: /proc` would shadow the sandbox's procfs with the 
 PID-namespace separation above. The NSS database's directory is the exception: naming it has the
 command's changes to it written back.
 
-These checks and the mount use the directory an entry really resolves to, since runc follows
-symlinks in a mount's source and destination. Only root-owned symlinks are followed. An entry
-through any other fails the step, since an earlier step running as the same user could have planted
-it to make `$RUNNER_TEMP`, `$HOME` or `/proc` writable. A missing entry is created by the runner
-when it can write the nearest existing parent, and fails the step otherwise. A step running
-concurrently as the same user can still swap a directory for a symlink between the check and the
-mount.
+An entry that is a symlink, or goes through one, fails the step: runc follows symlinks in a mount's
+source and destination, so the mount would land wherever the symlink leads. An earlier step can
+plant one where it writes, pointing at `/proc` or at a directory the sandbox keeps read-only but the
+runner user can write anyway (`/usr/local/bin` and `/opt/hostedtoolcache` are world-writable on
+GitHub-hosted runners). The error names the path the symlink leads to, which can be written instead.
+A missing entry is created by the runner when it can write the nearest existing parent, and fails
+the step otherwise. A step running concurrently as the same user can still swap a directory for a
+symlink between the check and the mount.
 
 After the command exits, the step keeps running on the host to read the report and tear the
 sandbox down, so what it runs is kept out of those paths:

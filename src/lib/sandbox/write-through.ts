@@ -179,42 +179,31 @@ function defaultMkdir(path: string): void {
 /* v8 ignore stop */
 
 /**
- * Resolve the symlinks along a write_through path, so the checks and the bind
- * mount act on the real directory. Only root-owned symlinks are followed: steps
- * share the runner's uid, so any other could have been planted by an earlier
- * step to make its target writable. Missing components are kept as written.
+ * Refuses a write_through path with a symlink anywhere along it. Following one
+ * would make writable wherever it leads, and an earlier step could have
+ * pointed it at a path the sandbox keeps read-only. Missing components are
+ * fine: they are created as written.
  */
-export function resolveWriteThroughOnHost(
+export function assertNoSymlinkInWriteThrough(
   path: string,
   { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink }: Partial<SymlinkDeps> = {},
-): string {
+): void {
   const resolved = resolveHostPath(path, { lstat, readlink });
-  const planted = resolved.links.find((l) => l.uid !== 0);
-  if (planted) {
-    throw new Error(
-      `write_through entry ${JSON.stringify(path)} passes through ${JSON.stringify(planted.at)}, a symlink ` +
-        `to ${JSON.stringify(planted.target)} owned by uid ${planted.uid}. Only root-owned symlinks are followed, ` +
-        "since any other could have been planted by an earlier step. Name the real path instead.",
-    );
-  }
-  if ("loop" in resolved) {
-    throw new Error(
-      `write_through entry ${JSON.stringify(path)} passes through too many symlinks to resolve.`,
-    );
-  }
-  if (resolved.real === "/") {
-    throw new Error(
-      `write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a ` +
-        'literal "/" if dropping the read-only restriction entirely is what you meant.',
-    );
-  }
-  return resolved.real;
+  const link = resolved.links[0];
+  if (link === undefined) return;
+  const hint =
+    "real" in resolved && resolved.real !== "/"
+      ? ` Name the path it leads to instead: ${JSON.stringify(resolved.real)}.`
+      : "";
+  throw new Error(
+    `write_through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a ` +
+      `symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`,
+  );
 }
 
 /**
  * The runner creates KNOWN_FILE_VARS' files itself, so a missing one is a
- * broken environment, not a directory to create. Takes the paths as written:
- * resolveWriteThroughOnHost can respell one so it no longer matches its variable.
+ * broken environment, not a directory to create.
  */
 export function assertKnownFilesExist(
   paths: string[],

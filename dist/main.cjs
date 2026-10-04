@@ -24664,16 +24664,15 @@ function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
 			current = (0, node_path.dirname)(current);
 			continue;
 		}
-		let next = (0, node_path.join)(current, name), info = lstat(next);
-		if (!info?.isSymbolicLink()) {
+		let next = (0, node_path.join)(current, name);
+		if (!lstat(next)?.isSymbolicLink()) {
 			current = next;
 			continue;
 		}
 		let target = readlink(next);
 		if (links.push({
 			at: next,
-			target,
-			uid: info.uid
+			target
 		}), links.length > 40) return {
 			loop: !0,
 			links
@@ -24949,15 +24948,14 @@ function defaultCanWrite(path) {
 function defaultMkdir(path) {
 	(0, node_fs.mkdirSync)(path, { recursive: !0 });
 }
-function resolveWriteThroughOnHost(path, { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = {}) {
+function assertNoSymlinkInWriteThrough(path, { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = {}) {
 	let resolved = resolveHostPath(path, {
 		lstat,
 		readlink
-	}), planted = resolved.links.find((l) => l.uid !== 0);
-	if (planted) throw Error(`write_through entry ${JSON.stringify(path)} passes through ${JSON.stringify(planted.at)}, a symlink to ${JSON.stringify(planted.target)} owned by uid ${planted.uid}. Only root-owned symlinks are followed, since any other could have been planted by an earlier step. Name the real path instead.`);
-	if ("loop" in resolved) throw Error(`write_through entry ${JSON.stringify(path)} passes through too many symlinks to resolve.`);
-	if (resolved.real === "/") throw Error(`write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a literal "/" if dropping the read-only restriction entirely is what you meant.`);
-	return resolved.real;
+	}), link = resolved.links[0];
+	if (link === void 0) return;
+	let hint = "real" in resolved && resolved.real !== "/" ? ` Name the path it leads to instead: ${JSON.stringify(resolved.real)}.` : "";
+	throw Error(`write_through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`);
 }
 function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
 	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
@@ -24983,14 +24981,9 @@ function runnerActionRoot() {
 }
 const PINNED_COMMANDS = ["docker", "sudo"];
 function persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath = realPathOf) {
-	let realWriteThrough = writeThroughPaths.map((path) => {
-		let real = realpath(path);
-		if (real === "/" && path !== "/") throw new SandboxError(`write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a literal "/" if dropping the read-only restriction entirely is what you meant.`, "INVALID_WRITE_THROUGH_PATH");
-		return real;
-	});
-	return filesystemMode === "ephemeral" ? [...new Set(realWriteThrough)] : writableDirsOf({
+	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
 		...resolveDefaultWritableDirs(env, realpath),
-		writablePaths: realWriteThrough
+		writablePaths: writeThroughPaths
 	});
 }
 const realFindCommandDeps = {
@@ -25131,7 +25124,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 		throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
 	}
 	try {
-		writeThroughPaths = [...new Set(writeThroughPaths.map((p) => resolveWriteThroughOnHost(p, deps)))];
+		for (let path of writeThroughPaths) assertNoSymlinkInWriteThrough(path, deps);
 	} catch (e) {
 		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
