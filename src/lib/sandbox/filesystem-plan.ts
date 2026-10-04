@@ -19,11 +19,11 @@ import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
 import { reservedCaStorePaths } from "./ca-trust.ts";
 import { determineOverlayRoots, nestedMountRoots } from "./ephemeral-fs.ts";
-import { realpathOrSelf, resolveDefaultWritableDirs } from "./host-commands.ts";
+import { resolveDefaultWritableDirs } from "./host-commands.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import { reservedInternalDestinations } from "./oci-mounts.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
-import type { SymlinkDeps } from "./symlinks.ts";
+import { realPathOf, type SymlinkDeps } from "./symlinks.ts";
 import type { HostMount } from "./types.ts";
 import {
   resolveWriteThroughPaths,
@@ -159,8 +159,12 @@ export function resolveFilesystemPlan(
     );
   }
   // The CA mount lands where a candidate's symlinks lead, so that file is reserved too.
-  const realpath = deps.realpath ?? realpathOrSelf;
-  validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map(realpath));
+  const realpath = deps.realpath ?? realPathOf;
+  validateFilesystemInputs(
+    filesystemMode,
+    writeThroughPaths,
+    reservedCaStorePaths().map((p) => realpath(p)),
+  );
 
   // Before anything is created: buildOciConfig rejects a path overlapping the
   // sandbox's own scratch base outright, so checking it here keeps a doomed

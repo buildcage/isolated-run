@@ -21,12 +21,10 @@ import { createOverlayScratchDirs, overlayUpperFor } from "./ephemeral-fs.ts";
 import {
   jvmTools,
   persistingWritablePaths,
-  realpathOrSelf,
   renameGuardDirs as renameGuards,
   resolveDefaultWritableDirs,
   sandboxReadonlyFileCommands,
   sandboxReadonlyHostDirs,
-  withRealPaths,
 } from "./host-commands.ts";
 import { resolveSandboxGid } from "./identity.ts";
 import { listHostMounts } from "./mountinfo.ts";
@@ -43,7 +41,7 @@ import { pathAliases, WritablePathConflictError } from "./paths.ts";
 import { runIsolated } from "./run.ts";
 import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
 import { SANDBOX_SCRATCH_BASE, withScratchDir, type Warn } from "./scratch-dir.ts";
-import { realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
+import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
 import type { BuiltOciSpec, OverlayDirs } from "./types.ts";
 
 /**
@@ -117,7 +115,7 @@ const realDeps: RunSandboxedCommandDeps = {
   // Untested by design: readFileSync, handed the path the tested caller chose.
   /* v8 ignore next */
   readFile: (path) => readFileSync(path, "utf8"),
-  realpath: realpathOrSelf,
+  realpath: realPathOf,
   ...realSymlinkDeps,
   info: core.info,
 };
@@ -200,7 +198,10 @@ function extractCaTrust(
   try {
     const caCertPath = extractCaCert(containerName, dir);
     // Persistent mode's paths in either mode; see pinningPaths.
-    const tools = jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env));
+    const tools = jvmTools(
+      env,
+      persistingWritablePaths("persistent", writeThroughPaths, env, realpath),
+    );
     const files: CaTrustFiles = {
       ...writeCaTrustFiles(caCertPath, dir, env, tools, { warn }),
       nssDb: prepareNssDb(
@@ -208,7 +209,7 @@ function extractCaTrust(
         dir,
         env.HOME,
         { warn, info },
-        { homeUpper: homeUpperFor(dir, options) },
+        { homeUpper: homeUpperFor(dir, options, realpath) },
       ),
     };
     const preset = presetCaVariables(files, env, realpath);
@@ -231,11 +232,15 @@ function extractCaTrust(
 
 /** Set only when HOME is its own ephemeral overlay root and ~/.pki/nssdb is
  *  not written through. */
-function homeUpperFor(dir: string, options: AssembleBundleOptions): string | undefined {
+function homeUpperFor(
+  dir: string,
+  options: AssembleBundleOptions,
+  realpath: RunSandboxedCommandDeps["realpath"],
+): string | undefined {
   const { filesystemMode, overlayRoots, env } = options;
   const home = env.HOME;
   if (filesystemMode !== "ephemeral" || !home || !overlayRoots.includes(home)) return undefined;
-  if (persists(join(home, NSS_DB_PATH), options)) return undefined;
+  if (persists(join(home, NSS_DB_PATH), options, realpath)) return undefined;
   return overlayUpperFor(dir, home);
 }
 
@@ -338,10 +343,13 @@ export function assembleBundle(
     // alone only covers the top-level rootfs mount (see
     // computeReadonlyHostMounts).
     const hostMounts = listHostMounts();
-    const persisting = withRealPaths(
-      persistingWritablePaths(filesystemMode, writeThroughPaths, env),
+    const persisting = persistingWritablePaths(
+      filesystemMode,
+      writeThroughPaths,
+      env,
+      deps.realpath,
     );
-    const symlinkDeps = { lstat: deps.lstat, readlink: deps.readlink, realpathDir: deps.realpath };
+    const symlinkDeps = { lstat: deps.lstat, readlink: deps.readlink };
     const readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, undefined, symlinkDeps);
     const readonlyFiles = sandboxReadonlyFileCommands(
       writeThroughPaths,
@@ -413,8 +421,9 @@ function persists(
     writeThroughPaths,
     env,
   }: Pick<RunSandboxedCommandOptions, "filesystemMode" | "writeThroughPaths" | "env">,
+  realpath: RunSandboxedCommandDeps["realpath"],
 ): boolean {
-  return withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)).some(
+  return persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath).some(
     (p) => p === "/" || path === p || path.startsWith(`${p}/`),
   );
 }
@@ -435,7 +444,7 @@ function finishNssDb(
   options: RunSandboxedCommandOptions,
   deps: RunSandboxedCommandDeps,
 ): void {
-  const { nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info } = deps;
+  const { nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info, realpath } = deps;
   const nssDb = caTrust?.nssDb;
   if (!nssDb) return;
   const { failOnCaResidue, warn } = options;
@@ -443,7 +452,7 @@ function finishNssDb(
 
   // Under ephemeral the mount sits on the overlay, which a host rmdir cannot
   // detach.
-  const persist = persists(nssDb.destination, options);
+  const persist = persists(nssDb.destination, options, realpath);
   const detached = persist ? nssDbDetached(nssDb) : undefined;
   if (detached !== undefined) {
     warn(detached);
