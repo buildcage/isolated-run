@@ -333,10 +333,10 @@ writable path, so a `write_through:` entry cannot take the sandbox's CA trust wi
 
 `filesystem_mode` controls what happens to those writes once the step ends:
 
-| `filesystem_mode`          | What it does                                                                                                                                                                        |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, exactly as today. Everything else is read-only.                                   |
-| `ephemeral` (experimental) | Every writable path is discarded when the step ends (via an overlay). A host mount under one gets an overlay of its own, with [exceptions](./docs/reference.md#ephemeral-overlays). |
+| `filesystem_mode`          | What it does                                                                                                                                                                                             |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, exactly as today. Everything else is read-only, `$GITHUB_ENV`/`$GITHUB_PATH`/`$GITHUB_STATE` included. |
+| `ephemeral` (experimental) | Every writable path is discarded when the step ends (via an overlay). A host mount under one gets an overlay of its own, with [exceptions](./docs/reference.md#ephemeral-overlays).                      |
 
 `write_through:` names the paths whose writes reach the real host filesystem in either mode, the
 paths that opt out of whichever default applies:
@@ -359,6 +359,7 @@ command exits. The exceptions are a `write_through:` entry naming the directory 
 `gcloud auth configure-docker`) needs a step of its own. Either directory reached through a symlink
 the command could replace, such as a `~/.docker` that links elsewhere, fails the step before the
 command runs; point `DOCKER_CONFIG` or the runner's work directory at the real path instead.
+`write_through: /` skips this check, since every path on the way is writable then.
 
 > [!WARNING]
 > `filesystem_mode: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
