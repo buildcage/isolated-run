@@ -24,6 +24,8 @@ var __create = Object.create, __defProp = Object.defineProperty, __getOwnPropDes
 	enumerable: !0
 }) : target, mod));
 //#endregion
+let node_fs = require("node:fs");
+node_fs = __toESM(node_fs, 1);
 let node_url = require("node:url"), os = require("os");
 os = __toESM(os, 1);
 let crypto$1 = require("crypto");
@@ -50,8 +52,6 @@ let node_events = require("node:events"), node_zlib = require("node:zlib");
 node_zlib = __toESM(node_zlib, 1);
 let node_crypto = require("node:crypto"), child_process = require("child_process");
 child_process = __toESM(child_process, 1), require("timers");
-let node_fs = require("node:fs");
-node_fs = __toESM(node_fs, 1);
 let node_path = require("node:path");
 node_path = __toESM(node_path, 1);
 let buffer = require("buffer"), node_os = require("node:os");
@@ -72218,7 +72218,7 @@ async function runSandboxStep(env, overrides = {}) {
 }
 //#endregion
 //#region src/main.ts
-process.argv[1] === (0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href) && runSandboxStep(process.env).then((exitCode) => {
+process.argv[1] && (0, node_fs.realpathSync)(process.argv[1]) === (0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href) && runSandboxStep(process.env).then((exitCode) => {
 	exitCode !== 0 && (process.exitCode = exitCode);
 }).catch(exitOnFatalError("sandbox"));
 //#endregion
