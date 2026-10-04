@@ -102,7 +102,7 @@ function sandboxNamespaces(
     if (entries.length !== 1 || entries[0].path !== undefined) {
       throw new Error(
         `runc's default spec does not give the sandbox exactly one new ${type} namespace; ` +
-          "refusing to run the sandbox without it",
+          "refusing to run the sandbox",
       );
     }
   }
