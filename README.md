@@ -359,7 +359,8 @@ command exits. The exceptions are a `write_through:` entry naming the directory 
 `gcloud auth configure-docker`) needs a step of its own. Either directory reached through a symlink
 the command could replace, such as a `~/.docker` that links elsewhere, fails the step before the
 command runs; point `DOCKER_CONFIG` or the runner's work directory at the real path instead.
-`write_through: /` skips this check, since every path on the way is writable then.
+Under `write_through: /`, only a symlink in one of the four always-writable paths or another
+`write_through:` entry is refused, though the command could replace one anywhere.
 
 > [!WARNING]
 > `filesystem_mode: ephemeral` is **experimental**: its behavior, inputs, and error messages may still

@@ -235,8 +235,9 @@ export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
  *
  * Throws when one goes through a symlink in a persisting path: the mount
  * protects only the symlink's target, and the sandbox could replace the
- * symlink itself with a directory of its own. Under write_through: / every
- * symlink is replaceable, so none is refused.
+ * symlink itself with a directory of its own. `/` itself is not one of the
+ * paths checked: under write_through: / a symlink anywhere else is replaceable
+ * too, and only one in another persisting path is refused.
  */
 export function sandboxReadonlyHostDirs(
   persisting: string[],
