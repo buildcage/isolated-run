@@ -244,24 +244,32 @@ set +e
 # any later one kills it. Either way CODE is what `runc run` exits with.
 STOPPING=0
 stop_sandbox() {
+  # $! covers a signal that lands between the fork and the assignment.
+  local pid=${RUNC_PID:-${!:-}}
+  if [ -z "$pid" ]; then
+    # Nothing forked yet, so exit as the traps above would.
+    CODE=$1
+    exit
+  fi
   if [ "$STOPPING" = "0" ]; then
     STOPPING=1
-    kill -TERM "$RUNC_PID" 2>/dev/null
+    kill -TERM "$pid" 2>/dev/null
   else
     # Through runc, so `runc run` exits with the container's status rather
     # than being killed itself.
-    "$RUNC_PATH" kill "$CONTAINER_ID" KILL 2>/dev/null || kill -KILL "$RUNC_PID" 2>/dev/null
+    "$RUNC_PATH" kill "$CONTAINER_ID" KILL 2>/dev/null || kill -KILL "$pid" 2>/dev/null
   fi
 }
+# Before the fork: once `runc run` has started, killing it rather than letting
+# it forward the signal can leave its `runc init` behind.
+trap 'stop_sandbox 130' INT
+trap 'stop_sandbox 143' TERM
 # In the background so the trap runs as soon as a signal arrives: bash defers
 # it until a foreground child returns. An asynchronous command starts with
 # SIGINT and SIGQUIT ignored and stdin on /dev/null, which the command would
 # inherit, hence the reset and the explicit stdin.
 ( trap - INT QUIT; exec setpriv --pdeathsig=KILL -- "$RUNC_PATH" run --preserve-fds 1 --bundle "$BUNDLE_DIR" "$CONTAINER_ID" ) <&0 &
 RUNC_PID=$!
-# A signal before this still exits through cleanup, whose `runc delete -f`
-# stops the container.
-trap stop_sandbox INT TERM
 # wait returns early when a trapped signal arrives; the last one returns the
 # status bash kept.
 while kill -0 "$RUNC_PID" 2>/dev/null; do wait "$RUNC_PID"; done

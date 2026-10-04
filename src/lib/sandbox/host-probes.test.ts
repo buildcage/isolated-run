@@ -114,4 +114,17 @@ describe("parseCgroupV2Path", () => {
     expect(parseCgroupV2Path("")).toBeUndefined();
     expect(parseCgroupV2Path("0::relative\n")).toBeUndefined();
   });
+
+  it("reads nothing off a path outside the cgroup namespace's root", () => {
+    expect(parseCgroupV2Path("0::/../runner.service\n")).toBeUndefined();
+    expect(parseCgroupV2Path("0::/a/../b\n")).toBeUndefined();
+  });
+
+  it("reads nothing off a removed cgroup", () => {
+    expect(parseCgroupV2Path("0::/system.slice/runner.service (deleted)\n")).toBeUndefined();
+  });
+
+  it("keeps a name with dots in it that is not ..", () => {
+    expect(parseCgroupV2Path("0::/a..b/.c\n")).toBe("/a..b/.c");
+  });
 });

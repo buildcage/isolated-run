@@ -85,12 +85,16 @@ export function shmSizeFromStatfs({ type, bsize, blocks }: StatfsShape): number 
 /**
  * Pure: the cgroup v2 path in a /proc/<pid>/cgroup dump, undefined unless v2
  * is the only hierarchy. A cgroup v1 or hybrid host lists a line per v1
- * hierarchy too.
+ * hierarchy too. Also undefined for a path runc could not create a child
+ * under: one outside this cgroup namespace's root ("/../x") or a removed
+ * cgroup (" (deleted)").
  */
 export function parseCgroupV2Path(procCgroup: string): string | undefined {
   const lines = procCgroup.split("\n").filter((line) => line !== "");
   if (lines.length !== 1 || !lines[0].startsWith("0::/")) return undefined;
-  return lines[0].slice("0::".length);
+  const path = lines[0].slice("0::".length);
+  if (/\s/.test(path) || path.split("/").includes("..")) return undefined;
+  return path;
 }
 
 export interface HostProbes {
