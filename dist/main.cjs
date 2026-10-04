@@ -25113,23 +25113,21 @@ function resolveWriteThroughInput(writeThroughInput, env) {
 	}
 }
 function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
-	let written = resolveWriteThroughInput(writeThroughInput, env);
-	if (validateFilesystemInputs(filesystemMode, written), written.includes("/")) return {
+	let written = resolveWriteThroughInput(writeThroughInput, env), realpath = deps.realpath ?? realPathOf, writeThroughPaths = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
+	if (validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map((p) => realpath(p))), writeThroughPaths.includes("/")) return {
 		overlayRoots: [],
-		writeThroughPaths: written
+		writeThroughPaths
 	};
 	try {
 		assertKnownFilesExist(written, env, deps);
 	} catch (e) {
 		throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
 	}
-	let realpath = deps.realpath ?? realPathOf, writeThroughPaths = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
 	try {
 		for (let path of writeThroughPaths) assertNoSymlinkInWriteThrough(path, deps);
 	} catch (e) {
 		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
-	validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map((p) => realpath(p)));
 	try {
 		assertScratchBaseNotWritable(writeThroughPaths);
 	} catch (e) {
