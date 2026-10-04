@@ -71,15 +71,12 @@ function defaultMkdir(path: string, mode: number): void {
 
 /**
  * Force-detaches any mount points still nested under `dir` before it is
- * recursively deleted. The safety net for rootfsBindDir (a `mount --rbind /`
- * of the entire host filesystem; see run-isolated.sh) surviving past
- * run-isolated.sh's own cleanup trap: if that trap never runs (run-isolated.sh
- * itself being SIGKILL'd bypasses traps entirely) or its `umount -R` fails
- * (EBUSY), a plain recursive delete of `dir` would walk straight through the
- * still-live bind-mount and delete the real files on the host it points at,
- * not a sandboxed copy. `-l` (lazy) detaches each mount from the namespace
- * immediately regardless of busy references, so this step itself cannot hang
- * or fail the way a normal unmount could.
+ * recursively deleted. Nothing is mounted there in this namespace: the rootfs
+ * bind lives in run-isolated.sh's private mount namespace and the overlays in
+ * the container's. Kept because removeScratchDir's `sudo rm -rf` would follow
+ * a mount that did reach here into the host's own files. `-l` (lazy) detaches
+ * each mount regardless of busy references, so this cannot hang or fail the
+ * way a normal unmount could.
  */
 function unmountAllUnder(dir: string, deps: ScratchDirDeps, warn?: Warn): void {
   const { readMountinfo = defaultReadMountinfo, exec = runPinnedHostCommand } = deps;
@@ -165,8 +162,8 @@ export interface CleanupScratchDirOptions {
 }
 
 /**
- * Force-detach anything still mounted under `dir` (the rootfs bind-mount
- * safety net; see unmountAllUnder) and then recursively remove it. Exported
+ * Force-detach anything still mounted under `dir` (see unmountAllUnder) and
+ * then recursively remove it. Exported
  * so post.ts can reclaim a scratch dir orphaned by a hard kill that bypassed
  * withScratchDir's own finally. No-ops safely when `dir` doesn't exist.
  */

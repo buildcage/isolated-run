@@ -79,10 +79,9 @@ export function planPostCleanup(
   // Reclaim this step's sandbox scratch dir if a hard kill bypassed the run's
   // own withScratchDir finally. Its path is derived deterministically from
   // containerName (scratchDirFor), so no separately recorded path is needed.
-  // cleanupScratchDir force-detaches the rootfs bind-mount before deleting, so
-  // this can't walk into the host filesystem even if a mount somehow survived.
-  // Independent of the container teardown, so a failure in one still leaves
-  // the other to run.
+  // cleanupScratchDir detaches anything mounted there before deleting; see
+  // scratch-dir.ts's unmountAllUnder. Independent of the container teardown,
+  // so a failure in one still leaves the other to run.
   let reclaimed = false;
   try {
     const scratchDir = scratchDirFor(targets.containerName);

@@ -118,7 +118,7 @@ group_end() {
 
 cleanup() {
   # Once only: a signal during the teardown, or the exit below, would
-  # otherwise run it again and warn about mounts it already removed.
+  # otherwise run it again.
   trap '' INT TERM
   trap - EXIT
   set +e
@@ -127,16 +127,9 @@ cleanup() {
   # abnormally and left it behind, so it must run before the network/mount
   # resources below are torn out from under it.
   "$RUNC_PATH" delete -f "$CONTAINER_ID" >/dev/null 2>&1
-  # Not silenced: a failed unmount here (e.g. EBUSY from a lingering
-  # process) leaves ROOTFS_BIND_DIR, a bind-mount of the entire host
-  # filesystem, still live, so it's worth surfacing even though
-  # sandbox/scratch-dir.ts's withScratchDir has its own safety net before it
-  # recursively deletes this directory.
-  # Captured, not redirected to a file: /tmp is the sandbox's, and a root
-  # redirect there would follow a symlink it planted.
-  if ! UMOUNT_ERR=$(umount -R "$ROOTFS_BIND_DIR" 2>&1 >/dev/null); then
-    echo "WARNING: failed to unmount ${ROOTFS_BIND_DIR}: ${UMOUNT_ERR}" >&2
-  fi
+  # This bind, like the netns one below, exists only in this script's private
+  # mount namespace, which drops it on exit anyway.
+  umount -R "$ROOTFS_BIND_DIR" >/dev/null 2>&1
   # The proxy-side veth end (renamed to "buildcage0" below) lives in the
   # long-lived proxy container's netns, so it must be explicitly removed.
   # Unlike the target-side end (torn down for free when the sandbox netns
@@ -146,8 +139,6 @@ cleanup() {
   ip netns del "$NETNS_NAME" >/dev/null 2>&1
   # A pair that failed to move out of this netns is still here, both ends.
   ip link del "$VETH_T" >/dev/null 2>&1
-  # The private mount namespace would drop this bind on exit anyway; explicit
-  # for the same reason the rootfs unmount above is.
   umount "/var/run/netns/${PROXY_NETNS_NAME}" >/dev/null 2>&1
   rm -f "/var/run/netns/${PROXY_NETNS_NAME}" >/dev/null 2>&1
   exit "$CODE"
