@@ -15,9 +15,11 @@
 # the proxy image at runtime, so this dev loop doesn't need the Docker
 # socket mounted in just to reach a sibling container: it stays scoped to
 # testing run-isolated.sh itself.
-# renovate: datasource=github-releases depName=opencontainers/runc
+# renovate: datasource=github-release-attachments depName=opencontainers/runc
 ARG RUNC_VERSION=v1.5.1
+# renovate: datasource=github-release-attachments depName=opencontainers/runc digestVersion=v1.5.1
 ARG RUNC_SHA256_AMD64=177df879d50c913eb205e898d5c1c05a18f574053c0ce5524c471208eaf06f6f
+# renovate: datasource=github-release-attachments depName=opencontainers/runc digestVersion=v1.5.1
 ARG RUNC_SHA256_ARM64=ca70e7dbd6616ca782a59b5d3ac86909123fdaa9fa3f89dcf29051c70eee7ce9
 
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS deps
