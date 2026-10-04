@@ -24,7 +24,6 @@ import {
   realpathOrSelf,
   renameGuardDirs as renameGuards,
   resolveDefaultWritableDirs,
-  readlinkAbsolute,
   sandboxReadonlyFileCommands,
   sandboxReadonlyHostDirs,
   withRealPaths,
@@ -44,6 +43,7 @@ import { pathAliases, WritablePathConflictError } from "./paths.ts";
 import { runIsolated } from "./run.ts";
 import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
 import { SANDBOX_SCRATCH_BASE, withScratchDir, type Warn } from "./scratch-dir.ts";
+import { realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
 import type { BuiltOciSpec, OverlayDirs } from "./types.ts";
 
 /**
@@ -84,7 +84,8 @@ export interface RunSandboxedCommandDeps {
   touch: (path: string) => void;
   readFile: (path: string) => string;
   realpath: (path: string) => string;
-  readlink: (path: string) => string | null;
+  lstat: SymlinkDeps["lstat"];
+  readlink: SymlinkDeps["readlink"];
   info: (message: string) => void;
 }
 
@@ -117,7 +118,7 @@ const realDeps: RunSandboxedCommandDeps = {
   /* v8 ignore next */
   readFile: (path) => readFileSync(path, "utf8"),
   realpath: realpathOrSelf,
-  readlink: readlinkAbsolute,
+  ...realSymlinkDeps,
   info: core.info,
 };
 
@@ -340,14 +341,14 @@ export function assembleBundle(
     const persisting = withRealPaths(
       persistingWritablePaths(filesystemMode, writeThroughPaths, env),
     );
-    const readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, undefined, {
-      readlink: deps.readlink,
-      realpathDir: deps.realpath,
-    });
-    const readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, {
-      readlink: deps.readlink,
-      realpathDir: deps.realpath,
-    });
+    const symlinkDeps = { lstat: deps.lstat, readlink: deps.readlink, realpathDir: deps.realpath };
+    const readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, undefined, symlinkDeps);
+    const readonlyFiles = sandboxReadonlyFileCommands(
+      writeThroughPaths,
+      persisting,
+      env,
+      symlinkDeps,
+    );
     const renameGuardDirs = renameGuards([...readonlyHostDirs, ...readonlyFiles], persisting);
     // runc skips a read-only path that doesn't exist, and the sandbox could
     // then create it.

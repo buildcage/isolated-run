@@ -23,6 +23,7 @@ import { realpathOrSelf, resolveDefaultWritableDirs } from "./host-commands.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import { reservedInternalDestinations } from "./oci-mounts.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
+import type { SymlinkDeps } from "./symlinks.ts";
 import type { HostMount } from "./types.ts";
 import {
   resolveWriteThroughPaths,
@@ -82,13 +83,13 @@ export interface FilesystemPlan {
   writeThroughPaths: string[];
 }
 
-/** `warn` aside, a test-only seam onto ensureWriteThroughTargetsExist/determineOverlayRoots's
- *  own filesystem dependencies; see write-through.ts / ephemeral-fs.ts. */
+/** `warn` aside, a test-only seam onto the filesystem dependencies of
+ *  resolveWriteThroughOnHost, ensureWriteThroughTargetsExist and determineOverlayRoots. */
 export interface ResolveFilesystemPlanDeps {
   warn?: (message: string) => void;
   exists?: (path: string) => boolean;
-  stat?: (path: string) => { uid: number; gid: number; mode: number };
-  readlink?: (path: string) => string;
+  lstat?: SymlinkDeps["lstat"];
+  readlink?: SymlinkDeps["readlink"];
   canWrite?: (path: string) => boolean;
   mkdir?: (path: string) => void;
   deviceOf?: (path: string) => number;

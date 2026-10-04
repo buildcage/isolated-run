@@ -1,5 +1,7 @@
-import { accessSync, constants, lstatSync, mkdirSync, readlinkSync } from "node:fs";
-import { dirname, join, isAbsolute, normalize } from "node:path";
+import { accessSync, constants, lstatSync, mkdirSync } from "node:fs";
+import { dirname, isAbsolute, join, normalize } from "node:path";
+
+import { realSymlinkDeps, resolveHostPath, type SymlinkDeps } from "./symlinks.ts";
 
 /** Env vars a write_through: entry may reference via $NAME/${NAME}. Not
  *  arbitrary env: a step's own `env:` block could otherwise smuggle a
@@ -142,16 +144,6 @@ export class WriteThroughTargetMissingError extends Error {}
  *  created. */
 export class WriteThroughTargetUncreatableError extends Error {}
 
-/** From lstat(2): a symlink is reported as itself. */
-interface StatShape {
-  uid: number;
-  gid: number;
-  mode: number;
-}
-
-const S_IFMT = 0o170000;
-const S_IFLNK = 0o120000;
-
 export interface EnsureWriteThroughTargetsExistOptions {
   /** A dangling symlink counts as existing. */
   exists?: (path: string) => boolean;
@@ -160,15 +152,8 @@ export interface EnsureWriteThroughTargetsExistOptions {
   mkdir?: (path: string) => void;
 }
 
-export interface ResolveWriteThroughOnHostOptions {
-  exists?: (path: string) => boolean;
-  stat?: (path: string) => StatShape;
-  readlink?: (path: string) => string;
-}
-
-// Untested by design: the defaults behind ensureWriteThroughTargetsExist's and
-// resolveWriteThroughOnHost's seams, which only hand node:fs what the tested
-// caller decided.
+// Untested by design: the defaults behind ensureWriteThroughTargetsExist's
+// seams, which only hand node:fs what the tested caller decided.
 /* v8 ignore start */
 function defaultExists(path: string): boolean {
   try {
@@ -177,15 +162,6 @@ function defaultExists(path: string): boolean {
   } catch {
     return false;
   }
-}
-
-function defaultStat(path: string): StatShape {
-  const s = lstatSync(path);
-  return { uid: s.uid, gid: s.gid, mode: s.mode };
-}
-
-function defaultReadlink(path: string): string {
-  return readlinkSync(path);
 }
 
 function defaultCanWrite(path: string): boolean {
@@ -202,8 +178,6 @@ function defaultMkdir(path: string): void {
 }
 /* v8 ignore stop */
 
-const MAX_SYMLINK_HOPS = 40;
-
 /**
  * Resolve the symlinks along a write_through path, so the checks and the bind
  * mount act on the real directory. Only root-owned symlinks are followed: steps
@@ -212,56 +186,29 @@ const MAX_SYMLINK_HOPS = 40;
  */
 export function resolveWriteThroughOnHost(
   path: string,
-  {
-    exists = defaultExists,
-    stat = defaultStat,
-    readlink = defaultReadlink,
-  }: ResolveWriteThroughOnHostOptions = {},
+  { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink }: Partial<SymlinkDeps> = {},
 ): string {
-  const pending = path.split("/").filter((c) => c !== "");
-  let current = "/";
-  let hops = 0;
-  while (pending.length > 0) {
-    const name = pending.shift()!;
-    if (name === ".") continue;
-    if (name === "..") {
-      current = dirname(current);
-      continue;
-    }
-    const next = join(current, name);
-    // Keep walking: a ".." from a link target can climb back to existing components.
-    if (!exists(next)) {
-      current = next;
-      continue;
-    }
-    const { uid, mode } = stat(next);
-    if ((mode & S_IFMT) !== S_IFLNK) {
-      current = next;
-      continue;
-    }
-    const target = readlink(next);
-    if (uid !== 0) {
-      throw new Error(
-        `write_through entry ${JSON.stringify(path)} passes through ${JSON.stringify(next)}, a symlink ` +
-          `to ${JSON.stringify(target)} owned by uid ${uid}. Only root-owned symlinks are followed, ` +
-          "since any other could have been planted by an earlier step. Name the real path instead.",
-      );
-    }
-    if (++hops > MAX_SYMLINK_HOPS) {
-      throw new Error(
-        `write_through entry ${JSON.stringify(path)} passes through too many symlinks to resolve.`,
-      );
-    }
-    pending.unshift(...target.split("/").filter((c) => c !== ""));
-    if (isAbsolute(target)) current = "/";
+  const resolved = resolveHostPath(path, { lstat, readlink });
+  const planted = resolved.links.find((l) => l.uid !== 0);
+  if (planted) {
+    throw new Error(
+      `write_through entry ${JSON.stringify(path)} passes through ${JSON.stringify(planted.at)}, a symlink ` +
+        `to ${JSON.stringify(planted.target)} owned by uid ${planted.uid}. Only root-owned symlinks are followed, ` +
+        "since any other could have been planted by an earlier step. Name the real path instead.",
+    );
   }
-  if (current === "/") {
+  if ("loop" in resolved) {
+    throw new Error(
+      `write_through entry ${JSON.stringify(path)} passes through too many symlinks to resolve.`,
+    );
+  }
+  if (resolved.real === "/") {
     throw new Error(
       `write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a ` +
         'literal "/" if dropping the read-only restriction entirely is what you meant.',
     );
   }
-  return current;
+  return resolved.real;
 }
 
 /**

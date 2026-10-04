@@ -14,7 +14,7 @@ describe("resolveFilesystemPlan", () => {
   // Everything "exists" by default (candidates + write_through targets) unless
   // a test narrows it, which keeps each test focused on the one thing it checks.
   const alwaysExists = () => true;
-  const dirStat = () => ({ uid: 1000, gid: 1000, mode: 0o40755 });
+  const notLink = () => ({ uid: 1000, isSymbolicLink: () => false });
 
   it("returns an empty plan for persistent mode with no write_through:, without touching the filesystem", () => {
     const exists = vi.fn(alwaysExists);
@@ -26,7 +26,7 @@ describe("resolveFilesystemPlan", () => {
   it("resolves write_through: in persistent mode too, normalizing each entry", () => {
     const plan = resolveFilesystemPlan("persistent", "./dist\n/opt/./cache/\n", ENV, {
       exists: alwaysExists,
-      stat: dirStat,
+      lstat: notLink,
     });
     expect(plan.writeThroughPaths).toStrictEqual([`${ENV.GITHUB_WORKSPACE}/dist`, "/opt/cache"]);
     expect(plan.overlayRoots).toStrictEqual([]);
@@ -36,7 +36,7 @@ describe("resolveFilesystemPlan", () => {
     const mkdir = vi.fn();
     resolveFilesystemPlan("persistent", "/opt/build-output", ENV, {
       exists: (p) => p !== "/opt/build-output",
-      stat: dirStat,
+      lstat: notLink,
       canWrite: () => true,
       mkdir,
     });
@@ -83,7 +83,7 @@ describe("resolveFilesystemPlan", () => {
     try {
       resolveFilesystemPlan("persistent", `${SANDBOX_SCRATCH_BASE}/x`, ENV, {
         exists: () => false,
-        stat: () => ({ uid: 1000, gid: 1000, mode: 0o40755 }),
+        lstat: notLink,
         mkdir,
       });
     } catch (err) {
@@ -102,7 +102,7 @@ describe("resolveFilesystemPlan", () => {
       expect(() =>
         resolveFilesystemPlan("persistent", REAL_STORE, ENV, {
           exists: alwaysExists,
-          stat: (p) => (p === REAL_STORE ? { ...dirStat(), mode: 0o100644 } : dirStat()),
+          lstat: notLink,
           realpath,
         }),
       ).toThrow(expect.objectContaining({ code: "FILESYSTEM_INPUT_CONFLICT" }));
@@ -111,7 +111,7 @@ describe("resolveFilesystemPlan", () => {
     it("leaves a directory containing it allowed", () => {
       const plan = resolveFilesystemPlan("persistent", "/etc/pki/ca-trust", ENV, {
         exists: alwaysExists,
-        stat: dirStat,
+        lstat: notLink,
         realpath,
       });
       expect(plan.writeThroughPaths).toStrictEqual(["/etc/pki/ca-trust"]);
@@ -121,8 +121,7 @@ describe("resolveFilesystemPlan", () => {
   describe("an entry that passes through a symlink", () => {
     const link = (links: Record<string, { target: string; uid: number }>) => ({
       exists: alwaysExists,
-      stat: (p: string) =>
-        p in links ? { uid: links[p]!.uid, gid: 0, mode: 0o120777 } : dirStat(),
+      lstat: (p: string) => ({ uid: links[p]?.uid ?? 1000, isSymbolicLink: () => p in links }),
       readlink: (p: string) => links[p]!.target,
       mkdir: () => {},
       deviceOf: () => 1,
@@ -167,7 +166,7 @@ describe("resolveFilesystemPlan", () => {
     expect(() =>
       resolveFilesystemPlan("persistent", `${SANDBOX_SCRATCH_BASE}/./x`, ENV, {
         exists: alwaysExists,
-        stat: dirStat,
+        lstat: notLink,
       }),
     ).toThrow(/overlaps/);
   });
@@ -200,7 +199,7 @@ describe("resolveFilesystemPlan", () => {
   it("adds an overlay for each host mount under an overlay root, but not under write_through", () => {
     const plan = resolveFilesystemPlan("ephemeral", "/home/runner/out", ENV, {
       exists: alwaysExists,
-      stat: dirStat,
+      lstat: notLink,
       deviceOf: () => 1,
       realpath: (p) => p,
       listHostMounts: () =>
@@ -243,7 +242,7 @@ describe("resolveFilesystemPlan", () => {
     const mkdir = vi.fn();
     const plan = resolveFilesystemPlan("ephemeral", "./dist", selfHostedEnv, {
       exists: (p) => p !== "/workspace/dist",
-      stat: dirStat,
+      lstat: notLink,
       canWrite: () => true,
       mkdir,
       deviceOf: () => 1,
@@ -278,7 +277,7 @@ describe("resolveFilesystemPlan", () => {
       resolveFilesystemPlan("persistent", "$GITHUB_OUTPUT", envBehindLink, {
         exists: (p) =>
           p === "/work" || p === "/mnt" || p === "/mnt/work" || p === "/mnt/work/_temp",
-        stat: (p) => (p === "/work" ? { uid: 0, gid: 0, mode: 0o120777 } : dirStat()),
+        lstat: (p) => ({ uid: p === "/work" ? 0 : 1000, isSymbolicLink: () => p === "/work" }),
         readlink: () => "/mnt/work",
         mkdir,
       });
@@ -294,7 +293,7 @@ describe("resolveFilesystemPlan", () => {
     try {
       resolveFilesystemPlan("ephemeral", "./dist", ENV, {
         exists: (p) => p !== `${ENV.GITHUB_WORKSPACE}/dist`,
-        stat: dirStat,
+        lstat: notLink,
         canWrite: () => false,
       });
     } catch (err) {

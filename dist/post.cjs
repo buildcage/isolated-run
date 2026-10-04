@@ -708,6 +708,47 @@ function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths
 	].filter((p) => !!p))];
 }
 //#endregion
+//#region src/lib/sandbox/symlinks.ts
+const realSymlinkDeps = {
+	lstat: (path) => {
+		try {
+			return (0, node_fs.lstatSync)(path);
+		} catch {
+			return;
+		}
+	},
+	readlink: (path) => (0, node_fs.readlinkSync)(path)
+};
+function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
+	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
+	for (; pending.length > 0;) {
+		let name = pending.shift();
+		if (name === "..") {
+			current = (0, node_path.dirname)(current);
+			continue;
+		}
+		let next = (0, node_path.join)(current, name), info = lstat(next);
+		if (!info?.isSymbolicLink()) {
+			current = next;
+			continue;
+		}
+		let target = readlink(next);
+		if (links.push({
+			at: next,
+			target,
+			uid: info.uid
+		}), links.length > 40) return {
+			loop: !0,
+			links
+		};
+		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
+	}
+	return {
+		real: current,
+		links
+	};
+}
+//#endregion
 //#region src/lib/sandbox/write-through.ts
 const ALLOWED_WRITE_THROUGH_VARS = [
 	"HOME",
@@ -757,6 +798,7 @@ function realpathOrSelf(path) {
 	}
 }
 const realFindCommandDeps = {
+	...realSymlinkDeps,
 	isExecutable: (path) => {
 		try {
 			return (0, node_fs.accessSync)(path, node_fs.constants.X_OK), !0;
@@ -764,28 +806,10 @@ const realFindCommandDeps = {
 			return !1;
 		}
 	},
-	readlink: readlinkAbsolute,
 	realpathDir: realpathOrSelf
 };
-function readlinkAbsolute(path) {
-	try {
-		let target = (0, node_fs.readlinkSync)(path);
-		return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)(realpathOrSelf((0, node_path.dirname)(path)), target);
-	} catch {
-		return null;
-	}
-}
 function withRealPaths(paths, realpath = realpathOrSelf) {
 	return [...new Set([...paths, ...paths.map(realpath)])];
-}
-function commandChain(candidate, readlink) {
-	let chain = [candidate], current = candidate;
-	for (let i = 0; i < 40; i++) {
-		let target = readlink(current);
-		if (target === null) break;
-		chain.push(target), current = target;
-	}
-	return chain;
 }
 function insidePersisting(persisting, realpathDir) {
 	let writable = withRealPaths(persisting, realpathDir);
@@ -796,12 +820,15 @@ function pathOutside(pathEnv = "", persisting, realpathDir) {
 	let inside = insidePersisting(persisting, realpathDir);
 	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !inside(dir) && !inside(realpathDir(dir))).join(node_path.delimiter);
 }
-function findPinnableCommand(command, pathEnv, persisting, { isExecutable, readlink, realpathDir } = realFindCommandDeps) {
-	let optedOut = persisting.includes("/"), inside = insidePersisting(persisting, realpathDir), reachable = (hop) => inside(hop) || inside((0, node_path.join)(realpathDir((0, node_path.dirname)(hop)), (0, node_path.basename)(hop)));
+function findPinnableCommand(command, pathEnv, persisting, deps = realFindCommandDeps) {
+	let optedOut = persisting.includes("/"), inside = insidePersisting(persisting, deps.realpathDir), reachable = (candidate) => {
+		let resolved = resolveHostPath(candidate, deps);
+		return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
+	};
 	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
 		if (!(0, node_path.isAbsolute)(dir)) continue;
 		let candidate = (0, node_path.join)(dir, command);
-		if (isExecutable(candidate) && (optedOut || !commandChain(candidate, readlink).some(reachable))) return candidate;
+		if (deps.isExecutable(candidate) && (optedOut || !reachable(candidate))) return candidate;
 	}
 }
 function pinHostCommands(paths, env, deps = realFindCommandDeps) {
