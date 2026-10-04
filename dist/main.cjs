@@ -25114,7 +25114,7 @@ function resolveWriteThroughInput(writeThroughInput, env) {
 }
 function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
 	let written = resolveWriteThroughInput(writeThroughInput, env), realpath = deps.realpath ?? realPathOf, writeThroughPaths = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
-	if (validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map((p) => realpath(p))), writeThroughPaths.includes("/")) return {
+	if (validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map((p) => realpath(p))), written.includes("/")) return {
 		overlayRoots: [],
 		writeThroughPaths
 	};

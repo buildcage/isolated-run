@@ -143,8 +143,9 @@ export function resolveFilesystemPlan(
   // `/` drops the read-only restriction wholesale (persistent only, see
   // validateFilesystemInputs), so no path is bind-mounted individually:
   // nothing to create, and buildOciConfig skips the scratch-base guard for
-  // the same reason.
-  if (writeThroughPaths.includes(WRITE_THROUGH_ALL)) {
+  // the same reason. Only a literal `/` opts out: an entry that a symlinked
+  // runner directory turns into `/` still meets that guard.
+  if (written.includes(WRITE_THROUGH_ALL)) {
     return { overlayRoots: [], writeThroughPaths };
   }
 
