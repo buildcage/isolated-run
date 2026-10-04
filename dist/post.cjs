@@ -239,16 +239,15 @@ function resolveFilesystemMode(input) {
 }
 function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice) {
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
-	if (writeThrough.trim() && writable.trim()) throw new SandboxError("write_through: and writable: are the same input under two names. Set only write_through:.", "FILESYSTEM_INPUT_CONFLICT");
-	return !writeThrough.trim() && writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writable) : writeThrough;
+	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readFilesystemInputs(notice, getInput$4 = getInput) {
+function readFilesystemInputs(notice, getInput$1 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$4("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput({
-			writeThrough: getInput$4("write_through"),
-			writable: getInput$4("writable"),
-			allowWrite: getInput$4("allow_write")
+			writeThrough: getInput$1("write_through"),
+			writable: getInput$1("writable"),
+			allowWrite: getInput$1("allow_write")
 		}, notice)
 	};
 }
