@@ -315,6 +315,12 @@ export function sandboxReadonlyHostDirs(
   return candidates.flatMap(({ name, dir, fix }) => {
     if (persisting.includes(dir) || persisting.includes(deps.realpathDir(dir))) return [];
     const resolved = resolveThroughFixedLinks(dir, roots, deps.readlink);
+    if ("loop" in resolved) {
+      throw new SandboxError(
+        `${name} ${JSON.stringify(dir)} goes through too many symlinks to resolve.`,
+        "HOST_DIR_UNPROTECTABLE",
+      );
+    }
     if ("link" in resolved) {
       throw new SandboxError(
         `${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(resolved.link)}, a symlink the ` +
@@ -329,13 +335,13 @@ export function sandboxReadonlyHostDirs(
 
 /**
  * `path` with its symlinks resolved, or the first symlink that sits in one of
- * `roots`. Components past the last existing one are kept as written.
+ * `roots`, or a loop. Components past the last existing one are kept as written.
  */
 function resolveThroughFixedLinks(
   path: string,
   roots: string[],
   readlink: FindCommandDeps["readlink"],
-): { real: string } | { link: string } {
+): { real: string } | { link: string } | { loop: true } {
   let rest = path.split("/").filter(Boolean);
   let current = "/";
   for (let hops = 0; rest.length > 0;) {
@@ -345,9 +351,8 @@ function resolveThroughFixedLinks(
       current = candidate;
       continue;
     }
-    if (roots.some((p) => isAtOrUnder(current, p)) || ++hops > MAX_SYMLINK_HOPS) {
-      return { link: candidate };
-    }
+    if (roots.some((p) => isAtOrUnder(current, p))) return { link: candidate };
+    if (++hops > MAX_SYMLINK_HOPS) return { loop: true };
     rest = [...target.split("/").filter(Boolean), ...rest];
     current = "/";
   }
@@ -377,6 +382,12 @@ export function sandboxReadonlyFileCommands(
     const path = env[name];
     if (!path || openable(name, path)) return [];
     const resolved = resolveThroughFixedLinks(path, roots, deps.readlink);
+    if ("loop" in resolved) {
+      throw new SandboxError(
+        `The runner's ${name} file ${JSON.stringify(path)} goes through too many symlinks to resolve.`,
+        "HOST_DIR_UNPROTECTABLE",
+      );
+    }
     if ("link" in resolved) {
       throw new SandboxError(
         `The runner's ${name} file ${JSON.stringify(path)} goes through ` +

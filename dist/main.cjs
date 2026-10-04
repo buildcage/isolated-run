@@ -25050,6 +25050,7 @@ function sandboxReadonlyHostDirs(persisting, env, actionRoot = runnerActionRoot(
 	return candidates.flatMap(({ name, dir, fix }) => {
 		if (persisting.includes(dir) || persisting.includes(deps.realpathDir(dir))) return [];
 		let resolved = resolveThroughFixedLinks(dir, roots, deps.readlink);
+		if ("loop" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
 		if ("link" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and ${fix()}`, "HOST_DIR_UNPROTECTABLE");
 		let real = resolved.real;
 		return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
@@ -25063,7 +25064,8 @@ function resolveThroughFixedLinks(path, roots, readlink) {
 			current = candidate;
 			continue;
 		}
-		if (roots.some((p) => isAtOrUnder(current, p)) || ++hops > 40) return { link: candidate };
+		if (roots.some((p) => isAtOrUnder(current, p))) return { link: candidate };
+		if (++hops > 40) return { loop: !0 };
 		rest = [...target.split("/").filter(Boolean), ...rest], current = "/";
 	}
 	return { real: current };
@@ -25078,6 +25080,7 @@ function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = 
 		let path = env[name];
 		if (!path || openable(name, path)) return [];
 		let resolved = resolveThroughFixedLinks(path, roots, deps.readlink);
+		if ("loop" in resolved) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
 		if ("link" in resolved) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through ${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and the runner reads it after the step. Configure the runner's work directory by its real path, not through the symlink.`, "HOST_DIR_UNPROTECTABLE");
 		return [resolved.real];
 	});

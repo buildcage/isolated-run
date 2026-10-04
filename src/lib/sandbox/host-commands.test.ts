@@ -483,6 +483,25 @@ describe("sandboxReadonlyHostDirs", () => {
     ).toStrictEqual([]);
   });
 
+  it("still refuses a replaceable symlink whose target loops, naming no other path", () => {
+    const links: Record<string, string> = {
+      [`${HOME}/.docker`]: "/opt/a",
+      "/opt/a": "/opt/b",
+      "/opt/b": "/opt/a",
+    };
+
+    expect(() =>
+      sandboxReadonlyHostDirs(PERSISTENT, { HOME }, ACTION, {
+        readlink: (p) => links[p] ?? null,
+        realpathDir: (p) => p,
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        message: expect.stringContaining(`its real path, "${HOME}/.docker"`),
+      }),
+    );
+  });
+
   it("refuses nothing for a directory write_through names, even through a symlink", () => {
     expect(
       sandboxReadonlyHostDirs(
@@ -500,7 +519,12 @@ describe("sandboxReadonlyHostDirs", () => {
         readlink: (p) => ({ "/opt/a": "/opt/b", "/opt/b": "/opt/a" })[p] ?? null,
         realpathDir: (p) => p,
       }),
-    ).toThrow(expect.objectContaining({ code: "HOST_DIR_UNPROTECTABLE" }));
+    ).toThrow(
+      expect.objectContaining({
+        code: "HOST_DIR_UNPROTECTABLE",
+        message: expect.stringContaining("too many symlinks"),
+      }),
+    );
   });
 });
 
@@ -512,8 +536,11 @@ describe("sandboxReadonlyFileCommands", () => {
     GITHUB_STATE: `${COMMANDS}/save_state_1`,
     GITHUB_OUTPUT: `${COMMANDS}/set_output_1`,
   };
-  const files = (writeThrough: string[], env: NodeJS.ProcessEnv = ENV, deps = NO_LINKS) =>
-    sandboxReadonlyFileCommands(writeThrough, [...PERSISTENT, ...writeThrough], env, deps);
+  const files = (
+    writeThrough: string[],
+    env: NodeJS.ProcessEnv = ENV,
+    deps: Parameters<typeof sandboxReadonlyFileCommands>[3] = NO_LINKS,
+  ) => sandboxReadonlyFileCommands(writeThrough, [...PERSISTENT, ...writeThrough], env, deps);
 
   it("is this step's GITHUB_ENV, GITHUB_PATH and GITHUB_STATE, and not GITHUB_OUTPUT", () => {
     expect(files([])).toStrictEqual([ENV.GITHUB_ENV, ENV.GITHUB_PATH, ENV.GITHUB_STATE]);
@@ -542,6 +569,21 @@ describe("sandboxReadonlyFileCommands", () => {
 
   it("skips one that is not set", () => {
     expect(files([], { GITHUB_ENV: ENV.GITHUB_ENV })).toStrictEqual([ENV.GITHUB_ENV]);
+  });
+
+  it("refuses one reached through a symlink loop", () => {
+    const links: Record<string, string> = { "/opt/a": "/opt/b", "/opt/b": "/opt/a" };
+
+    expect(() =>
+      files(
+        [],
+        { GITHUB_ENV: "/opt/a/set_env_1" },
+        {
+          readlink: (p) => links[p] ?? null,
+          realpathDir: (p) => p,
+        },
+      ),
+    ).toThrow(expect.objectContaining({ message: expect.stringContaining("too many symlinks") }));
   });
 
   it("refuses one reached through a symlink in a persisting path", () => {
