@@ -394,7 +394,9 @@ function parseMountinfo(mountinfoContent) {
 		return {
 			mountPoint: unescapeField(fields[4]),
 			fsType: unescapeField(fields[dashIndex + 1]),
-			superOptions: superOptions ? superOptions.split(",") : []
+			superOptions: superOptions ? superOptions.split(",") : [],
+			device: unescapeField(fields[2]),
+			root: unescapeField(fields[3])
 		};
 	});
 }

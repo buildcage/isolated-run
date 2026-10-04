@@ -263,15 +263,18 @@ export function writableDirsOf({
  * scratch base, and root-owned/unwritable so the sandbox can only traverse
  * it. Not maskedPaths: runc applies those after every mount, which would
  * undo the reveal below.
+ *
+ * `aliases` are the other paths the scratch base is reachable at on the host
+ * (see pathAliases), each covered the same way with nothing revealed again.
  */
-export function scratchBaseLayers(execDir: string): MountEntry[] {
+export function scratchBaseLayers(execDir: string, aliases: string[] = []): MountEntry[] {
   return [
-    {
-      destination: SANDBOX_SCRATCH_BASE,
+    ...[SANDBOX_SCRATCH_BASE, ...aliases].map((destination) => ({
+      destination,
       type: "tmpfs",
       source: "tmpfs",
       options: ["nosuid", "nodev", "mode=0555"],
-    },
+    })),
     // `bind`, never `rbind`: the scratch dir also holds the live
     // `mount --rbind /` rootfs by now, and a recursive bind would pull that
     // in as a second copy of the whole host `/`, read-write at that, since

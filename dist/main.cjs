@@ -23328,7 +23328,9 @@ function parseMountinfo(mountinfoContent) {
 		return {
 			mountPoint: unescapeField(fields[4]),
 			fsType: unescapeField(fields[dashIndex + 1]),
-			superOptions: superOptions ? superOptions.split(",") : []
+			superOptions: superOptions ? superOptions.split(",") : [],
+			device: unescapeField(fields[2]),
+			root: unescapeField(fields[3])
 		};
 	});
 }
@@ -23703,6 +23705,22 @@ function isAtOrUnder(path, ancestor) {
 }
 function pathsOverlap(a, b) {
 	return isAtOrUnder(a, b) || isAtOrUnder(b, a);
+}
+function pathAliases(mounts, path) {
+	let owner = mountAt(mounts, path);
+	if (!owner) return [];
+	let inFs = (0, node_path.join)(owner.root, (0, node_path.relative)(owner.mountPoint, path)), aliases = new Set();
+	for (let m of mounts) {
+		if (m.device !== owner.device) continue;
+		let alias = isAtOrUnder(inFs, m.root) ? (0, node_path.join)(m.mountPoint, (0, node_path.relative)(m.root, inFs)) : isAtOrUnder(m.root, inFs) ? m.mountPoint : void 0;
+		alias !== void 0 && !isAtOrUnder(alias, path) && mountAt(mounts, alias) === m && aliases.add(alias);
+	}
+	return [...aliases].filter((a) => ![...aliases].some((b) => b !== a && isAtOrUnder(a, b)));
+}
+function mountAt(mounts, path) {
+	let found;
+	for (let m of mounts) isAtOrUnder(path, m.mountPoint) && m.mountPoint.length >= (found?.mountPoint.length ?? 0) && (found = m);
+	return found;
 }
 var WritablePathConflictError = class extends Error {};
 function assertScratchBaseNotWritable(writableDirs) {
@@ -24815,9 +24833,9 @@ function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths
 		...writablePaths
 	].filter((p) => !!p))];
 }
-function scratchBaseLayers(execDir) {
-	return [{
-		destination: SANDBOX_SCRATCH_BASE,
+function scratchBaseLayers(execDir, aliases = []) {
+	return [...[SANDBOX_SCRATCH_BASE, ...aliases].map((destination) => ({
+		destination,
 		type: "tmpfs",
 		source: "tmpfs",
 		options: [
@@ -24825,7 +24843,7 @@ function scratchBaseLayers(execDir) {
 			"nodev",
 			"mode=0555"
 		]
-	}, {
+	})), {
 		destination: execDir,
 		type: "none",
 		source: execDir,
@@ -25450,7 +25468,7 @@ function cgroupsPathFor(runnerCgroup, name) {
 	if (runnerCgroup !== void 0) return `${runnerCgroup.replace(/\/$/, "")}/${name}`;
 }
 function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [] }, probes = realHostProbes) {
-	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, cgroupName, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
+	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, cgroupName, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [], scratchBaseAliases = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
 	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths, (path) => probes.realpath(path));
 	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
 		destination: RESOLV_CONF_DESTINATION,
@@ -25471,7 +25489,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		...layers.mounts,
 		...renameGuards,
 		...internalMounts,
-		...scratchBaseLayers(execDir)
+		...scratchBaseLayers(execDir, scratchBaseAliases)
 	], protectedWritablePaths = new Set([...layers.writablePaths, ...runCoverage.writablePaths]), { maskedPaths, readonlyPaths } = resolveProtectedPaths({
 		baseMaskedPaths: baseSpec.linux.maskedPaths ?? [],
 		baseReadonlyPaths: baseSpec.linux.readonlyPaths ?? [],
@@ -25755,7 +25773,8 @@ function assembleBundle(dir, options, deps) {
 				execDir,
 				envLoaderPath,
 				scriptPath,
-				hostMounts
+				hostMounts,
+				scratchBaseAliases: pathAliases(hostMounts, SANDBOX_SCRATCH_BASE)
 			},
 			env,
 			caTrust,

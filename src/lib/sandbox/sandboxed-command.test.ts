@@ -8,6 +8,7 @@ import {
   type RunSandboxedCommandDeps,
   type RunSandboxedCommandOptions,
 } from "./sandboxed-command.ts";
+import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 
 // Every collaborator is tested in its own file; what is left to check here is
 // the order they run in, what runSandboxedCommand hands each one, and which
@@ -141,6 +142,18 @@ describe("runSandboxedCommand", () => {
       "/var/run/netns/buildcage-sandbox-deadbeef",
     );
     expect(mocks.buildOciConfig.mock.calls[0][1].runtime.cgroupName).toBe(CONTAINER);
+  });
+
+  it("hands the scratch base's aliases from the host mount table to the config", async () => {
+    mocks.listHostMounts.mockReturnValue([
+      { mountPoint: "/", fsType: "ext4", device: "8:1", root: "/" },
+      { mountPoint: "/var/tmp", fsType: "ext4", device: "8:1", root: "/tmp" },
+    ]);
+    await runSandboxedCommand(options(), deps);
+
+    expect(mocks.buildOciConfig.mock.calls[0][1].runtime.scratchBaseAliases).toStrictEqual([
+      SANDBOX_SCRATCH_BASE.replace(/^\/var\/tmp\//, "/tmp/"),
+    ]);
   });
 
   it("trusts the proxy's CA under the inspect engine", async () => {

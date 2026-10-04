@@ -23,6 +23,7 @@ import { realpathOrSelf, resolveDefaultWritableDirs } from "./host-commands.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import { reservedInternalDestinations } from "./oci-mounts.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
+import type { HostMount } from "./types.ts";
 import {
   resolveWriteThroughPaths,
   resolveWriteThroughOnHost,
@@ -92,7 +93,7 @@ export interface ResolveFilesystemPlanDeps {
   mkdir?: (path: string) => void;
   deviceOf?: (path: string) => number;
   realpath?: (path: string) => string;
-  listHostMounts?: typeof listHostMounts;
+  listHostMounts?: () => HostMount[];
   isDirectory?: (path: string) => boolean;
 }
 

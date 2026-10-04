@@ -151,6 +151,9 @@ invocation, so no step inherits anything another one left behind.
   copy of every concurrent step's bundle, and their 0700 modes would not help, since every sandbox
   on a runner shares one real UID. The reveal is a non-recursive `bind`, which keeps the
   `mount --rbind /` rootfs staged beside it from coming back in as a second, writable host root.
+  Any other path the host mount table shows the same directory at is covered the same way: with
+  `/var/tmp` bind-mounted onto `/tmp`, a common hardening step, `/tmp/buildcage-<uid>` would
+  otherwise hand the sandbox the directory through a writable path.
 - **No list of the sandboxes beside it.** `ip netns add` leaves each namespace's name under the
   host's `/run/netns`, which the `/run` tmpfs hides with the rest. Defense in depth rather than a
   boundary anything rests on.

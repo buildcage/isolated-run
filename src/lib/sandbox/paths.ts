@@ -1,4 +1,7 @@
+import { join, relative } from "node:path";
+
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
+import type { MountinfoEntry } from "./types.ts";
 
 /**
  * True if `path` is `ancestor` itself or sits under it, compared
@@ -16,6 +19,45 @@ export function isAtOrUnder(path: string, ancestor: string): boolean {
 /** True if `a` and `b` are the same path, or either one contains the other. */
 export function pathsOverlap(a: string, b: string): boolean {
   return isAtOrUnder(a, b) || isAtOrUnder(b, a);
+}
+
+/**
+ * Pure: the other paths the directory at `path` can be reached through, by a
+ * bind mount of it or of an ancestor, or a second mount of its filesystem.
+ * `/var/tmp` bind-mounted onto `/tmp`, a common hardening step, makes
+ * `/tmp/x` an alias of `/var/tmp/x`. Mounts are matched by device and root,
+ * not inode, which btrfs subvolumes reuse. A path a later mount covers is
+ * left out, and so is anything under `path` itself.
+ */
+export function pathAliases(mounts: MountinfoEntry[], path: string): string[] {
+  const owner = mountAt(mounts, path);
+  if (!owner) return [];
+  const inFs = join(owner.root, relative(owner.mountPoint, path));
+  const aliases = new Set<string>();
+  for (const m of mounts) {
+    if (m.device !== owner.device) continue;
+    // The mount shows `inFs` itself, or only part of what is under it.
+    const alias = isAtOrUnder(inFs, m.root)
+      ? join(m.mountPoint, relative(m.root, inFs))
+      : isAtOrUnder(m.root, inFs)
+        ? m.mountPoint
+        : undefined;
+    if (alias !== undefined && !isAtOrUnder(alias, path) && mountAt(mounts, alias) === m) {
+      aliases.add(alias);
+    }
+  }
+  return [...aliases].filter((a) => ![...aliases].some((b) => b !== a && isAtOrUnder(a, b)));
+}
+
+/** The mount `path` is on: the deepest one above it, the later of two at one point. */
+function mountAt(mounts: MountinfoEntry[], path: string): MountinfoEntry | undefined {
+  let found: MountinfoEntry | undefined;
+  for (const m of mounts) {
+    if (isAtOrUnder(path, m.mountPoint) && m.mountPoint.length >= (found?.mountPoint.length ?? 0)) {
+      found = m;
+    }
+  }
+  return found;
 }
 
 /**
