@@ -41,14 +41,17 @@ const LOCK_NAME = "nssdb-ledger.lock";
 const MAX_LEDGER_BYTES = 64 << 10;
 const LOCK_DELAY_MS = 100;
 
-/** Kept well under acquireLock's wait so a lock left by a killed holder is
- *  taken over within it. */
+/** About 15s, past MAX_LOCK_HOLD_MS, so a waiter outlasts a killed holder's
+ *  lock whose pid was reused rather than failing its step. */
+const LOCK_ATTEMPTS = 150;
+
+/** Past this a lock is taken over from a pid that is gone. */
 const STALE_LOCK_MS = 2_000;
 
 /** Past this a lock is taken over even from a live pid, which may be another
  *  process's after a killed holder's pid was reused. Holders keep it for
  *  milliseconds. */
-const MAX_LOCK_HOLD_MS = 60_000;
+const MAX_LOCK_HOLD_MS = 10_000;
 
 export interface DirId {
   dev: string;
@@ -175,13 +178,19 @@ export function stillThere(
  *  EEXIST, so no reader sees an empty lock. */
 function acquireLock(
   lock: string,
-  { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 50 }: NssDbLedgerDeps,
+  {
+    pidAlive = defaultPidAlive,
+    now = () => new Date(),
+    lockAttempts = LOCK_ATTEMPTS,
+  }: NssDbLedgerDeps,
 ): () => void {
   const mine = `${lock}.${process.pid}`;
-  writeFileSync(mine, String(process.pid), { mode: 0o600 });
   try {
     retryBriefly(
       () => {
+        // Written on every try: link(2) keeps the mtime, which would otherwise
+        // date the lock from the start of the wait.
+        writeFileSync(mine, String(process.pid), { mode: 0o600 });
         try {
           linkSync(mine, lock);
         } catch (e) {
@@ -192,7 +201,7 @@ function acquireLock(
       { attempts: lockAttempts, delayMs: LOCK_DELAY_MS, retryOn: (e) => errnoCode(e) === "EEXIST" },
     );
   } catch (e) {
-    // link(2) fails otherwise only on a broken scratch base, which no test builds.
+    // Anything but EEXIST means a broken scratch base, which no test builds.
     /* v8 ignore next */
     if (errnoCode(e) !== "EEXIST") throw e;
     const waited = ((lockAttempts - 1) * LOCK_DELAY_MS) / 1000;

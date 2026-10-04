@@ -650,8 +650,11 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   mode and mounted over itself, and each directory between it and the outermost path above it whose
   writes persist is made a mount point, so none of them can be renamed or replaced. One reached
   through a symlink in such a path fails the step.
-  What they set reaches every later step and post step at once. `write_through:` can open
-  `GITHUB_ENV` or `GITHUB_PATH` by naming it.
+  What `GITHUB_ENV` and `GITHUB_PATH` set reaches every later step and post step at once, and
+  `write_through:` can open either by naming it. Only this action's post step reads `GITHUB_STATE`.
+  Workflow commands printed to stdout are not stopped: in a job that sets
+  `ACTIONS_ALLOW_UNSECURE_COMMANDS: true`, `::set-env::` and `::add-path::` reach later steps the
+  way the two files would.
   `filesystem_mode: ephemeral` closes this off for everything except what `write_through:` names.
   Naming only the outputs a later step needs, such as `./dist`, also discards a payload planted
   elsewhere in `$GITHUB_WORKSPACE`. A named path is as exposed as in `persistent` mode.
@@ -737,9 +740,10 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   tool expecting a session keyring or its own scratch state there finds nothing and fails outright
   rather than silently landing on the host's real directory. Only naming it in `write_through:`
   brings it back.
-- **The post step validates `$GITHUB_STATE` rather than trusting it.** The command cannot write
-  that file, but a process outside the sandbox, such as one an earlier step left running, can
-  overwrite what this action wrote there. The post step checks that the container name it reads back
+- **The post step validates `$GITHUB_STATE` rather than trusting it.** The command cannot write that
+  file, but a process outside the sandbox, such as one an earlier step left running, can overwrite
+  what this action wrote there, and the command can still print a `::save-state::` line, which the
+  runner applies to this action's state. The post step checks that the container name it reads back
   is shaped like one this action generates, computes its own Compose project name rather than
   trusting a stored value, and reads back which step started that container, recorded as a label
   from environment the runner sets per step and the command cannot forge. Another Buildcage step's

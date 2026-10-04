@@ -39,7 +39,7 @@ inputs:
     required: false
     default: ""
   upload_traffic_artifact:
-    description: "Upload the observed traffic as a JSON artifact, fetchable afterwards by whoever turns out to want it: a later job in the same run via actions/download-artifact, or anyone else via the API, subject to the retention period below. It keeps every URL verbatim, including any credential a build embedded in a query or a path, so treat it as sensitive. Both engines produce one; under universal it omits the method, URL, status and resolved address that only inspect sees. Default false."
+    description: "Upload the observed traffic as a JSON artifact. It keeps every URL verbatim, so treat it as sensitive. Default false. See docs/reference.md#traffic-artifact."
     required: false
   traffic_artifact_retention_days:
     description: "How long to keep that artifact, in days. Empty uses the repository's own default, and a value above the repository maximum is lowered to it, with a warning."
@@ -49,7 +49,7 @@ inputs:
     description: "Fail the step if any connection was blocked (restrict mode only). Default true."
     required: false
   fail_on_ca_residue:
-    description: "proxy_engine: inspect only. Whether a command that leaves a copy of the proxy CA in the NSS database Chromium reads fails the step (true, default) or only warns (false). With false, the copy is written back."
+    description: "proxy_engine: inspect only. Whether a command that leaves a copy of the proxy CA in the NSS database Chromium reads fails the step (true, default) or only warns (false). With false, the copy is written back. See docs/reference.md#chromium."
     required: false
   known_blocked_rules:
     description: "Traffic expected to be blocked, one rule per line: a host rule (wildcard or ~regex) or, under proxy_engine: inspect, a URL rule. Blocked traffic matching one doesn't fail the step even when fail_on_blocked is true. See docs/reference.md#blocked-rules-known_blocked_rules."
