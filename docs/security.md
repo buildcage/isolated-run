@@ -278,10 +278,12 @@ orphans.
 
 The isolated command runs in its own network namespace, connected to the proxy container's netns by
 a dedicated veth pair. There is no bridge: it is always a 1:1 connection, one sandbox to one proxy.
-The proxy's netns is referenced by Docker's own `NetworkSettings.SandboxKey` path rather than by
-PID, which Docker holds for the container's whole lifetime, so it cannot be silently reused if the
-proxy dies before the sandbox starts. iptables sends all TCP to a single listener and drops
-everything else, and that veth is the sandbox's only route to any network at all.
+The namespaces come from runc's default spec, and the step fails before the sandbox starts if that
+spec stops giving it a new network, PID, mount, IPC or UTS namespace. The proxy's netns is
+referenced by Docker's own `NetworkSettings.SandboxKey` path rather than by PID, which Docker holds
+for the container's whole lifetime, so it cannot be silently reused if the proxy dies before the
+sandbox starts. iptables sends all TCP to a single listener and drops everything else, and that
+veth is the sandbox's only route to any network at all.
 
 Nothing in the command has to be told about a proxy: interception is at the network level, so the
 `HTTP_PROXY` family of variables is not what puts a request in front of the rules, and ignoring them
