@@ -44,8 +44,9 @@ export function checkScratchBaseParent(realpath: (path: string) => string = real
   }
   if (real !== parent) {
     throw new SandboxError(
-      `${parent} resolves to ${real} through a symlink. runc will not run the sandbox under ` +
-        `a path that goes through one, so this action needs ${parent} to be a real directory.`,
+      `${parent} resolves to ${real} through a symlink, and the sandbox cannot be set up ` +
+        `under a path that goes through one. Replace that symlink, at ${parent} or on the way ` +
+        "to it, with a real directory.",
       "SCRATCH_BASE_SYMLINKED",
     );
   }

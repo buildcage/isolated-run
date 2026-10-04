@@ -31,11 +31,13 @@ describe("checkScratchBaseParent", () => {
     expect(() => checkScratchBaseParent((path) => path)).not.toThrow();
   });
 
-  it("refuses a /var/tmp that resolves elsewhere, naming both paths", () => {
+  it("refuses a /var/tmp that resolves elsewhere, naming both paths and the fix", () => {
     expect(() => checkScratchBaseParent(() => "/tmp")).toThrow(
       expect.objectContaining({
         code: "SCRATCH_BASE_SYMLINKED",
-        message: expect.stringContaining("/var/tmp resolves to /tmp through a symlink"),
+        message: expect.stringMatching(
+          /^\/var\/tmp resolves to \/tmp through a symlink.*Replace that symlink, at \/var\/tmp or on the way to it, with a real directory\.$/,
+        ),
       }),
     );
   });
