@@ -24643,6 +24643,10 @@ function shmSizeFromStatfs({ type, bsize, blocks }) {
 	let size = bsize * blocks;
 	return Number.isFinite(size) && size > 0 ? size : void 0;
 }
+function parseCgroupV2Path(procCgroup) {
+	let lines = procCgroup.split("\n").filter((line) => line !== "");
+	if (lines.length === 1 && lines[0].startsWith("0::/")) return lines[0].slice(3);
+}
 function readOptionalFile(path) {
 	try {
 		return (0, node_fs.readFileSync)(path, "utf8");
@@ -24678,7 +24682,11 @@ const realHostProbes = {
 			return;
 		}
 	},
-	realpath: realpathOrSelf
+	realpath: realpathOrSelf,
+	cgroupPath: () => {
+		let procCgroup = readOptionalFile("/proc/self/cgroup");
+		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
+	}
 };
 //#endregion
 //#region src/lib/sandbox/oci-mounts.ts
@@ -25389,8 +25397,11 @@ function sandboxNamespaces(base, netnsPath) {
 		path: netnsPath
 	} : ns);
 }
+function cgroupsPathFor(runnerCgroup, name) {
+	if (runnerCgroup !== void 0) return `${runnerCgroup.replace(/\/$/, "")}/${name}`;
+}
 function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [] }, probes = realHostProbes) {
-	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
+	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, cgroupName, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
 	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths, (path) => probes.realpath(path));
 	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
 		destination: RESOLV_CONF_DESTINATION,
@@ -25420,7 +25431,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		writablePaths: protectedWritablePaths,
 		freshMountDestinations,
 		disableReadonly
-	}), namespaces = sandboxNamespaces(baseSpec.linux.namespaces, netnsPath);
+	}), namespaces = sandboxNamespaces(baseSpec.linux.namespaces, netnsPath), cgroupsPath = cgroupsPathFor(probes.cgroupPath(), cgroupName);
 	return {
 		...baseSpec,
 		root: {
@@ -25461,6 +25472,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		},
 		linux: {
 			...baseSpec.linux,
+			...cgroupsPath !== void 0 && { cgroupsPath },
 			namespaces,
 			seccomp: seccompProfile,
 			maskedPaths,
@@ -25680,6 +25692,7 @@ function assembleBundle(dir, options, deps) {
 			} : void 0,
 			runtime: {
 				netnsPath: `/var/run/netns/${netnsName}`,
+				cgroupName: containerName,
 				rootfsBindDir,
 				resolvConfPath,
 				seccompProfile,

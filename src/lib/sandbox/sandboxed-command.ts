@@ -356,6 +356,7 @@ export function assembleBundle(
           : undefined,
       runtime: {
         netnsPath: `/var/run/netns/${netnsName}`,
+        cgroupName: containerName,
         rootfsBindDir,
         resolvConfPath,
         seccompProfile,

@@ -664,10 +664,11 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 - **Exhausting the host.** The OCI spec sets no `linux.resources`, so there is no memory, pids or
   CPU ceiling, and capability bounding and seccomp cannot close this either, since a legitimate
   build calls `fork(2)` and `mmap(2)` freely. A fork bomb consumes host memory or the process table
-  until something gives out. Wrapping a step does not change its exposure here, since an un-sandboxed
-  `run:` step has the same absence of limits on the same host. On GitHub-hosted runners that stays
-  inside the job's disposable VM; bounding it on a shared self-hosted runner is a runner-service
-  concern, such as a systemd slice's `MemoryMax=` around the runner service itself.
+  until something gives out. Wrapping a step does not change its exposure here: on a cgroup v2 host
+  the sandbox's cgroup is made under the runner's own, so it is bound by whatever the runner's
+  service is, as an un-sandboxed `run:` step is. On GitHub-hosted runners that stays inside the
+  job's disposable VM; bounding it on a shared self-hosted runner is a runner-service concern, such
+  as `MemoryMax=` and `TasksMax=` on the runner's systemd unit or a slice around it.
 - **Reading a step's staging directory from outside any sandbox.** `/var/tmp/buildcage-<uid>` is
   hidden from every sandbox, including its own, but a process running as the same user outside one
   can still read it. That is the same accepted limitation as credential retrieval above.

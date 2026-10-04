@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  parseCgroupV2Path,
   parseNofileLimit,
   resolveSetprivPath,
   shmSizeFromStatfs,
@@ -85,5 +86,32 @@ describe("parseNofileLimit", () => {
 
   it("returns undefined for an empty dump", () => {
     expect(parseNofileLimit("")).toBeUndefined();
+  });
+});
+
+describe("parseCgroupV2Path", () => {
+  it("reads the path off a cgroup v2 host's single line", () => {
+    expect(parseCgroupV2Path("0::/system.slice/actions.runner.service\n")).toBe(
+      "/system.slice/actions.runner.service",
+    );
+  });
+
+  it("reads the root of a cgroup namespace", () => {
+    expect(parseCgroupV2Path("0::/\n")).toBe("/");
+  });
+
+  it("reads nothing off a hybrid host, which lists its v1 hierarchies too", () => {
+    const hybrid =
+      "12:pids:/system.slice/a.service\n1:name=systemd:/system.slice/a.service\n0::/system.slice/a.service\n";
+    expect(parseCgroupV2Path(hybrid)).toBeUndefined();
+  });
+
+  it("reads nothing off a cgroup v1 host", () => {
+    expect(parseCgroupV2Path("3:memory:/user.slice\n2:cpu,cpuacct:/user.slice\n")).toBeUndefined();
+  });
+
+  it("reads nothing off an empty or malformed dump", () => {
+    expect(parseCgroupV2Path("")).toBeUndefined();
+    expect(parseCgroupV2Path("0::relative\n")).toBeUndefined();
   });
 });
