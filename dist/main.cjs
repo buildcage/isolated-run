@@ -26077,7 +26077,7 @@ function authorityOf(host, port, scheme) {
 }
 function hostBeforeRequest(sni, address) {
 	return sni !== void 0 && sni !== "-" ? {
-		host: ruleHost(sni),
+		host: sniHost(sni),
 		byAddress: !1
 	} : address === "198.19.255.1" ? {
 		host: UNKNOWN_HOST,
@@ -26090,7 +26090,7 @@ function hostBeforeRequest(sni, address) {
 function parseProxyLine(line, isAudit) {
 	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
 	if (request) {
-		let incomplete = request[3] === "<BADREQ>" && request[11]?.startsWith("SSL_") === !0 ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[13]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[12], request[9]) : void 0, event = {
+		let fcerr = request[11] ?? "", incomplete = request[3] === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[13]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[12], request[9]) : void 0, event = {
 			time: Number(request[1]) / 1e3,
 			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
 			protocol: unnamed?.byAddress ? "tcp" : scheme,
@@ -26234,15 +26234,19 @@ function aggregate(filtered) {
 const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
 function clientEndedNoise(timeline) {
 	let completed = new Set();
-	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(event.host);
-	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "") && completed.has(event.host);
+	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
+	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "") && completed.has(ruleHost(event.host));
 }
 function connectedHosts(timeline) {
 	let connected = {
 		any: new Set(),
 		blocked: new Set()
 	};
-	for (let event of timeline) event.protocol !== "dns" && (connected.any.add(event.host), event.action === "block" && connected.blocked.add(event.host));
+	for (let event of timeline) {
+		if (event.protocol === "dns" || event.action === "incomplete") continue;
+		let host = ruleHost(event.host);
+		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
+	}
 	return connected;
 }
 function isRedundantDns(event, connected) {

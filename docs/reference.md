@@ -440,8 +440,9 @@ no such section, folds nothing.
 A name the step looked up and never connected to gets a row of its own, with `DNS` as the rule kind
 and no port (folded like any other row when a `known_blocked_rules` rule matches it). Under
 `inspect` that is the only trace of a name the step reached for and did not use, which is how a rule
-wider than the step needs shows up. A name that was connected to has no such row: the request is
-already there.
+wider than the step needs shows up. A name that was connected to has no such row: the connection is
+already there. One whose every connection ended before a request keeps it, as the
+[ones nobody decided](#the-ones-nobody-decided) reach no table.
 
 ## Blocked service names
 
