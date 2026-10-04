@@ -696,7 +696,7 @@ Job Summary is the exception: it replaces credential query parameters, see
 ## CA trust variables
 
 `proxy_engine: inspect` terminates TLS and re-signs it with a CA generated for the step, so the
-command has to trust that CA. The CA is valid for two days from when the proxy starts and carries a
+command has to trust that CA. The CA is valid for two days from when it is generated and carries a
 random `serialNumber` in its subject, so no two runs share one. The CA, and where relevant an
 augmented copy of the system CA store, is mounted over the sandbox's own view of those paths. The
 store copy goes back over the path it was read from, which is what the tools going by their own
