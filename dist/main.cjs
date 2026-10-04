@@ -25038,7 +25038,7 @@ function sandboxReadonlyFileCommands(writeThroughPaths, env, realpath = realpath
 function renameGuardDirs(readonlyDirs, persisting) {
 	let guards = new Set();
 	for (let dir of readonlyDirs) {
-		let root = persisting.filter((p) => p !== "/" && isAtOrUnder(dir, p)).sort((a, b) => b.length - a.length)[0];
+		let root = persisting.filter((p) => p !== dir && isAtOrUnder(dir, p)).sort((a, b) => a.length - b.length)[0];
 		if (root) for (let p = (0, node_path.dirname)(dir); p !== root && isAtOrUnder(p, root); p = (0, node_path.dirname)(p)) guards.add(p);
 	}
 	return [...guards].sort((a, b) => a.length - b.length || a.localeCompare(b));
@@ -25371,7 +25371,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		type: "none",
 		source: resolvConfPath,
 		options: ["rbind", "ro"]
-	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), renameGuards = renameGuardDirs.map((p) => ({
+	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), overlapsFresh = (p) => [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p)), renameGuards = renameGuardDirs.filter((p) => !overlapsFresh(p)).map((p) => ({
 		destination: p,
 		type: "none",
 		source: p,

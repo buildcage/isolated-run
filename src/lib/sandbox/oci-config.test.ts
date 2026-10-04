@@ -479,6 +479,20 @@ describe("buildOciConfig", () => {
     });
   });
 
+  it("never binds a rename guard on or around a path the sandbox mounts fresh", () => {
+    const config = build(fakeBaseSpec(), {
+      ...baseArgs,
+      renameGuardDirs: ["/dev", "/dev/shm", "/dev/shm/x", "/home/runner"],
+    });
+    const guarded = config.mounts
+      .filter((m) => m.source === m.destination && m.options?.includes("rbind"))
+      .map((m) => m.destination);
+    expect(guarded).not.toContain("/dev");
+    expect(guarded).not.toContain("/dev/shm");
+    expect(guarded).not.toContain("/dev/shm/x");
+    expect(guarded).toContain("/home/runner");
+  });
+
   describe("the scratch base, which nothing may make writable", () => {
     it("does not mount anything over rootfsBindDir (it lives under the scratch base, so nothing re-exposes it)", () => {
       const config = build(fakeBaseSpec(), {

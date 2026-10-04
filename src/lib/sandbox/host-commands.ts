@@ -307,18 +307,20 @@ export function sandboxReadonlyFileCommands(
 }
 
 /**
- * The writable directories between a read-only dir and the persisting root
- * above it. Renaming one would move the read-only dir aside and free its path
- * for a replacement; binding each onto itself makes it a mount point, which
- * the kernel refuses to rename. The root and the read-only dir are mount
- * points already.
+ * The writable directories between a read-only dir and the outermost persisting
+ * root above it. Renaming one would move the read-only dir aside and free its
+ * path for a replacement; binding each onto itself makes it a mount point,
+ * which the kernel refuses to rename. The outermost root, so a persisting path
+ * nested in another (the workspace in $HOME) is guarded too, and the guards
+ * stay inside what is writable anyway. The root and the read-only dir are
+ * mount points already, or `/`.
  */
 export function renameGuardDirs(readonlyDirs: string[], persisting: string[]): string[] {
   const guards = new Set<string>();
   for (const dir of readonlyDirs) {
     const root = persisting
-      .filter((p) => p !== "/" && isAtOrUnder(dir, p))
-      .sort((a, b) => b.length - a.length)[0];
+      .filter((p) => p !== dir && isAtOrUnder(dir, p))
+      .sort((a, b) => a.length - b.length)[0];
     if (!root) continue;
     for (let p = dirname(dir); p !== root && isAtOrUnder(p, root); p = dirname(p)) {
       guards.add(p);

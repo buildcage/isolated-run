@@ -455,8 +455,23 @@ describe("renameGuardDirs", () => {
     expect(renameGuardDirs([`${HOME}/.docker`], PERSISTENT)).toStrictEqual([]);
   });
 
-  it("uses the deepest containing root, so it never pins a path outside the writable area", () => {
-    expect(renameGuardDirs([`${WORKSPACE}/a/b`], PERSISTENT)).toStrictEqual([`${WORKSPACE}/a`]);
+  it("uses the outermost containing root, pinning a writable root nested in it", () => {
+    expect(renameGuardDirs([`${WORKSPACE}/a/b`], PERSISTENT)).toStrictEqual([
+      "/home/runner/work",
+      "/home/runner/work/repo",
+      WORKSPACE,
+      `${WORKSPACE}/a`,
+    ]);
+  });
+
+  it("never pins a path outside the writable area", () => {
+    expect(renameGuardDirs(["/etc/x/y"], PERSISTENT)).toStrictEqual([]);
+  });
+
+  it("does not take the read-only path itself as its root", () => {
+    expect(renameGuardDirs([`${WORKSPACE}/a/b`], [`${WORKSPACE}/a/b`, WORKSPACE])).toStrictEqual([
+      `${WORKSPACE}/a`,
+    ]);
   });
 
   it("dedupes shared ancestors across several read-only dirs", () => {
@@ -475,7 +490,15 @@ describe("renameGuardDirs", () => {
     ]);
   });
 
-  it("pins nothing under write_through: /, the full opt-out", () => {
-    expect(renameGuardDirs([ACTION], ["/"])).toStrictEqual([]);
+  // Nothing is a mount point then, so every directory above the dir is pinned.
+  it("pins up to / under write_through: /", () => {
+    expect(renameGuardDirs([ACTION], ["/", HOME])).toStrictEqual([
+      "/home",
+      "/home/runner",
+      "/home/runner/work",
+      "/home/runner/work/_actions",
+      "/home/runner/work/_actions/buildcage",
+      "/home/runner/work/_actions/buildcage/isolated-run",
+    ]);
   });
 });
