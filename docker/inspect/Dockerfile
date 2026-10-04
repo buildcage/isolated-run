@@ -76,8 +76,7 @@ LABEL org.opencontainers.image.title="isolated-run-inspect-proxy" \
 # haproxy carries what this engine needs in one binary: it tells a TLS
 # handshake from a plain request by its first bytes, generates certificates
 # for an SNI, resolves names itself, and normalises a path before matching
-# it. No dnsmasq, no gettext/envsubst: CoreDNS replaces dnsmasq, and
-# gen-configs.js generates haproxy.cfg directly instead of templating it.
+# it.
 # nss-tools provides certutil for init-cfg's NSS database.
 ARG HAPROXY_BRANCH
 RUN apk add --no-cache \
