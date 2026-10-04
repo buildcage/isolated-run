@@ -787,6 +787,7 @@ jobs:
         changes,
         test_sandbox_audit_mode,
         test_sandbox_enforcement,
+        test_sandbox_config_file,
         test_sandbox_inspect_enforcement,
         test_sandbox_fail_on_blocked,
         test_sandbox_concurrency,
