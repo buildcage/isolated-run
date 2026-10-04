@@ -23887,11 +23887,11 @@ function stillThere(path, id, deps = {}) {
 	let current = dirIdOf(path, deps);
 	return current !== void 0 && sameId(current, id);
 }
-function acquireLock(lock, { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 50 }) {
+function acquireLock(lock, { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 150 }) {
 	let mine = `${lock}.${process.pid}`;
-	(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
 	try {
 		retryBriefly(() => {
+			(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
 			try {
 				(0, node_fs.linkSync)(mine, lock);
 			} catch (e) {
@@ -23918,7 +23918,7 @@ function takeOverStaleLock(lock, pidAlive, now) {
 	} catch {
 		return;
 	}
-	age < 2e3 || age < 6e4 && Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
+	age < 2e3 || age < 1e4 && Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
 }
 function withLock(base, fn, deps) {
 	let release = acquireLock((0, node_path.join)(base, "nssdb-ledger.lock"), deps);

@@ -24,6 +24,7 @@ import {
   releaseNssDb,
   stillThere,
   useNameFor,
+  withNssDbLock,
   type NssDbLedgerDeps,
 } from "./nss-db-ledger.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
@@ -341,7 +342,7 @@ describe("the lock", () => {
   });
 
   it.each(["", "not a pid"])("is taken over, long left, holding %j", (content) => {
-    holdLock(999_999, 60_000);
+    holdLock(999_999, 10_000);
     writeFileSync(join(base, "nssdb-ledger.lock"), content);
     utimesSync(join(base, "nssdb-ledger.lock"), new Date(0), new Date(0));
 
@@ -376,15 +377,40 @@ describe("the lock", () => {
 
   // Its pid may since have gone to another process.
   it("is taken over when held past any real holder's time, its pid alive or not", () => {
-    holdLock(999_999, 60_000);
+    holdLock(999_999, 10_000);
 
     claim(step("sandbox-a"), { pidAlive: () => true });
 
     expect(Object.keys(ledger().uses)).toStrictEqual(["sandbox-a"]);
   });
 
+  // The clock moves a second per look, so the lock is taken over only if the
+  // waiter keeps trying past the hold limit.
+  it("is taken over within the wait when a live pid holds it too long", () => {
+    holdLock(999_999);
+    let clock = Date.now();
+
+    claim(step("sandbox-a"), { pidAlive: () => true, now: () => new Date((clock += 1_000)) });
+
+    expect(Object.keys(ledger().uses)).toStrictEqual(["sandbox-a"]);
+  });
+
+  // link(2) keeps the mtime, so a lock linked after a long wait would look as
+  // old as the wait, and the next waiter would take it from its live holder.
+  it("starts its age when it is taken, not when the wait began", () => {
+    holdLock(999_999);
+    let clock = Date.now();
+
+    const age = withNssDbLock(
+      () => Date.now() - lstatSync(join(base, "nssdb-ledger.lock")).mtimeMs,
+      { base, pidAlive: () => true, now: () => new Date((clock += 1_000)) },
+    );
+
+    expect(age).toBeLessThan(500);
+  });
+
   it.each([
-    ["whose holder is still there", 59_000, true],
+    ["whose holder is still there", 9_000, true],
     ["taken only just now", 0, false],
   ])("is waited on, not taken over, when it is one %s", (_label, age, alive) => {
     holdLock(999_999, age);
