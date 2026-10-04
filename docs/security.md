@@ -186,9 +186,11 @@ source and destination, so the mount would land wherever the symlink leads. An e
 plant one where it writes, pointing at `/proc` or at a directory the sandbox keeps read-only but the
 runner user can write anyway (`/usr/local/bin` and `/opt/hostedtoolcache` are world-writable on
 GitHub-hosted runners). The error names the path the symlink leads to, which can be written instead.
-A missing entry is created by the runner when it can write the nearest existing parent, and fails
-the step otherwise. A step running concurrently as the same user can still swap a directory for a
-symlink between the check and the mount.
+The part of an entry that is `$HOME`, `$GITHUB_WORKSPACE` or `$RUNNER_TEMP` is taken at its real
+path, as the persistent writable set is, so only what the entry adds below one is checked. A missing
+entry is created by the runner when it can write the nearest existing parent, and fails the step
+otherwise. A step running concurrently as the same user can still swap a directory for a symlink
+between the check and the mount.
 
 After the command exits, the step keeps running on the host to read the report and tear the
 sandbox down, so what it runs is kept out of those paths:

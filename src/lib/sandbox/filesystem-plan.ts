@@ -13,6 +13,8 @@
  * the same reason: which paths a write_through: entry may name is decided by
  * the mounts the sandbox makes for itself, not by how the input was spelled.
  */
+import { join, normalize, relative } from "node:path";
+
 import { errorMessage } from "#core/lib/errors.ts";
 
 import { SandboxError } from "../errors.ts";
@@ -125,25 +127,28 @@ export function resolveFilesystemPlan(
   env: NodeJS.ProcessEnv,
   deps: ResolveFilesystemPlanDeps = {},
 ): FilesystemPlan {
-  const writeThroughPaths = resolveWriteThroughInput(writeThroughInput, env);
+  const written = resolveWriteThroughInput(writeThroughInput, env);
 
   // The authoritative call, ahead of the early return below: reaching that
   // with the sentinel under ephemeral would leave the run with no overlay.
-  validateFilesystemInputs(filesystemMode, writeThroughPaths);
+  validateFilesystemInputs(filesystemMode, written);
 
   // `/` drops the read-only restriction wholesale (persistent only, see
   // validateFilesystemInputs), so no path is bind-mounted individually:
   // nothing to create, and buildOciConfig skips the scratch-base guard for
   // the same reason.
-  if (writeThroughPaths.includes(WRITE_THROUGH_ALL)) {
-    return { overlayRoots: [], writeThroughPaths };
+  if (written.includes(WRITE_THROUGH_ALL)) {
+    return { overlayRoots: [], writeThroughPaths: written };
   }
 
   try {
-    assertKnownFilesExist(writeThroughPaths, env, deps);
+    assertKnownFilesExist(written, env, deps);
   } catch (e) {
     throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
   }
+
+  const realpath = deps.realpath ?? realPathOf;
+  const writeThroughPaths = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
 
   // From here each entry is the real path the checks below and the mount act on.
   try {
@@ -155,7 +160,6 @@ export function resolveFilesystemPlan(
     );
   }
   // The CA mount lands where a candidate's symlinks lead, so that file is reserved too.
-  const realpath = deps.realpath ?? realPathOf;
   validateFilesystemInputs(
     filesystemMode,
     writeThroughPaths,
@@ -203,4 +207,21 @@ export function resolveFilesystemPlan(
       "FILESYSTEM_PLAN_FAILED",
     );
   }
+}
+
+/**
+ * `path` with the runner directory it sits under, if any, spelled by its real
+ * path. Persistent mode resolves those and makes them writable anyway, so only
+ * what an entry adds below one is checked for symlinks.
+ */
+function onRealRunnerDir(
+  path: string,
+  env: NodeJS.ProcessEnv,
+  realpath: (path: string) => string,
+): string {
+  const dir = [env.GITHUB_WORKSPACE, env.HOME, env.RUNNER_TEMP]
+    .flatMap((d) => (d ? [normalize(d)] : []))
+    .filter((d) => isAtOrUnder(path, d))
+    .sort((a, b) => b.length - a.length)[0];
+  return dir === undefined ? path : join(realpath(dir), relative(dir, path));
 }

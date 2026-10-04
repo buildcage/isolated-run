@@ -26,6 +26,7 @@ describe("resolveFilesystemPlan", () => {
   it("resolves write_through: in persistent mode too, normalizing each entry", () => {
     const plan = resolveFilesystemPlan("persistent", "./dist\n/opt/./cache/\n", ENV, {
       exists: alwaysExists,
+      realpath: (p) => p,
       lstat: notLink,
     });
     expect(plan.writeThroughPaths).toStrictEqual([`${ENV.GITHUB_WORKSPACE}/dist`, "/opt/cache"]);
@@ -124,6 +125,7 @@ describe("resolveFilesystemPlan", () => {
     try {
       resolveFilesystemPlan("ephemeral", "./cache", ENV, {
         exists: alwaysExists,
+        realpath: (p) => p,
         lstat: (p) => ({ isSymbolicLink: () => p === `${ENV.GITHUB_WORKSPACE}/cache` }),
         readlink: () => ENV.RUNNER_TEMP,
         mkdir,
@@ -133,6 +135,50 @@ describe("resolveFilesystemPlan", () => {
       expect((err as SandboxError).code).toBe("INVALID_WRITE_THROUGH_PATH");
     }
     expect(mkdir).not.toHaveBeenCalled();
+  });
+
+  describe("an entry under a runner directory that goes through a symlink", () => {
+    // As on Fedora Atomic, where /home links to /var/home.
+    const fedora = (extraLinks: string[] = []) => ({
+      exists: alwaysExists,
+      lstat: (p: string) => ({ isSymbolicLink: () => p === "/home" || extraLinks.includes(p) }),
+      readlink: () => "var/home",
+      realpath: (p: string) => p.replace(/^\/home\//, "/var/home/"),
+      mkdir: () => {},
+    });
+
+    it("takes the runner directory at its real path, however the entry spells it", () => {
+      const plan = resolveFilesystemPlan(
+        "persistent",
+        "./dist\n~/.cache/pip\n/home/runner/out\n$RUNNER_TEMP/x",
+        ENV,
+        fedora(),
+      );
+      expect(plan.writeThroughPaths).toStrictEqual([
+        "/var/home/runner/work/repo/repo/dist",
+        "/var/home/runner/.cache/pip",
+        "/var/home/runner/out",
+        "/var/home/runner/work/_temp/x",
+      ]);
+    });
+
+    it("leaves an entry under no runner directory as written", () => {
+      const env = { HOME: ENV.HOME, GITHUB_WORKSPACE: ENV.GITHUB_WORKSPACE };
+      expect(
+        resolveFilesystemPlan("persistent", "/opt/out", env, fedora()).writeThroughPaths,
+      ).toStrictEqual(["/opt/out"]);
+    });
+
+    it("still refuses a symlink in what the entry adds below it", () => {
+      expect(() =>
+        resolveFilesystemPlan(
+          "persistent",
+          "~/.cache/pip",
+          ENV,
+          fedora(["/var/home/runner/.cache"]),
+        ),
+      ).toThrow(expect.objectContaining({ code: "INVALID_WRITE_THROUGH_PATH" }));
+    });
   });
 
   it("catches an overlap that only normalization reveals", () => {
@@ -266,6 +312,7 @@ describe("resolveFilesystemPlan", () => {
     try {
       resolveFilesystemPlan("ephemeral", "./dist", ENV, {
         exists: (p) => p !== `${ENV.GITHUB_WORKSPACE}/dist`,
+        realpath: (p) => p,
         lstat: notLink,
         canWrite: () => false,
       });

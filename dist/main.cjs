@@ -25113,22 +25113,22 @@ function resolveWriteThroughInput(writeThroughInput, env) {
 	}
 }
 function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
-	let writeThroughPaths = resolveWriteThroughInput(writeThroughInput, env);
-	if (validateFilesystemInputs(filesystemMode, writeThroughPaths), writeThroughPaths.includes("/")) return {
+	let written = resolveWriteThroughInput(writeThroughInput, env);
+	if (validateFilesystemInputs(filesystemMode, written), written.includes("/")) return {
 		overlayRoots: [],
-		writeThroughPaths
+		writeThroughPaths: written
 	};
 	try {
-		assertKnownFilesExist(writeThroughPaths, env, deps);
+		assertKnownFilesExist(written, env, deps);
 	} catch (e) {
 		throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
 	}
+	let realpath = deps.realpath ?? realPathOf, writeThroughPaths = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
 	try {
 		for (let path of writeThroughPaths) assertNoSymlinkInWriteThrough(path, deps);
 	} catch (e) {
 		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
-	let realpath = deps.realpath ?? realPathOf;
 	validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map((p) => realpath(p)));
 	try {
 		assertScratchBaseNotWritable(writeThroughPaths);
@@ -25158,6 +25158,14 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	} catch (e) {
 		throw new SandboxError(`Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
 	}
+}
+function onRealRunnerDir(path, env, realpath) {
+	let dir = [
+		env.GITHUB_WORKSPACE,
+		env.HOME,
+		env.RUNNER_TEMP
+	].flatMap((d) => d ? [(0, node_path.normalize)(d)] : []).filter((d) => isAtOrUnder(path, d)).sort((a, b) => b.length - a.length)[0];
+	return dir === void 0 ? path : (0, node_path.join)(realpath(dir), (0, node_path.relative)(dir, path));
 }
 //#endregion
 //#region src/lib/sandbox/runtime-sockets.ts
