@@ -36,7 +36,7 @@ details.
 | `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                      |
 | `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                     |
 | `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                |
-| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact; both engines produce one. See [Traffic artifact](#traffic-artifact).          |
+| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                    |
 | `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                            |
 
 `fail_on_blocked`, `fail_on_ca_residue` and `upload_traffic_artifact` take `true` or `false`, and
@@ -230,8 +230,9 @@ connection carries. A leading, trailing or doubled dot is refused.
 
 A `Host` header ending in a dot (`example.com.`) matches as the name without it. An SNI may not end
 in one (RFC 6066), so where a rule is judged on the SNI (`allowed_tls_rules`, and
-`allowed_https_rules` under `universal`), only a rule whose name ends in `**`, or a `~` rule
-written to allow the dot, matches such a name.
+`allowed_https_rules` under `universal`), only a rule whose `**` can take in the dot
+(`example.**` or `**`, not `example.com.**`), or a `~` rule written to allow the dot, matches such a
+name.
 
 `**` alone matches an address too: under `**:443`, a request that reaches the proxy through a name
 with `Host: 10.0.0.5` goes to that private address (see
@@ -430,12 +431,11 @@ refused with an error naming what to write instead.
 Matching is per request, so a row that counts several requests to one host is Expected only when a
 rule accounts for every one of them: a URL rule that names one endpoint leaves the host's other
 blocked requests to fail the step. Once `known_blocked_rules` is set, the Blocked Hosts table gains
-an **Expected** column (✅) on the matched rows. Under `inspect` those rows are also folded into one row per rule, named after the rule
-and counting the hosts behind it (`*.example.com:* (12 hosts)`), below the rows nothing matched. A
-rule covering noisy traffic then costs the table one line however many hosts it names, which matters
-most when the noise puts its payload in the name itself and every request brings a new long
-hostname. The individual hosts stay in **Communication details**, so `universal`, whose report has
-no such section, folds nothing.
+an **Expected** column (✅) on the matched rows. Those rows are also folded into one row per rule,
+named after the rule and counting the hosts behind it (`*.example.com:* (12 hosts)`), below the rows
+nothing matched. A rule covering noisy traffic then costs the table one line however many hosts it
+names, which matters most when the noise puts its payload in the name itself and every request
+brings a new long hostname. The individual hosts stay in **Communication details**.
 
 A name the step looked up and never connected to gets a row of its own, with `DNS` as the rule kind
 and no port (folded like any other row when a `known_blocked_rules` rule matches it). Under
@@ -563,8 +563,7 @@ server to speak first (SMTP, FTP) ends as one nobody decided. No rule on the nam
 
 A request no rule refused can still come to nothing: the origin answers nothing usable, breaks off
 mid-transfer, or its name resolves nowhere. The report tables those apart from what the rules did
-refuse, under **⚠️ Failed Connections**. Under `inspect`, **Communication details** shows each with
-⚠️ too:
+refuse, under **⚠️ Failed Connections**. **Communication details** shows each with ⚠️ too:
 
 ```
 ⚠️ 00:12.004: GET https://registry.npmjs.org/big.tgz -> origin-aborted
@@ -623,9 +622,9 @@ resolver saying no rule allows the name, and it does fail the step.
 named `buildcage-traffic-<id>`, where `<id>` is this step's own container suffix so several steps in
 one job never collide. It carries every name lookup, including the ones the summary folds into the
 request that followed them, and service-discovery lookups with the record type that was asked for.
-Both engines produce one; `universal` sees neither the request nor where a name resolved, so under
-it `method`, `url`, `status` and `destination` are absent and the rows are name lookups and a
-connection-level view (host, port and bytes).
+`universal` sees neither the request nor where a name resolved, so under it `method`, `url`,
+`status` and `destination` are absent and the rows are name lookups and a connection-level view
+(host, port and bytes).
 
 This is also the form to keep where the report is an audit trail rather than something to read: in
 `filesystem_mode: persistent` a later step can add to the Job Summary, but not to an artifact
