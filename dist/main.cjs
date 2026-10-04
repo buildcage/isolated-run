@@ -25068,15 +25068,18 @@ function resolveThroughFixedLinks(path, roots, readlink) {
 	}
 	return { real: current };
 }
-function sandboxReadonlyFileCommands(writeThroughPaths, env, realpath = realpathOrSelf) {
-	let named = new Set(withRealPaths(writeThroughPaths, realpath)), openable = (name, path) => name !== "GITHUB_STATE" && (named.has(path) || named.has(realpath(path)));
+function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = realFindCommandDeps) {
+	let named = new Set(withRealPaths(writeThroughPaths, deps.realpathDir)), openable = (name, path) => name !== "GITHUB_STATE" && (named.has(path) || named.has(deps.realpathDir(path))), roots = persisting.filter((p) => p !== "/");
 	return [
 		"GITHUB_ENV",
 		"GITHUB_PATH",
 		"GITHUB_STATE"
 	].flatMap((name) => {
 		let path = env[name];
-		return path && !openable(name, path) ? [realpath(path)] : [];
+		if (!path || openable(name, path)) return [];
+		let resolved = resolveThroughFixedLinks(path, roots, deps.readlink);
+		if ("link" in resolved) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through ${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and the runner reads it after the step. Configure the runner's work directory by its real path, not through the symlink.`, "HOST_DIR_UNPROTECTABLE");
+		return [resolved.real];
 	});
 }
 function renameGuardDirs(readonlyDirs, persisting) {
@@ -25684,7 +25687,10 @@ function assembleBundle(dir, options, deps) {
 		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)), readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, void 0, {
 			readlink: deps.readlink,
 			realpathDir: deps.realpath
-		}), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, env, deps.realpath), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
+		}), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, {
+			readlink: deps.readlink,
+			realpathDir: deps.realpath
+		}), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
 		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
 			mode: 448,
 			recursive: !0

@@ -639,8 +639,9 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   else under a writable exception, a later step's `config_file` included. `GITHUB_ENV`,
   `GITHUB_PATH` and `GITHUB_STATE` are the exception: each is read-only inside the sandbox in either
   mode, mounted over itself so it cannot be renamed or replaced, and every writable directory above
-  it is pinned the same way. What they set reaches every later step and post step at once.
-  `write_through:` can open `GITHUB_ENV` or `GITHUB_PATH` by naming it.
+  it is pinned the same way. One reached through a symlink in a writable path fails the step.
+  What they set reaches every later step and post step at once. `write_through:` can open
+  `GITHUB_ENV` or `GITHUB_PATH` by naming it.
   `filesystem_mode: ephemeral` closes this off for everything except what `write_through:` names.
   Naming only the outputs a later step needs, such as `./dist`, also discards a payload planted
   elsewhere in `$GITHUB_WORKSPACE`. A named path is as exposed as in `persistent` mode.

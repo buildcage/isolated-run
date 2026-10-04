@@ -360,19 +360,33 @@ function resolveThroughFixedLinks(
  * directory first in GITHUB_PATH would reach all of them. Read-only in either
  * mode, whatever is writable around them, unless write_through names
  * GITHUB_ENV or GITHUB_PATH itself. GITHUB_STATE, which only this action's
- * post step reads, is never opened.
+ * post step reads, is never opened. Like sandboxReadonlyHostDirs, throws when
+ * one goes through a symlink in a persisting path.
  */
 export function sandboxReadonlyFileCommands(
   writeThroughPaths: string[],
+  persisting: string[],
   env: NodeJS.ProcessEnv,
-  realpath: (path: string) => string = realpathOrSelf,
+  deps: Pick<FindCommandDeps, "readlink" | "realpathDir"> = realFindCommandDeps,
 ): string[] {
-  const named = new Set(withRealPaths(writeThroughPaths, realpath));
+  const named = new Set(withRealPaths(writeThroughPaths, deps.realpathDir));
   const openable = (name: string, path: string) =>
-    name !== "GITHUB_STATE" && (named.has(path) || named.has(realpath(path)));
+    name !== "GITHUB_STATE" && (named.has(path) || named.has(deps.realpathDir(path)));
+  const roots = persisting.filter((p) => p !== "/");
   return ["GITHUB_ENV", "GITHUB_PATH", "GITHUB_STATE"].flatMap((name) => {
     const path = env[name];
-    return path && !openable(name, path) ? [realpath(path)] : [];
+    if (!path || openable(name, path)) return [];
+    const resolved = resolveThroughFixedLinks(path, roots, deps.readlink);
+    if ("link" in resolved) {
+      throw new SandboxError(
+        `The runner's ${name} file ${JSON.stringify(path)} goes through ` +
+          `${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and the ` +
+          "runner reads it after the step. Configure the runner's work directory by its real " +
+          "path, not through the symlink.",
+        "HOST_DIR_UNPROTECTABLE",
+      );
+    }
+    return [resolved.real];
   });
 }
 

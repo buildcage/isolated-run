@@ -22,6 +22,20 @@ const HOME = "/home/runner";
 const WORKSPACE = "/home/runner/work/repo/repo";
 const PERSISTENT = [WORKSPACE, HOME, "/tmp", "/home/runner/work/_temp"];
 
+/** A filesystem whose only symlinks are `links`, each to an absolute path. */
+function withLinks(links: Record<string, string>) {
+  const realpathDir = (path: string): string => {
+    for (const [link, target] of Object.entries(links)) {
+      if (path === link || path.startsWith(`${link}/`)) {
+        return realpathDir(target + path.slice(link.length));
+      }
+    }
+    return path;
+  };
+  return { readlink: (path: string) => links[path] ?? null, realpathDir };
+}
+const NO_LINKS = withLinks({});
+
 /**
  * A host where `files` are the executables, and `links` map a symlink to its
  * immediate target (a chain is spelled out one hop per entry). A path in
@@ -354,20 +368,6 @@ describe("dockerConfigDir", () => {
 describe("sandboxReadonlyHostDirs", () => {
   const ACTION = "/home/runner/work/_actions/buildcage/isolated-run/v1";
 
-  /** A filesystem whose only symlinks are `links`, each to an absolute path. */
-  function withLinks(links: Record<string, string>) {
-    const realpathDir = (path: string): string => {
-      for (const [link, target] of Object.entries(links)) {
-        if (path === link || path.startsWith(`${link}/`)) {
-          return realpathDir(target + path.slice(link.length));
-        }
-      }
-      return path;
-    };
-    return { readlink: (path: string) => links[path] ?? null, realpathDir };
-  }
-  const NO_LINKS = withLinks({});
-
   it("is the action and docker config directories when a persisting path holds them", () => {
     expect(sandboxReadonlyHostDirs(PERSISTENT, { HOME }, ACTION, NO_LINKS)).toStrictEqual([
       ACTION,
@@ -512,24 +512,19 @@ describe("sandboxReadonlyFileCommands", () => {
     GITHUB_STATE: `${COMMANDS}/save_state_1`,
     GITHUB_OUTPUT: `${COMMANDS}/set_output_1`,
   };
+  const files = (writeThrough: string[], env: NodeJS.ProcessEnv = ENV, deps = NO_LINKS) =>
+    sandboxReadonlyFileCommands(writeThrough, [...PERSISTENT, ...writeThrough], env, deps);
 
   it("is this step's GITHUB_ENV, GITHUB_PATH and GITHUB_STATE, and not GITHUB_OUTPUT", () => {
-    expect(sandboxReadonlyFileCommands([COMMANDS], ENV)).toStrictEqual([
-      ENV.GITHUB_ENV,
-      ENV.GITHUB_PATH,
-      ENV.GITHUB_STATE,
-    ]);
+    expect(files([])).toStrictEqual([ENV.GITHUB_ENV, ENV.GITHUB_PATH, ENV.GITHUB_STATE]);
   });
 
   it("leaves out GITHUB_ENV or GITHUB_PATH when write_through names it", () => {
-    expect(sandboxReadonlyFileCommands([ENV.GITHUB_ENV], ENV)).toStrictEqual([
-      ENV.GITHUB_PATH,
-      ENV.GITHUB_STATE,
-    ]);
+    expect(files([ENV.GITHUB_ENV])).toStrictEqual([ENV.GITHUB_PATH, ENV.GITHUB_STATE]);
   });
 
   it("keeps GITHUB_STATE even when write_through names its path", () => {
-    expect(sandboxReadonlyFileCommands([ENV.GITHUB_STATE], ENV)).toStrictEqual([
+    expect(files([ENV.GITHUB_STATE])).toStrictEqual([
       ENV.GITHUB_ENV,
       ENV.GITHUB_PATH,
       ENV.GITHUB_STATE,
@@ -537,18 +532,27 @@ describe("sandboxReadonlyFileCommands", () => {
   });
 
   it("matches a write_through entry through a symlink, and names each by its real path", () => {
-    const realpath = (p: string) => p.replace(/^\/home\//, "/var/home/");
+    const deps = withLinks({ "/home": "/var/home" });
+    const real = (p: string) => p.replace(/^\/home\//, "/var/home/");
 
-    expect(sandboxReadonlyFileCommands([realpath(ENV.GITHUB_PATH)], ENV, realpath)).toStrictEqual([
-      realpath(ENV.GITHUB_ENV),
-      realpath(ENV.GITHUB_STATE),
-    ]);
+    expect(
+      sandboxReadonlyFileCommands([real(ENV.GITHUB_PATH)], [real(ENV.GITHUB_PATH)], ENV, deps),
+    ).toStrictEqual([real(ENV.GITHUB_ENV), real(ENV.GITHUB_STATE)]);
   });
 
   it("skips one that is not set", () => {
-    expect(sandboxReadonlyFileCommands([], { GITHUB_ENV: ENV.GITHUB_ENV })).toStrictEqual([
-      ENV.GITHUB_ENV,
-    ]);
+    expect(files([], { GITHUB_ENV: ENV.GITHUB_ENV })).toStrictEqual([ENV.GITHUB_ENV]);
+  });
+
+  it("refuses one reached through a symlink in a persisting path", () => {
+    expect(() => files([], ENV, withLinks({ "/home/runner/work": "/mnt/data/work" }))).toThrow(
+      expect.objectContaining({
+        code: "HOST_DIR_UNPROTECTABLE",
+        message: expect.stringContaining(
+          `The runner's GITHUB_ENV file "${ENV.GITHUB_ENV}" goes through "/home/runner/work"`,
+        ),
+      }),
+    );
   });
 });
 

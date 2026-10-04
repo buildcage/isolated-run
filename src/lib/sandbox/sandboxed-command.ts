@@ -344,7 +344,10 @@ export function assembleBundle(
       readlink: deps.readlink,
       realpathDir: deps.realpath,
     });
-    const readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, env, deps.realpath);
+    const readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, {
+      readlink: deps.readlink,
+      realpathDir: deps.realpath,
+    });
     const renameGuardDirs = renameGuards([...readonlyHostDirs, ...readonlyFiles], persisting);
     // runc skips a read-only path that doesn't exist, and the sandbox could
     // then create it.
