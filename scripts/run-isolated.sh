@@ -16,6 +16,12 @@
 # Must be run as root (invoked via `sudo -n` from the run action).
 set -euo pipefail
 
+# The checks before setup_failed's ERR trap below, annotated the same way.
+check_failed() {
+  echo "::error::buildcage: sandbox setup failed: ${1//'%'/'%25'}" >&2
+  exit 1
+}
+
 # Re-exec into a fresh, private mount namespace before doing anything else.
 # Every concurrently running `run:` step's own scratch dir lives under the
 # same /tmp, so without this, the `mount --rbind /` staging below (and `ip
@@ -34,7 +40,7 @@ set -euo pipefail
 # because sudo passes the caller's variables through under
 # `Defaults !env_reset`.
 if [ "${1:-}" != "--unshared" ]; then
-  command -v unshare >/dev/null 2>&1 || { echo "ERROR: required command not found: unshare" >&2; exit 1; }
+  command -v unshare >/dev/null 2>&1 || check_failed "required command not found: unshare"
   exec unshare --mount --propagation private -- "$0" --unshared "$@"
 fi
 shift
@@ -67,29 +73,26 @@ while [ $# -gt 0 ]; do
     --gateway) GATEWAY="$2"; shift 2 ;;
     --target-ip) TARGET_IP="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "ERROR: unknown argument: $1" >&2; usage; exit 1 ;;
+    *) usage; check_failed "unknown argument: $1" ;;
   esac
 done
 
-[ -z "$PROXY_NETNS" ] && { echo "ERROR: --proxy-netns is required" >&2; usage; exit 1; }
-[ -z "$RUNC_PATH" ] && { echo "ERROR: --runc is required" >&2; usage; exit 1; }
-[ -z "$BUNDLE_DIR" ] && { echo "ERROR: --bundle is required" >&2; usage; exit 1; }
-[ -z "$CONTAINER_ID" ] && { echo "ERROR: --container-id is required" >&2; usage; exit 1; }
-[ -z "$NETNS_NAME" ] && { echo "ERROR: --netns-name is required" >&2; usage; exit 1; }
-[ -z "$ROOTFS_BIND_DIR" ] && { echo "ERROR: --rootfs-bind-dir is required" >&2; usage; exit 1; }
-[ -z "$GATEWAY" ] && { echo "ERROR: --gateway is required" >&2; usage; exit 1; }
-[ -z "$TARGET_IP" ] && { echo "ERROR: --target-ip is required" >&2; usage; exit 1; }
+[ -z "$PROXY_NETNS" ] && { usage; check_failed "--proxy-netns is required"; }
+[ -z "$RUNC_PATH" ] && { usage; check_failed "--runc is required"; }
+[ -z "$BUNDLE_DIR" ] && { usage; check_failed "--bundle is required"; }
+[ -z "$CONTAINER_ID" ] && { usage; check_failed "--container-id is required"; }
+[ -z "$NETNS_NAME" ] && { usage; check_failed "--netns-name is required"; }
+[ -z "$ROOTFS_BIND_DIR" ] && { usage; check_failed "--rootfs-bind-dir is required"; }
+[ -z "$GATEWAY" ] && { usage; check_failed "--gateway is required"; }
+[ -z "$TARGET_IP" ] && { usage; check_failed "--target-ip is required"; }
 
-if [ "$(id -u)" != "0" ]; then
-  echo "ERROR: run-isolated.sh must be run as root (via sudo)" >&2
-  exit 1
-fi
+[ "$(id -u)" = "0" ] || check_failed "run-isolated.sh must be run as root (via sudo)"
 for cmd in nsenter ip mount setpriv; do
-  command -v "$cmd" >/dev/null 2>&1 || { echo "ERROR: required command not found: $cmd" >&2; exit 1; }
+  command -v "$cmd" >/dev/null 2>&1 || check_failed "required command not found: $cmd"
 done
-[ -e "$PROXY_NETNS" ] || { echo "ERROR: proxy netns not found at ${PROXY_NETNS}" >&2; exit 1; }
-[ -x "$RUNC_PATH" ] || { echo "ERROR: runc not found or not executable: ${RUNC_PATH}" >&2; exit 1; }
-[ -f "${BUNDLE_DIR}/config.json" ] || { echo "ERROR: OCI bundle config not found: ${BUNDLE_DIR}/config.json" >&2; exit 1; }
+[ -e "$PROXY_NETNS" ] || check_failed "proxy netns not found at ${PROXY_NETNS}"
+[ -x "$RUNC_PATH" ] || check_failed "runc not found or not executable: ${RUNC_PATH}"
+[ -f "${BUNDLE_DIR}/config.json" ] || check_failed "OCI bundle config not found: ${BUNDLE_DIR}/config.json"
 
 RAND_ID=$(od -An -tx1 -N4 /dev/urandom | tr -d ' \n')
 VETH_T="sbxt${RAND_ID}"
@@ -211,6 +214,10 @@ nsenter --net="$PROXY_NETNS" -- sh -c '
 ' sh "$VETH_P" "$GATEWAY" </dev/null
 
 echo "Executing isolated command via runc..." >&2
+# env-loader.sh writes to fd 3 just before it runs the command, so a `runc run`
+# that fails before then is told apart from the command exiting.
+STARTED_FILE="${BUNDLE_DIR}/started"
+exec 3>"$STARTED_FILE"
 group_end
 trap - ERR
 set +e
@@ -250,7 +257,7 @@ stop_sandbox() {
 # it until a foreground child returns. An asynchronous command starts with
 # SIGINT and SIGQUIT ignored and stdin on /dev/null, which the command would
 # inherit, hence the reset and the explicit stdin.
-( trap - INT QUIT; exec setpriv --pdeathsig=KILL -- "$RUNC_PATH" run --bundle "$BUNDLE_DIR" "$CONTAINER_ID" ) <&0 &
+( trap - INT QUIT; exec setpriv --pdeathsig=KILL -- "$RUNC_PATH" run --preserve-fds 1 --bundle "$BUNDLE_DIR" "$CONTAINER_ID" ) <&0 &
 RUNC_PID=$!
 # A signal before this still exits through cleanup, whose `runc delete -f`
 # stops the container.
@@ -261,5 +268,12 @@ while kill -0 "$RUNC_PID" 2>/dev/null; do wait "$RUNC_PID"; done
 wait "$RUNC_PID"
 CODE=$?
 set -e
+exec 3>&-
 
-echo "buildcage: command exited with code ${CODE}" >&2
+# A cancelled step can stop the sandbox before the command starts; that is not
+# a launch failure.
+if [ "$STOPPING" = "0" ] && [ ! -s "$STARTED_FILE" ]; then
+  echo "::error::buildcage: sandbox launch failed (runc exit ${CODE})" >&2
+else
+  echo "buildcage: command exited with code ${CODE}" >&2
+fi

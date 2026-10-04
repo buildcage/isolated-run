@@ -1,5 +1,14 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -181,7 +190,8 @@ describe("writeEnvLoader", () => {
 
 /**
  * Runs the written loader with `script` as the run script, the way the sandbox
- * starts it. `onReady` fires once the script prints "ready".
+ * starts it, fd 3 included. `onReady` fires once the script prints "ready".
+ * `started` is what the loader wrote to fd 3.
  */
 async function runLoader(
   script: string,
@@ -196,20 +206,25 @@ async function runLoader(
     onReady?: (loader: ChildProcess) => void;
     onExit?: () => void;
   } = {},
-): Promise<{ code: number | null; stdout: string; stderr: string }> {
+): Promise<{ code: number | null; stdout: string; stderr: string; started: string }> {
   const dir = mkdtempSync(join(tmpdir(), "env-loader-test-"));
   try {
     const loaderPath = writeEnvLoader(dir);
     const scriptPath = join(dir, "run-script.sh");
     writeFileSync(scriptPath, `#!/bin/bash\n${script}\n`, { mode: 0o700 });
-    const loader = spawn("bash", [loaderPath, scriptPath]);
+    const startedPath = join(dir, "started");
+    const startedFd = openSync(startedPath, "w");
+    const loader = spawn("bash", [loaderPath, scriptPath], {
+      stdio: ["pipe", "pipe", "pipe", startedFd],
+    });
+    closeSync(startedFd);
     let stdout = "";
     let stderr = "";
     let ready = false;
-    loader.stderr.on("data", (chunk: Buffer) => {
+    loader.stderr!.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
     });
-    loader.stdout.on("data", (chunk: Buffer) => {
+    loader.stdout!.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
       if (!ready && stdout.includes("ready\n")) {
         ready = true;
@@ -219,7 +234,7 @@ async function runLoader(
     loader.on("exit", () => onExit?.());
     feed(loader);
     const code = await new Promise<number | null>((resolve) => loader.on("close", resolve));
-    return { code, stdout, stderr };
+    return { code, stdout, stderr, started: readFileSync(startedPath, "utf8") };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -275,10 +290,20 @@ describe("the written loader", () => {
   it("refuses to run the script when the environment ends before its terminator", async () => {
     const blob = buildEnvBlob({ A: "one" });
     const truncated = blob.subarray(0, blob.indexOf("__BUILDCAGE_ENV_END__"));
-    const { code, stdout, stderr } = await runLoader("echo ran", { blob: truncated });
+    const { code, stdout, stderr, started } = await runLoader("echo ran", { blob: truncated });
     expect(stdout).toBe("");
     expect(stderr).toContain("ended before its terminator");
+    expect(started).toBe("");
     expect(code).toBe(1);
+  });
+
+  it("writes to fd 3 before running the script, and keeps fd 3 from it", async () => {
+    const { code, stdout, started } = await runLoader(
+      "{ : >&3; } 2>/dev/null && echo open || echo closed",
+    );
+    expect(started).toBe("1");
+    expect(stdout).toBe("closed\n");
+    expect(code).toBe(0);
   });
 
   it("exits with the script's own status", async () => {

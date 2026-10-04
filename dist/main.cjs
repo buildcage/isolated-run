@@ -25358,6 +25358,11 @@ fi
 # Never hand the run script the tail of this blob.
 exec 0</dev/null
 
+# Tells run-isolated.sh that the command is starting. The command never gets
+# fd 3.
+{ printf 1 >&3; } 2>/dev/null
+exec 3>&-
+
 # Job control puts the child in a process group of its own, and leaves SIGINT
 # and SIGQUIT as they are rather than ignoring them in it. Held signals are
 # raised from inside the child.
