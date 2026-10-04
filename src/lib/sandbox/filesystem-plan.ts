@@ -41,10 +41,8 @@ import {
  * checkPasswordlessSudo()/checkOverlayfsSupport() in the step, so a plain input
  * mistake is rejected immediately rather than only after those privileged
  * preflight checks have already run. That early call passes the paths as
- * resolveWriteThroughInput spells them; resolveFilesystemPlan calls it again on
- * their real paths on the host, which is the authoritative one. Both see the
- * same sentinel: resolveWriteThroughEntry rejects a spelling that merely
- * normalizes to "/", so only a literal one reaches either call.
+ * resolveWriteThroughInput spells them; resolveFilesystemPlan's call, on the
+ * paths it mounts, is the authoritative one.
  */
 export function validateFilesystemInputs(
   filesystemMode: FilesystemMode,
@@ -128,17 +126,25 @@ export function resolveFilesystemPlan(
   deps: ResolveFilesystemPlanDeps = {},
 ): FilesystemPlan {
   const written = resolveWriteThroughInput(writeThroughInput, env);
+  const realpath = deps.realpath ?? realPathOf;
+  const writeThroughPaths = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
 
-  // The authoritative call, ahead of the early return below: reaching that
-  // with the sentinel under ephemeral would leave the run with no overlay.
-  validateFilesystemInputs(filesystemMode, written);
+  // Ahead of the early return below: reaching that with the sentinel under
+  // ephemeral would leave the run with no overlay. The CA mount lands where a
+  // candidate's symlinks lead, so that file is reserved too.
+  validateFilesystemInputs(
+    filesystemMode,
+    writeThroughPaths,
+    reservedCaStorePaths().map((p) => realpath(p)),
+  );
 
   // `/` drops the read-only restriction wholesale (persistent only, see
   // validateFilesystemInputs), so no path is bind-mounted individually:
   // nothing to create, and buildOciConfig skips the scratch-base guard for
-  // the same reason.
+  // the same reason. Only a literal `/` opts out: an entry that a symlinked
+  // runner directory turns into `/` still meets that guard.
   if (written.includes(WRITE_THROUGH_ALL)) {
-    return { overlayRoots: [], writeThroughPaths: written };
+    return { overlayRoots: [], writeThroughPaths };
   }
 
   try {
@@ -146,9 +152,6 @@ export function resolveFilesystemPlan(
   } catch (e) {
     throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
   }
-
-  const realpath = deps.realpath ?? realPathOf;
-  const writeThroughPaths = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
 
   // From here each entry is the real path the checks below and the mount act on.
   try {
@@ -159,13 +162,6 @@ export function resolveFilesystemPlan(
       "INVALID_WRITE_THROUGH_PATH",
     );
   }
-  // The CA mount lands where a candidate's symlinks lead, so that file is reserved too.
-  validateFilesystemInputs(
-    filesystemMode,
-    writeThroughPaths,
-    reservedCaStorePaths().map((p) => realpath(p)),
-  );
-
   // Before anything is created: buildOciConfig rejects a path overlapping the
   // sandbox's own scratch base outright, so checking it here keeps a doomed
   // input from leaving freshly-created directories behind. Its own check

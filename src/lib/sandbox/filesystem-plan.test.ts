@@ -167,6 +167,15 @@ describe("resolveFilesystemPlan", () => {
       ]);
     });
 
+    it("does not take an entry that only resolves to / as the full opt-out", () => {
+      expect(() =>
+        resolveFilesystemPlan("persistent", "$HOME", ENV, {
+          ...fedora(),
+          realpath: (p) => (p === ENV.HOME ? "/" : p),
+        }),
+      ).toThrow(expect.objectContaining({ code: "FILESYSTEM_INPUT_CONFLICT" }));
+    });
+
     it("leaves an entry under no runner directory as written", () => {
       const env = { HOME: ENV.HOME, GITHUB_WORKSPACE: ENV.GITHUB_WORKSPACE };
       expect(
