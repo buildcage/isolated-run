@@ -9,7 +9,7 @@
 import { existsSync, readFileSync, realpathSync, statfsSync } from "node:fs";
 import os from "node:os";
 
-import { realpathOrSelf } from "./host-commands.ts";
+import { realPathOf } from "./symlinks.ts";
 
 // runc resolves process.args[0] against the *sandbox's* PATH (the step's own
 // env, which a user could override to omit /usr/bin), so resolve setpriv to an
@@ -100,7 +100,7 @@ export interface HostProbes {
   hostname(): string;
   /** /var/run's real path, undefined when it doesn't exist. */
   varRunRealPath(): string | undefined;
-  /** `path` with its symlinks resolved, or `path` itself when that fails. */
+  /** `path` with its symlinks resolved, or `path` itself when they loop. */
   realpath(path: string): string;
   /** This process's cgroup on a cgroup v2 host, undefined on any other. */
   cgroupPath(): string | undefined;
@@ -162,7 +162,7 @@ export const realHostProbes: HostProbes = {
     }
   },
 
-  realpath: realpathOrSelf,
+  realpath: (path) => realPathOf(path),
 
   // This process, the runner's own cgroup: the one the step would run in
   // unwrapped. Read here, before run.ts's `sudo`, which can move its child to

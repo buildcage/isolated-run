@@ -5,6 +5,12 @@ import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 import { SandboxError } from "./errors.ts";
 import { runSandboxStep, type SandboxStepDeps } from "./sandbox-step.ts";
 
+// pinningPaths resolves the runner's paths on this machine otherwise.
+vi.mock("./sandbox/symlinks.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./sandbox/symlinks.ts")>()),
+  realPathOf: (path: string) => path,
+}));
+
 // What is left to check here is the order they run in, what each one is
 // handed, and which of them still run when an earlier step fails.
 const annotation = { notice: vi.fn(), warning: vi.fn(), error: vi.fn() };

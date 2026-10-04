@@ -13,11 +13,10 @@ import {
   renameGuardDirs,
   sandboxReadonlyFileCommands,
   sandboxReadonlyHostDirs,
-  withRealPaths,
   type FindCommandDeps,
 } from "./host-commands.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
-import { resolveHostPath } from "./symlinks.ts";
+import { realPathOf } from "./symlinks.ts";
 
 const HOME = "/home/runner";
 const WORKSPACE = "/home/runner/work/repo/repo";
@@ -29,13 +28,10 @@ function withLinks(links: Record<string, string>) {
     lstat: (path: string) => ({ uid: 1001, isSymbolicLink: () => path in links }),
     readlink: (path: string) => links[path]!,
   };
-  const realpathDir = (path: string): string => {
-    const resolved = resolveHostPath(path, fs);
-    return "real" in resolved ? resolved.real : path;
-  };
-  return { ...fs, realpathDir };
+  return fs;
 }
 const NO_LINKS = withLinks({});
+const asWritten = (path: string) => path;
 
 /**
  * A host where `files` are the executables, and `links` map each symlink, to a
@@ -50,15 +46,27 @@ describe("persistingWritablePaths", () => {
   const env = { GITHUB_WORKSPACE: WORKSPACE, HOME, RUNNER_TEMP: "/home/runner/work/_temp" };
 
   it("is every directory persistent mode binds back read-write", () => {
-    expect(persistingWritablePaths("persistent", ["/opt/out"], env)).toStrictEqual([
+    expect(persistingWritablePaths("persistent", ["/opt/out"], env, asWritten)).toStrictEqual([
       ...PERSISTENT,
       "/opt/out",
     ]);
   });
 
   it("is only the write_through paths in ephemeral mode, whose overlays are discarded", () => {
-    expect(persistingWritablePaths("ephemeral", [`${WORKSPACE}/dist`], env)).toStrictEqual([
-      `${WORKSPACE}/dist`,
+    expect(
+      persistingWritablePaths("ephemeral", [`${WORKSPACE}/dist`], env, asWritten),
+    ).toStrictEqual([`${WORKSPACE}/dist`]);
+  });
+
+  it("spells each path as it really resolves, so a path is judged by one spelling", () => {
+    const real = (p: string) => realPathOf(p, withLinks({ [HOME]: "/data/runner" }));
+
+    expect(persistingWritablePaths("persistent", [`${HOME}/out`], env, real)).toStrictEqual([
+      "/data/runner/work/repo/repo",
+      "/data/runner",
+      "/tmp",
+      "/data/runner/work/_temp",
+      "/data/runner/out",
     ]);
   });
 });
@@ -128,17 +136,6 @@ describe("findPinnableCommand", () => {
     );
   });
 
-  it("recognizes a persisting path by its real spelling too", () => {
-    // $HOME=/home/runner is a symlink to /data/runner.
-    const deps = host(["/data/runner/.local/bin/docker", "/usr/bin/docker"], {
-      [HOME]: "/data/runner",
-    });
-
-    expect(
-      findPinnableCommand("docker", "/data/runner/.local/bin:/usr/bin", PERSISTENT, deps),
-    ).toBe("/usr/bin/docker");
-  });
-
   it("passes over a symlink cycle rather than looping", () => {
     const deps = host([], {
       "/usr/bin/docker": "/usr/local/bin/docker",
@@ -182,24 +179,6 @@ describe("resolveDefaultWritableDirs", () => {
       runnerTemp: undefined,
       tmp: "/tmp",
     });
-  });
-
-  it("drops a trailing slash even when the path doesn't exist to resolve", () => {
-    expect(
-      resolveDefaultWritableDirs({ HOME: "/home/runner/", RUNNER_TEMP: "/opt/temp//" }, (p) => p),
-    ).toMatchObject({ home: "/home/runner", runnerTemp: "/opt/temp" });
-  });
-
-  it("leaves / as it is", () => {
-    expect(resolveDefaultWritableDirs({ HOME: "/" }, (p) => p).home).toBe("/");
-  });
-});
-
-describe("withRealPaths", () => {
-  it("adds each path's real spelling, without duplicates", () => {
-    const real = (p: string) => (p === HOME ? "/data/runner" : p);
-
-    expect(withRealPaths([HOME, "/tmp"], real)).toStrictEqual([HOME, "/tmp", "/data/runner"]);
   });
 });
 
@@ -254,35 +233,41 @@ describe("pathOutside", () => {
   it("drops the persisting paths a hosted runner puts on PATH", () => {
     const path = `${HOME}/.local/bin:/opt/pipx_bin:${HOME}/.cargo/bin:/usr/local/bin:/usr/bin:/snap/bin`;
 
-    expect(pathOutside(path, PERSISTENT, (d) => d)).toBe(
+    expect(pathOutside(path, PERSISTENT, NO_LINKS)).toBe(
       "/opt/pipx_bin:/usr/local/bin:/usr/bin:/snap/bin",
     );
   });
 
   it("drops an entry whose real directory is inside a persisting path", () => {
-    const realpath = (d: string) => (d === "/opt/tools" ? `${HOME}/tools` : d);
+    const deps = withLinks({ "/opt/tools": `${HOME}/tools` });
 
-    expect(pathOutside("/opt/tools:/usr/bin", PERSISTENT, realpath)).toBe("/usr/bin");
+    expect(pathOutside("/opt/tools:/usr/bin", PERSISTENT, deps)).toBe("/usr/bin");
+  });
+
+  it("drops an entry not there yet that a symlink leads into a persisting path", () => {
+    const deps = withLinks({ [HOME]: "/data/runner" });
+
+    expect(pathOutside(`${HOME}/.local/bin:/usr/bin`, ["/data/runner"], deps)).toBe("/usr/bin");
   });
 
   it("drops relative and empty entries, which resolve against the workspace", () => {
-    expect(pathOutside("bin::/usr/bin:./node_modules/.bin:", PERSISTENT, (d) => d)).toBe(
+    expect(pathOutside("bin::/usr/bin:./node_modules/.bin:", PERSISTENT, NO_LINKS)).toBe(
       "/usr/bin",
     );
   });
 
   it("drops a write_through path outside the persistent set", () => {
-    expect(pathOutside("/usr/local/bin:/usr/bin", ["/usr/local/bin"], (d) => d)).toBe("/usr/bin");
+    expect(pathOutside("/usr/local/bin:/usr/bin", ["/usr/local/bin"], NO_LINKS)).toBe("/usr/bin");
   });
 
   it("is empty for an unset PATH", () => {
-    expect(pathOutside(undefined, PERSISTENT, (d) => d)).toBe("");
+    expect(pathOutside(undefined, PERSISTENT, NO_LINKS)).toBe("");
   });
 
   it("keeps PATH as is under write_through: /, the full opt-out", () => {
     const path = `${HOME}/.local/bin:bin:/usr/bin`;
 
-    expect(pathOutside(path, [...PERSISTENT, "/"], (d) => d)).toBe(path);
+    expect(pathOutside(path, [...PERSISTENT, "/"], NO_LINKS)).toBe(path);
   });
 });
 
@@ -338,14 +323,21 @@ describe("pinningPaths", () => {
   const env = { GITHUB_WORKSPACE: WORKSPACE, HOME, RUNNER_TEMP: "/home/runner/work/_temp" };
 
   it("is persistent mode's set plus write_through, whatever mode the step runs in", () => {
-    expect(pinningPaths(() => "/opt/out", env)).toStrictEqual([...PERSISTENT, "/opt/out"]);
+    expect(pinningPaths(() => "/opt/out", env, asWritten)).toStrictEqual([
+      ...PERSISTENT,
+      "/opt/out",
+    ]);
   });
 
   it("falls back to persistent mode's set when the input does not parse", () => {
     expect(
-      pinningPaths(() => {
-        throw new Error("allow_write was removed");
-      }, env),
+      pinningPaths(
+        () => {
+          throw new Error("allow_write was removed");
+        },
+        env,
+        asWritten,
+      ),
     ).toStrictEqual(PERSISTENT);
   });
 });
@@ -496,7 +488,7 @@ describe("sandboxReadonlyHostDirs", () => {
   it("refuses nothing for a directory write_through names, even through a symlink", () => {
     expect(
       sandboxReadonlyHostDirs(
-        [...PERSISTENT, `${HOME}/.docker`],
+        [...PERSISTENT, "/mnt/shared/docker"],
         { HOME },
         ACTION,
         withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),

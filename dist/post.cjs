@@ -695,19 +695,6 @@ function isAtOrUnder(path, ancestor) {
 	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
 }
 //#endregion
-//#region src/lib/sandbox/host-probes.ts
-//#endregion
-//#region src/lib/sandbox/oci-mounts.ts
-function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths = [] }) {
-	return [...new Set([
-		workdir,
-		home,
-		tmp,
-		runnerTemp,
-		...writablePaths
-	].filter((p) => !!p))];
-}
-//#endregion
 //#region src/lib/sandbox/symlinks.ts
 const realSymlinkDeps = {
 	lstat: (path) => {
@@ -748,6 +735,21 @@ function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
 		links
 	};
 }
+function realPathOf(path, deps = realSymlinkDeps) {
+	let resolved = resolveHostPath(path, deps);
+	return "real" in resolved ? resolved.real : path;
+}
+//#endregion
+//#region src/lib/sandbox/oci-mounts.ts
+function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths = [] }) {
+	return [...new Set([
+		workdir,
+		home,
+		tmp,
+		runnerTemp,
+		...writablePaths
+	].filter((p) => !!p))];
+}
 //#endregion
 //#region src/lib/sandbox/write-through.ts
 const ALLOWED_WRITE_THROUGH_VARS = [
@@ -782,20 +784,12 @@ function resolveWriteThroughPaths(input, env) {
 //#endregion
 //#region src/lib/sandbox/host-commands.ts
 const PINNED_COMMANDS = ["docker", "sudo"];
-function persistingWritablePaths(filesystemMode, writeThroughPaths, env) {
-	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
-		workdir: env.GITHUB_WORKSPACE,
-		home: env.HOME,
-		runnerTemp: env.RUNNER_TEMP,
+function persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath = realPathOf) {
+	let paths = filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
+		...resolveDefaultWritableDirs(env, realpath),
 		writablePaths: writeThroughPaths
 	});
-}
-function realpathOrSelf(path) {
-	try {
-		return (0, node_fs.realpathSync)(path);
-	} catch {
-		return path;
-	}
+	return [...new Set(paths.map((p) => realpath(p)))];
 }
 const realFindCommandDeps = {
 	...realSymlinkDeps,
@@ -805,23 +799,26 @@ const realFindCommandDeps = {
 		} catch {
 			return !1;
 		}
-	},
-	realpathDir: realpathOrSelf
+	}
 };
-function withRealPaths(paths, realpath = realpathOrSelf) {
-	return [...new Set([...paths, ...paths.map(realpath)])];
+function resolveDefaultWritableDirs(env, realpath = realPathOf) {
+	return {
+		workdir: env.GITHUB_WORKSPACE ? realpath(env.GITHUB_WORKSPACE) : void 0,
+		home: env.HOME ? realpath(env.HOME) : void 0,
+		runnerTemp: env.RUNNER_TEMP ? realpath(env.RUNNER_TEMP) : void 0,
+		tmp: realpath("/tmp")
+	};
 }
-function insidePersisting(persisting, realpathDir) {
-	let writable = withRealPaths(persisting, realpathDir);
-	return (path) => writable.some((w) => isAtOrUnder(path, w));
+function insidePersisting(persisting) {
+	return (path) => persisting.some((w) => isAtOrUnder(path, w));
 }
-function pathOutside(pathEnv = "", persisting, realpathDir) {
+function pathOutside(pathEnv = "", persisting, deps = realSymlinkDeps) {
 	if (persisting.includes("/")) return pathEnv;
-	let inside = insidePersisting(persisting, realpathDir);
-	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !inside(dir) && !inside(realpathDir(dir))).join(node_path.delimiter);
+	let inside = insidePersisting(persisting);
+	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !inside(realPathOf(dir, deps))).join(node_path.delimiter);
 }
 function findPinnableCommand(command, pathEnv, persisting, deps = realFindCommandDeps) {
-	let optedOut = persisting.includes("/"), inside = insidePersisting(persisting, deps.realpathDir), reachable = (candidate) => {
+	let optedOut = persisting.includes("/"), inside = insidePersisting(persisting), reachable = (candidate) => {
 		let resolved = resolveHostPath(candidate, deps);
 		return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
 	};
@@ -840,14 +837,14 @@ function pinHostCommands(paths, env, deps = realFindCommandDeps) {
 		}
 		if (findPinnableCommand(command, env.PATH, [], deps)) throw new SandboxError(`'${command}' is on PATH only under paths a sandboxed command can write to (${paths.join(", ")}). This action runs it outside the sandbox, so it has to live somewhere no sandboxed command can replace it, such as /usr/bin.`, "HOST_COMMAND_UNPINNABLE");
 	}
-	pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps.realpathDir)), pinCommandPathEnv("sudo", pathOutside("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", paths, deps.realpathDir));
+	pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps)), pinCommandPathEnv("sudo", pathOutside("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", paths, deps));
 }
-function pinningPaths(readWriteThroughInput, env) {
+function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
 	let writeThroughPaths = [];
 	try {
 		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
 	} catch {}
-	return persistingWritablePaths("persistent", writeThroughPaths, env);
+	return persistingWritablePaths("persistent", writeThroughPaths, env, realpath);
 }
 //#endregion
 //#region src/post.ts

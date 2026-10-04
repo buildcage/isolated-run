@@ -24645,6 +24645,51 @@ function caTrustAdditions(files, env) {
 	};
 }
 //#endregion
+//#region src/lib/sandbox/symlinks.ts
+const realSymlinkDeps = {
+	lstat: (path) => {
+		try {
+			return (0, node_fs.lstatSync)(path);
+		} catch {
+			return;
+		}
+	},
+	readlink: (path) => (0, node_fs.readlinkSync)(path)
+};
+function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
+	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
+	for (; pending.length > 0;) {
+		let name = pending.shift();
+		if (name === "..") {
+			current = (0, node_path.dirname)(current);
+			continue;
+		}
+		let next = (0, node_path.join)(current, name), info = lstat(next);
+		if (!info?.isSymbolicLink()) {
+			current = next;
+			continue;
+		}
+		let target = readlink(next);
+		if (links.push({
+			at: next,
+			target,
+			uid: info.uid
+		}), links.length > 40) return {
+			loop: !0,
+			links
+		};
+		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
+	}
+	return {
+		real: current,
+		links
+	};
+}
+function realPathOf(path, deps = realSymlinkDeps) {
+	let resolved = resolveHostPath(path, deps);
+	return "real" in resolved ? resolved.real : path;
+}
+//#endregion
 //#region src/lib/sandbox/host-probes.ts
 const SETPRIV_CANDIDATE_PATHS = [
 	"/usr/bin/setpriv",
@@ -24708,7 +24753,7 @@ const realHostProbes = {
 			return;
 		}
 	},
-	realpath: realpathOrSelf,
+	realpath: (path) => realPathOf(path),
 	cgroupPath: () => {
 		let procCgroup = readOptionalFile("/proc/self/cgroup");
 		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
@@ -24851,47 +24896,6 @@ function scratchBaseLayers(execDir, aliases = []) {
 	}];
 }
 //#endregion
-//#region src/lib/sandbox/symlinks.ts
-const realSymlinkDeps = {
-	lstat: (path) => {
-		try {
-			return (0, node_fs.lstatSync)(path);
-		} catch {
-			return;
-		}
-	},
-	readlink: (path) => (0, node_fs.readlinkSync)(path)
-};
-function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
-	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
-	for (; pending.length > 0;) {
-		let name = pending.shift();
-		if (name === "..") {
-			current = (0, node_path.dirname)(current);
-			continue;
-		}
-		let next = (0, node_path.join)(current, name), info = lstat(next);
-		if (!info?.isSymbolicLink()) {
-			current = next;
-			continue;
-		}
-		let target = readlink(next);
-		if (links.push({
-			at: next,
-			target,
-			uid: info.uid
-		}), links.length > 40) return {
-			loop: !0,
-			links
-		};
-		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
-	}
-	return {
-		real: current,
-		links
-	};
-}
-//#endregion
 //#region src/lib/sandbox/write-through.ts
 const ALLOWED_WRITE_THROUGH_VARS = [
 	"HOME",
@@ -24978,20 +24982,12 @@ function runnerActionRoot() {
 	return (0, node_path.resolve)((0, node_path.dirname)(process.argv[1]), "..");
 }
 const PINNED_COMMANDS = ["docker", "sudo"];
-function persistingWritablePaths(filesystemMode, writeThroughPaths, env) {
-	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
-		workdir: env.GITHUB_WORKSPACE,
-		home: env.HOME,
-		runnerTemp: env.RUNNER_TEMP,
+function persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath = realPathOf) {
+	let paths = filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
+		...resolveDefaultWritableDirs(env, realpath),
 		writablePaths: writeThroughPaths
 	});
-}
-function realpathOrSelf(path) {
-	try {
-		return (0, node_fs.realpathSync)(path);
-	} catch {
-		return path;
-	}
+	return [...new Set(paths.map((p) => realpath(p)))];
 }
 const realFindCommandDeps = {
 	...realSymlinkDeps,
@@ -25001,35 +24997,26 @@ const realFindCommandDeps = {
 		} catch {
 			return !1;
 		}
-	},
-	realpathDir: realpathOrSelf
+	}
 };
-function resolveDefaultWritableDirs(env, realpath = realpathOrSelf) {
-	let real = (path) => {
-		let normalized = (0, node_path.normalize)(path);
-		return realpath(normalized.length > 1 ? normalized.replace(/\/$/, "") : normalized);
-	};
+function resolveDefaultWritableDirs(env, realpath = realPathOf) {
 	return {
-		workdir: env.GITHUB_WORKSPACE ? real(env.GITHUB_WORKSPACE) : void 0,
-		home: env.HOME ? real(env.HOME) : void 0,
-		runnerTemp: env.RUNNER_TEMP ? real(env.RUNNER_TEMP) : void 0,
-		tmp: real("/tmp")
+		workdir: env.GITHUB_WORKSPACE ? realpath(env.GITHUB_WORKSPACE) : void 0,
+		home: env.HOME ? realpath(env.HOME) : void 0,
+		runnerTemp: env.RUNNER_TEMP ? realpath(env.RUNNER_TEMP) : void 0,
+		tmp: realpath("/tmp")
 	};
 }
-function withRealPaths(paths, realpath = realpathOrSelf) {
-	return [...new Set([...paths, ...paths.map(realpath)])];
+function insidePersisting(persisting) {
+	return (path) => persisting.some((w) => isAtOrUnder(path, w));
 }
-function insidePersisting(persisting, realpathDir) {
-	let writable = withRealPaths(persisting, realpathDir);
-	return (path) => writable.some((w) => isAtOrUnder(path, w));
-}
-function pathOutside(pathEnv = "", persisting, realpathDir) {
+function pathOutside(pathEnv = "", persisting, deps = realSymlinkDeps) {
 	if (persisting.includes("/")) return pathEnv;
-	let inside = insidePersisting(persisting, realpathDir);
-	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !inside(dir) && !inside(realpathDir(dir))).join(node_path.delimiter);
+	let inside = insidePersisting(persisting);
+	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !inside(realPathOf(dir, deps))).join(node_path.delimiter);
 }
 function findPinnableCommand(command, pathEnv, persisting, deps = realFindCommandDeps) {
-	let optedOut = persisting.includes("/"), inside = insidePersisting(persisting, deps.realpathDir), reachable = (candidate) => {
+	let optedOut = persisting.includes("/"), inside = insidePersisting(persisting), reachable = (candidate) => {
 		let resolved = resolveHostPath(candidate, deps);
 		return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
 	};
@@ -25048,7 +25035,7 @@ function pinHostCommands(paths, env, deps = realFindCommandDeps) {
 		}
 		if (findPinnableCommand(command, env.PATH, [], deps)) throw new SandboxError(`'${command}' is on PATH only under paths a sandboxed command can write to (${paths.join(", ")}). This action runs it outside the sandbox, so it has to live somewhere no sandboxed command can replace it, such as /usr/bin.`, "HOST_COMMAND_UNPINNABLE");
 	}
-	pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps.realpathDir)), pinCommandPathEnv("sudo", pathOutside("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", paths, deps.realpathDir));
+	pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps)), pinCommandPathEnv("sudo", pathOutside("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", paths, deps));
 }
 function jvmTools(env, persisting, deps = realFindCommandDeps) {
 	let javaHomeBin = env.JAVA_HOME ? (0, node_path.join)(env.JAVA_HOME, "bin") : void 0;
@@ -25057,17 +25044,17 @@ function jvmTools(env, persisting, deps = realFindCommandDeps) {
 		keytool: findPinnableCommand("keytool", javaHomeBin, persisting, deps) ?? findPinnableCommand("keytool", env.PATH, persisting, deps)
 	};
 }
-function pinningPaths(readWriteThroughInput, env) {
+function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
 	let writeThroughPaths = [];
 	try {
 		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
 	} catch {}
-	return persistingWritablePaths("persistent", writeThroughPaths, env);
+	return persistingWritablePaths("persistent", writeThroughPaths, env, realpath);
 }
 function dockerConfigDir(env) {
 	return env.DOCKER_CONFIG ? (0, node_path.resolve)(env.DOCKER_CONFIG) : env.HOME ? (0, node_path.join)(env.HOME, ".docker") : void 0;
 }
-function sandboxReadonlyHostDirs(persisting, env, actionRoot = runnerActionRoot(), deps = realFindCommandDeps) {
+function sandboxReadonlyHostDirs(persisting, env, actionRoot = runnerActionRoot(), deps = realSymlinkDeps) {
 	let docker = dockerConfigDir(env), candidates = [{
 		name: "This action's checkout",
 		dir: actionRoot,
@@ -25075,13 +25062,10 @@ function sandboxReadonlyHostDirs(persisting, env, actionRoot = runnerActionRoot(
 	}, ...docker ? [{
 		name: "The docker CLI's config directory",
 		dir: docker,
-		fix: () => `this action runs docker on the host after the command exits. Set DOCKER_CONFIG to its real path, ${JSON.stringify(followAll(docker))}.`
-	}] : []], followAll = (path) => {
-		let resolved = resolveHostPath(path, deps);
-		return "real" in resolved ? resolved.real : path;
-	}, roots = persisting.filter((p) => p !== "/");
+		fix: () => `this action runs docker on the host after the command exits. Set DOCKER_CONFIG to its real path, ${JSON.stringify(realPathOf(docker, deps))}.`
+	}] : []], roots = persisting.filter((p) => p !== "/");
 	return candidates.flatMap(({ name, dir, fix }) => {
-		if (persisting.includes(dir) || persisting.includes(deps.realpathDir(dir))) return [];
+		if (persisting.includes(realPathOf(dir, deps))) return [];
 		let resolved = resolveHostPath(dir, deps), link = replaceableLink(resolved, roots);
 		if (link !== void 0) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(link)}, a symlink the sandboxed command can replace, and ${fix()}`, "HOST_DIR_UNPROTECTABLE");
 		if ("loop" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
@@ -25092,8 +25076,8 @@ function sandboxReadonlyHostDirs(persisting, env, actionRoot = runnerActionRoot(
 function replaceableLink(resolved, roots) {
 	return resolved.links.find((l) => roots.some((p) => isAtOrUnder((0, node_path.dirname)(l.at), p)))?.at;
 }
-function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = realFindCommandDeps) {
-	let named = new Set(withRealPaths(writeThroughPaths, deps.realpathDir)), openable = (name, path) => name !== "GITHUB_STATE" && (named.has(path) || named.has(deps.realpathDir(path))), roots = persisting.filter((p) => p !== "/");
+function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = realSymlinkDeps) {
+	let named = new Set(writeThroughPaths), openable = (name, path) => name !== "GITHUB_STATE" && named.has(realPathOf(path, deps)), roots = persisting.filter((p) => p !== "/");
 	return [
 		"GITHUB_ENV",
 		"GITHUB_PATH",
@@ -25147,8 +25131,8 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	} catch (e) {
 		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
-	let realpath = deps.realpath ?? realpathOrSelf;
-	validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map(realpath));
+	let realpath = deps.realpath ?? realPathOf;
+	validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map((p) => realpath(p)));
 	try {
 		assertScratchBaseNotWritable(writeThroughPaths);
 	} catch (e) {
@@ -25677,7 +25661,7 @@ const realDeps$2 = {
 		mode: 384
 	}),
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
-	realpath: realpathOrSelf,
+	realpath: realPathOf,
 	...realSymlinkDeps,
 	info
 };
@@ -25695,20 +25679,20 @@ function extractCaTrust(containerName, dir, options, { extractCaCert, writeCaTru
 	let { env, writeThroughPaths, warn } = options;
 	try {
 		let files = {
-			...writeCaTrustFiles(extractCaCert(containerName, dir), dir, env, jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env)), { warn }),
+			...writeCaTrustFiles(extractCaCert(containerName, dir), dir, env, jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env, realpath)), { warn }),
 			nssDb: prepareNssDb(containerName, dir, env.HOME, {
 				warn,
 				info
-			}, { homeUpper: homeUpperFor(dir, options) })
+			}, { homeUpper: homeUpperFor(dir, options, realpath) })
 		}, preset = presetCaVariables(files, env, realpath);
 		return preset.length > 0 && warn(`these CA variables are already set and do not point at the proxy CA: ${preset.map((name) => `${name} (${env[name]})`).join(", ")}. A tool reading one fails TLS under proxy_engine: inspect; unset them for this step, or use proxy_engine: universal.`), files;
 	} catch (e) {
 		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`, "CA_EXTRACT_FAILED");
 	}
 }
-function homeUpperFor(dir, options) {
+function homeUpperFor(dir, options, realpath) {
 	let { filesystemMode, overlayRoots, env } = options, home = env.HOME;
-	if (filesystemMode === "ephemeral" && home && overlayRoots.includes(home) && !persists((0, node_path.join)(home, ".pki/nssdb"), options)) return overlayUpperFor(dir, home);
+	if (filesystemMode === "ephemeral" && home && overlayRoots.includes(home) && !persists((0, node_path.join)(home, ".pki/nssdb"), options, realpath)) return overlayUpperFor(dir, home);
 }
 function writeBundleFiles(dir, { runInput, filesystemMode, overlayRoots }, { createOverlayScratchDirs, writeResolvConf, writeRunScript, writeEnvLoader, mkdir }) {
 	let overlayScratchPaths = filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [], resolvConfPath = writeResolvConf(PROXY_ADDRESS, dir), execDir = (0, node_path.join)(dir, "exec");
@@ -25730,10 +25714,9 @@ function resolveIdentity(env, warn, { resolveSandboxGid, info }) {
 function assembleBundle(dir, options, deps) {
 	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
-		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)), symlinkDeps = {
+		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = persistingWritablePaths(filesystemMode, writeThroughPaths, env, deps.realpath), symlinkDeps = {
 			lstat: deps.lstat,
-			readlink: deps.readlink,
-			realpathDir: deps.realpath
+			readlink: deps.readlink
 		}, readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, void 0, symlinkDeps), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, symlinkDeps), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
 		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
 			mode: 448,
@@ -25778,8 +25761,8 @@ function assembleBundle(dir, options, deps) {
 		rootfsBindDir
 	};
 }
-function persists(path, { filesystemMode, writeThroughPaths, env }) {
-	return withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)).some((p) => p === "/" || path === p || path.startsWith(`${p}/`));
+function persists(path, { filesystemMode, writeThroughPaths, env }, realpath) {
+	return persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath).some((p) => p === "/" || path === p || path.startsWith(`${p}/`));
 }
 function releaseDeps({ warn }, { info }) {
 	return {
@@ -25788,9 +25771,9 @@ function releaseDeps({ warn }, { info }) {
 	};
 }
 function finishNssDb(caTrust, options, deps) {
-	let { nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info } = deps, nssDb = caTrust?.nssDb;
+	let { nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info, realpath } = deps, nssDb = caTrust?.nssDb;
 	if (!nssDb) return;
-	let { failOnCaResidue, warn } = options, release = () => releaseNssDbDirs(nssDb, releaseDeps(options, deps)), persist = persists(nssDb.destination, options), detached = persist ? nssDbDetached(nssDb) : void 0;
+	let { failOnCaResidue, warn } = options, release = () => releaseNssDbDirs(nssDb, releaseDeps(options, deps)), persist = persists(nssDb.destination, options, realpath), detached = persist ? nssDbDetached(nssDb) : void 0;
 	if (detached !== void 0) {
 		warn(detached), release();
 		return;

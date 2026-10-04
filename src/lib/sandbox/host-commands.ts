@@ -10,8 +10,8 @@
  * runner's file commands that reach every later step.
  */
 
-import { accessSync, constants, realpathSync } from "node:fs";
-import { delimiter, dirname, isAbsolute, join, normalize, resolve } from "node:path";
+import { accessSync, constants } from "node:fs";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
@@ -20,6 +20,7 @@ import { writableDirsOf } from "./oci-mounts.ts";
 import { isAtOrUnder } from "./paths.ts";
 import { pinCommand, pinCommandPathEnv, SYSTEM_PATH } from "./pinned-commands.ts";
 import {
+  realPathOf,
   realSymlinkDeps,
   resolveHostPath,
   type ResolvedHostPath,
@@ -36,38 +37,31 @@ function runnerActionRoot(): string {
 
 const PINNED_COMMANDS = ["docker", "sudo"] as const;
 
-/** Host paths whose writes outlive the command. Ephemeral mode's overlays
- *  discard theirs, so only write_through counts there. */
+/** Host paths whose writes outlive the command, by real path. Ephemeral mode's
+ *  overlays discard theirs, so only write_through counts there. */
 export function persistingWritablePaths(
   filesystemMode: FilesystemMode,
   writeThroughPaths: string[],
   env: NodeJS.ProcessEnv,
+  realpath: (path: string) => string = realPathOf,
 ): string[] {
-  if (filesystemMode === "ephemeral") return writeThroughPaths;
-  return writableDirsOf({
-    workdir: env.GITHUB_WORKSPACE,
-    home: env.HOME,
-    runnerTemp: env.RUNNER_TEMP,
-    writablePaths: writeThroughPaths,
-  });
+  const paths =
+    filesystemMode === "ephemeral"
+      ? writeThroughPaths
+      : writableDirsOf({
+          ...resolveDefaultWritableDirs(env, realpath),
+          writablePaths: writeThroughPaths,
+        });
+  return [...new Set(paths.map((p) => realpath(p)))];
 }
 
 export interface FindCommandDeps extends SymlinkDeps {
   isExecutable: (path: string) => boolean;
-  realpathDir: (dir: string) => string;
 }
 
 // Untested by design: the defaults behind this module's seams, which only hand
 // node:fs what the tested caller decided.
 /* v8 ignore start */
-export function realpathOrSelf(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-}
-
 const realFindCommandDeps: FindCommandDeps = {
   ...realSymlinkDeps,
   isExecutable: (path) => {
@@ -78,7 +72,6 @@ const realFindCommandDeps: FindCommandDeps = {
       return false;
     }
   },
-  realpathDir: realpathOrSelf,
 };
 /* v8 ignore stop */
 
@@ -96,35 +89,18 @@ export interface DefaultWritableDirs {
  */
 export function resolveDefaultWritableDirs(
   env: NodeJS.ProcessEnv,
-  realpath: (path: string) => string = realpathOrSelf,
+  realpath: (path: string) => string = realPathOf,
 ): DefaultWritableDirs {
-  const real = (path: string) => {
-    const normalized = normalize(path);
-    // A path that doesn't exist comes back as given, so drop the slash here.
-    return realpath(normalized.length > 1 ? normalized.replace(/\/$/, "") : normalized);
-  };
   return {
-    workdir: env.GITHUB_WORKSPACE ? real(env.GITHUB_WORKSPACE) : undefined,
-    home: env.HOME ? real(env.HOME) : undefined,
-    runnerTemp: env.RUNNER_TEMP ? real(env.RUNNER_TEMP) : undefined,
-    tmp: real("/tmp"),
+    workdir: env.GITHUB_WORKSPACE ? realpath(env.GITHUB_WORKSPACE) : undefined,
+    home: env.HOME ? realpath(env.HOME) : undefined,
+    runnerTemp: env.RUNNER_TEMP ? realpath(env.RUNNER_TEMP) : undefined,
+    tmp: realpath("/tmp"),
   };
 }
 
-/** `paths` plus their real spellings, since `$HOME` may itself be a symlink. */
-export function withRealPaths(
-  paths: string[],
-  realpath: (path: string) => string = realpathOrSelf,
-): string[] {
-  return [...new Set([...paths, ...paths.map(realpath)])];
-}
-
-function insidePersisting(
-  persisting: string[],
-  realpathDir: FindCommandDeps["realpathDir"],
-): (path: string) => boolean {
-  const writable = withRealPaths(persisting, realpathDir);
-  return (path) => writable.some((w) => isAtOrUnder(path, w));
+function insidePersisting(persisting: string[]): (path: string) => boolean {
+  return (path) => persisting.some((w) => isAtOrUnder(path, w));
 }
 
 /**
@@ -135,13 +111,13 @@ function insidePersisting(
 export function pathOutside(
   pathEnv: string = "",
   persisting: string[],
-  realpathDir: FindCommandDeps["realpathDir"],
+  deps: SymlinkDeps = realSymlinkDeps,
 ): string {
   if (persisting.includes("/")) return pathEnv;
-  const inside = insidePersisting(persisting, realpathDir);
+  const inside = insidePersisting(persisting);
   return pathEnv
     .split(delimiter)
-    .filter((dir) => isAbsolute(dir) && !inside(dir) && !inside(realpathDir(dir)))
+    .filter((dir) => isAbsolute(dir) && !inside(realPathOf(dir, deps)))
     .join(delimiter);
 }
 
@@ -161,7 +137,7 @@ export function findPinnableCommand(
   deps: FindCommandDeps = realFindCommandDeps,
 ): string | undefined {
   const optedOut = persisting.includes("/");
-  const inside = insidePersisting(persisting, deps.realpathDir);
+  const inside = insidePersisting(persisting);
   const reachable = (candidate: string): boolean => {
     const resolved = resolveHostPath(candidate, deps);
     return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
@@ -200,8 +176,8 @@ export function pinHostCommands(
       "HOST_COMMAND_UNPINNABLE",
     );
   }
-  pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps.realpathDir));
-  pinCommandPathEnv("sudo", pathOutside(SYSTEM_PATH, paths, deps.realpathDir));
+  pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps));
+  pinCommandPathEnv("sudo", pathOutside(SYSTEM_PATH, paths, deps));
 }
 
 /**
@@ -232,6 +208,7 @@ export function jvmTools(
 export function pinningPaths(
   readWriteThroughInput: () => string,
   env: NodeJS.ProcessEnv,
+  realpath: (path: string) => string = realPathOf,
 ): string[] {
   let writeThroughPaths: string[] = [];
   try {
@@ -239,7 +216,7 @@ export function pinningPaths(
   } catch {
     // See above.
   }
-  return persistingWritablePaths("persistent", writeThroughPaths, env);
+  return persistingWritablePaths("persistent", writeThroughPaths, env, realpath);
 }
 
 export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
@@ -263,7 +240,7 @@ export function sandboxReadonlyHostDirs(
   persisting: string[],
   env: NodeJS.ProcessEnv,
   actionRoot: string = runnerActionRoot(),
-  deps: Pick<FindCommandDeps, "lstat" | "readlink" | "realpathDir"> = realFindCommandDeps,
+  deps: SymlinkDeps = realSymlinkDeps,
 ): string[] {
   const docker = dockerConfigDir(env);
   const candidates = [
@@ -281,19 +258,14 @@ export function sandboxReadonlyHostDirs(
             dir: docker,
             fix: () =>
               "this action runs docker on the host after the command exits. Set DOCKER_CONFIG to " +
-              `its real path, ${JSON.stringify(followAll(docker))}.`,
+              `its real path, ${JSON.stringify(realPathOf(docker, deps))}.`,
           },
         ]
       : []),
   ];
-  // Followed link by link rather than realpath'd, so a dangling one still has a target.
-  const followAll = (path: string) => {
-    const resolved = resolveHostPath(path, deps);
-    return "real" in resolved ? resolved.real : path;
-  };
   const roots = persisting.filter((p) => p !== "/");
   return candidates.flatMap(({ name, dir, fix }) => {
-    if (persisting.includes(dir) || persisting.includes(deps.realpathDir(dir))) return [];
+    if (persisting.includes(realPathOf(dir, deps))) return [];
     const resolved = resolveHostPath(dir, deps);
     const link = replaceableLink(resolved, roots);
     if (link !== undefined) {
@@ -332,11 +304,11 @@ export function sandboxReadonlyFileCommands(
   writeThroughPaths: string[],
   persisting: string[],
   env: NodeJS.ProcessEnv,
-  deps: Pick<FindCommandDeps, "lstat" | "readlink" | "realpathDir"> = realFindCommandDeps,
+  deps: SymlinkDeps = realSymlinkDeps,
 ): string[] {
-  const named = new Set(withRealPaths(writeThroughPaths, deps.realpathDir));
+  const named = new Set(writeThroughPaths);
   const openable = (name: string, path: string) =>
-    name !== "GITHUB_STATE" && (named.has(path) || named.has(deps.realpathDir(path)));
+    name !== "GITHUB_STATE" && named.has(realPathOf(path, deps));
   const roots = persisting.filter((p) => p !== "/");
   return ["GITHUB_ENV", "GITHUB_PATH", "GITHUB_STATE"].flatMap((name) => {
     const path = env[name];

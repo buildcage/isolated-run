@@ -70,3 +70,10 @@ export function resolveHostPath(
   }
   return { real: current, links };
 }
+
+/** `path` with its symlinks resolved, or as given when they loop. A dangling
+ *  symlink still leads to its target, where realpath(3) would fail. */
+export function realPathOf(path: string, deps: SymlinkDeps = realSymlinkDeps): string {
+  const resolved = resolveHostPath(path, deps);
+  return "real" in resolved ? resolved.real : path;
+}

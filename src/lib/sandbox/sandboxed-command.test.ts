@@ -500,7 +500,7 @@ describe("runSandboxedCommand", () => {
       options({
         env: {
           GITHUB_WORKSPACE: "/home/runner/work/repo/repo",
-          HOME: "/home/runner/",
+          HOME: "/home/runner",
           RUNNER_TEMP: "/home/runner/work/_temp",
         },
       }),
