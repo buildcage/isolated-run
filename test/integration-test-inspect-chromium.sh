@@ -13,7 +13,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to a locally built inspect-engine image (BUILDCAGE_TEST_HOOKS=1 PROXY_ENGINE=inspect docker compose build proxy)}"
 
-PUPPETEER_VERSION=25.12.0
 CHROME_VERSION=154.0.8037.57
 
 echo ""
@@ -32,9 +31,8 @@ TMPDIR=$(mktemp -d)
 # Installed outside the sandbox. Chrome for Testing ships chrome-headless-shell
 # for x86-64 Linux only.
 echo "--- installing puppeteer-core and chrome-headless-shell $CHROME_VERSION ---"
-mkdir -p "$TMPDIR/check"
-cp "$REPO_ROOT/test/chromium-check.js" "$TMPDIR/check/"
-(cd "$TMPDIR/check" && npm install --silent --no-audit --no-fund "puppeteer-core@$PUPPETEER_VERSION" &&
+cp -R "$REPO_ROOT/test/chromium" "$TMPDIR/check"
+(cd "$TMPDIR/check" && npm ci --silent --no-audit --no-fund &&
   npx --no-install browsers install "chrome-headless-shell@$CHROME_VERSION" --path "$TMPDIR/chrome") >/dev/null ||
   { fail "could not install chrome-headless-shell"; assert_results; }
 CHROME="$TMPDIR/chrome/chrome-headless-shell/linux-$CHROME_VERSION/chrome-headless-shell-linux64/chrome-headless-shell"
