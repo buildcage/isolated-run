@@ -20,8 +20,9 @@ export function generateContainerName(): string {
 
 /**
  * A container name read back from GITHUB_STATE can differ from the one this
- * action saved there, since the sandboxed command can overwrite it. Kept
- * next to generateContainerName so the two can't drift apart.
+ * action saved there, since a process outside the sandbox, such as one an
+ * earlier step left running, can overwrite it. Kept next to
+ * generateContainerName so the two can't drift apart.
  */
 export const CONTAINER_NAME_PATTERN = /^buildcage-proxy-[0-9a-f]{8}$/;
 
@@ -70,7 +71,7 @@ const OWNER_TOKEN_VARS = [
  * Identifies the step that started a proxy container. The post step compares
  * it against the container's own OWNER_LABEL so it only tears down what this
  * step started: a well-formed container name proves nothing on its own,
- * since the isolated command can write one into GITHUB_STATE.
+ * since a process outside the sandbox can write one into GITHUB_STATE.
  *
  * Empty when the environment isn't a real Actions step (this repo's own
  * integration tests and `make setup_sandbox_dev` drive dist/main.cjs

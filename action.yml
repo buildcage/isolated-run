@@ -9,7 +9,7 @@ inputs:
     description: "Command(s) to run inside the isolated sandbox (multi-line supported, like a workflow run: step). Runs under bash -e; start with a #! line to use another interpreter."
     required: true
   config_file:
-    description: "YAML file, relative to the workspace, setting any input but run and writable. An input the workflow sets wins; rule lists and write_through are combined. See docs/reference.md#config-file."
+    description: "YAML file, relative to the workspace, setting any input but run and the deprecated writable. An input the workflow sets wins; rule lists and write_through are combined. See docs/reference.md#config-file."
     required: false
     default: ""
   proxy_mode:
