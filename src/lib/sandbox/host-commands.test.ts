@@ -38,10 +38,9 @@ function withLinks(links: Record<string, string>) {
 const NO_LINKS = withLinks({});
 
 /**
- * A host where `files` are the executables, and `links` map a symlink, a file's
- * or a directory's, to its immediate target (a chain is spelled out one hop per
- * entry). A path in `links` is executable too, so only its final target need be
- * listed in `files`.
+ * A host where `files` are the executables, and `links` map each symlink, to a
+ * file or a directory, to its immediate target, one hop per entry. A path in
+ * `links` is executable too, so only its final target need be listed in `files`.
  */
 function host(files: string[], links: Record<string, string> = {}): FindCommandDeps {
   return { ...withLinks(links), isExecutable: (p) => files.includes(p) || p in links };

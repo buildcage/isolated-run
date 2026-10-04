@@ -2,7 +2,7 @@ import { lstatSync, readlinkSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
 export interface SymlinkDeps {
-  /** lstat(2), or undefined when the path cannot be read as an entry. */
+  /** lstat(2), or undefined when it fails, as on a missing path. */
   lstat: (path: string) => { uid: number; isSymbolicLink(): boolean } | undefined;
   /** readlink(2): the target as stored, relative or not. */
   readlink: (path: string) => string;
@@ -39,9 +39,9 @@ export const realSymlinkDeps: SymlinkDeps = {
 
 /**
  * `path` with its symlinks resolved component by component, as the kernel
- * would, and every symlink passed through, for the caller to judge. Unlike
- * realpath(3), components past the last existing one are kept as written, so a
- * path still to be created resolves too.
+ * would, and every symlink passed through. Unlike realpath(3), components past
+ * the last existing one are kept as written, so a path still to be created
+ * resolves too.
  */
 export function resolveHostPath(
   path: string,

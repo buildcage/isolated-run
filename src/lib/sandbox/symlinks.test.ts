@@ -33,7 +33,7 @@ describe("resolveHostPath", () => {
     });
   });
 
-  it("keeps a component that cannot be read as written", () => {
+  it("keeps a component lstat fails on as written", () => {
     const missing = { lstat: () => undefined, readlink: () => "" };
 
     expect(resolveHostPath("/a/b", missing)).toStrictEqual({ real: "/a/b", links: [] });
