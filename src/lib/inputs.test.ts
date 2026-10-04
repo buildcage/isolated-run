@@ -54,14 +54,14 @@ describe("resolveWriteThroughInput", () => {
     );
   });
 
-  it("throws FILESYSTEM_INPUT_CONFLICT when both spellings are set", () => {
-    expect.assertions(2);
-    try {
-      resolveWriteThroughInput(inputs({ writeThrough: "/opt/a", writable: "/opt/b" }), silent);
-    } catch (err) {
-      expect(err).toBeInstanceOf(SandboxError);
-      expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
-    }
+  // write_through may hold config_file's lines, which the workflow cannot see.
+  it("joins writable:'s lines to write_through:'s when both are set", () => {
+    const notice = vi.fn();
+
+    expect(
+      resolveWriteThroughInput(inputs({ writeThrough: "/opt/a", writable: "/opt/b" }), notice),
+    ).toBe("/opt/a\n/opt/b");
+    expect(notice).toHaveBeenCalledOnce();
   });
 
   it("rejects the removed allow_write: input rather than ignoring it", () => {

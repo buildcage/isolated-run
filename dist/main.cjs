@@ -23277,38 +23277,37 @@ const LIST_INPUTS = [
 };
 function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, notice) {
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
-	if (writeThrough.trim() && writable.trim()) throw new SandboxError("write_through: and writable: are the same input under two names. Set only write_through:.", "FILESYSTEM_INPUT_CONFLICT");
-	return !writeThrough.trim() && writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writable) : writeThrough;
+	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$3 = getInput) {
-	let runInput = getInput$3("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$6 = getInput) {
+	let runInput = getInput$6("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$2 = getInput) {
+function readProxyInputs(getInput$5 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$2("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$2("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$5("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$5("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$4 = getInput) {
+function readFilesystemInputs(notice, getInput$1 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$4("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$4("write_through"),
-			writable: getInput$4("writable"),
-			allowWrite: getInput$4("allow_write")
+			writeThrough: getInput$1("write_through"),
+			writable: getInput$1("writable"),
+			allowWrite: getInput$1("allow_write")
 		}, notice)
 	};
 }
-function readStepLabel(getInput$5 = getInput) {
-	return getInput$5("label") || void 0;
+function readStepLabel(getInput$4 = getInput) {
+	return getInput$4("label") || void 0;
 }
-function readFailOnCaResidue(getInput$6 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$6);
+function readFailOnCaResidue(getInput$2 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$2);
 }
-function readFailOnBlocked(getInput$1 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$1);
+function readFailOnBlocked(getInput$3 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$3);
 }
 //#endregion
 //#region src/lib/retry-briefly.ts

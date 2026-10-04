@@ -67,10 +67,10 @@ export interface WriteThroughInputs {
 }
 
 /**
- * Pick the effective write_through: input. `writable:` is the same input under
- * its old name and still works; `allow_write:` (the ephemeral-only input this
- * replaced) is rejected rather than ignored, since ignoring it would silently
- * discard writes the step asked to keep.
+ * The effective write_through: input. `writable:` is its old name and still
+ * works; its lines join write_through's, as config_file's do. `allow_write:`
+ * (the ephemeral-only input this replaced) is rejected rather than ignored,
+ * since ignoring it would silently discard writes the step asked to keep.
  */
 export function resolveWriteThroughInput(
   { writeThrough, writable, allowWrite }: WriteThroughInputs,
@@ -83,19 +83,11 @@ export function resolveWriteThroughInput(
       "ALLOW_WRITE_REMOVED",
     );
   }
-  if (writeThrough.trim() && writable.trim()) {
-    throw new SandboxError(
-      "write_through: and writable: are the same input under two names. Set only write_through:.",
-      "FILESYSTEM_INPUT_CONFLICT",
-    );
-  }
-  if (!writeThrough.trim() && writable.trim()) {
-    notice(
-      "writable: is now called write_through:; writable: still works, but consider updating to write_through:.",
-    );
-    return writable;
-  }
-  return writeThrough;
+  if (!writable.trim()) return writeThrough;
+  notice(
+    "writable: is now called write_through:; writable: still works, but consider updating to write_through:.",
+  );
+  return writeThrough.trim() ? `${writeThrough}\n${writable}` : writable;
 }
 
 /** The `run:` script. Read untrimmed: leading indentation is part of it. */

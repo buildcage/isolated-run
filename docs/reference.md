@@ -876,6 +876,7 @@ to `/` (a miscounted `../`, say) is an error rather than a silent full opt-out.
 was its `filesystem_mode: ephemeral`-only counterpart. `writable:` still works and means the same
 thing, with one change: its entries now go through the resolution above, so a relative entry
 resolves against `$GITHUB_WORKSPACE` rather than being passed through as-is, and a `$NAME` outside
-the seven supported variables is rejected instead of being treated as a literal path. `allow_write:`
+the seven supported variables is rejected instead of being treated as a literal path. Setting both
+joins their lines. `allow_write:`
 has been removed, and a step still passing it fails with a message saying so rather than silently
 discarding the writes it asked to keep.
