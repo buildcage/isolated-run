@@ -69,8 +69,7 @@ fi
 echo "--- bringing up fixture origins (compose.test-inspect.yaml) ---"
 docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" up -d --build --wait
 
-# The link itself is refused before the CA directory is looked at, as any
-# write_through entry through a symlink is.
+# The link itself fails as a symlink, before the CA directory check.
 run_instance "$CA_DIR_LINK" "true"
 CODE=$(cat "$WORKDIR/exit_code")
 if [ "$CODE" != "0" ] && grep -qF "symlinks are not followed. Name the path it leads to instead: \"$TARGET\"" "$WORKDIR/out.log"; then

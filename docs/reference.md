@@ -801,7 +801,9 @@ this:
 - Symlinks are not followed. A path that is a symlink, or goes through one anywhere along it, fails
   the step, and the error names the path it leads to, which you can write instead. Following one
   would make writable wherever it leads, and an earlier step could have pointed it at a path the
-  sandbox keeps read-only, such as a tool installed under `/opt/hostedtoolcache`.
+  sandbox keeps read-only, such as a tool installed under `/opt/hostedtoolcache`. This covers
+  `$HOME` and `$GITHUB_WORKSPACE` too: where either goes through a symlink (`/home -> /var/home`),
+  `~/` and relative entries need the real path.
 - A path that doesn't already exist is created before the step runs, **always as a directory**, the
   same convention Docker itself uses for a bind mount whose host source doesn't exist yet
   (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and

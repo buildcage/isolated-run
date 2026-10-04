@@ -78,9 +78,7 @@ export interface FilesystemPlan {
   /** filesystem_mode: ephemeral only; already folded (determineOverlayRoots), plus the host
    *  mounts nested under them (nestedMountRoots). [] in persistent mode. */
   overlayRoots: string[];
-  /** Already resolved (resolveWriteThroughPaths), free of symlinks
-   *  (assertNoSymlinkInWriteThrough) and pre-created (ensureWriteThroughTargetsExist), in
-   *  either filesystem mode. */
+  /** Normalized, free of symlinks and pre-created, in either filesystem mode. */
   writeThroughPaths: string[];
 }
 
@@ -147,8 +145,7 @@ export function resolveFilesystemPlan(
     throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
   }
 
-  // runc follows symlinks in a mount's source and destination, so an entry with
-  // none on it is the real path the checks below and the mount act on.
+  // From here each entry is the real path the checks below and the mount act on.
   try {
     for (const path of writeThroughPaths) assertNoSymlinkInWriteThrough(path, deps);
   } catch (e) {

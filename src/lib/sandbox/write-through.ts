@@ -179,10 +179,9 @@ function defaultMkdir(path: string): void {
 /* v8 ignore stop */
 
 /**
- * Refuses a write_through path with a symlink anywhere along it. Following one
- * would make writable wherever it leads, and an earlier step could have
- * pointed it at a path the sandbox keeps read-only. Missing components are
- * fine: they are created as written.
+ * Following a symlink would make writable wherever it leads, which an earlier
+ * step could have pointed at a path the sandbox keeps read-only. A missing
+ * component is fine: it is created as written.
  */
 export function assertNoSymlinkInWriteThrough(
   path: string,
