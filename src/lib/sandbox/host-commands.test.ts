@@ -250,6 +250,19 @@ describe("pathOutside", () => {
     expect(pathOutside(`${HOME}/.local/bin:/usr/bin`, ["/data/runner"], deps)).toBe("/usr/bin");
   });
 
+  it("drops an entry that passes through a symlink in a persisting path, wherever it resolves", () => {
+    // ~/bin -> /opt/tools/bin: the command could repoint ~/bin itself.
+    const deps = withLinks({ [`${HOME}/bin`]: "/opt/tools/bin" });
+
+    expect(pathOutside(`${HOME}/bin:/usr/bin`, PERSISTENT, deps)).toBe("/usr/bin");
+  });
+
+  it("drops an entry whose symlinks loop", () => {
+    const deps = withLinks({ "/opt/a": "/opt/b", "/opt/b": "/opt/a" });
+
+    expect(pathOutside("/opt/a/bin:/usr/bin", PERSISTENT, deps)).toBe("/usr/bin");
+  });
+
   it("drops relative and empty entries, which resolve against the workspace", () => {
     expect(pathOutside("bin::/usr/bin:./node_modules/.bin:", PERSISTENT, NO_LINKS)).toBe(
       "/usr/bin",

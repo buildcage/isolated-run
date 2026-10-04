@@ -807,19 +807,20 @@ function resolveDefaultWritableDirs(env, realpath = realPathOf) {
 		tmp: realpath("/tmp")
 	};
 }
-function insidePersisting(persisting) {
-	return (path) => persisting.some((w) => isAtOrUnder(path, w));
+function reachableFrom(persisting, deps) {
+	let inside = (path) => persisting.some((w) => isAtOrUnder(path, w));
+	return (path) => {
+		let resolved = resolveHostPath(path, deps);
+		return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
+	};
 }
 function pathOutside(pathEnv = "", persisting, deps = realSymlinkDeps) {
 	if (persisting.includes("/")) return pathEnv;
-	let inside = insidePersisting(persisting);
-	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !inside(realPathOf(dir, deps))).join(node_path.delimiter);
+	let reachable = reachableFrom(persisting, deps);
+	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !reachable(dir)).join(node_path.delimiter);
 }
 function findPinnableCommand(command, pathEnv, persisting, deps = realFindCommandDeps) {
-	let optedOut = persisting.includes("/"), inside = insidePersisting(persisting), reachable = (candidate) => {
-		let resolved = resolveHostPath(candidate, deps);
-		return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
-	};
+	let optedOut = persisting.includes("/"), reachable = reachableFrom(persisting, deps);
 	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
 		if (!(0, node_path.isAbsolute)(dir)) continue;
 		let candidate = (0, node_path.join)(dir, command);
