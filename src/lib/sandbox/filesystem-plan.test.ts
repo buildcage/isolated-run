@@ -5,6 +5,11 @@ import { resolveFilesystemPlan, validateFilesystemInputs } from "./filesystem-pl
 import { reservedInternalDestinations } from "./oci-mounts.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 
+// /proc/self/mountinfo is Linux-only, so the default listHostMounts is mocked.
+vi.mock("./mountinfo.ts", () => ({
+  listHostMounts: () => [{ mountPoint: "/home/runner/remote", fsType: "fuse.sshfs" }],
+}));
+
 describe("resolveFilesystemPlan", () => {
   const ENV = {
     HOME: "/home/runner",
@@ -243,14 +248,15 @@ describe("resolveFilesystemPlan", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('"/home/runner/remote"'));
   });
 
-  // /proc/self/mountinfo is Linux-only.
-  it.skipIf(process.platform !== "linux")("reads the real host mount table by default", () => {
-    const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
+  it("reads the host mount table by default", () => {
+    const warn = vi.fn();
+    resolveFilesystemPlan("ephemeral", "", ENV, {
       exists: alwaysExists,
       deviceOf: () => 1,
       realpath: (p) => p,
+      warn,
     });
-    expect(plan.overlayRoots).toContain("/tmp");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"/home/runner/remote"'));
   });
 
   it("resolves and pre-creates write_through targets, then excludes only what's actually covered by them", () => {
