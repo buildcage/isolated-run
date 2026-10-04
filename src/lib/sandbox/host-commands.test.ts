@@ -22,6 +22,20 @@ const HOME = "/home/runner";
 const WORKSPACE = "/home/runner/work/repo/repo";
 const PERSISTENT = [WORKSPACE, HOME, "/tmp", "/home/runner/work/_temp"];
 
+/** A filesystem whose only symlinks are `links`, each to an absolute path. */
+function withLinks(links: Record<string, string>) {
+  const realpathDir = (path: string): string => {
+    for (const [link, target] of Object.entries(links)) {
+      if (path === link || path.startsWith(`${link}/`)) {
+        return realpathDir(target + path.slice(link.length));
+      }
+    }
+    return path;
+  };
+  return { readlink: (path: string) => links[path] ?? null, realpathDir };
+}
+const NO_LINKS = withLinks({});
+
 /**
  * A host where `files` are the executables, and `links` map a symlink to its
  * immediate target (a chain is spelled out one hop per entry). A path in
@@ -355,39 +369,162 @@ describe("sandboxReadonlyHostDirs", () => {
   const ACTION = "/home/runner/work/_actions/buildcage/isolated-run/v1";
 
   it("is the action and docker config directories when a persisting path holds them", () => {
-    expect(sandboxReadonlyHostDirs(PERSISTENT, { HOME }, ACTION)).toStrictEqual([
+    expect(sandboxReadonlyHostDirs(PERSISTENT, { HOME }, ACTION, NO_LINKS)).toStrictEqual([
       ACTION,
       `${HOME}/.docker`,
     ]);
   });
 
   it("leaves out a directory no persisting path holds", () => {
-    expect(sandboxReadonlyHostDirs([`${WORKSPACE}/dist`], { HOME }, ACTION)).toStrictEqual([]);
+    expect(
+      sandboxReadonlyHostDirs([`${WORKSPACE}/dist`], { HOME }, ACTION, NO_LINKS),
+    ).toStrictEqual([]);
   });
 
   it("covers both under write_through: /", () => {
-    expect(sandboxReadonlyHostDirs(["/"], { HOME }, ACTION)).toStrictEqual([
+    expect(sandboxReadonlyHostDirs(["/"], { HOME }, ACTION, NO_LINKS)).toStrictEqual([
       ACTION,
       `${HOME}/.docker`,
     ]);
   });
 
   it("leaves out one that contains a persisting path, as uses: ./ puts the action in the workspace", () => {
-    expect(sandboxReadonlyHostDirs(PERSISTENT, { HOME }, WORKSPACE)).toStrictEqual([
+    expect(sandboxReadonlyHostDirs(PERSISTENT, { HOME }, WORKSPACE, NO_LINKS)).toStrictEqual([
       `${HOME}/.docker`,
     ]);
   });
 
   it("keeps one read-only when a persisting path only sits inside it", () => {
     expect(
-      sandboxReadonlyHostDirs([...PERSISTENT, `${HOME}/.docker/buildx`], { HOME }, ACTION),
+      sandboxReadonlyHostDirs(
+        [...PERSISTENT, `${HOME}/.docker/buildx`],
+        { HOME },
+        ACTION,
+        NO_LINKS,
+      ),
     ).toStrictEqual([ACTION, `${HOME}/.docker`]);
   });
 
   it("leaves out one a write_through entry names outright", () => {
     expect(
-      sandboxReadonlyHostDirs([...PERSISTENT, `${HOME}/.docker`], { HOME }, ACTION),
+      sandboxReadonlyHostDirs([...PERSISTENT, `${HOME}/.docker`], { HOME }, ACTION, NO_LINKS),
     ).toStrictEqual([ACTION]);
+  });
+  it("refuses a docker config directory that is itself a symlink in a persisting path", () => {
+    expect(() =>
+      sandboxReadonlyHostDirs(
+        PERSISTENT,
+        { HOME },
+        ACTION,
+        withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        code: "HOST_DIR_UNPROTECTABLE",
+        message: expect.stringContaining(
+          'Set DOCKER_CONFIG to its real path, "/mnt/shared/docker"',
+        ),
+      }),
+    );
+  });
+
+  it("refuses a checkout reached through a symlinked runner work directory in a persisting path", () => {
+    const checkout = `${HOME}/actions-runner/_work/_actions/buildcage/isolated-run/v1`;
+
+    expect(() =>
+      sandboxReadonlyHostDirs(
+        PERSISTENT,
+        { HOME },
+        checkout,
+        withLinks({ [`${HOME}/actions-runner/_work`]: "/mnt/data/_work" }),
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        code: "HOST_DIR_UNPROTECTABLE",
+        message: expect.stringMatching(
+          new RegExp(
+            `goes through "${HOME}/actions-runner/_work".*work directory by its real path`,
+          ),
+        ),
+      }),
+    );
+  });
+
+  it("follows a symlink outside every persisting path and protects its target", () => {
+    expect(
+      sandboxReadonlyHostDirs(
+        PERSISTENT,
+        { HOME, DOCKER_CONFIG: "/opt/cfg" },
+        ACTION,
+        withLinks({ "/opt/cfg": `${HOME}/.cfg` }),
+      ),
+    ).toStrictEqual([ACTION, `${HOME}/.cfg`]);
+  });
+
+  it("refuses nothing under write_through: /, where every symlink is replaceable", () => {
+    expect(
+      sandboxReadonlyHostDirs(
+        ["/"],
+        { HOME },
+        ACTION,
+        withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),
+      ),
+    ).toStrictEqual([ACTION, "/mnt/shared/docker"]);
+  });
+
+  it("refuses nothing when the symlink sits where writes are discarded, as in ephemeral mode", () => {
+    expect(
+      sandboxReadonlyHostDirs(
+        [`${WORKSPACE}/dist`],
+        { HOME },
+        ACTION,
+        withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),
+      ),
+    ).toStrictEqual([]);
+  });
+
+  it("still refuses a replaceable symlink whose target loops, naming no other path", () => {
+    const links: Record<string, string> = {
+      [`${HOME}/.docker`]: "/opt/a",
+      "/opt/a": "/opt/b",
+      "/opt/b": "/opt/a",
+    };
+
+    expect(() =>
+      sandboxReadonlyHostDirs(PERSISTENT, { HOME }, ACTION, {
+        readlink: (p) => links[p] ?? null,
+        realpathDir: (p) => p,
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        message: expect.stringContaining(`its real path, "${HOME}/.docker"`),
+      }),
+    );
+  });
+
+  it("refuses nothing for a directory write_through names, even through a symlink", () => {
+    expect(
+      sandboxReadonlyHostDirs(
+        [...PERSISTENT, `${HOME}/.docker`],
+        { HOME },
+        ACTION,
+        withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),
+      ),
+    ).toStrictEqual([ACTION]);
+  });
+
+  it("refuses a symlink loop", () => {
+    expect(() =>
+      sandboxReadonlyHostDirs(PERSISTENT, { HOME, DOCKER_CONFIG: "/opt/a" }, ACTION, {
+        readlink: (p) => ({ "/opt/a": "/opt/b", "/opt/b": "/opt/a" })[p] ?? null,
+        realpathDir: (p) => p,
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: "HOST_DIR_UNPROTECTABLE",
+        message: expect.stringContaining("too many symlinks"),
+      }),
+    );
   });
 });
 
@@ -399,24 +536,22 @@ describe("sandboxReadonlyFileCommands", () => {
     GITHUB_STATE: `${COMMANDS}/save_state_1`,
     GITHUB_OUTPUT: `${COMMANDS}/set_output_1`,
   };
+  const files = (
+    writeThrough: string[],
+    env: NodeJS.ProcessEnv = ENV,
+    deps: Parameters<typeof sandboxReadonlyFileCommands>[3] = NO_LINKS,
+  ) => sandboxReadonlyFileCommands(writeThrough, [...PERSISTENT, ...writeThrough], env, deps);
 
   it("is this step's GITHUB_ENV, GITHUB_PATH and GITHUB_STATE, and not GITHUB_OUTPUT", () => {
-    expect(sandboxReadonlyFileCommands([COMMANDS], ENV)).toStrictEqual([
-      ENV.GITHUB_ENV,
-      ENV.GITHUB_PATH,
-      ENV.GITHUB_STATE,
-    ]);
+    expect(files([])).toStrictEqual([ENV.GITHUB_ENV, ENV.GITHUB_PATH, ENV.GITHUB_STATE]);
   });
 
   it("leaves out GITHUB_ENV or GITHUB_PATH when write_through names it", () => {
-    expect(sandboxReadonlyFileCommands([ENV.GITHUB_ENV], ENV)).toStrictEqual([
-      ENV.GITHUB_PATH,
-      ENV.GITHUB_STATE,
-    ]);
+    expect(files([ENV.GITHUB_ENV])).toStrictEqual([ENV.GITHUB_PATH, ENV.GITHUB_STATE]);
   });
 
   it("keeps GITHUB_STATE even when write_through names its path", () => {
-    expect(sandboxReadonlyFileCommands([ENV.GITHUB_STATE], ENV)).toStrictEqual([
+    expect(files([ENV.GITHUB_STATE])).toStrictEqual([
       ENV.GITHUB_ENV,
       ENV.GITHUB_PATH,
       ENV.GITHUB_STATE,
@@ -424,18 +559,42 @@ describe("sandboxReadonlyFileCommands", () => {
   });
 
   it("matches a write_through entry through a symlink, and names each by its real path", () => {
-    const realpath = (p: string) => p.replace(/^\/home\//, "/var/home/");
+    const deps = withLinks({ "/home": "/var/home" });
+    const real = (p: string) => p.replace(/^\/home\//, "/var/home/");
 
-    expect(sandboxReadonlyFileCommands([realpath(ENV.GITHUB_PATH)], ENV, realpath)).toStrictEqual([
-      realpath(ENV.GITHUB_ENV),
-      realpath(ENV.GITHUB_STATE),
-    ]);
+    expect(
+      sandboxReadonlyFileCommands([real(ENV.GITHUB_PATH)], [real(ENV.GITHUB_PATH)], ENV, deps),
+    ).toStrictEqual([real(ENV.GITHUB_ENV), real(ENV.GITHUB_STATE)]);
   });
 
   it("skips one that is not set", () => {
-    expect(sandboxReadonlyFileCommands([], { GITHUB_ENV: ENV.GITHUB_ENV })).toStrictEqual([
-      ENV.GITHUB_ENV,
-    ]);
+    expect(files([], { GITHUB_ENV: ENV.GITHUB_ENV })).toStrictEqual([ENV.GITHUB_ENV]);
+  });
+
+  it("refuses one reached through a symlink loop", () => {
+    const links: Record<string, string> = { "/opt/a": "/opt/b", "/opt/b": "/opt/a" };
+
+    expect(() =>
+      files(
+        [],
+        { GITHUB_ENV: "/opt/a/set_env_1" },
+        {
+          readlink: (p) => links[p] ?? null,
+          realpathDir: (p) => p,
+        },
+      ),
+    ).toThrow(expect.objectContaining({ message: expect.stringContaining("too many symlinks") }));
+  });
+
+  it("refuses one reached through a symlink in a persisting path", () => {
+    expect(() => files([], ENV, withLinks({ "/home/runner/work": "/mnt/data/work" }))).toThrow(
+      expect.objectContaining({
+        code: "HOST_DIR_UNPROTECTABLE",
+        message: expect.stringContaining(
+          `The runner's GITHUB_ENV file "${ENV.GITHUB_ENV}" goes through "/home/runner/work"`,
+        ),
+      }),
+    );
   });
 });
 

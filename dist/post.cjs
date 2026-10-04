@@ -208,7 +208,7 @@ function buildComposeDownArgs({ composeFile, projectName }) {
 }
 //#endregion
 //#region src/lib/compose-file.ts
-const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$2, "../docker/compose.action.yaml");
+const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml");
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
 }
@@ -739,8 +739,6 @@ function resolveWriteThroughPaths(input, env) {
 }
 //#endregion
 //#region src/lib/sandbox/host-commands.ts
-const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
-(0, node_path.resolve)(__dirname$1, "..");
 const PINNED_COMMANDS = ["docker", "sudo"];
 function persistingWritablePaths(filesystemMode, writeThroughPaths, env) {
 	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
@@ -765,16 +763,17 @@ const realFindCommandDeps = {
 			return !1;
 		}
 	},
-	readlink: (path) => {
-		try {
-			let target = (0, node_fs.readlinkSync)(path);
-			return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)(realpathOrSelf((0, node_path.dirname)(path)), target);
-		} catch {
-			return null;
-		}
-	},
+	readlink: readlinkAbsolute,
 	realpathDir: realpathOrSelf
 };
+function readlinkAbsolute(path) {
+	try {
+		let target = (0, node_fs.readlinkSync)(path);
+		return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)(realpathOrSelf((0, node_path.dirname)(path)), target);
+	} catch {
+		return null;
+	}
+}
 function withRealPaths(paths, realpath = realpathOrSelf) {
 	return [...new Set([...paths, ...paths.map(realpath)])];
 }

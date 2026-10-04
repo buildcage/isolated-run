@@ -12,7 +12,6 @@
 
 import { accessSync, constants, readlinkSync, realpathSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, normalize, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
@@ -22,12 +21,12 @@ import { isAtOrUnder } from "./paths.ts";
 import { pinCommand, pinCommandPathEnv, SYSTEM_PATH } from "./pinned-commands.ts";
 import { resolveWriteThroughPaths } from "./write-through.ts";
 
-// rollup's cjs output doesn't convert import.meta.dirname (it silently
-// becomes undefined), so use this form instead.
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-/** The bundle runs from `dist/`, one level below the checkout. */
-const ACTION_ROOT = resolve(__dirname, "..");
+/** The checkout as the runner spelled it, which is the path it runs the post
+ *  step from: the bundle runs from `dist/`, one level below it. Node resolves
+ *  symlinks in __filename but not in argv. */
+function runnerActionRoot(): string {
+  return resolve(dirname(process.argv[1]!), "..");
+}
 
 const PINNED_COMMANDS = ["docker", "sudo"] as const;
 
@@ -77,17 +76,19 @@ const realFindCommandDeps: FindCommandDeps = {
       return false;
     }
   },
-  readlink: (path) => {
-    try {
-      const target = readlinkSync(path);
-      // The kernel resolves a relative target against the real directory.
-      return isAbsolute(target) ? target : resolve(realpathOrSelf(dirname(path)), target);
-    } catch {
-      return null;
-    }
-  },
+  readlink: readlinkAbsolute,
   realpathDir: realpathOrSelf,
 };
+
+export function readlinkAbsolute(path: string): string | null {
+  try {
+    const target = readlinkSync(path);
+    // The kernel resolves a relative target against the real directory.
+    return isAbsolute(target) ? target : resolve(realpathOrSelf(dirname(path)), target);
+  } catch {
+    return null;
+  }
+}
 /* v8 ignore stop */
 
 export interface DefaultWritableDirs {
@@ -267,21 +268,95 @@ export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
 }
 
 /**
- * The action checkout and docker config directory, where a persisting path
- * contains them. One that is itself a persisting path is skipped: `uses: ./`
- * runs the action from the workspace, and write_through may name the config
- * directory. A persisting path nested inside one stays writable, since runc
- * remounts only the top of a read-only path.
+ * The action checkout and docker config directory, by real path, where a
+ * persisting path contains them. One that is itself a persisting path is
+ * skipped: `uses: ./` runs the action from the workspace, and write_through may
+ * name the config directory. A persisting path nested inside one stays
+ * writable, since runc remounts only the top of a read-only path.
+ *
+ * Throws when one goes through a symlink in a persisting path: the mount
+ * protects only the symlink's target, and the sandbox could replace the
+ * symlink itself with a directory of its own. Under write_through: / every
+ * symlink is replaceable, so none is refused.
  */
 export function sandboxReadonlyHostDirs(
   persisting: string[],
   env: NodeJS.ProcessEnv,
-  actionRoot: string = ACTION_ROOT,
+  actionRoot: string = runnerActionRoot(),
+  deps: Pick<FindCommandDeps, "readlink" | "realpathDir"> = realFindCommandDeps,
 ): string[] {
-  const candidates = [actionRoot, dockerConfigDir(env)].filter((p): p is string => Boolean(p));
-  return candidates.filter(
-    (dir) => persisting.some((p) => isAtOrUnder(dir, p)) && !persisting.includes(dir),
-  );
+  const docker = dockerConfigDir(env);
+  const candidates = [
+    {
+      name: "This action's checkout",
+      dir: actionRoot,
+      fix: () =>
+        "the runner runs this action's post step from there. Configure the runner's work " +
+        "directory by its real path, not through the symlink.",
+    },
+    ...(docker
+      ? [
+          {
+            name: "The docker CLI's config directory",
+            dir: docker,
+            fix: () =>
+              "this action runs docker on the host after the command exits. Set DOCKER_CONFIG to " +
+              `its real path, ${JSON.stringify(followAll(docker))}.`,
+          },
+        ]
+      : []),
+  ];
+  // Followed link by link rather than realpath'd, so a dangling one still has a target.
+  const followAll = (path: string) => {
+    const resolved = resolveThroughFixedLinks(path, [], deps.readlink);
+    return "real" in resolved ? resolved.real : path;
+  };
+  const roots = persisting.filter((p) => p !== "/");
+  return candidates.flatMap(({ name, dir, fix }) => {
+    if (persisting.includes(dir) || persisting.includes(deps.realpathDir(dir))) return [];
+    const resolved = resolveThroughFixedLinks(dir, roots, deps.readlink);
+    if ("loop" in resolved) {
+      throw new SandboxError(
+        `${name} ${JSON.stringify(dir)} goes through too many symlinks to resolve.`,
+        "HOST_DIR_UNPROTECTABLE",
+      );
+    }
+    if ("link" in resolved) {
+      throw new SandboxError(
+        `${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(resolved.link)}, a symlink the ` +
+          `sandboxed command can replace, and ${fix()}`,
+        "HOST_DIR_UNPROTECTABLE",
+      );
+    }
+    const real = resolved.real;
+    return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
+  });
+}
+
+/**
+ * `path` with its symlinks resolved, or the first symlink that sits in one of
+ * `roots`, or a loop. Components past the last existing one are kept as written.
+ */
+function resolveThroughFixedLinks(
+  path: string,
+  roots: string[],
+  readlink: FindCommandDeps["readlink"],
+): { real: string } | { link: string } | { loop: true } {
+  let rest = path.split("/").filter(Boolean);
+  let current = "/";
+  for (let hops = 0; rest.length > 0;) {
+    const candidate = join(current, rest.shift()!);
+    const target = readlink(candidate);
+    if (target === null) {
+      current = candidate;
+      continue;
+    }
+    if (roots.some((p) => isAtOrUnder(current, p))) return { link: candidate };
+    if (++hops > MAX_SYMLINK_HOPS) return { loop: true };
+    rest = [...target.split("/").filter(Boolean), ...rest];
+    current = "/";
+  }
+  return { real: current };
 }
 
 /**
@@ -290,19 +365,39 @@ export function sandboxReadonlyHostDirs(
  * directory first in GITHUB_PATH would reach all of them. Read-only in either
  * mode, whatever is writable around them, unless write_through names
  * GITHUB_ENV or GITHUB_PATH itself. GITHUB_STATE, which only this action's
- * post step reads, is never opened.
+ * post step reads, is never opened. Like sandboxReadonlyHostDirs, throws when
+ * one goes through a symlink in a persisting path.
  */
 export function sandboxReadonlyFileCommands(
   writeThroughPaths: string[],
+  persisting: string[],
   env: NodeJS.ProcessEnv,
-  realpath: (path: string) => string = realpathOrSelf,
+  deps: Pick<FindCommandDeps, "readlink" | "realpathDir"> = realFindCommandDeps,
 ): string[] {
-  const named = new Set(withRealPaths(writeThroughPaths, realpath));
+  const named = new Set(withRealPaths(writeThroughPaths, deps.realpathDir));
   const openable = (name: string, path: string) =>
-    name !== "GITHUB_STATE" && (named.has(path) || named.has(realpath(path)));
+    name !== "GITHUB_STATE" && (named.has(path) || named.has(deps.realpathDir(path)));
+  const roots = persisting.filter((p) => p !== "/");
   return ["GITHUB_ENV", "GITHUB_PATH", "GITHUB_STATE"].flatMap((name) => {
     const path = env[name];
-    return path && !openable(name, path) ? [realpath(path)] : [];
+    if (!path || openable(name, path)) return [];
+    const resolved = resolveThroughFixedLinks(path, roots, deps.readlink);
+    if ("loop" in resolved) {
+      throw new SandboxError(
+        `The runner's ${name} file ${JSON.stringify(path)} goes through too many symlinks to resolve.`,
+        "HOST_DIR_UNPROTECTABLE",
+      );
+    }
+    if ("link" in resolved) {
+      throw new SandboxError(
+        `The runner's ${name} file ${JSON.stringify(path)} goes through ` +
+          `${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and the ` +
+          "runner reads it after the step. Configure the runner's work directory by its real " +
+          "path, not through the symlink.",
+        "HOST_DIR_UNPROTECTABLE",
+      );
+    }
+    return [resolved.real];
   });
 }
 

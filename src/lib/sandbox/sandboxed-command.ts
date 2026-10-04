@@ -24,6 +24,7 @@ import {
   realpathOrSelf,
   renameGuardDirs as renameGuards,
   resolveDefaultWritableDirs,
+  readlinkAbsolute,
   sandboxReadonlyFileCommands,
   sandboxReadonlyHostDirs,
   withRealPaths,
@@ -83,6 +84,7 @@ export interface RunSandboxedCommandDeps {
   touch: (path: string) => void;
   readFile: (path: string) => string;
   realpath: (path: string) => string;
+  readlink: (path: string) => string | null;
   info: (message: string) => void;
 }
 
@@ -115,6 +117,7 @@ const realDeps: RunSandboxedCommandDeps = {
   /* v8 ignore next */
   readFile: (path) => readFileSync(path, "utf8"),
   realpath: realpathOrSelf,
+  readlink: readlinkAbsolute,
   info: core.info,
 };
 
@@ -337,8 +340,14 @@ export function assembleBundle(
     const persisting = withRealPaths(
       persistingWritablePaths(filesystemMode, writeThroughPaths, env),
     );
-    const readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env);
-    const readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, env, deps.realpath);
+    const readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, undefined, {
+      readlink: deps.readlink,
+      realpathDir: deps.realpath,
+    });
+    const readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, {
+      readlink: deps.readlink,
+      realpathDir: deps.realpath,
+    });
     const renameGuardDirs = renameGuards([...readonlyHostDirs, ...readonlyFiles], persisting);
     // runc skips a read-only path that doesn't exist, and the sandbox could
     // then create it.

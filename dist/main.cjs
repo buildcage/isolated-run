@@ -23235,7 +23235,7 @@ function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, http
 }
 //#endregion
 //#region src/lib/compose-file.ts
-const __dirname$3 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$3, "../docker/compose.action.yaml");
+const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$2, "../docker/compose.action.yaml");
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
 }
@@ -24927,7 +24927,10 @@ function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists,
 }
 //#endregion
 //#region src/lib/sandbox/host-commands.ts
-const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), ACTION_ROOT = (0, node_path.resolve)(__dirname$2, ".."), PINNED_COMMANDS = ["docker", "sudo"];
+function runnerActionRoot() {
+	return (0, node_path.resolve)((0, node_path.dirname)(process.argv[1]), "..");
+}
+const PINNED_COMMANDS = ["docker", "sudo"];
 function persistingWritablePaths(filesystemMode, writeThroughPaths, env) {
 	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
 		workdir: env.GITHUB_WORKSPACE,
@@ -24951,16 +24954,17 @@ const realFindCommandDeps = {
 			return !1;
 		}
 	},
-	readlink: (path) => {
-		try {
-			let target = (0, node_fs.readlinkSync)(path);
-			return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)(realpathOrSelf((0, node_path.dirname)(path)), target);
-		} catch {
-			return null;
-		}
-	},
+	readlink: readlinkAbsolute,
 	realpathDir: realpathOrSelf
 };
+function readlinkAbsolute(path) {
+	try {
+		let target = (0, node_fs.readlinkSync)(path);
+		return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)(realpathOrSelf((0, node_path.dirname)(path)), target);
+	} catch {
+		return null;
+	}
+}
 function resolveDefaultWritableDirs(env, realpath = realpathOrSelf) {
 	let real = (path) => {
 		let normalized = (0, node_path.normalize)(path);
@@ -25030,18 +25034,55 @@ function pinningPaths(readWriteThroughInput, env) {
 function dockerConfigDir(env) {
 	return env.DOCKER_CONFIG ? (0, node_path.resolve)(env.DOCKER_CONFIG) : env.HOME ? (0, node_path.join)(env.HOME, ".docker") : void 0;
 }
-function sandboxReadonlyHostDirs(persisting, env, actionRoot = ACTION_ROOT) {
-	return [actionRoot, dockerConfigDir(env)].filter((p) => !!p).filter((dir) => persisting.some((p) => isAtOrUnder(dir, p)) && !persisting.includes(dir));
+function sandboxReadonlyHostDirs(persisting, env, actionRoot = runnerActionRoot(), deps = realFindCommandDeps) {
+	let docker = dockerConfigDir(env), candidates = [{
+		name: "This action's checkout",
+		dir: actionRoot,
+		fix: () => "the runner runs this action's post step from there. Configure the runner's work directory by its real path, not through the symlink."
+	}, ...docker ? [{
+		name: "The docker CLI's config directory",
+		dir: docker,
+		fix: () => `this action runs docker on the host after the command exits. Set DOCKER_CONFIG to its real path, ${JSON.stringify(followAll(docker))}.`
+	}] : []], followAll = (path) => {
+		let resolved = resolveThroughFixedLinks(path, [], deps.readlink);
+		return "real" in resolved ? resolved.real : path;
+	}, roots = persisting.filter((p) => p !== "/");
+	return candidates.flatMap(({ name, dir, fix }) => {
+		if (persisting.includes(dir) || persisting.includes(deps.realpathDir(dir))) return [];
+		let resolved = resolveThroughFixedLinks(dir, roots, deps.readlink);
+		if ("loop" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
+		if ("link" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and ${fix()}`, "HOST_DIR_UNPROTECTABLE");
+		let real = resolved.real;
+		return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
+	});
 }
-function sandboxReadonlyFileCommands(writeThroughPaths, env, realpath = realpathOrSelf) {
-	let named = new Set(withRealPaths(writeThroughPaths, realpath)), openable = (name, path) => name !== "GITHUB_STATE" && (named.has(path) || named.has(realpath(path)));
+function resolveThroughFixedLinks(path, roots, readlink) {
+	let rest = path.split("/").filter(Boolean), current = "/";
+	for (let hops = 0; rest.length > 0;) {
+		let candidate = (0, node_path.join)(current, rest.shift()), target = readlink(candidate);
+		if (target === null) {
+			current = candidate;
+			continue;
+		}
+		if (roots.some((p) => isAtOrUnder(current, p))) return { link: candidate };
+		if (++hops > 40) return { loop: !0 };
+		rest = [...target.split("/").filter(Boolean), ...rest], current = "/";
+	}
+	return { real: current };
+}
+function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = realFindCommandDeps) {
+	let named = new Set(withRealPaths(writeThroughPaths, deps.realpathDir)), openable = (name, path) => name !== "GITHUB_STATE" && (named.has(path) || named.has(deps.realpathDir(path))), roots = persisting.filter((p) => p !== "/");
 	return [
 		"GITHUB_ENV",
 		"GITHUB_PATH",
 		"GITHUB_STATE"
 	].flatMap((name) => {
 		let path = env[name];
-		return path && !openable(name, path) ? [realpath(path)] : [];
+		if (!path || openable(name, path)) return [];
+		let resolved = resolveThroughFixedLinks(path, roots, deps.readlink);
+		if ("loop" in resolved) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
+		if ("link" in resolved) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through ${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and the runner reads it after the step. Configure the runner's work directory by its real path, not through the symlink.`, "HOST_DIR_UNPROTECTABLE");
+		return [resolved.real];
 	});
 }
 function renameGuardDirs(readonlyDirs, persisting) {
@@ -25611,6 +25652,7 @@ const realDeps$2 = {
 	}),
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
 	realpath: realpathOrSelf,
+	readlink: readlinkAbsolute,
 	info
 };
 function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
@@ -25662,7 +25704,13 @@ function resolveIdentity(env, warn, { resolveSandboxGid, info }) {
 function assembleBundle(dir, options, deps) {
 	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
-		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)), readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, env, deps.realpath), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
+		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)), readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, void 0, {
+			readlink: deps.readlink,
+			realpathDir: deps.realpath
+		}), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, {
+			readlink: deps.readlink,
+			realpathDir: deps.realpath
+		}), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
 		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
 			mode: 448,
 			recursive: !0
