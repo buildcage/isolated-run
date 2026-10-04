@@ -70,7 +70,7 @@ FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4c
 
 LABEL org.opencontainers.image.title="isolated-run-inspect-proxy" \
       org.opencontainers.image.description="Network-isolated, method/path-inspecting proxy for arbitrary GitHub Actions commands" \
-      org.opencontainers.image.licenses="MIT AND GPL-2.0-or-later AND Apache-2.0 AND ISC AND MPL-2.0" \
+      org.opencontainers.image.licenses="MIT AND Apache-2.0 AND GPL-2.0-or-later AND GPL-1.0-or-later AND curl AND ISC AND MPL-2.0 AND LGPL-2.1-only AND (MPL-2.0 OR LGPL-3.0-or-later) AND BSD-3-Clause" \
       org.opencontainers.image.source="https://github.com/buildcage/isolated-run"
 
 # haproxy carries what this engine needs in one binary: it tells a TLS
