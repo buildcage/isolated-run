@@ -16,6 +16,8 @@
 #     GET ~^https://blocked\.example\.com/defaultport/.*$
 #     GET ~https://ok\.wildcard\.example\.com/regexpub/        (no anchors)
 #     GET ~^https://ok\.wildcard\.example\.com/regexexact$
+#     POST https://grpc.example.com/grpc.health.v1.Health/Check
+#     POST https://grpc.example.com/grpc.health.v1.Health/Watch
 #   allowed_https_rules: sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443 impostor.example.com:443 deadend.example.com:443
 #   allowed_http_rules:  allowed.example.com:80 deadend.example.com:80
 #   allowed_tls_rules:     tlspass.example.com:443 ~^tlspass\.example\.com:8443$
@@ -431,6 +433,23 @@ JAVA
   *) fail "the JVM's HTTPS request through the proxy failed: $JOUT" ;;
   esac
 fi
+
+# gRPC needs HTTP/2 to the client and to the origin, and grpc-go refuses a
+# connection where ALPN did not choose it.
+GRPC="$(dirname "${BASH_SOURCE[0]}")/test-grpc-inspect/bin/grpc-fixture"
+
+echo "=== [gRPC - method allowed] ==="
+check_status "gRPC Check" "$("$GRPC" check)" "SERVING"
+
+# Unimplemented would mean the call reached the origin.
+echo "=== [gRPC - method not allowed] ==="
+check_status "gRPC call to a method no rule allows" \
+  "$("$GRPC" invoke -method /grpc.health.v1.Health/Absent)" "PermissionDenied"
+
+# The origin is silent for 35s between its two messages, past the 30s client
+# and server timeouts.
+echo "=== [gRPC - stream silent past the timeouts] ==="
+check_status "gRPC Watch" "$("$GRPC" watch)" "messages=2"
 
 # Python 3.13+ verifies strictly by default and refuses a CA without keyUsage.
 # Older Pythons never check.
