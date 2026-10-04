@@ -441,7 +441,11 @@ describe("sandboxReadonlyHostDirs", () => {
     ).toThrow(
       expect.objectContaining({
         code: "HOST_DIR_UNPROTECTABLE",
-        message: expect.stringContaining(`goes through "${HOME}/actions-runner/_work"`),
+        message: expect.stringMatching(
+          new RegExp(
+            `goes through "${HOME}/actions-runner/_work".*work directory by its real path`,
+          ),
+        ),
       }),
     );
   });

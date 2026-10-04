@@ -25038,16 +25038,19 @@ function sandboxReadonlyHostDirs(persisting, env, actionRoot = runnerActionRoot(
 	let docker = dockerConfigDir(env), candidates = [{
 		name: "This action's checkout",
 		dir: actionRoot,
-		fix: (link) => `the runner runs this action's post step from there. Configure the runner's work directory by its real path, ${JSON.stringify(deps.realpathDir(link))}, not through the symlink.`
+		fix: () => "the runner runs this action's post step from there. Configure the runner's work directory by its real path, not through the symlink."
 	}, ...docker ? [{
 		name: "The docker CLI's config directory",
 		dir: docker,
-		fix: () => `this action runs docker on the host after the command exits. Set DOCKER_CONFIG to its real path, ${JSON.stringify(deps.realpathDir(docker))}.`
-	}] : []], roots = persisting.filter((p) => p !== "/");
+		fix: () => `this action runs docker on the host after the command exits. Set DOCKER_CONFIG to its real path, ${JSON.stringify(followAll(docker))}.`
+	}] : []], followAll = (path) => {
+		let resolved = resolveThroughFixedLinks(path, [], deps.readlink);
+		return "real" in resolved ? resolved.real : path;
+	}, roots = persisting.filter((p) => p !== "/");
 	return candidates.flatMap(({ name, dir, fix }) => {
 		if (persisting.includes(dir) || persisting.includes(deps.realpathDir(dir))) return [];
 		let resolved = resolveThroughFixedLinks(dir, roots, deps.readlink);
-		if ("link" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and ${fix(resolved.link)}`, "HOST_DIR_UNPROTECTABLE");
+		if ("link" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and ${fix()}`, "HOST_DIR_UNPROTECTABLE");
 		let real = resolved.real;
 		return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
 	});

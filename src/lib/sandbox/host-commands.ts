@@ -290,9 +290,9 @@ export function sandboxReadonlyHostDirs(
     {
       name: "This action's checkout",
       dir: actionRoot,
-      fix: (link: string) =>
+      fix: () =>
         "the runner runs this action's post step from there. Configure the runner's work " +
-        `directory by its real path, ${JSON.stringify(deps.realpathDir(link))}, not through the symlink.`,
+        "directory by its real path, not through the symlink.",
     },
     ...(docker
       ? [
@@ -301,11 +301,16 @@ export function sandboxReadonlyHostDirs(
             dir: docker,
             fix: () =>
               "this action runs docker on the host after the command exits. Set DOCKER_CONFIG to " +
-              `its real path, ${JSON.stringify(deps.realpathDir(docker))}.`,
+              `its real path, ${JSON.stringify(followAll(docker))}.`,
           },
         ]
       : []),
   ];
+  // Followed link by link rather than realpath'd, so a dangling one still has a target.
+  const followAll = (path: string) => {
+    const resolved = resolveThroughFixedLinks(path, [], deps.readlink);
+    return "real" in resolved ? resolved.real : path;
+  };
   const roots = persisting.filter((p) => p !== "/");
   return candidates.flatMap(({ name, dir, fix }) => {
     if (persisting.includes(dir) || persisting.includes(deps.realpathDir(dir))) return [];
@@ -313,7 +318,7 @@ export function sandboxReadonlyHostDirs(
     if ("link" in resolved) {
       throw new SandboxError(
         `${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(resolved.link)}, a symlink the ` +
-          `sandboxed command can replace, and ${fix(resolved.link)}`,
+          `sandboxed command can replace, and ${fix()}`,
         "HOST_DIR_UNPROTECTABLE",
       );
     }
