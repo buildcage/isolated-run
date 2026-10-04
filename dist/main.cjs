@@ -26079,10 +26079,13 @@ function hostBeforeRequest(sni, address) {
 		byAddress: !0
 	};
 }
+function h2ClientSentNoRequest(request) {
+	return request[2] === "https" && request[3] === "<BADREQ>" && request[4] === "0" && request[6] === "PR" && request[7] === "-";
+}
 function parseProxyLine(line, isAudit) {
 	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
 	if (request) {
-		let incomplete = request[11]?.startsWith("SSL_") === !0 ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[13]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[12], request[9]) : void 0, event = {
+		let incomplete = request[11]?.startsWith("SSL_") === !0 ? "client-tls-failed" : h2ClientSentNoRequest(request) ? "client-aborted" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[13]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[12], request[9]) : void 0, event = {
 			time: Number(request[1]) / 1e3,
 			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
 			protocol: unnamed?.byAddress ? "tcp" : scheme,
