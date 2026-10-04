@@ -22,8 +22,33 @@ import {
   scratchDirFor,
   parseMountsUnder,
   ensureOwnScratchBase,
+  checkScratchBaseParent,
   SANDBOX_SCRATCH_BASE,
 } from "./scratch-dir.ts";
+
+describe("checkScratchBaseParent", () => {
+  it("passes a real /var/tmp", () => {
+    expect(() => checkScratchBaseParent((path) => path)).not.toThrow();
+  });
+
+  it("refuses a /var/tmp that resolves elsewhere, naming both paths and the fix", () => {
+    expect(() => checkScratchBaseParent(() => "/tmp")).toThrow(
+      expect.objectContaining({
+        code: "SCRATCH_BASE_SYMLINKED",
+        message: expect.stringMatching(
+          /^\/var\/tmp resolves to \/tmp through a symlink.*Replace that symlink, at \/var\/tmp or on the way to it, with a real directory\.$/,
+        ),
+      }),
+    );
+  });
+
+  it("leaves a missing /var/tmp to the mkdir that reports it", () => {
+    const missing = () => {
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    };
+    expect(() => checkScratchBaseParent(missing)).not.toThrow();
+  });
+});
 
 describe("scratchDirFor", () => {
   it("derives a path under SANDBOX_SCRATCH_BASE from the container name (not under a writable exception)", () => {

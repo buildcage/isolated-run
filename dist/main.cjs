@@ -23354,6 +23354,15 @@ function runPinnedHostCommand(command, args) {
 //#endregion
 //#region src/lib/sandbox/scratch-dir.ts
 const SANDBOX_SCRATCH_BASE = `/var/tmp/buildcage-${process.getuid()}`;
+function checkScratchBaseParent(realpath = node_fs.realpathSync) {
+	let parent = (0, node_path.dirname)(SANDBOX_SCRATCH_BASE), real;
+	try {
+		real = realpath(parent);
+	} catch {
+		return;
+	}
+	if (real !== parent) throw new SandboxError(`${parent} resolves to ${real} through a symlink, and the sandbox cannot be set up under a path that goes through one. Replace that symlink, at ${parent} or on the way to it, with a real directory.`, "SCRATCH_BASE_SYMLINKED");
+}
 function parseMountsUnder(mountinfoContent, dir) {
 	let prefix = dir.endsWith("/") ? dir : `${dir}/`;
 	return parseMountinfo(mountinfoContent).map(({ mountPoint }) => mountPoint).filter((mountPoint) => mountPoint === dir || mountPoint.startsWith(prefix)).sort((a, b) => b.length - a.length);
@@ -72071,6 +72080,7 @@ const realDeps = {
 	readTrafficArtifactInputs,
 	saveWriteThroughForPost,
 	validateFilesystemInputs,
+	checkScratchBaseParent,
 	checkPasswordlessSudo,
 	checkOverlayfsSupport,
 	createAnnotation,
@@ -72113,7 +72123,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -72121,7 +72131,7 @@ async function runSandboxStep(env, overrides = {}) {
 	let runInput = readRunCommand(), { proxyEngine, proxyMode } = readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
 	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
-	configFile && saveWriteThroughForPost(env, writeThroughInput);
+	checkScratchBaseParent(), configFile && saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs(), { httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs(), annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY);
 	checkUrlAndTlsRuleSupport({
 		proxyEngine,

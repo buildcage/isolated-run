@@ -40,6 +40,7 @@ import { ActionError } from "#core/lib/errors.ts";
  *                                     could not be written back
  *   SANDBOX_TERMINATED                a signal ended run-isolated.sh, so the command's exit status is unknown
  *   SANDBOX_LAUNCH_FAILED             `sudo run-isolated.sh` could not be started at all
+ *   SCRATCH_BASE_SYMLINKED            /var/tmp, the sandbox scratch base's parent, resolves through a symlink
  */
 export type SandboxErrorCode =
   | "MISSING_RUN"
@@ -70,6 +71,7 @@ export type SandboxErrorCode =
   | "NSS_DATABASE_CA_COPIED"
   | "NSS_DATABASE_WRITE_BACK_FAILED"
   | "SANDBOX_TERMINATED"
-  | "SANDBOX_LAUNCH_FAILED";
+  | "SANDBOX_LAUNCH_FAILED"
+  | "SCRATCH_BASE_SYMLINKED";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}

@@ -52,6 +52,7 @@ import {
 import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
+import { checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 
@@ -82,6 +83,7 @@ export interface SandboxStepDeps {
   readTrafficArtifactInputs: typeof readTrafficArtifactInputs;
   saveWriteThroughForPost: typeof saveWriteThroughForPost;
   validateFilesystemInputs: typeof validateFilesystemInputs;
+  checkScratchBaseParent: typeof checkScratchBaseParent;
   checkPasswordlessSudo: typeof checkPasswordlessSudo;
   checkOverlayfsSupport: typeof checkOverlayfsSupport;
   createAnnotation: typeof createAnnotation;
@@ -138,6 +140,7 @@ const realDeps: SandboxStepDeps = {
   readTrafficArtifactInputs,
   saveWriteThroughForPost,
   validateFilesystemInputs,
+  checkScratchBaseParent,
   checkPasswordlessSudo,
   checkOverlayfsSupport,
   createAnnotation,
@@ -219,6 +222,7 @@ export async function runSandboxStep(
     readTrafficArtifactInputs,
     saveWriteThroughForPost,
     validateFilesystemInputs,
+    checkScratchBaseParent,
     checkPasswordlessSudo,
     checkOverlayfsSupport,
     createAnnotation,
@@ -264,6 +268,8 @@ export async function runSandboxStep(
   // `notice`, not `annotation`: readFilesystemInputs reads a renamed input (see
   // SandboxStepDeps).
   const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
+  // Before the first write under the scratch base, the one just below.
+  checkScratchBaseParent();
   // Before the command runs, for the post step's pinning; see post-write-through.ts.
   if (configFile) saveWriteThroughForPost(env, writeThroughInput);
   // Needed only later, but read here so a typo fails before any setup.
