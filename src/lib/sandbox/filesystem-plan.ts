@@ -42,9 +42,7 @@ import {
  * mistake is rejected immediately rather than only after those privileged
  * preflight checks have already run. That early call passes the paths as
  * resolveWriteThroughInput spells them; resolveFilesystemPlan's call, on the
- * paths it mounts, is the authoritative one. Both see the same sentinel:
- * resolveWriteThroughEntry rejects a spelling that merely normalizes to "/",
- * so only a literal one reaches either call.
+ * paths it mounts, is the authoritative one.
  */
 export function validateFilesystemInputs(
   filesystemMode: FilesystemMode,
