@@ -211,6 +211,46 @@ describe("buildOciConfig", () => {
       expect(netNs!.path).toBe(baseArgs.runtime.netnsPath);
       expect(config.linux.namespaces.length).toBe(6);
     });
+
+    function withNamespaces(namespaces: { type: string; path?: string }[]) {
+      const spec = fakeBaseSpec();
+      spec.linux.namespaces = namespaces;
+      return spec;
+    }
+
+    const without = (type: string) =>
+      fakeBaseSpec().linux.namespaces.filter((ns) => ns.type !== type);
+
+    it.each(["pid", "network", "mount", "ipc", "uts"])(
+      "refuses a default spec with no %s namespace",
+      (type) => {
+        expect(() => build(withNamespaces(without(type)), baseArgs)).toThrow(
+          `exactly one new ${type} namespace`,
+        );
+      },
+    );
+
+    it("refuses a default spec that joins an existing namespace instead of making one", () => {
+      const spec = withNamespaces([...without("pid"), { type: "pid", path: "/proc/1/ns/pid" }]);
+      expect(() => build(spec, baseArgs)).toThrow("exactly one new pid namespace");
+    });
+
+    it("refuses a default spec that lists a namespace twice", () => {
+      const spec = withNamespaces([...fakeBaseSpec().linux.namespaces, { type: "network" }]);
+      expect(() => build(spec, baseArgs)).toThrow("exactly one new network namespace");
+    });
+
+    // runc leaves the cgroup namespace out on a cgroup v1 host.
+    it("does not require a cgroup namespace", () => {
+      const config = build(withNamespaces(without("cgroup")), baseArgs);
+      expect(config.linux.namespaces.map((ns) => ns.type)).toStrictEqual([
+        "pid",
+        "network",
+        "ipc",
+        "uts",
+        "mount",
+      ]);
+    });
   });
 
   describe("paths masked from the step", () => {

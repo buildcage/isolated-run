@@ -25372,6 +25372,23 @@ function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, env, hostMo
 }
 //#endregion
 //#region src/lib/sandbox/oci-config.ts
+const REQUIRED_NAMESPACES = [
+	"pid",
+	"network",
+	"mount",
+	"ipc",
+	"uts"
+];
+function sandboxNamespaces(base, netnsPath) {
+	for (let type of REQUIRED_NAMESPACES) {
+		let entries = base.filter((ns) => ns.type === type);
+		if (entries.length !== 1 || entries[0].path !== void 0) throw Error(`runc's default spec does not give the sandbox exactly one new ${type} namespace; refusing to run the sandbox without it`);
+	}
+	return base.map((ns) => ns.type === "network" ? {
+		...ns,
+		path: netnsPath
+	} : ns);
+}
 function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [] }, probes = realHostProbes) {
 	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
 	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths, (path) => probes.realpath(path));
@@ -25403,10 +25420,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		writablePaths: protectedWritablePaths,
 		freshMountDestinations,
 		disableReadonly
-	}), namespaces = baseSpec.linux.namespaces.map((ns) => ns.type === "network" ? {
-		...ns,
-		path: netnsPath
-	} : ns);
+	}), namespaces = sandboxNamespaces(baseSpec.linux.namespaces, netnsPath);
 	return {
 		...baseSpec,
 		root: {

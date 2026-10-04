@@ -82,6 +82,34 @@ export interface BuildOciConfigOptions {
 }
 
 /**
+ * Every one of these has to be a new namespace of the sandbox's own. runc
+ * itself would run without a network one, in the host's netns and around the
+ * proxy, and never requires pid or ipc.
+ */
+const REQUIRED_NAMESPACES = ["pid", "network", "mount", "ipc", "uts"];
+
+/**
+ * runc's default namespaces, with the network one pointed at the sandbox's
+ * netns. Throws rather than add a missing one, so a runc whose default spec
+ * changed fails the step instead of quietly running with something else.
+ */
+function sandboxNamespaces(
+  base: OciSpec["linux"]["namespaces"],
+  netnsPath: string,
+): OciSpec["linux"]["namespaces"] {
+  for (const type of REQUIRED_NAMESPACES) {
+    const entries = base.filter((ns) => ns.type === type);
+    if (entries.length !== 1 || entries[0].path !== undefined) {
+      throw new Error(
+        `runc's default spec does not give the sandbox exactly one new ${type} namespace; ` +
+          "refusing to run the sandbox without it",
+      );
+    }
+  }
+  return base.map((ns) => (ns.type === "network" ? { ...ns, path: netnsPath } : ns));
+}
+
+/**
  * Build the final OCI Runtime Spec (config.json) from runc's own `baseSpec`
  * (see generateBaseOciSpec), overriding only what this sandbox controls: the
  * read-only rootfs bind and its writable exceptions, the netns to join, a
@@ -191,9 +219,7 @@ export function buildOciConfig(
     disableReadonly,
   });
 
-  const namespaces = baseSpec.linux.namespaces.map((ns) =>
-    ns.type === "network" ? { ...ns, path: netnsPath } : ns,
-  );
+  const namespaces = sandboxNamespaces(baseSpec.linux.namespaces, netnsPath);
 
   return {
     ...baseSpec,
