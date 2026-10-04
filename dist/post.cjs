@@ -202,7 +202,8 @@ function buildComposeDownArgs({ composeFile, projectName }) {
 		composeFile,
 		"-p",
 		projectName,
-		"down"
+		"down",
+		"-v"
 	];
 }
 //#endregion
