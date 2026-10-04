@@ -13,6 +13,7 @@ export interface OciSpec {
     readonlyPaths?: string[];
     namespaces: { type: string; path?: string }[];
     seccomp?: unknown;
+    cgroupsPath?: string;
   };
   root?: unknown;
   process: Record<string, unknown>;

@@ -33,8 +33,11 @@ function pinnedProbes({ absent = [] }: { absent?: ("setpriv" | "nofile")[] } = {
     hostname: () => HOSTNAME,
     varRunRealPath: () => "/run",
     realpath: (path) => path,
+    cgroupPath: () => RUNNER_CGROUP,
   };
 }
+
+const RUNNER_CGROUP = "/system.slice/hosted-compute-agent.service";
 
 const HOSTNAME = "runner-abcdef";
 
@@ -109,6 +112,7 @@ describe("buildOciConfig", () => {
     },
     runtime: {
       netnsPath: "/var/run/netns/buildcage-sandbox-abcd1234",
+      cgroupName: "buildcage-proxy-abcd1234",
       rootfsBindDir: "/tmp/buildcage-sandbox-xyz/rootfs",
       resolvConfPath: "/tmp/buildcage-sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
@@ -250,6 +254,26 @@ describe("buildOciConfig", () => {
         "uts",
         "mount",
       ]);
+    });
+  });
+
+  describe("the cgroup", () => {
+    it("makes it a child of the runner's own, named after the container", () => {
+      const config = build(fakeBaseSpec(), baseArgs);
+      expect(config.linux.cgroupsPath).toBe(`${RUNNER_CGROUP}/buildcage-proxy-abcd1234`);
+    });
+
+    // What a runner in a cgroup namespace of its own sees.
+    it("puts it at the top of a cgroup namespace whose root the runner is in", () => {
+      probes = { ...pinnedProbes(), cgroupPath: () => "/" };
+      const config = build(fakeBaseSpec(), baseArgs);
+      expect(config.linux.cgroupsPath).toBe("/buildcage-proxy-abcd1234");
+    });
+
+    it("leaves it to runc on a host that is not cgroup v2 only", () => {
+      probes = { ...pinnedProbes(), cgroupPath: () => undefined };
+      const config = build(fakeBaseSpec(), baseArgs);
+      expect(config.linux).not.toHaveProperty("cgroupsPath");
     });
   });
 
@@ -720,6 +744,7 @@ describe("buildOciConfig: ephemeral mode", () => {
     },
     runtime: {
       netnsPath: "/var/run/netns/buildcage-sandbox-abcd1234",
+      cgroupName: "buildcage-proxy-abcd1234",
       rootfsBindDir: "/var/tmp/buildcage-1000/sandbox-xyz/rootfs",
       resolvConfPath: "/var/tmp/buildcage-1000/sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },
@@ -864,6 +889,7 @@ describe("buildOciConfig: caTrust", () => {
     },
     runtime: {
       netnsPath: "/var/run/netns/buildcage-sandbox-abcd1234",
+      cgroupName: "buildcage-proxy-abcd1234",
       rootfsBindDir: "/tmp/buildcage-sandbox-xyz/rootfs",
       resolvConfPath: "/tmp/buildcage-sandbox-xyz/resolv.conf",
       seccompProfile: { defaultAction: "SCMP_ACT_ERRNO" },

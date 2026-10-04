@@ -140,6 +140,7 @@ describe("runSandboxedCommand", () => {
     expect(mocks.buildOciConfig.mock.calls[0][1].runtime.netnsPath).toBe(
       "/var/run/netns/buildcage-sandbox-deadbeef",
     );
+    expect(mocks.buildOciConfig.mock.calls[0][1].runtime.cgroupName).toBe(CONTAINER);
   });
 
   it("trusts the proxy's CA under the inspect engine", async () => {

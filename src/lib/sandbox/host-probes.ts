@@ -82,6 +82,17 @@ export function shmSizeFromStatfs({ type, bsize, blocks }: StatfsShape): number 
   return Number.isFinite(size) && size > 0 ? size : undefined;
 }
 
+/**
+ * Pure: the cgroup v2 path in a /proc/<pid>/cgroup dump, undefined unless v2
+ * is the only hierarchy. A cgroup v1 or hybrid host lists a line per v1
+ * hierarchy too.
+ */
+export function parseCgroupV2Path(procCgroup: string): string | undefined {
+  const lines = procCgroup.split("\n").filter((line) => line !== "");
+  if (lines.length !== 1 || !lines[0].startsWith("0::/")) return undefined;
+  return lines[0].slice("0::".length);
+}
+
 export interface HostProbes {
   setprivPath(): string;
   nofileRlimit(): NofileLimit | undefined;
@@ -91,6 +102,8 @@ export interface HostProbes {
   varRunRealPath(): string | undefined;
   /** `path` with its symlinks resolved, or `path` itself when that fails. */
   realpath(path: string): string;
+  /** This process's cgroup on a cgroup v2 host, undefined on any other. */
+  cgroupPath(): string | undefined;
 }
 
 // Untested by design, down to the end of the file: the syscalls behind the
@@ -150,5 +163,14 @@ export const realHostProbes: HostProbes = {
   },
 
   realpath: realpathOrSelf,
+
+  // This process, the runner's own cgroup: the one the step would run in
+  // unwrapped. Read here, before run.ts's `sudo`, which can move its child to
+  // a session scope of root's on a distribution whose sudo goes through
+  // pam_systemd.
+  cgroupPath: () => {
+    const procCgroup = readOptionalFile("/proc/self/cgroup");
+    return procCgroup === undefined ? undefined : parseCgroupV2Path(procCgroup);
+  },
 };
 /* v8 ignore stop */

@@ -109,6 +109,25 @@ if zombies:
     sys.exit(1)'
 ORPHAN_CODE=$?
 
+# The sandbox's cgroup is a child of this script's, the runner's stand-in, so
+# whatever limits the runner's service has reach the command too. Read from
+# here, since the sandbox sees only its own cgroup namespace.
+OWN_CGROUP=$(sed -n 's/^0:://p' /proc/self/cgroup)
+echo "runner cgroup: ${OWN_CGROUP}"
+run_sandboxed 'sleep 5.04' &
+CGROUP_NODE_PID=$!
+SANDBOX_CGROUP=
+for _ in $(seq 1 60); do
+  SLEEP_PID=$(pgrep -f -n "sleep 5.04")
+  if [ -n "$SLEEP_PID" ]; then
+    SANDBOX_CGROUP=$(sed -n 's/^0:://p' "/proc/$SLEEP_PID/cgroup")
+    break
+  fi
+  sleep 0.5
+done
+wait "$CGROUP_NODE_PID"
+echo "sandbox cgroup: ${SANDBOX_CGROUP}"
+
 FAILED=0
 echo ""
 echo "=== Sandbox Host Environment Parity Assertions ==="
@@ -143,5 +162,12 @@ else
   echo "  FAIL  an orphan was left a zombie (exit $ORPHAN_CODE)"
   FAILED=1
 fi
+case "$SANDBOX_CGROUP" in
+  "${OWN_CGROUP%/}/buildcage-proxy-"*)
+    echo "  PASS  the sandbox's cgroup is a child of the runner's own" ;;
+  *)
+    echo "  FAIL  the sandbox's cgroup is ${SANDBOX_CGROUP:-unknown}, not under ${OWN_CGROUP}"
+    FAILED=1 ;;
+esac
 echo ""
 exit "$FAILED"

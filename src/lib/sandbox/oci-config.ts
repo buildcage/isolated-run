@@ -36,6 +36,8 @@ export interface WritablePolicy {
  *  already created, the rootfs bind-mount it will do, etc). */
 export interface SandboxRuntimeWiring {
   netnsPath: string;
+  /** Names the sandbox's cgroup, made under the runner's own; see cgroupsPathFor. */
+  cgroupName: string;
   rootfsBindDir: string;
   resolvConfPath: string;
   seccompProfile: unknown;
@@ -110,6 +112,18 @@ function sandboxNamespaces(
 }
 
 /**
+ * The sandbox's cgroup as a child of the runner's own, so the limits on the
+ * runner's service (MemoryMax=, TasksMax=) bound the wrapped step as they do
+ * an unwrapped one. Without it runc makes the cgroup beside its own on cgroup
+ * v2, outside that service. Undefined on any other host, where runc already
+ * nests it under its caller.
+ */
+function cgroupsPathFor(runnerCgroup: string | undefined, name: string): string | undefined {
+  if (runnerCgroup === undefined) return undefined;
+  return `${runnerCgroup.replace(/\/$/, "")}/${name}`;
+}
+
+/**
  * Build the final OCI Runtime Spec (config.json) from runc's own `baseSpec`
  * (see generateBaseOciSpec), overriding only what this sandbox controls: the
  * read-only rootfs bind and its writable exceptions, the netns to join, a
@@ -139,6 +153,7 @@ export function buildOciConfig(
   const { workdir, writablePaths = [] } = writable;
   const {
     netnsPath,
+    cgroupName,
     rootfsBindDir,
     resolvConfPath,
     seccompProfile,
@@ -220,6 +235,7 @@ export function buildOciConfig(
   });
 
   const namespaces = sandboxNamespaces(baseSpec.linux.namespaces, netnsPath);
+  const cgroupsPath = cgroupsPathFor(probes.cgroupPath(), cgroupName);
 
   return {
     ...baseSpec,
@@ -263,6 +279,7 @@ export function buildOciConfig(
     },
     linux: {
       ...baseSpec.linux,
+      ...(cgroupsPath !== undefined && { cgroupsPath }),
       namespaces,
       seccomp: seccompProfile,
       maskedPaths,
