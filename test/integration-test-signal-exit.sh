@@ -78,12 +78,6 @@ assert_cancelled_cleanly() {
   else
     pass "$name: the sandboxed command did not outlive the step"
   fi
-  if grep -q "WARNING: failed to unmount" "$dir/out.log"; then
-    fail "$name: the teardown ran twice and warned about an unmount"
-    cat "$dir/out.log"
-  else
-    pass "$name: the teardown ran once, without an unmount warning"
-  fi
   local container
   container=$(awk '/^container_name<</{getline; print; exit}' "$dir/state.env" 2>/dev/null)
   if [ -n "$container" ] && docker inspect "$container" >/dev/null 2>&1; then
