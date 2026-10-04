@@ -35,7 +35,7 @@ describe("checkScratchBaseParent", () => {
     expect(() => checkScratchBaseParent(() => "/tmp")).toThrow(
       expect.objectContaining({
         code: "SCRATCH_BASE_SYMLINKED",
-        message: expect.stringContaining("/var/tmp is a symlink to /tmp"),
+        message: expect.stringContaining("/var/tmp resolves to /tmp through a symlink"),
       }),
     );
   });

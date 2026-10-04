@@ -261,15 +261,16 @@ describe("runSandboxStep", () => {
     expect(orderOf(mocks.verifyImageDigestOrThrow)).toBeLessThan(orderOf(mocks.startSandboxProxy));
   });
 
-  it("refuses a symlinked /var/tmp before any privileged setup", async () => {
+  it("refuses a symlinked /var/tmp before writing anything under it", async () => {
+    mocks.applyConfigFile.mockReturnValue({ path: "/w/c.yml", summary: [] });
     mocks.checkScratchBaseParent.mockImplementation(() => {
-      throw new SandboxError("/var/tmp is a symlink to /tmp", "SCRATCH_BASE_SYMLINKED");
+      throw new SandboxError("/var/tmp resolves to /tmp", "SCRATCH_BASE_SYMLINKED");
     });
 
     await expect(runSandboxStep(ENV, deps)).rejects.toMatchObject({
       code: "SCRATCH_BASE_SYMLINKED",
     });
-    expect(orderOf(mocks.pinHostCommands)).toBeLessThan(orderOf(mocks.checkScratchBaseParent));
+    expect(mocks.saveWriteThroughForPost).not.toHaveBeenCalled();
     expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
     expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });

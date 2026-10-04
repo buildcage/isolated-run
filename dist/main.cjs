@@ -23362,7 +23362,7 @@ function checkScratchBaseParent(realpath = node_fs.realpathSync) {
 	} catch {
 		return;
 	}
-	if (real !== parent) throw new SandboxError(`${parent} is a symlink to ${real}. runc will not run the sandbox under a path that goes through a symlink, so this action needs ${parent} to be a real directory.`, "SCRATCH_BASE_SYMLINKED");
+	if (real !== parent) throw new SandboxError(`${parent} resolves to ${real} through a symlink. runc will not run the sandbox under a path that goes through one, so this action needs ${parent} to be a real directory.`, "SCRATCH_BASE_SYMLINKED");
 }
 function parseMountsUnder(mountinfoContent, dir) {
 	let prefix = dir.endsWith("/") ? dir : `${dir}/`;
@@ -72132,7 +72132,7 @@ async function runSandboxStep(env, overrides = {}) {
 	let runInput = readRunCommand(), { proxyEngine, proxyMode } = readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
 	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
-	configFile && saveWriteThroughForPost(env, writeThroughInput);
+	checkScratchBaseParent(), configFile && saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs(), { httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs(), annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY);
 	checkUrlAndTlsRuleSupport({
 		proxyEngine,
@@ -72143,7 +72143,7 @@ async function runSandboxStep(env, overrides = {}) {
 		proxyEngine,
 		proxyMode,
 		knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
-	}, annotation.warning), assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, resolveWriteThroughInput(writeThroughInput, env)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkScratchBaseParent(), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
+	}, annotation.warning), assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, resolveWriteThroughInput(writeThroughInput, env)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
 	let { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
 	let localOverride = await readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({

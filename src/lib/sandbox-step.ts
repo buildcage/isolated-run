@@ -268,6 +268,8 @@ export async function runSandboxStep(
   // `notice`, not `annotation`: readFilesystemInputs reads a renamed input (see
   // SandboxStepDeps).
   const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
+  // Before the first write under the scratch base, the one just below.
+  checkScratchBaseParent();
   // Before the command runs, for the post step's pinning; see post-write-through.ts.
   if (configFile) saveWriteThroughForPost(env, writeThroughInput);
   // Needed only later, but read here so a typo fails before any setup.
@@ -311,7 +313,6 @@ export async function runSandboxStep(
 
   // Fail fast, before image verification or starting the proxy container, if
   // the runner can't support the isolation setup at all.
-  checkScratchBaseParent();
   checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") checkOverlayfsSupport();
 

@@ -29,9 +29,9 @@ import { runPinnedHostCommand } from "./run-host-command.ts";
 export const SANDBOX_SCRATCH_BASE = `/var/tmp/buildcage-${process.getuid!()}`;
 
 /**
- * The scratch base's parent has to be a real directory: runc refuses a
- * sandbox root whose path runs through a symlink, which would fail every step
- * with a message naming neither. A missing parent is left to
+ * The scratch base's parent has to be reached without a symlink: runc refuses
+ * a sandbox root whose path runs through one, failing every step with a
+ * message that does not say where. A missing parent is left to
  * ensureOwnScratchBase's mkdir to report.
  */
 export function checkScratchBaseParent(realpath: (path: string) => string = realpathSync): void {
@@ -44,8 +44,8 @@ export function checkScratchBaseParent(realpath: (path: string) => string = real
   }
   if (real !== parent) {
     throw new SandboxError(
-      `${parent} is a symlink to ${real}. runc will not run the sandbox under a path ` +
-        `that goes through a symlink, so this action needs ${parent} to be a real directory.`,
+      `${parent} resolves to ${real} through a symlink. runc will not run the sandbox under ` +
+        `a path that goes through one, so this action needs ${parent} to be a real directory.`,
       "SCRATCH_BASE_SYMLINKED",
     );
   }
