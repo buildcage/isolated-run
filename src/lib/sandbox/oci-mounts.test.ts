@@ -232,6 +232,16 @@ describe("scratchBaseLayers", () => {
     const [, reveal] = scratchBaseLayers(execDir);
     expect(reveal.options).toStrictEqual(["bind", "ro"]);
   });
+
+  it("covers every alias of the scratch base the same way, before the reveal", () => {
+    const layers = scratchBaseLayers(execDir, ["/tmp/buildcage-1001"]);
+    expect(layers.map((m) => m.destination)).toStrictEqual([
+      SANDBOX_SCRATCH_BASE,
+      "/tmp/buildcage-1001",
+      execDir,
+    ]);
+    expect(layers[1]).toStrictEqual({ ...layers[0], destination: "/tmp/buildcage-1001" });
+  });
 });
 
 describe("hostRunCoverageLayers", () => {

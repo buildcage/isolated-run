@@ -47,6 +47,8 @@ export interface SandboxRuntimeWiring {
   envLoaderPath: string;
   scriptPath: string;
   hostMounts?: HostMount[];
+  /** Other host paths the scratch base is reachable at; see pathAliases. */
+  scratchBaseAliases?: string[];
 }
 
 /** `filesystem_mode: ephemeral` only. Already fully resolved/folded by
@@ -161,6 +163,7 @@ export function buildOciConfig(
     envLoaderPath,
     scriptPath,
     hostMounts = [],
+    scratchBaseAliases = [],
   } = runtime;
   const disableReadonly = !ephemeral && writablePaths.includes("/");
 
@@ -220,7 +223,7 @@ export function buildOciConfig(
     ...layers.mounts,
     ...renameGuards,
     ...internalMounts,
-    ...scratchBaseLayers(execDir),
+    ...scratchBaseLayers(execDir, scratchBaseAliases),
   ];
   const protectedWritablePaths = new Set([...layers.writablePaths, ...runCoverage.writablePaths]);
 

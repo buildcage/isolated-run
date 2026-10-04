@@ -17,18 +17,30 @@ describe("parseMountinfo", () => {
   // No "-" separator, so the lookups after it land on fields[0] and fields[2].
   it("yields empty strings for a line too malformed to have the fields", () => {
     expect(parseMountinfo("1 0 0:1 /")).toStrictEqual([
-      { mountPoint: "", fsType: "1", superOptions: ["0:1"] },
+      { mountPoint: "", fsType: "1", superOptions: ["0:1"], device: "0:1", root: "/" },
     ]);
     expect(parseMountinfo("1 0 0:1 / /x rw - ext4")[0].superOptions).toStrictEqual([]);
   });
 
   it("extracts the mount point, filesystem type and super options of every line", () => {
     expect(parseMountinfo(SAMPLE_MOUNTINFO)).toStrictEqual([
-      { mountPoint: "/", fsType: "ext4", superOptions: ["rw"] },
-      { mountPoint: "/proc", fsType: "proc", superOptions: ["rw"] },
-      { mountPoint: "/run", fsType: "tmpfs", superOptions: ["rw", "size=100k"] },
-      { mountPoint: "/run/user/1000", fsType: "tmpfs", superOptions: ["rw"] },
-      { mountPoint: "/mnt", fsType: "ext4", superOptions: ["rw"] },
+      { mountPoint: "/", fsType: "ext4", superOptions: ["rw"], device: "0:1", root: "/" },
+      { mountPoint: "/proc", fsType: "proc", superOptions: ["rw"], device: "0:2", root: "/" },
+      {
+        mountPoint: "/run",
+        fsType: "tmpfs",
+        superOptions: ["rw", "size=100k"],
+        device: "0:3",
+        root: "/",
+      },
+      {
+        mountPoint: "/run/user/1000",
+        fsType: "tmpfs",
+        superOptions: ["rw"],
+        device: "0:4",
+        root: "/",
+      },
+      { mountPoint: "/mnt", fsType: "ext4", superOptions: ["rw"], device: "0:5", root: "/" },
     ]);
   });
 
@@ -43,8 +55,16 @@ describe("parseMountinfo", () => {
         mountPoint: "/home/runner/remote",
         fsType: "fuse.sshfs",
         superOptions: ["rw", "user_id=1001", "group_id=1001", "allow_other"],
+        device: "0:60",
+        root: "/",
       },
     ]);
+  });
+
+  it("reads a bind mount's root within its filesystem, escapes undone", () => {
+    expect(
+      parseMountinfo("11 1 8:1 /my\\040tmp /var/tmp rw,relatime shared:1 - ext4 /dev/root rw")[0],
+    ).toMatchObject({ mountPoint: "/var/tmp", device: "8:1", root: "/my tmp" });
   });
 
   it("undoes the octal escapes a path with a space, a tab or a newline arrives in", () => {

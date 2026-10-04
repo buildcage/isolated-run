@@ -40,10 +40,10 @@ import {
 } from "./nss-db.ts";
 import { buildOciConfig, type SandboxIdentity } from "./oci-config.ts";
 import { writeRunScript, writeResolvConf, writeOciConfig } from "./oci-files.ts";
-import { WritablePathConflictError } from "./paths.ts";
+import { pathAliases, WritablePathConflictError } from "./paths.ts";
 import { runIsolated } from "./run.ts";
 import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
-import { withScratchDir, type Warn } from "./scratch-dir.ts";
+import { SANDBOX_SCRATCH_BASE, withScratchDir, type Warn } from "./scratch-dir.ts";
 import type { BuiltOciSpec, OverlayDirs } from "./types.ts";
 
 /**
@@ -373,6 +373,7 @@ export function assembleBundle(
         envLoaderPath,
         scriptPath,
         hostMounts,
+        scratchBaseAliases: pathAliases(hostMounts, SANDBOX_SCRATCH_BASE),
       },
       env,
       caTrust,

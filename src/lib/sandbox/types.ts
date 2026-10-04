@@ -43,6 +43,13 @@ export interface HostMount {
   superOptions?: string[];
 }
 
+export interface MountinfoEntry extends HostMount {
+  /** MAJOR:MINOR, shared by every mount of one filesystem. */
+  device: string;
+  /** The directory within that filesystem the mount shows. */
+  root: string;
+}
+
 export interface HasMounts {
   mounts: MountEntry[];
 }
