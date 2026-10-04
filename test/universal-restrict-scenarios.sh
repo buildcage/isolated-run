@@ -264,4 +264,10 @@ echo "=== [HTTPS - SNI holding a colon] ==="
  | nc -w 5 allowed.example.com 443 > /dev/null 2>&1 || true)
 echo "  request sent (an invalid-sni row expected in the report)"
 
+# The same name in a plaintext Host. Only the last `:port` is a port.
+echo "=== [HTTP - Host holding a colon] ==="
+((printf 'GET / HTTP/1.1\r\nHost: tlsany.example.com:x.evil.example.net:80\r\nConnection: close\r\n\r\n'; sleep 1) \
+ | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true)
+echo "  request sent (an invalid-host row expected in the report)"
+
 scenario_results
