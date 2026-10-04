@@ -295,13 +295,14 @@ function replaceableLink(resolved: ResolvedHostPath, roots: string[]): string | 
 }
 
 /**
- * This step's GITHUB_ENV, GITHUB_PATH and GITHUB_STATE files, which the runner
- * applies to every later step and the post step: LD_PRELOAD in GITHUB_ENV or a
- * directory first in GITHUB_PATH would reach all of them. Read-only in either
- * mode, whatever is writable around them, unless write_through names
- * GITHUB_ENV or GITHUB_PATH itself. GITHUB_STATE, which only this action's
- * post step reads, is never opened. Like sandboxReadonlyHostDirs, throws when
- * one goes through a symlink in a persisting path.
+ * This step's GITHUB_ENV and GITHUB_PATH files, which the runner applies to
+ * every later step and the post step, and its GITHUB_STATE file: LD_PRELOAD in
+ * GITHUB_ENV or a directory first in GITHUB_PATH would reach all of them.
+ * Read-only in either mode, whatever is writable around them, unless
+ * write_through names GITHUB_ENV or GITHUB_PATH itself. GITHUB_STATE, which
+ * only this action's post step reads, is never opened. Like
+ * sandboxReadonlyHostDirs, throws when one goes through a symlink in a
+ * persisting path.
  */
 export function sandboxReadonlyFileCommands(
   writeThroughPaths: string[],
