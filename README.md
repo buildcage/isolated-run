@@ -554,7 +554,8 @@ reported as blocked; see
   update, still needs `proxy_engine: universal` or an `allowed_tls_rules` passthrough, since it will
   not accept the re-signed certificate.
 - gRPC is inspected like any other HTTPS. A URL rule names a method by its path, as in
-  `POST https://api.example.com/pkg.Service/Method`.
+  `POST https://api.example.com/pkg.Service/Method`. grpc-go also looks up `_grpc_config.<host>`,
+  which is refused; see [Blocked rules](./docs/reference.md#blocked-rules-known_blocked_rules).
 - Only the JDKs of the `java` on `PATH` and of `$JAVA_HOME` get the CA in their keystore
   ([above](#ca-trust-and-compatibility)). Any other JDK keeps its own keystore. For one on the
   runner, such as the JDK a Maven or Gradle toolchain forks tests into, set `JAVA_HOME` to it in the
