@@ -61,10 +61,10 @@ echo ""
 echo "=== Sandbox proxy-gone Assertions ==="
 echo ""
 
-if [ "$CODE" != "0" ] && grep -q "proxy netns not found" "$WORKDIR/out.log"; then
-  pass "run-isolated.sh failed closed with a clear error (exit $CODE)"
+if [ "$CODE" != "0" ] && grep -q "^::error::buildcage: sandbox setup failed: proxy netns not found" "$WORKDIR/out.log"; then
+  pass "run-isolated.sh failed closed with an annotated error (exit $CODE)"
 else
-  fail "expected a clear 'proxy netns not found' failure, got exit $CODE; see log below"
+  fail "expected an annotated 'proxy netns not found' failure, got exit $CODE; see log below"
   cat "$WORKDIR/out.log"
 fi
 

@@ -205,7 +205,8 @@ jobs:
         run: ./test/assert-sandbox.sh
 
   # config_file through the real action: the engine, the rules and
-  # fail_on_blocked it sets all reach the step.
+  # fail_on_blocked it sets all reach the step. The image is universal either
+  # way, so the step checks for the CA inspect would have put in the sandbox.
   test_sandbox_config_file:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
@@ -256,6 +257,12 @@ jobs:
         with:
           config_file: e2e-config/buildcage.yml
           run: |
+            echo "=== the engine the file sets must be the one in use ==="
+            if [ -e /dev/buildcage-ca.pem ]; then
+              echo "UNEXPECTED: the inspect engine's CA is in the sandbox"
+              exit 1
+            fi
+
             echo "=== a host the file allows must be reachable ==="
             wget -q -T 5 -O /dev/null https://example.com/
 
@@ -787,6 +794,7 @@ jobs:
         changes,
         test_sandbox_audit_mode,
         test_sandbox_enforcement,
+        test_sandbox_config_file,
         test_sandbox_inspect_enforcement,
         test_sandbox_fail_on_blocked,
         test_sandbox_concurrency,

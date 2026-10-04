@@ -198,11 +198,12 @@ sandbox down, so what it runs is kept out of those paths:
 - `docker` and `sudo` are pinned, before either first runs, to a binary outside
   `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, `$RUNNER_TEMP` and `write_through:`. This applies in
   `ephemeral` mode too, since an earlier step's writes there survive. The step fails if either is on
-  `$PATH` only inside those paths. The post step pins them again. Both also run with those paths
-  left off `PATH`: `sudo` resolves what it runs there when sudoers sets no `secure_path`, and
-  `docker` finds its `docker-credential-*` helpers there. `sudo` gets the system directories and
-  `docker` the step's own `$PATH`, so a helper installed only under those paths is not found. A
-  helper that is a symlink into them is not caught.
+  `$PATH` only inside those paths. The post step pins them again. Both also run with `PATH`
+  stripped of those paths and of any entry through a symlink in them: `sudo` resolves what it runs
+  there when sudoers sets no `secure_path`, and `docker` finds its `docker-credential-*` helpers
+  there. `sudo` gets the system directories and `docker` the step's own `$PATH`, so a helper
+  installed only under those paths is not found. A helper that is a symlink into them is not
+  caught.
 - Under `inspect`, the `keytool` that adds the CA to the JVM keystores is pinned the same way,
   `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so the command's
   `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` stays inside the sandbox. Without one, the step skips the
@@ -262,8 +263,8 @@ payload for a later step. See [Filesystem access](../README.md#filesystem-access
   stays PID 1 and runs the command as its child, so `kill -TERM $$` works and a python or node
   shebang leaves no zombies. It forwards `SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGUSR1` and
   `SIGUSR2` to the command's process group, as a terminal's Ctrl-C does, so what the command runs
-  gets them too. It exits with the command's status, `128+n` if a signal killed it, but after
-  forwarding `SIGTERM` or `SIGINT` not before the rest of that group has exited.
+  gets them too. It exits with the command's status, `128+n` if a signal killed it. After
+  forwarding `SIGTERM` or `SIGINT`, it first waits for the rest of that group to exit.
 
 What is left is piped to the sandboxed process over stdin as NUL-delimited `KEY=VALUE` records,
 rather than written into `config.json`, so an `env:` secret never reaches the runner's disk. The
@@ -274,13 +275,13 @@ bash reserves (`UID`, `SECONDS`) arrives as set, as it does in an unwrapped `run
 
 An exit trap tears down the container, the rootfs bind-mount, the veth and the network namespace,
 and force-detaches anything still mounted under the run's scratch directory before deleting it. A
-cancelled step goes the same way: the action catches the runner's signal, sends the command and
-what it started `SIGTERM`, kills them if any is still running 5 seconds later, and then writes the
-traffic report and stops the proxy as usual. If the action is killed first, a fallback step reads the container's
-identity back from job state, stops the proxy and deletes the scratch directory. The command's own
-life is tied to `run-isolated.sh`'s by a two-hop `setpriv --pdeathsig=KILL` chain, so an
-out-of-memory kill on the script takes the whole sandboxed process tree with it rather than leaving
-orphans.
+cancelled step goes the same way: the action catches the runner's signal, `SIGTERM` reaches the
+command's process group, the whole sandbox is killed if it is still running 5 seconds later, and
+then the action writes the traffic report and stops the proxy as usual. If the action is killed
+first, a fallback step reads the container's identity back from job state, stops the proxy and
+deletes the scratch directory. The command's own life is tied to `run-isolated.sh`'s by a two-hop
+`setpriv --pdeathsig=KILL` chain, so an out-of-memory kill on the script takes the whole sandboxed
+process tree with it rather than leaving orphans.
 
 ## The network boundary
 
@@ -646,8 +647,9 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   exactly as an un-sandboxed one could, and the same goes for `~/.bashrc`, `~/.npmrc` and anything
   else under a writable exception, a later step's `config_file` included. `GITHUB_ENV`,
   `GITHUB_PATH` and `GITHUB_STATE` are the exception: each is read-only inside the sandbox in either
-  mode, mounted over itself so it cannot be renamed or replaced, and every writable directory above
-  it is pinned the same way. One reached through a symlink in a writable path fails the step.
+  mode and mounted over itself, and each directory between it and the outermost path above it whose
+  writes persist is made a mount point, so none of them can be renamed or replaced. One reached
+  through a symlink in such a path fails the step.
   What they set reaches every later step and post step at once. `write_through:` can open
   `GITHUB_ENV` or `GITHUB_PATH` by naming it.
   `filesystem_mode: ephemeral` closes this off for everything except what `write_through:` names.
@@ -655,21 +657,21 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   elsewhere in `$GITHUB_WORKSPACE`. A named path is as exposed as in `persistent` mode.
 
   That decides how the step is set up. Wrapping every untrusted step is not the way out: a payload
-  left in `$HOME` runs in the next step before its sandbox does.
-  This action's own `sudo`, `docker` and `keytool` (under `inspect`) are pinned out of reach, but
-  every process inherits the environment, this action's own included. Making it the last step in the
-  job does not close it off either: every action's post step, this one's included, runs after the last
-  step, with whatever it left in `$HOME`. What holds is `filesystem_mode: ephemeral` with
-  `write_through:` narrowed to the outputs the step really has to produce, leaving out `$HOME`.
+  left in `$HOME`, such as a `core.fsmonitor` in `~/.gitconfig` or a script in `~/.gradle/init.d`,
+  runs inside the next step's sandbox with that step's secrets and the hosts it allows. Making it
+  the last step in the job does not close it off either: every action's post step runs after the
+  last step, outside any sandbox, with whatever it left in `$HOME`. What holds is
+  `filesystem_mode: ephemeral` with `write_through:` narrowed to the outputs the step really has to
+  produce, leaving out `$HOME`.
 
 - **Appending to the Job Summary.** The report is rendered from the runner host after the command
   has exited, and a name or URL is escaped before it is written into a table, so the command cannot
   edit its own report. What it can do in `persistent` mode is append to `$GITHUB_STEP_SUMMARY`
   beforehand and leave markdown of its own beside the real report. Removing or locking the file
   instead leaves the report nowhere to go, which fails the step under `restrict` with
-  `fail_on_blocked`. Where the report is meant to be
-  an audit trail, take it from `upload_traffic_artifact: true` instead: the JSON is uploaded when
-  the step ends, and is not a file a later step can append a line to.
+  `fail_on_blocked`. Where the report is meant to be an audit trail, take it from
+  `upload_traffic_artifact: true` instead: the JSON is uploaded when the step ends, and is not a
+  file a later step can append a line to.
 - **Exhausting the host.** The OCI spec sets no `linux.resources`, so there is no memory, pids or
   CPU ceiling, and capability bounding and seccomp cannot close this either, since a legitimate
   build calls `fork(2)` and `mmap(2)` freely. A fork bomb consumes host memory or the process table
@@ -702,7 +704,7 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   fails the preflight as well. `persistent` remains available on any supported runner.
 - **`/var/tmp` must be reached without a symlink**, since runc refuses a sandbox root whose path
   goes through one. Otherwise the step fails before writing anything there, with an error saying
-  which symlink to replace with a real directory.
+  where `/var/tmp` resolves.
 - **Not on a host shared with other local users**, ideally. `/var/tmp` is world-writable, so another
   unprivileged local account could pre-create `/var/tmp/buildcage-<uid>` as a symlink or a
   world-writable directory and redirect the OCI bundle, the root-run `mount --rbind /` and cleanup's
