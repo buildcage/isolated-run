@@ -199,7 +199,7 @@ HAProxy's log carries one line per request, oldest first, with its method, statu
 header it carried, and its request target last:
 
 ```
-buildcage 1787471975123 https GET 200 708 ts=-- reason=- tlserr=- dst=104.16.1.34:443 sni=registry.npmjs.org host=registry.npmjs.org /express
+buildcage 1787471975123 https GET 200 708 ts=-- reason=- tlserr=- dst=104.16.1.34:443 fcerr=- sni=registry.npmjs.org host=registry.npmjs.org /express
 buildcage 1787471976000 pass tls 3421 ts=-- reason=- dst=10.200.0.100:5432 sni=db.example.com
 ```
 
@@ -212,7 +212,9 @@ dot, as the rules do before matching it.
 `ts` is HAProxy's termination state and `reason` the refusal reason where the rule that refused
 knew one the line could not otherwise show. `tlserr` carries haproxy's own error from the handshake
 with the origin, which is what tells a connection the proxy would not make from one it could not
-make; the passthrough stage terminates no TLS and logs no such field. What the report makes of the two is in
+make; the passthrough stage terminates no TLS and logs no such field. `fcerr` names a failed
+handshake with the client (`SSL_HANDSHAKE` and the like), which the report shows as
+`client-tls-failed`. What the report makes of the two is in
 [Requests that never arrived whole](./reference.md#requests-that-never-arrived-whole), for a
 connection that never delivered a whole request, and in
 [Connections that failed](./reference.md#connections-that-failed), for one the rules allowed that

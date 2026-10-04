@@ -257,6 +257,13 @@ echo "=== [SNI holding a colon] ==="
  | nc -w 5 allowed.example.com 443 > /dev/null 2>&1 || true)
 echo "  sent (checked in the report, see integration-test-inspect-restrict.sh)"
 
+# SNI = abandoned.example.com, and nothing after the ClientHello: the handshake
+# fails at the proxy, as it does for a client that does not trust the CA.
+echo "=== [Client abandons the TLS handshake] ==="
+((printf '\x16\x03\x01\x00\x4d\x01\x00\x00\x49\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xff\x01\x00\x00\x1e\x00\x00\x00\x1a\x00\x18\x00\x00\x15\x61\x62\x61\x6e\x64\x6f\x6e\x65\x64\x2e\x65\x78\x61\x6d\x70\x6c\x65\x2e\x63\x6f\x6d'; sleep 1) \
+ | nc -w 5 allowed.example.com 443 > /dev/null 2>&1 || true)
+echo "  sent (checked in the report, see integration-test-inspect-restrict.sh)"
+
 echo "=== [Host holding a colon] ==="
 CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -H 'Host: anyport.example.com:x.evil.example.net:80' http://allowed.example.com/public/x)
 check_status "Host anyport.example.com:x.evil.example.net:80" "$CODE" "400"
