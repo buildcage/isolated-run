@@ -339,6 +339,12 @@ keeps only what differs: `THIRD_PARTY_LICENSES` and the `init-cfg` script that g
 configs. A path in both would be settled silently by copy order, so
 `src/core/lib/docker/engine-files.test.ts` rejects one.
 
+runc and CoreDNS are downloaded at a pinned version and checked against one SHA256 per
+architecture, both set as `ARG`s in each engine's Dockerfile (runc also in `dev/Dockerfile`).
+Renovate updates the version and the SHA256 lines together, taking the digests from the release's
+own checksum files; each SHA256 line's `digestVersion` names the release its digest belongs to. A
+bump by hand changes all three lines.
+
 ## Troubleshooting
 
 If you encounter issues, try reproducing the problem locally to get detailed logs:

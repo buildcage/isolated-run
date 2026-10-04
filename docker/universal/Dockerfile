@@ -1,11 +1,15 @@
-# renovate: datasource=github-releases depName=opencontainers/runc
+# renovate: datasource=github-release-attachments depName=opencontainers/runc
 ARG RUNC_VERSION=v1.5.1
+# renovate: datasource=github-release-attachments depName=opencontainers/runc digestVersion=v1.5.1
 ARG RUNC_SHA256_AMD64=177df879d50c913eb205e898d5c1c05a18f574053c0ce5524c471208eaf06f6f
+# renovate: datasource=github-release-attachments depName=opencontainers/runc digestVersion=v1.5.1
 ARG RUNC_SHA256_ARM64=ca70e7dbd6616ca782a59b5d3ac86909123fdaa9fa3f89dcf29051c70eee7ce9
 
-# renovate: datasource=github-releases depName=coredns/coredns
-ARG COREDNS_VERSION=1.14.7
+# renovate: datasource=github-release-attachments depName=coredns/coredns
+ARG COREDNS_VERSION=v1.14.7
+# renovate: datasource=github-release-attachments depName=coredns/coredns digestVersion=v1.14.7
 ARG COREDNS_SHA256_AMD64=9a09356438c6d9591cb80011a2a7a52f87fc3a113f6690e41f243f98b98faac9
+# renovate: datasource=github-release-attachments depName=coredns/coredns digestVersion=v1.14.7
 ARG COREDNS_SHA256_ARM64=bf26782d19b5340e3e6cb50f1ed6df72f58e4a30932c79d167f0f0a8b1e92e16
 
 # Stated so a base image bump cannot move HAProxy quietly: apk fails rather than
@@ -31,7 +35,7 @@ RUN apk add --no-cache curl util-linux-misc && \
     echo "${EXPECTED_SHA256}  /opt/buildcage/bin/runc" | sha256sum -c && \
     chmod +x /opt/buildcage/bin/runc && \
     COREDNS_SHA=$([ "$ARCH" = "amd64" ] && echo "$COREDNS_SHA256_AMD64" || echo "$COREDNS_SHA256_ARM64") && \
-    curl -fsSL "https://github.com/coredns/coredns/releases/download/v${COREDNS_VERSION}/coredns_${COREDNS_VERSION}_linux_${ARCH}.tgz" \
+    curl -fsSL "https://github.com/coredns/coredns/releases/download/${COREDNS_VERSION}/coredns_${COREDNS_VERSION#v}_linux_${ARCH}.tgz" \
       -o /tmp/coredns.tgz && \
     echo "${COREDNS_SHA}  /tmp/coredns.tgz" | sha256sum -c && \
     tar -C /usr/local/bin -xz -f /tmp/coredns.tgz coredns

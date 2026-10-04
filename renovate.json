@@ -25,8 +25,8 @@
         "/^dev/Dockerfile$/"
       ],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)\\nARG RUNC_VERSION=(?<currentValue>v[\\d.]+)",
-        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)\\nARG COREDNS_VERSION=(?<currentValue>[\\d.]+)"
+        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)\\nARG [A-Z]+_VERSION=(?<currentValue>v[\\d.]+)\\n",
+        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+) digestVersion=(?<currentValue>v[\\d.]+)\\nARG [A-Z]+_SHA256_[A-Z0-9]+=(?<currentDigest>[a-f0-9]{64})\\n"
       ]
     },
     {
