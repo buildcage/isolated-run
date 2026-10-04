@@ -24715,7 +24715,9 @@ function shmSizeFromStatfs({ type, bsize, blocks }) {
 }
 function parseCgroupV2Path(procCgroup) {
 	let lines = procCgroup.split("\n").filter((line) => line !== "");
-	if (lines.length === 1 && lines[0].startsWith("0::/")) return lines[0].slice(3);
+	if (lines.length !== 1 || !lines[0].startsWith("0::/")) return;
+	let path = lines[0].slice(3);
+	if (!(/\s/.test(path) || path.split("/").includes(".."))) return path;
 }
 function readOptionalFile(path) {
 	try {
@@ -26083,7 +26085,7 @@ function hostBeforeRequest(sni, address) {
 function parseProxyLine(line, isAudit) {
 	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
 	if (request) {
-		let incomplete = request[11]?.startsWith("SSL_") === !0 ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[13]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[12], request[9]) : void 0, event = {
+		let incomplete = request[3] === "<BADREQ>" && request[11]?.startsWith("SSL_") === !0 ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[13]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[12], request[9]) : void 0, event = {
 			time: Number(request[1]) / 1e3,
 			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
 			protocol: unnamed?.byAddress ? "tcp" : scheme,
