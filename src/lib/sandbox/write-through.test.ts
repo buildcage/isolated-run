@@ -181,10 +181,13 @@ describe("splitWriteThroughInput", () => {
 });
 
 describe("resolveWriteThroughOnHost", () => {
-  const DIR = { uid: 1000, gid: 1000, mode: 0o40755 };
   const host = (dirs: string[], links: Record<string, { target: string; uid: number }> = {}) => ({
-    exists: (p: string) => p === "/" || dirs.includes(p) || p in links,
-    stat: (p: string) => (p in links ? { uid: links[p]!.uid, gid: 0, mode: 0o120777 } : DIR),
+    lstat: (p: string) =>
+      p in links
+        ? { uid: links[p]!.uid, isSymbolicLink: () => true }
+        : dirs.includes(p)
+          ? { uid: 1000, isSymbolicLink: () => false }
+          : undefined,
     readlink: (p: string) => links[p]!.target,
   });
 

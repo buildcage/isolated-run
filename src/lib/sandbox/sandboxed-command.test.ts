@@ -38,6 +38,7 @@ const mocks = {
   touch: vi.fn(),
   readFile: vi.fn(),
   realpath: vi.fn(),
+  lstat: vi.fn(),
   readlink: vi.fn(),
   info: vi.fn(),
   warn: vi.fn(),
@@ -92,7 +93,7 @@ beforeEach(() => {
   mocks.buildEnvBlob.mockReturnValue(Buffer.from(""));
   mocks.runIsolated.mockResolvedValue(0);
   mocks.realpath.mockImplementation((p: string) => p);
-  mocks.readlink.mockReturnValue(null);
+  mocks.lstat.mockReturnValue(undefined);
 });
 
 describe("runSandboxedCommand", () => {

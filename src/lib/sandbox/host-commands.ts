@@ -10,8 +10,8 @@
  * runner's file commands that reach every later step.
  */
 
-import { accessSync, constants, readlinkSync, realpathSync } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, normalize, resolve } from "node:path";
+import { accessSync, constants, realpathSync } from "node:fs";
+import { delimiter, dirname, isAbsolute, join, normalize, resolve } from "node:path";
 
 import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
@@ -19,6 +19,12 @@ import type { JvmTools } from "./ca-trust.ts";
 import { writableDirsOf } from "./oci-mounts.ts";
 import { isAtOrUnder } from "./paths.ts";
 import { pinCommand, pinCommandPathEnv, SYSTEM_PATH } from "./pinned-commands.ts";
+import {
+  realSymlinkDeps,
+  resolveHostPath,
+  type ResolvedHostPath,
+  type SymlinkDeps,
+} from "./symlinks.ts";
 import { resolveWriteThroughPaths } from "./write-through.ts";
 
 /** The checkout as the runner spelled it, which is the path it runs the post
@@ -46,15 +52,10 @@ export function persistingWritablePaths(
   });
 }
 
-export interface FindCommandDeps {
+export interface FindCommandDeps extends SymlinkDeps {
   isExecutable: (path: string) => boolean;
-  /** The absolute target of one symlink hop, or null if `path` is not a symlink. */
-  readlink: (path: string) => string | null;
   realpathDir: (dir: string) => string;
 }
-
-// The kernel's MAXSYMLINKS; also stops a symlink loop.
-const MAX_SYMLINK_HOPS = 40;
 
 // Untested by design: the defaults behind this module's seams, which only hand
 // node:fs what the tested caller decided.
@@ -68,6 +69,7 @@ export function realpathOrSelf(path: string): string {
 }
 
 const realFindCommandDeps: FindCommandDeps = {
+  ...realSymlinkDeps,
   isExecutable: (path) => {
     try {
       accessSync(path, constants.X_OK);
@@ -76,19 +78,8 @@ const realFindCommandDeps: FindCommandDeps = {
       return false;
     }
   },
-  readlink: readlinkAbsolute,
   realpathDir: realpathOrSelf,
 };
-
-export function readlinkAbsolute(path: string): string | null {
-  try {
-    const target = readlinkSync(path);
-    // The kernel resolves a relative target against the real directory.
-    return isAbsolute(target) ? target : resolve(realpathOrSelf(dirname(path)), target);
-  } catch {
-    return null;
-  }
-}
 /* v8 ignore stop */
 
 export interface DefaultWritableDirs {
@@ -128,20 +119,6 @@ export function withRealPaths(
   return [...new Set([...paths, ...paths.map(realpath)])];
 }
 
-/** The `$PATH` entry and each symlink hop after it. The command could repoint
- *  any hop it can write, so every one of them is checked. */
-function commandChain(candidate: string, readlink: FindCommandDeps["readlink"]): string[] {
-  const chain = [candidate];
-  let current = candidate;
-  for (let i = 0; i < MAX_SYMLINK_HOPS; i++) {
-    const target = readlink(current);
-    if (target === null) break;
-    chain.push(target);
-    current = target;
-  }
-  return chain;
-}
-
 function insidePersisting(
   persisting: string[],
   realpathDir: FindCommandDeps["realpathDir"],
@@ -169,28 +146,31 @@ export function pathOutside(
 }
 
 /**
- * The first `command` on `pathEnv` with no hop inside `persisting`, judged by
- * both its spelling and its real directory (a self-hosted `/opt/tools` may
- * point into `$HOME`). Returns the `$PATH` entry, not the resolved target:
- * snap's `/snap/bin/docker` -> `/usr/bin/snap` picks its role from the name it
- * was invoked by. Relative entries resolve against the workspace, so they are
- * skipped. `write_through: /` is the documented full opt-out.
+ * The first `command` on `pathEnv` that neither resolves inside `persisting`
+ * nor passes through a symlink there, which the command could repoint (a
+ * self-hosted `/opt/tools` may point into `$HOME`). Returns the `$PATH` entry,
+ * not the resolved target: snap's `/snap/bin/docker` -> `/usr/bin/snap` picks
+ * its role from the name it was invoked by. Relative entries resolve against
+ * the workspace, so they are skipped. `write_through: /` is the documented
+ * full opt-out.
  */
 export function findPinnableCommand(
   command: string,
   pathEnv: string | undefined,
   persisting: string[],
-  { isExecutable, readlink, realpathDir }: FindCommandDeps = realFindCommandDeps,
+  deps: FindCommandDeps = realFindCommandDeps,
 ): string | undefined {
   const optedOut = persisting.includes("/");
-  const inside = insidePersisting(persisting, realpathDir);
-  const reachable = (hop: string): boolean =>
-    inside(hop) || inside(join(realpathDir(dirname(hop)), basename(hop)));
+  const inside = insidePersisting(persisting, deps.realpathDir);
+  const reachable = (candidate: string): boolean => {
+    const resolved = resolveHostPath(candidate, deps);
+    return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
+  };
   for (const dir of (pathEnv ?? "").split(delimiter)) {
     if (!isAbsolute(dir)) continue;
     const candidate = join(dir, command);
-    if (!isExecutable(candidate)) continue;
-    if (optedOut || !commandChain(candidate, readlink).some(reachable)) return candidate;
+    if (!deps.isExecutable(candidate)) continue;
+    if (optedOut || !reachable(candidate)) return candidate;
   }
   return undefined;
 }
@@ -283,7 +263,7 @@ export function sandboxReadonlyHostDirs(
   persisting: string[],
   env: NodeJS.ProcessEnv,
   actionRoot: string = runnerActionRoot(),
-  deps: Pick<FindCommandDeps, "readlink" | "realpathDir"> = realFindCommandDeps,
+  deps: Pick<FindCommandDeps, "lstat" | "readlink" | "realpathDir"> = realFindCommandDeps,
 ): string[] {
   const docker = dockerConfigDir(env);
   const candidates = [
@@ -308,23 +288,24 @@ export function sandboxReadonlyHostDirs(
   ];
   // Followed link by link rather than realpath'd, so a dangling one still has a target.
   const followAll = (path: string) => {
-    const resolved = resolveThroughFixedLinks(path, [], deps.readlink);
+    const resolved = resolveHostPath(path, deps);
     return "real" in resolved ? resolved.real : path;
   };
   const roots = persisting.filter((p) => p !== "/");
   return candidates.flatMap(({ name, dir, fix }) => {
     if (persisting.includes(dir) || persisting.includes(deps.realpathDir(dir))) return [];
-    const resolved = resolveThroughFixedLinks(dir, roots, deps.readlink);
-    if ("loop" in resolved) {
+    const resolved = resolveHostPath(dir, deps);
+    const link = replaceableLink(resolved, roots);
+    if (link !== undefined) {
       throw new SandboxError(
-        `${name} ${JSON.stringify(dir)} goes through too many symlinks to resolve.`,
+        `${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(link)}, a symlink the ` +
+          `sandboxed command can replace, and ${fix()}`,
         "HOST_DIR_UNPROTECTABLE",
       );
     }
-    if ("link" in resolved) {
+    if ("loop" in resolved) {
       throw new SandboxError(
-        `${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(resolved.link)}, a symlink the ` +
-          `sandboxed command can replace, and ${fix()}`,
+        `${name} ${JSON.stringify(dir)} goes through too many symlinks to resolve.`,
         "HOST_DIR_UNPROTECTABLE",
       );
     }
@@ -333,30 +314,9 @@ export function sandboxReadonlyHostDirs(
   });
 }
 
-/**
- * `path` with its symlinks resolved, or the first symlink that sits in one of
- * `roots`, or a loop. Components past the last existing one are kept as written.
- */
-function resolveThroughFixedLinks(
-  path: string,
-  roots: string[],
-  readlink: FindCommandDeps["readlink"],
-): { real: string } | { link: string } | { loop: true } {
-  let rest = path.split("/").filter(Boolean);
-  let current = "/";
-  for (let hops = 0; rest.length > 0;) {
-    const candidate = join(current, rest.shift()!);
-    const target = readlink(candidate);
-    if (target === null) {
-      current = candidate;
-      continue;
-    }
-    if (roots.some((p) => isAtOrUnder(current, p))) return { link: candidate };
-    if (++hops > MAX_SYMLINK_HOPS) return { loop: true };
-    rest = [...target.split("/").filter(Boolean), ...rest];
-    current = "/";
-  }
-  return { real: current };
+/** The first symlink `resolved` passed through that sits in one of `roots`. */
+function replaceableLink(resolved: ResolvedHostPath, roots: string[]): string | undefined {
+  return resolved.links.find((l) => roots.some((p) => isAtOrUnder(dirname(l.at), p)))?.at;
 }
 
 /**
@@ -372,7 +332,7 @@ export function sandboxReadonlyFileCommands(
   writeThroughPaths: string[],
   persisting: string[],
   env: NodeJS.ProcessEnv,
-  deps: Pick<FindCommandDeps, "readlink" | "realpathDir"> = realFindCommandDeps,
+  deps: Pick<FindCommandDeps, "lstat" | "readlink" | "realpathDir"> = realFindCommandDeps,
 ): string[] {
   const named = new Set(withRealPaths(writeThroughPaths, deps.realpathDir));
   const openable = (name: string, path: string) =>
@@ -381,19 +341,20 @@ export function sandboxReadonlyFileCommands(
   return ["GITHUB_ENV", "GITHUB_PATH", "GITHUB_STATE"].flatMap((name) => {
     const path = env[name];
     if (!path || openable(name, path)) return [];
-    const resolved = resolveThroughFixedLinks(path, roots, deps.readlink);
-    if ("loop" in resolved) {
+    const resolved = resolveHostPath(path, deps);
+    const link = replaceableLink(resolved, roots);
+    if (link !== undefined) {
       throw new SandboxError(
-        `The runner's ${name} file ${JSON.stringify(path)} goes through too many symlinks to resolve.`,
+        `The runner's ${name} file ${JSON.stringify(path)} goes through ` +
+          `${JSON.stringify(link)}, a symlink the sandboxed command can replace, and the ` +
+          "runner reads it after the step. Configure the runner's work directory by its real " +
+          "path, not through the symlink.",
         "HOST_DIR_UNPROTECTABLE",
       );
     }
-    if ("link" in resolved) {
+    if ("loop" in resolved) {
       throw new SandboxError(
-        `The runner's ${name} file ${JSON.stringify(path)} goes through ` +
-          `${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and the ` +
-          "runner reads it after the step. Configure the runner's work directory by its real " +
-          "path, not through the symlink.",
+        `The runner's ${name} file ${JSON.stringify(path)} goes through too many symlinks to resolve.`,
         "HOST_DIR_UNPROTECTABLE",
       );
     }

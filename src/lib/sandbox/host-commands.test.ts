@@ -17,41 +17,33 @@ import {
   type FindCommandDeps,
 } from "./host-commands.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
+import { resolveHostPath } from "./symlinks.ts";
 
 const HOME = "/home/runner";
 const WORKSPACE = "/home/runner/work/repo/repo";
 const PERSISTENT = [WORKSPACE, HOME, "/tmp", "/home/runner/work/_temp"];
 
-/** A filesystem whose only symlinks are `links`, each to an absolute path. */
+/** A filesystem whose only symlinks are `links`, each to its stored target. */
 function withLinks(links: Record<string, string>) {
-  const realpathDir = (path: string): string => {
-    for (const [link, target] of Object.entries(links)) {
-      if (path === link || path.startsWith(`${link}/`)) {
-        return realpathDir(target + path.slice(link.length));
-      }
-    }
-    return path;
+  const fs = {
+    lstat: (path: string) => ({ uid: 1001, isSymbolicLink: () => path in links }),
+    readlink: (path: string) => links[path]!,
   };
-  return { readlink: (path: string) => links[path] ?? null, realpathDir };
+  const realpathDir = (path: string): string => {
+    const resolved = resolveHostPath(path, fs);
+    return "real" in resolved ? resolved.real : path;
+  };
+  return { ...fs, realpathDir };
 }
 const NO_LINKS = withLinks({});
 
 /**
- * A host where `files` are the executables, and `links` map a symlink to its
- * immediate target (a chain is spelled out one hop per entry). A path in
+ * A host where `files` are the executables, and `links` map each symlink, to a
+ * file or a directory, to its immediate target, one hop per entry. A path in
  * `links` is executable too, so only its final target need be listed in `files`.
- * `dirLinks` map a directory to where it really is.
  */
-function host(
-  files: string[],
-  links: Record<string, string> = {},
-  dirLinks: Record<string, string> = {},
-): FindCommandDeps {
-  return {
-    isExecutable: (p) => files.includes(p) || p in links,
-    readlink: (p) => links[p] ?? null,
-    realpathDir: (d) => dirLinks[d] ?? d,
-  };
+function host(files: string[], links: Record<string, string> = {}): FindCommandDeps {
+  return { ...withLinks(links), isExecutable: (p) => files.includes(p) || p in links };
 }
 
 describe("persistingWritablePaths", () => {
@@ -102,11 +94,9 @@ describe("findPinnableCommand", () => {
 
   it("judges a PATH directory by where it really is, not how it is spelled", () => {
     // A self-hosted /opt/tools -> ~/tools.
-    const deps = host(
-      ["/opt/tools/bin/docker", "/usr/bin/docker"],
-      {},
-      { "/opt/tools/bin": `${HOME}/tools/bin` },
-    );
+    const deps = host(["/opt/tools/bin/docker", "/usr/bin/docker"], {
+      "/opt/tools/bin": `${HOME}/tools/bin`,
+    });
 
     expect(findPinnableCommand("docker", "/opt/tools/bin:/usr/bin", PERSISTENT, deps)).toBe(
       "/usr/bin/docker",
@@ -115,11 +105,23 @@ describe("findPinnableCommand", () => {
 
   it("judges a symlink hop's directory the same way", () => {
     // /usr/local/bin/docker -> /opt/tools/bin/docker, whose directory is ~/tools/bin.
-    const deps = host(
-      ["/opt/tools/bin/docker", "/usr/bin/docker"],
-      { "/usr/local/bin/docker": "/opt/tools/bin/docker" },
-      { "/opt/tools/bin": `${HOME}/tools/bin` },
+    const deps = host(["/opt/tools/bin/docker", "/usr/bin/docker"], {
+      "/usr/local/bin/docker": "/opt/tools/bin/docker",
+      "/opt/tools/bin": `${HOME}/tools/bin`,
+    });
+
+    expect(findPinnableCommand("docker", "/usr/local/bin:/usr/bin", PERSISTENT, deps)).toBe(
+      "/usr/bin/docker",
     );
+  });
+
+  it("skips a candidate that passes through a symlink in a persisting path, wherever it resolves", () => {
+    // /usr/local/bin/docker -> /opt/tools/docker, where /opt/tools -> ~/tools -> /usr/lib/tools.
+    const deps = host(["/usr/lib/tools/docker", "/usr/bin/docker"], {
+      "/usr/local/bin/docker": "/opt/tools/docker",
+      "/opt/tools": `${HOME}/tools`,
+      [`${HOME}/tools`]: "/usr/lib/tools",
+    });
 
     expect(findPinnableCommand("docker", "/usr/local/bin:/usr/bin", PERSISTENT, deps)).toBe(
       "/usr/bin/docker",
@@ -128,28 +130,22 @@ describe("findPinnableCommand", () => {
 
   it("recognizes a persisting path by its real spelling too", () => {
     // $HOME=/home/runner is a symlink to /data/runner.
-    const deps = host(
-      ["/data/runner/.local/bin/docker", "/usr/bin/docker"],
-      {},
-      { [HOME]: "/data/runner" },
-    );
+    const deps = host(["/data/runner/.local/bin/docker", "/usr/bin/docker"], {
+      [HOME]: "/data/runner",
+    });
 
     expect(
       findPinnableCommand("docker", "/data/runner/.local/bin:/usr/bin", PERSISTENT, deps),
     ).toBe("/usr/bin/docker");
   });
 
-  it("gives up on a symlink cycle rather than looping", () => {
-    const deps = host([], { "/usr/bin/docker": "/usr/local/bin/docker" });
-    deps.readlink = (p) =>
-      ({
-        "/usr/bin/docker": "/usr/local/bin/docker",
-        "/usr/local/bin/docker": "/usr/bin/docker",
-      })[p] ?? null;
-    deps.isExecutable = (p) => p === "/usr/bin/docker";
+  it("passes over a symlink cycle rather than looping", () => {
+    const deps = host([], {
+      "/usr/bin/docker": "/usr/local/bin/docker",
+      "/usr/local/bin/docker": "/usr/bin/docker",
+    });
 
-    // Stopped by the hop limit: no hop is inside a persisting path.
-    expect(findPinnableCommand("docker", "/usr/bin", PERSISTENT, deps)).toBe("/usr/bin/docker");
+    expect(findPinnableCommand("docker", "/usr/bin", PERSISTENT, deps)).toBeUndefined();
   });
 
   it("skips relative and empty PATH entries, which resolve against the workspace", () => {
@@ -490,12 +486,7 @@ describe("sandboxReadonlyHostDirs", () => {
       "/opt/b": "/opt/a",
     };
 
-    expect(() =>
-      sandboxReadonlyHostDirs(PERSISTENT, { HOME }, ACTION, {
-        readlink: (p) => links[p] ?? null,
-        realpathDir: (p) => p,
-      }),
-    ).toThrow(
+    expect(() => sandboxReadonlyHostDirs(PERSISTENT, { HOME }, ACTION, withLinks(links))).toThrow(
       expect.objectContaining({
         message: expect.stringContaining(`its real path, "${HOME}/.docker"`),
       }),
@@ -515,10 +506,12 @@ describe("sandboxReadonlyHostDirs", () => {
 
   it("refuses a symlink loop", () => {
     expect(() =>
-      sandboxReadonlyHostDirs(PERSISTENT, { HOME, DOCKER_CONFIG: "/opt/a" }, ACTION, {
-        readlink: (p) => ({ "/opt/a": "/opt/b", "/opt/b": "/opt/a" })[p] ?? null,
-        realpathDir: (p) => p,
-      }),
+      sandboxReadonlyHostDirs(
+        PERSISTENT,
+        { HOME, DOCKER_CONFIG: "/opt/a" },
+        ACTION,
+        withLinks({ "/opt/a": "/opt/b", "/opt/b": "/opt/a" }),
+      ),
     ).toThrow(
       expect.objectContaining({
         code: "HOST_DIR_UNPROTECTABLE",
@@ -574,16 +567,9 @@ describe("sandboxReadonlyFileCommands", () => {
   it("refuses one reached through a symlink loop", () => {
     const links: Record<string, string> = { "/opt/a": "/opt/b", "/opt/b": "/opt/a" };
 
-    expect(() =>
-      files(
-        [],
-        { GITHUB_ENV: "/opt/a/set_env_1" },
-        {
-          readlink: (p) => links[p] ?? null,
-          realpathDir: (p) => p,
-        },
-      ),
-    ).toThrow(expect.objectContaining({ message: expect.stringContaining("too many symlinks") }));
+    expect(() => files([], { GITHUB_ENV: "/opt/a/set_env_1" }, withLinks(links))).toThrow(
+      expect.objectContaining({ message: expect.stringContaining("too many symlinks") }),
+    );
   });
 
   it("refuses one reached through a symlink in a persisting path", () => {

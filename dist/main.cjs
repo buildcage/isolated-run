@@ -23735,7 +23735,7 @@ function defaultDeviceOf(path) {
 function defaultIsDirectory$1(path) {
 	return (0, node_fs.statSync)(path).isDirectory();
 }
-function defaultStat$2(path) {
+function defaultStat$1(path) {
 	let { uid, gid, mode } = (0, node_fs.statSync)(path);
 	return {
 		uid,
@@ -23794,7 +23794,7 @@ function slugify(path) {
 function overlayUpperFor(scratchDir, root) {
 	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
 }
-function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat$2, execFile = defaultExecFile, self = {
+function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat$1, execFile = defaultExecFile, self = {
 	uid: process.getuid(),
 	gid: process.getgid()
 } } = {}) {
@@ -24082,7 +24082,7 @@ function defaultLstat(path) {
 		return;
 	}
 }
-function defaultStat$1(path) {
+function defaultStat(path) {
 	try {
 		return (0, node_fs.statSync)(path);
 	} catch {
@@ -24127,7 +24127,7 @@ function warnNotAdded(warn, reason) {
 	warn?.(`could not add the proxy CA to Chromium's NSS database: ${reason}. Chromium in this step will not trust the proxy; use proxy_engine: universal for it.`);
 }
 function prepareNssDb(containerName, dir, home, deps = {}, { homeUpper } = {}) {
-	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat$1, realpath = node_fs.realpathSync, warn } = deps;
+	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat, realpath = node_fs.realpathSync, warn } = deps;
 	if (!home || stat(home)?.isDirectory() !== !0) return warnNotAdded(warn, `HOME (${JSON.stringify(home ?? "")}) is not a directory`);
 	let realHome = realpath(home), plan = planNssDb(realHome, { lstat });
 	if (typeof plan == "string") return warnNotAdded(warn, plan);
@@ -24851,6 +24851,47 @@ function scratchBaseLayers(execDir, aliases = []) {
 	}];
 }
 //#endregion
+//#region src/lib/sandbox/symlinks.ts
+const realSymlinkDeps = {
+	lstat: (path) => {
+		try {
+			return (0, node_fs.lstatSync)(path);
+		} catch {
+			return;
+		}
+	},
+	readlink: (path) => (0, node_fs.readlinkSync)(path)
+};
+function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
+	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
+	for (; pending.length > 0;) {
+		let name = pending.shift();
+		if (name === "..") {
+			current = (0, node_path.dirname)(current);
+			continue;
+		}
+		let next = (0, node_path.join)(current, name), info = lstat(next);
+		if (!info?.isSymbolicLink()) {
+			current = next;
+			continue;
+		}
+		let target = readlink(next);
+		if (links.push({
+			at: next,
+			target,
+			uid: info.uid
+		}), links.length > 40) return {
+			loop: !0,
+			links
+		};
+		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
+	}
+	return {
+		real: current,
+		links
+	};
+}
+//#endregion
 //#region src/lib/sandbox/write-through.ts
 const ALLOWED_WRITE_THROUGH_VARS = [
 	"HOME",
@@ -24894,17 +24935,6 @@ function defaultExists(path) {
 		return !1;
 	}
 }
-function defaultStat(path) {
-	let s = (0, node_fs.lstatSync)(path);
-	return {
-		uid: s.uid,
-		gid: s.gid,
-		mode: s.mode
-	};
-}
-function defaultReadlink(path) {
-	return (0, node_fs.readlinkSync)(path);
-}
 function defaultCanWrite(path) {
 	try {
 		return (0, node_fs.accessSync)(path, node_fs.constants.W_OK | node_fs.constants.X_OK), !0;
@@ -24915,32 +24945,15 @@ function defaultCanWrite(path) {
 function defaultMkdir(path) {
 	(0, node_fs.mkdirSync)(path, { recursive: !0 });
 }
-function resolveWriteThroughOnHost(path, { exists = defaultExists, stat = defaultStat, readlink = defaultReadlink } = {}) {
-	let pending = path.split("/").filter((c) => c !== ""), current = "/", hops = 0;
-	for (; pending.length > 0;) {
-		let name = pending.shift();
-		if (name === ".") continue;
-		if (name === "..") {
-			current = (0, node_path.dirname)(current);
-			continue;
-		}
-		let next = (0, node_path.join)(current, name);
-		if (!exists(next)) {
-			current = next;
-			continue;
-		}
-		let { uid, mode } = stat(next);
-		if ((mode & 61440) != 40960) {
-			current = next;
-			continue;
-		}
-		let target = readlink(next);
-		if (uid !== 0) throw Error(`write_through entry ${JSON.stringify(path)} passes through ${JSON.stringify(next)}, a symlink to ${JSON.stringify(target)} owned by uid ${uid}. Only root-owned symlinks are followed, since any other could have been planted by an earlier step. Name the real path instead.`);
-		if (++hops > 40) throw Error(`write_through entry ${JSON.stringify(path)} passes through too many symlinks to resolve.`);
-		pending.unshift(...target.split("/").filter((c) => c !== "")), (0, node_path.isAbsolute)(target) && (current = "/");
-	}
-	if (current === "/") throw Error(`write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a literal "/" if dropping the read-only restriction entirely is what you meant.`);
-	return current;
+function resolveWriteThroughOnHost(path, { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = {}) {
+	let resolved = resolveHostPath(path, {
+		lstat,
+		readlink
+	}), planted = resolved.links.find((l) => l.uid !== 0);
+	if (planted) throw Error(`write_through entry ${JSON.stringify(path)} passes through ${JSON.stringify(planted.at)}, a symlink to ${JSON.stringify(planted.target)} owned by uid ${planted.uid}. Only root-owned symlinks are followed, since any other could have been planted by an earlier step. Name the real path instead.`);
+	if ("loop" in resolved) throw Error(`write_through entry ${JSON.stringify(path)} passes through too many symlinks to resolve.`);
+	if (resolved.real === "/") throw Error(`write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a literal "/" if dropping the read-only restriction entirely is what you meant.`);
+	return resolved.real;
 }
 function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
 	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
@@ -24981,6 +24994,7 @@ function realpathOrSelf(path) {
 	}
 }
 const realFindCommandDeps = {
+	...realSymlinkDeps,
 	isExecutable: (path) => {
 		try {
 			return (0, node_fs.accessSync)(path, node_fs.constants.X_OK), !0;
@@ -24988,17 +25002,8 @@ const realFindCommandDeps = {
 			return !1;
 		}
 	},
-	readlink: readlinkAbsolute,
 	realpathDir: realpathOrSelf
 };
-function readlinkAbsolute(path) {
-	try {
-		let target = (0, node_fs.readlinkSync)(path);
-		return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)(realpathOrSelf((0, node_path.dirname)(path)), target);
-	} catch {
-		return null;
-	}
-}
 function resolveDefaultWritableDirs(env, realpath = realpathOrSelf) {
 	let real = (path) => {
 		let normalized = (0, node_path.normalize)(path);
@@ -25014,15 +25019,6 @@ function resolveDefaultWritableDirs(env, realpath = realpathOrSelf) {
 function withRealPaths(paths, realpath = realpathOrSelf) {
 	return [...new Set([...paths, ...paths.map(realpath)])];
 }
-function commandChain(candidate, readlink) {
-	let chain = [candidate], current = candidate;
-	for (let i = 0; i < 40; i++) {
-		let target = readlink(current);
-		if (target === null) break;
-		chain.push(target), current = target;
-	}
-	return chain;
-}
 function insidePersisting(persisting, realpathDir) {
 	let writable = withRealPaths(persisting, realpathDir);
 	return (path) => writable.some((w) => isAtOrUnder(path, w));
@@ -25032,12 +25028,15 @@ function pathOutside(pathEnv = "", persisting, realpathDir) {
 	let inside = insidePersisting(persisting, realpathDir);
 	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !inside(dir) && !inside(realpathDir(dir))).join(node_path.delimiter);
 }
-function findPinnableCommand(command, pathEnv, persisting, { isExecutable, readlink, realpathDir } = realFindCommandDeps) {
-	let optedOut = persisting.includes("/"), inside = insidePersisting(persisting, realpathDir), reachable = (hop) => inside(hop) || inside((0, node_path.join)(realpathDir((0, node_path.dirname)(hop)), (0, node_path.basename)(hop)));
+function findPinnableCommand(command, pathEnv, persisting, deps = realFindCommandDeps) {
+	let optedOut = persisting.includes("/"), inside = insidePersisting(persisting, deps.realpathDir), reachable = (candidate) => {
+		let resolved = resolveHostPath(candidate, deps);
+		return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
+	};
 	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
 		if (!(0, node_path.isAbsolute)(dir)) continue;
 		let candidate = (0, node_path.join)(dir, command);
-		if (isExecutable(candidate) && (optedOut || !commandChain(candidate, readlink).some(reachable))) return candidate;
+		if (deps.isExecutable(candidate) && (optedOut || !reachable(candidate))) return candidate;
 	}
 }
 function pinHostCommands(paths, env, deps = realFindCommandDeps) {
@@ -25078,31 +25077,20 @@ function sandboxReadonlyHostDirs(persisting, env, actionRoot = runnerActionRoot(
 		dir: docker,
 		fix: () => `this action runs docker on the host after the command exits. Set DOCKER_CONFIG to its real path, ${JSON.stringify(followAll(docker))}.`
 	}] : []], followAll = (path) => {
-		let resolved = resolveThroughFixedLinks(path, [], deps.readlink);
+		let resolved = resolveHostPath(path, deps);
 		return "real" in resolved ? resolved.real : path;
 	}, roots = persisting.filter((p) => p !== "/");
 	return candidates.flatMap(({ name, dir, fix }) => {
 		if (persisting.includes(dir) || persisting.includes(deps.realpathDir(dir))) return [];
-		let resolved = resolveThroughFixedLinks(dir, roots, deps.readlink);
+		let resolved = resolveHostPath(dir, deps), link = replaceableLink(resolved, roots);
+		if (link !== void 0) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(link)}, a symlink the sandboxed command can replace, and ${fix()}`, "HOST_DIR_UNPROTECTABLE");
 		if ("loop" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
-		if ("link" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and ${fix()}`, "HOST_DIR_UNPROTECTABLE");
 		let real = resolved.real;
 		return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
 	});
 }
-function resolveThroughFixedLinks(path, roots, readlink) {
-	let rest = path.split("/").filter(Boolean), current = "/";
-	for (let hops = 0; rest.length > 0;) {
-		let candidate = (0, node_path.join)(current, rest.shift()), target = readlink(candidate);
-		if (target === null) {
-			current = candidate;
-			continue;
-		}
-		if (roots.some((p) => isAtOrUnder(current, p))) return { link: candidate };
-		if (++hops > 40) return { loop: !0 };
-		rest = [...target.split("/").filter(Boolean), ...rest], current = "/";
-	}
-	return { real: current };
+function replaceableLink(resolved, roots) {
+	return resolved.links.find((l) => roots.some((p) => isAtOrUnder((0, node_path.dirname)(l.at), p)))?.at;
 }
 function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = realFindCommandDeps) {
 	let named = new Set(withRealPaths(writeThroughPaths, deps.realpathDir)), openable = (name, path) => name !== "GITHUB_STATE" && (named.has(path) || named.has(deps.realpathDir(path))), roots = persisting.filter((p) => p !== "/");
@@ -25113,9 +25101,9 @@ function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = 
 	].flatMap((name) => {
 		let path = env[name];
 		if (!path || openable(name, path)) return [];
-		let resolved = resolveThroughFixedLinks(path, roots, deps.readlink);
+		let resolved = resolveHostPath(path, deps), link = replaceableLink(resolved, roots);
+		if (link !== void 0) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through ${JSON.stringify(link)}, a symlink the sandboxed command can replace, and the runner reads it after the step. Configure the runner's work directory by its real path, not through the symlink.`, "HOST_DIR_UNPROTECTABLE");
 		if ("loop" in resolved) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
-		if ("link" in resolved) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through ${JSON.stringify(resolved.link)}, a symlink the sandboxed command can replace, and the runner reads it after the step. Configure the runner's work directory by its real path, not through the symlink.`, "HOST_DIR_UNPROTECTABLE");
 		return [resolved.real];
 	});
 }
@@ -25690,7 +25678,7 @@ const realDeps$2 = {
 	}),
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
 	realpath: realpathOrSelf,
-	readlink: readlinkAbsolute,
+	...realSymlinkDeps,
 	info
 };
 function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
@@ -25742,13 +25730,11 @@ function resolveIdentity(env, warn, { resolveSandboxGid, info }) {
 function assembleBundle(dir, options, deps) {
 	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
-		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)), readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, void 0, {
+		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = withRealPaths(persistingWritablePaths(filesystemMode, writeThroughPaths, env)), symlinkDeps = {
+			lstat: deps.lstat,
 			readlink: deps.readlink,
 			realpathDir: deps.realpath
-		}), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, {
-			readlink: deps.readlink,
-			realpathDir: deps.realpath
-		}), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
+		}, readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, void 0, symlinkDeps), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, symlinkDeps), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
 		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
 			mode: 448,
 			recursive: !0
