@@ -547,9 +547,8 @@ reported as blocked; see
 - A tool that pins a specific certificate, or ships a bundled trust store it never lets the system
   update, still needs `proxy_engine: universal` or an `allowed_tls_rules` passthrough, since it will
   not accept the re-signed certificate.
-- A client that insists on HTTP/2 through ALPN, as gRPC clients do (grpc-go since 1.67, for one),
-  fails to connect: `inspect` answers no ALPN. Pass its host through with `allowed_tls_rules`,
-  which judges the SNI and port only. A client that falls back to HTTP/1.1, such as curl, works.
+- gRPC is inspected like any other HTTPS. A URL rule names a method by its path, as in
+  `POST https://api.example.com/pkg.Service/Method`.
 - Only the JDKs of the `java` on `PATH` and of `$JAVA_HOME` get the CA in their keystore
   ([above](#ca-trust-and-compatibility)). Any other JDK keeps its own keystore. For one on the
   runner, such as the JDK a Maven or Gradle toolchain forks tests into, set `JAVA_HOME` to it in the

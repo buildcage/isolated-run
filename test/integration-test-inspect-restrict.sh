@@ -29,6 +29,10 @@ cleanup() {
 trap cleanup EXIT
 docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" up -d --build --wait
 
+echo "--- building the gRPC client the step calls the fixture with ---"
+docker build -q --target client --output type=local,dest="$REPO_ROOT/test/test-grpc-inspect/bin" \
+  "$REPO_ROOT/test/test-grpc-inspect" >/dev/null
+
 SYSTEM_CA=/etc/ssl/certs/ca-certificates.crt
 HASH_BEFORE=$(sha256sum "$SYSTEM_CA" | awk '{print $1}')
 
@@ -60,6 +64,8 @@ GET ~^https://blocked\.example\.com:9443/public/.*$
 GET ~^https://blocked\.example\.com/defaultport/.*$
 GET ~https://ok\.wildcard\.example\.com/regexpub/
 GET ~^https://ok\.wildcard\.example\.com/regexexact$
+POST https://grpc.example.com/grpc.health.v1.Health/Check
+POST https://grpc.example.com/grpc.health.v1.Health/Watch
 # Its port half matches any text, so a Host of
 # anyport.example.com:x.evil.example.net:80 would match it.
 GET ~^https?://anyport\.example\.com:.*/.*$

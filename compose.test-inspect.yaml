@@ -32,6 +32,19 @@ services:
     networks:
       test-net:
 
+  # A gRPC origin, which only an HTTP/2 connection from the proxy can reach.
+  test-grpc:
+    build: test/test-grpc-inspect
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - TEST_NET_ADDR=10.200.0.103/24
+    volumes:
+      - ./test/test-server-inspect/cert.pem:/certs/cert.pem:ro
+      - ./test/test-server-inspect/key.pem:/certs/key.pem:ro
+    networks:
+      test-net:
+
   # Echoes whatever UDP it is sent. The sandboxed step must not be able to
   # reach it, and a container beside it must, or "unreachable" would prove
   # nothing.
