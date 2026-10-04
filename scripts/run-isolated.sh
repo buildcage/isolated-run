@@ -91,8 +91,7 @@ done
 [ -x "$RUNC_PATH" ] || { echo "ERROR: runc not found or not executable: ${RUNC_PATH}" >&2; exit 1; }
 [ -f "${BUNDLE_DIR}/config.json" ] || { echo "ERROR: OCI bundle config not found: ${BUNDLE_DIR}/config.json" >&2; exit 1; }
 
-RAND_ID=$(od -An -tx1 -N4 /dev/urandom 2>/dev/null | tr -d ' \n')
-[ -z "$RAND_ID" ] && RAND_ID=$(printf '%08x' "$$")
+RAND_ID=$(od -An -tx1 -N4 /dev/urandom | tr -d ' \n')
 VETH_T="sbxt${RAND_ID}"
 VETH_P="sbxp${RAND_ID}"
 # `ip link set ... netns` takes a name under /var/run/netns/, not a path.
@@ -157,6 +156,18 @@ trap cleanup EXIT
 trap 'CODE=130; exit' INT
 trap 'CODE=143; exit' TERM
 
+# A failed setup command would otherwise end the step with a bare exit 1, the
+# same as a command that exits 1. Closes the group first so the annotation is
+# not folded away inside it.
+setup_failed() {
+  # The first line names a multi-line command well enough; $LINENO would
+  # give its last.
+  local command=${2%%$'\n'*}
+  [ "$IN_GROUP" = "1" ] && group_end
+  echo "::error::buildcage: sandbox setup failed (exit $1): ${command//'%'/'%25'}" >&2
+}
+trap 'setup_failed "$?" "$BASH_COMMAND"' ERR
+
 # Bind-mounted first, before any of the network setup below: it has no
 # dependency on the netns/veth work that follows, and doing it first
 # minimizes the gap between sandbox/mountinfo.ts's listHostMounts() snapshot
@@ -210,6 +221,7 @@ nsenter --net="$PROXY_NETNS" -- sh -c '
 
 echo "Executing isolated command via runc..." >&2
 group_end
+trap - ERR
 set +e
 # No nsenter wrapper needed here: config.json's linux.namespaces network
 # entry already points at /var/run/netns/${NETNS_NAME}, so runc joins it
