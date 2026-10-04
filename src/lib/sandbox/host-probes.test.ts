@@ -114,4 +114,12 @@ describe("parseCgroupV2Path", () => {
     expect(parseCgroupV2Path("")).toBeUndefined();
     expect(parseCgroupV2Path("0::relative\n")).toBeUndefined();
   });
+
+  it("reads nothing for a cgroup outside this process's cgroup namespace", () => {
+    expect(parseCgroupV2Path("0::/../system.slice/actions.runner.service\n")).toBeUndefined();
+  });
+
+  it("reads nothing for a cgroup already removed", () => {
+    expect(parseCgroupV2Path("0::/system.slice/old.scope (deleted)\n")).toBeUndefined();
+  });
 });

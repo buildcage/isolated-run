@@ -24715,7 +24715,9 @@ function shmSizeFromStatfs({ type, bsize, blocks }) {
 }
 function parseCgroupV2Path(procCgroup) {
 	let lines = procCgroup.split("\n").filter((line) => line !== "");
-	if (lines.length === 1 && lines[0].startsWith("0::/")) return lines[0].slice(3);
+	if (lines.length !== 1 || !lines[0].startsWith("0::/")) return;
+	let path = lines[0].slice(3);
+	if (!(path.split("/").includes("..") || path.endsWith(" (deleted)"))) return path;
 }
 function readOptionalFile(path) {
 	try {
