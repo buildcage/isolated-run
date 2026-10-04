@@ -8,6 +8,10 @@
 # A second sandbox puts the config directory inside a workspace nested in
 # $HOME, as on a hosted runner, where the directories between the workspace
 # and $HOME are writable through $HOME and must not be renamable either.
+#
+# Two more reach the config directory through a symlink. One placed in $HOME,
+# which the command could replace, refuses to start; one placed where the
+# sandbox cannot write is followed, and its target is what becomes read-only.
 set -uo pipefail
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
@@ -23,9 +27,13 @@ NESTED_WRITABLE="$DOCKER_CONFIG_DIR/buildcage-test-$$"
 
 NESTED_BASE="$HOME/.buildcage-test-ws-$$"
 NESTED_WORKSPACE="$NESTED_BASE/repo/repo"
+LINK_IN_HOME="$HOME/.buildcage-test-cfg-link-$$"
+LINK_OUTSIDE="/var/tmp/buildcage-test-cfg-link-$$"
+LINKED_CONFIG="$HOME/.buildcage-test-cfg-$$"
 
 cleanup() {
   rm -rf "$WORKDIR" "$STANDIN_DIR" "$NESTED_WRITABLE" "$NESTED_BASE" "$NESTED_BASE.moved"
+  rm -rf "$LINK_IN_HOME" "$LINK_OUTSIDE" "$LINKED_CONFIG"
   rm -f "$DOCKER_CONFIG_DIR/.buildcage-probe" "$ACTION_ROOT/.buildcage-probe"
 }
 trap cleanup EXIT
@@ -117,11 +125,42 @@ exit \$rc
   node dist/main.cjs
 NESTED_CODE=$?
 
+mkdir -p "$LINKED_CONFIG"
+ln -s "$LINKED_CONFIG" "$LINK_IN_HOME"
+ln -s "$LINKED_CONFIG" "$LINK_OUTSIDE"
+
+run_with_config() {
+  GITHUB_WORKSPACE="$WORKDIR" \
+  GITHUB_STATE="$WORKDIR/state.env" \
+  GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
+  DOCKER_CONFIG="$1" \
+  BUILDCAGE_BUILD_TEST_HOOKS=1 \
+  BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
+  INPUT_RUN="if touch '$LINKED_CONFIG/probe' 2>/dev/null; then
+  echo 'UNEXPECTED: the linked config directory was writable'
+  exit 1
+fi
+echo 'OK: the linked config directory is read-only'" \
+    node dist/main.cjs 2>&1
+}
+
+LINK_IN_HOME_OUT=$(run_with_config "$LINK_IN_HOME")
+LINK_IN_HOME_CODE=$?
+echo "$LINK_IN_HOME_OUT"
+run_with_config "$LINK_OUTSIDE"
+LINK_OUTSIDE_CODE=$?
+
 echo ""
 echo "=== Sandbox Host Command Assertions ==="
 echo ""
 check_status "the step ran with the stand-in docker first on PATH" "$CODE" 0
 check_status "nothing between a nested workspace and \$HOME could be renamed" "$NESTED_CODE" 0
+if [ "$LINK_IN_HOME_CODE" != 0 ] && echo "$LINK_IN_HOME_OUT" | grep -q "a symlink the sandboxed command can replace"; then
+  pass "a config directory reached through a symlink in \$HOME refuses to start"
+else
+  fail "a config directory reached through a symlink in \$HOME did not refuse to start (exit $LINK_IN_HOME_CODE)"
+fi
+check_status "a config directory reached through a symlink outside \$HOME is read-only at its target" "$LINK_OUTSIDE_CODE" 0
 if [ -e "$MARKER" ]; then
   fail "the stand-in docker under \$HOME was run in place of the real one"
 else

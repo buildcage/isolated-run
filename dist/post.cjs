@@ -765,16 +765,17 @@ const realFindCommandDeps = {
 			return !1;
 		}
 	},
-	readlink: (path) => {
-		try {
-			let target = (0, node_fs.readlinkSync)(path);
-			return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)(realpathOrSelf((0, node_path.dirname)(path)), target);
-		} catch {
-			return null;
-		}
-	},
+	readlink: readlinkAbsolute,
 	realpathDir: realpathOrSelf
 };
+function readlinkAbsolute(path) {
+	try {
+		let target = (0, node_fs.readlinkSync)(path);
+		return (0, node_path.isAbsolute)(target) ? target : (0, node_path.resolve)(realpathOrSelf((0, node_path.dirname)(path)), target);
+	} catch {
+		return null;
+	}
+}
 function withRealPaths(paths, realpath = realpathOrSelf) {
 	return [...new Set([...paths, ...paths.map(realpath)])];
 }

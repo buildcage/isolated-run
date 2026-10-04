@@ -77,17 +77,19 @@ const realFindCommandDeps: FindCommandDeps = {
       return false;
     }
   },
-  readlink: (path) => {
-    try {
-      const target = readlinkSync(path);
-      // The kernel resolves a relative target against the real directory.
-      return isAbsolute(target) ? target : resolve(realpathOrSelf(dirname(path)), target);
-    } catch {
-      return null;
-    }
-  },
+  readlink: readlinkAbsolute,
   realpathDir: realpathOrSelf,
 };
+
+export function readlinkAbsolute(path: string): string | null {
+  try {
+    const target = readlinkSync(path);
+    // The kernel resolves a relative target against the real directory.
+    return isAbsolute(target) ? target : resolve(realpathOrSelf(dirname(path)), target);
+  } catch {
+    return null;
+  }
+}
 /* v8 ignore stop */
 
 export interface DefaultWritableDirs {
@@ -267,21 +269,84 @@ export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
 }
 
 /**
- * The action checkout and docker config directory, where a persisting path
- * contains them. One that is itself a persisting path is skipped: `uses: ./`
- * runs the action from the workspace, and write_through may name the config
- * directory. A persisting path nested inside one stays writable, since runc
- * remounts only the top of a read-only path.
+ * The action checkout and docker config directory, by real path, where a
+ * persisting path contains them. One that is itself a persisting path is
+ * skipped: `uses: ./` runs the action from the workspace, and write_through may
+ * name the config directory. A persisting path nested inside one stays
+ * writable, since runc remounts only the top of a read-only path.
+ *
+ * Throws when one goes through a symlink in a persisting path: the mount
+ * protects only the symlink's target, and the sandbox could replace the
+ * symlink itself with a directory of its own. Under write_through: / every
+ * symlink is replaceable, so none is refused.
  */
 export function sandboxReadonlyHostDirs(
   persisting: string[],
   env: NodeJS.ProcessEnv,
   actionRoot: string = ACTION_ROOT,
+  deps: Pick<FindCommandDeps, "readlink" | "realpathDir"> = realFindCommandDeps,
 ): string[] {
-  const candidates = [actionRoot, dockerConfigDir(env)].filter((p): p is string => Boolean(p));
-  return candidates.filter(
-    (dir) => persisting.some((p) => isAtOrUnder(dir, p)) && !persisting.includes(dir),
-  );
+  const docker = dockerConfigDir(env);
+  const candidates = [
+    {
+      name: "This action's checkout",
+      dir: actionRoot,
+      fix: (link: string) =>
+        "the runner runs this action's post step from there. Configure the runner's work " +
+        `directory by its real path, ${JSON.stringify(deps.realpathDir(link))}, not through the symlink.`,
+    },
+    ...(docker
+      ? [
+          {
+            name: "The docker CLI's config directory",
+            dir: docker,
+            fix: () =>
+              "this action runs docker on the host after the command exits. Set DOCKER_CONFIG to " +
+              `its real path, ${JSON.stringify(deps.realpathDir(docker))}.`,
+          },
+        ]
+      : []),
+  ];
+  const roots = persisting.filter((p) => p !== "/");
+  return candidates.flatMap(({ name, dir, fix }) => {
+    const resolved = resolveThroughFixedLinks(dir, roots, deps.readlink);
+    if ("link" in resolved) {
+      throw new SandboxError(
+        `${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(resolved.link)}, a symlink the ` +
+          `sandboxed command can replace, and ${fix(resolved.link)}`,
+        "HOST_DIR_UNPROTECTABLE",
+      );
+    }
+    const real = resolved.real;
+    return persisting.some((p) => isAtOrUnder(real, p)) && !persisting.includes(real) ? [real] : [];
+  });
+}
+
+/**
+ * `path` with its symlinks resolved, or the first symlink that sits in one of
+ * `roots`. Components past the last existing one are kept as written.
+ */
+function resolveThroughFixedLinks(
+  path: string,
+  roots: string[],
+  readlink: FindCommandDeps["readlink"],
+): { real: string } | { link: string } {
+  let rest = path.split("/").filter(Boolean);
+  let current = "/";
+  for (let hops = 0; rest.length > 0;) {
+    const candidate = join(current, rest.shift()!);
+    const target = readlink(candidate);
+    if (target === null) {
+      current = candidate;
+      continue;
+    }
+    if (roots.some((p) => isAtOrUnder(current, p)) || ++hops > MAX_SYMLINK_HOPS) {
+      return { link: candidate };
+    }
+    rest = [...target.split("/").filter(Boolean), ...rest];
+    current = "/";
+  }
+  return { real: current };
 }
 
 /**

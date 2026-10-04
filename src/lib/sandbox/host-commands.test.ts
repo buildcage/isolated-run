@@ -354,40 +354,138 @@ describe("dockerConfigDir", () => {
 describe("sandboxReadonlyHostDirs", () => {
   const ACTION = "/home/runner/work/_actions/buildcage/isolated-run/v1";
 
+  /** A filesystem whose only symlinks are `links`, each to an absolute path. */
+  function withLinks(links: Record<string, string>) {
+    const realpathDir = (path: string): string => {
+      for (const [link, target] of Object.entries(links)) {
+        if (path === link || path.startsWith(`${link}/`)) {
+          return realpathDir(target + path.slice(link.length));
+        }
+      }
+      return path;
+    };
+    return { readlink: (path: string) => links[path] ?? null, realpathDir };
+  }
+  const NO_LINKS = withLinks({});
+
   it("is the action and docker config directories when a persisting path holds them", () => {
-    expect(sandboxReadonlyHostDirs(PERSISTENT, { HOME }, ACTION)).toStrictEqual([
+    expect(sandboxReadonlyHostDirs(PERSISTENT, { HOME }, ACTION, NO_LINKS)).toStrictEqual([
       ACTION,
       `${HOME}/.docker`,
     ]);
   });
 
   it("leaves out a directory no persisting path holds", () => {
-    expect(sandboxReadonlyHostDirs([`${WORKSPACE}/dist`], { HOME }, ACTION)).toStrictEqual([]);
+    expect(
+      sandboxReadonlyHostDirs([`${WORKSPACE}/dist`], { HOME }, ACTION, NO_LINKS),
+    ).toStrictEqual([]);
   });
 
   it("covers both under write_through: /", () => {
-    expect(sandboxReadonlyHostDirs(["/"], { HOME }, ACTION)).toStrictEqual([
+    expect(sandboxReadonlyHostDirs(["/"], { HOME }, ACTION, NO_LINKS)).toStrictEqual([
       ACTION,
       `${HOME}/.docker`,
     ]);
   });
 
   it("leaves out one that contains a persisting path, as uses: ./ puts the action in the workspace", () => {
-    expect(sandboxReadonlyHostDirs(PERSISTENT, { HOME }, WORKSPACE)).toStrictEqual([
+    expect(sandboxReadonlyHostDirs(PERSISTENT, { HOME }, WORKSPACE, NO_LINKS)).toStrictEqual([
       `${HOME}/.docker`,
     ]);
   });
 
   it("keeps one read-only when a persisting path only sits inside it", () => {
     expect(
-      sandboxReadonlyHostDirs([...PERSISTENT, `${HOME}/.docker/buildx`], { HOME }, ACTION),
+      sandboxReadonlyHostDirs(
+        [...PERSISTENT, `${HOME}/.docker/buildx`],
+        { HOME },
+        ACTION,
+        NO_LINKS,
+      ),
     ).toStrictEqual([ACTION, `${HOME}/.docker`]);
   });
 
   it("leaves out one a write_through entry names outright", () => {
     expect(
-      sandboxReadonlyHostDirs([...PERSISTENT, `${HOME}/.docker`], { HOME }, ACTION),
+      sandboxReadonlyHostDirs([...PERSISTENT, `${HOME}/.docker`], { HOME }, ACTION, NO_LINKS),
     ).toStrictEqual([ACTION]);
+  });
+  it("refuses a docker config directory that is itself a symlink in a persisting path", () => {
+    expect(() =>
+      sandboxReadonlyHostDirs(
+        PERSISTENT,
+        { HOME },
+        ACTION,
+        withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        code: "HOST_DIR_UNPROTECTABLE",
+        message: expect.stringContaining(
+          'Set DOCKER_CONFIG to its real path, "/mnt/shared/docker"',
+        ),
+      }),
+    );
+  });
+
+  it("refuses a checkout reached through a symlinked runner work directory in a persisting path", () => {
+    const checkout = `${HOME}/actions-runner/_work/_actions/buildcage/isolated-run/v1`;
+
+    expect(() =>
+      sandboxReadonlyHostDirs(
+        PERSISTENT,
+        { HOME },
+        checkout,
+        withLinks({ [`${HOME}/actions-runner/_work`]: "/mnt/data/_work" }),
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        code: "HOST_DIR_UNPROTECTABLE",
+        message: expect.stringContaining(`goes through "${HOME}/actions-runner/_work"`),
+      }),
+    );
+  });
+
+  it("follows a symlink outside every persisting path and protects its target", () => {
+    expect(
+      sandboxReadonlyHostDirs(
+        PERSISTENT,
+        { HOME, DOCKER_CONFIG: "/opt/cfg" },
+        ACTION,
+        withLinks({ "/opt/cfg": `${HOME}/.cfg` }),
+      ),
+    ).toStrictEqual([ACTION, `${HOME}/.cfg`]);
+  });
+
+  it("refuses nothing under write_through: /, where every symlink is replaceable", () => {
+    expect(
+      sandboxReadonlyHostDirs(
+        ["/"],
+        { HOME },
+        ACTION,
+        withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),
+      ),
+    ).toStrictEqual([ACTION, "/mnt/shared/docker"]);
+  });
+
+  it("refuses nothing when the symlink sits where writes are discarded, as in ephemeral mode", () => {
+    expect(
+      sandboxReadonlyHostDirs(
+        [`${WORKSPACE}/dist`],
+        { HOME },
+        ACTION,
+        withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),
+      ),
+    ).toStrictEqual([]);
+  });
+
+  it("refuses a symlink loop", () => {
+    expect(() =>
+      sandboxReadonlyHostDirs(PERSISTENT, { HOME, DOCKER_CONFIG: "/opt/a" }, ACTION, {
+        readlink: (p) => ({ "/opt/a": "/opt/b", "/opt/b": "/opt/a" })[p] ?? null,
+        realpathDir: (p) => p,
+      }),
+    ).toThrow(expect.objectContaining({ code: "HOST_DIR_UNPROTECTABLE" }));
   });
 });
 

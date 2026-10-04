@@ -355,8 +355,10 @@ runner user could not write outside the sandbox stays unwritable inside it.
 The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) and this action's own
 checkout stay read-only, since the action runs `docker` and its post script from them after the
 command exits. The exceptions are a `write_through:` entry naming the directory itself, and
-`uses: ./`, whose checkout is the workspace. A command that writes docker config (`docker login`, `gcloud auth configure-docker`)
-needs a step of its own.
+`uses: ./`, whose checkout is the workspace. A command that writes docker config (`docker login`,
+`gcloud auth configure-docker`) needs a step of its own. Either directory reached through a symlink
+the command could replace, such as a `~/.docker` that links elsewhere, fails the step before the
+command runs; point `DOCKER_CONFIG` or the runner's work directory at the real path instead.
 
 > [!WARNING]
 > `filesystem_mode: ephemeral` is **experimental**: its behavior, inputs, and error messages may still

@@ -32,6 +32,8 @@ import { ActionError } from "#core/lib/errors.ts";
  *   CONTAINER_NAME_INVALID            a value read back from GITHUB_STATE isn't a name this action generates
  *   SCRATCH_DIR_UNSAFE                the sudo rm -rf fallback's target isn't owned by the runner uid
  *   HOST_COMMAND_UNPINNABLE           `docker` or `sudo` is only on PATH somewhere the sandboxed command can write
+ *   HOST_DIR_UNPROTECTABLE            the docker config directory or this action's checkout goes through a symlink
+ *                                     the sandboxed command can replace
  *   NSS_DATABASE_CA_COPIED            inspect engine only: what the command wrote to the runner's NSS database
  *                                     carries a copy of the proxy CA, under fail_on_ca_residue: true
  *   NSS_DATABASE_WRITE_BACK_FAILED    inspect engine only: what the command wrote to the runner's NSS database
@@ -62,6 +64,7 @@ export type SandboxErrorCode =
   | "SCRATCH_DIR_OUT_OF_BASE"
   | "SCRATCH_DIR_UNSAFE"
   | "HOST_COMMAND_UNPINNABLE"
+  | "HOST_DIR_UNPROTECTABLE"
   | "NSS_DATABASE_CA_COPIED"
   | "NSS_DATABASE_WRITE_BACK_FAILED";
 
