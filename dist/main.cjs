@@ -24985,7 +24985,7 @@ const PINNED_COMMANDS = ["docker", "sudo"];
 function persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath = realPathOf) {
 	let realWriteThrough = writeThroughPaths.map((path) => {
 		let real = realpath(path);
-		if (real === "/" && path !== "/") throw new SandboxError(`write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink.`, "INVALID_WRITE_THROUGH_PATH");
+		if (real === "/" && path !== "/") throw new SandboxError(`write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a literal "/" if dropping the read-only restriction entirely is what you meant.`, "INVALID_WRITE_THROUGH_PATH");
 		return real;
 	});
 	return filesystemMode === "ephemeral" ? [...new Set(realWriteThrough)] : writableDirsOf({

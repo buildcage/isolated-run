@@ -53,7 +53,8 @@ export function persistingWritablePaths(
     const real = realpath(path);
     if (real === "/" && path !== WRITE_THROUGH_ALL) {
       throw new SandboxError(
-        `write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink.`,
+        `write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a ` +
+          'literal "/" if dropping the read-only restriction entirely is what you meant.',
         "INVALID_WRITE_THROUGH_PATH",
       );
     }

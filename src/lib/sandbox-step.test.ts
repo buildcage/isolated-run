@@ -5,7 +5,7 @@ import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 import { SandboxError } from "./errors.ts";
 import { runSandboxStep, type SandboxStepDeps } from "./sandbox-step.ts";
 
-// pinningPaths resolves the runner's paths on this machine otherwise.
+// Keeps pinningPaths from resolving the fixture's paths on this machine.
 vi.mock("./sandbox/symlinks.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./sandbox/symlinks.ts")>()),
   realPathOf: (path: string) => path,

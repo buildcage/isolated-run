@@ -58,7 +58,7 @@ describe("persistingWritablePaths", () => {
     ).toStrictEqual([`${WORKSPACE}/dist`]);
   });
 
-  it("refuses an entry that only a symlink makes /, which would read as the full opt-out", () => {
+  it("refuses an entry a symlink resolves to /, which would read as the full opt-out", () => {
     const real = (p: string) => realPathOf(p, withLinks({ [`${HOME}/cache`]: "/" }));
 
     expect(() => persistingWritablePaths("ephemeral", [`${HOME}/cache`], env, real)).toThrow(
@@ -67,7 +67,7 @@ describe("persistingWritablePaths", () => {
     expect(persistingWritablePaths("ephemeral", ["/"], env, real)).toStrictEqual(["/"]);
   });
 
-  it("spells each path as it really resolves, so a path is judged by one spelling", () => {
+  it("spells each path as it really resolves", () => {
     const real = (p: string) => realPathOf(p, withLinks({ [HOME]: "/data/runner" }));
 
     expect(persistingWritablePaths("persistent", [`${HOME}/out`], env, real)).toStrictEqual([
