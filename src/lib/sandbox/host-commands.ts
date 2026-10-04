@@ -26,7 +26,7 @@ import {
   type ResolvedHostPath,
   type SymlinkDeps,
 } from "./symlinks.ts";
-import { resolveWriteThroughPaths, WRITE_THROUGH_ALL } from "./write-through.ts";
+import { resolveWriteThroughPaths } from "./write-through.ts";
 
 /** The checkout as the runner spelled it, which is the path it runs the post
  *  step from: the bundle runs from `dist/`, one level below it. Node resolves
@@ -38,10 +38,10 @@ function runnerActionRoot(): string {
 const PINNED_COMMANDS = ["docker", "sudo"] as const;
 
 /**
- * Host paths whose writes outlive the command, by real path. Ephemeral mode's
- * overlays discard theirs, so only write_through counts there. Throws for an
- * entry other than a literal `/` that resolves to `/`: an earlier step could
- * have planted the symlink, and `/` in the result is the full opt-out.
+ * Host paths whose writes outlive the command. Ephemeral mode's overlays
+ * discard theirs, so only write_through counts there. The runner's own
+ * directories are taken by real path, write_through entries as written: one
+ * through a symlink is refused before it is mounted.
  */
 export function persistingWritablePaths(
   filesystemMode: FilesystemMode,
@@ -49,21 +49,10 @@ export function persistingWritablePaths(
   env: NodeJS.ProcessEnv,
   realpath: (path: string) => string = realPathOf,
 ): string[] {
-  const realWriteThrough = writeThroughPaths.map((path) => {
-    const real = realpath(path);
-    if (real === "/" && path !== WRITE_THROUGH_ALL) {
-      throw new SandboxError(
-        `write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a ` +
-          'literal "/" if dropping the read-only restriction entirely is what you meant.',
-        "INVALID_WRITE_THROUGH_PATH",
-      );
-    }
-    return real;
-  });
-  if (filesystemMode === "ephemeral") return [...new Set(realWriteThrough)];
+  if (filesystemMode === "ephemeral") return writeThroughPaths;
   return writableDirsOf({
     ...resolveDefaultWritableDirs(env, realpath),
-    writablePaths: realWriteThrough,
+    writablePaths: writeThroughPaths,
   });
 }
 

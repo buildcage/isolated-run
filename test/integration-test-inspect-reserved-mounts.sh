@@ -69,15 +69,22 @@ fi
 echo "--- bringing up fixture origins (compose.test-inspect.yaml) ---"
 docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" up -d --build --wait
 
-for entry in "$CA_DIR_LINK" "$TARGET"; do
-  run_instance "$entry" "true"
-  CODE=$(cat "$WORKDIR/exit_code")
-  if [ "$CODE" != "0" ] && grep -qF "is in the CA directory \"$CA_DIR_LINK\" (a symlink to \"$TARGET\")" "$WORKDIR/out.log"; then
-    pass "write_through: $entry is refused when $CA_DIR_LINK links to $TARGET"
-  else
-    fail "write_through: $entry was accepted (exit $CODE)"
-  fi
-done
+# The link itself fails as a symlink, before the CA directory check.
+run_instance "$CA_DIR_LINK" "true"
+CODE=$(cat "$WORKDIR/exit_code")
+if [ "$CODE" != "0" ] && grep -qF "symlinks are not followed. Name the path it leads to instead: \"$TARGET\"" "$WORKDIR/out.log"; then
+  pass "write_through: $CA_DIR_LINK is refused as a symlink to $TARGET"
+else
+  fail "write_through: $CA_DIR_LINK was accepted (exit $CODE)"
+fi
+
+run_instance "$TARGET" "true"
+CODE=$(cat "$WORKDIR/exit_code")
+if [ "$CODE" != "0" ] && grep -qF "is in the CA directory \"$CA_DIR_LINK\" (a symlink to \"$TARGET\")" "$WORKDIR/out.log"; then
+  pass "write_through: $TARGET is refused when $CA_DIR_LINK links to it"
+else
+  fail "write_through: $TARGET was accepted (exit $CODE)"
+fi
 
 # The parent stays allowed, and the CA copy still lands where the link leads.
 run_instance "$TARGET_PARENT" "test -f '$TARGET/buildcage-proxy-ca.pem'"

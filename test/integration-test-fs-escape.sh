@@ -91,8 +91,8 @@ else
 fi
 echo ""
 
-# An earlier step could plant a runner-owned symlink under write_through, so an
-# entry through one must fail before the command runs.
+# An earlier step could plant a symlink under write_through, so an entry
+# through one must fail before the command runs.
 WORKDIR3=$(mktemp -d)
 TARGET3=$(mktemp -d)
 trap 'rm -rf "$WORKDIR" "$WORKDIR2" "$WORKDIR3" "$TARGET3"' EXIT
@@ -113,12 +113,12 @@ LINK_OUTPUT=$(
 LINK_CODE=$?
 echo "$LINK_OUTPUT"
 
-echo "=== Sandbox write_through: through a runner-owned symlink Fail-Closed Assertion ==="
+echo "=== Sandbox write_through: through a symlink Fail-Closed Assertion ==="
 echo ""
 if [ "$LINK_CODE" != "0" ] && echo "$LINK_OUTPUT" | grep -q "a symlink" && [ ! -e "$TARGET3/written" ]; then
   echo "  PASS  write_through: ./cache -> $TARGET3 was rejected before the command ran"
 else
-  echo "  FAIL  write_through: through a runner-owned symlink was not rejected (exit $LINK_CODE)"
+  echo "  FAIL  write_through: through a symlink was not rejected (exit $LINK_CODE)"
   exit 1
 fi
 echo ""

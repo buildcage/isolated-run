@@ -714,16 +714,15 @@ function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
 			current = (0, node_path.dirname)(current);
 			continue;
 		}
-		let next = (0, node_path.join)(current, name), info = lstat(next);
-		if (!info?.isSymbolicLink()) {
+		let next = (0, node_path.join)(current, name);
+		if (!lstat(next)?.isSymbolicLink()) {
 			current = next;
 			continue;
 		}
 		let target = readlink(next);
 		if (links.push({
 			at: next,
-			target,
-			uid: info.uid
+			target
 		}), links.length > 40) return {
 			loop: !0,
 			links
@@ -785,14 +784,9 @@ function resolveWriteThroughPaths(input, env) {
 //#region src/lib/sandbox/host-commands.ts
 const PINNED_COMMANDS = ["docker", "sudo"];
 function persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath = realPathOf) {
-	let realWriteThrough = writeThroughPaths.map((path) => {
-		let real = realpath(path);
-		if (real === "/" && path !== "/") throw new SandboxError(`write_through entry ${JSON.stringify(path)} resolves to "/" through a symlink. Write a literal "/" if dropping the read-only restriction entirely is what you meant.`, "INVALID_WRITE_THROUGH_PATH");
-		return real;
-	});
-	return filesystemMode === "ephemeral" ? [...new Set(realWriteThrough)] : writableDirsOf({
+	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
 		...resolveDefaultWritableDirs(env, realpath),
-		writablePaths: realWriteThrough
+		writablePaths: writeThroughPaths
 	});
 }
 const realFindCommandDeps = {

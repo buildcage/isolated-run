@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join } from "node:path";
 
 export interface SymlinkDeps {
   /** lstat(2), or undefined when it fails, as on a missing path. */
-  lstat: (path: string) => { uid: number; isSymbolicLink(): boolean } | undefined;
+  lstat: (path: string) => { isSymbolicLink(): boolean } | undefined;
   /** readlink(2): the target as stored, relative or not. */
   readlink: (path: string) => string;
 }
@@ -12,7 +12,6 @@ export interface SymlinkDeps {
 export interface SymlinkHop {
   at: string;
   target: string;
-  uid: number;
 }
 
 export type ResolvedHostPath =
@@ -63,7 +62,7 @@ export function resolveHostPath(
       continue;
     }
     const target = readlink(next);
-    links.push({ at: next, target, uid: info.uid });
+    links.push({ at: next, target });
     if (links.length > MAX_SYMLINK_HOPS) return { loop: true, links };
     pending.unshift(...target.split("/").filter((c) => c !== "" && c !== "."));
     if (isAbsolute(target)) current = "/";

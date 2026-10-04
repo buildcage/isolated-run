@@ -14,7 +14,7 @@ describe("resolveFilesystemPlan", () => {
   // Everything "exists" by default (candidates + write_through targets) unless
   // a test narrows it, which keeps each test focused on the one thing it checks.
   const alwaysExists = () => true;
-  const notLink = () => ({ uid: 1000, isSymbolicLink: () => false });
+  const notLink = () => ({ isSymbolicLink: () => false });
 
   it("returns an empty plan for persistent mode with no write_through:, without touching the filesystem", () => {
     const exists = vi.fn(alwaysExists);
@@ -26,6 +26,7 @@ describe("resolveFilesystemPlan", () => {
   it("resolves write_through: in persistent mode too, normalizing each entry", () => {
     const plan = resolveFilesystemPlan("persistent", "./dist\n/opt/./cache/\n", ENV, {
       exists: alwaysExists,
+      realpath: (p) => p,
       lstat: notLink,
     });
     expect(plan.writeThroughPaths).toStrictEqual([`${ENV.GITHUB_WORKSPACE}/dist`, "/opt/cache"]);
@@ -118,47 +119,65 @@ describe("resolveFilesystemPlan", () => {
     });
   });
 
-  describe("an entry that passes through a symlink", () => {
-    const link = (links: Record<string, { target: string; uid: number }>) => ({
-      exists: alwaysExists,
-      lstat: (p: string) => ({ uid: links[p]?.uid ?? 1000, isSymbolicLink: () => p in links }),
-      readlink: (p: string) => links[p]!.target,
-      mkdir: () => {},
-      deviceOf: () => 1,
-      listHostMounts: () => [],
-    });
-
-    it("refuses one the runner's uid owns as INVALID_WRITE_THROUGH_PATH, before creating anything", () => {
-      const deps = link({
-        [`${ENV.GITHUB_WORKSPACE}/cache`]: { target: ENV.RUNNER_TEMP, uid: 1000 },
+  it("refuses an entry through a symlink as INVALID_WRITE_THROUGH_PATH, before creating anything", () => {
+    const mkdir = vi.fn();
+    expect.assertions(3);
+    try {
+      resolveFilesystemPlan("ephemeral", "./cache", ENV, {
+        exists: alwaysExists,
+        realpath: (p) => p,
+        lstat: (p) => ({ isSymbolicLink: () => p === `${ENV.GITHUB_WORKSPACE}/cache` }),
+        readlink: () => ENV.RUNNER_TEMP,
+        mkdir,
       });
-      const mkdir = vi.fn();
-      expect.assertions(3);
-      try {
-        resolveFilesystemPlan("ephemeral", "./cache", ENV, { ...deps, mkdir });
-      } catch (err) {
-        expect(err).toBeInstanceOf(SandboxError);
-        expect((err as SandboxError).code).toBe("INVALID_WRITE_THROUGH_PATH");
-      }
-      expect(mkdir).not.toHaveBeenCalled();
+    } catch (err) {
+      expect(err).toBeInstanceOf(SandboxError);
+      expect((err as SandboxError).code).toBe("INVALID_WRITE_THROUGH_PATH");
+    }
+    expect(mkdir).not.toHaveBeenCalled();
+  });
+
+  describe("an entry under a runner directory that goes through a symlink", () => {
+    // As on Fedora Atomic, where /home links to /var/home.
+    const fedora = (extraLinks: string[] = []) => ({
+      exists: alwaysExists,
+      lstat: (p: string) => ({ isSymbolicLink: () => p === "/home" || extraLinks.includes(p) }),
+      readlink: () => "var/home",
+      realpath: (p: string) => p.replace(/^\/home\//, "/var/home/"),
+      mkdir: () => {},
     });
 
-    it("checks where a root-owned one leads, not how the entry was written", () => {
-      const deps = link({ "/opt/runc-view": { target: SANDBOX_SCRATCH_BASE, uid: 0 } });
-      expect(() => resolveFilesystemPlan("persistent", "/opt/runc-view", ENV, deps)).toThrow(
-        /overlaps/,
+    it("takes the runner directory at its real path, however the entry spells it", () => {
+      const plan = resolveFilesystemPlan(
+        "persistent",
+        "./dist\n~/.cache/pip\n/home/runner/out\n$RUNNER_TEMP/x",
+        ENV,
+        fedora(),
       );
-      const reserved = reservedInternalDestinations()[0]!;
-      const toReserved = link({ "/opt/dns": { target: reserved, uid: 0 } });
-      expect(() => resolveFilesystemPlan("persistent", "/opt/dns", ENV, toReserved)).toThrow(
-        /is reserved/,
-      );
+      expect(plan.writeThroughPaths).toStrictEqual([
+        "/var/home/runner/work/repo/repo/dist",
+        "/var/home/runner/.cache/pip",
+        "/var/home/runner/out",
+        "/var/home/runner/work/_temp/x",
+      ]);
     });
 
-    it("hands the real path on to the mounts and the overlay fold", () => {
-      const deps = link({ "/opt/cache": { target: "/data/cache", uid: 0 } });
-      const plan = resolveFilesystemPlan("persistent", "/opt/cache", ENV, deps);
-      expect(plan.writeThroughPaths).toStrictEqual(["/data/cache"]);
+    it("leaves an entry under no runner directory as written", () => {
+      const env = { HOME: ENV.HOME, GITHUB_WORKSPACE: ENV.GITHUB_WORKSPACE };
+      expect(
+        resolveFilesystemPlan("persistent", "/opt/out", env, fedora()).writeThroughPaths,
+      ).toStrictEqual(["/opt/out"]);
+    });
+
+    it("still refuses a symlink in what the entry adds below it", () => {
+      expect(() =>
+        resolveFilesystemPlan(
+          "persistent",
+          "~/.cache/pip",
+          ENV,
+          fedora(["/var/home/runner/.cache"]),
+        ),
+      ).toThrow(expect.objectContaining({ code: "INVALID_WRITE_THROUGH_PATH" }));
     });
   });
 
@@ -269,7 +288,7 @@ describe("resolveFilesystemPlan", () => {
     }
   });
 
-  it("still reports a missing runner file as missing when its directory sits behind a root-owned symlink", () => {
+  it("still reports a missing runner file as missing when its directory sits behind a symlink", () => {
     const envBehindLink = { ...ENV, GITHUB_OUTPUT: "/work/_temp/set_output" };
     const mkdir = vi.fn();
     expect.assertions(3);
@@ -277,7 +296,7 @@ describe("resolveFilesystemPlan", () => {
       resolveFilesystemPlan("persistent", "$GITHUB_OUTPUT", envBehindLink, {
         exists: (p) =>
           p === "/work" || p === "/mnt" || p === "/mnt/work" || p === "/mnt/work/_temp",
-        lstat: (p) => ({ uid: p === "/work" ? 0 : 1000, isSymbolicLink: () => p === "/work" }),
+        lstat: (p) => ({ isSymbolicLink: () => p === "/work" }),
         readlink: () => "/mnt/work",
         mkdir,
       });
@@ -293,6 +312,7 @@ describe("resolveFilesystemPlan", () => {
     try {
       resolveFilesystemPlan("ephemeral", "./dist", ENV, {
         exists: (p) => p !== `${ENV.GITHUB_WORKSPACE}/dist`,
+        realpath: (p) => p,
         lstat: notLink,
         canWrite: () => false,
       });

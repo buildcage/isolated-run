@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   resolveWriteThroughEntry,
   resolveWriteThroughPaths,
-  resolveWriteThroughOnHost,
+  assertNoSymlinkInWriteThrough,
   ensureWriteThroughTargetsExist,
   splitWriteThroughInput,
   WriteThroughTargetUncreatableError,
@@ -180,56 +180,40 @@ describe("splitWriteThroughInput", () => {
   });
 });
 
-describe("resolveWriteThroughOnHost", () => {
-  const host = (dirs: string[], links: Record<string, { target: string; uid: number }> = {}) => ({
-    lstat: (p: string) =>
-      p in links
-        ? { uid: links[p]!.uid, isSymbolicLink: () => true }
-        : dirs.includes(p)
-          ? { uid: 1000, isSymbolicLink: () => false }
-          : undefined,
-    readlink: (p: string) => links[p]!.target,
+describe("assertNoSymlinkInWriteThrough", () => {
+  /** Every path exists; `links` are the symlinks, each to its stored target. */
+  const host = (links: Record<string, string> = {}) => ({
+    lstat: (p: string) => ({ isSymbolicLink: () => p in links }),
+    readlink: (p: string) => links[p]!,
   });
 
-  it("returns a path with no symlinks on it unchanged", () => {
-    expect(resolveWriteThroughOnHost("/a/b", host(["/a", "/a/b"]))).toBe("/a/b");
+  it("accepts a path with no symlinks on it, including one still to be created", () => {
+    const missing = { lstat: () => undefined, readlink: () => "" };
+    expect(() => assertNoSymlinkInWriteThrough("/a/b", host())).not.toThrow();
+    expect(() => assertNoSymlinkInWriteThrough("/a/b", missing)).not.toThrow();
   });
 
-  it("keeps the components that don't exist yet as written", () => {
-    expect(resolveWriteThroughOnHost("/a/b/c", host(["/a"]))).toBe("/a/b/c");
-  });
-
-  it("refuses a symlink the runner's uid owns, which an earlier step could have planted", () => {
-    const fake = host(["/ws", "/tmp/_temp"], { "/ws/cache": { target: "/tmp/_temp", uid: 1000 } });
-    expect(() => resolveWriteThroughOnHost("/ws/cache", fake)).toThrow(
-      /"\/ws\/cache", a symlink to "\/tmp\/_temp" owned by uid 1000/,
+  it("refuses a path that is itself a symlink, naming where it leads", () => {
+    expect(() =>
+      assertNoSymlinkInWriteThrough("/ws/cache", host({ "/ws/cache": "/tmp/_temp" })),
+    ).toThrow(
+      '"/ws/cache", a symlink to "/tmp/_temp", and symlinks are not followed. ' +
+        'Name the path it leads to instead: "/tmp/_temp".',
     );
-    // Also when it sits partway along the path.
-    expect(() => resolveWriteThroughOnHost("/ws/cache/sub", fake)).toThrow(/owned by uid 1000/);
   });
 
-  it("follows a root-owned symlink, absolute or relative, to the directory really there", () => {
-    const fake = host(["/data", "/data/home", "/data/home/runner", "/opt", "/opt/real"], {
-      "/home": { target: "/data/home", uid: 0 },
-      "/opt/link": { target: "../opt/./real", uid: 0 },
-    });
-    expect(resolveWriteThroughOnHost("/home/runner/x", fake)).toBe("/data/home/runner/x");
-    expect(resolveWriteThroughOnHost("/opt/link", fake)).toBe("/opt/real");
+  it("refuses a symlink partway along the path, as an OS's own /home link", () => {
+    expect(() =>
+      assertNoSymlinkInWriteThrough("/home/runner/x", host({ "/home": "var/home" })),
+    ).toThrow(/goes through "\/home".*instead: "\/var\/home\/runner\/x"/);
   });
 
-  it("walks a link target's .. back up through a component that doesn't exist yet", () => {
-    const fake = host(["/a"], { "/a/l": { target: "missing/../real", uid: 0 } });
-    expect(resolveWriteThroughOnHost("/a/l", fake)).toBe("/a/real");
-  });
-
-  it("refuses a root-owned symlink that lands on /", () => {
-    const fake = host([], { "/root-link": { target: "/", uid: 0 } });
-    expect(() => resolveWriteThroughOnHost("/root-link", fake)).toThrow(/resolves to "\/"/);
-  });
-
-  it("gives up on a symlink loop", () => {
-    const fake = host([], { "/loop": { target: "/loop", uid: 0 } });
-    expect(() => resolveWriteThroughOnHost("/loop", fake)).toThrow(/too many symlinks/);
+  it("names no path to use instead when the symlink leads to / or loops", () => {
+    for (const links of [{ "/root-link": "/" }, { "/root-link": "/root-link" }]) {
+      expect(() => assertNoSymlinkInWriteThrough("/root-link", host(links))).toThrow(
+        /symlinks are not followed\.$/,
+      );
+    }
   });
 });
 

@@ -25,7 +25,7 @@ const PERSISTENT = [WORKSPACE, HOME, "/tmp", "/home/runner/work/_temp"];
 /** A filesystem whose only symlinks are `links`, each to its stored target. */
 function withLinks(links: Record<string, string>) {
   const fs = {
-    lstat: (path: string) => ({ uid: 1001, isSymbolicLink: () => path in links }),
+    lstat: (path: string) => ({ isSymbolicLink: () => path in links }),
     readlink: (path: string) => links[path]!,
   };
   return fs;
@@ -58,24 +58,15 @@ describe("persistingWritablePaths", () => {
     ).toStrictEqual([`${WORKSPACE}/dist`]);
   });
 
-  it("refuses an entry a symlink resolves to /, which would read as the full opt-out", () => {
-    const real = (p: string) => realPathOf(p, withLinks({ [`${HOME}/cache`]: "/" }));
-
-    expect(() => persistingWritablePaths("ephemeral", [`${HOME}/cache`], env, real)).toThrow(
-      expect.objectContaining({ code: "INVALID_WRITE_THROUGH_PATH" }),
-    );
-    expect(persistingWritablePaths("ephemeral", ["/"], env, real)).toStrictEqual(["/"]);
-  });
-
-  it("spells each path as it really resolves", () => {
+  it("spells the runner's directories as they really resolve, and write_through as written", () => {
     const real = (p: string) => realPathOf(p, withLinks({ [HOME]: "/data/runner" }));
 
-    expect(persistingWritablePaths("persistent", [`${HOME}/out`], env, real)).toStrictEqual([
+    expect(persistingWritablePaths("persistent", ["/opt/out"], env, real)).toStrictEqual([
       "/data/runner/work/repo/repo",
       "/data/runner",
       "/tmp",
       "/data/runner/work/_temp",
-      "/data/runner/out",
+      "/opt/out",
     ]);
   });
 });
