@@ -270,8 +270,8 @@ CODE=$?
 set -e
 exec 3>&-
 
-# A cancelled step may stop the sandbox before the command starts, which is no
-# launch failure.
+# A cancelled step can stop the sandbox before the command starts; that is not
+# a launch failure.
 if [ "$STOPPING" = "0" ] && [ ! -s "$STARTED_FILE" ]; then
   echo "::error::buildcage: sandbox launch failed (runc exit ${CODE})" >&2
 else
