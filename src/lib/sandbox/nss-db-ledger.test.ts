@@ -341,7 +341,7 @@ describe("the lock", () => {
   });
 
   it.each(["", "not a pid"])("is taken over, long left, holding %j", (content) => {
-    holdLock(999_999, 60_000);
+    holdLock(999_999, 10_000);
     writeFileSync(join(base, "nssdb-ledger.lock"), content);
     utimesSync(join(base, "nssdb-ledger.lock"), new Date(0), new Date(0));
 
@@ -376,15 +376,26 @@ describe("the lock", () => {
 
   // Its pid may since have gone to another process.
   it("is taken over when held past any real holder's time, its pid alive or not", () => {
-    holdLock(999_999, 60_000);
+    holdLock(999_999, 10_000);
 
     claim(step("sandbox-a"), { pidAlive: () => true });
 
     expect(Object.keys(ledger().uses)).toStrictEqual(["sandbox-a"]);
   });
 
+  // A waiter that gave up first would fail its step while the lock still
+  // looked held. The clock moves a second per look.
+  it("is taken over within the wait when a live pid holds it too long", () => {
+    holdLock(999_999);
+    let clock = Date.now();
+
+    claim(step("sandbox-a"), { pidAlive: () => true, now: () => new Date((clock += 1_000)) });
+
+    expect(Object.keys(ledger().uses)).toStrictEqual(["sandbox-a"]);
+  });
+
   it.each([
-    ["whose holder is still there", 59_000, true],
+    ["whose holder is still there", 9_000, true],
     ["taken only just now", 0, false],
   ])("is waited on, not taken over, when it is one %s", (_label, age, alive) => {
     holdLock(999_999, age);
