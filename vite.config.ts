@@ -41,6 +41,7 @@ export default defineConfig({
   staged: {
     "*.{ts,tsx,js,jsx,json,jsonc,yaml,yml,md}": "vp check --fix",
     "docker/gen-seccomp-profile/**/*.go": "gofmt -w",
+    "docker/filesystem-audit/**/*.go": "gofmt -w",
   },
   test: {
     include: ["src/**/*.test.ts"],

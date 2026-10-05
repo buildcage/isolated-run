@@ -121,6 +121,27 @@ Go modules linked into /opt/buildcage/bin/gen-seccomp-profile
   Compiled from source at image build time; no Go toolchain remains in
   the published image.
 
+Go modules linked into /opt/buildcage/bin/filesystem-audit
+
+  github.com/cilium/ebpf
+    License : MIT License (MIT)
+    Source  : https://github.com/cilium/ebpf
+
+  golang.org/x/sys
+    License : BSD 3-Clause License (BSD-3-Clause)
+    Source  : https://cs.opensource.google/go/x/sys
+
+  Go standard library
+    License : BSD 3-Clause License (BSD-3-Clause)
+    Source  : https://go.dev/src/
+
+  The binary also embeds an eBPF object compiled from buildcage's own source
+  (docker/filesystem-audit/bpf, GPL-2.0, as the kernel's BPF helpers require);
+  that source ships in this repository.
+
+  Compiled from source at image build time; no Go toolchain remains in
+  the published image.
+
 ------------------------------------------------------------------------------
 
 Libraries these packages pull in, and the rest of the base image's packages,
