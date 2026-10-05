@@ -103,7 +103,14 @@ def collapse(paths, fanout, keep):
                 shown = d + "/**"
                 break
         out.add(shown)
-    return out
+    # A directory whose descendants are listed (e.g. the mkdir -p chain
+    # above a "dir/**") adds nothing.
+    prefixes = set()
+    for p in out:
+        parts = p.removesuffix("/**").split("/")
+        for i in range(1, len(parts)):
+            prefixes.add("/".join(parts[:i]))
+    return {p for p in out if p.removesuffix("/**") not in prefixes or p.endswith("/**")}
 
 
 def main():
