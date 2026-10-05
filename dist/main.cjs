@@ -23182,7 +23182,7 @@ const OWNER_TOKEN_VARS = [
 	"GITHUB_RUN_ATTEMPT",
 	"GITHUB_JOB",
 	"GITHUB_ACTION",
-	"RUNNER_NAME"
+	"RUNNER_TEMP"
 ];
 function ownerToken(env) {
 	let values = OWNER_TOKEN_VARS.map((name) => env[name]);

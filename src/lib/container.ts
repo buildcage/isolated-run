@@ -60,14 +60,15 @@ const OWNER_LABEL = "io.buildcage.owner";
 /** Set by the runner, so the isolated command can't reach them:
  *  GITHUB_ACTION is numbered (_2, _3) for repeated uses of one action within
  *  a job, the run/attempt/job triple separates jobs sharing a host, and
- *  RUNNER_NAME separates matrix legs, which share the other four, running on
- *  one host at once. */
+ *  RUNNER_TEMP separates matrix legs, which share the other four, running on
+ *  one host at once. It lies in each runner install's own work directory,
+ *  where RUNNER_NAME defaults to the hostname and can repeat. */
 const OWNER_TOKEN_VARS = [
   "GITHUB_RUN_ID",
   "GITHUB_RUN_ATTEMPT",
   "GITHUB_JOB",
   "GITHUB_ACTION",
-  "RUNNER_NAME",
+  "RUNNER_TEMP",
 ] as const;
 
 /**

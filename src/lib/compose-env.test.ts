@@ -11,7 +11,7 @@ const STEP_ENV = {
   GITHUB_RUN_ATTEMPT: "1",
   GITHUB_JOB: "build",
   GITHUB_ACTION: "buildcage",
-  RUNNER_NAME: "runner-1",
+  RUNNER_TEMP: "/runner-1/_work/_temp",
 };
 
 function options(overrides: Partial<ComposeEnvOptions> = {}): ComposeEnvOptions {
@@ -64,7 +64,7 @@ describe("buildComposeEnv", () => {
   it("labels the container with the step that started it", () => {
     const env = buildComposeEnv(options(), STEP_ENV, () => []);
 
-    expect(env.BUILDCAGE_OWNER).toBe("1/1/build/buildcage/runner-1");
+    expect(env.BUILDCAGE_OWNER).toBe("1/1/build/buildcage//runner-1/_work/_temp");
   });
 
   it("passes the job environment through, so docker compose keeps working", () => {

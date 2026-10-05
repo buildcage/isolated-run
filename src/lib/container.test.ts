@@ -117,11 +117,11 @@ describe("ownerToken", () => {
     GITHUB_RUN_ATTEMPT: "2",
     GITHUB_JOB: "build",
     GITHUB_ACTION: "buildcage_2",
-    RUNNER_NAME: "runner-1",
+    RUNNER_TEMP: "/runner-1/_work/_temp",
   };
 
   it("is built from the variables the runner sets for the step", () => {
-    expect(ownerToken(ACTIONS_ENV)).toBe("17/2/build/buildcage_2/runner-1");
+    expect(ownerToken(ACTIONS_ENV)).toBe("17/2/build/buildcage_2//runner-1/_work/_temp");
   });
 
   it("separates two uses of the action in one job, which GITHUB_ACTION numbers", () => {
@@ -135,8 +135,8 @@ describe("ownerToken", () => {
     expect(ownerToken({ ...ACTIONS_ENV, GITHUB_JOB: "test" })).not.toBe(ownerToken(ACTIONS_ENV));
   });
 
-  it("separates matrix legs sharing a host, which differ only in RUNNER_NAME", () => {
-    expect(ownerToken({ ...ACTIONS_ENV, RUNNER_NAME: "runner-2" })).not.toBe(
+  it("separates matrix legs sharing a host, which differ only in RUNNER_TEMP", () => {
+    expect(ownerToken({ ...ACTIONS_ENV, RUNNER_TEMP: "/runner-2/_work/_temp" })).not.toBe(
       ownerToken(ACTIONS_ENV),
     );
   });
