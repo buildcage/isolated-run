@@ -30,7 +30,7 @@ The action's own isolation mechanism (`run-isolated.sh`) uses Linux-only primiti
 which is enough to reach the proxy container's `SandboxKey` netns the same way production does.
 That is close enough to the real "runner host + separate proxy container"
 arrangement for day-to-day iteration, though it can't validate the container-boundary parts of
-production. `runc` and `gen-seccomp-profile` are
+production. `runc`, `gen-seccomp-profile` and `filesystem-audit` are
 built directly into the dev-loop image (mirroring `docker/universal/Dockerfile`) rather than
 `docker cp`-extracted from the proxy image at runtime, so the dev loop doesn't need the Docker
 socket mounted in just to reach a sibling container; `dev/build-test-bundle.sh` stands in for
@@ -309,9 +309,10 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 ├── docker/                    # Proxy image build contexts, one per proxy_engine
 │   ├── common/                # Image files both engines share: s6 services, init-iptables
 │   ├── universal/             # alpine + haproxy/CoreDNS/iptables/s6-overlay + pinned runc +
-│   │                          # gen-seccomp-profile
+│   │                          # gen-seccomp-profile + filesystem-audit
 │   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay
 │   ├── gen-seccomp-profile/   # Go module: derives a seccomp filter from Docker's default profile
+│   ├── filesystem-audit/      # Go+eBPF module: records a sandboxed step's file accesses (experimental)
 │   ├── compose.action.yaml    # Runtime compose file the action uses (verified, digest-pinned
 │   │                          # image ref), distinct from the top-level compose.yaml below
 │   ├── compose.action.test-inspect.yaml  # Same, for the inspect-engine integration tests
