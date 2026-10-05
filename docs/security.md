@@ -215,15 +215,15 @@ sandbox down, so what it runs is kept out of those paths:
   One the runner user cannot write gets no slot, and the step warns. A symlink on the path leaves it
   unmounted, the path is checked again before anything is written back, and the mount point is
   created and removed as the runner user, never through `sudo`.
-- The runner's install directory, which holds the `node` every later JavaScript action and post
-  step runs on, the runner's `_actions` directory, which holds every action's checkout and this
-  one's post step script, and the docker CLI's config directory (`$DOCKER_CONFIG`, else
-  `~/.docker`), which holds its plugins, are read-only inside the sandbox, unless `write_through:`
-  names the directory itself or `uses: ./` makes this action's checkout the workspace. A
-  `write_through:` entry, the workspace or `$RUNNER_TEMP` inside one stays writable. The writable directories above
-  them are made mount points, so they cannot be renamed away. A read-only mount protects only a
-  symlink's target, so a symlink on the way to either that sits in a writable path, where the
-  command could replace it with a directory of its own, fails the step before the command runs.
+- The runner's install directory, which holds the `node` later JavaScript actions and post steps
+  run on, the runner's `_actions` directory, which holds every action's checkout, and the docker
+  CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins, are
+  read-only inside the sandbox, unless `write_through:` names the directory itself or `uses: ./`
+  makes this action's checkout the workspace. The workspace, `$RUNNER_TEMP` or a `write_through:`
+  entry inside one stays writable. The writable directories above them are made mount points, so
+  they cannot be renamed away. A read-only mount protects only a symlink's target, so a symlink on
+  the way to any of them that sits in a writable path, where the command could replace it with a
+  directory of its own, fails the step before the command runs.
 - `run-isolated.sh`, which runs as root, runs from a copy the sandbox cannot see.
 
 A command that writes the docker config (`docker login`, `gcloud auth configure-docker`) therefore

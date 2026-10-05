@@ -876,9 +876,9 @@ and `/dev`, and to the sandbox's own scratch directory under `/var/tmp`; see
 
 `write_through: /` makes every path writable but those that stay read-only under any writable
 parent: `$GITHUB_ENV`, `$GITHUB_PATH`, `$GITHUB_STATE`, the docker CLI's config directory, the
-runner's install directory, its `_actions` directory and the reserved paths above. It only means anything under `persistent` and is
-rejected under `ephemeral`, where it would persist every write, the one thing that mode exists to
-prevent. The sentinel is the literal `/` only: an entry that merely _resolves_ to `/` (a miscounted
+runner's install directory, its `_actions` directory and the reserved paths above. It only means
+anything under `persistent` and is rejected under `ephemeral`, where it would persist every write,
+the one thing that mode exists to prevent. The sentinel is the literal `/` only: an entry that merely _resolves_ to `/` (a miscounted
 `../`, say) is an error rather than a silent full opt-out.
 
 ### The former input names
