@@ -11,6 +11,7 @@ import {
   pinHostCommands,
   pinningPaths,
   renameGuardDirs,
+  runnerInstallRoot,
   sandboxReadonlyFileCommands,
   sandboxReadonlyHostDirs,
   type FindCommandDeps,
@@ -370,29 +371,27 @@ describe("sandboxReadonlyHostDirs", () => {
   const ACTION = "/home/runner/work/_actions/buildcage/isolated-run/v1";
 
   it("is the action and docker config directories when a persisting path holds them", () => {
-    expect(sandboxReadonlyHostDirs(PERSISTENT, { HOME }, ACTION, NO_LINKS)).toStrictEqual([
-      ACTION,
-      `${HOME}/.docker`,
-    ]);
+    expect(
+      sandboxReadonlyHostDirs(PERSISTENT, { HOME }, { actionRoot: ACTION }, NO_LINKS),
+    ).toStrictEqual([ACTION, `${HOME}/.docker`]);
   });
 
   it("leaves out a directory no persisting path holds", () => {
     expect(
-      sandboxReadonlyHostDirs([`${WORKSPACE}/dist`], { HOME }, ACTION, NO_LINKS),
+      sandboxReadonlyHostDirs([`${WORKSPACE}/dist`], { HOME }, { actionRoot: ACTION }, NO_LINKS),
     ).toStrictEqual([]);
   });
 
   it("covers both under write_through: /", () => {
-    expect(sandboxReadonlyHostDirs(["/"], { HOME }, ACTION, NO_LINKS)).toStrictEqual([
-      ACTION,
-      `${HOME}/.docker`,
-    ]);
+    expect(
+      sandboxReadonlyHostDirs(["/"], { HOME }, { actionRoot: ACTION }, NO_LINKS),
+    ).toStrictEqual([ACTION, `${HOME}/.docker`]);
   });
 
   it("leaves out one that contains a persisting path, as uses: ./ puts the action in the workspace", () => {
-    expect(sandboxReadonlyHostDirs(PERSISTENT, { HOME }, WORKSPACE, NO_LINKS)).toStrictEqual([
-      `${HOME}/.docker`,
-    ]);
+    expect(
+      sandboxReadonlyHostDirs(PERSISTENT, { HOME }, { actionRoot: WORKSPACE }, NO_LINKS),
+    ).toStrictEqual([`${HOME}/.docker`]);
   });
 
   it("keeps one read-only when a persisting path only sits inside it", () => {
@@ -400,7 +399,7 @@ describe("sandboxReadonlyHostDirs", () => {
       sandboxReadonlyHostDirs(
         [...PERSISTENT, `${HOME}/.docker/buildx`],
         { HOME },
-        ACTION,
+        { actionRoot: ACTION },
         NO_LINKS,
       ),
     ).toStrictEqual([ACTION, `${HOME}/.docker`]);
@@ -408,7 +407,12 @@ describe("sandboxReadonlyHostDirs", () => {
 
   it("leaves out one a write_through entry names outright", () => {
     expect(
-      sandboxReadonlyHostDirs([...PERSISTENT, `${HOME}/.docker`], { HOME }, ACTION, NO_LINKS),
+      sandboxReadonlyHostDirs(
+        [...PERSISTENT, `${HOME}/.docker`],
+        { HOME },
+        { actionRoot: ACTION },
+        NO_LINKS,
+      ),
     ).toStrictEqual([ACTION]);
   });
   it("refuses a docker config directory that is itself a symlink in a persisting path", () => {
@@ -416,7 +420,7 @@ describe("sandboxReadonlyHostDirs", () => {
       sandboxReadonlyHostDirs(
         PERSISTENT,
         { HOME },
-        ACTION,
+        { actionRoot: ACTION },
         withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),
       ),
     ).toThrow(
@@ -436,7 +440,7 @@ describe("sandboxReadonlyHostDirs", () => {
       sandboxReadonlyHostDirs(
         PERSISTENT,
         { HOME },
-        checkout,
+        { actionRoot: checkout },
         withLinks({ [`${HOME}/actions-runner/_work`]: "/mnt/data/_work" }),
       ),
     ).toThrow(
@@ -456,7 +460,7 @@ describe("sandboxReadonlyHostDirs", () => {
       sandboxReadonlyHostDirs(
         PERSISTENT,
         { HOME, DOCKER_CONFIG: "/opt/cfg" },
-        ACTION,
+        { actionRoot: ACTION },
         withLinks({ "/opt/cfg": `${HOME}/.cfg` }),
       ),
     ).toStrictEqual([ACTION, `${HOME}/.cfg`]);
@@ -467,7 +471,7 @@ describe("sandboxReadonlyHostDirs", () => {
       sandboxReadonlyHostDirs(
         ["/"],
         { HOME },
-        ACTION,
+        { actionRoot: ACTION },
         withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),
       ),
     ).toStrictEqual([ACTION, "/mnt/shared/docker"]);
@@ -478,7 +482,7 @@ describe("sandboxReadonlyHostDirs", () => {
       sandboxReadonlyHostDirs(
         [`${WORKSPACE}/dist`],
         { HOME },
-        ACTION,
+        { actionRoot: ACTION },
         withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),
       ),
     ).toStrictEqual([]);
@@ -491,7 +495,9 @@ describe("sandboxReadonlyHostDirs", () => {
       "/opt/b": "/opt/a",
     };
 
-    expect(() => sandboxReadonlyHostDirs(PERSISTENT, { HOME }, ACTION, withLinks(links))).toThrow(
+    expect(() =>
+      sandboxReadonlyHostDirs(PERSISTENT, { HOME }, { actionRoot: ACTION }, withLinks(links)),
+    ).toThrow(
       expect.objectContaining({
         message: expect.stringContaining(`its real path, "${HOME}/.docker"`),
       }),
@@ -503,7 +509,7 @@ describe("sandboxReadonlyHostDirs", () => {
       sandboxReadonlyHostDirs(
         [...PERSISTENT, "/mnt/shared/docker"],
         { HOME },
-        ACTION,
+        { actionRoot: ACTION },
         withLinks({ [`${HOME}/.docker`]: "/mnt/shared/docker" }),
       ),
     ).toStrictEqual([ACTION]);
@@ -514,7 +520,7 @@ describe("sandboxReadonlyHostDirs", () => {
       sandboxReadonlyHostDirs(
         PERSISTENT,
         { HOME, DOCKER_CONFIG: "/opt/a" },
-        ACTION,
+        { actionRoot: ACTION },
         withLinks({ "/opt/a": "/opt/b", "/opt/b": "/opt/a" }),
       ),
     ).toThrow(
@@ -523,6 +529,79 @@ describe("sandboxReadonlyHostDirs", () => {
         message: expect.stringContaining("too many symlinks"),
       }),
     );
+  });
+
+  describe("the runner's own directories", () => {
+    const RUNNER_WORKSPACE = "/home/runner/work/repo";
+    const INSTALL = "/home/runner/actions-runner/cached";
+
+    it("covers the action checkouts and the install directory in place of this checkout", () => {
+      expect(
+        sandboxReadonlyHostDirs(
+          PERSISTENT,
+          { HOME, RUNNER_WORKSPACE },
+          { actionRoot: ACTION, installRoot: INSTALL },
+          NO_LINKS,
+        ),
+      ).toStrictEqual(["/home/runner/work/_actions", INSTALL, `${HOME}/.docker`]);
+    });
+
+    it("leaves a work directory inside the install directory to it, as on a self-hosted runner", () => {
+      const root = `${HOME}/actions-runner`;
+
+      expect(
+        sandboxReadonlyHostDirs(
+          PERSISTENT,
+          { HOME, RUNNER_WORKSPACE: `${root}/_work/repo` },
+          { actionRoot: `${root}/_work/_actions/buildcage/isolated-run/v1`, installRoot: root },
+          NO_LINKS,
+        ),
+      ).toStrictEqual([root, `${HOME}/.docker`]);
+    });
+
+    it("refuses an action checkouts directory reached through a symlink in a persisting path", () => {
+      expect(() =>
+        sandboxReadonlyHostDirs(
+          PERSISTENT,
+          { HOME, RUNNER_WORKSPACE },
+          { actionRoot: WORKSPACE },
+          withLinks({ "/home/runner/work/_actions": "/mnt/actions" }),
+        ),
+      ).toThrow(
+        expect.objectContaining({
+          code: "HOST_DIR_UNPROTECTABLE",
+          message: expect.stringContaining("later steps' actions"),
+        }),
+      );
+    });
+
+    it("refuses an install directory reached through a symlink in a persisting path", () => {
+      expect(() =>
+        sandboxReadonlyHostDirs(
+          PERSISTENT,
+          { HOME },
+          { actionRoot: ACTION, installRoot: INSTALL },
+          withLinks({ [INSTALL]: "/mnt/runner" }),
+        ),
+      ).toThrow(
+        expect.objectContaining({
+          code: "HOST_DIR_UNPROTECTABLE",
+          message: expect.stringContaining("Install the runner by its real path"),
+        }),
+      );
+    });
+  });
+});
+
+describe("runnerInstallRoot", () => {
+  it("is the directory holding externals/, from the node the runner runs actions with", () => {
+    expect(runnerInstallRoot("/home/runner/actions-runner/externals/node24/bin/node")).toBe(
+      "/home/runner/actions-runner",
+    );
+  });
+
+  it("is nothing for a node the runner did not ship", () => {
+    expect(runnerInstallRoot("/usr/local/bin/node")).toBeUndefined();
   });
 });
 
@@ -638,6 +717,15 @@ describe("renameGuardDirs", () => {
       "/home/runner/work/_actions/x/a",
       "/home/runner/work/_actions/y/b",
     ]);
+  });
+
+  it("pins nothing inside another read-only dir, only what a persisting path nested there holds", () => {
+    const root = `${HOME}/actions-runner`;
+    const commands = `${root}/_work/_temp/_runner_file_commands`;
+
+    expect(
+      renameGuardDirs([root, `${commands}/set_env_1`], [HOME, `${root}/_work/_temp`]),
+    ).toStrictEqual([`${root}/_work/_temp`, commands]);
   });
 
   // Nothing is a mount point then, so every directory above the dir is pinned.
