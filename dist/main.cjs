@@ -26069,7 +26069,7 @@ const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
 function clientEndedNoise(timeline) {
 	let completed = new Set();
 	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
-	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "") && completed.has(ruleHost(event.host));
+	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason) && completed.has(ruleHost(event.host));
 }
 function connectedHosts(timeline) {
 	let connected = {
@@ -26191,12 +26191,8 @@ async function scanInspectLog(lines, isAudit = !1) {
 }
 function refuseUnpassedAddresses(events) {
 	let served = new Set();
-	for (let event of events) (event.protocol === "http" || event.protocol === "https") && event.action !== "incomplete" && served.add(event.destination ?? "");
-	for (let event of events) {
-		if (event.action !== "incomplete" || event.protocol !== "tcp") continue;
-		let reason = event.reason ?? "";
-		CLIENT_ENDED_REASONS.has(reason) && served.has(event.destination ?? "") || (event.action = "block", event.reason = "ip-not-allowed");
-	}
+	for (let event of events) (event.protocol === "http" || event.protocol === "https") && event.action !== "incomplete" && served.add(event.destination);
+	for (let event of events) event.action === "incomplete" && event.protocol === "tcp" && (CLIENT_ENDED_REASONS.has(event.reason) && served.has(event.destination) || (event.action = "block", event.reason = "ip-not-allowed"));
 }
 async function scanInspectDnsLog(lines, isAudit = !1) {
 	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
