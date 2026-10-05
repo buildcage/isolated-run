@@ -26719,19 +26719,23 @@ const MARK = {
 function renderEvent(event, startedAt) {
 	return `${MARK[event.action] ?? "✅"} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}`;
 }
-const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authtoken.clientsecret.code.idtoken.jwt.key.passwd.password.privatetoken.pwd.refreshtoken.secret.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
+const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
 function credentialName(name) {
 	return name.toLowerCase().replace(/[-_]/g, "");
+}
+const PARAM_NAME = /(^|[;?])([^;?=]*)=/g;
+function redactPart(part) {
+	for (let match of part.matchAll(PARAM_NAME)) {
+		if (!CREDENTIAL_PARAMS.has(credentialName(match[2]))) continue;
+		let value = match.index + match[0].length;
+		return value === part.length ? part : `${part.slice(0, value)}***`;
+	}
+	return part;
 }
 function redactCredentialQuery(url) {
 	let start = url.indexOf("?");
 	if (start === -1) return url;
-	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map((param) => {
-		let eq = param.indexOf("=");
-		if (eq === -1 || eq === param.length - 1) return param;
-		let name = param.slice(0, eq);
-		return CREDENTIAL_PARAMS.has(credentialName(name)) ? `${name}=***` : param;
-	}).join("&");
+	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map(redactPart).join("&");
 	return url.slice(0, start + 1) + query + url.slice(end);
 }
 function subject(event) {
