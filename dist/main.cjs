@@ -26190,8 +26190,13 @@ async function scanInspectLog(lines, isAudit = !1) {
 	};
 }
 function refuseUnpassedAddresses(events) {
-	let isNoise = clientEndedNoise(events);
-	for (let event of events) event.action !== "incomplete" || event.protocol !== "tcp" || isNoise(event) || (event.action = "block", event.reason = "ip-not-allowed");
+	let served = new Set();
+	for (let event of events) (event.protocol === "http" || event.protocol === "https") && event.action !== "incomplete" && served.add(event.destination ?? "");
+	for (let event of events) {
+		if (event.action !== "incomplete" || event.protocol !== "tcp") continue;
+		let reason = event.reason ?? "";
+		CLIENT_ENDED_REASONS.has(reason) && served.has(event.destination ?? "") || (event.action = "block", event.reason = "ip-not-allowed");
+	}
 }
 async function scanInspectDnsLog(lines, isAudit = !1) {
 	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
