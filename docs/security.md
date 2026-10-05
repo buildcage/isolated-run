@@ -189,8 +189,9 @@ GitHub-hosted runners). The error names the path the symlink leads to, which can
 The part of an entry that is `$HOME`, `$GITHUB_WORKSPACE` or `$RUNNER_TEMP` is taken at its real
 path, as the persistent writable set is, so only what the entry adds below one is checked. A missing
 entry is created by the runner when it can write the nearest existing parent, and fails the step
-otherwise. A step running concurrently as the same user can still swap a directory for a symlink
-between the check and the mount.
+otherwise. Another job running as the same user on the same machine can still swap a directory for
+a symlink between the check and the mount; see
+[Where it will not run](#where-it-will-not-run).
 
 After the command exits, the step keeps running on the host to read the report and tear the
 sandbox down, so what it runs is kept out of those paths:
@@ -721,6 +722,16 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   but the bar here is only an ordinary local account, so the base directory's owner, type and mode
   are checked at startup and the action refuses to proceed rather than reuse an unexpected one.
   Prefer a dedicated, single-tenant runner over relying on that check alone.
+- **Not beside another job running as the same user on the same machine.** This can only happen on
+  a self-hosted runner, for example several runners registered under one account on one machine;
+  a GitHub-hosted runner gives every job a fresh virtual machine. The other job's unwrapped steps
+  can write wherever this step can, so the sandbox does not separate the two jobs. They can also
+  swap a path for a symlink after the step has checked it and before the path is used: a
+  `write_through:` entry before runc mounts it, or, under `inspect`, the NSS database before what
+  the command wrote is written back there. That gains them nothing they could not do as the same
+  user directly. Run each job in an environment of its own, as GitHub-hosted runners do (a
+  self-hosted runner that takes one job and is then replaced), or give each runner its own user
+  account.
 
 ### Rough edges
 
