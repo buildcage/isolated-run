@@ -3,7 +3,8 @@
 # read-only inside the sandbox in both filesystem modes and cannot be renamed
 # away, and that write_through naming GITHUB_ENV or GITHUB_PATH opens that one
 # file only. Under write_through: / nothing above them is a mount point, so the
-# third run also tries to move $RUNNER_TEMP aside. See
+# third run also tries to move $RUNNER_TEMP aside. The fourth reaches the files
+# through a bind mount that write_through names. See
 # sandboxReadonlyFileCommands and renameGuardDirs in sandbox/host-commands.ts.
 set -uo pipefail
 
@@ -94,12 +95,46 @@ EPHEMERAL_CODE=$?
 run_probe whole persistent / none
 WHOLE_CODE=$?
 
+# The same files through a bind mount of the work directory that write_through
+# names: what is read-only at one path has to be at the other too.
+ALIAS="/mnt/buildcage-test-alias-$$"
+sudo -n mkdir -p "$ALIAS" && sudo -n mount --bind "$WORKDIR" "$ALIAS" || {
+  echo "  FAIL  could not bind-mount the work directory onto $ALIAS"
+  exit 1
+}
+trap 'sudo -n umount "$ALIAS"; sudo -n rmdir "$ALIAS"; rm -rf "$WORKDIR"' EXIT
+for name in env path state; do touch "$COMMANDS/${name}_alias"; done
+echo "=== persistent, write_through: $ALIAS ==="
+RUNNER_TEMP="$WORKDIR/_temp" \
+GITHUB_WORKSPACE="$WORKDIR" \
+GITHUB_ENV="$COMMANDS/env_alias" \
+GITHUB_PATH="$COMMANDS/path_alias" \
+GITHUB_STATE="$COMMANDS/state_alias" \
+GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
+BUILDCAGE_BUILD_TEST_HOOKS=1 \
+BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
+INPUT_WRITE_THROUGH="$ALIAS" \
+INPUT_RUN="rc=0
+for name in env path state; do
+  file='$ALIAS/_temp/_runner_file_commands/'\${name}_alias
+  if echo probe-alias >>\"\$file\" 2>/dev/null; then
+    echo \"UNEXPECTED: \$file was writable\"
+    rc=1
+  else
+    echo \"OK: \$file is read-only\"
+  fi
+done
+exit \$rc" \
+  node dist/main.cjs
+ALIAS_CODE=$?
+
 echo ""
 echo "=== Sandbox File Command Assertions ==="
 echo ""
 check_status "persistent: every probe inside the sandbox held" "$PERSISTENT_CODE" 0
 check_status "ephemeral: every probe inside the sandbox held" "$EPHEMERAL_CODE" 0
 check_status "write_through: /: every probe inside the sandbox held" "$WHOLE_CODE" 0
+check_status "an alias in write_through: every probe inside the sandbox held" "$ALIAS_CODE" 0
 
 # What reached the host: only the write to the file write_through named.
 check_host_file() {
@@ -118,4 +153,5 @@ check_host_file "persistent: GITHUB_STATE carries no probe" "$COMMANDS/save_stat
 check_host_file "ephemeral: GITHUB_ENV took the write" "$COMMANDS/set_env_ephemeral" probe-ephemeral
 check_host_file "ephemeral: GITHUB_PATH is untouched" "$COMMANDS/add_path_ephemeral" ""
 check_host_file "write_through: /: GITHUB_ENV is untouched" "$COMMANDS/set_env_whole" ""
+check_host_file "an alias in write_through: GITHUB_ENV is untouched" "$COMMANDS/env_alias" ""
 assert_results

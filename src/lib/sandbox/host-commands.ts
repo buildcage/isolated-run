@@ -17,7 +17,7 @@ import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
 import type { JvmTools } from "./ca-trust.ts";
 import { writableDirsOf } from "./oci-mounts.ts";
-import { isAtOrUnder } from "./paths.ts";
+import { isAtOrUnder, pathAliases } from "./paths.ts";
 import { pinCommand, pinCommandPathEnv, SYSTEM_PATH } from "./pinned-commands.ts";
 import {
   realPathOf,
@@ -26,6 +26,7 @@ import {
   type ResolvedHostPath,
   type SymlinkDeps,
 } from "./symlinks.ts";
+import type { MountinfoEntry } from "./types.ts";
 import { resolveWriteThroughPaths } from "./write-through.ts";
 
 /** The checkout as the runner spelled it, which is the path it runs the post
@@ -246,7 +247,8 @@ export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
  * workspace, and write_through may name the config directory. A persisting
  * path nested inside one stays writable, since runc remounts only the top of
  * a read-only path. One nested in another is left to the outer one, unless a
- * persisting path between them would reopen it.
+ * persisting path between them would reopen it. Each also covers the other
+ * paths `mounts` shows it at (see pathAliases), unless write_through names one.
  *
  * Throws when one goes through a symlink in a persisting path: the mount
  * protects only the symlink's target, and the sandbox could replace the
@@ -262,6 +264,7 @@ export function sandboxReadonlyHostDirs(
     installRoot: runnerInstallRoot(),
   },
   deps: SymlinkDeps = realSymlinkDeps,
+  mounts: MountinfoEntry[] = [],
 ): string[] {
   const docker = dockerConfigDir(env);
   const workDirFix =
@@ -323,7 +326,8 @@ export function sandboxReadonlyHostDirs(
       );
     }
     const real = resolved.real;
-    return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
+    const aliases = pathAliases(mounts, real).filter((a) => !persisting.includes(a));
+    return [real, ...aliases].filter((p) => persisting.some((root) => isAtOrUnder(p, root)));
   });
   const unique = [...new Set(dirs)];
   return unique.filter((dir) => {
@@ -349,14 +353,15 @@ function replaceableLink(resolved: ResolvedHostPath, roots: string[]): string | 
  * Read-only in either mode, whatever is writable around them, unless
  * write_through names GITHUB_ENV or GITHUB_PATH itself. GITHUB_STATE, which
  * only this action's post step reads, is never opened. Like
- * sandboxReadonlyHostDirs, throws when one goes through a symlink in a
- * persisting path.
+ * sandboxReadonlyHostDirs, covers each at its other paths in a persisting
+ * path too, and throws when one goes through a symlink in a persisting path.
  */
 export function sandboxReadonlyFileCommands(
   writeThroughPaths: string[],
   persisting: string[],
   env: NodeJS.ProcessEnv,
   deps: SymlinkDeps = realSymlinkDeps,
+  mounts: MountinfoEntry[] = [],
 ): string[] {
   const named = new Set(writeThroughPaths);
   const openable = (name: string, path: string) =>
@@ -382,7 +387,10 @@ export function sandboxReadonlyFileCommands(
         "HOST_DIR_UNPROTECTABLE",
       );
     }
-    return [resolved.real];
+    const aliases = pathAliases(mounts, resolved.real).filter(
+      (a) => !openable(name, a) && persisting.some((root) => isAtOrUnder(a, root)),
+    );
+    return [resolved.real, ...aliases];
   });
 }
 
