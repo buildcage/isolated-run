@@ -26174,7 +26174,7 @@ function parseProxyLine(line, isAudit) {
 	}
 	return null;
 }
-async function scanInspectLog(lines, isAudit = !1) {
+async function scanInspectLog(lines, isAudit = !1, allowsName) {
 	let events = [], startedAt, headIntact, unparsed = 0;
 	for await (let line of lines) {
 		let event = parseProxyLine(line, isAudit);
@@ -26187,7 +26187,7 @@ async function scanInspectLog(lines, isAudit = !1) {
 		let match = START$1.exec(trimmed);
 		headIntact ??= match !== null, match && startedAt === void 0 && (startedAt = Number(match[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
 	}
-	return refuseUnpassedAddresses(events), {
+	return refuseUnpassedAddresses(events), allowsName && refuseUnallowedNames(events, allowsName), {
 		events,
 		startedAt,
 		headIntact: headIntact ?? !1,
@@ -26198,6 +26198,9 @@ function refuseUnpassedAddresses(events) {
 	let served = new Set();
 	for (let event of events) (event.protocol === "http" || event.protocol === "https") && event.action !== "incomplete" && served.add(event.destination);
 	for (let event of events) event.action === "incomplete" && event.protocol === "tcp" && (CLIENT_ENDED_REASONS.has(event.reason) && served.has(event.destination) || (event.action = "block", event.reason = "ip-not-allowed"));
+}
+function refuseUnallowedNames(events, allowsName) {
+	for (let event of events) event.action === "incomplete" && event.protocol === "https" && (event.host === "(unknown)" || allowsName(event.host) || event.destination?.startsWith("198.19.255.1:") || (event.action = "block", event.reason = "sni-not-allowed"));
 }
 async function scanInspectDnsLog(lines, isAudit = !1) {
 	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
@@ -26379,8 +26382,17 @@ function reduceTimeline(timeline, knownBlockedRules) {
 }
 //#endregion
 //#region src/core/lib/report/build/inspect.ts
+function resolverAllows(parameters) {
+	let { resolverHosts } = compileRuleSet({
+		httpsRules: parameters.allowedHttpsRules,
+		httpRules: parameters.allowedHttpRules,
+		tlsRules: parameters.allowedTlsRules,
+		urlRules: buildUrlRules(parameters.allowedUrlRules.join("\n"))
+	}), allowed = resolverHosts.map((regex) => RegExp(`^(?:${regex})$`, "i"));
+	return (name) => allowed.some((regex) => regex.test(name));
+}
 async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedLogs) {
-	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanInspectLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
 	return {
 		engine: "inspect",
 		parameters,
@@ -72264,6 +72276,7 @@ async function runSandboxStep(env, overrides = {}) {
 				allowedHttpRules: httpRules,
 				allowedIpRules: ipRules,
 				allowedTlsRules: tlsRules,
+				allowedUrlRules: urlRules,
 				knownBlockedRules
 			},
 			annotation,
