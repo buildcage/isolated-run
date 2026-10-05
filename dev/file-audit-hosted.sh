@@ -16,13 +16,19 @@ OUT=/var/tmp/buildcage-poc/$NAME.jsonl
 : "${RUNNER_CG:?}" "${HOME_DIR:?}" "${WORK_DIR:?}" "${SANDBOX_PATH:?}" "${SECCOMP:?}"
 CG_REL="${RUNNER_CG%/}/buildcage-poc-$NAME"
 
-rm -rf "$BUNDLE" && mkdir -p "$BUNDLE/rootfs"
-mount --rbind / "$BUNDLE/rootfs"
-mount --make-rslave "$BUNDLE/rootfs"
+# One rootfs bind shared by every run: a fresh rbind of / per run would
+# copy the previous runs' binds too and soon hit the mount limit.
+ROOTFS=/var/tmp/buildcage-poc-rootfs
+if ! mountpoint -q "$ROOTFS"; then
+  mkdir -p "$ROOTFS"
+  mount --rbind / "$ROOTFS"
+  mount --make-rslave "$ROOTFS"
+fi
+rm -rf "$BUNDLE" && mkdir -p "$BUNDLE"
 (cd "$BUNDLE" && "$RUNC" spec)
-jq --arg cg "$CG_REL" --arg wl "$WORKLOAD" --arg home "$HOME_DIR" --arg ws "$WORK_DIR" --arg path "$SANDBOX_PATH" \
+jq --arg rootfs "$ROOTFS" --arg cg "$CG_REL" --arg wl "$WORKLOAD" --arg home "$HOME_DIR" --arg ws "$WORK_DIR" --arg path "$SANDBOX_PATH" \
   --argjson uid "$UID_" --argjson gid "$GID_" --slurpfile seccomp "$SECCOMP" '
-  .root = {"path": "rootfs", "readonly": true} |
+  .root = {"path": $rootfs, "readonly": true} |
   # No network namespace (the proxy is left out), and a fresh sysfs needs one.
   .mounts |= map(if .destination == "/sys" then {"destination":"/sys","type":"none","source":"/sys","options":["rbind","nosuid","noexec","nodev","ro"]} else . end) |
   .mounts += [
@@ -59,7 +65,6 @@ if [ -n "$TRACER" ]; then
   kill -TERM $TRACER
   wait $TRACER || true
 fi
-umount -R -l "$BUNDLE/rootfs"
 echo "--- $NAME ($MODE): exit $CODE, sandbox wall time $(awk "BEGIN{printf \"%.2f\", $END - $START}") s"
 [ -n "$TRACER" ] && cat "$BUNDLE.log"
 rmdir "/sys/fs/cgroup$CG_REL" 2>/dev/null || true
