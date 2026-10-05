@@ -310,7 +310,8 @@ struct {
 	__type(value, u8);
 } seen_files SEC(".maps");
 
-// Returns 1 if bit was newly set for file.
+// Reports whether bit was newly recorded for file: false if it was already
+// set, or if the map is full (so a saturated map cannot cause re-emission).
 static __always_inline int first_time(struct file *file, u8 bit)
 {
 	u64 key = (u64)file;
@@ -324,9 +325,9 @@ static __always_inline int first_time(struct file *file, u8 bit)
 	return bpf_map_update_elem(&seen_files, &key, &bit, BPF_ANY) == 0;
 }
 
-// Threads inside backing_file_open, overlayfs's open of a layer's real
-// file. Its mount namespace can't tell it apart: before 6.15 the layer
-// mounts carry MNT_NS_INTERNAL, later an anonymous namespace of their own.
+// Marks the thread while it is inside backing_file_open (overlayfs opening a
+// layer's real file), so that open is attributed to the overlay open above
+// it rather than counted again.
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 4096);
@@ -523,11 +524,10 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 	return 0;
 }
 
-// A refused or missing file never reaches security_file_open. Every open
-// syscall goes through do_sys_openat2; the name is captured from the
-// kernel's own copy (getname_flags) while inside it, since the caller could
-// rewrite its buffer before the syscall returns. do_filp_open would hand the
-// name over directly but isn't traceable on every kernel.
+// A refused or missing file never reaches security_file_open, so a failed
+// open is caught at the syscall. The name is read from the kernel's own copy
+// (getname_flags), not the user pointer, which the caller could rewrite
+// before the syscall returns.
 struct name_buf {
 	char name[PATH_LEN];
 };

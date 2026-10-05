@@ -167,9 +167,8 @@ func prepareCgroup(cgPath string) (cgid uint64, level uint32, err error) {
 	return st.Ino, level, nil
 }
 
-// dropAbsentPrograms removes the optional getname programs whose target the
-// running kernel does not expose, so loading the collection does not fail on
-// a missing fexit target.
+// dropAbsentPrograms removes optional programs whose attach target the
+// running kernel does not expose, so loading does not fail on a missing one.
 func dropAbsentPrograms(spec *ebpf.CollectionSpec) {
 	kspec, err := btf.LoadKernelSpec()
 	if err != nil {
