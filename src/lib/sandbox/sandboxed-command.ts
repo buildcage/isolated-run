@@ -19,6 +19,13 @@ import {
 import { buildEnvBlob, resolveSandboxEnv, writeEnvLoader } from "./env-loader.ts";
 import { createOverlayScratchDirs, overlayUpperFor } from "./ephemeral-fs.ts";
 import {
+  extractTracer,
+  startFilesystemAudit,
+  noAudit,
+  type AuditHandle,
+  type FilesystemAuditPaths,
+} from "./filesystem-audit.ts";
+import {
   jvmTools,
   persistingWritablePaths,
   renameGuardDirs as renameGuards,
@@ -40,7 +47,12 @@ import { writeRunScript, writeResolvConf, writeOciConfig } from "./oci-files.ts"
 import { pathAliases, WritablePathConflictError } from "./paths.ts";
 import { runIsolated } from "./run.ts";
 import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
-import { SANDBOX_SCRATCH_BASE, withScratchDir, type Warn } from "./scratch-dir.ts";
+import {
+  SANDBOX_SCRATCH_BASE,
+  ensureOwnScratchBase,
+  withScratchDir,
+  type Warn,
+} from "./scratch-dir.ts";
 import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
 import type { BuiltOciSpec, OverlayDirs } from "./types.ts";
 
@@ -78,6 +90,9 @@ export interface RunSandboxedCommandDeps {
   resolveSandboxEnv: typeof resolveSandboxEnv;
   buildEnvBlob: typeof buildEnvBlob;
   runIsolated: typeof runIsolated;
+  extractTracer: typeof extractTracer;
+  startFilesystemAudit: typeof startFilesystemAudit;
+  ensureOwnScratchBase: typeof ensureOwnScratchBase;
   mkdir: (path: string, options: { mode: number; recursive?: boolean }) => void;
   touch: (path: string) => void;
   readFile: (path: string) => string;
@@ -108,6 +123,9 @@ const realDeps: RunSandboxedCommandDeps = {
   resolveSandboxEnv,
   buildEnvBlob,
   runIsolated,
+  extractTracer,
+  startFilesystemAudit,
+  ensureOwnScratchBase,
   mkdir: mkdirSync,
   // Untested by design: writeFileSync, appending nothing to the path chosen.
   /* v8 ignore next */
@@ -136,6 +154,9 @@ export interface RunSandboxedCommandOptions {
   overlayRoots: string[];
   /** inspect only: whether a write to the NSS database fails the step. */
   failOnCaResidue: boolean;
+  /** Present only under filesystem_audit: record: where the tracer writes.
+   *  The step runs normally if it cannot be started. */
+  filesystemAudit?: FilesystemAuditPaths;
   /** Where this module's own warnings go: a scratch dir that would not
    *  unmount, the environment variables a shell cannot export, and NSS not
    *  answering the primary group check. Passed in
@@ -497,6 +518,48 @@ function finishNssDb(
 }
 
 /**
+ * Start the file-access tracer over the sandbox cgroup, before runc puts the
+ * command into it. Best-effort: anything that stops it from starting (no
+ * cgroup v2, extraction, attach) warns and yields a handle that records
+ * nothing, so the step is never affected by the audit.
+ */
+async function startAudit(
+  dir: string,
+  config: BuiltOciSpec,
+  options: AssembleBundleOptions,
+  deps: RunSandboxedCommandDeps,
+): Promise<AuditHandle> {
+  const { filesystemAudit, containerName, warn } = options;
+  if (filesystemAudit === undefined) return noAudit;
+  const cgroupsPath = config.linux.cgroupsPath;
+  if (cgroupsPath === undefined) {
+    warn(
+      "buildcage: filesystem_audit needs a cgroup v2 host; the step's file accesses were not recorded.",
+    );
+    return noAudit;
+  }
+  try {
+    const tracerPath = deps.extractTracer(containerName, dir);
+    deps.ensureOwnScratchBase(SANDBOX_SCRATCH_BASE);
+    return await deps.startFilesystemAudit(
+      {
+        tracerPath,
+        cgroupsPath,
+        outPath: filesystemAudit.outPath,
+        pidFilePath: filesystemAudit.pidFilePath,
+        readyPath: join(dir, "filesystem-audit.ready"),
+      },
+      warn,
+    );
+  } catch (e) {
+    warn(
+      `buildcage: filesystem_audit could not start (${errorMessage(e)}); the step's file accesses were not recorded.`,
+    );
+    return noAudit;
+  }
+}
+
+/**
  * Extracts runc/gen-seccomp-profile from the proxy container, builds the
  * OCI bundle, and runs the user's command inside it via run-isolated.sh.
  * Resolves to the isolated command's exit code.
@@ -519,18 +582,23 @@ export async function runSandboxedCommand(
       let exitCode: number;
       try {
         writeOciConfig(config, dir);
-        exitCode = await runIsolated({
-          envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
-          runcPath,
-          proxyNetns,
-          bundleDir: dir,
-          containerId: containerName,
-          netnsName,
-          rootfsBindDir,
-          gateway: PROXY_ADDRESS,
-          targetIp: SANDBOX_IP,
-          cancel,
-        });
+        const audit = await startAudit(dir, config, options, deps);
+        try {
+          exitCode = await runIsolated({
+            envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
+            runcPath,
+            proxyNetns,
+            bundleDir: dir,
+            containerId: containerName,
+            netnsName,
+            rootfsBindDir,
+            gateway: PROXY_ADDRESS,
+            targetIp: SANDBOX_IP,
+            cancel,
+          });
+        } finally {
+          await audit.stop();
+        }
       } catch (e) {
         // The command did not run to the end, so only the directories are removed.
         if (caTrust?.nssDb) deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps));

@@ -15542,10 +15542,10 @@ function readRetentionDays(getInput) {
 		return Number(days);
 	}
 }
-function readTrafficArtifactInputs(getInput$8 = getInput) {
+function readTrafficArtifactInputs(getInput$9 = getInput) {
 	return {
-		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$8),
-		retentionDays: readRetentionDays(getInput$8)
+		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$9),
+		retentionDays: readRetentionDays(getInput$9)
 	};
 }
 const ENGINES = ["universal", "inspect"];
@@ -16375,12 +16375,12 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 //#endregion
 //#region src/core/lib/actions/rule-inputs.ts
 init_core();
-function readRuleInputs(getInput$7 = getInput) {
+function readRuleInputs(getInput$8 = getInput) {
 	let rules = buildACLRules({
-		httpsRulesInput: getInput$7("allowed_https_rules"),
-		httpRulesInput: getInput$7("allowed_http_rules"),
-		ipRulesInput: getInput$7("allowed_ip_rules")
-	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$7("known_blocked_rules")), urlRulesInput = getInput$7("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$7("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
+		httpsRulesInput: getInput$8("allowed_https_rules"),
+		httpRulesInput: getInput$8("allowed_http_rules"),
+		ipRulesInput: getInput$8("allowed_ip_rules")
+	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$8("known_blocked_rules")), urlRulesInput = getInput$8("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$8("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
 	checkRulesCompileOrThrow({
 		...rules,
 		tlsRules,
@@ -23248,6 +23248,14 @@ function resolveComposeFile(override) {
 	return override?.composeFile ?? DEFAULT_COMPOSE_FILE;
 }
 //#endregion
+//#region src/lib/filesystem-audit-mode.ts
+const FILESYSTEM_AUDIT = ["off", "record"];
+function resolveFilesystemAudit(input) {
+	let trimmed = input?.trim() || "off";
+	if (!FILESYSTEM_AUDIT.includes(trimmed)) throw new SandboxError(`Invalid filesystem_audit: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_AUDIT.join(", ")}.`, "INVALID_FILESYSTEM_AUDIT");
+	return trimmed;
+}
+//#endregion
 //#region src/lib/filesystem-mode.ts
 const FILESYSTEM_MODES = ["persistent", "ephemeral"];
 function resolveFilesystemMode(input) {
@@ -23276,6 +23284,7 @@ const LIST_INPUTS = [
 		"fail_on_blocked",
 		"fail_on_ca_residue",
 		"filesystem_mode",
+		"filesystem_audit",
 		"label"
 	],
 	lists: LIST_INPUTS
@@ -23284,35 +23293,38 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$6 = getInput) {
-	let runInput = getInput$6("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$2 = getInput) {
+	let runInput = getInput$2("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$5 = getInput) {
+function readProxyInputs(getInput$1 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$5("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$5("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$1("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$1("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$1 = getInput) {
+function readFilesystemInputs(notice, getInput$3 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$3("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$1("write_through"),
-			writable: getInput$1("writable"),
-			allowWrite: getInput$1("allow_write")
+			writeThrough: getInput$3("write_through"),
+			writable: getInput$3("writable"),
+			allowWrite: getInput$3("allow_write")
 		}, notice)
 	};
 }
-function readStepLabel(getInput$4 = getInput) {
-	return getInput$4("label") || void 0;
+function readFilesystemAuditInput(getInput$7 = getInput) {
+	return resolveFilesystemAudit(getInput$7("filesystem_audit"));
 }
-function readFailOnCaResidue(getInput$2 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$2);
+function readStepLabel(getInput$6 = getInput) {
+	return getInput$6("label") || void 0;
 }
-function readFailOnBlocked(getInput$3 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$3);
+function readFailOnCaResidue(getInput$4 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$4);
+}
+function readFailOnBlocked(getInput$5 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$5);
 }
 //#endregion
 //#region src/lib/retry-briefly.ts
@@ -23377,7 +23389,7 @@ function parseMountsUnder(mountinfoContent, dir) {
 function defaultReadMountinfo() {
 	return (0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8");
 }
-function defaultRemove(path) {
+function defaultRemove$1(path) {
 	(0, node_fs.rmSync)(path, {
 		recursive: !0,
 		force: !0
@@ -23405,7 +23417,7 @@ function unmountAllUnder(dir, deps, warn) {
 	}
 }
 function removeScratchDir(dir, deps) {
-	let { exec = runPinnedHostCommand, lstat = node_fs.lstatSync, remove = defaultRemove } = deps;
+	let { exec = runPinnedHostCommand, lstat = node_fs.lstatSync, remove = defaultRemove$1 } = deps;
 	retryBriefly(() => {
 		try {
 			remove(dir);
@@ -23831,6 +23843,79 @@ function formatFilesystemPlanLog(mode, overlayRoots, writeThrough) {
 	for (let root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
 	for (let entry of writeThrough) lines.push(`Writable (persisted):                    ${entry}`);
 	return lines;
+}
+function filesystemAuditPaths(containerName, scratchBase) {
+	let suffix = containerName.split("-").at(-1);
+	return {
+		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
+		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`)
+	};
+}
+function cgroupFsPath(cgroupsPath) {
+	return (0, node_path.join)("/sys/fs/cgroup", cgroupsPath);
+}
+function defaultExec$3(command, args) {
+	return (0, node_child_process.execFileSync)(hostCommand(command), args, {
+		encoding: "utf8",
+		env: hostCommandEnv(command)
+	});
+}
+function defaultSpawn$1(command, args) {
+	let child = (0, node_child_process.spawn)(hostCommand(command), args, {
+		stdio: [
+			"ignore",
+			"inherit",
+			"inherit"
+		],
+		env: hostCommandEnv(command)
+	});
+	return {
+		exited: new Promise((resolve) => {
+			child.on("error", () => resolve()), child.on("close", () => resolve());
+		}),
+		kill: (signal) => child.kill(signal)
+	};
+}
+function defaultSleep(ms) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function defaultRemove(path) {
+	(0, node_fs.rmSync)(path, { force: !0 });
+}
+const noAudit = { stop: async () => {} };
+function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = node_fs.chmodSync } = {}) {
+	let tracerPath = (0, node_path.join)(destDir, "filesystem-audit");
+	return exec("docker", buildDockerCpArgs({
+		containerName,
+		containerPath: "/opt/buildcage/bin/filesystem-audit",
+		hostPath: tracerPath
+	})), chmod(tracerPath, 493), tracerPath;
+}
+async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath }, warn, deps = {}) {
+	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove } = deps, child = spawn("sudo", [
+		"-n",
+		"--",
+		tracerPath,
+		"--cgroup",
+		cgroupFsPath(cgroupsPath),
+		"--out",
+		outPath,
+		"--pidfile",
+		pidFilePath,
+		"--ready",
+		readyPath
+	]), stop = async () => {
+		child.kill("SIGTERM"), await child.exited, remove(pidFilePath);
+	}, exited = !1;
+	child.exited.then(() => {
+		exited = !0;
+	});
+	for (let i = 0; i < 50; i++) {
+		if (exists(readyPath)) return { stop };
+		if (exited) break;
+		await sleep(100);
+	}
+	return warn("buildcage: filesystem_audit did not start; the step's file accesses were not recorded."), await stop(), noAudit;
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
@@ -25328,6 +25413,7 @@ const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-
 	"write_through",
 	"writable",
 	"filesystem_mode",
+	"filesystem_audit",
 	"label"
 ].map((input) => `INPUT_${input.toUpperCase()}`));
 function isRunnerOnly(key) {
@@ -25698,6 +25784,9 @@ const realDeps$2 = {
 	resolveSandboxEnv,
 	buildEnvBlob,
 	runIsolated,
+	extractTracer,
+	startFilesystemAudit,
+	ensureOwnScratchBase,
 	mkdir: node_fs.mkdirSync,
 	touch: (path) => (0, node_fs.writeFileSync)(path, "", {
 		flag: "a",
@@ -25839,6 +25928,24 @@ function finishNssDb(caTrust, options, deps) {
 		release();
 	}
 }
+async function startAudit(dir, config, options, deps) {
+	let { filesystemAudit, containerName, warn } = options;
+	if (filesystemAudit === void 0) return noAudit;
+	let cgroupsPath = config.linux.cgroupsPath;
+	if (cgroupsPath === void 0) return warn("buildcage: filesystem_audit needs a cgroup v2 host; the step's file accesses were not recorded."), noAudit;
+	try {
+		let tracerPath = deps.extractTracer(containerName, dir);
+		return deps.ensureOwnScratchBase(SANDBOX_SCRATCH_BASE), await deps.startFilesystemAudit({
+			tracerPath,
+			cgroupsPath,
+			outPath: filesystemAudit.outPath,
+			pidFilePath: filesystemAudit.pidFilePath,
+			readyPath: (0, node_path.join)(dir, "filesystem-audit.ready")
+		}, warn);
+	} catch (e) {
+		return warn(`buildcage: filesystem_audit could not start (${errorMessage(e)}); the step's file accesses were not recorded.`), noAudit;
+	}
+}
 async function runSandboxedCommand(options, overrides = {}) {
 	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {
 		...realDeps$2,
@@ -25847,18 +25954,24 @@ async function runSandboxedCommand(options, overrides = {}) {
 	return withScratchDir(async (dir) => {
 		let { config, runcPath, caTrust, netnsName, rootfsBindDir } = assembleBundle(dir, options, deps), exitCode;
 		try {
-			writeOciConfig(config, dir), exitCode = await runIsolated({
-				envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
-				runcPath,
-				proxyNetns,
-				bundleDir: dir,
-				containerId: containerName,
-				netnsName,
-				rootfsBindDir,
-				gateway: PROXY_ADDRESS,
-				targetIp: "198.19.255.101",
-				cancel
-			});
+			writeOciConfig(config, dir);
+			let audit = await startAudit(dir, config, options, deps);
+			try {
+				exitCode = await runIsolated({
+					envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
+					runcPath,
+					proxyNetns,
+					bundleDir: dir,
+					containerId: containerName,
+					netnsName,
+					rootfsBindDir,
+					gateway: PROXY_ADDRESS,
+					targetIp: "198.19.255.101",
+					cancel
+				});
+			} finally {
+				await audit.stop();
+			}
 		} catch (e) {
 			throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e;
 		}
@@ -72130,6 +72243,7 @@ const realDeps = {
 	readRunCommand,
 	readProxyInputs,
 	readFilesystemInputs,
+	readFilesystemAuditInput,
 	readRuleInputs,
 	readFailOnCaResidue,
 	readFailOnBlocked,
@@ -72179,14 +72293,14 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
 	for (let line of configFile?.summary ?? []) log(line);
 	let runInput = readRunCommand(), { proxyEngine, proxyMode } = readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
+	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), filesystemAudit = readFilesystemAuditInput();
 	checkScratchBaseParent(), configFile && saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs(), { httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs(), annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY);
 	checkUrlAndTlsRuleSupport({
@@ -72214,7 +72328,7 @@ async function runSandboxStep(env, overrides = {}) {
 	withLogGroup("buildcage: Configured ACL Rules", () => {
 		logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
 	});
-	let containerName = generateContainerName(), projectName = deriveProjectName(containerName);
+	let containerName = generateContainerName(), projectName = deriveProjectName(containerName), audit = filesystemAudit === "record" ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE) : void 0;
 	saveCleanupState(env, {
 		containerName,
 		filesystemMode,
@@ -72263,6 +72377,7 @@ async function runSandboxStep(env, overrides = {}) {
 			filesystemMode,
 			overlayRoots,
 			failOnCaResidue,
+			filesystemAudit: audit,
 			warn,
 			cancel: cancel.signal
 		});

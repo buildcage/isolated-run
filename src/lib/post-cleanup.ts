@@ -1,12 +1,15 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
 import { ownerToken, readContainerOwner, scratchDirNameFor } from "./container.ts";
 import { resolvePostState, type PostCleanupTargets } from "./post-state.ts";
+import { filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
 import { releaseNssDb } from "./sandbox/nss-db-ledger.ts";
+import { runPinnedHostCommand } from "./sandbox/run-host-command.ts";
 import {
+  SANDBOX_SCRATCH_BASE,
   cleanupScratchDir,
   scratchDirFor,
   type CleanupScratchDirOptions,
@@ -17,6 +20,54 @@ export interface PostCleanupDeps {
   fileExists?: (path: string) => boolean;
   removeScratchDir?: (dir: string, options: CleanupScratchDirOptions) => void;
   releaseNssDb?: typeof releaseNssDb;
+  readFile?: (path: string) => string;
+  killTracer?: (pid: number) => void;
+  removeFile?: (path: string) => void;
+}
+
+// Untested by design: the defaults behind the audit-cleanup seams, which only
+// hand node:fs and the pinned sudo what the tested caller decided.
+/* v8 ignore start */
+function defaultKillTracer(pid: number): void {
+  runPinnedHostCommand("sudo", ["-n", "kill", "-TERM", String(pid)]);
+}
+function defaultReadFile(path: string): string {
+  return readFileSync(path, "utf8");
+}
+function defaultRemoveFile(path: string): void {
+  rmSync(path, { force: true });
+}
+/* v8 ignore stop */
+
+/**
+ * Stop a tracer a cancel orphaned, and remove its files. The step's own
+ * finally removes the pidfile once it stops the tracer cleanly, so a pidfile
+ * still here means the tracer may still be running. Best-effort: the runner
+ * host it leaked onto is the only thing at stake.
+ */
+function cleanupLeftoverAudit(
+  containerName: string,
+  annotation: Annotation,
+  {
+    fileExists = existsSync,
+    readFile = defaultReadFile,
+    killTracer = defaultKillTracer,
+    removeFile = defaultRemoveFile,
+  }: PostCleanupDeps,
+): void {
+  const { outPath, pidFilePath } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
+  if (fileExists(pidFilePath)) {
+    try {
+      const pid = Number(readFile(pidFilePath).trim());
+      if (Number.isInteger(pid) && pid > 0) killTracer(pid);
+    } catch (e) {
+      annotation.warning(
+        `run post-cleanup: failed to stop the file-audit tracer: ${errorMessage(e)}`,
+      );
+    }
+    removeFile(pidFilePath);
+  }
+  removeFile(outPath);
 }
 
 /**
@@ -54,13 +105,14 @@ export function planPostCleanup(
   state: { containerName: string; ephemeralRoots: string },
   env: NodeJS.ProcessEnv,
   annotation: Annotation,
-  {
+  deps: PostCleanupDeps = {},
+): PostCleanupTargets | null {
+  const {
     readOwner = readContainerOwner,
     fileExists = existsSync,
     removeScratchDir = cleanupScratchDir,
     releaseNssDb: releaseNssDbUse = releaseNssDb,
-  }: PostCleanupDeps = {},
-): PostCleanupTargets | null {
+  } = deps;
   const { targets, problems } = resolvePostState(state);
   for (const problem of problems) {
     annotation.error(`run post-cleanup: ${problem}`);
@@ -75,6 +127,8 @@ export function planPostCleanup(
     );
     return null;
   }
+
+  cleanupLeftoverAudit(targets.containerName, annotation, deps);
 
   // Reclaim this step's sandbox scratch dir if a hard kill bypassed the run's
   // own withScratchDir finally. Its path is derived deterministically from

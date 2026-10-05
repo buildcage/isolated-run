@@ -57,18 +57,19 @@ func main() {
 	cgPath := flag.String("cgroup", "", "cgroup v2 directory to watch, created if missing")
 	out := flag.String("out", "", "JSON lines output file")
 	ready := flag.String("ready", "", "file to create once the programs are attached")
+	pidfile := flag.String("pidfile", "", "file to write this process's pid to, for the caller to stop it")
 	flag.Parse()
 	if *cgPath == "" || *out == "" {
 		flag.Usage()
 		os.Exit(2)
 	}
-	if err := run(*cgPath, *out, *ready); err != nil {
+	if err := run(*cgPath, *out, *ready, *pidfile); err != nil {
 		fmt.Fprintln(os.Stderr, "filesystem-audit:", err)
 		os.Exit(1)
 	}
 }
 
-func run(cgPath, outPath, readyPath string) error {
+func run(cgPath, outPath, readyPath, pidPath string) error {
 	cgid, level, err := prepareCgroup(cgPath)
 	if err != nil {
 		return err
@@ -122,6 +123,11 @@ func run(cgPath, outPath, readyPath string) error {
 	bw := bufio.NewWriterSize(f, 1<<20)
 	defer bw.Flush()
 
+	if pidPath != "" {
+		if err := os.WriteFile(pidPath, []byte(fmt.Sprintln(os.Getpid())), 0o644); err != nil {
+			return err
+		}
+	}
 	if readyPath != "" {
 		if err := os.WriteFile(readyPath, nil, 0o644); err != nil {
 			return err

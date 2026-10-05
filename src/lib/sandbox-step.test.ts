@@ -4,6 +4,8 @@ import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 
 import { SandboxError } from "./errors.ts";
 import { runSandboxStep, type SandboxStepDeps } from "./sandbox-step.ts";
+import { filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
+import { SANDBOX_SCRATCH_BASE } from "./sandbox/scratch-dir.ts";
 
 // Keeps pinningPaths from resolving the fixture's paths on this machine.
 vi.mock("./sandbox/symlinks.ts", async (importOriginal) => ({
@@ -20,6 +22,7 @@ const mocks = {
   readRunCommand: vi.fn(),
   readProxyInputs: vi.fn(),
   readFilesystemInputs: vi.fn(),
+  readFilesystemAuditInput: vi.fn(),
   readRuleInputs: vi.fn(),
   readFailOnCaResidue: vi.fn(),
   readFailOnBlocked: vi.fn(),
@@ -77,6 +80,7 @@ beforeEach(() => {
     filesystemMode: "persistent",
     writeThroughInput: "",
   });
+  mocks.readFilesystemAuditInput.mockReturnValue("off");
   mocks.readRuleInputs.mockReturnValue({
     httpsRules: ["example.com:443"],
     httpRules: [],
@@ -178,6 +182,22 @@ describe("runSandboxStep", () => {
       writeThroughPaths: ["/home/runner/work/repo/repo/dist"],
       failOnCaResidue: false,
     });
+  });
+
+  it("passes the audit output paths to the command under filesystem_audit: record", async () => {
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.runSandboxedCommand.mock.calls[0][0].filesystemAudit).toStrictEqual(
+      filesystemAuditPaths("buildcage-proxy-deadbeef", SANDBOX_SCRATCH_BASE),
+    );
+  });
+
+  it("leaves the audit off by default", async () => {
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.runSandboxedCommand.mock.calls[0][0].filesystemAudit).toBeUndefined();
   });
 
   it("hands the report the inputs read up front", async () => {

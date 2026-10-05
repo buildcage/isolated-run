@@ -9,6 +9,7 @@ import {
   readProxyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
+  readFilesystemAuditInput,
   readFilesystemInputs,
   readRunCommand,
   readStepLabel,
@@ -160,6 +161,22 @@ describe("readFilesystemInputs", () => {
     expect(notice).toHaveBeenCalledOnce();
     expect(() => readFilesystemInputs(silent, inputs({ allow_write: "/tmp/out" }))).toThrow(
       /allow_write: has been replaced/,
+    );
+  });
+});
+
+describe("readFilesystemAuditInput", () => {
+  it("defaults to off", () => {
+    expect(readFilesystemAuditInput(inputs())).toBe("off");
+  });
+
+  it("reads record", () => {
+    expect(readFilesystemAuditInput(inputs({ filesystem_audit: "record" }))).toBe("record");
+  });
+
+  it("rejects an invalid value", () => {
+    expect(() => readFilesystemAuditInput(inputs({ filesystem_audit: "on" }))).toThrow(
+      /Invalid filesystem_audit/,
     );
   });
 });
