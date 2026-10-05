@@ -53,7 +53,7 @@ jobs:
               dev/file-audit-hosted.sh "$PWD/docker/file-audit/out/file-audit-$arch" "$RUNNER_TEMP/runc" \
               "$(id -u)" "$(id -g)" "$@"
           }
-          NPM='d=$(mktemp -d -p "$PWD" npm-poc.XXXX) && cd $d && npm cache clean --force 2>/dev/null; npm init -y >/dev/null && npm install --no-audit --no-fund express@4 typescript eslint >/dev/null'
+          NPM='d=$(mktemp -d -p "$PWD" npm-poc.XXXX) && cd $d && npm cache clean --force 2>/dev/null; echo "{\"name\":\"npm-poc\",\"version\":\"1.0.0\"}" > package.json && npm install --no-audit --no-fund express@4 typescript eslint >/dev/null'
           GO='cd docker/file-audit && GOCACHE=$(mktemp -d) go build -o /tmp/fa-build . && echo built'
 
           run scenario "$PWD/dev/file-audit-scenario.sh"

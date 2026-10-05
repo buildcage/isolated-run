@@ -66,5 +66,6 @@ if [ -n "$TRACER" ]; then
   wait $TRACER || true
 fi
 echo "--- $NAME ($MODE): exit $CODE, sandbox wall time $(awk "BEGIN{printf \"%.2f\", $END - $START}") s"
-[ -n "$TRACER" ] && cat "$BUNDLE.log"
+if [ -n "$TRACER" ]; then cat "$BUNDLE.log"; fi
 rmdir "/sys/fs/cgroup$CG_REL" 2>/dev/null || true
+exit "$CODE"
