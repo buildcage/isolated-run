@@ -284,7 +284,11 @@ cancelled step goes the same way: the action catches the runner's signal, `SIGTE
 command's process group, the whole sandbox is killed if it is still running 5 seconds later, and
 then the action writes the traffic report and stops the proxy as usual. If the action is killed
 first, a fallback step reads the container's identity back from job state, stops the proxy and
-deletes the scratch directory. The command's own life is tied to `run-isolated.sh`'s by a two-hop
+deletes the scratch directory, but nothing stops the sandbox. `sudo`, `run-isolated.sh` and the
+command are left running, still confined and with no network once the proxy is gone, and the command
+can go on writing to the host's files while an `if: always()` step or a post step runs: every
+writable path in `persistent` mode, the `write_through:` ones in `ephemeral`. That takes the action
+being killed within those 5 seconds, before it kills the sandbox itself. The command's own life is tied to `run-isolated.sh`'s by a two-hop
 `setpriv --pdeathsig=KILL` chain, so an out-of-memory kill on the script takes the whole sandboxed
 process tree with it rather than leaving orphans.
 
