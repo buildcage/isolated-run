@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
@@ -23,23 +23,19 @@ export interface PostCleanupDeps {
   readFile?: (path: string) => string;
   killTracer?: (pid: number) => void;
   removeFile?: (path: string) => void;
-  copyFile?: (from: string, to: string) => void;
 }
 
 // Untested by design: the defaults behind the audit-cleanup seams, which only
 // hand node:fs and the pinned sudo what the tested caller decided.
 /* v8 ignore start */
 function defaultKillTracer(pid: number): void {
-  runPinnedHostCommand("sudo", ["-n", "kill", "-TERM", String(pid)]);
+  runPinnedHostCommand("sudo", ["-n", "kill", "-KILL", String(pid)]);
 }
 function defaultReadFile(path: string): string {
   return readFileSync(path, "utf8");
 }
 function defaultRemoveFile(path: string): void {
   rmSync(path, { force: true });
-}
-function defaultCopyFile(from: string, to: string): void {
-  copyFileSync(from, to);
 }
 /* v8 ignore stop */
 
@@ -57,7 +53,6 @@ function cleanupLeftoverAudit(
     readFile = defaultReadFile,
     killTracer = defaultKillTracer,
     removeFile = defaultRemoveFile,
-    copyFile = defaultCopyFile,
   }: PostCleanupDeps,
 ): void {
   const { outPath, pidFilePath } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
@@ -74,7 +69,6 @@ function cleanupLeftoverAudit(
     }
     removeFile(pidFilePath);
   }
-  mirrorForDebug(outPath, fileExists, copyFile);
   removeFile(outPath);
 }
 
@@ -84,18 +78,6 @@ function isTracer(pid: number, readFile: (path: string) => string): boolean {
   } catch {
     return false;
   }
-}
-
-// Test hook: surface the recording for an e2e to read before it is removed. A
-// normal build drops this; see rolldown.config.js.
-function mirrorForDebug(
-  outPath: string,
-  fileExists: (path: string) => boolean,
-  copyFile: (from: string, to: string) => void,
-): void {
-  if (process.env.BUILDCAGE_BUILD_TEST_HOOKS !== "1") return;
-  const debugFile = process.env.BUILDCAGE_FILESYSTEM_AUDIT_DEBUG_FILE;
-  if (debugFile && fileExists(outPath)) copyFile(outPath, debugFile);
 }
 
 /**

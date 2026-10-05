@@ -663,7 +663,7 @@ function defaultKillTracer(pid) {
 	runPinnedHostCommand("sudo", [
 		"-n",
 		"kill",
-		"-TERM",
+		"-KILL",
 		String(pid)
 	]);
 }
@@ -673,10 +673,7 @@ function defaultReadFile(path) {
 function defaultRemoveFile(path) {
 	(0, node_fs.rmSync)(path, { force: !0 });
 }
-function defaultCopyFile(from, to) {
-	(0, node_fs.copyFileSync)(from, to);
-}
-function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.existsSync, readFile = defaultReadFile, killTracer = defaultKillTracer, removeFile = defaultRemoveFile, copyFile = defaultCopyFile }) {
+function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.existsSync, readFile = defaultReadFile, killTracer = defaultKillTracer, removeFile = defaultRemoveFile }) {
 	let { outPath, pidFilePath } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
 	if (fileExists(pidFilePath)) {
 		try {

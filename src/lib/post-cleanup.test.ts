@@ -1,12 +1,10 @@
-import { describe, it, expect, vi, afterEach, type Mock } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 
 import { planPostCleanup, type PostCleanupDeps } from "./post-cleanup.ts";
 import { filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
 import { SANDBOX_SCRATCH_BASE, scratchDirFor } from "./sandbox/scratch-dir.ts";
-
-afterEach(() => vi.unstubAllEnvs());
 
 const CONTAINER = "buildcage-proxy-deadbeef";
 const STATE = { containerName: CONTAINER, ephemeralRoots: "" };
@@ -244,33 +242,6 @@ describe("planPostCleanup", () => {
       "run post-cleanup: filesystem_audit cleanup failed: EBUSY",
     );
     expect(released).toContain("after the scratch dir");
-  });
-
-  it("mirrors the recording to the debug file in a test-hooks build", () => {
-    vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "1");
-    vi.stubEnv("BUILDCAGE_FILESYSTEM_AUDIT_DEBUG_FILE", "/tmp/audit-debug.jsonl");
-    const copied: [string, string][] = [];
-    const { deps: d } = deps({
-      fileExists: () => true,
-      copyFile: (from, to) => copied.push([from, to]),
-    });
-
-    planPostCleanup(STATE, ENV, annotation(), d);
-
-    expect(copied).toStrictEqual([[AUDIT.outPath, "/tmp/audit-debug.jsonl"]]);
-  });
-
-  it("does not mirror the recording when the debug file is unset", () => {
-    vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "1");
-    const copied: [string, string][] = [];
-    const { deps: d } = deps({
-      fileExists: () => true,
-      copyFile: (from, to) => copied.push([from, to]),
-    });
-
-    planPostCleanup(STATE, ENV, annotation(), d);
-
-    expect(copied).toStrictEqual([]);
   });
 
   it("only clears the audit output when the tracer was already stopped", () => {

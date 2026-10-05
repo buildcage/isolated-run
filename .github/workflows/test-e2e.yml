@@ -188,7 +188,6 @@ jobs:
         uses: ./
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-          BUILDCAGE_FILESYSTEM_AUDIT_DEBUG_FILE: ${{ runner.temp }}/filesystem-audit.jsonl
         with:
           proxy_engine: universal
           proxy_mode: audit
@@ -201,11 +200,13 @@ jobs:
 
       - name: Verify the tracer recorded the step's file accesses
         run: |
-          f="${{ runner.temp }}/filesystem-audit.jsonl"
-          test -s "$f"
+          # The recording is still under the scratch base here; the post step
+          # that removes it runs after this one. The tracer wrote it as root.
+          f=$(sudo sh -c 'ls /var/tmp/buildcage-*/filesystem-audit-*.jsonl')
+          sudo test -s "$f"
           for kind in exec write rename unlink; do
-            grep -q "\"kind\":\"$kind\"" "$f" || {
-              echo "no $kind recorded; got:"; cat "$f"; exit 1
+            sudo grep -q "\"kind\":\"$kind\"" "$f" || {
+              echo "no $kind recorded; got:"; sudo cat "$f"; exit 1
             }
           done
 

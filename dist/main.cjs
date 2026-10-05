@@ -23877,10 +23877,13 @@ function defaultSpawn$1(command, args) {
 	};
 }
 function defaultSleep(ms) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+	return new Promise((resolve) => setTimeout(resolve, ms).unref());
 }
 function defaultRemove(path) {
 	(0, node_fs.rmSync)(path, { force: !0 });
+}
+function defaultReadFile$2(path) {
+	return (0, node_fs.readFileSync)(path, "utf8");
 }
 const noAudit = { stop: async () => {} };
 function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = node_fs.chmodSync } = {}) {
@@ -23892,7 +23895,7 @@ function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = n
 	})), chmod(tracerPath, 493), tracerPath;
 }
 async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath }, warn, deps = {}) {
-	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove } = deps, child = spawn("sudo", [
+	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2 } = deps, child = spawn("sudo", [
 		"-n",
 		"--",
 		tracerPath,
@@ -23904,12 +23907,22 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		pidFilePath,
 		"--ready",
 		readyPath
-	]), stop = async () => {
-		child.kill("SIGTERM"), await Promise.race([child.exited, sleep(2e3)]), child.kill("SIGKILL"), await child.exited, remove(pidFilePath);
-	}, exited = !1;
+	]), exited = !1;
 	child.exited.then(() => {
 		exited = !0;
 	});
+	let stop = async () => {
+		if (child.kill("SIGTERM"), await Promise.race([child.exited, sleep(2e3)]), !exited) try {
+			let pid = Number(readFile(pidFilePath).trim());
+			pid > 0 && exec("sudo", [
+				"-n",
+				"kill",
+				"-KILL",
+				String(pid)
+			]);
+		} catch {}
+		await child.exited, remove(pidFilePath);
+	};
 	for (let i = 0; i < 50; i++) {
 		if (exists(readyPath)) return { stop };
 		if (exited) break;

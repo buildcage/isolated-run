@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
@@ -56,6 +56,7 @@ export interface FilesystemAuditDeps {
   exists?: (path: string) => boolean;
   sleep?: (ms: number) => Promise<void>;
   remove?: (path: string) => void;
+  readFile?: (path: string) => string;
 }
 
 // Untested by design: the defaults behind this module's seams, which only hand
@@ -81,11 +82,17 @@ function defaultSpawn(command: string, args: string[]): AuditChild {
 }
 
 function defaultSleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  // unref so the grace timer, once it has lost the race in stop(), does not
+  // hold the action process open for its full duration.
+  return new Promise((resolve) => setTimeout(resolve, ms).unref());
 }
 
 function defaultRemove(path: string): void {
   rmSync(path, { force: true });
+}
+
+function defaultReadFile(path: string): string {
+  return readFileSync(path, "utf8");
 }
 /* v8 ignore stop */
 
@@ -147,6 +154,8 @@ export async function startFilesystemAudit(
     exists = existsSync,
     sleep = defaultSleep,
     remove = defaultRemove,
+    exec = defaultExec,
+    readFile = defaultReadFile,
   } = deps;
   const child = spawn("sudo", [
     "-n",
@@ -161,19 +170,28 @@ export async function startFilesystemAudit(
     "--ready",
     readyPath,
   ]);
-  // Removing the pidfile once it has exited tells the post step the tracer was
-  // already stopped, so the post step only acts on one a cancel orphaned.
-  const stop = async () => {
-    child.kill("SIGTERM");
-    await Promise.race([child.exited, sleep(STOP_GRACE_MS)]);
-    child.kill("SIGKILL"); // a no-op once it has exited; guarantees it does otherwise
-    await child.exited;
-    remove(pidFilePath);
-  };
   let exited = false;
   void child.exited.then(() => {
     exited = true;
   });
+  // sudo relays SIGTERM to the tracer for a clean flush. If that does not end
+  // it in time, SIGKILL the tracer itself: SIGKILL to the sudo wrapper would
+  // not reach it. Removing the pidfile afterwards tells the post step the
+  // tracer is stopped, so it only acts on one a cancel orphaned.
+  const stop = async () => {
+    child.kill("SIGTERM");
+    await Promise.race([child.exited, sleep(STOP_GRACE_MS)]);
+    if (!exited) {
+      try {
+        const pid = Number(readFile(pidFilePath).trim()); // NaN for a junk pidfile
+        if (pid > 0) exec("sudo", ["-n", "kill", "-KILL", String(pid)]);
+      } catch {
+        // The tracer is already gone, or its pidfile cannot be read.
+      }
+    }
+    await child.exited;
+    remove(pidFilePath);
+  };
   for (let i = 0; i < READY_TRIES; i++) {
     if (exists(readyPath)) return { stop };
     if (exited) break;

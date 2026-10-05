@@ -147,4 +147,78 @@ describe("startFilesystemAudit", () => {
     expect(sleep).toHaveBeenCalledTimes(2);
     expect(warn).toHaveBeenCalledOnce();
   });
+
+  it("kills the tracer directly when it outlives the SIGTERM grace", async () => {
+    let resolveExit: () => void;
+    const exited = new Promise<void>((r) => {
+      resolveExit = r;
+    });
+    const kill = vi.fn(); // SIGTERM to the sudo wrapper does not end a wedged tracer
+    const exec = vi.fn(() => {
+      resolveExit();
+      return "";
+    });
+    const remove = vi.fn();
+
+    const handle = await startFilesystemAudit(START_OPTIONS, vi.fn(), {
+      spawn: () => ({ exited, kill }),
+      exists: () => true,
+      sleep: async () => {},
+      remove,
+      exec,
+      readFile: () => "999\n",
+    });
+    await handle.stop();
+
+    expect(kill).toHaveBeenCalledWith("SIGTERM");
+    expect(exec).toHaveBeenCalledWith("sudo", ["-n", "kill", "-KILL", "999"]);
+    expect(remove).toHaveBeenCalledWith(START_OPTIONS.pidFilePath);
+  });
+
+  it("does not signal anything when the pidfile holds no usable pid", async () => {
+    let resolveExit: () => void;
+    const exited = new Promise<void>((r) => {
+      resolveExit = r;
+    });
+    const exec = vi.fn();
+
+    const handle = await startFilesystemAudit(START_OPTIONS, vi.fn(), {
+      spawn: () => ({ exited, kill: vi.fn() }),
+      exists: () => true,
+      sleep: async () => {},
+      remove: vi.fn(),
+      exec,
+      // The pidfile is junk; the tracer turns out to have already gone.
+      readFile: () => {
+        queueMicrotask(() => resolveExit());
+        return "not-a-pid\n";
+      },
+    });
+    await handle.stop();
+
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("swallows a pidfile that cannot be read while escalating", async () => {
+    let resolveExit: () => void;
+    const exited = new Promise<void>((r) => {
+      resolveExit = r;
+    });
+    const exec = vi.fn();
+
+    const handle = await startFilesystemAudit(START_OPTIONS, vi.fn(), {
+      spawn: () => ({ exited, kill: vi.fn() }),
+      exists: () => true,
+      sleep: async () => {},
+      remove: vi.fn(),
+      exec,
+      readFile: () => {
+        queueMicrotask(() => resolveExit());
+        throw new Error("ENOENT");
+      },
+    });
+    await handle.stop();
+
+    expect(exec).not.toHaveBeenCalled();
+  });
 });
