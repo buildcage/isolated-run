@@ -9,13 +9,13 @@ import (
 
 // event builds a raw sample matching struct event's layout in decode.go.
 type event struct {
-	kind, flags, mode uint32
-	pathRet           int32
-	argsLen           uint32
-	n1, n2, truncated uint8
-	pid, ppid         uint32
-	comm              string
-	data              []byte
+	kind, flags, mode         uint32
+	pathRet                   int32
+	argsLen                   uint32
+	n1, n2, truncated, trunc2 uint8
+	pid, ppid                 uint32
+	comm                      string
+	data                      []byte
 }
 
 func (e event) bytes() []byte {
@@ -28,7 +28,7 @@ func (e event) bytes() []byte {
 	le.PutUint32(b[16:], e.mode)
 	le.PutUint32(b[20:], uint32(e.pathRet))
 	le.PutUint32(b[24:], e.argsLen)
-	b[32], b[33], b[34] = e.n1, e.n2, e.truncated
+	b[32], b[33], b[34], b[35] = e.n1, e.n2, e.truncated, e.trunc2
 	copy(b[36:52], e.comm)
 	return append(b, e.data...)
 }
@@ -110,6 +110,13 @@ func TestDecode(t *testing.T) {
 			name: "truncated walk",
 			ev:   event{kind: 3, comm: "rm", n1: 1, truncated: 1, data: comps("deep")},
 			want: record{Kind: "unlink", Comm: "rm", Path: "…/deep"},
+		},
+		{
+			// Only the rename target was truncated; the source must not
+			// inherit the mark.
+			name: "rename, only target truncated",
+			ev:   event{kind: 5, comm: "mv", n1: 2, n2: 1, trunc2: 1, data: append(comps("a", "tmp"), comps("b")...)},
+			want: record{Kind: "rename", Comm: "mv", Path: "/tmp/a", To: "…/b"},
 		},
 	}
 	for _, c := range cases {

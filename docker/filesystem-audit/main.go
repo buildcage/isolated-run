@@ -37,10 +37,21 @@ import (
 
 const cgroupRoot = "/sys/fs/cgroup"
 
-// getnameProgs are the two spellings of the kernel's open-path copy. One is
-// inlined into the other depending on the build, so each is optional, but at
-// least one must be present to record a failed open's name.
-var getnameProgs = map[string]string{"on_getname": "getname_flags", "on_getname_outer": "getname"}
+// optionalProgs are programs whose attach target some supported kernels do
+// not expose; each is dropped before load when its function is absent from
+// kernel BTF. getname has two spellings (one inlined into the other) and
+// names a failed open; backing_file_open (added in 6.7) de-duplicates
+// overlayfs layer opens, so on older kernels those opens go unmerged.
+var optionalProgs = map[string]string{
+	"on_getname":       "getname_flags",
+	"on_getname_outer": "getname",
+	"on_backing_enter": "backing_file_open",
+	"on_backing_exit":  "backing_file_open",
+}
+
+// getnameProgs is the subset of optionalProgs that records a failed open's
+// name; at least one must attach.
+var getnameProgs = map[string]bool{"on_getname": true, "on_getname_outer": true}
 
 func main() {
 	cgPath := flag.String("cgroup", "", "cgroup v2 directory to watch, created if missing")
@@ -125,10 +136,7 @@ func run(cgPath, outPath, readyPath string) error {
 		rd.Flush() // Read drains what is queued, then returns ErrFlushed.
 	}()
 
-	if err := readLoop(rd, bufio.NewWriter(bw), coll); err != nil {
-		return err
-	}
-	return bw.Flush()
+	return readLoop(rd, bw, coll)
 }
 
 // prepareCgroup verifies the host is cgroup v2, creates the watched cgroup
@@ -167,7 +175,7 @@ func dropAbsentPrograms(spec *ebpf.CollectionSpec) {
 	if err != nil {
 		return
 	}
-	for prog, fn := range getnameProgs {
+	for prog, fn := range optionalProgs {
 		var f *btf.Func
 		if err := kspec.TypeByName(fn, &f); err != nil {
 			fmt.Fprintf(os.Stderr, "filesystem-audit: %s absent from kernel BTF, skipped\n", fn)
@@ -193,7 +201,7 @@ func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, e
 		} else {
 			l, err = link.AttachTracing(link.TracingOptions{Program: p})
 		}
-		_, optional := getnameProgs[name]
+		_, optional := optionalProgs[name]
 		if err != nil {
 			if optional || p.Type() == ebpf.TracePoint {
 				fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
@@ -202,7 +210,7 @@ func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, e
 			return links, fmt.Errorf("attach %s: %w", name, err)
 		}
 		links = append(links, l)
-		if optional {
+		if getnameProgs[name] {
 			getnames++
 		}
 	}

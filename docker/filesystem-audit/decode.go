@@ -87,7 +87,8 @@ func decode(raw []byte) (record, error) {
 	mode := le.Uint32(raw[16:])
 	pathRet := int32(le.Uint32(raw[20:]))
 	argsLen := le.Uint32(raw[24:])
-	n1, n2, truncated := int(raw[32]), int(raw[33]), raw[34] != 0
+	n1, n2 := int(raw[32]), int(raw[33])
+	truncated, truncated2 := raw[34] != 0, raw[35] != 0
 	data := raw[hdrLen:]
 	r := record{
 		Kind: kindNames[kind],
@@ -137,7 +138,7 @@ func decode(raw []byte) (record, error) {
 	case 5, 9: // rename, link
 		var rest []byte
 		r.Path, rest = components(data, n1, truncated)
-		r.To, _ = components(rest, n2, truncated)
+		r.To, _ = components(rest, n2, truncated2)
 	case 16, 18, 19: // failed delete / chmod / chown
 		r.Path = cstr(data)
 		r.Err = pathRet

@@ -1,3 +1,5 @@
 # bpf2go output, regenerated at image build time
 *_bpfel.go
 *_bpfel.o
+# local build output
+out/

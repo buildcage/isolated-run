@@ -3,7 +3,9 @@
 // the first read and write of each open file, mmaps, execs, and the path
 // operations (create, move, delete, attribute change), successes and
 // failures alike. Kernel types are declared locally with preserve_access_index
-// so one CO-RE object runs on any BTF-enabled kernel from 5.17 on.
+// so one CO-RE object runs on any BTF-enabled kernel from 5.17 on. The
+// overlayfs de-duplication uses backing_file_open, added in 6.7; where it is
+// absent the loader drops those two programs (see main.go).
 
 #include <linux/types.h>
 #include <linux/bpf.h>
@@ -111,8 +113,8 @@ struct event {
 	u32 data_len;
 	u8 n1;
 	u8 n2;
-	u8 truncated;
-	u8 internal;
+	u8 truncated;  // the path, or the first path of a two-path operation
+	u8 trunc2;     // the second path of a rename or link
 	char comm[16];
 	char data[DATA_SZ + NAME_LEN]; // slack: masked offset + one component
 };
@@ -187,7 +189,7 @@ static __always_inline struct event *start(u32 kind)
 	e->n1 = 0;
 	e->n2 = 0;
 	e->truncated = 0;
-	e->internal = 0;
+	e->trunc2 = 0;
 	bpf_get_current_comm(e->comm, sizeof(e->comm));
 	return e;
 }
@@ -217,6 +219,7 @@ struct walk_ctx {
 	struct event *e;
 	u32 off;
 	u32 n;
+	u8 *trunc;
 	u32 off_mnt_root, off_d_parent, off_d_name, off_mnt_parent, off_mountpoint, off_mnt;
 };
 
@@ -241,7 +244,7 @@ static long walk_step(u64 i, struct walk_ctx *c)
 		return 0;
 	}
 	if (c->off >= DATA_SZ) {
-		c->e->truncated = 1;
+		*c->trunc = 1;
 		return 1;
 	}
 	long r = bpf_probe_read_kernel_str(&c->e->data[c->off & (DATA_SZ - 1)], NAME_LEN,
@@ -256,7 +259,7 @@ static long walk_step(u64 i, struct walk_ctx *c)
 // Appends the leaf-first path components of a dentry under a mount to
 // e->data at off, crossing mounts up to the namespace root like d_path.
 static __always_inline u32 walk(struct event *e, u32 off, struct dentry *d,
-				struct vfsmount *vfs, u8 *n)
+				struct vfsmount *vfs, u8 *n, u8 *trunc)
 {
 	u32 off_mnt = bpf_core_field_offset(struct mount, mnt);
 	struct walk_ctx c = {
@@ -266,6 +269,7 @@ static __always_inline u32 walk(struct event *e, u32 off, struct dentry *d,
 		.e = e,
 		.off = off,
 		.n = *n,
+		.trunc = trunc,
 		.off_mnt_root = bpf_core_field_offset(struct vfsmount, mnt_root),
 		.off_d_parent = bpf_core_field_offset(struct dentry, d_parent),
 		.off_d_name = bpf_core_field_offset(struct dentry, d_name.name),
@@ -317,8 +321,7 @@ static __always_inline int first_time(struct file *file, u8 bit)
 		*v |= bit;
 		return 1;
 	}
-	bpf_map_update_elem(&seen_files, &key, &bit, BPF_ANY);
-	return 1;
+	return bpf_map_update_elem(&seen_files, &key, &bit, BPF_ANY) == 0;
 }
 
 // Threads inside backing_file_open, overlayfs's open of a layer's real
@@ -334,6 +337,8 @@ struct {
 SEC("fentry/backing_file_open")
 int BPF_PROG(on_backing_enter)
 {
+	if (!in_target())
+		return 0;
 	u64 id = bpf_get_current_pid_tgid();
 	u8 one = 1;
 	bpf_map_update_elem(&in_backing, &id, &one, BPF_ANY);
@@ -343,6 +348,8 @@ int BPF_PROG(on_backing_enter)
 SEC("fexit/backing_file_open")
 int on_backing_exit(u64 *ctx)
 {
+	if (!in_target())
+		return 0;
 	u64 id = bpf_get_current_pid_tgid();
 	bpf_map_delete_elem(&in_backing, &id);
 	// Reads and writes on the overlay file reach the layer's file too;
@@ -411,7 +418,7 @@ int BPF_PROG(on_##hook, const struct path *dir, struct dentry *dentry)		\
 	if (!e)									\
 		return 0;							\
 	u32 off = leaf(e, 0, dentry, &e->n1);					\
-	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1); \
+	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated); \
 	submit(e);								\
 	return 0;								\
 }
@@ -432,7 +439,7 @@ int BPF_PROG(on_symlink, const struct path *dir, struct dentry *dentry, const ch
 	u32 off = r > 0 ? r : 0;
 	e->path_len = off;
 	off = leaf(e, off, dentry, &e->n1);
-	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1);
+	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated);
 	submit(e);
 	return 0;
 }
@@ -447,9 +454,9 @@ int BPF_PROG(on_rename, const struct path *old_dir, struct dentry *old_dentry,
 	if (!e)
 		return 0;
 	u32 off = leaf(e, 0, old_dentry, &e->n1);
-	off = walk(e, off, BPF_CORE_READ(old_dir, dentry), BPF_CORE_READ(old_dir, mnt), &e->n1);
+	off = walk(e, off, BPF_CORE_READ(old_dir, dentry), BPF_CORE_READ(old_dir, mnt), &e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
-	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), BPF_CORE_READ(new_dir, mnt), &e->n2);
+	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), BPF_CORE_READ(new_dir, mnt), &e->n2, &e->trunc2);
 	submit(e);
 	return 0;
 }
@@ -463,7 +470,7 @@ int BPF_PROG(on_chmod, const struct path *path, unsigned short mode)
 	if (!e)
 		return 0;
 	e->mode = mode;
-	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1);
+	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
 	submit(e);
 	return 0;
 }
@@ -480,9 +487,9 @@ int BPF_PROG(on_link, struct dentry *old_dentry, const struct path *new_dir,
 	if (!e)
 		return 0;
 	struct vfsmount *mnt = BPF_CORE_READ(new_dir, mnt); // link(2) stays on one mount
-	u32 off = walk(e, 0, old_dentry, mnt, &e->n1);
+	u32 off = walk(e, 0, old_dentry, mnt, &e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
-	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), mnt, &e->n2);
+	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), mnt, &e->n2, &e->trunc2);
 	submit(e);
 	return 0;
 }
@@ -496,7 +503,7 @@ int BPF_PROG(on_truncate, const struct path *path)
 	struct event *e = start(K_TRUNCATE);
 	if (!e)
 		return 0;
-	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1);
+	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
 	submit(e);
 	return 0;
 }
@@ -511,7 +518,7 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 		return 0;
 	e->flags = uid;
 	e->mode = gid;
-	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1);
+	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
 	submit(e);
 	return 0;
 }
@@ -677,7 +684,7 @@ int BPF_PROG(on_mmap, struct file *file, unsigned long prot, unsigned long flags
 		return 0;
 	e->mode = prot;
 	e->flags = flags;
-	e->data_len = walk(e, 0, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), &e->n1);
+	e->data_len = walk(e, 0, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), &e->n1, &e->truncated);
 	submit(e);
 	return 0;
 }
