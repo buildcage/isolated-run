@@ -223,7 +223,9 @@ sandbox down, so what it runs is kept out of those paths:
   entry inside one stays writable. The writable directories above them are made mount points, so
   they cannot be renamed away. A read-only mount protects only a symlink's target, so a symlink on
   the way to any of them that sits in a writable path, where the command could replace it with a
-  directory of its own, fails the step before the command runs.
+  directory of its own, fails the step before the command runs. Where the host bind-mounts one of
+  them, or a directory above it, to a second path in a writable directory, that path is read-only
+  too.
 - `run-isolated.sh`, which runs as root, runs from a copy the sandbox cannot see.
 
 A command that writes the docker config (`docker login`, `gcloud auth configure-docker`) therefore
@@ -651,7 +653,8 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   `GITHUB_PATH` and `GITHUB_STATE` are the exception: each is read-only inside the sandbox in either
   mode and mounted over itself, and each directory between it and the outermost path above it whose
   writes persist is made a mount point, so none of them can be renamed or replaced. One reached
-  through a symlink in such a path fails the step. The runner's install directory and its
+  through a symlink in such a path fails the step, and one the host also shows at a second path
+  through a bind mount is read-only there too. The runner's install directory and its
   `_actions` directory, which later steps and post steps run code from, are protected the same way.
   What `GITHUB_ENV` and `GITHUB_PATH` set reaches every later step and post step at once, and
   `write_through:` can open either by naming it. Only this action's post step reads `GITHUB_STATE`.

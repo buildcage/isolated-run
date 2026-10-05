@@ -18,6 +18,7 @@ import {
 } from "./host-commands.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 import { realPathOf } from "./symlinks.ts";
+import type { MountinfoEntry } from "./types.ts";
 
 const HOME = "/home/runner";
 const WORKSPACE = "/home/runner/work/repo/repo";
@@ -32,6 +33,11 @@ function withLinks(links: Record<string, string>) {
   return fs;
 }
 const NO_LINKS = withLinks({});
+
+/** A bind mount of `root` on the host's one filesystem at `mountPoint`. */
+function mount(root: string, mountPoint: string): MountinfoEntry {
+  return { mountPoint, fsType: "ext4", device: "8:1", root };
+}
 const asWritten = (path: string) => path;
 
 /**
@@ -605,6 +611,58 @@ describe("sandboxReadonlyHostDirs", () => {
       );
     });
   });
+
+  describe("at the other paths a bind mount shows it", () => {
+    const MOUNTS = [mount("/", "/"), mount("/home", "/data/home"), mount("/etc", "/data/etc")];
+    const ALIAS = "/data/home/runner";
+
+    it("covers each alias in a persisting path too", () => {
+      expect(
+        sandboxReadonlyHostDirs(
+          [...PERSISTENT, "/data/home"],
+          { HOME },
+          { actionRoot: ACTION },
+          NO_LINKS,
+          MOUNTS,
+        ),
+      ).toStrictEqual([
+        ACTION,
+        `${ALIAS}/work/_actions/buildcage/isolated-run/v1`,
+        `${HOME}/.docker`,
+        `${ALIAS}/.docker`,
+      ]);
+    });
+
+    it("leaves out an alias no persisting path holds, as the rest of the host is read-only", () => {
+      expect(
+        sandboxReadonlyHostDirs(PERSISTENT, { HOME }, { actionRoot: ACTION }, NO_LINKS, MOUNTS),
+      ).toStrictEqual([ACTION, `${HOME}/.docker`]);
+    });
+
+    it("leaves out an alias a write_through entry names outright", () => {
+      expect(
+        sandboxReadonlyHostDirs(
+          [...PERSISTENT, `${ALIAS}/.docker`],
+          { HOME },
+          { actionRoot: ACTION },
+          NO_LINKS,
+          MOUNTS,
+        ),
+      ).toStrictEqual([ACTION, `${HOME}/.docker`]);
+    });
+
+    it("covers the alias of a directory no persisting path holds itself", () => {
+      expect(
+        sandboxReadonlyHostDirs(
+          [...PERSISTENT, "/data/etc"],
+          { HOME, DOCKER_CONFIG: "/etc/docker-cli" },
+          { actionRoot: ACTION },
+          NO_LINKS,
+          MOUNTS,
+        ),
+      ).toStrictEqual([ACTION, "/data/etc/docker-cli"]);
+    });
+  });
 });
 
 describe("runnerInstallRoot", () => {
@@ -631,10 +689,47 @@ describe("sandboxReadonlyFileCommands", () => {
     writeThrough: string[],
     env: NodeJS.ProcessEnv = ENV,
     deps: Parameters<typeof sandboxReadonlyFileCommands>[3] = NO_LINKS,
-  ) => sandboxReadonlyFileCommands(writeThrough, [...PERSISTENT, ...writeThrough], env, deps);
+    mounts: MountinfoEntry[] = [],
+  ) =>
+    sandboxReadonlyFileCommands(writeThrough, [...PERSISTENT, ...writeThrough], env, deps, mounts);
 
   it("is this step's GITHUB_ENV, GITHUB_PATH and GITHUB_STATE, and not GITHUB_OUTPUT", () => {
     expect(files([])).toStrictEqual([ENV.GITHUB_ENV, ENV.GITHUB_PATH, ENV.GITHUB_STATE]);
+  });
+
+  describe("at the other paths a bind mount shows it", () => {
+    const MOUNTS = [mount("/", "/"), mount("/home", "/data/home")];
+    const ALIASED = "/data/home/runner/work/_temp/_runner_file_commands";
+
+    it("covers each alias in a persisting path too", () => {
+      expect(files(["/data/home"], ENV, NO_LINKS, MOUNTS)).toStrictEqual([
+        ENV.GITHUB_ENV,
+        `${ALIASED}/set_env_1`,
+        ENV.GITHUB_PATH,
+        `${ALIASED}/add_path_1`,
+        ENV.GITHUB_STATE,
+        `${ALIASED}/save_state_1`,
+      ]);
+    });
+
+    it("leaves out an alias no persisting path holds", () => {
+      expect(files([], ENV, NO_LINKS, MOUNTS)).toStrictEqual([
+        ENV.GITHUB_ENV,
+        ENV.GITHUB_PATH,
+        ENV.GITHUB_STATE,
+      ]);
+    });
+
+    it("opens a GITHUB_ENV alias write_through names, but never one of GITHUB_STATE", () => {
+      expect(
+        files([`${ALIASED}/set_env_1`, `${ALIASED}/save_state_1`], ENV, NO_LINKS, MOUNTS),
+      ).toStrictEqual([
+        ENV.GITHUB_ENV,
+        ENV.GITHUB_PATH,
+        ENV.GITHUB_STATE,
+        `${ALIASED}/save_state_1`,
+      ]);
+    });
   });
 
   it("leaves out GITHUB_ENV or GITHUB_PATH when write_through names it", () => {

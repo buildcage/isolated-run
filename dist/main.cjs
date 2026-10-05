@@ -25061,7 +25061,7 @@ function dockerConfigDir(env) {
 function sandboxReadonlyHostDirs(persisting, env, { actionRoot, installRoot } = {
 	actionRoot: runnerActionRoot(),
 	installRoot: runnerInstallRoot()
-}, deps = realSymlinkDeps) {
+}, deps = realSymlinkDeps, mounts = []) {
 	let docker = dockerConfigDir(env), workDirFix = "Configure the runner's work directory by its real path, not through the symlink.", candidates = [
 		{
 			name: "This action's checkout",
@@ -25089,7 +25089,7 @@ function sandboxReadonlyHostDirs(persisting, env, { actionRoot, installRoot } = 
 		if (link !== void 0) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(link)}, a symlink the sandboxed command can replace, and ${fix()}`, "HOST_DIR_UNPROTECTABLE");
 		if ("loop" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
 		let real = resolved.real;
-		return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
+		return [real, ...pathAliases(mounts, real).filter((a) => !persisting.includes(a))].filter((p) => persisting.some((root) => isAtOrUnder(p, root)));
 	}), unique = [...new Set(dirs)];
 	return unique.filter((dir) => {
 		let others = unique.filter((o) => o !== dir);
@@ -25102,7 +25102,7 @@ function innermost(dir, paths) {
 function replaceableLink(resolved, roots) {
 	return resolved.links.find((l) => roots.some((p) => isAtOrUnder((0, node_path.dirname)(l.at), p)))?.at;
 }
-function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = realSymlinkDeps) {
+function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = realSymlinkDeps, mounts = []) {
 	let named = new Set(writeThroughPaths), openable = (name, path) => name !== "GITHUB_STATE" && named.has(realPathOf(path, deps)), roots = persisting.filter((p) => p !== "/");
 	return [
 		"GITHUB_ENV",
@@ -25114,7 +25114,8 @@ function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = 
 		let resolved = resolveHostPath(path, deps), link = replaceableLink(resolved, roots);
 		if (link !== void 0) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through ${JSON.stringify(link)}, a symlink the sandboxed command can replace, and the runner reads it after the step. Configure the runner's work directory by its real path, not through the symlink.`, "HOST_DIR_UNPROTECTABLE");
 		if ("loop" in resolved) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
-		return [resolved.real];
+		let aliases = pathAliases(mounts, resolved.real).filter((a) => !openable(name, a) && persisting.some((root) => isAtOrUnder(a, root)));
+		return [resolved.real, ...aliases];
 	});
 }
 function renameGuardDirs(readonlyDirs, persisting) {
@@ -25754,7 +25755,7 @@ function assembleBundle(dir, options, deps) {
 		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = persistingWritablePaths(filesystemMode, writeThroughPaths, env, deps.realpath), symlinkDeps = {
 			lstat: deps.lstat,
 			readlink: deps.readlink
-		}, readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, void 0, symlinkDeps), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, symlinkDeps), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
+		}, readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, void 0, symlinkDeps, hostMounts), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, symlinkDeps, hostMounts), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
 		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
 			mode: 448,
 			recursive: !0
