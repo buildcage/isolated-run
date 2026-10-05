@@ -72,12 +72,14 @@ struct linux_binprm {
 
 enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	K_MKDIR = 6, K_CHMOD = 7, K_SYMLINK = 8, K_LINK = 9, K_TRUNCATE = 10, K_CHOWN = 11,
-	K_OPEN_FAILED = 12 };
+	K_OPEN_FAILED = 12, K_READ = 13, K_WRITE = 14, K_MMAP = 15 };
 
 // Fixed header, then data_len bytes of data:
 //   open:    d_path result (path_len is its return value)
 //   open-failed: the name as passed to open(2), possibly relative; path_len
 //            holds the errno
+//   read/write: d_path result, once per open file and direction
+//   mmap:    path components; mode holds prot, flags the map flags
 //   exec:    filename at 0, argv (NUL-separated) at PATH_LEN
 //   symlink: link body at 0, then the link's own path components
 //   others:  leaf-first NUL-terminated path components, n1 of them, then
@@ -254,6 +256,41 @@ static __always_inline u32 leaf(struct event *e, u32 off, struct dentry *d, u8 *
 	return r > 0 ? off + r : off;
 }
 
+// Open files already reported as read (1), written (2) or mapped
+// executable (4), so each is reported once per direction rather than per
+// read(2). Keyed by the struct file and cleared when it is freed, before
+// the address can be reused.
+#define SEEN_READ 1
+#define SEEN_WRITE 2
+#define SEEN_EXEC 4
+#define MAY_WRITE 2
+#define MAY_READ 4
+#define PROT_WRITE 2
+#define PROT_EXEC 4
+#define MAP_SHARED 1
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 65536);
+	__type(key, u64);
+	__type(value, u8);
+} seen_files SEC(".maps");
+
+// Returns 1 if bit was newly set for file.
+static __always_inline int first_time(struct file *file, u8 bit)
+{
+	u64 key = (u64)file;
+	u8 *v = bpf_map_lookup_elem(&seen_files, &key);
+	if (v) {
+		if (*v & bit)
+			return 0;
+		*v |= bit;
+		return 1;
+	}
+	bpf_map_update_elem(&seen_files, &key, &bit, BPF_ANY);
+	return 1;
+}
+
 // Threads inside backing_file_open, overlayfs's open of a layer's real
 // file. Its mount namespace can't tell it apart: before 6.15 the layer
 // mounts carry MNT_NS_INTERNAL, later an anonymous namespace of their own.
@@ -274,10 +311,18 @@ int BPF_PROG(on_backing_enter)
 }
 
 SEC("fexit/backing_file_open")
-int BPF_PROG(on_backing_exit)
+int on_backing_exit(u64 *ctx)
 {
 	u64 id = bpf_get_current_pid_tgid();
 	bpf_map_delete_elem(&in_backing, &id);
+	// Reads and writes on the overlay file reach the layer's file too;
+	// mark the latter as already reported in every direction.
+	u64 ret = 0;
+	bpf_get_func_ret(ctx, &ret);
+	if ((long)ret < 0 && (long)ret >= -4095)
+		return 0;
+	u8 all = 0xff;
+	bpf_map_update_elem(&seen_files, &ret, &all, BPF_ANY);
 	return 0;
 }
 
@@ -537,6 +582,67 @@ int on_open_exit(u64 *ctx)
 	u64 ret = 0;
 	bpf_get_func_ret(ctx, &ret);
 	open_exit((int)ret);
+	return 0;
+}
+
+// read(2), write(2) and their vector, positional, splice, sendfile and
+// copy_file_range forms all pass through rw_verify_area, which calls this;
+// so does iterate_dir for a directory listing (as a read).
+SEC("fentry/security_file_permission")
+int BPF_PROG(on_file_permission, struct file *file, int mask)
+{
+	if (!in_target())
+		return 0;
+	u32 kind;
+	u8 bit;
+	if (mask & MAY_WRITE) {
+		kind = K_WRITE;
+		bit = SEEN_WRITE;
+	} else if (mask & MAY_READ) {
+		kind = K_READ;
+		bit = SEEN_READ;
+	} else {
+		return 0;
+	}
+	if (!first_time(file, bit))
+		return 0;
+	struct event *e = start(kind);
+	if (!e)
+		return 0;
+	long r = bpf_d_path(&file->f_path, e->data, PATH_LEN);
+	e->path_len = r;
+	e->data_len = r > 0 ? r : 0;
+	submit(e);
+	return 0;
+}
+
+SEC("fentry/security_mmap_file")
+int BPF_PROG(on_mmap, struct file *file, unsigned long prot, unsigned long flags)
+{
+	if (!file || !in_target())
+		return 0;
+	u8 bit = SEEN_READ;
+	if (prot & PROT_EXEC)
+		bit = SEEN_EXEC;
+	else if ((prot & PROT_WRITE) && (flags & MAP_SHARED))
+		bit = SEEN_WRITE;
+	if (!first_time(file, bit))
+		return 0;
+	struct event *e = start(K_MMAP);
+	if (!e)
+		return 0;
+	e->mode = prot;
+	e->flags = flags;
+	e->data_len = walk(e, 0, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), &e->n1);
+	submit(e);
+	return 0;
+}
+
+SEC("fentry/security_file_free")
+int BPF_PROG(on_file_free, struct file *file)
+{
+	u64 key = (u64)file;
+	bpf_map_delete_elem(&seen_files, &key);
 	return 0;
 }
 

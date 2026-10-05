@@ -53,7 +53,7 @@ jobs:
               dev/file-audit-hosted.sh "$PWD/docker/file-audit/out/file-audit-$arch" "$RUNNER_TEMP/runc" \
               "$(id -u)" "$(id -g)" "$@"
           }
-          NPM='d=$(mktemp -d) && cd $d && npm cache clean --force 2>/dev/null; npm init -y >/dev/null && npm install --no-audit --no-fund express@4 typescript eslint >/dev/null'
+          NPM='d=$(mktemp -d -p "$PWD" npm-poc.XXXX) && cd $d && npm cache clean --force 2>/dev/null; npm init -y >/dev/null && npm install --no-audit --no-fund express@4 typescript eslint >/dev/null'
           GO='cd docker/file-audit && GOCACHE=$(mktemp -d) go build -o /tmp/fa-build . && echo built'
 
           run scenario "$PWD/dev/file-audit-scenario.sh"
@@ -85,3 +85,18 @@ jobs:
           echo "== paths that leak the bundle rootfs"
           sudo jq -r 'select(.path) | .path' ./*.jsonl | grep -c '/var/tmp/buildcage-poc' || true
           ls -la
+
+      - name: Collect records
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/records"
+          sudo cp /var/tmp/buildcage-poc/{scenario,npm-trace-1,go-trace-1}.jsonl "$RUNNER_TEMP/records/"
+          sudo chown -R "$(id -u)" "$RUNNER_TEMP/records"
+          printf '%s\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/records/workspace.txt"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: file-audit-records-${{ matrix.os }}
+          path: ${{ runner.temp }}/records
+          retention-days: 7

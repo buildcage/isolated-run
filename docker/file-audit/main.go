@@ -124,6 +124,7 @@ func run(cgPath, outPath, readyPath string) error {
 		"link": objs.OnLink, "truncate": objs.OnTruncate, "chown": objs.OnChown,
 		"openat2-enter": objs.OnOpenat2Enter, "getname": objs.OnGetname,
 		"openat2-exit": objs.OnOpenat2Exit, "open-enter": objs.OnOpenEnter, "open-exit": objs.OnOpenExit,
+		"file-permission": objs.OnFilePermission, "mmap": objs.OnMmap, "file-free": objs.OnFileFree,
 	} {
 		l, err := link.AttachTracing(link.TracingOptions{Program: p})
 		if err != nil {
@@ -215,7 +216,7 @@ func run(cgPath, outPath, readyPath string) error {
 	return nil
 }
 
-var kindNames = map[uint32]string{1: "open", 2: "exec", 3: "unlink", 4: "rmdir", 5: "rename", 6: "mkdir", 7: "chmod", 8: "symlink", 9: "link", 10: "truncate", 11: "chown", 12: "open-failed"}
+var kindNames = map[uint32]string{1: "open", 2: "exec", 3: "unlink", 4: "rmdir", 5: "rename", 6: "mkdir", 7: "chmod", 8: "symlink", 9: "link", 10: "truncate", 11: "chown", 12: "open-failed", 13: "read", 14: "write", 15: "mmap"}
 
 // Mirrors struct event's fixed header in bpf/file_audit.bpf.c.
 const (
@@ -294,6 +295,15 @@ func decode(raw []byte) (record, error) {
 	case 12:
 		r.Path = cstr(data)
 		r.Err = pathRet
+	case 13, 14:
+		if pathRet < 0 {
+			r.Err = pathRet
+		} else {
+			r.Path = cstr(data)
+		}
+	case 15:
+		r.Path, _ = components(data, n1, truncated)
+		r.Access = mmapAccess(mode, flags)
 	case 2:
 		r.Path = cstr(data)
 		if int(pathLen+argsLen) <= len(data) {
@@ -321,6 +331,17 @@ func decode(raw []byte) (record, error) {
 }
 
 const fmodeExec = 0x20
+
+func mmapAccess(prot, flags uint32) string {
+	switch {
+	case prot&unix.PROT_EXEC != 0:
+		return "x"
+	case prot&unix.PROT_WRITE != 0 && flags&unix.MAP_SHARED != 0:
+		return "w"
+	default:
+		return "r"
+	}
+}
 
 func access(flags, mode uint32) string {
 	var s string
