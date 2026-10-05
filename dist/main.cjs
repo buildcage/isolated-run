@@ -25091,7 +25091,13 @@ function sandboxReadonlyHostDirs(persisting, env, { actionRoot, installRoot } = 
 		let real = resolved.real;
 		return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
 	}), unique = [...new Set(dirs)];
-	return unique.filter((dir) => !unique.some((o) => o !== dir && isAtOrUnder(dir, o)));
+	return unique.filter((dir) => {
+		let others = unique.filter((o) => o !== dir);
+		return persisting.includes(innermost(dir, [...persisting, ...others]));
+	});
+}
+function innermost(dir, paths) {
+	return paths.filter((p) => isAtOrUnder(dir, p)).sort((a, b) => b.length - a.length)[0];
 }
 function replaceableLink(resolved, roots) {
 	return resolved.links.find((l) => roots.some((p) => isAtOrUnder((0, node_path.dirname)(l.at), p)))?.at;
@@ -25112,10 +25118,7 @@ function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = 
 	});
 }
 function renameGuardDirs(readonlyDirs, persisting) {
-	let writable = (dir) => {
-		let innermost = [...persisting, ...readonlyDirs].filter((p) => isAtOrUnder(dir, p)).sort((a, b) => b.length - a.length)[0];
-		return persisting.includes(innermost);
-	}, guards = new Set();
+	let writable = (dir) => persisting.includes(innermost(dir, [...persisting, ...readonlyDirs])), guards = new Set();
 	for (let dir of readonlyDirs) {
 		let root = persisting.filter((p) => p !== dir && isAtOrUnder(dir, p)).sort((a, b) => a.length - b.length)[0];
 		if (root) for (let p = (0, node_path.dirname)(dir); p !== root && isAtOrUnder(p, root); p = (0, node_path.dirname)(p)) writable(p) && guards.add(p);

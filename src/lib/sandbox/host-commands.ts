@@ -245,7 +245,8 @@ export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
  * is itself a persisting path is skipped: `uses: ./` runs the action from the
  * workspace, and write_through may name the config directory. A persisting
  * path nested inside one stays writable, since runc remounts only the top of
- * a read-only path. One nested in another is left to the outer one.
+ * a read-only path. One nested in another is left to the outer one, unless a
+ * persisting path between them would reopen it.
  *
  * Throws when one goes through a symlink in a persisting path: the mount
  * protects only the symlink's target, and the sandbox could replace the
@@ -325,7 +326,15 @@ export function sandboxReadonlyHostDirs(
     return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
   });
   const unique = [...new Set(dirs)];
-  return unique.filter((dir) => !unique.some((o) => o !== dir && isAtOrUnder(dir, o)));
+  return unique.filter((dir) => {
+    const others = unique.filter((o) => o !== dir);
+    return persisting.includes(innermost(dir, [...persisting, ...others])!);
+  });
+}
+
+/** The longest of `paths` that `dir` is at or under. */
+function innermost(dir: string, paths: string[]): string | undefined {
+  return paths.filter((p) => isAtOrUnder(dir, p)).sort((a, b) => b.length - a.length)[0];
 }
 
 /** The first symlink `resolved` passed through that sits in one of `roots`. */
@@ -388,12 +397,8 @@ export function sandboxReadonlyFileCommands(
  * left alone: it cannot be renamed, and a read-write bind would reopen it.
  */
 export function renameGuardDirs(readonlyDirs: string[], persisting: string[]): string[] {
-  const writable = (dir: string) => {
-    const innermost = [...persisting, ...readonlyDirs]
-      .filter((p) => isAtOrUnder(dir, p))
-      .sort((a, b) => b.length - a.length)[0];
-    return persisting.includes(innermost!);
-  };
+  const writable = (dir: string) =>
+    persisting.includes(innermost(dir, [...persisting, ...readonlyDirs])!);
   const guards = new Set<string>();
   for (const dir of readonlyDirs) {
     const root = persisting

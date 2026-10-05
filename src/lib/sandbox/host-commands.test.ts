@@ -559,6 +559,20 @@ describe("sandboxReadonlyHostDirs", () => {
       ).toStrictEqual([root, `${HOME}/.docker`]);
     });
 
+    it("keeps one inside the install directory that a persisting path between them would reopen", () => {
+      const root = `${HOME}/actions-runner`;
+      const temp = `${root}/_work/_temp`;
+
+      expect(
+        sandboxReadonlyHostDirs(
+          [...PERSISTENT, temp],
+          { HOME, RUNNER_WORKSPACE: `${root}/_work/repo`, DOCKER_CONFIG: `${temp}/docker` },
+          { actionRoot: `${root}/_work/_actions/buildcage/isolated-run/v1`, installRoot: root },
+          NO_LINKS,
+        ),
+      ).toStrictEqual([root, `${temp}/docker`]);
+    });
+
     it("refuses an action checkouts directory reached through a symlink in a persisting path", () => {
       expect(() =>
         sandboxReadonlyHostDirs(
