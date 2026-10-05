@@ -124,8 +124,9 @@ describe("startFilesystemAudit", () => {
 
     expect(warn).toHaveBeenCalledOnce();
     expect(kill).toHaveBeenCalledWith("SIGTERM");
+    expect(remove).toHaveBeenCalledWith(START_OPTIONS.pidFilePath);
     await handle.stop(); // the returned no-op handle does nothing more
-    expect(kill).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledTimes(1);
   });
 
   it("stops waiting as soon as the tracer exits on its own", async () => {
@@ -141,7 +142,9 @@ describe("startFilesystemAudit", () => {
       remove: vi.fn(),
     });
 
-    expect(sleep).toHaveBeenCalledTimes(1); // one yield, then the exit is seen
+    // One yield in the ready loop before the exit is seen, then one in stop's
+    // grace race.
+    expect(sleep).toHaveBeenCalledTimes(2);
     expect(warn).toHaveBeenCalledOnce();
   });
 });

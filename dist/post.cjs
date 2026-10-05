@@ -673,18 +673,28 @@ function defaultReadFile(path) {
 function defaultRemoveFile(path) {
 	(0, node_fs.rmSync)(path, { force: !0 });
 }
-function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.existsSync, readFile = defaultReadFile, killTracer = defaultKillTracer, removeFile = defaultRemoveFile }) {
+function defaultCopyFile(from, to) {
+	(0, node_fs.copyFileSync)(from, to);
+}
+function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.existsSync, readFile = defaultReadFile, killTracer = defaultKillTracer, removeFile = defaultRemoveFile, copyFile = defaultCopyFile }) {
 	let { outPath, pidFilePath } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
 	if (fileExists(pidFilePath)) {
 		try {
 			let pid = Number(readFile(pidFilePath).trim());
-			Number.isInteger(pid) && pid > 0 && killTracer(pid);
+			Number.isInteger(pid) && pid > 0 && isTracer(pid, readFile) && killTracer(pid);
 		} catch (e) {
 			annotation.warning(`run post-cleanup: failed to stop the file-audit tracer: ${errorMessage(e)}`);
 		}
 		removeFile(pidFilePath);
 	}
 	removeFile(outPath);
+}
+function isTracer(pid, readFile) {
+	try {
+		return readFile(`/proc/${pid}/comm`).startsWith("filesystem-audi");
+	} catch {
+		return !1;
+	}
 }
 function startedByThisStep(containerName, env, readOwner) {
 	let owner = readOwner(containerName);
@@ -695,7 +705,11 @@ function planPostCleanup(state, env, annotation, deps = {}) {
 	for (let problem of problems) annotation.error(`run post-cleanup: ${problem}`);
 	if (!targets) return null;
 	if (!startedByThisStep(targets.containerName, env, readOwner)) return annotation.error("run post-cleanup: the proxy container named in GITHUB_STATE was started by a different step. Skipping all post-step cleanup: tearing it down would stop that step's proxy and delete its sandbox scratch directory."), null;
-	cleanupLeftoverAudit(targets.containerName, annotation, deps);
+	try {
+		cleanupLeftoverAudit(targets.containerName, annotation, deps);
+	} catch (e) {
+		annotation.warning(`run post-cleanup: filesystem_audit cleanup failed: ${errorMessage(e)}`);
+	}
 	let reclaimed = !1;
 	try {
 		let scratchDir = scratchDirFor(targets.containerName);

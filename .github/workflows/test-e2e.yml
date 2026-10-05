@@ -188,6 +188,7 @@ jobs:
         uses: ./
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_FILESYSTEM_AUDIT_DEBUG_FILE: ${{ runner.temp }}/filesystem-audit.jsonl
         with:
           proxy_engine: universal
           proxy_mode: audit
@@ -197,6 +198,13 @@ jobs:
             echo probe > "$GITHUB_WORKSPACE/probe.txt"
             mv "$GITHUB_WORKSPACE/probe.txt" "$GITHUB_WORKSPACE/probe2.txt"
             rm "$GITHUB_WORKSPACE/probe2.txt"
+
+      - name: Verify the tracer recorded the step's file accesses
+        run: |
+          f="${{ runner.temp }}/filesystem-audit.jsonl"
+          test -s "$f"
+          grep -q "$GITHUB_WORKSPACE/probe" "$f"
+          grep -q '"kind":"write"' "$f"
 
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network), proves proxy_engine: universal

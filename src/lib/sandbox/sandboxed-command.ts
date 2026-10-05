@@ -47,12 +47,7 @@ import { writeRunScript, writeResolvConf, writeOciConfig } from "./oci-files.ts"
 import { pathAliases, WritablePathConflictError } from "./paths.ts";
 import { runIsolated } from "./run.ts";
 import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
-import {
-  SANDBOX_SCRATCH_BASE,
-  ensureOwnScratchBase,
-  withScratchDir,
-  type Warn,
-} from "./scratch-dir.ts";
+import { SANDBOX_SCRATCH_BASE, withScratchDir, type Warn } from "./scratch-dir.ts";
 import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
 import type { BuiltOciSpec, OverlayDirs } from "./types.ts";
 
@@ -92,7 +87,6 @@ export interface RunSandboxedCommandDeps {
   runIsolated: typeof runIsolated;
   extractTracer: typeof extractTracer;
   startFilesystemAudit: typeof startFilesystemAudit;
-  ensureOwnScratchBase: typeof ensureOwnScratchBase;
   mkdir: (path: string, options: { mode: number; recursive?: boolean }) => void;
   touch: (path: string) => void;
   readFile: (path: string) => string;
@@ -125,7 +119,6 @@ const realDeps: RunSandboxedCommandDeps = {
   runIsolated,
   extractTracer,
   startFilesystemAudit,
-  ensureOwnScratchBase,
   mkdir: mkdirSync,
   // Untested by design: writeFileSync, appending nothing to the path chosen.
   /* v8 ignore next */
@@ -540,7 +533,6 @@ async function startAudit(
   }
   try {
     const tracerPath = deps.extractTracer(containerName, dir);
-    deps.ensureOwnScratchBase(SANDBOX_SCRATCH_BASE);
     return await deps.startFilesystemAudit(
       {
         tracerPath,

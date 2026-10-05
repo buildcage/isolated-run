@@ -9,6 +9,9 @@ import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 const CGROUP_ROOT = "/sys/fs/cgroup";
 const READY_POLL_MS = 100;
 const READY_TRIES = 50;
+/** How long the tracer has to exit on SIGTERM before it is killed, so a wedged
+ *  tracer cannot hang the step's own teardown. */
+const STOP_GRACE_MS = 2_000;
 
 /** Where the tracer writes, under the scratch base so the post step can read
  *  them after the per-step scratch dir is gone. The suffix matches the
@@ -162,6 +165,8 @@ export async function startFilesystemAudit(
   // already stopped, so the post step only acts on one a cancel orphaned.
   const stop = async () => {
     child.kill("SIGTERM");
+    await Promise.race([child.exited, sleep(STOP_GRACE_MS)]);
+    child.kill("SIGKILL"); // a no-op once it has exited; guarantees it does otherwise
     await child.exited;
     remove(pidFilePath);
   };

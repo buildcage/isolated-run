@@ -36,7 +36,6 @@ const mocks = {
   runIsolated: vi.fn(),
   extractTracer: vi.fn(),
   startFilesystemAudit: vi.fn(),
-  ensureOwnScratchBase: vi.fn(),
   mkdir: vi.fn(),
   touch: vi.fn(),
   readFile: vi.fn(),
@@ -154,7 +153,6 @@ describe("runSandboxedCommand", () => {
       await runSandboxedCommand(auditing(), deps);
 
       expect(mocks.extractTracer).toHaveBeenCalledWith(CONTAINER, SCRATCH);
-      expect(mocks.ensureOwnScratchBase).toHaveBeenCalledWith(SANDBOX_SCRATCH_BASE);
       expect(mocks.startFilesystemAudit.mock.calls[0][0]).toStrictEqual({
         tracerPath: `${SCRATCH}/filesystem-audit`,
         cgroupsPath: "/system.slice/runner.service/buildcage-proxy-deadbeef",

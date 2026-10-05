@@ -23905,7 +23905,7 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		"--ready",
 		readyPath
 	]), stop = async () => {
-		child.kill("SIGTERM"), await child.exited, remove(pidFilePath);
+		child.kill("SIGTERM"), await Promise.race([child.exited, sleep(2e3)]), child.kill("SIGKILL"), await child.exited, remove(pidFilePath);
 	}, exited = !1;
 	child.exited.then(() => {
 		exited = !0;
@@ -25786,7 +25786,6 @@ const realDeps$2 = {
 	runIsolated,
 	extractTracer,
 	startFilesystemAudit,
-	ensureOwnScratchBase,
 	mkdir: node_fs.mkdirSync,
 	touch: (path) => (0, node_fs.writeFileSync)(path, "", {
 		flag: "a",
@@ -25935,7 +25934,7 @@ async function startAudit(dir, config, options, deps) {
 	if (cgroupsPath === void 0) return warn("buildcage: filesystem_audit needs a cgroup v2 host; the step's file accesses were not recorded."), noAudit;
 	try {
 		let tracerPath = deps.extractTracer(containerName, dir);
-		return deps.ensureOwnScratchBase(SANDBOX_SCRATCH_BASE), await deps.startFilesystemAudit({
+		return await deps.startFilesystemAudit({
 			tracerPath,
 			cgroupsPath,
 			outPath: filesystemAudit.outPath,

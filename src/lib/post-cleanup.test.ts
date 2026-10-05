@@ -1,10 +1,12 @@
-import { describe, it, expect, vi, type Mock } from "vitest";
+import { describe, it, expect, vi, afterEach, type Mock } from "vitest";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 
 import { planPostCleanup, type PostCleanupDeps } from "./post-cleanup.ts";
 import { filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
 import { SANDBOX_SCRATCH_BASE, scratchDirFor } from "./sandbox/scratch-dir.ts";
+
+afterEach(() => vi.unstubAllEnvs());
 
 const CONTAINER = "buildcage-proxy-deadbeef";
 const STATE = { containerName: CONTAINER, ephemeralRoots: "" };
@@ -51,7 +53,8 @@ function deps(overrides: PostCleanupDeps = {}): {
         released.push("after the scratch dir");
       },
       releaseNssDb: (name) => released.push(`nssdb:${name}`),
-      readFile: () => "4321\n",
+      // The pidfile holds the pid; /proc/<pid>/comm identifies it as the tracer.
+      readFile: (p) => (p === AUDIT.pidFilePath ? "4321\n" : "filesystem-audi\n"),
       killTracer: (pid) => killed.push(pid),
       removeFile: (p) => removedFiles.push(p),
       ...overrides,
@@ -204,6 +207,70 @@ describe("planPostCleanup", () => {
 
     expect(killed).toStrictEqual([4321]);
     expect(removedFiles).toStrictEqual(expect.arrayContaining([AUDIT.pidFilePath, AUDIT.outPath]));
+  });
+
+  it("does not signal a pid that is no longer the tracer", () => {
+    const {
+      deps: d,
+      killed,
+      removedFiles,
+    } = deps({
+      fileExists: () => true,
+      // The pid is gone (or reused), so /proc/<pid>/comm no longer reads ours.
+      readFile: (p) => {
+        if (p === AUDIT.pidFilePath) return "4321\n";
+        throw new Error("ESRCH");
+      },
+    });
+
+    planPostCleanup(STATE, ENV, annotation(), d);
+
+    expect(killed).toStrictEqual([]);
+    expect(removedFiles).toContain(AUDIT.pidFilePath);
+  });
+
+  it("keeps reclaiming the scratch dir when the audit cleanup throws", () => {
+    const note = annotation();
+    const { deps: d, released } = deps({
+      fileExists: () => true,
+      removeFile: () => {
+        throw new Error("EBUSY");
+      },
+    });
+
+    planPostCleanup(STATE, ENV, note, d);
+
+    expect(note.warning).toHaveBeenCalledWith(
+      "run post-cleanup: filesystem_audit cleanup failed: EBUSY",
+    );
+    expect(released).toContain("after the scratch dir");
+  });
+
+  it("mirrors the recording to the debug file in a test-hooks build", () => {
+    vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "1");
+    vi.stubEnv("BUILDCAGE_FILESYSTEM_AUDIT_DEBUG_FILE", "/tmp/audit-debug.jsonl");
+    const copied: [string, string][] = [];
+    const { deps: d } = deps({
+      fileExists: () => true,
+      copyFile: (from, to) => copied.push([from, to]),
+    });
+
+    planPostCleanup(STATE, ENV, annotation(), d);
+
+    expect(copied).toStrictEqual([[AUDIT.outPath, "/tmp/audit-debug.jsonl"]]);
+  });
+
+  it("does not mirror the recording when the debug file is unset", () => {
+    vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "1");
+    const copied: [string, string][] = [];
+    const { deps: d } = deps({
+      fileExists: () => true,
+      copyFile: (from, to) => copied.push([from, to]),
+    });
+
+    planPostCleanup(STATE, ENV, annotation(), d);
+
+    expect(copied).toStrictEqual([]);
   });
 
   it("only clears the audit output when the tracer was already stopped", () => {
