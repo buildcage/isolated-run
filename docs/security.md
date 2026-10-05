@@ -189,9 +189,9 @@ GitHub-hosted runners). The error names the path the symlink leads to, which can
 The part of an entry that is `$HOME`, `$GITHUB_WORKSPACE` or `$RUNNER_TEMP` is taken at its real
 path, as the persistent writable set is, so only what the entry adds below one is checked. A missing
 entry is created by the runner when it can write the nearest existing parent, and fails the step
-otherwise. Another job running as the same user on the same machine can still swap a directory for
-a symlink between the check and the mount; see
-[Where it will not run](#where-it-will-not-run).
+otherwise. A process an earlier step of this job left running, or another job running as the same
+user on the same machine, can still swap a directory for a symlink between the check and the
+mount; see [Threat model](#threat-model) and [Where it will not run](#where-it-will-not-run).
 
 After the command exits, the step keeps running on the host to read the report and tear the
 sandbox down, so what it runs is kept out of those paths:
