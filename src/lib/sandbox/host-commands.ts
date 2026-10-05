@@ -4,14 +4,14 @@
  * the inspect engine's `keytool` are pinned to binaries outside those paths,
  * since a lookup through `$PATH` could pick one the command planted
  * (`~/.local/bin` precedes `/usr/bin` on hosted runners). For the same reason
- * docker and sudo run with those paths left off PATH. The docker CLI's
- * config directory and this action's own checkout, which hold its plugins and
- * the post step's script, are made read-only inside the sandbox, as are the
- * runner's file commands that reach every later step.
+ * docker and sudo run with those paths left off PATH. The runner's install
+ * directory, the action checkouts and the docker CLI's config directory, which
+ * later steps, post steps and docker run code from, are made read-only inside
+ * the sandbox, as are the runner's file commands that reach every later step.
  */
 
 import { accessSync, constants } from "node:fs";
-import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
@@ -33,6 +33,18 @@ import { resolveWriteThroughPaths } from "./write-through.ts";
  *  symlinks in __filename but not in argv. */
 function runnerActionRoot(): string {
   return resolve(dirname(process.argv[1]!), "..");
+}
+
+/** The runner's install directory, from the node it runs actions with
+ *  (`externals/node24/bin/node`), or nothing when some other node runs this. */
+export function runnerInstallRoot(execPath: string = process.execPath): string | undefined {
+  const externals = resolve(execPath, "../../..");
+  return basename(externals) === "externals" ? dirname(externals) : undefined;
+}
+
+export interface RunnerDirs {
+  actionRoot: string;
+  installRoot?: string;
 }
 
 const PINNED_COMMANDS = ["docker", "sudo"] as const;
@@ -227,11 +239,14 @@ export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
 }
 
 /**
- * The action checkout and docker config directory, by real path, where a
- * persisting path contains them. One that is itself a persisting path is
- * skipped: `uses: ./` runs the action from the workspace, and write_through may
- * name the config directory. A persisting path nested inside one stays
- * writable, since runc remounts only the top of a read-only path.
+ * What runs outside the sandbox after the command, by real path, where a
+ * persisting path contains it: the runner's install directory, the action
+ * checkouts, this one's included, and the docker config directory. One that
+ * is itself a persisting path is skipped: `uses: ./` runs the action from the
+ * workspace, and write_through may name the config directory. A persisting
+ * path nested inside one stays writable, since runc remounts only the top of
+ * a read-only path. One nested in another is left to the outer one, unless a
+ * persisting path between them would reopen it.
  *
  * Throws when one goes through a symlink in a persisting path: the mount
  * protects only the symlink's target, and the sandbox could replace the
@@ -242,18 +257,41 @@ export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
 export function sandboxReadonlyHostDirs(
   persisting: string[],
   env: NodeJS.ProcessEnv,
-  actionRoot: string = runnerActionRoot(),
+  { actionRoot, installRoot }: RunnerDirs = {
+    actionRoot: runnerActionRoot(),
+    installRoot: runnerInstallRoot(),
+  },
   deps: SymlinkDeps = realSymlinkDeps,
 ): string[] {
   const docker = dockerConfigDir(env);
+  const workDirFix =
+    "Configure the runner's work directory by its real path, not through the symlink.";
   const candidates = [
     {
       name: "This action's checkout",
       dir: actionRoot,
-      fix: () =>
-        "the runner runs this action's post step from there. Configure the runner's work " +
-        "directory by its real path, not through the symlink.",
+      fix: () => `the runner runs this action's post step from there. ${workDirFix}`,
     },
+    ...(env.RUNNER_WORKSPACE
+      ? [
+          {
+            name: "The runner's action checkouts",
+            dir: join(dirname(resolve(env.RUNNER_WORKSPACE)), "_actions"),
+            fix: () => `the runner runs later steps' actions from there. ${workDirFix}`,
+          },
+        ]
+      : []),
+    ...(installRoot
+      ? [
+          {
+            name: "The runner's install directory",
+            dir: installRoot,
+            fix: () =>
+              "the runner runs later steps from there. Install the runner by its real path, " +
+              "not through the symlink.",
+          },
+        ]
+      : []),
     ...(docker
       ? [
           {
@@ -267,7 +305,7 @@ export function sandboxReadonlyHostDirs(
       : []),
   ];
   const roots = persisting.filter((p) => p !== "/");
-  return candidates.flatMap(({ name, dir, fix }) => {
+  const dirs = candidates.flatMap(({ name, dir, fix }) => {
     if (persisting.includes(realPathOf(dir, deps))) return [];
     const resolved = resolveHostPath(dir, deps);
     const link = replaceableLink(resolved, roots);
@@ -287,6 +325,16 @@ export function sandboxReadonlyHostDirs(
     const real = resolved.real;
     return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
   });
+  const unique = [...new Set(dirs)];
+  return unique.filter((dir) => {
+    const others = unique.filter((o) => o !== dir);
+    return persisting.includes(innermost(dir, [...persisting, ...others])!);
+  });
+}
+
+/** The longest of `paths` that `dir` is at or under. */
+function innermost(dir: string, paths: string[]): string | undefined {
+  return paths.filter((p) => isAtOrUnder(dir, p)).sort((a, b) => b.length - a.length)[0];
 }
 
 /** The first symlink `resolved` passed through that sits in one of `roots`. */
@@ -345,9 +393,12 @@ export function sandboxReadonlyFileCommands(
  * which the kernel refuses to rename. The outermost root, so a persisting path
  * nested in another (the workspace in $HOME) is guarded too, and the guards
  * stay inside what is writable anyway. The root and the read-only dir are
- * mount points already, or `/`.
+ * mount points already, or `/`. A directory inside another read-only dir is
+ * left alone: it cannot be renamed, and a read-write bind would reopen it.
  */
 export function renameGuardDirs(readonlyDirs: string[], persisting: string[]): string[] {
+  const writable = (dir: string) =>
+    persisting.includes(innermost(dir, [...persisting, ...readonlyDirs])!);
   const guards = new Set<string>();
   for (const dir of readonlyDirs) {
     const root = persisting
@@ -355,7 +406,7 @@ export function renameGuardDirs(readonlyDirs: string[], persisting: string[]): s
       .sort((a, b) => a.length - b.length)[0];
     if (!root) continue;
     for (let p = dirname(dir); p !== root && isAtOrUnder(p, root); p = dirname(p)) {
-      guards.add(p);
+      if (writable(p)) guards.add(p);
     }
   }
   // Parents are bound before the children nested in them.
