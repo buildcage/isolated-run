@@ -1,0 +1,84 @@
+name: File audit PoC
+
+on:
+  push:
+    branches: [feat/file-audit-poc]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  poc:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Kernel facts
+        run: |
+          uname -a
+          ls -la /sys/kernel/btf/vmlinux
+          sudo cat /sys/kernel/security/lsm; echo
+          cat /proc/self/cgroup
+          stat -fc %T /sys/fs/cgroup
+          sudo grep -cwE "do_filp_open|do_sys_openat2|do_sys_open|getname_flags|backing_file_open|security_path_unlink|security_file_open" /sys/kernel/tracing/available_filter_functions || true
+
+      - name: Build tracer
+        run: |
+          docker build -q -t file-audit-build -f docker/file-audit/Dockerfile.build docker/file-audit
+          docker run --rm -v "$PWD/docker/file-audit:/src" file-audit-build ./build.sh
+
+      - name: Fetch runc
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/runc" "https://github.com/opencontainers/runc/releases/download/v1.5.1/runc.$(dpkg --print-architecture)"
+          chmod +x "$RUNNER_TEMP/runc"
+
+      - name: Run workloads
+        run: |
+          arch=$(dpkg --print-architecture)
+          export RUNNER_CG=$(sed -n 's/^0:://p' /proc/self/cgroup)
+          export HOME_DIR=$HOME WORK_DIR=$GITHUB_WORKSPACE SANDBOX_PATH=$PATH
+          run() {
+            sudo --preserve-env=RUNNER_CG,HOME_DIR,WORK_DIR,SANDBOX_PATH \
+              dev/file-audit-hosted.sh "$PWD/docker/file-audit/out/file-audit-$arch" "$RUNNER_TEMP/runc" \
+              "$(id -u)" "$(id -g)" "$@"
+          }
+          NPM='d=$(mktemp -d) && cd $d && npm cache clean --force 2>/dev/null; npm init -y >/dev/null && npm install --no-audit --no-fund express@4 typescript eslint >/dev/null'
+          GO='cd docker/file-audit && GOCACHE=$(mktemp -d) go build -o /tmp/fa-build . && echo built'
+
+          run scenario "$PWD/dev/file-audit-scenario.sh"
+          run evasion "$PWD/docker/file-audit/out/evasion-$arch"
+          run load-warm "$PWD/dev/file-audit-load.sh" none
+          run npm-warm "$NPM" none
+          run go-warm "$GO" none
+          for i in 1 2; do
+            for m in none trace; do
+              run "load-$m-$i" "$PWD/dev/file-audit-load.sh" "$m"
+              run "npm-$m-$i" "$NPM" "$m"
+              run "go-$m-$i" "$GO" "$m"
+            done
+          done
+
+      - name: Show records
+        if: always()
+        run: |
+          cd /var/tmp/buildcage-poc
+          echo "== scenario"
+          sudo jq -c '[.kind,.access,.comm,.path,.to,.args,.err]' scenario.jsonl | grep -vE '"/(usr/)?lib|/etc/ld.so' | head -80
+          echo "== evasion (flood opens of /tmp/other omitted)"
+          sudo jq -c 'select(.path != "/tmp/other" or .kind != "open") | [.kind,.access,.comm,.path,.to,.args,.err]' evasion.jsonl | grep -vE '"/(usr/)?lib|/etc/ld.so' | cut -c1-200 | head -80
+          echo "== npm: event kinds and top-level dirs"
+          sudo jq -r '.kind' npm-trace-1.jsonl | sort | uniq -c
+          sudo jq -r 'select(.path) | .path | split("/")[1:3] | join("/")' npm-trace-1.jsonl | sort | uniq -c | sort -rn | head -20
+          echo "== npm: failed opens by errno"
+          sudo jq -r 'select(.kind=="open-failed") | .err' npm-trace-1.jsonl | sort | uniq -c
+          echo "== paths that leak the bundle rootfs"
+          sudo jq -r 'select(.path) | .path' ./*.jsonl | grep -c '/var/tmp/buildcage-poc' || true
+          ls -la

@@ -1,0 +1,6 @@
+# PoC build environment: compiles the BPF object with clang and the Go
+# loader for both runner architectures. Output lands in /out.
+FROM golang:1.27-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends clang llvm libbpf-dev linux-libc-dev \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
