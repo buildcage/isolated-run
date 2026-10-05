@@ -123,4 +123,10 @@ func main() {
 	report("chmod-missing", unix.Fchmodat(unix.AT_FDCWD, "/tmp/no-such-chmod", 0o600, 0))
 	report("chown-missing", unix.Fchownat(unix.AT_FDCWD, "/tmp/no-such-chown", 0, 0, 0))
 	report("rmdir-readonly", unix.Unlinkat(unix.AT_FDCWD, "/etc", unix.AT_REMOVEDIR))
+
+	// Attribute changes with no security_path_* hook of their own.
+	os.WriteFile("/tmp/poc-attr", []byte("x"), 0o644)
+	now := []unix.Timespec{{Sec: 1700000000}, {Sec: 1700000000}}
+	report("utimensat", unix.UtimesNanoAt(unix.AT_FDCWD, "/tmp/poc-attr", now, 0))
+	report("setxattr", unix.Setxattr("/tmp/poc-attr", "user.poc", []byte("v"), 0))
 }

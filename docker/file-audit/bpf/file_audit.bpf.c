@@ -86,7 +86,7 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	// Failed path syscalls: data holds the raw user path(s), NUL-separated
 	// (old then new for rename/link); path_len holds the errno.
 	K_DELETE_FAILED = 16, K_RENAME_FAILED = 17, K_CHMOD_FAILED = 18,
-	K_CHOWN_FAILED = 19 };
+	K_CHOWN_FAILED = 19, K_ATTR = 20, K_ATTR_FAILED = 21 };
 
 // Fixed header, then data_len bytes of data:
 //   open:    d_path result (path_len is its return value)
@@ -151,7 +151,8 @@ struct {
 struct pending {
 	u64 p1;
 	u64 p2;
-	u32 kind;
+	u32 kind;    // emitted on failure
+	u32 kind_ok; // emitted on success, 0 to skip
 };
 
 struct {
@@ -691,13 +692,18 @@ int BPF_PROG(on_file_free, struct file *file)
 // resolved, so a missing target (the common failure) never reaches it; the
 // syscall tracepoints catch it. The entry stashes the user path pointer(s);
 // the exit emits only when ret < 0, reading the kernel-safe user string.
-static __always_inline void op_enter(u32 kind, u64 p1, u64 p2)
+static __always_inline void op_enter2(u32 kind, u32 kind_ok, u64 p1, u64 p2)
 {
 	if (!in_target())
 		return;
 	u64 id = bpf_get_current_pid_tgid();
-	struct pending pend = {.p1 = p1, .p2 = p2, .kind = kind};
+	struct pending pend = {.p1 = p1, .p2 = p2, .kind = kind, .kind_ok = kind_ok};
 	bpf_map_update_elem(&pending_ops, &id, &pend, BPF_ANY);
+}
+
+static __always_inline void op_enter(u32 kind, u64 p1, u64 p2)
+{
+	op_enter2(kind, 0, p1, p2);
 }
 
 static __always_inline void op_exit(long ret)
@@ -706,13 +712,15 @@ static __always_inline void op_exit(long ret)
 	struct pending *pend = bpf_map_lookup_elem(&pending_ops, &id);
 	if (!pend)
 		return;
-	if (ret >= 0) {
+	u32 kind = ret < 0 ? pend->kind : pend->kind_ok;
+	if (kind == 0) {
 		bpf_map_delete_elem(&pending_ops, &id);
 		return;
 	}
-	struct event *e = start(pend->kind);
+	struct event *e = start(kind);
 	if (e) {
-		e->path_len = -ret;
+		if (ret < 0)
+			e->path_len = -ret;
 		long r = bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1);
 		u32 off = r > 0 ? r : 0;
 		if (pend->p2) {
@@ -790,6 +798,49 @@ int on_fchownat_enter(struct trace_event_raw_sys_enter *ctx)
 }
 SEC("tracepoint/syscalls/sys_exit_fchownat")
 int on_fchownat_exit(struct trace_event_raw_sys_exit *ctx)
+{
+	op_exit(ctx->ret);
+	return 0;
+}
+
+// utimensat(dfd, path=arg1, ...) and {,l}setxattr(path=arg0, ...) are the
+// attribute changes with no security_path_* hook of their own; captured at
+// the syscall, success and failure alike.
+SEC("tracepoint/syscalls/sys_enter_utimensat")
+int on_utimensat_enter(struct trace_event_raw_sys_enter *ctx)
+{
+	if (ctx->args[1]) // NULL path updates a dirfd, not a named file
+		op_enter2(K_ATTR_FAILED, K_ATTR, ctx->args[1], 0);
+	return 0;
+}
+SEC("tracepoint/syscalls/sys_exit_utimensat")
+int on_utimensat_exit(struct trace_event_raw_sys_exit *ctx)
+{
+	op_exit(ctx->ret);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_setxattr")
+int on_setxattr_enter(struct trace_event_raw_sys_enter *ctx)
+{
+	op_enter2(K_ATTR_FAILED, K_ATTR, ctx->args[0], 0);
+	return 0;
+}
+SEC("tracepoint/syscalls/sys_exit_setxattr")
+int on_setxattr_exit(struct trace_event_raw_sys_exit *ctx)
+{
+	op_exit(ctx->ret);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_lsetxattr")
+int on_lsetxattr_enter(struct trace_event_raw_sys_enter *ctx)
+{
+	op_enter2(K_ATTR_FAILED, K_ATTR, ctx->args[0], 0);
+	return 0;
+}
+SEC("tracepoint/syscalls/sys_exit_lsetxattr")
+int on_lsetxattr_exit(struct trace_event_raw_sys_exit *ctx)
 {
 	op_exit(ctx->ret);
 	return 0;

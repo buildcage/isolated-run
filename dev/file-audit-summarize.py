@@ -24,6 +24,7 @@ LETTER = {
     "read": "R", "write": "W", "exec": "X",
     "mkdir": "W", "truncate": "W", "symlink": "W", "link": "W",
     "rename": "M", "unlink": "D", "rmdir": "D", "chmod": "A", "chown": "A",
+    "attr": "A",
 }
 ORDER = "RWXMDA"
 
@@ -34,8 +35,10 @@ def classify(r):
     if k == "open-failed":
         return ("R", r.get("path"), True)  # refused/missing open, intent unknown
     if r.get("failed"):
-        letter = {"rename": "M", "unlink": "D", "rmdir": "D",
-                  "chmod": "A", "chown": "A"}.get(k)
+        # Failed records decode to base names: delete, rename, chmod,
+        # chown, attr (see kindNames in main.go).
+        letter = {"delete": "D", "rename": "M", "chmod": "A",
+                  "chown": "A", "attr": "A"}.get(k)
         return (letter, r.get("path"), True) if letter else None
     if k == "mmap":
         return ("W" if r.get("access") == "w" else "R", r.get("path"), False)
@@ -91,14 +94,26 @@ def collapse(paths, fanout, keep):
     return shown
 
 
-def fmt_flags(ok, failed):
+PERM_ERRNO = {1, 13, 30}  # EPERM, EACCES, EROFS
+
+
+def fmt_flags(ok, failed, perm):
     out = ""
     for c in ORDER:
         if c in ok:
             out += c
         elif c in failed:
-            out += c.lower()
+            out += c.lower() + ("!" if c in perm else "")
     return out
+
+
+def sort_key(path):
+    cat = 2
+    if path == "." or path.startswith("./"):
+        cat = 0
+    elif path == "~" or path.startswith("~/"):
+        cat = 1
+    return (cat, path)
 
 
 def main():
@@ -109,8 +124,9 @@ def main():
     ap.add_argument("--fanout", type=int, default=3)
     a = ap.parse_args()
 
-    ok = defaultdict(set)      # path -> set of letters that succeeded
-    failed = defaultdict(set)  # path -> set of letters that only failed
+    ok = defaultdict(set)      # path -> letters that succeeded
+    failed = defaultdict(set)  # path -> letters that failed
+    perm = defaultdict(set)    # path -> letters whose failure was permission-class
     libs, execd = set(), set()
     n = 0
     with open(a.records) as f:
@@ -126,7 +142,12 @@ def main():
             if not c or not c[0] or not c[1]:
                 continue
             letter, path, is_failed = c
-            (failed if is_failed else ok)[path].add(letter)
+            if is_failed:
+                failed[path].add(letter)
+                if r.get("err", 0) in PERM_ERRNO:
+                    perm[path].add(letter)
+            else:
+                ok[path].add(letter)
 
     for p in libs | execd | {"/etc/ld.so.cache"}:
         ok.get(p, set()).discard("R")
@@ -134,17 +155,19 @@ def main():
     keep = {"/", "/home", a.workspace, a.home, "/tmp", "/proc", "/proc/<pid>"}
     paths = {normalize(p) for p in set(ok) | set(failed) if p and p.startswith("/")}
     # Re-key flags onto normalized paths.
-    nok, nfailed = defaultdict(set), defaultdict(set)
+    nok, nfailed, nperm = defaultdict(set), defaultdict(set), defaultdict(set)
     for p in set(ok) | set(failed):
         if p and p.startswith("/"):
             nok[normalize(p)] |= ok.get(p, set())
             nfailed[normalize(p)] |= failed.get(p, set())
+            nperm[normalize(p)] |= perm.get(p, set())
 
     shown = collapse(paths, a.fanout, keep)
-    line_ok, line_failed = defaultdict(set), defaultdict(set)
+    line_ok, line_failed, line_perm = defaultdict(set), defaultdict(set), defaultdict(set)
     for p, line in shown.items():
         line_ok[line] |= nok.get(p, set())
         line_failed[line] |= nfailed.get(p, set())
+        line_perm[line] |= nperm.get(p, set())
 
     lines = set(shown.values())
 
@@ -170,15 +193,16 @@ def main():
 
     rows = []
     for line in lines:
-        o, fl = line_ok[line], line_failed[line] - line_ok[line]
-        flags = fmt_flags(o, fl)
+        o = line_ok[line]
+        fl = line_failed[line] - o
+        flags = fmt_flags(o, fl, line_perm[line] & fl)
         if not flags:
             continue  # e.g. a binary seen only as a mapped library
         rows.append((rel(line, a.workspace, a.home), flags))
-    rows.sort()
+    rows.sort(key=lambda row: sort_key(row[0]))
     print(f"records: {n}  libraries dropped: {len(libs)}  lines: {len(rows)}")
     for path, flags in rows:
-        print(f"  {flags:<6} {path}")
+        print(f"  {flags:<7} {path}")
 
 
 if __name__ == "__main__":

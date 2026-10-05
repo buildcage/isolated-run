@@ -243,7 +243,7 @@ func run(cgPath, outPath, readyPath string) error {
 	return nil
 }
 
-var kindNames = map[uint32]string{1: "open", 2: "exec", 3: "unlink", 4: "rmdir", 5: "rename", 6: "mkdir", 7: "chmod", 8: "symlink", 9: "link", 10: "truncate", 11: "chown", 12: "open-failed", 13: "read", 14: "write", 15: "mmap", 16: "delete", 17: "rename", 18: "chmod", 19: "chown"}
+var kindNames = map[uint32]string{1: "open", 2: "exec", 3: "unlink", 4: "rmdir", 5: "rename", 6: "mkdir", 7: "chmod", 8: "symlink", 9: "link", 10: "truncate", 11: "chown", 12: "open-failed", 13: "read", 14: "write", 15: "mmap", 16: "delete", 17: "rename", 18: "chmod", 19: "chown", 20: "attr", 21: "attr"}
 
 // Mirrors struct event's fixed header in bpf/file_audit.bpf.c.
 const (
@@ -354,6 +354,12 @@ func decode(raw []byte) (record, error) {
 		r.Path, rest = components(data, n1, truncated)
 		r.To, _ = components(rest, n2, truncated)
 	case 16, 18, 19: // failed delete / chmod / chown
+		r.Path = cstr(data)
+		r.Err = pathRet
+		r.Failed = true
+	case 20: // attr via utimes / setxattr
+		r.Path = cstr(data)
+	case 21: // failed attr via utimes / setxattr
 		r.Path = cstr(data)
 		r.Err = pathRet
 		r.Failed = true
