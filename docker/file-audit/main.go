@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
@@ -106,34 +107,52 @@ func run(cgPath, outPath, readyPath string) error {
 	if err := spec.Variables["target_level"].Set(level); err != nil {
 		return err
 	}
-	var objs fileAuditObjects
-	if err := spec.LoadAndAssign(&objs, nil); err != nil {
+	// Kernel builds differ on which of these exists (getname_flags is
+	// inlined into getname on 6.8, called directly on 7.0); at least one
+	// must load and attach. A fexit program can't even load without its
+	// target, so absent ones are dropped from the spec first.
+	optional := map[string]string{"on_getname": "getname_flags", "on_getname_outer": "getname"}
+	kspec, err := btf.LoadKernelSpec()
+	if err != nil {
+		return err
+	}
+	for prog, fn := range optional {
+		var f *btf.Func
+		if err := kspec.TypeByName(fn, &f); err != nil {
+			fmt.Fprintf(os.Stderr, "file-audit: %s not in kernel BTF, skipped\n", fn)
+			delete(spec.Programs, prog)
+		}
+	}
+	coll, err := ebpf.NewCollection(spec)
+	if err != nil {
 		var ve *ebpf.VerifierError
 		if errors.As(err, &ve) {
 			return fmt.Errorf("load: %+v", ve)
 		}
 		return fmt.Errorf("load: %w", err)
 	}
-	defer objs.Close()
+	defer coll.Close()
 
-	for name, p := range map[string]*ebpf.Program{
-		"open": objs.OnOpen, "exec": objs.OnExec, "unlink": objs.OnSecurityPathUnlink,
-		"rmdir": objs.OnSecurityPathRmdir, "mkdir": objs.OnSecurityPathMkdir,
-		"rename": objs.OnRename, "chmod": objs.OnChmod, "symlink": objs.OnSymlink,
-		"backing-enter": objs.OnBackingEnter, "backing-exit": objs.OnBackingExit,
-		"link": objs.OnLink, "truncate": objs.OnTruncate, "chown": objs.OnChown,
-		"openat2-enter": objs.OnOpenat2Enter, "getname": objs.OnGetname,
-		"openat2-exit": objs.OnOpenat2Exit, "open-enter": objs.OnOpenEnter, "open-exit": objs.OnOpenExit,
-		"file-permission": objs.OnFilePermission, "mmap": objs.OnMmap, "file-free": objs.OnFileFree,
-	} {
+	attachedOptional := 0
+	for name, p := range coll.Programs {
 		l, err := link.AttachTracing(link.TracingOptions{Program: p})
 		if err != nil {
+			if _, ok := optional[name]; ok {
+				fmt.Fprintf(os.Stderr, "file-audit: %s not attached: %v\n", name, err)
+				continue
+			}
 			return fmt.Errorf("attach %s: %w", name, err)
+		}
+		if _, ok := optional[name]; ok {
+			attachedOptional++
 		}
 		defer l.Close()
 	}
+	if attachedOptional == 0 {
+		return fmt.Errorf("neither getname nor getname_flags can be traced")
+	}
 
-	rd, err := ringbuf.NewReader(objs.Events)
+	rd, err := ringbuf.NewReader(coll.Maps["events"])
 	if err != nil {
 		return err
 	}
@@ -201,7 +220,7 @@ func run(cgPath, outPath, readyPath string) error {
 	}
 	rd.Close()
 
-	dropped, internal := sumPerCPU(objs.Drops), sumPerCPU(objs.SkippedInternal)
+	dropped, internal := sumPerCPU(coll.Maps["drops"]), sumPerCPU(coll.Maps["skipped_internal"])
 	kinds := make([]string, 0, len(counts))
 	for k := range counts {
 		kinds = append(kinds, k)

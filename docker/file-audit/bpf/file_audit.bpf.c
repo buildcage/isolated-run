@@ -551,16 +551,30 @@ int BPF_PROG(on_open_enter)
 	return 0;
 }
 
-SEC("fexit/getname_flags")
-int on_getname(u64 *ctx)
+static __always_inline void stash_name(u64 *ctx)
 {
 	struct filename *ret = 0;
 	bpf_get_func_ret(ctx, (u64 *)&ret);
 	u64 id = bpf_get_current_pid_tgid();
 	struct name_buf *nb = bpf_map_lookup_elem(&open_names, &id);
 	if (!nb || ((long)ret < 0 && (long)ret >= -4095))
-		return 0;
+		return;
 	bpf_probe_read_kernel_str(nb->name, PATH_LEN, BPF_CORE_READ(ret, name));
+}
+
+// Some builds inline getname_flags into getname (6.8), others call
+// getname_flags directly (7.0); either may be absent, so both are optional.
+SEC("fexit/getname_flags")
+int on_getname(u64 *ctx)
+{
+	stash_name(ctx);
+	return 0;
+}
+
+SEC("fexit/getname")
+int on_getname_outer(u64 *ctx)
+{
+	stash_name(ctx);
 	return 0;
 }
 

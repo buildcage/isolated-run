@@ -15,6 +15,7 @@ import re
 from collections import defaultdict
 
 LOADER_FILES = {"/etc/ld.so.cache"}
+DROP_LISTINGS = False
 
 
 def rel(path, ws):
@@ -64,9 +65,23 @@ def collect(lines):
         elif k == "exec":
             actions["exec"].add(p)
             execd.add(p)
-        elif k == "open-failed":
+        elif k == "open-failed" and p:
             failed[r["err"]].add(p)
     actions["read"] -= libs | execd | LOADER_FILES
+    # pipe:[n], socket:[n], anon_inode:... are not files.
+    for act in actions:
+        actions[act] = {p for p in actions[act] if p and p.startswith("/")}
+    # Directory listings: approximated as paths with something recorded
+    # beneath them; the tracer would flag S_IFDIR instead.
+    every = set().union(*actions.values())
+    parents = set()
+    for p in every:
+        parts = p.split("/")
+        for i in range(1, len(parts)):
+            parents.add("/".join(parts[:i]) or "/")
+    listings = actions["read"] & parents
+    if DROP_LISTINGS:
+        actions["read"] -= listings
     return actions, failed, libs
 
 
@@ -98,7 +113,10 @@ def main():
     ap.add_argument("--home", default="/home/runner")
     ap.add_argument("--fanout", type=int, default=10)
     ap.add_argument("--show", action="store_true")
+    ap.add_argument("--drop-listings", action="store_true")
     a = ap.parse_args()
+    global DROP_LISTINGS
+    DROP_LISTINGS = a.drop_listings
     with open(a.records) as f:
         lines = f.readlines()
     actions, failed, libs = collect(lines)
