@@ -146,9 +146,9 @@ jobs:
       # No cleanup step: the action stops its own proxy container in its
       # finally block.
 
-  # Proves the filesystem_audit tracer runs over a real sandboxed step on the
-  # runner host without disrupting it. What it records is covered by the Go
-  # unit tests and, once the artifact lands, by its own e2e.
+  # Runs a real sandboxed step with filesystem_audit and checks the tracer
+  # recorded its file accesses; a test-hooks build surfaces the recording for
+  # the assertion.
   test_sandbox_filesystem_audit:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
@@ -203,8 +203,11 @@ jobs:
         run: |
           f="${{ runner.temp }}/filesystem-audit.jsonl"
           test -s "$f"
-          grep -q "$GITHUB_WORKSPACE/probe" "$f"
-          grep -q '"kind":"write"' "$f"
+          for kind in exec write rename unlink; do
+            grep -q "\"kind\":\"$kind\"" "$f" || {
+              echo "no $kind recorded; got:"; cat "$f"; exit 1
+            }
+          done
 
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network), proves proxy_engine: universal

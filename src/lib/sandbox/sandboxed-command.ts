@@ -511,10 +511,9 @@ function finishNssDb(
 }
 
 /**
- * Start the file-access tracer over the sandbox cgroup, before runc puts the
- * command into it. Best-effort: anything that stops it from starting (no
- * cgroup v2, extraction, attach) warns and yields a handle that records
- * nothing, so the step is never affected by the audit.
+ * Resolve the sandbox cgroup from the built config and the extracted tracer,
+ * then hand off to startFilesystemAudit. A host without cgroup v2, or a failed
+ * extraction, warns and skips the audit; the step runs unaffected either way.
  */
 async function startAudit(
   dir: string,
