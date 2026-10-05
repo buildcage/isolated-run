@@ -765,10 +765,10 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   runner applies to this action's state. The post step checks that the container name it reads back
   is shaped like one this action generates, computes its own Compose project name rather than
   trusting a stored value, and reads back which step started that container, recorded as a label
-  from environment the runner sets per step and the command cannot forge. Another Buildcage step's
-  container is left alone. A value that fails either check is treated as absent: cleanup is skipped
-  with an `::error::` rather than guessed at, which leaves the proxy container and its scratch
-  directory behind on a self-hosted runner.
+  from environment the runner sets and the command cannot forge. Another Buildcage step's container
+  is left alone, a concurrent matrix leg's on the same host included. A value that fails either
+  check is treated as absent: cleanup is skipped with an `::error::` rather than guessed at, which
+  leaves the proxy container and its scratch directory behind on a self-hosted runner.
 - **Per-step overhead.** Each step starts and stops its own proxy container rather than sharing one
   across the job, which keeps allowlists independently configurable and the report's
   step-to-container mapping unambiguous, at the cost of startup time on jobs with many isolated

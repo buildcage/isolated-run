@@ -16,6 +16,7 @@ const ENV = {
   GITHUB_RUN_ATTEMPT: "1",
   GITHUB_JOB: "build",
   GITHUB_ACTION: "buildcage",
+  RUNNER_NAME: "runner-1",
   GITHUB_STATE: "/home/runner/work/_temp/state",
 };
 
@@ -36,6 +37,7 @@ describe("postWriteThroughPath", () => {
     const path = postWriteThroughPath(ENV, base);
     expect(path).toMatch(new RegExp(`^${base}/write-through-[0-9a-f]{16}$`));
     expect(postWriteThroughPath({ ...ENV, GITHUB_ACTION: "other" }, base)).not.toBe(path);
+    expect(postWriteThroughPath({ ...ENV, RUNNER_NAME: "runner-2" }, base)).not.toBe(path);
   });
 
   it("is undefined outside a real step, whose owner can't be told", () => {

@@ -57,14 +57,17 @@ export function scratchDirNameFor(containerName: string): string {
 /** Label carrying the identity of the step that started the container. */
 const OWNER_LABEL = "io.buildcage.owner";
 
-/** Set by the runner per step, so the isolated command can't reach them:
+/** Set by the runner, so the isolated command can't reach them:
  *  GITHUB_ACTION is numbered (_2, _3) for repeated uses of one action within
- *  a job, and the run/attempt/job triple separates jobs sharing a host. */
+ *  a job, the run/attempt/job triple separates jobs sharing a host, and
+ *  RUNNER_NAME separates matrix legs, which share the other four, running on
+ *  one host at once. */
 const OWNER_TOKEN_VARS = [
   "GITHUB_RUN_ID",
   "GITHUB_RUN_ATTEMPT",
   "GITHUB_JOB",
   "GITHUB_ACTION",
+  "RUNNER_NAME",
 ] as const;
 
 /**

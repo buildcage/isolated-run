@@ -14,8 +14,9 @@ const ENV = {
   GITHUB_RUN_ATTEMPT: "1",
   GITHUB_JOB: "build",
   GITHUB_ACTION: "buildcage",
+  RUNNER_NAME: "runner-1",
 };
-const OWNER = "1/1/build/buildcage";
+const OWNER = "1/1/build/buildcage/runner-1";
 
 /** The emitter the entry point supplies; asserted on directly rather than
  *  through a console.log spy. */

@@ -185,7 +185,7 @@ touch "$VICTIM_DIR/state.env" "$VICTIM_DIR/summary.md"
 GITHUB_WORKSPACE="$VICTIM_DIR" \
   GITHUB_STATE="$VICTIM_DIR/state.env" \
   GITHUB_STEP_SUMMARY="$VICTIM_DIR/summary.md" \
-  GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 GITHUB_JOB=test GITHUB_ACTION=buildcage \
+  GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 GITHUB_JOB=test GITHUB_ACTION=buildcage RUNNER_NAME=runner-1 \
   BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_RUN="sleep 300" \
@@ -211,7 +211,7 @@ if [ -z "$VICTIM_NAME" ] || [ ! -e "$VICTIM_SCRATCH" ]; then
   cat "$VICTIM_DIR/out.log"
 else
   OUT=$(PATH="$FAKE_BIN:$PATH" \
-    GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 GITHUB_JOB=test GITHUB_ACTION=buildcage_2 \
+    GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 GITHUB_JOB=test GITHUB_ACTION=buildcage_2 RUNNER_NAME=runner-1 \
     STATE_container_name="$VICTIM_NAME" node dist/post.cjs 2>&1)
 
   if [ -e "$VICTIM_SCRATCH" ]; then
@@ -241,7 +241,7 @@ else
   kill -9 "$VICTIM_PID" >/dev/null 2>&1
   sudo -n pkill -9 -f "sudo -n -- .*/run-isolated.sh" >/dev/null 2>&1
   sleep 1
-  GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 GITHUB_JOB=test GITHUB_ACTION=buildcage \
+  GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 GITHUB_JOB=test GITHUB_ACTION=buildcage RUNNER_NAME=runner-1 \
     STATE_container_name="$VICTIM_NAME" node dist/post.cjs
   if [ -e "$VICTIM_SCRATCH" ]; then
     fail "the owning step's own post left $VICTIM_SCRATCH behind"
