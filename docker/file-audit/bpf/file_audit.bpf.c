@@ -63,6 +63,16 @@ struct linux_binprm {
 	const char *filename;
 } __attribute__((preserve_access_index));
 
+struct trace_event_raw_sys_enter {
+	long id;
+	unsigned long args[6];
+} __attribute__((preserve_access_index));
+
+struct trace_event_raw_sys_exit {
+	long id;
+	long ret;
+} __attribute__((preserve_access_index));
+
 #define DATA_SZ 8192
 #define PATH_LEN 4096
 #define ARGS_LEN 512
@@ -72,7 +82,11 @@ struct linux_binprm {
 
 enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	K_MKDIR = 6, K_CHMOD = 7, K_SYMLINK = 8, K_LINK = 9, K_TRUNCATE = 10, K_CHOWN = 11,
-	K_OPEN_FAILED = 12, K_READ = 13, K_WRITE = 14, K_MMAP = 15 };
+	K_OPEN_FAILED = 12, K_READ = 13, K_WRITE = 14, K_MMAP = 15,
+	// Failed path syscalls: data holds the raw user path(s), NUL-separated
+	// (old then new for rename/link); path_len holds the errno.
+	K_DELETE_FAILED = 16, K_RENAME_FAILED = 17, K_CHMOD_FAILED = 18,
+	K_CHOWN_FAILED = 19 };
 
 // Fixed header, then data_len bytes of data:
 //   open:    d_path result (path_len is its return value)
@@ -133,6 +147,19 @@ struct {
 	__type(key, u32);
 	__type(value, struct event);
 } scratch SEC(".maps");
+
+struct pending {
+	u64 p1;
+	u64 p2;
+	u32 kind;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 4096);
+	__type(key, u64);
+	__type(value, struct pending);
+} pending_ops SEC(".maps");
 
 static __always_inline int in_target(void)
 {
@@ -657,6 +684,114 @@ int BPF_PROG(on_file_free, struct file *file)
 {
 	u64 key = (u64)file;
 	bpf_map_delete_elem(&seen_files, &key);
+	return 0;
+}
+
+// Failed path syscalls. security_path_* fires only once the path has
+// resolved, so a missing target (the common failure) never reaches it; the
+// syscall tracepoints catch it. The entry stashes the user path pointer(s);
+// the exit emits only when ret < 0, reading the kernel-safe user string.
+static __always_inline void op_enter(u32 kind, u64 p1, u64 p2)
+{
+	if (!in_target())
+		return;
+	u64 id = bpf_get_current_pid_tgid();
+	struct pending pend = {.p1 = p1, .p2 = p2, .kind = kind};
+	bpf_map_update_elem(&pending_ops, &id, &pend, BPF_ANY);
+}
+
+static __always_inline void op_exit(long ret)
+{
+	u64 id = bpf_get_current_pid_tgid();
+	struct pending *pend = bpf_map_lookup_elem(&pending_ops, &id);
+	if (!pend)
+		return;
+	if (ret >= 0) {
+		bpf_map_delete_elem(&pending_ops, &id);
+		return;
+	}
+	struct event *e = start(pend->kind);
+	if (e) {
+		e->path_len = -ret;
+		long r = bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1);
+		u32 off = r > 0 ? r : 0;
+		if (pend->p2) {
+			e->n1 = 1; // a second path follows
+			long r2 = bpf_probe_read_user_str(&e->data[off & (DATA_SZ - 1)], PATH_LEN, (void *)pend->p2);
+			if (r2 > 0)
+				off += r2;
+		}
+		e->data_len = off;
+		submit(e);
+	}
+	bpf_map_delete_elem(&pending_ops, &id);
+}
+
+// unlinkat covers both unlink and rmdir (rmdir(2) is unlinkat+AT_REMOVEDIR
+// on current kernels); pathname is arg1.
+SEC("tracepoint/syscalls/sys_enter_unlinkat")
+int on_unlinkat_enter(struct trace_event_raw_sys_enter *ctx)
+{
+	op_enter(K_DELETE_FAILED, ctx->args[1], 0);
+	return 0;
+}
+SEC("tracepoint/syscalls/sys_exit_unlinkat")
+int on_unlinkat_exit(struct trace_event_raw_sys_exit *ctx)
+{
+	op_exit(ctx->ret);
+	return 0;
+}
+
+// renameat2(olddfd, oldname=arg1, newdfd, newname=arg3, flags)
+SEC("tracepoint/syscalls/sys_enter_renameat2")
+int on_renameat2_enter(struct trace_event_raw_sys_enter *ctx)
+{
+	op_enter(K_RENAME_FAILED, ctx->args[1], ctx->args[3]);
+	return 0;
+}
+SEC("tracepoint/syscalls/sys_exit_renameat2")
+int on_renameat2_exit(struct trace_event_raw_sys_exit *ctx)
+{
+	op_exit(ctx->ret);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_fchmodat")
+int on_fchmodat_enter(struct trace_event_raw_sys_enter *ctx)
+{
+	op_enter(K_CHMOD_FAILED, ctx->args[1], 0);
+	return 0;
+}
+SEC("tracepoint/syscalls/sys_exit_fchmodat")
+int on_fchmodat_exit(struct trace_event_raw_sys_exit *ctx)
+{
+	op_exit(ctx->ret);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_fchmodat2")
+int on_fchmodat2_enter(struct trace_event_raw_sys_enter *ctx)
+{
+	op_enter(K_CHMOD_FAILED, ctx->args[1], 0);
+	return 0;
+}
+SEC("tracepoint/syscalls/sys_exit_fchmodat2")
+int on_fchmodat2_exit(struct trace_event_raw_sys_exit *ctx)
+{
+	op_exit(ctx->ret);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_fchownat")
+int on_fchownat_enter(struct trace_event_raw_sys_enter *ctx)
+{
+	op_enter(K_CHOWN_FAILED, ctx->args[1], 0);
+	return 0;
+}
+SEC("tracepoint/syscalls/sys_exit_fchownat")
+int on_fchownat_exit(struct trace_event_raw_sys_exit *ctx)
+{
+	op_exit(ctx->ret);
 	return 0;
 }
 

@@ -115,4 +115,12 @@ func main() {
 	fd, err = unix.Open("/etc/passwd", unix.O_RDONLY, 0)
 	report("after-flood-ok", err)
 	unix.Close(fd)
+
+	// Failed path operations via direct syscalls (coreutils often stat
+	// first, so the syscall never fires on a missing target).
+	report("unlink-missing", unix.Unlinkat(unix.AT_FDCWD, "/tmp/no-such-del", 0))
+	report("rename-missing", unix.Renameat2(unix.AT_FDCWD, "/tmp/no-such-src", unix.AT_FDCWD, "/tmp/no-such-dst", 0))
+	report("chmod-missing", unix.Fchmodat(unix.AT_FDCWD, "/tmp/no-such-chmod", 0o600, 0))
+	report("chown-missing", unix.Fchownat(unix.AT_FDCWD, "/tmp/no-such-chown", 0, 0, 0))
+	report("rmdir-readonly", unix.Unlinkat(unix.AT_FDCWD, "/etc", unix.AT_REMOVEDIR))
 }

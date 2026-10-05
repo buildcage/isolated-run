@@ -44,6 +44,7 @@ type record struct {
 	Flags  uint32 `json:"flags,omitempty"`
 	Args   string `json:"args,omitempty"`
 	Err    int32  `json:"err,omitempty"`
+	Failed bool   `json:"failed,omitempty"`
 }
 
 var benchMode string
@@ -135,7 +136,14 @@ func run(cgPath, outPath, readyPath string) error {
 
 	attachedOptional := 0
 	for name, p := range coll.Programs {
-		l, err := link.AttachTracing(link.TracingOptions{Program: p})
+		var l link.Link
+		var err error
+		if p.Type() == ebpf.TracePoint {
+			group, tp, _ := strings.Cut(strings.TrimPrefix(spec.Programs[name].SectionName, "tracepoint/"), "/")
+			l, err = link.Tracepoint(group, tp, p, nil)
+		} else {
+			l, err = link.AttachTracing(link.TracingOptions{Program: p})
+		}
 		if err != nil {
 			if _, ok := optional[name]; ok {
 				fmt.Fprintf(os.Stderr, "file-audit: %s not attached: %v\n", name, err)
@@ -235,7 +243,7 @@ func run(cgPath, outPath, readyPath string) error {
 	return nil
 }
 
-var kindNames = map[uint32]string{1: "open", 2: "exec", 3: "unlink", 4: "rmdir", 5: "rename", 6: "mkdir", 7: "chmod", 8: "symlink", 9: "link", 10: "truncate", 11: "chown", 12: "open-failed", 13: "read", 14: "write", 15: "mmap"}
+var kindNames = map[uint32]string{1: "open", 2: "exec", 3: "unlink", 4: "rmdir", 5: "rename", 6: "mkdir", 7: "chmod", 8: "symlink", 9: "link", 10: "truncate", 11: "chown", 12: "open-failed", 13: "read", 14: "write", 15: "mmap", 16: "delete", 17: "rename", 18: "chmod", 19: "chown"}
 
 // Mirrors struct event's fixed header in bpf/file_audit.bpf.c.
 const (
@@ -345,6 +353,17 @@ func decode(raw []byte) (record, error) {
 		var rest []byte
 		r.Path, rest = components(data, n1, truncated)
 		r.To, _ = components(rest, n2, truncated)
+	case 16, 18, 19: // failed delete / chmod / chown
+		r.Path = cstr(data)
+		r.Err = pathRet
+		r.Failed = true
+	case 17: // failed rename
+		r.Path = cstr(data)
+		if n1 == 1 { // a second path follows
+			r.To = cstr(data[len(r.Path)+1:])
+		}
+		r.Err = pathRet
+		r.Failed = true
 	}
 	return r, nil
 }

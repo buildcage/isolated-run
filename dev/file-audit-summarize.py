@@ -1,93 +1,65 @@
 #!/usr/bin/env python3
 """PoC: turn file-audit JSON lines into the Job Summary shape under design.
 
-Usage: file-audit-summarize.py <records.jsonl> <workspace> [--fanout N] [--show]
+Usage: file-audit-summarize.py <records.jsonl> <workspace> [--home H]
+                               [--fanout N] [--show]
 
-Each path lands in one or more actions: read, write, move, delete, attr,
-exec, plus failed opens. Files the loader maps executable (libraries) and
-the binaries exec'd are dropped from reads. A directory whose direct
-children with events reach --fanout is listed once as "dir/**". Paths
-under the workspace are shown relative to it.
+Every path lands in one of six actions: read, write, move, delete, attr,
+exec, each split into done and failed. Libraries (files mapped executable)
+and exec'd binaries drop out of reads; non-file objects (pipes, sockets)
+drop out entirely. A directory with --fanout or more children that saw
+events collapses to "dir/**", strongly enough that the role of a tree shows
+without every leaf. Paths under the workspace are shown relative to it;
+under $HOME, as ~/...; otherwise absolute.
 """
 import argparse
 import json
 import re
 from collections import defaultdict
 
-LOADER_FILES = {"/etc/ld.so.cache"}
-DROP_LISTINGS = False
+DONE = {
+    "read": "read", "write": "write",
+    "mkdir": "write", "truncate": "write", "symlink": "write", "link": "write",
+    "rename": "move", "unlink": "delete", "rmdir": "delete",
+    "chmod": "attr", "chown": "attr", "exec": "exec",
+}
+ACTIONS = ["read", "write", "move", "delete", "attr", "exec"]
 
 
-def rel(path, ws):
+def classify(r):
+    """Return (action, failed) or None to drop the record."""
+    k = r["kind"]
+    if k == "open-failed":
+        return ("read", True)  # a refused or missing open; intent unknown
+    if r.get("failed"):
+        return ({"rename": "move", "unlink": "delete", "rmdir": "delete",
+                 "chmod": "attr", "chown": "attr"}.get(k), True)
+    if k == "mmap":
+        return ("write" if r.get("access") == "w" else "read", False)
+    if k == "open":
+        acc = r.get("access", "")
+        return ("write", False) if ("c" in acc or "t" in acc) else None
+    act = DONE.get(k)
+    return (act, False) if act else None
+
+
+def normalize(path):
+    return re.sub(r"^/proc/\d+/", "/proc/<pid>/", path)
+
+
+def rel(path, ws, home):
     if path == ws:
         return "."
     if path.startswith(ws + "/"):
         return "./" + path[len(ws) + 1:]
+    if path == home:
+        return "~"
+    if path.startswith(home + "/"):
+        return "~/" + path[len(home) + 1:]
     return path
 
 
-def normalize(path):
-    # Per-process /proc entries differ only by pid.
-    return re.sub(r"^/proc/\d+/", "/proc/<pid>/", path)
-
-
-def collect(lines):
-    actions = defaultdict(set)  # action -> paths
-    failed = defaultdict(set)   # errno -> names
-    libs, execd = set(), set()
-    moves = []
-    for line in lines:
-        r = json.loads(line)
-        k, p = r["kind"], r.get("path")
-        if k == "mmap" and r.get("access") == "x":
-            libs.add(p)
-        elif k == "mmap" and r.get("access") == "w":
-            actions["write"].add(p)
-        elif k == "mmap":
-            actions["read"].add(p)
-        elif k == "read" and p:
-            actions["read"].add(p)
-        elif k == "write" and p:
-            actions["write"].add(p)
-        elif k == "open" and p and ("c" in r["access"] or "t" in r["access"]):
-            actions["write"].add(p)
-        elif k in ("mkdir", "truncate", "symlink"):
-            actions["write"].add(p)
-        elif k == "link":
-            actions["write"].add(r["to"])
-        elif k == "rename":
-            actions["move"].add(p)
-            moves.append((p, r["to"]))
-        elif k in ("unlink", "rmdir"):
-            actions["delete"].add(p)
-        elif k in ("chmod", "chown"):
-            actions["attr"].add(p)
-        elif k == "exec":
-            actions["exec"].add(p)
-            execd.add(p)
-        elif k == "open-failed" and p:
-            failed[r["err"]].add(p)
-    actions["read"] -= libs | execd | LOADER_FILES
-    # pipe:[n], socket:[n], anon_inode:... are not files.
-    for act in actions:
-        actions[act] = {p for p in actions[act] if p and p.startswith("/")}
-    # Directory listings: approximated as paths with something recorded
-    # beneath them; the tracer would flag S_IFDIR instead.
-    every = set().union(*actions.values())
-    parents = set()
-    for p in every:
-        parts = p.split("/")
-        for i in range(1, len(parts)):
-            parents.add("/".join(parts[:i]) or "/")
-    listings = actions["read"] & parents
-    if DROP_LISTINGS:
-        actions["read"] -= listings
-    return actions, failed, libs
-
-
 def collapse(paths, fanout, keep):
-    """Top-down: the first directory with >= fanout direct children that saw
-    events becomes "dir/**"; dirs in keep (/, the workspace, $HOME) never do."""
     children = defaultdict(set)
     for p in paths:
         parts = p.split("/")
@@ -103,14 +75,17 @@ def collapse(paths, fanout, keep):
                 shown = d + "/**"
                 break
         out.add(shown)
-    # A directory whose descendants are listed (e.g. the mkdir -p chain
-    # above a "dir/**") adds nothing.
+    # Drop a bare directory already covered by a "dir/**" (its own or a
+    # deeper one) or by a descendant line.
+    collapsed = {p[:-3] for p in out if p.endswith("/**")}
     prefixes = set()
     for p in out:
-        parts = p.removesuffix("/**").split("/")
+        base = p[:-3] if p.endswith("/**") else p
+        parts = base.split("/")
         for i in range(1, len(parts)):
             prefixes.add("/".join(parts[:i]))
-    return {p for p in out if p.removesuffix("/**") not in prefixes or p.endswith("/**")}
+    return {p for p in out
+            if p.endswith("/**") or (p not in prefixes and p not in collapsed)}
 
 
 def main():
@@ -118,34 +93,54 @@ def main():
     ap.add_argument("records")
     ap.add_argument("workspace")
     ap.add_argument("--home", default="/home/runner")
-    ap.add_argument("--fanout", type=int, default=10)
+    ap.add_argument("--fanout", type=int, default=3)
     ap.add_argument("--show", action="store_true")
-    ap.add_argument("--drop-listings", action="store_true")
     a = ap.parse_args()
-    global DROP_LISTINGS
-    DROP_LISTINGS = a.drop_listings
+
+    done = {act: set() for act in ACTIONS}
+    failed = {act: set() for act in ACTIONS}
+    libs, execd = set(), set()
+    n = 0
     with open(a.records) as f:
-        lines = f.readlines()
-    actions, failed, libs = collect(lines)
+        for line in f:
+            n += 1
+            r = json.loads(line)
+            if r["kind"] == "mmap" and r.get("access") == "x":
+                libs.add(r.get("path"))
+                continue
+            if r["kind"] == "exec":
+                execd.add(r.get("path"))
+            c = classify(r)
+            if not c or not c[0]:
+                continue
+            act, is_failed = c
+            bucket = failed[act] if is_failed else done[act]
+            p = r.get("to") if r["kind"] == "link" else r.get("path")
+            bucket.add(p)
+            if r["kind"] == "rename" and r.get("to"):
+                bucket.add(r["to"])
+
+    done["read"] -= libs | execd | {"/etc/ld.so.cache"}
+
     keep = {"/", "/home", a.workspace, a.home, "/tmp", "/proc", "/proc/<pid>"}
+
+    def clean(paths):
+        return {normalize(p) for p in paths if p and p.startswith("/")}
+
+    print(f"records: {n}  libraries dropped: {len(libs)}  fanout: {a.fanout}")
     total = 0
-    print(f"records: {len(lines)}  libraries dropped: {len(libs)}  fanout: {a.fanout}")
-    for act in ("read", "write", "move", "delete", "attr", "exec"):
-        paths = {normalize(p) for p in actions[act]}
-        shown = sorted(rel(p, a.workspace) for p in collapse(paths, a.fanout, keep))
-        total += len(shown)
-        print(f"  {act:7} {len(paths):6} paths -> {len(shown):4} lines")
-        if a.show:
-            for s in shown:
-                print(f"      {s}")
-    for errno, names in sorted(failed.items()):
-        paths = {normalize(p) for p in names}
-        shown = sorted(rel(p, a.workspace) for p in collapse(paths, a.fanout, keep))
-        total += len(shown)
-        print(f"  failed(errno {errno}) {len(paths):6} names -> {len(shown):4} lines")
-        if a.show:
-            for s in shown[:40]:
-                print(f"      {s}")
+    for act in ACTIONS:
+        for label, raw in ((" ", done[act]), (" (failed)", failed[act])):
+            paths = clean(raw)
+            if not paths:
+                continue
+            shown = sorted(rel(p, a.workspace, a.home)
+                           for p in collapse(paths, a.fanout, keep))
+            total += len(shown)
+            print(f"  {act}{label}: {len(paths)} paths -> {len(shown)} lines")
+            if a.show:
+                for s in shown:
+                    print(f"      {s}")
     print(f"summary lines: {total}")
 
 
