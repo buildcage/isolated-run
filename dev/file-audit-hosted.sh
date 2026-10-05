@@ -7,13 +7,13 @@
 #
 # Usage: file-audit-hosted.sh <tracer> <runc> <uid> <gid> <name> <workload> [trace|none]
 # Env: RUNNER_CG (the runner's cgroup, read before sudo), HOME_DIR, WORK_DIR,
-# SANDBOX_PATH.
+# SANDBOX_PATH, SECCOMP (gen-seccomp-profile's output, as production uses).
 set -euo pipefail
 
 TRACER_BIN=$1 RUNC=$2 UID_=$3 GID_=$4 NAME=$5 WORKLOAD=$6 MODE=${7:-trace}
 BUNDLE=/var/tmp/buildcage-poc/$NAME
 OUT=/var/tmp/buildcage-poc/$NAME.jsonl
-: "${RUNNER_CG:?}" "${HOME_DIR:?}" "${WORK_DIR:?}" "${SANDBOX_PATH:?}"
+: "${RUNNER_CG:?}" "${HOME_DIR:?}" "${WORK_DIR:?}" "${SANDBOX_PATH:?}" "${SECCOMP:?}"
 CG_REL="${RUNNER_CG%/}/buildcage-poc-$NAME"
 
 rm -rf "$BUNDLE" && mkdir -p "$BUNDLE/rootfs"
@@ -21,7 +21,7 @@ mount --rbind / "$BUNDLE/rootfs"
 mount --make-rslave "$BUNDLE/rootfs"
 (cd "$BUNDLE" && "$RUNC" spec)
 jq --arg cg "$CG_REL" --arg wl "$WORKLOAD" --arg home "$HOME_DIR" --arg ws "$WORK_DIR" --arg path "$SANDBOX_PATH" \
-  --argjson uid "$UID_" --argjson gid "$GID_" '
+  --argjson uid "$UID_" --argjson gid "$GID_" --slurpfile seccomp "$SECCOMP" '
   .root = {"path": "rootfs", "readonly": true} |
   # No network namespace (the proxy is left out), and a fresh sysfs needs one.
   .mounts |= map(if .destination == "/sys" then {"destination":"/sys","type":"none","source":"/sys","options":["rbind","nosuid","noexec","nodev","ro"]} else . end) |
@@ -32,6 +32,7 @@ jq --arg cg "$CG_REL" --arg wl "$WORKLOAD" --arg home "$HOME_DIR" --arg ws "$WOR
   ] |
   .linux.namespaces = [{"type":"pid"},{"type":"ipc"},{"type":"uts"},{"type":"mount"}] |
   .linux.cgroupsPath = $cg |
+  .linux.seccomp = $seccomp[0] |
   .process.terminal = false |
   .process.cwd = $ws |
   .process.env = ["PATH=" + $path, "HOME=" + $home] |
@@ -58,7 +59,7 @@ if [ -n "$TRACER" ]; then
   kill -TERM $TRACER
   wait $TRACER || true
 fi
-umount -R "$BUNDLE/rootfs"
+umount -R -l "$BUNDLE/rootfs"
 echo "--- $NAME ($MODE): exit $CODE, sandbox wall time $(awk "BEGIN{printf \"%.2f\", $END - $START}") s"
 [ -n "$TRACER" ] && cat "$BUNDLE.log"
 rmdir "/sys/fs/cgroup$CG_REL" 2>/dev/null || true

@@ -34,6 +34,9 @@ jobs:
         run: |
           docker build -q -t file-audit-build -f docker/file-audit/Dockerfile.build docker/file-audit
           docker run --rm -v "$PWD/docker/file-audit:/src" file-audit-build ./build.sh
+          docker run --rm -v "$PWD/docker/gen-seccomp-profile:/src" -e GOARCH="$(dpkg --print-architecture)" \
+            file-audit-build go build -o /src/gen-seccomp-profile .
+          docker/gen-seccomp-profile/gen-seccomp-profile > "$RUNNER_TEMP/seccomp.json"
 
       - name: Fetch runc
         run: |
@@ -44,9 +47,9 @@ jobs:
         run: |
           arch=$(dpkg --print-architecture)
           export RUNNER_CG=$(sed -n 's/^0:://p' /proc/self/cgroup)
-          export HOME_DIR=$HOME WORK_DIR=$GITHUB_WORKSPACE SANDBOX_PATH=$PATH
+          export HOME_DIR=$HOME WORK_DIR=$GITHUB_WORKSPACE SANDBOX_PATH=$PATH SECCOMP=$RUNNER_TEMP/seccomp.json
           run() {
-            sudo --preserve-env=RUNNER_CG,HOME_DIR,WORK_DIR,SANDBOX_PATH \
+            sudo --preserve-env=RUNNER_CG,HOME_DIR,WORK_DIR,SANDBOX_PATH,SECCOMP \
               dev/file-audit-hosted.sh "$PWD/docker/file-audit/out/file-audit-$arch" "$RUNNER_TEMP/runc" \
               "$(id -u)" "$(id -g)" "$@"
           }
