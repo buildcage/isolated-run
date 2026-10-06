@@ -212,7 +212,7 @@ else
 fi
 
 echo ""
-echo "--- origin assertions (what the proxy sent the fixture origin) ---"
+echo "--- origin assertions ---"
 # See test/test-server-inspect/nginx.conf for the line format.
 ORIGIN_LOG=$(docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" logs --no-log-prefix test-server 2>/dev/null |
   grep '^HTTP/' || true)
@@ -242,8 +242,7 @@ else
   fail "a request arrived under another name's SNI, or not over h2"
   sed 's/^/    /' <<< "$MISMATCHED"
 fi
-# Without a connection serving two of them, nothing above was reused and the
-# check proves nothing.
+# Otherwise nothing was reused and the SNI check above proves nothing.
 if [ -n "$(awk '{ print $4 }' <<< "$REUSE_LOG" | sort | uniq -d)" ]; then
   pass "an origin connection carried more than one of them"
 else
