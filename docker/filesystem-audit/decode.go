@@ -110,7 +110,7 @@ func decode(raw []byte) (record, error) {
 		r.Access = openAccess(flags, mode)
 	case 12: // failed open
 		r.Path = cstr(data)
-		r.Err = pathRet
+		r.Err = pathRet // the positive errno the BPF side stored as -ret
 	case 13, 14: // read, write
 		if pathRet < 0 {
 			r.Err = pathRet

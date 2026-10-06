@@ -58,12 +58,13 @@ let buffer = require("buffer"), node_os = require("node:os");
 node_os = __toESM(node_os, 1);
 let node_fs_promises = require("node:fs/promises"), fs_promises = require("fs/promises");
 fs_promises = __toESM(fs_promises, 1);
-let node_child_process = require("node:child_process"), node_readline = require("node:readline"), node_process = require("node:process");
+let node_child_process = require("node:child_process"), node_process = require("node:process");
 node_process = __toESM(node_process, 1);
 let node_https = require("node:https");
 node_https = __toESM(node_https, 1);
 let stream = require("stream");
 stream = __toESM(stream, 1);
+let node_readline = require("node:readline");
 //#region src/core/lib/errors.ts
 var ActionError = class extends Error {
 	code;
@@ -15542,10 +15543,10 @@ function readRetentionDays(getInput) {
 		return Number(days);
 	}
 }
-function readTrafficArtifactInputs(getInput$9 = getInput) {
+function readTrafficArtifactInputs(getInput$10 = getInput) {
 	return {
-		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$9),
-		retentionDays: readRetentionDays(getInput$9)
+		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$10),
+		retentionDays: readRetentionDays(getInput$10)
 	};
 }
 const ENGINES = ["universal", "inspect"];
@@ -16375,12 +16376,12 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 //#endregion
 //#region src/core/lib/actions/rule-inputs.ts
 init_core();
-function readRuleInputs(getInput$8 = getInput) {
+function readRuleInputs(getInput$9 = getInput) {
 	let rules = buildACLRules({
-		httpsRulesInput: getInput$8("allowed_https_rules"),
-		httpRulesInput: getInput$8("allowed_http_rules"),
-		ipRulesInput: getInput$8("allowed_ip_rules")
-	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$8("known_blocked_rules")), urlRulesInput = getInput$8("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$8("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
+		httpsRulesInput: getInput$9("allowed_https_rules"),
+		httpRulesInput: getInput$9("allowed_http_rules"),
+		ipRulesInput: getInput$9("allowed_ip_rules")
+	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$9("known_blocked_rules")), urlRulesInput = getInput$9("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$9("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
 	checkRulesCompileOrThrow({
 		...rules,
 		tlsRules,
@@ -23248,3881 +23249,10 @@ function resolveComposeFile(override) {
 	return override?.composeFile ?? DEFAULT_COMPOSE_FILE;
 }
 //#endregion
-//#region src/lib/filesystem-audit-mode.ts
-const FILESYSTEM_AUDIT = ["off", "record"];
-function resolveFilesystemAudit(input) {
-	let trimmed = input?.trim() || "off";
-	if (!FILESYSTEM_AUDIT.includes(trimmed)) throw new SandboxError(`Invalid filesystem_audit: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_AUDIT.join(", ")}.`, "INVALID_FILESYSTEM_AUDIT");
-	return trimmed;
-}
-//#endregion
-//#region src/lib/filesystem-mode.ts
-const FILESYSTEM_MODES = ["persistent", "ephemeral"];
-function resolveFilesystemMode(input) {
-	let trimmed = input?.trim() || "persistent";
-	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem_mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
-	return trimmed;
-}
-//#endregion
-//#region src/lib/inputs.ts
-init_core();
-const LIST_INPUTS = [
-	"allowed_https_rules",
-	"allowed_http_rules",
-	"allowed_ip_rules",
-	"allowed_url_rules",
-	"allowed_tls_rules",
-	"known_blocked_rules",
-	"write_through"
-], CONFIG_FILE_INPUTS = {
-	known: [
-		"proxy_mode",
-		"proxy_engine",
-		...LIST_INPUTS,
-		"upload_traffic_artifact",
-		"traffic_artifact_retention_days",
-		"fail_on_blocked",
-		"fail_on_ca_residue",
-		"filesystem_mode",
-		"filesystem_audit",
-		"label"
-	],
-	lists: LIST_INPUTS
-};
-function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, notice) {
-	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
-	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
-}
-function readRunCommand(getInput$2 = getInput) {
-	let runInput = getInput$2("run", { trimWhitespace: !1 });
-	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
-	return runInput;
-}
-function readProxyInputs(getInput$1 = getInput) {
-	return {
-		proxyEngine: resolveProxyEngine(getInput$1("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$1("proxy_mode"))
-	};
-}
-function readFilesystemInputs(notice, getInput$3 = getInput) {
-	return {
-		filesystemMode: resolveFilesystemMode(getInput$3("filesystem_mode")),
-		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$3("write_through"),
-			writable: getInput$3("writable"),
-			allowWrite: getInput$3("allow_write")
-		}, notice)
-	};
-}
-function readFilesystemAuditInput(getInput$7 = getInput) {
-	return resolveFilesystemAudit(getInput$7("filesystem_audit"));
-}
-function readStepLabel(getInput$6 = getInput) {
-	return getInput$6("label") || void 0;
-}
-function readFailOnCaResidue(getInput$4 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$4);
-}
-function readFailOnBlocked(getInput$5 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$5);
-}
-//#endregion
-//#region src/lib/retry-briefly.ts
-function retryBriefly(fn, options = {}) {
-	let { attempts = 5, delayMs = 200, retryOn = () => !0 } = options;
-	for (let attempt = 1;; attempt++) try {
-		return fn();
-	} catch (e) {
-		if (attempt >= attempts || !retryOn(e)) throw e;
-		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
-	}
-}
-//#endregion
-//#region src/lib/sandbox/mountinfo.ts
-function parseMountinfo(mountinfoContent) {
-	return mountinfoContent.split("\n").filter(Boolean).map((line) => {
-		let fields = line.split(" "), dashIndex = fields.indexOf("-"), superOptions = unescapeField(fields[dashIndex + 3]);
-		return {
-			mountPoint: unescapeField(fields[4]),
-			fsType: unescapeField(fields[dashIndex + 1]),
-			superOptions: superOptions ? superOptions.split(",") : [],
-			device: unescapeField(fields[2]),
-			root: unescapeField(fields[3])
-		};
-	});
-}
-function unescapeField(field) {
-	return (field ?? "").replace(/\\([0-7]{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)));
-}
-function listHostMounts() {
-	return parseMountinfo((0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8"));
-}
-//#endregion
-//#region src/lib/sandbox/run-host-command.ts
-function runPinnedHostCommand(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		encoding: "utf8",
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv(command)
-	});
-}
-//#endregion
-//#region src/lib/sandbox/scratch-dir.ts
-const SANDBOX_SCRATCH_BASE = `/var/tmp/buildcage-${process.getuid()}`;
-function checkScratchBaseParent(realpath = node_fs.realpathSync) {
-	let parent = (0, node_path.dirname)(SANDBOX_SCRATCH_BASE), real;
-	try {
-		real = realpath(parent);
-	} catch {
-		return;
-	}
-	if (real !== parent) throw new SandboxError(`${parent} resolves to ${real} through a symlink, and the sandbox cannot be set up under a path that goes through one. Replace that symlink, at ${parent} or on the way to it, with a real directory.`, "SCRATCH_BASE_SYMLINKED");
-}
-function parseMountsUnder(mountinfoContent, dir) {
-	let prefix = dir.endsWith("/") ? dir : `${dir}/`;
-	return parseMountinfo(mountinfoContent).map(({ mountPoint }) => mountPoint).filter((mountPoint) => mountPoint === dir || mountPoint.startsWith(prefix)).sort((a, b) => b.length - a.length);
-}
-function defaultReadMountinfo() {
-	return (0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8");
-}
-function defaultRemove$1(path) {
-	(0, node_fs.rmSync)(path, {
-		recursive: !0,
-		force: !0
-	});
-}
-function defaultMkdir$2(path, mode) {
-	(0, node_fs.mkdirSync)(path, { mode });
-}
-function unmountAllUnder(dir, deps, warn) {
-	let { readMountinfo = defaultReadMountinfo, exec = runPinnedHostCommand } = deps, mountPoints;
-	try {
-		mountPoints = parseMountsUnder(readMountinfo(), dir);
-	} catch {
-		return;
-	}
-	for (let mountPoint of mountPoints) try {
-		exec("sudo", [
-			"umount",
-			"-R",
-			"-l",
-			mountPoint
-		]);
-	} catch (e) {
-		warn?.(`Failed to unmount ${mountPoint} before cleanup: ${errorMessage(e)}`);
-	}
-}
-function removeScratchDir(dir, deps) {
-	let { exec = runPinnedHostCommand, lstat = node_fs.lstatSync, remove = defaultRemove$1 } = deps;
-	retryBriefly(() => {
-		try {
-			remove(dir);
-		} catch (e) {
-			if (e.code !== "EACCES") throw e;
-			let st = lstat(dir);
-			if (!st.isDirectory() || st.uid !== process.getuid()) throw new SandboxError(`Refusing to sudo rm -rf ${dir}: not a directory owned by uid ${process.getuid()}.`, "SCRATCH_DIR_UNSAFE");
-			exec("sudo", [
-				"-n",
-				"rm",
-				"-rf",
-				dir
-			]);
-		}
-	}, { retryOn: (e) => e.code === "EBUSY" });
-}
-function cleanupScratchDir(dir, { ephemeralRoots, warn } = {}, deps = {}) {
-	assertUnderScratchBase(dir), ephemeralRoots && ephemeralRoots.length > 0 && console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`), unmountAllUnder(dir, deps, warn), removeScratchDir(dir, deps);
-}
-function assertUnderScratchBase(dir) {
-	let abs = (0, node_path.resolve)(dir);
-	if ((0, node_path.dirname)(abs) !== SANDBOX_SCRATCH_BASE || !/^sandbox-[A-Za-z0-9]+$/.test((0, node_path.basename)(abs))) throw new SandboxError(`Refusing to clean up ${JSON.stringify(dir)}: not a scratch dir under ${SANDBOX_SCRATCH_BASE}.`, "SCRATCH_DIR_OUT_OF_BASE");
-}
-function scratchDirFor(containerName) {
-	if (!isValidContainerName(containerName)) throw new SandboxError(`Refusing to derive a scratch dir from container name ${JSON.stringify(containerName)}.`, "CONTAINER_NAME_INVALID");
-	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchDirNameFor(containerName));
-}
-function ensureOwnScratchBase(base = SANDBOX_SCRATCH_BASE, { mkdir = defaultMkdir$2, lstat = node_fs.lstatSync } = {}) {
-	try {
-		mkdir(base, 448);
-		return;
-	} catch (e) {
-		if (e.code !== "EEXIST") throw e;
-	}
-	let st = lstat(base), uid = process.getuid();
-	if (!st.isDirectory() || st.uid !== uid || st.mode & 63) throw new SandboxError(`${base} exists but is not a private directory owned by uid ${uid} (mode ${(st.mode & 4095).toString(8)}, uid ${st.uid}). Another user may have created it. Remove it and re-run.`, "SCRATCH_BASE_UNSAFE");
-}
-async function withScratchDir(fn, { containerName, ephemeralRoots, warn } = {}) {
-	let dir;
-	ensureOwnScratchBase(), containerName ? (dir = scratchDirFor(containerName), cleanupScratchDir(dir, { warn }), (0, node_fs.mkdirSync)(dir, {
-		recursive: !0,
-		mode: 448
-	})) : dir = (0, node_fs.mkdtempSync)((0, node_path.join)(SANDBOX_SCRATCH_BASE, "sandbox-"));
-	try {
-		return await fn(dir);
-	} finally {
-		cleanupScratchDir(dir, {
-			ephemeralRoots,
-			warn
-		});
-	}
-}
-//#endregion
-//#region src/lib/overlayfs-preflight.ts
-const REQUIREMENT$1 = `filesystem_mode: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE}: an overlay mount's upperdir/workdir are placed there, and the kernel doesn't allow those to themselves sit on an overlayfs filesystem. This commonly fails when the runner process is itself running inside a container whose own root filesystem is overlayfs (e.g. many container-based self-hosted runner setups), since that puts SANDBOX_SCRATCH_BASE on overlayfs too. Use filesystem_mode: persistent instead, or run this action from a runner whose filesystem isn't overlayfs-backed.`;
-function describeOverlayFailure(e) {
-	let captured = capturedStderr(e);
-	return `overlayfs probe mount failed. ${REQUIREMENT$1}${captured ? ` (${captured})` : ""}`;
-}
-function describeProbeCleanupFailure(dir, e) {
-	let captured = capturedStderr(e);
-	return `Failed to remove the overlayfs probe directory ${dir}. The probe mount itself succeeded, so this runner does support overlayfs; what failed is removing the probe directory afterwards. That needs \`sudo rm -rf\`, because the kernel writes root-owned overlayfs bookkeeping into workdir while the mount is live (see removeProbeDir), and filesystem_mode: ephemeral's real cleanup discards its overlay work dirs exactly the same way, so a run would fail on this runner anyway, later and with less to go on. This is usually a sudoers config scoped to specific commands rather than a blanket NOPASSWD:ALL, which checkPasswordlessSudo's own \`sudo -n true\` probe cannot detect. Grant the runner user passwordless sudo for \`rm\`, or use filesystem_mode: persistent instead.${captured ? ` (${captured})` : ""}`;
-}
-function removeProbeDir(dir, exec) {
-	retryBriefly(() => exec(hostCommand("sudo"), [
-		"-n",
-		"rm",
-		"-rf",
-		dir
-	], {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv("sudo")
-	}));
-}
-function checkOverlayfsSupport({ base = SANDBOX_SCRATCH_BASE, exec = node_child_process.execFileSync } = {}) {
-	ensureOwnScratchBase(base);
-	let probeDir = (0, node_fs.mkdtempSync)((0, node_path.join)(base, "overlay-probe-")), probeFailure = null;
-	try {
-		probeOverlayMount(probeDir, exec);
-	} catch (error) {
-		probeFailure = { error };
-	}
-	try {
-		removeProbeDir(probeDir, exec);
-	} catch (e) {
-		if (!probeFailure) throw new SandboxError(describeProbeCleanupFailure(probeDir, e), "OVERLAY_PROBE_CLEANUP_FAILED");
-	}
-	if (probeFailure) throw new SandboxError(describeOverlayFailure(probeFailure.error), "OVERLAYFS_UNSUPPORTED");
-}
-function probeOverlayMount(probeDir, exec) {
-	let lower = (0, node_path.join)(probeDir, "lower"), upper = (0, node_path.join)(probeDir, "upper"), work = (0, node_path.join)(probeDir, "work"), merged = (0, node_path.join)(probeDir, "merged");
-	for (let dir of [
-		lower,
-		upper,
-		work,
-		merged
-	]) (0, node_fs.mkdirSync)(dir);
-	exec(hostCommand("sudo"), [
-		"-n",
-		"unshare",
-		"--mount",
-		"--propagation",
-		"private",
-		"--",
-		"sh",
-		"-c",
-		`mount -t overlay overlay -o lowerdir=${lower},upperdir=${upper},workdir=${work} ${merged}`
-	], {
-		encoding: "utf8",
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv("sudo")
-	});
-}
-//#endregion
-//#region src/lib/post-write-through.ts
-function postWriteThroughPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
-	let owner = ownerToken(env);
-	if (!owner) return;
-	let id = (0, node_crypto.createHash)("sha256").update(owner).digest("hex").slice(0, 16);
-	return (0, node_path.join)(scratchBase, `write-through-${id}`);
-}
-function saveWriteThroughForPost(env, writeThroughInput, scratchBase = SANDBOX_SCRATCH_BASE) {
-	let path = postWriteThroughPath(env, scratchBase);
-	env.GITHUB_STATE && path && (ensureOwnScratchBase(scratchBase), (0, node_fs.writeFileSync)(path, writeThroughInput, { mode: 384 }));
-}
-//#endregion
-//#region src/core/lib/docker/args.ts
-function buildDockerCpArgs({ containerName, containerPath, hostPath }) {
-	return [
-		"cp",
-		`${containerName}:${containerPath}`,
-		hostPath
-	];
-}
-function buildComposeUpArgs({ composeFile, projectName, pullPolicy }) {
-	return [
-		"compose",
-		"-f",
-		composeFile,
-		"-p",
-		projectName,
-		"up",
-		"-d",
-		"--pull",
-		pullPolicy,
-		"--no-build",
-		"--wait",
-		"--wait-timeout",
-		"180",
-		"--quiet-pull"
-	];
-}
-function buildComposeLogsArgs({ composeFile, projectName, tail }) {
-	return [
-		"compose",
-		"-f",
-		composeFile,
-		"-p",
-		projectName,
-		"logs",
-		"--no-color",
-		"--tail",
-		String(tail)
-	];
-}
-function buildComposeDownArgs({ composeFile, projectName }) {
-	return [
-		"compose",
-		"-f",
-		composeFile,
-		"-p",
-		projectName,
-		"down",
-		"-v"
-	];
-}
-//#endregion
-//#region src/core/lib/docker/health.ts
-function buildDockerInspectStateArgs(containerName) {
-	return [
-		"inspect",
-		"--format",
-		"{{json .State}}",
-		containerName
-	];
-}
-function parseContainerState(inspectOutput) {
-	let raw;
-	try {
-		raw = JSON.parse(inspectOutput);
-	} catch {
-		return null;
-	}
-	if (!raw || typeof raw != "object" || typeof raw.Status != "string") return null;
-	let log = Array.isArray(raw.Health?.Log) ? raw.Health.Log : [], lastOutput = log.length > 0 ? log[log.length - 1]?.Output : void 0;
-	return {
-		status: raw.Status,
-		exitCode: typeof raw.ExitCode == "number" ? raw.ExitCode : null,
-		health: typeof raw.Health?.Status == "string" ? raw.Health.Status : null,
-		lastHealthOutput: typeof lastOutput == "string" && lastOutput.trim() || null
-	};
-}
-function isContainerReady(state) {
-	return state.status === "running" && state.health !== "unhealthy" && state.health !== "starting";
-}
-function describeContainerStartFailure(state, { role, containerName }) {
-	let subject = `Buildcage's ${role} container (${containerName})`, probe = state.lastHealthOutput ? ` Last health check output: ${JSON.stringify(state.lastHealthOutput)}.` : "", evidence = " Its log is printed above.";
-	return state.status === "running" ? isContainerReady(state) ? `${subject} is running, but \`docker compose up\` failed. See the Docker output above.${probe}` : `${subject} started but never became ready.${probe}${evidence}` : `${subject} stopped${state.exitCode === null ? "" : ` with code ${state.exitCode}`} instead of starting up.${probe}${evidence}`;
-}
-//#endregion
-//#region src/lib/proxy-lifecycle.ts
-const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
-	encoding: "utf8",
-	env: hostCommandEnv("docker", env),
-	stdio: [
-		"ignore",
-		"pipe",
-		"pipe"
-	]
-}), printDockerViaExec = (args, env) => {
-	(0, node_child_process.execFileSync)(hostCommand("docker"), args, {
-		stdio: "inherit",
-		env: hostCommandEnv("docker", env)
-	});
-};
-async function startSandboxProxy({ composeFile, projectName, containerName, pullPolicy, composeEnv }, deps = {}) {
-	let { printDocker = printDockerViaExec } = deps;
-	await withLogGroupAsync("buildcage: starting sandbox proxy", () => {
-		try {
-			printDocker(buildComposeUpArgs({
-				composeFile,
-				projectName,
-				pullPolicy
-			}), composeEnv);
-		} catch (e) {
-			throw proxyStartError(e, {
-				composeFile,
-				projectName,
-				containerName,
-				composeEnv
-			}, deps);
-		}
-	});
-}
-function proxyStartError(e, { composeFile, projectName, containerName, composeEnv }, deps) {
-	let state = readProxyState(containerName, composeEnv, deps);
-	return state ? (printProxyLog({
-		composeFile,
-		projectName,
-		composeEnv
-	}, deps), new SandboxError(describeContainerStartFailure(state, {
-		role: "sandbox proxy",
-		containerName
-	}), "PROXY_NOT_READY")) : new SandboxError(describeDockerFailure(e, { operation: "docker compose up" }), "DOCKER_UNAVAILABLE");
-}
-function readProxyState(containerName, composeEnv, { captureDocker = captureDockerViaExec }) {
-	try {
-		return parseContainerState(captureDocker(buildDockerInspectStateArgs(containerName), composeEnv));
-	} catch (e) {
-		return reportInspectFailure(e), null;
-	}
-}
-function reportInspectFailure(e) {
-	let stderr = capturedStderr(e);
-	stderr && !/no such object/i.test(stderr) && console.log(`buildcage: could not read the sandbox proxy container's state: ${stderr}`);
-}
-function printProxyLog({ composeFile, projectName, composeEnv }, { printDocker = printDockerViaExec }) {
-	try {
-		printDocker(buildComposeLogsArgs({
-			composeFile,
-			projectName,
-			tail: 100
-		}), composeEnv);
-	} catch {
-		console.log("The sandbox proxy container's log could not be read.");
-	}
-}
-async function stopSandboxProxy({ composeFile, projectName, composeEnv, annotation }, { printDocker = printDockerViaExec } = {}) {
-	await withLogGroupAsync("buildcage: stopping sandbox proxy", () => {
-		try {
-			printDocker(buildComposeDownArgs({
-				composeFile,
-				projectName
-			}), composeEnv);
-		} catch (e) {
-			annotation.warning(`Failed to stop the sandbox proxy container: ${describeDockerFailure(e, { operation: "docker compose down" })}`);
-		}
-	});
-}
-//#endregion
-//#region src/lib/sandbox/paths.ts
-function isAtOrUnder(path, ancestor) {
-	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
-}
-function pathsOverlap(a, b) {
-	return isAtOrUnder(a, b) || isAtOrUnder(b, a);
-}
-function pathAliases(mounts, path) {
-	let owner = mountAt(mounts, path);
-	if (!owner) return [];
-	let inFs = (0, node_path.join)(owner.root, (0, node_path.relative)(owner.mountPoint, path)), aliases = new Set();
-	for (let m of mounts) {
-		if (m.device !== owner.device) continue;
-		let alias = isAtOrUnder(inFs, m.root) ? (0, node_path.join)(m.mountPoint, (0, node_path.relative)(m.root, inFs)) : isAtOrUnder(m.root, inFs) ? m.mountPoint : void 0;
-		alias !== void 0 && !isAtOrUnder(alias, path) && mountAt(mounts, alias) === m && aliases.add(alias);
-	}
-	return [...aliases].filter((a) => ![...aliases].some((b) => b !== a && isAtOrUnder(a, b)));
-}
-function mountAt(mounts, path) {
-	let found;
-	for (let m of mounts) isAtOrUnder(path, m.mountPoint) && m.mountPoint.length >= (found?.mountPoint.length ?? 0) && (found = m);
-	return found;
-}
-var WritablePathConflictError = class extends Error {};
-function assertScratchBaseNotWritable(writableDirs) {
-	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
-	if (overlapping) throw new WritablePathConflictError(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
-}
-//#endregion
-//#region src/lib/sandbox/ephemeral-fs.ts
-function defaultDeviceOf(path) {
-	return (0, node_fs.statSync)(path).dev;
-}
-function defaultIsDirectory$1(path) {
-	return (0, node_fs.statSync)(path).isDirectory();
-}
-function defaultStat$1(path) {
-	let { uid, gid, mode } = (0, node_fs.statSync)(path);
-	return {
-		uid,
-		gid,
-		mode
-	};
-}
-function defaultExecFile(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv(command)
-	});
-}
-function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs.existsSync, deviceOf = defaultDeviceOf } = {}) {
-	let notCoveredByWriteThrough = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !writeThroughPaths.some((a) => isAtOrUnder(c, a)));
-	return notCoveredByWriteThrough.filter((c) => {
-		let nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isAtOrUnder(c, p));
-		if (!nestingParent) return !0;
-		try {
-			return deviceOf(c) !== deviceOf(nestingParent);
-		} catch {
-			return !0;
-		}
-	});
-}
-function rootCannotRead({ fsType, superOptions = [] }) {
-	return (fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.")) && !superOptions.includes("allow_other");
-}
-function nestedMountRoots(overlayRoots, hostMounts, writeThroughPaths, { isDirectory = defaultIsDirectory$1, warn } = {}) {
-	let visible = new Map(hostMounts.map((m) => [m.mountPoint, m])), roots = [];
-	for (let [path, mount] of visible) {
-		if (overlayRoots.includes(path) || !overlayRoots.some((r) => isAtOrUnder(path, r)) || writeThroughPaths.some((w) => isAtOrUnder(path, w))) continue;
-		let reason;
-		if (path.includes(",") || path.includes(":")) reason = "an overlay mount option cannot contain \",\" or \":\"";
-		else if (rootCannotRead(mount)) reason = `it is a FUSE mount (${mount.fsType}) without allow_other, which root cannot read`;
-		else try {
-			if (!isDirectory(path)) continue;
-		} catch (e) {
-			reason = `the runner cannot stat it (${errorMessage(e)})`;
-		}
-		if (reason !== void 0) {
-			warn?.(`filesystem_mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the command sees the empty directory beneath it: ${reason}. Use filesystem_mode: persistent if the command needs its contents.`);
-			continue;
-		}
-		roots.push(path);
-	}
-	return roots;
-}
-function slugify(path) {
-	return (0, node_crypto.createHash)("sha256").update(path).digest("hex").slice(0, 16);
-}
-function overlayUpperFor(scratchDir, root) {
-	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
-}
-function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat$1, execFile = defaultExecFile, self = {
-	uid: process.getuid(),
-	gid: process.getgid()
-} } = {}) {
-	return roots.map((path) => {
-		let upper = overlayUpperFor(scratchDir, path), work = (0, node_path.join)((0, node_path.dirname)(upper), "work");
-		mkdir(work, { recursive: !0 });
-		let { uid, gid, mode } = stat(path), perm = mode & 4095;
-		return uid === self.uid && gid === self.gid ? (mkdir(upper, { recursive: !0 }), chmod(upper, perm)) : execFile("sudo", [
-			"install",
-			"-d",
-			"-o",
-			String(uid),
-			"-g",
-			String(gid),
-			"-m",
-			perm.toString(8),
-			"--",
-			upper
-		]), {
-			path,
-			upper,
-			work
-		};
-	});
-}
-function formatFilesystemPlanLog(mode, overlayRoots, writeThrough) {
-	if (mode !== "ephemeral") return [];
-	let lines = ["Filesystem mode: ephemeral"];
-	for (let root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
-	for (let entry of writeThrough) lines.push(`Writable (persisted):                    ${entry}`);
-	return lines;
-}
-function filesystemAuditPaths(containerName, scratchBase) {
-	let suffix = containerName.split("-").at(-1);
-	return {
-		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
-		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`)
-	};
-}
-function cgroupFsPath(cgroupsPath) {
-	return (0, node_path.join)("/sys/fs/cgroup", cgroupsPath);
-}
-function defaultExec$3(command, args) {
-	return (0, node_child_process.execFileSync)(hostCommand(command), args, {
-		encoding: "utf8",
-		env: hostCommandEnv(command)
-	});
-}
-function defaultSpawn$1(command, args) {
-	let child = (0, node_child_process.spawn)(hostCommand(command), args, {
-		stdio: [
-			"ignore",
-			"inherit",
-			"inherit"
-		],
-		env: hostCommandEnv(command)
-	});
-	return {
-		exited: new Promise((resolve) => {
-			child.on("error", () => resolve()), child.on("close", () => resolve());
-		}),
-		kill: (signal) => child.kill(signal)
-	};
-}
-function defaultSleep(ms) {
-	return new Promise((resolve) => setTimeout(resolve, ms).unref());
-}
-function defaultRemove(path) {
-	(0, node_fs.rmSync)(path, { force: !0 });
-}
-function defaultReadFile$2(path) {
-	return (0, node_fs.readFileSync)(path, "utf8");
-}
-const noAudit = { stop: async () => {} };
-function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = node_fs.chmodSync } = {}) {
-	let tracerPath = (0, node_path.join)(destDir, "filesystem-audit");
-	return exec("docker", buildDockerCpArgs({
-		containerName,
-		containerPath: "/opt/buildcage/bin/filesystem-audit",
-		hostPath: tracerPath
-	})), chmod(tracerPath, 493), tracerPath;
-}
-async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath }, warn, deps = {}) {
-	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2 } = deps, child = spawn("sudo", [
-		"-n",
-		"--",
-		tracerPath,
-		"--cgroup",
-		cgroupFsPath(cgroupsPath),
-		"--out",
-		outPath,
-		"--pidfile",
-		pidFilePath,
-		"--ready",
-		readyPath
-	]), exited = !1;
-	child.exited.then(() => {
-		exited = !0;
-	});
-	let stop = async () => {
-		if (child.kill("SIGTERM"), await Promise.race([child.exited, sleep(2e3)]), !exited) try {
-			let pid = Number(readFile(pidFilePath).trim());
-			pid > 0 && exec("sudo", [
-				"-n",
-				"kill",
-				"-KILL",
-				String(pid)
-			]);
-		} catch {}
-		await child.exited, remove(pidFilePath);
-	};
-	for (let i = 0; i < 50; i++) {
-		if (exists(readyPath)) return { stop };
-		if (exited) break;
-		await sleep(100);
-	}
-	return warn("buildcage: filesystem_audit did not start; the step's file accesses were not recorded."), await stop(), noAudit;
-}
-//#endregion
-//#region src/lib/sandbox/nss-db-ledger.ts
-const NSS_DB_LEDGER_NAME = "nssdb-ledger.json";
-function defaultMkdir$1(path, mode) {
-	(0, node_fs.mkdirSync)(path, { mode });
-}
-function defaultLstat$1(path) {
-	return (0, node_fs.lstatSync)(path, {
-		bigint: !0,
-		throwIfNoEntry: !1
-	});
-}
-function defaultPidAlive(pid) {
-	try {
-		return process.kill(pid, 0), !0;
-	} catch (e) {
-		return e.code !== "ESRCH";
-	}
-}
-const USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
-function emptyLedger() {
-	return {
-		version: 1,
-		dirs: {},
-		uses: {}
-	};
-}
-function isLedger(parsed) {
-	let l = parsed;
-	return l?.version === 1 && typeof l.dirs == "object" && l.dirs !== null && typeof l.uses == "object" && l.uses !== null && Object.entries(l.dirs).every(([p, d]) => p.startsWith("/") && isId(d)) && Object.entries(l.uses).every(([n, u]) => USE_NAME_RE.test(n) && isId(u));
-}
-function errnoCode(e) {
-	return e.code;
-}
-function idOf(info) {
-	return {
-		dev: String(info.dev),
-		ino: String(info.ino),
-		birthtimeNs: String(info.birthtimeNs)
-	};
-}
-function sameId(a, b) {
-	return a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
-}
-function isId(value) {
-	let v = value;
-	return typeof v == "object" && !!v && [
-		v.dev,
-		v.ino,
-		v.birthtimeNs
-	].every((s) => typeof s == "string" && /^\d+$/.test(s));
-}
-function dirIdOf(path, { lstat = defaultLstat$1 } = {}) {
-	let info = lstat(path);
-	return info?.isDirectory() ? idOf(info) : void 0;
-}
-function stillThere(path, id, deps = {}) {
-	let current = dirIdOf(path, deps);
-	return current !== void 0 && sameId(current, id);
-}
-function acquireLock(lock, { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 150 }) {
-	let mine = `${lock}.${process.pid}`;
-	try {
-		retryBriefly(() => {
-			(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
-			try {
-				(0, node_fs.linkSync)(mine, lock);
-			} catch (e) {
-				throw takeOverStaleLock(lock, pidAlive, now), e;
-			}
-		}, {
-			attempts: lockAttempts,
-			delayMs: 100,
-			retryOn: (e) => errnoCode(e) === "EEXIST"
-		});
-	} catch (e) {
-		if (errnoCode(e) !== "EEXIST") throw e;
-		let waited = (lockAttempts - 1) * 100 / 1e3;
-		throw Error(`could not take ${lock}: another step held it for over ${waited}s`, { cause: e });
-	} finally {
-		(0, node_fs.rmSync)(mine, { force: !0 });
-	}
-	return () => (0, node_fs.rmSync)(lock, { force: !0 });
-}
-function takeOverStaleLock(lock, pidAlive, now) {
-	let pid, age;
-	try {
-		pid = Number((0, node_fs.readFileSync)(lock, "utf8")), age = now().getTime() - (0, node_fs.lstatSync)(lock).mtimeMs;
-	} catch {
-		return;
-	}
-	age < 2e3 || age < 1e4 && Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
-}
-function withLock(base, fn, deps) {
-	let release = acquireLock((0, node_path.join)(base, "nssdb-ledger.lock"), deps);
-	try {
-		return fn();
-	} finally {
-		release();
-	}
-}
-function readLedger(path) {
-	let fd;
-	try {
-		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
-	} catch (e) {
-		return errnoCode(e) === "ENOENT" ? emptyLedger() : `${path} cannot be opened (${errorMessage(e)})`;
-	}
-	try {
-		let info = (0, node_fs.fstatSync)(fd);
-		if (!info.isFile()) return `${path} is not a file`;
-		if (info.size > 65536) return `${path} is ${info.size} bytes, too large`;
-		let parsed = JSON.parse((0, node_fs.readFileSync)(fd, "utf8"));
-		return isLedger(parsed) ? parsed : `${path} is not a ledger this version can read`;
-	} catch (e) {
-		return `${path} cannot be read (${errorMessage(e)})`;
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-}
-function writeLedger(path, ledger) {
-	let tmp = `${path}.${process.pid}.tmp`;
-	(0, node_fs.rmSync)(tmp, { force: !0 });
-	let fd = (0, node_fs.openSync)(tmp, node_fs.constants.O_WRONLY | node_fs.constants.O_CREAT | node_fs.constants.O_EXCL | node_fs.constants.O_NOFOLLOW, 384);
-	try {
-		(0, node_fs.writeSync)(fd, `${JSON.stringify(ledger, null, 2)}\n`);
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-	(0, node_fs.renameSync)(tmp, path);
-}
-function withLedger(fn, deps) {
-	let path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
-	return withLock(baseOf(deps), () => {
-		let ledger = readLedger(path);
-		try {
-			return fn(ledger);
-		} finally {
-			typeof ledger != "string" && writeLedger(path, ledger);
-		}
-	}, deps);
-}
-function withNssDbLock(fn, deps = {}) {
-	return withLock(baseOf(deps), fn, deps);
-}
-function baseOf({ base }) {
-	return base ?? SANDBOX_SCRATCH_BASE;
-}
-function dropStaleUses(ledger, deps) {
-	let { lstat = defaultLstat$1 } = deps;
-	for (let name of Object.keys(ledger.uses)) lstat((0, node_path.join)(baseOf(deps), name)) === void 0 && delete ledger.uses[name];
-}
-function removeUnusedDirs(ledger, deps) {
-	if (Object.keys(ledger.uses).length > 0) return;
-	let { rmdir = node_fs.rmdirSync, info } = deps;
-	for (let path of Object.keys(ledger.dirs).sort((a, b) => b.length - a.length)) {
-		let entry = ledger.dirs[path];
-		delete ledger.dirs[path];
-		let current = dirIdOf(path, deps);
-		if (current === void 0) {
-			info?.(`buildcage: ${path}, made for Chromium's NSS database by ${entry.createdBy}, had already been removed by something else`);
-			continue;
-		}
-		if (sameId(current, entry)) try {
-			rmdir(path);
-		} catch {}
-	}
-}
-function claimNssDb(name, destination, dirs, deps = {}) {
-	let { mkdir = defaultMkdir$1, lstat = defaultLstat$1, now = () => new Date(), warn } = deps;
-	return withLedger((ledger) => {
-		let undo = () => {
-			typeof ledger != "string" && removeUnusedDirs(ledger, deps);
-		};
-		typeof ledger != "string" && dropStaleUses(ledger, deps);
-		try {
-			for (let path of dirs) {
-				try {
-					mkdir(path, 448);
-				} catch (e) {
-					let info = errnoCode(e) === "EEXIST" ? lstat(path) : void 0;
-					if (!info?.isDirectory() || info.isSymbolicLink()) throw e;
-					continue;
-				}
-				let made = lstat(path);
-				typeof ledger != "string" && made && made.birthtimeNs !== 0n && (ledger.dirs[path] = {
-					...idOf(made),
-					createdBy: name,
-					createdAt: now().toISOString()
-				});
-			}
-		} catch (e) {
-			throw undo(), e;
-		}
-		let current = lstat(destination);
-		if (!current?.isDirectory()) throw undo(), Error(`${destination} is not a directory`);
-		let destinationId = idOf(current);
-		return typeof ledger == "string" ? (warn?.(`buildcage: ${ledger}, so the directories made for Chromium's NSS database are left in place after the step`), {
-			destinationId,
-			registered: !1
-		}) : (ledger.uses[name] = {
-			destination,
-			...destinationId,
-			startedAt: now().toISOString()
-		}, {
-			destinationId,
-			registered: !0
-		});
-	}, deps);
-}
-function releaseNssDb(name, deps = {}) {
-	let { lstat = defaultLstat$1, warn } = deps, path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
-	if (lstat(path) !== void 0) try {
-		withLedger((ledger) => {
-			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses(ledger, deps), removeUnusedDirs(ledger, deps));
-		}, deps);
-	} catch (e) {
-		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for Chromium's NSS database are left in place for a later step to remove`);
-	}
-}
-function useNameFor(scratchDir) {
-	return (0, node_path.basename)(scratchDir);
-}
-//#endregion
-//#region src/lib/sandbox/nss-db.ts
-const NSS_XDG_DB_PATH = ".local/share/pki/nssdb", NSS_CA_DB_DESTINATION = "/dev/buildcage-nssdb", NSS_SLOT = `library=libsoftokn3.so
-name="buildcage proxy CA"
-parameters="configdir='sql:${NSS_CA_DB_DESTINATION}' flags=readOnly"\nNSS=""
-
-`, STAGING_PREFIX = ".buildcage-";
-function isStaging(name) {
-	return name.startsWith(STAGING_PREFIX);
-}
-function stagingOwnerAlive(name, pidAlive) {
-	let pid = /^\.buildcage-(\d+)-/.exec(name)?.[1];
-	return pid !== void 0 && pidAlive(Number(pid));
-}
-function inStaging(dir, path) {
-	return isStaging((0, node_path.relative)(dir, path).split("/")[0]);
-}
-const NSS_DB_FILES = [
-	"cert9.db",
-	"key4.db",
-	"pkcs11.txt"
-];
-function defaultExec$2(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, { env: hostCommandEnv(command) });
-}
-function defaultLstat(path) {
-	try {
-		return (0, node_fs.lstatSync)(path);
-	} catch {
-		return;
-	}
-}
-function defaultStat(path) {
-	try {
-		return (0, node_fs.statSync)(path);
-	} catch {
-		return;
-	}
-}
-function defaultCopyDir$1(source, destination, filter) {
-	(0, node_fs.cpSync)(source, destination, {
-		recursive: !0,
-		preserveTimestamps: !0,
-		verbatimSymlinks: !0,
-		filter
-	});
-}
-function defaultAccess(path) {
-	(0, node_fs.accessSync)(path, node_fs.constants.W_OK);
-}
-function planNssDb(home, { lstat = defaultLstat } = {}) {
-	let legacy = walkPlan(home, ".pki/nssdb", lstat);
-	if (typeof legacy == "string" || legacy.missing.length === 0) return legacy;
-	let xdg = walkPlan(home, NSS_XDG_DB_PATH, lstat);
-	return typeof xdg != "string" && xdg.missing.length === 0 ? xdg : legacy;
-}
-function walkPlan(home, path, lstat) {
-	let dir = home, missing = [];
-	for (let component of path.split("/")) {
-		if (dir = (0, node_path.join)(dir, component), missing.length > 0) {
-			missing.push(dir);
-			continue;
-		}
-		let info = lstat(dir);
-		if (info === void 0) missing.push(dir);
-		else if (info.isSymbolicLink()) return `${dir} is a symlink`;
-		else if (!info.isDirectory()) return `${dir} is not a directory`;
-	}
-	return {
-		destination: dir,
-		missing
-	};
-}
-function warnNotAdded(warn, reason) {
-	warn?.(`could not add the proxy CA to Chromium's NSS database: ${reason}. Chromium in this step will not trust the proxy; use proxy_engine: universal for it.`);
-}
-function prepareNssDb(containerName, dir, home, deps = {}, { homeUpper } = {}) {
-	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat, realpath = node_fs.realpathSync, warn } = deps;
-	if (!home || stat(home)?.isDirectory() !== !0) return warnNotAdded(warn, `HOME (${JSON.stringify(home ?? "")}) is not a directory`);
-	let realHome = realpath(home), plan = planNssDb(realHome, { lstat });
-	if (typeof plan == "string") return warnNotAdded(warn, plan);
-	let caDb = (0, node_path.join)(dir, "nssdb-ca");
-	exec("docker", buildDockerCpArgs({
-		containerName,
-		containerPath: "/opt/buildcage/nssdb",
-		hostPath: caDb
-	}));
-	let path = (0, node_path.join)(dir, "nssdb"), exists = lstat(plan.destination)?.isDirectory() === !0, refusal = exists ? whyNotSlot(plan.destination, deps) : void 0;
-	if (refusal !== void 0) return warnNotAdded(warn, refusal);
-	let slot;
-	try {
-		slot = prepareSlot(caDb, path, plan.destination, exists, deps);
-	} catch (e) {
-		return (0, node_fs.rmSync)(path, {
-			recursive: !0,
-			force: !0
-		}), warnNotAdded(warn, `the slot could not be added (${errorMessage(e)})`);
-	}
-	let files = {
-		path,
-		destination: plan.destination,
-		slot
-	}, xdgPath = (0, node_path.join)(realHome, NSS_XDG_DB_PATH);
-	if (plan.destination !== xdgPath && lstat(xdgPath) === void 0 && (files.xdgPath = xdgPath), !exists && homeUpper !== void 0 && realHome === home && plan.destination === (0, node_path.join)(home, ".pki/nssdb")) try {
-		return makeInUpper(realHome, plan.destination, homeUpper), files;
-	} catch (e) {
-		deps.info?.(`buildcage: could not make ${plan.destination} in the ephemeral overlay (${errorMessage(e)}), so it is made on the runner instead`);
-	}
-	let name = useNameFor(dir);
-	try {
-		files.claim = {
-			name,
-			...claimNssDb(name, plan.destination, dirsDownTo(realHome, plan.destination), {
-				warn,
-				...deps.ledger
-			})
-		};
-	} catch (e) {
-		return warnNotAdded(warn, `cannot create or claim ${plan.destination} (${errorMessage(e)})`);
-	}
-	return files;
-}
-function makeInUpper(home, destination, upper) {
-	let made = [];
-	for (let path of dirsDownTo(home, destination)) {
-		let inUpper = (0, node_path.join)(upper, (0, node_path.relative)(home, path)), host = (0, node_fs.lstatSync)(path, { throwIfNoEntry: !1 });
-		(0, node_fs.mkdirSync)(inUpper, { recursive: !0 }), (0, node_fs.chmodSync)(inUpper, host ? host.mode & 4095 : 448), made.push([inUpper, host]);
-	}
-	for (let [inUpper, host] of made.reverse()) host && (0, node_fs.utimesSync)(inUpper, host.atime, host.mtime);
-}
-function dirsDownTo(home, destination) {
-	let dir = home;
-	return (0, node_path.relative)(home, destination).split("/").map((component) => dir = (0, node_path.join)(dir, component));
-}
-function overMirrorBounds(dir, { skip = () => !1, extraFiles = 0, extraBytes = 0 } = {}) {
-	let files = 0, bytes = 0, pending = [dir];
-	for (let next = pending.pop(); next !== void 0; next = pending.pop()) {
-		let handle = (0, node_fs.opendirSync)(next);
-		try {
-			for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
-				if (next === dir && skip(entry.name)) continue;
-				let path = (0, node_path.join)(next, entry.name);
-				if (files++, entry.isFile() ? bytes += (0, node_fs.lstatSync)(path).size : entry.isDirectory() && pending.push(path), files > 512 + extraFiles || bytes > 20971520 + extraBytes) return !0;
-			}
-		} finally {
-			handle.closeSync();
-		}
-	}
-	return !1;
-}
-function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess }) {
-	for (let path of [destination, ...NSS_DB_FILES.map((name) => (0, node_path.join)(destination, name))]) {
-		let info = lstat(path);
-		if (info !== void 0) {
-			if (info.isSymbolicLink()) return `${path} is a symlink`;
-			try {
-				access(path);
-			} catch {
-				return `the runner user cannot write ${path}`;
-			}
-		}
-	}
-	try {
-		if (overMirrorBounds(destination, { skip: isStaging })) return `${destination} is too large to copy`;
-	} catch (e) {
-		return `${destination} cannot be read through (${errorMessage(e)})`;
-	}
-}
-function prepareSlot(caDb, path, destination, exists, { copyDir = defaultCopyDir$1, ledger }) {
-	(0, node_fs.chmodSync)(caDb, 493);
-	for (let name of (0, node_fs.readdirSync)(caDb)) (0, node_fs.chmodSync)((0, node_path.join)(caDb, name), 420);
-	exists ? withNssDbLock(() => copyDir(destination, path, (entry) => !inStaging(destination, entry)), ledger) : (0, node_fs.mkdirSync)(path, { mode: 448 });
-	let pkcs11 = (0, node_path.join)(path, "pkcs11.txt"), hadPkcs11 = (0, node_fs.lstatSync)(pkcs11, { throwIfNoEntry: !1 }) !== void 0;
-	return {
-		caDb,
-		appended: appendNssSlot(pkcs11),
-		hadPkcs11,
-		snapshot: snapshotDir(path)
-	};
-}
-function appendNssSlot(path) {
-	let fd = (0, node_fs.openSync)(path, node_fs.constants.O_CREAT | node_fs.constants.O_RDWR | node_fs.constants.O_APPEND | node_fs.constants.O_NOFOLLOW, 384);
-	try {
-		let size = (0, node_fs.fstatSync)(fd).size, appended = "";
-		if (size > 0) {
-			let tail = Buffer.alloc(Math.min(size, 2));
-			(0, node_fs.readSync)(fd, tail, 0, tail.length, size - tail.length);
-			let text = tail.toString("latin1");
-			appended = text.endsWith("\n\n") || text === "\n" ? "" : text.endsWith("\n") ? "\n" : "\n\n";
-		}
-		return appended += NSS_SLOT, (0, node_fs.writeSync)(fd, appended), appended;
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-}
-function removeNssSlot(path, appended, created) {
-	let fd;
-	try {
-		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDWR | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
-	} catch (e) {
-		let code = e.code;
-		if (code === "ENOENT" || code === "ELOOP" || code === "EISDIR" || code === "ENXIO") return;
-		throw e;
-	}
-	try {
-		let info = (0, node_fs.fstatSync)(fd);
-		if (!info.isFile()) return;
-		if (info.size > 1048576) throw Error(`${path} is ${info.size} bytes, too large to take the proxy CA's slot back out of`);
-		let content = (0, node_fs.readFileSync)(fd).toString("latin1"), cut = appended, i = content.lastIndexOf(cut);
-		if ((i < 0 || i + cut.length < content.length) && (cut = NSS_SLOT, i = content.lastIndexOf(cut)), i < 0) return;
-		let kept = content.slice(0, i) + content.slice(i + cut.length);
-		if (created && kept === "") {
-			(0, node_fs.rmSync)(path);
-			return;
-		}
-		(0, node_fs.ftruncateSync)(fd, 0), (0, node_fs.writeSync)(fd, kept, 0, "latin1");
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-}
-function snapshotDir(dir) {
-	let snapshot = new Map();
-	for (let entry of (0, node_fs.readdirSync)(dir, {
-		recursive: !0,
-		withFileTypes: !0
-	})) {
-		let path = (0, node_path.join)(entry.parentPath, entry.name), rel = (0, node_path.relative)(dir, path);
-		entry.isSymbolicLink() ? snapshot.set(rel, (0, node_fs.readlinkSync)(path)) : entry.isDirectory() ? snapshot.set(rel, null) : entry.isFile() ? snapshot.set(rel, (0, node_fs.readFileSync)(path)) : snapshot.set(rel, !1);
-	}
-	return snapshot;
-}
-function sameSnapshot(a, b) {
-	if (a.size !== b.size) return !1;
-	for (let [rel, value] of a) {
-		if (!b.has(rel)) return !1;
-		let other = b.get(rel);
-		if (Buffer.isBuffer(value) && Buffer.isBuffer(other)) {
-			if (!value.equals(other)) return !1;
-		} else if (value !== other) return !1;
-	}
-	return !0;
-}
-function certificateDer(pem) {
-	let match = /-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/.exec(pem);
-	return Buffer.from(match?.[1]?.replace(/\s+/g, "") ?? "", "base64");
-}
-function syncTree(staging, mirror, destination, removals, top = !1) {
-	let present = new Set();
-	for (let entry of (0, node_fs.readdirSync)(staging, { withFileTypes: !0 })) {
-		if (top && isStaging(entry.name)) continue;
-		present.add(entry.name);
-		let from = (0, node_path.join)(staging, entry.name), to = (0, node_path.join)(destination, entry.name), existing = (0, node_fs.lstatSync)(to, { throwIfNoEntry: !1 });
-		if (entry.isDirectory()) {
-			if (existing?.isDirectory()) {
-				syncTree(from, (0, node_path.join)(mirror, entry.name), to, removals);
-				continue;
-			}
-			existing !== void 0 && (0, node_fs.rmSync)(to, { force: !0 }), (0, node_fs.mkdirSync)(to, { mode: 448 }), syncTree(from, (0, node_path.join)(mirror, entry.name), to, removals), (0, node_fs.chmodSync)(to, (0, node_fs.lstatSync)((0, node_path.join)(mirror, entry.name)).mode & 4095);
-			continue;
-		}
-		if (existing?.isDirectory()) (0, node_fs.rmSync)(to, {
-			recursive: !0,
-			force: !0
-		});
-		else if (existing !== void 0 && sameEntry(from, to)) continue;
-		(0, node_fs.renameSync)(from, to);
-	}
-	for (let name of (0, node_fs.readdirSync)(destination)) !present.has(name) && !(top && isStaging(name)) && removals.push((0, node_path.join)(destination, name));
-}
-function sameEntry(a, b) {
-	let x = (0, node_fs.lstatSync)(a), y = (0, node_fs.lstatSync)(b);
-	return x.isSymbolicLink() && y.isSymbolicLink() ? (0, node_fs.readlinkSync)(a) === (0, node_fs.readlinkSync)(b) : x.isFile() && y.isFile() && x.mode === y.mode && x.size === y.size && (0, node_fs.readFileSync)(a).equals((0, node_fs.readFileSync)(b));
-}
-function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync, copyDir = defaultCopyDir$1, pidAlive = defaultPidAlive, lock = withNssDbLock }) {
-	let overBounds;
-	try {
-		let slot = {
-			extraFiles: +!files.slot.hadPkcs11,
-			extraBytes: Buffer.byteLength(files.slot.appended)
-		};
-		overMirrorBounds(files.path, slot) && (overBounds = "over 512 files or 20 MiB");
-	} catch (e) {
-		overBounds = `unreadable (${errorMessage(e)})`;
-	}
-	if (overBounds !== void 0) {
-		if (!persist) return "discarded";
-		throw Error(`the command left the NSS database at ${files.destination} ${overBounds}, so it is not written back`);
-	}
-	let current;
-	try {
-		current = snapshotDir(files.path);
-	} catch {
-		current = new Map();
-	}
-	if (sameSnapshot(current, files.slot.snapshot)) return "unchanged";
-	if (!persist) return "discarded";
-	removeNssSlot((0, node_path.join)(files.path, "pkcs11.txt"), files.slot.appended, !files.slot.hadPkcs11);
-	let der = certificateDer(caPem);
-	for (let [rel, value] of snapshotDir(files.path)) Buffer.isBuffer(value) && der.length > 0 && value.includes(der) && onResidue(`the command copied the proxy CA into the NSS database at ${files.destination} (${rel})`);
-	let resolved;
-	try {
-		resolved = realpath(files.destination);
-	} catch {
-		resolved = void 0;
-	}
-	if (resolved !== files.destination) throw Error(`${files.destination} no longer resolves to itself, so what the command wrote to the NSS database there is not written back`);
-	let staging = (0, node_fs.mkdtempSync)((0, node_path.join)(files.destination, `${STAGING_PREFIX}${process.pid}-`));
-	try {
-		copyDir(files.path, staging);
-	} catch (e) {
-		throw (0, node_fs.rmSync)(staging, {
-			recursive: !0,
-			force: !0
-		}), e;
-	}
-	try {
-		lock(() => {
-			for (let name of (0, node_fs.readdirSync)(files.destination)) {
-				let path = (0, node_path.join)(files.destination, name);
-				if (isStaging(name) && path !== staging && !stagingOwnerAlive(name, pidAlive)) try {
-					(0, node_fs.rmSync)(path, {
-						recursive: !0,
-						force: !0
-					});
-				} catch {}
-			}
-			let removals = [];
-			syncTree(staging, files.path, files.destination, removals, !0);
-			for (let path of removals) (0, node_fs.rmSync)(path, {
-				recursive: !0,
-				force: !0
-			});
-		});
-	} finally {
-		try {
-			(0, node_fs.rmSync)(staging, {
-				recursive: !0,
-				force: !0
-			});
-		} catch {}
-	}
-	return "written";
-}
-function nssDbMounts(files) {
-	return [{
-		destination: files.destination,
-		type: "none",
-		source: files.path,
-		options: ["rbind", "rw"]
-	}, {
-		destination: NSS_CA_DB_DESTINATION,
-		type: "none",
-		source: files.slot.caDb,
-		options: [
-			"rbind",
-			"ro",
-			"nosuid",
-			"nodev",
-			"noexec"
-		]
-	}];
-}
-function nssDbDetached(files, deps = {}) {
-	if (!files.claim || stillThere(files.destination, files.claim.destinationId, deps)) return;
-	let message = `buildcage: ${files.destination} was removed or replaced on the runner while the command ran, which detached the NSS database Buildcage had mounted there: Chromium in this step did not trust the proxy CA from then on, and what the command wrote to that database is discarded. Something outside this step removed it, such as another step running in parallel.`;
-	return files.xdgPath && dirIdOf(files.xdgPath, deps) !== void 0 && (message += ` Chromium may have made a database of its own at ${files.xdgPath}.`), message;
-}
-function releaseNssDbDirs(files, deps = {}) {
-	files.claim?.registered && releaseNssDb(files.claim.name, deps);
-}
-//#endregion
-//#region src/lib/sandbox/ca-trust.ts
-const SYSTEM_CA_CANDIDATES = [
-	"/etc/ssl/certs/ca-certificates.crt",
-	"/etc/pki/tls/certs/ca-bundle.crt",
-	"/etc/ssl/ca-bundle.pem",
-	"/etc/pki/tls/cacert.pem",
-	"/etc/ssl/cert.pem"
-], CA_DIR_CANDIDATES = [
-	"/etc/pki/ca-trust/source/anchors",
-	"/etc/pki/trust/anchors",
-	"/var/lib/ca-certificates/pem"
-], OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
-function defaultExec$1(command, args, env) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, { env: hostCommandEnv(command, env) });
-}
-function defaultReadFile$1(path) {
-	return (0, node_fs.readFileSync)(path, "utf8");
-}
-function defaultWriteFile(path, contents, mode) {
-	(0, node_fs.writeFileSync)(path, contents, { mode });
-}
-function defaultIsDirectory(path) {
-	return (0, node_fs.statSync)(path, { throwIfNoEntry: !1 })?.isDirectory() === !0;
-}
-function defaultCopyDir(source, destination) {
-	(0, node_fs.cpSync)(source, destination, {
-		recursive: !0,
-		verbatimSymlinks: !0
-	});
-}
-function extractCaCert(containerName, destDir, { exec = defaultExec$1, chmod = node_fs.chmodSync } = {}) {
-	let caCertPath = (0, node_path.join)(destDir, "proxy-ca.pem");
-	return exec("docker", buildDockerCpArgs({
-		containerName,
-		containerPath: "/opt/buildcage/ca.pem",
-		hostPath: caCertPath
-	})), chmod(caCertPath, 420), caCertPath;
-}
-const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"];
-function keystoreDirsOf(home) {
-	return [(0, node_path.join)(home, "lib", "security"), (0, node_path.join)(home, "jre", "lib", "security")];
-}
-function discoverJvmKeystores(env, java, { exists = node_fs.existsSync, realpath = node_fs.realpathSync } = {}) {
-	let dirs = [];
-	java && dirs.push(...keystoreDirsOf((0, node_path.dirname)((0, node_path.dirname)(realpath(java))))), env.JAVA_HOME && dirs.push(...keystoreDirsOf(env.JAVA_HOME));
-	let found = [], seen = new Set();
-	for (let dir of dirs) for (let name of JVM_KEYSTORE_NAMES) {
-		let candidate = (0, node_path.join)(dir, name);
-		if (!exists(candidate)) continue;
-		let real = realpath(candidate);
-		seen.has(real) || (seen.add(real), found.push(real));
-	}
-	return found;
-}
-const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_STORE = [
-	"REQUESTS_CA_BUNDLE",
-	"PIP_CERT",
-	"SSL_CERT_FILE"
-], READ_ONLY = ["rbind", "ro"], CA_STORES = {
-	systemStore: {
-		find: ({ deps }) => {
-			let found = SYSTEM_CA_CANDIDATES.find((p) => deps.exists(p));
-			return found ? [found] : [];
-		},
-		copyName: () => "system-ca-bundle.pem",
-		inject: ({ ca, deps }, destination, path) => {
-			let existing = deps.readFile(destination).trimEnd();
-			deps.writeFile(path, `${existing}\n${ca}\n`, 420);
-		},
-		mountOptions: READ_ONLY,
-		variables: POINT_AT_SYSTEM_STORE,
-		reserve: { candidates: SYSTEM_CA_CANDIDATES }
-	},
-	caDir: {
-		find: ({ deps }) => CA_DIR_CANDIDATES.filter((d) => deps.isDirectory(d)),
-		copyName: (i) => `ca-dir${i}`,
-		inject: ({ ca, deps }, destination, path) => {
-			deps.copyDir(deps.realpath(destination), path), deps.writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420);
-		},
-		notAdded: (destination, e) => `could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); a tool that reads it through GnuTLS or p11-kit (such as wget on RHEL or SUSE) will not trust the proxy. Check that the runner user can read it, or use proxy_engine: universal.`,
-		mountOptions: READ_ONLY,
-		reserve: {
-			refuses: (entry, destination) => isAtOrUnder(entry, destination),
-			refusal: (destination, resolved) => `is in the CA directory ${JSON.stringify(destination)}` + (resolved === destination ? "" : ` (a symlink to ${JSON.stringify(resolved)})`) + ", which the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it."
-		}
-	},
-	jvmKeystore: {
-		find: ({ env, tools, deps }) => {
-			let keystores = discoverJvmKeystores(env, tools.java, deps);
-			return !tools.keytool && keystores.length > 0 ? (deps.warn?.(`could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no keytool outside the paths a sandboxed command can write to (\$HOME, \$GITHUB_WORKSPACE, /tmp, \$RUNNER_TEMP, write_through:). A Java step will not trust the proxy. Install a JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside \$HOME), or use proxy_engine: universal.`), []) : keystores;
-		},
-		copyName: (i) => `jvm-keystore-${i}`,
-		inject: ({ caCertPath, tools, deps }, destination, path) => {
-			deps.copyFile(destination, path), deps.chmod(path, 420), deps.exec(tools.keytool, [
-				"-importcert",
-				"-noprompt",
-				"-alias",
-				"buildcage-proxy-ca",
-				"-file",
-				caCertPath,
-				"-keystore",
-				path,
-				"-storepass",
-				"changeit"
-			], {});
-		},
-		notAdded: (destination) => `could not add the proxy CA to the JVM keystore ${destination}; a Java step will not trust it. Use proxy_engine: universal for a JVM build whose keystore cannot be rewritten.`,
-		mountOptions: READ_ONLY,
-		reserve: {
-			refuses: (entry, destination) => entry === destination,
-			refusal: () => "is a JVM keystore the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it."
-		}
-	}
-};
-function reservedCaStorePaths() {
-	return Object.values(CA_STORES).flatMap(({ reserve }) => "candidates" in reserve ? reserve.candidates : []);
-}
-const NSS_DB_RESERVATION = {
-	refuses: (entry, destination) => entry !== destination && isAtOrUnder(entry, destination),
-	refusal: (destination) => `is inside the NSS database at ${JSON.stringify(destination)}, which the inspect engine covers for the step. Name ${JSON.stringify(destination)} itself to have the command's changes written back.`
-};
-function writeCaTrustFiles(caCertPath, dir, env, tools, { exec = defaultExec$1, readFile = defaultReadFile$1, writeFile = defaultWriteFile, exists = node_fs.existsSync, chmod = node_fs.chmodSync, copyFile = node_fs.copyFileSync, realpath = node_fs.realpathSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir, warn } = {}) {
-	let deps = {
-		exec,
-		readFile,
-		writeFile,
-		exists,
-		chmod,
-		copyFile,
-		realpath,
-		isDirectory,
-		copyDir,
-		warn
-	}, ca = readFile(caCertPath).trimEnd(), ownCaPath = (0, node_path.join)(dir, "buildcage-ca.pem");
-	writeFile(ownCaPath, `${ca}\n`, 420);
-	let context = {
-		ca,
-		caCertPath,
-		env,
-		tools,
-		deps
-	}, stores = [];
-	for (let [kind, store] of Object.entries(CA_STORES)) store.find(context).forEach((destination, i) => {
-		let path = (0, node_path.join)(dir, store.copyName(i));
-		try {
-			store.inject(context, destination, path);
-		} catch (e) {
-			if (!store.notAdded) throw e;
-			warn?.(store.notAdded(destination, e));
-			return;
-		}
-		stores.push({
-			kind,
-			path,
-			destination
-		});
-	});
-	return {
-		ownCaPath,
-		stores
-	};
-}
-const REPLACING_WHEN_SET = [
-	"CURL_CA_BUNDLE",
-	"GIT_SSL_CAINFO",
-	"AWS_CA_BUNDLE",
-	"CARGO_HTTP_CAINFO",
-	"BUNDLE_SSL_CA_CERT"
-], REPLACING_WHEN_SET_ANY_CASE = ["npm_config_cafile"];
-function presetCaVariables(files, env, realpath) {
-	let stores = files.stores.filter((s) => CA_STORES[s.kind].variables).map((s) => realpath(s.destination)), exact = [
-		...POINT_AT_OWN_CA,
-		...POINT_AT_SYSTEM_STORE,
-		...REPLACING_WHEN_SET
-	];
-	return Object.keys(env).filter((name) => {
-		let value = env[name];
-		return !value || value === "/dev/buildcage-ca.pem" || stores.includes(realpath(value)) ? !1 : exact.includes(name) || REPLACING_WHEN_SET_ANY_CASE.some((v) => v.toLowerCase() === name.toLowerCase());
-	});
-}
-function assertWriteThroughClearOfCaTrust(files, writeThroughPaths, realpath) {
-	let covered = files.stores.map(({ kind, destination }) => ({
-		reserve: CA_STORES[kind].reserve,
-		destination
-	}));
-	files.nssDb && covered.push({
-		reserve: NSS_DB_RESERVATION,
-		destination: files.nssDb.destination
-	});
-	for (let path of writeThroughPaths) for (let { reserve, destination } of covered) {
-		let resolved = realpath(destination);
-		if ("refuses" in reserve && reserve.refuses(path, resolved)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} ${reserve.refusal(destination, resolved)}`);
-	}
-}
-function caTrustAdditions(files, env) {
-	let mounts = [{
-		destination: OWN_CA_DESTINATION,
-		type: "none",
-		source: files.ownCaPath,
-		options: [
-			"rbind",
-			"ro",
-			"nosuid",
-			"nodev",
-			"noexec"
-		]
-	}], extraEnv = {};
-	for (let name of POINT_AT_OWN_CA) env[name] || (extraEnv[name] = OWN_CA_DESTINATION);
-	for (let { kind, path, destination } of files.stores) {
-		let { mountOptions, variables = [] } = CA_STORES[kind];
-		mounts.push({
-			destination,
-			type: "none",
-			source: path,
-			options: [...mountOptions]
-		});
-		for (let name of variables) env[name] || (extraEnv[name] = destination);
-	}
-	return files.nssDb && mounts.push(...nssDbMounts(files.nssDb)), {
-		mounts,
-		env: extraEnv
-	};
-}
-//#endregion
-//#region src/lib/sandbox/symlinks.ts
-const realSymlinkDeps = {
-	lstat: (path) => {
-		try {
-			return (0, node_fs.lstatSync)(path);
-		} catch {
-			return;
-		}
-	},
-	readlink: (path) => (0, node_fs.readlinkSync)(path)
-};
-function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
-	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
-	for (; pending.length > 0;) {
-		let name = pending.shift();
-		if (name === "..") {
-			current = (0, node_path.dirname)(current);
-			continue;
-		}
-		let next = (0, node_path.join)(current, name);
-		if (!lstat(next)?.isSymbolicLink()) {
-			current = next;
-			continue;
-		}
-		let target = readlink(next);
-		if (links.push({
-			at: next,
-			target
-		}), links.length > 40) return {
-			loop: !0,
-			links
-		};
-		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
-	}
-	return {
-		real: current,
-		links
-	};
-}
-function realPathOf(path, deps = realSymlinkDeps) {
-	let resolved = resolveHostPath(path, deps);
-	return "real" in resolved ? resolved.real : path;
-}
-//#endregion
-//#region src/lib/sandbox/host-probes.ts
-const SETPRIV_CANDIDATE_PATHS = [
-	"/usr/bin/setpriv",
-	"/bin/setpriv",
-	"/usr/sbin/setpriv",
-	"/sbin/setpriv"
-];
-function resolveSetprivPath(exists) {
-	return SETPRIV_CANDIDATE_PATHS.find((p) => exists(p)) ?? "setpriv";
-}
-function parseNofileLimit(procLimits, nrOpen) {
-	let line = procLimits.split("\n").find((l) => l.startsWith("Max open files"));
-	if (!line) return;
-	let [soft, hard] = line.slice(14).trim().split(/\s+/).map((c) => /^\d+$/.test(c) ? Number(c) : c === "unlimited" ? nrOpen : void 0);
-	return soft !== void 0 && hard !== void 0 ? {
-		soft,
-		hard
-	} : void 0;
-}
-function shmSizeFromStatfs({ type, bsize, blocks }) {
-	if (type !== 16914836) return;
-	let size = bsize * blocks;
-	return Number.isFinite(size) && size > 0 ? size : void 0;
-}
-function parseCgroupV2Path(procCgroup) {
-	let lines = procCgroup.split("\n").filter((line) => line !== "");
-	if (lines.length !== 1 || !lines[0].startsWith("0::/")) return;
-	let path = lines[0].slice(3);
-	if (!(/\s/.test(path) || path.split("/").includes(".."))) return path;
-}
-function readOptionalFile(path) {
-	try {
-		return (0, node_fs.readFileSync)(path, "utf8");
-	} catch {
-		return;
-	}
-}
-function readNumericFile(path) {
-	let raw = readOptionalFile(path)?.trim();
-	return raw !== void 0 && /^\d+$/.test(raw) ? Number(raw) : void 0;
-}
-const realHostProbes = {
-	setprivPath: () => resolveSetprivPath(node_fs.existsSync),
-	nofileRlimit: () => {
-		let nrOpen = readNumericFile("/proc/sys/fs/nr_open");
-		for (let pid of [process.ppid, "self"]) {
-			let limits = readOptionalFile(`/proc/${pid}/limits`), parsed = limits === void 0 ? void 0 : parseNofileLimit(limits, nrOpen);
-			if (parsed) return parsed;
-		}
-	},
-	shmSizeBytes: () => {
-		try {
-			return shmSizeFromStatfs((0, node_fs.statfsSync)("/dev/shm"));
-		} catch {
-			return;
-		}
-	},
-	hostname: () => node_os.default.hostname(),
-	varRunRealPath: () => {
-		try {
-			return (0, node_fs.realpathSync)("/var/run");
-		} catch {
-			return;
-		}
-	},
-	realpath: (path) => realPathOf(path),
-	cgroupPath: () => {
-		let procCgroup = readOptionalFile("/proc/self/cgroup");
-		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
-	}
-};
-//#endregion
-//#region src/lib/sandbox/oci-mounts.ts
-function freshMountDestinationsFrom(baseSpec) {
-	return new Set(baseSpec.mounts.map((m) => m.destination));
-}
-function withHostShmSize(mounts, hostShmBytes) {
-	return mounts.map((m) => {
-		if (m.destination !== "/dev/shm") return m;
-		let options = (m.options ?? []).filter((o) => !o.startsWith("size="));
-		return {
-			...m,
-			options: hostShmBytes ? [...options, `size=${hostShmBytes}`] : options
-		};
-	});
-}
-const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", HOST_RUN_LOCK_DIR = "/run/lock";
-function hostRunCoverageLayers(varRunRealPath) {
-	let varRun = varRunRealPath === void 0 || isAtOrUnder(varRunRealPath, "/run") ? [] : [emptyRunTmpfs(varRunRealPath)];
-	return {
-		mounts: [
-			emptyRunTmpfs("/run"),
-			{
-				destination: HOST_RUN_LOCK_DIR,
-				type: "tmpfs",
-				source: "tmpfs",
-				options: [
-					"nosuid",
-					"nodev",
-					"noexec",
-					"mode=1777",
-					"size=5242880"
-				]
-			},
-			...varRun
-		],
-		writablePaths: new Set([HOST_RUN_LOCK_DIR])
-	};
-}
-function emptyRunTmpfs(destination) {
-	return {
-		destination,
-		type: "tmpfs",
-		source: "tmpfs",
-		options: [
-			"nosuid",
-			"nodev",
-			"mode=0755"
-		]
-	};
-}
-function reservedInternalDestinations() {
-	return [RESOLV_CONF_DESTINATION, ...reservedCaStorePaths()];
-}
-function assertNoFreshMountDestinations(writableDirs, freshMountDestinations) {
-	for (let dir of writableDirs) {
-		let shadowed = [...freshMountDestinations].find((d) => isAtOrUnder(dir, d));
-		if (shadowed) throw new WritablePathConflictError(`writable path ${JSON.stringify(dir)} is inside ${JSON.stringify(shadowed)}, which the sandbox mounts itself; bind-mounting the host's copy there would expose it inside the sandbox. Choose a path outside it.`);
-	}
-}
-function assertOverlayPathsAreOptionSafe(roots) {
-	for (let { path, upper, work } of roots) {
-		let bad = [
-			path,
-			upper,
-			work
-		].find((p) => p.includes(",") || p.includes(":"));
-		if (bad !== void 0) throw new WritablePathConflictError(`filesystem_mode: ephemeral cannot overlay ${JSON.stringify(bad)}: an overlay mount option cannot contain "," or ":", and the kernel offers no way to escape them. Use filesystem_mode: persistent, which binds the directory directly.`);
-	}
-}
-function ephemeralLayers({ overlayRoots, allowWrite }, freshMountDestinations) {
-	let mounts = [], overlayPaths = overlayRoots.map((r) => r.path);
-	assertScratchBaseNotWritable([...overlayPaths, ...allowWrite]), assertNoFreshMountDestinations(allowWrite, freshMountDestinations), assertOverlayPathsAreOptionSafe(overlayRoots);
-	let protectedPaths = new Set([...overlayPaths, ...allowWrite]);
-	for (let root of [...overlayRoots].sort((a, b) => a.path.length - b.path.length)) mounts.push({
-		destination: root.path,
-		type: "overlay",
-		source: "overlay",
-		options: [
-			`lowerdir=${root.path}`,
-			`upperdir=${root.upper}`,
-			`workdir=${root.work}`
-		]
-	});
-	for (let p of [...allowWrite].sort((a, b) => a.length - b.length)) mounts.push({
-		destination: p,
-		type: "none",
-		source: p,
-		options: ["rbind", "rw"]
-	});
-	return {
-		mounts,
-		writablePaths: protectedPaths
-	};
-}
-function persistentLayers(writableDirs, freshMountDestinations, { disableReadonly }) {
-	let mounts = [], protectedPaths = new Set(writableDirs);
-	if (!disableReadonly) {
-		assertScratchBaseNotWritable(writableDirs), assertNoFreshMountDestinations(writableDirs, freshMountDestinations);
-		for (let p of writableDirs) mounts.push({
-			destination: p,
-			type: "none",
-			source: p,
-			options: ["rbind", "rw"]
-		});
-	}
-	return {
-		mounts,
-		writablePaths: protectedPaths
-	};
-}
-function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths = [] }) {
-	return [...new Set([
-		workdir,
-		home,
-		tmp,
-		runnerTemp,
-		...writablePaths
-	].filter((p) => !!p))];
-}
-function scratchBaseLayers(execDir, aliases = []) {
-	return [...[SANDBOX_SCRATCH_BASE, ...aliases].map((destination) => ({
-		destination,
-		type: "tmpfs",
-		source: "tmpfs",
-		options: [
-			"nosuid",
-			"nodev",
-			"mode=0555"
-		]
-	})), {
-		destination: execDir,
-		type: "none",
-		source: execDir,
-		options: ["bind", "ro"]
-	}];
-}
-//#endregion
-//#region src/lib/sandbox/write-through.ts
-const ALLOWED_WRITE_THROUGH_VARS = [
-	"HOME",
-	"GITHUB_WORKSPACE",
-	"RUNNER_TEMP",
-	"GITHUB_OUTPUT",
-	"GITHUB_ENV",
-	"GITHUB_PATH",
-	"GITHUB_STEP_SUMMARY"
-], KNOWN_FILE_VARS = [
-	"GITHUB_OUTPUT",
-	"GITHUB_ENV",
-	"GITHUB_PATH",
-	"GITHUB_STEP_SUMMARY"
-], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-function resolveWriteThroughEntry(rawLine, env) {
-	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
-		let name = braced ?? bare;
-		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
-		let value = env[name];
-		if (!value) throw Error(`write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
-		return value;
-	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded);
-	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write_through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
-	let normalized = (0, node_path.normalize)(resolved);
-	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write_through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
-	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
-}
-function splitWriteThroughInput(input) {
-	return input?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
-}
-function resolveWriteThroughPaths(input, env) {
-	let lines = splitWriteThroughInput(input);
-	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
-}
-var WriteThroughTargetMissingError = class extends Error {}, WriteThroughTargetUncreatableError = class extends Error {};
-function defaultExists(path) {
-	try {
-		return (0, node_fs.lstatSync)(path), !0;
-	} catch {
-		return !1;
-	}
-}
-function defaultCanWrite(path) {
-	try {
-		return (0, node_fs.accessSync)(path, node_fs.constants.W_OK | node_fs.constants.X_OK), !0;
-	} catch {
-		return !1;
-	}
-}
-function defaultMkdir(path) {
-	(0, node_fs.mkdirSync)(path, { recursive: !0 });
-}
-function assertNoSymlinkInWriteThrough(path, { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = {}) {
-	let resolved = resolveHostPath(path, {
-		lstat,
-		readlink
-	}), link = resolved.links[0];
-	if (link === void 0) return;
-	let hint = "real" in resolved && resolved.real !== "/" ? ` Name the path it leads to instead: ${JSON.stringify(resolved.real)}.` : "";
-	throw Error(`write_through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`);
-}
-function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
-	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
-	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
-}
-function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists, canWrite = defaultCanWrite, mkdir = defaultMkdir } = {}) {
-	let missing = resolvedPaths.filter((path) => !exists(path));
-	for (let path of missing) {
-		let ancestor = (0, node_path.dirname)(path);
-		for (; ancestor !== "/" && !exists(ancestor);) ancestor = (0, node_path.dirname)(ancestor);
-		if (!canWrite(ancestor)) throw new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it under ${JSON.stringify(ancestor)}. Create it in an earlier step and make it writable by the runner, e.g. sudo install -d -o "$(id -u)" -g "$(id -g)" ${JSON.stringify(path)}`);
-	}
-	for (let path of missing) try {
-		mkdir(path);
-	} catch (e) {
-		throw new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
-	}
-}
-//#endregion
-//#region src/lib/sandbox/host-commands.ts
-function runnerActionRoot() {
-	return (0, node_path.resolve)((0, node_path.dirname)(process.argv[1]), "..");
-}
-function runnerInstallRoot(execPath = process.execPath) {
-	let externals = (0, node_path.resolve)(execPath, "../../..");
-	return (0, node_path.basename)(externals) === "externals" ? (0, node_path.dirname)(externals) : void 0;
-}
-const PINNED_COMMANDS = ["docker", "sudo"];
-function persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath = realPathOf) {
-	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
-		...resolveDefaultWritableDirs(env, realpath),
-		writablePaths: writeThroughPaths
-	});
-}
-const realFindCommandDeps = {
-	...realSymlinkDeps,
-	isExecutable: (path) => {
-		try {
-			return (0, node_fs.accessSync)(path, node_fs.constants.X_OK), !0;
-		} catch {
-			return !1;
-		}
-	}
-};
-function resolveDefaultWritableDirs(env, realpath = realPathOf) {
-	return {
-		workdir: env.GITHUB_WORKSPACE ? realpath(env.GITHUB_WORKSPACE) : void 0,
-		home: env.HOME ? realpath(env.HOME) : void 0,
-		runnerTemp: env.RUNNER_TEMP ? realpath(env.RUNNER_TEMP) : void 0,
-		tmp: realpath("/tmp")
-	};
-}
-function reachableFrom(persisting, deps) {
-	let inside = (path) => persisting.some((w) => isAtOrUnder(path, w));
-	return (path) => {
-		let resolved = resolveHostPath(path, deps);
-		return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
-	};
-}
-function pathOutside(pathEnv = "", persisting, deps = realSymlinkDeps) {
-	if (persisting.includes("/")) return pathEnv;
-	let reachable = reachableFrom(persisting, deps);
-	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !reachable(dir)).join(node_path.delimiter);
-}
-function findPinnableCommand(command, pathEnv, persisting, deps = realFindCommandDeps) {
-	let optedOut = persisting.includes("/"), reachable = reachableFrom(persisting, deps);
-	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
-		if (!(0, node_path.isAbsolute)(dir)) continue;
-		let candidate = (0, node_path.join)(dir, command);
-		if (deps.isExecutable(candidate) && (optedOut || !reachable(candidate))) return candidate;
-	}
-}
-function pinHostCommands(paths, env, deps = realFindCommandDeps) {
-	for (let command of PINNED_COMMANDS) {
-		let path = findPinnableCommand(command, env.PATH, paths, deps);
-		if (path) {
-			pinCommand(command, path);
-			continue;
-		}
-		if (findPinnableCommand(command, env.PATH, [], deps)) throw new SandboxError(`'${command}' is on PATH only under paths a sandboxed command can write to (${paths.join(", ")}). This action runs it outside the sandbox, so it has to live somewhere no sandboxed command can replace it, such as /usr/bin.`, "HOST_COMMAND_UNPINNABLE");
-	}
-	pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps)), pinCommandPathEnv("sudo", pathOutside("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", paths, deps));
-}
-function jvmTools(env, persisting, deps = realFindCommandDeps) {
-	let javaHomeBin = env.JAVA_HOME ? (0, node_path.join)(env.JAVA_HOME, "bin") : void 0;
-	return {
-		java: findPinnableCommand("java", env.PATH, [], deps),
-		keytool: findPinnableCommand("keytool", javaHomeBin, persisting, deps) ?? findPinnableCommand("keytool", env.PATH, persisting, deps)
-	};
-}
-function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
-	let writeThroughPaths = [];
-	try {
-		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
-	} catch {}
-	return persistingWritablePaths("persistent", writeThroughPaths, env, realpath);
-}
-function dockerConfigDir(env) {
-	return env.DOCKER_CONFIG ? (0, node_path.resolve)(env.DOCKER_CONFIG) : env.HOME ? (0, node_path.join)(env.HOME, ".docker") : void 0;
-}
-function sandboxReadonlyHostDirs(persisting, env, { actionRoot, installRoot } = {
-	actionRoot: runnerActionRoot(),
-	installRoot: runnerInstallRoot()
-}, deps = realSymlinkDeps, mounts = []) {
-	let docker = dockerConfigDir(env), workDirFix = "Configure the runner's work directory by its real path, not through the symlink.", candidates = [
-		{
-			name: "This action's checkout",
-			dir: actionRoot,
-			fix: () => `the runner runs this action's post step from there. ${workDirFix}`
-		},
-		...env.RUNNER_WORKSPACE ? [{
-			name: "The runner's action checkouts",
-			dir: (0, node_path.join)((0, node_path.dirname)((0, node_path.resolve)(env.RUNNER_WORKSPACE)), "_actions"),
-			fix: () => `the runner runs later steps' actions from there. ${workDirFix}`
-		}] : [],
-		...installRoot ? [{
-			name: "The runner's install directory",
-			dir: installRoot,
-			fix: () => "the runner runs later steps from there. Install the runner by its real path, not through the symlink."
-		}] : [],
-		...docker ? [{
-			name: "The docker CLI's config directory",
-			dir: docker,
-			fix: () => `this action runs docker on the host after the command exits. Set DOCKER_CONFIG to its real path, ${JSON.stringify(realPathOf(docker, deps))}.`
-		}] : []
-	], roots = persisting.filter((p) => p !== "/"), dirs = candidates.flatMap(({ name, dir, fix }) => {
-		if (persisting.includes(realPathOf(dir, deps))) return [];
-		let resolved = resolveHostPath(dir, deps), link = replaceableLink(resolved, roots);
-		if (link !== void 0) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(link)}, a symlink the sandboxed command can replace, and ${fix()}`, "HOST_DIR_UNPROTECTABLE");
-		if ("loop" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
-		let real = resolved.real;
-		return [real, ...pathAliases(mounts, real).filter((a) => !persisting.includes(a))].filter((p) => persisting.some((root) => isAtOrUnder(p, root)));
-	}), unique = [...new Set(dirs)];
-	return unique.filter((dir) => {
-		let others = unique.filter((o) => o !== dir);
-		return persisting.includes(innermost(dir, [...persisting, ...others]));
-	});
-}
-function innermost(dir, paths) {
-	return paths.filter((p) => isAtOrUnder(dir, p)).sort((a, b) => b.length - a.length)[0];
-}
-function replaceableLink(resolved, roots) {
-	return resolved.links.find((l) => roots.some((p) => isAtOrUnder((0, node_path.dirname)(l.at), p)))?.at;
-}
-function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = realSymlinkDeps, mounts = []) {
-	let named = new Set(writeThroughPaths), openable = (name, path) => name !== "GITHUB_STATE" && named.has(realPathOf(path, deps)), roots = persisting.filter((p) => p !== "/");
-	return [
-		"GITHUB_ENV",
-		"GITHUB_PATH",
-		"GITHUB_STATE"
-	].flatMap((name) => {
-		let path = env[name];
-		if (!path || openable(name, path)) return [];
-		let resolved = resolveHostPath(path, deps), link = replaceableLink(resolved, roots);
-		if (link !== void 0) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through ${JSON.stringify(link)}, a symlink the sandboxed command can replace, and the runner reads it after the step. Configure the runner's work directory by its real path, not through the symlink.`, "HOST_DIR_UNPROTECTABLE");
-		if ("loop" in resolved) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
-		let aliases = pathAliases(mounts, resolved.real).filter((a) => !openable(name, a) && persisting.some((root) => isAtOrUnder(a, root)));
-		return [resolved.real, ...aliases];
-	});
-}
-function renameGuardDirs(readonlyDirs, persisting) {
-	let writable = (dir) => persisting.includes(innermost(dir, [...persisting, ...readonlyDirs])), guards = new Set();
-	for (let dir of readonlyDirs) {
-		let root = persisting.filter((p) => p !== dir && isAtOrUnder(dir, p)).sort((a, b) => a.length - b.length)[0];
-		if (root) for (let p = (0, node_path.dirname)(dir); p !== root && isAtOrUnder(p, root); p = (0, node_path.dirname)(p)) writable(p) && guards.add(p);
-	}
-	return [...guards].sort((a, b) => a.length - b.length || a.localeCompare(b));
-}
-//#endregion
-//#region src/lib/sandbox/filesystem-plan.ts
-function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRealPaths = []) {
-	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
-	for (let path of writeThroughPaths) {
-		let reserved = [...reservedInternalDestinations(), ...reservedRealPaths].find((r) => isAtOrUnder(path, r));
-		if (reserved) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
-	}
-}
-function resolveWriteThroughInput(writeThroughInput, env) {
-	try {
-		return resolveWriteThroughPaths(writeThroughInput, env);
-	} catch (e) {
-		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
-	}
-}
-function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
-	let written = resolveWriteThroughInput(writeThroughInput, env), realpath = deps.realpath ?? realPathOf, writeThroughPaths = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
-	if (validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map((p) => realpath(p))), written.includes("/")) return {
-		overlayRoots: [],
-		writeThroughPaths
-	};
-	try {
-		assertKnownFilesExist(written, env, deps);
-	} catch (e) {
-		throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
-	}
-	try {
-		for (let path of writeThroughPaths) assertNoSymlinkInWriteThrough(path, deps);
-	} catch (e) {
-		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
-	}
-	try {
-		assertScratchBaseNotWritable(writeThroughPaths);
-	} catch (e) {
-		throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
-	}
-	try {
-		ensureWriteThroughTargetsExist(writeThroughPaths, deps);
-	} catch (e) {
-		throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_UNCREATABLE");
-	}
-	if (filesystemMode !== "ephemeral") return {
-		overlayRoots: [],
-		writeThroughPaths
-	};
-	try {
-		let { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath), candidateRoots = determineOverlayRoots([
-			home,
-			runnerTemp,
-			tmp,
-			workdir
-		].filter((p) => !!p), writeThroughPaths, deps), hostMounts = (deps.listHostMounts ?? listHostMounts)();
-		return {
-			overlayRoots: [...candidateRoots, ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps)],
-			writeThroughPaths
-		};
-	} catch (e) {
-		throw new SandboxError(`Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
-	}
-}
-function onRealRunnerDir(path, env, realpath) {
-	let dir = [
-		env.GITHUB_WORKSPACE,
-		env.HOME,
-		env.RUNNER_TEMP
-	].flatMap((d) => d ? [(0, node_path.normalize)(d)] : []).filter((d) => isAtOrUnder(path, d)).sort((a, b) => b.length - a.length)[0];
-	return dir === void 0 ? path : (0, node_path.join)(realpath(dir), (0, node_path.relative)(dir, path));
-}
-//#endregion
-//#region src/lib/sandbox/runtime-sockets.ts
-const RUNTIME_SOCKET_PATHS = [
-	"/var/run/docker.sock",
-	"/run/docker.sock",
-	"/run/containerd/containerd.sock",
-	"/var/run/docker/containerd/containerd.sock",
-	"/run/buildkit/buildkitd.sock",
-	"/run/podman/podman.sock",
-	"/var/run/crio/crio.sock",
-	"/run/dbus/system_bus_socket",
-	"/var/run/dbus/system_bus_socket"
-];
-function rootlessRuntimeSocketPaths(env) {
-	let dir = env.XDG_RUNTIME_DIR;
-	return dir ? [`${dir}/docker.sock`, `${dir}/podman/podman.sock`] : [];
-}
-//#endregion
-//#region src/lib/sandbox/identity.ts
-function assertNonRootUid(uid) {
-	if (uid === 0) throw new SandboxError("Buildcage will not run as root (uid 0): it keeps the runner's own uid, and as root only filesystem permissions separate the command from root-owned host sockets, which cannot guarantee isolation. Run the GitHub Actions runner as a non-root user.", "ROOT_RUNNER");
-}
-const PRIVILEGED_GROUP_NAMES = new Set([
-	"root",
-	"docker",
-	"containerd",
-	"podman",
-	"lxd",
-	"libvirt",
-	"libvirt-qemu",
-	"kvm",
-	"sudo",
-	"wheel"
-]), FALLBACK_GROUP_NAMES = ["nogroup", "nobody"], FALLBACK_GID = 65534, GETENT_PATHS = ["/usr/bin/getent", "/bin/getent"], realHost = {
-	readGroupFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
-	lookupGroups: (keys) => {
-		let getent = GETENT_PATHS.find((p) => (0, node_fs.existsSync)(p));
-		if (!getent) return { lines: "" };
-		try {
-			return { lines: (0, node_child_process.execFileSync)(getent, ["group", ...keys], {
-				encoding: "utf8",
-				stdio: "pipe",
-				timeout: 5e3
-			}) };
-		} catch (e) {
-			let { status, stdout } = e;
-			return status === 2 ? { lines: stdout ?? "" } : { error: errorMessage(e) };
-		}
-	},
-	gidOf: (path) => (0, node_fs.statSync)(path).gid
-};
-function readGroupNamesByGid(groupFile, nssLines, host) {
-	let sources = [];
-	try {
-		sources.push(host.readGroupFile(groupFile));
-	} catch {}
-	if (nssLines && sources.push(nssLines), sources.length === 0) return null;
-	let map = new Map();
-	for (let line of sources.join("\n").split("\n")) {
-		if (!line || line.startsWith("#")) continue;
-		let [name, , gidStr] = line.split(":"), gid = Number(gidStr);
-		if (!name || !Number.isInteger(gid)) continue;
-		let names = map.get(gid);
-		names ? names.push(name) : map.set(gid, [name]);
-	}
-	return map;
-}
-function ownerGids(paths, host) {
-	let gids = new Set();
-	for (let p of paths) try {
-		gids.add(host.gidOf(p));
-	} catch {}
-	return gids;
-}
-function resolveSandboxGid(primaryGid, env, options = {}) {
-	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...RUNTIME_SOCKET_PATHS, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, nss = host.lookupGroups([
-		String(primaryGid),
-		...PRIVILEGED_GROUP_NAMES,
-		...FALLBACK_GROUP_NAMES,
-		"65534"
-	]), nssError = "error" in nss ? nss.error : void 0, groupNamesByGid = readGroupNamesByGid(groupFile, "lines" in nss ? nss.lines : void 0, host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1, reported = nssError === void 0 ? {} : { nssError };
-	if (nssError === void 0 && !isPrivileged(primaryGid)) return { gid: primaryGid };
-	let substitute = (gid) => gid === primaryGid ? {
-		gid,
-		...reported
-	} : {
-		gid,
-		substitutedFrom: primaryGid,
-		...reported
-	}, gidForName = (name) => {
-		if (groupNamesByGid) {
-			for (let [gid, names] of groupNamesByGid) if (names.includes(name)) return gid;
-		}
-	};
-	for (let name of FALLBACK_GROUP_NAMES) {
-		let gid = gidForName(name);
-		if (gid !== void 0 && !isPrivileged(gid)) return substitute(gid);
-	}
-	if (!isPrivileged(FALLBACK_GID)) return substitute(FALLBACK_GID);
-	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group${nssError === void 0 ? "" : " or couldn't be verified through NSS"}, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
-}
-//#endregion
-//#region src/lib/sandbox/env-loader.ts
-const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = new Set([
-	"ACTIONS_RUNTIME_URL",
-	"ACTIONS_RUNTIME_TOKEN",
-	"ACTIONS_CACHE_URL",
-	"ACTIONS_RESULTS_URL",
-	"ACTIONS_CACHE_SERVICE_V2",
-	"ACTIONS_CACHE_MODE"
-]), ACTION_INPUT_ENV_KEYS = new Set([
-	"run",
-	"config_file",
-	"proxy_mode",
-	"proxy_engine",
-	"allowed_https_rules",
-	"allowed_http_rules",
-	"allowed_ip_rules",
-	"allowed_url_rules",
-	"allowed_tls_rules",
-	"upload_traffic_artifact",
-	"traffic_artifact_retention_days",
-	"fail_on_blocked",
-	"fail_on_ca_residue",
-	"known_blocked_rules",
-	"write_through",
-	"writable",
-	"filesystem_mode",
-	"filesystem_audit",
-	"label"
-].map((input) => `INPUT_${input.toUpperCase()}`));
-function isRunnerOnly(key) {
-	return RUNNER_ONLY_ENV_KEYS.has(key) || ACTION_INPUT_ENV_KEYS.has(key);
-}
-function resolveSandboxEnv(env, caTrust, warn) {
-	let merged = {
-		...env,
-		...caTrust ? caTrustAdditions(caTrust, env).env : void 0
-	}, resolved = {}, skipped = [];
-	for (let [key, value] of Object.entries(merged)) value !== void 0 && (isRunnerOnly(key) || (ENV_KEY.test(key) ? resolved[key] = value : skipped.push(key)));
-	return skipped.length > 0 && warn?.(`Not passing environment variables whose names a shell cannot export: ${skipped.join(", ")}`), resolved;
-}
-function buildEnvBlob(resolved) {
-	let records = [...Object.entries(resolved).map(([k, v]) => `${k}=${v}`), ENV_BLOB_TERMINATOR];
-	return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
-}
-const ENV_LOADER_SCRIPT = `#!/bin/bash
-# Applies the step environment from stdin, then runs $1 as a child: forwards
-# signals to its process group, reaps orphans, and exits with its status. See
-# sandbox/env-loader.ts for the wire format.
-#
-# The records go to env(1) rather than being exported, so a step variable
-# named like one of this script's, or like a bash readonly or dynamic variable
-# (UID, SECONDS), arrives as set. No eval: each record is one argument, never
-# re-interpreted, so a value containing $(...) or a backtick stays literal.
-set -u
-
-# Trapped before reading, as PID 1 drops untrapped signals. Any that arrive
-# before the child exists are held for it. A forwarded one goes to the
-# child's whole process group, which holds the command the script runs, as a
-# terminal's Ctrl-C does.
-child=
-pending=
-stopping=
-forward() {
-  if [ -n "$child" ]; then
-    case "$1" in TERM | INT) stopping=1 ;; esac
-    kill -s "$1" -- "-$child" 2>/dev/null
-  else
-    pending="$pending $1"
-  fi
-}
-for sig in TERM INT HUP QUIT USR1 USR2; do trap "forward $sig" "$sig"; done
-
-complete=
-records=()
-while IFS= read -r -d '' record; do
-  if [ "$record" = "${ENV_BLOB_TERMINATOR}" ]; then
-    complete=1
-    break
-  fi
-  [[ $record =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
-  records+=("$record")
-done
-
-if [ -z "$complete" ]; then
-  echo "buildcage: the sandbox environment ended before its terminator; refusing to run" >&2
-  exit 1
-fi
-
-# Never hand the run script the tail of this blob.
-exec 0</dev/null
-
-# Tells run-isolated.sh that the command is starting. The command never gets
-# fd 3.
-{ printf 1 >&3; } 2>/dev/null
-exec 3>&-
-
-# Job control puts the child in a process group of its own, and leaves SIGINT
-# and SIGQUIT as they are rather than ignoring them in it. Held signals are
-# raised from inside the child.
-held=$pending
-set -m
-{
-  for sig in $held; do kill -s "$sig" "$BASHPID"; done
-  # $1 is this run's script, whose path holds no "=" for env to read as a record.
-  exec /usr/bin/env -i -- \${records[@]+"\${records[@]}"} "$1"
-} &
-child=$!
-set +m
-# Signals that arrived during the fork.
-for sig in \${pending#"$held"}; do forward "$sig"; done
-# Keeps bash's "Killed" job notice out of the step's output. The child has its
-# own stderr.
-exec 2>/dev/null
-# A trapped signal interrupts \`wait\` with 128+n; the final \`wait\` returns the
-# child's own status, 128+n if a signal killed it, as runc reports for an init.
-while kill -0 "$child" 2>/dev/null; do wait "$child"; done
-wait "$child"
-status=$?
-# The script can exit on a SIGTERM or SIGINT while the command it ran is still
-# winding down, and this process exiting would kill it. Anything in the group
-# that ignores the signal holds the step until it is killed from outside.
-if [ -n "$stopping" ]; then
-  nap=/usr/bin/sleep
-  [ -x "$nap" ] || nap=/bin/sleep
-  while kill -0 -- "-$child" 2>/dev/null; do "$nap" 0.1; done
-fi
-exit $status
-`;
-function writeEnvLoader(execDir) {
-	let loaderPath = (0, node_path.join)(execDir, "env-loader.sh");
-	return (0, node_fs.writeFileSync)(loaderPath, ENV_LOADER_SCRIPT, { mode: 448 }), loaderPath;
-}
-//#endregion
-//#region scripts/extra-masked-proc-paths.json
-var extra_masked_proc_paths_default = [
-	"/proc/kallsyms",
-	"/proc/kmsg",
-	"/proc/sysrq-trigger"
-];
-//#endregion
-//#region src/lib/sandbox/oci-protected-paths.ts
-function maskedRuntimeDir(env) {
-	let dir = env.XDG_RUNTIME_DIR;
-	return !dir || ["/run", "/var/run"].some((run) => isAtOrUnder(dir, run)) ? [] : [dir];
-}
-function computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinations) {
-	return hostMounts.filter(({ mountPoint }) => mountPoint !== "/" && !freshMountDestinations.has(mountPoint) && ![...protectedPaths].some((p) => isAtOrUnder(mountPoint, p))).map(({ mountPoint }) => mountPoint);
-}
-function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, env, hostMounts, writablePaths, freshMountDestinations, disableReadonly }) {
-	let extraMaskedHostPaths = maskedRuntimeDir(env).filter((p) => !writablePaths.has("/") && !writablePaths.has(p.replace(/\/+$/, ""))), maskedPaths = [
-		...baseMaskedPaths,
-		...extra_masked_proc_paths_default,
-		...extraMaskedHostPaths
-	], isExtraMasked = (p) => extra_masked_proc_paths_default.includes(p) || extraMaskedHostPaths.includes(p), keptReadonlyPaths = baseReadonlyPaths.filter((p) => !isExtraMasked(p));
-	return {
-		maskedPaths,
-		readonlyPaths: disableReadonly ? keptReadonlyPaths : Array.from(new Set([...keptReadonlyPaths, ...computeReadonlyHostMounts(hostMounts, writablePaths, freshMountDestinations).filter((p) => !isExtraMasked(p))]))
-	};
-}
-//#endregion
-//#region src/lib/sandbox/oci-config.ts
-const REQUIRED_NAMESPACES = [
-	"pid",
-	"network",
-	"mount",
-	"ipc",
-	"uts"
-];
-function sandboxNamespaces(base, netnsPath) {
-	for (let type of REQUIRED_NAMESPACES) {
-		let entries = base.filter((ns) => ns.type === type);
-		if (entries.length !== 1 || entries[0].path !== void 0) throw Error(`runc's default spec does not give the sandbox exactly one new ${type} namespace; refusing to run the sandbox`);
-	}
-	return base.map((ns) => ns.type === "network" ? {
-		...ns,
-		path: netnsPath
-	} : ns);
-}
-function cgroupsPathFor(runnerCgroup, name) {
-	if (runnerCgroup !== void 0) return `${runnerCgroup.replace(/\/$/, "")}/${name}`;
-}
-function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [] }, probes = realHostProbes) {
-	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, cgroupName, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [], scratchBaseAliases = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
-	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths, (path) => probes.realpath(path));
-	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
-		destination: RESOLV_CONF_DESTINATION,
-		type: "none",
-		source: resolvConfPath,
-		options: ["rbind", "ro"]
-	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), overlapsFresh = (p) => [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p)), renameGuards = renameGuardDirs.filter((p) => !overlapsFresh(p)).map((p) => ({
-		destination: p,
-		type: "none",
-		source: p,
-		options: ["rbind", "rw"]
-	})), runCoverage = disableReadonly ? {
-		mounts: [],
-		writablePaths: new Set()
-	} : hostRunCoverageLayers(probes.varRunRealPath()), mounts = [
-		...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
-		...runCoverage.mounts,
-		...layers.mounts,
-		...renameGuards,
-		...internalMounts,
-		...scratchBaseLayers(execDir, scratchBaseAliases)
-	], protectedWritablePaths = new Set([...layers.writablePaths, ...runCoverage.writablePaths]), { maskedPaths, readonlyPaths } = resolveProtectedPaths({
-		baseMaskedPaths: baseSpec.linux.maskedPaths ?? [],
-		baseReadonlyPaths: baseSpec.linux.readonlyPaths ?? [],
-		env,
-		hostMounts,
-		writablePaths: protectedWritablePaths,
-		freshMountDestinations,
-		disableReadonly
-	}), namespaces = sandboxNamespaces(baseSpec.linux.namespaces, netnsPath), cgroupsPath = cgroupsPathFor(probes.cgroupPath(), cgroupName);
-	return {
-		...baseSpec,
-		root: {
-			path: rootfsBindDir,
-			readonly: !disableReadonly
-		},
-		mounts,
-		hostname: probes.hostname(),
-		process: {
-			...baseSpec.process,
-			terminal: !1,
-			user: {
-				uid,
-				gid
-			},
-			args: [
-				probes.setprivPath(),
-				"--pdeathsig=KILL",
-				"--",
-				envLoaderPath,
-				scriptPath
-			],
-			env: [],
-			cwd: workdir || "/",
-			capabilities: {
-				bounding: [],
-				effective: [],
-				permitted: [],
-				inheritable: [],
-				ambient: []
-			},
-			noNewPrivileges: !0,
-			rlimits: nofile ? [{
-				type: "RLIMIT_NOFILE",
-				soft: nofile.soft,
-				hard: nofile.hard
-			}] : void 0
-		},
-		linux: {
-			...baseSpec.linux,
-			...cgroupsPath !== void 0 && { cgroupsPath },
-			namespaces,
-			seccomp: seccompProfile,
-			maskedPaths,
-			readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostPaths])]
-		}
-	};
-}
-//#endregion
-//#region src/lib/sandbox/oci-files.ts
-function writeRunScript(runInput, execDir) {
-	let scriptPath = (0, node_path.join)(execDir, "run-script.sh"), content = runInput.startsWith("#!") ? runInput : `#!/bin/bash\nset -e\n${runInput}\n`;
-	return (0, node_fs.writeFileSync)(scriptPath, content, { mode: 448 }), scriptPath;
-}
-function writeOciConfig(config, bundleDir) {
-	let configPath = (0, node_path.join)(bundleDir, "config.json");
-	return (0, node_fs.writeFileSync)(configPath, JSON.stringify(config), { mode: 384 }), configPath;
-}
-function writeResolvConf(dns, dir) {
-	let resolvConfPath = (0, node_path.join)(dir, "resolv.conf");
-	return (0, node_fs.writeFileSync)(resolvConfPath, `nameserver ${dns}\n`, { mode: 420 }), resolvConfPath;
-}
-//#endregion
-//#region src/lib/sandbox/run.ts
-const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
-function defaultSpawn(command, args, input) {
-	let child = (0, node_child_process.spawn)(hostCommand(command), args, {
-		stdio: [
-			"pipe",
-			"inherit",
-			"inherit"
-		],
-		env: hostCommandEnv(command)
-	});
-	return child.stdin.on("error", () => {}), child.stdin.end(input), {
-		exited: new Promise((resolve) => {
-			child.on("error", (error) => {
-				child.pid === void 0 && resolve({ error });
-			}), child.on("close", (code, signal) => resolve(code === null ? { signal } : { status: code }));
-		}),
-		kill: (signal) => child.kill(signal)
-	};
-}
-function defaultCopyScript(from, to) {
-	(0, node_fs.copyFileSync)(from, to), (0, node_fs.chmodSync)(to, 320);
-}
-async function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, targetIp, envBlob, cancel }, { spawn = defaultSpawn, copyScript = defaultCopyScript } = {}) {
-	let runIsolatedShPath = (0, node_path.join)(bundleDir, "run-isolated.sh");
-	copyScript((0, node_path.join)(__dirname$1, "..", "scripts", "run-isolated.sh"), runIsolatedShPath);
-	let child = spawn("sudo", [
-		"-n",
-		"--",
-		runIsolatedShPath,
-		"--proxy-netns",
-		proxyNetns,
-		"--runc",
-		runcPath,
-		"--bundle",
-		bundleDir,
-		"--container-id",
-		containerId,
-		"--netns-name",
-		netnsName,
-		"--rootfs-bind-dir",
-		rootfsBindDir,
-		"--gateway",
-		gateway,
-		"--target-ip",
-		targetIp
-	], envBlob), escalation, stop = () => {
-		child.kill("SIGTERM"), escalation = setTimeout(() => child.kill("SIGTERM"), 5e3);
-	};
-	cancel?.aborted ? stop() : cancel?.addEventListener("abort", stop, { once: !0 });
-	let exit;
-	try {
-		exit = await child.exited;
-	} finally {
-		clearTimeout(escalation), cancel?.removeEventListener("abort", stop);
-	}
-	if ("status" in exit) return exit.status;
-	throw "signal" in exit ? new SandboxError(`The sandbox was ended by ${exit.signal}, so the command's exit status is unknown.`, "SANDBOX_TERMINATED") : new SandboxError(`Failed to start the sandbox: ${errorMessage(exit.error)}`, "SANDBOX_LAUNCH_FAILED");
-}
-//#endregion
-//#region src/lib/sandbox/runc-bootstrap.ts
-function generateBaseOciSpec(runcPath, bundleDir, { execIn = defaultExecIn, readFile = defaultReadFile } = {}) {
-	return execIn(runcPath, ["spec"], bundleDir), JSON.parse(readFile((0, node_path.join)(bundleDir, "config.json")));
-}
-function defaultExec(command, args) {
-	return (0, node_child_process.execFileSync)(hostCommand(command), args, {
-		encoding: "utf8",
-		env: hostCommandEnv(command)
-	});
-}
-function defaultExecIn(command, args, cwd) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		cwd,
-		env: hostCommandEnv(command)
-	});
-}
-function defaultReadFile(path) {
-	return (0, node_fs.readFileSync)(path, "utf8");
-}
-function extractRuncBootstrap({ containerName, destDir }, deps = {}) {
-	let { exec = defaultExec, chmod = node_fs.chmodSync, remove = node_fs.rmSync } = deps, runcPath = (0, node_path.join)(destDir, "runc"), genSeccompProfilePath = (0, node_path.join)(destDir, "gen-seccomp-profile");
-	exec("docker", buildDockerCpArgs({
-		containerName,
-		containerPath: "/opt/buildcage/bin/runc",
-		hostPath: runcPath
-	})), exec("docker", buildDockerCpArgs({
-		containerName,
-		containerPath: "/opt/buildcage/bin/gen-seccomp-profile",
-		hostPath: genSeccompProfilePath
-	})), chmod(runcPath, 493), chmod(genSeccompProfilePath, 493);
-	let seccompProfile = JSON.parse(exec(genSeccompProfilePath, [])), baseSpec = generateBaseOciSpec(runcPath, destDir, deps);
-	return remove(genSeccompProfilePath), {
-		runcPath,
-		seccompProfile,
-		baseSpec
-	};
-}
-//#endregion
-//#region src/lib/sandbox/sandboxed-command.ts
-init_core();
-const realDeps$2 = {
-	withScratchDir,
-	extractRuncBootstrap,
-	extractCaCert,
-	writeCaTrustFiles,
-	jvmTools,
-	prepareNssDb,
-	settleNssDbSlot,
-	nssDbDetached,
-	releaseNssDbDirs,
-	createOverlayScratchDirs,
-	writeResolvConf,
-	writeRunScript,
-	writeEnvLoader,
-	listHostMounts,
-	resolveSandboxGid,
-	buildOciConfig,
-	writeOciConfig,
-	resolveSandboxEnv,
-	buildEnvBlob,
-	runIsolated,
-	extractTracer,
-	startFilesystemAudit,
-	mkdir: node_fs.mkdirSync,
-	touch: (path) => (0, node_fs.writeFileSync)(path, "", {
-		flag: "a",
-		mode: 384
-	}),
-	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
-	realpath: realPathOf,
-	...realSymlinkDeps,
-	info
-};
-function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
-	try {
-		return extractRuncBootstrap({
-			containerName,
-			destDir: dir
-		});
-	} catch (e) {
-		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`, "RUNC_EXTRACT_FAILED");
-	}
-}
-function extractCaTrust(containerName, dir, options, { extractCaCert, writeCaTrustFiles, jvmTools, prepareNssDb, info, realpath }) {
-	let { env, writeThroughPaths, warn } = options;
-	try {
-		let files = {
-			...writeCaTrustFiles(extractCaCert(containerName, dir), dir, env, jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env, realpath)), { warn }),
-			nssDb: prepareNssDb(containerName, dir, env.HOME, {
-				warn,
-				info
-			}, { homeUpper: homeUpperFor(dir, options, realpath) })
-		}, preset = presetCaVariables(files, env, realpath);
-		return preset.length > 0 && warn(`these CA variables are already set and do not point at the proxy CA: ${preset.map((name) => `${name} (${env[name]})`).join(", ")}. A tool reading one fails TLS under proxy_engine: inspect; unset them for this step, or use proxy_engine: universal.`), files;
-	} catch (e) {
-		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`, "CA_EXTRACT_FAILED");
-	}
-}
-function homeUpperFor(dir, options, realpath) {
-	let { filesystemMode, overlayRoots, env } = options, home = env.HOME;
-	if (filesystemMode === "ephemeral" && home && overlayRoots.includes(home) && !persists((0, node_path.join)(home, ".pki/nssdb"), options, realpath)) return overlayUpperFor(dir, home);
-}
-function writeBundleFiles(dir, { runInput, filesystemMode, overlayRoots }, { createOverlayScratchDirs, writeResolvConf, writeRunScript, writeEnvLoader, mkdir }) {
-	let overlayScratchPaths = filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [], resolvConfPath = writeResolvConf(PROXY_ADDRESS, dir), execDir = (0, node_path.join)(dir, "exec");
-	return mkdir(execDir, { mode: 448 }), {
-		overlayScratchPaths,
-		resolvConfPath,
-		execDir,
-		scriptPath: writeRunScript(runInput, execDir),
-		envLoaderPath: writeEnvLoader(execDir)
-	};
-}
-function resolveIdentity(env, warn, { resolveSandboxGid, info }) {
-	let { gid, substitutedFrom, nssError } = resolveSandboxGid(process.getgid(), env);
-	return nssError !== void 0 && warn(`buildcage: could not look up groups through NSS (${nssError}); the primary group couldn't be verified and is treated as privileged`), substitutedFrom !== void 0 && info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- ${nssError === void 0 ? "the runner's primary group grants container/VM runtime access" : "the runner's primary group couldn't be verified through NSS"}`), {
-		uid: process.getuid(),
-		gid
-	};
-}
-function assembleBundle(dir, options, deps) {
-	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
-	try {
-		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = persistingWritablePaths(filesystemMode, writeThroughPaths, env, deps.realpath), symlinkDeps = {
-			lstat: deps.lstat,
-			readlink: deps.readlink
-		}, readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, void 0, symlinkDeps, hostMounts), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, symlinkDeps, hostMounts), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
-		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
-			mode: 448,
-			recursive: !0
-		});
-		for (let file of readonlyFiles) deps.touch(file);
-		config = buildOciConfig(baseSpec, {
-			identity: resolveIdentity(env, options.warn, deps),
-			writable: {
-				...resolveDefaultWritableDirs(env, deps.realpath),
-				writablePaths: writeThroughPaths
-			},
-			ephemeral: filesystemMode === "ephemeral" ? {
-				overlayRoots: overlayScratchPaths,
-				allowWrite: writeThroughPaths
-			} : void 0,
-			runtime: {
-				netnsPath: `/var/run/netns/${netnsName}`,
-				cgroupName: containerName,
-				rootfsBindDir,
-				resolvConfPath,
-				seccompProfile,
-				execDir,
-				envLoaderPath,
-				scriptPath,
-				hostMounts,
-				scratchBaseAliases: pathAliases(hostMounts, SANDBOX_SCRATCH_BASE)
-			},
-			env,
-			caTrust,
-			readonlyHostPaths: [...readonlyHostDirs, ...readonlyFiles],
-			renameGuardDirs: renameGuardDirs$1
-		});
-	} catch (e) {
-		throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
-	}
-	return {
-		config,
-		runcPath,
-		caTrust,
-		netnsName,
-		rootfsBindDir
-	};
-}
-function persists(path, { filesystemMode, writeThroughPaths, env }, realpath) {
-	return persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath).some((p) => p === "/" || path === p || path.startsWith(`${p}/`));
-}
-function releaseDeps({ warn }, { info }) {
-	return {
-		info,
-		warn
-	};
-}
-function finishNssDb(caTrust, options, deps) {
-	let { nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info, realpath } = deps, nssDb = caTrust?.nssDb;
-	if (!nssDb) return;
-	let { failOnCaResidue, warn } = options, release = () => releaseNssDbDirs(nssDb, releaseDeps(options, deps)), persist = persists(nssDb.destination, options, realpath), detached = persist ? nssDbDetached(nssDb) : void 0;
-	if (detached !== void 0) {
-		warn(detached), release();
-		return;
-	}
-	try {
-		settleNssDbSlot(nssDb, {
-			persist,
-			caPem: readFile(caTrust.ownCaPath),
-			onResidue: (message) => {
-				if (!failOnCaResidue) {
-					warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
-					return;
-				}
-				throw new SandboxError(`${message}. To let the step carry on with only a warning, set fail_on_ca_residue: false (a copy of the CA is then written back).`, "NSS_DATABASE_CA_COPIED");
-			}
-		}) === "discarded" && info(`buildcage: what the command wrote to the NSS database at ${nssDb.destination} is discarded, as the filesystem mode discards writes there`);
-	} catch (e) {
-		throw e instanceof SandboxError ? e : new SandboxError(`could not write back what the command wrote to the NSS database at ${nssDb.destination}: ` + errorMessage(e), "NSS_DATABASE_WRITE_BACK_FAILED");
-	} finally {
-		release();
-	}
-}
-async function startAudit(dir, config, options, deps) {
-	let { filesystemAudit, containerName, warn } = options;
-	if (filesystemAudit === void 0) return noAudit;
-	let cgroupsPath = config.linux.cgroupsPath;
-	if (cgroupsPath === void 0) return warn("buildcage: filesystem_audit needs a cgroup v2 host; the step's file accesses were not recorded."), noAudit;
-	try {
-		let tracerPath = deps.extractTracer(containerName, dir);
-		return await deps.startFilesystemAudit({
-			tracerPath,
-			cgroupsPath,
-			outPath: filesystemAudit.outPath,
-			pidFilePath: filesystemAudit.pidFilePath,
-			readyPath: (0, node_path.join)(dir, "filesystem-audit.ready")
-		}, warn);
-	} catch (e) {
-		return warn(`buildcage: filesystem_audit could not start (${errorMessage(e)}); the step's file accesses were not recorded.`), noAudit;
-	}
-}
-async function runSandboxedCommand(options, overrides = {}) {
-	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {
-		...realDeps$2,
-		...overrides
-	}, { withScratchDir, writeOciConfig, resolveSandboxEnv, buildEnvBlob, runIsolated } = deps;
-	return withScratchDir(async (dir) => {
-		let { config, runcPath, caTrust, netnsName, rootfsBindDir } = assembleBundle(dir, options, deps), exitCode;
-		try {
-			writeOciConfig(config, dir);
-			let audit = await startAudit(dir, config, options, deps);
-			try {
-				exitCode = await runIsolated({
-					envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
-					runcPath,
-					proxyNetns,
-					bundleDir: dir,
-					containerId: containerName,
-					netnsName,
-					rootfsBindDir,
-					gateway: PROXY_ADDRESS,
-					targetIp: "198.19.255.101",
-					cancel
-				});
-			} finally {
-				await audit.stop();
-			}
-		} catch (e) {
-			throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e;
-		}
-		return finishNssDb(caTrust, options, deps), exitCode;
-	}, {
-		containerName,
-		ephemeralRoots: filesystemMode === "ephemeral" ? overlayRoots : void 0,
-		warn
-	});
-}
-//#endregion
 //#region src/core/lib/actions/write-step-summary.ts
 init_core();
 async function writeStepSummary(markdown, summaryFile) {
 	summaryFile ? await summary.addRaw(markdown).write() : console.log(markdown);
-}
-//#endregion
-//#region src/core/lib/docker/container-env.ts
-function parseDockerInspectEnv(inspectOutput) {
-	let entries = JSON.parse(inspectOutput), env = {};
-	for (let entry of entries) {
-		let i = entry.indexOf("=");
-		i !== -1 && (env[entry.slice(0, i)] = entry.slice(i + 1));
-	}
-	return env;
-}
-function parseDockerInspectLabels(inspectOutput) {
-	return JSON.parse(inspectOutput) ?? {};
-}
-//#endregion
-//#region src/core/lib/docker/client.ts
-function parseContainerIds(psOutput) {
-	return psOutput.split("\n").map((s) => s.trim()).filter(Boolean);
-}
-function defaultRunCommand(args) {
-	return (0, node_child_process.execFileSync)("docker", args, {
-		encoding: "utf8",
-		stdio: [
-			"ignore",
-			"pipe",
-			"pipe"
-		],
-		maxBuffer: 67108864
-	});
-}
-function defaultSpawnCommand(args) {
-	return (0, node_child_process.spawn)("docker", args, { stdio: [
-		"ignore",
-		"pipe",
-		"pipe"
-	] });
-}
-async function* streamDockerLines(spawnDocker, args, operation) {
-	let child = spawnDocker(args), spawnError;
-	child.on("error", (err) => {
-		spawnError = err;
-	});
-	let closed = (0, node_events.once)(child, "close").then(([code, signal]) => ({
-		code,
-		signal
-	}), () => ({
-		code: null,
-		signal: null
-	})), stderr = "";
-	child.stderr?.setEncoding("utf8"), child.stderr?.on("data", (chunk) => {
-		stderr += chunk;
-	});
-	let rl = (0, node_readline.createInterface)({
-		input: child.stdout,
-		crlfDelay: Infinity
-	}), exhausted = !1;
-	try {
-		for await (let line of rl) yield line;
-		exhausted = !0;
-	} finally {
-		rl.close(), !exhausted && child.exitCode === null && child.signalCode === null && child.kill();
-	}
-	let { code, signal } = await closed;
-	if (spawnError) throw spawnError;
-	if (code !== 0) throw Object.assign(Error(`${operation} exited with code ${code}${signal ? ` (signal ${signal})` : ""}: ${stderr.trim()}`), {
-		status: code ?? void 0,
-		stderr
-	});
-}
-function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand) {
-	return {
-		findContainers(filters) {
-			let args = ["ps"];
-			for (let filter of filters) args.push("--filter", filter);
-			return args.push("--format", "{{.ID}}"), parseContainerIds(run(args));
-		},
-		copyFromContainer(containerId, containerPath, hostPath) {
-			run(buildDockerCpArgs({
-				containerName: containerId,
-				containerPath,
-				hostPath
-			}));
-		},
-		readFileLines(containerId, path) {
-			return streamDockerLines(spawnDocker, [
-				"exec",
-				containerId,
-				"cat",
-				path
-			], `docker exec cat ${path}`);
-		},
-		readEnv(containerId) {
-			return parseDockerInspectEnv(run([
-				"inspect",
-				containerId,
-				"--format",
-				"{{json .Config.Env}}"
-			]));
-		},
-		readLabels(containerId) {
-			return parseDockerInspectLabels(run([
-				"inspect",
-				containerId,
-				"--format",
-				"{{json .Config.Labels}}"
-			]));
-		},
-		exec(containerId, args) {
-			return run([
-				"exec",
-				containerId,
-				...args
-			]);
-		}
-	};
-}
-//#endregion
-//#region src/core/lib/docker/proxy-dropped-logs.ts
-const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m;
-function parseDroppedLogs(metrics) {
-	let match = COUNTER.exec(metrics);
-	return match ? Number(match[1]) : void 0;
-}
-function readProxyDroppedLogs(docker, containerId) {
-	try {
-		return parseDroppedLogs(docker.exec(containerId, [
-			"curl",
-			"-sf",
-			"--max-time",
-			"10",
-			"--unix-socket",
-			"/var/run/haproxy-health.sock",
-			"http://localhost/metrics?scope=global"
-		]));
-	} catch {
-		return;
-	}
-}
-//#endregion
-//#region src/core/lib/docker/rotated-log.ts
-const SEGMENT = /^@[0-9a-f]{24}\.[a-z]$/;
-function parseLogSegments(lsOutput) {
-	let entries = lsOutput.split("\n").map((line) => line.trim()).filter(Boolean), segments = entries.filter((name) => SEGMENT.test(name)).sort();
-	return entries.includes("current") && segments.push("current"), segments;
-}
-async function* readRotatedLog(docker, containerId, dir) {
-	let listing = docker.exec(containerId, [
-		"ls",
-		"-1",
-		dir
-	]);
-	for (let name of parseLogSegments(listing)) yield* docker.readFileLines(containerId, `${dir}/${name}`);
-}
-//#endregion
-//#region src/core/lib/report/action-version.ts
-function readActionVersion$1(docker, containerId, proxyEngine) {
-	try {
-		let label = docker.readLabels(containerId)["org.opencontainers.image.version"];
-		if (!label) return;
-		let suffix = `-${proxyEngine}`;
-		return `v${label.endsWith(suffix) ? label.slice(0, -suffix.length) : label}`;
-	} catch {
-		return;
-	}
-}
-//#endregion
-//#region src/core/lib/log/authority.ts
-const DEFAULT_PORT = {
-	https: "443",
-	http: "80"
-};
-function splitHostPort(authority) {
-	let colon = authority.lastIndexOf(":");
-	return colon <= 0 || authority.slice(colon + 1).includes("]") ? {
-		host: authority,
-		port: void 0
-	} : {
-		host: authority.slice(0, colon),
-		port: authority.slice(colon + 1)
-	};
-}
-function ruleHost(host) {
-	return sniHost(host).replace(/\.$/, "");
-}
-function sniHost(sni) {
-	return sni.replace(/[A-Z]/g, (c) => c.toLowerCase());
-}
-//#endregion
-//#region src/core/lib/log/start-marker.ts
-const PROXY_START_MARKER = "buildcage haproxy starting", BAD_REQUEST_METHOD = "<BADREQ>";
-function incompleteReason(terminationState, method) {
-	let cause = terminationState[0];
-	if (cause !== "P") return terminationState[1] === "R" ? cause === "C" ? "client-aborted" : cause === "c" ? "client-timeout" : "no-request" : method === "<BADREQ>" ? "no-request" : void 0;
-}
-//#endregion
-//#region src/core/lib/log/traffic-event.ts
-const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
-function clientEndedNoise(timeline) {
-	let completed = new Set();
-	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
-	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason) && completed.has(ruleHost(event.host));
-}
-function connectedHosts(timeline) {
-	let connected = {
-		any: new Set(),
-		blocked: new Set()
-	};
-	for (let event of timeline) {
-		if (event.protocol === "dns" || event.action === "incomplete") continue;
-		let host = ruleHost(event.host);
-		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
-	}
-	return connected;
-}
-function isRedundantDns(event, connected) {
-	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
-}
-//#endregion
-//#region src/core/lib/log/inspect.ts
-const REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:fcerr=(\S+) )?(?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
-function timeOf(stamp) {
-	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
-	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
-}
-function isRefusal(terminationState) {
-	let cause = terminationState[0];
-	if (cause === "P" || cause === "S") return !0;
-	let phase = terminationState[1];
-	return cause === "s" && (phase === "C" || phase === "H");
-}
-function reasonFor(logged, terminationState, tlsError, method) {
-	if (logged !== "-") return logged;
-	let cause = terminationState[0];
-	if (cause !== "S" && cause !== "s") return method === "<BADREQ>" ? "bad-request" : "not-allowed";
-	switch (terminationState[1]) {
-		case "H": return "origin-no-response";
-		case "D":
-		case "L": return "origin-aborted";
-		default: return tlsError === void 0 ? "origin-unreachable" : cause === "S" && tlsError !== "-" && tlsError !== "0" ? "origin-untrusted" : "origin-connect-failed";
-	}
-}
-const REQUESTLESS_REASONS = new Set(["bad-request", "missing-host-header"]), FAILURE_REASONS$1 = new Set([
-	"origin-unreachable",
-	"origin-no-response",
-	"origin-aborted",
-	"dns-failed"
-]);
-function actionFor(reason, isAudit) {
-	return reason === void 0 ? isAudit ? "audit" : "allow" : FAILURE_REASONS$1.has(reason) ? "failed" : "block";
-}
-function urlOf(scheme, authority, target) {
-	return target.startsWith("/") ? `${scheme}://${authority}${target}` : void 0;
-}
-function authorityOf(host, port, scheme) {
-	return port === DEFAULT_PORT$1[scheme] ? host : `${host}:${port}`;
-}
-function hostBeforeRequest(sni, address) {
-	return sni !== void 0 && sni !== "-" ? {
-		host: sniHost(sni),
-		byAddress: !1
-	} : address === "198.19.255.1" ? {
-		host: UNKNOWN_HOST,
-		byAddress: !1
-	} : {
-		host: address,
-		byAddress: !0
-	};
-}
-function parseProxyLine(line, isAudit) {
-	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
-	if (request) {
-		let fcerr = request[11] ?? "", incomplete = request[3] === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[13]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[12], request[9]) : void 0, event = {
-			time: Number(request[1]) / 1e3,
-			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
-			protocol: unnamed?.byAddress ? "tcp" : scheme,
-			host: unnamed?.host ?? host,
-			port: Number(request[10]),
-			destination: `${request[9]}:${request[10]}`
-		};
-		if (parsedRequest) {
-			event.method = request[3];
-			let url = urlOf(scheme, unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority, request[14]);
-			url !== void 0 && (event.url = url);
-		}
-		return reason === void 0 ? (event.status = Number(request[4]), event.bytes = Number(request[5])) : event.reason = reason, event;
-	}
-	let pass = PASSTHROUGH.exec(trimmed);
-	if (pass) {
-		let reason = isRefusal(pass[4]) ? reasonFor(pass[5], pass[4], void 0, "-") : void 0, sni = pass[8], event = {
-			time: Number(pass[1]) / 1e3,
-			action: actionFor(reason, isAudit),
-			protocol: pass[2],
-			host: sni === "-" ? pass[6] : sniHost(sni),
-			port: Number(pass[7]),
-			destination: `${pass[6]}:${pass[7]}`
-		};
-		return reason === void 0 ? event.bytes = Number(pass[3]) : event.reason = reason, event;
-	}
-	return null;
-}
-async function scanInspectLog(lines, isAudit = !1, allowsName) {
-	let events = [], startedAt, headIntact, unparsed = 0;
-	for await (let line of lines) {
-		let event = parseProxyLine(line, isAudit);
-		if (event) {
-			headIntact ??= !1, events.push(event);
-			continue;
-		}
-		let trimmed = line.trim();
-		if (trimmed === "") continue;
-		let match = START$1.exec(trimmed);
-		headIntact ??= match !== null, match && startedAt === void 0 && (startedAt = Number(match[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
-	}
-	return refuseUnpassedAddresses(events), allowsName && refuseUnallowedNames(events, allowsName), {
-		events,
-		startedAt,
-		headIntact: headIntact ?? !1,
-		unparsed
-	};
-}
-function refuseUnpassedAddresses(events) {
-	let served = new Set();
-	for (let event of events) (event.protocol === "http" || event.protocol === "https") && event.action !== "incomplete" && served.add(event.destination);
-	for (let event of events) event.action === "incomplete" && event.protocol === "tcp" && (CLIENT_ENDED_REASONS.has(event.reason) && served.has(event.destination) || (event.action = "block", event.reason = "ip-not-allowed"));
-}
-function refuseUnallowedNames(events, allowsName) {
-	for (let event of events) event.action === "incomplete" && event.protocol === "https" && (event.host === "(unknown)" || allowsName(event.host) || event.destination?.startsWith("198.19.255.1:") || (event.action = "block", event.reason = "sni-not-allowed"));
-}
-async function scanInspectDnsLog(lines, isAudit = !1) {
-	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
-	for await (let line of lines) {
-		let trimmed = line.trim();
-		trimmed !== "" && (headIntact ??= trimmed.endsWith("buildcage coredns starting"));
-		let match = DNS.exec(trimmed);
-		if (match) {
-			let time = timeOf(match[1]), allowed = match[2] === "allowed", existing = seen.get(match[3]);
-			existing ? existing.allowed ||= allowed : seen.set(match[3], {
-				time,
-				allowed
-			});
-			continue;
-		}
-		let lookup = DNS_DISCOVERY.exec(trimmed);
-		if (lookup) {
-			let key = `${lookup[2]}\t${lookup[3]}`;
-			discovery.has(key) || discovery.set(key, {
-				time: timeOf(lookup[1]),
-				host: lookup[2],
-				queryType: lookup[3]
-			});
-			continue;
-		}
-		let refused = DNS_SERVICE_DENIED.exec(trimmed);
-		if (!refused) {
-			DNS_LINE.test(trimmed) && unparsed++;
-			continue;
-		}
-		service.has(refused[2]) || service.set(refused[2], {
-			time: timeOf(refused[1]),
-			host: refused[2],
-			queryType: refused[3]
-		});
-	}
-	let events = [...seen.entries()].map(([host, { time, allowed }]) => {
-		let reason = allowed ? void 0 : "dns-not-allowed", event = {
-			time,
-			action: actionFor(reason, isAudit),
-			protocol: "dns",
-			host
-		};
-		return reason !== void 0 && (event.reason = reason), event;
-	});
-	for (let { time, host, queryType } of discovery.values()) events.push({
-		time,
-		action: "discovery",
-		protocol: "dns",
-		host,
-		queryType
-	});
-	for (let { time, host, queryType } of service.values()) events.push({
-		time,
-		action: actionFor("dns-service-not-allowed", isAudit),
-		protocol: "dns",
-		host,
-		queryType,
-		reason: "dns-service-not-allowed"
-	});
-	return {
-		events,
-		headIntact: headIntact ?? !1,
-		unparsed
-	};
-}
-//#endregion
-//#region src/core/lib/log/aggregate.ts
-function entryKey(e) {
-	return `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
-}
-function compareAggregated(a, b) {
-	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
-}
-function aggregate(filtered) {
-	let map = {};
-	for (let e of filtered) {
-		let key = entryKey(e);
-		map[key] = (map[key] || 0) + 1;
-	}
-	return Object.keys(map).map((key) => {
-		let [host, portStr, ruleType, reason] = key.split("	");
-		return {
-			host,
-			port: portStr,
-			ruleType,
-			reason,
-			count: map[key]
-		};
-	}).sort(compareAggregated);
-}
-//#endregion
-//#region src/core/lib/report/build/aggregate.ts
-function targetOf(event) {
-	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
-}
-function requestPath(url) {
-	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
-	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
-}
-function matchesUrlRule({ rule, hostRe, pathRe }, event) {
-	if (event.method === void 0 || event.url === void 0) return !1;
-	let scheme = rule.schemes.find((s) => s === event.protocol);
-	if (scheme === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
-	let hostPort = `${event.host}:${event.port}`;
-	if (rule.isRegex) {
-		let defaultPort = Number(DEFAULT_PORT$1[scheme]);
-		return event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
-	}
-	return hostRe.test(hostPort);
-}
-function buildMatchers(knownBlockedRules) {
-	return knownBlockedRules.map((line) => {
-		if (isKnownBlockedUrlRule(line)) {
-			let urlRule = convertUrlRule(line), compiled = {
-				rule: urlRule,
-				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex, "i"),
-				pathRe: new RegExp(urlRule.pathRegex)
-			};
-			return {
-				rule: urlRule.raw,
-				matches: (event) => matchesUrlRule(compiled, event)
-			};
-		}
-		let completed = completeRulePort(line), re = new RegExp(convertRule(completed), "i");
-		return {
-			rule: completed,
-			matches: (event) => re.test(targetOf(event))
-		};
-	});
-}
-function annotateKnownBlocked(blockedEvents, knownBlockedRules) {
-	let matchers = buildMatchers(knownBlockedRules), accumulators = new Map();
-	for (let event of blockedEvents) {
-		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = entryKey(entry), accumulator = accumulators.get(key);
-		accumulator ? (accumulator.count++, index === -1 ? accumulator.expectedAll = !1 : index < accumulator.bestIndex && (accumulator.bestIndex = index, accumulator.bestRule = matchers[index].rule)) : accumulators.set(key, {
-			entry,
-			count: 1,
-			expectedAll: index !== -1,
-			bestIndex: index === -1 ? Infinity : index,
-			bestRule: index === -1 ? void 0 : matchers[index].rule
-		});
-	}
-	return [...accumulators.values()].map(({ entry, count, expectedAll, bestRule }) => expectedAll ? {
-		...entry,
-		count,
-		expected: !0,
-		expectedBy: bestRule
-	} : {
-		...entry,
-		count,
-		expected: !1
-	}).sort(compareAggregated);
-}
-const RULE_TYPE = {
-	https: "HTTPS",
-	http: "HTTP",
-	tls: "TLS",
-	tcp: "IP",
-	dns: "DNS"
-};
-function toHostRow(event) {
-	return {
-		host: event.host,
-		port: event.port === void 0 ? "-" : String(event.port),
-		ruleType: RULE_TYPE[event.protocol],
-		reason: event.reason ?? "-"
-	};
-}
-function reduceTimeline(timeline, knownBlockedRules) {
-	let passedRows = [], blockedEvents = [], failedRows = [], connected = connectedHosts(timeline);
-	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : event.action === "block" ? blockedEvents.push(event) : passedRows.push(toHostRow(event))));
-	return {
-		passed: aggregate(passedRows),
-		blocked: annotateKnownBlocked(blockedEvents, knownBlockedRules),
-		failed: aggregate(failedRows),
-		blockedCount: blockedEvents.length
-	};
-}
-//#endregion
-//#region src/core/lib/report/build/inspect.ts
-function resolverAllows(parameters) {
-	let { resolverHosts } = compileRuleSet({
-		httpsRules: parameters.allowedHttpsRules,
-		httpRules: parameters.allowedHttpRules,
-		tlsRules: parameters.allowedTlsRules,
-		urlRules: buildUrlRules(parameters.allowedUrlRules.join("\n"))
-	}), allowed = resolverHosts.map((regex) => RegExp(`^(?:${regex})$`, "i"));
-	return (name) => allowed.some((regex) => regex.test(name));
-}
-async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedLogs) {
-	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
-	return {
-		engine: "inspect",
-		parameters,
-		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
-		startedAt,
-		timeline
-	};
-}
-//#endregion
-//#region src/core/lib/log/haproxy.ts
-const DECISION = /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za-z0-9._:-]+)" ([A-Za-z0-9-]+) (\d+|-)(?: ts=[A-Za-z-]{2} dst=[0-9.]+:\d+)?$/, NO_REQUEST = /^buildcage (\d+) \[-\] \(HTTP\) "-" - (?:\d+|-) ts=([A-Za-z-]{2}) dst=([0-9.]+):(\d+)$/, START = RegExp(`^${PROXY_START_MARKER} (\\d+)$`), PROTOCOL = {
-	HTTPS: "https",
-	HTTP: "http",
-	IP: "tcp"
-}, FAILURE_REASONS = new Set(["dns-failed"]);
-function hostOf(address, ruleType) {
-	return address === "198.19.255.1" ? UNKNOWN_HOST : ruleType === "HTTPS" ? sniHost(address) : ruleHost(address);
-}
-async function scanHaproxyLog(lines, isAudit) {
-	let events = [], passedDecision = isAudit ? "AUDIT" : "ALLOWED", startedAt, headIntact, unparsed = 0;
-	for await (let line of lines) {
-		let m = DECISION.exec(line);
-		if (m) {
-			headIntact ??= !1;
-			let [, ms, decision, ruleType, target, reason, bytes] = m;
-			if (decision !== passedDecision && decision !== "BLOCKED") continue;
-			let { host: address, port } = splitHostPort(target), host = hostOf(address, ruleType), failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), refused = decision === "BLOCKED" && !failed, event = {
-				time: Number(ms) / 1e3,
-				action: failed ? "failed" : refused ? "block" : isAudit ? "audit" : "allow",
-				protocol: PROTOCOL[ruleType] ?? "tcp",
-				host
-			};
-			port !== void 0 && (event.port = Number(port)), refused || failed ? event.reason = reason : bytes !== "-" && (event.bytes = Number(bytes)), events.push(event);
-			continue;
-		}
-		let none = NO_REQUEST.exec(line);
-		if (none) {
-			headIntact ??= !1;
-			let [, ms, terminationState, address, port] = none, ended = incompleteReason(terminationState, BAD_REQUEST_METHOD);
-			events.push({
-				time: Number(ms) / 1e3,
-				action: ended === void 0 ? "block" : "incomplete",
-				protocol: "http",
-				host: hostOf(address),
-				port: Number(port),
-				reason: ended ?? "bad-request"
-			});
-			continue;
-		}
-		let trimmed = line.trim();
-		if (trimmed === "") continue;
-		let start = START.exec(trimmed);
-		headIntact ??= start !== null, start && startedAt === void 0 && (startedAt = Number(start[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
-	}
-	return {
-		events,
-		startedAt,
-		headIntact: headIntact ?? !1,
-		unparsed
-	};
-}
-//#endregion
-//#region src/core/lib/report/build/universal.ts
-async function buildUniversalReportData(proxyLines, dnsLines, parameters, droppedLogs) {
-	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
-	return {
-		engine: "universal",
-		parameters,
-		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
-		startedAt,
-		timeline
-	};
-}
-//#endregion
-//#region src/core/lib/report/outcome/annotate.ts
-function applyOutcomeAnnotations(annotation, emissions) {
-	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
-}
-//#endregion
-//#region src/core/lib/report/outcome/blocked-outcome.ts
-function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible }) {
-	if (!logLooksPlausible) return isAudit ? {
-		level: "notice",
-		shouldFail: !1
-	} : failOnBlocked ? {
-		level: "error",
-		shouldFail: !0
-	} : {
-		level: "notice",
-		shouldFail: !1
-	};
-	if (!blockedCount) return {
-		level: "none",
-		shouldFail: !1
-	};
-	if (isAudit) return {
-		level: "notice",
-		shouldFail: !1
-	};
-	let hasUnexpected = blockedRows.length === 0 || blockedRows.some((row) => !row.expected);
-	return failOnBlocked && hasUnexpected ? {
-		level: "error",
-		shouldFail: !0
-	} : {
-		level: "notice",
-		shouldFail: !1
-	};
-}
-const COUNT_NOUN = "connection(s) and lookup(s)";
-function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }) {
-	let base = `${blockedCount} blocked ${COUNT_NOUN} detected by buildcage ${engineLabel}`;
-	if (isAudit) return base;
-	let unexpected = blockedRows.filter((row) => !row.expected).length;
-	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known_blocked_rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known_blocked_rules)`;
-}
-function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, engineLabel }) {
-	let outcome = determineBlockedOutcome({
-		isAudit,
-		failOnBlocked,
-		blockedCount,
-		blockedRows,
-		logLooksPlausible
-	}), base = buildBlockedMessage({
-		blockedCount,
-		blockedRows,
-		engineLabel,
-		isAudit
-	});
-	if (logLooksPlausible) return {
-		...outcome,
-		message: base
-	};
-	if (isAudit) return {
-		...outcome,
-		message: `${base}, but the logs are incomplete and this is not a full record`
-	};
-	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. Either the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
-	return {
-		...outcome,
-		message
-	};
-}
-//#endregion
-//#region src/core/lib/report/outcome/report-outcomes.ts
-function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
-	let emissions = [describeBlockedOutcome({
-		isAudit: report.parameters.mode === "audit",
-		failOnBlocked,
-		blockedCount: report.blockedCount,
-		blockedRows: report.blocked,
-		logLooksPlausible: report.logLooksPlausible,
-		engineLabel
-	})], undecided = describeUndecidedRequests(report, engineLabel);
-	undecided && emissions.push(undecided);
-	let failed = describeFailedConnections(report, engineLabel);
-	return failed && emissions.push(failed), emissions;
-}
-function describeUndecidedRequests(report, engineLabel) {
-	let isNoise = clientEndedNoise(report.timeline), count = report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
-	if (count !== 0) return {
-		level: "warning",
-		shouldFail: !1,
-		message: `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in Communication details. Each ended before a whole request had arrived, so no rule decided it and none reached an origin: the client closed or failed the TLS handshake, its own timeout expired, or this proxy ran into an error while still reading. None of them fails the step. Bytes this proxy would not read as a request are not among them: that is a refusal, and it is in Blocked Hosts.`
-	};
-}
-function describeFailedConnections(report, engineLabel) {
-	let count = report.failed.reduce((total, row) => total + row.count, 0);
-	if (count !== 0) return {
-		level: "notice",
-		shouldFail: !1,
-		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed under Failed Connections. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
-	};
-}
-function usesLine(actionRepo, actionRef, actionVersion) {
-	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
-}
-function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", actionVersion, runCommand } = {}) {
-	let yaml = `- name: ${stepName}\n`;
-	if (yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", runCommand) {
-		yaml += "    run: |\n";
-		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
-	}
-	return yaml;
-}
-function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
-	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "\n<details>\n";
-	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
-}
-//#endregion
-//#region src/core/lib/report/render/build-example.ts
-const ruleTypeToParam = {
-	HTTPS: "allowed_https_rules",
-	HTTP: "allowed_http_rules",
-	IP: "allowed_ip_rules"
-};
-function buildRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
-	if (!auditedRows || auditedRows.length === 0) return "";
-	let groups = new Map();
-	for (let r of auditedRows) {
-		let param = ruleTypeToParam[r.ruleType];
-		param && (groups.has(param) || groups.set(param, new Set()), groups.get(param).add(`${r.host}:${r.port}`));
-	}
-	if (groups.size === 0) return "";
-	let yaml = exampleStepHead(actionRepo, actionRef, step);
-	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: universal\n";
-	for (let [param, rules] of groups) {
-		yaml += `    ${param}: >-\n`;
-		for (let rule of rules) yaml += `      ${rule}\n`;
-	}
-	return restrictExampleBlock(yaml);
-}
-//#endregion
-//#region src/core/lib/report/render/fold-expected-blocked.ts
-function foldExpectedBlockedRows(rows) {
-	let unmatched = [], groups = new Map();
-	for (let row of rows) {
-		if (!row.expected || row.expectedBy === void 0) {
-			unmatched.push(row);
-			continue;
-		}
-		let key = `${row.expectedBy}\t${row.ruleType}\t${row.reason}`, group = groups.get(key);
-		group ? (group.hosts.add(row.host), group.count += row.count) : groups.set(key, {
-			rule: row.expectedBy,
-			ruleType: row.ruleType,
-			reason: row.reason,
-			hosts: new Set([row.host]),
-			count: row.count
-		});
-	}
-	let folded = [...groups.values()].sort(compareGroups).map(toRow);
-	return [...unmatched, ...folded];
-}
-function compareGroups(a, b) {
-	return b.count - a.count || (a.rule < b.rule ? -1 : +(a.rule > b.rule));
-}
-function toRow(group) {
-	return {
-		host: group.rule,
-		port: "-",
-		ruleType: group.ruleType,
-		reason: group.reason,
-		count: group.count,
-		expected: !0,
-		expectedBy: group.rule,
-		display: `${group.rule} (${group.hosts.size} host${group.hosts.size === 1 ? "" : "s"})`
-	};
-}
-//#endregion
-//#region src/core/lib/report/render/markdown-table.ts
-const ALIGN_MARKERS = {
-	left: "---",
-	right: "---:",
-	center: ":---:"
-}, alignMarker = (align) => ALIGN_MARKERS[align ?? "left"];
-function escapeCell(value) {
-	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
-}
-function markdownTable(formats, rows) {
-	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
-	for (let row of rows) {
-		let cells = formats.map((f) => escapeCell(row[f.key]));
-		lines.push(`| ${cells.join(" | ")} |`);
-	}
-	return lines.join("\n");
-}
-//#endregion
-//#region src/core/lib/report/render/host-table.ts
-function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
-	let formats = [{
-		key: "host",
-		title: "Host"
-	}, {
-		key: "ruleType",
-		title: "Rule"
-	}];
-	return showReason && formats.push({
-		key: "reason",
-		title: "Reason"
-	}), formats.push({
-		key: "count",
-		title: "Count",
-		align: "right"
-	}), showExpected && formats.push({
-		key: "expected",
-		title: "Expected",
-		align: "center"
-	}), markdownTable(formats, rows.map((r) => ({
-		host: r.display ?? (r.port === "-" ? r.host : `${r.host}:${r.port}`),
-		ruleType: r.ruleType,
-		reason: r.reason,
-		count: r.count,
-		expected: r.expected ? "✅" : ""
-	})));
-}
-//#endregion
-//#region src/core/lib/report/elapsed-time.ts
-function toParts(elapsedSeconds) {
-	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
-	return {
-		hours: Math.floor(totalMinutes / 60),
-		minutes,
-		seconds,
-		ms
-	};
-}
-function pad(n, width = 2) {
-	return String(n).padStart(width, "0");
-}
-function formatElapsedVariable(elapsedSeconds) {
-	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
-	return hours === 0 ? `${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
-}
-function formatElapsedFixed(elapsedSeconds) {
-	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
-	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
-}
-//#endregion
-//#region src/core/lib/report/render/communication-section.ts
-const COMMUNICATION_DETAILS_OPEN = "<details>\n<summary>💬 Communication details</summary>\n\n", COMMUNICATION_DETAILS_CLOSE = "</details>\n";
-function wrapCommunicationDetails(body) {
-	return `\n${COMMUNICATION_DETAILS_OPEN}${body}${COMMUNICATION_DETAILS_CLOSE}`;
-}
-//#endregion
-//#region src/core/lib/report/render/inspect-details.ts
-function renderInspectDetails(timeline, startedAt) {
-	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
-	return shown.length === 0 ? "" : wrapCommunicationDetails(`\`\`\`\n${shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n\n`);
-}
-const MARK = {
-	block: "🚫",
-	discovery: "ℹ️",
-	incomplete: "⚠️",
-	failed: "⚠️"
-};
-function renderEvent(event, startedAt) {
-	return `${MARK[event.action] ?? "✅"} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}`;
-}
-const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
-function credentialName(name) {
-	return name.toLowerCase().replace(/[-_]/g, "");
-}
-const PARAM_NAME = /(^|[;?])([^;?=]*)=/g;
-function redactPart(part) {
-	for (let match of part.matchAll(PARAM_NAME)) {
-		if (!CREDENTIAL_PARAMS.has(credentialName(match[2]))) continue;
-		let value = match.index + match[0].length;
-		return value === part.length ? part : `${part.slice(0, value)}***`;
-	}
-	return part;
-}
-function redactCredentialQuery(url) {
-	let start = url.indexOf("?");
-	if (start === -1) return url;
-	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map(redactPart).join("&");
-	return url.slice(0, start + 1) + query + url.slice(end);
-}
-function subject(event) {
-	if (event.queryType !== void 0) return `DNS ${event.queryType} ${event.host}`;
-	if (event.protocol === "dns") return `DNS ${event.host}`;
-	if (event.url === void 0) {
-		let authority = event.port === void 0 ? event.host : `${event.host}:${event.port}`, nameAndPort = `${event.protocol.toUpperCase()} ${authority}`;
-		return event.method === void 0 ? nameAndPort : `${event.method} ${nameAndPort}`;
-	}
-	return `${event.method} ${redactCredentialQuery(event.url)}`;
-}
-function outcome(event) {
-	if (event.action === "block") return event.reason ?? "blocked";
-	if (event.action === "incomplete") return event.reason ?? "no request";
-	if (event.action === "failed") return event.reason ?? "failed";
-	if (event.action === "discovery") return `no data (${event.queryType} is never served)`;
-	let parts = [];
-	return event.status !== void 0 && parts.push(String(event.status)), event.bytes !== void 0 && parts.push(`(${formatBytes(event.bytes)})`), parts.length > 0 ? parts.join(" ") : "resolved";
-}
-function formatTime(epochSeconds, startedAt) {
-	return startedAt === void 0 ? new Date(epochSeconds * 1e3).toISOString().slice(11, 23) + "Z" : formatElapsedVariable(epochSeconds - startedAt);
-}
-function formatBytes(bytes) {
-	return bytes < 1024 ? `${bytes}B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1048576).toFixed(1)}MB`;
-}
-//#endregion
-//#region src/core/lib/report/render/inspect-example.ts
-const METHOD_ORDER = [
-	"GET",
-	"HEAD",
-	"POST",
-	"PUT",
-	"PATCH",
-	"DELETE",
-	"OPTIONS"
-], LITERAL_METHOD = /^[A-Z]+$/, LITERAL_HOST = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
-function parseRequest(request) {
-	if (request.url === void 0 || request.method === void 0 || request.port === void 0) return null;
-	let match = /^(https?):\/\/([^/]*)([^?#]*)/.exec(request.url);
-	if (!match) return null;
-	let [, scheme, authority, target] = match, { host } = splitHostPort(authority), path = target || "/", part = LITERAL_METHOD.test(request.method) ? LITERAL_HOST.test(host) ? path.includes("*") ? "path" : void 0 : "host" : "method";
-	if (part) return {
-		method: request.method,
-		url: `${scheme}://${authority}${path}`,
-		part
-	};
-	let port = String(request.port);
-	return {
-		origin: port === DEFAULT_PORT[scheme] ? `${scheme}://${host}` : `${scheme}://${host}:${port}`,
-		method: request.method,
-		path
-	};
-}
-function commonPrefixSegments(paths) {
-	let split = paths.map((p) => p.split("/").slice(1)), prefix = split[0];
-	for (let segments of split.slice(1)) {
-		let i = 0;
-		for (; i < prefix.length && i < segments.length && prefix[i] === segments[i];) i++;
-		prefix = prefix.slice(0, i);
-	}
-	return prefix;
-}
-function pathPatternsFor(paths) {
-	let distinct = [...new Set(paths)].sort();
-	if (distinct.length === 0) return [];
-	if (distinct.length === 1) return distinct;
-	let prefix = commonPrefixSegments(distinct);
-	if (prefix.length === 0) return ["/**"];
-	let base = `/${prefix.join("/")}`, patterns = [`${base}/**`];
-	return distinct.includes(base) && patterns.unshift(base), patterns;
-}
-function sortMethods(methods) {
-	return [...new Set(methods)].sort((a, b) => {
-		let ai = METHOD_ORDER.indexOf(a), bi = METHOD_ORDER.indexOf(b);
-		return ai !== -1 && bi !== -1 ? ai - bi : ai === -1 ? bi === -1 && a < b ? -1 : 1 : -1;
-	});
-}
-function partitionRequests(requests) {
-	let writable = [], leftOut = new Map();
-	for (let request of requests) {
-		if (request.action === "block") continue;
-		let parsed = parseRequest(request);
-		parsed && ("part" in parsed ? leftOut.set(`${parsed.method} ${parsed.url}`, parsed) : writable.push(parsed));
-	}
-	return {
-		writable,
-		leftOut: [...leftOut.values()]
-	};
-}
-function ruleLinesFrom(requests) {
-	let byOriginMethod = new Map();
-	for (let parsed of requests) {
-		let key = `${parsed.origin}\t${parsed.method}`, group = byOriginMethod.get(key);
-		group ? group.paths.push(parsed.path) : byOriginMethod.set(key, {
-			origin: parsed.origin,
-			method: parsed.method,
-			paths: [parsed.path]
-		});
-	}
-	let byPattern = new Map();
-	for (let { origin, method, paths } of byOriginMethod.values()) for (let pattern of pathPatternsFor(paths)) {
-		let key = `${origin}\t${pattern}`, entry = byPattern.get(key);
-		entry ? entry.methods.push(method) : byPattern.set(key, {
-			origin,
-			pattern,
-			methods: [method]
-		});
-	}
-	return [...byPattern.values()].sort((a, b) => a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : a.pattern < b.pattern ? -1 : 1).map(({ origin, pattern, methods }) => `${sortMethods(methods).join("|")} ${origin}${pattern}`);
-}
-function leftOutSection(leftOut) {
-	let shown = leftOut.slice(0, 20), md = "Left out of the rules above: a rule would read part of each request as a pattern, and so permit more than was sent.\n\n";
-	return md += markdownTable([
-		{
-			key: "method",
-			title: "Method"
-		},
-		{
-			key: "url",
-			title: "URL"
-		},
-		{
-			key: "part",
-			title: "Read as a pattern"
-		}
-	], shown.map((r) => ({ ...r }))), md += "\n\n", leftOut.length > shown.length && (md += `…and ${leftOut.length - shown.length} more, listed in Communication details.\n\n`), md;
-}
-function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedIpRules = [], allowedTlsRules = [], ...step } = {}) {
-	let { writable, leftOut } = partitionRequests(requests ?? []), lines = ruleLinesFrom(writable);
-	if (lines.length === 0 && leftOut.length === 0 && allowedIpRules.length === 0 && allowedTlsRules.length === 0) return "";
-	let yaml = exampleStepHead(actionRepo, actionRef, step);
-	if (yaml += "    proxy_mode: restrict\n", lines.length > 0) {
-		yaml += "    allowed_url_rules: |\n";
-		for (let line of lines) yaml += `      ${line}\n`;
-	}
-	if (allowedTlsRules.length > 0) {
-		yaml += "    allowed_tls_rules: |\n";
-		for (let rule of allowedTlsRules) yaml += `      ${rule}\n`;
-	}
-	if (allowedIpRules.length > 0) {
-		yaml += "    allowed_ip_rules: |\n";
-		for (let rule of allowedIpRules) yaml += `      ${rule}\n`;
-	}
-	return restrictExampleBlock(yaml, {
-		appendix: leftOut.length > 0 ? leftOutSection(leftOut) : void 0,
-		footnote: "Permits exactly what this build did; a versioned or dated URL may drift."
-	});
-}
-//#endregion
-//#region src/core/lib/report/render/render-report-markdown.ts
-function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", ...step } = {}) {
-	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
-	if (report.logLooksPlausible || (markdown += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
-		...step,
-		allowedIpRules: report.parameters.allowedIpRules,
-		allowedTlsRules: report.parameters.allowedTlsRules
-	}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step)), report.blocked.length > 0) {
-		report.passed.length > 0 && (markdown += "\n");
-		let blocked = foldExpectedBlockedRows(report.blocked);
-		markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(blocked, {
-			showReason: !0,
-			showExpected
-		}) + "\n";
-	}
-	return report.failed.length > 0 && ((report.passed.length > 0 || report.blocked.length > 0) && (markdown += "\n"), markdown += "### ⚠️ Failed Connections\n\n" + renderHostTable(report.failed, { showReason: !0 }) + "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"), report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && (markdown += "_(no communication)_\n\n"), markdown += renderInspectDetails(report.timeline, report.startedAt), report.engine === "universal" && (markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), markdown += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, markdown += "\n<hr>\n", markdown;
-}
-//#endregion
-//#region src/core/lib/report/render/truncate-communication-details.ts
-const SAFETY_MARGIN_BYTES = 8192;
-function truncateForStepSummary(markdown, artifactAvailable, limitBytes = 1048576) {
-	if (Buffer.byteLength(markdown, "utf8") <= limitBytes - SAFETY_MARGIN_BYTES) return markdown;
-	let openAt = markdown.indexOf(COMMUNICATION_DETAILS_OPEN);
-	if (openAt === -1) return markdown;
-	let bodyStart = openAt + 55, closeAt = markdown.indexOf(COMMUNICATION_DETAILS_CLOSE, bodyStart);
-	if (closeAt === -1) return markdown;
-	let before = markdown.slice(0, bodyStart), body = markdown.slice(bodyStart, closeAt), after = markdown.slice(closeAt), note = truncationNote(artifactAvailable), fixedBytes = Buffer.byteLength(before, "utf8") + Buffer.byteLength(after, "utf8") + Buffer.byteLength(note, "utf8"), budget = Math.max(0, limitBytes - SAFETY_MARGIN_BYTES - fixedBytes), kept = "", usedBytes = 0, fenceOpen = !1;
-	for (let line of body.split("\n")) {
-		let withNewline = `${line}\n`, lineBytes = Buffer.byteLength(withNewline, "utf8");
-		if (usedBytes + lineBytes > budget) break;
-		kept += withNewline, usedBytes += lineBytes, line.trim().startsWith("```") && (fenceOpen = !fenceOpen);
-	}
-	return fenceOpen && (kept += "```\n"), before + kept + note + after;
-}
-function truncationNote(artifactAvailable) {
-	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
-}
-//#endregion
-//#region src/lib/report.ts
-const HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
-function createHostDocker() {
-	return createDocker((args) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
-		encoding: "utf8",
-		stdio: [
-			"ignore",
-			"pipe",
-			"pipe"
-		],
-		maxBuffer: 67108864,
-		env: hostCommandEnv("docker")
-	}), (args) => (0, node_child_process.spawn)(hostCommand("docker"), args, {
-		stdio: [
-			"ignore",
-			"pipe",
-			"pipe"
-		],
-		env: hostCommandEnv("docker")
-	}));
-}
-function fetchReport(containerName, parameters, proxyEngine) {
-	let docker = createHostDocker();
-	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName)) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName));
-}
-function readActionVersion(containerName, proxyEngine, docker) {
-	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
-}
-function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, actionVersion }) {
-	let emissions = describeReportOutcomes(report, {
-		failOnBlocked: failOnBlocked ?? !1,
-		engineLabel: "sandbox"
-	});
-	return {
-		markdown: renderReportMarkdown(report, actionRepo, actionRef, {
-			title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
-			stepName: "Start isolated-run",
-			runCommand,
-			actionVersion
-		}),
-		emissions
-	};
-}
-async function writeReportSummary(report, annotation, options, artifactAvailable, env, { appendFile = node_fs.appendFileSync } = {}) {
-	let outcomes = computeReportOutcomes(report, options);
-	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeStepSummary(truncateForStepSummary(outcomes.markdown, artifactAvailable), env.GITHUB_STEP_SUMMARY);
-}
-//#endregion
-//#region src/core/lib/report/outcome/traffic-output.ts
-function buildTrafficRecords(events, startedAt) {
-	return [...events].sort((a, b) => a.time - b.time).map((e) => {
-		let record = {
-			time: new Date(e.time * 1e3).toISOString(),
-			action: e.action,
-			protocol: e.protocol,
-			host: e.host
-		};
-		return startedAt !== void 0 && (record.elapsed = formatElapsedFixed(e.time - startedAt)), e.port !== void 0 && (record.port = e.port), e.queryType !== void 0 && (record.queryType = e.queryType), e.method !== void 0 && (record.method = e.method), e.url !== void 0 && (record.url = e.url), e.status !== void 0 && (record.status = e.status), e.bytes !== void 0 && (record.bytes = e.bytes), e.reason !== void 0 && (record.reason = e.reason), e.destination !== void 0 && (record.destination = e.destination), record;
-	});
-}
-function writeTrafficFile(path, records) {
-	(0, node_fs.writeFileSync)(path, JSON.stringify(records, null, 2) + "\n");
 }
 //#endregion
 //#region node_modules/.pnpm/@actions+artifact@6.2.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/config.js
@@ -46471,7 +42601,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 			} }
 		}
 	};
-})), contentType, blobServiceProperties, accept, url, restype, comp, timeoutInSeconds, version, requestId, accept1, comp1, comp2, prefix, marker, maxPageSize, include, keyInfo, comp3, restype1, body, comp4, contentLength, multipartContentType, comp5, where, restype2, metadata, access, defaultEncryptionScope, preventEncryptionScopeOverride, leaseId, ifModifiedSince, ifUnmodifiedSince, comp6, comp7, containerAcl, comp8, deletedContainerName, deletedContainerVersion, comp9, sourceContainerName, sourceLeaseId, comp10, action, duration, proposedLeaseId, action1, leaseId1, action2, action3, breakPeriod, action4, proposedLeaseId1, include1, startFrom, delimiter, snapshot, versionId, range, rangeGetContentMD5, rangeGetContentCRC64, structuredBodyType, encryptionKey, encryptionKeySha256, encryptionAlgorithm, ifMatch, ifNoneMatch, ifTags, deleteSnapshots, blobDeleteType, accessTierIfModifiedSince, accessTierIfUnmodifiedSince, comp11, expiryOptions, expiresOn, blobCacheControl, blobContentType, blobContentMD5, blobContentEncoding, blobContentLanguage, blobContentDisposition, comp12, immutabilityPolicyExpiry, immutabilityPolicyMode, comp13, legalHold, encryptionScope, comp14, tier, rehydratePriority, sourceIfModifiedSince, sourceIfUnmodifiedSince, sourceIfMatch, sourceIfNoneMatch, sourceIfTags, copySource, blobTagsString, sealBlob, legalHold1, xMsRequiresSync, sourceContentMD5, copySourceAuthorization, copySourceTags, fileRequestIntent, comp15, copyActionAbortConstant, copyId, comp16, tier1, queryRequest, comp17, comp18, ifModifiedSince1, ifUnmodifiedSince1, ifMatch1, ifNoneMatch1, tags, transactionalContentMD5, transactionalContentCrc64, blobType, blobContentLength, blobSequenceNumber, contentType1, body1, accept2, comp19, pageWrite, ifSequenceNumberLessThanOrEqualTo, ifSequenceNumberLessThan, ifSequenceNumberEqualTo, structuredContentLength, pageWrite1, sourceUrl, sourceRange, sourceContentCrc64, range1, sourceEncryptionKey, sourceEncryptionKeySha256, sourceEncryptionAlgorithm, comp20, prevsnapshot, prevSnapshotUrl, sequenceNumberAction, comp21, blobType1, comp22, maxSize, appendPosition, sourceRange1, comp23, blobType2, copySourceBlobProperties, comp24, blockId, blocks, comp25, listType, init_parameters = __esmMin((() => {
+})), contentType, blobServiceProperties, accept, url, restype, comp, timeoutInSeconds, version, requestId, accept1, comp1, comp2, prefix, marker, maxPageSize, include, keyInfo, comp3, restype1, body, comp4, contentLength, multipartContentType, comp5, where, restype2, metadata, access, defaultEncryptionScope, preventEncryptionScopeOverride, leaseId, ifModifiedSince, ifUnmodifiedSince, comp6, comp7, containerAcl, comp8, deletedContainerName, deletedContainerVersion, comp9, sourceContainerName, sourceLeaseId, comp10, action, duration, proposedLeaseId, action1, leaseId1, action2, action3, breakPeriod, action4, proposedLeaseId1, include1, startFrom, delimiter$1, snapshot, versionId, range, rangeGetContentMD5, rangeGetContentCRC64, structuredBodyType, encryptionKey, encryptionKeySha256, encryptionAlgorithm, ifMatch, ifNoneMatch, ifTags, deleteSnapshots, blobDeleteType, accessTierIfModifiedSince, accessTierIfUnmodifiedSince, comp11, expiryOptions, expiresOn, blobCacheControl, blobContentType, blobContentMD5, blobContentEncoding, blobContentLanguage, blobContentDisposition, comp12, immutabilityPolicyExpiry, immutabilityPolicyMode, comp13, legalHold, encryptionScope, comp14, tier, rehydratePriority, sourceIfModifiedSince, sourceIfUnmodifiedSince, sourceIfMatch, sourceIfNoneMatch, sourceIfTags, copySource, blobTagsString, sealBlob, legalHold1, xMsRequiresSync, sourceContentMD5, copySourceAuthorization, copySourceTags, fileRequestIntent, comp15, copyActionAbortConstant, copyId, comp16, tier1, queryRequest, comp17, comp18, ifModifiedSince1, ifUnmodifiedSince1, ifMatch1, ifNoneMatch1, tags, transactionalContentMD5, transactionalContentCrc64, blobType, blobContentLength, blobSequenceNumber, contentType1, body1, accept2, comp19, pageWrite, ifSequenceNumberLessThanOrEqualTo, ifSequenceNumberLessThan, ifSequenceNumberEqualTo, structuredContentLength, pageWrite1, sourceUrl, sourceRange, sourceContentCrc64, range1, sourceEncryptionKey, sourceEncryptionKeySha256, sourceEncryptionAlgorithm, comp20, prevsnapshot, prevSnapshotUrl, sequenceNumberAction, comp21, blobType1, comp22, maxSize, appendPosition, sourceRange1, comp23, blobType2, copySourceBlobProperties, comp24, blockId, blocks, comp25, listType, init_parameters = __esmMin((() => {
 	init_mappers(), contentType = {
 		parameterPath: ["options", "contentType"],
 		mapper: {
@@ -46948,7 +43078,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 			xmlName: "startFrom",
 			type: { name: "String" }
 		}
-	}, delimiter = {
+	}, delimiter$1 = {
 		parameterPath: "delimiter",
 		mapper: {
 			serializedName: "delimiter",
@@ -48683,7 +44813,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 			restype2,
 			include1,
 			startFrom,
-			delimiter
+			delimiter$1
 		],
 		urlParameters: [url],
 		headerParameters: [
@@ -54109,7 +50239,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 	minimatch.Minimatch = Minimatch;
 })), require_readdir_glob = __commonJSMin(((exports, module) => {
 	module.exports = readdirGlob;
-	let fs$6 = require("fs"), { EventEmitter: EventEmitter$2 } = require("events"), { Minimatch } = require_minimatch(), { resolve } = require("path");
+	let fs$6 = require("fs"), { EventEmitter: EventEmitter$2 } = require("events"), { Minimatch } = require_minimatch(), { resolve: resolve$2 } = require("path");
 	function readdir(dir, strict) {
 		return new Promise((resolve, reject) => {
 			fs$6.readdir(dir, { withFileTypes: !0 }, (err, files) => {
@@ -54198,7 +50328,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 				let skipPatterns = Array.isArray(this.options.skip) ? this.options.skip : [this.options.skip];
 				this.skipMatchers = skipPatterns.map((skip) => new Minimatch(skip, { dot: !0 }));
 			}
-			this.iterator = explore(resolve(cwd || "."), this.options.follow, this.options.stat, this._shouldSkipDirectory.bind(this)), this.paused = !1, this.inactive = !1, this.aborted = !1, cb && (this._matches = [], this.on("match", (match) => this._matches.push(this.options.absolute ? match.absolute : match.relative)), this.on("error", (err) => cb(err)), this.on("end", () => cb(null, this._matches))), setTimeout(() => this._next(), 0);
+			this.iterator = explore(resolve$2(cwd || "."), this.options.follow, this.options.stat, this._shouldSkipDirectory.bind(this)), this.paused = !1, this.inactive = !1, this.aborted = !1, cb && (this._matches = [], this.on("match", (match) => this._matches.push(this.options.absolute ? match.absolute : match.relative)), this.on("error", (err) => cb(err)), this.on("end", () => cb(null, this._matches))), setTimeout(() => this._next(), 0);
 		}
 		_shouldSkipDirectory(relative) {
 			return this.skipMatchers.some((m) => m.match(relative));
@@ -55474,7 +51604,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		exports$1.all = every$1, exports$1.allLimit = everyLimit$1, exports$1.allSeries = everySeries$1, exports$1.any = some$1, exports$1.anyLimit = someLimit$1, exports$1.anySeries = someSeries$1, exports$1.apply = apply, exports$1.applyEach = applyEach, exports$1.applyEachSeries = applyEachSeries, exports$1.asyncify = asyncify, exports$1.auto = auto, exports$1.autoInject = autoInject, exports$1.cargo = cargo$1, exports$1.cargoQueue = cargo, exports$1.compose = compose, exports$1.concat = concat$1, exports$1.concatLimit = concatLimit$1, exports$1.concatSeries = concatSeries$1, exports$1.constant = constant$1, exports$1.default = index, exports$1.detect = detect$1, exports$1.detectLimit = detectLimit$1, exports$1.detectSeries = detectSeries$1, exports$1.dir = dir, exports$1.doDuring = doWhilst$1, exports$1.doUntil = doUntil, exports$1.doWhilst = doWhilst$1, exports$1.during = whilst$1, exports$1.each = each, exports$1.eachLimit = eachLimit$1, exports$1.eachOf = eachOf$1, exports$1.eachOfLimit = eachOfLimit$1, exports$1.eachOfSeries = eachOfSeries$1, exports$1.eachSeries = eachSeries$1, exports$1.ensureAsync = ensureAsync, exports$1.every = every$1, exports$1.everyLimit = everyLimit$1, exports$1.everySeries = everySeries$1, exports$1.filter = filter$1, exports$1.filterLimit = filterLimit$1, exports$1.filterSeries = filterSeries$1, exports$1.find = detect$1, exports$1.findLimit = detectLimit$1, exports$1.findSeries = detectSeries$1, exports$1.flatMap = concat$1, exports$1.flatMapLimit = concatLimit$1, exports$1.flatMapSeries = concatSeries$1, exports$1.foldl = reduce$1, exports$1.foldr = reduceRight, exports$1.forEach = each, exports$1.forEachLimit = eachLimit$1, exports$1.forEachOf = eachOf$1, exports$1.forEachOfLimit = eachOfLimit$1, exports$1.forEachOfSeries = eachOfSeries$1, exports$1.forEachSeries = eachSeries$1, exports$1.forever = forever$1, exports$1.groupBy = groupBy, exports$1.groupByLimit = groupByLimit$1, exports$1.groupBySeries = groupBySeries, exports$1.inject = reduce$1, exports$1.log = log, exports$1.map = map$1, exports$1.mapLimit = mapLimit$1, exports$1.mapSeries = mapSeries$1, exports$1.mapValues = mapValues, exports$1.mapValuesLimit = mapValuesLimit$1, exports$1.mapValuesSeries = mapValuesSeries, exports$1.memoize = memoize, exports$1.nextTick = nextTick, exports$1.parallel = parallel, exports$1.parallelLimit = parallelLimit, exports$1.priorityQueue = priorityQueue, exports$1.queue = queue, exports$1.race = race$1, exports$1.reduce = reduce$1, exports$1.reduceRight = reduceRight, exports$1.reflect = reflect, exports$1.reflectAll = reflectAll, exports$1.reject = reject$1, exports$1.rejectLimit = rejectLimit$1, exports$1.rejectSeries = rejectSeries$1, exports$1.retry = retry, exports$1.retryable = retryable, exports$1.select = filter$1, exports$1.selectLimit = filterLimit$1, exports$1.selectSeries = filterSeries$1, exports$1.seq = seq, exports$1.series = series, exports$1.setImmediate = setImmediate$1, exports$1.some = some$1, exports$1.someLimit = someLimit$1, exports$1.someSeries = someSeries$1, exports$1.sortBy = sortBy$1, exports$1.timeout = timeout, exports$1.times = times, exports$1.timesLimit = timesLimit, exports$1.timesSeries = timesSeries, exports$1.transform = transform, exports$1.tryEach = tryEach$1, exports$1.unmemoize = unmemoize, exports$1.until = until, exports$1.waterfall = waterfall$1, exports$1.whilst = whilst$1, exports$1.wrapSync = asyncify, Object.defineProperty(exports$1, "__esModule", { value: !0 });
 	}));
 })), require_polyfills = __commonJSMin(((exports, module) => {
-	var constants = require("constants"), origCwd = process.cwd, cwd = null, platform = process.env.GRACEFUL_FS_PLATFORM || process.platform;
+	var constants$4 = require("constants"), origCwd = process.cwd, cwd = null, platform = process.env.GRACEFUL_FS_PLATFORM || process.platform;
 	process.cwd = function() {
 		return cwd ||= origCwd.call(process), cwd;
 	};
@@ -55489,7 +51619,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 	}
 	module.exports = patch;
 	function patch(fs) {
-		constants.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./) && patchLchmod(fs), fs.lutimes || patchLutimes(fs), fs.chown = chownFix(fs.chown), fs.fchown = chownFix(fs.fchown), fs.lchown = chownFix(fs.lchown), fs.chmod = chmodFix(fs.chmod), fs.fchmod = chmodFix(fs.fchmod), fs.lchmod = chmodFix(fs.lchmod), fs.chownSync = chownFixSync(fs.chownSync), fs.fchownSync = chownFixSync(fs.fchownSync), fs.lchownSync = chownFixSync(fs.lchownSync), fs.chmodSync = chmodFixSync(fs.chmodSync), fs.fchmodSync = chmodFixSync(fs.fchmodSync), fs.lchmodSync = chmodFixSync(fs.lchmodSync), fs.stat = statFix(fs.stat), fs.fstat = statFix(fs.fstat), fs.lstat = statFix(fs.lstat), fs.statSync = statFixSync(fs.statSync), fs.fstatSync = statFixSync(fs.fstatSync), fs.lstatSync = statFixSync(fs.lstatSync), fs.chmod && !fs.lchmod && (fs.lchmod = function(path, mode, cb) {
+		constants$4.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./) && patchLchmod(fs), fs.lutimes || patchLutimes(fs), fs.chown = chownFix(fs.chown), fs.fchown = chownFix(fs.fchown), fs.lchown = chownFix(fs.lchown), fs.chmod = chmodFix(fs.chmod), fs.fchmod = chmodFix(fs.fchmod), fs.lchmod = chmodFix(fs.lchmod), fs.chownSync = chownFixSync(fs.chownSync), fs.fchownSync = chownFixSync(fs.fchownSync), fs.lchownSync = chownFixSync(fs.lchownSync), fs.chmodSync = chmodFixSync(fs.chmodSync), fs.fchmodSync = chmodFixSync(fs.fchmodSync), fs.lchmodSync = chmodFixSync(fs.lchmodSync), fs.stat = statFix(fs.stat), fs.fstat = statFix(fs.fstat), fs.lstat = statFix(fs.lstat), fs.statSync = statFixSync(fs.statSync), fs.fstatSync = statFixSync(fs.fstatSync), fs.lstatSync = statFixSync(fs.lstatSync), fs.chmod && !fs.lchmod && (fs.lchmod = function(path, mode, cb) {
 			cb && process.nextTick(cb);
 		}, fs.lchmodSync = function() {}), fs.chown && !fs.lchown && (fs.lchown = function(path, uid, gid, cb) {
 			cb && process.nextTick(cb);
@@ -55537,7 +51667,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		})(fs.readSync) : fs.readSync;
 		function patchLchmod(fs) {
 			fs.lchmod = function(path, mode, callback) {
-				fs.open(path, constants.O_WRONLY | constants.O_SYMLINK, mode, function(err, fd) {
+				fs.open(path, constants$4.O_WRONLY | constants$4.O_SYMLINK, mode, function(err, fd) {
 					if (err) {
 						callback && callback(err);
 						return;
@@ -55549,7 +51679,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 					});
 				});
 			}, fs.lchmodSync = function(path, mode) {
-				var fd = fs.openSync(path, constants.O_WRONLY | constants.O_SYMLINK, mode), threw = !0, ret;
+				var fd = fs.openSync(path, constants$4.O_WRONLY | constants$4.O_SYMLINK, mode), threw = !0, ret;
 				try {
 					ret = fs.fchmodSync(fd, mode), threw = !1;
 				} finally {
@@ -55562,8 +51692,8 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 			};
 		}
 		function patchLutimes(fs) {
-			constants.hasOwnProperty("O_SYMLINK") && fs.futimes ? (fs.lutimes = function(path, at, mt, cb) {
-				fs.open(path, constants.O_SYMLINK, function(er, fd) {
+			constants$4.hasOwnProperty("O_SYMLINK") && fs.futimes ? (fs.lutimes = function(path, at, mt, cb) {
+				fs.open(path, constants$4.O_SYMLINK, function(er, fd) {
 					if (er) {
 						cb && cb(er);
 						return;
@@ -55575,7 +51705,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 					});
 				});
 			}, fs.lutimesSync = function(path, at, mt) {
-				var fd = fs.openSync(path, constants.O_SYMLINK), ret, threw = !0;
+				var fd = fs.openSync(path, constants$4.O_SYMLINK), ret, threw = !0;
 				try {
 					ret = fs.futimesSync(fd, at, mt), threw = !1;
 				} finally {
@@ -72148,6 +68278,4106 @@ If the error persists, please check whether Actions and API requests are operati
 	init_client(), init_interfaces(), init_errors(), init_client(), client = new DefaultArtifactClient();
 }));
 //#endregion
+//#region src/lib/filesystem-audit-artifact.ts
+init_core();
+function filesystemAuditArtifactName(containerName) {
+	return `buildcage-filesystem-audit-${containerName.split("-").at(-1)}`;
+}
+const uploadViaActionsArtifact$1 = async (name, files, rootDirectory, options) => {
+	let { DefaultArtifactClient } = await Promise.resolve().then(() => (init_artifact(), artifact_exports));
+	return new DefaultArtifactClient().uploadArtifact(name, files, rootDirectory, options);
+};
+async function uploadFilesystemAuditArtifact(outPath, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact$1 } = {}) {
+	try {
+		let name = filesystemAuditArtifactName(containerName);
+		return await upload(name, [outPath], (0, node_path.dirname)(outPath), { retentionDays }), console.log(`Uploaded the filesystem audit as ${name}`), name;
+	} catch (e) {
+		annotation.warning(`Could not upload the filesystem audit artifact: ${errorMessage(e)}`);
+		return;
+	}
+}
+function setFilesystemAuditOutput(name) {
+	setOutput("filesystem_audit_artifact_name", name);
+}
+//#endregion
+//#region src/lib/filesystem-audit-summary.ts
+const LETTER = {
+	read: "R",
+	write: "W",
+	exec: "X",
+	mkdir: "W",
+	truncate: "W",
+	symlink: "W",
+	link: "W",
+	rename: "M",
+	unlink: "D",
+	rmdir: "D",
+	chmod: "A",
+	chown: "A",
+	attr: "A"
+}, FAILED_LETTER = {
+	delete: "D",
+	rename: "M",
+	chmod: "A",
+	chown: "A",
+	attr: "A"
+}, PERM_ERRNO = new Set([
+	1,
+	13,
+	30
+]);
+function classify(r) {
+	let letter, path = r.path, failed = !1;
+	return r.kind === "open-failed" ? (letter = "R", failed = !0) : r.failed ? (letter = FAILED_LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : r.kind === "link" ? (letter = "W", path = r.to) : letter = LETTER[r.kind], letter && path ? {
+		letter,
+		path,
+		failed
+	} : void 0;
+}
+function normalize$2(path) {
+	return path.replace(/^\/proc\/\d+\//, "/proc/<pid>/");
+}
+function relativize(path, prefixes) {
+	for (let ws of prefixes.workspace) {
+		if (path === ws) return ".";
+		if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
+	}
+	for (let home of prefixes.home) {
+		if (path === home) return "~";
+		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
+	}
+	return path;
+}
+function sortKey(path) {
+	return path === "." || path.startsWith("./") ? [0, path] : path === "~" || path.startsWith("~/") ? [1, path] : [2, path];
+}
+function addFlag(m, key, flag) {
+	let set = m.get(key);
+	set || m.set(key, set = new Set()), set.add(flag);
+}
+function collapse(paths, fanout, keep) {
+	let children = new Map();
+	for (let p of paths) {
+		let parts = p.split("/");
+		for (let i = 1; i < parts.length; i++) addFlag(children, parts.slice(0, i).join("/") || "/", parts[i]);
+	}
+	let shown = new Map();
+	for (let p of paths) {
+		let parts = p.split("/"), line = p;
+		for (let i = 1; i < parts.length; i++) {
+			let d = parts.slice(0, i).join("/") || "/";
+			if (!keep.has(d) && children.get(d).size >= fanout) {
+				line = `${d}/**`;
+				break;
+			}
+		}
+		shown.set(p, line);
+	}
+	let collapsed = new Set();
+	for (let line of shown.values()) line.endsWith("/**") && collapsed.add(line.slice(0, -3));
+	for (let [p, line] of shown) collapsed.has(line) && shown.set(p, `${line}/**`);
+	return shown;
+}
+function fmtFlags(ok, failed, perm) {
+	let out = "";
+	for (let c of "RWXMDA") ok.has(c) ? out += c : failed.has(c) && (out += c.toLowerCase() + (perm.has(c) ? "!" : ""));
+	return out;
+}
+const HEADING = "### Filesystem audit (experimental)";
+function renderFilesystemAuditSummary(jsonl, prefixes) {
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set();
+	for (let line of jsonl.split("\n")) {
+		if (!line) continue;
+		let r;
+		try {
+			r = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (r.kind === "mmap" && r.access === "x") {
+			r.path && libs.add(r.path);
+			continue;
+		}
+		r.kind === "exec" && r.path && execd.add(r.path);
+		let c = classify(r);
+		c && (c.failed ? (addFlag(failed, c.path, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, c.path, c.letter)) : addFlag(ok, c.path, c.letter));
+	}
+	for (let p of [
+		...libs,
+		...execd,
+		"/etc/ld.so.cache"
+	]) ok.get(p)?.delete("R");
+	let nok = new Map(), nfailed = new Map(), nperm = new Map(), mergeInto = (dst, src) => {
+		for (let [p, set] of src) {
+			if (!p.startsWith("/") && !p.startsWith("…/")) continue;
+			let np = normalize$2(p), dstSet = dst.get(np);
+			dstSet || dst.set(np, dstSet = new Set());
+			for (let c of set) dstSet.add(c);
+		}
+	};
+	mergeInto(nok, ok), mergeInto(nfailed, failed), mergeInto(nperm, perm);
+	let keep = new Set([
+		"/",
+		"/home",
+		"/tmp",
+		"/proc",
+		"/proc/<pid>",
+		...prefixes.workspace,
+		...prefixes.home
+	]), shown = collapse(new Set([...nok.keys(), ...nfailed.keys()]), fanout, keep), lineOk = new Map(), lineFailed = new Map(), linePerm = new Map(), union = (dst, line, src) => {
+		if (src) for (let c of src) addFlag(dst, line, c);
+	};
+	for (let [p, line] of shown) union(lineOk, line, nok.get(p)), union(lineFailed, line, nfailed.get(p)), union(linePerm, line, nperm.get(p));
+	let lines = new Set(shown.values()), base = (l) => l.endsWith("/**") ? l.slice(0, -3) : l;
+	for (let l of lines) {
+		if (l.endsWith("/**")) continue;
+		let prefix = `${base(l)}/`, hasDesc = !1, descFlags = new Set();
+		for (let d of lines) if (d !== l && base(d).startsWith(prefix)) {
+			hasDesc = !0;
+			for (let c of lineOk.get(d) ?? []) descFlags.add(c);
+			for (let c of lineFailed.get(d) ?? []) descFlags.add(c);
+		}
+		let flags = new Set([...lineOk.get(l) ?? [], ...lineFailed.get(l) ?? []]);
+		hasDesc && [...flags].every((c) => descFlags.has(c)) && lines.delete(l);
+	}
+	let rows = [];
+	for (let line of lines) {
+		let o = lineOk.get(line) ?? new Set(), fl = new Set([...lineFailed.get(line) ?? []].filter((c) => !o.has(c))), flags = fmtFlags(o, fl, new Set([...linePerm.get(line) ?? []].filter((c) => fl.has(c))));
+		flags && rows.push([relativize(line, prefixes), flags]);
+	}
+	if (rows.sort((a, b) => {
+		let [ca, pa] = sortKey(a[0]), [cb, pb] = sortKey(b[0]);
+		return ca - cb || (pa < pb ? -1 : 1);
+	}), rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
+	let body = rows.map(([path, flags]) => `\`${flags}\` ${path}`).join("\n");
+	return `${HEADING}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = permission denied</sub>\n\n${body}\n`;
+}
+//#endregion
+//#region src/lib/filesystem-audit-report.ts
+const realDeps$3 = {
+	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
+	realpath: (path) => (0, node_fs.realpathSync)(path),
+	writeStepSummary,
+	uploadArtifact: uploadFilesystemAuditArtifact,
+	setOutput: setFilesystemAuditOutput,
+	appendFile: (path, content) => (0, node_fs.appendFileSync)(path, content)
+};
+function prefixes(value, realpath) {
+	if (!value) return [];
+	let out = [value];
+	try {
+		let real = realpath(value);
+		real !== value && out.push(real);
+	} catch {}
+	return out;
+}
+async function reportStepFilesystemAudit({ audit, retentionDays, containerName, annotation, env }, overrides = {}) {
+	let deps = {
+		...realDeps$3,
+		...overrides
+	}, artifactName = "", jsonl = audit && readOptional(audit.outPath, deps.readFile);
+	if (audit && jsonl) {
+		try {
+			let markdown = renderFilesystemAuditSummary(jsonl, {
+				workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
+				home: prefixes(env.HOME, deps.realpath)
+			});
+			await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY), deps.appendFile;
+		} catch (e) {
+			annotation.warning(`Failed to write the filesystem audit summary: ${errorMessage(e)}`);
+		}
+		artifactName = await deps.uploadArtifact(audit.outPath, containerName, retentionDays, annotation) ?? "";
+	}
+	deps.setOutput(artifactName);
+}
+function readOptional(path, readFile) {
+	try {
+		return readFile(path) || void 0;
+	} catch {
+		return;
+	}
+}
+//#endregion
+//#region src/lib/filesystem-audit-mode.ts
+const FILESYSTEM_AUDIT = ["off", "record"];
+function resolveFilesystemAudit(input) {
+	let trimmed = input?.trim() || "off";
+	if (!FILESYSTEM_AUDIT.includes(trimmed)) throw new SandboxError(`Invalid filesystem_audit: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_AUDIT.join(", ")}.`, "INVALID_FILESYSTEM_AUDIT");
+	return trimmed;
+}
+//#endregion
+//#region src/lib/filesystem-mode.ts
+const FILESYSTEM_MODES = ["persistent", "ephemeral"];
+function resolveFilesystemMode(input) {
+	let trimmed = input?.trim() || "persistent";
+	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem_mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
+	return trimmed;
+}
+//#endregion
+//#region src/lib/inputs.ts
+init_core();
+const LIST_INPUTS = [
+	"allowed_https_rules",
+	"allowed_http_rules",
+	"allowed_ip_rules",
+	"allowed_url_rules",
+	"allowed_tls_rules",
+	"known_blocked_rules",
+	"write_through"
+], CONFIG_FILE_INPUTS = {
+	known: [
+		"proxy_mode",
+		"proxy_engine",
+		...LIST_INPUTS,
+		"upload_traffic_artifact",
+		"traffic_artifact_retention_days",
+		"fail_on_blocked",
+		"fail_on_ca_residue",
+		"filesystem_mode",
+		"filesystem_audit",
+		"filesystem_audit_retention_days",
+		"label"
+	],
+	lists: LIST_INPUTS
+};
+function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, notice) {
+	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
+	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
+}
+function readRunCommand(getInput$4 = getInput) {
+	let runInput = getInput$4("run", { trimWhitespace: !1 });
+	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
+	return runInput;
+}
+function readProxyInputs(getInput$3 = getInput) {
+	return {
+		proxyEngine: resolveProxyEngine(getInput$3("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$3("proxy_mode"))
+	};
+}
+function readFilesystemInputs(notice, getInput$8 = getInput) {
+	return {
+		filesystemMode: resolveFilesystemMode(getInput$8("filesystem_mode")),
+		writeThroughInput: resolveWriteThroughInput$1({
+			writeThrough: getInput$8("write_through"),
+			writable: getInput$8("writable"),
+			allowWrite: getInput$8("allow_write")
+		}, notice)
+	};
+}
+function readFilesystemAuditInput(getInput$7 = getInput) {
+	return resolveFilesystemAudit(getInput$7("filesystem_audit"));
+}
+function readFilesystemAuditRetentionDays(getInput$1 = getInput) {
+	let days = getInput$1("filesystem_audit_retention_days");
+	if (days !== "") {
+		if (!/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
+		return Number(days);
+	}
+}
+function readStepLabel(getInput$6 = getInput) {
+	return getInput$6("label") || void 0;
+}
+function readFailOnCaResidue(getInput$2 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$2);
+}
+function readFailOnBlocked(getInput$5 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$5);
+}
+//#endregion
+//#region src/lib/retry-briefly.ts
+function retryBriefly(fn, options = {}) {
+	let { attempts = 5, delayMs = 200, retryOn = () => !0 } = options;
+	for (let attempt = 1;; attempt++) try {
+		return fn();
+	} catch (e) {
+		if (attempt >= attempts || !retryOn(e)) throw e;
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+	}
+}
+//#endregion
+//#region src/lib/sandbox/mountinfo.ts
+function parseMountinfo(mountinfoContent) {
+	return mountinfoContent.split("\n").filter(Boolean).map((line) => {
+		let fields = line.split(" "), dashIndex = fields.indexOf("-"), superOptions = unescapeField(fields[dashIndex + 3]);
+		return {
+			mountPoint: unescapeField(fields[4]),
+			fsType: unescapeField(fields[dashIndex + 1]),
+			superOptions: superOptions ? superOptions.split(",") : [],
+			device: unescapeField(fields[2]),
+			root: unescapeField(fields[3])
+		};
+	});
+}
+function unescapeField(field) {
+	return (field ?? "").replace(/\\([0-7]{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)));
+}
+function listHostMounts() {
+	return parseMountinfo((0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8"));
+}
+//#endregion
+//#region src/lib/sandbox/run-host-command.ts
+function runPinnedHostCommand(command, args) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
+}
+//#endregion
+//#region src/lib/sandbox/scratch-dir.ts
+const SANDBOX_SCRATCH_BASE = `/var/tmp/buildcage-${process.getuid()}`;
+function checkScratchBaseParent(realpath = node_fs.realpathSync) {
+	let parent = (0, node_path.dirname)(SANDBOX_SCRATCH_BASE), real;
+	try {
+		real = realpath(parent);
+	} catch {
+		return;
+	}
+	if (real !== parent) throw new SandboxError(`${parent} resolves to ${real} through a symlink, and the sandbox cannot be set up under a path that goes through one. Replace that symlink, at ${parent} or on the way to it, with a real directory.`, "SCRATCH_BASE_SYMLINKED");
+}
+function parseMountsUnder(mountinfoContent, dir) {
+	let prefix = dir.endsWith("/") ? dir : `${dir}/`;
+	return parseMountinfo(mountinfoContent).map(({ mountPoint }) => mountPoint).filter((mountPoint) => mountPoint === dir || mountPoint.startsWith(prefix)).sort((a, b) => b.length - a.length);
+}
+function defaultReadMountinfo() {
+	return (0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8");
+}
+function defaultRemove$1(path) {
+	(0, node_fs.rmSync)(path, {
+		recursive: !0,
+		force: !0
+	});
+}
+function defaultMkdir$2(path, mode) {
+	(0, node_fs.mkdirSync)(path, { mode });
+}
+function unmountAllUnder(dir, deps, warn) {
+	let { readMountinfo = defaultReadMountinfo, exec = runPinnedHostCommand } = deps, mountPoints;
+	try {
+		mountPoints = parseMountsUnder(readMountinfo(), dir);
+	} catch {
+		return;
+	}
+	for (let mountPoint of mountPoints) try {
+		exec("sudo", [
+			"umount",
+			"-R",
+			"-l",
+			mountPoint
+		]);
+	} catch (e) {
+		warn?.(`Failed to unmount ${mountPoint} before cleanup: ${errorMessage(e)}`);
+	}
+}
+function removeScratchDir(dir, deps) {
+	let { exec = runPinnedHostCommand, lstat = node_fs.lstatSync, remove = defaultRemove$1 } = deps;
+	retryBriefly(() => {
+		try {
+			remove(dir);
+		} catch (e) {
+			if (e.code !== "EACCES") throw e;
+			let st = lstat(dir);
+			if (!st.isDirectory() || st.uid !== process.getuid()) throw new SandboxError(`Refusing to sudo rm -rf ${dir}: not a directory owned by uid ${process.getuid()}.`, "SCRATCH_DIR_UNSAFE");
+			exec("sudo", [
+				"-n",
+				"rm",
+				"-rf",
+				dir
+			]);
+		}
+	}, { retryOn: (e) => e.code === "EBUSY" });
+}
+function cleanupScratchDir(dir, { ephemeralRoots, warn } = {}, deps = {}) {
+	assertUnderScratchBase(dir), ephemeralRoots && ephemeralRoots.length > 0 && console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`), unmountAllUnder(dir, deps, warn), removeScratchDir(dir, deps);
+}
+function assertUnderScratchBase(dir) {
+	let abs = (0, node_path.resolve)(dir);
+	if ((0, node_path.dirname)(abs) !== SANDBOX_SCRATCH_BASE || !/^sandbox-[A-Za-z0-9]+$/.test((0, node_path.basename)(abs))) throw new SandboxError(`Refusing to clean up ${JSON.stringify(dir)}: not a scratch dir under ${SANDBOX_SCRATCH_BASE}.`, "SCRATCH_DIR_OUT_OF_BASE");
+}
+function scratchDirFor(containerName) {
+	if (!isValidContainerName(containerName)) throw new SandboxError(`Refusing to derive a scratch dir from container name ${JSON.stringify(containerName)}.`, "CONTAINER_NAME_INVALID");
+	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchDirNameFor(containerName));
+}
+function ensureOwnScratchBase(base = SANDBOX_SCRATCH_BASE, { mkdir = defaultMkdir$2, lstat = node_fs.lstatSync } = {}) {
+	try {
+		mkdir(base, 448);
+		return;
+	} catch (e) {
+		if (e.code !== "EEXIST") throw e;
+	}
+	let st = lstat(base), uid = process.getuid();
+	if (!st.isDirectory() || st.uid !== uid || st.mode & 63) throw new SandboxError(`${base} exists but is not a private directory owned by uid ${uid} (mode ${(st.mode & 4095).toString(8)}, uid ${st.uid}). Another user may have created it. Remove it and re-run.`, "SCRATCH_BASE_UNSAFE");
+}
+async function withScratchDir(fn, { containerName, ephemeralRoots, warn } = {}) {
+	let dir;
+	ensureOwnScratchBase(), containerName ? (dir = scratchDirFor(containerName), cleanupScratchDir(dir, { warn }), (0, node_fs.mkdirSync)(dir, {
+		recursive: !0,
+		mode: 448
+	})) : dir = (0, node_fs.mkdtempSync)((0, node_path.join)(SANDBOX_SCRATCH_BASE, "sandbox-"));
+	try {
+		return await fn(dir);
+	} finally {
+		cleanupScratchDir(dir, {
+			ephemeralRoots,
+			warn
+		});
+	}
+}
+//#endregion
+//#region src/lib/overlayfs-preflight.ts
+const REQUIREMENT$1 = `filesystem_mode: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE}: an overlay mount's upperdir/workdir are placed there, and the kernel doesn't allow those to themselves sit on an overlayfs filesystem. This commonly fails when the runner process is itself running inside a container whose own root filesystem is overlayfs (e.g. many container-based self-hosted runner setups), since that puts SANDBOX_SCRATCH_BASE on overlayfs too. Use filesystem_mode: persistent instead, or run this action from a runner whose filesystem isn't overlayfs-backed.`;
+function describeOverlayFailure(e) {
+	let captured = capturedStderr(e);
+	return `overlayfs probe mount failed. ${REQUIREMENT$1}${captured ? ` (${captured})` : ""}`;
+}
+function describeProbeCleanupFailure(dir, e) {
+	let captured = capturedStderr(e);
+	return `Failed to remove the overlayfs probe directory ${dir}. The probe mount itself succeeded, so this runner does support overlayfs; what failed is removing the probe directory afterwards. That needs \`sudo rm -rf\`, because the kernel writes root-owned overlayfs bookkeeping into workdir while the mount is live (see removeProbeDir), and filesystem_mode: ephemeral's real cleanup discards its overlay work dirs exactly the same way, so a run would fail on this runner anyway, later and with less to go on. This is usually a sudoers config scoped to specific commands rather than a blanket NOPASSWD:ALL, which checkPasswordlessSudo's own \`sudo -n true\` probe cannot detect. Grant the runner user passwordless sudo for \`rm\`, or use filesystem_mode: persistent instead.${captured ? ` (${captured})` : ""}`;
+}
+function removeProbeDir(dir, exec) {
+	retryBriefly(() => exec(hostCommand("sudo"), [
+		"-n",
+		"rm",
+		"-rf",
+		dir
+	], {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv("sudo")
+	}));
+}
+function checkOverlayfsSupport({ base = SANDBOX_SCRATCH_BASE, exec = node_child_process.execFileSync } = {}) {
+	ensureOwnScratchBase(base);
+	let probeDir = (0, node_fs.mkdtempSync)((0, node_path.join)(base, "overlay-probe-")), probeFailure = null;
+	try {
+		probeOverlayMount(probeDir, exec);
+	} catch (error) {
+		probeFailure = { error };
+	}
+	try {
+		removeProbeDir(probeDir, exec);
+	} catch (e) {
+		if (!probeFailure) throw new SandboxError(describeProbeCleanupFailure(probeDir, e), "OVERLAY_PROBE_CLEANUP_FAILED");
+	}
+	if (probeFailure) throw new SandboxError(describeOverlayFailure(probeFailure.error), "OVERLAYFS_UNSUPPORTED");
+}
+function probeOverlayMount(probeDir, exec) {
+	let lower = (0, node_path.join)(probeDir, "lower"), upper = (0, node_path.join)(probeDir, "upper"), work = (0, node_path.join)(probeDir, "work"), merged = (0, node_path.join)(probeDir, "merged");
+	for (let dir of [
+		lower,
+		upper,
+		work,
+		merged
+	]) (0, node_fs.mkdirSync)(dir);
+	exec(hostCommand("sudo"), [
+		"-n",
+		"unshare",
+		"--mount",
+		"--propagation",
+		"private",
+		"--",
+		"sh",
+		"-c",
+		`mount -t overlay overlay -o lowerdir=${lower},upperdir=${upper},workdir=${work} ${merged}`
+	], {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv("sudo")
+	});
+}
+//#endregion
+//#region src/lib/post-write-through.ts
+function postWriteThroughPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
+	let owner = ownerToken(env);
+	if (!owner) return;
+	let id = (0, node_crypto.createHash)("sha256").update(owner).digest("hex").slice(0, 16);
+	return (0, node_path.join)(scratchBase, `write-through-${id}`);
+}
+function saveWriteThroughForPost(env, writeThroughInput, scratchBase = SANDBOX_SCRATCH_BASE) {
+	let path = postWriteThroughPath(env, scratchBase);
+	env.GITHUB_STATE && path && (ensureOwnScratchBase(scratchBase), (0, node_fs.writeFileSync)(path, writeThroughInput, { mode: 384 }));
+}
+//#endregion
+//#region src/core/lib/docker/args.ts
+function buildDockerCpArgs({ containerName, containerPath, hostPath }) {
+	return [
+		"cp",
+		`${containerName}:${containerPath}`,
+		hostPath
+	];
+}
+function buildComposeUpArgs({ composeFile, projectName, pullPolicy }) {
+	return [
+		"compose",
+		"-f",
+		composeFile,
+		"-p",
+		projectName,
+		"up",
+		"-d",
+		"--pull",
+		pullPolicy,
+		"--no-build",
+		"--wait",
+		"--wait-timeout",
+		"180",
+		"--quiet-pull"
+	];
+}
+function buildComposeLogsArgs({ composeFile, projectName, tail }) {
+	return [
+		"compose",
+		"-f",
+		composeFile,
+		"-p",
+		projectName,
+		"logs",
+		"--no-color",
+		"--tail",
+		String(tail)
+	];
+}
+function buildComposeDownArgs({ composeFile, projectName }) {
+	return [
+		"compose",
+		"-f",
+		composeFile,
+		"-p",
+		projectName,
+		"down",
+		"-v"
+	];
+}
+//#endregion
+//#region src/core/lib/docker/health.ts
+function buildDockerInspectStateArgs(containerName) {
+	return [
+		"inspect",
+		"--format",
+		"{{json .State}}",
+		containerName
+	];
+}
+function parseContainerState(inspectOutput) {
+	let raw;
+	try {
+		raw = JSON.parse(inspectOutput);
+	} catch {
+		return null;
+	}
+	if (!raw || typeof raw != "object" || typeof raw.Status != "string") return null;
+	let log = Array.isArray(raw.Health?.Log) ? raw.Health.Log : [], lastOutput = log.length > 0 ? log[log.length - 1]?.Output : void 0;
+	return {
+		status: raw.Status,
+		exitCode: typeof raw.ExitCode == "number" ? raw.ExitCode : null,
+		health: typeof raw.Health?.Status == "string" ? raw.Health.Status : null,
+		lastHealthOutput: typeof lastOutput == "string" && lastOutput.trim() || null
+	};
+}
+function isContainerReady(state) {
+	return state.status === "running" && state.health !== "unhealthy" && state.health !== "starting";
+}
+function describeContainerStartFailure(state, { role, containerName }) {
+	let subject = `Buildcage's ${role} container (${containerName})`, probe = state.lastHealthOutput ? ` Last health check output: ${JSON.stringify(state.lastHealthOutput)}.` : "", evidence = " Its log is printed above.";
+	return state.status === "running" ? isContainerReady(state) ? `${subject} is running, but \`docker compose up\` failed. See the Docker output above.${probe}` : `${subject} started but never became ready.${probe}${evidence}` : `${subject} stopped${state.exitCode === null ? "" : ` with code ${state.exitCode}`} instead of starting up.${probe}${evidence}`;
+}
+//#endregion
+//#region src/lib/proxy-lifecycle.ts
+const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
+	encoding: "utf8",
+	env: hostCommandEnv("docker", env),
+	stdio: [
+		"ignore",
+		"pipe",
+		"pipe"
+	]
+}), printDockerViaExec = (args, env) => {
+	(0, node_child_process.execFileSync)(hostCommand("docker"), args, {
+		stdio: "inherit",
+		env: hostCommandEnv("docker", env)
+	});
+};
+async function startSandboxProxy({ composeFile, projectName, containerName, pullPolicy, composeEnv }, deps = {}) {
+	let { printDocker = printDockerViaExec } = deps;
+	await withLogGroupAsync("buildcage: starting sandbox proxy", () => {
+		try {
+			printDocker(buildComposeUpArgs({
+				composeFile,
+				projectName,
+				pullPolicy
+			}), composeEnv);
+		} catch (e) {
+			throw proxyStartError(e, {
+				composeFile,
+				projectName,
+				containerName,
+				composeEnv
+			}, deps);
+		}
+	});
+}
+function proxyStartError(e, { composeFile, projectName, containerName, composeEnv }, deps) {
+	let state = readProxyState(containerName, composeEnv, deps);
+	return state ? (printProxyLog({
+		composeFile,
+		projectName,
+		composeEnv
+	}, deps), new SandboxError(describeContainerStartFailure(state, {
+		role: "sandbox proxy",
+		containerName
+	}), "PROXY_NOT_READY")) : new SandboxError(describeDockerFailure(e, { operation: "docker compose up" }), "DOCKER_UNAVAILABLE");
+}
+function readProxyState(containerName, composeEnv, { captureDocker = captureDockerViaExec }) {
+	try {
+		return parseContainerState(captureDocker(buildDockerInspectStateArgs(containerName), composeEnv));
+	} catch (e) {
+		return reportInspectFailure(e), null;
+	}
+}
+function reportInspectFailure(e) {
+	let stderr = capturedStderr(e);
+	stderr && !/no such object/i.test(stderr) && console.log(`buildcage: could not read the sandbox proxy container's state: ${stderr}`);
+}
+function printProxyLog({ composeFile, projectName, composeEnv }, { printDocker = printDockerViaExec }) {
+	try {
+		printDocker(buildComposeLogsArgs({
+			composeFile,
+			projectName,
+			tail: 100
+		}), composeEnv);
+	} catch {
+		console.log("The sandbox proxy container's log could not be read.");
+	}
+}
+async function stopSandboxProxy({ composeFile, projectName, composeEnv, annotation }, { printDocker = printDockerViaExec } = {}) {
+	await withLogGroupAsync("buildcage: stopping sandbox proxy", () => {
+		try {
+			printDocker(buildComposeDownArgs({
+				composeFile,
+				projectName
+			}), composeEnv);
+		} catch (e) {
+			annotation.warning(`Failed to stop the sandbox proxy container: ${describeDockerFailure(e, { operation: "docker compose down" })}`);
+		}
+	});
+}
+//#endregion
+//#region src/lib/sandbox/paths.ts
+function isAtOrUnder(path, ancestor) {
+	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
+}
+function pathsOverlap(a, b) {
+	return isAtOrUnder(a, b) || isAtOrUnder(b, a);
+}
+function pathAliases(mounts, path) {
+	let owner = mountAt(mounts, path);
+	if (!owner) return [];
+	let inFs = (0, node_path.join)(owner.root, (0, node_path.relative)(owner.mountPoint, path)), aliases = new Set();
+	for (let m of mounts) {
+		if (m.device !== owner.device) continue;
+		let alias = isAtOrUnder(inFs, m.root) ? (0, node_path.join)(m.mountPoint, (0, node_path.relative)(m.root, inFs)) : isAtOrUnder(m.root, inFs) ? m.mountPoint : void 0;
+		alias !== void 0 && !isAtOrUnder(alias, path) && mountAt(mounts, alias) === m && aliases.add(alias);
+	}
+	return [...aliases].filter((a) => ![...aliases].some((b) => b !== a && isAtOrUnder(a, b)));
+}
+function mountAt(mounts, path) {
+	let found;
+	for (let m of mounts) isAtOrUnder(path, m.mountPoint) && m.mountPoint.length >= (found?.mountPoint.length ?? 0) && (found = m);
+	return found;
+}
+var WritablePathConflictError = class extends Error {};
+function assertScratchBaseNotWritable(writableDirs) {
+	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
+	if (overlapping) throw new WritablePathConflictError(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
+}
+//#endregion
+//#region src/lib/sandbox/ephemeral-fs.ts
+function defaultDeviceOf(path) {
+	return (0, node_fs.statSync)(path).dev;
+}
+function defaultIsDirectory$1(path) {
+	return (0, node_fs.statSync)(path).isDirectory();
+}
+function defaultStat$1(path) {
+	let { uid, gid, mode } = (0, node_fs.statSync)(path);
+	return {
+		uid,
+		gid,
+		mode
+	};
+}
+function defaultExecFile(command, args) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
+}
+function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs.existsSync, deviceOf = defaultDeviceOf } = {}) {
+	let notCoveredByWriteThrough = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !writeThroughPaths.some((a) => isAtOrUnder(c, a)));
+	return notCoveredByWriteThrough.filter((c) => {
+		let nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isAtOrUnder(c, p));
+		if (!nestingParent) return !0;
+		try {
+			return deviceOf(c) !== deviceOf(nestingParent);
+		} catch {
+			return !0;
+		}
+	});
+}
+function rootCannotRead({ fsType, superOptions = [] }) {
+	return (fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.")) && !superOptions.includes("allow_other");
+}
+function nestedMountRoots(overlayRoots, hostMounts, writeThroughPaths, { isDirectory = defaultIsDirectory$1, warn } = {}) {
+	let visible = new Map(hostMounts.map((m) => [m.mountPoint, m])), roots = [];
+	for (let [path, mount] of visible) {
+		if (overlayRoots.includes(path) || !overlayRoots.some((r) => isAtOrUnder(path, r)) || writeThroughPaths.some((w) => isAtOrUnder(path, w))) continue;
+		let reason;
+		if (path.includes(",") || path.includes(":")) reason = "an overlay mount option cannot contain \",\" or \":\"";
+		else if (rootCannotRead(mount)) reason = `it is a FUSE mount (${mount.fsType}) without allow_other, which root cannot read`;
+		else try {
+			if (!isDirectory(path)) continue;
+		} catch (e) {
+			reason = `the runner cannot stat it (${errorMessage(e)})`;
+		}
+		if (reason !== void 0) {
+			warn?.(`filesystem_mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the command sees the empty directory beneath it: ${reason}. Use filesystem_mode: persistent if the command needs its contents.`);
+			continue;
+		}
+		roots.push(path);
+	}
+	return roots;
+}
+function slugify(path) {
+	return (0, node_crypto.createHash)("sha256").update(path).digest("hex").slice(0, 16);
+}
+function overlayUpperFor(scratchDir, root) {
+	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
+}
+function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat$1, execFile = defaultExecFile, self = {
+	uid: process.getuid(),
+	gid: process.getgid()
+} } = {}) {
+	return roots.map((path) => {
+		let upper = overlayUpperFor(scratchDir, path), work = (0, node_path.join)((0, node_path.dirname)(upper), "work");
+		mkdir(work, { recursive: !0 });
+		let { uid, gid, mode } = stat(path), perm = mode & 4095;
+		return uid === self.uid && gid === self.gid ? (mkdir(upper, { recursive: !0 }), chmod(upper, perm)) : execFile("sudo", [
+			"install",
+			"-d",
+			"-o",
+			String(uid),
+			"-g",
+			String(gid),
+			"-m",
+			perm.toString(8),
+			"--",
+			upper
+		]), {
+			path,
+			upper,
+			work
+		};
+	});
+}
+function formatFilesystemPlanLog(mode, overlayRoots, writeThrough) {
+	if (mode !== "ephemeral") return [];
+	let lines = ["Filesystem mode: ephemeral"];
+	for (let root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
+	for (let entry of writeThrough) lines.push(`Writable (persisted):                    ${entry}`);
+	return lines;
+}
+function filesystemAuditPaths(containerName, scratchBase) {
+	let suffix = containerName.split("-").at(-1);
+	return {
+		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
+		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`)
+	};
+}
+function cgroupFsPath(cgroupsPath) {
+	return (0, node_path.join)("/sys/fs/cgroup", cgroupsPath);
+}
+function defaultExec$3(command, args) {
+	return (0, node_child_process.execFileSync)(hostCommand(command), args, {
+		encoding: "utf8",
+		env: hostCommandEnv(command)
+	});
+}
+function defaultSpawn$1(command, args) {
+	let child = (0, node_child_process.spawn)(hostCommand(command), args, {
+		stdio: [
+			"ignore",
+			"inherit",
+			"inherit"
+		],
+		env: hostCommandEnv(command)
+	});
+	return {
+		exited: new Promise((resolve) => {
+			child.on("error", () => resolve()), child.on("close", () => resolve());
+		}),
+		kill: (signal) => child.kill(signal)
+	};
+}
+function defaultSleep(ms) {
+	return new Promise((resolve) => setTimeout(resolve, ms).unref());
+}
+function defaultRemove(path) {
+	(0, node_fs.rmSync)(path, { force: !0 });
+}
+function defaultReadFile$2(path) {
+	return (0, node_fs.readFileSync)(path, "utf8");
+}
+const noAudit = { stop: async () => {} };
+function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = node_fs.chmodSync } = {}) {
+	let tracerPath = (0, node_path.join)(destDir, "filesystem-audit");
+	return exec("docker", buildDockerCpArgs({
+		containerName,
+		containerPath: "/opt/buildcage/bin/filesystem-audit",
+		hostPath: tracerPath
+	})), chmod(tracerPath, 493), tracerPath;
+}
+async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath }, warn, deps = {}) {
+	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2 } = deps, child = spawn("sudo", [
+		"-n",
+		"--",
+		tracerPath,
+		"--cgroup",
+		cgroupFsPath(cgroupsPath),
+		"--out",
+		outPath,
+		"--pidfile",
+		pidFilePath,
+		"--ready",
+		readyPath
+	]), exited = !1;
+	child.exited.then(() => {
+		exited = !0;
+	});
+	let stop = async () => {
+		if (child.kill("SIGTERM"), await Promise.race([child.exited, sleep(2e3)]), !exited) try {
+			let pid = Number(readFile(pidFilePath).trim());
+			pid > 0 && exec("sudo", [
+				"-n",
+				"kill",
+				"-KILL",
+				String(pid)
+			]);
+		} catch {}
+		await child.exited, remove(pidFilePath);
+	};
+	for (let i = 0; i < 50; i++) {
+		if (exists(readyPath)) return { stop };
+		if (exited) break;
+		await sleep(100);
+	}
+	return warn("buildcage: filesystem_audit did not start; the step's file accesses were not recorded."), await stop(), noAudit;
+}
+//#endregion
+//#region src/lib/sandbox/nss-db-ledger.ts
+const NSS_DB_LEDGER_NAME = "nssdb-ledger.json";
+function defaultMkdir$1(path, mode) {
+	(0, node_fs.mkdirSync)(path, { mode });
+}
+function defaultLstat$1(path) {
+	return (0, node_fs.lstatSync)(path, {
+		bigint: !0,
+		throwIfNoEntry: !1
+	});
+}
+function defaultPidAlive(pid) {
+	try {
+		return process.kill(pid, 0), !0;
+	} catch (e) {
+		return e.code !== "ESRCH";
+	}
+}
+const USE_NAME_RE = /^sandbox-[A-Za-z0-9]+$/;
+function emptyLedger() {
+	return {
+		version: 1,
+		dirs: {},
+		uses: {}
+	};
+}
+function isLedger(parsed) {
+	let l = parsed;
+	return l?.version === 1 && typeof l.dirs == "object" && l.dirs !== null && typeof l.uses == "object" && l.uses !== null && Object.entries(l.dirs).every(([p, d]) => p.startsWith("/") && isId(d)) && Object.entries(l.uses).every(([n, u]) => USE_NAME_RE.test(n) && isId(u));
+}
+function errnoCode(e) {
+	return e.code;
+}
+function idOf(info) {
+	return {
+		dev: String(info.dev),
+		ino: String(info.ino),
+		birthtimeNs: String(info.birthtimeNs)
+	};
+}
+function sameId(a, b) {
+	return a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
+}
+function isId(value) {
+	let v = value;
+	return typeof v == "object" && !!v && [
+		v.dev,
+		v.ino,
+		v.birthtimeNs
+	].every((s) => typeof s == "string" && /^\d+$/.test(s));
+}
+function dirIdOf(path, { lstat = defaultLstat$1 } = {}) {
+	let info = lstat(path);
+	return info?.isDirectory() ? idOf(info) : void 0;
+}
+function stillThere(path, id, deps = {}) {
+	let current = dirIdOf(path, deps);
+	return current !== void 0 && sameId(current, id);
+}
+function acquireLock(lock, { pidAlive = defaultPidAlive, now = () => new Date(), lockAttempts = 150 }) {
+	let mine = `${lock}.${process.pid}`;
+	try {
+		retryBriefly(() => {
+			(0, node_fs.writeFileSync)(mine, String(process.pid), { mode: 384 });
+			try {
+				(0, node_fs.linkSync)(mine, lock);
+			} catch (e) {
+				throw takeOverStaleLock(lock, pidAlive, now), e;
+			}
+		}, {
+			attempts: lockAttempts,
+			delayMs: 100,
+			retryOn: (e) => errnoCode(e) === "EEXIST"
+		});
+	} catch (e) {
+		if (errnoCode(e) !== "EEXIST") throw e;
+		let waited = (lockAttempts - 1) * 100 / 1e3;
+		throw Error(`could not take ${lock}: another step held it for over ${waited}s`, { cause: e });
+	} finally {
+		(0, node_fs.rmSync)(mine, { force: !0 });
+	}
+	return () => (0, node_fs.rmSync)(lock, { force: !0 });
+}
+function takeOverStaleLock(lock, pidAlive, now) {
+	let pid, age;
+	try {
+		pid = Number((0, node_fs.readFileSync)(lock, "utf8")), age = now().getTime() - (0, node_fs.lstatSync)(lock).mtimeMs;
+	} catch {
+		return;
+	}
+	age < 2e3 || age < 1e4 && Number.isInteger(pid) && pid > 0 && pidAlive(pid) || (0, node_fs.rmSync)(lock, { force: !0 });
+}
+function withLock(base, fn, deps) {
+	let release = acquireLock((0, node_path.join)(base, "nssdb-ledger.lock"), deps);
+	try {
+		return fn();
+	} finally {
+		release();
+	}
+}
+function readLedger(path) {
+	let fd;
+	try {
+		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
+	} catch (e) {
+		return errnoCode(e) === "ENOENT" ? emptyLedger() : `${path} cannot be opened (${errorMessage(e)})`;
+	}
+	try {
+		let info = (0, node_fs.fstatSync)(fd);
+		if (!info.isFile()) return `${path} is not a file`;
+		if (info.size > 65536) return `${path} is ${info.size} bytes, too large`;
+		let parsed = JSON.parse((0, node_fs.readFileSync)(fd, "utf8"));
+		return isLedger(parsed) ? parsed : `${path} is not a ledger this version can read`;
+	} catch (e) {
+		return `${path} cannot be read (${errorMessage(e)})`;
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function writeLedger(path, ledger) {
+	let tmp = `${path}.${process.pid}.tmp`;
+	(0, node_fs.rmSync)(tmp, { force: !0 });
+	let fd = (0, node_fs.openSync)(tmp, node_fs.constants.O_WRONLY | node_fs.constants.O_CREAT | node_fs.constants.O_EXCL | node_fs.constants.O_NOFOLLOW, 384);
+	try {
+		(0, node_fs.writeSync)(fd, `${JSON.stringify(ledger, null, 2)}\n`);
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+	(0, node_fs.renameSync)(tmp, path);
+}
+function withLedger(fn, deps) {
+	let path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
+	return withLock(baseOf(deps), () => {
+		let ledger = readLedger(path);
+		try {
+			return fn(ledger);
+		} finally {
+			typeof ledger != "string" && writeLedger(path, ledger);
+		}
+	}, deps);
+}
+function withNssDbLock(fn, deps = {}) {
+	return withLock(baseOf(deps), fn, deps);
+}
+function baseOf({ base }) {
+	return base ?? SANDBOX_SCRATCH_BASE;
+}
+function dropStaleUses(ledger, deps) {
+	let { lstat = defaultLstat$1 } = deps;
+	for (let name of Object.keys(ledger.uses)) lstat((0, node_path.join)(baseOf(deps), name)) === void 0 && delete ledger.uses[name];
+}
+function removeUnusedDirs(ledger, deps) {
+	if (Object.keys(ledger.uses).length > 0) return;
+	let { rmdir = node_fs.rmdirSync, info } = deps;
+	for (let path of Object.keys(ledger.dirs).sort((a, b) => b.length - a.length)) {
+		let entry = ledger.dirs[path];
+		delete ledger.dirs[path];
+		let current = dirIdOf(path, deps);
+		if (current === void 0) {
+			info?.(`buildcage: ${path}, made for Chromium's NSS database by ${entry.createdBy}, had already been removed by something else`);
+			continue;
+		}
+		if (sameId(current, entry)) try {
+			rmdir(path);
+		} catch {}
+	}
+}
+function claimNssDb(name, destination, dirs, deps = {}) {
+	let { mkdir = defaultMkdir$1, lstat = defaultLstat$1, now = () => new Date(), warn } = deps;
+	return withLedger((ledger) => {
+		let undo = () => {
+			typeof ledger != "string" && removeUnusedDirs(ledger, deps);
+		};
+		typeof ledger != "string" && dropStaleUses(ledger, deps);
+		try {
+			for (let path of dirs) {
+				try {
+					mkdir(path, 448);
+				} catch (e) {
+					let info = errnoCode(e) === "EEXIST" ? lstat(path) : void 0;
+					if (!info?.isDirectory() || info.isSymbolicLink()) throw e;
+					continue;
+				}
+				let made = lstat(path);
+				typeof ledger != "string" && made && made.birthtimeNs !== 0n && (ledger.dirs[path] = {
+					...idOf(made),
+					createdBy: name,
+					createdAt: now().toISOString()
+				});
+			}
+		} catch (e) {
+			throw undo(), e;
+		}
+		let current = lstat(destination);
+		if (!current?.isDirectory()) throw undo(), Error(`${destination} is not a directory`);
+		let destinationId = idOf(current);
+		return typeof ledger == "string" ? (warn?.(`buildcage: ${ledger}, so the directories made for Chromium's NSS database are left in place after the step`), {
+			destinationId,
+			registered: !1
+		}) : (ledger.uses[name] = {
+			destination,
+			...destinationId,
+			startedAt: now().toISOString()
+		}, {
+			destinationId,
+			registered: !0
+		});
+	}, deps);
+}
+function releaseNssDb(name, deps = {}) {
+	let { lstat = defaultLstat$1, warn } = deps, path = (0, node_path.join)(baseOf(deps), NSS_DB_LEDGER_NAME);
+	if (lstat(path) !== void 0) try {
+		withLedger((ledger) => {
+			typeof ledger != "string" && (delete ledger.uses[name], dropStaleUses(ledger, deps), removeUnusedDirs(ledger, deps));
+		}, deps);
+	} catch (e) {
+		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for Chromium's NSS database are left in place for a later step to remove`);
+	}
+}
+function useNameFor(scratchDir) {
+	return (0, node_path.basename)(scratchDir);
+}
+//#endregion
+//#region src/lib/sandbox/nss-db.ts
+const NSS_XDG_DB_PATH = ".local/share/pki/nssdb", NSS_CA_DB_DESTINATION = "/dev/buildcage-nssdb", NSS_SLOT = `library=libsoftokn3.so
+name="buildcage proxy CA"
+parameters="configdir='sql:${NSS_CA_DB_DESTINATION}' flags=readOnly"\nNSS=""
+
+`, STAGING_PREFIX = ".buildcage-";
+function isStaging(name) {
+	return name.startsWith(STAGING_PREFIX);
+}
+function stagingOwnerAlive(name, pidAlive) {
+	let pid = /^\.buildcage-(\d+)-/.exec(name)?.[1];
+	return pid !== void 0 && pidAlive(Number(pid));
+}
+function inStaging(dir, path) {
+	return isStaging((0, node_path.relative)(dir, path).split("/")[0]);
+}
+const NSS_DB_FILES = [
+	"cert9.db",
+	"key4.db",
+	"pkcs11.txt"
+];
+function defaultExec$2(command, args) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, { env: hostCommandEnv(command) });
+}
+function defaultLstat(path) {
+	try {
+		return (0, node_fs.lstatSync)(path);
+	} catch {
+		return;
+	}
+}
+function defaultStat(path) {
+	try {
+		return (0, node_fs.statSync)(path);
+	} catch {
+		return;
+	}
+}
+function defaultCopyDir$1(source, destination, filter) {
+	(0, node_fs.cpSync)(source, destination, {
+		recursive: !0,
+		preserveTimestamps: !0,
+		verbatimSymlinks: !0,
+		filter
+	});
+}
+function defaultAccess(path) {
+	(0, node_fs.accessSync)(path, node_fs.constants.W_OK);
+}
+function planNssDb(home, { lstat = defaultLstat } = {}) {
+	let legacy = walkPlan(home, ".pki/nssdb", lstat);
+	if (typeof legacy == "string" || legacy.missing.length === 0) return legacy;
+	let xdg = walkPlan(home, NSS_XDG_DB_PATH, lstat);
+	return typeof xdg != "string" && xdg.missing.length === 0 ? xdg : legacy;
+}
+function walkPlan(home, path, lstat) {
+	let dir = home, missing = [];
+	for (let component of path.split("/")) {
+		if (dir = (0, node_path.join)(dir, component), missing.length > 0) {
+			missing.push(dir);
+			continue;
+		}
+		let info = lstat(dir);
+		if (info === void 0) missing.push(dir);
+		else if (info.isSymbolicLink()) return `${dir} is a symlink`;
+		else if (!info.isDirectory()) return `${dir} is not a directory`;
+	}
+	return {
+		destination: dir,
+		missing
+	};
+}
+function warnNotAdded(warn, reason) {
+	warn?.(`could not add the proxy CA to Chromium's NSS database: ${reason}. Chromium in this step will not trust the proxy; use proxy_engine: universal for it.`);
+}
+function prepareNssDb(containerName, dir, home, deps = {}, { homeUpper } = {}) {
+	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat, realpath = node_fs.realpathSync, warn } = deps;
+	if (!home || stat(home)?.isDirectory() !== !0) return warnNotAdded(warn, `HOME (${JSON.stringify(home ?? "")}) is not a directory`);
+	let realHome = realpath(home), plan = planNssDb(realHome, { lstat });
+	if (typeof plan == "string") return warnNotAdded(warn, plan);
+	let caDb = (0, node_path.join)(dir, "nssdb-ca");
+	exec("docker", buildDockerCpArgs({
+		containerName,
+		containerPath: "/opt/buildcage/nssdb",
+		hostPath: caDb
+	}));
+	let path = (0, node_path.join)(dir, "nssdb"), exists = lstat(plan.destination)?.isDirectory() === !0, refusal = exists ? whyNotSlot(plan.destination, deps) : void 0;
+	if (refusal !== void 0) return warnNotAdded(warn, refusal);
+	let slot;
+	try {
+		slot = prepareSlot(caDb, path, plan.destination, exists, deps);
+	} catch (e) {
+		return (0, node_fs.rmSync)(path, {
+			recursive: !0,
+			force: !0
+		}), warnNotAdded(warn, `the slot could not be added (${errorMessage(e)})`);
+	}
+	let files = {
+		path,
+		destination: plan.destination,
+		slot
+	}, xdgPath = (0, node_path.join)(realHome, NSS_XDG_DB_PATH);
+	if (plan.destination !== xdgPath && lstat(xdgPath) === void 0 && (files.xdgPath = xdgPath), !exists && homeUpper !== void 0 && realHome === home && plan.destination === (0, node_path.join)(home, ".pki/nssdb")) try {
+		return makeInUpper(realHome, plan.destination, homeUpper), files;
+	} catch (e) {
+		deps.info?.(`buildcage: could not make ${plan.destination} in the ephemeral overlay (${errorMessage(e)}), so it is made on the runner instead`);
+	}
+	let name = useNameFor(dir);
+	try {
+		files.claim = {
+			name,
+			...claimNssDb(name, plan.destination, dirsDownTo(realHome, plan.destination), {
+				warn,
+				...deps.ledger
+			})
+		};
+	} catch (e) {
+		return warnNotAdded(warn, `cannot create or claim ${plan.destination} (${errorMessage(e)})`);
+	}
+	return files;
+}
+function makeInUpper(home, destination, upper) {
+	let made = [];
+	for (let path of dirsDownTo(home, destination)) {
+		let inUpper = (0, node_path.join)(upper, (0, node_path.relative)(home, path)), host = (0, node_fs.lstatSync)(path, { throwIfNoEntry: !1 });
+		(0, node_fs.mkdirSync)(inUpper, { recursive: !0 }), (0, node_fs.chmodSync)(inUpper, host ? host.mode & 4095 : 448), made.push([inUpper, host]);
+	}
+	for (let [inUpper, host] of made.reverse()) host && (0, node_fs.utimesSync)(inUpper, host.atime, host.mtime);
+}
+function dirsDownTo(home, destination) {
+	let dir = home;
+	return (0, node_path.relative)(home, destination).split("/").map((component) => dir = (0, node_path.join)(dir, component));
+}
+function overMirrorBounds(dir, { skip = () => !1, extraFiles = 0, extraBytes = 0 } = {}) {
+	let files = 0, bytes = 0, pending = [dir];
+	for (let next = pending.pop(); next !== void 0; next = pending.pop()) {
+		let handle = (0, node_fs.opendirSync)(next);
+		try {
+			for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
+				if (next === dir && skip(entry.name)) continue;
+				let path = (0, node_path.join)(next, entry.name);
+				if (files++, entry.isFile() ? bytes += (0, node_fs.lstatSync)(path).size : entry.isDirectory() && pending.push(path), files > 512 + extraFiles || bytes > 20971520 + extraBytes) return !0;
+			}
+		} finally {
+			handle.closeSync();
+		}
+	}
+	return !1;
+}
+function whyNotSlot(destination, { lstat = defaultLstat, access = defaultAccess }) {
+	for (let path of [destination, ...NSS_DB_FILES.map((name) => (0, node_path.join)(destination, name))]) {
+		let info = lstat(path);
+		if (info !== void 0) {
+			if (info.isSymbolicLink()) return `${path} is a symlink`;
+			try {
+				access(path);
+			} catch {
+				return `the runner user cannot write ${path}`;
+			}
+		}
+	}
+	try {
+		if (overMirrorBounds(destination, { skip: isStaging })) return `${destination} is too large to copy`;
+	} catch (e) {
+		return `${destination} cannot be read through (${errorMessage(e)})`;
+	}
+}
+function prepareSlot(caDb, path, destination, exists, { copyDir = defaultCopyDir$1, ledger }) {
+	(0, node_fs.chmodSync)(caDb, 493);
+	for (let name of (0, node_fs.readdirSync)(caDb)) (0, node_fs.chmodSync)((0, node_path.join)(caDb, name), 420);
+	exists ? withNssDbLock(() => copyDir(destination, path, (entry) => !inStaging(destination, entry)), ledger) : (0, node_fs.mkdirSync)(path, { mode: 448 });
+	let pkcs11 = (0, node_path.join)(path, "pkcs11.txt"), hadPkcs11 = (0, node_fs.lstatSync)(pkcs11, { throwIfNoEntry: !1 }) !== void 0;
+	return {
+		caDb,
+		appended: appendNssSlot(pkcs11),
+		hadPkcs11,
+		snapshot: snapshotDir(path)
+	};
+}
+function appendNssSlot(path) {
+	let fd = (0, node_fs.openSync)(path, node_fs.constants.O_CREAT | node_fs.constants.O_RDWR | node_fs.constants.O_APPEND | node_fs.constants.O_NOFOLLOW, 384);
+	try {
+		let size = (0, node_fs.fstatSync)(fd).size, appended = "";
+		if (size > 0) {
+			let tail = Buffer.alloc(Math.min(size, 2));
+			(0, node_fs.readSync)(fd, tail, 0, tail.length, size - tail.length);
+			let text = tail.toString("latin1");
+			appended = text.endsWith("\n\n") || text === "\n" ? "" : text.endsWith("\n") ? "\n" : "\n\n";
+		}
+		return appended += NSS_SLOT, (0, node_fs.writeSync)(fd, appended), appended;
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function removeNssSlot(path, appended, created) {
+	let fd;
+	try {
+		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDWR | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
+	} catch (e) {
+		let code = e.code;
+		if (code === "ENOENT" || code === "ELOOP" || code === "EISDIR" || code === "ENXIO") return;
+		throw e;
+	}
+	try {
+		let info = (0, node_fs.fstatSync)(fd);
+		if (!info.isFile()) return;
+		if (info.size > 1048576) throw Error(`${path} is ${info.size} bytes, too large to take the proxy CA's slot back out of`);
+		let content = (0, node_fs.readFileSync)(fd).toString("latin1"), cut = appended, i = content.lastIndexOf(cut);
+		if ((i < 0 || i + cut.length < content.length) && (cut = NSS_SLOT, i = content.lastIndexOf(cut)), i < 0) return;
+		let kept = content.slice(0, i) + content.slice(i + cut.length);
+		if (created && kept === "") {
+			(0, node_fs.rmSync)(path);
+			return;
+		}
+		(0, node_fs.ftruncateSync)(fd, 0), (0, node_fs.writeSync)(fd, kept, 0, "latin1");
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function snapshotDir(dir) {
+	let snapshot = new Map();
+	for (let entry of (0, node_fs.readdirSync)(dir, {
+		recursive: !0,
+		withFileTypes: !0
+	})) {
+		let path = (0, node_path.join)(entry.parentPath, entry.name), rel = (0, node_path.relative)(dir, path);
+		entry.isSymbolicLink() ? snapshot.set(rel, (0, node_fs.readlinkSync)(path)) : entry.isDirectory() ? snapshot.set(rel, null) : entry.isFile() ? snapshot.set(rel, (0, node_fs.readFileSync)(path)) : snapshot.set(rel, !1);
+	}
+	return snapshot;
+}
+function sameSnapshot(a, b) {
+	if (a.size !== b.size) return !1;
+	for (let [rel, value] of a) {
+		if (!b.has(rel)) return !1;
+		let other = b.get(rel);
+		if (Buffer.isBuffer(value) && Buffer.isBuffer(other)) {
+			if (!value.equals(other)) return !1;
+		} else if (value !== other) return !1;
+	}
+	return !0;
+}
+function certificateDer(pem) {
+	let match = /-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/.exec(pem);
+	return Buffer.from(match?.[1]?.replace(/\s+/g, "") ?? "", "base64");
+}
+function syncTree(staging, mirror, destination, removals, top = !1) {
+	let present = new Set();
+	for (let entry of (0, node_fs.readdirSync)(staging, { withFileTypes: !0 })) {
+		if (top && isStaging(entry.name)) continue;
+		present.add(entry.name);
+		let from = (0, node_path.join)(staging, entry.name), to = (0, node_path.join)(destination, entry.name), existing = (0, node_fs.lstatSync)(to, { throwIfNoEntry: !1 });
+		if (entry.isDirectory()) {
+			if (existing?.isDirectory()) {
+				syncTree(from, (0, node_path.join)(mirror, entry.name), to, removals);
+				continue;
+			}
+			existing !== void 0 && (0, node_fs.rmSync)(to, { force: !0 }), (0, node_fs.mkdirSync)(to, { mode: 448 }), syncTree(from, (0, node_path.join)(mirror, entry.name), to, removals), (0, node_fs.chmodSync)(to, (0, node_fs.lstatSync)((0, node_path.join)(mirror, entry.name)).mode & 4095);
+			continue;
+		}
+		if (existing?.isDirectory()) (0, node_fs.rmSync)(to, {
+			recursive: !0,
+			force: !0
+		});
+		else if (existing !== void 0 && sameEntry(from, to)) continue;
+		(0, node_fs.renameSync)(from, to);
+	}
+	for (let name of (0, node_fs.readdirSync)(destination)) !present.has(name) && !(top && isStaging(name)) && removals.push((0, node_path.join)(destination, name));
+}
+function sameEntry(a, b) {
+	let x = (0, node_fs.lstatSync)(a), y = (0, node_fs.lstatSync)(b);
+	return x.isSymbolicLink() && y.isSymbolicLink() ? (0, node_fs.readlinkSync)(a) === (0, node_fs.readlinkSync)(b) : x.isFile() && y.isFile() && x.mode === y.mode && x.size === y.size && (0, node_fs.readFileSync)(a).equals((0, node_fs.readFileSync)(b));
+}
+function settleNssDbSlot(files, { persist, caPem, onResidue, realpath = node_fs.realpathSync, copyDir = defaultCopyDir$1, pidAlive = defaultPidAlive, lock = withNssDbLock }) {
+	let overBounds;
+	try {
+		let slot = {
+			extraFiles: +!files.slot.hadPkcs11,
+			extraBytes: Buffer.byteLength(files.slot.appended)
+		};
+		overMirrorBounds(files.path, slot) && (overBounds = "over 512 files or 20 MiB");
+	} catch (e) {
+		overBounds = `unreadable (${errorMessage(e)})`;
+	}
+	if (overBounds !== void 0) {
+		if (!persist) return "discarded";
+		throw Error(`the command left the NSS database at ${files.destination} ${overBounds}, so it is not written back`);
+	}
+	let current;
+	try {
+		current = snapshotDir(files.path);
+	} catch {
+		current = new Map();
+	}
+	if (sameSnapshot(current, files.slot.snapshot)) return "unchanged";
+	if (!persist) return "discarded";
+	removeNssSlot((0, node_path.join)(files.path, "pkcs11.txt"), files.slot.appended, !files.slot.hadPkcs11);
+	let der = certificateDer(caPem);
+	for (let [rel, value] of snapshotDir(files.path)) Buffer.isBuffer(value) && der.length > 0 && value.includes(der) && onResidue(`the command copied the proxy CA into the NSS database at ${files.destination} (${rel})`);
+	let resolved;
+	try {
+		resolved = realpath(files.destination);
+	} catch {
+		resolved = void 0;
+	}
+	if (resolved !== files.destination) throw Error(`${files.destination} no longer resolves to itself, so what the command wrote to the NSS database there is not written back`);
+	let staging = (0, node_fs.mkdtempSync)((0, node_path.join)(files.destination, `${STAGING_PREFIX}${process.pid}-`));
+	try {
+		copyDir(files.path, staging);
+	} catch (e) {
+		throw (0, node_fs.rmSync)(staging, {
+			recursive: !0,
+			force: !0
+		}), e;
+	}
+	try {
+		lock(() => {
+			for (let name of (0, node_fs.readdirSync)(files.destination)) {
+				let path = (0, node_path.join)(files.destination, name);
+				if (isStaging(name) && path !== staging && !stagingOwnerAlive(name, pidAlive)) try {
+					(0, node_fs.rmSync)(path, {
+						recursive: !0,
+						force: !0
+					});
+				} catch {}
+			}
+			let removals = [];
+			syncTree(staging, files.path, files.destination, removals, !0);
+			for (let path of removals) (0, node_fs.rmSync)(path, {
+				recursive: !0,
+				force: !0
+			});
+		});
+	} finally {
+		try {
+			(0, node_fs.rmSync)(staging, {
+				recursive: !0,
+				force: !0
+			});
+		} catch {}
+	}
+	return "written";
+}
+function nssDbMounts(files) {
+	return [{
+		destination: files.destination,
+		type: "none",
+		source: files.path,
+		options: ["rbind", "rw"]
+	}, {
+		destination: NSS_CA_DB_DESTINATION,
+		type: "none",
+		source: files.slot.caDb,
+		options: [
+			"rbind",
+			"ro",
+			"nosuid",
+			"nodev",
+			"noexec"
+		]
+	}];
+}
+function nssDbDetached(files, deps = {}) {
+	if (!files.claim || stillThere(files.destination, files.claim.destinationId, deps)) return;
+	let message = `buildcage: ${files.destination} was removed or replaced on the runner while the command ran, which detached the NSS database Buildcage had mounted there: Chromium in this step did not trust the proxy CA from then on, and what the command wrote to that database is discarded. Something outside this step removed it, such as another step running in parallel.`;
+	return files.xdgPath && dirIdOf(files.xdgPath, deps) !== void 0 && (message += ` Chromium may have made a database of its own at ${files.xdgPath}.`), message;
+}
+function releaseNssDbDirs(files, deps = {}) {
+	files.claim?.registered && releaseNssDb(files.claim.name, deps);
+}
+//#endregion
+//#region src/lib/sandbox/ca-trust.ts
+const SYSTEM_CA_CANDIDATES = [
+	"/etc/ssl/certs/ca-certificates.crt",
+	"/etc/pki/tls/certs/ca-bundle.crt",
+	"/etc/ssl/ca-bundle.pem",
+	"/etc/pki/tls/cacert.pem",
+	"/etc/ssl/cert.pem"
+], CA_DIR_CANDIDATES = [
+	"/etc/pki/ca-trust/source/anchors",
+	"/etc/pki/trust/anchors",
+	"/var/lib/ca-certificates/pem"
+], OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
+function defaultExec$1(command, args, env) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, { env: hostCommandEnv(command, env) });
+}
+function defaultReadFile$1(path) {
+	return (0, node_fs.readFileSync)(path, "utf8");
+}
+function defaultWriteFile(path, contents, mode) {
+	(0, node_fs.writeFileSync)(path, contents, { mode });
+}
+function defaultIsDirectory(path) {
+	return (0, node_fs.statSync)(path, { throwIfNoEntry: !1 })?.isDirectory() === !0;
+}
+function defaultCopyDir(source, destination) {
+	(0, node_fs.cpSync)(source, destination, {
+		recursive: !0,
+		verbatimSymlinks: !0
+	});
+}
+function extractCaCert(containerName, destDir, { exec = defaultExec$1, chmod = node_fs.chmodSync } = {}) {
+	let caCertPath = (0, node_path.join)(destDir, "proxy-ca.pem");
+	return exec("docker", buildDockerCpArgs({
+		containerName,
+		containerPath: "/opt/buildcage/ca.pem",
+		hostPath: caCertPath
+	})), chmod(caCertPath, 420), caCertPath;
+}
+const JVM_KEYSTORE_NAMES = ["jssecacerts", "cacerts"];
+function keystoreDirsOf(home) {
+	return [(0, node_path.join)(home, "lib", "security"), (0, node_path.join)(home, "jre", "lib", "security")];
+}
+function discoverJvmKeystores(env, java, { exists = node_fs.existsSync, realpath = node_fs.realpathSync } = {}) {
+	let dirs = [];
+	java && dirs.push(...keystoreDirsOf((0, node_path.dirname)((0, node_path.dirname)(realpath(java))))), env.JAVA_HOME && dirs.push(...keystoreDirsOf(env.JAVA_HOME));
+	let found = [], seen = new Set();
+	for (let dir of dirs) for (let name of JVM_KEYSTORE_NAMES) {
+		let candidate = (0, node_path.join)(dir, name);
+		if (!exists(candidate)) continue;
+		let real = realpath(candidate);
+		seen.has(real) || (seen.add(real), found.push(real));
+	}
+	return found;
+}
+const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_STORE = [
+	"REQUESTS_CA_BUNDLE",
+	"PIP_CERT",
+	"SSL_CERT_FILE"
+], READ_ONLY = ["rbind", "ro"], CA_STORES = {
+	systemStore: {
+		find: ({ deps }) => {
+			let found = SYSTEM_CA_CANDIDATES.find((p) => deps.exists(p));
+			return found ? [found] : [];
+		},
+		copyName: () => "system-ca-bundle.pem",
+		inject: ({ ca, deps }, destination, path) => {
+			let existing = deps.readFile(destination).trimEnd();
+			deps.writeFile(path, `${existing}\n${ca}\n`, 420);
+		},
+		mountOptions: READ_ONLY,
+		variables: POINT_AT_SYSTEM_STORE,
+		reserve: { candidates: SYSTEM_CA_CANDIDATES }
+	},
+	caDir: {
+		find: ({ deps }) => CA_DIR_CANDIDATES.filter((d) => deps.isDirectory(d)),
+		copyName: (i) => `ca-dir${i}`,
+		inject: ({ ca, deps }, destination, path) => {
+			deps.copyDir(deps.realpath(destination), path), deps.writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420);
+		},
+		notAdded: (destination, e) => `could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); a tool that reads it through GnuTLS or p11-kit (such as wget on RHEL or SUSE) will not trust the proxy. Check that the runner user can read it, or use proxy_engine: universal.`,
+		mountOptions: READ_ONLY,
+		reserve: {
+			refuses: (entry, destination) => isAtOrUnder(entry, destination),
+			refusal: (destination, resolved) => `is in the CA directory ${JSON.stringify(destination)}` + (resolved === destination ? "" : ` (a symlink to ${JSON.stringify(resolved)})`) + ", which the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it."
+		}
+	},
+	jvmKeystore: {
+		find: ({ env, tools, deps }) => {
+			let keystores = discoverJvmKeystores(env, tools.java, deps);
+			return !tools.keytool && keystores.length > 0 ? (deps.warn?.(`could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no keytool outside the paths a sandboxed command can write to (\$HOME, \$GITHUB_WORKSPACE, /tmp, \$RUNNER_TEMP, write_through:). A Java step will not trust the proxy. Install a JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside \$HOME), or use proxy_engine: universal.`), []) : keystores;
+		},
+		copyName: (i) => `jvm-keystore-${i}`,
+		inject: ({ caCertPath, tools, deps }, destination, path) => {
+			deps.copyFile(destination, path), deps.chmod(path, 420), deps.exec(tools.keytool, [
+				"-importcert",
+				"-noprompt",
+				"-alias",
+				"buildcage-proxy-ca",
+				"-file",
+				caCertPath,
+				"-keystore",
+				path,
+				"-storepass",
+				"changeit"
+			], {});
+		},
+		notAdded: (destination) => `could not add the proxy CA to the JVM keystore ${destination}; a Java step will not trust it. Use proxy_engine: universal for a JVM build whose keystore cannot be rewritten.`,
+		mountOptions: READ_ONLY,
+		reserve: {
+			refuses: (entry, destination) => entry === destination,
+			refusal: () => "is a JVM keystore the inspect engine covers with a read-only copy carrying the proxy CA for the step. Name a containing directory instead to persist writes around it."
+		}
+	}
+};
+function reservedCaStorePaths() {
+	return Object.values(CA_STORES).flatMap(({ reserve }) => "candidates" in reserve ? reserve.candidates : []);
+}
+const NSS_DB_RESERVATION = {
+	refuses: (entry, destination) => entry !== destination && isAtOrUnder(entry, destination),
+	refusal: (destination) => `is inside the NSS database at ${JSON.stringify(destination)}, which the inspect engine covers for the step. Name ${JSON.stringify(destination)} itself to have the command's changes written back.`
+};
+function writeCaTrustFiles(caCertPath, dir, env, tools, { exec = defaultExec$1, readFile = defaultReadFile$1, writeFile = defaultWriteFile, exists = node_fs.existsSync, chmod = node_fs.chmodSync, copyFile = node_fs.copyFileSync, realpath = node_fs.realpathSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir, warn } = {}) {
+	let deps = {
+		exec,
+		readFile,
+		writeFile,
+		exists,
+		chmod,
+		copyFile,
+		realpath,
+		isDirectory,
+		copyDir,
+		warn
+	}, ca = readFile(caCertPath).trimEnd(), ownCaPath = (0, node_path.join)(dir, "buildcage-ca.pem");
+	writeFile(ownCaPath, `${ca}\n`, 420);
+	let context = {
+		ca,
+		caCertPath,
+		env,
+		tools,
+		deps
+	}, stores = [];
+	for (let [kind, store] of Object.entries(CA_STORES)) store.find(context).forEach((destination, i) => {
+		let path = (0, node_path.join)(dir, store.copyName(i));
+		try {
+			store.inject(context, destination, path);
+		} catch (e) {
+			if (!store.notAdded) throw e;
+			warn?.(store.notAdded(destination, e));
+			return;
+		}
+		stores.push({
+			kind,
+			path,
+			destination
+		});
+	});
+	return {
+		ownCaPath,
+		stores
+	};
+}
+const REPLACING_WHEN_SET = [
+	"CURL_CA_BUNDLE",
+	"GIT_SSL_CAINFO",
+	"AWS_CA_BUNDLE",
+	"CARGO_HTTP_CAINFO",
+	"BUNDLE_SSL_CA_CERT"
+], REPLACING_WHEN_SET_ANY_CASE = ["npm_config_cafile"];
+function presetCaVariables(files, env, realpath) {
+	let stores = files.stores.filter((s) => CA_STORES[s.kind].variables).map((s) => realpath(s.destination)), exact = [
+		...POINT_AT_OWN_CA,
+		...POINT_AT_SYSTEM_STORE,
+		...REPLACING_WHEN_SET
+	];
+	return Object.keys(env).filter((name) => {
+		let value = env[name];
+		return !value || value === "/dev/buildcage-ca.pem" || stores.includes(realpath(value)) ? !1 : exact.includes(name) || REPLACING_WHEN_SET_ANY_CASE.some((v) => v.toLowerCase() === name.toLowerCase());
+	});
+}
+function assertWriteThroughClearOfCaTrust(files, writeThroughPaths, realpath) {
+	let covered = files.stores.map(({ kind, destination }) => ({
+		reserve: CA_STORES[kind].reserve,
+		destination
+	}));
+	files.nssDb && covered.push({
+		reserve: NSS_DB_RESERVATION,
+		destination: files.nssDb.destination
+	});
+	for (let path of writeThroughPaths) for (let { reserve, destination } of covered) {
+		let resolved = realpath(destination);
+		if ("refuses" in reserve && reserve.refuses(path, resolved)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} ${reserve.refusal(destination, resolved)}`);
+	}
+}
+function caTrustAdditions(files, env) {
+	let mounts = [{
+		destination: OWN_CA_DESTINATION,
+		type: "none",
+		source: files.ownCaPath,
+		options: [
+			"rbind",
+			"ro",
+			"nosuid",
+			"nodev",
+			"noexec"
+		]
+	}], extraEnv = {};
+	for (let name of POINT_AT_OWN_CA) env[name] || (extraEnv[name] = OWN_CA_DESTINATION);
+	for (let { kind, path, destination } of files.stores) {
+		let { mountOptions, variables = [] } = CA_STORES[kind];
+		mounts.push({
+			destination,
+			type: "none",
+			source: path,
+			options: [...mountOptions]
+		});
+		for (let name of variables) env[name] || (extraEnv[name] = destination);
+	}
+	return files.nssDb && mounts.push(...nssDbMounts(files.nssDb)), {
+		mounts,
+		env: extraEnv
+	};
+}
+//#endregion
+//#region src/lib/sandbox/symlinks.ts
+const realSymlinkDeps = {
+	lstat: (path) => {
+		try {
+			return (0, node_fs.lstatSync)(path);
+		} catch {
+			return;
+		}
+	},
+	readlink: (path) => (0, node_fs.readlinkSync)(path)
+};
+function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
+	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
+	for (; pending.length > 0;) {
+		let name = pending.shift();
+		if (name === "..") {
+			current = (0, node_path.dirname)(current);
+			continue;
+		}
+		let next = (0, node_path.join)(current, name);
+		if (!lstat(next)?.isSymbolicLink()) {
+			current = next;
+			continue;
+		}
+		let target = readlink(next);
+		if (links.push({
+			at: next,
+			target
+		}), links.length > 40) return {
+			loop: !0,
+			links
+		};
+		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
+	}
+	return {
+		real: current,
+		links
+	};
+}
+function realPathOf(path, deps = realSymlinkDeps) {
+	let resolved = resolveHostPath(path, deps);
+	return "real" in resolved ? resolved.real : path;
+}
+//#endregion
+//#region src/lib/sandbox/host-probes.ts
+const SETPRIV_CANDIDATE_PATHS = [
+	"/usr/bin/setpriv",
+	"/bin/setpriv",
+	"/usr/sbin/setpriv",
+	"/sbin/setpriv"
+];
+function resolveSetprivPath(exists) {
+	return SETPRIV_CANDIDATE_PATHS.find((p) => exists(p)) ?? "setpriv";
+}
+function parseNofileLimit(procLimits, nrOpen) {
+	let line = procLimits.split("\n").find((l) => l.startsWith("Max open files"));
+	if (!line) return;
+	let [soft, hard] = line.slice(14).trim().split(/\s+/).map((c) => /^\d+$/.test(c) ? Number(c) : c === "unlimited" ? nrOpen : void 0);
+	return soft !== void 0 && hard !== void 0 ? {
+		soft,
+		hard
+	} : void 0;
+}
+function shmSizeFromStatfs({ type, bsize, blocks }) {
+	if (type !== 16914836) return;
+	let size = bsize * blocks;
+	return Number.isFinite(size) && size > 0 ? size : void 0;
+}
+function parseCgroupV2Path(procCgroup) {
+	let lines = procCgroup.split("\n").filter((line) => line !== "");
+	if (lines.length !== 1 || !lines[0].startsWith("0::/")) return;
+	let path = lines[0].slice(3);
+	if (!(/\s/.test(path) || path.split("/").includes(".."))) return path;
+}
+function readOptionalFile(path) {
+	try {
+		return (0, node_fs.readFileSync)(path, "utf8");
+	} catch {
+		return;
+	}
+}
+function readNumericFile(path) {
+	let raw = readOptionalFile(path)?.trim();
+	return raw !== void 0 && /^\d+$/.test(raw) ? Number(raw) : void 0;
+}
+const realHostProbes = {
+	setprivPath: () => resolveSetprivPath(node_fs.existsSync),
+	nofileRlimit: () => {
+		let nrOpen = readNumericFile("/proc/sys/fs/nr_open");
+		for (let pid of [process.ppid, "self"]) {
+			let limits = readOptionalFile(`/proc/${pid}/limits`), parsed = limits === void 0 ? void 0 : parseNofileLimit(limits, nrOpen);
+			if (parsed) return parsed;
+		}
+	},
+	shmSizeBytes: () => {
+		try {
+			return shmSizeFromStatfs((0, node_fs.statfsSync)("/dev/shm"));
+		} catch {
+			return;
+		}
+	},
+	hostname: () => node_os.default.hostname(),
+	varRunRealPath: () => {
+		try {
+			return (0, node_fs.realpathSync)("/var/run");
+		} catch {
+			return;
+		}
+	},
+	realpath: (path) => realPathOf(path),
+	cgroupPath: () => {
+		let procCgroup = readOptionalFile("/proc/self/cgroup");
+		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
+	}
+};
+//#endregion
+//#region src/lib/sandbox/oci-mounts.ts
+function freshMountDestinationsFrom(baseSpec) {
+	return new Set(baseSpec.mounts.map((m) => m.destination));
+}
+function withHostShmSize(mounts, hostShmBytes) {
+	return mounts.map((m) => {
+		if (m.destination !== "/dev/shm") return m;
+		let options = (m.options ?? []).filter((o) => !o.startsWith("size="));
+		return {
+			...m,
+			options: hostShmBytes ? [...options, `size=${hostShmBytes}`] : options
+		};
+	});
+}
+const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", HOST_RUN_LOCK_DIR = "/run/lock";
+function hostRunCoverageLayers(varRunRealPath) {
+	let varRun = varRunRealPath === void 0 || isAtOrUnder(varRunRealPath, "/run") ? [] : [emptyRunTmpfs(varRunRealPath)];
+	return {
+		mounts: [
+			emptyRunTmpfs("/run"),
+			{
+				destination: HOST_RUN_LOCK_DIR,
+				type: "tmpfs",
+				source: "tmpfs",
+				options: [
+					"nosuid",
+					"nodev",
+					"noexec",
+					"mode=1777",
+					"size=5242880"
+				]
+			},
+			...varRun
+		],
+		writablePaths: new Set([HOST_RUN_LOCK_DIR])
+	};
+}
+function emptyRunTmpfs(destination) {
+	return {
+		destination,
+		type: "tmpfs",
+		source: "tmpfs",
+		options: [
+			"nosuid",
+			"nodev",
+			"mode=0755"
+		]
+	};
+}
+function reservedInternalDestinations() {
+	return [RESOLV_CONF_DESTINATION, ...reservedCaStorePaths()];
+}
+function assertNoFreshMountDestinations(writableDirs, freshMountDestinations) {
+	for (let dir of writableDirs) {
+		let shadowed = [...freshMountDestinations].find((d) => isAtOrUnder(dir, d));
+		if (shadowed) throw new WritablePathConflictError(`writable path ${JSON.stringify(dir)} is inside ${JSON.stringify(shadowed)}, which the sandbox mounts itself; bind-mounting the host's copy there would expose it inside the sandbox. Choose a path outside it.`);
+	}
+}
+function assertOverlayPathsAreOptionSafe(roots) {
+	for (let { path, upper, work } of roots) {
+		let bad = [
+			path,
+			upper,
+			work
+		].find((p) => p.includes(",") || p.includes(":"));
+		if (bad !== void 0) throw new WritablePathConflictError(`filesystem_mode: ephemeral cannot overlay ${JSON.stringify(bad)}: an overlay mount option cannot contain "," or ":", and the kernel offers no way to escape them. Use filesystem_mode: persistent, which binds the directory directly.`);
+	}
+}
+function ephemeralLayers({ overlayRoots, allowWrite }, freshMountDestinations) {
+	let mounts = [], overlayPaths = overlayRoots.map((r) => r.path);
+	assertScratchBaseNotWritable([...overlayPaths, ...allowWrite]), assertNoFreshMountDestinations(allowWrite, freshMountDestinations), assertOverlayPathsAreOptionSafe(overlayRoots);
+	let protectedPaths = new Set([...overlayPaths, ...allowWrite]);
+	for (let root of [...overlayRoots].sort((a, b) => a.path.length - b.path.length)) mounts.push({
+		destination: root.path,
+		type: "overlay",
+		source: "overlay",
+		options: [
+			`lowerdir=${root.path}`,
+			`upperdir=${root.upper}`,
+			`workdir=${root.work}`
+		]
+	});
+	for (let p of [...allowWrite].sort((a, b) => a.length - b.length)) mounts.push({
+		destination: p,
+		type: "none",
+		source: p,
+		options: ["rbind", "rw"]
+	});
+	return {
+		mounts,
+		writablePaths: protectedPaths
+	};
+}
+function persistentLayers(writableDirs, freshMountDestinations, { disableReadonly }) {
+	let mounts = [], protectedPaths = new Set(writableDirs);
+	if (!disableReadonly) {
+		assertScratchBaseNotWritable(writableDirs), assertNoFreshMountDestinations(writableDirs, freshMountDestinations);
+		for (let p of writableDirs) mounts.push({
+			destination: p,
+			type: "none",
+			source: p,
+			options: ["rbind", "rw"]
+		});
+	}
+	return {
+		mounts,
+		writablePaths: protectedPaths
+	};
+}
+function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths = [] }) {
+	return [...new Set([
+		workdir,
+		home,
+		tmp,
+		runnerTemp,
+		...writablePaths
+	].filter((p) => !!p))];
+}
+function scratchBaseLayers(execDir, aliases = []) {
+	return [...[SANDBOX_SCRATCH_BASE, ...aliases].map((destination) => ({
+		destination,
+		type: "tmpfs",
+		source: "tmpfs",
+		options: [
+			"nosuid",
+			"nodev",
+			"mode=0555"
+		]
+	})), {
+		destination: execDir,
+		type: "none",
+		source: execDir,
+		options: ["bind", "ro"]
+	}];
+}
+//#endregion
+//#region src/lib/sandbox/write-through.ts
+const ALLOWED_WRITE_THROUGH_VARS = [
+	"HOME",
+	"GITHUB_WORKSPACE",
+	"RUNNER_TEMP",
+	"GITHUB_OUTPUT",
+	"GITHUB_ENV",
+	"GITHUB_PATH",
+	"GITHUB_STEP_SUMMARY"
+], KNOWN_FILE_VARS = [
+	"GITHUB_OUTPUT",
+	"GITHUB_ENV",
+	"GITHUB_PATH",
+	"GITHUB_STEP_SUMMARY"
+], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
+function resolveWriteThroughEntry(rawLine, env) {
+	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
+		let name = braced ?? bare;
+		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
+		let value = env[name];
+		if (!value) throw Error(`write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
+		return value;
+	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded);
+	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write_through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
+	let normalized = (0, node_path.normalize)(resolved);
+	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write_through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
+	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+function splitWriteThroughInput(input) {
+	return input?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
+}
+function resolveWriteThroughPaths(input, env) {
+	let lines = splitWriteThroughInput(input);
+	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
+}
+var WriteThroughTargetMissingError = class extends Error {}, WriteThroughTargetUncreatableError = class extends Error {};
+function defaultExists(path) {
+	try {
+		return (0, node_fs.lstatSync)(path), !0;
+	} catch {
+		return !1;
+	}
+}
+function defaultCanWrite(path) {
+	try {
+		return (0, node_fs.accessSync)(path, node_fs.constants.W_OK | node_fs.constants.X_OK), !0;
+	} catch {
+		return !1;
+	}
+}
+function defaultMkdir(path) {
+	(0, node_fs.mkdirSync)(path, { recursive: !0 });
+}
+function assertNoSymlinkInWriteThrough(path, { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = {}) {
+	let resolved = resolveHostPath(path, {
+		lstat,
+		readlink
+	}), link = resolved.links[0];
+	if (link === void 0) return;
+	let hint = "real" in resolved && resolved.real !== "/" ? ` Name the path it leads to instead: ${JSON.stringify(resolved.real)}.` : "";
+	throw Error(`write_through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`);
+}
+function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
+	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
+	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
+}
+function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists, canWrite = defaultCanWrite, mkdir = defaultMkdir } = {}) {
+	let missing = resolvedPaths.filter((path) => !exists(path));
+	for (let path of missing) {
+		let ancestor = (0, node_path.dirname)(path);
+		for (; ancestor !== "/" && !exists(ancestor);) ancestor = (0, node_path.dirname)(ancestor);
+		if (!canWrite(ancestor)) throw new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it under ${JSON.stringify(ancestor)}. Create it in an earlier step and make it writable by the runner, e.g. sudo install -d -o "$(id -u)" -g "$(id -g)" ${JSON.stringify(path)}`);
+	}
+	for (let path of missing) try {
+		mkdir(path);
+	} catch (e) {
+		throw new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
+	}
+}
+//#endregion
+//#region src/lib/sandbox/host-commands.ts
+function runnerActionRoot() {
+	return (0, node_path.resolve)((0, node_path.dirname)(process.argv[1]), "..");
+}
+function runnerInstallRoot(execPath = process.execPath) {
+	let externals = (0, node_path.resolve)(execPath, "../../..");
+	return (0, node_path.basename)(externals) === "externals" ? (0, node_path.dirname)(externals) : void 0;
+}
+const PINNED_COMMANDS = ["docker", "sudo"];
+function persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath = realPathOf) {
+	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
+		...resolveDefaultWritableDirs(env, realpath),
+		writablePaths: writeThroughPaths
+	});
+}
+const realFindCommandDeps = {
+	...realSymlinkDeps,
+	isExecutable: (path) => {
+		try {
+			return (0, node_fs.accessSync)(path, node_fs.constants.X_OK), !0;
+		} catch {
+			return !1;
+		}
+	}
+};
+function resolveDefaultWritableDirs(env, realpath = realPathOf) {
+	return {
+		workdir: env.GITHUB_WORKSPACE ? realpath(env.GITHUB_WORKSPACE) : void 0,
+		home: env.HOME ? realpath(env.HOME) : void 0,
+		runnerTemp: env.RUNNER_TEMP ? realpath(env.RUNNER_TEMP) : void 0,
+		tmp: realpath("/tmp")
+	};
+}
+function reachableFrom(persisting, deps) {
+	let inside = (path) => persisting.some((w) => isAtOrUnder(path, w));
+	return (path) => {
+		let resolved = resolveHostPath(path, deps);
+		return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
+	};
+}
+function pathOutside(pathEnv = "", persisting, deps = realSymlinkDeps) {
+	if (persisting.includes("/")) return pathEnv;
+	let reachable = reachableFrom(persisting, deps);
+	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !reachable(dir)).join(node_path.delimiter);
+}
+function findPinnableCommand(command, pathEnv, persisting, deps = realFindCommandDeps) {
+	let optedOut = persisting.includes("/"), reachable = reachableFrom(persisting, deps);
+	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
+		if (!(0, node_path.isAbsolute)(dir)) continue;
+		let candidate = (0, node_path.join)(dir, command);
+		if (deps.isExecutable(candidate) && (optedOut || !reachable(candidate))) return candidate;
+	}
+}
+function pinHostCommands(paths, env, deps = realFindCommandDeps) {
+	for (let command of PINNED_COMMANDS) {
+		let path = findPinnableCommand(command, env.PATH, paths, deps);
+		if (path) {
+			pinCommand(command, path);
+			continue;
+		}
+		if (findPinnableCommand(command, env.PATH, [], deps)) throw new SandboxError(`'${command}' is on PATH only under paths a sandboxed command can write to (${paths.join(", ")}). This action runs it outside the sandbox, so it has to live somewhere no sandboxed command can replace it, such as /usr/bin.`, "HOST_COMMAND_UNPINNABLE");
+	}
+	pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps)), pinCommandPathEnv("sudo", pathOutside("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", paths, deps));
+}
+function jvmTools(env, persisting, deps = realFindCommandDeps) {
+	let javaHomeBin = env.JAVA_HOME ? (0, node_path.join)(env.JAVA_HOME, "bin") : void 0;
+	return {
+		java: findPinnableCommand("java", env.PATH, [], deps),
+		keytool: findPinnableCommand("keytool", javaHomeBin, persisting, deps) ?? findPinnableCommand("keytool", env.PATH, persisting, deps)
+	};
+}
+function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
+	let writeThroughPaths = [];
+	try {
+		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
+	} catch {}
+	return persistingWritablePaths("persistent", writeThroughPaths, env, realpath);
+}
+function dockerConfigDir(env) {
+	return env.DOCKER_CONFIG ? (0, node_path.resolve)(env.DOCKER_CONFIG) : env.HOME ? (0, node_path.join)(env.HOME, ".docker") : void 0;
+}
+function sandboxReadonlyHostDirs(persisting, env, { actionRoot, installRoot } = {
+	actionRoot: runnerActionRoot(),
+	installRoot: runnerInstallRoot()
+}, deps = realSymlinkDeps, mounts = []) {
+	let docker = dockerConfigDir(env), workDirFix = "Configure the runner's work directory by its real path, not through the symlink.", candidates = [
+		{
+			name: "This action's checkout",
+			dir: actionRoot,
+			fix: () => `the runner runs this action's post step from there. ${workDirFix}`
+		},
+		...env.RUNNER_WORKSPACE ? [{
+			name: "The runner's action checkouts",
+			dir: (0, node_path.join)((0, node_path.dirname)((0, node_path.resolve)(env.RUNNER_WORKSPACE)), "_actions"),
+			fix: () => `the runner runs later steps' actions from there. ${workDirFix}`
+		}] : [],
+		...installRoot ? [{
+			name: "The runner's install directory",
+			dir: installRoot,
+			fix: () => "the runner runs later steps from there. Install the runner by its real path, not through the symlink."
+		}] : [],
+		...docker ? [{
+			name: "The docker CLI's config directory",
+			dir: docker,
+			fix: () => `this action runs docker on the host after the command exits. Set DOCKER_CONFIG to its real path, ${JSON.stringify(realPathOf(docker, deps))}.`
+		}] : []
+	], roots = persisting.filter((p) => p !== "/"), dirs = candidates.flatMap(({ name, dir, fix }) => {
+		if (persisting.includes(realPathOf(dir, deps))) return [];
+		let resolved = resolveHostPath(dir, deps), link = replaceableLink(resolved, roots);
+		if (link !== void 0) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(link)}, a symlink the sandboxed command can replace, and ${fix()}`, "HOST_DIR_UNPROTECTABLE");
+		if ("loop" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
+		let real = resolved.real;
+		return [real, ...pathAliases(mounts, real).filter((a) => !persisting.includes(a))].filter((p) => persisting.some((root) => isAtOrUnder(p, root)));
+	}), unique = [...new Set(dirs)];
+	return unique.filter((dir) => {
+		let others = unique.filter((o) => o !== dir);
+		return persisting.includes(innermost(dir, [...persisting, ...others]));
+	});
+}
+function innermost(dir, paths) {
+	return paths.filter((p) => isAtOrUnder(dir, p)).sort((a, b) => b.length - a.length)[0];
+}
+function replaceableLink(resolved, roots) {
+	return resolved.links.find((l) => roots.some((p) => isAtOrUnder((0, node_path.dirname)(l.at), p)))?.at;
+}
+function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = realSymlinkDeps, mounts = []) {
+	let named = new Set(writeThroughPaths), openable = (name, path) => name !== "GITHUB_STATE" && named.has(realPathOf(path, deps)), roots = persisting.filter((p) => p !== "/");
+	return [
+		"GITHUB_ENV",
+		"GITHUB_PATH",
+		"GITHUB_STATE"
+	].flatMap((name) => {
+		let path = env[name];
+		if (!path || openable(name, path)) return [];
+		let resolved = resolveHostPath(path, deps), link = replaceableLink(resolved, roots);
+		if (link !== void 0) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through ${JSON.stringify(link)}, a symlink the sandboxed command can replace, and the runner reads it after the step. Configure the runner's work directory by its real path, not through the symlink.`, "HOST_DIR_UNPROTECTABLE");
+		if ("loop" in resolved) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
+		let aliases = pathAliases(mounts, resolved.real).filter((a) => !openable(name, a) && persisting.some((root) => isAtOrUnder(a, root)));
+		return [resolved.real, ...aliases];
+	});
+}
+function renameGuardDirs(readonlyDirs, persisting) {
+	let writable = (dir) => persisting.includes(innermost(dir, [...persisting, ...readonlyDirs])), guards = new Set();
+	for (let dir of readonlyDirs) {
+		let root = persisting.filter((p) => p !== dir && isAtOrUnder(dir, p)).sort((a, b) => a.length - b.length)[0];
+		if (root) for (let p = (0, node_path.dirname)(dir); p !== root && isAtOrUnder(p, root); p = (0, node_path.dirname)(p)) writable(p) && guards.add(p);
+	}
+	return [...guards].sort((a, b) => a.length - b.length || a.localeCompare(b));
+}
+//#endregion
+//#region src/lib/sandbox/filesystem-plan.ts
+function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRealPaths = []) {
+	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
+	for (let path of writeThroughPaths) {
+		let reserved = [...reservedInternalDestinations(), ...reservedRealPaths].find((r) => isAtOrUnder(path, r));
+		if (reserved) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
+	}
+}
+function resolveWriteThroughInput(writeThroughInput, env) {
+	try {
+		return resolveWriteThroughPaths(writeThroughInput, env);
+	} catch (e) {
+		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
+	}
+}
+function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
+	let written = resolveWriteThroughInput(writeThroughInput, env), realpath = deps.realpath ?? realPathOf, writeThroughPaths = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
+	if (validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map((p) => realpath(p))), written.includes("/")) return {
+		overlayRoots: [],
+		writeThroughPaths
+	};
+	try {
+		assertKnownFilesExist(written, env, deps);
+	} catch (e) {
+		throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_MISSING");
+	}
+	try {
+		for (let path of writeThroughPaths) assertNoSymlinkInWriteThrough(path, deps);
+	} catch (e) {
+		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
+	}
+	try {
+		assertScratchBaseNotWritable(writeThroughPaths);
+	} catch (e) {
+		throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
+	}
+	try {
+		ensureWriteThroughTargetsExist(writeThroughPaths, deps);
+	} catch (e) {
+		throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_UNCREATABLE");
+	}
+	if (filesystemMode !== "ephemeral") return {
+		overlayRoots: [],
+		writeThroughPaths
+	};
+	try {
+		let { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath), candidateRoots = determineOverlayRoots([
+			home,
+			runnerTemp,
+			tmp,
+			workdir
+		].filter((p) => !!p), writeThroughPaths, deps), hostMounts = (deps.listHostMounts ?? listHostMounts)();
+		return {
+			overlayRoots: [...candidateRoots, ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps)],
+			writeThroughPaths
+		};
+	} catch (e) {
+		throw new SandboxError(`Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
+	}
+}
+function onRealRunnerDir(path, env, realpath) {
+	let dir = [
+		env.GITHUB_WORKSPACE,
+		env.HOME,
+		env.RUNNER_TEMP
+	].flatMap((d) => d ? [(0, node_path.normalize)(d)] : []).filter((d) => isAtOrUnder(path, d)).sort((a, b) => b.length - a.length)[0];
+	return dir === void 0 ? path : (0, node_path.join)(realpath(dir), (0, node_path.relative)(dir, path));
+}
+//#endregion
+//#region src/lib/sandbox/runtime-sockets.ts
+const RUNTIME_SOCKET_PATHS = [
+	"/var/run/docker.sock",
+	"/run/docker.sock",
+	"/run/containerd/containerd.sock",
+	"/var/run/docker/containerd/containerd.sock",
+	"/run/buildkit/buildkitd.sock",
+	"/run/podman/podman.sock",
+	"/var/run/crio/crio.sock",
+	"/run/dbus/system_bus_socket",
+	"/var/run/dbus/system_bus_socket"
+];
+function rootlessRuntimeSocketPaths(env) {
+	let dir = env.XDG_RUNTIME_DIR;
+	return dir ? [`${dir}/docker.sock`, `${dir}/podman/podman.sock`] : [];
+}
+//#endregion
+//#region src/lib/sandbox/identity.ts
+function assertNonRootUid(uid) {
+	if (uid === 0) throw new SandboxError("Buildcage will not run as root (uid 0): it keeps the runner's own uid, and as root only filesystem permissions separate the command from root-owned host sockets, which cannot guarantee isolation. Run the GitHub Actions runner as a non-root user.", "ROOT_RUNNER");
+}
+const PRIVILEGED_GROUP_NAMES = new Set([
+	"root",
+	"docker",
+	"containerd",
+	"podman",
+	"lxd",
+	"libvirt",
+	"libvirt-qemu",
+	"kvm",
+	"sudo",
+	"wheel"
+]), FALLBACK_GROUP_NAMES = ["nogroup", "nobody"], FALLBACK_GID = 65534, GETENT_PATHS = ["/usr/bin/getent", "/bin/getent"], realHost = {
+	readGroupFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
+	lookupGroups: (keys) => {
+		let getent = GETENT_PATHS.find((p) => (0, node_fs.existsSync)(p));
+		if (!getent) return { lines: "" };
+		try {
+			return { lines: (0, node_child_process.execFileSync)(getent, ["group", ...keys], {
+				encoding: "utf8",
+				stdio: "pipe",
+				timeout: 5e3
+			}) };
+		} catch (e) {
+			let { status, stdout } = e;
+			return status === 2 ? { lines: stdout ?? "" } : { error: errorMessage(e) };
+		}
+	},
+	gidOf: (path) => (0, node_fs.statSync)(path).gid
+};
+function readGroupNamesByGid(groupFile, nssLines, host) {
+	let sources = [];
+	try {
+		sources.push(host.readGroupFile(groupFile));
+	} catch {}
+	if (nssLines && sources.push(nssLines), sources.length === 0) return null;
+	let map = new Map();
+	for (let line of sources.join("\n").split("\n")) {
+		if (!line || line.startsWith("#")) continue;
+		let [name, , gidStr] = line.split(":"), gid = Number(gidStr);
+		if (!name || !Number.isInteger(gid)) continue;
+		let names = map.get(gid);
+		names ? names.push(name) : map.set(gid, [name]);
+	}
+	return map;
+}
+function ownerGids(paths, host) {
+	let gids = new Set();
+	for (let p of paths) try {
+		gids.add(host.gidOf(p));
+	} catch {}
+	return gids;
+}
+function resolveSandboxGid(primaryGid, env, options = {}) {
+	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...RUNTIME_SOCKET_PATHS, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, nss = host.lookupGroups([
+		String(primaryGid),
+		...PRIVILEGED_GROUP_NAMES,
+		...FALLBACK_GROUP_NAMES,
+		"65534"
+	]), nssError = "error" in nss ? nss.error : void 0, groupNamesByGid = readGroupNamesByGid(groupFile, "lines" in nss ? nss.lines : void 0, host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1, reported = nssError === void 0 ? {} : { nssError };
+	if (nssError === void 0 && !isPrivileged(primaryGid)) return { gid: primaryGid };
+	let substitute = (gid) => gid === primaryGid ? {
+		gid,
+		...reported
+	} : {
+		gid,
+		substitutedFrom: primaryGid,
+		...reported
+	}, gidForName = (name) => {
+		if (groupNamesByGid) {
+			for (let [gid, names] of groupNamesByGid) if (names.includes(name)) return gid;
+		}
+	};
+	for (let name of FALLBACK_GROUP_NAMES) {
+		let gid = gidForName(name);
+		if (gid !== void 0 && !isPrivileged(gid)) return substitute(gid);
+	}
+	if (!isPrivileged(FALLBACK_GID)) return substitute(FALLBACK_GID);
+	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group${nssError === void 0 ? "" : " or couldn't be verified through NSS"}, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
+}
+//#endregion
+//#region src/lib/sandbox/env-loader.ts
+const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = new Set([
+	"ACTIONS_RUNTIME_URL",
+	"ACTIONS_RUNTIME_TOKEN",
+	"ACTIONS_CACHE_URL",
+	"ACTIONS_RESULTS_URL",
+	"ACTIONS_CACHE_SERVICE_V2",
+	"ACTIONS_CACHE_MODE"
+]), ACTION_INPUT_ENV_KEYS = new Set([
+	"run",
+	"config_file",
+	"proxy_mode",
+	"proxy_engine",
+	"allowed_https_rules",
+	"allowed_http_rules",
+	"allowed_ip_rules",
+	"allowed_url_rules",
+	"allowed_tls_rules",
+	"upload_traffic_artifact",
+	"traffic_artifact_retention_days",
+	"fail_on_blocked",
+	"fail_on_ca_residue",
+	"known_blocked_rules",
+	"write_through",
+	"writable",
+	"filesystem_mode",
+	"filesystem_audit",
+	"filesystem_audit_retention_days",
+	"label"
+].map((input) => `INPUT_${input.toUpperCase()}`));
+function isRunnerOnly(key) {
+	return RUNNER_ONLY_ENV_KEYS.has(key) || ACTION_INPUT_ENV_KEYS.has(key);
+}
+function resolveSandboxEnv(env, caTrust, warn) {
+	let merged = {
+		...env,
+		...caTrust ? caTrustAdditions(caTrust, env).env : void 0
+	}, resolved = {}, skipped = [];
+	for (let [key, value] of Object.entries(merged)) value !== void 0 && (isRunnerOnly(key) || (ENV_KEY.test(key) ? resolved[key] = value : skipped.push(key)));
+	return skipped.length > 0 && warn?.(`Not passing environment variables whose names a shell cannot export: ${skipped.join(", ")}`), resolved;
+}
+function buildEnvBlob(resolved) {
+	let records = [...Object.entries(resolved).map(([k, v]) => `${k}=${v}`), ENV_BLOB_TERMINATOR];
+	return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
+}
+const ENV_LOADER_SCRIPT = `#!/bin/bash
+# Applies the step environment from stdin, then runs $1 as a child: forwards
+# signals to its process group, reaps orphans, and exits with its status. See
+# sandbox/env-loader.ts for the wire format.
+#
+# The records go to env(1) rather than being exported, so a step variable
+# named like one of this script's, or like a bash readonly or dynamic variable
+# (UID, SECONDS), arrives as set. No eval: each record is one argument, never
+# re-interpreted, so a value containing $(...) or a backtick stays literal.
+set -u
+
+# Trapped before reading, as PID 1 drops untrapped signals. Any that arrive
+# before the child exists are held for it. A forwarded one goes to the
+# child's whole process group, which holds the command the script runs, as a
+# terminal's Ctrl-C does.
+child=
+pending=
+stopping=
+forward() {
+  if [ -n "$child" ]; then
+    case "$1" in TERM | INT) stopping=1 ;; esac
+    kill -s "$1" -- "-$child" 2>/dev/null
+  else
+    pending="$pending $1"
+  fi
+}
+for sig in TERM INT HUP QUIT USR1 USR2; do trap "forward $sig" "$sig"; done
+
+complete=
+records=()
+while IFS= read -r -d '' record; do
+  if [ "$record" = "${ENV_BLOB_TERMINATOR}" ]; then
+    complete=1
+    break
+  fi
+  [[ $record =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+  records+=("$record")
+done
+
+if [ -z "$complete" ]; then
+  echo "buildcage: the sandbox environment ended before its terminator; refusing to run" >&2
+  exit 1
+fi
+
+# Never hand the run script the tail of this blob.
+exec 0</dev/null
+
+# Tells run-isolated.sh that the command is starting. The command never gets
+# fd 3.
+{ printf 1 >&3; } 2>/dev/null
+exec 3>&-
+
+# Job control puts the child in a process group of its own, and leaves SIGINT
+# and SIGQUIT as they are rather than ignoring them in it. Held signals are
+# raised from inside the child.
+held=$pending
+set -m
+{
+  for sig in $held; do kill -s "$sig" "$BASHPID"; done
+  # $1 is this run's script, whose path holds no "=" for env to read as a record.
+  exec /usr/bin/env -i -- \${records[@]+"\${records[@]}"} "$1"
+} &
+child=$!
+set +m
+# Signals that arrived during the fork.
+for sig in \${pending#"$held"}; do forward "$sig"; done
+# Keeps bash's "Killed" job notice out of the step's output. The child has its
+# own stderr.
+exec 2>/dev/null
+# A trapped signal interrupts \`wait\` with 128+n; the final \`wait\` returns the
+# child's own status, 128+n if a signal killed it, as runc reports for an init.
+while kill -0 "$child" 2>/dev/null; do wait "$child"; done
+wait "$child"
+status=$?
+# The script can exit on a SIGTERM or SIGINT while the command it ran is still
+# winding down, and this process exiting would kill it. Anything in the group
+# that ignores the signal holds the step until it is killed from outside.
+if [ -n "$stopping" ]; then
+  nap=/usr/bin/sleep
+  [ -x "$nap" ] || nap=/bin/sleep
+  while kill -0 -- "-$child" 2>/dev/null; do "$nap" 0.1; done
+fi
+exit $status
+`;
+function writeEnvLoader(execDir) {
+	let loaderPath = (0, node_path.join)(execDir, "env-loader.sh");
+	return (0, node_fs.writeFileSync)(loaderPath, ENV_LOADER_SCRIPT, { mode: 448 }), loaderPath;
+}
+//#endregion
+//#region scripts/extra-masked-proc-paths.json
+var extra_masked_proc_paths_default = [
+	"/proc/kallsyms",
+	"/proc/kmsg",
+	"/proc/sysrq-trigger"
+];
+//#endregion
+//#region src/lib/sandbox/oci-protected-paths.ts
+function maskedRuntimeDir(env) {
+	let dir = env.XDG_RUNTIME_DIR;
+	return !dir || ["/run", "/var/run"].some((run) => isAtOrUnder(dir, run)) ? [] : [dir];
+}
+function computeReadonlyHostMounts(hostMounts, protectedPaths, freshMountDestinations) {
+	return hostMounts.filter(({ mountPoint }) => mountPoint !== "/" && !freshMountDestinations.has(mountPoint) && ![...protectedPaths].some((p) => isAtOrUnder(mountPoint, p))).map(({ mountPoint }) => mountPoint);
+}
+function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, env, hostMounts, writablePaths, freshMountDestinations, disableReadonly }) {
+	let extraMaskedHostPaths = maskedRuntimeDir(env).filter((p) => !writablePaths.has("/") && !writablePaths.has(p.replace(/\/+$/, ""))), maskedPaths = [
+		...baseMaskedPaths,
+		...extra_masked_proc_paths_default,
+		...extraMaskedHostPaths
+	], isExtraMasked = (p) => extra_masked_proc_paths_default.includes(p) || extraMaskedHostPaths.includes(p), keptReadonlyPaths = baseReadonlyPaths.filter((p) => !isExtraMasked(p));
+	return {
+		maskedPaths,
+		readonlyPaths: disableReadonly ? keptReadonlyPaths : Array.from(new Set([...keptReadonlyPaths, ...computeReadonlyHostMounts(hostMounts, writablePaths, freshMountDestinations).filter((p) => !isExtraMasked(p))]))
+	};
+}
+//#endregion
+//#region src/lib/sandbox/oci-config.ts
+const REQUIRED_NAMESPACES = [
+	"pid",
+	"network",
+	"mount",
+	"ipc",
+	"uts"
+];
+function sandboxNamespaces(base, netnsPath) {
+	for (let type of REQUIRED_NAMESPACES) {
+		let entries = base.filter((ns) => ns.type === type);
+		if (entries.length !== 1 || entries[0].path !== void 0) throw Error(`runc's default spec does not give the sandbox exactly one new ${type} namespace; refusing to run the sandbox`);
+	}
+	return base.map((ns) => ns.type === "network" ? {
+		...ns,
+		path: netnsPath
+	} : ns);
+}
+function cgroupsPathFor(runnerCgroup, name) {
+	if (runnerCgroup !== void 0) return `${runnerCgroup.replace(/\/$/, "")}/${name}`;
+}
+function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [] }, probes = realHostProbes) {
+	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, cgroupName, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [], scratchBaseAliases = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
+	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths, (path) => probes.realpath(path));
+	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
+		destination: RESOLV_CONF_DESTINATION,
+		type: "none",
+		source: resolvConfPath,
+		options: ["rbind", "ro"]
+	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), overlapsFresh = (p) => [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p)), renameGuards = renameGuardDirs.filter((p) => !overlapsFresh(p)).map((p) => ({
+		destination: p,
+		type: "none",
+		source: p,
+		options: ["rbind", "rw"]
+	})), runCoverage = disableReadonly ? {
+		mounts: [],
+		writablePaths: new Set()
+	} : hostRunCoverageLayers(probes.varRunRealPath()), mounts = [
+		...withHostShmSize(baseSpec.mounts, probes.shmSizeBytes()),
+		...runCoverage.mounts,
+		...layers.mounts,
+		...renameGuards,
+		...internalMounts,
+		...scratchBaseLayers(execDir, scratchBaseAliases)
+	], protectedWritablePaths = new Set([...layers.writablePaths, ...runCoverage.writablePaths]), { maskedPaths, readonlyPaths } = resolveProtectedPaths({
+		baseMaskedPaths: baseSpec.linux.maskedPaths ?? [],
+		baseReadonlyPaths: baseSpec.linux.readonlyPaths ?? [],
+		env,
+		hostMounts,
+		writablePaths: protectedWritablePaths,
+		freshMountDestinations,
+		disableReadonly
+	}), namespaces = sandboxNamespaces(baseSpec.linux.namespaces, netnsPath), cgroupsPath = cgroupsPathFor(probes.cgroupPath(), cgroupName);
+	return {
+		...baseSpec,
+		root: {
+			path: rootfsBindDir,
+			readonly: !disableReadonly
+		},
+		mounts,
+		hostname: probes.hostname(),
+		process: {
+			...baseSpec.process,
+			terminal: !1,
+			user: {
+				uid,
+				gid
+			},
+			args: [
+				probes.setprivPath(),
+				"--pdeathsig=KILL",
+				"--",
+				envLoaderPath,
+				scriptPath
+			],
+			env: [],
+			cwd: workdir || "/",
+			capabilities: {
+				bounding: [],
+				effective: [],
+				permitted: [],
+				inheritable: [],
+				ambient: []
+			},
+			noNewPrivileges: !0,
+			rlimits: nofile ? [{
+				type: "RLIMIT_NOFILE",
+				soft: nofile.soft,
+				hard: nofile.hard
+			}] : void 0
+		},
+		linux: {
+			...baseSpec.linux,
+			...cgroupsPath !== void 0 && { cgroupsPath },
+			namespaces,
+			seccomp: seccompProfile,
+			maskedPaths,
+			readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostPaths])]
+		}
+	};
+}
+//#endregion
+//#region src/lib/sandbox/oci-files.ts
+function writeRunScript(runInput, execDir) {
+	let scriptPath = (0, node_path.join)(execDir, "run-script.sh"), content = runInput.startsWith("#!") ? runInput : `#!/bin/bash\nset -e\n${runInput}\n`;
+	return (0, node_fs.writeFileSync)(scriptPath, content, { mode: 448 }), scriptPath;
+}
+function writeOciConfig(config, bundleDir) {
+	let configPath = (0, node_path.join)(bundleDir, "config.json");
+	return (0, node_fs.writeFileSync)(configPath, JSON.stringify(config), { mode: 384 }), configPath;
+}
+function writeResolvConf(dns, dir) {
+	let resolvConfPath = (0, node_path.join)(dir, "resolv.conf");
+	return (0, node_fs.writeFileSync)(resolvConfPath, `nameserver ${dns}\n`, { mode: 420 }), resolvConfPath;
+}
+//#endregion
+//#region src/lib/sandbox/run.ts
+const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
+function defaultSpawn(command, args, input) {
+	let child = (0, node_child_process.spawn)(hostCommand(command), args, {
+		stdio: [
+			"pipe",
+			"inherit",
+			"inherit"
+		],
+		env: hostCommandEnv(command)
+	});
+	return child.stdin.on("error", () => {}), child.stdin.end(input), {
+		exited: new Promise((resolve) => {
+			child.on("error", (error) => {
+				child.pid === void 0 && resolve({ error });
+			}), child.on("close", (code, signal) => resolve(code === null ? { signal } : { status: code }));
+		}),
+		kill: (signal) => child.kill(signal)
+	};
+}
+function defaultCopyScript(from, to) {
+	(0, node_fs.copyFileSync)(from, to), (0, node_fs.chmodSync)(to, 320);
+}
+async function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, targetIp, envBlob, cancel }, { spawn = defaultSpawn, copyScript = defaultCopyScript } = {}) {
+	let runIsolatedShPath = (0, node_path.join)(bundleDir, "run-isolated.sh");
+	copyScript((0, node_path.join)(__dirname$1, "..", "scripts", "run-isolated.sh"), runIsolatedShPath);
+	let child = spawn("sudo", [
+		"-n",
+		"--",
+		runIsolatedShPath,
+		"--proxy-netns",
+		proxyNetns,
+		"--runc",
+		runcPath,
+		"--bundle",
+		bundleDir,
+		"--container-id",
+		containerId,
+		"--netns-name",
+		netnsName,
+		"--rootfs-bind-dir",
+		rootfsBindDir,
+		"--gateway",
+		gateway,
+		"--target-ip",
+		targetIp
+	], envBlob), escalation, stop = () => {
+		child.kill("SIGTERM"), escalation = setTimeout(() => child.kill("SIGTERM"), 5e3);
+	};
+	cancel?.aborted ? stop() : cancel?.addEventListener("abort", stop, { once: !0 });
+	let exit;
+	try {
+		exit = await child.exited;
+	} finally {
+		clearTimeout(escalation), cancel?.removeEventListener("abort", stop);
+	}
+	if ("status" in exit) return exit.status;
+	throw "signal" in exit ? new SandboxError(`The sandbox was ended by ${exit.signal}, so the command's exit status is unknown.`, "SANDBOX_TERMINATED") : new SandboxError(`Failed to start the sandbox: ${errorMessage(exit.error)}`, "SANDBOX_LAUNCH_FAILED");
+}
+//#endregion
+//#region src/lib/sandbox/runc-bootstrap.ts
+function generateBaseOciSpec(runcPath, bundleDir, { execIn = defaultExecIn, readFile = defaultReadFile } = {}) {
+	return execIn(runcPath, ["spec"], bundleDir), JSON.parse(readFile((0, node_path.join)(bundleDir, "config.json")));
+}
+function defaultExec(command, args) {
+	return (0, node_child_process.execFileSync)(hostCommand(command), args, {
+		encoding: "utf8",
+		env: hostCommandEnv(command)
+	});
+}
+function defaultExecIn(command, args, cwd) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		cwd,
+		env: hostCommandEnv(command)
+	});
+}
+function defaultReadFile(path) {
+	return (0, node_fs.readFileSync)(path, "utf8");
+}
+function extractRuncBootstrap({ containerName, destDir }, deps = {}) {
+	let { exec = defaultExec, chmod = node_fs.chmodSync, remove = node_fs.rmSync } = deps, runcPath = (0, node_path.join)(destDir, "runc"), genSeccompProfilePath = (0, node_path.join)(destDir, "gen-seccomp-profile");
+	exec("docker", buildDockerCpArgs({
+		containerName,
+		containerPath: "/opt/buildcage/bin/runc",
+		hostPath: runcPath
+	})), exec("docker", buildDockerCpArgs({
+		containerName,
+		containerPath: "/opt/buildcage/bin/gen-seccomp-profile",
+		hostPath: genSeccompProfilePath
+	})), chmod(runcPath, 493), chmod(genSeccompProfilePath, 493);
+	let seccompProfile = JSON.parse(exec(genSeccompProfilePath, [])), baseSpec = generateBaseOciSpec(runcPath, destDir, deps);
+	return remove(genSeccompProfilePath), {
+		runcPath,
+		seccompProfile,
+		baseSpec
+	};
+}
+//#endregion
+//#region src/lib/sandbox/sandboxed-command.ts
+init_core();
+const realDeps$2 = {
+	withScratchDir,
+	extractRuncBootstrap,
+	extractCaCert,
+	writeCaTrustFiles,
+	jvmTools,
+	prepareNssDb,
+	settleNssDbSlot,
+	nssDbDetached,
+	releaseNssDbDirs,
+	createOverlayScratchDirs,
+	writeResolvConf,
+	writeRunScript,
+	writeEnvLoader,
+	listHostMounts,
+	resolveSandboxGid,
+	buildOciConfig,
+	writeOciConfig,
+	resolveSandboxEnv,
+	buildEnvBlob,
+	runIsolated,
+	extractTracer,
+	startFilesystemAudit,
+	mkdir: node_fs.mkdirSync,
+	touch: (path) => (0, node_fs.writeFileSync)(path, "", {
+		flag: "a",
+		mode: 384
+	}),
+	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
+	realpath: realPathOf,
+	...realSymlinkDeps,
+	info
+};
+function extractBootstrap(containerName, dir, { extractRuncBootstrap }) {
+	try {
+		return extractRuncBootstrap({
+			containerName,
+			destDir: dir
+		});
+	} catch (e) {
+		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`, "RUNC_EXTRACT_FAILED");
+	}
+}
+function extractCaTrust(containerName, dir, options, { extractCaCert, writeCaTrustFiles, jvmTools, prepareNssDb, info, realpath }) {
+	let { env, writeThroughPaths, warn } = options;
+	try {
+		let files = {
+			...writeCaTrustFiles(extractCaCert(containerName, dir), dir, env, jvmTools(env, persistingWritablePaths("persistent", writeThroughPaths, env, realpath)), { warn }),
+			nssDb: prepareNssDb(containerName, dir, env.HOME, {
+				warn,
+				info
+			}, { homeUpper: homeUpperFor(dir, options, realpath) })
+		}, preset = presetCaVariables(files, env, realpath);
+		return preset.length > 0 && warn(`these CA variables are already set and do not point at the proxy CA: ${preset.map((name) => `${name} (${env[name]})`).join(", ")}. A tool reading one fails TLS under proxy_engine: inspect; unset them for this step, or use proxy_engine: universal.`), files;
+	} catch (e) {
+		throw e instanceof SandboxError ? e : new SandboxError(`Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`, "CA_EXTRACT_FAILED");
+	}
+}
+function homeUpperFor(dir, options, realpath) {
+	let { filesystemMode, overlayRoots, env } = options, home = env.HOME;
+	if (filesystemMode === "ephemeral" && home && overlayRoots.includes(home) && !persists((0, node_path.join)(home, ".pki/nssdb"), options, realpath)) return overlayUpperFor(dir, home);
+}
+function writeBundleFiles(dir, { runInput, filesystemMode, overlayRoots }, { createOverlayScratchDirs, writeResolvConf, writeRunScript, writeEnvLoader, mkdir }) {
+	let overlayScratchPaths = filesystemMode === "ephemeral" ? createOverlayScratchDirs(dir, overlayRoots) : [], resolvConfPath = writeResolvConf(PROXY_ADDRESS, dir), execDir = (0, node_path.join)(dir, "exec");
+	return mkdir(execDir, { mode: 448 }), {
+		overlayScratchPaths,
+		resolvConfPath,
+		execDir,
+		scriptPath: writeRunScript(runInput, execDir),
+		envLoaderPath: writeEnvLoader(execDir)
+	};
+}
+function resolveIdentity(env, warn, { resolveSandboxGid, info }) {
+	let { gid, substitutedFrom, nssError } = resolveSandboxGid(process.getgid(), env);
+	return nssError !== void 0 && warn(`buildcage: could not look up groups through NSS (${nssError}); the primary group couldn't be verified and is treated as privileged`), substitutedFrom !== void 0 && info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- ${nssError === void 0 ? "the runner's primary group grants container/VM runtime access" : "the runner's primary group couldn't be verified through NSS"}`), {
+		uid: process.getuid(),
+		gid
+	};
+}
+function assembleBundle(dir, options, deps) {
+	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
+	try {
+		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = persistingWritablePaths(filesystemMode, writeThroughPaths, env, deps.realpath), symlinkDeps = {
+			lstat: deps.lstat,
+			readlink: deps.readlink
+		}, readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, void 0, symlinkDeps, hostMounts), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, symlinkDeps, hostMounts), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
+		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
+			mode: 448,
+			recursive: !0
+		});
+		for (let file of readonlyFiles) deps.touch(file);
+		config = buildOciConfig(baseSpec, {
+			identity: resolveIdentity(env, options.warn, deps),
+			writable: {
+				...resolveDefaultWritableDirs(env, deps.realpath),
+				writablePaths: writeThroughPaths
+			},
+			ephemeral: filesystemMode === "ephemeral" ? {
+				overlayRoots: overlayScratchPaths,
+				allowWrite: writeThroughPaths
+			} : void 0,
+			runtime: {
+				netnsPath: `/var/run/netns/${netnsName}`,
+				cgroupName: containerName,
+				rootfsBindDir,
+				resolvConfPath,
+				seccompProfile,
+				execDir,
+				envLoaderPath,
+				scriptPath,
+				hostMounts,
+				scratchBaseAliases: pathAliases(hostMounts, SANDBOX_SCRATCH_BASE)
+			},
+			env,
+			caTrust,
+			readonlyHostPaths: [...readonlyHostDirs, ...readonlyFiles],
+			renameGuardDirs: renameGuardDirs$1
+		});
+	} catch (e) {
+		throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
+	}
+	return {
+		config,
+		runcPath,
+		caTrust,
+		netnsName,
+		rootfsBindDir
+	};
+}
+function persists(path, { filesystemMode, writeThroughPaths, env }, realpath) {
+	return persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath).some((p) => p === "/" || path === p || path.startsWith(`${p}/`));
+}
+function releaseDeps({ warn }, { info }) {
+	return {
+		info,
+		warn
+	};
+}
+function finishNssDb(caTrust, options, deps) {
+	let { nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info, realpath } = deps, nssDb = caTrust?.nssDb;
+	if (!nssDb) return;
+	let { failOnCaResidue, warn } = options, release = () => releaseNssDbDirs(nssDb, releaseDeps(options, deps)), persist = persists(nssDb.destination, options, realpath), detached = persist ? nssDbDetached(nssDb) : void 0;
+	if (detached !== void 0) {
+		warn(detached), release();
+		return;
+	}
+	try {
+		settleNssDbSlot(nssDb, {
+			persist,
+			caPem: readFile(caTrust.ownCaPath),
+			onResidue: (message) => {
+				if (!failOnCaResidue) {
+					warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
+					return;
+				}
+				throw new SandboxError(`${message}. To let the step carry on with only a warning, set fail_on_ca_residue: false (a copy of the CA is then written back).`, "NSS_DATABASE_CA_COPIED");
+			}
+		}) === "discarded" && info(`buildcage: what the command wrote to the NSS database at ${nssDb.destination} is discarded, as the filesystem mode discards writes there`);
+	} catch (e) {
+		throw e instanceof SandboxError ? e : new SandboxError(`could not write back what the command wrote to the NSS database at ${nssDb.destination}: ` + errorMessage(e), "NSS_DATABASE_WRITE_BACK_FAILED");
+	} finally {
+		release();
+	}
+}
+async function startAudit(dir, config, options, deps) {
+	let { filesystemAudit, containerName, warn } = options;
+	if (filesystemAudit === void 0) return noAudit;
+	let cgroupsPath = config.linux.cgroupsPath;
+	if (cgroupsPath === void 0) return warn("buildcage: filesystem_audit needs a cgroup v2 host; the step's file accesses were not recorded."), noAudit;
+	try {
+		let tracerPath = deps.extractTracer(containerName, dir);
+		return await deps.startFilesystemAudit({
+			tracerPath,
+			cgroupsPath,
+			outPath: filesystemAudit.outPath,
+			pidFilePath: filesystemAudit.pidFilePath,
+			readyPath: (0, node_path.join)(dir, "filesystem-audit.ready")
+		}, warn);
+	} catch (e) {
+		return warn(`buildcage: filesystem_audit could not start (${errorMessage(e)}); the step's file accesses were not recorded.`), noAudit;
+	}
+}
+async function runSandboxedCommand(options, overrides = {}) {
+	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {
+		...realDeps$2,
+		...overrides
+	}, { withScratchDir, writeOciConfig, resolveSandboxEnv, buildEnvBlob, runIsolated } = deps;
+	return withScratchDir(async (dir) => {
+		let { config, runcPath, caTrust, netnsName, rootfsBindDir } = assembleBundle(dir, options, deps), exitCode;
+		try {
+			writeOciConfig(config, dir);
+			let audit = await startAudit(dir, config, options, deps);
+			try {
+				exitCode = await runIsolated({
+					envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
+					runcPath,
+					proxyNetns,
+					bundleDir: dir,
+					containerId: containerName,
+					netnsName,
+					rootfsBindDir,
+					gateway: PROXY_ADDRESS,
+					targetIp: "198.19.255.101",
+					cancel
+				});
+			} finally {
+				await audit.stop();
+			}
+		} catch (e) {
+			throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e;
+		}
+		return finishNssDb(caTrust, options, deps), exitCode;
+	}, {
+		containerName,
+		ephemeralRoots: filesystemMode === "ephemeral" ? overlayRoots : void 0,
+		warn
+	});
+}
+//#endregion
+//#region src/core/lib/docker/container-env.ts
+function parseDockerInspectEnv(inspectOutput) {
+	let entries = JSON.parse(inspectOutput), env = {};
+	for (let entry of entries) {
+		let i = entry.indexOf("=");
+		i !== -1 && (env[entry.slice(0, i)] = entry.slice(i + 1));
+	}
+	return env;
+}
+function parseDockerInspectLabels(inspectOutput) {
+	return JSON.parse(inspectOutput) ?? {};
+}
+//#endregion
+//#region src/core/lib/docker/client.ts
+function parseContainerIds(psOutput) {
+	return psOutput.split("\n").map((s) => s.trim()).filter(Boolean);
+}
+function defaultRunCommand(args) {
+	return (0, node_child_process.execFileSync)("docker", args, {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		maxBuffer: 67108864
+	});
+}
+function defaultSpawnCommand(args) {
+	return (0, node_child_process.spawn)("docker", args, { stdio: [
+		"ignore",
+		"pipe",
+		"pipe"
+	] });
+}
+async function* streamDockerLines(spawnDocker, args, operation) {
+	let child = spawnDocker(args), spawnError;
+	child.on("error", (err) => {
+		spawnError = err;
+	});
+	let closed = (0, node_events.once)(child, "close").then(([code, signal]) => ({
+		code,
+		signal
+	}), () => ({
+		code: null,
+		signal: null
+	})), stderr = "";
+	child.stderr?.setEncoding("utf8"), child.stderr?.on("data", (chunk) => {
+		stderr += chunk;
+	});
+	let rl = (0, node_readline.createInterface)({
+		input: child.stdout,
+		crlfDelay: Infinity
+	}), exhausted = !1;
+	try {
+		for await (let line of rl) yield line;
+		exhausted = !0;
+	} finally {
+		rl.close(), !exhausted && child.exitCode === null && child.signalCode === null && child.kill();
+	}
+	let { code, signal } = await closed;
+	if (spawnError) throw spawnError;
+	if (code !== 0) throw Object.assign(Error(`${operation} exited with code ${code}${signal ? ` (signal ${signal})` : ""}: ${stderr.trim()}`), {
+		status: code ?? void 0,
+		stderr
+	});
+}
+function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand) {
+	return {
+		findContainers(filters) {
+			let args = ["ps"];
+			for (let filter of filters) args.push("--filter", filter);
+			return args.push("--format", "{{.ID}}"), parseContainerIds(run(args));
+		},
+		copyFromContainer(containerId, containerPath, hostPath) {
+			run(buildDockerCpArgs({
+				containerName: containerId,
+				containerPath,
+				hostPath
+			}));
+		},
+		readFileLines(containerId, path) {
+			return streamDockerLines(spawnDocker, [
+				"exec",
+				containerId,
+				"cat",
+				path
+			], `docker exec cat ${path}`);
+		},
+		readEnv(containerId) {
+			return parseDockerInspectEnv(run([
+				"inspect",
+				containerId,
+				"--format",
+				"{{json .Config.Env}}"
+			]));
+		},
+		readLabels(containerId) {
+			return parseDockerInspectLabels(run([
+				"inspect",
+				containerId,
+				"--format",
+				"{{json .Config.Labels}}"
+			]));
+		},
+		exec(containerId, args) {
+			return run([
+				"exec",
+				containerId,
+				...args
+			]);
+		}
+	};
+}
+//#endregion
+//#region src/core/lib/docker/proxy-dropped-logs.ts
+const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m;
+function parseDroppedLogs(metrics) {
+	let match = COUNTER.exec(metrics);
+	return match ? Number(match[1]) : void 0;
+}
+function readProxyDroppedLogs(docker, containerId) {
+	try {
+		return parseDroppedLogs(docker.exec(containerId, [
+			"curl",
+			"-sf",
+			"--max-time",
+			"10",
+			"--unix-socket",
+			"/var/run/haproxy-health.sock",
+			"http://localhost/metrics?scope=global"
+		]));
+	} catch {
+		return;
+	}
+}
+//#endregion
+//#region src/core/lib/docker/rotated-log.ts
+const SEGMENT = /^@[0-9a-f]{24}\.[a-z]$/;
+function parseLogSegments(lsOutput) {
+	let entries = lsOutput.split("\n").map((line) => line.trim()).filter(Boolean), segments = entries.filter((name) => SEGMENT.test(name)).sort();
+	return entries.includes("current") && segments.push("current"), segments;
+}
+async function* readRotatedLog(docker, containerId, dir) {
+	let listing = docker.exec(containerId, [
+		"ls",
+		"-1",
+		dir
+	]);
+	for (let name of parseLogSegments(listing)) yield* docker.readFileLines(containerId, `${dir}/${name}`);
+}
+//#endregion
+//#region src/core/lib/report/action-version.ts
+function readActionVersion$1(docker, containerId, proxyEngine) {
+	try {
+		let label = docker.readLabels(containerId)["org.opencontainers.image.version"];
+		if (!label) return;
+		let suffix = `-${proxyEngine}`;
+		return `v${label.endsWith(suffix) ? label.slice(0, -suffix.length) : label}`;
+	} catch {
+		return;
+	}
+}
+//#endregion
+//#region src/core/lib/log/authority.ts
+const DEFAULT_PORT = {
+	https: "443",
+	http: "80"
+};
+function splitHostPort(authority) {
+	let colon = authority.lastIndexOf(":");
+	return colon <= 0 || authority.slice(colon + 1).includes("]") ? {
+		host: authority,
+		port: void 0
+	} : {
+		host: authority.slice(0, colon),
+		port: authority.slice(colon + 1)
+	};
+}
+function ruleHost(host) {
+	return sniHost(host).replace(/\.$/, "");
+}
+function sniHost(sni) {
+	return sni.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+//#endregion
+//#region src/core/lib/log/start-marker.ts
+const PROXY_START_MARKER = "buildcage haproxy starting", BAD_REQUEST_METHOD = "<BADREQ>";
+function incompleteReason(terminationState, method) {
+	let cause = terminationState[0];
+	if (cause !== "P") return terminationState[1] === "R" ? cause === "C" ? "client-aborted" : cause === "c" ? "client-timeout" : "no-request" : method === "<BADREQ>" ? "no-request" : void 0;
+}
+//#endregion
+//#region src/core/lib/log/traffic-event.ts
+const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
+function clientEndedNoise(timeline) {
+	let completed = new Set();
+	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
+	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason) && completed.has(ruleHost(event.host));
+}
+function connectedHosts(timeline) {
+	let connected = {
+		any: new Set(),
+		blocked: new Set()
+	};
+	for (let event of timeline) {
+		if (event.protocol === "dns" || event.action === "incomplete") continue;
+		let host = ruleHost(event.host);
+		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
+	}
+	return connected;
+}
+function isRedundantDns(event, connected) {
+	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
+}
+//#endregion
+//#region src/core/lib/log/inspect.ts
+const REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:fcerr=(\S+) )?(?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
+function timeOf(stamp) {
+	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
+	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
+}
+function isRefusal(terminationState) {
+	let cause = terminationState[0];
+	if (cause === "P" || cause === "S") return !0;
+	let phase = terminationState[1];
+	return cause === "s" && (phase === "C" || phase === "H");
+}
+function reasonFor(logged, terminationState, tlsError, method) {
+	if (logged !== "-") return logged;
+	let cause = terminationState[0];
+	if (cause !== "S" && cause !== "s") return method === "<BADREQ>" ? "bad-request" : "not-allowed";
+	switch (terminationState[1]) {
+		case "H": return "origin-no-response";
+		case "D":
+		case "L": return "origin-aborted";
+		default: return tlsError === void 0 ? "origin-unreachable" : cause === "S" && tlsError !== "-" && tlsError !== "0" ? "origin-untrusted" : "origin-connect-failed";
+	}
+}
+const REQUESTLESS_REASONS = new Set(["bad-request", "missing-host-header"]), FAILURE_REASONS$1 = new Set([
+	"origin-unreachable",
+	"origin-no-response",
+	"origin-aborted",
+	"dns-failed"
+]);
+function actionFor(reason, isAudit) {
+	return reason === void 0 ? isAudit ? "audit" : "allow" : FAILURE_REASONS$1.has(reason) ? "failed" : "block";
+}
+function urlOf(scheme, authority, target) {
+	return target.startsWith("/") ? `${scheme}://${authority}${target}` : void 0;
+}
+function authorityOf(host, port, scheme) {
+	return port === DEFAULT_PORT$1[scheme] ? host : `${host}:${port}`;
+}
+function hostBeforeRequest(sni, address) {
+	return sni !== void 0 && sni !== "-" ? {
+		host: sniHost(sni),
+		byAddress: !1
+	} : address === "198.19.255.1" ? {
+		host: UNKNOWN_HOST,
+		byAddress: !1
+	} : {
+		host: address,
+		byAddress: !0
+	};
+}
+function parseProxyLine(line, isAudit) {
+	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
+	if (request) {
+		let fcerr = request[11] ?? "", incomplete = request[3] === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[13]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[12], request[9]) : void 0, event = {
+			time: Number(request[1]) / 1e3,
+			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
+			protocol: unnamed?.byAddress ? "tcp" : scheme,
+			host: unnamed?.host ?? host,
+			port: Number(request[10]),
+			destination: `${request[9]}:${request[10]}`
+		};
+		if (parsedRequest) {
+			event.method = request[3];
+			let url = urlOf(scheme, unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority, request[14]);
+			url !== void 0 && (event.url = url);
+		}
+		return reason === void 0 ? (event.status = Number(request[4]), event.bytes = Number(request[5])) : event.reason = reason, event;
+	}
+	let pass = PASSTHROUGH.exec(trimmed);
+	if (pass) {
+		let reason = isRefusal(pass[4]) ? reasonFor(pass[5], pass[4], void 0, "-") : void 0, sni = pass[8], event = {
+			time: Number(pass[1]) / 1e3,
+			action: actionFor(reason, isAudit),
+			protocol: pass[2],
+			host: sni === "-" ? pass[6] : sniHost(sni),
+			port: Number(pass[7]),
+			destination: `${pass[6]}:${pass[7]}`
+		};
+		return reason === void 0 ? event.bytes = Number(pass[3]) : event.reason = reason, event;
+	}
+	return null;
+}
+async function scanInspectLog(lines, isAudit = !1, allowsName) {
+	let events = [], startedAt, headIntact, unparsed = 0;
+	for await (let line of lines) {
+		let event = parseProxyLine(line, isAudit);
+		if (event) {
+			headIntact ??= !1, events.push(event);
+			continue;
+		}
+		let trimmed = line.trim();
+		if (trimmed === "") continue;
+		let match = START$1.exec(trimmed);
+		headIntact ??= match !== null, match && startedAt === void 0 && (startedAt = Number(match[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
+	}
+	return refuseUnpassedAddresses(events), allowsName && refuseUnallowedNames(events, allowsName), {
+		events,
+		startedAt,
+		headIntact: headIntact ?? !1,
+		unparsed
+	};
+}
+function refuseUnpassedAddresses(events) {
+	let served = new Set();
+	for (let event of events) (event.protocol === "http" || event.protocol === "https") && event.action !== "incomplete" && served.add(event.destination);
+	for (let event of events) event.action === "incomplete" && event.protocol === "tcp" && (CLIENT_ENDED_REASONS.has(event.reason) && served.has(event.destination) || (event.action = "block", event.reason = "ip-not-allowed"));
+}
+function refuseUnallowedNames(events, allowsName) {
+	for (let event of events) event.action === "incomplete" && event.protocol === "https" && (event.host === "(unknown)" || allowsName(event.host) || event.destination?.startsWith("198.19.255.1:") || (event.action = "block", event.reason = "sni-not-allowed"));
+}
+async function scanInspectDnsLog(lines, isAudit = !1) {
+	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
+	for await (let line of lines) {
+		let trimmed = line.trim();
+		trimmed !== "" && (headIntact ??= trimmed.endsWith("buildcage coredns starting"));
+		let match = DNS.exec(trimmed);
+		if (match) {
+			let time = timeOf(match[1]), allowed = match[2] === "allowed", existing = seen.get(match[3]);
+			existing ? existing.allowed ||= allowed : seen.set(match[3], {
+				time,
+				allowed
+			});
+			continue;
+		}
+		let lookup = DNS_DISCOVERY.exec(trimmed);
+		if (lookup) {
+			let key = `${lookup[2]}\t${lookup[3]}`;
+			discovery.has(key) || discovery.set(key, {
+				time: timeOf(lookup[1]),
+				host: lookup[2],
+				queryType: lookup[3]
+			});
+			continue;
+		}
+		let refused = DNS_SERVICE_DENIED.exec(trimmed);
+		if (!refused) {
+			DNS_LINE.test(trimmed) && unparsed++;
+			continue;
+		}
+		service.has(refused[2]) || service.set(refused[2], {
+			time: timeOf(refused[1]),
+			host: refused[2],
+			queryType: refused[3]
+		});
+	}
+	let events = [...seen.entries()].map(([host, { time, allowed }]) => {
+		let reason = allowed ? void 0 : "dns-not-allowed", event = {
+			time,
+			action: actionFor(reason, isAudit),
+			protocol: "dns",
+			host
+		};
+		return reason !== void 0 && (event.reason = reason), event;
+	});
+	for (let { time, host, queryType } of discovery.values()) events.push({
+		time,
+		action: "discovery",
+		protocol: "dns",
+		host,
+		queryType
+	});
+	for (let { time, host, queryType } of service.values()) events.push({
+		time,
+		action: actionFor("dns-service-not-allowed", isAudit),
+		protocol: "dns",
+		host,
+		queryType,
+		reason: "dns-service-not-allowed"
+	});
+	return {
+		events,
+		headIntact: headIntact ?? !1,
+		unparsed
+	};
+}
+//#endregion
+//#region src/core/lib/log/aggregate.ts
+function entryKey(e) {
+	return `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
+}
+function compareAggregated(a, b) {
+	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
+}
+function aggregate(filtered) {
+	let map = {};
+	for (let e of filtered) {
+		let key = entryKey(e);
+		map[key] = (map[key] || 0) + 1;
+	}
+	return Object.keys(map).map((key) => {
+		let [host, portStr, ruleType, reason] = key.split("	");
+		return {
+			host,
+			port: portStr,
+			ruleType,
+			reason,
+			count: map[key]
+		};
+	}).sort(compareAggregated);
+}
+//#endregion
+//#region src/core/lib/report/build/aggregate.ts
+function targetOf(event) {
+	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
+}
+function requestPath(url) {
+	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
+	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
+}
+function matchesUrlRule({ rule, hostRe, pathRe }, event) {
+	if (event.method === void 0 || event.url === void 0) return !1;
+	let scheme = rule.schemes.find((s) => s === event.protocol);
+	if (scheme === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
+	let hostPort = `${event.host}:${event.port}`;
+	if (rule.isRegex) {
+		let defaultPort = Number(DEFAULT_PORT$1[scheme]);
+		return event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
+	}
+	return hostRe.test(hostPort);
+}
+function buildMatchers(knownBlockedRules) {
+	return knownBlockedRules.map((line) => {
+		if (isKnownBlockedUrlRule(line)) {
+			let urlRule = convertUrlRule(line), compiled = {
+				rule: urlRule,
+				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex, "i"),
+				pathRe: new RegExp(urlRule.pathRegex)
+			};
+			return {
+				rule: urlRule.raw,
+				matches: (event) => matchesUrlRule(compiled, event)
+			};
+		}
+		let completed = completeRulePort(line), re = new RegExp(convertRule(completed), "i");
+		return {
+			rule: completed,
+			matches: (event) => re.test(targetOf(event))
+		};
+	});
+}
+function annotateKnownBlocked(blockedEvents, knownBlockedRules) {
+	let matchers = buildMatchers(knownBlockedRules), accumulators = new Map();
+	for (let event of blockedEvents) {
+		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = entryKey(entry), accumulator = accumulators.get(key);
+		accumulator ? (accumulator.count++, index === -1 ? accumulator.expectedAll = !1 : index < accumulator.bestIndex && (accumulator.bestIndex = index, accumulator.bestRule = matchers[index].rule)) : accumulators.set(key, {
+			entry,
+			count: 1,
+			expectedAll: index !== -1,
+			bestIndex: index === -1 ? Infinity : index,
+			bestRule: index === -1 ? void 0 : matchers[index].rule
+		});
+	}
+	return [...accumulators.values()].map(({ entry, count, expectedAll, bestRule }) => expectedAll ? {
+		...entry,
+		count,
+		expected: !0,
+		expectedBy: bestRule
+	} : {
+		...entry,
+		count,
+		expected: !1
+	}).sort(compareAggregated);
+}
+const RULE_TYPE = {
+	https: "HTTPS",
+	http: "HTTP",
+	tls: "TLS",
+	tcp: "IP",
+	dns: "DNS"
+};
+function toHostRow(event) {
+	return {
+		host: event.host,
+		port: event.port === void 0 ? "-" : String(event.port),
+		ruleType: RULE_TYPE[event.protocol],
+		reason: event.reason ?? "-"
+	};
+}
+function reduceTimeline(timeline, knownBlockedRules) {
+	let passedRows = [], blockedEvents = [], failedRows = [], connected = connectedHosts(timeline);
+	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : event.action === "block" ? blockedEvents.push(event) : passedRows.push(toHostRow(event))));
+	return {
+		passed: aggregate(passedRows),
+		blocked: annotateKnownBlocked(blockedEvents, knownBlockedRules),
+		failed: aggregate(failedRows),
+		blockedCount: blockedEvents.length
+	};
+}
+//#endregion
+//#region src/core/lib/report/build/inspect.ts
+function resolverAllows(parameters) {
+	let { resolverHosts } = compileRuleSet({
+		httpsRules: parameters.allowedHttpsRules,
+		httpRules: parameters.allowedHttpRules,
+		tlsRules: parameters.allowedTlsRules,
+		urlRules: buildUrlRules(parameters.allowedUrlRules.join("\n"))
+	}), allowed = resolverHosts.map((regex) => RegExp(`^(?:${regex})$`, "i"));
+	return (name) => allowed.some((regex) => regex.test(name));
+}
+async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedLogs) {
+	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	return {
+		engine: "inspect",
+		parameters,
+		...reduceTimeline(timeline, parameters.knownBlockedRules),
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
+		startedAt,
+		timeline
+	};
+}
+//#endregion
+//#region src/core/lib/log/haproxy.ts
+const DECISION = /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za-z0-9._:-]+)" ([A-Za-z0-9-]+) (\d+|-)(?: ts=[A-Za-z-]{2} dst=[0-9.]+:\d+)?$/, NO_REQUEST = /^buildcage (\d+) \[-\] \(HTTP\) "-" - (?:\d+|-) ts=([A-Za-z-]{2}) dst=([0-9.]+):(\d+)$/, START = RegExp(`^${PROXY_START_MARKER} (\\d+)$`), PROTOCOL = {
+	HTTPS: "https",
+	HTTP: "http",
+	IP: "tcp"
+}, FAILURE_REASONS = new Set(["dns-failed"]);
+function hostOf(address, ruleType) {
+	return address === "198.19.255.1" ? UNKNOWN_HOST : ruleType === "HTTPS" ? sniHost(address) : ruleHost(address);
+}
+async function scanHaproxyLog(lines, isAudit) {
+	let events = [], passedDecision = isAudit ? "AUDIT" : "ALLOWED", startedAt, headIntact, unparsed = 0;
+	for await (let line of lines) {
+		let m = DECISION.exec(line);
+		if (m) {
+			headIntact ??= !1;
+			let [, ms, decision, ruleType, target, reason, bytes] = m;
+			if (decision !== passedDecision && decision !== "BLOCKED") continue;
+			let { host: address, port } = splitHostPort(target), host = hostOf(address, ruleType), failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), refused = decision === "BLOCKED" && !failed, event = {
+				time: Number(ms) / 1e3,
+				action: failed ? "failed" : refused ? "block" : isAudit ? "audit" : "allow",
+				protocol: PROTOCOL[ruleType] ?? "tcp",
+				host
+			};
+			port !== void 0 && (event.port = Number(port)), refused || failed ? event.reason = reason : bytes !== "-" && (event.bytes = Number(bytes)), events.push(event);
+			continue;
+		}
+		let none = NO_REQUEST.exec(line);
+		if (none) {
+			headIntact ??= !1;
+			let [, ms, terminationState, address, port] = none, ended = incompleteReason(terminationState, BAD_REQUEST_METHOD);
+			events.push({
+				time: Number(ms) / 1e3,
+				action: ended === void 0 ? "block" : "incomplete",
+				protocol: "http",
+				host: hostOf(address),
+				port: Number(port),
+				reason: ended ?? "bad-request"
+			});
+			continue;
+		}
+		let trimmed = line.trim();
+		if (trimmed === "") continue;
+		let start = START.exec(trimmed);
+		headIntact ??= start !== null, start && startedAt === void 0 && (startedAt = Number(start[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
+	}
+	return {
+		events,
+		startedAt,
+		headIntact: headIntact ?? !1,
+		unparsed
+	};
+}
+//#endregion
+//#region src/core/lib/report/build/universal.ts
+async function buildUniversalReportData(proxyLines, dnsLines, parameters, droppedLogs) {
+	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	return {
+		engine: "universal",
+		parameters,
+		...reduceTimeline(timeline, parameters.knownBlockedRules),
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
+		startedAt,
+		timeline
+	};
+}
+//#endregion
+//#region src/core/lib/report/outcome/annotate.ts
+function applyOutcomeAnnotations(annotation, emissions) {
+	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
+}
+//#endregion
+//#region src/core/lib/report/outcome/blocked-outcome.ts
+function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible }) {
+	if (!logLooksPlausible) return isAudit ? {
+		level: "notice",
+		shouldFail: !1
+	} : failOnBlocked ? {
+		level: "error",
+		shouldFail: !0
+	} : {
+		level: "notice",
+		shouldFail: !1
+	};
+	if (!blockedCount) return {
+		level: "none",
+		shouldFail: !1
+	};
+	if (isAudit) return {
+		level: "notice",
+		shouldFail: !1
+	};
+	let hasUnexpected = blockedRows.length === 0 || blockedRows.some((row) => !row.expected);
+	return failOnBlocked && hasUnexpected ? {
+		level: "error",
+		shouldFail: !0
+	} : {
+		level: "notice",
+		shouldFail: !1
+	};
+}
+const COUNT_NOUN = "connection(s) and lookup(s)";
+function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }) {
+	let base = `${blockedCount} blocked ${COUNT_NOUN} detected by buildcage ${engineLabel}`;
+	if (isAudit) return base;
+	let unexpected = blockedRows.filter((row) => !row.expected).length;
+	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known_blocked_rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known_blocked_rules)`;
+}
+function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, engineLabel }) {
+	let outcome = determineBlockedOutcome({
+		isAudit,
+		failOnBlocked,
+		blockedCount,
+		blockedRows,
+		logLooksPlausible
+	}), base = buildBlockedMessage({
+		blockedCount,
+		blockedRows,
+		engineLabel,
+		isAudit
+	});
+	if (logLooksPlausible) return {
+		...outcome,
+		message: base
+	};
+	if (isAudit) return {
+		...outcome,
+		message: `${base}, but the logs are incomplete and this is not a full record`
+	};
+	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. Either the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
+	return {
+		...outcome,
+		message
+	};
+}
+//#endregion
+//#region src/core/lib/report/outcome/report-outcomes.ts
+function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
+	let emissions = [describeBlockedOutcome({
+		isAudit: report.parameters.mode === "audit",
+		failOnBlocked,
+		blockedCount: report.blockedCount,
+		blockedRows: report.blocked,
+		logLooksPlausible: report.logLooksPlausible,
+		engineLabel
+	})], undecided = describeUndecidedRequests(report, engineLabel);
+	undecided && emissions.push(undecided);
+	let failed = describeFailedConnections(report, engineLabel);
+	return failed && emissions.push(failed), emissions;
+}
+function describeUndecidedRequests(report, engineLabel) {
+	let isNoise = clientEndedNoise(report.timeline), count = report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
+	if (count !== 0) return {
+		level: "warning",
+		shouldFail: !1,
+		message: `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in Communication details. Each ended before a whole request had arrived, so no rule decided it and none reached an origin: the client closed or failed the TLS handshake, its own timeout expired, or this proxy ran into an error while still reading. None of them fails the step. Bytes this proxy would not read as a request are not among them: that is a refusal, and it is in Blocked Hosts.`
+	};
+}
+function describeFailedConnections(report, engineLabel) {
+	let count = report.failed.reduce((total, row) => total + row.count, 0);
+	if (count !== 0) return {
+		level: "notice",
+		shouldFail: !1,
+		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed under Failed Connections. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
+	};
+}
+function usesLine(actionRepo, actionRef, actionVersion) {
+	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
+}
+function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", actionVersion, runCommand } = {}) {
+	let yaml = `- name: ${stepName}\n`;
+	if (yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", runCommand) {
+		yaml += "    run: |\n";
+		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
+	}
+	return yaml;
+}
+function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
+	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "\n<details>\n";
+	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
+}
+//#endregion
+//#region src/core/lib/report/render/build-example.ts
+const ruleTypeToParam = {
+	HTTPS: "allowed_https_rules",
+	HTTP: "allowed_http_rules",
+	IP: "allowed_ip_rules"
+};
+function buildRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
+	if (!auditedRows || auditedRows.length === 0) return "";
+	let groups = new Map();
+	for (let r of auditedRows) {
+		let param = ruleTypeToParam[r.ruleType];
+		param && (groups.has(param) || groups.set(param, new Set()), groups.get(param).add(`${r.host}:${r.port}`));
+	}
+	if (groups.size === 0) return "";
+	let yaml = exampleStepHead(actionRepo, actionRef, step);
+	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: universal\n";
+	for (let [param, rules] of groups) {
+		yaml += `    ${param}: >-\n`;
+		for (let rule of rules) yaml += `      ${rule}\n`;
+	}
+	return restrictExampleBlock(yaml);
+}
+//#endregion
+//#region src/core/lib/report/render/fold-expected-blocked.ts
+function foldExpectedBlockedRows(rows) {
+	let unmatched = [], groups = new Map();
+	for (let row of rows) {
+		if (!row.expected || row.expectedBy === void 0) {
+			unmatched.push(row);
+			continue;
+		}
+		let key = `${row.expectedBy}\t${row.ruleType}\t${row.reason}`, group = groups.get(key);
+		group ? (group.hosts.add(row.host), group.count += row.count) : groups.set(key, {
+			rule: row.expectedBy,
+			ruleType: row.ruleType,
+			reason: row.reason,
+			hosts: new Set([row.host]),
+			count: row.count
+		});
+	}
+	let folded = [...groups.values()].sort(compareGroups).map(toRow);
+	return [...unmatched, ...folded];
+}
+function compareGroups(a, b) {
+	return b.count - a.count || (a.rule < b.rule ? -1 : +(a.rule > b.rule));
+}
+function toRow(group) {
+	return {
+		host: group.rule,
+		port: "-",
+		ruleType: group.ruleType,
+		reason: group.reason,
+		count: group.count,
+		expected: !0,
+		expectedBy: group.rule,
+		display: `${group.rule} (${group.hosts.size} host${group.hosts.size === 1 ? "" : "s"})`
+	};
+}
+//#endregion
+//#region src/core/lib/report/render/markdown-table.ts
+const ALIGN_MARKERS = {
+	left: "---",
+	right: "---:",
+	center: ":---:"
+}, alignMarker = (align) => ALIGN_MARKERS[align ?? "left"];
+function escapeCell(value) {
+	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+function markdownTable(formats, rows) {
+	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
+	for (let row of rows) {
+		let cells = formats.map((f) => escapeCell(row[f.key]));
+		lines.push(`| ${cells.join(" | ")} |`);
+	}
+	return lines.join("\n");
+}
+//#endregion
+//#region src/core/lib/report/render/host-table.ts
+function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
+	let formats = [{
+		key: "host",
+		title: "Host"
+	}, {
+		key: "ruleType",
+		title: "Rule"
+	}];
+	return showReason && formats.push({
+		key: "reason",
+		title: "Reason"
+	}), formats.push({
+		key: "count",
+		title: "Count",
+		align: "right"
+	}), showExpected && formats.push({
+		key: "expected",
+		title: "Expected",
+		align: "center"
+	}), markdownTable(formats, rows.map((r) => ({
+		host: r.display ?? (r.port === "-" ? r.host : `${r.host}:${r.port}`),
+		ruleType: r.ruleType,
+		reason: r.reason,
+		count: r.count,
+		expected: r.expected ? "✅" : ""
+	})));
+}
+//#endregion
+//#region src/core/lib/report/elapsed-time.ts
+function toParts(elapsedSeconds) {
+	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
+	return {
+		hours: Math.floor(totalMinutes / 60),
+		minutes,
+		seconds,
+		ms
+	};
+}
+function pad(n, width = 2) {
+	return String(n).padStart(width, "0");
+}
+function formatElapsedVariable(elapsedSeconds) {
+	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
+	return hours === 0 ? `${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
+}
+function formatElapsedFixed(elapsedSeconds) {
+	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
+	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
+}
+//#endregion
+//#region src/core/lib/report/render/communication-section.ts
+const COMMUNICATION_DETAILS_OPEN = "<details>\n<summary>💬 Communication details</summary>\n\n", COMMUNICATION_DETAILS_CLOSE = "</details>\n";
+function wrapCommunicationDetails(body) {
+	return `\n${COMMUNICATION_DETAILS_OPEN}${body}${COMMUNICATION_DETAILS_CLOSE}`;
+}
+//#endregion
+//#region src/core/lib/report/render/inspect-details.ts
+function renderInspectDetails(timeline, startedAt) {
+	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
+	return shown.length === 0 ? "" : wrapCommunicationDetails(`\`\`\`\n${shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n\n`);
+}
+const MARK = {
+	block: "🚫",
+	discovery: "ℹ️",
+	incomplete: "⚠️",
+	failed: "⚠️"
+};
+function renderEvent(event, startedAt) {
+	return `${MARK[event.action] ?? "✅"} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}`;
+}
+const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
+function credentialName(name) {
+	return name.toLowerCase().replace(/[-_]/g, "");
+}
+const PARAM_NAME = /(^|[;?])([^;?=]*)=/g;
+function redactPart(part) {
+	for (let match of part.matchAll(PARAM_NAME)) {
+		if (!CREDENTIAL_PARAMS.has(credentialName(match[2]))) continue;
+		let value = match.index + match[0].length;
+		return value === part.length ? part : `${part.slice(0, value)}***`;
+	}
+	return part;
+}
+function redactCredentialQuery(url) {
+	let start = url.indexOf("?");
+	if (start === -1) return url;
+	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map(redactPart).join("&");
+	return url.slice(0, start + 1) + query + url.slice(end);
+}
+function subject(event) {
+	if (event.queryType !== void 0) return `DNS ${event.queryType} ${event.host}`;
+	if (event.protocol === "dns") return `DNS ${event.host}`;
+	if (event.url === void 0) {
+		let authority = event.port === void 0 ? event.host : `${event.host}:${event.port}`, nameAndPort = `${event.protocol.toUpperCase()} ${authority}`;
+		return event.method === void 0 ? nameAndPort : `${event.method} ${nameAndPort}`;
+	}
+	return `${event.method} ${redactCredentialQuery(event.url)}`;
+}
+function outcome(event) {
+	if (event.action === "block") return event.reason ?? "blocked";
+	if (event.action === "incomplete") return event.reason ?? "no request";
+	if (event.action === "failed") return event.reason ?? "failed";
+	if (event.action === "discovery") return `no data (${event.queryType} is never served)`;
+	let parts = [];
+	return event.status !== void 0 && parts.push(String(event.status)), event.bytes !== void 0 && parts.push(`(${formatBytes(event.bytes)})`), parts.length > 0 ? parts.join(" ") : "resolved";
+}
+function formatTime(epochSeconds, startedAt) {
+	return startedAt === void 0 ? new Date(epochSeconds * 1e3).toISOString().slice(11, 23) + "Z" : formatElapsedVariable(epochSeconds - startedAt);
+}
+function formatBytes(bytes) {
+	return bytes < 1024 ? `${bytes}B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1048576).toFixed(1)}MB`;
+}
+//#endregion
+//#region src/core/lib/report/render/inspect-example.ts
+const METHOD_ORDER = [
+	"GET",
+	"HEAD",
+	"POST",
+	"PUT",
+	"PATCH",
+	"DELETE",
+	"OPTIONS"
+], LITERAL_METHOD = /^[A-Z]+$/, LITERAL_HOST = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
+function parseRequest(request) {
+	if (request.url === void 0 || request.method === void 0 || request.port === void 0) return null;
+	let match = /^(https?):\/\/([^/]*)([^?#]*)/.exec(request.url);
+	if (!match) return null;
+	let [, scheme, authority, target] = match, { host } = splitHostPort(authority), path = target || "/", part = LITERAL_METHOD.test(request.method) ? LITERAL_HOST.test(host) ? path.includes("*") ? "path" : void 0 : "host" : "method";
+	if (part) return {
+		method: request.method,
+		url: `${scheme}://${authority}${path}`,
+		part
+	};
+	let port = String(request.port);
+	return {
+		origin: port === DEFAULT_PORT[scheme] ? `${scheme}://${host}` : `${scheme}://${host}:${port}`,
+		method: request.method,
+		path
+	};
+}
+function commonPrefixSegments(paths) {
+	let split = paths.map((p) => p.split("/").slice(1)), prefix = split[0];
+	for (let segments of split.slice(1)) {
+		let i = 0;
+		for (; i < prefix.length && i < segments.length && prefix[i] === segments[i];) i++;
+		prefix = prefix.slice(0, i);
+	}
+	return prefix;
+}
+function pathPatternsFor(paths) {
+	let distinct = [...new Set(paths)].sort();
+	if (distinct.length === 0) return [];
+	if (distinct.length === 1) return distinct;
+	let prefix = commonPrefixSegments(distinct);
+	if (prefix.length === 0) return ["/**"];
+	let base = `/${prefix.join("/")}`, patterns = [`${base}/**`];
+	return distinct.includes(base) && patterns.unshift(base), patterns;
+}
+function sortMethods(methods) {
+	return [...new Set(methods)].sort((a, b) => {
+		let ai = METHOD_ORDER.indexOf(a), bi = METHOD_ORDER.indexOf(b);
+		return ai !== -1 && bi !== -1 ? ai - bi : ai === -1 ? bi === -1 && a < b ? -1 : 1 : -1;
+	});
+}
+function partitionRequests(requests) {
+	let writable = [], leftOut = new Map();
+	for (let request of requests) {
+		if (request.action === "block") continue;
+		let parsed = parseRequest(request);
+		parsed && ("part" in parsed ? leftOut.set(`${parsed.method} ${parsed.url}`, parsed) : writable.push(parsed));
+	}
+	return {
+		writable,
+		leftOut: [...leftOut.values()]
+	};
+}
+function ruleLinesFrom(requests) {
+	let byOriginMethod = new Map();
+	for (let parsed of requests) {
+		let key = `${parsed.origin}\t${parsed.method}`, group = byOriginMethod.get(key);
+		group ? group.paths.push(parsed.path) : byOriginMethod.set(key, {
+			origin: parsed.origin,
+			method: parsed.method,
+			paths: [parsed.path]
+		});
+	}
+	let byPattern = new Map();
+	for (let { origin, method, paths } of byOriginMethod.values()) for (let pattern of pathPatternsFor(paths)) {
+		let key = `${origin}\t${pattern}`, entry = byPattern.get(key);
+		entry ? entry.methods.push(method) : byPattern.set(key, {
+			origin,
+			pattern,
+			methods: [method]
+		});
+	}
+	return [...byPattern.values()].sort((a, b) => a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : a.pattern < b.pattern ? -1 : 1).map(({ origin, pattern, methods }) => `${sortMethods(methods).join("|")} ${origin}${pattern}`);
+}
+function leftOutSection(leftOut) {
+	let shown = leftOut.slice(0, 20), md = "Left out of the rules above: a rule would read part of each request as a pattern, and so permit more than was sent.\n\n";
+	return md += markdownTable([
+		{
+			key: "method",
+			title: "Method"
+		},
+		{
+			key: "url",
+			title: "URL"
+		},
+		{
+			key: "part",
+			title: "Read as a pattern"
+		}
+	], shown.map((r) => ({ ...r }))), md += "\n\n", leftOut.length > shown.length && (md += `…and ${leftOut.length - shown.length} more, listed in Communication details.\n\n`), md;
+}
+function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedIpRules = [], allowedTlsRules = [], ...step } = {}) {
+	let { writable, leftOut } = partitionRequests(requests ?? []), lines = ruleLinesFrom(writable);
+	if (lines.length === 0 && leftOut.length === 0 && allowedIpRules.length === 0 && allowedTlsRules.length === 0) return "";
+	let yaml = exampleStepHead(actionRepo, actionRef, step);
+	if (yaml += "    proxy_mode: restrict\n", lines.length > 0) {
+		yaml += "    allowed_url_rules: |\n";
+		for (let line of lines) yaml += `      ${line}\n`;
+	}
+	if (allowedTlsRules.length > 0) {
+		yaml += "    allowed_tls_rules: |\n";
+		for (let rule of allowedTlsRules) yaml += `      ${rule}\n`;
+	}
+	if (allowedIpRules.length > 0) {
+		yaml += "    allowed_ip_rules: |\n";
+		for (let rule of allowedIpRules) yaml += `      ${rule}\n`;
+	}
+	return restrictExampleBlock(yaml, {
+		appendix: leftOut.length > 0 ? leftOutSection(leftOut) : void 0,
+		footnote: "Permits exactly what this build did; a versioned or dated URL may drift."
+	});
+}
+//#endregion
+//#region src/core/lib/report/render/render-report-markdown.ts
+function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", ...step } = {}) {
+	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
+	if (report.logLooksPlausible || (markdown += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
+		...step,
+		allowedIpRules: report.parameters.allowedIpRules,
+		allowedTlsRules: report.parameters.allowedTlsRules
+	}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step)), report.blocked.length > 0) {
+		report.passed.length > 0 && (markdown += "\n");
+		let blocked = foldExpectedBlockedRows(report.blocked);
+		markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(blocked, {
+			showReason: !0,
+			showExpected
+		}) + "\n";
+	}
+	return report.failed.length > 0 && ((report.passed.length > 0 || report.blocked.length > 0) && (markdown += "\n"), markdown += "### ⚠️ Failed Connections\n\n" + renderHostTable(report.failed, { showReason: !0 }) + "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"), report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && (markdown += "_(no communication)_\n\n"), markdown += renderInspectDetails(report.timeline, report.startedAt), report.engine === "universal" && (markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), markdown += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, markdown += "\n<hr>\n", markdown;
+}
+//#endregion
+//#region src/core/lib/report/render/truncate-communication-details.ts
+const SAFETY_MARGIN_BYTES = 8192;
+function truncateForStepSummary(markdown, artifactAvailable, limitBytes = 1048576) {
+	if (Buffer.byteLength(markdown, "utf8") <= limitBytes - SAFETY_MARGIN_BYTES) return markdown;
+	let openAt = markdown.indexOf(COMMUNICATION_DETAILS_OPEN);
+	if (openAt === -1) return markdown;
+	let bodyStart = openAt + 55, closeAt = markdown.indexOf(COMMUNICATION_DETAILS_CLOSE, bodyStart);
+	if (closeAt === -1) return markdown;
+	let before = markdown.slice(0, bodyStart), body = markdown.slice(bodyStart, closeAt), after = markdown.slice(closeAt), note = truncationNote(artifactAvailable), fixedBytes = Buffer.byteLength(before, "utf8") + Buffer.byteLength(after, "utf8") + Buffer.byteLength(note, "utf8"), budget = Math.max(0, limitBytes - SAFETY_MARGIN_BYTES - fixedBytes), kept = "", usedBytes = 0, fenceOpen = !1;
+	for (let line of body.split("\n")) {
+		let withNewline = `${line}\n`, lineBytes = Buffer.byteLength(withNewline, "utf8");
+		if (usedBytes + lineBytes > budget) break;
+		kept += withNewline, usedBytes += lineBytes, line.trim().startsWith("```") && (fenceOpen = !fenceOpen);
+	}
+	return fenceOpen && (kept += "```\n"), before + kept + note + after;
+}
+function truncationNote(artifactAvailable) {
+	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
+}
+//#endregion
+//#region src/lib/report.ts
+const HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
+function createHostDocker() {
+	return createDocker((args) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		maxBuffer: 67108864,
+		env: hostCommandEnv("docker")
+	}), (args) => (0, node_child_process.spawn)(hostCommand("docker"), args, {
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		env: hostCommandEnv("docker")
+	}));
+}
+function fetchReport(containerName, parameters, proxyEngine) {
+	let docker = createHostDocker();
+	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName)) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName));
+}
+function readActionVersion(containerName, proxyEngine, docker) {
+	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
+}
+function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, actionVersion }) {
+	let emissions = describeReportOutcomes(report, {
+		failOnBlocked: failOnBlocked ?? !1,
+		engineLabel: "sandbox"
+	});
+	return {
+		markdown: renderReportMarkdown(report, actionRepo, actionRef, {
+			title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
+			stepName: "Start isolated-run",
+			runCommand,
+			actionVersion
+		}),
+		emissions
+	};
+}
+async function writeReportSummary(report, annotation, options, artifactAvailable, env, { appendFile = node_fs.appendFileSync } = {}) {
+	let outcomes = computeReportOutcomes(report, options);
+	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeStepSummary(truncateForStepSummary(outcomes.markdown, artifactAvailable), env.GITHUB_STEP_SUMMARY);
+}
+//#endregion
+//#region src/core/lib/report/outcome/traffic-output.ts
+function buildTrafficRecords(events, startedAt) {
+	return [...events].sort((a, b) => a.time - b.time).map((e) => {
+		let record = {
+			time: new Date(e.time * 1e3).toISOString(),
+			action: e.action,
+			protocol: e.protocol,
+			host: e.host
+		};
+		return startedAt !== void 0 && (record.elapsed = formatElapsedFixed(e.time - startedAt)), e.port !== void 0 && (record.port = e.port), e.queryType !== void 0 && (record.queryType = e.queryType), e.method !== void 0 && (record.method = e.method), e.url !== void 0 && (record.url = e.url), e.status !== void 0 && (record.status = e.status), e.bytes !== void 0 && (record.bytes = e.bytes), e.reason !== void 0 && (record.reason = e.reason), e.destination !== void 0 && (record.destination = e.destination), record;
+	});
+}
+function writeTrafficFile(path, records) {
+	(0, node_fs.writeFileSync)(path, JSON.stringify(records, null, 2) + "\n");
+}
+//#endregion
 //#region src/lib/traffic-artifact.ts
 init_core();
 function trafficArtifactName(containerName) {
@@ -72256,6 +72486,7 @@ const realDeps = {
 	readProxyInputs,
 	readFilesystemInputs,
 	readFilesystemAuditInput,
+	readFilesystemAuditRetentionDays,
 	readRuleInputs,
 	readFailOnCaResidue,
 	readFailOnBlocked,
@@ -72280,6 +72511,7 @@ const realDeps = {
 	stopSandboxProxy,
 	runSandboxedCommand,
 	reportStepTraffic,
+	reportStepFilesystemAudit,
 	onCancel,
 	saveState,
 	info,
@@ -72305,17 +72537,17 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditRetentionDays, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, reportStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
 	for (let line of configFile?.summary ?? []) log(line);
 	let runInput = readRunCommand(), { proxyEngine, proxyMode } = readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), filesystemAudit = readFilesystemAuditInput();
+	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), filesystemAudit = readFilesystemAuditInput(), filesystemAuditRetentionDays = readFilesystemAuditRetentionDays();
 	checkScratchBaseParent(), configFile && saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs(), { httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs(), annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY);
-	checkUrlAndTlsRuleSupport({
+	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), checkUrlAndTlsRuleSupport({
 		proxyEngine,
 		proxyMode,
 		urlRules,
@@ -72412,6 +72644,12 @@ async function runSandboxStep(env, overrides = {}) {
 			runCommand: runInput,
 			failOnBlocked,
 			trafficArtifact,
+			env
+		}), await reportStepFilesystemAudit({
+			audit,
+			retentionDays: filesystemAuditRetentionDays,
+			containerName,
+			annotation,
 			env
 		}), await stopSandboxProxy({
 			composeFile,

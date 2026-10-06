@@ -35,6 +35,7 @@ Docker build's `RUN` steps rather than a workflow step, use
 - [How `run` is executed](#how-run-is-executed)
 - [Passing values to `run`](#passing-values-to-run)
 - [Filesystem access](#filesystem-access)
+- [Filesystem audit](#filesystem-audit)
 - [How it works](#how-it-works)
 - [CA trust and compatibility](#ca-trust-and-compatibility)
 - [Scope](#scope)
@@ -421,6 +422,29 @@ directory for example, list it under `write_through:`:
 How an entry is resolved, which paths are reserved, what `write_through: /` does, and what happened
 to the old `writable:` and `allow_write:` inputs are all in
 [Reference](./docs/reference.md#write_through-paths).
+
+## Filesystem audit
+
+> [!WARNING]
+> `filesystem_audit` is **experimental**: its behavior, inputs, and output format may still change.
+
+`filesystem_audit: record` records what the isolated step reads, writes, moves, deletes, changes the
+attributes of, and executes, and adds a section to the Job Summary with one line per path and a flag
+for each action (`R` read, `W` write, `X` exec, `M` move, `D` delete, `A` attr; lowercase for an
+action that only failed, `!` for a permission denial). The full record is uploaded as a
+`buildcage-filesystem-audit-<id>` artifact; treat it as sensitive.
+
+```yaml
+- uses: buildcage/isolated-run@v2
+  with:
+    filesystem_audit: record
+    run: npm ci
+```
+
+It observes accesses in the kernel, below the libraries a command links against, and only records;
+it never blocks an access. It needs a cgroup v2 host on Linux 5.17 or newer; elsewhere it warns and
+the step runs unaudited. The flag format, the artifact, and what it does not record are in
+[Reference](./docs/reference.md#filesystem-audit).
 
 ## How it works
 
