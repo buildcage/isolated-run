@@ -3,10 +3,11 @@ import { describe, it, expect } from "vitest";
 
 import { renderFilesystemAuditSummary } from "./filesystem-audit-summary.ts";
 
-const PREFIXES = { workspace: ["/work"], home: ["/home/u"] };
+const PREFIXES = { workspace: ["/work"], home: ["/home/u"], startedAt: 1_791_244_800 };
 
 const recordArb = fc.record(
   {
+    t: fc.constantFrom("2026-10-06T00:00:00.000Z", "2026-10-06T00:00:01.500Z", "garbage"),
     comm: fc.constantFrom("node", "cat", "bash", "sh"),
     kind: fc.constantFrom("read", "write", "exec", "mmap", "open", "unlink", "rename", "chmod"),
     path: fc.constantFrom(
@@ -38,8 +39,8 @@ describe("renderFilesystemAuditSummary: properties", () => {
         const block = md.match(/```\n([\s\S]*?)\n```/);
         if (block)
           for (const row of block[1].split("\n"))
-            // flag column, command column, then a path, all space-separated.
-            expect(row).toMatch(/^[RWXMDArwxmda!]+ +\S+ +\S/);
+            // An optional time column, then flags, command and a path.
+            expect(row).toMatch(/^(?:(?:[\d:.-]+:)? +)?[RWXMDArwxmda!]+ +\S+ +\S/);
       }),
     );
   });

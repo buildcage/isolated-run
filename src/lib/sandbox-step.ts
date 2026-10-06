@@ -437,7 +437,7 @@ export async function runSandboxStep(
     });
   } finally {
     // Neither throws, so the teardown and stopListening are always reached.
-    await reportStepTraffic({
+    const startedAt = await reportStepTraffic({
       containerName,
       proxyEngine,
       parameters: {
@@ -459,6 +459,7 @@ export async function runSandboxStep(
     });
     await reportStepFilesystemAudit({
       audit,
+      startedAt,
       retentionDays: filesystemAuditRetentionDays,
       containerName,
       annotation,

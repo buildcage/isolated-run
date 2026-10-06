@@ -47,6 +47,7 @@ const mocks = {
   stopSandboxProxy: vi.fn(),
   runSandboxedCommand: vi.fn(),
   reportStepTraffic: vi.fn(),
+  reportStepFilesystemAudit: vi.fn(),
   onCancel: vi.fn(),
   saveState: vi.fn(),
   info: vi.fn(),
@@ -192,6 +193,16 @@ describe("runSandboxStep", () => {
     expect(mocks.runSandboxedCommand.mock.calls[0][0].filesystemAudit).toStrictEqual(
       filesystemAuditPaths("buildcage-proxy-deadbeef", SANDBOX_SCRATCH_BASE),
     );
+  });
+
+  it("times the audit from the proxy start the traffic report read", async () => {
+    mocks.reportStepTraffic.mockResolvedValue(1_791_244_800);
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.reportStepFilesystemAudit.mock.calls[0][0]).toMatchObject({
+      startedAt: 1_791_244_800,
+    });
   });
 
   it("leaves the audit off by default", async () => {
