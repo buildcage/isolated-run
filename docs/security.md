@@ -705,8 +705,7 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   outside the sandbox could tamper with the staging file before it is read, the same accepted
   limitation as above. It does not record changes made through an already-open descriptor inherited
   across `exec`, extended attributes other than `setxattr`, or a failed `exec`, `mkdir`, `symlink`,
-  `link` or `truncate`. It needs a cgroup v2 host on Linux 5.17 or newer with the kernel's tracing
-  support; where either is missing it warns and the step runs unaudited.
+  `link` or `truncate`.
 
 ### Where it will not run
 
