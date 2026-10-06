@@ -66,6 +66,19 @@ describe("stripSandboxMachinery", () => {
     ]);
   });
 
+  it("drops a pid whose recorded parents loop back on themselves", () => {
+    const out = stripSandboxMachinery(
+      jsonl(
+        { pid: 10, ppid: 1, kind: "exec", comm: "run-script.sh", path: `${BASE}/run-script.sh` },
+        { pid: 40, ppid: 41, kind: "read", comm: "a", path: "/work/a" },
+        { pid: 41, ppid: 40, kind: "read", comm: "b", path: "/work/b" },
+        { pid: 42, ppid: 42, kind: "read", comm: "c", path: "/work/c" },
+      ),
+      BASE,
+    );
+    expect(records(out)).toEqual([]);
+  });
+
   it("changes nothing but scratch paths when no step shell is found", () => {
     const out = stripSandboxMachinery(
       jsonl(

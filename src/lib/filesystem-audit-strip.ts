@@ -54,10 +54,14 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
     }
   });
 
-  // A pid belongs to the step if it is the shell or descends from it.
+  // A pid belongs to the step if it is the shell or descends from it. A reused
+  // pid can make the recorded parents loop, so stop at a pid already seen.
   const inStep = (pid: number): boolean => {
-    for (let p: number | undefined = pid; p !== undefined; p = parent.get(p))
+    const seen = new Set<number>();
+    for (let p: number | undefined = pid; p !== undefined && !seen.has(p); p = parent.get(p)) {
       if (p === shell) return true;
+      seen.add(p);
+    }
     return false;
   };
 
