@@ -81,6 +81,7 @@ export async function reportStepFilesystemAudit(
     // buildcage's own machinery. Strip that out once and feed the result to both
     // the summary and the uploaded artifact.
     const clean = stripSandboxMachinery(raw, dirname(audit.outPath));
+    mirrorForDebug(raw, env.BUILDCAGE_RUN_DEBUG_RAW_FILE, deps.appendFile);
     // The summary and the upload are independent: a render failure (e.g. a
     // line the tracer left truncated) must not also drop the artifact, which is
     // most wanted when the recording is incomplete.
@@ -90,7 +91,7 @@ export async function reportStepFilesystemAudit(
         home: prefixes(env.HOME, deps.realpath),
       });
       await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY);
-      mirrorForDebug(markdown, env, deps.appendFile);
+      mirrorForDebug(markdown, env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE, deps.appendFile);
     } catch (e) {
       annotation.warning(`Failed to write the filesystem audit summary: ${errorMessage(e)}`);
     }
@@ -123,14 +124,14 @@ function readOptional(path: string, readFile: (p: string) => string): string | u
 }
 
 // Debug-only mirror, matching writeReportSummary's: GITHUB_STEP_SUMMARY is
-// per-step and cannot be read back, so this repo's own e2e reads a copy. A
-// test-hooks build drops it; see rolldown.config.js.
+// per-step and cannot be read back, so this repo's own e2e reads a copy, and
+// the raw recording (before stripping) feeds the test fixtures. Only a
+// test-hooks build, pointed at a file, writes anything.
 function mirrorForDebug(
-  markdown: string,
-  env: NodeJS.ProcessEnv,
+  content: string,
+  debugFile: string | undefined,
   appendFile: (path: string, content: string) => void,
 ): void {
   if (process.env.BUILDCAGE_BUILD_TEST_HOOKS !== "1") return;
-  const debugFile = env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE;
-  if (debugFile) appendFile(debugFile, markdown);
+  if (debugFile) appendFile(debugFile, content);
 }

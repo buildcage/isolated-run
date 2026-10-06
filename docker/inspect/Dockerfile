@@ -68,6 +68,7 @@ COPY docker/filesystem-audit/go.mod docker/filesystem-audit/go.sum ./
 RUN go mod download
 COPY docker/filesystem-audit/ ./
 RUN go generate ./... && \
+    CGO_ENABLED=0 go test ./... && \
     CGO_ENABLED=0 GOARCH="${TARGETARCH}" go build -trimpath -ldflags="-s -w" -o /out/filesystem-audit .
 
 # Bundle the QuickJS scripts (rolldown; see rolldown.scripts.config.js),

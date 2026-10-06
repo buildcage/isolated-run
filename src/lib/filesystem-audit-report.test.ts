@@ -233,6 +233,25 @@ describe("reportStepFilesystemAudit", () => {
     expect(appended[0]).toContain("Filesystem audit");
   });
 
+  it("mirrors the raw recording to the debug file for fixture capture", async () => {
+    vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "1");
+    const { deps: d, appended } = deps();
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: { GITHUB_WORKSPACE: "/work", BUILDCAGE_RUN_DEBUG_RAW_FILE: "/tmp/raw.jsonl" },
+      },
+      d,
+    );
+
+    expect(appended).toEqual([
+      JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
+    ]);
+  });
+
   it("does not mirror without the debug file set", async () => {
     vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "1");
     const { deps: d, appended } = deps();
