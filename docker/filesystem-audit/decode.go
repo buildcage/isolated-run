@@ -26,6 +26,9 @@ type record struct {
 	Args   string `json:"args,omitempty"`
 	Err    int32  `json:"err,omitempty"`
 	Failed bool   `json:"failed,omitempty"`
+	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the reader
+	// turns it into Time.
+	boot uint64
 }
 
 // kindNames maps the kind field of struct event to a name. The failed path
@@ -38,9 +41,10 @@ var kindNames = map[uint32]string{
 }
 
 // Mirrors the fixed header of struct event in bpf/filesystem_audit.bpf.c:
-// eight u32 fields, four u8 fields, then comm[16], then the data bytes.
+// eight u32 fields, four u8 fields, comm[16], a u32 pad, the u64 timestamp,
+// then the data bytes.
 const (
-	hdrLen  = 8*4 + 4 + 16
+	hdrLen  = 8*4 + 4 + 16 + 4 + 8
 	pathLen = 4096
 )
 
@@ -98,6 +102,7 @@ func decode(raw []byte) (record, error) {
 		PID:  le.Uint32(raw[4:]),
 		PPID: le.Uint32(raw[8:]),
 		Comm: cstr(raw[36:52]),
+		boot: le.Uint64(raw[56:]),
 	}
 	switch kind {
 	case 1: // open

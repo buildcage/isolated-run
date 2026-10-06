@@ -230,6 +230,25 @@ func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, e
 	return links, nil
 }
 
+// bootOffset is CLOCK_REALTIME minus CLOCK_BOOTTIME, read back to back, so
+// adding it to an event's boot timestamp gives the wall-clock time of the
+// access.
+func bootOffset() (int64, error) {
+	var boot, real unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &boot); err != nil {
+		return 0, fmt.Errorf("read CLOCK_BOOTTIME: %w", err)
+	}
+	if err := unix.ClockGettime(unix.CLOCK_REALTIME, &real); err != nil {
+		return 0, fmt.Errorf("read CLOCK_REALTIME: %w", err)
+	}
+	return real.Nano() - boot.Nano(), nil
+}
+
+// wallTime formats an event's boot timestamp as UTC to the millisecond.
+func wallTime(boot uint64, offset int64) string {
+	return time.Unix(0, int64(boot)+offset).UTC().Format("2006-01-02T15:04:05.000Z07:00")
+}
+
 // readLoop drains the ring buffer into the writer until the reader is
 // flushed, then reports a one-line tally to stderr. Events before the
 // sandboxed command's first exec belong to runc's own setup and are
@@ -262,7 +281,13 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 			}
 			started = true
 		}
-		r.Time = time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		// Read per event, so a wall-clock step mid-run shifts later times as it
+		// shifts the proxy's.
+		offset, err := bootOffset()
+		if err != nil {
+			return err
+		}
+		r.Time = wallTime(r.boot, offset)
 		counts[r.Kind]++
 		total++
 		if err := enc.Encode(r); err != nil {
