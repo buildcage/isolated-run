@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, it, expect } from "vitest";
 
-import { renderFilesystemAuditSummary } from "./filesystem-audit-summary.ts";
+import { dropWalkedDirs, keyOf, renderFilesystemAuditSummary } from "./filesystem-audit-summary.ts";
 
 const START = 1_791_244_800; // epoch seconds
 const PREFIXES = { workspace: ["/work"], home: ["/home/u"], startedAt: START };
@@ -110,6 +110,52 @@ describe("renderFilesystemAuditSummary: properties", () => {
     fc.assert(
       fc.property(fc.string(), (s) => {
         expect(() => renderFilesystemAuditSummary(s, PREFIXES)).not.toThrow();
+      }),
+    );
+  });
+
+  it("drops walked directories exactly as comparing every pair would", () => {
+    // The definition, checked pair by pair: a bare line goes when the same
+    // command has a line strictly below it and those lines carry all its flags.
+    const base = (p: string): string => (p.endsWith("/**") ? p.slice(0, -3) : p);
+    const reference = (lines: Map<string, { comm: string; path: string; flags: string[] }>) => {
+      const kept = new Set<string>();
+      for (const [k, l] of lines) {
+        const lb = base(l.path);
+        const prefix = lb === "/" ? "/" : `${lb}/`;
+        const below = [...lines.values()].filter(
+          (d) => d.comm === l.comm && base(d.path) !== lb && base(d.path).startsWith(prefix),
+        );
+        const carried = new Set(below.flatMap((d) => d.flags));
+        const walked =
+          !l.path.endsWith("/**") && below.length > 0 && l.flags.every((c) => carried.has(c));
+        if (!walked) kept.add(k);
+      }
+      return kept;
+    };
+    const lineArb = fc.record({
+      comm: fc.constantFrom("a", "b"),
+      path: fc.constantFrom(
+        "/",
+        "/x",
+        "/x/**",
+        "/x/",
+        "/x/y",
+        "/x/y/**",
+        "/x/y/z",
+        "/xy",
+        "rel",
+        "rel/f",
+        "…/t",
+        "…/t/u",
+      ),
+      flags: fc.subarray(["R", "W", "X", "M", "D", "A"]),
+    });
+    fc.assert(
+      fc.property(fc.array(lineArb, { maxLength: 15 }), (ls) => {
+        const lines = new Map(ls.map((l) => [keyOf(l.comm, l.path), l]));
+        const got = dropWalkedDirs(new Set(lines.keys()), (k) => lines.get(k)!.flags);
+        expect(got).toEqual(reference(lines));
       }),
     );
   });

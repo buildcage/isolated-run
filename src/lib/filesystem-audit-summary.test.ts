@@ -410,4 +410,35 @@ describe("renderFilesystemAuditSummary", () => {
       expect(lines(md)).toEqual(["00:00.000: R a ./c", "R a ./a", "R a ./b"]);
     });
   });
+
+  it("drops the root like any directory its descendants' flags cover", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "read", comm: "find", path: "/" },
+        { kind: "read", comm: "find", path: "/etc" },
+        { kind: "read", comm: "find", path: "/etc/hosts" },
+      ),
+      PREFIXES,
+    );
+    expect(lines(md)).toEqual(["R find /etc/hosts"]);
+  });
+
+  it("keeps the root when nothing below it was touched", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl({ kind: "write", comm: "sh", path: "/" }),
+      PREFIXES,
+    );
+    expect(lines(md)).toEqual(["W sh /"]);
+  });
+
+  it("renders tens of thousands of rows in well under the test timeout", () => {
+    // One path per command, so nothing collapses and every record is a row;
+    // comparing every pair of rows took minutes at this size.
+    const records = Array.from({ length: 50_000 }, (_, i) => ({
+      kind: "read",
+      comm: `c${i}`,
+      path: `/work/f${i}`,
+    }));
+    expect(lines(renderFilesystemAuditSummary(jsonl(...records), PREFIXES))).toHaveLength(50_000);
+  });
 });

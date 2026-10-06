@@ -68460,6 +68460,25 @@ function collapse(paths, fanout, keep) {
 	for (let [p, line] of shown) collapsed.has(line) && shown.set(p, `${line}/**`);
 	return shown;
 }
+function dropWalkedDirs(lines, flagsOf) {
+	let base = (p) => p.endsWith("/**") ? p.slice(0, -3) : p, below = new Map();
+	for (let d of lines) {
+		let path = base(pathOf(d));
+		if (path === "/") continue;
+		let comm = commOf(d), parts = path.split("/");
+		for (let i = parts.length - 1; i > 0; i--) {
+			let dir = keyOf(comm, parts.slice(0, i).join("/") || "/"), acc = below.get(dir);
+			acc || below.set(dir, acc = new Set());
+			for (let c of flagsOf(d)) acc.add(c);
+		}
+	}
+	let kept = new Set();
+	for (let l of lines) {
+		let acc = below.get(l);
+		!pathOf(l).endsWith("/**") && acc && [...flagsOf(l)].every((c) => acc.has(c)) || kept.add(l);
+	}
+	return kept;
+}
 function fmtFlags(ok, failed, perm) {
 	let out = "";
 	for (let c of "RWXMDA") ok.has(c) ? out += c : failed.has(c) && (out += c.toLowerCase() + (perm.has(c) ? "!" : ""));
@@ -68523,20 +68542,7 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		if (src) for (let c of src) addFlag(dst, key, c);
 	};
 	for (let [pk, lk] of shown) union(lineOk, lk, nok.get(pk)), union(lineFailed, lk, nfailed.get(pk)), union(linePerm, lk, nperm.get(pk)), widen(lineSpans, lk, nspans.get(pk));
-	let keys = new Set(shown.values()), base = (p) => p.endsWith("/**") ? p.slice(0, -3) : p;
-	for (let l of keys) {
-		let lpath = pathOf(l);
-		if (lpath.endsWith("/**")) continue;
-		let comm = commOf(l), prefix = `${base(lpath)}/`, hasDesc = !1, descFlags = new Set();
-		for (let d of keys) if (d !== l && commOf(d) === comm && base(pathOf(d)).startsWith(prefix)) {
-			hasDesc = !0;
-			for (let c of lineOk.get(d) ?? []) descFlags.add(c);
-			for (let c of lineFailed.get(d) ?? []) descFlags.add(c);
-		}
-		let flags = new Set([...lineOk.get(l) ?? [], ...lineFailed.get(l) ?? []]);
-		hasDesc && [...flags].every((c) => descFlags.has(c)) && keys.delete(l);
-	}
-	let rows = [];
+	let keys = dropWalkedDirs(new Set(shown.values()), (l) => [...lineOk.get(l) ?? [], ...lineFailed.get(l) ?? []]), rows = [];
 	for (let lk of keys) {
 		let o = lineOk.get(lk) ?? new Set(), fl = new Set([...lineFailed.get(lk) ?? []].filter((c) => !o.has(c))), flags = fmtFlags(o, fl, new Set([...linePerm.get(lk) ?? []].filter((c) => fl.has(c))));
 		if (!flags) continue;

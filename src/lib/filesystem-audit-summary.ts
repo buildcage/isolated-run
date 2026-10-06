@@ -164,7 +164,7 @@ function fmtSpan(span: Span | undefined, originMs: number): string {
 // Rows are keyed per (command, path). NUL cannot occur in either, so it joins
 // them unambiguously.
 const SEP = "\0";
-const keyOf = (comm: string, path: string): string => `${comm}${SEP}${path}`;
+export const keyOf = (comm: string, path: string): string => `${comm}${SEP}${path}`;
 const commOf = (key: string): string => key.slice(0, key.indexOf(SEP));
 const pathOf = (key: string): string => key.slice(key.indexOf(SEP) + 1);
 
@@ -196,6 +196,39 @@ function collapse(paths: Set<string>, fanout: number, keep: Set<string>): Map<st
   for (const line of shown.values()) if (line.endsWith("/**")) collapsed.add(line.slice(0, -3));
   for (const [p, line] of shown) if (collapsed.has(line)) shown.set(p, `${line}/**`);
   return shown;
+}
+
+/**
+ * Drops each bare directory line whose flags the same command's lines below it
+ * already carry: its read is only the walk that reached them. Each line's flags
+ * are credited to every directory above it once, so this stays linear in the
+ * lines times their depth rather than comparing every pair.
+ */
+export function dropWalkedDirs(
+  lines: Set<string>,
+  flagsOf: (line: string) => Iterable<string>,
+): Set<string> {
+  const base = (p: string): string => (p.endsWith("/**") ? p.slice(0, -3) : p);
+  const below = new Map<string, Set<string>>();
+  for (const d of lines) {
+    const path = base(pathOf(d));
+    if (path === "/") continue; // nothing above the root
+    const comm = commOf(d);
+    const parts = path.split("/");
+    for (let i = parts.length - 1; i > 0; i--) {
+      const dir = keyOf(comm, parts.slice(0, i).join("/") || "/");
+      let acc = below.get(dir);
+      if (!acc) below.set(dir, (acc = new Set()));
+      for (const c of flagsOf(d)) acc.add(c);
+    }
+  }
+  const kept = new Set<string>();
+  for (const l of lines) {
+    const acc = below.get(l);
+    const walked = !pathOf(l).endsWith("/**") && acc && [...flagsOf(l)].every((c) => acc.has(c));
+    if (!walked) kept.add(l);
+  }
+  return kept;
 }
 
 function fmtFlags(ok: Set<string>, failed: Set<string>, perm: Set<string>): string {
@@ -331,27 +364,10 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
     widen(lineSpans, lk, nspans.get(pk));
   }
 
-  // Drop a bare directory whose flags its own descendants already carry: its
-  // read is only the walk that reached them.
-  const keys = new Set(shown.values());
-  const base = (p: string): string => (p.endsWith("/**") ? p.slice(0, -3) : p);
-  for (const l of keys) {
-    const lpath = pathOf(l);
-    if (lpath.endsWith("/**")) continue;
-    const comm = commOf(l);
-    const prefix = `${base(lpath)}/`;
-    let hasDesc = false;
-    const descFlags = new Set<string>();
-    for (const d of keys) {
-      if (d !== l && commOf(d) === comm && base(pathOf(d)).startsWith(prefix)) {
-        hasDesc = true;
-        for (const c of lineOk.get(d) ?? []) descFlags.add(c);
-        for (const c of lineFailed.get(d) ?? []) descFlags.add(c);
-      }
-    }
-    const flags = new Set([...(lineOk.get(l) ?? []), ...(lineFailed.get(l) ?? [])]);
-    if (hasDesc && [...flags].every((c) => descFlags.has(c))) keys.delete(l);
-  }
+  const keys = dropWalkedDirs(new Set(shown.values()), (l) => [
+    ...(lineOk.get(l) ?? []),
+    ...(lineFailed.get(l) ?? []),
+  ]);
 
   const rows: {
     span: Span | undefined;
