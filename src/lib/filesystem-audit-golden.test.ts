@@ -25,6 +25,9 @@ describe("filesystem audit: real recording golden", () => {
       renderFilesystemAuditSummary(read("recording.cleaned.jsonl"), {
         workspace: ["/home/runner/work/isolated-run/isolated-run"],
         home: ["/home/runner"],
+        // The recording does not carry the proxy's start; a few seconds before
+        // its first record stands in for it.
+        startedAt: Date.parse("2026-10-06T14:09:30Z") / 1000,
       }),
     ).toBe(read("recording.summary.md"));
   });
