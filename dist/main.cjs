@@ -68300,6 +68300,45 @@ function setFilesystemAuditOutput(name) {
 	setOutput("filesystem_audit_artifact_name", name);
 }
 //#endregion
+//#region src/lib/filesystem-audit-strip.ts
+const SHELL_COMM = "run-script.sh";
+function stripSandboxMachinery(jsonl, scratchBase) {
+	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), lines = jsonl.split("\n"), recs = lines.map((line) => {
+		try {
+			return JSON.parse(line);
+		} catch {
+			return;
+		}
+	}), parent = new Map(), ownShellPids = new Set(), shell, boundary = -1;
+	recs.forEach((r, i) => {
+		r && r.pid !== void 0 && (!parent.has(r.pid) && r.ppid !== void 0 && parent.set(r.pid, r.ppid), r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? [shell, boundary] = [r.pid, i] : ownShellPids.add(r.pid)));
+	});
+	let inStep = (pid) => {
+		let seen = new Set();
+		for (let p = pid; p !== void 0 && !seen.has(p); p = parent.get(p)) {
+			if (p === shell) return !0;
+			seen.add(p);
+		}
+		return !1;
+	}, out = [];
+	return recs.forEach((r, i) => {
+		if (r === void 0) {
+			lines[i] !== "" && out.push(lines[i]);
+			return;
+		}
+		if (!under(r.path) && (shell === void 0 || r.pid === void 0 || (r.pid === shell ? i >= boundary : inStep(r.pid)))) {
+			if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
+				out.push(JSON.stringify({
+					...r,
+					comm: "bash"
+				}));
+				return;
+			}
+			out.push(lines[i]);
+		}
+	}), out.join("\n");
+}
+//#endregion
 //#region src/lib/filesystem-audit-summary.ts
 const LETTER = {
 	read: "R",
@@ -68355,6 +68394,7 @@ function addFlag(m, key, flag) {
 	let set = m.get(key);
 	set || m.set(key, set = new Set()), set.add(flag);
 }
+const keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1);
 function collapse(paths, fanout, keep) {
 	let children = new Map();
 	for (let p of paths) {
@@ -68383,7 +68423,7 @@ function fmtFlags(ok, failed, perm) {
 	for (let c of "RWXMDA") ok.has(c) ? out += c : failed.has(c) && (out += c.toLowerCase() + (perm.has(c) ? "!" : ""));
 	return out;
 }
-const HEADING = "### Filesystem audit (experimental)";
+const HEADING = "### Filesystem audit";
 function renderFilesystemAuditSummary(jsonl, prefixes) {
 	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set();
 	for (let line of jsonl.split("\n")) {
@@ -68400,18 +68440,22 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		}
 		r.kind === "exec" && r.path && execd.add(r.path);
 		let c = classify(r);
-		c && (c.failed ? (addFlag(failed, c.path, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, c.path, c.letter)) : addFlag(ok, c.path, c.letter));
+		if (!c) continue;
+		let key = keyOf(r.comm ?? "", c.path);
+		c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
 	}
-	for (let p of [
+	let libDrop = new Set([
 		...libs,
 		...execd,
 		"/etc/ld.so.cache"
-	]) ok.get(p)?.delete("R");
+	]);
+	for (let key of ok.keys()) libDrop.has(pathOf(key)) && ok.get(key).delete("R");
 	let nok = new Map(), nfailed = new Map(), nperm = new Map(), mergeInto = (dst, src, keepRelative) => {
-		for (let [p, set] of src) {
+		for (let [key, set] of src) {
+			let p = pathOf(key);
 			if (/^(pipe|socket|anon_inode):/.test(p) || !keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
-			let np = normalize$2(p), dstSet = dst.get(np);
-			dstSet || dst.set(np, dstSet = new Set());
+			let nk = keyOf(commOf(key), normalize$2(p)), dstSet = dst.get(nk);
+			dstSet || dst.set(nk, dstSet = new Set());
 			for (let c of set) dstSet.add(c);
 		}
 	};
@@ -68424,38 +68468,51 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		"/proc/<pid>",
 		...prefixes.workspace,
 		...prefixes.home
-	]), shown = collapse(new Set([...nok.keys(), ...nfailed.keys()]), fanout, keep), lineOk = new Map(), lineFailed = new Map(), linePerm = new Map(), union = (dst, line, src) => {
-		if (src) for (let c of src) addFlag(dst, line, c);
+	]), byComm = new Map();
+	for (let key of new Set([...nok.keys(), ...nfailed.keys()])) {
+		let set = byComm.get(commOf(key));
+		set || byComm.set(commOf(key), set = new Set()), set.add(pathOf(key));
+	}
+	let shown = new Map();
+	for (let [comm, paths] of byComm) for (let [p, line] of collapse(paths, fanout, keep)) shown.set(keyOf(comm, p), keyOf(comm, line));
+	let lineOk = new Map(), lineFailed = new Map(), linePerm = new Map(), union = (dst, key, src) => {
+		if (src) for (let c of src) addFlag(dst, key, c);
 	};
-	for (let [p, line] of shown) union(lineOk, line, nok.get(p)), union(lineFailed, line, nfailed.get(p)), union(linePerm, line, nperm.get(p));
-	let lines = new Set(shown.values()), base = (l) => l.endsWith("/**") ? l.slice(0, -3) : l;
-	for (let l of lines) {
-		if (l.endsWith("/**")) continue;
-		let prefix = `${base(l)}/`, hasDesc = !1, descFlags = new Set();
-		for (let d of lines) if (d !== l && base(d).startsWith(prefix)) {
+	for (let [pk, lk] of shown) union(lineOk, lk, nok.get(pk)), union(lineFailed, lk, nfailed.get(pk)), union(linePerm, lk, nperm.get(pk));
+	let keys = new Set(shown.values()), base = (p) => p.endsWith("/**") ? p.slice(0, -3) : p;
+	for (let l of keys) {
+		let lpath = pathOf(l);
+		if (lpath.endsWith("/**")) continue;
+		let comm = commOf(l), prefix = `${base(lpath)}/`, hasDesc = !1, descFlags = new Set();
+		for (let d of keys) if (d !== l && commOf(d) === comm && base(pathOf(d)).startsWith(prefix)) {
 			hasDesc = !0;
 			for (let c of lineOk.get(d) ?? []) descFlags.add(c);
 			for (let c of lineFailed.get(d) ?? []) descFlags.add(c);
 		}
 		let flags = new Set([...lineOk.get(l) ?? [], ...lineFailed.get(l) ?? []]);
-		hasDesc && [...flags].every((c) => descFlags.has(c)) && lines.delete(l);
+		hasDesc && [...flags].every((c) => descFlags.has(c)) && keys.delete(l);
 	}
 	let rows = [];
-	for (let line of lines) {
-		let o = lineOk.get(line) ?? new Set(), fl = new Set([...lineFailed.get(line) ?? []].filter((c) => !o.has(c))), flags = fmtFlags(o, fl, new Set([...linePerm.get(line) ?? []].filter((c) => fl.has(c))));
-		flags && rows.push([relativize(line, prefixes), flags]);
+	for (let lk of keys) {
+		let o = lineOk.get(lk) ?? new Set(), fl = new Set([...lineFailed.get(lk) ?? []].filter((c) => !o.has(c))), flags = fmtFlags(o, fl, new Set([...linePerm.get(lk) ?? []].filter((c) => fl.has(c))));
+		flags && rows.push({
+			flags,
+			comm: commOf(lk),
+			path: relativize(pathOf(lk), prefixes)
+		});
 	}
 	if (rows.sort((a, b) => {
-		let [ca, pa] = sortKey(a[0]), [cb, pb] = sortKey(b[0]);
-		return ca - cb || (pa < pb ? -1 : 1);
+		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
+		return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
 	}), rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
-	let body = rows.map(([path, flags]) => `\`${flags}\` ${path}`).join("\n");
-	return `${HEADING}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>\n\n${body}\n`;
+	let flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r) => `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
+	return `${HEADING}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
 }
 //#endregion
 //#region src/lib/filesystem-audit-report.ts
 const realDeps$3 = {
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
+	writeFile: (path, content) => (0, node_fs.writeFileSync)(path, content),
 	realpath: (path) => (0, node_fs.realpathSync)(path),
 	writeStepSummary,
 	uploadArtifact: uploadFilesystemAuditArtifact,
@@ -68475,10 +68532,11 @@ async function reportStepFilesystemAudit({ audit, retentionDays, containerName, 
 	let deps = {
 		...realDeps$3,
 		...overrides
-	}, artifactName = "", jsonl = audit && readOptional(audit.outPath, deps.readFile);
-	if (audit && jsonl) {
+	}, artifactName = "", raw = audit && readOptional(audit.outPath, deps.readFile);
+	if (audit && raw) {
+		let clean = stripSandboxMachinery(raw, (0, node_path.dirname)(audit.outPath));
 		try {
-			let markdown = renderFilesystemAuditSummary(jsonl, {
+			let markdown = renderFilesystemAuditSummary(clean, {
 				workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
 				home: prefixes(env.HOME, deps.realpath)
 			});
@@ -68486,7 +68544,13 @@ async function reportStepFilesystemAudit({ audit, retentionDays, containerName, 
 		} catch (e) {
 			annotation.warning(`Failed to write the filesystem audit summary: ${errorMessage(e)}`);
 		}
-		artifactName = await deps.uploadArtifact(audit.outPath, containerName, retentionDays, annotation) ?? "";
+		let cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl"), wrote = !1;
+		try {
+			deps.writeFile(cleanPath, clean), wrote = !0;
+		} catch (e) {
+			annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
+		}
+		wrote && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
 	}
 	deps.setOutput(artifactName);
 }

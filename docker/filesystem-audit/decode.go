@@ -14,7 +14,7 @@ import (
 // mmap flags as letters; Failed and Err describe an operation that did not
 // succeed.
 type record struct {
-	TimeNs int64  `json:"t"`
+	Time   string `json:"t"`
 	Kind   string `json:"kind"`
 	PID    uint32 `json:"pid"`
 	PPID   uint32 `json:"ppid"`
@@ -137,7 +137,13 @@ func decode(raw []byte) (record, error) {
 		r.Args = fmt.Sprintf("%d:%d", flags, mode)
 	case 8: // symlink
 		r.To = cstr(data)
-		r.Path, _ = components(data[pathRet:], n1, truncated)
+		// pathRet is the link body's length, i.e. the offset of the path
+		// components; clamp it so a malformed sample cannot slice out of range.
+		off := int(pathRet)
+		if off < 0 || off > len(data) {
+			off = len(data)
+		}
+		r.Path, _ = components(data[off:], n1, truncated)
 	case 5, 9: // rename, link
 		var rest []byte
 		r.Path, rest = components(data, n1, truncated)
@@ -148,7 +154,9 @@ func decode(raw []byte) (record, error) {
 		r.Failed = true
 	case 17: // failed rename
 		r.Path = cstr(data)
-		if n1 == 1 { // a second path follows
+		// n1 == 1 marks a second path after the first one's NUL; guard the
+		// offset so a sample without that NUL cannot slice out of range.
+		if n1 == 1 && len(r.Path)+1 <= len(data) {
 			r.To = cstr(data[len(r.Path)+1:])
 		}
 		r.Err = pathRet

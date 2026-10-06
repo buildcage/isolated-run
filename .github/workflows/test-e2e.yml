@@ -146,9 +146,9 @@ jobs:
       # No cleanup step: the action stops its own proxy container in its
       # finally block.
 
-  # Runs a real sandboxed step with filesystem_audit and checks the tracer
-  # recorded its file accesses; a test-hooks build surfaces the recording for
-  # the assertion.
+  # Runs a real sandboxed step with filesystem_mode: ephemeral and
+  # filesystem_audit and checks the tracer recorded its file accesses; a
+  # test-hooks build surfaces the recording for the assertion.
   test_sandbox_filesystem_audit:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
@@ -190,9 +190,11 @@ jobs:
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/summary.md
+          BUILDCAGE_RUN_DEBUG_RAW_FILE: ${{ runner.temp }}/raw.jsonl
         with:
           proxy_engine: universal
           proxy_mode: audit
+          filesystem_mode: ephemeral
           filesystem_audit: record
           run: |
             cat /etc/hostname > /dev/null
@@ -203,20 +205,29 @@ jobs:
       - name: Verify the Job Summary has the filesystem audit
         run: |
           f="${{ runner.temp }}/summary.md"
+          echo "::group::Filesystem audit summary"; cat "$f"; echo "::endgroup::"
+          # The raw recording (before stripping) feeds the committed fixtures.
+          echo "::group::Raw recording"; cat "${{ runner.temp }}/raw.jsonl" 2>/dev/null || true; echo "::endgroup::"
           grep -q "Filesystem audit" "$f"
-          # The probe writes show as a flagged line under the workspace.
-          grep -qE '`[RWXMDA]+` \./probe' "$f" || { cat "$f"; exit 1; }
+          # The probe writes show as a flagged, command-tagged line under the workspace.
+          grep -qE '^[RWXMDArwxmda!]+ +\S+ +\./probe' "$f" || exit 1
+          # buildcage's own wrappers must never reach the summary.
+          ! grep -qE ' (setpriv|env-loader\.sh|run-script\.sh) ' "$f"
 
       - name: Download and check the filesystem audit artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ steps.audit.outputs.filesystem_audit_artifact_name }}
           path: ${{ runner.temp }}/audit
-      - name: The artifact holds the recorded events
+      - name: The artifact holds the step's events with buildcage's own stripped out
         run: |
           f=$(ls ${{ runner.temp }}/audit/*.jsonl)
           test -s "$f"
+          echo "::group::Recorded events (first lines)"; head -20 "$f"; echo "::endgroup::"
           grep -q '"kind":"write"' "$f"
+          # buildcage's own exec wrappers and scratch files must not leak.
+          ! grep -qE '"comm":"(setpriv|env-loader\.sh|run-script\.sh)"' "$f"
+          ! grep -q '/var/tmp/buildcage-' "$f"
 
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network), proves proxy_engine: universal

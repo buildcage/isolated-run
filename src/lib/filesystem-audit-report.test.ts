@@ -14,6 +14,9 @@ const AUDIT = {
   pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-deadbeef.pid",
 };
 
+// The stripped copy, written beside the recording and uploaded in its place.
+const CLEAN = "/var/tmp/buildcage-0/filesystem-audit-deadbeef.step.jsonl";
+
 function annotation(): Annotation & { warning: Mock; error: Mock } {
   return { notice: vi.fn(), warning: vi.fn(), error: vi.fn() };
 }
@@ -24,18 +27,22 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
   uploads: string[];
   outputs: string[];
   appended: string[];
+  writes: { path: string; content: string }[];
 } {
   const summaries: string[] = [];
   const uploads: string[] = [];
   const outputs: string[] = [];
   const appended: string[] = [];
+  const writes: { path: string; content: string }[] = [];
   return {
     summaries,
     uploads,
     outputs,
     appended,
+    writes,
     deps: {
-      readFile: () => JSON.stringify({ kind: "write", path: "/work/a.txt" }),
+      readFile: () => JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
+      writeFile: (path, content) => void writes.push({ path, content }),
       realpath: (p) => p,
       writeStepSummary: async (md) => void summaries.push(md),
       uploadArtifact: async (outPath) => {
@@ -53,7 +60,7 @@ describe("reportStepFilesystemAudit", () => {
   const base = { retentionDays: 3, containerName: "buildcage-proxy-deadbeef" };
 
   it("renders, uploads and sets the output when a recording exists", async () => {
-    const { deps: d, summaries, uploads, outputs } = deps();
+    const { deps: d, summaries, uploads, outputs, writes } = deps();
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
@@ -61,8 +68,16 @@ describe("reportStepFilesystemAudit", () => {
     );
 
     expect(summaries[0]).toContain("Filesystem audit");
-    expect(summaries[0]).toContain("`W` ./a.txt");
-    expect(uploads).toEqual([AUDIT.outPath]);
+    expect(summaries[0]).toContain("W node ./a.txt");
+    // The stripped copy is written beside the recording and uploaded; the
+    // root-owned recording itself is left untouched.
+    expect(writes).toEqual([
+      {
+        path: CLEAN,
+        content: JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
+      },
+    ]);
+    expect(uploads).toEqual([CLEAN]);
     expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
   });
 
@@ -119,13 +134,37 @@ describe("reportStepFilesystemAudit", () => {
     expect(note.warning).toHaveBeenCalledWith(
       "Failed to write the filesystem audit summary: summary disk full",
     );
-    expect(uploads).toEqual([AUDIT.outPath]);
+    expect(uploads).toEqual([CLEAN]);
     expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
+  });
+
+  it("warns and uploads nothing when the stripped copy cannot be written", async () => {
+    const note = annotation();
+    const {
+      deps: d,
+      uploads,
+      outputs,
+    } = deps({
+      writeFile: () => {
+        throw new Error("EACCES");
+      },
+    });
+
+    await reportStepFilesystemAudit(
+      { ...base, audit: AUDIT, annotation: note, env: { GITHUB_WORKSPACE: "/work" } },
+      d,
+    );
+
+    expect(note.warning).toHaveBeenCalledWith(
+      "Failed to prepare the filesystem audit artifact: EACCES",
+    );
+    expect(uploads).toEqual([]);
+    expect(outputs).toEqual([""]);
   });
 
   it("matches a recorded canonical path against the realpath of the workspace", async () => {
     const { deps: d, summaries } = deps({
-      readFile: () => JSON.stringify({ kind: "write", path: "/real/work/a.txt" }),
+      readFile: () => JSON.stringify({ kind: "write", comm: "node", path: "/real/work/a.txt" }),
       realpath: (p) => (p === "/sym/work" ? "/real/work" : p),
     });
 
@@ -134,7 +173,7 @@ describe("reportStepFilesystemAudit", () => {
       d,
     );
 
-    expect(summaries[0]).toContain("`W` ./a.txt");
+    expect(summaries[0]).toContain("W node ./a.txt");
   });
 
   it("falls back to the raw prefix when the realpath cannot be resolved", async () => {
@@ -149,7 +188,7 @@ describe("reportStepFilesystemAudit", () => {
       d,
     );
 
-    expect(summaries[0]).toContain("`W` ./a.txt");
+    expect(summaries[0]).toContain("W node ./a.txt");
   });
 
   it("sets an empty output when the recording file is empty", async () => {
@@ -190,6 +229,25 @@ describe("reportStepFilesystemAudit", () => {
     );
 
     expect(appended[0]).toContain("Filesystem audit");
+  });
+
+  it("mirrors the raw recording to the debug file for fixture capture", async () => {
+    vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "1");
+    const { deps: d, appended } = deps();
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: { GITHUB_WORKSPACE: "/work", BUILDCAGE_RUN_DEBUG_RAW_FILE: "/tmp/raw.jsonl" },
+      },
+      d,
+    );
+
+    expect(appended).toEqual([
+      JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
+    ]);
   });
 
   it("does not mirror without the debug file set", async () => {

@@ -125,7 +125,7 @@ func TestDecode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got.TimeNs = 0 // stamped by the caller, not decode
+			got.Time = "" // stamped by the caller, not decode
 			if got != c.want {
 				t.Errorf("decode mismatch\n got: %+v\nwant: %+v", got, c.want)
 			}
@@ -146,4 +146,38 @@ func TestExecArgs(t *testing.T) {
 	if got.Path != "/bin/true" || got.Args != "true --flag arg" {
 		t.Errorf("exec decode: path=%q args=%q", got.Path, got.Args)
 	}
+}
+
+// Malformed samples must decode to a record or an error, never a panic: the
+// ring-buffer bytes are trusted only as far as the kernel wrote them, and the
+// fixed-length offsets (a symlink body length, a second path after a NUL) have
+// to stay in range even when a sample does not match the layout.
+func TestDecodeMalformed(t *testing.T) {
+	cases := map[string][]byte{
+		"empty":             {},
+		"short header":      make([]byte, hdrLen-1),
+		"bare header":       make([]byte, hdrLen),
+		"symlink bad off":   event{kind: 8, pathRet: 1 << 20, n1: 2, data: []byte("x\x00y\x00")}.bytes(),
+		"rename no NUL":     event{kind: 17, n1: 1, data: []byte("no-terminator")}.bytes(),
+		"components run-on": event{kind: 5, n1: 5, n2: 5, data: comps("a", "b")}.bytes(),
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, _ = decode(raw) // only that it returns rather than panicking
+		})
+	}
+}
+
+func FuzzDecode(f *testing.F) {
+	for _, raw := range [][]byte{
+		{},
+		make([]byte, hdrLen),
+		event{kind: 8, pathRet: 1 << 20, n1: 2, data: []byte("x\x00y\x00")}.bytes(),
+		event{kind: 17, n1: 1, data: []byte("no-terminator")}.bytes(),
+	} {
+		f.Add(raw)
+	}
+	f.Fuzz(func(_ *testing.T, raw []byte) {
+		_, _ = decode(raw)
+	})
 }
