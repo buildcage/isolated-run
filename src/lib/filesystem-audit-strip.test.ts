@@ -66,6 +66,20 @@ describe("stripSandboxMachinery", () => {
     ]);
   });
 
+  it("stops the parent walk when recorded parents form a cycle", () => {
+    const out = stripSandboxMachinery(
+      jsonl(
+        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        // Two processes whose recorded parents point at each other: the walk
+        // must terminate rather than loop, and neither reaches the shell.
+        { pid: 20, ppid: 21, kind: "read", comm: "node", path: "/work/a" },
+        { pid: 21, ppid: 20, kind: "read", comm: "node", path: "/work/b" },
+      ),
+      BASE,
+    );
+    expect(records(out)).toEqual([]);
+  });
+
   it("changes nothing but scratch paths when no step shell is found", () => {
     const out = stripSandboxMachinery(
       jsonl(

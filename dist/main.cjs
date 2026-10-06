@@ -68314,7 +68314,11 @@ function stripSandboxMachinery(jsonl, scratchBase) {
 		r && r.pid !== void 0 && (!parent.has(r.pid) && r.ppid !== void 0 && parent.set(r.pid, r.ppid), r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? [shell, boundary] = [r.pid, i] : ownShellPids.add(r.pid)));
 	});
 	let inStep = (pid) => {
-		for (let p = pid; p !== void 0; p = parent.get(p)) if (p === shell) return !0;
+		let seen = new Set();
+		for (let p = pid; p !== void 0 && !seen.has(p); p = parent.get(p)) {
+			if (p === shell) return !0;
+			seen.add(p);
+		}
 		return !1;
 	}, out = [];
 	return recs.forEach((r, i) => {
