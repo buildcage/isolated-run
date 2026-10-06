@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
@@ -25,7 +25,6 @@ export interface FilesystemAuditReportOptions {
 export interface FilesystemAuditReportDeps {
   readFile: (path: string) => string;
   writeFile: (path: string, content: string) => void;
-  removeFile: (path: string) => void;
   realpath: (path: string) => string;
   writeStepSummary: typeof writeStepSummary;
   uploadArtifact: typeof uploadFilesystemAuditArtifact;
@@ -39,7 +38,6 @@ export interface FilesystemAuditReportDeps {
 const realDeps: FilesystemAuditReportDeps = {
   readFile: (path) => readFileSync(path, "utf8"),
   writeFile: (path, content) => writeFileSync(path, content),
-  removeFile: (path) => rmSync(path, { force: true }),
   realpath: (path) => realpathSync(path),
   writeStepSummary,
   uploadArtifact: uploadFilesystemAuditArtifact,
@@ -94,22 +92,22 @@ export async function reportStepFilesystemAudit(
     } catch (e) {
       annotation.warning(`Failed to write the filesystem audit summary: ${errorMessage(e)}`);
     }
-    // Replace the recording in place with the stripped copy, then upload that.
-    // The tracer wrote it as root under the scratch base, which the sandbox
-    // cannot write to (unlike $RUNNER_TEMP or /tmp), so the stripped copy stays
-    // out of a concurrent step's reach; we own the directory, so we drop the
-    // root-owned file and write our own. The raw is never uploaded.
-    let replaced = false;
+    // Upload the stripped copy, written beside the recording under the scratch
+    // base. That directory is ours (not $RUNNER_TEMP or /tmp), so the sandbox
+    // cannot reach the copy, and writing a new file leaves the root-owned
+    // recording in place: a failed write loses nothing and never uploads the
+    // raw. The suffix keeps it off the recording's own name.
+    const cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl");
+    let wrote = false;
     try {
-      deps.removeFile(audit.outPath);
-      deps.writeFile(audit.outPath, clean);
-      replaced = true;
+      deps.writeFile(cleanPath, clean);
+      wrote = true;
     } catch (e) {
       annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
     }
-    if (replaced)
+    if (wrote)
       artifactName =
-        (await deps.uploadArtifact(audit.outPath, containerName, retentionDays, annotation)) ?? "";
+        (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
   }
   deps.setOutput(artifactName);
 }

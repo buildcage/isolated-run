@@ -68505,7 +68505,7 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
 	}), rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
-	let flagsW = Math.max(...rows.map((r) => r.flags.length)), commW = Math.max(...rows.map((r) => r.comm.length)), body = rows.map((r) => `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
+	let flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r) => `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
 	return `${HEADING}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
 }
 //#endregion
@@ -68513,7 +68513,6 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 const realDeps$3 = {
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
 	writeFile: (path, content) => (0, node_fs.writeFileSync)(path, content),
-	removeFile: (path) => (0, node_fs.rmSync)(path, { force: !0 }),
 	realpath: (path) => (0, node_fs.realpathSync)(path),
 	writeStepSummary,
 	uploadArtifact: uploadFilesystemAuditArtifact,
@@ -68545,13 +68544,13 @@ async function reportStepFilesystemAudit({ audit, retentionDays, containerName, 
 		} catch (e) {
 			annotation.warning(`Failed to write the filesystem audit summary: ${errorMessage(e)}`);
 		}
-		let replaced = !1;
+		let cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl"), wrote = !1;
 		try {
-			deps.removeFile(audit.outPath), deps.writeFile(audit.outPath, clean), replaced = !0;
+			deps.writeFile(cleanPath, clean), wrote = !0;
 		} catch (e) {
 			annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
 		}
-		replaced && (artifactName = await deps.uploadArtifact(audit.outPath, containerName, retentionDays, annotation) ?? "");
+		wrote && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
 	}
 	deps.setOutput(artifactName);
 }

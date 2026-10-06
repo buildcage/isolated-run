@@ -305,8 +305,10 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
 
   if (rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
   // Fixed-width flag and command columns, sized to the rows actually shown.
-  const flagsW = Math.max(...rows.map((r) => r.flags.length));
-  const commW = Math.max(...rows.map((r) => r.comm.length));
+  // reduce, not Math.max(...spread), which overflows the argument limit on a
+  // recording with very many distinct paths.
+  const flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0);
+  const commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0);
   const body = rows
     .map((r) => `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`)
     .join("\n");

@@ -14,6 +14,9 @@ const AUDIT = {
   pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-deadbeef.pid",
 };
 
+// The stripped copy, written beside the recording and uploaded in its place.
+const CLEAN = "/var/tmp/buildcage-0/filesystem-audit-deadbeef.step.jsonl";
+
 function annotation(): Annotation & { warning: Mock; error: Mock } {
   return { notice: vi.fn(), warning: vi.fn(), error: vi.fn() };
 }
@@ -25,25 +28,21 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
   outputs: string[];
   appended: string[];
   writes: { path: string; content: string }[];
-  removed: string[];
 } {
   const summaries: string[] = [];
   const uploads: string[] = [];
   const outputs: string[] = [];
   const appended: string[] = [];
   const writes: { path: string; content: string }[] = [];
-  const removed: string[] = [];
   return {
     summaries,
     uploads,
     outputs,
     appended,
     writes,
-    removed,
     deps: {
       readFile: () => JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
       writeFile: (path, content) => void writes.push({ path, content }),
-      removeFile: (path) => void removed.push(path),
       realpath: (p) => p,
       writeStepSummary: async (md) => void summaries.push(md),
       uploadArtifact: async (outPath) => {
@@ -61,7 +60,7 @@ describe("reportStepFilesystemAudit", () => {
   const base = { retentionDays: 3, containerName: "buildcage-proxy-deadbeef" };
 
   it("renders, uploads and sets the output when a recording exists", async () => {
-    const { deps: d, summaries, uploads, outputs, writes, removed } = deps();
+    const { deps: d, summaries, uploads, outputs, writes } = deps();
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
@@ -70,16 +69,15 @@ describe("reportStepFilesystemAudit", () => {
 
     expect(summaries[0]).toContain("Filesystem audit");
     expect(summaries[0]).toContain("W node ./a.txt");
-    // The root-owned recording is replaced in place with the stripped copy, in
-    // the scratch base (not /tmp), and that is what is uploaded.
-    expect(removed).toEqual([AUDIT.outPath]);
+    // The stripped copy is written beside the recording and uploaded; the
+    // root-owned recording itself is left untouched.
     expect(writes).toEqual([
       {
-        path: AUDIT.outPath,
+        path: CLEAN,
         content: JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
       },
     ]);
-    expect(uploads).toEqual([AUDIT.outPath]);
+    expect(uploads).toEqual([CLEAN]);
     expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
   });
 
@@ -136,7 +134,7 @@ describe("reportStepFilesystemAudit", () => {
     expect(note.warning).toHaveBeenCalledWith(
       "Failed to write the filesystem audit summary: summary disk full",
     );
-    expect(uploads).toEqual([AUDIT.outPath]);
+    expect(uploads).toEqual([CLEAN]);
     expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
   });
 
