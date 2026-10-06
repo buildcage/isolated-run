@@ -99,7 +99,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run unit tests under QuickJS
-        timeout-minutes: 10
+        timeout-minutes: 5
         run: make test_unit_qjs
 
   # Single, stably-named required status check for branch protection: the
