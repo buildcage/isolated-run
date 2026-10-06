@@ -2,17 +2,18 @@
  * Removes buildcage's own sandbox machinery from a recording, so both the
  * summary and the uploaded artifact show only the step's accesses.
  *
- * The sandbox init (the first recorded process) runs buildcage's wrappers
- * (setpriv, env-loader.sh, env), forking helper subshells along the way, and
- * finally execs the step's shell, run-script.sh, from the scratch base. That
- * exec is the boundary: the init's earlier records and any process forked
- * before it are machinery; what comes after is the step. Accesses under the
- * scratch base are buildcage's own files. The step's shell is relabeled bash.
+ * buildcage runs the step under setpriv and env-loader.sh; env-loader.sh stays
+ * alive as the sandbox init (forwarding signals, reaping, propagating the exit
+ * status) and forks the step's shell, which execs run-script.sh from the
+ * scratch base. So the step is that shell and its descendants, from the
+ * run-script.sh exec onward; the init, setpriv, the shell's earlier exec
+ * phases, and every access under the scratch base are machinery. The step's
+ * shell is relabeled bash.
  *
- * The boundary and the shell are found by pid and exec path, never by command
- * name, so a step command named setpriv or run-script.sh (run from the
- * workspace, forked after the boundary, exec'd from a non-scratch path) is left
- * alone and keeps its own name.
+ * The shell is found by the exec of run-script.sh under the scratch base, never
+ * by command name, so a step command named setpriv or run-script.sh (run from
+ * the workspace, a different pid, exec'd from a non-scratch path) is left alone
+ * and keeps its own name.
  */
 
 const SHELL_COMM = "run-script.sh"; // buildcage's step shell (sandbox/oci-files.ts)
@@ -20,6 +21,7 @@ const SHELL_LABEL = "bash";
 
 interface Record_ {
   pid?: number;
+  ppid?: number;
   kind?: string;
   comm?: string;
   path?: string;
@@ -39,18 +41,25 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
     }
   });
 
-  const initPid = recs.find((r) => r !== undefined)?.pid;
-  const firstSeen = new Map<number, number>();
-  const stepShellPids = new Set<number>(); // execs its own run-script.sh, not buildcage's
+  const parent = new Map<number, number>();
+  const ownShellPids = new Set<number>(); // execs its own run-script.sh, not buildcage's
+  let shell: number | undefined; // the pid that execs buildcage's run-script.sh
   let boundary = -1;
   recs.forEach((r, i) => {
     if (!r || r.pid === undefined) return;
-    if (!firstSeen.has(r.pid)) firstSeen.set(r.pid, i);
-    if (r.kind === "exec" && typeof r.path === "string") {
-      if (r.pid === initPid && under(r.path)) boundary = i;
-      if (!under(r.path) && leaf(r.path) === SHELL_COMM) stepShellPids.add(r.pid);
+    if (!parent.has(r.pid) && r.ppid !== undefined) parent.set(r.pid, r.ppid);
+    if (r.kind === "exec" && typeof r.path === "string" && leaf(r.path) === SHELL_COMM) {
+      if (under(r.path)) [shell, boundary] = [r.pid, i];
+      else ownShellPids.add(r.pid);
     }
   });
+
+  // A pid belongs to the step if it is the shell or descends from it.
+  const inStep = (pid: number): boolean => {
+    for (let p: number | undefined = pid; p !== undefined; p = parent.get(p))
+      if (p === shell) return true;
+    return false;
+  };
 
   const out: string[] = [];
   recs.forEach((r, i) => {
@@ -59,16 +68,15 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
       return;
     }
     if (under(r.path)) return; // a buildcage scratch file
-    if (boundary >= 0 && r.pid !== undefined) {
-      // The init's own wrapper phase, or a helper it forked before the shell.
-      const machinery = r.pid === initPid ? i <= boundary : firstSeen.get(r.pid)! <= boundary;
-      if (machinery) return;
+    if (shell !== undefined && r.pid !== undefined) {
+      const stepRecord = r.pid === shell ? i >= boundary : inStep(r.pid);
+      if (!stepRecord) return; // the init, setpriv, or the shell's pre-exec phase
     }
     if (
-      boundary >= 0 &&
+      shell !== undefined &&
       r.comm === SHELL_COMM &&
       r.pid !== undefined &&
-      !stepShellPids.has(r.pid)
+      !ownShellPids.has(r.pid)
     ) {
       out.push(JSON.stringify({ ...r, comm: SHELL_LABEL })); // the step's shell
       return;
