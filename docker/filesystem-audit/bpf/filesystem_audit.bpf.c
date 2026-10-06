@@ -116,6 +116,8 @@ struct event {
 	u8 truncated;  // the path, or the first path of a two-path operation
 	u8 trunc2;     // the second path of a rename or link
 	char comm[16];
+	u32 pad;
+	u64 ts; // CLOCK_BOOTTIME when the access happened, not when it is read
 	char data[DATA_SZ + NAME_LEN]; // slack: masked offset + one component
 };
 
@@ -191,6 +193,7 @@ static __always_inline struct event *start(u32 kind)
 	e->truncated = 0;
 	e->trunc2 = 0;
 	bpf_get_current_comm(e->comm, sizeof(e->comm));
+	e->ts = bpf_ktime_get_boot_ns();
 	return e;
 }
 

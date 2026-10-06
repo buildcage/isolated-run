@@ -15,6 +15,7 @@ type event struct {
 	n1, n2, truncated, trunc2 uint8
 	pid, ppid                 uint32
 	comm                      string
+	boot                      uint64
 	data                      []byte
 }
 
@@ -30,6 +31,7 @@ func (e event) bytes() []byte {
 	le.PutUint32(b[24:], e.argsLen)
 	b[32], b[33], b[34], b[35] = e.n1, e.n2, e.truncated, e.trunc2
 	copy(b[36:52], e.comm)
+	le.PutUint64(b[56:], e.boot)
 	return append(b, e.data...)
 }
 
@@ -47,6 +49,35 @@ func comps(leafFirst ...string) []byte {
 func TestDecodeShort(t *testing.T) {
 	if _, err := decode(make([]byte, hdrLen-1)); err == nil {
 		t.Fatal("want error on short event")
+	}
+}
+
+func TestDecodeBootTime(t *testing.T) {
+	r, err := decode(event{kind: 13, comm: "cat", boot: 123_456_789_000, data: []byte("/etc/hosts\x00")}.bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.boot != 123_456_789_000 {
+		t.Fatalf("boot = %d, want 123456789000", r.boot)
+	}
+}
+
+func TestWallTime(t *testing.T) {
+	// 1.5 s after boot, with boot at 2026-10-06T00:00:00Z.
+	offset := int64(1_791_244_800) * 1_000_000_000
+	if got, want := wallTime(1_500_000_000, offset), "2026-10-06T00:00:01.500Z"; got != want {
+		t.Fatalf("wallTime = %s, want %s", got, want)
+	}
+}
+
+func TestBootOffset(t *testing.T) {
+	// Boot is in the past, so the offset is a positive wall-clock instant.
+	off, err := bootOffset()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off <= 0 {
+		t.Fatalf("bootOffset = %d, want > 0", off)
 	}
 }
 
