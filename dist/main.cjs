@@ -68335,7 +68335,7 @@ function classify(r) {
 	} : void 0;
 }
 function normalize$2(path) {
-	return path.replace(/^\/proc\/\d+\//, "/proc/<pid>/");
+	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
 }
 function relativize(path, prefixes) {
 	for (let ws of prefixes.workspace) {
@@ -68346,7 +68346,7 @@ function relativize(path, prefixes) {
 		if (path === home) return "~";
 		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
 	}
-	return path;
+	return !path.startsWith("/") && !path.startsWith("…/") ? `./${path}` : path;
 }
 function sortKey(path) {
 	return path === "." || path.startsWith("./") ? [0, path] : path === "~" || path.startsWith("~/") ? [1, path] : [2, path];
@@ -68407,15 +68407,15 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		...execd,
 		"/etc/ld.so.cache"
 	]) ok.get(p)?.delete("R");
-	let nok = new Map(), nfailed = new Map(), nperm = new Map(), mergeInto = (dst, src) => {
+	let nok = new Map(), nfailed = new Map(), nperm = new Map(), mergeInto = (dst, src, keepRelative) => {
 		for (let [p, set] of src) {
-			if (/^(pipe|socket|anon_inode):/.test(p)) continue;
+			if (/^(pipe|socket|anon_inode):/.test(p) || !keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
 			let np = normalize$2(p), dstSet = dst.get(np);
 			dstSet || dst.set(np, dstSet = new Set());
 			for (let c of set) dstSet.add(c);
 		}
 	};
-	mergeInto(nok, ok), mergeInto(nfailed, failed), mergeInto(nperm, perm);
+	mergeInto(nok, ok, !1), mergeInto(nfailed, failed, !0), mergeInto(nperm, perm, !0);
 	let keep = new Set([
 		"/",
 		"/home",
@@ -69181,7 +69181,7 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		} catch {}
 		await child.exited, remove(pidFilePath);
 	};
-	for (let i = 0; i < 300; i++) {
+	for (let i = 0; i < 150; i++) {
 		if (exists(readyPath)) return { stop };
 		if (exited) break;
 		await sleep(100);

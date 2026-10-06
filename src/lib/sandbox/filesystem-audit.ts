@@ -8,11 +8,11 @@ import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 const CGROUP_ROOT = "/sys/fs/cgroup";
 const READY_POLL_MS = 100;
-// Up to 30s for the tracer to load and attach its programs, which a cold or
-// arm64 runner can need. A tracer that cannot attach exits and ends the wait
-// early (see the loop in startFilesystemAudit), so a wide window only ever
-// helps a slow start.
-const READY_TRIES = 300;
+// Up to 15s for the tracer to load and attach its programs, which a cold or
+// arm64 runner can need. A failed attach exits the tracer and ends the wait
+// early (see the loop in startFilesystemAudit); this cap only bites if it
+// spawns but neither attaches nor exits.
+const READY_TRIES = 150;
 /** How long the tracer has to exit on SIGTERM before it is killed, so a wedged
  *  tracer cannot hang the step's own teardown. */
 const STOP_GRACE_MS = 2_000;
