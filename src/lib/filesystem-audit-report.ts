@@ -1,4 +1,5 @@
 import { appendFileSync, readFileSync, realpathSync } from "node:fs";
+import { dirname } from "node:path";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { writeStepSummary } from "#core/lib/actions/write-step-summary.ts";
@@ -10,6 +11,15 @@ import {
 } from "./filesystem-audit-artifact.ts";
 import { renderFilesystemAuditSummary } from "./filesystem-audit-summary.ts";
 import type { FilesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
+
+// buildcage wraps the step in its own exec chain (sandbox/oci-config.ts:
+// setpriv -- env-loader.sh, which execs `env -i` then run-script.sh with the
+// step's command). Those processes are machinery, so their accesses are
+// dropped and the step's shell (run-script.sh) is shown as plain bash.
+const SANDBOX_WRAPPER = {
+  commands: ["setpriv", "env-loader.sh", "env"],
+  rename: { "run-script.sh": "bash" },
+};
 
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */
@@ -77,6 +87,10 @@ export async function reportStepFilesystemAudit(
       const markdown = renderFilesystemAuditSummary(jsonl, {
         workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
         home: prefixes(env.HOME, deps.realpath),
+        // The recording is written under the scratch base (see
+        // sandbox/filesystem-audit.ts), next to the exec wrapper's own files, so
+        // its directory is the prefix whose contents are buildcage's own.
+        sandbox: { paths: [dirname(audit.outPath)], ...SANDBOX_WRAPPER },
       });
       await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY);
       mirrorForDebug(markdown, env, deps.appendFile);

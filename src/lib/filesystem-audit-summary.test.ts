@@ -266,6 +266,35 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["R node ./a", "R node ./b", "R node ./c"]);
   });
 
+  it("hides buildcage's exec wrappers and scratch files and labels the shell bash", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
+        { kind: "read", comm: "env-loader.sh", path: "/etc/passwd" },
+        { kind: "exec", comm: "env", path: "/usr/bin/env" },
+        {
+          kind: "exec",
+          comm: "run-script.sh",
+          path: "/var/tmp/buildcage-0/sandbox-x/exec/run-script.sh",
+        },
+        { kind: "read", comm: "node", path: "/var/tmp/buildcage-0" },
+        { kind: "read", comm: "node", path: "/var/tmp/buildcage-0/sandbox-x/started" },
+        { kind: "write", comm: "run-script.sh", path: "/work/probe.txt" },
+        { kind: "read", comm: "node", path: "/work/a.txt" },
+      ),
+      {
+        workspace: ["/work"],
+        home: [],
+        sandbox: {
+          paths: ["/var/tmp/buildcage-0"],
+          commands: ["setpriv", "env-loader.sh", "env"],
+          rename: { "run-script.sh": "bash" },
+        },
+      },
+    );
+    expect(lines(md)).toEqual(["R node ./a.txt", "W bash ./probe.txt"]);
+  });
+
   it("folds a bare directory under a collapsed subtree with a failed sibling", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(

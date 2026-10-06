@@ -83,6 +83,17 @@ export interface SummaryPrefixes {
   workspace: string[];
   home: string[];
   fanout?: number;
+  // buildcage's own sandbox scaffolding, dropped from the report so only the
+  // step's own accesses show.
+  sandbox?: {
+    paths: string[]; // events under one of these are buildcage's scratch files
+    commands: string[]; // these processes are buildcage's exec wrappers
+    rename: Record<string, string>; // relabel the step's shell, run-script.sh -> bash
+  };
+}
+
+function underAny(path: string, bases: string[]): boolean {
+  return bases.some((b) => path === b || path.startsWith(`${b}/`));
 }
 
 function relativize(path: string, prefixes: SummaryPrefixes): string {
@@ -166,6 +177,7 @@ const HEADING = "### Filesystem audit";
 
 export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPrefixes): string {
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
+  const sandbox = prefixes.sandbox;
   const ok = new Map<string, Set<string>>();
   const failed = new Map<string, Set<string>>();
   const perm = new Map<string, Set<string>>();
@@ -180,6 +192,9 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
     } catch {
       continue; // a line the tracer left truncated (e.g. a hard kill mid-write)
     }
+    const rawComm = r.comm ?? "";
+    if (sandbox?.commands.includes(rawComm)) continue; // a buildcage exec wrapper
+    const comm = sandbox?.rename[rawComm] ?? rawComm;
     if (r.kind === "mmap" && r.access === "x") {
       if (r.path) libs.add(r.path);
       continue;
@@ -187,7 +202,8 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
     if (r.kind === "exec" && r.path) execd.add(r.path);
     const c = classify(r);
     if (!c) continue;
-    const key = keyOf(r.comm ?? "", c.path);
+    if (sandbox && underAny(c.path, sandbox.paths)) continue; // a buildcage scratch file
+    const key = keyOf(comm, c.path);
     if (c.failed) {
       addFlag(failed, key, c.letter);
       if (PERM_ERRNO.has(r.err ?? 0)) addFlag(perm, key, c.letter);

@@ -68337,6 +68337,9 @@ function classify(r) {
 function normalize$2(path) {
 	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
 }
+function underAny(path, bases) {
+	return bases.some((b) => path === b || path.startsWith(`${b}/`));
+}
 function relativize(path, prefixes) {
 	for (let ws of prefixes.workspace) {
 		if (path === ws) return ".";
@@ -68386,7 +68389,7 @@ function fmtFlags(ok, failed, perm) {
 }
 const HEADING = "### Filesystem audit";
 function renderFilesystemAuditSummary(jsonl, prefixes) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set();
+	let fanout = prefixes.fanout ?? 3, sandbox = prefixes.sandbox, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set();
 	for (let line of jsonl.split("\n")) {
 		if (!line) continue;
 		let r;
@@ -68395,14 +68398,17 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		} catch {
 			continue;
 		}
+		let rawComm = r.comm ?? "";
+		if (sandbox?.commands.includes(rawComm)) continue;
+		let comm = sandbox?.rename[rawComm] ?? rawComm;
 		if (r.kind === "mmap" && r.access === "x") {
 			r.path && libs.add(r.path);
 			continue;
 		}
 		r.kind === "exec" && r.path && execd.add(r.path);
 		let c = classify(r);
-		if (!c) continue;
-		let key = keyOf(r.comm ?? "", c.path);
+		if (!c || sandbox && underAny(c.path, sandbox.paths)) continue;
+		let key = keyOf(comm, c.path);
 		c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
 	}
 	let libDrop = new Set([
@@ -68471,7 +68477,14 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 }
 //#endregion
 //#region src/lib/filesystem-audit-report.ts
-const realDeps$3 = {
+const SANDBOX_WRAPPER = {
+	commands: [
+		"setpriv",
+		"env-loader.sh",
+		"env"
+	],
+	rename: { "run-script.sh": "bash" }
+}, realDeps$3 = {
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
 	realpath: (path) => (0, node_fs.realpathSync)(path),
 	writeStepSummary,
@@ -68497,7 +68510,11 @@ async function reportStepFilesystemAudit({ audit, retentionDays, containerName, 
 		try {
 			let markdown = renderFilesystemAuditSummary(jsonl, {
 				workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-				home: prefixes(env.HOME, deps.realpath)
+				home: prefixes(env.HOME, deps.realpath),
+				sandbox: {
+					paths: [(0, node_path.dirname)(audit.outPath)],
+					...SANDBOX_WRAPPER
+				}
 			});
 			await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY), deps.appendFile;
 		} catch (e) {
