@@ -68509,7 +68509,7 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 const realDeps$3 = {
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
 	writeFile: (path, content) => (0, node_fs.writeFileSync)(path, content),
-	tmpDir: () => (0, node_os.tmpdir)(),
+	removeFile: (path) => (0, node_fs.rmSync)(path, { force: !0 }),
 	realpath: (path) => (0, node_fs.realpathSync)(path),
 	writeStepSummary,
 	uploadArtifact: uploadFilesystemAuditArtifact,
@@ -68531,8 +68531,7 @@ async function reportStepFilesystemAudit({ audit, retentionDays, containerName, 
 		...overrides
 	}, artifactName = "", raw = audit && readOptional(audit.outPath, deps.readFile);
 	if (audit && raw) {
-		let clean = stripSandboxMachinery(raw, (0, node_path.dirname)(audit.outPath)), cleanPath = (0, node_path.join)(deps.tmpDir(), (0, node_path.basename)(audit.outPath));
-		deps.writeFile(cleanPath, clean);
+		let clean = stripSandboxMachinery(raw, (0, node_path.dirname)(audit.outPath));
 		try {
 			let markdown = renderFilesystemAuditSummary(clean, {
 				workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
@@ -68542,7 +68541,13 @@ async function reportStepFilesystemAudit({ audit, retentionDays, containerName, 
 		} catch (e) {
 			annotation.warning(`Failed to write the filesystem audit summary: ${errorMessage(e)}`);
 		}
-		artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "";
+		let replaced = !1;
+		try {
+			deps.removeFile(audit.outPath), deps.writeFile(audit.outPath, clean), replaced = !0;
+		} catch (e) {
+			annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
+		}
+		replaced && (artifactName = await deps.uploadArtifact(audit.outPath, containerName, retentionDays, annotation) ?? "");
 	}
 	deps.setOutput(artifactName);
 }
