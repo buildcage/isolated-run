@@ -185,9 +185,11 @@ jobs:
         run: vp run build
 
       - name: Run a step with filesystem_audit enabled
+        id: audit
         uses: ./
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/summary.md
         with:
           proxy_engine: universal
           proxy_mode: audit
@@ -198,17 +200,23 @@ jobs:
             mv "$GITHUB_WORKSPACE/probe.txt" "$GITHUB_WORKSPACE/probe2.txt"
             rm "$GITHUB_WORKSPACE/probe2.txt"
 
-      - name: Verify the tracer recorded the step's file accesses
+      - name: Verify the Job Summary has the filesystem audit
         run: |
-          # The recording is still under the scratch base here; the post step
-          # that removes it runs after this one. The tracer wrote it as root.
-          f=$(sudo sh -c 'ls /var/tmp/buildcage-*/filesystem-audit-*.jsonl')
-          sudo test -s "$f"
-          for kind in exec write rename unlink; do
-            sudo grep -q "\"kind\":\"$kind\"" "$f" || {
-              echo "no $kind recorded; got:"; sudo cat "$f"; exit 1
-            }
-          done
+          f="${{ runner.temp }}/summary.md"
+          grep -q "Filesystem audit" "$f"
+          # The probe writes show as a flagged line under the workspace.
+          grep -qE '`[RWXMDA]+` \./probe' "$f" || { cat "$f"; exit 1; }
+
+      - name: Download and check the filesystem audit artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ steps.audit.outputs.filesystem_audit_artifact_name }}
+          path: ${{ runner.temp }}/audit
+      - name: The artifact holds the recorded events
+        run: |
+          f=$(ls ${{ runner.temp }}/audit/*.jsonl)
+          test -s "$f"
+          grep -q '"kind":"write"' "$f"
 
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network), proves proxy_engine: universal

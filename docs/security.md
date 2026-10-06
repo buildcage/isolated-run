@@ -699,6 +699,14 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 - **Reading a step's staging directory from outside any sandbox.** `/var/tmp/buildcage-<uid>` is
   hidden from every sandbox, including its own, but a process running as the same user outside one
   can still read it. That is the same accepted limitation as credential retrieval above.
+- **`filesystem_audit` records, it does not enforce.** It observes what the step touches and reports
+  it; it never blocks an access, so it is a visibility aid, not a control. Like the traffic report,
+  its record is produced from the host after the command exits, so a step running as the same user
+  outside the sandbox could tamper with the staging file before it is read, the same accepted
+  limitation as above. It does not record changes made through an already-open descriptor inherited
+  across `exec`, extended attributes other than `setxattr`, or a failed `exec`, `mkdir`, `symlink`,
+  `link` or `truncate`. It needs a cgroup v2 host on Linux 5.17 or newer with the kernel's tracing
+  support; where either is missing it warns and the step runs unaudited.
 
 ### Where it will not run
 

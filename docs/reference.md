@@ -16,6 +16,7 @@ details.
 - [Requests that never arrived whole](#requests-that-never-arrived-whole)
 - [Connections that failed](#connections-that-failed)
 - [Traffic artifact](#traffic-artifact)
+- [Filesystem audit](#filesystem-audit)
 - [CA trust variables](#ca-trust-variables)
 - [`ephemeral` overlays](#ephemeral-overlays)
 - [`write_through` paths](#write_through-paths)
@@ -34,7 +35,8 @@ details.
 | `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium).          |
 | `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                         |
 | `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                      |
-| `filesystem_audit`                | `off`        | `record` logs the step's file accesses (**experimental**); needs a cgroup v2 host.                                            |
+| `filesystem_audit`                | `off`        | `record` logs the step's file accesses (**experimental**). See [Filesystem audit](#filesystem-audit).                         |
+| `filesystem_audit_retention_days` | empty        | How long to keep the filesystem audit artifact, as a whole number of days; empty uses the repository's own default            |
 | `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                     |
 | `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                |
 | `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                    |
@@ -103,9 +105,10 @@ known_blocked_rules: |
 
 ## Outputs
 
-| Output                  | Description                                                                                                                                                                    |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `traffic_artifact_name` | Name of the uploaded traffic artifact, when `upload_traffic_artifact` produced one. Empty otherwise, so a later step can tell an upload apart from none having been requested. |
+| Output                           | Description                                                                                                                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `traffic_artifact_name`          | Name of the uploaded traffic artifact, when `upload_traffic_artifact` produced one. Empty otherwise, so a later step can tell an upload apart from none having been requested. |
+| `filesystem_audit_artifact_name` | Name of the uploaded filesystem audit artifact, when `filesystem_audit: record` recorded something. Empty otherwise.                                                           |
 
 ## Operation modes
 
@@ -722,6 +725,35 @@ Job Summary is the exception: it replaces credential query parameters, see
 Treat the artifact as sensitive: it keeps any credential a build put in a query or a path. A later
 job in the same run can fetch it with `actions/download-artifact`, and anyone who can read the
 repository can fetch it through the API, until it expires.
+
+## Filesystem audit
+
+**Experimental.** `filesystem_audit: record` records every file the isolated step opens, reads,
+writes, moves, deletes, changes the attributes of, and executes, and adds a section to the Job
+Summary with one line per path:
+
+```
+### Filesystem audit (experimental)
+R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = permission denied
+
+`RWD` ./node_modules/**
+`R`   ./package.json
+`r!`  /etc/shadow
+```
+
+Flags combine per path (`RW` read and written). An action that only ever failed is lowercase, and a
+permission-denied failure is marked `!`. A directory with many touched children is shown once as
+`dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and `$HOME` (`~/…`), else
+absolute. The libraries a command loads are left out.
+
+The full record is uploaded as JSON lines in an artifact named `buildcage-filesystem-audit-<id>`,
+with absolute paths; `filesystem_audit_artifact_name` carries its name. Treat it as sensitive, like
+the traffic artifact. `filesystem_audit_retention_days` sets how long it is kept.
+
+It observes accesses in the kernel, below any library the step links against, and only records; it
+never blocks an access. It needs a cgroup v2 host running Linux 5.17 or newer; where that or the
+kernel's tracing support is missing it warns and the step runs unaudited. See
+[Known Limitations](./security.md#known-limitations) for what it does not record.
 
 ## CA trust variables
 

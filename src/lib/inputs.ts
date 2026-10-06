@@ -49,6 +49,7 @@ export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
     "fail_on_ca_residue",
     "filesystem_mode",
     "filesystem_audit",
+    "filesystem_audit_retention_days",
     "label",
   ],
   lists: LIST_INPUTS,
@@ -138,6 +139,22 @@ export function readFilesystemInputs(
 
 export function readFilesystemAuditInput(getInput: GetInput = core.getInput): FilesystemAudit {
   return resolveFilesystemAudit(getInput("filesystem_audit"));
+}
+
+/** Undefined when unset, which leaves the retention to the repository default. */
+export function readFilesystemAuditRetentionDays(
+  getInput: GetInput = core.getInput,
+): number | undefined {
+  const days = getInput("filesystem_audit_retention_days");
+  if (days === "") return undefined;
+  if (!/^[1-9]\d*$/.test(days)) {
+    throw new SandboxError(
+      `Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. ` +
+        "Must be a whole number of days above zero.",
+      "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS",
+    );
+  }
+  return Number(days);
 }
 
 /** The optional `label:`, which only titles the report heading. */

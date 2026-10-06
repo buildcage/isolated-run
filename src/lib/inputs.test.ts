@@ -10,6 +10,7 @@ import {
   readFailOnBlocked,
   readFailOnCaResidue,
   readFilesystemAuditInput,
+  readFilesystemAuditRetentionDays,
   readFilesystemInputs,
   readRunCommand,
   readStepLabel,
@@ -178,6 +179,24 @@ describe("readFilesystemAuditInput", () => {
     expect(() => readFilesystemAuditInput(inputs({ filesystem_audit: "on" }))).toThrow(
       /Invalid filesystem_audit/,
     );
+  });
+});
+
+describe("readFilesystemAuditRetentionDays", () => {
+  it("is undefined when unset", () => {
+    expect(readFilesystemAuditRetentionDays(inputs())).toBeUndefined();
+  });
+
+  it("reads a whole number of days", () => {
+    expect(readFilesystemAuditRetentionDays(inputs({ filesystem_audit_retention_days: "7" }))).toBe(
+      7,
+    );
+  });
+
+  it("rejects a non-positive or non-numeric value", () => {
+    expect(() =>
+      readFilesystemAuditRetentionDays(inputs({ filesystem_audit_retention_days: "0" })),
+    ).toThrow(/Invalid filesystem_audit_retention_days/);
   });
 });
 
