@@ -191,7 +191,9 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
   const nperm = new Map<string, Set<string>>();
   const mergeInto = (dst: Map<string, Set<string>>, src: Map<string, Set<string>>): void => {
     for (const [p, set] of src) {
-      if (!p.startsWith("/")) continue; // pipe:/socket:/anon_inode are not files
+      // pipe:/socket:/anon_inode are not files; a leading "…/" is a real path
+      // the tracer could not walk to the top, so keep it.
+      if (!p.startsWith("/") && !p.startsWith("…/")) continue;
       // Keep the path even with no flags left (a read-then-dropped library):
       // it still counts toward a directory's collapse, though it prints no row.
       const np = normalize(p);

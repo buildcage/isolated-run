@@ -93,6 +93,14 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["R ./node_modules/**"]);
   });
 
+  it("keeps a path the tracer could not walk to the top", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl({ kind: "unlink", path: "…/deep/x", err: 2 }),
+      PREFIXES,
+    );
+    expect(lines(md)).toEqual(["D …/deep/x"]);
+  });
+
   it("skips a line the tracer left truncated", () => {
     const md = renderFilesystemAuditSummary(
       `{"kind":"read","path":"/work/a"}\n{"kind":"write","pa`,

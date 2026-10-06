@@ -68409,7 +68409,7 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 	]) ok.get(p)?.delete("R");
 	let nok = new Map(), nfailed = new Map(), nperm = new Map(), mergeInto = (dst, src) => {
 		for (let [p, set] of src) {
-			if (!p.startsWith("/")) continue;
+			if (!p.startsWith("/") && !p.startsWith("…/")) continue;
 			let np = normalize$2(p), dstSet = dst.get(np);
 			dstSet || dst.set(np, dstSet = new Set());
 			for (let c of set) dstSet.add(c);

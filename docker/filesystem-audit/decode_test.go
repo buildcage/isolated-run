@@ -68,8 +68,8 @@ func TestDecode(t *testing.T) {
 		},
 		{
 			name: "failed open",
-			ev:   event{kind: 12, comm: "node", pathRet: -int32(unix.ENOENT), data: []byte("/missing\x00")},
-			want: record{Kind: "open-failed", Comm: "node", Path: "/missing", Err: -int32(unix.ENOENT)},
+			ev:   event{kind: 12, comm: "node", pathRet: int32(unix.ENOENT), data: []byte("/missing\x00")},
+			want: record{Kind: "open-failed", Comm: "node", Path: "/missing", Err: int32(unix.ENOENT)},
 		},
 		{
 			name: "write",
@@ -93,13 +93,13 @@ func TestDecode(t *testing.T) {
 		},
 		{
 			name: "failed delete, read-only",
-			ev:   event{kind: 16, comm: "rm", pathRet: -int32(unix.EROFS), data: []byte("/etc\x00")},
-			want: record{Kind: "delete", Comm: "rm", Path: "/etc", Err: -int32(unix.EROFS), Failed: true},
+			ev:   event{kind: 16, comm: "rm", pathRet: int32(unix.EROFS), data: []byte("/etc\x00")},
+			want: record{Kind: "delete", Comm: "rm", Path: "/etc", Err: int32(unix.EROFS), Failed: true},
 		},
 		{
 			name: "failed rename, two paths",
-			ev:   event{kind: 17, comm: "mv", pathRet: -int32(unix.ENOENT), n1: 1, data: []byte("/a\x00/b\x00")},
-			want: record{Kind: "rename", Comm: "mv", Path: "/a", To: "/b", Err: -int32(unix.ENOENT), Failed: true},
+			ev:   event{kind: 17, comm: "mv", pathRet: int32(unix.ENOENT), n1: 1, data: []byte("/a\x00/b\x00")},
+			want: record{Kind: "rename", Comm: "mv", Path: "/a", To: "/b", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
 			name: "attr ok",
