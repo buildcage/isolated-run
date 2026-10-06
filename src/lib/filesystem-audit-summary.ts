@@ -162,7 +162,7 @@ function fmtFlags(ok: Set<string>, failed: Set<string>, perm: Set<string>): stri
 const LEGEND =
   "<sub>R read · W write · X exec · M move · D delete · A attr · " +
   "lowercase = failed · ! = denied</sub>";
-const HEADING = "### Filesystem audit (experimental)";
+const HEADING = "### Filesystem audit";
 
 export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPrefixes): string {
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;

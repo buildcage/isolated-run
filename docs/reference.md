@@ -733,7 +733,7 @@ writes, moves, deletes, changes the attributes of, and executes, and adds a sect
 Summary with one row per command and path:
 
 ```
-### Filesystem audit (experimental)
+### Filesystem audit
 R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied
 
 RWD node ./node_modules/**

@@ -68384,7 +68384,7 @@ function fmtFlags(ok, failed, perm) {
 	for (let c of "RWXMDA") ok.has(c) ? out += c : failed.has(c) && (out += c.toLowerCase() + (perm.has(c) ? "!" : ""));
 	return out;
 }
-const HEADING = "### Filesystem audit (experimental)";
+const HEADING = "### Filesystem audit";
 function renderFilesystemAuditSummary(jsonl, prefixes) {
 	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set();
 	for (let line of jsonl.split("\n")) {

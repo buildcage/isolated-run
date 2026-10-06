@@ -26,7 +26,7 @@ describe("renderFilesystemAuditSummary", () => {
       jsonl({ kind: "read", comm: "cat", path: "/etc/hostname" }),
       PREFIXES,
     );
-    expect(md).toContain("### Filesystem audit (experimental)");
+    expect(md).toContain("### Filesystem audit");
     expect(md).toContain("<sub>R read");
   });
 
