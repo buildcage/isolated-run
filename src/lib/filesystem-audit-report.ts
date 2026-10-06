@@ -16,7 +16,7 @@ import type { FilesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */
   audit: FilesystemAuditPaths | undefined;
-  /** The proxy's start, in epoch seconds; undefined shows absolute times. */
+  /** The proxy's start, in epoch seconds; undefined counts from the first record. */
   startedAt: number | undefined;
   retentionDays: number | undefined;
   containerName: string;

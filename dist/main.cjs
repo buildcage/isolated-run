@@ -68419,14 +68419,15 @@ function addFlag(m, key, flag) {
 function widen(m, key, span) {
 	if (!span) return;
 	let cur = m.get(key);
-	cur ? ((span.first < cur.first || span.first === cur.first && span.seq < cur.seq) && (cur.first = span.first, cur.seq = span.seq), cur.last = Math.max(cur.last, span.last)) : m.set(key, { ...span });
+	cur ? (cur.first = Math.min(cur.first, span.first), cur.last = Math.max(cur.last, span.last), cur.seq = Math.min(cur.seq, span.seq)) : m.set(key, { ...span });
 }
-function fmtTime(ms, startedAt) {
-	return startedAt === void 0 ? new Date(ms).toISOString().slice(11, 23) + "Z" : formatElapsedVariable(ms / 1e3 - startedAt);
+function widenLetter(m, key, letter, span) {
+	let byLetter = m.get(key);
+	byLetter || m.set(key, byLetter = new Map()), widen(byLetter, letter, span);
 }
-function fmtSpan(span, startedAt) {
+function fmtSpan(span, originMs) {
 	if (!span) return "";
-	let first = fmtTime(span.first, startedAt), last = fmtTime(span.last, startedAt);
+	let first = formatElapsedVariable((span.first - originMs) / 1e3), last = formatElapsedVariable((span.last - originMs) / 1e3);
 	return first === last ? first : `${first}-${last}`;
 }
 const keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1);
@@ -68458,9 +68459,9 @@ function fmtFlags(ok, failed, perm) {
 	for (let c of "RWXMDA") ok.has(c) ? out += c : failed.has(c) && (out += c.toLowerCase() + (perm.has(c) ? "!" : ""));
 	return out;
 }
-const HEADING = "### Filesystem audit";
+const LEGEND = "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit";
 function renderFilesystemAuditSummary(jsonl, prefixes) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), spans = new Map(), seq = 0;
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), earliest = Infinity, seq = 0;
 	for (let line of jsonl.split("\n")) {
 		if (!line) continue;
 		let r;
@@ -68477,30 +68478,35 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		let c = classify(r);
 		if (!c) continue;
 		let key = keyOf(r.comm ?? "", c.path), t = Date.parse(r.t ?? "");
-		Number.isNaN(t) || widen(spans, key, {
-			first: t,
-			last: t,
-			seq: seq++
-		}), c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
+		if (!Number.isNaN(t)) {
+			earliest = Math.min(earliest, t);
+			let span = {
+				first: t,
+				last: t,
+				seq: seq++
+			};
+			widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, span);
+		}
+		c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
 	}
 	let libDrop = new Set([
 		...libs,
 		...execd,
 		"/etc/ld.so.cache"
 	]);
-	for (let key of ok.keys()) libDrop.has(pathOf(key)) && ok.get(key).delete("R");
-	let nok = new Map(), nfailed = new Map(), nperm = new Map(), nspans = new Map(), mergeInto = (dst, src, keepRelative) => {
+	for (let key of ok.keys()) libDrop.has(pathOf(key)) && (ok.get(key).delete("R"), okSpans.get(key)?.delete("R"));
+	let nok = new Map(), nfailed = new Map(), nperm = new Map(), nspans = new Map(), mergeInto = (dst, src, keepRelative, srcSpans) => {
 		for (let [key, set] of src) {
 			let p = pathOf(key);
 			if (/^(pipe|socket|anon_inode):/.test(p) || !keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
 			let nk = keyOf(commOf(key), normalize$2(p));
-			widen(nspans, nk, spans.get(key));
+			for (let span of srcSpans?.get(key)?.values() ?? []) widen(nspans, nk, span);
 			let dstSet = dst.get(nk);
 			dstSet || dst.set(nk, dstSet = new Set());
 			for (let c of set) dstSet.add(c);
 		}
 	};
-	mergeInto(nok, ok, !1), mergeInto(nfailed, failed, !0), mergeInto(nperm, perm, !0);
+	mergeInto(nok, ok, !1, okSpans), mergeInto(nfailed, failed, !0, failedSpans), mergeInto(nperm, perm, !0);
 	let keep = new Set([
 		"/",
 		"/home",
@@ -68533,14 +68539,13 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		let flags = new Set([...lineOk.get(l) ?? [], ...lineFailed.get(l) ?? []]);
 		hasDesc && [...flags].every((c) => descFlags.has(c)) && keys.delete(l);
 	}
-	let rows = [];
+	let originMs = prefixes.startedAt === void 0 ? earliest : prefixes.startedAt * 1e3, rows = [];
 	for (let lk of keys) {
 		let o = lineOk.get(lk) ?? new Set(), fl = new Set([...lineFailed.get(lk) ?? []].filter((c) => !o.has(c))), flags = fmtFlags(o, fl, new Set([...linePerm.get(lk) ?? []].filter((c) => fl.has(c))));
 		if (!flags) continue;
 		let span = lineSpans.get(lk);
 		rows.push({
-			time: fmtSpan(span, prefixes.startedAt),
-			first: span?.first ?? Infinity,
+			time: fmtSpan(span, originMs),
 			seq: span?.seq ?? Infinity,
 			flags,
 			comm: commOf(lk),
@@ -68549,10 +68554,10 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 	}
 	if (rows.sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
-		return a.first - b.first || a.seq - b.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
+		return a.seq - b.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
 	}), rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
 	let timeW = rows.reduce((m, r) => Math.max(m, r.time.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r) => `${timeW ? `${(r.time && `${r.time}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
-	return `${HEADING}\n\n<sub>first-last access · R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
+	return `${HEADING}\n\n<sub>${timeW ? `first-last access · ${LEGEND}` : LEGEND}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
 }
 //#endregion
 //#region src/lib/filesystem-audit-report.ts
