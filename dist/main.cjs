@@ -68355,6 +68355,7 @@ function addFlag(m, key, flag) {
 	let set = m.get(key);
 	set || m.set(key, set = new Set()), set.add(flag);
 }
+const keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1);
 function collapse(paths, fanout, keep) {
 	let children = new Map();
 	for (let p of paths) {
@@ -68400,18 +68401,22 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		}
 		r.kind === "exec" && r.path && execd.add(r.path);
 		let c = classify(r);
-		c && (c.failed ? (addFlag(failed, c.path, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, c.path, c.letter)) : addFlag(ok, c.path, c.letter));
+		if (!c) continue;
+		let key = keyOf(r.comm ?? "", c.path);
+		c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
 	}
-	for (let p of [
+	let libDrop = new Set([
 		...libs,
 		...execd,
 		"/etc/ld.so.cache"
-	]) ok.get(p)?.delete("R");
+	]);
+	for (let key of ok.keys()) libDrop.has(pathOf(key)) && ok.get(key).delete("R");
 	let nok = new Map(), nfailed = new Map(), nperm = new Map(), mergeInto = (dst, src, keepRelative) => {
-		for (let [p, set] of src) {
+		for (let [key, set] of src) {
+			let p = pathOf(key);
 			if (/^(pipe|socket|anon_inode):/.test(p) || !keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
-			let np = normalize$2(p), dstSet = dst.get(np);
-			dstSet || dst.set(np, dstSet = new Set());
+			let nk = keyOf(commOf(key), normalize$2(p)), dstSet = dst.get(nk);
+			dstSet || dst.set(nk, dstSet = new Set());
 			for (let c of set) dstSet.add(c);
 		}
 	};
@@ -68424,33 +68429,45 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		"/proc/<pid>",
 		...prefixes.workspace,
 		...prefixes.home
-	]), shown = collapse(new Set([...nok.keys(), ...nfailed.keys()]), fanout, keep), lineOk = new Map(), lineFailed = new Map(), linePerm = new Map(), union = (dst, line, src) => {
-		if (src) for (let c of src) addFlag(dst, line, c);
+	]), byComm = new Map();
+	for (let key of new Set([...nok.keys(), ...nfailed.keys()])) {
+		let set = byComm.get(commOf(key));
+		set || byComm.set(commOf(key), set = new Set()), set.add(pathOf(key));
+	}
+	let shown = new Map();
+	for (let [comm, paths] of byComm) for (let [p, line] of collapse(paths, fanout, keep)) shown.set(keyOf(comm, p), keyOf(comm, line));
+	let lineOk = new Map(), lineFailed = new Map(), linePerm = new Map(), union = (dst, key, src) => {
+		if (src) for (let c of src) addFlag(dst, key, c);
 	};
-	for (let [p, line] of shown) union(lineOk, line, nok.get(p)), union(lineFailed, line, nfailed.get(p)), union(linePerm, line, nperm.get(p));
-	let lines = new Set(shown.values()), base = (l) => l.endsWith("/**") ? l.slice(0, -3) : l;
-	for (let l of lines) {
-		if (l.endsWith("/**")) continue;
-		let prefix = `${base(l)}/`, hasDesc = !1, descFlags = new Set();
-		for (let d of lines) if (d !== l && base(d).startsWith(prefix)) {
+	for (let [pk, lk] of shown) union(lineOk, lk, nok.get(pk)), union(lineFailed, lk, nfailed.get(pk)), union(linePerm, lk, nperm.get(pk));
+	let keys = new Set(shown.values()), base = (p) => p.endsWith("/**") ? p.slice(0, -3) : p;
+	for (let l of keys) {
+		let lpath = pathOf(l);
+		if (lpath.endsWith("/**")) continue;
+		let comm = commOf(l), prefix = `${base(lpath)}/`, hasDesc = !1, descFlags = new Set();
+		for (let d of keys) if (d !== l && commOf(d) === comm && base(pathOf(d)).startsWith(prefix)) {
 			hasDesc = !0;
 			for (let c of lineOk.get(d) ?? []) descFlags.add(c);
 			for (let c of lineFailed.get(d) ?? []) descFlags.add(c);
 		}
 		let flags = new Set([...lineOk.get(l) ?? [], ...lineFailed.get(l) ?? []]);
-		hasDesc && [...flags].every((c) => descFlags.has(c)) && lines.delete(l);
+		hasDesc && [...flags].every((c) => descFlags.has(c)) && keys.delete(l);
 	}
 	let rows = [];
-	for (let line of lines) {
-		let o = lineOk.get(line) ?? new Set(), fl = new Set([...lineFailed.get(line) ?? []].filter((c) => !o.has(c))), flags = fmtFlags(o, fl, new Set([...linePerm.get(line) ?? []].filter((c) => fl.has(c))));
-		flags && rows.push([relativize(line, prefixes), flags]);
+	for (let lk of keys) {
+		let o = lineOk.get(lk) ?? new Set(), fl = new Set([...lineFailed.get(lk) ?? []].filter((c) => !o.has(c))), flags = fmtFlags(o, fl, new Set([...linePerm.get(lk) ?? []].filter((c) => fl.has(c))));
+		flags && rows.push({
+			flags,
+			comm: commOf(lk),
+			path: relativize(pathOf(lk), prefixes)
+		});
 	}
 	if (rows.sort((a, b) => {
-		let [ca, pa] = sortKey(a[0]), [cb, pb] = sortKey(b[0]);
-		return ca - cb || (pa < pb ? -1 : 1);
+		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
+		return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
 	}), rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
-	let body = rows.map(([path, flags]) => `\`${flags}\` ${path}`).join("\n");
-	return `${HEADING}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>\n\n${body}\n`;
+	let flagsW = Math.max(...rows.map((r) => r.flags.length)), commW = Math.max(...rows.map((r) => r.comm.length)), body = rows.map((r) => `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
+	return `${HEADING}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
 }
 //#endregion
 //#region src/lib/filesystem-audit-report.ts

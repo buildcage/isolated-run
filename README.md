@@ -386,6 +386,7 @@ is gone.
 - uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
   with:
     filesystem_mode: ephemeral
+    filesystem_audit: record # record what the command touches while discarding its writes
     write_through: |
       $GITHUB_OUTPUT
       ./dist

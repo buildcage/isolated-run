@@ -35,7 +35,7 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
     outputs,
     appended,
     deps: {
-      readFile: () => JSON.stringify({ kind: "write", path: "/work/a.txt" }),
+      readFile: () => JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
       realpath: (p) => p,
       writeStepSummary: async (md) => void summaries.push(md),
       uploadArtifact: async (outPath) => {
@@ -61,7 +61,7 @@ describe("reportStepFilesystemAudit", () => {
     );
 
     expect(summaries[0]).toContain("Filesystem audit");
-    expect(summaries[0]).toContain("`W` ./a.txt");
+    expect(summaries[0]).toContain("W node ./a.txt");
     expect(uploads).toEqual([AUDIT.outPath]);
     expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
   });
@@ -125,7 +125,7 @@ describe("reportStepFilesystemAudit", () => {
 
   it("matches a recorded canonical path against the realpath of the workspace", async () => {
     const { deps: d, summaries } = deps({
-      readFile: () => JSON.stringify({ kind: "write", path: "/real/work/a.txt" }),
+      readFile: () => JSON.stringify({ kind: "write", comm: "node", path: "/real/work/a.txt" }),
       realpath: (p) => (p === "/sym/work" ? "/real/work" : p),
     });
 
@@ -134,7 +134,7 @@ describe("reportStepFilesystemAudit", () => {
       d,
     );
 
-    expect(summaries[0]).toContain("`W` ./a.txt");
+    expect(summaries[0]).toContain("W node ./a.txt");
   });
 
   it("falls back to the raw prefix when the realpath cannot be resolved", async () => {
@@ -149,7 +149,7 @@ describe("reportStepFilesystemAudit", () => {
       d,
     );
 
-    expect(summaries[0]).toContain("`W` ./a.txt");
+    expect(summaries[0]).toContain("W node ./a.txt");
   });
 
   it("sets an empty output when the recording file is empty", async () => {

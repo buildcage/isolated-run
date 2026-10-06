@@ -1,12 +1,13 @@
 /**
  * Renders the tracer's JSON lines (see docker/filesystem-audit) into the
- * filesystem-audit Job Summary: one line per path, a flag per action. Pure,
- * so it is tested directly; the caller resolves the workspace and $HOME
- * prefixes (both the raw and realpath forms) and hands them in.
+ * filesystem-audit Job Summary: one row per command and path, a flag per
+ * action. Pure, so it is tested directly; the caller resolves the workspace and
+ * $HOME prefixes (both the raw and realpath forms) and hands them in.
  */
 
 interface AuditRecord {
   kind: string;
+  comm?: string;
   path?: string;
   to?: string;
   access?: string;
@@ -112,6 +113,13 @@ function addFlag(m: Map<string, Set<string>>, key: string, flag: string): void {
   set.add(flag);
 }
 
+// Rows are keyed per (command, path). NUL cannot occur in either, so it joins
+// them unambiguously.
+const SEP = "\0";
+const keyOf = (comm: string, path: string): string => `${comm}${SEP}${path}`;
+const commOf = (key: string): string => key.slice(0, key.indexOf(SEP));
+const pathOf = (key: string): string => key.slice(key.indexOf(SEP) + 1);
+
 // Maps each path to the line that stands for it: itself, or an ancestor
 // "dir/**" once that ancestor has fanout or more children that saw events.
 function collapse(paths: Set<string>, fanout: number, keep: Set<string>): Map<string, string> {
@@ -179,18 +187,20 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
     if (r.kind === "exec" && r.path) execd.add(r.path);
     const c = classify(r);
     if (!c) continue;
+    const key = keyOf(r.comm ?? "", c.path);
     if (c.failed) {
-      addFlag(failed, c.path, c.letter);
-      if (PERM_ERRNO.has(r.err ?? 0)) addFlag(perm, c.path, c.letter);
+      addFlag(failed, key, c.letter);
+      if (PERM_ERRNO.has(r.err ?? 0)) addFlag(perm, key, c.letter);
     } else {
-      addFlag(ok, c.path, c.letter);
+      addFlag(ok, key, c.letter);
     }
   }
 
   // A library or an exec'd binary is already shown by its X; drop its read.
-  for (const p of [...libs, ...execd, "/etc/ld.so.cache"]) ok.get(p)?.delete("R");
+  const libDrop = new Set([...libs, ...execd, "/etc/ld.so.cache"]);
+  for (const key of ok.keys()) if (libDrop.has(pathOf(key))) ok.get(key)!.delete("R");
 
-  // Key everything on the normalized path, dropping non-file targets.
+  // Re-key on the normalized path, dropping non-file targets.
   const nok = new Map<string, Set<string>>();
   const nfailed = new Map<string, Set<string>>();
   const nperm = new Map<string, Set<string>>();
@@ -199,17 +209,18 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
     src: Map<string, Set<string>>,
     keepRelative: boolean,
   ): void => {
-    for (const [p, set] of src) {
+    for (const [key, set] of src) {
+      const p = pathOf(key);
       if (/^(pipe|socket|anon_inode):/.test(p)) continue; // d_path's non-file targets
       // A succeeding record always resolves to an absolute path or a truncated
       // "…/" walk, so anything else there is not a real path; a failed one may
       // carry the cwd-relative name it was given.
       if (!keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
-      // Keep the path even with no flags left (a read-then-dropped library):
-      // it still counts toward a directory's collapse, though it prints no row.
-      const np = normalize(p);
-      let dstSet = dst.get(np);
-      if (!dstSet) dst.set(np, (dstSet = new Set()));
+      // Keep the key even with no flags left (a read-then-dropped library): it
+      // still counts toward a directory's collapse, though it prints no row.
+      const nk = keyOf(commOf(key), normalize(p));
+      let dstSet = dst.get(nk);
+      if (!dstSet) dst.set(nk, (dstSet = new Set()));
       for (const c of set) dstSet.add(c);
     }
   };
@@ -226,63 +237,78 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
     ...prefixes.workspace,
     ...prefixes.home,
   ]);
-  const shown = collapse(new Set([...nok.keys(), ...nfailed.keys()]), fanout, keep);
+
+  // Collapse each command's paths on their own, so one command's many touches
+  // of a tree fold without pulling in another's.
+  const byComm = new Map<string, Set<string>>();
+  for (const key of new Set([...nok.keys(), ...nfailed.keys()])) {
+    let set = byComm.get(commOf(key));
+    if (!set) byComm.set(commOf(key), (set = new Set()));
+    set.add(pathOf(key));
+  }
+  const shown = new Map<string, string>(); // (comm, path) -> (comm, line)
+  for (const [comm, paths] of byComm)
+    for (const [p, line] of collapse(paths, fanout, keep))
+      shown.set(keyOf(comm, p), keyOf(comm, line));
 
   const lineOk = new Map<string, Set<string>>();
   const lineFailed = new Map<string, Set<string>>();
   const linePerm = new Map<string, Set<string>>();
   const union = (
     dst: Map<string, Set<string>>,
-    line: string,
+    key: string,
     src: Set<string> | undefined,
   ): void => {
-    if (src) for (const c of src) addFlag(dst, line, c);
+    if (src) for (const c of src) addFlag(dst, key, c);
   };
-  for (const [p, line] of shown) {
-    union(lineOk, line, nok.get(p));
-    union(lineFailed, line, nfailed.get(p));
-    union(linePerm, line, nperm.get(p));
+  for (const [pk, lk] of shown) {
+    union(lineOk, lk, nok.get(pk));
+    union(lineFailed, lk, nfailed.get(pk));
+    union(linePerm, lk, nperm.get(pk));
   }
 
-  // Drop a bare directory whose flags its descendants already carry: its own
+  // Drop a bare directory whose flags its own descendants already carry: its
   // read is only the walk that reached them.
-  const lines = new Set(shown.values());
-  const base = (l: string): string => (l.endsWith("/**") ? l.slice(0, -3) : l);
-  for (const l of lines) {
-    if (l.endsWith("/**")) continue;
-    const prefix = `${base(l)}/`;
+  const keys = new Set(shown.values());
+  const base = (p: string): string => (p.endsWith("/**") ? p.slice(0, -3) : p);
+  for (const l of keys) {
+    const lpath = pathOf(l);
+    if (lpath.endsWith("/**")) continue;
+    const comm = commOf(l);
+    const prefix = `${base(lpath)}/`;
     let hasDesc = false;
     const descFlags = new Set<string>();
-    for (const d of lines) {
-      if (d !== l && base(d).startsWith(prefix)) {
+    for (const d of keys) {
+      if (d !== l && commOf(d) === comm && base(pathOf(d)).startsWith(prefix)) {
         hasDesc = true;
         for (const c of lineOk.get(d) ?? []) descFlags.add(c);
         for (const c of lineFailed.get(d) ?? []) descFlags.add(c);
       }
     }
     const flags = new Set([...(lineOk.get(l) ?? []), ...(lineFailed.get(l) ?? [])]);
-    if (hasDesc && [...flags].every((c) => descFlags.has(c))) lines.delete(l);
+    if (hasDesc && [...flags].every((c) => descFlags.has(c))) keys.delete(l);
   }
 
-  const rows: [string, string][] = [];
-  for (const line of lines) {
-    const o = lineOk.get(line) ?? new Set<string>();
-    const fl = new Set([...(lineFailed.get(line) ?? [])].filter((c) => !o.has(c)));
-    const flags = fmtFlags(
-      o,
-      fl,
-      new Set([...(linePerm.get(line) ?? [])].filter((c) => fl.has(c))),
-    );
+  const rows: { flags: string; comm: string; path: string }[] = [];
+  for (const lk of keys) {
+    const o = lineOk.get(lk) ?? new Set<string>();
+    const fl = new Set([...(lineFailed.get(lk) ?? [])].filter((c) => !o.has(c)));
+    const flags = fmtFlags(o, fl, new Set([...(linePerm.get(lk) ?? [])].filter((c) => fl.has(c))));
     if (!flags) continue; // a binary seen only as a mapped library
-    rows.push([relativize(line, prefixes), flags]);
+    rows.push({ flags, comm: commOf(lk), path: relativize(pathOf(lk), prefixes) });
   }
   rows.sort((a, b) => {
-    const [ca, pa] = sortKey(a[0]);
-    const [cb, pb] = sortKey(b[0]);
-    return ca - cb || (pa < pb ? -1 : 1); // paths are distinct, so never equal
+    const [ca, pa] = sortKey(a.path);
+    const [cb, pb] = sortKey(b.path);
+    return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
   });
 
   if (rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
-  const body = rows.map(([path, flags]) => `\`${flags}\` ${path}`).join("\n");
-  return `${HEADING}\n\n${LEGEND}\n\n${body}\n`;
+  // Fixed-width flag and command columns, sized to the rows actually shown.
+  const flagsW = Math.max(...rows.map((r) => r.flags.length));
+  const commW = Math.max(...rows.map((r) => r.comm.length));
+  const body = rows
+    .map((r) => `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`)
+    .join("\n");
+  return `${HEADING}\n\n${LEGEND}\n\n\`\`\`\n${body}\n\`\`\`\n`;
 }

@@ -14,7 +14,7 @@ import (
 // mmap flags as letters; Failed and Err describe an operation that did not
 // succeed.
 type record struct {
-	TimeNs int64  `json:"t"`
+	Time   string `json:"t"`
 	Kind   string `json:"kind"`
 	PID    uint32 `json:"pid"`
 	PPID   uint32 `json:"ppid"`

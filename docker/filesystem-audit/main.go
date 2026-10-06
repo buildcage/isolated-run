@@ -262,7 +262,7 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 			}
 			started = true
 		}
-		r.TimeNs = time.Now().UnixNano()
+		r.Time = time.Now().UTC().Format(time.RFC3339)
 		counts[r.Kind]++
 		total++
 		if err := enc.Encode(r); err != nil {

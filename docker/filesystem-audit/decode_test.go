@@ -125,7 +125,7 @@ func TestDecode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got.TimeNs = 0 // stamped by the caller, not decode
+			got.Time = "" // stamped by the caller, not decode
 			if got != c.want {
 				t.Errorf("decode mismatch\n got: %+v\nwant: %+v", got, c.want)
 			}
