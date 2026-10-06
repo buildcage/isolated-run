@@ -15,11 +15,10 @@
  * the workspace, a different pid, exec'd from a non-scratch path) is left alone
  * and keeps its own name.
  *
- * This leans on the recording being complete: if the shell's exec line is
- * missing, nothing anchors the step and the machinery is left in; and a step
- * process is placed by walking recorded parents, so one whose ancestor emitted
- * no record cannot be tied back to the shell. Both need a gap in the stream and
- * only skew an experimental report, so they are left as is.
+ * It assumes a complete recording: a missing shell exec leaves the step
+ * unanchored (machinery stays in), and a process whose ancestor emitted no
+ * record cannot be walked back to the shell. Both need a gap in the stream and
+ * only skew an experimental report.
  */
 
 const SHELL_COMM = "run-script.sh"; // buildcage's step shell (sandbox/oci-files.ts)

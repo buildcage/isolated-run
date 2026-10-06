@@ -304,9 +304,8 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
   });
 
   if (rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
-  // Fixed-width flag and command columns, sized to the rows actually shown.
-  // reduce, not Math.max(...spread), which overflows the argument limit on a
-  // recording with very many distinct paths.
+  // Fixed-width flag and command columns. reduce, not Math.max(...spread),
+  // which overflows the argument limit on very many rows.
   const flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0);
   const commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0);
   const body = rows
