@@ -853,6 +853,11 @@ this:
   `$GITHUB_STEP_SUMMARY`'s own contract is append-only, so this doesn't affect them in practice. If
   you need a file that doesn't exist yet to persist, either have an earlier step create it first, or
   list its (already-existing) parent directory instead.
+- A directory entry is a mount point inside the sandbox. A tool that refreshes its output directory
+  by removing it and recreating it, rather than clearing its contents, fails at the final `rmdir`
+  with `EBUSY`, the same way removing a `docker run -v` target does: a mount point can't be removed
+  from inside. Writes inside the directory still go through; only removing the directory itself does
+  not.
 - `$GITHUB_ENV` and `$GITHUB_PATH` are read-only inside the sandbox until named here, even under a
   writable parent such as `$RUNNER_TEMP` or `write_through: /`, since what they set reaches every
   later step and post step. `$GITHUB_STATE` stays read-only, named or not.
