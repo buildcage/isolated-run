@@ -16,6 +16,7 @@ import { ActionError } from "#core/lib/errors.ts";
  *   DOCKER_UNAVAILABLE                docker CLI missing from PATH or a docker command failed
  *   UNSAFE_PRIMARY_GID                the runner's primary GID is privileged and no safe substitute GID exists
  *   ROOT_RUNNER                       the runner is uid 0, where DAC alone would guard root-owned host sockets
+ *   INVALID_FILESYSTEM_AUDIT          filesystem_audit input was neither off nor record
  *   FILESYSTEM_INPUT_CONFLICT         filesystem_mode/write_through inputs combined in a disallowed way, or a
  *                                     writable path that collides with a mount the sandbox needs itself
  *   INVALID_WRITE_THROUGH_PATH        a write_through entry failed path-resolution rules (unknown $VAR, etc.)
@@ -57,6 +58,7 @@ export type SandboxErrorCode =
   | "ROOT_RUNNER"
   | "FILESYSTEM_INPUT_CONFLICT"
   | "INVALID_FILESYSTEM_MODE"
+  | "INVALID_FILESYSTEM_AUDIT"
   | "INVALID_WRITE_THROUGH_PATH"
   | "WRITE_THROUGH_TARGET_MISSING"
   | "WRITE_THROUGH_TARGET_UNCREATABLE"

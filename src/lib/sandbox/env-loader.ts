@@ -61,6 +61,7 @@ export const ACTION_INPUT_ENV_KEYS = new Set(
     "write_through",
     "writable",
     "filesystem_mode",
+    "filesystem_audit",
     "label",
   ].map((input) => `INPUT_${input.toUpperCase()}`),
 );

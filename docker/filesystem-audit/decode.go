@@ -57,23 +57,26 @@ func cstr(b []byte) string {
 // path, and returns the bytes left after them. A truncated walk is marked
 // with a leading ellipsis.
 func components(b []byte, n int, truncated bool) (string, []byte) {
-	parts := make([]string, n)
+	names := make([]string, 0, n) // leaf first; fewer than n if the buffer ran out
 	for i := 0; i < n && len(b) > 0; i++ {
 		j := bytes.IndexByte(b, 0)
 		if j < 0 {
 			j = len(b)
 		}
-		parts[n-1-i] = string(b[:j])
+		names = append(names, string(b[:j]))
 		if j < len(b) {
 			j++
 		}
 		b = b[j:]
 	}
+	for l, r := 0, len(names)-1; l < r; l, r = l+1, r-1 {
+		names[l], names[r] = names[r], names[l]
+	}
 	prefix := "/"
 	if truncated {
 		prefix = "…/"
 	}
-	return prefix + strings.Join(parts, "/"), b
+	return prefix + strings.Join(names, "/"), b
 }
 
 // decode turns one raw ring-buffer sample into a record.

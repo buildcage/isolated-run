@@ -37,6 +37,7 @@ import {
   readProxyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
+  readFilesystemAuditInput,
   readFilesystemInputs,
   readRunCommand,
 } from "./inputs.ts";
@@ -44,6 +45,7 @@ import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { saveWriteThroughForPost } from "./post-write-through.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
+import { filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
 import {
   resolveFilesystemPlan,
   resolveWriteThroughInput,
@@ -52,7 +54,7 @@ import {
 import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
-import { checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
+import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 
@@ -77,6 +79,7 @@ export interface SandboxStepDeps {
   readRunCommand: typeof readRunCommand;
   readProxyInputs: typeof readProxyInputs;
   readFilesystemInputs: typeof readFilesystemInputs;
+  readFilesystemAuditInput: typeof readFilesystemAuditInput;
   readRuleInputs: typeof readRuleInputs;
   readFailOnCaResidue: typeof readFailOnCaResidue;
   readFailOnBlocked: typeof readFailOnBlocked;
@@ -134,6 +137,7 @@ const realDeps: SandboxStepDeps = {
   readRunCommand,
   readProxyInputs,
   readFilesystemInputs,
+  readFilesystemAuditInput,
   readRuleInputs,
   readFailOnCaResidue,
   readFailOnBlocked,
@@ -216,6 +220,7 @@ export async function runSandboxStep(
     readRunCommand,
     readProxyInputs,
     readFilesystemInputs,
+    readFilesystemAuditInput,
     readRuleInputs,
     readFailOnCaResidue,
     readFailOnBlocked,
@@ -268,6 +273,7 @@ export async function runSandboxStep(
   // `notice`, not `annotation`: readFilesystemInputs reads a renamed input (see
   // SandboxStepDeps).
   const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
+  const filesystemAudit = readFilesystemAuditInput();
   // Before the first write under the scratch base, the one just below.
   checkScratchBaseParent();
   // Before the command runs, for the post step's pinning; see post-write-through.ts.
@@ -353,6 +359,10 @@ export async function runSandboxStep(
 
   const containerName = generateContainerName();
   const projectName = deriveProjectName(containerName);
+  const audit =
+    filesystemAudit === "record"
+      ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE)
+      : undefined;
   saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, saveState);
 
   const composeEnv = buildComposeEnv(
@@ -409,6 +419,7 @@ export async function runSandboxStep(
       filesystemMode,
       overlayRoots,
       failOnCaResidue,
+      filesystemAudit: audit,
       warn,
       cancel: cancel.signal,
     });

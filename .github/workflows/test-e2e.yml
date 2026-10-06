@@ -146,6 +146,70 @@ jobs:
       # No cleanup step: the action stops its own proxy container in its
       # finally block.
 
+  # Runs a real sandboxed step with filesystem_audit and checks the tracer
+  # recorded its file accesses; a test-hooks build surfaces the recording for
+  # the assertion.
+  test_sandbox_filesystem_audit:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    name: "e2e: test (filesystem_audit, ${{ matrix.runner }})"
+
+    env:
+      PROXY_ENGINE: universal
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-vp
+
+      - name: Build local sandbox proxy image
+        run: docker compose build proxy
+
+      - name: Resolve local image ref
+        id: local_image
+        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild the action with the local-image test hook enabled
+        env:
+          BUILDCAGE_BUILD_TEST_HOOKS: "1"
+        run: vp run build
+
+      - name: Run a step with filesystem_audit enabled
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+        with:
+          proxy_engine: universal
+          proxy_mode: audit
+          filesystem_audit: record
+          run: |
+            cat /etc/hostname > /dev/null
+            echo probe > "$GITHUB_WORKSPACE/probe.txt"
+            mv "$GITHUB_WORKSPACE/probe.txt" "$GITHUB_WORKSPACE/probe2.txt"
+            rm "$GITHUB_WORKSPACE/probe2.txt"
+
+      - name: Verify the tracer recorded the step's file accesses
+        run: |
+          # The recording is still under the scratch base here; the post step
+          # that removes it runs after this one. The tracer wrote it as root.
+          f=$(sudo sh -c 'ls /var/tmp/buildcage-*/filesystem-audit-*.jsonl')
+          sudo test -s "$f"
+          for kind in exec write rename unlink; do
+            sudo grep -q "\"kind\":\"$kind\"" "$f" || {
+              echo "no $kind recorded; got:"; sudo cat "$f"; exit 1
+            }
+          done
+
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network), proves proxy_engine: universal
   # wiring end-to-end: an allowed host reaches its origin, a blocked one does
@@ -821,6 +885,7 @@ jobs:
       [
         changes,
         test_sandbox_audit_mode,
+        test_sandbox_filesystem_audit,
         test_sandbox_enforcement,
         test_sandbox_config_file,
         test_sandbox_inspect_enforcement,
