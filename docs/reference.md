@@ -742,11 +742,11 @@ R read · W write · X exec · M move · D delete · A attr · lowercase = faile
 ```
 
 Flags combine per path (`RW` read and written). An action that only ever failed is lowercase, and a
-failure the sandbox refused, for want of permission or because the location is read-only, is marked
+one the sandbox refused, for want of permission or because the location is read-only, is marked
 `!`. A directory with many touched children is shown once as
 `dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and `$HOME` (`~/…`), else
 absolute. A failed access is recorded under the name the command used, which may be relative to its
-working directory (`$GITHUB_WORKSPACE` unless the command changed it); such a name is shown `./…`.
+working directory (`$GITHUB_WORKSPACE` unless the command changed it); such a name is shown as `./…`.
 The libraries a command loads are left out.
 
 The full record is uploaded as JSON lines in an artifact named `buildcage-filesystem-audit-<id>`,

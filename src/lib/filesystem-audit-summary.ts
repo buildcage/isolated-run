@@ -203,7 +203,7 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
       if (/^(pipe|socket|anon_inode):/.test(p)) continue; // d_path's non-file targets
       // A succeeding record always resolves to an absolute path or a truncated
       // "…/" walk, so anything else there is not a real path; a failed one may
-      // carry the cwd-relative name it was given, which is kept.
+      // carry the cwd-relative name it was given.
       if (!keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
       // Keep the path even with no flags left (a read-then-dropped library):
       // it still counts toward a directory's collapse, though it prints no row.
