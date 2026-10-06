@@ -434,6 +434,26 @@ JAVA
   esac
 fi
 
+# integration-test-inspect-restrict.sh checks the version each reached the
+# origin in.
+echo "=== [Origin protocol follows the client] ==="
+OUT=$($S https://allowed.example.com/public/proto-h2)
+check_ok "GET /public/proto-h2" "$OUT" "PUBLIC GET"
+OUT=$($S --http1.1 https://allowed.example.com/public/proto-h1)
+check_ok "GET /public/proto-h1 over HTTP/1.1" "$OUT" "PUBLIC GET"
+
+# Both names resolve to the same origin, so a pooled h2 connection could carry
+# one name's request under the other's SNI. The bodies cannot show that;
+# integration-test-inspect-restrict.sh checks the SNI the origin saw.
+echo "=== [Origin connection reuse across names] ==="
+OUT=$($S https://allowed.example.com/public/reuse-1 https://api.example.com/v1/reuse-2 \
+  https://allowed.example.com/public/reuse-3 https://api.example.com/v1/reuse-4 \
+  https://allowed.example.com/public/reuse-5 https://api.example.com/v1/reuse-6)
+check_status "six requests alternating between two names" "$OUT" \
+  "$(printf '%s\n' 'PUBLIC GET /public/reuse-1' 'API GET /v1/reuse-2' \
+    'PUBLIC GET /public/reuse-3' 'API GET /v1/reuse-4' \
+    'PUBLIC GET /public/reuse-5' 'API GET /v1/reuse-6')"
+
 # gRPC needs HTTP/2 to the client and to the origin, and grpc-go refuses a
 # connection where ALPN did not choose it.
 GRPC="$(dirname "${BASH_SOURCE[0]}")/test-grpc-inspect/bin/grpc-fixture"

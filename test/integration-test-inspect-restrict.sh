@@ -212,6 +212,45 @@ else
 fi
 
 echo ""
+echo "--- origin assertions ---"
+# See test/test-server-inspect/nginx.conf for the line format.
+ORIGIN_LOG=$(docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" logs --no-log-prefix test-server 2>/dev/null |
+  grep '^HTTP/' || true)
+assert_origin_protocol() {
+  local protocol="$1" path="$2"
+  if grep -qE "^${protocol//./\\.} sni=\S+ host=allowed\.example\.com conn=[0-9]+ GET $path " <<< "$ORIGIN_LOG"; then
+    pass "$protocol to the origin for $path"
+  else
+    fail "$protocol to the origin for $path -- no such line in the origin log"
+    grep -E " GET $path " <<< "$ORIGIN_LOG" || echo "    (no request for it at all)"
+  fi
+}
+assert_origin_protocol HTTP/2.0 /public/proto-h2
+assert_origin_protocol HTTP/1.1 /public/proto-h1
+
+REUSE_LOG=$(grep -E ' GET /(public|v1)/reuse-[0-9]+ ' <<< "$ORIGIN_LOG" || true)
+REUSE_COUNT=$(grep -c . <<< "$REUSE_LOG" || true)
+if [ "$REUSE_COUNT" -eq 6 ]; then
+  pass "all 6 alternating requests reached the origin"
+else
+  fail "$REUSE_COUNT of the 6 alternating requests reached the origin"
+fi
+MISMATCHED=$(grep -vE '^HTTP/2\.0 sni=([^ ]+) host=\1 ' <<< "$REUSE_LOG" || true)
+if [ -n "$REUSE_LOG" ] && [ -z "$MISMATCHED" ]; then
+  pass "each arrived over h2 with an SNI that matches its Host"
+else
+  fail "a request arrived under another name's SNI, or not over h2"
+  sed 's/^/    /' <<< "$MISMATCHED"
+fi
+# Otherwise nothing was reused and the SNI check above proves nothing.
+if [ -n "$(awk '{ print $4 }' <<< "$REUSE_LOG" | sort | uniq -d)" ]; then
+  pass "an origin connection carried more than one of them"
+else
+  fail "every request had an origin connection of its own, so none was reused"
+  sed 's/^/    /' <<< "$REUSE_LOG"
+fi
+
+echo ""
 echo "--- positive control: the UDP echo server is reachable from beside the cage ---"
 UDP_REPLY=$(docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" exec -T test-dns sh -c \
   'echo probe | nc -u -w 3 10.200.0.102 9999' 2>/dev/null | tr -d '\r\n' || true)
