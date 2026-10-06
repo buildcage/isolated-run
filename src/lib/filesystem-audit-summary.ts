@@ -73,7 +73,9 @@ function classify(r: AuditRecord): Classified | undefined {
 }
 
 function normalize(path: string): string {
-  return path.replace(/^\/proc\/\d+\//, "/proc/<pid>/");
+  // Unify a cwd-relative failed name's "./x" and "x" spellings before anything
+  // keys on the path.
+  return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
 }
 
 export interface SummaryPrefixes {
@@ -91,6 +93,9 @@ function relativize(path: string, prefixes: SummaryPrefixes): string {
     if (path === home) return "~";
     if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
   }
+  // A relative name is a failed syscall's raw argument, relative to the sandbox
+  // cwd, which is $GITHUB_WORKSPACE, so show and group it workspace-relative.
+  if (!path.startsWith("/") && !path.startsWith("…/")) return `./${path}`;
   return path;
 }
 
@@ -148,7 +153,7 @@ function fmtFlags(ok: Set<string>, failed: Set<string>, perm: Set<string>): stri
 
 const LEGEND =
   "<sub>R read · W write · X exec · M move · D delete · A attr · " +
-  "lowercase = failed · ! = permission denied</sub>";
+  "lowercase = failed · ! = denied</sub>";
 const HEADING = "### Filesystem audit (experimental)";
 
 export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPrefixes): string {
@@ -189,11 +194,17 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
   const nok = new Map<string, Set<string>>();
   const nfailed = new Map<string, Set<string>>();
   const nperm = new Map<string, Set<string>>();
-  const mergeInto = (dst: Map<string, Set<string>>, src: Map<string, Set<string>>): void => {
+  const mergeInto = (
+    dst: Map<string, Set<string>>,
+    src: Map<string, Set<string>>,
+    keepRelative: boolean,
+  ): void => {
     for (const [p, set] of src) {
-      // pipe:/socket:/anon_inode are not files; a leading "…/" is a real path
-      // the tracer could not walk to the top, so keep it.
-      if (!p.startsWith("/") && !p.startsWith("…/")) continue;
+      if (/^(pipe|socket|anon_inode):/.test(p)) continue; // d_path's non-file targets
+      // A succeeding record always resolves to an absolute path or a truncated
+      // "…/" walk, so anything else there is not a real path; a failed one may
+      // carry the cwd-relative name it was given.
+      if (!keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
       // Keep the path even with no flags left (a read-then-dropped library):
       // it still counts toward a directory's collapse, though it prints no row.
       const np = normalize(p);
@@ -202,9 +213,9 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
       for (const c of set) dstSet.add(c);
     }
   };
-  mergeInto(nok, ok);
-  mergeInto(nfailed, failed);
-  mergeInto(nperm, perm);
+  mergeInto(nok, ok, false);
+  mergeInto(nfailed, failed, true);
+  mergeInto(nperm, perm, true);
 
   const keep = new Set([
     "/",

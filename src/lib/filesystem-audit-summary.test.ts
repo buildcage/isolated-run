@@ -101,6 +101,25 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["D …/deep/x"]);
   });
 
+  it("shows a failed access's relative name workspace-relative, bare or dotted alike", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "open-failed", path: "config.json", err: 2 },
+        { kind: "open-failed", path: "./secret", err: 13 },
+      ),
+      PREFIXES,
+    );
+    expect(lines(md)).toEqual(["r ./config.json", "r! ./secret"]);
+  });
+
+  it("drops a relative path on a succeeding record, which can only be spurious", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl({ kind: "read", path: "not-a-real-path" }),
+      PREFIXES,
+    );
+    expect(lines(md)).toEqual([]);
+  });
+
   it("skips a line the tracer left truncated", () => {
     const md = renderFilesystemAuditSummary(
       `{"kind":"read","path":"/work/a"}\n{"kind":"write","pa`,
