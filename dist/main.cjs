@@ -68395,13 +68395,14 @@ function classify(r) {
 		failed
 	} : void 0;
 }
-const UNSAFE_CHARS = /[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, NAMED_ESCAPES = {
+const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\]/gu, NAMED_ESCAPES = {
 	"\n": "\\n",
 	"\r": "\\r",
-	"	": "\\t"
+	"	": "\\t",
+	"\\": "\\\\"
 };
 function escapeForDisplay(name) {
-	return name.replace(UNSAFE_CHARS, (c) => NAMED_ESCAPES[c] ?? `\\u{${c.charCodeAt(0).toString(16)}}`);
+	return name.replace(UNSAFE_CHARS, (c) => NAMED_ESCAPES[c] ?? `\\u{${Number(c.codePointAt(0)).toString(16)}}`);
 }
 function normalize$2(path) {
 	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");

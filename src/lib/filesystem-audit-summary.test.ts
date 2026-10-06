@@ -36,18 +36,22 @@ describe("renderFilesystemAuditSummary", () => {
     expect(md).toContain("<sub>R read");
   });
 
-  it("escapes control and bidi characters so a name cannot close the code block", () => {
+  it("escapes control, format and separator characters so a name cannot close the code block", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
         { kind: "write", comm: "sh", path: "/work/a\n```\n## Forged\n```\nb" },
-        { kind: "read", comm: "x\ty", path: "/work/c\u202ed\u0007" },
+        { kind: "read", comm: "x\ty", path: "/work/c\u202ed\u0007\u007f\u0085" },
+        { kind: "read", comm: "sh", path: "/work/e\u2028f\u2029g\u200bh\u{e0001}" },
+        { kind: "read", comm: "sh", path: "/work/i\\nj" },
       ),
       PREFIXES,
     );
     expect(md.split("\n").filter((l) => l.startsWith("```"))).toHaveLength(2);
     expect(lines(md)).toEqual([
       "W sh ./a\\n```\\n## Forged\\n```\\nb",
-      "R x\\ty ./c\\u{202e}d\\u{7}",
+      "R x\\ty ./c\\u{202e}d\\u{7}\\u{7f}\\u{85}",
+      "R sh ./e\\u{2028}f\\u{2029}g\\u{200b}h\\u{e0001}",
+      "R sh ./i\\\\nj",
     ]);
   });
 
