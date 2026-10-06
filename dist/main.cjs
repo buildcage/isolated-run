@@ -68395,6 +68395,15 @@ function classify(r) {
 		failed
 	} : void 0;
 }
+const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\]/gu, NAMED_ESCAPES = {
+	"\n": "\\n",
+	"\r": "\\r",
+	"	": "\\t",
+	"\\": "\\\\"
+};
+function escapeForDisplay(name) {
+	return name.replace(UNSAFE_CHARS, (c) => NAMED_ESCAPES[c] ?? `\\u{${Number(c.codePointAt(0)).toString(16)}}`);
+}
 function normalize$2(path) {
 	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
 }
@@ -68551,8 +68560,8 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 			span,
 			seq: span?.seq ?? Infinity,
 			flags,
-			comm: commOf(lk),
-			path: relativize(pathOf(lk), prefixes)
+			comm: escapeForDisplay(commOf(lk)),
+			path: escapeForDisplay(relativize(pathOf(lk), prefixes))
 		});
 	}
 	if (rows.sort((a, b) => {
