@@ -68532,13 +68532,12 @@ async function reportStepFilesystemAudit({ audit, retentionDays, containerName, 
 	}, artifactName = "", raw = audit && readOptional(audit.outPath, deps.readFile);
 	if (audit && raw) {
 		let clean = stripSandboxMachinery(raw, (0, node_path.dirname)(audit.outPath));
-		env.BUILDCAGE_RUN_DEBUG_RAW_FILE, deps.appendFile;
 		try {
 			let markdown = renderFilesystemAuditSummary(clean, {
 				workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
 				home: prefixes(env.HOME, deps.realpath)
 			});
-			await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY), env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE, deps.appendFile;
+			await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY), deps.appendFile;
 		} catch (e) {
 			annotation.warning(`Failed to write the filesystem audit summary: ${errorMessage(e)}`);
 		}
