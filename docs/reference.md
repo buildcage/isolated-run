@@ -734,7 +734,7 @@ Summary with one line per path:
 
 ```
 ### Filesystem audit (experimental)
-R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = permission denied
+R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied
 
 `RWD` ./node_modules/**
 `R`   ./package.json
@@ -742,7 +742,8 @@ R read · W write · X exec · M move · D delete · A attr · lowercase = faile
 ```
 
 Flags combine per path (`RW` read and written). An action that only ever failed is lowercase, and a
-permission-denied failure is marked `!`. A directory with many touched children is shown once as
+failure the sandbox refused, for want of permission or because the location is read-only, is marked
+`!`. A directory with many touched children is shown once as
 `dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and `$HOME` (`~/…`), else
 absolute. The libraries a command loads are left out.
 

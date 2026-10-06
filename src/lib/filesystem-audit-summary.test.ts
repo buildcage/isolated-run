@@ -101,6 +101,17 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["D …/deep/x"]);
   });
 
+  it("keeps a relative path recorded by a failed access", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "open-failed", path: "config.json", err: 2 },
+        { kind: "open-failed", path: "secret", err: 13 },
+      ),
+      PREFIXES,
+    );
+    expect(lines(md)).toEqual(["r config.json", "r! secret"]);
+  });
+
   it("skips a line the tracer left truncated", () => {
     const md = renderFilesystemAuditSummary(
       `{"kind":"read","path":"/work/a"}\n{"kind":"write","pa`,

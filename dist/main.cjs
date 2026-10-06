@@ -68409,7 +68409,7 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 	]) ok.get(p)?.delete("R");
 	let nok = new Map(), nfailed = new Map(), nperm = new Map(), mergeInto = (dst, src) => {
 		for (let [p, set] of src) {
-			if (!p.startsWith("/") && !p.startsWith("…/")) continue;
+			if (/^(pipe|socket|anon_inode):/.test(p)) continue;
 			let np = normalize$2(p), dstSet = dst.get(np);
 			dstSet || dst.set(np, dstSet = new Set());
 			for (let c of set) dstSet.add(c);
@@ -68450,7 +68450,7 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		return ca - cb || (pa < pb ? -1 : 1);
 	}), rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
 	let body = rows.map(([path, flags]) => `\`${flags}\` ${path}`).join("\n");
-	return `${HEADING}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = permission denied</sub>\n\n${body}\n`;
+	return `${HEADING}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>\n\n${body}\n`;
 }
 //#endregion
 //#region src/lib/filesystem-audit-report.ts
@@ -69181,7 +69181,7 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		} catch {}
 		await child.exited, remove(pidFilePath);
 	};
-	for (let i = 0; i < 50; i++) {
+	for (let i = 0; i < 300; i++) {
 		if (exists(readyPath)) return { stop };
 		if (exited) break;
 		await sleep(100);
