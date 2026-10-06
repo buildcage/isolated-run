@@ -14,6 +14,9 @@ const AUDIT = {
   pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-deadbeef.pid",
 };
 
+// Where the stripped copy is written and uploaded from (our own temp dir).
+const CLEAN = "/tmp/clean/filesystem-audit-deadbeef.jsonl";
+
 function annotation(): Annotation & { warning: Mock; error: Mock } {
   return { notice: vi.fn(), warning: vi.fn(), error: vi.fn() };
 }
@@ -24,19 +27,23 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
   uploads: string[];
   outputs: string[];
   appended: string[];
+  writes: { path: string; content: string }[];
 } {
   const summaries: string[] = [];
   const uploads: string[] = [];
   const outputs: string[] = [];
   const appended: string[] = [];
+  const writes: { path: string; content: string }[] = [];
   return {
     summaries,
     uploads,
     outputs,
     appended,
+    writes,
     deps: {
       readFile: () => JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
-      writeFile: () => {},
+      writeFile: (path, content) => void writes.push({ path, content }),
+      tmpDir: () => "/tmp/clean",
       realpath: (p) => p,
       writeStepSummary: async (md) => void summaries.push(md),
       uploadArtifact: async (outPath) => {
@@ -54,7 +61,7 @@ describe("reportStepFilesystemAudit", () => {
   const base = { retentionDays: 3, containerName: "buildcage-proxy-deadbeef" };
 
   it("renders, uploads and sets the output when a recording exists", async () => {
-    const { deps: d, summaries, uploads, outputs } = deps();
+    const { deps: d, summaries, uploads, outputs, writes } = deps();
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
@@ -63,7 +70,13 @@ describe("reportStepFilesystemAudit", () => {
 
     expect(summaries[0]).toContain("Filesystem audit");
     expect(summaries[0]).toContain("W node ./a.txt");
-    expect(uploads).toEqual([AUDIT.outPath]);
+    expect(writes).toEqual([
+      {
+        path: CLEAN,
+        content: JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
+      },
+    ]);
+    expect(uploads).toEqual([CLEAN]);
     expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
   });
 
@@ -120,7 +133,7 @@ describe("reportStepFilesystemAudit", () => {
     expect(note.warning).toHaveBeenCalledWith(
       "Failed to write the filesystem audit summary: summary disk full",
     );
-    expect(uploads).toEqual([AUDIT.outPath]);
+    expect(uploads).toEqual([CLEAN]);
     expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
   });
 

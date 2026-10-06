@@ -1,5 +1,6 @@
 import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { writeStepSummary } from "#core/lib/actions/write-step-summary.ts";
@@ -25,6 +26,7 @@ export interface FilesystemAuditReportOptions {
 export interface FilesystemAuditReportDeps {
   readFile: (path: string) => string;
   writeFile: (path: string, content: string) => void;
+  tmpDir: () => string;
   realpath: (path: string) => string;
   writeStepSummary: typeof writeStepSummary;
   uploadArtifact: typeof uploadFilesystemAuditArtifact;
@@ -38,6 +40,7 @@ export interface FilesystemAuditReportDeps {
 const realDeps: FilesystemAuditReportDeps = {
   readFile: (path) => readFileSync(path, "utf8"),
   writeFile: (path, content) => writeFileSync(path, content),
+  tmpDir: () => tmpdir(),
   realpath: (path) => realpathSync(path),
   writeStepSummary,
   uploadArtifact: uploadFilesystemAuditArtifact,
@@ -74,12 +77,15 @@ export async function reportStepFilesystemAudit(
   let artifactName = "";
   const raw = audit && readOptional(audit.outPath, deps.readFile);
   if (audit && raw) {
-    // The recording is written under the scratch base (see
-    // sandbox/filesystem-audit.ts), next to the exec wrapper's own files, so its
-    // directory is the one holding buildcage's own machinery. Strip that out
-    // once and feed the result to both the summary and the uploaded artifact.
+    // The recording sits under the scratch base (see sandbox/filesystem-audit.ts),
+    // next to the exec wrapper's own files, so its directory is the one holding
+    // buildcage's own machinery. Strip that out once and feed the result to both
+    // the summary and the uploaded artifact. The tracer wrote the recording as
+    // root, readable but not writable by us, so the stripped copy goes to our
+    // own temp file, which is what we upload.
     const clean = stripSandboxMachinery(raw, dirname(audit.outPath));
-    deps.writeFile(audit.outPath, clean);
+    const cleanPath = join(deps.tmpDir(), basename(audit.outPath));
+    deps.writeFile(cleanPath, clean);
     // The summary and the upload are independent: a render failure (e.g. a
     // line the tracer left truncated) must not also drop the artifact, which is
     // most wanted when the recording is incomplete.
@@ -94,7 +100,7 @@ export async function reportStepFilesystemAudit(
       annotation.warning(`Failed to write the filesystem audit summary: ${errorMessage(e)}`);
     }
     artifactName =
-      (await deps.uploadArtifact(audit.outPath, containerName, retentionDays, annotation)) ?? "";
+      (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
   }
   deps.setOutput(artifactName);
 }
