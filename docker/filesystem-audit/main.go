@@ -281,8 +281,8 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 			}
 			started = true
 		}
-		// Read per event, so a wall-clock step mid-run (an NTP step) moves the
-		// later times with it, as it moves the proxy's.
+		// Read per event, so a wall-clock step mid-run shifts later times as it
+		// shifts the proxy's.
 		offset, err := bootOffset()
 		if err != nil {
 			return err

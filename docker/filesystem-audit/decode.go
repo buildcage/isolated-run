@@ -26,8 +26,8 @@ type record struct {
 	Args   string `json:"args,omitempty"`
 	Err    int32  `json:"err,omitempty"`
 	Failed bool   `json:"failed,omitempty"`
-	// boot is CLOCK_BOOTTIME in nanoseconds when the access happened; the
-	// reader turns it into Time.
+	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the reader
+	// turns it into Time.
 	boot uint64
 }
 

@@ -117,7 +117,7 @@ struct event {
 	u8 trunc2;     // the second path of a rename or link
 	char comm[16];
 	u32 pad;
-	u64 ts; // CLOCK_BOOTTIME at the access; a failed syscall's is its entry
+	u64 ts; // CLOCK_BOOTTIME at the access; a failed syscall at its entry
 	char data[DATA_SZ + NAME_LEN]; // slack: masked offset + one component
 };
 
