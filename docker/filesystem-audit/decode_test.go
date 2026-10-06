@@ -154,6 +154,11 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "rename", Comm: "mv", Path: "/a", To: "/b", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
+			name: "fork",
+			ev:   event{kind: 22, pid: 9, ppid: 7, comm: "bash"},
+			want: record{Kind: "fork", PID: 9, PPID: 7, Comm: "bash"},
+		},
+		{
 			name: "attr ok",
 			ev:   event{kind: 20, comm: "touch", data: []byte("/tmp/t\x00")},
 			want: record{Kind: "attr", Comm: "touch", Path: "/tmp/t"},

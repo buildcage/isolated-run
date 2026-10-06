@@ -201,6 +201,8 @@ jobs:
             echo probe > "$GITHUB_WORKSPACE/probe.txt"
             mv "$GITHUB_WORKSPACE/probe.txt" "$GITHUB_WORKSPACE/probe2.txt"
             rm "$GITHUB_WORKSPACE/probe2.txt"
+            # A command run from a subshell that itself touches nothing.
+            (cd "$GITHUB_WORKSPACE" && touch subshell.txt || true)
 
       - name: Verify the Job Summary has the filesystem audit
         run: |
@@ -218,6 +220,8 @@ jobs:
           m=$(grep -nE ' M +mv +\./probe\.txt$' "$f" | head -1 | cut -d: -f1)
           d=$(grep -nE ' D +rm +\./probe2\.txt$' "$f" | head -1 | cut -d: -f1)
           [ -n "$w" ] && [ -n "$m" ] && [ -n "$d" ] && [ "$w" -lt "$m" ] && [ "$m" -lt "$d" ]
+          # A subshell's command still counts as the step's.
+          grep -qE ' W +touch +\./subshell\.txt$' "$f"
           # buildcage's own wrappers must never reach the summary.
           ! grep -qE ' (setpriv|env-loader\.sh|run-script\.sh) ' "$f"
 

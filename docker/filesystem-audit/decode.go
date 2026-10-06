@@ -38,6 +38,7 @@ var kindNames = map[uint32]string{
 	7: "chmod", 8: "symlink", 9: "link", 10: "truncate", 11: "chown",
 	12: "open-failed", 13: "read", 14: "write", 15: "mmap",
 	16: "delete", 17: "rename", 18: "chmod", 19: "chown", 20: "attr", 21: "attr",
+	22: "fork",
 }
 
 // Mirrors the fixed header of struct event in bpf/filesystem_audit.bpf.c:

@@ -163,6 +163,17 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual([]);
   });
 
+  it("shows no row for a fork, which only links processes", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "fork", pid: 2, ppid: 1, comm: "bash" },
+        { kind: "read", pid: 2, ppid: 1, comm: "bash", path: "/work/a" },
+      ),
+      PREFIXES,
+    );
+    expect(lines(md)).toEqual(["R bash ./a"]);
+  });
+
   it("skips a line the tracer left truncated", () => {
     const md = renderFilesystemAuditSummary(
       `{"kind":"read","comm":"node","path":"/work/a"}\n{"kind":"write","pa`,

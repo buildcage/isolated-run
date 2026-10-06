@@ -90,7 +90,9 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	// Failed path syscalls: data holds the raw user path(s), NUL-separated
 	// (old then new for rename/link); path_len holds the errno.
 	K_DELETE_FAILED = 16, K_RENAME_FAILED = 17, K_CHMOD_FAILED = 18,
-	K_CHOWN_FAILED = 19, K_ATTR = 20, K_ATTR_FAILED = 21 };
+	K_CHOWN_FAILED = 19, K_ATTR = 20, K_ATTR_FAILED = 21,
+	// A new process: pid is the child, ppid its parent; no data.
+	K_FORK = 22 };
 
 // Fixed header (mirrored by hdrLen in decode.go), then data_len bytes of data:
 //   open:    d_path result (path_len is its return value)
@@ -413,6 +415,25 @@ int BPF_PROG(on_exec, struct task_struct *p, int old_pid, struct linux_binprm *b
 	if (bpf_probe_read_user(&e->data[PATH_LEN], len & (ARGS_LEN - 1), (void *)a) == 0)
 		e->args_len = len;
 	e->data_len = PATH_LEN + e->args_len;
+	submit(e);
+	return 0;
+}
+
+// Every new process, so a parent that forks and never execs or touches a file
+// (a subshell) still links its children to the processes above it.
+SEC("tp_btf/sched_process_fork")
+int BPF_PROG(on_fork, struct task_struct *parent, struct task_struct *child)
+{
+	if (!in_target())
+		return 0;
+	int tgid = BPF_CORE_READ(child, tgid);
+	if (tgid == BPF_CORE_READ(parent, tgid))
+		return 0; // a new thread, not a process
+	struct event *e = start(K_FORK);
+	if (!e)
+		return 0;
+	e->pid = tgid;
+	e->ppid = BPF_CORE_READ(child, real_parent, tgid);
 	submit(e);
 	return 0;
 }
