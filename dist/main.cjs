@@ -68299,16 +68299,19 @@ async function uploadFilesystemAuditArtifact(outPath, containerName, retentionDa
 function setFilesystemAuditOutput(name) {
 	setOutput("filesystem_audit_artifact_name", name);
 }
+//#endregion
+//#region src/lib/filesystem-audit-strip.ts
+const SHELL_COMM = "run-script.sh";
 function stripSandboxMachinery(jsonl, scratchBase) {
-	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), lines = jsonl.split("\n"), recs = lines.map((line) => {
+	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), lines = jsonl.split("\n"), recs = lines.map((line) => {
 		try {
 			return JSON.parse(line);
 		} catch {
 			return;
 		}
-	}), initPid = recs.find((r) => r !== void 0)?.pid, shellExec = -1;
-	initPid !== void 0 && recs.forEach((r, i) => {
-		r?.pid === initPid && r.kind === "exec" && under(r.path) && (shellExec = i);
+	}), initPid = recs.find((r) => r !== void 0)?.pid, firstSeen = new Map(), stepShellPids = new Set(), boundary = -1;
+	recs.forEach((r, i) => {
+		r && r.pid !== void 0 && (firstSeen.has(r.pid) || firstSeen.set(r.pid, i), r.kind === "exec" && typeof r.path == "string" && (r.pid === initPid && under(r.path) && (boundary = i), !under(r.path) && leaf(r.path) === SHELL_COMM && stepShellPids.add(r.pid)));
 	});
 	let out = [];
 	return recs.forEach((r, i) => {
@@ -68316,9 +68319,8 @@ function stripSandboxMachinery(jsonl, scratchBase) {
 			lines[i] !== "" && out.push(lines[i]);
 			return;
 		}
-		if (!under(r.path)) {
-			if (shellExec >= 0 && r.pid === initPid) {
-				if (i <= shellExec) return;
+		if (!under(r.path) && !(boundary >= 0 && r.pid !== void 0 && (r.pid === initPid ? i <= boundary : firstSeen.get(r.pid) <= boundary))) {
+			if (boundary >= 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !stepShellPids.has(r.pid)) {
 				out.push(JSON.stringify({
 					...r,
 					comm: "bash"

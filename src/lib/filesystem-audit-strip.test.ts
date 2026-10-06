@@ -29,6 +29,9 @@ describe("stripSandboxMachinery", () => {
           path: `${BASE}/sandbox-x/exec/env-loader.sh`,
         },
         { pid: 100, kind: "read", comm: "env-loader.sh", path: "/etc/passwd" },
+        // A helper subshell the wrapper forks before the step's shell: a system
+        // path, so only the pre-boundary rule (not the scratch path) drops it.
+        { pid: 102, ppid: 100, kind: "read", comm: "env-loader.sh", path: "/etc/nsswitch.conf" },
         { pid: 100, kind: "exec", comm: "env", path: "/usr/bin/env" },
         {
           pid: 100,
