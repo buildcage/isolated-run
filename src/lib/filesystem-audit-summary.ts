@@ -161,7 +161,12 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
 
   for (const line of jsonl.split("\n")) {
     if (!line) continue;
-    const r = JSON.parse(line) as AuditRecord;
+    let r: AuditRecord;
+    try {
+      r = JSON.parse(line) as AuditRecord;
+    } catch {
+      continue; // a line the tracer left truncated (e.g. a hard kill mid-write)
+    }
     if (r.kind === "mmap" && r.access === "x") {
       if (r.path) libs.add(r.path);
       continue;

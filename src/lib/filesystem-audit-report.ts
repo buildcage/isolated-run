@@ -68,20 +68,23 @@ export async function reportStepFilesystemAudit(
 ): Promise<void> {
   const deps = { ...realDeps, ...overrides };
   let artifactName = "";
-  try {
-    const jsonl = audit && readOptional(audit.outPath, deps.readFile);
-    if (audit && jsonl) {
+  const jsonl = audit && readOptional(audit.outPath, deps.readFile);
+  if (audit && jsonl) {
+    // The summary and the upload are independent: a render failure (e.g. a
+    // line the tracer left truncated) must not also drop the raw artifact,
+    // which is most wanted when the recording is incomplete.
+    try {
       const markdown = renderFilesystemAuditSummary(jsonl, {
         workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
         home: prefixes(env.HOME, deps.realpath),
       });
       await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY);
       mirrorForDebug(markdown, env, deps.appendFile);
-      artifactName =
-        (await deps.uploadArtifact(audit.outPath, containerName, retentionDays, annotation)) ?? "";
+    } catch (e) {
+      annotation.warning(`Failed to write the filesystem audit summary: ${errorMessage(e)}`);
     }
-  } catch (e) {
-    annotation.warning(`Failed to report the filesystem audit: ${errorMessage(e)}`);
+    artifactName =
+      (await deps.uploadArtifact(audit.outPath, containerName, retentionDays, annotation)) ?? "";
   }
   deps.setOutput(artifactName);
 }

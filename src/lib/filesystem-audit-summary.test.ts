@@ -93,6 +93,14 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["R ./node_modules/**"]);
   });
 
+  it("skips a line the tracer left truncated", () => {
+    const md = renderFilesystemAuditSummary(
+      `{"kind":"read","path":"/work/a"}\n{"kind":"write","pa`,
+      PREFIXES,
+    );
+    expect(lines(md)).toEqual(["R ./a"]);
+  });
+
   it("normalizes per-process /proc paths", () => {
     const md = renderFilesystemAuditSummary(
       jsonl({ kind: "read", path: "/proc/4321/status" }),

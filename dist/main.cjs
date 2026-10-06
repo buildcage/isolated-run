@@ -68388,7 +68388,12 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set();
 	for (let line of jsonl.split("\n")) {
 		if (!line) continue;
-		let r = JSON.parse(line);
+		let r;
+		try {
+			r = JSON.parse(line);
+		} catch {
+			continue;
+		}
 		if (r.kind === "mmap" && r.access === "x") {
 			r.path && libs.add(r.path);
 			continue;
@@ -68470,18 +68475,18 @@ async function reportStepFilesystemAudit({ audit, retentionDays, containerName, 
 	let deps = {
 		...realDeps$3,
 		...overrides
-	}, artifactName = "";
-	try {
-		let jsonl = audit && readOptional(audit.outPath, deps.readFile);
-		if (audit && jsonl) {
+	}, artifactName = "", jsonl = audit && readOptional(audit.outPath, deps.readFile);
+	if (audit && jsonl) {
+		try {
 			let markdown = renderFilesystemAuditSummary(jsonl, {
 				workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
 				home: prefixes(env.HOME, deps.realpath)
 			});
-			await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY), deps.appendFile, artifactName = await deps.uploadArtifact(audit.outPath, containerName, retentionDays, annotation) ?? "";
+			await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY), deps.appendFile;
+		} catch (e) {
+			annotation.warning(`Failed to write the filesystem audit summary: ${errorMessage(e)}`);
 		}
-	} catch (e) {
-		annotation.warning(`Failed to report the filesystem audit: ${errorMessage(e)}`);
+		artifactName = await deps.uploadArtifact(audit.outPath, containerName, retentionDays, annotation) ?? "";
 	}
 	deps.setOutput(artifactName);
 }
@@ -72532,7 +72537,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, reportStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditRetentionDays, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, reportStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);

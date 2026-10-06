@@ -120,6 +120,11 @@ func run(cgPath, outPath, readyPath, pidPath string) error {
 		return err
 	}
 	defer f.Close()
+	// The tracer runs as root; 0644 regardless of root's umask so the action,
+	// running as the runner, can read the recording back.
+	if err := f.Chmod(0o644); err != nil {
+		return err
+	}
 	bw := bufio.NewWriterSize(f, 1<<20)
 	defer bw.Flush()
 

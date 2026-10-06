@@ -99,9 +99,13 @@ describe("reportStepFilesystemAudit", () => {
     expect(outputs).toEqual([""]);
   });
 
-  it("warns and still sets the output when rendering or upload throws", async () => {
+  it("still uploads the recording when the summary fails to render", async () => {
     const note = annotation();
-    const { deps: d, outputs } = deps({
+    const {
+      deps: d,
+      uploads,
+      outputs,
+    } = deps({
       writeStepSummary: async () => {
         throw new Error("summary disk full");
       },
@@ -113,9 +117,10 @@ describe("reportStepFilesystemAudit", () => {
     );
 
     expect(note.warning).toHaveBeenCalledWith(
-      "Failed to report the filesystem audit: summary disk full",
+      "Failed to write the filesystem audit summary: summary disk full",
     );
-    expect(outputs).toEqual([""]);
+    expect(uploads).toEqual([AUDIT.outPath]);
+    expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
   });
 
   it("matches a recorded canonical path against the realpath of the workspace", async () => {

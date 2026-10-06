@@ -227,6 +227,7 @@ export async function runSandboxStep(
     readProxyInputs,
     readFilesystemInputs,
     readFilesystemAuditInput,
+    readFilesystemAuditRetentionDays,
     readRuleInputs,
     readFailOnCaResidue,
     readFailOnBlocked,
