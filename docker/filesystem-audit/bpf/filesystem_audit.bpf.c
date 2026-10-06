@@ -249,9 +249,12 @@ static long walk_step(u64 i, struct walk_ctx *c)
 	}
 	long r = bpf_probe_read_kernel_str(&c->e->data[c->off & (DATA_SZ - 1)], NAME_LEN,
 					   rd_ptr(c->d, c->off_d_name));
-	if (r > 0)
+	// Count a component only when its name was stored, so n never exceeds the
+	// NUL-terminated names the decoder will find.
+	if (r > 0) {
 		c->off += r;
-	c->n++;
+		c->n++;
+	}
 	c->d = parent;
 	return 0;
 }
@@ -286,8 +289,10 @@ static __always_inline u32 leaf(struct event *e, u32 off, struct dentry *d, u8 *
 {
 	long r = bpf_probe_read_kernel_str(&e->data[off & (DATA_SZ - 1)], NAME_LEN,
 					   BPF_CORE_READ(d, d_name.name));
+	if (r <= 0)
+		return off; // nothing stored, so do not count the leaf
 	*n += 1;
-	return r > 0 ? off + r : off;
+	return off + r;
 }
 
 // Open files already reported as read (1), written (2) or mapped
@@ -700,7 +705,10 @@ int BPF_PROG(on_file_free, struct file *file)
 // Failed path syscalls. security_path_* fires only once the path has
 // resolved, so a missing target (the common failure) never reaches it; the
 // syscall tracepoints catch it. The entry stashes the user path pointer(s);
-// the exit emits only when ret < 0, reading the kernel-safe user string.
+// the exit emits only when ret < 0, reading them back. Best-effort: this reads
+// the user buffer, which a concurrent thread could rewrite between entry and
+// exit, so a failed op's recorded path is not tamper-proof the way the open
+// path's getname copy is.
 static __always_inline void op_enter2(u32 kind, u32 kind_ok, u64 p1, u64 p2)
 {
 	if (!in_target())
@@ -732,11 +740,14 @@ static __always_inline void op_exit(long ret)
 			e->path_len = -ret;
 		long r = bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1);
 		u32 off = r > 0 ? r : 0;
-		if (pend->p2) {
-			e->n1 = 1; // a second path follows
+		// Mark a second path only when both were read, so a failed read never
+		// leaves n1 claiming a name that is not in the buffer.
+		if (pend->p2 && off > 0) {
 			long r2 = bpf_probe_read_user_str(&e->data[off & (DATA_SZ - 1)], PATH_LEN, (void *)pend->p2);
-			if (r2 > 0)
+			if (r2 > 0) {
+				e->n1 = 1;
 				off += r2;
+			}
 		}
 		e->data_len = off;
 		submit(e);
