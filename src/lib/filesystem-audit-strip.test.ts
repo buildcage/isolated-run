@@ -46,6 +46,28 @@ describe("stripSandboxMachinery", () => {
     ]);
   });
 
+  it("keeps a command run from a subshell that recorded nothing but its fork", () => {
+    const out = stripSandboxMachinery(
+      jsonl(
+        { pid: 10, ppid: 1, kind: "read", comm: "env-loader.sh", path: "/etc/passwd" },
+        { pid: 11, ppid: 10, kind: "fork", comm: "env-loader.sh" },
+        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        // ( cd sub && cat missing ): the subshell only forks.
+        { pid: 13, ppid: 11, kind: "fork", comm: "run-script.sh" },
+        { pid: 14, ppid: 13, kind: "fork", comm: "run-script.sh" },
+        { pid: 14, ppid: 13, kind: "exec", comm: "cat", path: "/usr/bin/cat" },
+        { pid: 14, ppid: 13, kind: "open-failed", comm: "cat", path: "/work/sub/missing", err: 2 },
+      ),
+      BASE,
+    );
+    expect(records(out)).toEqual([
+      { pid: 13, ppid: 11, kind: "fork", comm: "bash" },
+      { pid: 14, ppid: 13, kind: "fork", comm: "bash" },
+      { pid: 14, ppid: 13, kind: "exec", comm: "cat", path: "/usr/bin/cat" },
+      { pid: 14, ppid: 13, kind: "open-failed", comm: "cat", path: "/work/sub/missing", err: 2 },
+    ]);
+  });
+
   it("leaves a step command named like a wrapper alone, by its pid and exec path", () => {
     const out = stripSandboxMachinery(
       jsonl(
