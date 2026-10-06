@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 
-import { renderFilesystemAuditSummary, type SummaryOptions } from "./filesystem-audit-summary.ts";
+import {
+  dropWalkedDirs,
+  keyOf,
+  renderFilesystemAuditSummary,
+  type SummaryOptions,
+} from "./filesystem-audit-summary.ts";
 
 const PREFIXES: SummaryOptions = { workspace: ["/work"], home: ["/home/u"] };
 
@@ -409,5 +414,32 @@ describe("renderFilesystemAuditSummary", () => {
       );
       expect(lines(md)).toEqual(["00:00.000: R a ./c", "R a ./a", "R a ./b"]);
     });
+  });
+
+  it("drops the root like any directory its descendants' flags cover", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "read", comm: "find", path: "/" },
+        { kind: "read", comm: "find", path: "/etc" },
+        { kind: "read", comm: "find", path: "/etc/hosts" },
+      ),
+      PREFIXES,
+    );
+    expect(lines(md)).toEqual(["R find /etc/hosts"]);
+  });
+
+  it("keeps the root when nothing below it was touched", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl({ kind: "write", comm: "sh", path: "/" }),
+      PREFIXES,
+    );
+    expect(lines(md)).toEqual(["W sh /"]);
+  });
+
+  it("finds walked directories among a hundred thousand lines without comparing every pair", () => {
+    // Every line is its own command's, so none has a line below it; comparing
+    // every pair would take minutes at this size.
+    const many = new Set(Array.from({ length: 100_000 }, (_, i) => keyOf(`c${i}`, `/work/f${i}`)));
+    expect(dropWalkedDirs(many, () => ["R"])).toEqual(many);
   });
 });
