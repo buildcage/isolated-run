@@ -232,8 +232,7 @@ func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, e
 
 // bootOffset is CLOCK_REALTIME minus CLOCK_BOOTTIME, read back to back, so
 // adding it to an event's boot timestamp gives the wall-clock time of the
-// access. The reader drains the ring buffer in batches, so the time it reads
-// an event can trail the access by the batch interval.
+// access.
 func bootOffset() (int64, error) {
 	var boot, real unix.Timespec
 	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &boot); err != nil {
@@ -255,10 +254,6 @@ func wallTime(boot uint64, offset int64) string {
 // sandboxed command's first exec belong to runc's own setup and are
 // dropped; the cgroup holds nothing else before then.
 func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error {
-	offset, err := bootOffset()
-	if err != nil {
-		return err
-	}
 	enc := json.NewEncoder(w)
 	counts := map[string]int{}
 	preExec, total := 0, 0
@@ -285,6 +280,12 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 				continue
 			}
 			started = true
+		}
+		// Read per event, so a wall-clock step mid-run (an NTP step) moves the
+		// later times with it, as it moves the proxy's.
+		offset, err := bootOffset()
+		if err != nil {
+			return err
 		}
 		r.Time = wallTime(r.boot, offset)
 		counts[r.Kind]++

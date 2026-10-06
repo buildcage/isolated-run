@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/binary"
 	"testing"
+	"time"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -71,13 +73,32 @@ func TestWallTime(t *testing.T) {
 }
 
 func TestBootOffset(t *testing.T) {
-	// Boot is in the past, so the offset is a positive wall-clock instant.
 	off, err := bootOffset()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if off <= 0 {
-		t.Fatalf("bootOffset = %d, want > 0", off)
+	var boot unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &boot); err != nil {
+		t.Fatal(err)
+	}
+	got, err := time.Parse(time.RFC3339Nano, wallTime(uint64(boot.Nano()), off))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(got); d < -time.Second || d > time.Second {
+		t.Fatalf("boot time now converts to %s, %s from the wall clock", got, d)
+	}
+}
+
+// decode reads the header by hand; this pins its offsets to the layout the
+// compiler gave struct event.
+func TestHeaderMatchesEvent(t *testing.T) {
+	var e filesystemAuditEvent
+	if got := unsafe.Offsetof(e.Ts); got != 56 {
+		t.Fatalf("ts at %d, decode reads 56", got)
+	}
+	if got := unsafe.Offsetof(e.Data); got != hdrLen {
+		t.Fatalf("data at %d, hdrLen is %d", got, hdrLen)
 	}
 }
 

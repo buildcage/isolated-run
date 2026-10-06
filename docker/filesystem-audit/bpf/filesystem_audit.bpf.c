@@ -92,7 +92,7 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	K_DELETE_FAILED = 16, K_RENAME_FAILED = 17, K_CHMOD_FAILED = 18,
 	K_CHOWN_FAILED = 19, K_ATTR = 20, K_ATTR_FAILED = 21 };
 
-// Fixed header, then data_len bytes of data:
+// Fixed header (mirrored by hdrLen in decode.go), then data_len bytes of data:
 //   open:    d_path result (path_len is its return value)
 //   open-failed: the name as passed to open(2), possibly relative; path_len
 //            holds the errno
@@ -117,7 +117,7 @@ struct event {
 	u8 trunc2;     // the second path of a rename or link
 	char comm[16];
 	u32 pad;
-	u64 ts; // CLOCK_BOOTTIME when the access happened, not when it is read
+	u64 ts; // CLOCK_BOOTTIME at the access; a failed syscall's is its entry
 	char data[DATA_SZ + NAME_LEN]; // slack: masked offset + one component
 };
 
@@ -157,6 +157,7 @@ struct {
 struct pending {
 	u64 p1;
 	u64 p2;
+	u64 ts;
 	u32 kind;    // emitted on failure
 	u32 kind_ok; // emitted on success, 0 to skip
 };
@@ -193,6 +194,7 @@ static __always_inline struct event *start(u32 kind)
 	e->truncated = 0;
 	e->trunc2 = 0;
 	bpf_get_current_comm(e->comm, sizeof(e->comm));
+	e->pad = 0;
 	e->ts = bpf_ktime_get_boot_ns();
 	return e;
 }
@@ -538,6 +540,7 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 // before the syscall returns.
 struct name_buf {
 	char name[PATH_LEN];
+	u64 ts;
 };
 
 struct {
@@ -559,6 +562,9 @@ static __always_inline void open_enter(void)
 	e->data[0] = 0;
 	// Seed from scratch so the hash value starts as an empty string.
 	bpf_map_update_elem(&open_names, &id, e->data, BPF_ANY);
+	struct name_buf *nb = bpf_map_lookup_elem(&open_names, &id);
+	if (nb)
+		nb->ts = bpf_ktime_get_boot_ns();
 }
 
 static __always_inline void open_exit(long ret)
@@ -570,6 +576,7 @@ static __always_inline void open_exit(long ret)
 	if (ret < 0) {
 		struct event *e = start(K_OPEN_FAILED);
 		if (e) {
+			e->ts = nb->ts;
 			e->path_len = -ret;
 			long r = bpf_probe_read_kernel_str(e->data, PATH_LEN, nb->name);
 			e->data_len = r > 0 ? r : 0;
@@ -717,7 +724,9 @@ static __always_inline void op_enter2(u32 kind, u32 kind_ok, u64 p1, u64 p2)
 	if (!in_target())
 		return;
 	u64 id = bpf_get_current_pid_tgid();
-	struct pending pend = {.p1 = p1, .p2 = p2, .kind = kind, .kind_ok = kind_ok};
+	struct pending pend = {
+		.p1 = p1, .p2 = p2, .ts = bpf_ktime_get_boot_ns(), .kind = kind, .kind_ok = kind_ok,
+	};
 	bpf_map_update_elem(&pending_ops, &id, &pend, BPF_ANY);
 }
 
@@ -739,6 +748,7 @@ static __always_inline void op_exit(long ret)
 	}
 	struct event *e = start(kind);
 	if (e) {
+		e->ts = pend->ts;
 		if (ret < 0)
 			e->path_len = -ret;
 		long r = bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1);
