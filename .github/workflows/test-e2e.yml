@@ -146,9 +146,9 @@ jobs:
       # No cleanup step: the action stops its own proxy container in its
       # finally block.
 
-  # Runs a real sandboxed step with filesystem_audit and checks the tracer
-  # recorded its file accesses; a test-hooks build surfaces the recording for
-  # the assertion.
+  # Runs a real sandboxed step with filesystem_mode: ephemeral and
+  # filesystem_audit and checks the tracer recorded its file accesses; a
+  # test-hooks build surfaces the recording for the assertion.
   test_sandbox_filesystem_audit:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
@@ -193,6 +193,7 @@ jobs:
         with:
           proxy_engine: universal
           proxy_mode: audit
+          filesystem_mode: ephemeral
           filesystem_audit: record
           run: |
             cat /etc/hostname > /dev/null
@@ -203,9 +204,10 @@ jobs:
       - name: Verify the Job Summary has the filesystem audit
         run: |
           f="${{ runner.temp }}/summary.md"
+          echo "::group::Filesystem audit summary"; cat "$f"; echo "::endgroup::"
           grep -q "Filesystem audit" "$f"
           # The probe writes show as a flagged, command-tagged line under the workspace.
-          grep -qE '^[RWXMDArwxmda!]+ +\S+ +\./probe' "$f" || { cat "$f"; exit 1; }
+          grep -qE '^[RWXMDArwxmda!]+ +\S+ +\./probe' "$f" || exit 1
 
       - name: Download and check the filesystem audit artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -216,6 +218,7 @@ jobs:
         run: |
           f=$(ls ${{ runner.temp }}/audit/*.jsonl)
           test -s "$f"
+          echo "::group::Recorded events (first lines)"; head -20 "$f"; echo "::endgroup::"
           grep -q '"kind":"write"' "$f"
 
   # One representative case through the real action wrapper, against real
