@@ -214,12 +214,15 @@ jobs:
         with:
           name: ${{ steps.audit.outputs.filesystem_audit_artifact_name }}
           path: ${{ runner.temp }}/audit
-      - name: The artifact holds the recorded events
+      - name: The artifact holds the step's events with buildcage's own stripped out
         run: |
           f=$(ls ${{ runner.temp }}/audit/*.jsonl)
           test -s "$f"
           echo "::group::Recorded events (first lines)"; head -20 "$f"; echo "::endgroup::"
           grep -q '"kind":"write"' "$f"
+          # buildcage's own exec wrappers and scratch files must not leak.
+          ! grep -q '"comm":"setpriv"' "$f"
+          ! grep -q '/var/tmp/buildcage-' "$f"
 
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network), proves proxy_engine: universal

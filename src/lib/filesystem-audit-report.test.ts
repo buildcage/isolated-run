@@ -36,6 +36,7 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
     appended,
     deps: {
       readFile: () => JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
+      writeFile: () => {},
       realpath: (p) => p,
       writeStepSummary: async (md) => void summaries.push(md),
       uploadArtifact: async (outPath) => {

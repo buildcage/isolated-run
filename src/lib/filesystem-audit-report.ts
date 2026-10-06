@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
@@ -9,17 +9,9 @@ import {
   setFilesystemAuditOutput,
   uploadFilesystemAuditArtifact,
 } from "./filesystem-audit-artifact.ts";
+import { stripSandboxMachinery } from "./filesystem-audit-strip.ts";
 import { renderFilesystemAuditSummary } from "./filesystem-audit-summary.ts";
 import type { FilesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
-
-// buildcage wraps the step in its own exec chain (sandbox/oci-config.ts:
-// setpriv -- env-loader.sh, which execs `env -i` then run-script.sh with the
-// step's command). Those processes are machinery, so their accesses are
-// dropped and the step's shell (run-script.sh) is shown as plain bash.
-const SANDBOX_WRAPPER = {
-  commands: ["setpriv", "env-loader.sh", "env"],
-  rename: { "run-script.sh": "bash" },
-};
 
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */
@@ -32,6 +24,7 @@ export interface FilesystemAuditReportOptions {
 
 export interface FilesystemAuditReportDeps {
   readFile: (path: string) => string;
+  writeFile: (path: string, content: string) => void;
   realpath: (path: string) => string;
   writeStepSummary: typeof writeStepSummary;
   uploadArtifact: typeof uploadFilesystemAuditArtifact;
@@ -44,6 +37,7 @@ export interface FilesystemAuditReportDeps {
 /* v8 ignore start */
 const realDeps: FilesystemAuditReportDeps = {
   readFile: (path) => readFileSync(path, "utf8"),
+  writeFile: (path, content) => writeFileSync(path, content),
   realpath: (path) => realpathSync(path),
   writeStepSummary,
   uploadArtifact: uploadFilesystemAuditArtifact,
@@ -78,19 +72,21 @@ export async function reportStepFilesystemAudit(
 ): Promise<void> {
   const deps = { ...realDeps, ...overrides };
   let artifactName = "";
-  const jsonl = audit && readOptional(audit.outPath, deps.readFile);
-  if (audit && jsonl) {
+  const raw = audit && readOptional(audit.outPath, deps.readFile);
+  if (audit && raw) {
+    // The recording is written under the scratch base (see
+    // sandbox/filesystem-audit.ts), next to the exec wrapper's own files, so its
+    // directory is the one holding buildcage's own machinery. Strip that out
+    // once and feed the result to both the summary and the uploaded artifact.
+    const clean = stripSandboxMachinery(raw, dirname(audit.outPath));
+    deps.writeFile(audit.outPath, clean);
     // The summary and the upload are independent: a render failure (e.g. a
-    // line the tracer left truncated) must not also drop the raw artifact,
-    // which is most wanted when the recording is incomplete.
+    // line the tracer left truncated) must not also drop the artifact, which is
+    // most wanted when the recording is incomplete.
     try {
-      const markdown = renderFilesystemAuditSummary(jsonl, {
+      const markdown = renderFilesystemAuditSummary(clean, {
         workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
         home: prefixes(env.HOME, deps.realpath),
-        // The recording is written under the scratch base (see
-        // sandbox/filesystem-audit.ts), next to the exec wrapper's own files, so
-        // its directory is the prefix whose contents are buildcage's own.
-        sandbox: { paths: [dirname(audit.outPath)], ...SANDBOX_WRAPPER },
       });
       await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY);
       mirrorForDebug(markdown, env, deps.appendFile);
