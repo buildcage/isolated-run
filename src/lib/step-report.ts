@@ -58,7 +58,8 @@ export interface ReportStepOptions {
 
 /**
  * Fetch the proxy's report, write the Job Summary, and upload the traffic
- * artifact if one was asked for.
+ * artifact if one was asked for. Returns the proxy's start time, which the
+ * filesystem audit counts from too, or undefined when it is unknown.
  *
  * Never throws. A failure here is a warning naming the step that failed, and
  * under `restrict` with fail_on_blocked it also fails the step: a report that
@@ -79,7 +80,7 @@ export async function reportStepTraffic(
     env,
   }: ReportStepOptions,
   overrides: Partial<ReportStepDeps> = {},
-): Promise<void> {
+): Promise<number | undefined> {
   const {
     fetchReport,
     readActionVersion,
@@ -149,4 +150,5 @@ export async function reportStepTraffic(
   } catch (e) {
     fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
   }
+  return report?.startedAt;
 }

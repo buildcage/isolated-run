@@ -3,10 +3,19 @@ import { describe, it, expect } from "vitest";
 
 import { renderFilesystemAuditSummary } from "./filesystem-audit-summary.ts";
 
-const PREFIXES = { workspace: ["/work"], home: ["/home/u"] };
+const START = 1_791_244_800; // epoch seconds
+const PREFIXES = { workspace: ["/work"], home: ["/home/u"], startedAt: START };
+
+// Up to two minutes after the start, so every time prints as MM:SS.mmm, plus an
+// unparsable value standing in for a damaged record.
+const timeArb = fc.oneof(
+  fc.integer({ min: 0, max: 120_000 }).map((ms) => new Date(START * 1000 + ms).toISOString()),
+  fc.constant("garbage"),
+);
 
 const recordArb = fc.record(
   {
+    t: timeArb,
     comm: fc.constantFrom("node", "cat", "bash", "sh"),
     kind: fc.constantFrom("read", "write", "exec", "mmap", "open", "unlink", "rename", "chmod"),
     path: fc.constantFrom(
@@ -25,9 +34,18 @@ const recordArb = fc.record(
   },
   { requiredKeys: ["comm", "kind", "path"] },
 );
-const jsonlArb = fc
-  .array(recordArb, { maxLength: 40 })
-  .map((rs) => rs.map((r) => JSON.stringify(r)).join("\n"));
+const recordsArb = fc.array(recordArb, { maxLength: 40 });
+const toJsonl = (rs: object[]): string => rs.map((r) => JSON.stringify(r)).join("\n");
+const jsonlArb = recordsArb.map(toJsonl);
+
+function rows(md: string): string[] {
+  const block = md.match(/```\n([\s\S]*?)\n```/);
+  return block ? block[1].split("\n") : [];
+}
+
+const TIME = /^(\d\d):(\d\d)\.(\d{3})(?:-(\d\d):(\d\d)\.(\d{3}))?:/;
+const ms = (m: string, sec: string, milli: string): number =>
+  (Number(m) * 60 + Number(sec)) * 1000 + Number(milli);
 
 describe("renderFilesystemAuditSummary: properties", () => {
   it("always leads with the heading and emits only well-formed rows", () => {
@@ -38,8 +56,52 @@ describe("renderFilesystemAuditSummary: properties", () => {
         const block = md.match(/```\n([\s\S]*?)\n```/);
         if (block)
           for (const row of block[1].split("\n"))
-            // flag column, command column, then a path, all space-separated.
-            expect(row).toMatch(/^[RWXMDArwxmda!]+ +\S+ +\S/);
+            // An optional time column, then flags, command and a path.
+            expect(row).toMatch(/^(?:(?:[\d:.-]+:)? +)?[RWXMDArwxmda!]+ +\S+ +\S/);
+      }),
+    );
+  });
+
+  it("adds no rows for the times: the same rows print with or without them", () => {
+    fc.assert(
+      fc.property(recordsArb, (rs) => {
+        const untimed = rs.map(({ t: _t, ...r }) => r);
+        const strip = (row: string): string => row.replace(TIME, "").trim().replace(/\s+/g, " ");
+        const timed = rows(renderFilesystemAuditSummary(toJsonl(rs), PREFIXES)).map(strip);
+        const plain = rows(renderFilesystemAuditSummary(toJsonl(untimed), PREFIXES)).map(strip);
+        expect(timed.toSorted()).toEqual(plain.toSorted());
+      }),
+    );
+  });
+
+  it("orders rows by first access, each span forward, untimed rows last", () => {
+    // The recording's own order, with times rising along it as the tracer
+    // stamps them; missing or damaged times stay where they fell.
+    const risingArb = recordsArb.map((rs) => {
+      const stamped = (t: string | undefined): t is string => t !== undefined && t !== "garbage";
+      const times = rs
+        .map((r) => r.t)
+        .filter(stamped)
+        .toSorted((a, b) => a.localeCompare(b));
+      let i = 0;
+      return toJsonl(rs.map((r) => (stamped(r.t) ? { ...r, t: times[i++] } : r)));
+    });
+    fc.assert(
+      fc.property(risingArb, (jsonl) => {
+        let prev = -1;
+        let untimedSeen = false;
+        for (const row of rows(renderFilesystemAuditSummary(jsonl, PREFIXES))) {
+          const m = row.match(TIME);
+          if (!m) {
+            untimedSeen = true;
+            continue;
+          }
+          expect(untimedSeen).toBe(false);
+          const first = ms(m[1], m[2], m[3]);
+          expect(first).toBeGreaterThanOrEqual(prev);
+          if (m[4]) expect(ms(m[4], m[5], m[6])).toBeGreaterThan(first);
+          prev = first;
+        }
       }),
     );
   });

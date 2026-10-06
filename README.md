@@ -430,10 +430,10 @@ to the old `writable:` and `allow_write:` inputs are all in
 > `filesystem_audit` is **experimental**: its behavior, inputs, and output format may still change.
 
 `filesystem_audit: record` records what the isolated step reads, writes, moves, deletes, changes the
-attributes of, and executes, and adds a section to the Job Summary with one line per path and a flag
-for each action (`R` read, `W` write, `X` exec, `M` move, `D` delete, `A` attr; lowercase for an
-action that only failed, `!` for one the sandbox refused). The full record is uploaded as a
-`buildcage-filesystem-audit-<id>` artifact; treat it as sensitive.
+attributes of, and executes, and adds a section to the Job Summary with one line per path, the first
+and last time it was touched, and a flag for each action (`R` read, `W` write, `X` exec, `M` move,
+`D` delete, `A` attr; lowercase for an action that only failed, `!` for one the sandbox refused).
+The full record is uploaded as a `buildcage-filesystem-audit-<id>` artifact; treat it as sensitive.
 
 ```yaml
 - uses: buildcage/isolated-run@v2

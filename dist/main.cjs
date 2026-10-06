@@ -68339,6 +68339,28 @@ function stripSandboxMachinery(jsonl, scratchBase) {
 	}), out.join("\n");
 }
 //#endregion
+//#region src/core/lib/report/elapsed-time.ts
+function toParts(elapsedSeconds) {
+	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
+	return {
+		hours: Math.floor(totalMinutes / 60),
+		minutes,
+		seconds,
+		ms
+	};
+}
+function pad(n, width = 2) {
+	return String(n).padStart(width, "0");
+}
+function formatElapsedVariable(elapsedSeconds) {
+	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
+	return hours === 0 ? `${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
+}
+function formatElapsedFixed(elapsedSeconds) {
+	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
+	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
+}
+//#endregion
 //#region src/lib/filesystem-audit-summary.ts
 const LETTER = {
 	read: "R",
@@ -68394,6 +68416,26 @@ function addFlag(m, key, flag) {
 	let set = m.get(key);
 	set || m.set(key, set = new Set()), set.add(flag);
 }
+function widen(m, key, span) {
+	if (!span) return;
+	let cur = m.get(key);
+	cur ? (cur.first = Math.min(cur.first, span.first), cur.last = Math.max(cur.last, span.last), cur.seq = Math.min(cur.seq, span.seq)) : m.set(key, { ...span });
+}
+function widenLetter(m, key, letter, t, seq) {
+	let byLetter = m.get(key);
+	byLetter || m.set(key, byLetter = new Map());
+	let cur = byLetter.get(letter);
+	cur ? (cur.first = Math.min(cur.first, t), cur.last = Math.max(cur.last, t)) : byLetter.set(letter, {
+		first: t,
+		last: t,
+		seq
+	});
+}
+function fmtSpan(span, originMs) {
+	if (!span) return "";
+	let first = formatElapsedVariable((span.first - originMs) / 1e3), last = formatElapsedVariable((span.last - originMs) / 1e3);
+	return first === last ? first : `${first}-${last}`;
+}
 const keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1);
 function collapse(paths, fanout, keep) {
 	let children = new Map();
@@ -68423,9 +68465,9 @@ function fmtFlags(ok, failed, perm) {
 	for (let c of "RWXMDA") ok.has(c) ? out += c : failed.has(c) && (out += c.toLowerCase() + (perm.has(c) ? "!" : ""));
 	return out;
 }
-const HEADING = "### Filesystem audit";
+const LEGEND = "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit";
 function renderFilesystemAuditSummary(jsonl, prefixes) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set();
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), seq = 0;
 	for (let line of jsonl.split("\n")) {
 		if (!line) continue;
 		let r;
@@ -68441,25 +68483,27 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		r.kind === "exec" && r.path && execd.add(r.path);
 		let c = classify(r);
 		if (!c) continue;
-		let key = keyOf(r.comm ?? "", c.path);
-		c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
+		let key = keyOf(r.comm ?? "", c.path), t = Date.parse(r.t ?? "");
+		Number.isNaN(t) || widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++), c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
 	}
 	let libDrop = new Set([
 		...libs,
 		...execd,
 		"/etc/ld.so.cache"
 	]);
-	for (let key of ok.keys()) libDrop.has(pathOf(key)) && ok.get(key).delete("R");
-	let nok = new Map(), nfailed = new Map(), nperm = new Map(), mergeInto = (dst, src, keepRelative) => {
+	for (let key of ok.keys()) libDrop.has(pathOf(key)) && (ok.get(key).delete("R"), okSpans.get(key)?.delete("R"));
+	let nok = new Map(), nfailed = new Map(), nperm = new Map(), nspans = new Map(), mergeInto = (dst, src, keepRelative, srcSpans) => {
 		for (let [key, set] of src) {
 			let p = pathOf(key);
 			if (/^(pipe|socket|anon_inode):/.test(p) || !keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
-			let nk = keyOf(commOf(key), normalize$2(p)), dstSet = dst.get(nk);
+			let nk = keyOf(commOf(key), normalize$2(p));
+			for (let span of srcSpans?.get(key)?.values() ?? []) widen(nspans, nk, span);
+			let dstSet = dst.get(nk);
 			dstSet || dst.set(nk, dstSet = new Set());
 			for (let c of set) dstSet.add(c);
 		}
 	};
-	mergeInto(nok, ok, !1), mergeInto(nfailed, failed, !0), mergeInto(nperm, perm, !0);
+	mergeInto(nok, ok, !1, okSpans), mergeInto(nfailed, failed, !0, failedSpans), mergeInto(nperm, perm, !0);
 	let keep = new Set([
 		"/",
 		"/home",
@@ -68475,10 +68519,10 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 	}
 	let shown = new Map();
 	for (let [comm, paths] of byComm) for (let [p, line] of collapse(paths, fanout, keep)) shown.set(keyOf(comm, p), keyOf(comm, line));
-	let lineOk = new Map(), lineFailed = new Map(), linePerm = new Map(), union = (dst, key, src) => {
+	let lineOk = new Map(), lineFailed = new Map(), linePerm = new Map(), lineSpans = new Map(), union = (dst, key, src) => {
 		if (src) for (let c of src) addFlag(dst, key, c);
 	};
-	for (let [pk, lk] of shown) union(lineOk, lk, nok.get(pk)), union(lineFailed, lk, nfailed.get(pk)), union(linePerm, lk, nperm.get(pk));
+	for (let [pk, lk] of shown) union(lineOk, lk, nok.get(pk)), union(lineFailed, lk, nfailed.get(pk)), union(linePerm, lk, nperm.get(pk)), widen(lineSpans, lk, nspans.get(pk));
 	let keys = new Set(shown.values()), base = (p) => p.endsWith("/**") ? p.slice(0, -3) : p;
 	for (let l of keys) {
 		let lpath = pathOf(l);
@@ -68495,7 +68539,11 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 	let rows = [];
 	for (let lk of keys) {
 		let o = lineOk.get(lk) ?? new Set(), fl = new Set([...lineFailed.get(lk) ?? []].filter((c) => !o.has(c))), flags = fmtFlags(o, fl, new Set([...linePerm.get(lk) ?? []].filter((c) => fl.has(c))));
-		flags && rows.push({
+		if (!flags) continue;
+		let span = lineSpans.get(lk);
+		rows.push({
+			span,
+			seq: span?.seq ?? Infinity,
 			flags,
 			comm: commOf(lk),
 			path: relativize(pathOf(lk), prefixes)
@@ -68503,10 +68551,10 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 	}
 	if (rows.sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
-		return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
+		return a.seq - b.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
 	}), rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
-	let flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r) => `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
-	return `${HEADING}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
+	let originMs = prefixes.startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.span?.first ?? Infinity), Infinity) : prefixes.startedAt * 1e3, times = rows.map((r) => fmtSpan(r.span, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
+	return `${HEADING}\n\n<sub>${timeW ? `first-last access · ${LEGEND}` : LEGEND}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
 }
 //#endregion
 //#region src/lib/filesystem-audit-report.ts
@@ -68528,7 +68576,7 @@ function prefixes(value, realpath) {
 	} catch {}
 	return out;
 }
-async function reportStepFilesystemAudit({ audit, retentionDays, containerName, annotation, env }, overrides = {}) {
+async function reportStepFilesystemAudit({ audit, startedAt, retentionDays, containerName, annotation, env }, overrides = {}) {
 	let deps = {
 		...realDeps$3,
 		...overrides
@@ -68538,7 +68586,8 @@ async function reportStepFilesystemAudit({ audit, retentionDays, containerName, 
 		try {
 			let markdown = renderFilesystemAuditSummary(clean, {
 				workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-				home: prefixes(env.HOME, deps.realpath)
+				home: prefixes(env.HOME, deps.realpath),
+				startedAt
 			});
 			await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY), deps.appendFile;
 		} catch (e) {
@@ -72132,28 +72181,6 @@ function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
 	})));
 }
 //#endregion
-//#region src/core/lib/report/elapsed-time.ts
-function toParts(elapsedSeconds) {
-	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
-	return {
-		hours: Math.floor(totalMinutes / 60),
-		minutes,
-		seconds,
-		ms
-	};
-}
-function pad(n, width = 2) {
-	return String(n).padStart(width, "0");
-}
-function formatElapsedVariable(elapsedSeconds) {
-	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
-	return hours === 0 ? `${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
-}
-function formatElapsedFixed(elapsedSeconds) {
-	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
-	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
-}
-//#endregion
 //#region src/core/lib/report/render/communication-section.ts
 const COMMUNICATION_DETAILS_OPEN = "<details>\n<summary>💬 Communication details</summary>\n\n", COMMUNICATION_DETAILS_CLOSE = "</details>\n";
 function wrapCommunicationDetails(body) {
@@ -72519,6 +72546,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	} catch (e) {
 		fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
 	}
+	return report?.startedAt;
 }
 //#endregion
 //#region src/lib/sudo-preflight.ts
@@ -72690,27 +72718,28 @@ async function runSandboxStep(env, overrides = {}) {
 			cancel: cancel.signal
 		});
 	} finally {
-		await reportStepTraffic({
-			containerName,
-			proxyEngine,
-			parameters: {
-				mode: proxyMode,
-				allowedHttpsRules: httpsRules,
-				allowedHttpRules: httpRules,
-				allowedIpRules: ipRules,
-				allowedTlsRules: tlsRules,
-				allowedUrlRules: urlRules,
-				knownBlockedRules
-			},
-			annotation,
-			actionRepo,
-			actionRef: reportActionRef,
-			runCommand: runInput,
-			failOnBlocked,
-			trafficArtifact,
-			env
-		}), await reportStepFilesystemAudit({
+		await reportStepFilesystemAudit({
 			audit,
+			startedAt: await reportStepTraffic({
+				containerName,
+				proxyEngine,
+				parameters: {
+					mode: proxyMode,
+					allowedHttpsRules: httpsRules,
+					allowedHttpRules: httpRules,
+					allowedIpRules: ipRules,
+					allowedTlsRules: tlsRules,
+					allowedUrlRules: urlRules,
+					knownBlockedRules
+				},
+				annotation,
+				actionRepo,
+				actionRef: reportActionRef,
+				runCommand: runInput,
+				failOnBlocked,
+				trafficArtifact,
+				env
+			}),
 			retentionDays: filesystemAuditRetentionDays,
 			containerName,
 			annotation,

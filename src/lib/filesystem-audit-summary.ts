@@ -1,11 +1,15 @@
 /**
  * Renders the tracer's JSON lines (see docker/filesystem-audit) into the
  * filesystem-audit Job Summary: one row per command and path, a flag per
- * action. Pure, so it is tested directly; the caller resolves the workspace and
- * $HOME prefixes (both the raw and realpath forms) and hands them in.
+ * action, in the order the rows were first touched. Pure, so it is tested
+ * directly; the caller resolves the workspace and $HOME prefixes (both the raw
+ * and realpath forms) and hands them in.
  */
 
+import { formatElapsedVariable } from "#core/lib/report/elapsed-time.ts";
+
 interface AuditRecord {
+  t?: string;
   kind: string;
   comm?: string;
   path?: string;
@@ -79,13 +83,15 @@ function normalize(path: string): string {
   return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
 }
 
-export interface SummaryPrefixes {
+export interface SummaryOptions {
   workspace: string[];
   home: string[];
+  /** The proxy's start, in epoch seconds. */
+  startedAt?: number;
   fanout?: number;
 }
 
-function relativize(path: string, prefixes: SummaryPrefixes): string {
+function relativize(path: string, prefixes: SummaryOptions): string {
   for (const ws of prefixes.workspace) {
     if (path === ws) return ".";
     if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
@@ -111,6 +117,48 @@ function addFlag(m: Map<string, Set<string>>, key: string, flag: string): void {
   let set = m.get(key);
   if (!set) m.set(key, (set = new Set()));
   set.add(flag);
+}
+
+// The first and last access a row stands for, in epoch milliseconds, and the
+// earliest one's place in the recording, which orders the rows.
+interface Span {
+  first: number;
+  last: number;
+  seq: number;
+}
+
+function widen(m: Map<string, Span>, key: string, span: Span | undefined): void {
+  if (!span) return;
+  const cur = m.get(key);
+  if (!cur) m.set(key, { ...span });
+  else {
+    cur.first = Math.min(cur.first, span.first);
+    cur.last = Math.max(cur.last, span.last);
+    cur.seq = Math.min(cur.seq, span.seq);
+  }
+}
+
+// Spans per key and action letter, so an action the summary drops (a library's
+// read, a success under a relative name) takes its times with it.
+type LetterSpans = Map<string, Map<string, Span>>;
+
+// The first record seen for a key and letter has the lowest seq.
+function widenLetter(m: LetterSpans, key: string, letter: string, t: number, seq: number): void {
+  let byLetter = m.get(key);
+  if (!byLetter) m.set(key, (byLetter = new Map()));
+  const cur = byLetter.get(letter);
+  if (!cur) byLetter.set(letter, { first: t, last: t, seq });
+  else {
+    cur.first = Math.min(cur.first, t);
+    cur.last = Math.max(cur.last, t);
+  }
+}
+
+function fmtSpan(span: Span | undefined, originMs: number): string {
+  if (!span) return "";
+  const first = formatElapsedVariable((span.first - originMs) / 1000);
+  const last = formatElapsedVariable((span.last - originMs) / 1000);
+  return first === last ? first : `${first}-${last}`;
 }
 
 // Rows are keyed per (command, path). NUL cannot occur in either, so it joins
@@ -160,18 +208,21 @@ function fmtFlags(ok: Set<string>, failed: Set<string>, perm: Set<string>): stri
 }
 
 const LEGEND =
-  "<sub>R read · W write · X exec · M move · D delete · A attr · " +
-  "lowercase = failed · ! = denied</sub>";
+  "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied";
+const TIME_LEGEND = "first-last access";
 const HEADING = "### Filesystem audit";
 
-export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPrefixes): string {
+export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOptions): string {
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
   const ok = new Map<string, Set<string>>();
   const failed = new Map<string, Set<string>>();
   const perm = new Map<string, Set<string>>();
   const libs = new Set<string>();
   const execd = new Set<string>();
+  const okSpans: LetterSpans = new Map();
+  const failedSpans: LetterSpans = new Map();
 
+  let seq = 0;
   for (const line of jsonl.split("\n")) {
     if (!line) continue;
     let r: AuditRecord;
@@ -188,6 +239,10 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
     const c = classify(r);
     if (!c) continue;
     const key = keyOf(r.comm ?? "", c.path);
+    const t = Date.parse(r.t ?? "");
+    if (!Number.isNaN(t)) {
+      widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++);
+    }
     if (c.failed) {
       addFlag(failed, key, c.letter);
       if (PERM_ERRNO.has(r.err ?? 0)) addFlag(perm, key, c.letter);
@@ -198,16 +253,22 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
 
   // A library or an exec'd binary is already shown by its X; drop its read.
   const libDrop = new Set([...libs, ...execd, "/etc/ld.so.cache"]);
-  for (const key of ok.keys()) if (libDrop.has(pathOf(key))) ok.get(key)!.delete("R");
+  for (const key of ok.keys())
+    if (libDrop.has(pathOf(key))) {
+      ok.get(key)!.delete("R");
+      okSpans.get(key)?.delete("R");
+    }
 
   // Re-key on the normalized path, dropping non-file targets.
   const nok = new Map<string, Set<string>>();
   const nfailed = new Map<string, Set<string>>();
   const nperm = new Map<string, Set<string>>();
+  const nspans = new Map<string, Span>();
   const mergeInto = (
     dst: Map<string, Set<string>>,
     src: Map<string, Set<string>>,
     keepRelative: boolean,
+    srcSpans?: LetterSpans,
   ): void => {
     for (const [key, set] of src) {
       const p = pathOf(key);
@@ -219,13 +280,14 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
       // Keep the key even with no flags left (a read-then-dropped library): it
       // still counts toward a directory's collapse, though it prints no row.
       const nk = keyOf(commOf(key), normalize(p));
+      for (const span of srcSpans?.get(key)?.values() ?? []) widen(nspans, nk, span);
       let dstSet = dst.get(nk);
       if (!dstSet) dst.set(nk, (dstSet = new Set()));
       for (const c of set) dstSet.add(c);
     }
   };
-  mergeInto(nok, ok, false);
-  mergeInto(nfailed, failed, true);
+  mergeInto(nok, ok, false, okSpans);
+  mergeInto(nfailed, failed, true, failedSpans);
   mergeInto(nperm, perm, true);
 
   const keep = new Set([
@@ -254,6 +316,7 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
   const lineOk = new Map<string, Set<string>>();
   const lineFailed = new Map<string, Set<string>>();
   const linePerm = new Map<string, Set<string>>();
+  const lineSpans = new Map<string, Span>();
   const union = (
     dst: Map<string, Set<string>>,
     key: string,
@@ -265,6 +328,7 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
     union(lineOk, lk, nok.get(pk));
     union(lineFailed, lk, nfailed.get(pk));
     union(linePerm, lk, nperm.get(pk));
+    widen(lineSpans, lk, nspans.get(pk));
   }
 
   // Drop a bare directory whose flags its own descendants already carry: its
@@ -289,27 +353,57 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryPre
     if (hasDesc && [...flags].every((c) => descFlags.has(c))) keys.delete(l);
   }
 
-  const rows: { flags: string; comm: string; path: string }[] = [];
+  const rows: {
+    span: Span | undefined;
+    seq: number;
+    flags: string;
+    comm: string;
+    path: string;
+  }[] = [];
   for (const lk of keys) {
     const o = lineOk.get(lk) ?? new Set<string>();
     const fl = new Set([...(lineFailed.get(lk) ?? [])].filter((c) => !o.has(c)));
     const flags = fmtFlags(o, fl, new Set([...(linePerm.get(lk) ?? [])].filter((c) => fl.has(c))));
     if (!flags) continue; // a binary seen only as a mapped library
-    rows.push({ flags, comm: commOf(lk), path: relativize(pathOf(lk), prefixes) });
+    const span = lineSpans.get(lk);
+    rows.push({
+      span,
+      // A row with no timestamped record (never from the tracer) goes last.
+      seq: span?.seq ?? Infinity,
+      flags,
+      comm: commOf(lk),
+      path: relativize(pathOf(lk), prefixes),
+    });
   }
+  // In recording order, not by time, which a clock step could reorder. Rows
+  // with no time keep the path order.
   rows.sort((a, b) => {
     const [ca, pa] = sortKey(a.path);
     const [cb, pb] = sortKey(b.path);
-    return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
+    return a.seq - b.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
   });
 
   if (rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
-  // Fixed-width flag and command columns. reduce, not Math.max(...spread),
-  // which overflows the argument limit on very many rows.
+  // Times count from the proxy's start, as the communication details do, or
+  // from the first access shown when that start is unknown.
+  const originMs =
+    prefixes.startedAt === undefined
+      ? rows.reduce((m, r) => Math.min(m, r.span?.first ?? Infinity), Infinity)
+      : prefixes.startedAt * 1000;
+  const times = rows.map((r) => fmtSpan(r.span, originMs));
+  // Fixed-width columns. reduce, not Math.max(...spread), which overflows the
+  // argument limit on very many rows. The time ends in a colon, as in the
+  // communication details.
+  const timeW = times.reduce((m, t) => Math.max(m, t.length), 0);
   const flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0);
   const commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0);
   const body = rows
-    .map((r) => `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`)
+    .map(
+      (r, i) =>
+        `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}` +
+        `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`,
+    )
     .join("\n");
-  return `${HEADING}\n\n${LEGEND}\n\n\`\`\`\n${body}\n\`\`\`\n`;
+  const legend = timeW ? `${TIME_LEGEND} · ${LEGEND}` : LEGEND;
+  return `${HEADING}\n\n<sub>${legend}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
 }

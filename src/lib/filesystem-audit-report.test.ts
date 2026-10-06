@@ -57,7 +57,11 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
 }
 
 describe("reportStepFilesystemAudit", () => {
-  const base = { retentionDays: 3, containerName: "buildcage-proxy-deadbeef" };
+  const base = {
+    startedAt: undefined,
+    retentionDays: 3,
+    containerName: "buildcage-proxy-deadbeef",
+  };
 
   it("renders, uploads and sets the output when a recording exists", async () => {
     const { deps: d, summaries, uploads, outputs, writes } = deps();
@@ -79,6 +83,26 @@ describe("reportStepFilesystemAudit", () => {
     ]);
     expect(uploads).toEqual([CLEAN]);
     expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
+  });
+
+  it("counts the summary's times from the proxy's start", async () => {
+    const { deps: d, summaries } = deps({
+      readFile: () =>
+        JSON.stringify({ t: "2026-10-06T00:00:02.500Z", kind: "read", comm: "a", path: "/w/x" }),
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        startedAt: Date.parse("2026-10-06T00:00:00Z") / 1000,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: {},
+      },
+      d,
+    );
+
+    expect(summaries[0]).toContain("00:02.500: R a /w/x");
   });
 
   it("sets an empty output and does nothing else when the audit was off", async () => {

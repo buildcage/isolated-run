@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 
-import { renderFilesystemAuditSummary, type SummaryPrefixes } from "./filesystem-audit-summary.ts";
+import { renderFilesystemAuditSummary, type SummaryOptions } from "./filesystem-audit-summary.ts";
 
-const PREFIXES: SummaryPrefixes = { workspace: ["/work"], home: ["/home/u"] };
+const PREFIXES: SummaryOptions = { workspace: ["/work"], home: ["/home/u"] };
 
 function jsonl(...records: object[]): string {
   return records.map((r) => JSON.stringify(r)).join("\n");
@@ -27,6 +27,7 @@ describe("renderFilesystemAuditSummary", () => {
       PREFIXES,
     );
     expect(md).toContain("### Filesystem audit");
+    // No record carries a time, so the legend leaves out the time column.
     expect(md).toContain("<sub>R read");
   });
 
@@ -278,5 +279,135 @@ describe("renderFilesystemAuditSummary", () => {
       PREFIXES,
     );
     expect(lines(md)).toEqual(["d node ./d/gone", "R node ./d/x/**"]);
+  });
+
+  describe("times", () => {
+    // 2026-10-06T00:00:00Z in epoch seconds, the proxy's start in these cases.
+    const START = Date.parse("2026-10-06T00:00:00Z") / 1000;
+    const at = (ms: number): string => new Date(START * 1000 + ms).toISOString();
+    const timed = { ...PREFIXES, startedAt: START };
+
+    it("orders rows by first access and shows each row's first-last span", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { t: at(250), kind: "read", comm: "node", path: "/work/a" },
+          { t: at(1500), kind: "read", comm: "node", path: "/etc/hosts" },
+          { t: at(4000), kind: "write", comm: "node", path: "/work/a" },
+        ),
+        timed,
+      );
+      expect(md).toContain("<sub>first-last access · R read");
+      expect(lines(md)).toEqual([
+        "00:00.250-00:04.000: RW node ./a",
+        "00:01.500: R node /etc/hosts",
+      ]);
+    });
+
+    it("orders by the recording, not the clock, when the clock steps back", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { t: at(5000), kind: "read", comm: "a", path: "/work/first" },
+          { t: at(3000), kind: "write", comm: "a", path: "/work/second" },
+        ),
+        timed,
+      );
+      expect(lines(md)).toEqual(["00:05.000: R a ./first", "00:03.000: W a ./second"]);
+    });
+
+    it("leaves a dropped library read out of the row's span", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { t: at(0), kind: "read", comm: "sh", path: "/lib/libc.so.6" },
+          { t: at(0), kind: "mmap", comm: "sh", path: "/lib/libc.so.6", access: "x" },
+          { t: at(5000), kind: "read", comm: "sh", path: "/lib/data" },
+        ),
+        timed,
+      );
+      expect(lines(md)).toEqual(["00:05.000: R sh /lib/data"]);
+    });
+
+    it("leaves a success under a relative name out of the failed row's span", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { t: at(1000), kind: "open-failed", comm: "a", path: "foo", err: 2 },
+          { t: at(30_000), kind: "read", comm: "a", path: "foo" },
+        ),
+        timed,
+      );
+      expect(lines(md)).toEqual(["00:01.000: r a ./foo"]);
+    });
+
+    it("pads a single time to the width of a span", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { t: at(0), kind: "read", comm: "a", path: "/work/x" },
+          { t: at(1000), kind: "read", comm: "a", path: "/work/x" },
+          { t: at(2000), kind: "read", comm: "a", path: "/work/y" },
+        ),
+        timed,
+      );
+      const block = md.match(/```\n([\s\S]*?)\n```/)![1];
+      expect(block.split("\n")).toEqual([
+        "00:00.000-00:01.000: R a ./x",
+        "00:02.000:           R a ./y",
+      ]);
+    });
+
+    it("spans every path folded into a dir/** row", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { t: at(100), kind: "read", comm: "go", path: "/work/d/1" },
+          { t: at(900), kind: "write", comm: "go", path: "/work/d/2" },
+          { t: at(500), kind: "read", comm: "go", path: "/work/d/3" },
+        ),
+        timed,
+      );
+      expect(lines(md)).toEqual(["00:00.100-00:00.900: RW go ./d/**"]);
+    });
+
+    it("keeps recording order among rows first touched in the same millisecond", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { t: at(0), kind: "exec", comm: "mv", path: "/usr/bin/mv" },
+          { t: at(0), kind: "rename", comm: "mv", path: "/work/b" },
+        ),
+        timed,
+      );
+      expect(lines(md)).toEqual(["00:00.000: X mv /usr/bin/mv", "00:00.000: M mv ./b"]);
+    });
+
+    it("counts from the first access shown, not a dropped library read", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { t: at(0), kind: "read", comm: "sh", path: "/etc/ld.so.cache" },
+          { t: at(3), kind: "read", comm: "sh", path: "/work/x" },
+        ),
+        PREFIXES,
+      );
+      expect(lines(md)).toEqual(["00:00.000: R sh ./x"]);
+    });
+
+    it("counts from the first record when the proxy's start is unknown", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { t: at(61_234), kind: "read", comm: "a", path: "/work/x" },
+          { t: at(62_000), kind: "read", comm: "a", path: "/work/y" },
+        ),
+        PREFIXES,
+      );
+      expect(lines(md)).toEqual(["00:00.000: R a ./x", "00:00.766: R a ./y"]);
+    });
+
+    it("puts a row with no timestamp last, with no time", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { kind: "read", comm: "a", path: "/work/a" },
+          { t: "not a time", kind: "read", comm: "a", path: "/work/b" },
+          { t: at(0), kind: "read", comm: "a", path: "/work/c" },
+        ),
+        timed,
+      );
+      expect(lines(md)).toEqual(["00:00.000: R a ./c", "R a ./a", "R a ./b"]);
+    });
   });
 });

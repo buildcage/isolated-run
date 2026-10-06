@@ -63,6 +63,12 @@ describe("reportStepTraffic", () => {
     );
   });
 
+  it("returns the proxy's start for the filesystem audit to count from", async () => {
+    mocks.fetchReport.mockResolvedValue({ engine: "inspect", startedAt: 1_791_244_800 });
+
+    await expect(reportStepTraffic(options(), deps)).resolves.toBe(1_791_244_800);
+  });
+
   it("hands the summary the step's own labelling and the inputs that shape it", async () => {
     await reportStepTraffic(options(), deps);
 

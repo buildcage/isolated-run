@@ -209,8 +209,15 @@ jobs:
           # The raw recording (before stripping) feeds the committed fixtures.
           echo "::group::Raw recording"; cat "${{ runner.temp }}/raw.jsonl" 2>/dev/null || true; echo "::endgroup::"
           grep -q "Filesystem audit" "$f"
-          # The probe writes show as a flagged, command-tagged line under the workspace.
-          grep -qE '^[RWXMDArwxmda!]+ +\S+ +\./probe' "$f" || exit 1
+          # The probe writes show as a flagged, command-tagged line under the
+          # workspace, led by its elapsed time (MM:SS.mmm) and a colon.
+          t='[0-9]{2}:[0-9]{2}\.[0-9]{3}'
+          grep -qE "^$t(-$t)?: +[RWXMDArwxmda!]+ +\S+ +\./probe" "$f" || exit 1
+          # Rows run in the order they were first touched: write, move, delete.
+          w=$(grep -nE ' W +bash +\./probe\.txt$' "$f" | head -1 | cut -d: -f1)
+          m=$(grep -nE ' M +mv +\./probe\.txt$' "$f" | head -1 | cut -d: -f1)
+          d=$(grep -nE ' D +rm +\./probe2\.txt$' "$f" | head -1 | cut -d: -f1)
+          [ -n "$w" ] && [ -n "$m" ] && [ -n "$d" ] && [ "$w" -lt "$m" ] && [ "$m" -lt "$d" ]
           # buildcage's own wrappers must never reach the summary.
           ! grep -qE ' (setpriv|env-loader\.sh|run-script\.sh) ' "$f"
 

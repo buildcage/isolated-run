@@ -16,6 +16,8 @@ import type { FilesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */
   audit: FilesystemAuditPaths | undefined;
+  /** The proxy's start, in epoch seconds; undefined counts from the first access shown. */
+  startedAt: number | undefined;
   retentionDays: number | undefined;
   containerName: string;
   annotation: Annotation;
@@ -67,7 +69,7 @@ function prefixes(value: string | undefined, realpath: (p: string) => string): s
  * set so a later step can read it. Does nothing when nothing was recorded.
  */
 export async function reportStepFilesystemAudit(
-  { audit, retentionDays, containerName, annotation, env }: FilesystemAuditReportOptions,
+  { audit, startedAt, retentionDays, containerName, annotation, env }: FilesystemAuditReportOptions,
   overrides: Partial<FilesystemAuditReportDeps> = {},
 ): Promise<void> {
   const deps = { ...realDeps, ...overrides };
@@ -86,6 +88,7 @@ export async function reportStepFilesystemAudit(
       const markdown = renderFilesystemAuditSummary(clean, {
         workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
         home: prefixes(env.HOME, deps.realpath),
+        startedAt,
       });
       await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY);
       mirrorForDebug(env, deps.appendFile, raw, markdown);

@@ -730,25 +730,28 @@ repository can fetch it through the API, until it expires.
 
 **Experimental.** `filesystem_audit: record` records every file the isolated step opens, reads,
 writes, moves, deletes, changes the attributes of, and executes, and adds a section to the Job
-Summary with one row per command and path:
+Summary with one row per command and path, in the order the rows were first touched:
 
 ```
 ### Filesystem audit
-R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied
+first-last access · R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied
 
-RWD node ./node_modules/**
-R   node ./package.json
-r!  node /etc/shadow
+00:00.412:           R   node ./package.json
+00:00.415:           r!  node /etc/shadow
+00:00.530-00:41.207: RWD node ./node_modules/**
 ```
 
 Each row names the command (its process name) and combines its flags for that path (`RW` read and
-written). An action that only ever failed is lowercase, and one the sandbox refused, for want of
-permission or because the location is read-only, is marked `!`. A directory with many touched
-children is shown once as
-`dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and `$HOME` (`~/…`), else
-absolute. A failed access is recorded under the name the command used, which may be relative to its
-working directory (`$GITHUB_WORKSPACE` unless the command changed it); such a name is shown as `./…`.
-The libraries a command loads are left out.
+written). The time is when the command first and last touched it, counted from the proxy's start
+like the communication details (from the first access if that start is unknown); a row touched once
+shows one time. It does not say which action came when, and a file kept open counts only its first
+read and first write, so the last time can be earlier than its last write. The artifact has every
+access in order. An action that only ever failed is lowercase, and one the sandbox refused, for want
+of permission or because the location is read-only, is marked `!`. A directory with many touched
+children is shown once as `dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and
+`$HOME` (`~/…`), else absolute. A failed access is recorded under the name the command used, which
+may be relative to its working directory (`$GITHUB_WORKSPACE` unless the command changed it); such a
+name is shown as `./…`. The libraries a command loads are left out.
 
 The full record is uploaded as JSON lines in an artifact named `buildcage-filesystem-audit-<id>`,
 with absolute paths; `filesystem_audit_artifact_name` carries its name. Treat it as sensitive, like
