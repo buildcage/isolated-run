@@ -159,6 +159,46 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "fork", PID: 9, PPID: 7, Comm: "bash"},
 		},
 		{
+			name: "failed delete, relative to a dirfd",
+			ev: event{kind: 16, comm: "go", pathRet: int32(unix.ENOENT), argsLen: 1, mode: 2,
+				data: append([]byte("b001\x00"), comps("go-build1", "tmp")...)},
+			want: record{Kind: "delete", Comm: "go", Path: "/tmp/go-build1/b001", Err: int32(unix.ENOENT), Failed: true},
+		},
+		{
+			name: "failed open, relative to the cwd",
+			ev: event{kind: 12, comm: "asm", pathRet: int32(unix.ENOENT), argsLen: 1, mode: 2,
+				data: append([]byte("./textflag.h\x00"), comps("runtime", "src")...)},
+			want: record{Kind: "open-failed", Comm: "asm", Path: "/src/runtime/textflag.h", Err: int32(unix.ENOENT)},
+		},
+		{
+			name: "relative to the root",
+			ev:   event{kind: 21, comm: "touch", pathRet: int32(unix.EROFS), argsLen: 1, data: []byte("etc\x00")},
+			want: record{Kind: "attr", Comm: "touch", Path: "/etc", Err: int32(unix.EROFS), Failed: true},
+		},
+		{
+			name: "relative under a truncated base",
+			ev: event{kind: 16, comm: "rm", pathRet: int32(unix.ENOENT), argsLen: 1, mode: 1, truncated: 1,
+				data: append([]byte("x\x00"), comps("deep")...)},
+			want: record{Kind: "delete", Comm: "rm", Path: "…/deep/x", Err: int32(unix.ENOENT), Failed: true},
+		},
+		{
+			name: "relative with no base walked",
+			ev:   event{kind: 16, comm: "rm", pathRet: int32(unix.EBADF), data: []byte("x\x00")},
+			want: record{Kind: "delete", Comm: "rm", Path: "x", Err: int32(unix.EBADF), Failed: true},
+		},
+		{
+			name: "failed rename, each name on its own base",
+			ev: event{kind: 17, comm: "mv", pathRet: int32(unix.EXDEV), n1: 1, argsLen: 3, mode: 1, flags: 1,
+				data: append(append([]byte("a\x00b\x00"), comps("src")...), comps("dst")...)},
+			want: record{Kind: "rename", Comm: "mv", Path: "/src/a", To: "/dst/b", Err: int32(unix.EXDEV), Failed: true},
+		},
+		{
+			name: "failed rename, only the new name relative",
+			ev: event{kind: 17, comm: "mv", pathRet: int32(unix.ENOENT), n1: 1, argsLen: 2, flags: 1,
+				data: append([]byte("/a\x00b\x00"), comps("dst")...)},
+			want: record{Kind: "rename", Comm: "mv", Path: "/a", To: "/dst/b", Err: int32(unix.ENOENT), Failed: true},
+		},
+		{
 			name: "attr ok",
 			ev:   event{kind: 20, comm: "touch", data: []byte("/tmp/t\x00")},
 			want: record{Kind: "attr", Comm: "touch", Path: "/tmp/t"},

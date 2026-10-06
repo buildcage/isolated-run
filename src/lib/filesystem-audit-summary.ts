@@ -78,8 +78,8 @@ function classify(r: AuditRecord): Classified | undefined {
 }
 
 function normalize(path: string): string {
-  // Unify a cwd-relative failed name's "./x" and "x" spellings before anything
-  // keys on the path.
+  // Unify a relative name's "./x" and "x" spellings before anything keys on
+  // the path.
   return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
 }
 
@@ -100,9 +100,9 @@ function relativize(path: string, prefixes: SummaryOptions): string {
     if (path === home) return "~";
     if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
   }
-  // A relative name is a failed syscall's raw argument, relative to the sandbox
-  // cwd, which is $GITHUB_WORKSPACE, so show and group it workspace-relative.
-  if (!path.startsWith("/") && !path.startsWith("…/")) return `./${path}`;
+  // A name still relative is one whose directory the tracer could not find
+  // (its fd was closed meanwhile); like a truncated walk, its start is unknown.
+  if (!path.startsWith("/") && !path.startsWith("…/")) return `…/${path}`;
   return path;
 }
 
@@ -309,7 +309,7 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
       if (/^(pipe|socket|anon_inode):/.test(p)) continue; // d_path's non-file targets
       // A succeeding record always resolves to an absolute path or a truncated
       // "…/" walk, so anything else there is not a real path; a failed one may
-      // carry the cwd-relative name it was given.
+      // keep the relative name it was given when its directory was not found.
       if (!keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
       // Keep the key even with no flags left (a read-then-dropped library): it
       // still counts toward a directory's collapse, though it prints no row.

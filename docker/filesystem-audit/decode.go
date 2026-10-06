@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"path"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -84,6 +85,31 @@ func components(b []byte, n int, truncated bool) (string, []byte) {
 	return prefix + strings.Join(names, "/"), b
 }
 
+// after returns what follows a NUL-terminated name of length n, or nothing
+// when the sample ends first.
+func after(b []byte, n int) []byte {
+	if n+1 > len(b) {
+		return nil
+	}
+	return b[n+1:]
+}
+
+// joinBase prefixes a relative name with the base directory the BPF side
+// walked for it, whose n components lead rest; has says one was walked.
+func joinBase(name string, rest []byte, has bool, n int, truncated bool) (string, []byte) {
+	if !has {
+		return name, rest
+	}
+	base, rest := components(rest, n, truncated)
+	return path.Join(base, name), rest
+}
+
+// withBase decodes a single name followed by its base directory, if any.
+func withBase(data []byte, has bool, n int, truncated bool) (string, []byte) {
+	name := cstr(data)
+	return joinBase(name, after(data, len(name)), has, n, truncated)
+}
+
 // decode turns one raw ring-buffer sample into a record.
 func decode(raw []byte) (record, error) {
 	if len(raw) < hdrLen {
@@ -115,7 +141,7 @@ func decode(raw []byte) (record, error) {
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
 	case 12: // failed open
-		r.Path = cstr(data)
+		r.Path, _ = withBase(data, argsLen&1 != 0, int(mode), truncated)
 		r.Err = pathRet // the positive errno the BPF side stored as -ret
 	case 13, 14: // read, write
 		if pathRet < 0 {
@@ -155,22 +181,29 @@ func decode(raw []byte) (record, error) {
 		r.Path, rest = components(data, n1, truncated)
 		r.To, _ = components(rest, n2, truncated2)
 	case 16, 18, 19: // failed delete / chmod / chown
-		r.Path = cstr(data)
+		r.Path, _ = withBase(data, argsLen&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
 	case 17: // failed rename
-		r.Path = cstr(data)
-		// n1 == 1 marks a second path after the first one's NUL; guard the
-		// offset so a sample without that NUL cannot slice out of range.
-		if n1 == 1 && len(r.Path)+1 <= len(data) {
-			r.To = cstr(data[len(r.Path)+1:])
+		// n1 == 1 marks a second name after the first; both come before the
+		// base directories.
+		name := cstr(data)
+		rest := after(data, len(name))
+		to := ""
+		if n1 == 1 {
+			to = cstr(rest)
+			rest = after(rest, len(to))
+		}
+		r.Path, rest = joinBase(name, rest, argsLen&1 != 0, int(mode), truncated)
+		if n1 == 1 {
+			r.To, _ = joinBase(to, rest, argsLen&2 != 0, int(flags), truncated2)
 		}
 		r.Err = pathRet
 		r.Failed = true
 	case 20: // attr via utimes / setxattr
-		r.Path = cstr(data)
+		r.Path, _ = withBase(data, argsLen&1 != 0, int(mode), truncated)
 	case 21: // failed attr via utimes / setxattr
-		r.Path = cstr(data)
+		r.Path, _ = withBase(data, argsLen&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
 	}

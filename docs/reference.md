@@ -749,9 +749,10 @@ read and first write, so the last time can be earlier than its last write. The a
 access in order. An action that only ever failed is lowercase, and one the sandbox refused, for want
 of permission or because the location is read-only, is marked `!`. A directory with many touched
 children is shown once as `dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and
-`$HOME` (`~/…`), else absolute. A failed access is recorded under the name the command used, which
-may be relative to its working directory (`$GITHUB_WORKSPACE` unless the command changed it); such a
-name is shown as `./…`. The libraries a command loads are left out.
+`$HOME` (`~/…`), else absolute. A failed access is recorded under the name the command used, joined
+to the directory a relative name resolved against (its working directory, or the directory it passed
+by descriptor); a name whose directory was closed before it could be read is shown as `…/name`. The
+libraries a command loads are left out.
 
 The full record is uploaded as JSON lines in an artifact named `buildcage-filesystem-audit-<id>`,
 with absolute paths; `filesystem_audit_artifact_name` carries its name. Treat it as sensitive, like
