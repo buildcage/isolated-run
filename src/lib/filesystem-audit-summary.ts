@@ -201,8 +201,8 @@ function collapse(paths: Set<string>, fanout: number, keep: Set<string>): Map<st
 /**
  * Drops each bare directory line whose flags the same command's lines below it
  * already carry: its read is only the walk that reached them. Each line's flags
- * are credited to every directory above it once, so this stays linear in the
- * lines times their depth rather than comparing every pair.
+ * are credited once to every directory above it, so the cost is the lines
+ * times their depth.
  */
 export function dropWalkedDirs(
   lines: Set<string>,
@@ -215,7 +215,7 @@ export function dropWalkedDirs(
     if (path === "/") continue; // nothing above the root
     const comm = commOf(d);
     const flags = [...flagsOf(d)];
-    // Each "/" ends an ancestor; the one at 0 leaves the root.
+    // Each "/" ends an ancestor's path; the one at index 0 is the root.
     for (let i = path.lastIndexOf("/"); i >= 0; i = i > 0 ? path.lastIndexOf("/", i - 1) : -1) {
       const dir = keyOf(comm, i === 0 ? "/" : path.slice(0, i));
       let acc = below.get(dir);
