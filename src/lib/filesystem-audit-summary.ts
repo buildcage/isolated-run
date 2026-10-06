@@ -86,8 +86,7 @@ function normalize(path: string): string {
 export interface SummaryOptions {
   workspace: string[];
   home: string[];
-  /** The proxy's start in epoch seconds, which the communication details count
-   *  from too, so the two sections' times line up. */
+  /** The proxy's start, in epoch seconds. */
   startedAt?: number;
   fanout?: number;
 }
@@ -143,7 +142,7 @@ function widen(m: Map<string, Span>, key: string, span: Span | undefined): void 
 // read, a success under a relative name) takes its times with it.
 type LetterSpans = Map<string, Map<string, Span>>;
 
-// Records arrive in recording order, so the first one seen keeps the lowest seq.
+// The first record seen for a key and letter has the lowest seq.
 function widenLetter(m: LetterSpans, key: string, letter: string, t: number, seq: number): void {
   let byLetter = m.get(key);
   if (!byLetter) m.set(key, (byLetter = new Map()));

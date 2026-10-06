@@ -59,7 +59,7 @@ export interface ReportStepOptions {
 /**
  * Fetch the proxy's report, write the Job Summary, and upload the traffic
  * artifact if one was asked for. Returns the proxy's start time, which the
- * filesystem audit counts from too, or undefined if the report was not read.
+ * filesystem audit counts from too, or undefined when it is unknown.
  *
  * Never throws. A failure here is a warning naming the step that failed, and
  * under `restrict` with fail_on_blocked it also fails the step: a report that
