@@ -203,6 +203,13 @@ jobs:
             rm "$GITHUB_WORKSPACE/probe2.txt"
             # A command run from a subshell that itself touches nothing.
             (cd "$GITHUB_WORKSPACE" && touch subshell.txt || true)
+            # Failed calls on relative names: one against a changed working
+            # directory, one against a directory passed by descriptor.
+            mkdir -p "$GITHUB_WORKSPACE/sub"
+            (cd "$GITHUB_WORKSPACE/sub" && cat missing.txt 2>/dev/null || true)
+            python3 -c 'import os, sys; d = os.open(sys.argv[1], os.O_RDONLY)
+            try: os.unlink("gone", dir_fd=d)
+            except FileNotFoundError: pass' "$GITHUB_WORKSPACE/sub"
 
       - name: Verify the Job Summary has the filesystem audit
         run: |
@@ -222,6 +229,9 @@ jobs:
           [ -n "$w" ] && [ -n "$m" ] && [ -n "$d" ] && [ "$w" -lt "$m" ] && [ "$m" -lt "$d" ]
           # A subshell's command still counts as the step's.
           grep -qE ' W +touch +\./subshell\.txt$' "$f"
+          # Relative names show under the directory they resolved against.
+          grep -qE ' r +cat +\./sub/missing\.txt$' "$f"
+          grep -qE ' d +python3 +\./sub/gone$' "$f"
           # buildcage's own wrappers must never reach the summary.
           ! grep -qE ' (setpriv|env-loader\.sh|run-script\.sh) ' "$f"
 

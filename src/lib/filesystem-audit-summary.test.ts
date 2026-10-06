@@ -144,7 +144,7 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["D rm …/deep/x"]);
   });
 
-  it("shows a failed access's relative name workspace-relative, bare or dotted alike", () => {
+  it("shows a failed access's unresolved relative name under …/, bare or dotted alike", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
         { kind: "open-failed", comm: "node", path: "config.json", err: 2 },
@@ -152,7 +152,7 @@ describe("renderFilesystemAuditSummary", () => {
       ),
       PREFIXES,
     );
-    expect(lines(md)).toEqual(["r node ./config.json", "r! node ./secret"]);
+    expect(lines(md)).toEqual(["r node …/config.json", "r! node …/secret"]);
   });
 
   it("drops a relative path on a succeeding record, which can only be spurious", () => {
@@ -350,7 +350,7 @@ describe("renderFilesystemAuditSummary", () => {
         ),
         timed,
       );
-      expect(lines(md)).toEqual(["00:01.000: r a ./foo"]);
+      expect(lines(md)).toEqual(["00:01.000: r a …/foo"]);
     });
 
     it("pads a single time to the width of a span", () => {

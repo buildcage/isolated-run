@@ -705,7 +705,9 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   outside the sandbox could tamper with the staging file before it is read, the same accepted
   limitation as above. It does not record changes made through an already-open descriptor inherited
   across `exec`, extended attributes other than `setxattr`, or a failed `exec`, `mkdir`, `symlink`,
-  `link` or `truncate`.
+  `link` or `truncate`. A failed access, and an attribute change through `utimes` or `setxattr`,
+  is placed in the directory its relative name pointed at when the call returned, so a thread that
+  changes directory or closes that descriptor meanwhile can have it recorded elsewhere.
 
 ### Where it will not run
 

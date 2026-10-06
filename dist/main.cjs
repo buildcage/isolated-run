@@ -68407,7 +68407,7 @@ function relativize(path, prefixes) {
 		if (path === home) return "~";
 		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
 	}
-	return !path.startsWith("/") && !path.startsWith("…/") ? `./${path}` : path;
+	return !path.startsWith("/") && !path.startsWith("…/") ? `…/${path}` : path;
 }
 function sortKey(path) {
 	return path === "." || path.startsWith("./") ? [0, path] : path === "~" || path.startsWith("~/") ? [1, path] : [2, path];

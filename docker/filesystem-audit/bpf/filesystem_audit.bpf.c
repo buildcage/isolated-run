@@ -53,10 +53,25 @@ struct mm_struct {
 	unsigned long arg_end;
 } __attribute__((preserve_access_index));
 
+struct fs_struct {
+	struct path pwd;
+} __attribute__((preserve_access_index));
+
+struct fdtable {
+	unsigned int max_fds;
+	struct file **fd;
+} __attribute__((preserve_access_index));
+
+struct files_struct {
+	struct fdtable *fdt;
+} __attribute__((preserve_access_index));
+
 struct task_struct {
 	struct task_struct *real_parent;
 	int tgid;
 	struct mm_struct *mm;
+	struct fs_struct *fs;
+	struct files_struct *files;
 } __attribute__((preserve_access_index));
 
 struct filename {
@@ -83,12 +98,14 @@ struct trace_event_raw_sys_exit {
 #define NAME_LEN 256
 #define MAX_COMPONENTS 64
 #define WAKEUP_BYTES (1 << 20)
+#define AT_FDCWD -100
 
 enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	K_MKDIR = 6, K_CHMOD = 7, K_SYMLINK = 8, K_LINK = 9, K_TRUNCATE = 10, K_CHOWN = 11,
 	K_OPEN_FAILED = 12, K_READ = 13, K_WRITE = 14, K_MMAP = 15,
-	// Failed path syscalls: data holds the raw user path(s), NUL-separated
-	// (old then new for rename/link); path_len holds the errno.
+	// Failed path syscalls: data holds the user path(s), NUL-separated (old
+	// then new for rename), then the base directories of the relative ones
+	// (see add_base); path_len holds the errno.
 	K_DELETE_FAILED = 16, K_RENAME_FAILED = 17, K_CHMOD_FAILED = 18,
 	K_CHOWN_FAILED = 19, K_ATTR = 20, K_ATTR_FAILED = 21,
 	// A new process: pid is the child, ppid its parent; no data.
@@ -96,8 +113,8 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 
 // Fixed header (mirrored by hdrLen in decode.go), then data_len bytes of data:
 //   open:    d_path result (path_len is its return value)
-//   open-failed: the name as passed to open(2), possibly relative; path_len
-//            holds the errno
+//   open-failed: the name as passed to open(2), then its base directory if
+//            it is relative (see add_base); path_len holds the errno
 //   read/write: d_path result, once per open file and direction
 //   mmap:    path components; mode holds prot, flags the map flags
 //   exec:    filename at 0, argv (NUL-separated) at PATH_LEN
@@ -162,6 +179,8 @@ struct pending {
 	u64 ts;
 	u32 kind;    // emitted on failure
 	u32 kind_ok; // emitted on success, 0 to skip
+	s32 dfd1;    // what p1 and p2 resolve against when relative
+	s32 dfd2;
 };
 
 struct {
@@ -300,6 +319,38 @@ static __always_inline u32 leaf(struct event *e, u32 off, struct dentry *d, u8 *
 		return off; // nothing stored, so do not count the leaf
 	*n += 1;
 	return off + r;
+}
+
+// A relative name in a syscall resolves against dfd: the calling task's
+// working directory for AT_FDCWD, else that open directory. Appends the
+// directory's leaf-first components at off and sets bit in e->args_len, or
+// leaves both alone when the fd is not open. Read at the syscall's exit, so a
+// thread that closes the fd or changes directory meanwhile can give another
+// directory.
+static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8 *trunc, u32 bit)
+{
+	struct task_struct *t = bpf_get_current_task_btf();
+	struct dentry *d;
+	struct vfsmount *m;
+	if (dfd == AT_FDCWD) {
+		d = BPF_CORE_READ(t, fs, pwd.dentry);
+		m = BPF_CORE_READ(t, fs, pwd.mnt);
+	} else {
+		struct fdtable *fdt = BPF_CORE_READ(t, files, fdt);
+		if (dfd < 0 || (unsigned int)dfd >= BPF_CORE_READ(fdt, max_fds))
+			return off;
+		struct file **fds = BPF_CORE_READ(fdt, fd);
+		struct file *f = 0;
+		bpf_probe_read_kernel(&f, sizeof(f), &fds[dfd]);
+		if (!f)
+			return off;
+		d = BPF_CORE_READ(f, f_path.dentry);
+		m = BPF_CORE_READ(f, f_path.mnt);
+	}
+	if (!d || !m)
+		return off;
+	e->args_len |= bit;
+	return walk(e, off, d, m, n, trunc);
 }
 
 // Open files already reported as read (1), written (2) or mapped
@@ -562,6 +613,7 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 struct name_buf {
 	char name[PATH_LEN];
 	u64 ts;
+	s32 dfd;
 };
 
 struct {
@@ -571,7 +623,7 @@ struct {
 	__type(value, struct name_buf);
 } open_names SEC(".maps");
 
-static __always_inline void open_enter(void)
+static __always_inline void open_enter(int dfd)
 {
 	if (!in_target())
 		return;
@@ -584,8 +636,10 @@ static __always_inline void open_enter(void)
 	// Seed from scratch so the hash value starts as an empty string.
 	bpf_map_update_elem(&open_names, &id, e->data, BPF_ANY);
 	struct name_buf *nb = bpf_map_lookup_elem(&open_names, &id);
-	if (nb)
+	if (nb) {
 		nb->ts = bpf_ktime_get_boot_ns();
+		nb->dfd = dfd;
+	}
 }
 
 static __always_inline void open_exit(long ret)
@@ -600,7 +654,13 @@ static __always_inline void open_exit(long ret)
 			e->ts = nb->ts;
 			e->path_len = -ret;
 			long r = bpf_probe_read_kernel_str(e->data, PATH_LEN, nb->name);
-			e->data_len = r > 0 ? r : 0;
+			u32 off = r > 0 ? r : 0;
+			u8 n = 0;
+			if (r > 1 && e->data[0] != '/') {
+				off = add_base(e, off, nb->dfd, &n, &e->truncated, 1);
+				e->mode = n;
+			}
+			e->data_len = off;
 			submit(e);
 		}
 	}
@@ -611,16 +671,16 @@ static __always_inline void open_exit(long ret)
 // it; hooking both covers either build. When both fire, the inner exit
 // emits and the outer one finds nothing left.
 SEC("fentry/do_sys_openat2")
-int BPF_PROG(on_openat2_enter)
+int BPF_PROG(on_openat2_enter, int dfd)
 {
-	open_enter();
+	open_enter(dfd);
 	return 0;
 }
 
 SEC("fentry/do_sys_open")
-int BPF_PROG(on_open_enter)
+int BPF_PROG(on_open_enter, int dfd)
 {
-	open_enter();
+	open_enter(dfd);
 	return 0;
 }
 
@@ -740,20 +800,21 @@ int BPF_PROG(on_file_free, struct file *file)
 // the user buffer, which a concurrent thread could rewrite between entry and
 // exit, so a failed op's recorded path is not tamper-proof the way the open
 // path's getname copy is.
-static __always_inline void op_enter2(u32 kind, u32 kind_ok, u64 p1, u64 p2)
+static __always_inline void op_enter2(u32 kind, u32 kind_ok, int dfd1, u64 p1, int dfd2, u64 p2)
 {
 	if (!in_target())
 		return;
 	u64 id = bpf_get_current_pid_tgid();
 	struct pending pend = {
 		.p1 = p1, .p2 = p2, .ts = bpf_ktime_get_boot_ns(), .kind = kind, .kind_ok = kind_ok,
+		.dfd1 = dfd1, .dfd2 = dfd2,
 	};
 	bpf_map_update_elem(&pending_ops, &id, &pend, BPF_ANY);
 }
 
-static __always_inline void op_enter(u32 kind, u64 p1, u64 p2)
+static __always_inline void op_enter(u32 kind, int dfd1, u64 p1, int dfd2, u64 p2)
 {
-	op_enter2(kind, 0, p1, p2);
+	op_enter2(kind, 0, dfd1, p1, dfd2, p2);
 }
 
 static __always_inline void op_exit(long ret)
@@ -774,6 +835,7 @@ static __always_inline void op_exit(long ret)
 			e->path_len = -ret;
 		long r = bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1);
 		u32 off = r > 0 ? r : 0;
+		u32 second = off;
 		// Mark a second path only when both were read, so a failed read never
 		// leaves n1 claiming a name that is not in the buffer.
 		if (pend->p2 && off > 0) {
@@ -782,6 +844,17 @@ static __always_inline void op_exit(long ret)
 				e->n1 = 1;
 				off += r2;
 			}
+		}
+		// mode and flags count the base components of the first and second name.
+		u8 nb = 0;
+		if (r > 1 && e->data[0] != '/') {
+			off = add_base(e, off, pend->dfd1, &nb, &e->truncated, 1);
+			e->mode = nb;
+		}
+		if (e->n1 && e->data[second & (DATA_SZ - 1)] != '/' && e->data[second & (DATA_SZ - 1)]) {
+			nb = 0;
+			off = add_base(e, off, pend->dfd2, &nb, &e->trunc2, 2);
+			e->flags = nb;
 		}
 		e->data_len = off;
 		submit(e);
@@ -794,7 +867,7 @@ static __always_inline void op_exit(long ret)
 SEC("tracepoint/syscalls/sys_enter_unlinkat")
 int on_unlinkat_enter(struct trace_event_raw_sys_enter *ctx)
 {
-	op_enter(K_DELETE_FAILED, ctx->args[1], 0);
+	op_enter(K_DELETE_FAILED, ctx->args[0], ctx->args[1], 0, 0);
 	return 0;
 }
 SEC("tracepoint/syscalls/sys_exit_unlinkat")
@@ -808,7 +881,7 @@ int on_unlinkat_exit(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_renameat2")
 int on_renameat2_enter(struct trace_event_raw_sys_enter *ctx)
 {
-	op_enter(K_RENAME_FAILED, ctx->args[1], ctx->args[3]);
+	op_enter(K_RENAME_FAILED, ctx->args[0], ctx->args[1], ctx->args[2], ctx->args[3]);
 	return 0;
 }
 SEC("tracepoint/syscalls/sys_exit_renameat2")
@@ -821,7 +894,7 @@ int on_renameat2_exit(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_fchmodat")
 int on_fchmodat_enter(struct trace_event_raw_sys_enter *ctx)
 {
-	op_enter(K_CHMOD_FAILED, ctx->args[1], 0);
+	op_enter(K_CHMOD_FAILED, ctx->args[0], ctx->args[1], 0, 0);
 	return 0;
 }
 SEC("tracepoint/syscalls/sys_exit_fchmodat")
@@ -834,7 +907,7 @@ int on_fchmodat_exit(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_fchmodat2")
 int on_fchmodat2_enter(struct trace_event_raw_sys_enter *ctx)
 {
-	op_enter(K_CHMOD_FAILED, ctx->args[1], 0);
+	op_enter(K_CHMOD_FAILED, ctx->args[0], ctx->args[1], 0, 0);
 	return 0;
 }
 SEC("tracepoint/syscalls/sys_exit_fchmodat2")
@@ -847,7 +920,7 @@ int on_fchmodat2_exit(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_fchownat")
 int on_fchownat_enter(struct trace_event_raw_sys_enter *ctx)
 {
-	op_enter(K_CHOWN_FAILED, ctx->args[1], 0);
+	op_enter(K_CHOWN_FAILED, ctx->args[0], ctx->args[1], 0, 0);
 	return 0;
 }
 SEC("tracepoint/syscalls/sys_exit_fchownat")
@@ -864,7 +937,7 @@ SEC("tracepoint/syscalls/sys_enter_utimensat")
 int on_utimensat_enter(struct trace_event_raw_sys_enter *ctx)
 {
 	if (ctx->args[1]) // NULL path updates a dirfd, not a named file
-		op_enter2(K_ATTR_FAILED, K_ATTR, ctx->args[1], 0);
+		op_enter2(K_ATTR_FAILED, K_ATTR, ctx->args[0], ctx->args[1], 0, 0);
 	return 0;
 }
 SEC("tracepoint/syscalls/sys_exit_utimensat")
@@ -877,7 +950,7 @@ int on_utimensat_exit(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_setxattr")
 int on_setxattr_enter(struct trace_event_raw_sys_enter *ctx)
 {
-	op_enter2(K_ATTR_FAILED, K_ATTR, ctx->args[0], 0);
+	op_enter2(K_ATTR_FAILED, K_ATTR, AT_FDCWD, ctx->args[0], 0, 0);
 	return 0;
 }
 SEC("tracepoint/syscalls/sys_exit_setxattr")
@@ -890,7 +963,7 @@ int on_setxattr_exit(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_lsetxattr")
 int on_lsetxattr_enter(struct trace_event_raw_sys_enter *ctx)
 {
-	op_enter2(K_ATTR_FAILED, K_ATTR, ctx->args[0], 0);
+	op_enter2(K_ATTR_FAILED, K_ATTR, AT_FDCWD, ctx->args[0], 0, 0);
 	return 0;
 }
 SEC("tracepoint/syscalls/sys_exit_lsetxattr")
