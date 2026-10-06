@@ -77,6 +77,19 @@ function classify(r: AuditRecord): Classified | undefined {
   return letter && path ? { letter, path, failed } : undefined;
 }
 
+// A file or process name is chosen by the step, and a newline in one could
+// close the code block and write Markdown of its own into the Job Summary.
+// Bidi controls are escaped too, since they can make one path read as another.
+const UNSAFE_CHARS = /[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
+const NAMED_ESCAPES: Record<string, string> = { "\n": "\\n", "\r": "\\r", "\t": "\\t" };
+
+function escapeForDisplay(name: string): string {
+  return name.replace(
+    UNSAFE_CHARS,
+    (c) => NAMED_ESCAPES[c] ?? `\\u{${c.charCodeAt(0).toString(16)}}`,
+  );
+}
+
 function normalize(path: string): string {
   // Unify a relative name's "./x" and "x" spellings before anything keys on
   // the path.
@@ -388,8 +401,8 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
       // A row with no timestamped record (never from the tracer) goes last.
       seq: span?.seq ?? Infinity,
       flags,
-      comm: commOf(lk),
-      path: relativize(pathOf(lk), prefixes),
+      comm: escapeForDisplay(commOf(lk)),
+      path: escapeForDisplay(relativize(pathOf(lk), prefixes)),
     });
   }
   // In recording order, not by time, which a clock step could reorder. Rows
