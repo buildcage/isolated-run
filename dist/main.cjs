@@ -68421,9 +68421,15 @@ function widen(m, key, span) {
 	let cur = m.get(key);
 	cur ? (cur.first = Math.min(cur.first, span.first), cur.last = Math.max(cur.last, span.last), cur.seq = Math.min(cur.seq, span.seq)) : m.set(key, { ...span });
 }
-function widenLetter(m, key, letter, span) {
+function widenLetter(m, key, letter, t, seq) {
 	let byLetter = m.get(key);
-	byLetter || m.set(key, byLetter = new Map()), widen(byLetter, letter, span);
+	byLetter || m.set(key, byLetter = new Map());
+	let cur = byLetter.get(letter);
+	cur ? (cur.first = Math.min(cur.first, t), cur.last = Math.max(cur.last, t)) : byLetter.set(letter, {
+		first: t,
+		last: t,
+		seq
+	});
 }
 function fmtSpan(span, originMs) {
 	if (!span) return "";
@@ -68461,7 +68467,7 @@ function fmtFlags(ok, failed, perm) {
 }
 const LEGEND = "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit";
 function renderFilesystemAuditSummary(jsonl, prefixes) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), earliest = Infinity, seq = 0;
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), seq = 0;
 	for (let line of jsonl.split("\n")) {
 		if (!line) continue;
 		let r;
@@ -68478,16 +68484,7 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		let c = classify(r);
 		if (!c) continue;
 		let key = keyOf(r.comm ?? "", c.path), t = Date.parse(r.t ?? "");
-		if (!Number.isNaN(t)) {
-			earliest = Math.min(earliest, t);
-			let span = {
-				first: t,
-				last: t,
-				seq: seq++
-			};
-			widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, span);
-		}
-		c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
+		Number.isNaN(t) || widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++), c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
 	}
 	let libDrop = new Set([
 		...libs,
@@ -68539,13 +68536,13 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		let flags = new Set([...lineOk.get(l) ?? [], ...lineFailed.get(l) ?? []]);
 		hasDesc && [...flags].every((c) => descFlags.has(c)) && keys.delete(l);
 	}
-	let originMs = prefixes.startedAt === void 0 ? earliest : prefixes.startedAt * 1e3, rows = [];
+	let rows = [];
 	for (let lk of keys) {
 		let o = lineOk.get(lk) ?? new Set(), fl = new Set([...lineFailed.get(lk) ?? []].filter((c) => !o.has(c))), flags = fmtFlags(o, fl, new Set([...linePerm.get(lk) ?? []].filter((c) => fl.has(c))));
 		if (!flags) continue;
 		let span = lineSpans.get(lk);
 		rows.push({
-			time: fmtSpan(span, originMs),
+			span,
 			seq: span?.seq ?? Infinity,
 			flags,
 			comm: commOf(lk),
@@ -68556,7 +68553,7 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return a.seq - b.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
 	}), rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
-	let timeW = rows.reduce((m, r) => Math.max(m, r.time.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r) => `${timeW ? `${(r.time && `${r.time}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
+	let originMs = prefixes.startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.span?.first ?? Infinity), Infinity) : prefixes.startedAt * 1e3, times = rows.map((r) => fmtSpan(r.span, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
 	return `${HEADING}\n\n<sub>${timeW ? `first-last access · ${LEGEND}` : LEGEND}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
 }
 //#endregion

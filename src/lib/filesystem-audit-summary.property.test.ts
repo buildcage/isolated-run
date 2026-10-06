@@ -76,14 +76,15 @@ describe("renderFilesystemAuditSummary: properties", () => {
 
   it("orders rows by first access, each span forward, untimed rows last", () => {
     // The recording's own order, with times rising along it as the tracer
-    // stamps them; damaged times stay where they fell.
+    // stamps them; missing or damaged times stay where they fell.
     const risingArb = recordsArb.map((rs) => {
+      const stamped = (t: string | undefined): t is string => t !== undefined && t !== "garbage";
       const times = rs
         .map((r) => r.t)
-        .filter((t) => t !== "garbage")
+        .filter(stamped)
         .toSorted((a, b) => a.localeCompare(b));
       let i = 0;
-      return toJsonl(rs.map((r) => (r.t === "garbage" ? r : { ...r, t: times[i++] })));
+      return toJsonl(rs.map((r) => (stamped(r.t) ? { ...r, t: times[i++] } : r)));
     });
     fc.assert(
       fc.property(risingArb, (jsonl) => {

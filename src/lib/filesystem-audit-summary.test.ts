@@ -376,6 +376,17 @@ describe("renderFilesystemAuditSummary", () => {
       expect(lines(md)).toEqual(["00:00.000: X mv /usr/bin/mv", "00:00.000: M mv ./b"]);
     });
 
+    it("counts from the first access shown, not a dropped library read", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { t: at(0), kind: "read", comm: "sh", path: "/etc/ld.so.cache" },
+          { t: at(3), kind: "read", comm: "sh", path: "/work/x" },
+        ),
+        PREFIXES,
+      );
+      expect(lines(md)).toEqual(["00:00.000: R sh ./x"]);
+    });
+
     it("counts from the first record when the proxy's start is unknown", () => {
       const md = renderFilesystemAuditSummary(
         jsonl(

@@ -143,10 +143,16 @@ function widen(m: Map<string, Span>, key: string, span: Span | undefined): void 
 // read, a success under a relative name) takes its times with it.
 type LetterSpans = Map<string, Map<string, Span>>;
 
-function widenLetter(m: LetterSpans, key: string, letter: string, span: Span): void {
+// Records arrive in recording order, so the first one seen keeps the lowest seq.
+function widenLetter(m: LetterSpans, key: string, letter: string, t: number, seq: number): void {
   let byLetter = m.get(key);
   if (!byLetter) m.set(key, (byLetter = new Map()));
-  widen(byLetter, letter, span);
+  const cur = byLetter.get(letter);
+  if (!cur) byLetter.set(letter, { first: t, last: t, seq });
+  else {
+    cur.first = Math.min(cur.first, t);
+    cur.last = Math.max(cur.last, t);
+  }
 }
 
 function fmtSpan(span: Span | undefined, originMs: number): string {
@@ -216,7 +222,6 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
   const execd = new Set<string>();
   const okSpans: LetterSpans = new Map();
   const failedSpans: LetterSpans = new Map();
-  let earliest = Infinity;
 
   let seq = 0;
   for (const line of jsonl.split("\n")) {
@@ -237,9 +242,7 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
     const key = keyOf(r.comm ?? "", c.path);
     const t = Date.parse(r.t ?? "");
     if (!Number.isNaN(t)) {
-      earliest = Math.min(earliest, t);
-      const span = { first: t, last: t, seq: seq++ };
-      widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, span);
+      widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++);
     }
     if (c.failed) {
       addFlag(failed, key, c.letter);
@@ -351,11 +354,8 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
     if (hasDesc && [...flags].every((c) => descFlags.has(c))) keys.delete(l);
   }
 
-  // Times count from the proxy's start, as the communication details do, or
-  // from the first record when that start is unknown.
-  const originMs = prefixes.startedAt === undefined ? earliest : prefixes.startedAt * 1000;
   const rows: {
-    time: string;
+    span: Span | undefined;
     seq: number;
     flags: string;
     comm: string;
@@ -368,7 +368,7 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
     if (!flags) continue; // a binary seen only as a mapped library
     const span = lineSpans.get(lk);
     rows.push({
-      time: fmtSpan(span, originMs),
+      span,
       // A row with no timestamped record (never from the tracer) goes last.
       seq: span?.seq ?? Infinity,
       flags,
@@ -385,16 +385,23 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
   });
 
   if (rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
+  // Times count from the proxy's start, as the communication details do, or
+  // from the first access shown when that start is unknown.
+  const originMs =
+    prefixes.startedAt === undefined
+      ? rows.reduce((m, r) => Math.min(m, r.span?.first ?? Infinity), Infinity)
+      : prefixes.startedAt * 1000;
+  const times = rows.map((r) => fmtSpan(r.span, originMs));
   // Fixed-width columns. reduce, not Math.max(...spread), which overflows the
   // argument limit on very many rows. The time ends in a colon, as in the
   // communication details.
-  const timeW = rows.reduce((m, r) => Math.max(m, r.time.length), 0);
+  const timeW = times.reduce((m, t) => Math.max(m, t.length), 0);
   const flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0);
   const commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0);
   const body = rows
     .map(
-      (r) =>
-        `${timeW ? `${(r.time && `${r.time}:`).padEnd(timeW + 1)} ` : ""}` +
+      (r, i) =>
+        `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}` +
         `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`,
     )
     .join("\n");
