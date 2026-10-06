@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 
-import { renderFilesystemAuditSummary, type SummaryOptions } from "./filesystem-audit-summary.ts";
+import {
+  dropWalkedDirs,
+  keyOf,
+  renderFilesystemAuditSummary,
+  type SummaryOptions,
+} from "./filesystem-audit-summary.ts";
 
 const PREFIXES: SummaryOptions = { workspace: ["/work"], home: ["/home/u"] };
 
@@ -431,14 +436,10 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["W sh /"]);
   });
 
-  it("renders tens of thousands of rows in well under the test timeout", () => {
-    // One path per command, so nothing collapses and every record is a row;
-    // comparing every pair of rows took minutes at this size.
-    const records = Array.from({ length: 50_000 }, (_, i) => ({
-      kind: "read",
-      comm: `c${i}`,
-      path: `/work/f${i}`,
-    }));
-    expect(lines(renderFilesystemAuditSummary(jsonl(...records), PREFIXES))).toHaveLength(50_000);
+  it("finds walked directories among a hundred thousand lines without comparing every pair", () => {
+    // Every line is its own command's, so none has a line below it; comparing
+    // every pair would take minutes at this size.
+    const many = new Set(Array.from({ length: 100_000 }, (_, i) => keyOf(`c${i}`, `/work/f${i}`)));
+    expect(dropWalkedDirs(many, () => ["R"])).toEqual(many);
   });
 });

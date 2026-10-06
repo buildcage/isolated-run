@@ -68465,11 +68465,11 @@ function dropWalkedDirs(lines, flagsOf) {
 	for (let d of lines) {
 		let path = base(pathOf(d));
 		if (path === "/") continue;
-		let comm = commOf(d), parts = path.split("/");
-		for (let i = parts.length - 1; i > 0; i--) {
-			let dir = keyOf(comm, parts.slice(0, i).join("/") || "/"), acc = below.get(dir);
+		let comm = commOf(d), flags = [...flagsOf(d)];
+		for (let i = path.lastIndexOf("/"); i >= 0; i = i > 0 ? path.lastIndexOf("/", i - 1) : -1) {
+			let dir = keyOf(comm, i === 0 ? "/" : path.slice(0, i)), acc = below.get(dir);
 			acc || below.set(dir, acc = new Set());
-			for (let c of flagsOf(d)) acc.add(c);
+			for (let c of flags) acc.add(c);
 		}
 	}
 	let kept = new Set();

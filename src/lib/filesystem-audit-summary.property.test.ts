@@ -143,6 +143,8 @@ describe("renderFilesystemAuditSummary: properties", () => {
         "/x/y",
         "/x/y/**",
         "/x/y/z",
+        "/x//y",
+        "//**",
         "/xy",
         "rel",
         "rel/f",

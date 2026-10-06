@@ -214,12 +214,13 @@ export function dropWalkedDirs(
     const path = base(pathOf(d));
     if (path === "/") continue; // nothing above the root
     const comm = commOf(d);
-    const parts = path.split("/");
-    for (let i = parts.length - 1; i > 0; i--) {
-      const dir = keyOf(comm, parts.slice(0, i).join("/") || "/");
+    const flags = [...flagsOf(d)];
+    // Each "/" ends an ancestor; the one at 0 leaves the root.
+    for (let i = path.lastIndexOf("/"); i >= 0; i = i > 0 ? path.lastIndexOf("/", i - 1) : -1) {
+      const dir = keyOf(comm, i === 0 ? "/" : path.slice(0, i));
       let acc = below.get(dir);
       if (!acc) below.set(dir, (acc = new Set()));
-      for (const c of flagsOf(d)) acc.add(c);
+      for (const c of flags) acc.add(c);
     }
   }
   const kept = new Set<string>();
