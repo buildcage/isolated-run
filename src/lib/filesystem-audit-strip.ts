@@ -7,9 +7,11 @@
  * status) and forks the step's shell, which execs run-script.sh from the
  * scratch base. The sandbox cgroup holds nothing but the init and the step, so
  * from the shell's exec on every record is the step's except those of the init,
- * the parent that exec names. Everything before that exec, every access under
- * the scratch base, and the init's records are machinery.
- * The step's shell is relabeled bash.
+ * the parent that exec names. Everything before that exec, the shell's own
+ * reads of run-script.sh, and the init's records are machinery. Any other
+ * record naming the scratch base is the step's: a prefix match would let a
+ * name like <base>/../../home/... hide an access. The step's shell is relabeled
+ * bash.
  *
  * The shell is found by the exec of run-script.sh under the scratch base, never
  * by command name, so a step command named setpriv or run-script.sh (run from
@@ -21,11 +23,19 @@
  * Nothing the step does with its process tree, such as CLONE_PARENT, setsid or
  * being reparented to the init, changes which records are kept. It assumes a
  * complete recording: without the shell's exec the step is anchored on a later
- * one, or not at all. A recording with gaps is marked incomplete in the summary.
+ * one, or not at all, and then every record is kept. A recording with gaps is
+ * marked incomplete in the summary.
  */
 
 const SHELL_COMM = "run-script.sh"; // buildcage's step shell (sandbox/oci-files.ts)
 const SHELL_LABEL = "bash";
+// How the shell reads its script; anything else it does to the script, such
+// as opening it to write, is kept.
+const readsOnly = (r: { kind?: string; access?: string }): boolean =>
+  r.kind === "read" ||
+  ((r.kind === "open" || r.kind === "mmap") &&
+    (r.access ?? "").startsWith("r") &&
+    !(r.access ?? "").includes("w"));
 
 interface Record_ {
   pid?: number;
@@ -33,6 +43,8 @@ interface Record_ {
   kind?: string;
   comm?: string;
   path?: string;
+  access?: string;
+  failed?: boolean;
 }
 
 export function stripSandboxMachinery(jsonl: string, scratchBase: string): string {
@@ -51,13 +63,14 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
 
   const ownShellPids = new Set<number>(); // runs a run-script.sh as other than buildcage's shell
   let shell: number | undefined; // the pid that first execs buildcage's run-script.sh
+  let script: string | undefined; // that run-script.sh
   let init: number | undefined; // the shell's parent at that exec
   let boundary = -1;
   recs.forEach((r, i) => {
     if (!r || r.pid === undefined) return;
     if (r.kind === "exec" && typeof r.path === "string" && leaf(r.path) === SHELL_COMM) {
       if (!under(r.path)) ownShellPids.add(r.pid);
-      else if (shell === undefined) [shell, boundary, init] = [r.pid, i, r.ppid];
+      else if (shell === undefined) [shell, script, boundary, init] = [r.pid, r.path, i, r.ppid];
       else if (r.pid !== shell) ownShellPids.add(r.pid);
     }
   });
@@ -76,10 +89,15 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
       ownShellPids.has(r.ppid)
     )
       ownShellPids.add(r.pid);
-    // A buildcage scratch file, unless the step itself execs it.
-    if (under(r.path) && !(r.kind === "exec" && shell !== undefined && i > boundary)) return;
-    // setpriv, the init, or the shell before its exec; after it, the init.
-    if (shell !== undefined && r.pid !== undefined && (i < boundary || r.pid === init)) return;
+    // setpriv, the init, or the shell before and at its exec; after it, the
+    // init and the shell reading its script.
+    const readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
+    if (
+      shell !== undefined &&
+      r.pid !== undefined &&
+      (i <= boundary || r.pid === init || readsScript)
+    )
+      return;
     if (
       shell !== undefined &&
       r.comm === SHELL_COMM &&

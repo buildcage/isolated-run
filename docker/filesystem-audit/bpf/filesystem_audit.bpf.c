@@ -97,7 +97,7 @@ struct trace_event_raw_sys_exit {
 #define PATH_LEN 4096
 #define ARGS_LEN 512
 #define NAME_LEN 256
-#define MAX_COMPONENTS 64
+#define MAX_COMPONENTS 254 // n1 and n2 are u8; a longer walk is marked cut
 #define WAKEUP_BYTES (1 << 20)
 #define AT_FDCWD -100
 
@@ -273,6 +273,7 @@ struct walk_ctx {
 	u32 off;
 	u32 n;
 	u8 *trunc;
+	u8 done; // reached the namespace root, or set *trunc itself
 	u32 off_mnt_root, off_d_parent, off_d_name, off_mnt_parent, off_mountpoint, off_mnt;
 };
 
@@ -289,8 +290,10 @@ static long walk_step(u64 i, struct walk_ctx *c)
 	void *parent = rd_ptr(c->d, c->off_d_parent);
 	if (c->d == root || c->d == parent) {
 		void *up = rd_ptr(c->mnt, c->off_mnt_parent);
-		if (c->d != root || up == c->mnt)
+		if (c->d != root || up == c->mnt) {
+			c->done = 1;
 			return 1;
+		}
 		c->d = rd_ptr(c->mnt, c->off_mountpoint);
 		c->mnt = up;
 		c->vfs = up + c->off_mnt;
@@ -298,6 +301,7 @@ static long walk_step(u64 i, struct walk_ctx *c)
 	}
 	if (c->off >= DATA_SZ) {
 		*c->trunc = 1;
+		c->done = 1;
 		return 1;
 	}
 	long r = bpf_probe_read_kernel_str(&c->e->data[c->off & (DATA_SZ - 1)], NAME_LEN,
@@ -334,6 +338,11 @@ static __always_inline u32 walk(struct event *e, u32 off, struct dentry *d,
 		.off_mnt = off_mnt,
 	};
 	bpf_loop(MAX_COMPONENTS, walk_step, &c, 0);
+	// Out of iterations short of the root, or before checking for it: the path
+	// is treated as cut there, which keeps a deeper one from passing as the
+	// shorter path it ends with.
+	if (!c.done)
+		*trunc = 1;
 	*n = c.n;
 	return c.off;
 }

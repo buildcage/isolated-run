@@ -66,6 +66,25 @@ func TestDecodeHeldRefusal(t *testing.T) {
 	}
 }
 
+func TestTidy(t *testing.T) {
+	for in, want := range map[string]string{
+		"/a/./b//c":       "/a/b/c",
+		"/a/l/../b":       "/a/l/../b",
+		"/work/l/":        "/work/l/",
+		"/work/./l/.":     "/work/l/.",
+		"/":               "/",
+		".":               ".",
+		"":                "",
+		"x":               "x",
+		"…/deep/./x":      "…/deep/x",
+		"/var/tmp/b/../x": "/var/tmp/b/../x",
+	} {
+		if got := tidy(in); got != want {
+			t.Errorf("tidy(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestDecodeBootTime(t *testing.T) {
 	r, err := decode(event{kind: 13, comm: "cat", boot: 123_456_789_000, data: []byte("/etc/hosts\x00")}.bytes())
 	if err != nil {
@@ -174,24 +193,32 @@ func TestDecode(t *testing.T) {
 			name: "failed delete, relative to a dirfd",
 			ev: event{kind: 16, comm: "go", pathRet: int32(unix.ENOENT), argsLen: 1, mode: 2,
 				data: append([]byte("b001\x00"), comps("go-build1", "tmp")...)},
-			want: record{Kind: "delete", Comm: "go", Path: "/tmp/go-build1/b001", Err: int32(unix.ENOENT), Failed: true},
+			want: record{Kind: "delete", Comm: "go", Path: "/tmp/go-build1/b001", Name: "b001", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
 			name: "failed open, relative to the cwd",
 			ev: event{kind: 12, comm: "asm", pathRet: int32(unix.ENOENT), argsLen: 1, mode: 2,
 				data: append([]byte("./textflag.h\x00"), comps("runtime", "src")...)},
-			want: record{Kind: "open-failed", Comm: "asm", Path: "/src/runtime/textflag.h", Err: int32(unix.ENOENT)},
+			want: record{Kind: "open-failed", Comm: "asm", Path: "/src/runtime/textflag.h", Name: "./textflag.h", Err: int32(unix.ENOENT)},
+		},
+		{
+			// Joined as passed: cleaning would drop "link/..", and with it the
+			// symlink the kernel followed.
+			name: "failed chmod, relative through a symlink",
+			ev: event{kind: 18, comm: "chmod", pathRet: int32(unix.EPERM), argsLen: 1, mode: 1,
+				data: append([]byte("l/../hosts\x00"), comps("work")...)},
+			want: record{Kind: "chmod", Comm: "chmod", Path: "/work/l/../hosts", Name: "l/../hosts", Err: int32(unix.EPERM), Failed: true},
 		},
 		{
 			name: "relative to the root",
 			ev:   event{kind: 21, comm: "touch", pathRet: int32(unix.EROFS), argsLen: 1, data: []byte("etc\x00")},
-			want: record{Kind: "attr", Comm: "touch", Path: "/etc", Err: int32(unix.EROFS), Failed: true},
+			want: record{Kind: "attr", Comm: "touch", Path: "/etc", Name: "etc", Err: int32(unix.EROFS), Failed: true},
 		},
 		{
 			name: "relative under a truncated base",
 			ev: event{kind: 16, comm: "rm", pathRet: int32(unix.ENOENT), argsLen: 1, mode: 1, truncated: 1,
 				data: append([]byte("x\x00"), comps("deep")...)},
-			want: record{Kind: "delete", Comm: "rm", Path: "…/deep/x", Err: int32(unix.ENOENT), Failed: true},
+			want: record{Kind: "delete", Comm: "rm", Path: "…/deep/x", Name: "x", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
 			name: "relative with no base walked",
@@ -202,13 +229,13 @@ func TestDecode(t *testing.T) {
 			name: "failed rename, each name on its own base",
 			ev: event{kind: 17, comm: "mv", pathRet: int32(unix.EXDEV), n1: 1, argsLen: 3, mode: 1, flags: 1,
 				data: append(append([]byte("a\x00b\x00"), comps("src")...), comps("dst")...)},
-			want: record{Kind: "rename", Comm: "mv", Path: "/src/a", To: "/dst/b", Err: int32(unix.EXDEV), Failed: true},
+			want: record{Kind: "rename", Comm: "mv", Path: "/src/a", To: "/dst/b", Name: "a", ToName: "b", Err: int32(unix.EXDEV), Failed: true},
 		},
 		{
 			name: "failed rename, only the new name relative",
 			ev: event{kind: 17, comm: "mv", pathRet: int32(unix.ENOENT), n1: 1, argsLen: 2, flags: 1,
 				data: append([]byte("/a\x00b\x00"), comps("dst")...)},
-			want: record{Kind: "rename", Comm: "mv", Path: "/a", To: "/dst/b", Err: int32(unix.ENOENT), Failed: true},
+			want: record{Kind: "rename", Comm: "mv", Path: "/a", To: "/dst/b", ToName: "b", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
 			name: "exec file, resolved",

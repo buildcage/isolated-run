@@ -35,31 +35,43 @@ const jsonlArb = fc
   .map((rs) => rs.map((r) => JSON.stringify(r)).join("\n"));
 
 describe("stripSandboxMachinery: properties", () => {
-  it("drops every scratch-base path but a step's exec and never emits more lines than it got", () => {
+  it("never emits more lines than it got, and keeps them all without an anchor", () => {
     fc.assert(
       fc.property(jsonlArb, (jsonl) => {
-        const out = stripSandboxMachinery(jsonl, BASE);
-        const outLines = out.split("\n").filter(Boolean);
+        const outLines = stripSandboxMachinery(jsonl, BASE).split("\n").filter(Boolean);
         const inLines = jsonl.split("\n").filter(Boolean);
         expect(outLines.length).toBeLessThanOrEqual(inLines.length);
-        const parse = (line: string) => JSON.parse(line) as { kind?: unknown; path?: unknown };
-        const scratchExec = (line: string): boolean => {
-          const { kind, path: p } = parse(line);
-          return (
-            kind === "exec" && typeof p === "string" && (p === BASE || p.startsWith(`${BASE}/`))
-          );
-        };
-        // Only execs after the anchor, the first scratch run-script.sh exec, survive.
-        const anchor = inLines.findIndex(
-          (l) => scratchExec(l) && String(parse(l).path).endsWith("/run-script.sh"),
+        const anchored = inLines.some((l) => {
+          const { kind, path: p } = JSON.parse(l) as { kind?: unknown; path?: unknown };
+          return kind === "exec" && p === `${BASE}/sandbox-x/exec/run-script.sh`;
+        });
+        if (!anchored) expect(outLines).toEqual(inLines);
+      }),
+    );
+  });
+
+  it("after the anchor, keeps every record but the init's and the shell's reads of its script", () => {
+    const script = `${BASE}/sandbox-x/exec/run-script.sh`;
+    fc.assert(
+      fc.property(jsonlArb, (jsonl) => {
+        type R = { pid?: number; ppid?: number; kind?: string; path?: string; failed?: boolean };
+        const recs = jsonl
+          .split("\n")
+          .filter(Boolean)
+          .map((l) => JSON.parse(l) as R);
+        const boundary = recs.findIndex((r) => r.kind === "exec" && r.path === script);
+        fc.pre(boundary >= 0);
+        const { pid: shell, ppid: init } = recs[boundary];
+        // The generator gives no access, so only a read counts as reading the script.
+        const expected = recs.filter(
+          (r, i) =>
+            i > boundary &&
+            r.pid !== init &&
+            !(r.pid === shell && r.path === script && r.kind === "read" && !r.failed),
+        ).length;
+        expect(stripSandboxMachinery(jsonl, BASE).split("\n").filter(Boolean)).toHaveLength(
+          expected,
         );
-        const allowed = anchor < 0 ? 0 : inLines.slice(anchor + 1).filter(scratchExec).length;
-        expect(outLines.filter(scratchExec).length).toBeLessThanOrEqual(allowed);
-        for (const line of outLines) {
-          const p = parse(line).path;
-          if (typeof p === "string" && !scratchExec(line))
-            expect(p === BASE || p.startsWith(`${BASE}/`)).toBe(false);
-        }
       }),
     );
   });
