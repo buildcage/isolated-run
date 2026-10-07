@@ -6,9 +6,9 @@
  * alive as the sandbox init (forwarding signals, reaping, propagating the exit
  * status) and forks the step's shell, which execs run-script.sh from the
  * scratch base. The sandbox cgroup holds nothing but the init and the step, so
- * from the shell's exec on every record is the step's except the init's own,
- * the init being the parent that exec names. Everything before that exec,
- * every access under the scratch base, and the init's records are machinery.
+ * from the shell's exec on every record is the step's except those of the init,
+ * the parent that exec names. Everything before that exec, every access under
+ * the scratch base, and the init's records are machinery.
  * The step's shell is relabeled bash.
  *
  * The shell is found by the exec of run-script.sh under the scratch base, never
@@ -68,7 +68,7 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
       if (lines[i] !== "") out.push(lines[i]);
       return;
     }
-    // A child of such a process inherits its run-script.sh name and keeps it too.
+    // A child of an ownShellPids process inherits its run-script.sh name, so it keeps it too.
     if (
       r.kind === "fork" &&
       r.pid !== undefined &&
