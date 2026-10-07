@@ -68643,7 +68643,7 @@ function buildRows(records, prefixes, byCommand) {
 }
 function executedPaths(records, prefixes) {
 	let seen = new Set();
-	for (let r of records) r.kind === "exec" && r.path && seen.add(canonical(r.path, prefixes));
+	for (let r of records) r.kind === "exec" && r.path && seen.add(normalize$2(canonical(r.path, prefixes)));
 	return [...seen].map((p) => escapeForDisplay(relativize(p, prefixes)));
 }
 function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
@@ -68668,7 +68668,7 @@ function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
 	executed.length > 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, "Executed", markdownRows(["Path"], executed.map((path) => [codeCell(path)]))));
 	let byPath = buildRows(records, prefixes, !1).sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
-		return ca - cb || (pa < pb ? -1 : 1);
+		return ca - cb || (pa < pb ? -1 : +(pa > pb));
 	});
 	blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", markdownRows(["Access", "Path"], byPath.map(({ flags, path }) => [flags, codeCell(path)]))));
 	let originMs = prefixes.startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.span?.first ?? Infinity), Infinity) : prefixes.startedAt * 1e3, times = rows.map((r) => fmtSpan(r.span, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
@@ -69176,7 +69176,11 @@ async function prepareStepFilesystemAudit({ audit, retentionDays, containerName,
 	} catch (e) {
 		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), NONE;
 	} finally {
-		deps.setOutput(artifactName);
+		try {
+			deps.setOutput(artifactName);
+		} catch (e) {
+			annotation.warning(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
+		}
 	}
 }
 async function upload(clean, outPath, retentionDays, containerName, annotation, deps) {

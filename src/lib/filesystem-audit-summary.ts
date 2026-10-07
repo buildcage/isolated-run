@@ -511,7 +511,8 @@ function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: 
 // The step's own executables, each once, in the order they were first run.
 function executedPaths(records: AuditRecord[], prefixes: SummaryOptions): string[] {
   const seen = new Set<string>();
-  for (const r of records) if (r.kind === "exec" && r.path) seen.add(canonical(r.path, prefixes));
+  for (const r of records)
+    if (r.kind === "exec" && r.path) seen.add(normalize(canonical(r.path, prefixes)));
   return [...seen].map((p) => escapeForDisplay(relativize(p, prefixes)));
 }
 
@@ -565,8 +566,7 @@ export function renderFilesystemAuditBlocks(
   const byPath = buildRows(records, prefixes, false).sort((a, b) => {
     const [ca, pa] = sortKey(a.path);
     const [cb, pb] = sortKey(b.path);
-    // One row per path here, so no two compare equal.
-    return ca - cb || (pa < pb ? -1 : 1);
+    return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : 0);
   });
   blocks.push(
     table(

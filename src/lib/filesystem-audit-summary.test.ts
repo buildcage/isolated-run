@@ -516,6 +516,30 @@ describe("renderFilesystemAuditSummary", () => {
       );
     });
 
+    it("spells an executed path the way the other views do", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { kind: "exec", comm: "sh", path: "./run.sh" },
+          { kind: "exec", comm: "sh", path: "run.sh" },
+          { kind: "exec", comm: "a", path: "/proc/12/fd/3" },
+          { kind: "exec", comm: "a", path: "/proc/34/fd/3" },
+        ),
+        PREFIXES,
+      );
+      expect(md).toContain("| Path |\n| --- |\n| `…/run.sh` |\n| `/proc/<pid>/fd/3` |\n\n");
+    });
+
+    it("keeps two rows that read alike in a stable order", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { kind: "read", comm: "a", path: "…/x" },
+          { kind: "open-failed", comm: "a", path: "x", err: 2 },
+        ),
+        PREFIXES,
+      );
+      expect(md).toContain("| R | `…/x` |\n| r | `…/x` |\n");
+    });
+
     it("leaves the executed table out when nothing was run", () => {
       const md = renderFilesystemAuditSummary(
         jsonl({ kind: "read", comm: "a", path: "/work/x" }),

@@ -778,8 +778,9 @@ the name it was run by as `name`. The libraries a command loads are left out.
 When the step's Job Summary would pass GitHub's size limit, its parts give way in this order: the
 filesystem details, the traffic report's communication log, the accessed-paths table, the executed
 table, then the traffic report's own tables and example. Each is cut at a line boundary with a note
-after what is kept, except the example, which is replaced whole by its note. The filesystem audit's
-note names its artifact, or says the record was not kept when the artifact could not be uploaded.
+after what is kept, except the example, which is replaced whole by its note. Once a filesystem audit
+table is cut, the details are left out with it, under that one note. The filesystem audit's note
+names its artifact, or says the record was not kept when the artifact could not be uploaded.
 
 The full record is uploaded as JSON lines in an artifact named `buildcage-filesystem-audit-<id>`,
 with absolute paths; `filesystem_audit_artifact_name` carries its name. Treat it as sensitive, like

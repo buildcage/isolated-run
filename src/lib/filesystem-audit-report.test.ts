@@ -386,4 +386,23 @@ describe("prepareStepFilesystemAudit", () => {
 
     expect(summaries[0]).toContain("Filesystem audit");
   });
+
+  it("only warns when the output cannot be set", async () => {
+    const note = annotation();
+    const { deps: d, summaries } = deps({
+      setOutput: () => {
+        throw new Error("GITHUB_OUTPUT is gone");
+      },
+    });
+
+    await reportStepFilesystemAudit(
+      { ...base, audit: AUDIT, annotation: note, env: { GITHUB_WORKSPACE: "/work" } },
+      d,
+    );
+
+    expect(note.warning).toHaveBeenCalledWith(
+      "Failed to set the filesystem_audit_artifact_name output: GITHUB_OUTPUT is gone",
+    );
+    expect(summaries[0]).toContain("Filesystem audit");
+  });
 });

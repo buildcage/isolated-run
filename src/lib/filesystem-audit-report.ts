@@ -141,7 +141,13 @@ export async function prepareStepFilesystemAudit(
     annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
     return NONE;
   } finally {
-    deps.setOutput(artifactName);
+    try {
+      deps.setOutput(artifactName);
+    } catch (e) {
+      annotation.warning(
+        `Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`,
+      );
+    }
   }
 }
 
