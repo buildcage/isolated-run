@@ -80,6 +80,7 @@ struct filename {
 
 struct linux_binprm {
 	const char *filename;
+	struct file *file;
 } __attribute__((preserve_access_index));
 
 struct trace_event_raw_sys_enter {
@@ -110,7 +111,11 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	K_CHOWN_FAILED = 19, K_ATTR = 20, K_ATTR_FAILED = 21,
 	// A new process: pid is the child, ppid the process that made it, where
 	// every other kind's ppid is its current parent; no data.
-	K_FORK = 22 };
+	K_FORK = 22,
+	// The file an exec is about to run, before a script hands over to its
+	// interpreter: path components, as for unlink. The reader moves it onto
+	// the exec event that follows.
+	K_EXEC_FILE = 23 };
 
 // Fixed header (mirrored by hdrLen in decode.go), then data_len bytes of data:
 //   open:    d_path result (path_len is its return value)
@@ -471,6 +476,24 @@ int BPF_PROG(on_open, struct file *file)
 	long r = bpf_d_path(&file->f_path, e->data, PATH_LEN);
 	e->path_len = r;
 	e->data_len = r > 0 ? r : 0;
+	submit(e);
+	return 0;
+}
+
+// The file being executed, resolved, while bprm->file is still the one named:
+// by sched_process_exec a script has been swapped for its interpreter, and
+// filename is only the name the caller passed, relative to its cwd or not.
+SEC("fentry/security_bprm_creds_for_exec")
+int BPF_PROG(on_exec_file, struct linux_binprm *bprm)
+{
+	if (!in_target())
+		return 0;
+	struct event *e = start(K_EXEC_FILE);
+	if (!e)
+		return 0;
+	struct file *f = BPF_CORE_READ(bprm, file);
+	e->data_len = walk(e, 0, BPF_CORE_READ(f, f_path.dentry), BPF_CORE_READ(f, f_path.mnt),
+			   &e->n1, &e->truncated);
 	submit(e);
 	return 0;
 }

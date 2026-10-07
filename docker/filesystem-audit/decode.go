@@ -15,12 +15,15 @@ import (
 // mmap flags as letters; Failed and Err describe an operation that did not
 // succeed.
 type record struct {
-	Time   string `json:"t"`
-	Kind   string `json:"kind"`
-	PID    uint32 `json:"pid"`
-	PPID   uint32 `json:"ppid"`
-	Comm   string `json:"comm"`
-	Path   string `json:"path,omitempty"`
+	Time string `json:"t"`
+	Kind string `json:"kind"`
+	PID  uint32 `json:"pid"`
+	PPID uint32 `json:"ppid"`
+	Comm string `json:"comm"`
+	Path string `json:"path,omitempty"`
+	// Name is what an exec was asked to run, when Path is the file that
+	// resolved to.
+	Name   string `json:"name,omitempty"`
 	To     string `json:"to,omitempty"`
 	Access string `json:"access,omitempty"`
 	Flags  uint32 `json:"flags,omitempty"`
@@ -39,7 +42,7 @@ var kindNames = map[uint32]string{
 	7: "chmod", 8: "symlink", 9: "link", 10: "truncate", 11: "chown",
 	12: "open-failed", 13: "read", 14: "write", 15: "mmap",
 	16: "delete", 17: "rename", 18: "chmod", 19: "chown", 20: "attr", 21: "attr",
-	22: "fork",
+	22: "fork", 23: "exec-file",
 }
 
 // Mirrors the fixed header of struct event in bpf/filesystem_audit.bpf.c:
@@ -110,6 +113,27 @@ func withBase(data []byte, has bool, n int, truncated bool) (string, []byte) {
 	return joinBase(name, after(data, len(name)), has, n, truncated)
 }
 
+// execFiles holds each process's resolved exec target until its exec record
+// arrives.
+type execFiles map[uint32]string
+
+// attach takes in an exec-file record, keeping its path for the exec that
+// follows, and reports true so the caller drops it. An exec record gets that
+// path, with the name it was run by moved to Name.
+func (f execFiles) attach(r *record) bool {
+	switch r.Kind {
+	case "exec-file":
+		f[r.PID] = r.Path
+		return true
+	case "exec":
+		if p, ok := f[r.PID]; ok {
+			delete(f, r.PID)
+			r.Name, r.Path = r.Path, p
+		}
+	}
+	return false
+}
+
 // decode turns one raw ring-buffer sample into a record.
 func decode(raw []byte) (record, error) {
 	if len(raw) < hdrLen {
@@ -164,7 +188,7 @@ func decode(raw []byte) (record, error) {
 			a := data[pathLen : pathLen+argsLen]
 			r.Args = strings.TrimRight(strings.ReplaceAll(string(a), "\x00", " "), " ")
 		}
-	case 3, 4, 6, 10: // unlink, rmdir, mkdir, truncate
+	case 3, 4, 6, 10, 23: // unlink, rmdir, mkdir, truncate, exec-file
 		r.Path, _ = components(data, n1, truncated)
 	case 7: // chmod
 		r.Path, _ = components(data, n1, truncated)

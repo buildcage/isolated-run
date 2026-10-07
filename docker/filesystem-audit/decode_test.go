@@ -211,6 +211,11 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "rename", Comm: "mv", Path: "/a", To: "/dst/b", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
+			name: "exec file, resolved",
+			ev:   event{kind: 23, pid: 9, comm: "sh", n1: 3, data: comps("gradlew", "A", "work")},
+			want: record{Kind: "exec-file", PID: 9, Comm: "sh", Path: "/work/A/gradlew"},
+		},
+		{
 			name: "attr ok",
 			ev:   event{kind: 20, comm: "touch", data: []byte("/tmp/t\x00")},
 			want: record{Kind: "attr", Comm: "touch", Path: "/tmp/t"},
@@ -289,4 +294,28 @@ func FuzzDecode(f *testing.F) {
 	f.Fuzz(func(_ *testing.T, raw []byte) {
 		_, _ = decode(raw)
 	})
+}
+
+func TestExecFilesAttach(t *testing.T) {
+	files := execFiles{}
+	if !files.attach(&record{Kind: "exec-file", PID: 9, Path: "/work/A/gradlew"}) {
+		t.Fatal("an exec-file record should be dropped")
+	}
+	other := record{Kind: "exec", PID: 7, Path: "/usr/bin/env"}
+	if files.attach(&other) || other.Path != "/usr/bin/env" || other.Name != "" {
+		t.Fatalf("an exec with no resolved file changed: %+v", other)
+	}
+	exec := record{Kind: "exec", PID: 9, Path: "./gradlew"}
+	if files.attach(&exec) {
+		t.Fatal("an exec record should be kept")
+	}
+	if exec.Path != "/work/A/gradlew" || exec.Name != "./gradlew" {
+		t.Fatalf("exec = %+v, want the resolved path with the name it was run by", exec)
+	}
+	if _, left := files[9]; left {
+		t.Fatal("the resolved file should be used once")
+	}
+	if files.attach(&record{Kind: "read", PID: 9, Path: "/etc/hosts"}) {
+		t.Fatal("other records should be kept")
+	}
 }
