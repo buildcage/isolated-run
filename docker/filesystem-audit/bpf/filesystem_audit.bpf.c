@@ -470,6 +470,13 @@ int on_backing_exit(u64 *ctx)
 	return 0;
 }
 
+// An open file's path as leaf-first components, from its own dentry up.
+static __always_inline u32 file_walk(struct event *e, struct file *file)
+{
+	return walk(e, 0, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt),
+		    &e->n1, &e->truncated);
+}
+
 // An open file's path for an open, read or write event. bpf_d_path refuses a
 // path longer than PATH_LEN, and the access would then go unnamed, so such a
 // path is spelled from its dentries instead and marked cut (n1 tells the
@@ -482,8 +489,7 @@ static __always_inline void file_path(struct event *e, struct file *file)
 		e->data_len = r;
 		return;
 	}
-	e->data_len = walk(e, 0, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt),
-			   &e->n1, &e->truncated);
+	e->data_len = file_walk(e, file);
 }
 
 SEC("fentry/security_file_open")
@@ -518,8 +524,7 @@ int BPF_PROG(on_exec_file, struct linux_binprm *bprm)
 	if (!e)
 		return 0;
 	struct file *f = BPF_CORE_READ(bprm, file);
-	e->data_len = walk(e, 0, BPF_CORE_READ(f, f_path.dentry), BPF_CORE_READ(f, f_path.mnt),
-			   &e->n1, &e->truncated);
+	e->data_len = file_walk(e, f);
 	submit(e);
 	return 0;
 }
@@ -677,8 +682,7 @@ int BPF_PROG(on_file_truncate, struct file *file)
 	struct event *e = start(K_TRUNCATE);
 	if (!e)
 		return 0;
-	e->data_len = walk(e, 0, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt),
-			   &e->n1, &e->truncated);
+	e->data_len = file_walk(e, file);
 	hold(e);
 	return 0;
 }
@@ -926,7 +930,7 @@ int BPF_PROG(on_mmap, struct file *file, unsigned long prot, unsigned long flags
 		return 0;
 	e->mode = prot;
 	e->flags = flags;
-	e->data_len = walk(e, 0, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), &e->n1, &e->truncated);
+	e->data_len = file_walk(e, file);
 	submit(e);
 	return 0;
 }
@@ -990,7 +994,7 @@ static __always_inline void op_exit(long ret, int failure_only)
 		e->ts = pend->ts;
 		if (ret < 0)
 			e->path_len = -ret;
-		long r = bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1);
+		long r = pend->p1 ? bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1) : 0;
 		u32 off = r > 0 ? r : 0;
 		u32 second = off;
 		// Mark a second path only when both were read, so a failed read never
@@ -1180,7 +1184,8 @@ FAILED_OP_1(lchown, K_CHOWN_FAILED)
 SEC("tracepoint/syscalls/sys_enter_" #sys)					\
 int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
 {										\
-	op_enter2(K_ATTR_FAILED, K_ATTR, dfd, p, 0, 0);				\
+	if (p || (int)(dfd) != AT_FDCWD) /* as for utimensat */			\
+		op_enter2(K_ATTR_FAILED, K_ATTR, dfd, p, 0, 0);			\
 	return 0;								\
 }										\
 SEC("tracepoint/syscalls/sys_exit_" #sys)					\
@@ -1193,7 +1198,5 @@ int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
 ATTR_OP(utime, AT_FDCWD, ctx->args[0])
 ATTR_OP(utimes, AT_FDCWD, ctx->args[0])
 ATTR_OP(futimesat, ctx->args[0], ctx->args[1])
-
-
 
 char LICENSE[] SEC("license") = "GPL";
