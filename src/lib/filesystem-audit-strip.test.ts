@@ -149,15 +149,32 @@ describe("stripSandboxMachinery", () => {
     expect(records(out)).toEqual([sleep]);
   });
 
-  it("changes nothing but scratch paths when no step shell is found", () => {
+  it("keeps every record when no step shell is found", () => {
+    const records_ = [
+      { pid: 30, kind: "read", comm: "node", path: "/work/a" },
+      { pid: 30, kind: "read", comm: "node", path: `${BASE}/leftover` },
+    ];
+    expect(records(stripSandboxMachinery(jsonl(...records_), BASE))).toEqual(records_);
+  });
+
+  it("keeps a step's access spelled through the scratch base", () => {
+    const sneaky = {
+      pid: 12,
+      ppid: 11,
+      kind: "attr",
+      comm: "node",
+      path: `${BASE}/../../home/u/.bashrc`,
+    };
     const out = stripSandboxMachinery(
       jsonl(
-        { pid: 30, kind: "read", comm: "node", path: "/work/a" },
-        { pid: 30, kind: "read", comm: "node", path: `${BASE}/leftover` },
+        { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
+        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        { pid: 11, ppid: 10, kind: "read", comm: "run-script.sh", path: RUN_SCRIPT },
+        sneaky,
       ),
       BASE,
     );
-    expect(records(out)).toEqual([{ pid: 30, kind: "read", comm: "node", path: "/work/a" }]);
+    expect(records(out)).toEqual([sneaky]);
   });
 
   it("keeps a truncated tail and tolerates an empty recording", () => {

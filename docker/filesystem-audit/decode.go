@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"path"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -21,10 +20,12 @@ type record struct {
 	PPID uint32 `json:"ppid"`
 	Comm string `json:"comm"`
 	Path string `json:"path,omitempty"`
-	// Name is what an exec was asked to run, when Path is the file that
-	// resolved to.
+	// Name is the name the command passed, where Path is not that name as
+	// written: the file an exec resolved to, or a passed name joined to its
+	// directory. ToName is the same for To.
 	Name   string `json:"name,omitempty"`
 	To     string `json:"to,omitempty"`
+	ToName string `json:"to_name,omitempty"`
 	Access string `json:"access,omitempty"`
 	Flags  uint32 `json:"flags,omitempty"`
 	Args   string `json:"args,omitempty"`
@@ -98,13 +99,18 @@ func after(b []byte, n int) []byte {
 }
 
 // joinBase prefixes a relative name with the base directory the BPF side
-// walked for it, whose n components lead rest; has says one was walked.
+// walked for it, whose n components lead rest; has says one was walked. It
+// joins them as they are: cleaning "dir/link/.." would drop a symlink the
+// kernel followed, and the name's own spelling is part of what it records.
 func joinBase(name string, rest []byte, has bool, n int, truncated bool) (string, []byte) {
 	if !has {
 		return name, rest
 	}
 	base, rest := components(rest, n, truncated)
-	return path.Join(base, name), rest
+	if name == "" {
+		return base, rest
+	}
+	return strings.TrimSuffix(base, "/") + "/" + name, rest
 }
 
 // withBase decodes a single name followed by its base directory, if any.
@@ -171,6 +177,7 @@ func decode(raw []byte) (record, error) {
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
 	case 12: // failed open
+		r.Name = cstr(data)
 		r.Path, _ = withBase(data, argsLen&1 != 0, int(mode), truncated)
 		r.Err = pathRet // the positive errno the BPF side stored as -ret
 	case 13, 14: // read, write
@@ -211,6 +218,7 @@ func decode(raw []byte) (record, error) {
 		r.Path, rest = components(data, n1, truncated)
 		r.To, _ = components(rest, n2, truncated2)
 	case 16, 18, 19: // failed delete / chmod / chown
+		r.Name = cstr(data)
 		r.Path, _ = withBase(data, argsLen&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
@@ -224,15 +232,19 @@ func decode(raw []byte) (record, error) {
 			to = cstr(rest)
 			rest = after(rest, len(to))
 		}
+		r.Name = name
 		r.Path, rest = joinBase(name, rest, argsLen&1 != 0, int(mode), truncated)
 		if n1 == 1 {
+			r.ToName = to
 			r.To, _ = joinBase(to, rest, argsLen&2 != 0, int(flags), truncated2)
 		}
 		r.Err = pathRet
 		r.Failed = true
 	case 20: // attr via utimes / setxattr
+		r.Name = cstr(data)
 		r.Path, _ = withBase(data, argsLen&1 != 0, int(mode), truncated)
 	case 21: // failed attr via utimes / setxattr
+		r.Name = cstr(data)
 		r.Path, _ = withBase(data, argsLen&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true

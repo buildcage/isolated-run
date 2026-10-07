@@ -68309,10 +68309,11 @@ function stripSandboxMachinery(jsonl, scratchBase) {
 		} catch {
 			return;
 		}
-	}), ownShellPids = new Set(), shell, init, boundary = -1;
+	}), ownShellPids = new Set(), shell, script, init, boundary = -1;
 	recs.forEach((r, i) => {
-		r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 ? [shell, boundary, init] = [
+		r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 ? [shell, script, boundary, init] = [
 			r.pid,
+			r.path,
 			i,
 			r.ppid
 		] : r.pid !== shell && ownShellPids.add(r.pid) : ownShellPids.add(r.pid));
@@ -68323,7 +68324,9 @@ function stripSandboxMachinery(jsonl, scratchBase) {
 			lines[i] !== "" && out.push(lines[i]);
 			return;
 		}
-		if (r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid), (!under(r.path) || r.kind === "exec" && shell !== void 0 && i > boundary) && !(shell !== void 0 && r.pid !== void 0 && (i < boundary || r.pid === init))) {
+		r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
+		let readsScript = r.pid === shell && r.path === script && r.kind !== "exec";
+		if (!(shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript))) {
 			if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
 				out.push(JSON.stringify({
 					...r,
