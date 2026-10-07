@@ -68495,7 +68495,7 @@ function fmtFlags(ok, failed, perm) {
 }
 const LEGEND = "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit";
 function renderFilesystemAuditSummary(jsonl, prefixes) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), seq = 0, incomplete = !1;
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), seq = 0, ended = !1, lost = !1;
 	for (let line of jsonl.split("\n")) {
 		if (!line) continue;
 		let r;
@@ -68504,8 +68504,8 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		} catch {
 			continue;
 		}
-		if (r.kind === "incomplete") {
-			incomplete = !0;
+		if (r.kind === "end") {
+			ended = !0, lost = !!(r.dropped || r.untracked);
 			continue;
 		}
 		if (r.kind === "mmap" && r.access === "x") {
@@ -68572,8 +68572,8 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return a.seq - b.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
 	});
-	let heading = incomplete ? `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up, so some accesses are missing
-> from the list below and from the artifact.` : HEADING;
+	let heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
+> some accesses are missing from this summary and from the artifact.`;
 	if (rows.length === 0) return `${heading}\n\nNo file access was recorded.\n`;
 	let originMs = prefixes.startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.span?.first ?? Infinity), Infinity) : prefixes.startedAt * 1e3, times = rows.map((r) => fmtSpan(r.span, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
 	return `${heading}\n\n<sub>${timeW ? `first-last access · ${LEGEND}` : LEGEND}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;

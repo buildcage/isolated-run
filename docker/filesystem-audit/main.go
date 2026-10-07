@@ -296,12 +296,6 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 	}
 	dropped := sumPerCPU(coll.Maps["drops"])
 	untracked := sumPerCPU(coll.Maps["untracked"])
-	if err := writeIncomplete(enc, dropped, untracked); err != nil {
-		return err
-	}
-	if err := w.Flush(); err != nil {
-		return err
-	}
 	internal := sumPerCPU(coll.Maps["skipped_internal"])
 	kinds := make([]string, 0, len(counts))
 	for k := range counts {
@@ -313,23 +307,19 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 	}
 	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d internal-skipped=%d pre-exec-skipped=%d\n",
 		total, dropped, untracked, internal, preExec)
-	return nil
+	if err := enc.Encode(end{Kind: "end", Dropped: dropped, Untracked: untracked}); err != nil {
+		return err
+	}
+	return w.Flush()
 }
 
-// incomplete is the recording's last line when some accesses went unrecorded:
-// Dropped events found the ring buffer full, and Untracked reads or writes
-// found the per-file map full. The report warns that the record has gaps.
-type incomplete struct {
+// end is the recording's last line, written only once every queued event is
+// out, so a recording without it was cut short. Dropped events found the ring
+// buffer full, and Untracked file checks found the per-file map full.
+type end struct {
 	Kind      string `json:"kind"`
 	Dropped   uint64 `json:"dropped"`
 	Untracked uint64 `json:"untracked"`
-}
-
-func writeIncomplete(enc *json.Encoder, dropped, untracked uint64) error {
-	if dropped == 0 && untracked == 0 {
-		return nil
-	}
-	return enc.Encode(incomplete{Kind: "incomplete", Dropped: dropped, Untracked: untracked})
 }
 
 func sumPerCPU(m *ebpf.Map) uint64 {

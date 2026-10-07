@@ -313,3 +313,4 @@
 {"t":"2026-10-06T14:09:36.395Z","kind":"unlink","pid":8783,"ppid":8780,"comm":"rm","path":"/home/runner/work/isolated-run/isolated-run/probe2.txt"}
 {"t":"2026-10-06T14:09:36.395Z","kind":"open","pid":8774,"ppid":8759,"comm":"env-loader.sh","path":"/dev/null","access":"wct","flags":33345}
 {"t":"2026-10-06T14:09:36.395Z","kind":"write","pid":8774,"ppid":8759,"comm":"env-loader.sh","path":"/dev/null"}
+{"kind":"end","dropped":0,"untracked":0}

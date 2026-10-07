@@ -760,10 +760,11 @@ The full record is uploaded as JSON lines in an artifact named `buildcage-filesy
 with absolute paths; `filesystem_audit_artifact_name` carries its name. Treat it as sensitive, like
 the traffic artifact. `filesystem_audit_retention_days` sets how long it is kept.
 
-If the tracer's buffers fill up, the section opens with a warning that the record is incomplete, and
-the artifact ends with a line such as `{"kind":"incomplete","dropped":120,"untracked":0}`.
-`dropped` counts accesses that found the event buffer full, and `untracked` the reads and writes left
-unreported because too many files were open at once to track.
+The artifact's last line, such as `{"kind":"end","dropped":0,"untracked":0}`, is written once the
+tracer has written every access it caught. `dropped` counts accesses that found its event buffer
+full, and `untracked` the read, write and map checks it skipped because too many files were open at
+once to track, one per call. If either is nonzero, or the line is missing because the tracer did not
+stop cleanly, the section opens with a warning that the record is incomplete.
 
 It observes accesses in the kernel, below any library the step links against, and only records; it
 never blocks an access. It needs a cgroup v2 host running Linux 5.17 or newer; where that or the
