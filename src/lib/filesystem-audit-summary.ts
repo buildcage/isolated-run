@@ -426,10 +426,10 @@ function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: 
   ): void => {
     for (const [key, set] of src) {
       const p = pathOf(key);
-      // A succeeding record always resolves to an absolute path or a truncated
-      // "…/" walk, so anything else there (d_path's pipe:, socket: and
-      // anon_inode: targets) is not a file; a failed one may keep the relative
-      // name it was given when its directory was not found.
+      // A succeeding record resolves to an absolute path or a "…/" walk, so a
+      // relative one there is d_path's pipe:, socket: or anon_inode: target,
+      // or an attribute change whose directory descriptor closed meanwhile; a
+      // failed one may keep the relative name it was given.
       if (!keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
       // Keep the key even with no flags left (a read-then-dropped library): it
       // still counts toward a directory's collapse, though it prints no row.

@@ -68331,7 +68331,7 @@ function setFilesystemAuditOutput(name) {
 }
 //#endregion
 //#region src/lib/filesystem-audit-strip.ts
-const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && (r.access ?? "").startsWith("r") && !(r.access ?? "").includes("w");
+const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && r.access === "r";
 function stripSandboxMachinery(jsonl, scratchBase) {
 	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), lines = jsonl.split("\n"), recs = lines.map((line) => {
 		try {

@@ -204,6 +204,8 @@ describe("stripSandboxMachinery", () => {
         { ...shell, kind: "open", access: "r" },
         { ...shell, kind: "mmap", access: "r" },
         { ...shell, kind: "open", access: "rw" },
+        { ...shell, kind: "open", access: "rt" },
+        { ...shell, kind: "read", err: 5, failed: true },
         // Another step process reading the script is the step's.
         { pid: 12, ppid: 11, kind: "read", comm: "cat", path: RUN_SCRIPT },
       ),
@@ -211,6 +213,8 @@ describe("stripSandboxMachinery", () => {
     );
     expect(records(out)).toEqual([
       { ...shell, comm: "bash", kind: "open", access: "rw" },
+      { ...shell, comm: "bash", kind: "open", access: "rt" },
+      { ...shell, comm: "bash", kind: "read", err: 5, failed: true },
       { pid: 12, ppid: 11, kind: "read", comm: "cat", path: RUN_SCRIPT },
     ]);
   });
@@ -236,11 +240,14 @@ describe("stripSandboxMachinery", () => {
 
   it("keeps a record with no pid, such as the tracer's end line, with or without an anchor", () => {
     const end = { kind: "end", dropped: 0, untracked: 0 };
-    expect(
-      records(
-        stripSandboxMachinery(jsonl({ pid: 30, kind: "read", comm: "c", path: "/w" }, end), BASE),
-      ),
-    ).toContainEqual(end);
+    const read = { pid: 30, kind: "read", comm: "c", path: "/w" };
+    expect(records(stripSandboxMachinery(jsonl(read, end), BASE))).toEqual([read, end]);
+    const anchored = jsonl(
+      { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
+      { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+      end,
+    );
+    expect(records(stripSandboxMachinery(anchored, BASE))).toEqual([end]);
   });
 
   it("keeps a truncated tail and tolerates an empty recording", () => {

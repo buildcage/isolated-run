@@ -103,6 +103,16 @@ describe("renderFilesystemAuditSummary", () => {
       PREFIXES,
     );
     expect(lines(md)).toContain("a! cat ./l/../../etc/passwd");
+    // Nor does it count among their children toward a fold.
+    expect(
+      lines(
+        render(
+          { kind: "read", comm: "c", path: "/work/l/a" },
+          { kind: "read", comm: "c", path: "/work/l/b" },
+          { kind: "read", comm: "c", path: "/work/l/../x" },
+        ),
+      ),
+    ).toEqual(["R c ./l/../x", "R c ./l/a", "R c ./l/b"]);
   });
 
   it("gives every kind its letter, uppercase when done and lowercase when failed", () => {
@@ -158,9 +168,10 @@ describe("renderFilesystemAuditSummary", () => {
           { kind: "write", comm: "sh", path: "socket:[34]" },
           { kind: "read", comm: "sh", path: "/work/pipe:x" },
           { kind: "open-failed", comm: "sh", path: "pipe:y", err: 2 },
+          { kind: "delete", comm: "sh", path: "pipe:z", err: 13, failed: true },
         ),
       ),
-    ).toEqual(["R sh ./pipe:x", "r sh …/pipe:y"]);
+    ).toEqual(["R sh ./pipe:x", "r sh …/pipe:y", "d! sh …/pipe:z"]);
   });
 
   it("shows a mapped data file, and leaves out a mapped library, with or without a path", () => {
@@ -197,18 +208,6 @@ describe("renderFilesystemAuditSummary", () => {
       );
       expect(lines(md).some((l) => l.endsWith("/**"))).toBe(false);
     }
-  });
-
-  it("does not count a climbing path among the children it names", () => {
-    expect(
-      lines(
-        render(
-          { kind: "read", comm: "c", path: "/work/l/a" },
-          { kind: "read", comm: "c", path: "/work/l/b" },
-          { kind: "read", comm: "c", path: "/work/l/../x" },
-        ),
-      ),
-    ).toEqual(["R c ./l/../x", "R c ./l/a", "R c ./l/b"]);
   });
 
   it("orders rows without times by workspace, home, then the rest, then path and command", () => {
