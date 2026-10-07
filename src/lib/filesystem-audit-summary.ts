@@ -37,12 +37,20 @@ const LETTER: Record<string, string> = {
   attr: "A",
 };
 const ORDER = "RWXMDA";
+// Failed kinds from the syscall tracepoints, and the path changes the kernel
+// refused after the tracer's hook saw them, which keep their own kind.
 const FAILED_LETTER: Record<string, string> = {
   delete: "D",
   rename: "M",
   chmod: "A",
   chown: "A",
   attr: "A",
+  unlink: "D",
+  rmdir: "D",
+  mkdir: "W",
+  truncate: "W",
+  symlink: "W",
+  link: "W",
 };
 const PERM_ERRNO = new Set([1, 13, 30]); // EPERM, EACCES, EROFS
 const DEFAULT_FANOUT = 3;
@@ -65,6 +73,7 @@ function classify(r: AuditRecord): Classified | undefined {
     failed = true;
   } else if (r.failed) {
     letter = FAILED_LETTER[r.kind];
+    if (r.kind === "link") path = r.to;
     failed = true;
   } else if (r.kind === "mmap") {
     letter = r.access === "w" ? "W" : "R";

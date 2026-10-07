@@ -71,6 +71,18 @@ describe("renderFilesystemAuditSummary", () => {
     ]);
   });
 
+  it("shows a path change the kernel refused after the tracer saw it as failed", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "unlink", comm: "rm", path: "/tmp/f", err: 1, failed: true },
+        { kind: "mkdir", comm: "mkdir", path: "/work/d", err: 13, failed: true },
+        { kind: "link", comm: "ln", path: "/work/a", to: "/work/b", err: 2, failed: true },
+      ),
+      PREFIXES,
+    );
+    expect(lines(md)).toEqual(["w ln ./b", "w! mkdir ./d", "d! rm /tmp/f"]);
+  });
+
   it("combines an action's flags per path and relativizes", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(

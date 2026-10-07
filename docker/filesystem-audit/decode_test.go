@@ -13,6 +13,7 @@ import (
 type event struct {
 	kind, flags, mode         uint32
 	pathRet                   int32
+	err                       uint32
 	argsLen                   uint32
 	n1, n2, truncated, trunc2 uint8
 	pid, ppid                 uint32
@@ -33,6 +34,7 @@ func (e event) bytes() []byte {
 	le.PutUint32(b[24:], e.argsLen)
 	b[32], b[33], b[34], b[35] = e.n1, e.n2, e.truncated, e.trunc2
 	copy(b[36:52], e.comm)
+	le.PutUint32(b[52:], e.err)
 	le.PutUint64(b[56:], e.boot)
 	return append(b, e.data...)
 }
@@ -51,6 +53,16 @@ func comps(leafFirst ...string) []byte {
 func TestDecodeShort(t *testing.T) {
 	if _, err := decode(make([]byte, hdrLen-1)); err == nil {
 		t.Fatal("want error on short event")
+	}
+}
+
+func TestDecodeHeldRefusal(t *testing.T) {
+	r, err := decode(event{kind: 3, n1: 2, err: 1, data: comps("f", "tmp")}.bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Kind != "unlink" || r.Path != "/tmp/f" || !r.Failed || r.Err != 1 {
+		t.Errorf("held refusal decode: %+v", r)
 	}
 }
 
