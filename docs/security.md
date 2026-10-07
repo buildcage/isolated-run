@@ -264,18 +264,18 @@ payload for a later step. See [Filesystem access](../README.md#filesystem-access
   else the runner sets still arrives: this is a named list rather than a sweep over `ACTIONS_*`,
   which would rest on guessing which of them a `run:` step legitimately sees.
 - **A command that is not PID 1.** The kernel drops any signal a PID namespace's PID 1 has no
-  handler for, SIGKILL from inside included, and hands it every orphan to reap. The loader below
+  handler for, SIGKILL from inside included, and hands it every orphan to reap. `buildcage-init`
   stays PID 1 and runs the command as its child, so `kill -TERM $$` works and a python or node
-  shebang leaves no zombies. It forwards `SIGHUP`, `SIGQUIT`, `SIGUSR1` and `SIGUSR2` to the
-  command's process group, as a terminal's Ctrl-C does, so what the command runs gets them too, and
-  `SIGTERM` and `SIGINT` to every other process in the sandbox, one moved out of that group with
-  `setsid` included. It exits with the command's status, `128+n` if a signal killed it. After
-  forwarding `SIGTERM` or `SIGINT`, it first waits for all of them to exit.
+  shebang leaves no zombies. It forwards `SIGTERM` and `SIGINT` to every other process in the
+  sandbox, one the command moved out of its process group with `setsid` included, and `SIGHUP`,
+  `SIGQUIT`, `SIGUSR1` and `SIGUSR2` to that process group, so what the command runs gets them
+  too. It exits with the command's status, `128+n` if a signal killed it. After forwarding
+  `SIGTERM` or `SIGINT`, it first waits for all of them to exit.
 
 What is left is piped to the sandboxed process over stdin as NUL-delimited `KEY=VALUE` records,
-rather than written into `config.json`, so an `env:` secret never reaches the runner's disk. The
-loader hands them to the run script through `env -i` instead of exporting them itself, so a name
-bash reserves (`UID`, `SECONDS`) arrives as set, as it does in an unwrapped `run:` step.
+rather than written into `config.json`, so an `env:` secret never reaches the runner's disk.
+`buildcage-init` hands them to the run script through `env -i` instead of exporting them itself, so
+a name bash reserves (`UID`, `SECONDS`) arrives as set, as it does in an unwrapped `run:` step.
 
 ### When the step ends
 

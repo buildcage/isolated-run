@@ -70840,7 +70840,7 @@ function buildEnvBlob(resolved) {
 }
 const ENV_LOADER_SCRIPT = `#!/bin/bash
 # Applies the step environment from stdin, then runs $1 as a child: forwards
-# signals to its process group, reaps orphans, and exits with its status. See
+# signals to it, reaps orphans, and exits with its status. See
 # sandbox/env-loader.ts for the wire format.
 #
 # The records go to env(1) rather than being exported, so a step variable
@@ -70850,10 +70850,10 @@ const ENV_LOADER_SCRIPT = `#!/bin/bash
 set -u
 
 # Trapped before reading, as PID 1 drops untrapped signals. Any that arrive
-# before the child exists are held for it. A forwarded one goes to the
-# child's whole process group, which holds the command the script runs, as a
-# terminal's Ctrl-C does. TERM and INT stop the step, so they go to everything
-# the step started, a process it moved out of the group with setsid included.
+# before the child exists are held for it. TERM and INT stop the step, so
+# they go to everything the step started, a process it moved out of the
+# child's group with setsid included; the rest go to that group, which holds
+# the command the script runs.
 child=
 # As the sandbox's PID 1, -1 reaches every process in its pid namespace but
 # itself; anywhere else, as in this script's own tests, it would reach every
@@ -70898,9 +70898,13 @@ exec 0</dev/null
 
 # A pipe this process holds both ends of, so \`read -t\` on it waits out its
 # timeout: a pause that starts no process, unlike sleep(1). Opened before the
-# step starts, so even this one fork is over by then. Linux reopens the pipe
-# through /dev/fd; where that fails, the wait below spins instead.
-{ exec 9<> <(:); } 2>/dev/null
+# step starts, so even this one fork happens before then. Linux reopens the
+# pipe through /dev/fd; where that fails, the wait falls back to sleep(1).
+nap=
+if ! { exec 9<> <(:); } 2>/dev/null; then
+  nap=/usr/bin/sleep
+  [ -x "$nap" ] || nap=/bin/sleep
+fi
 
 # Tells run-isolated.sh that the command is starting. The command never gets
 # fd 3.
@@ -70934,7 +70938,9 @@ status=$?
 # winding down, and this process exiting would kill it. Anything that ignores
 # the signal holds the step until it is killed from outside.
 if [ -n "$stopping" ]; then
-  while kill -0 -- "\${stop_target:--$child}" 2>/dev/null; do read -r -t 0.1 -u 9 _ || :; done
+  while kill -0 -- "\${stop_target:--$child}" 2>/dev/null; do
+    if [ -n "$nap" ]; then "$nap" 0.1; else read -r -t 0.1 -u 9 _ || :; fi
+  done
 fi
 exit $status
 `;
