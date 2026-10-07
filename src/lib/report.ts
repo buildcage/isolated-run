@@ -15,8 +15,14 @@ import {
   type OutcomeEmission,
 } from "#core/lib/report/outcome/annotate.ts";
 import { describeReportOutcomes } from "#core/lib/report/outcome/report-outcomes.ts";
-import { renderReportMarkdown } from "#core/lib/report/render/render-report-markdown.ts";
-import { truncateForStepSummary } from "#core/lib/report/render/truncate-communication-details.ts";
+import { communicationTruncationNote } from "#core/lib/report/render/communication-section.ts";
+import {
+  fitStepSummary,
+  joinSummaryBlocks,
+  withNotice,
+  type SummaryBlock,
+} from "#core/lib/report/render/fit-step-summary.ts";
+import { renderReportBlocks } from "#core/lib/report/render/render-report-markdown.ts";
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
 import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
@@ -106,6 +112,8 @@ export interface ComputeReportOutcomesOptions {
 
 export interface ReportOutcomes {
   markdown: string;
+  /** The same report as blocks, for fitting it into the Job Summary. */
+  blocks: SummaryBlock[];
   /** Every annotation this report calls for, in the order to emit them. */
   emissions: OutcomeEmission[];
 }
@@ -129,7 +137,7 @@ export function computeReportOutcomes(
     failOnBlocked: failOnBlocked ?? false,
     engineLabel: "sandbox",
   });
-  const markdown = renderReportMarkdown(report, actionRepo, actionRef, {
+  const blocks = renderReportBlocks(report, actionRepo, actionRef, {
     // stepLabel is the untrusted `label` input; the renderer escapes the whole
     // title, so it is folded in raw here rather than pre-sanitized twice.
     title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : undefined,
@@ -138,7 +146,7 @@ export function computeReportOutcomes(
     actionVersion,
   });
 
-  return { markdown, emissions };
+  return { markdown: joinSummaryBlocks(blocks), blocks, emissions };
 }
 
 /** The one write this module makes that isn't the Job Summary; injected for
@@ -173,7 +181,7 @@ export async function writeReportSummary(
   applyOutcomeAnnotations(annotation, outcomes.emissions);
 
   await writeStepSummary(
-    truncateForStepSummary(outcomes.markdown, artifactAvailable),
+    fitStepSummary(withNotice(outcomes.blocks, communicationTruncationNote(artifactAvailable))),
     env.GITHUB_STEP_SUMMARY,
   );
 

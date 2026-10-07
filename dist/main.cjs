@@ -26568,6 +26568,45 @@ function describeFailedConnections(report, engineLabel) {
 		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed under Failed Connections. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
 	};
 }
+function communicationTruncationNote(artifactAvailable) {
+	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
+}
+//#endregion
+//#region src/core/lib/report/render/fit-step-summary.ts
+const bytes = (s) => Buffer.byteLength(s, "utf8"), whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
+function withNotice(blocks, notice) {
+	return blocks.map((b) => b.cut === "keep" ? b : {
+		...b,
+		notice
+	});
+}
+function joinSummaryBlocks(blocks) {
+	return blocks.map(whole).join("");
+}
+function fitStepSummary(blocks, limitBytes = 1048576, usedBytes = 0) {
+	let full = blocks.map(whole), budget = limitBytes - 8192 - usedBytes;
+	if (bytes(full.join("")) <= budget) return full.join("");
+	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => blocks[a].priority - blocks[b].priority || a - b);
+	for (let i of order) {
+		let b = blocks[i];
+		if ((cutAt.get(b.section) ?? Infinity) < b.level) continue;
+		let size = bytes(full[i]);
+		b.cut === "keep" || size <= budget ? out[i] = full[i] : (out[i] = cutBlock(b, Math.max(0, budget)), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level))), budget -= bytes(out[i]);
+	}
+	return out.join("");
+}
+function cutBlock(b, budget) {
+	let notice = b.notice ?? "";
+	if (b.cut === "atomic") return notice;
+	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
+	for (let line of b.text.split("\n")) {
+		let withNewline = `${line}\n`, lineBytes = bytes(withNewline);
+		if (usedBytes + lineBytes > room) break;
+		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen);
+	}
+	let head = b.head ?? 0;
+	return count < head ? notice : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
+}
 function usesLine(actionRepo, actionRef, actionVersion) {
 	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
 }
@@ -26712,16 +26751,10 @@ function formatElapsedFixed(elapsedSeconds) {
 	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
 }
 //#endregion
-//#region src/core/lib/report/render/communication-section.ts
-const COMMUNICATION_DETAILS_OPEN = "<details>\n<summary>💬 Communication details</summary>\n\n", COMMUNICATION_DETAILS_CLOSE = "</details>\n";
-function wrapCommunicationDetails(body) {
-	return `\n${COMMUNICATION_DETAILS_OPEN}${body}${COMMUNICATION_DETAILS_CLOSE}`;
-}
-//#endregion
 //#region src/core/lib/report/render/inspect-details.ts
-function renderInspectDetails(timeline, startedAt) {
+function renderInspectDetailsBody(timeline, startedAt) {
 	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
-	return shown.length === 0 ? "" : wrapCommunicationDetails(`\`\`\`\n${shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n\n`);
+	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n\n`;
 }
 const MARK = {
 	block: "🚫",
@@ -26899,41 +26932,65 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 }
 //#endregion
 //#region src/core/lib/report/render/render-report-markdown.ts
-function renderReportMarkdown(report, actionRepo, actionRef, { title = "Outbound Traffic Report", ...step } = {}) {
-	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", markdown = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
-	if (report.logLooksPlausible || (markdown += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), report.passed.length > 0 && (markdown += `### ${heading}\n\n` + renderHostTable(report.passed) + "\n"), isAudit && (markdown += report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
-		...step,
-		allowedIpRules: report.parameters.allowedIpRules,
-		allowedTlsRules: report.parameters.allowedTlsRules
-	}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step)), report.blocked.length > 0) {
-		report.passed.length > 0 && (markdown += "\n");
+const SECTION = "traffic";
+function tableBlock(before, table, after) {
+	return {
+		priority: 3,
+		level: 2,
+		section: SECTION,
+		text: before + table + after,
+		cut: "lines",
+		head: before.split("\n").length + 1
+	};
+}
+const frame = (text) => ({
+	priority: 1,
+	level: 1,
+	section: SECTION,
+	text,
+	cut: "keep"
+});
+function renderReportBlocks(report, actionRepo, actionRef, { title = "Outbound Traffic Report", ...step } = {}) {
+	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
+	if (report.logLooksPlausible || (top += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(frame(top)), report.passed.length > 0 && blocks.push(tableBlock(`### ${heading}\n\n`, renderHostTable(report.passed), "\n")), isAudit && blocks.push({
+		priority: 3,
+		level: 2,
+		section: SECTION,
+		cut: "atomic",
+		text: report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
+			...step,
+			allowedIpRules: report.parameters.allowedIpRules,
+			allowedTlsRules: report.parameters.allowedTlsRules
+		}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step)
+	}), report.blocked.length > 0) {
 		let blocked = foldExpectedBlockedRows(report.blocked);
-		markdown += "### 🚫 Blocked Hosts\n\n" + renderHostTable(blocked, {
+		blocks.push(tableBlock(`${report.passed.length > 0 ? "\n" : ""}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
 			showReason: !0,
 			showExpected
-		}) + "\n";
+		}), "\n"));
 	}
-	return report.failed.length > 0 && ((report.passed.length > 0 || report.blocked.length > 0) && (markdown += "\n"), markdown += "### ⚠️ Failed Connections\n\n" + renderHostTable(report.failed, { showReason: !0 }) + "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"), report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && (markdown += "_(no communication)_\n\n"), markdown += renderInspectDetails(report.timeline, report.startedAt), report.engine === "universal" && (markdown += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), markdown += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, markdown += "\n<hr>\n", markdown;
-}
-//#endregion
-//#region src/core/lib/report/render/truncate-communication-details.ts
-const SAFETY_MARGIN_BYTES = 8192;
-function truncateForStepSummary(markdown, artifactAvailable, limitBytes = 1048576) {
-	if (Buffer.byteLength(markdown, "utf8") <= limitBytes - SAFETY_MARGIN_BYTES) return markdown;
-	let openAt = markdown.indexOf(COMMUNICATION_DETAILS_OPEN);
-	if (openAt === -1) return markdown;
-	let bodyStart = openAt + 55, closeAt = markdown.indexOf(COMMUNICATION_DETAILS_CLOSE, bodyStart);
-	if (closeAt === -1) return markdown;
-	let before = markdown.slice(0, bodyStart), body = markdown.slice(bodyStart, closeAt), after = markdown.slice(closeAt), note = truncationNote(artifactAvailable), fixedBytes = Buffer.byteLength(before, "utf8") + Buffer.byteLength(after, "utf8") + Buffer.byteLength(note, "utf8"), budget = Math.max(0, limitBytes - SAFETY_MARGIN_BYTES - fixedBytes), kept = "", usedBytes = 0, fenceOpen = !1;
-	for (let line of body.split("\n")) {
-		let withNewline = `${line}\n`, lineBytes = Buffer.byteLength(withNewline, "utf8");
-		if (usedBytes + lineBytes > budget) break;
-		kept += withNewline, usedBytes += lineBytes, line.trim().startsWith("```") && (fenceOpen = !fenceOpen);
+	if (report.failed.length > 0) {
+		let gap = report.passed.length > 0 || report.blocked.length > 0 ? "\n" : "";
+		blocks.push(tableBlock(`${gap}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n")), blocks.push({
+			priority: 3,
+			level: 3,
+			section: SECTION,
+			cut: "atomic",
+			text: "\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"
+		});
 	}
-	return fenceOpen && (kept += "```\n"), before + kept + note + after;
-}
-function truncationNote(artifactAvailable) {
-	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
+	let bottom = "";
+	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame("_(no communication)_\n\n"));
+	let details = renderInspectDetailsBody(report.timeline, report.startedAt);
+	return details && blocks.push({
+		priority: 4,
+		level: 3,
+		section: SECTION,
+		cut: "lines",
+		open: "\n<details>\n<summary>💬 Communication details</summary>\n\n",
+		text: details,
+		close: "</details>\n"
+	}), report.engine === "universal" && (bottom += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), bottom += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, bottom += "\n<hr>\n", blocks.push(frame(bottom)), blocks;
 }
 //#endregion
 //#region src/lib/report.ts
@@ -26968,20 +27025,21 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
+	}), blocks = renderReportBlocks(report, actionRepo, actionRef, {
+		title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
+		stepName: "Start isolated-run",
+		runCommand,
+		actionVersion
 	});
 	return {
-		markdown: renderReportMarkdown(report, actionRepo, actionRef, {
-			title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
-			stepName: "Start isolated-run",
-			runCommand,
-			actionVersion
-		}),
+		markdown: joinSummaryBlocks(blocks),
+		blocks,
 		emissions
 	};
 }
 async function writeReportSummary(report, annotation, options, artifactAvailable, env, { appendFile = node_fs.appendFileSync } = {}) {
 	let outcomes = computeReportOutcomes(report, options);
-	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeStepSummary(truncateForStepSummary(outcomes.markdown, artifactAvailable), env.GITHUB_STEP_SUMMARY);
+	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeStepSummary(fitStepSummary(withNotice(outcomes.blocks, communicationTruncationNote(artifactAvailable))), env.GITHUB_STEP_SUMMARY);
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts
