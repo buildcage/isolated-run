@@ -92,6 +92,11 @@ an unsigned request there is refused, `GET` included. A host missing from the ta
 treated the same way; if a legitimate request is refused as `aws-no-credential` for that reason,
 report it.
 
+An S3 POST-policy upload, the browser-style upload that carries its credential in the form body, is
+refused as `aws-no-credential`, since the proxy does not read the body. Upload with `PutObject`
+instead, as the AWS CLI and the SDKs do, or with a presigned `PutObject` URL. Both carry the key
+where the check reads it.
+
 These hosts are only as narrow as the URL rules that allow them. A rule such as
 `* https://**.amazonaws.com/**` lets an unsigned request reach anyone's bucket, registry or API, and
 whoever owns it can read what was sent, `User-Agent` and query string included, in their own logs.

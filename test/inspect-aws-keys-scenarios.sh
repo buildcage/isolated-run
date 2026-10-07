@@ -42,6 +42,8 @@ echo "=== [no AWS credential] ==="
 check_status "an unsigned read from a bucket" "$($C https://bucket.s3.amazonaws.com/public/x)" "200"
 check_status "a Bearer-token push to a registry" \
   "$($C -X POST -H "Authorization: Bearer registry-token" https://111111111111.dkr.ecr.us-east-1.amazonaws.com/v2/app/blobs/uploads/)" "200"
+check_status "a POST-policy upload to a bucket, its credential in the form" \
+  "$($C -F "x-amz-credential=${AKIA}TESTATTACKER0001/20261008/us-east-1/s3/aws4_request" -F "file=@/dev/null" https://bucket.s3.amazonaws.com/)" "403"
 check_status "an unsigned STS call" "$($C -X POST $STS/)" "403"
 check_status "an unsigned read from STS" "$($C "$STS/?Action=GetCallerIdentity")" "403"
 check_status "a Bearer token to CloudFormation" "$($C -X POST -H "Authorization: Bearer token" $CF)" "403"

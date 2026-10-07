@@ -35,8 +35,9 @@ export const STS_HOST =
 // is left to them: S3 in every form, ECR registries, CodeArtifact repositories,
 // API Gateway, AppSync, load balancers, EC2 public names, and the AWS CLI's
 // download host. Every other API host names only a service and a region.
+export const S3_HOST = "(^|\\.)s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.amazonaws\\.(com|com\\.cn|eu)$";
 export const AWS_RESOURCE_HOST =
-  "(^|\\.)s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  S3_HOST +
   "|\\.(dkr\\.ecr|d\\.codeartifact|execute-api|appsync-api|appsync-realtime-api)\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|\\.elb(\\.[a-z0-9-]+)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|\\.compute(-1)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
@@ -83,8 +84,12 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_host aws_auth aws_query or aws_host aws_auth aws_auth_many or aws_host aws_query_many",
     "    # Unsigned, whatever the method: where the host names no resource, the",
     "    # account it reaches is in the parameters or the body, out of sight.",
-    "    http-request set-var(txn.aws) str(unsigned) if aws_host !aws_auth !aws_query aws_resource_host",
-    "    http-request set-var(txn.aws) str(no-credential) if aws_host !aws_auth !aws_query !aws_resource_host",
+    "    # An S3 POST-policy upload carries its credential in the form body,",
+    "    # which this does not read, so it counts as unsigned and is refused.",
+    `    http-request set-var(txn.aws_form) bool(true) if METH_POST { var(txn.host) -m reg ${S3_HOST} } { req.hdr(content-type) -m beg -i multipart/form-data }`,
+    "    acl aws_form var(txn.aws_form) -m bool",
+    "    http-request set-var(txn.aws) str(unsigned) if aws_host !aws_auth !aws_query aws_resource_host !aws_form",
+    "    http-request set-var(txn.aws) str(no-credential) if aws_host !aws_auth !aws_query !aws_resource_host or aws_host !aws_auth !aws_query aws_form",
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_host !{ var(txn.aws) -m found } !{ var(txn.aws_key),map(${check.keyMapFile}) -m found }`,
     "    http-request set-var(txn.aws) str(allowed) if aws_host !{ var(txn.aws) -m found }",
   ];

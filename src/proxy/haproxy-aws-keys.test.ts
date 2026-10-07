@@ -164,12 +164,18 @@ describe("awsKeyRequestRules", () => {
 
   it("leaves an unsigned request to the URL rules only where the host names a resource", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(rules.includes("str(unsigned) if aws_host !aws_auth !aws_query aws_resource_host")).toBe(
-      true,
-    );
     expect(
-      rules.includes("str(no-credential) if aws_host !aws_auth !aws_query !aws_resource_host"),
+      rules.includes("str(unsigned) if aws_host !aws_auth !aws_query aws_resource_host !aws_form"),
     ).toBe(true);
+    expect(
+      rules.includes("str(no-credential) if aws_host !aws_auth !aws_query !aws_resource_host or"),
+    ).toBe(true);
+  });
+
+  it("refuses an S3 POST-policy upload, whose credential is in a body it does not read", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
+    expect(rules.includes("{ req.hdr(content-type) -m beg -i multipart/form-data }")).toBe(true);
+    expect(rules.includes("or aws_host !aws_auth !aws_query aws_form")).toBe(true);
   });
 
   it("decodes the query before looking for a credential in it", () => {
