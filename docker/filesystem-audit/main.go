@@ -265,7 +265,12 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 			if errors.Is(err, ringbuf.ErrFlushed) {
 				break
 			}
+			// Idle: write out what is buffered, so a tracer killed later loses
+			// at most what came since.
 			if errors.Is(err, os.ErrDeadlineExceeded) {
+				if err := w.Flush(); err != nil {
+					return err
+				}
 				continue
 			}
 			return err
@@ -294,11 +299,9 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 			return err
 		}
 	}
-	if err := w.Flush(); err != nil {
-		return err
-	}
-	dropped := sumPerCPU(coll.Maps["drops"])
-	internal := sumPerCPU(coll.Maps["skipped_internal"])
+	dropped, errDropped := sumPerCPU(coll.Maps["drops"])
+	untracked, errUntracked := sumPerCPU(coll.Maps["untracked"])
+	internal, _ := sumPerCPU(coll.Maps["skipped_internal"])
 	kinds := make([]string, 0, len(counts))
 	for k := range counts {
 		kinds = append(kinds, k)
@@ -307,18 +310,37 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 	for _, k := range kinds {
 		fmt.Fprintf(os.Stderr, "filesystem-audit: %-11s %d\n", k, counts[k])
 	}
-	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d internal-skipped=%d pre-exec-skipped=%d\n",
-		total, dropped, internal, preExec)
-	return nil
+	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d internal-skipped=%d pre-exec-skipped=%d\n",
+		total, dropped, untracked, internal, preExec)
+	// Without both counts the recording cannot claim to be complete, so it is
+	// left without its end line.
+	if err := errors.Join(errDropped, errUntracked); err != nil {
+		fmt.Fprintln(os.Stderr, "filesystem-audit: read loss counters:", err)
+		return w.Flush()
+	}
+	if err := enc.Encode(end{Kind: "end", Dropped: dropped, Untracked: untracked}); err != nil {
+		return err
+	}
+	return w.Flush()
 }
 
-func sumPerCPU(m *ebpf.Map) uint64 {
+// end is the recording's last line, written only once every queued event is
+// out, so a recording without it was cut short. Dropped events found the ring
+// buffer full, and Untracked calls found a tracking map full.
+type end struct {
+	Kind      string `json:"kind"`
+	Dropped   uint64 `json:"dropped"`
+	Untracked uint64 `json:"untracked"`
+}
+
+func sumPerCPU(m *ebpf.Map) (uint64, error) {
 	var per []uint64
-	var sum uint64
-	if err := m.Lookup(uint32(0), &per); err == nil {
-		for _, v := range per {
-			sum += v
-		}
+	if err := m.Lookup(uint32(0), &per); err != nil {
+		return 0, err
 	}
-	return sum
+	var sum uint64
+	for _, v := range per {
+		sum += v
+	}
+	return sum, nil
 }

@@ -26,6 +26,22 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual([]);
   });
 
+  it("warns unless the tracer's end line is there and counts nothing lost", () => {
+    const read = { kind: "read", comm: "cat", path: "/etc/hostname" };
+    const warning = "### Filesystem audit\n\n> ⚠️ **This record is incomplete.**";
+    const render = (...records: object[]) =>
+      renderFilesystemAuditSummary(jsonl(...records), PREFIXES);
+
+    expect(render(read, { kind: "end", dropped: 0, untracked: 0 })).not.toContain("⚠️");
+    expect(render(read)).toContain(warning); // cut short before the end line
+    const dropped = render(read, { kind: "end", dropped: 3, untracked: 0 });
+    expect(dropped).toContain(warning);
+    expect(lines(dropped)).toEqual(["R cat /etc/hostname"]);
+    expect(render({ kind: "end", dropped: 0, untracked: 2 })).toMatch(
+      /incomplete\.\*\*[\s\S]*No file access was recorded\./,
+    );
+  });
+
   it("includes a heading and the flag legend", () => {
     const md = renderFilesystemAuditSummary(
       jsonl({ kind: "read", comm: "cat", path: "/etc/hostname" }),

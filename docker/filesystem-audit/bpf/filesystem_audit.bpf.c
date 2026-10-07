@@ -156,7 +156,7 @@ struct {
 	__uint(max_entries, 1);
 	__type(key, u32);
 	__type(value, u64);
-} drops SEC(".maps"), skipped_internal SEC(".maps");
+} drops SEC(".maps"), untracked SEC(".maps"), skipped_internal SEC(".maps");
 
 static __always_inline void bump(void *counter)
 {
@@ -183,9 +183,10 @@ struct pending {
 	s32 dfd2;
 };
 
+// One entry per thread inside a path syscall.
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 4096);
+	__uint(max_entries, 65536);
 	__type(key, u64);
 	__type(value, struct pending);
 } pending_ops SEC(".maps");
@@ -375,6 +376,7 @@ struct {
 
 // Reports whether bit was newly recorded for file: false if it was already
 // set, or if the map is full (so a saturated map cannot cause re-emission).
+// A full map counts in untracked, since that access then goes unreported.
 static __always_inline int first_time(struct file *file, u8 bit)
 {
 	u64 key = (u64)file;
@@ -385,7 +387,10 @@ static __always_inline int first_time(struct file *file, u8 bit)
 		*v |= bit;
 		return 1;
 	}
-	return bpf_map_update_elem(&seen_files, &key, &bit, BPF_ANY) == 0;
+	if (bpf_map_update_elem(&seen_files, &key, &bit, BPF_ANY) == 0)
+		return 1;
+	bump(&untracked);
+	return 0;
 }
 
 // Marks the thread while it is inside backing_file_open (overlayfs opening a
@@ -616,9 +621,12 @@ struct name_buf {
 	s32 dfd;
 };
 
+// One entry per thread inside open(2), each the size of a path, so allocated
+// on use rather than up front; fentry and fexit programs may use such a map.
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 4096);
+	__uint(max_entries, 65536);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
 	__type(key, u64);
 	__type(value, struct name_buf);
 } open_names SEC(".maps");
@@ -632,14 +640,23 @@ static __always_inline void open_enter(int dfd)
 	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
 	if (!e)
 		return;
-	e->data[0] = 0;
-	// Seed from scratch so the hash value starts as an empty string.
-	bpf_map_update_elem(&open_names, &id, e->data, BPF_ANY);
+	// When both hooks fire, do_sys_open's has already made the entry.
 	struct name_buf *nb = bpf_map_lookup_elem(&open_names, &id);
-	if (nb) {
-		nb->ts = bpf_ktime_get_boot_ns();
-		nb->dfd = dfd;
+	if (!nb) {
+		e->data[0] = 0;
+		// Seed from scratch so the hash value starts as an empty string. A full
+		// map counts in untracked even if this open then succeeds and is recorded.
+		if (bpf_map_update_elem(&open_names, &id, e->data, BPF_ANY) != 0) {
+			bump(&untracked);
+			return;
+		}
+		nb = bpf_map_lookup_elem(&open_names, &id);
+		if (!nb)
+			return;
 	}
+	nb->name[0] = 0;
+	nb->ts = bpf_ktime_get_boot_ns();
+	nb->dfd = dfd;
 }
 
 static __always_inline void open_exit(long ret)
@@ -809,7 +826,10 @@ static __always_inline void op_enter2(u32 kind, u32 kind_ok, int dfd1, u64 p1, i
 		.p1 = p1, .p2 = p2, .ts = bpf_ktime_get_boot_ns(), .kind = kind, .kind_ok = kind_ok,
 		.dfd1 = dfd1, .dfd2 = dfd2,
 	};
-	bpf_map_update_elem(&pending_ops, &id, &pend, BPF_ANY);
+	// An op recorded on success too is lost either way; one recorded only on
+	// failure is counted at the exit, once the result is known.
+	if (bpf_map_update_elem(&pending_ops, &id, &pend, BPF_ANY) != 0 && kind_ok)
+		bump(&untracked);
 }
 
 static __always_inline void op_enter(u32 kind, int dfd1, u64 p1, int dfd2, u64 p2)
@@ -817,12 +837,17 @@ static __always_inline void op_enter(u32 kind, int dfd1, u64 p1, int dfd2, u64 p
 	op_enter2(kind, 0, dfd1, p1, dfd2, p2);
 }
 
-static __always_inline void op_exit(long ret)
+// failure_only: the op is recorded only on failure and its entry stashes on
+// every call, so a failure that finds no entry is one the full map lost.
+static __always_inline void op_exit(long ret, int failure_only)
 {
 	u64 id = bpf_get_current_pid_tgid();
 	struct pending *pend = bpf_map_lookup_elem(&pending_ops, &id);
-	if (!pend)
+	if (!pend) {
+		if (failure_only && ret < 0 && in_target())
+			bump(&untracked);
 		return;
+	}
 	u32 kind = ret < 0 ? pend->kind : pend->kind_ok;
 	if (kind == 0) {
 		bpf_map_delete_elem(&pending_ops, &id);
@@ -873,7 +898,7 @@ int on_unlinkat_enter(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_unlinkat")
 int on_unlinkat_exit(struct trace_event_raw_sys_exit *ctx)
 {
-	op_exit(ctx->ret);
+	op_exit(ctx->ret, 1);
 	return 0;
 }
 
@@ -887,7 +912,7 @@ int on_renameat2_enter(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_renameat2")
 int on_renameat2_exit(struct trace_event_raw_sys_exit *ctx)
 {
-	op_exit(ctx->ret);
+	op_exit(ctx->ret, 1);
 	return 0;
 }
 
@@ -900,7 +925,7 @@ int on_fchmodat_enter(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_fchmodat")
 int on_fchmodat_exit(struct trace_event_raw_sys_exit *ctx)
 {
-	op_exit(ctx->ret);
+	op_exit(ctx->ret, 1);
 	return 0;
 }
 
@@ -913,7 +938,7 @@ int on_fchmodat2_enter(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_fchmodat2")
 int on_fchmodat2_exit(struct trace_event_raw_sys_exit *ctx)
 {
-	op_exit(ctx->ret);
+	op_exit(ctx->ret, 1);
 	return 0;
 }
 
@@ -926,7 +951,7 @@ int on_fchownat_enter(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_fchownat")
 int on_fchownat_exit(struct trace_event_raw_sys_exit *ctx)
 {
-	op_exit(ctx->ret);
+	op_exit(ctx->ret, 1);
 	return 0;
 }
 
@@ -943,7 +968,7 @@ int on_utimensat_enter(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_utimensat")
 int on_utimensat_exit(struct trace_event_raw_sys_exit *ctx)
 {
-	op_exit(ctx->ret);
+	op_exit(ctx->ret, 0);
 	return 0;
 }
 
@@ -956,7 +981,7 @@ int on_setxattr_enter(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_setxattr")
 int on_setxattr_exit(struct trace_event_raw_sys_exit *ctx)
 {
-	op_exit(ctx->ret);
+	op_exit(ctx->ret, 0);
 	return 0;
 }
 
@@ -969,7 +994,7 @@ int on_lsetxattr_enter(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_lsetxattr")
 int on_lsetxattr_exit(struct trace_event_raw_sys_exit *ctx)
 {
-	op_exit(ctx->ret);
+	op_exit(ctx->ret, 0);
 	return 0;
 }
 

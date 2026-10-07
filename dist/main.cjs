@@ -68495,13 +68495,17 @@ function fmtFlags(ok, failed, perm) {
 }
 const LEGEND = "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit";
 function renderFilesystemAuditSummary(jsonl, prefixes) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), seq = 0;
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), seq = 0, ended = !1, lost = !1;
 	for (let line of jsonl.split("\n")) {
 		if (!line) continue;
 		let r;
 		try {
 			r = JSON.parse(line);
 		} catch {
+			continue;
+		}
+		if (r.kind === "end") {
+			ended = !0, lost = !!(r.dropped || r.untracked);
 			continue;
 		}
 		if (r.kind === "mmap" && r.access === "x") {
@@ -68564,12 +68568,15 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 			path: escapeForDisplay(relativize(pathOf(lk), prefixes))
 		});
 	}
-	if (rows.sort((a, b) => {
+	rows.sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return a.seq - b.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
-	}), rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
+	});
+	let heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
+> some accesses are missing from this summary and from the artifact.`;
+	if (rows.length === 0) return `${heading}\n\nNo file access was recorded.\n`;
 	let originMs = prefixes.startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.span?.first ?? Infinity), Infinity) : prefixes.startedAt * 1e3, times = rows.map((r) => fmtSpan(r.span, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
-	return `${HEADING}\n\n<sub>${timeW ? `first-last access · ${LEGEND}` : LEGEND}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
+	return `${heading}\n\n<sub>${timeW ? `first-last access · ${LEGEND}` : LEGEND}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
 }
 //#endregion
 //#region src/lib/filesystem-audit-report.ts
@@ -68596,7 +68603,7 @@ async function reportStepFilesystemAudit({ audit, startedAt, retentionDays, cont
 		...realDeps$3,
 		...overrides
 	}, artifactName = "", raw = audit && readOptional(audit.outPath, deps.readFile);
-	if (audit && raw) {
+	if (audit && raw !== void 0) {
 		let clean = stripSandboxMachinery(raw, (0, node_path.dirname)(audit.outPath));
 		try {
 			let markdown = renderFilesystemAuditSummary(clean, {
@@ -68614,13 +68621,13 @@ async function reportStepFilesystemAudit({ audit, startedAt, retentionDays, cont
 		} catch (e) {
 			annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
 		}
-		wrote && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
+		wrote && clean && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
 	}
 	deps.setOutput(artifactName);
 }
 function readOptional(path, readFile) {
 	try {
-		return readFile(path) || void 0;
+		return readFile(path);
 	} catch {
 		return;
 	}
@@ -69314,7 +69321,7 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		if (exited) break;
 		await sleep(100);
 	}
-	return warn("buildcage: filesystem_audit did not start; the step's file accesses were not recorded."), await stop(), noAudit;
+	return warn("buildcage: filesystem_audit did not start; the step's file accesses were not recorded."), await stop(), remove(outPath), noAudit;
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts

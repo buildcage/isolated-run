@@ -241,3 +241,4 @@
 {"t":"2026-10-06T14:09:36.395Z","kind":"open","pid":8783,"ppid":8780,"comm":"rm","path":"/usr/lib/locale/C.utf8/LC_CTYPE","access":"r","flags":32768}
 {"t":"2026-10-06T14:09:36.395Z","kind":"mmap","pid":8783,"ppid":8780,"comm":"rm","path":"/usr/lib/locale/C.utf8/LC_CTYPE","access":"r"}
 {"t":"2026-10-06T14:09:36.395Z","kind":"unlink","pid":8783,"ppid":8780,"comm":"rm","path":"/home/runner/work/isolated-run/isolated-run/probe2.txt"}
+{"kind":"end","dropped":0,"untracked":0}
