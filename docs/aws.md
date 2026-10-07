@@ -3,8 +3,7 @@
 A step that deploys to AWS needs its URL rules to allow AWS API hosts such as
 `cloudformation.us-east-1.amazonaws.com` or `sts.amazonaws.com`. Those hosts serve every AWS account,
 so a rule that allows them lets the step reach any account, not only yours. `allowed_aws_accounts`
-narrows that down to the accounts you name. This page covers what the check does, what it does not
-stop, and what to set up in IAM for the rest.
+narrows that down to the accounts you name.
 
 ## Why URL rules are not enough
 
@@ -35,9 +34,10 @@ path, before the request leaves the runner.
 ```
 
 With `allowed_aws_accounts` set, a request to an AWS API host that carries an AWS signature must be
-signed with a key the proxy knows belongs to one of those accounts. The proxy reads the access key ID from the
-`Authorization` header (SigV4, SigV4a or SigV2) or from a presigned URL's `X-Amz-Credential` or
-`AWSAccessKeyId` parameter, and compares it with the keys it knows as a whole string. It never
+signed with a key the proxy knows belongs to one of those accounts. The proxy reads the access key ID
+from the `Authorization` header (SigV4, SigV4a or SigV2) or from a presigned URL's
+`X-Amz-Credential` or `AWSAccessKeyId` parameter, and compares it with the keys it knows as a whole
+string. It never
 decodes a key ID or verifies a signature: a request that copies one of your key IDs without the
 secret is refused by AWS and logged in your own account.
 
@@ -90,7 +90,7 @@ region, such as `sts.us-east-1.amazonaws.com` or `sqs.us-east-1.amazonaws.com`. 
 request to one of those reaches is in its parameters or its body, where the proxy does not look, so
 an unsigned request there is refused, `GET` included. A host missing from the table above is
 treated the same way; if a legitimate request is refused as `aws-no-credential` for that reason,
-please report it.
+report it.
 
 These hosts are only as narrow as the URL rules that allow them. A rule such as
 `* https://**.amazonaws.com/**` lets an unsigned request reach anyone's bucket, registry or API, and

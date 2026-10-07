@@ -158,12 +158,10 @@ export interface AwsKeyInputs {
 }
 
 /**
- * allowed_aws_accounts, and the key the AWS access key check starts from. The
- * key comes from the step's environment, where an earlier step such as
- * aws-actions/configure-aws-credentials put it; any other key the step uses
- * must come out of an AssumeRole the proxy sees. Only inspect reads a request's
- * headers, so universal fails in restrict and is warned about in audit, as
- * checkUrlAndTlsRuleSupport does for the rules it cannot enforce.
+ * allowed_aws_accounts, and the key the AWS access key check starts from: the
+ * step's AWS_ACCESS_KEY_ID, put there by an earlier step such as
+ * aws-actions/configure-aws-credentials. universal never sees a request's
+ * headers, so it fails in restrict and is warned about in audit.
  */
 export function readAwsKeyInputs(
   { proxyEngine, proxyMode }: ProxyInputs,
@@ -196,8 +194,7 @@ export function readAwsKeyInputs(
     );
   }
 
-  // Not echoed back: configure-aws-credentials masks it, and an error message
-  // is no place to undo that.
+  // Not echoed back: configure-aws-credentials masks it.
   const key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
   if (!isAwsAccessKeyId(key)) {
     if (proxyMode === "audit") {
