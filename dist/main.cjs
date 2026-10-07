@@ -68309,24 +68309,17 @@ function stripSandboxMachinery(jsonl, scratchBase) {
 		} catch {
 			return;
 		}
-	}), parent = new Map(), ownShellPids = new Set(), shell, boundary = -1;
+	}), ownShellPids = new Set(), firstParent = new Map(), forkParent = new Map(), shell, init, boundary = -1;
 	recs.forEach((r, i) => {
-		r && r.pid !== void 0 && (r.ppid !== void 0 && (r.kind === "fork" || !parent.has(r.pid)) && parent.set(r.pid, r.ppid), r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 && ([shell, boundary] = [r.pid, i]) : ownShellPids.add(r.pid)));
+		r && r.pid !== void 0 && (r.ppid !== void 0 && (firstParent.has(r.pid) || firstParent.set(r.pid, r.ppid), r.kind === "fork" && forkParent.set(r.pid, r.ppid)), r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 && ([shell, boundary] = [r.pid, i], init = forkParent.get(r.pid) ?? firstParent.get(r.pid)) : ownShellPids.add(r.pid)));
 	});
-	let inStep = (pid) => {
-		let seen = new Set();
-		for (let p = pid; p !== void 0 && !seen.has(p); p = parent.get(p)) {
-			if (p === shell) return !0;
-			seen.add(p);
-		}
-		return !1;
-	}, out = [];
+	let initStarted = new Set(), out = [];
 	return recs.forEach((r, i) => {
 		if (r === void 0) {
 			lines[i] !== "" && out.push(lines[i]);
 			return;
 		}
-		if (!under(r.path) && (shell === void 0 || r.pid === void 0 || (r.pid === shell ? i >= boundary : inStep(r.pid)))) {
+		if (r.kind === "fork" && r.pid !== void 0 && (r.ppid === init && r.pid !== shell ? initStarted.add(r.pid) : initStarted.delete(r.pid)), !under(r.path) && !(shell !== void 0 && r.pid !== void 0 && (i < boundary || r.pid === init || initStarted.has(r.pid)))) {
 			if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
 				out.push(JSON.stringify({
 					...r,

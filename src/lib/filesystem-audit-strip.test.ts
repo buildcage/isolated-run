@@ -107,18 +107,21 @@ describe("stripSandboxMachinery", () => {
   });
 
   it("gives a reused pid the parent its latest fork names", () => {
-    // pid 20 first belonged to machinery under the init, then to a step process.
+    // pid 20 is first a sleep the init starts, then a step process.
     const read = { pid: 20, ppid: 12, kind: "read", comm: "node", path: "/home/u/.aws/a" };
     const out = stripSandboxMachinery(
       jsonl(
-        { pid: 20, ppid: 10, kind: "fork", comm: "env-loader.sh" },
+        { pid: 11, ppid: 10, kind: "fork", comm: "env-loader.sh" },
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        { pid: 20, ppid: 10, kind: "fork", comm: "env-loader.sh" },
+        { pid: 20, ppid: 10, kind: "exec", comm: "sleep", path: "/usr/bin/sleep" },
         { pid: 12, ppid: 11, kind: "fork", comm: "run-script.sh" },
         { pid: 20, ppid: 12, kind: "fork", comm: "node" },
         read,
       ),
       BASE,
     );
+    expect(records(out)).not.toContainEqual(expect.objectContaining({ comm: "sleep" }));
     expect(records(out)).toContainEqual(read);
   });
 
@@ -142,18 +145,23 @@ describe("stripSandboxMachinery", () => {
     ]);
   });
 
-  it("stops the parent walk when recorded parents form a cycle", () => {
+  it("drops what the init starts after the anchor, and keeps a process with no recorded fork", () => {
     const out = stripSandboxMachinery(
       jsonl(
+        { pid: 11, ppid: 10, kind: "fork", comm: "env-loader.sh" },
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
-        // Two processes whose recorded parents point at each other: the walk
-        // must terminate rather than loop, and neither reaches the shell.
-        { pid: 20, ppid: 21, kind: "read", comm: "node", path: "/work/a" },
-        { pid: 21, ppid: 20, kind: "read", comm: "node", path: "/work/b" },
+        { pid: 10, ppid: 1, kind: "write", comm: "env-loader.sh", path: "/dev/null" },
+        // The sleep the init waits with while a stopped step winds down.
+        { pid: 30, ppid: 10, kind: "fork", comm: "env-loader.sh" },
+        { pid: 30, ppid: 10, kind: "exec", comm: "sleep", path: "/usr/bin/sleep" },
+        // Its fork lost, a process naming the init as its parent stays in.
+        { pid: 31, ppid: 10, kind: "read", comm: "node", path: "/work/a" },
       ),
       BASE,
     );
-    expect(records(out)).toEqual([]);
+    expect(records(out)).toEqual([
+      { pid: 31, ppid: 10, kind: "read", comm: "node", path: "/work/a" },
+    ]);
   });
 
   it("changes nothing but scratch paths when no step shell is found", () => {

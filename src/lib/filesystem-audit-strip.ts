@@ -5,28 +5,22 @@
  * buildcage runs the step under setpriv and env-loader.sh; env-loader.sh stays
  * alive as the sandbox init (forwarding signals, reaping, propagating the exit
  * status) and forks the step's shell, which execs run-script.sh from the
- * scratch base. So the step is that shell and its descendants, from the
- * run-script.sh exec onward; the init, setpriv, the shell's earlier exec
- * phases, and every access under the scratch base are machinery. The step's
- * shell is relabeled bash.
+ * scratch base. The sandbox cgroup holds nothing else, so from that exec on
+ * every record is the step's except the init's own and those of processes the
+ * init starts (the sleeps it waits with while a stopped step winds down).
+ * Everything before the exec, every access under the scratch base, and those
+ * init records are machinery. The step's shell is relabeled bash.
  *
  * The shell is found by the exec of run-script.sh under the scratch base, never
  * by command name, so a step command named setpriv or run-script.sh (run from
  * the workspace, a different pid, exec'd from a non-scratch path) is left alone
  * and keeps its own name. Only the first such exec counts: the step can see and
- * run its own run-script.sh, and a later exec of it must not move the anchor
- * away from the shell and drop everything outside the new process.
+ * run its own run-script.sh, and a later exec of it must not move the anchor.
  *
- * A process's parent comes from its fork record, which names the process that
- * made it (see the tracer), so neither CLONE_PARENT nor a later reparent to the
- * init can detach it from the step; the latest fork wins, so a reused pid takes
- * its new parent. A process with no fork record, such as the init, keeps the
- * parent its first record names.
- *
- * It assumes a complete recording: a missing shell exec leaves the step
- * unanchored (machinery stays in), and a process whose ancestor emitted no
- * record cannot be walked back to the shell. Both need a gap in the stream and
- * only skew an experimental report.
+ * A process counts as the init's only by a fork record naming the init as the
+ * process that made it (see the tracer), which the step cannot produce: not by
+ * CLONE_PARENT, nor by being reparented to the init. A process whose fork was
+ * not recorded is kept, so a gap in the recording shows more, never less.
  */
 
 const SHELL_COMM = "run-script.sh"; // buildcage's step shell (sandbox/oci-files.ts)
@@ -54,41 +48,44 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
     }
   });
 
-  const parent = new Map<number, number>();
   const ownShellPids = new Set<number>(); // execs its own run-script.sh, not buildcage's
+  const firstParent = new Map<number, number>();
+  const forkParent = new Map<number, number>();
   let shell: number | undefined; // the pid that first execs buildcage's run-script.sh
+  let init: number | undefined; // the process that made the shell
   let boundary = -1;
   recs.forEach((r, i) => {
     if (!r || r.pid === undefined) return;
-    if (r.ppid !== undefined && (r.kind === "fork" || !parent.has(r.pid)))
-      parent.set(r.pid, r.ppid);
+    if (r.ppid !== undefined) {
+      if (!firstParent.has(r.pid)) firstParent.set(r.pid, r.ppid);
+      if (r.kind === "fork") forkParent.set(r.pid, r.ppid);
+    }
     if (r.kind === "exec" && typeof r.path === "string" && leaf(r.path) === SHELL_COMM) {
       if (!under(r.path)) ownShellPids.add(r.pid);
-      else if (shell === undefined) [shell, boundary] = [r.pid, i];
+      else if (shell === undefined) {
+        [shell, boundary] = [r.pid, i];
+        init = forkParent.get(r.pid) ?? firstParent.get(r.pid);
+      }
     }
   });
 
-  // A pid belongs to the step if it is the shell or descends from it. The seen
-  // set stops the walk if the recorded parents form a cycle.
-  const inStep = (pid: number): boolean => {
-    const seen = new Set<number>();
-    for (let p: number | undefined = pid; p !== undefined && !seen.has(p); p = parent.get(p)) {
-      if (p === shell) return true;
-      seen.add(p);
-    }
-    return false;
-  };
-
+  // In recording order, so a reused pid takes the owner its latest fork names.
+  const initStarted = new Set<number>();
   const out: string[] = [];
   recs.forEach((r, i) => {
     if (r === undefined) {
       if (lines[i] !== "") out.push(lines[i]);
       return;
     }
+    if (r.kind === "fork" && r.pid !== undefined) {
+      if (r.ppid === init && r.pid !== shell) initStarted.add(r.pid);
+      else initStarted.delete(r.pid);
+    }
     if (under(r.path)) return; // a buildcage scratch file
     if (shell !== undefined && r.pid !== undefined) {
-      const stepRecord = r.pid === shell ? i >= boundary : inStep(r.pid);
-      if (!stepRecord) return; // the init, setpriv, or the shell's pre-exec phase
+      // setpriv, the init, or the shell before its exec; or later, the init
+      // and what it starts.
+      if (i < boundary || r.pid === init || initStarted.has(r.pid)) return;
     }
     if (
       shell !== undefined &&
