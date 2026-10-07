@@ -16,6 +16,7 @@ import * as core from "@actions/core";
 
 import type { ConfigFileInputs } from "#core/lib/actions/config-file.ts";
 import {
+  InvalidInputError,
   readBooleanInput,
   resolveProxyEngine,
   resolveProxyMode,
@@ -23,6 +24,7 @@ import {
   type ProxyMode,
 } from "#core/lib/actions/inputs.ts";
 
+import { isAwsAccessKeyId, parseAwsAccounts } from "../proxy/aws-keys.ts";
 import { SandboxError } from "./errors.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
 
@@ -33,6 +35,7 @@ const LIST_INPUTS = [
   "allowed_url_rules",
   "allowed_tls_rules",
   "known_blocked_rules",
+  "allowed_aws_accounts",
   "write_through",
 ];
 
@@ -145,4 +148,68 @@ export function readFailOnCaResidue(getInput: GetInput = core.getInput): boolean
 
 export function readFailOnBlocked(getInput: GetInput = core.getInput): boolean {
   return readBooleanInput("fail_on_blocked", true, getInput);
+}
+
+export interface AwsKeyInputs {
+  /** Empty when allowed_aws_accounts is unset, which leaves the check off. */
+  accounts: string[];
+  /** The key the step starts with: its own AWS_ACCESS_KEY_ID. */
+  keys: string[];
+}
+
+/**
+ * allowed_aws_accounts, and the key the AWS access key check starts from: the
+ * step's AWS_ACCESS_KEY_ID, put there by an earlier step such as
+ * aws-actions/configure-aws-credentials. universal never sees a request's
+ * headers, so it fails in restrict and is warned about in audit.
+ */
+export function readAwsKeyInputs(
+  { proxyEngine, proxyMode }: ProxyInputs,
+  env: NodeJS.ProcessEnv,
+  warn: Notice,
+  getInput: GetInput = core.getInput,
+): AwsKeyInputs {
+  let accounts: string[];
+  try {
+    accounts = parseAwsAccounts(getInput("allowed_aws_accounts"));
+  } catch (e) {
+    throw new SandboxError(
+      `allowed_aws_accounts: ${(e as Error).message}. Each entry must be a 12-digit AWS account ID.`,
+      "INVALID_AWS_ACCOUNTS",
+    );
+  }
+  if (accounts.length === 0) return { accounts, keys: [] };
+
+  if (proxyEngine !== "inspect") {
+    const reason =
+      `allowed_aws_accounts has no effect with proxy_engine: ${proxyEngine}, which never ` +
+      "sees a request's headers.";
+    if (proxyMode === "audit") {
+      warn(`${reason} It is ignored for this run.`);
+      return { accounts: [], keys: [] };
+    }
+    throw new InvalidInputError(
+      `${reason} Switch to proxy_engine: inspect, or remove allowed_aws_accounts.`,
+      "INVALID_PROXY_ENGINE",
+    );
+  }
+
+  // Not echoed back: configure-aws-credentials masks it.
+  const key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
+  if (!isAwsAccessKeyId(key)) {
+    if (proxyMode === "audit") {
+      warn(
+        "allowed_aws_accounts is set, but AWS_ACCESS_KEY_ID is unset or is not an access key " +
+          "ID, so the AWS access key check is off for this run.",
+      );
+      return { accounts: [], keys: [] };
+    }
+    throw new SandboxError(
+      "allowed_aws_accounts is set, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. " +
+        "Set up the credentials in an earlier step, for example with " +
+        "aws-actions/configure-aws-credentials.",
+      "AWS_ACCESS_KEY_MISSING",
+    );
+  }
+  return { accounts, keys: [key] };
 }

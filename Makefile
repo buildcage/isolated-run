@@ -49,9 +49,11 @@ test_unit_coverage: ## Run every Node unit test once, with coverage
 # qjs can't execute .ts directly, so compile fresh (vp run build:qjs-test)
 # and bind-mount the output in.
 QJS_MOUNTS := \
-	-v "$(CURDIR)/dist/qjs-test/src/core:/opt/buildcage/core:ro"
+	-v "$(CURDIR)/dist/qjs-test/src/core:/opt/buildcage/core:ro" \
+	-v "$(CURDIR)/dist/qjs-test/src/proxy:/opt/buildcage/proxy:ro"
 QJS_TEST_DIRS := \
-	/opt/buildcage/core/lib/acl
+	/opt/buildcage/core/lib/acl \
+	/opt/buildcage/proxy
 
 .PHONY: test_unit_qjs
 test_unit_qjs: ## Run unit tests in Docker
@@ -154,6 +156,7 @@ test_integration_sandbox_inspect: ## Run the inspect-engine integration tests (n
 	@./test/integration-test-inspect-roundtrip.sh
 	@./test/integration-test-inspect-chromium.sh
 	@./test/integration-test-inspect-reserved-mounts.sh
+	@./test/integration-test-inspect-aws-keys.sh
 
 # Builds each engine's proxy image itself (docker compose build), unlike the
 # two groups above which reuse a pre-built BUILDCAGE_LOCAL_IMAGE_REF.

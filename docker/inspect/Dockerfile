@@ -66,6 +66,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --ignore-scripts
 COPY rolldown.scripts.config.js ./
 COPY src/core/ ./src/core/
+COPY src/proxy/ ./src/proxy/
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm run build:qjs
 
@@ -121,8 +122,9 @@ RUN mkdir -p /etc/haproxy/rules /etc/coredns /var/log/haproxy /var/log/coredns
 # and the CoreDNS Corefile from one shared rule parse, so the two can't
 # describe different allowlists. No report-action.js here: src/lib/report.ts
 # builds its own report in-process instead of fetching one from the
-# container, same as docker/universal/Dockerfile.
-COPY --from=qjs-build /build/dist/qjs/src/core/scripts/gen-configs-inspect.js /opt/buildcage/scripts/gen-configs.js
+# container, same as docker/universal/Dockerfile. This action's generator is
+# core's with the AWS access key check added (src/proxy/).
+COPY --from=qjs-build /build/dist/qjs/src/proxy/scripts/gen-configs-inspect.js /opt/buildcage/scripts/gen-configs.js
 
 # runc, extracted onto the runner host at action startup and used by
 # run-isolated.sh to execute the isolated command (see docs/development.md)

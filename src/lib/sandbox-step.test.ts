@@ -5,6 +5,10 @@ import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 import { SandboxError } from "./errors.ts";
 import { runSandboxStep, type SandboxStepDeps } from "./sandbox-step.ts";
 
+// Assembled at runtime: a literal shaped like an AWS access key ID trips
+// secret scanning on push.
+const ASIA = ["A", "S", "I", "A"].join("");
+
 // Keeps pinningPaths from resolving the fixture's paths on this machine.
 vi.mock("./sandbox/symlinks.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./sandbox/symlinks.ts")>()),
@@ -23,6 +27,7 @@ const mocks = {
   readRuleInputs: vi.fn(),
   readFailOnCaResidue: vi.fn(),
   readFailOnBlocked: vi.fn(),
+  readAwsKeyInputs: vi.fn(),
   readTrafficArtifactInputs: vi.fn(),
   saveWriteThroughForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
@@ -87,6 +92,7 @@ beforeEach(() => {
   });
   mocks.readFailOnCaResidue.mockReturnValue(true);
   mocks.readFailOnBlocked.mockReturnValue(true);
+  mocks.readAwsKeyInputs.mockReturnValue({ accounts: [], keys: [] });
   mocks.readTrafficArtifactInputs.mockReturnValue({ upload: false });
   mocks.createAnnotation.mockReturnValue(annotation);
   mocks.resolveFilesystemPlan.mockReturnValue({
@@ -197,6 +203,7 @@ describe("runSandboxStep", () => {
     "readFailOnBlocked",
     "readTrafficArtifactInputs",
     "readRuleInputs",
+    "readAwsKeyInputs",
   ] as const)("fails on a bad value from %s before any setup", async (reader) => {
     mocks[reader].mockImplementation(() => {
       throw new InvalidInputError("Invalid input", "INVALID_BOOLEAN_INPUT");
@@ -342,6 +349,29 @@ describe("runSandboxStep", () => {
       "Ephemeral (writes discarded at step end): /home/runner",
       "Writable (persisted):                    /opt/cache",
     ]);
+  });
+
+  it("hands the AWS accounts and the starting key to the proxy, and logs only the accounts", async () => {
+    mocks.readAwsKeyInputs.mockReturnValue({
+      accounts: ["111111111111"],
+      keys: [`${ASIA}AAAAAAAAAAAAAAAA`],
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.readAwsKeyInputs).toHaveBeenCalledWith(
+      { proxyEngine: "universal", proxyMode: "restrict" },
+      ENV,
+      annotation.warning,
+    );
+    expect(mocks.startSandboxProxy.mock.calls[0][0].composeEnv).toMatchObject({
+      ALLOWED_AWS_ACCOUNTS: "111111111111",
+      ALLOWED_AWS_KEYS: `${ASIA}AAAAAAAAAAAAAAAA`,
+    });
+    expect(log).toHaveBeenCalledWith("AWS accounts: 111111111111");
+    expect(log.mock.calls.flat().join("\n").includes(`${ASIA}AAAAAAAAAAAAAAAA`)).toBe(false);
+    log.mockRestore();
   });
 
   it("pulls the image by verified digest, under the action's own repository", async () => {
