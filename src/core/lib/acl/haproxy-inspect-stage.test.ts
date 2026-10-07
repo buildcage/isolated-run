@@ -131,7 +131,7 @@ describe("inspect stage", () => {
 });
 
 describe("extension", () => {
-  const rules = { httpRules: ["b.example.com:80"] };
+  const rules = { httpRules: ["~^b\\.example\\.com:80$"] };
 
   it("is left out, log field and all, when there is none", () => {
     const plain = plainStage(rules);
@@ -156,7 +156,7 @@ describe("extension", () => {
 
   it("adds response rules to the TLS stage alone", () => {
     expect(
-      tlsStage({ httpsRules: ["b.example.com:443"] }, "audit", EXTENSION).includes(
+      tlsStage({ httpsRules: ["~^b\\.example\\.com:443$"] }, "audit", EXTENSION).includes(
         "extension response rules",
       ),
     ).toBe(true);
