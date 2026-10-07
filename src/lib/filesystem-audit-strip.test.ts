@@ -191,6 +191,58 @@ describe("stripSandboxMachinery", () => {
     ]);
   });
 
+  it("drops only the shell's reads of its script: read, read-only open, read mmap", () => {
+    const anchor = [
+      { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
+      { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+    ];
+    const shell = { pid: 11, ppid: 10, comm: "run-script.sh", path: RUN_SCRIPT };
+    const out = stripSandboxMachinery(
+      jsonl(
+        ...anchor,
+        { ...shell, kind: "read" },
+        { ...shell, kind: "open", access: "r" },
+        { ...shell, kind: "mmap", access: "r" },
+        { ...shell, kind: "open", access: "rw" },
+        // Another step process reading the script is the step's.
+        { pid: 12, ppid: 11, kind: "read", comm: "cat", path: RUN_SCRIPT },
+      ),
+      BASE,
+    );
+    expect(records(out)).toEqual([
+      { ...shell, comm: "bash", kind: "open", access: "rw" },
+      { pid: 12, ppid: 11, kind: "read", comm: "cat", path: RUN_SCRIPT },
+    ]);
+  });
+
+  it("names a re-exec's descendants by their fork alone, and survives an exec with no path", () => {
+    const out = stripSandboxMachinery(
+      jsonl(
+        { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
+        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        { pid: 13, ppid: 11, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        { pid: 14, ppid: 11, kind: "exec", comm: "node" },
+        // pid 15 names pid 13 as its parent but was not seen forking from it.
+        { pid: 15, ppid: 13, kind: "read", comm: "run-script.sh", path: "/work/a" },
+      ),
+      BASE,
+    );
+    expect(records(out)).toEqual([
+      { pid: 13, ppid: 11, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+      { pid: 14, ppid: 11, kind: "exec", comm: "node" },
+      { pid: 15, ppid: 13, kind: "read", comm: "bash", path: "/work/a" },
+    ]);
+  });
+
+  it("keeps a record with no pid, such as the tracer's end line, with or without an anchor", () => {
+    const end = { kind: "end", dropped: 0, untracked: 0 };
+    expect(
+      records(
+        stripSandboxMachinery(jsonl({ pid: 30, kind: "read", comm: "c", path: "/w" }, end), BASE),
+      ),
+    ).toContainEqual(end);
+  });
+
   it("keeps a truncated tail and tolerates an empty recording", () => {
     expect(stripSandboxMachinery("", BASE)).toBe("");
     const out = stripSandboxMachinery(

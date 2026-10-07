@@ -19,6 +19,15 @@ function lines(md: string): string[] {
   return m ? m[1].split("\n").map((l) => l.replace(/\s+/g, " ").trim()) : [];
 }
 
+// The rows of the "Accessed paths" table.
+function tableRows(md: string): string[] {
+  const m = md.match(/#### Accessed paths\n\n[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/);
+  return m ? m[1].split("\n") : [];
+}
+
+const render = (...records: object[]): string =>
+  renderFilesystemAuditSummary(jsonl(...records), PREFIXES);
+
 describe("renderFilesystemAuditSummary", () => {
   it("reports no access on empty input", () => {
     const md = renderFilesystemAuditSummary("", PREFIXES);
@@ -56,7 +65,7 @@ describe("renderFilesystemAuditSummary", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
         { kind: "write", comm: "sh", path: "/work/a\n```\n## Forged\n```\nb" },
-        { kind: "read", comm: "x\ty", path: "/work/c\u202ed\u0007\u007f\u0085" },
+        { kind: "read", comm: "x\ty", path: "/work/c\u202ed\u0007\u007f\u0085\r" },
         { kind: "read", comm: "sh", path: "/work/e\u2028f\u2029g\u200bh\u{e0001}" },
         { kind: "read", comm: "sh", path: "/work/i\\nj" },
       ),
@@ -65,7 +74,7 @@ describe("renderFilesystemAuditSummary", () => {
     expect(md.split("\n").filter((l) => l.startsWith("```"))).toHaveLength(2);
     expect(lines(md)).toEqual([
       "W sh ./a\\n```\\n## Forged\\n```\\nb",
-      "R x\\ty ./c\\u{202e}d\\u{7}\\u{7f}\\u{85}",
+      "R x\\ty ./c\\u{202e}d\\u{7}\\u{7f}\\u{85}\\r",
       "R sh ./e\\u{2028}f\\u{2029}g\\u{200b}h\\u{e0001}",
       "R sh ./i\\\\nj",
     ]);
@@ -83,7 +92,7 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["w ln ./b", "w! mkdir ./d", "d! rm /tmp/f"]);
   });
 
-  it("never folds a path spelled with .. into the directories it names", () => {
+  it("never folds a climbing path into the directories it names", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
         { kind: "read", comm: "cat", path: "/work/l/a" },
@@ -94,6 +103,129 @@ describe("renderFilesystemAuditSummary", () => {
       PREFIXES,
     );
     expect(lines(md)).toContain("a! cat ./l/../../etc/passwd");
+  });
+
+  it("gives every kind its letter, uppercase when done and lowercase when failed", () => {
+    const letters: [string, string][] = [
+      ["mkdir", "W"],
+      ["mknod", "W"],
+      ["truncate", "W"],
+      ["symlink", "W"],
+      ["unlink", "D"],
+      ["rmdir", "D"],
+      ["delete", "D"],
+      ["rename", "M"],
+      ["chmod", "A"],
+      ["chown", "A"],
+      ["attr", "A"],
+    ];
+    for (const [kind, letter] of letters) {
+      if (kind !== "delete")
+        expect(lines(render({ kind, comm: "c", path: "/x" }))).toEqual([`${letter} c /x`]);
+      expect(lines(render({ kind, comm: "c", path: "/x", err: 2, failed: true }))).toEqual([
+        `${letter.toLowerCase()} c /x`,
+      ]);
+    }
+    // A link's row is its new name, done or failed.
+    expect(lines(render({ kind: "link", comm: "ln", path: "/a", to: "/b" }))).toEqual(["W ln /b"]);
+    expect(
+      lines(render({ kind: "link", comm: "ln", path: "/a", to: "/b", err: 2, failed: true })),
+    ).toEqual(["w ln /b"]);
+  });
+
+  it("counts an open as a write when it truncates, without creating", () => {
+    expect(lines(render({ kind: "open", comm: "sh", path: "/work/f", access: "wt" }))).toEqual([
+      "W sh ./f",
+    ]);
+  });
+
+  it("names /proc/<pid> only at the start of a path", () => {
+    expect(
+      lines(
+        render(
+          { kind: "read", comm: "ps", path: "/proc/123/status" },
+          { kind: "read", comm: "ps", path: "/work/proc/12/x" },
+        ),
+      ),
+    ).toEqual(["R ps ./proc/12/x", "R ps /proc/<pid>/status"]);
+  });
+
+  it("leaves out pipes and sockets, but not a file named like one", () => {
+    expect(
+      lines(
+        render(
+          { kind: "read", comm: "sh", path: "pipe:[12]" },
+          { kind: "write", comm: "sh", path: "socket:[34]" },
+          { kind: "read", comm: "sh", path: "/work/pipe:x" },
+          { kind: "open-failed", comm: "sh", path: "pipe:y", err: 2 },
+        ),
+      ),
+    ).toEqual(["R sh ./pipe:x", "r sh …/pipe:y"]);
+  });
+
+  it("shows a mapped data file, and leaves out a mapped library, with or without a path", () => {
+    expect(
+      lines(
+        render(
+          { kind: "mmap", comm: "c", path: "/work/data", access: "r" },
+          { kind: "mmap", comm: "c", path: "/lib/libc.so", access: "x" },
+          { kind: "mmap", comm: "c", access: "x" },
+        ),
+      ),
+    ).toEqual(["R c ./data"]);
+  });
+
+  it("merges two spellings of one relative name into a row", () => {
+    expect(
+      lines(
+        render(
+          { kind: "open-failed", comm: "c", path: "x", err: 2 },
+          { kind: "delete", comm: "c", path: "./x", err: 2, failed: true },
+        ),
+      ),
+    ).toEqual(["rd c …/x"]);
+  });
+
+  it("shows a record with no command under an empty command", () => {
+    expect(lines(render({ kind: "read", path: "/etc/hosts" }))).toEqual(["R /etc/hosts"]);
+  });
+
+  it("never folds the root, home, tmp, proc or a process dir into one line", () => {
+    for (const dir of ["", "/home", "/tmp", "/proc", "/proc/9"]) {
+      const md = render(
+        ...["a", "b", "c"].map((leaf) => ({ kind: "read", comm: "c", path: `${dir}/${leaf}` })),
+      );
+      expect(lines(md).some((l) => l.endsWith("/**"))).toBe(false);
+    }
+  });
+
+  it("does not count a climbing path among the children it names", () => {
+    expect(
+      lines(
+        render(
+          { kind: "read", comm: "c", path: "/work/l/a" },
+          { kind: "read", comm: "c", path: "/work/l/b" },
+          { kind: "read", comm: "c", path: "/work/l/../x" },
+        ),
+      ),
+    ).toEqual(["R c ./l/../x", "R c ./l/a", "R c ./l/b"]);
+  });
+
+  it("orders rows without times by workspace, home, then the rest, then path and command", () => {
+    const md = render(
+      { kind: "read", comm: "b", path: "/etc/x" },
+      { kind: "read", comm: "a", path: "/etc/x" },
+      { kind: "read", comm: "c", path: "/home/u/y" },
+      { kind: "read", comm: "c", path: "/work/b" },
+      { kind: "read", comm: "c", path: "/work/a" },
+    );
+    expect(lines(md)).toEqual(["R c ./a", "R c ./b", "R c ~/y", "R a /etc/x", "R b /etc/x"]);
+    expect(tableRows(md)).toEqual([
+      "| R | `./a` |",
+      "| R | `./b` |",
+      "| R | `~/y` |",
+      "| R | `/etc/x` |",
+    ]);
   });
 
   it("combines an action's flags per path and relativizes", () => {
@@ -290,7 +422,7 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["R node ./a"]);
   });
 
-  it("names the workspace and $HOME roots themselves", () => {
+  it("names the workspace and home roots themselves", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
         { kind: "read", comm: "node", path: "/work" },
@@ -429,7 +561,7 @@ describe("renderFilesystemAuditSummary", () => {
       ]);
     });
 
-    it("spans every path folded into a dir/** row", () => {
+    it("spans every path folded into a directory row", () => {
       const md = renderFilesystemAuditSummary(
         jsonl(
           { t: at(100), kind: "read", comm: "go", path: "/work/d/1" },
