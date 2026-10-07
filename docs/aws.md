@@ -1,5 +1,11 @@
 # AWS access key check
 
+> [!WARNING]
+> `allowed_aws_accounts` is **experimental**: its behavior, inputs, and error messages may still
+> change in a future release without following semver. Without it, nothing on this page applies and
+> the action behaves as before. Try it in a non-critical workflow first, and pin this action to a
+> commit SHA rather than a version tag if you adopt it.
+
 A step that deploys to AWS needs its URL rules to allow AWS API hosts such as
 `cloudformation.us-east-1.amazonaws.com` or `sts.amazonaws.com`. Those hosts serve every AWS account,
 so a rule that allows them lets the step reach any account, not only yours. `allowed_aws_accounts`

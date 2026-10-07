@@ -25,21 +25,21 @@ details.
 
 `run` is the only required input.
 
-| Input                             | Default      | Description                                                                                                                   |
-| --------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `run`                             | required     | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed). |
-| `config_file`                     | empty        | A YAML file, relative to the workspace, that sets the other inputs. See [Config file](#config-file).                          |
-| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                               |
-| `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                |
-| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                       |
-| `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium).          |
-| `allowed_aws_accounts`            | empty        | `inspect` only. AWS accounts whose keys may sign AWS API requests. See [AWS access key check](#aws-access-key-check).         |
-| `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                         |
-| `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                      |
-| `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                     |
-| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                |
-| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                    |
-| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                            |
+| Input                             | Default      | Description                                                                                                                             |
+| --------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`                             | required     | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed).           |
+| `config_file`                     | empty        | A YAML file, relative to the workspace, that sets the other inputs. See [Config file](#config-file).                                    |
+| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                                         |
+| `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                          |
+| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                                 |
+| `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium).                    |
+| `allowed_aws_accounts`            | empty        | `inspect` only, **experimental**. AWS accounts whose keys may sign AWS API requests. See [AWS access key check](#aws-access-key-check). |
+| `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                                   |
+| `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                                |
+| `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                               |
+| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                          |
+| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                              |
+| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                                      |
 
 `fail_on_blocked`, `fail_on_ca_residue` and `upload_traffic_artifact` take `true` or `false`, and
 `traffic_artifact_retention_days` a whole number above zero. Any other value fails the step before
@@ -644,7 +644,8 @@ resolver saying no rule allows the name, and it does fail the step.
 
 ## AWS access key check
 
-`allowed_aws_accounts` takes 12-digit AWS account IDs, separated by whitespace or newlines, with `#`
+`allowed_aws_accounts` is **experimental**: its behavior and error messages may still change without
+following semver. It takes 12-digit AWS account IDs, separated by whitespace or newlines, with `#`
 comments as in the rule inputs. In a config file its lines are added to the workflow's. With it
 set, a request to an AWS API host must be signed with a key the proxy knows: the step's own
 `AWS_ACCESS_KEY_ID`, or one an STS `AssumeRole` issued for a role in one of these accounts. An
