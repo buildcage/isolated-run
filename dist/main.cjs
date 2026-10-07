@@ -26612,7 +26612,7 @@ function describeWouldRefuse(report) {
 	if (count !== 0) return {
 		level: "warning",
 		shouldFail: !1,
-		message: `${count} request(s) restrict mode would refuse, marked "restrict would refuse" in Communication details. Audit let them through.`
+		message: `${count} request(s) restrict mode would refuse. Communication details notes each with "restrict would refuse", and marks with 🚨 the ones audit let through.`
 	};
 }
 function describeUndecidedRequests(report, engineLabel) {
@@ -26832,7 +26832,7 @@ const MARK = {
 	failed: "⚠️"
 };
 function renderEvent(event, startedAt) {
-	let mark = MARK[event.action] ?? "✅", note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${event.wouldRefuse})`;
+	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "🚨" : MARK[event.action] ?? "✅", note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${event.wouldRefuse})`;
 	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}${note}`;
 }
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
