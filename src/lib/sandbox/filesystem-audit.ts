@@ -203,5 +203,8 @@ export async function startFilesystemAudit(
   }
   warn("buildcage: filesystem_audit did not start; the step's file accesses were not recorded.");
   await stop();
+  // A tracer that attached just too late may have created the recording; the
+  // report would otherwise read it as one cut short.
+  remove(outPath);
   return noAudit;
 }

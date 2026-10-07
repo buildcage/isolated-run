@@ -215,15 +215,18 @@ describe("reportStepFilesystemAudit", () => {
     expect(summaries[0]).toContain("W node ./a.txt");
   });
 
-  it("sets an empty output when the recording file is empty", async () => {
-    const { deps: d, summaries, outputs } = deps({ readFile: () => "" });
+  it("warns of a cut-short recording when the file is empty, and uploads nothing", async () => {
+    const { deps: d, summaries, uploads, outputs } = deps({ readFile: () => "" });
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: {} },
       d,
     );
 
-    expect(summaries).toEqual([]);
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toContain("**This record is incomplete.**");
+    expect(summaries[0]).toContain("No file access was recorded.");
+    expect(uploads).toEqual([]);
     expect(outputs).toEqual([""]);
   });
 

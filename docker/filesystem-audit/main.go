@@ -265,7 +265,12 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 			if errors.Is(err, ringbuf.ErrFlushed) {
 				break
 			}
+			// Idle: write out what is buffered, so a tracer killed later loses
+			// at most what came since.
 			if errors.Is(err, os.ErrDeadlineExceeded) {
+				if err := w.Flush(); err != nil {
+					return err
+				}
 				continue
 			}
 			return err
@@ -294,9 +299,9 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 			return err
 		}
 	}
-	dropped := sumPerCPU(coll.Maps["drops"])
-	untracked := sumPerCPU(coll.Maps["untracked"])
-	internal := sumPerCPU(coll.Maps["skipped_internal"])
+	dropped, errDropped := sumPerCPU(coll.Maps["drops"])
+	untracked, errUntracked := sumPerCPU(coll.Maps["untracked"])
+	internal, _ := sumPerCPU(coll.Maps["skipped_internal"])
 	kinds := make([]string, 0, len(counts))
 	for k := range counts {
 		kinds = append(kinds, k)
@@ -307,6 +312,12 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 	}
 	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d internal-skipped=%d pre-exec-skipped=%d\n",
 		total, dropped, untracked, internal, preExec)
+	// Without both counts the recording cannot claim to be complete, so it is
+	// left without its end line.
+	if err := errors.Join(errDropped, errUntracked); err != nil {
+		fmt.Fprintln(os.Stderr, "filesystem-audit: read loss counters:", err)
+		return w.Flush()
+	}
 	if err := enc.Encode(end{Kind: "end", Dropped: dropped, Untracked: untracked}); err != nil {
 		return err
 	}
@@ -322,13 +333,14 @@ type end struct {
 	Untracked uint64 `json:"untracked"`
 }
 
-func sumPerCPU(m *ebpf.Map) uint64 {
+func sumPerCPU(m *ebpf.Map) (uint64, error) {
 	var per []uint64
-	var sum uint64
-	if err := m.Lookup(uint32(0), &per); err == nil {
-		for _, v := range per {
-			sum += v
-		}
+	if err := m.Lookup(uint32(0), &per); err != nil {
+		return 0, err
 	}
-	return sum
+	var sum uint64
+	for _, v := range per {
+		sum += v
+	}
+	return sum, nil
 }

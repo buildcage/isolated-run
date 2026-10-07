@@ -640,18 +640,23 @@ static __always_inline void open_enter(int dfd)
 	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
 	if (!e)
 		return;
-	e->data[0] = 0;
-	// Seed from scratch so the hash value starts as an empty string. A full map
-	// counts in untracked even if this open then succeeds and is recorded.
-	if (bpf_map_update_elem(&open_names, &id, e->data, BPF_ANY) != 0) {
-		bump(&untracked);
-		return;
-	}
+	// do_sys_open's entry has already made one when do_sys_openat2's fires.
 	struct name_buf *nb = bpf_map_lookup_elem(&open_names, &id);
-	if (nb) {
-		nb->ts = bpf_ktime_get_boot_ns();
-		nb->dfd = dfd;
+	if (!nb) {
+		e->data[0] = 0;
+		// Seed from scratch so the hash value starts as an empty string. A full
+		// map counts in untracked even if this open then succeeds and is recorded.
+		if (bpf_map_update_elem(&open_names, &id, e->data, BPF_ANY) != 0) {
+			bump(&untracked);
+			return;
+		}
+		nb = bpf_map_lookup_elem(&open_names, &id);
+		if (!nb)
+			return;
 	}
+	nb->name[0] = 0;
+	nb->ts = bpf_ktime_get_boot_ns();
+	nb->dfd = dfd;
 }
 
 static __always_inline void open_exit(long ret)

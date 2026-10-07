@@ -75,7 +75,9 @@ export async function reportStepFilesystemAudit(
   const deps = { ...realDeps, ...overrides };
   let artifactName = "";
   const raw = audit && readOptional(audit.outPath, deps.readFile);
-  if (audit && raw) {
+  // An empty recording is still reported: a tracer that stops cleanly always
+  // writes an end line, so an empty one was cut short and gets the warning.
+  if (audit && raw !== undefined) {
     // The recording sits under the scratch base (see sandbox/filesystem-audit.ts),
     // next to the exec wrapper's own files, so its directory is the one holding
     // buildcage's own machinery. Strip that out once and feed the result to both
@@ -108,7 +110,7 @@ export async function reportStepFilesystemAudit(
     } catch (e) {
       annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
     }
-    if (wrote)
+    if (wrote && clean)
       artifactName =
         (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
   }
@@ -117,9 +119,9 @@ export async function reportStepFilesystemAudit(
 
 function readOptional(path: string, readFile: (p: string) => string): string | undefined {
   try {
-    return readFile(path) || undefined;
+    return readFile(path);
   } catch {
-    return undefined; // nothing was recorded, or the file is already gone
+    return undefined; // the tracer never started, or the file is already gone
   }
 }
 

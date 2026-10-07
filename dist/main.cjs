@@ -68603,7 +68603,7 @@ async function reportStepFilesystemAudit({ audit, startedAt, retentionDays, cont
 		...realDeps$3,
 		...overrides
 	}, artifactName = "", raw = audit && readOptional(audit.outPath, deps.readFile);
-	if (audit && raw) {
+	if (audit && raw !== void 0) {
 		let clean = stripSandboxMachinery(raw, (0, node_path.dirname)(audit.outPath));
 		try {
 			let markdown = renderFilesystemAuditSummary(clean, {
@@ -68621,13 +68621,13 @@ async function reportStepFilesystemAudit({ audit, startedAt, retentionDays, cont
 		} catch (e) {
 			annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
 		}
-		wrote && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
+		wrote && clean && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
 	}
 	deps.setOutput(artifactName);
 }
 function readOptional(path, readFile) {
 	try {
-		return readFile(path) || void 0;
+		return readFile(path);
 	} catch {
 		return;
 	}
@@ -69321,7 +69321,7 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		if (exited) break;
 		await sleep(100);
 	}
-	return warn("buildcage: filesystem_audit did not start; the step's file accesses were not recorded."), await stop(), noAudit;
+	return warn("buildcage: filesystem_audit did not start; the step's file accesses were not recorded."), await stop(), remove(outPath), noAudit;
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts

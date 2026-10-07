@@ -125,8 +125,9 @@ describe("startFilesystemAudit", () => {
     expect(warn).toHaveBeenCalledOnce();
     expect(kill).toHaveBeenCalledWith("SIGTERM");
     expect(remove).toHaveBeenCalledWith(START_OPTIONS.pidFilePath);
+    expect(remove).toHaveBeenCalledWith(START_OPTIONS.outPath);
     await handle.stop(); // the returned no-op handle does nothing more
-    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledTimes(2);
   });
 
   it("stops waiting as soon as the tracer exits on its own", async () => {
