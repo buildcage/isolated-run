@@ -29,6 +29,7 @@ describe("AWS API hosts", () => {
       "sts.us-east-1.api.aws",
       "sts.cn-north-1.api.amazonwebservices.com.cn",
       "sts.eusc-de-east-1.amazonaws.eu",
+      "sts.eusc-de-east-1.api.amazonwebservices.eu",
     ]) {
       expect(apiHost.test(host)).toBe(true);
     }

@@ -23,7 +23,7 @@ export const AWS_REFUSED_VERDICTS = ["no-credential", "ambiguous-credential", "k
 // API endpoints only: the commercial, China and European Sovereign Cloud
 // domains, and the dual-stack ones.
 const AWS_DOMAINS =
-  "(amazonaws\\.com|amazonaws\\.com\\.cn|amazonaws\\.eu|api\\.aws|api\\.amazonwebservices\\.com\\.cn)";
+  "(amazonaws\\.com|amazonaws\\.com\\.cn|amazonaws\\.eu|api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)";
 // Matched against txn.host, which is lowercased and has no port.
 export const AWS_API_HOST = `^([a-z0-9-]+\\.)+${AWS_DOMAINS}$`;
 // An interface VPC endpoint's own names are STS too.

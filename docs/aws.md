@@ -57,8 +57,9 @@ The proxy knows two kinds of key:
   `cdk-hnb659fds-deploy-role-*` roles or Terraform's `assume_role`. A role in any other account
   issues a key the proxy never learns, so requests signed with it are refused.
 
-AWS API hosts are names under `amazonaws.com`, `amazonaws.com.cn`, `amazonaws.eu` (the European
-Sovereign Cloud), `api.aws` (the dual-stack endpoints) and `api.amazonwebservices.com.cn`. Other AWS names, such as `public.ecr.aws` or Lambda
+AWS API hosts are names under `amazonaws.com`, `amazonaws.com.cn` and `amazonaws.eu` (the European
+Sovereign Cloud), and under their dual-stack counterparts `api.aws`, `api.amazonwebservices.com.cn`
+and `api.amazonwebservices.eu`. Other AWS names, such as `public.ecr.aws` or Lambda
 function URLs under `on.aws`, are left to the URL rules alone.
 
 The URL rules still decide first. A request they refuse stays `not-allowed`, and the key check only
