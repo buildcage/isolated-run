@@ -315,7 +315,7 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 
 // end is the recording's last line, written only once every queued event is
 // out, so a recording without it was cut short. Dropped events found the ring
-// buffer full, and Untracked file checks found the per-file map full.
+// buffer full, and Untracked calls found a tracking map full.
 type end struct {
 	Kind      string `json:"kind"`
 	Dropped   uint64 `json:"dropped"`
