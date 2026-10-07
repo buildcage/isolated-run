@@ -630,10 +630,14 @@ reported as blocked; see
 
 ### The Job Summary size cap
 
-GitHub caps a Job Summary at 1 MiB per step and drops the whole summary rather than truncating it,
-so if the timeline would push the step over that limit, that section alone is cut at a line boundary
-and a note takes its place. The report is written to the Job Summary only, so a cut section is
-recovered from the [traffic artifact](./docs/reference.md#traffic-artifact) and nowhere else.
+GitHub caps a Job Summary at 1 MiB per step, counting what the command itself wrote there, and drops
+the whole summary rather than truncating it. When the report would push the step over that limit,
+its parts give way in order: the timeline first, then the allowed, failed and blocked tables, and
+last the `restrict` example. A part that does not fit is cut at a line boundary with a note after
+what is kept, or replaced by the note when nothing of it fits; the example is always replaced whole
+rather than printed in part. Once a table is cut, the timeline is left out with it, under that one
+note. The report is written to the Job Summary only, so what was cut is recovered from the
+[traffic artifact](./docs/reference.md#traffic-artifact) and nowhere else.
 
 ## FAQ
 
