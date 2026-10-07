@@ -43,7 +43,7 @@ var kindNames = map[uint32]string{
 }
 
 // Mirrors the fixed header of struct event in bpf/filesystem_audit.bpf.c:
-// eight u32 fields, four u8 fields, comm[16], a u32 pad, the u64 timestamp,
+// eight u32 fields, four u8 fields, comm[16], a u32 err, the u64 timestamp,
 // then the data bytes.
 const (
 	hdrLen  = 8*4 + 4 + 16 + 4 + 8
@@ -130,6 +130,12 @@ func decode(raw []byte) (record, error) {
 		PPID: le.Uint32(raw[8:]),
 		Comm: cstr(raw[36:52]),
 		boot: le.Uint64(raw[56:]),
+	}
+	// A held path change its syscall refused carries the errno; its path and
+	// kind are as for one that succeeded.
+	if heldErr := le.Uint32(raw[52:]); heldErr != 0 {
+		r.Err = int32(heldErr)
+		r.Failed = true
 	}
 	switch kind {
 	case 1: // open

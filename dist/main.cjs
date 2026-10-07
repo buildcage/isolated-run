@@ -68378,7 +68378,13 @@ const LETTER = {
 	rename: "M",
 	chmod: "A",
 	chown: "A",
-	attr: "A"
+	attr: "A",
+	unlink: "D",
+	rmdir: "D",
+	mkdir: "W",
+	truncate: "W",
+	symlink: "W",
+	link: "W"
 }, PERM_ERRNO = new Set([
 	1,
 	13,
@@ -68386,7 +68392,7 @@ const LETTER = {
 ]);
 function classify(r) {
 	let letter, path = r.path, failed = !1;
-	return r.kind === "open-failed" ? (letter = "R", failed = !0) : r.failed ? (letter = FAILED_LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : r.kind === "link" ? (letter = "W", path = r.to) : letter = LETTER[r.kind], letter && path ? {
+	return r.kind === "open-failed" ? (letter = "R", failed = !0) : r.failed ? (letter = FAILED_LETTER[r.kind], r.kind === "link" && (path = r.to), failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : r.kind === "link" ? (letter = "W", path = r.to) : letter = LETTER[r.kind], letter && path ? {
 		letter,
 		path,
 		failed

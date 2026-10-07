@@ -136,7 +136,7 @@ struct event {
 	u8 truncated;  // the path, or the first path of a two-path operation
 	u8 trunc2;     // the second path of a rename or link
 	char comm[16];
-	u32 pad;
+	u32 err; // a held path change's errno when its syscall refused it
 	u64 ts; // CLOCK_BOOTTIME at the access; a failed syscall at its entry
 	char data[DATA_SZ + NAME_LEN]; // slack: masked offset + one component
 };
@@ -217,7 +217,7 @@ static __always_inline struct event *start(u32 kind)
 	e->truncated = 0;
 	e->trunc2 = 0;
 	bpf_get_current_comm(e->comm, sizeof(e->comm));
-	e->pad = 0;
+	e->err = 0;
 	e->ts = bpf_ktime_get_boot_ns();
 	return e;
 }
@@ -236,6 +236,26 @@ static __always_inline void submit(struct event *e)
 		    BPF_RB_FORCE_WAKEUP : BPF_RB_NO_WAKEUP;
 	if (bpf_ringbuf_output(&events, e, size, flags) != 0)
 		bump(&drops);
+}
+
+// A path change, held per thread from its security_path_* hook until the
+// syscall returns: the hook runs before the kernel's own permission checks
+// (may_delete, may_create, notify_change), so whether it happened is known
+// only then. Each entry is an event, so allocated on use, and lives only while
+// its syscall runs.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 4096);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
+	__type(key, u64);
+	__type(value, struct event);
+} held_ops SEC(".maps");
+
+static __always_inline void hold(struct event *e)
+{
+	u64 id = bpf_get_current_pid_tgid();
+	if (bpf_map_update_elem(&held_ops, &id, e, BPF_ANY) != 0)
+		bump(&untracked);
 }
 
 // Field offsets are resolved by CO-RE in the caller and handed over, since
@@ -509,7 +529,7 @@ int BPF_PROG(on_##hook, const struct path *dir, struct dentry *dentry)		\
 		return 0;							\
 	u32 off = leaf(e, 0, dentry, &e->n1);					\
 	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated); \
-	submit(e);								\
+	hold(e);								\
 	return 0;								\
 }
 
@@ -530,7 +550,7 @@ int BPF_PROG(on_symlink, const struct path *dir, struct dentry *dentry, const ch
 	e->path_len = off;
 	off = leaf(e, off, dentry, &e->n1);
 	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated);
-	submit(e);
+	hold(e);
 	return 0;
 }
 
@@ -547,7 +567,7 @@ int BPF_PROG(on_rename, const struct path *old_dir, struct dentry *old_dentry,
 	off = walk(e, off, BPF_CORE_READ(old_dir, dentry), BPF_CORE_READ(old_dir, mnt), &e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
 	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), BPF_CORE_READ(new_dir, mnt), &e->n2, &e->trunc2);
-	submit(e);
+	hold(e);
 	return 0;
 }
 
@@ -561,7 +581,7 @@ int BPF_PROG(on_chmod, const struct path *path, unsigned short mode)
 		return 0;
 	e->mode = mode;
 	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
-	submit(e);
+	hold(e);
 	return 0;
 }
 
@@ -580,7 +600,7 @@ int BPF_PROG(on_link, struct dentry *old_dentry, const struct path *new_dir,
 	u32 off = walk(e, 0, old_dentry, mnt, &e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
 	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), mnt, &e->n2, &e->trunc2);
-	submit(e);
+	hold(e);
 	return 0;
 }
 
@@ -594,7 +614,7 @@ int BPF_PROG(on_truncate, const struct path *path)
 	if (!e)
 		return 0;
 	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
-	submit(e);
+	hold(e);
 	return 0;
 }
 
@@ -609,7 +629,31 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 	e->flags = uid;
 	e->mode = gid;
 	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
-	submit(e);
+	hold(e);
+	return 0;
+}
+
+// Reports a held path change when its syscall returns: as done if it
+// succeeded (a truncating open returns a descriptor), else as failed with the
+// errno, unless a failed-path tracepoint below records the failure itself.
+// That tracepoint and this program run in either order on the same exit, so
+// each clears the other's entry.
+SEC("tp_btf/sys_exit")
+int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
+{
+	if (!in_target())
+		return 0;
+	u64 id = bpf_get_current_pid_tgid();
+	struct event *e = bpf_map_lookup_elem(&held_ops, &id);
+	if (!e)
+		return 0;
+	if (ret >= 0) {
+		submit(e);
+	} else if (!bpf_map_lookup_elem(&pending_ops, &id)) {
+		e->err = -ret;
+		submit(e);
+	}
+	bpf_map_delete_elem(&held_ops, &id);
 	return 0;
 }
 
@@ -850,6 +894,9 @@ static __always_inline void op_exit(long ret, int failure_only)
 			bump(&untracked);
 		return;
 	}
+	// This records the failure, so a change held for it is not reported too.
+	if (ret < 0)
+		bpf_map_delete_elem(&held_ops, &id);
 	u32 kind = ret < 0 ? pend->kind : pend->kind_ok;
 	if (kind == 0) {
 		bpf_map_delete_elem(&pending_ops, &id);
