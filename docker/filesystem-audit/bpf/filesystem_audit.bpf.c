@@ -496,11 +496,6 @@ int BPF_PROG(on_open, struct file *file)
 		bump(&skipped_internal);
 		return 0;
 	}
-	// An open that creates its file passed security_path_mknod first; this
-	// open's c flag already says so.
-	struct event *h = bpf_map_lookup_elem(&held_ops, &id);
-	if (h && h->kind == K_MKNOD)
-		bpf_map_delete_elem(&held_ops, &id);
 	struct event *e = start(K_OPEN);
 	if (!e)
 		return 0;
@@ -590,7 +585,6 @@ int BPF_PROG(on_##hook, const struct path *dir, struct dentry *dentry)		\
 DIR_ENTRY_HOOK(security_path_unlink, K_UNLINK)
 DIR_ENTRY_HOOK(security_path_rmdir, K_RMDIR)
 DIR_ENTRY_HOOK(security_path_mkdir, K_MKDIR)
-DIR_ENTRY_HOOK(security_path_mknod, K_MKNOD)
 
 SEC("fentry/security_path_symlink")
 int BPF_PROG(on_symlink, const struct path *dir, struct dentry *dentry, const char *old_name)
@@ -747,6 +741,26 @@ struct {
 	__type(key, u64);
 	__type(value, struct name_buf);
 } open_names SEC(".maps");
+
+// mknod(2) and bind(2) to a path. An open that creates its file passes
+// through here too, from may_o_create, and is skipped: the open records the
+// creation (its c flag), or its own failure.
+SEC("fentry/security_path_mknod")
+int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
+{
+	if (!in_target())
+		return 0;
+	u64 id = bpf_get_current_pid_tgid();
+	if (bpf_map_lookup_elem(&open_names, &id))
+		return 0;
+	struct event *e = start(K_MKNOD);
+	if (!e)
+		return 0;
+	u32 off = leaf(e, 0, dentry, &e->n1);
+	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated);
+	hold(e);
+	return 0;
+}
 
 static __always_inline void open_enter(int dfd)
 {
@@ -991,10 +1005,15 @@ static __always_inline void op_exit(long ret, int failure_only)
 		// mode and flags count the base components of the first and second name.
 		u8 nb = 0;
 		if (!pend->p1) {
-			// No name (futimens): an empty one, then the descriptor's own path.
+			// No name (futimens): an empty one, then the descriptor's own path,
+			// or nothing at all if it was not open.
 			e->data[0] = 0;
 			off = add_base(e, 1, pend->dfd1, &nb, &e->truncated, 1);
 			e->mode = nb;
+			if (!(e->args_len & 1)) {
+				bpf_map_delete_elem(&pending_ops, &id);
+				return;
+			}
 		} else if (r > 1 && e->data[0] != '/') {
 			off = add_base(e, off, pend->dfd1, &nb, &e->truncated, 1);
 			e->mode = nb;
@@ -1010,8 +1029,8 @@ static __always_inline void op_exit(long ret, int failure_only)
 	bpf_map_delete_elem(&pending_ops, &id);
 }
 
-// unlinkat covers both unlink and rmdir (rmdir(2) is unlinkat+AT_REMOVEDIR
-// on current kernels); pathname is arg1.
+// unlinkat (pathname=arg1) is unlink and rmdir on architectures without
+// those older syscalls; where they exist they are traced on their own below.
 SEC("tracepoint/syscalls/sys_enter_unlinkat")
 int on_unlinkat_enter(struct trace_event_raw_sys_enter *ctx)
 {
@@ -1025,19 +1044,27 @@ int on_unlinkat_exit(struct trace_event_raw_sys_exit *ctx)
 	return 0;
 }
 
-// renameat2(olddfd, oldname=arg1, newdfd, newname=arg3, flags)
-SEC("tracepoint/syscalls/sys_enter_renameat2")
-int on_renameat2_enter(struct trace_event_raw_sys_enter *ctx)
-{
-	op_enter(K_RENAME_FAILED, ctx->args[0], ctx->args[1], ctx->args[2], ctx->args[3]);
-	return 0;
+// A failed move: (old dfd, old name, new dfd, new name) from the syscall's
+// arguments, AT_FDCWD standing in for a dfd the syscall does not take.
+#define FAILED_RENAME(sys, dfd1, p1, dfd2, p2)					\
+SEC("tracepoint/syscalls/sys_enter_" #sys)					\
+int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
+{										\
+	op_enter(K_RENAME_FAILED, dfd1, p1, dfd2, p2);				\
+	return 0;								\
+}										\
+SEC("tracepoint/syscalls/sys_exit_" #sys)					\
+int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
+{										\
+	op_exit(ctx->ret, 1);							\
+	return 0;								\
 }
-SEC("tracepoint/syscalls/sys_exit_renameat2")
-int on_renameat2_exit(struct trace_event_raw_sys_exit *ctx)
-{
-	op_exit(ctx->ret, 1);
-	return 0;
-}
+
+// renameat2(olddfd, oldname, newdfd, newname, flags), and renameat without
+// the flags; rename(oldname, newname) is x86_64's older form.
+FAILED_RENAME(renameat2, ctx->args[0], ctx->args[1], ctx->args[2], ctx->args[3])
+FAILED_RENAME(renameat, ctx->args[0], ctx->args[1], ctx->args[2], ctx->args[3])
+FAILED_RENAME(rename, AT_FDCWD, ctx->args[0], AT_FDCWD, ctx->args[1])
 
 SEC("tracepoint/syscalls/sys_enter_fchmodat")
 int on_fchmodat_enter(struct trace_event_raw_sys_enter *ctx)
@@ -1084,8 +1111,10 @@ int on_fchownat_exit(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_utimensat")
 int on_utimensat_enter(struct trace_event_raw_sys_enter *ctx)
 {
-	// A NULL path (futimens) changes the file dfd refers to.
-	op_enter2(K_ATTR_FAILED, K_ATTR, ctx->args[0], ctx->args[1], 0, 0);
+	// A NULL path (futimens) changes the file dfd refers to; with AT_FDCWD it
+	// names nothing and fails.
+	if (ctx->args[1] || (int)ctx->args[0] != AT_FDCWD)
+		op_enter2(K_ATTR_FAILED, K_ATTR, ctx->args[0], ctx->args[1], 0, 0);
 	return 0;
 }
 SEC("tracepoint/syscalls/sys_exit_utimensat")
@@ -1121,9 +1150,9 @@ int on_lsetxattr_exit(struct trace_event_raw_sys_exit *ctx)
 	return 0;
 }
 
-// The older forms x86_64 still has beside the *at ones, and renameat, which
-// every architecture has; a tracepoint for a syscall the architecture lacks
-// fails to attach, which only warns (see main.go).
+// The older forms x86_64 keeps beside the *at ones. A tracepoint for a
+// syscall the architecture lacks does not exist, which the loader skips
+// quietly (see main.go).
 #define FAILED_OP_1(sys, kind)							\
 SEC("tracepoint/syscalls/sys_enter_" #sys)					\
 int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
@@ -1144,31 +1173,27 @@ FAILED_OP_1(chmod, K_CHMOD_FAILED)
 FAILED_OP_1(chown, K_CHOWN_FAILED)
 FAILED_OP_1(lchown, K_CHOWN_FAILED)
 
-SEC("tracepoint/syscalls/sys_enter_rename")
-int on_rename_enter(struct trace_event_raw_sys_enter *ctx)
-{
-	op_enter(K_RENAME_FAILED, AT_FDCWD, ctx->args[0], AT_FDCWD, ctx->args[1]);
-	return 0;
-}
-SEC("tracepoint/syscalls/sys_exit_rename")
-int on_rename_exit(struct trace_event_raw_sys_exit *ctx)
-{
-	op_exit(ctx->ret, 1);
-	return 0;
+// utime(filename, times) and utimes(filename, times) change a named file,
+// futimesat(dfd, filename, times) one relative to dfd; recorded either way,
+// as utimensat is.
+#define ATTR_OP(sys, dfd, p)							\
+SEC("tracepoint/syscalls/sys_enter_" #sys)					\
+int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
+{										\
+	op_enter2(K_ATTR_FAILED, K_ATTR, dfd, p, 0, 0);				\
+	return 0;								\
+}										\
+SEC("tracepoint/syscalls/sys_exit_" #sys)					\
+int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
+{										\
+	op_exit(ctx->ret, 0);							\
+	return 0;								\
 }
 
-// renameat(olddfd, oldname=arg1, newdfd, newname=arg3)
-SEC("tracepoint/syscalls/sys_enter_renameat")
-int on_renameat_enter(struct trace_event_raw_sys_enter *ctx)
-{
-	op_enter(K_RENAME_FAILED, ctx->args[0], ctx->args[1], ctx->args[2], ctx->args[3]);
-	return 0;
-}
-SEC("tracepoint/syscalls/sys_exit_renameat")
-int on_renameat_exit(struct trace_event_raw_sys_exit *ctx)
-{
-	op_exit(ctx->ret, 1);
-	return 0;
-}
+ATTR_OP(utime, AT_FDCWD, ctx->args[0])
+ATTR_OP(utimes, AT_FDCWD, ctx->args[0])
+ATTR_OP(futimesat, ctx->args[0], ctx->args[1])
+
+
 
 char LICENSE[] SEC("license") = "GPL";

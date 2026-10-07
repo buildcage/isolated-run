@@ -51,18 +51,6 @@ var optionalProgs = map[string]string{
 	"on_file_truncate": "security_file_truncate",
 }
 
-// archOnlyProgs trace syscalls only some architectures have (x86_64 keeps
-// these older forms beside the *at ones; arm64 has none of them), so where
-// one fails to attach the syscall is simply absent and nothing is said.
-var archOnlyProgs = map[string]bool{
-	"on_unlink_enter": true, "on_unlink_exit": true,
-	"on_rmdir_enter": true, "on_rmdir_exit": true,
-	"on_rename_enter": true, "on_rename_exit": true,
-	"on_chmod_enter": true, "on_chmod_exit": true,
-	"on_chown_enter": true, "on_chown_exit": true,
-	"on_lchown_enter": true, "on_lchown_exit": true,
-}
-
 // getnameProgs is the subset of optionalProgs that records a failed open's
 // name; at least one must attach.
 var getnameProgs = map[string]bool{"on_getname": true, "on_getname_outer": true}
@@ -228,7 +216,9 @@ func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, e
 		_, optional := optionalProgs[name]
 		if err != nil {
 			if optional || p.Type() == ebpf.TracePoint {
-				if !archOnlyProgs[name] {
+				// A syscall the architecture lacks (x86_64's older forms on
+				// arm64) has no tracepoint, which is no loss worth reporting.
+				if !errors.Is(err, os.ErrNotExist) {
 					fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
 				}
 				continue
