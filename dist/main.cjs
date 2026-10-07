@@ -26568,9 +26568,6 @@ function describeFailedConnections(report, engineLabel) {
 		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed under Failed Connections. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
 	};
 }
-function communicationTruncationNote(artifactAvailable) {
-	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
-}
 //#endregion
 //#region src/core/lib/report/render/fit-step-summary.ts
 const bytes = (s) => Buffer.byteLength(s, "utf8"), whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
@@ -26647,6 +26644,9 @@ function buildRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
 		for (let rule of rules) yaml += `      ${rule}\n`;
 	}
 	return restrictExampleBlock(yaml);
+}
+function communicationTruncationNote(artifactAvailable) {
+	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
 }
 //#endregion
 //#region src/core/lib/report/render/fold-expected-blocked.ts
@@ -26730,6 +26730,9 @@ function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
 		count: r.count,
 		expected: r.expected ? "✅" : ""
 	})));
+}
+function hostTableTruncationNote(artifactAvailable) {
+	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload_traffic_artifact: true to get every request as a downloadable artifact"}._\n\n`;
 }
 //#endregion
 //#region src/core/lib/report/elapsed-time.ts
@@ -26942,6 +26945,9 @@ const SECTION = "traffic", TRAFFIC_BLOCK = {
 	passed: "traffic-passed",
 	log: "traffic-log"
 };
+function trafficNotice(block, artifactAvailable) {
+	return block.id === TRAFFIC_BLOCK.example ? restrictExampleTruncationNote(artifactAvailable) : block.id === TRAFFIC_BLOCK.log ? communicationTruncationNote(artifactAvailable) : hostTableTruncationNote(artifactAvailable);
+}
 function tableBlock(id, priority, before, table, after) {
 	return {
 		id,
@@ -27053,7 +27059,7 @@ function summarySize(path, fileSize) {
 }
 async function writeReportSummary(report, annotation, options, artifactAvailable, env, { appendFile = node_fs.appendFileSync, fileSize = (p) => (0, node_fs.statSync)(p).size, writeSummary = writeStepSummary } = {}) {
 	let outcomes = computeReportOutcomes(report, options);
-	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeSummary(fitStepSummary(withNotices(outcomes.blocks, (b) => b.id === TRAFFIC_BLOCK.example ? restrictExampleTruncationNote(artifactAvailable) : communicationTruncationNote(artifactAvailable)), { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) }), env.GITHUB_STEP_SUMMARY);
+	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeSummary(fitStepSummary(withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)), { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) }), env.GITHUB_STEP_SUMMARY);
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts

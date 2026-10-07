@@ -15,7 +15,6 @@ import {
   type OutcomeEmission,
 } from "#core/lib/report/outcome/annotate.ts";
 import { describeReportOutcomes } from "#core/lib/report/outcome/report-outcomes.ts";
-import { communicationTruncationNote } from "#core/lib/report/render/communication-section.ts";
 import {
   fitStepSummary,
   joinSummaryBlocks,
@@ -24,9 +23,8 @@ import {
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
   renderReportBlocks,
-  TRAFFIC_BLOCK,
+  trafficNotice,
 } from "#core/lib/report/render/render-report-markdown.ts";
-import { restrictExampleTruncationNote } from "#core/lib/report/render/restrict-example.ts";
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
 import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
@@ -203,11 +201,7 @@ export async function writeReportSummary(
 
   await writeSummary(
     fitStepSummary(
-      withNotices(outcomes.blocks, (b) =>
-        b.id === TRAFFIC_BLOCK.example
-          ? restrictExampleTruncationNote(artifactAvailable)
-          : communicationTruncationNote(artifactAvailable),
-      ),
+      withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)),
       { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) },
     ),
     env.GITHUB_STEP_SUMMARY,
