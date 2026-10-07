@@ -87,23 +87,26 @@ describe("stripSandboxMachinery", () => {
       { pid: 12, ppid: 11, kind: "fork", comm: "bash" },
       { pid: 12, ppid: 11, kind: "read", comm: "node", path: "/home/u/.aws/credentials" },
       { pid: 13, ppid: 12, kind: "fork", comm: "node" },
+      // Kept under its own name, so the re-exec shows.
+      { pid: 13, ppid: 12, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
     ]);
   });
 
   it("keeps a process the step detaches, whatever parent it names", () => {
     // By CLONE_PARENT, or once its parent exits, a step process can name the
     // init as its parent.
+    const fork = { pid: 13, ppid: 10, kind: "fork", comm: "node" };
     const read = { pid: 13, ppid: 10, kind: "read", comm: "node", path: "/home/u/.aws/a" };
     const out = stripSandboxMachinery(
       jsonl(
         { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
-        { pid: 13, ppid: 10, kind: "fork", comm: "node" },
+        fork,
         read,
       ),
       BASE,
     );
-    expect(records(out)).toContainEqual(read);
+    expect(records(out)).toEqual([fork, read]);
   });
 
   it("leaves a step command named like a wrapper alone, by its pid and exec path", () => {

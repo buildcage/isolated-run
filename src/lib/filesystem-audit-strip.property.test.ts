@@ -35,7 +35,7 @@ const jsonlArb = fc
   .map((rs) => rs.map((r) => JSON.stringify(r)).join("\n"));
 
 describe("stripSandboxMachinery: properties", () => {
-  it("drops every scratch-base path and never emits more lines than it got", () => {
+  it("drops every scratch-base path but a step's exec and never emits more lines than it got", () => {
     fc.assert(
       fc.property(jsonlArb, (jsonl) => {
         const out = stripSandboxMachinery(jsonl, BASE);
@@ -43,8 +43,9 @@ describe("stripSandboxMachinery: properties", () => {
         const inLines = jsonl.split("\n").filter(Boolean);
         expect(outLines.length).toBeLessThanOrEqual(inLines.length);
         for (const line of outLines) {
-          const p = (JSON.parse(line) as { path?: unknown }).path;
-          if (typeof p === "string") expect(p === BASE || p.startsWith(`${BASE}/`)).toBe(false);
+          const { kind, path: p } = JSON.parse(line) as { kind?: unknown; path?: unknown };
+          if (typeof p === "string" && kind !== "exec")
+            expect(p === BASE || p.startsWith(`${BASE}/`)).toBe(false);
         }
       }),
     );

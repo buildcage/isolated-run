@@ -68309,9 +68309,13 @@ function stripSandboxMachinery(jsonl, scratchBase) {
 		} catch {
 			return;
 		}
-	}), ownShellPids = new Set(), init, shell, boundary = -1;
+	}), ownShellPids = new Set(), shell, init, boundary = -1;
 	recs.forEach((r, i) => {
-		r && r.pid !== void 0 && (init ??= r.pid, r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 && ([shell, boundary] = [r.pid, i]) : ownShellPids.add(r.pid)));
+		r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (!under(r.path) || shell !== void 0 ? ownShellPids.add(r.pid) : [shell, boundary, init] = [
+			r.pid,
+			i,
+			r.ppid
+		]);
 	});
 	let out = [];
 	return recs.forEach((r, i) => {
@@ -68319,7 +68323,7 @@ function stripSandboxMachinery(jsonl, scratchBase) {
 			lines[i] !== "" && out.push(lines[i]);
 			return;
 		}
-		if (!under(r.path) && !(shell !== void 0 && r.pid !== void 0 && (i < boundary || r.pid === init))) {
+		if ((!under(r.path) || r.kind === "exec" && shell !== void 0 && i > boundary) && !(shell !== void 0 && r.pid !== void 0 && (i < boundary || r.pid === init))) {
 			if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
 				out.push(JSON.stringify({
 					...r,
