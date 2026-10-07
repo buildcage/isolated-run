@@ -28,6 +28,7 @@ describe("AWS API hosts", () => {
       "iam.global.api.aws",
       "sts.us-east-1.api.aws",
       "sts.cn-north-1.api.amazonwebservices.com.cn",
+      "sts.eusc-de-east-1.amazonaws.eu",
     ]) {
       expect(apiHost.test(host)).toBe(true);
     }
@@ -53,6 +54,9 @@ describe("AWS API hosts", () => {
       "sts-fips.us-east-1.amazonaws.com",
       "sts.us-east-1.api.aws",
       "sts.cn-north-1.amazonaws.com.cn",
+      "sts.eusc-de-east-1.amazonaws.eu",
+      "vpce-0123456789abcdef0-abcdefgh.sts.us-east-1.vpce.amazonaws.com",
+      "us-east-1a.vpce-0123456789abcdef0-abcdefgh.sts.us-east-1.vpce.amazonaws.com",
     ]) {
       expect(stsHost.test(host)).toBe(true);
     }
@@ -81,6 +85,7 @@ describe("hosts that name the resource", () => {
       "bucket.s3-accelerate.amazonaws.com",
       "bucket.s3-accelerate.dualstack.amazonaws.com",
       "bucket.s3.cn-north-1.amazonaws.com.cn",
+      "bucket.s3.eusc-de-east-1.amazonaws.eu",
       "111111111111.dkr.ecr.us-east-1.amazonaws.com",
       "111111111111.dkr.ecr.cn-north-1.amazonaws.com.cn",
       "my-domain-111111111111.d.codeartifact.us-east-1.amazonaws.com",
@@ -146,6 +151,12 @@ describe("awsKeyRequestRules", () => {
     expect(rules.includes("deny")).toBe(false);
   });
 
+  it("matches the host once, and names the result everywhere else", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
+    expect(rules.split("-m reg ^([a-z0-9-]+\\.)+").length).toBe(2);
+    expect(rules.includes("acl aws_host var(txn.aws_host) -m bool")).toBe(true);
+  });
+
   it("looks keys up in the map it is given", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(rules.includes("map(/rules/keys.map) -m found")).toBe(true);
@@ -167,8 +178,13 @@ describe("awsKeyRequestRules", () => {
     expect(rules.includes("acl aws_query_many query,url_dec -m reg -i")).toBe(true);
   });
 
-  it("leaves Accept-Encoding alone where the client signed it", () => {
+  it("leaves Accept-Encoding alone where the client signed it, in a header or a query", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
+    expect(
+      rules.includes(
+        "acl aws_coding_signed query,url_dec -m reg -i (^|&)x-amz-signedheaders=[^&]*accept-encoding",
+      ),
+    ).toBe(true);
     expect(
       rules.includes("set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed"),
     ).toBe(true);

@@ -51,8 +51,8 @@ The proxy knows two kinds of key:
   `cdk-hnb659fds-deploy-role-*` roles or Terraform's `assume_role`. A role in any other account
   issues a key the proxy never learns, so requests signed with it are refused.
 
-AWS API hosts are names under `amazonaws.com`, `amazonaws.com.cn`, `api.aws` (the dual-stack
-endpoints) and `api.amazonwebservices.com.cn`. Other AWS names, such as `public.ecr.aws` or Lambda
+AWS API hosts are names under `amazonaws.com`, `amazonaws.com.cn`, `amazonaws.eu` (the European
+Sovereign Cloud), `api.aws` (the dual-stack endpoints) and `api.amazonwebservices.com.cn`. Other AWS names, such as `public.ecr.aws` or Lambda
 function URLs under `on.aws`, are left to the URL rules alone.
 
 The URL rules still decide first. A request they refuse stays `not-allowed`, and the key check only
@@ -85,7 +85,7 @@ rules:
 | EC2                    | `ec2-<ip>.<region>.compute.amazonaws.com`, `ec2-<ip>.compute-1.amazonaws.com`                                                                                |
 | AWS CLI downloads      | `awscli.amazonaws.com`                                                                                                                                       |
 
-Each also matches under `amazonaws.com.cn`. Every other AWS API host names only a service and a
+Each also matches under `amazonaws.com.cn` and `amazonaws.eu`. Every other AWS API host names only a service and a
 region, such as `sts.us-east-1.amazonaws.com` or `sqs.us-east-1.amazonaws.com`. The account a
 request to one of those reaches is in its parameters or its body, where the proxy does not look, so
 an unsigned request there is refused, `GET` included. A host missing from the table above is
@@ -160,6 +160,11 @@ use one:
   unless the client signed its own `Accept-Encoding`, which the proxy then leaves alone. It reads an
   answer up to its buffer size (16 KB). A key in a compressed answer or past the buffer is not
   learned, and requests signed with it are refused.
+- A connection `allowed_tls_rules` or `allowed_ip_rules` passes through is never decrypted, so the
+  check never sees its requests. Do not pass AWS API hosts through.
+- S3 Express One Zone directory buckets are signed with keys `CreateSession` issues, which the proxy
+  does not learn: its answer names no account to check them against. Requests to directory buckets
+  are refused as `aws-key-not-allowed`.
 - The starting key ID is handed to the proxy container as an environment variable, so it is visible
   to `docker inspect` on the runner while the step runs. A key ID is not a secret on its own:
   signing needs the secret access key, which never reaches the proxy.

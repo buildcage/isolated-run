@@ -20,22 +20,26 @@ export interface AwsKeyCheck {
 /** The verdicts restrict mode refuses on, each logged as `reason=aws-<verdict>`. */
 export const AWS_REFUSED_VERDICTS = ["no-credential", "ambiguous-credential", "key-not-allowed"];
 
-// API endpoints only: the classic and China domains, and the dual-stack ones.
+// API endpoints only: the commercial, China and European Sovereign Cloud
+// domains, and the dual-stack ones.
+const AWS_DOMAINS =
+  "(amazonaws\\.com|amazonaws\\.com\\.cn|amazonaws\\.eu|api\\.aws|api\\.amazonwebservices\\.com\\.cn)";
 // Matched against txn.host, which is lowercased and has no port.
-export const AWS_API_HOST =
-  "^([a-z0-9-]+\\.)+(amazonaws\\.com|amazonaws\\.com\\.cn|api\\.aws|api\\.amazonwebservices\\.com\\.cn)$";
+export const AWS_API_HOST = `^([a-z0-9-]+\\.)+${AWS_DOMAINS}$`;
+// An interface VPC endpoint's own names are STS too.
 export const STS_HOST =
-  "^sts(-fips)?(\\.[a-z0-9-]+)?\\.(amazonaws\\.com|amazonaws\\.com\\.cn|api\\.aws|api\\.amazonwebservices\\.com\\.cn)$";
+  `^sts(-fips)?(\\.[a-z0-9-]+)?\\.${AWS_DOMAINS}$` +
+  "|^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.sts\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$";
 // Hosts that name the resource a request is for, in the host or (S3's path
 // style) the path, so the URL rules can pin the account and an unsigned request
 // is left to them: S3 in every form, ECR registries, CodeArtifact repositories,
 // API Gateway, AppSync, load balancers, EC2 public names, and the AWS CLI's
 // download host. Every other API host names only a service and a region.
 export const AWS_RESOURCE_HOST =
-  "(^|\\.)s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.amazonaws\\.com(\\.cn)?$" +
-  "|\\.(dkr\\.ecr|d\\.codeartifact|execute-api|appsync-api|appsync-realtime-api)\\.[a-z0-9-]+\\.amazonaws\\.com(\\.cn)?$" +
-  "|\\.elb(\\.[a-z0-9-]+)?\\.amazonaws\\.com(\\.cn)?$" +
-  "|\\.compute(-1)?\\.amazonaws\\.com(\\.cn)?$" +
+  "(^|\\.)s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  "|\\.(dkr\\.ecr|d\\.codeartifact|execute-api|appsync-api|appsync-realtime-api)\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  "|\\.elb(\\.[a-z0-9-]+)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  "|\\.compute(-1)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|^awscli\\.amazonaws\\.com$";
 // Both query spellings of a credential: SigV4's and SigV2's. Matched without
 // regard to case, so a spelling the extraction below does not read is still
@@ -57,7 +61,9 @@ export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
 export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit"): string[] {
   const l = [
     "    # AWS access key check. req.fhdr, not req.hdr: Authorization holds commas.",
-    `    acl aws_host var(txn.host) -m reg ${AWS_API_HOST}`,
+    "    # Matched once: an acl is evaluated again on every line that names it.",
+    `    http-request set-var(txn.aws_host) bool(true) if { var(txn.host) -m reg ${AWS_API_HOST} }`,
+    "    acl aws_host var(txn.aws_host) -m bool",
     `    acl aws_sts_host var(txn.host) -m reg ${STS_HOST}`,
     `    acl aws_resource_host var(txn.host) -m reg ${AWS_RESOURCE_HOST}`,
     "    # Only AWS's own schemes are a credential here: CodeArtifact and ECR take",
@@ -97,6 +103,7 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    # it is signed, which rewriting would break: a compressed answer then",
     "    # teaches nothing, and the key it issues is refused.",
     "    acl aws_coding_signed req.fhdr(authorization) -m reg -i signedheaders=[^,]*accept-encoding",
+    "    acl aws_coding_signed query,url_dec -m reg -i (^|&)x-amz-signedheaders=[^&]*accept-encoding",
     "    http-request set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed",
     "    http-request set-var(txn.aws_sts) bool(true) if aws_sts_host",
     "",
