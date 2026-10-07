@@ -184,6 +184,9 @@ jobs:
           BUILDCAGE_BUILD_TEST_HOOKS: "1"
         run: vp run build
 
+      - name: Leave a file in the workspace the step does not own
+        run: sudo touch "$GITHUB_WORKSPACE/root-owned.txt"
+
       - name: Run a step with filesystem_audit enabled
         id: audit
         uses: ./
@@ -210,6 +213,8 @@ jobs:
             python3 -c 'import os, sys; d = os.open(sys.argv[1], os.O_RDONLY)
             try: os.unlink("gone", dir_fd=d)
             except FileNotFoundError: pass' "$GITHUB_WORKSPACE/sub"
+            # A change the kernel refuses after the hook that sees it.
+            chmod 777 "$GITHUB_WORKSPACE/root-owned.txt" 2>/dev/null || true
 
       - name: Verify the Job Summary has the filesystem audit
         run: |
@@ -232,6 +237,8 @@ jobs:
           # Relative names show under the directory they resolved against.
           grep -qE ' r +cat +\./sub/missing\.txt$' "$f"
           grep -qE ' d +python3 +\./sub/gone$' "$f"
+          # A refused change shows only as failed.
+          grep -qE ' a!? +chmod +\./root-owned\.txt$' "$f"
           # buildcage's own wrappers must never reach the summary.
           ! grep -qE ' (setpriv|buildcage-init|run-script\.sh) ' "$f"
 

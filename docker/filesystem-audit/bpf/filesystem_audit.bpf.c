@@ -238,6 +238,25 @@ static __always_inline void submit(struct event *e)
 		bump(&drops);
 }
 
+// A path change, held per thread from its security_path_* hook until the
+// syscall returns: the hook runs before the kernel's own permission checks
+// (may_delete, may_create, notify_change), so it is reported only if the
+// syscall succeeds. Each entry is an event, so allocated on use.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 65536);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
+	__type(key, u64);
+	__type(value, struct event);
+} held_ops SEC(".maps");
+
+static __always_inline void hold(struct event *e)
+{
+	u64 id = bpf_get_current_pid_tgid();
+	if (bpf_map_update_elem(&held_ops, &id, e, BPF_ANY) != 0)
+		bump(&untracked);
+}
+
 // Field offsets are resolved by CO-RE in the caller and handed over, since
 // relocations inside a bpf_loop callback come out poisoned with cilium/ebpf.
 struct walk_ctx {
@@ -509,7 +528,7 @@ int BPF_PROG(on_##hook, const struct path *dir, struct dentry *dentry)		\
 		return 0;							\
 	u32 off = leaf(e, 0, dentry, &e->n1);					\
 	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated); \
-	submit(e);								\
+	hold(e);								\
 	return 0;								\
 }
 
@@ -530,7 +549,7 @@ int BPF_PROG(on_symlink, const struct path *dir, struct dentry *dentry, const ch
 	e->path_len = off;
 	off = leaf(e, off, dentry, &e->n1);
 	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated);
-	submit(e);
+	hold(e);
 	return 0;
 }
 
@@ -547,7 +566,7 @@ int BPF_PROG(on_rename, const struct path *old_dir, struct dentry *old_dentry,
 	off = walk(e, off, BPF_CORE_READ(old_dir, dentry), BPF_CORE_READ(old_dir, mnt), &e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
 	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), BPF_CORE_READ(new_dir, mnt), &e->n2, &e->trunc2);
-	submit(e);
+	hold(e);
 	return 0;
 }
 
@@ -561,7 +580,7 @@ int BPF_PROG(on_chmod, const struct path *path, unsigned short mode)
 		return 0;
 	e->mode = mode;
 	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
-	submit(e);
+	hold(e);
 	return 0;
 }
 
@@ -580,7 +599,7 @@ int BPF_PROG(on_link, struct dentry *old_dentry, const struct path *new_dir,
 	u32 off = walk(e, 0, old_dentry, mnt, &e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
 	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), mnt, &e->n2, &e->trunc2);
-	submit(e);
+	hold(e);
 	return 0;
 }
 
@@ -594,7 +613,7 @@ int BPF_PROG(on_truncate, const struct path *path)
 	if (!e)
 		return 0;
 	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
-	submit(e);
+	hold(e);
 	return 0;
 }
 
@@ -609,7 +628,35 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 	e->flags = uid;
 	e->mode = gid;
 	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
-	submit(e);
+	hold(e);
+	return 0;
+}
+
+// Reports a held path change once its syscall has succeeded (a truncating
+// open returns a descriptor), and drops one the kernel refused, whose failure
+// the syscall tracepoints below record.
+SEC("tp_btf/sys_exit")
+int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
+{
+	if (!in_target())
+		return 0;
+	u64 id = bpf_get_current_pid_tgid();
+	struct event *e = bpf_map_lookup_elem(&held_ops, &id);
+	if (!e)
+		return 0;
+	if (ret >= 0)
+		submit(e);
+	bpf_map_delete_elem(&held_ops, &id);
+	return 0;
+}
+
+// A thread killed inside the syscall never reaches sys_exit; drop what it
+// held so a later thread with the same id does not report it.
+SEC("tp_btf/sched_process_exit")
+int BPF_PROG(on_thread_exit, struct task_struct *p)
+{
+	u64 id = bpf_get_current_pid_tgid();
+	bpf_map_delete_elem(&held_ops, &id);
 	return 0;
 }
 
