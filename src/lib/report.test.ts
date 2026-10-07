@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { createAnnotation } from "#core/lib/actions/annotation.ts";
 import type { Docker } from "#core/lib/docker/client.ts";
+import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { annotateKnownBlocked } from "#core/lib/report/build/aggregate.ts";
 import type { InspectReportData, UniversalReportData } from "#core/lib/report/types.ts";
 import { reportParams } from "#core/lib/test/report-data.node.ts";
@@ -203,6 +204,36 @@ describe("writeReportSummary", () => {
       ),
     });
   }
+
+  it.each([
+    { held: 1024 * 1024, cut: true },
+    { held: undefined, cut: false }, // unreadable: counted as empty
+  ])(
+    "counts what the summary already holds against the limit ($held bytes)",
+    async ({ held, cut }) => {
+      const written: string[] = [];
+      const timeline: TrafficEvent[] = [
+        { time: 1, action: "allow", protocol: "https", host: "a.example.com", port: 443 },
+      ];
+
+      await writeReportSummary(
+        report({ timeline }),
+        createAnnotation(true),
+        options(),
+        false,
+        { GITHUB_STEP_SUMMARY: "/summary.md" },
+        {
+          fileSize: () => {
+            if (held === undefined) throw new Error("EACCES");
+            return held;
+          },
+          writeSummary: async (markdown) => void written.push(markdown),
+        },
+      );
+
+      expect(written[0].includes("truncated")).toBe(cut);
+    },
+  );
 
   it("writes the summary to GITHUB_STEP_SUMMARY", async () => {
     const summaryFile = join(scratchDir, "summary.md");

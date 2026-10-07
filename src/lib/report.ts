@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, statSync } from "node:fs";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
@@ -149,10 +149,23 @@ export function computeReportOutcomes(
   return { markdown: joinSummaryBlocks(blocks), blocks, emissions };
 }
 
-/** The one write this module makes that isn't the Job Summary; injected for
- *  the same reason the Docker client and the Annotation are. */
+/** The file access this module makes besides the Job Summary write; injected
+ *  for the same reason the Docker client and the Annotation are. */
 export interface WriteReportSummaryDeps {
   appendFile?: (path: string, content: string) => void;
+  fileSize?: (path: string) => number;
+  writeSummary?: typeof writeStepSummary;
+}
+
+// What the summary already holds counts against GitHub's limit too: the
+// isolated command can append to it. A missing or unreadable file holds nothing.
+function summarySize(path: string | undefined, fileSize: (p: string) => number): number {
+  if (!path) return 0;
+  try {
+    return fileSize(path);
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -172,7 +185,11 @@ export async function writeReportSummary(
   options: ComputeReportOutcomesOptions,
   artifactAvailable: boolean,
   env: NodeJS.ProcessEnv,
-  { appendFile = appendFileSync }: WriteReportSummaryDeps = {},
+  {
+    appendFile = appendFileSync,
+    fileSize = (p) => statSync(p).size,
+    writeSummary = writeStepSummary,
+  }: WriteReportSummaryDeps = {},
 ): Promise<void> {
   const outcomes = computeReportOutcomes(report, options);
 
@@ -180,8 +197,12 @@ export async function writeReportSummary(
   // cannot take the step's outcome down with it.
   applyOutcomeAnnotations(annotation, outcomes.emissions);
 
-  await writeStepSummary(
-    fitStepSummary(withNotice(outcomes.blocks, communicationTruncationNote(artifactAvailable))),
+  await writeSummary(
+    fitStepSummary(
+      withNotice(outcomes.blocks, communicationTruncationNote(artifactAvailable)),
+      undefined,
+      summarySize(env.GITHUB_STEP_SUMMARY, fileSize),
+    ),
     env.GITHUB_STEP_SUMMARY,
   );
 

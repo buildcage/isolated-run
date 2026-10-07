@@ -26584,8 +26584,8 @@ function joinSummaryBlocks(blocks) {
 	return blocks.map(whole).join("");
 }
 function fitStepSummary(blocks, limitBytes = 1048576, usedBytes = 0) {
-	let full = blocks.map(whole), budget = limitBytes - 8192 - usedBytes;
-	if (bytes(full.join("")) <= budget) return full.join("");
+	let full = blocks.map(whole), all = full.join(""), budget = limitBytes - 8192 - usedBytes;
+	if (bytes(all) <= budget) return all;
 	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => blocks[a].priority - blocks[b].priority || a - b);
 	for (let i of order) {
 		let b = blocks[i];
@@ -26971,13 +26971,7 @@ function renderReportBlocks(report, actionRepo, actionRef, { title = "Outbound T
 	}
 	if (report.failed.length > 0) {
 		let gap = report.passed.length > 0 || report.blocked.length > 0 ? "\n" : "";
-		blocks.push(tableBlock(`${gap}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n")), blocks.push({
-			priority: 3,
-			level: 3,
-			section: SECTION,
-			cut: "atomic",
-			text: "\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"
-		});
+		blocks.push(tableBlock(`${gap}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
 	}
 	let bottom = "";
 	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame("_(no communication)_\n\n"));
@@ -27037,9 +27031,17 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 		emissions
 	};
 }
-async function writeReportSummary(report, annotation, options, artifactAvailable, env, { appendFile = node_fs.appendFileSync } = {}) {
+function summarySize(path, fileSize) {
+	if (!path) return 0;
+	try {
+		return fileSize(path);
+	} catch {
+		return 0;
+	}
+}
+async function writeReportSummary(report, annotation, options, artifactAvailable, env, { appendFile = node_fs.appendFileSync, fileSize = (p) => (0, node_fs.statSync)(p).size, writeSummary = writeStepSummary } = {}) {
 	let outcomes = computeReportOutcomes(report, options);
-	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeStepSummary(fitStepSummary(withNotice(outcomes.blocks, communicationTruncationNote(artifactAvailable))), env.GITHUB_STEP_SUMMARY);
+	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeSummary(fitStepSummary(withNotice(outcomes.blocks, communicationTruncationNote(artifactAvailable)), void 0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize)), env.GITHUB_STEP_SUMMARY);
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts
