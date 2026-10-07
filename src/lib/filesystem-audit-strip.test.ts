@@ -70,9 +70,54 @@ describe("stripSandboxMachinery", () => {
     ]);
   });
 
+  it("keeps the first run-script.sh exec as the anchor when the step runs it again", () => {
+    const out = stripSandboxMachinery(
+      jsonl(
+        { pid: 10, ppid: 1, kind: "read", comm: "env-loader.sh", path: "/etc/passwd" },
+        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        { pid: 12, ppid: 11, kind: "fork", comm: "run-script.sh" },
+        { pid: 12, ppid: 11, kind: "read", comm: "node", path: "/home/u/.aws/credentials" },
+        // The step finds its own run-script.sh and execs it from a child,
+        // and the shell itself execs it again too.
+        { pid: 13, ppid: 12, kind: "fork", comm: "node" },
+        { pid: 13, ppid: 12, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        { pid: 14, ppid: 13, kind: "fork", comm: "run-script.sh" },
+        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+      ),
+      BASE,
+    );
+    expect(records(out)).toEqual([
+      { pid: 12, ppid: 11, kind: "fork", comm: "bash" },
+      { pid: 12, ppid: 11, kind: "read", comm: "node", path: "/home/u/.aws/credentials" },
+      { pid: 13, ppid: 12, kind: "fork", comm: "node" },
+      // Kept under their own name, a child of the re-exec included, so it shows.
+      { pid: 13, ppid: 12, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+      { pid: 14, ppid: 13, kind: "fork", comm: "run-script.sh" },
+      { pid: 11, ppid: 10, kind: "exec", comm: "bash", path: RUN_SCRIPT },
+    ]);
+  });
+
+  it("keeps a process the step detaches, whatever parent it names", () => {
+    // By CLONE_PARENT, or once its parent exits, a step process can name the
+    // init as its parent.
+    const fork = { pid: 13, ppid: 10, kind: "fork", comm: "node" };
+    const read = { pid: 13, ppid: 10, kind: "read", comm: "node", path: "/home/u/.aws/a" };
+    const out = stripSandboxMachinery(
+      jsonl(
+        { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
+        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        fork,
+        read,
+      ),
+      BASE,
+    );
+    expect(records(out)).toEqual([fork, read]);
+  });
+
   it("leaves a step command named like a wrapper alone, by its pid and exec path", () => {
     const out = stripSandboxMachinery(
       jsonl(
+        { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
         // The step runs its own files that happen to share buildcage's names.
         { pid: 20, ppid: 11, kind: "exec", comm: "setpriv", path: "/work/tools/setpriv" },
@@ -90,18 +135,18 @@ describe("stripSandboxMachinery", () => {
     ]);
   });
 
-  it("stops the parent walk when recorded parents form a cycle", () => {
+  it("drops the init's own records after the anchor, and keeps any process it starts", () => {
+    const sleep = { pid: 30, ppid: 10, kind: "exec", comm: "sleep", path: "/usr/bin/sleep" };
     const out = stripSandboxMachinery(
       jsonl(
+        { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
-        // Two processes whose recorded parents point at each other: the walk
-        // must terminate rather than loop, and neither reaches the shell.
-        { pid: 20, ppid: 21, kind: "read", comm: "node", path: "/work/a" },
-        { pid: 21, ppid: 20, kind: "read", comm: "node", path: "/work/b" },
+        { pid: 10, ppid: 1, kind: "write", comm: "env-loader.sh", path: "/dev/null" },
+        sleep,
       ),
       BASE,
     );
-    expect(records(out)).toEqual([]);
+    expect(records(out)).toEqual([sleep]);
   });
 
   it("changes nothing but scratch paths when no step shell is found", () => {
