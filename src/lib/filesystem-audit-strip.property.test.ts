@@ -50,6 +50,32 @@ describe("stripSandboxMachinery: properties", () => {
     );
   });
 
+  it("after the anchor, keeps every record but the init's and the shell's reads of its script", () => {
+    const script = `${BASE}/sandbox-x/exec/run-script.sh`;
+    fc.assert(
+      fc.property(jsonlArb, (jsonl) => {
+        type R = { pid?: number; ppid?: number; kind?: string; path?: string; failed?: boolean };
+        const recs = jsonl
+          .split("\n")
+          .filter(Boolean)
+          .map((l) => JSON.parse(l) as R);
+        const boundary = recs.findIndex((r) => r.kind === "exec" && r.path === script);
+        fc.pre(boundary >= 0);
+        const { pid: shell, ppid: init } = recs[boundary];
+        const reads = new Set(["open", "read", "mmap"]);
+        const expected = recs.filter(
+          (r, i) =>
+            i > boundary &&
+            r.pid !== init &&
+            !(r.pid === shell && r.path === script && reads.has(String(r.kind)) && !r.failed),
+        ).length;
+        expect(stripSandboxMachinery(jsonl, BASE).split("\n").filter(Boolean)).toHaveLength(
+          expected,
+        );
+      }),
+    );
+  });
+
   it("tolerates arbitrary text without throwing", () => {
     fc.assert(
       fc.property(fc.string(), (s) => {

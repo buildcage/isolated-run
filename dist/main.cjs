@@ -68301,7 +68301,11 @@ function setFilesystemAuditOutput(name) {
 }
 //#endregion
 //#region src/lib/filesystem-audit-strip.ts
-const SHELL_COMM = "run-script.sh";
+const SHELL_COMM = "run-script.sh", SCRIPT_READS = new Set([
+	"open",
+	"read",
+	"mmap"
+]);
 function stripSandboxMachinery(jsonl, scratchBase) {
 	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), lines = jsonl.split("\n"), recs = lines.map((line) => {
 		try {
@@ -68325,7 +68329,7 @@ function stripSandboxMachinery(jsonl, scratchBase) {
 			return;
 		}
 		r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
-		let readsScript = r.pid === shell && r.path === script && r.kind !== "exec";
+		let readsScript = r.pid === shell && r.path === script && SCRIPT_READS.has(String(r.kind)) && !r.failed;
 		if (!(shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript))) {
 			if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
 				out.push(JSON.stringify({

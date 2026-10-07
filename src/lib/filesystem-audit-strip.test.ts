@@ -171,10 +171,22 @@ describe("stripSandboxMachinery", () => {
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
         { pid: 11, ppid: 10, kind: "read", comm: "run-script.sh", path: RUN_SCRIPT },
         sneaky,
+        // The shell's own failed write to its script is the step's too.
+        {
+          pid: 11,
+          ppid: 10,
+          kind: "open-failed",
+          comm: "run-script.sh",
+          path: RUN_SCRIPT,
+          err: 30,
+        },
       ),
       BASE,
     );
-    expect(records(out)).toEqual([sneaky]);
+    expect(records(out)).toEqual([
+      sneaky,
+      { pid: 11, ppid: 10, kind: "open-failed", comm: "bash", path: RUN_SCRIPT, err: 30 },
+    ]);
   });
 
   it("keeps a truncated tail and tolerates an empty recording", () => {

@@ -338,8 +338,9 @@ static __always_inline u32 walk(struct event *e, u32 off, struct dentry *d,
 		.off_mnt = off_mnt,
 	};
 	bpf_loop(MAX_COMPONENTS, walk_step, &c, 0);
-	// Out of iterations short of the root: the path is cut there, and saying
-	// so keeps a deeper one from passing as the shorter path it ends with.
+	// Out of iterations short of the root, or before checking for it: the path
+	// is treated as cut there, which keeps a deeper one from passing as the
+	// shorter path it ends with.
 	if (!c.done)
 		*trunc = 1;
 	*n = c.n;

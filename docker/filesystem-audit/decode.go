@@ -107,16 +107,43 @@ func joinBase(name string, rest []byte, has bool, n int, truncated bool) (string
 		return name, rest
 	}
 	base, rest := components(rest, n, truncated)
-	if name == "" {
-		return base, rest
-	}
 	return strings.TrimSuffix(base, "/") + "/" + name, rest
 }
 
-// withBase decodes a single name followed by its base directory, if any.
-func withBase(data []byte, has bool, n int, truncated bool) (string, []byte) {
+// tidy drops the spellings that never change where a path leads: "."
+// segments, repeated slashes and a trailing slash. ".." stays, since through
+// a symlink it leads somewhere a lexical clean would not.
+func tidy(p string) string {
+	parts := strings.Split(p, "/")
+	kept := parts[:0]
+	for i, part := range parts {
+		if part == "." || (part == "" && i > 0) {
+			continue
+		}
+		kept = append(kept, part)
+	}
+	if len(kept) == 1 && kept[0] == "" {
+		return "/"
+	}
+	return strings.Join(kept, "/")
+}
+
+// passedName returns the name the command passed, for Name or ToName, when
+// it differs from the path recorded for it.
+func passedName(name, p string) string {
+	if name == p {
+		return ""
+	}
+	return name
+}
+
+// passed decodes a name the command passed, followed by its base directory if
+// any, into its tidied path and, where that differs, the name itself.
+func passed(data []byte, has bool, n int, truncated bool) (string, string) {
 	name := cstr(data)
-	return joinBase(name, after(data, len(name)), has, n, truncated)
+	p, _ := joinBase(name, after(data, len(name)), has, n, truncated)
+	p = tidy(p)
+	return p, passedName(name, p)
 }
 
 // execFiles holds each process's resolved exec target until its exec record
@@ -177,8 +204,7 @@ func decode(raw []byte) (record, error) {
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
 	case 12: // failed open
-		r.Name = cstr(data)
-		r.Path, _ = withBase(data, argsLen&1 != 0, int(mode), truncated)
+		r.Path, r.Name = passed(data, argsLen&1 != 0, int(mode), truncated)
 		r.Err = pathRet // the positive errno the BPF side stored as -ret
 	case 13, 14: // read, write
 		if pathRet < 0 {
@@ -218,8 +244,7 @@ func decode(raw []byte) (record, error) {
 		r.Path, rest = components(data, n1, truncated)
 		r.To, _ = components(rest, n2, truncated2)
 	case 16, 18, 19: // failed delete / chmod / chown
-		r.Name = cstr(data)
-		r.Path, _ = withBase(data, argsLen&1 != 0, int(mode), truncated)
+		r.Path, r.Name = passed(data, argsLen&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
 	case 17: // failed rename
@@ -232,20 +257,20 @@ func decode(raw []byte) (record, error) {
 			to = cstr(rest)
 			rest = after(rest, len(to))
 		}
-		r.Name = name
 		r.Path, rest = joinBase(name, rest, argsLen&1 != 0, int(mode), truncated)
+		r.Path = tidy(r.Path)
+		r.Name = passedName(name, r.Path)
 		if n1 == 1 {
-			r.ToName = to
 			r.To, _ = joinBase(to, rest, argsLen&2 != 0, int(flags), truncated2)
+			r.To = tidy(r.To)
+			r.ToName = passedName(to, r.To)
 		}
 		r.Err = pathRet
 		r.Failed = true
 	case 20: // attr via utimes / setxattr
-		r.Name = cstr(data)
-		r.Path, _ = withBase(data, argsLen&1 != 0, int(mode), truncated)
+		r.Path, r.Name = passed(data, argsLen&1 != 0, int(mode), truncated)
 	case 21: // failed attr via utimes / setxattr
-		r.Name = cstr(data)
-		r.Path, _ = withBase(data, argsLen&1 != 0, int(mode), truncated)
+		r.Path, r.Name = passed(data, argsLen&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
 	}

@@ -66,6 +66,21 @@ func TestDecodeHeldRefusal(t *testing.T) {
 	}
 }
 
+func TestTidy(t *testing.T) {
+	for in, want := range map[string]string{
+		"/a/./b//c/":      "/a/b/c",
+		"/a/l/../b":       "/a/l/../b",
+		"/":               "/",
+		"x":               "x",
+		"…/deep/./x":      "…/deep/x",
+		"/var/tmp/b/../x": "/var/tmp/b/../x",
+	} {
+		if got := tidy(in); got != want {
+			t.Errorf("tidy(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestDecodeBootTime(t *testing.T) {
 	r, err := decode(event{kind: 13, comm: "cat", boot: 123_456_789_000, data: []byte("/etc/hosts\x00")}.bytes())
 	if err != nil {
@@ -133,7 +148,7 @@ func TestDecode(t *testing.T) {
 		{
 			name: "failed open",
 			ev:   event{kind: 12, comm: "node", pathRet: int32(unix.ENOENT), data: []byte("/missing\x00")},
-			want: record{Kind: "open-failed", Comm: "node", Path: "/missing", Name: "/missing", Err: int32(unix.ENOENT)},
+			want: record{Kind: "open-failed", Comm: "node", Path: "/missing", Err: int32(unix.ENOENT)},
 		},
 		{
 			name: "write",
@@ -158,12 +173,12 @@ func TestDecode(t *testing.T) {
 		{
 			name: "failed delete, read-only",
 			ev:   event{kind: 16, comm: "rm", pathRet: int32(unix.EROFS), data: []byte("/etc\x00")},
-			want: record{Kind: "delete", Comm: "rm", Path: "/etc", Name: "/etc", Err: int32(unix.EROFS), Failed: true},
+			want: record{Kind: "delete", Comm: "rm", Path: "/etc", Err: int32(unix.EROFS), Failed: true},
 		},
 		{
 			name: "failed rename, two paths",
 			ev:   event{kind: 17, comm: "mv", pathRet: int32(unix.ENOENT), n1: 1, data: []byte("/a\x00/b\x00")},
-			want: record{Kind: "rename", Comm: "mv", Path: "/a", To: "/b", Name: "/a", ToName: "/b", Err: int32(unix.ENOENT), Failed: true},
+			want: record{Kind: "rename", Comm: "mv", Path: "/a", To: "/b", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
 			name: "fork",
@@ -180,7 +195,7 @@ func TestDecode(t *testing.T) {
 			name: "failed open, relative to the cwd",
 			ev: event{kind: 12, comm: "asm", pathRet: int32(unix.ENOENT), argsLen: 1, mode: 2,
 				data: append([]byte("./textflag.h\x00"), comps("runtime", "src")...)},
-			want: record{Kind: "open-failed", Comm: "asm", Path: "/src/runtime/./textflag.h", Name: "./textflag.h", Err: int32(unix.ENOENT)},
+			want: record{Kind: "open-failed", Comm: "asm", Path: "/src/runtime/textflag.h", Name: "./textflag.h", Err: int32(unix.ENOENT)},
 		},
 		{
 			// Joined as passed: cleaning would drop "link/..", and with it the
@@ -204,7 +219,7 @@ func TestDecode(t *testing.T) {
 		{
 			name: "relative with no base walked",
 			ev:   event{kind: 16, comm: "rm", pathRet: int32(unix.EBADF), data: []byte("x\x00")},
-			want: record{Kind: "delete", Comm: "rm", Path: "x", Name: "x", Err: int32(unix.EBADF), Failed: true},
+			want: record{Kind: "delete", Comm: "rm", Path: "x", Err: int32(unix.EBADF), Failed: true},
 		},
 		{
 			name: "failed rename, each name on its own base",
@@ -216,7 +231,7 @@ func TestDecode(t *testing.T) {
 			name: "failed rename, only the new name relative",
 			ev: event{kind: 17, comm: "mv", pathRet: int32(unix.ENOENT), n1: 1, argsLen: 2, flags: 1,
 				data: append([]byte("/a\x00b\x00"), comps("dst")...)},
-			want: record{Kind: "rename", Comm: "mv", Path: "/a", To: "/dst/b", Name: "/a", ToName: "b", Err: int32(unix.ENOENT), Failed: true},
+			want: record{Kind: "rename", Comm: "mv", Path: "/a", To: "/dst/b", ToName: "b", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
 			name: "exec file, resolved",
@@ -226,7 +241,7 @@ func TestDecode(t *testing.T) {
 		{
 			name: "attr ok",
 			ev:   event{kind: 20, comm: "touch", data: []byte("/tmp/t\x00")},
-			want: record{Kind: "attr", Comm: "touch", Path: "/tmp/t", Name: "/tmp/t"},
+			want: record{Kind: "attr", Comm: "touch", Path: "/tmp/t"},
 		},
 		{
 			name: "truncated walk",

@@ -29,6 +29,8 @@
 
 const SHELL_COMM = "run-script.sh"; // buildcage's step shell (sandbox/oci-files.ts)
 const SHELL_LABEL = "bash";
+// How the shell reads its script; anything else it does to the script is kept.
+const SCRIPT_READS = new Set(["open", "read", "mmap"]);
 
 interface Record_ {
   pid?: number;
@@ -36,6 +38,7 @@ interface Record_ {
   kind?: string;
   comm?: string;
   path?: string;
+  failed?: boolean;
 }
 
 export function stripSandboxMachinery(jsonl: string, scratchBase: string): string {
@@ -82,7 +85,8 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
       ownShellPids.add(r.pid);
     // setpriv, the init, or the shell before and at its exec; after it, the
     // init and the shell reading its script.
-    const readsScript = r.pid === shell && r.path === script && r.kind !== "exec";
+    const readsScript =
+      r.pid === shell && r.path === script && SCRIPT_READS.has(String(r.kind)) && !r.failed;
     if (
       shell !== undefined &&
       r.pid !== undefined &&
