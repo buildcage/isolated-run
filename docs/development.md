@@ -107,10 +107,10 @@ instead, via a build-time-gated mechanism: `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run 
 lives in its own module (`src/core/lib/provenance/local-image-override.ts`), loaded only via a
 dynamic `import()` gated by that build-time flag. Without the flag (i.e. every normal/committed
 build), rolldown's own module-graph tree-shaking excludes that entire file from the bundle. It is
-physically absent, not just unreachable. A CI check (`unit_test` job) additionally confirms a
-normal build's `dist/` never mentions `BUILDCAGE_BUILD_TEST_HOOKS`,
-`BUILDCAGE_LOCAL_IMAGE_REF`, `BUILDCAGE_TEST_COMPOSE_FILE` or `BUILDCAGE_RUN_DEBUG_SUMMARY_FILE`
-(the copy of the step summary the integration assertions read).
+physically absent, not just unreachable. A CI check (`unit_test` job) and the pre-commit hook
+additionally confirm a normal build's `dist/` never mentions `BUILDCAGE_BUILD_TEST_HOOKS`,
+`BUILDCAGE_LOCAL_IMAGE_REF` or any `BUILDCAGE_TEST_*` or `BUILDCAGE_RUN_DEBUG_*` name (such as
+`BUILDCAGE_RUN_DEBUG_SUMMARY_FILE`, the copy of the step summary the integration assertions read).
 
 To exercise it locally:
 

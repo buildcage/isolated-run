@@ -10868,8 +10868,12 @@ function checkGroups(text, label, rule) {
 		}
 	}
 }
+const QUANTIFIER = /^\{\d+(?:,\d*)?\}/;
+function checkBraces(text, label, rule) {
+	for (let [i, inClass] of regexChars(text)) if (!(inClass || text[i] !== "{" || QUANTIFIER.test(text.slice(i)))) throw Error(`Invalid regex in rule "${rule}": the ${label} "${text}" has a "{" that does not open a quantifier such as {2} or {1,3}. The proxy's PCRE2 reads some such braces, "{,3}" among them, as a quantifier where setup reads text; write a literal brace as "\\{"`);
+}
 function checkRawRegexHalf(text, label, rule, hostHalf) {
-	if (checkClasses(text, label, rule), checkEscapes(text, label, rule), checkGroups(text, label, rule), hostHalf && checkResolverRegexSyntax(text, label, rule), hasTopLevelAlternation(text)) throw Error(`Invalid regex in rule "${rule}": the ${label} "${text}" has a top-level "|". Anchors bind to its first and last branch rather than to the whole ${label}, so write one rule per alternative, or put the "|" inside a group, as in "(a|b)\\.example\\.com"`);
+	if (checkClasses(text, label, rule), checkEscapes(text, label, rule), checkGroups(text, label, rule), checkBraces(text, label, rule), hostHalf && checkResolverRegexSyntax(text, label, rule), hasTopLevelAlternation(text)) throw Error(`Invalid regex in rule "${rule}": the ${label} "${text}" has a top-level "|". Anchors bind to its first and last branch rather than to the whole ${label}, so write one rule per alternative, or put the "|" inside a group, as in "(a|b)\\.example\\.com"`);
 	if (hostHalf && HOST_LITERAL_ILLEGAL.test(text)) throw Error(`Invalid regex in rule "${rule}": the ${label} "${text}" holds a character no hostname can, so the ":" this rule was split at is not its port separator. An IPv6 address is not supported here, in a "~" rule any more than in a literal one`);
 	if (hostHalf && COREFILE_UNSAFE.test(text)) throw Error(`Invalid regex in rule "${rule}": the ${label} "${text}" holds a "'", a backtick, "{$" or "{%". No hostname contains one, and the resolver's config cannot quote it`);
 }
@@ -23188,7 +23192,8 @@ const OWNER_TOKEN_VARS = [
 	"GITHUB_RUN_ID",
 	"GITHUB_RUN_ATTEMPT",
 	"GITHUB_JOB",
-	"GITHUB_ACTION"
+	"GITHUB_ACTION",
+	"RUNNER_TEMP"
 ];
 function ownerToken(env) {
 	let values = OWNER_TOKEN_VARS.map((name) => env[name]);
@@ -24992,6 +24997,10 @@ function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists,
 function runnerActionRoot() {
 	return (0, node_path.resolve)((0, node_path.dirname)(process.argv[1]), "..");
 }
+function runnerInstallRoot(execPath = process.execPath) {
+	let externals = (0, node_path.resolve)(execPath, "../../..");
+	return (0, node_path.basename)(externals) === "externals" ? (0, node_path.dirname)(externals) : void 0;
+}
 const PINNED_COMMANDS = ["docker", "sudo"];
 function persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath = realPathOf) {
 	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
@@ -25065,29 +25074,51 @@ function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
 function dockerConfigDir(env) {
 	return env.DOCKER_CONFIG ? (0, node_path.resolve)(env.DOCKER_CONFIG) : env.HOME ? (0, node_path.join)(env.HOME, ".docker") : void 0;
 }
-function sandboxReadonlyHostDirs(persisting, env, actionRoot = runnerActionRoot(), deps = realSymlinkDeps) {
-	let docker = dockerConfigDir(env), candidates = [{
-		name: "This action's checkout",
-		dir: actionRoot,
-		fix: () => "the runner runs this action's post step from there. Configure the runner's work directory by its real path, not through the symlink."
-	}, ...docker ? [{
-		name: "The docker CLI's config directory",
-		dir: docker,
-		fix: () => `this action runs docker on the host after the command exits. Set DOCKER_CONFIG to its real path, ${JSON.stringify(realPathOf(docker, deps))}.`
-	}] : []], roots = persisting.filter((p) => p !== "/");
-	return candidates.flatMap(({ name, dir, fix }) => {
+function sandboxReadonlyHostDirs(persisting, env, { actionRoot, installRoot } = {
+	actionRoot: runnerActionRoot(),
+	installRoot: runnerInstallRoot()
+}, deps = realSymlinkDeps, mounts = []) {
+	let docker = dockerConfigDir(env), workDirFix = "Configure the runner's work directory by its real path, not through the symlink.", candidates = [
+		{
+			name: "This action's checkout",
+			dir: actionRoot,
+			fix: () => `the runner runs this action's post step from there. ${workDirFix}`
+		},
+		...env.RUNNER_WORKSPACE ? [{
+			name: "The runner's action checkouts",
+			dir: (0, node_path.join)((0, node_path.dirname)((0, node_path.resolve)(env.RUNNER_WORKSPACE)), "_actions"),
+			fix: () => `the runner runs later steps' actions from there. ${workDirFix}`
+		}] : [],
+		...installRoot ? [{
+			name: "The runner's install directory",
+			dir: installRoot,
+			fix: () => "the runner runs later steps from there. Install the runner by its real path, not through the symlink."
+		}] : [],
+		...docker ? [{
+			name: "The docker CLI's config directory",
+			dir: docker,
+			fix: () => `this action runs docker on the host after the command exits. Set DOCKER_CONFIG to its real path, ${JSON.stringify(realPathOf(docker, deps))}.`
+		}] : []
+	], roots = persisting.filter((p) => p !== "/"), dirs = candidates.flatMap(({ name, dir, fix }) => {
 		if (persisting.includes(realPathOf(dir, deps))) return [];
 		let resolved = resolveHostPath(dir, deps), link = replaceableLink(resolved, roots);
 		if (link !== void 0) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through ${JSON.stringify(link)}, a symlink the sandboxed command can replace, and ${fix()}`, "HOST_DIR_UNPROTECTABLE");
 		if ("loop" in resolved) throw new SandboxError(`${name} ${JSON.stringify(dir)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
 		let real = resolved.real;
-		return persisting.some((p) => isAtOrUnder(real, p)) ? [real] : [];
+		return [real, ...pathAliases(mounts, real).filter((a) => !persisting.includes(a))].filter((p) => persisting.some((root) => isAtOrUnder(p, root)));
+	}), unique = [...new Set(dirs)];
+	return unique.filter((dir) => {
+		let others = unique.filter((o) => o !== dir);
+		return persisting.includes(innermost(dir, [...persisting, ...others]));
 	});
+}
+function innermost(dir, paths) {
+	return paths.filter((p) => isAtOrUnder(dir, p)).sort((a, b) => b.length - a.length)[0];
 }
 function replaceableLink(resolved, roots) {
 	return resolved.links.find((l) => roots.some((p) => isAtOrUnder((0, node_path.dirname)(l.at), p)))?.at;
 }
-function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = realSymlinkDeps) {
+function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = realSymlinkDeps, mounts = []) {
 	let named = new Set(writeThroughPaths), openable = (name, path) => name !== "GITHUB_STATE" && named.has(realPathOf(path, deps)), roots = persisting.filter((p) => p !== "/");
 	return [
 		"GITHUB_ENV",
@@ -25099,14 +25130,15 @@ function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = 
 		let resolved = resolveHostPath(path, deps), link = replaceableLink(resolved, roots);
 		if (link !== void 0) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through ${JSON.stringify(link)}, a symlink the sandboxed command can replace, and the runner reads it after the step. Configure the runner's work directory by its real path, not through the symlink.`, "HOST_DIR_UNPROTECTABLE");
 		if ("loop" in resolved) throw new SandboxError(`The runner's ${name} file ${JSON.stringify(path)} goes through too many symlinks to resolve.`, "HOST_DIR_UNPROTECTABLE");
-		return [resolved.real];
+		let aliases = pathAliases(mounts, resolved.real).filter((a) => !openable(name, a) && persisting.some((root) => isAtOrUnder(a, root)));
+		return [resolved.real, ...aliases];
 	});
 }
 function renameGuardDirs(readonlyDirs, persisting) {
-	let guards = new Set();
+	let writable = (dir) => persisting.includes(innermost(dir, [...persisting, ...readonlyDirs])), guards = new Set();
 	for (let dir of readonlyDirs) {
 		let root = persisting.filter((p) => p !== dir && isAtOrUnder(dir, p)).sort((a, b) => a.length - b.length)[0];
-		if (root) for (let p = (0, node_path.dirname)(dir); p !== root && isAtOrUnder(p, root); p = (0, node_path.dirname)(p)) guards.add(p);
+		if (root) for (let p = (0, node_path.dirname)(dir); p !== root && isAtOrUnder(p, root); p = (0, node_path.dirname)(p)) writable(p) && guards.add(p);
 	}
 	return [...guards].sort((a, b) => a.length - b.length || a.localeCompare(b));
 }
@@ -25739,7 +25771,7 @@ function assembleBundle(dir, options, deps) {
 		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), persisting = persistingWritablePaths(filesystemMode, writeThroughPaths, env, deps.realpath), symlinkDeps = {
 			lstat: deps.lstat,
 			readlink: deps.readlink
-		}, readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, void 0, symlinkDeps), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, symlinkDeps), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
+		}, readonlyHostDirs = sandboxReadonlyHostDirs(persisting, env, void 0, symlinkDeps, hostMounts), readonlyFiles = sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, symlinkDeps, hostMounts), renameGuardDirs$1 = renameGuardDirs([...readonlyHostDirs, ...readonlyFiles], persisting);
 		for (let dir of readonlyHostDirs) deps.mkdir(dir, {
 			mode: 448,
 			recursive: !0
@@ -26048,6 +26080,29 @@ function incompleteReason(terminationState, method) {
 	if (cause !== "P") return terminationState[1] === "R" ? cause === "C" ? "client-aborted" : cause === "c" ? "client-timeout" : "no-request" : method === "<BADREQ>" ? "no-request" : void 0;
 }
 //#endregion
+//#region src/core/lib/log/traffic-event.ts
+const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
+function clientEndedNoise(timeline) {
+	let completed = new Set();
+	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
+	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason) && completed.has(ruleHost(event.host));
+}
+function connectedHosts(timeline) {
+	let connected = {
+		any: new Set(),
+		blocked: new Set()
+	};
+	for (let event of timeline) {
+		if (event.protocol === "dns" || event.action === "incomplete") continue;
+		let host = ruleHost(event.host);
+		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
+	}
+	return connected;
+}
+function isRedundantDns(event, connected) {
+	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
+}
+//#endregion
 //#region src/core/lib/log/inspect.ts
 const REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:fcerr=(\S+) )?(?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
 function timeOf(stamp) {
@@ -26133,7 +26188,7 @@ function parseProxyLine(line, isAudit) {
 	}
 	return null;
 }
-async function scanInspectLog(lines, isAudit = !1) {
+async function scanInspectLog(lines, isAudit = !1, allowsName) {
 	let events = [], startedAt, headIntact, unparsed = 0;
 	for await (let line of lines) {
 		let event = parseProxyLine(line, isAudit);
@@ -26146,12 +26201,20 @@ async function scanInspectLog(lines, isAudit = !1) {
 		let match = START$1.exec(trimmed);
 		headIntact ??= match !== null, match && startedAt === void 0 && (startedAt = Number(match[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
 	}
-	return {
+	return refuseUnpassedAddresses(events), allowsName && refuseUnallowedNames(events, allowsName), {
 		events,
 		startedAt,
 		headIntact: headIntact ?? !1,
 		unparsed
 	};
+}
+function refuseUnpassedAddresses(events) {
+	let served = new Set();
+	for (let event of events) (event.protocol === "http" || event.protocol === "https") && event.action !== "incomplete" && served.add(event.destination);
+	for (let event of events) event.action === "incomplete" && event.protocol === "tcp" && (CLIENT_ENDED_REASONS.has(event.reason) && served.has(event.destination) || (event.action = "block", event.reason = "ip-not-allowed"));
+}
+function refuseUnallowedNames(events, allowsName) {
+	for (let event of events) event.action === "incomplete" && event.protocol === "https" && (event.host === "(unknown)" || allowsName(event.host) || event.destination?.startsWith("198.19.255.1:") || (event.action = "block", event.reason = "sni-not-allowed"));
 }
 async function scanInspectDnsLog(lines, isAudit = !1) {
 	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
@@ -26244,29 +26307,6 @@ function aggregate(filtered) {
 	}).sort(compareAggregated);
 }
 //#endregion
-//#region src/core/lib/log/traffic-event.ts
-const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
-function clientEndedNoise(timeline) {
-	let completed = new Set();
-	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
-	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason ?? "") && completed.has(ruleHost(event.host));
-}
-function connectedHosts(timeline) {
-	let connected = {
-		any: new Set(),
-		blocked: new Set()
-	};
-	for (let event of timeline) {
-		if (event.protocol === "dns" || event.action === "incomplete") continue;
-		let host = ruleHost(event.host);
-		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
-	}
-	return connected;
-}
-function isRedundantDns(event, connected) {
-	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
-}
-//#endregion
 //#region src/core/lib/report/build/aggregate.ts
 function targetOf(event) {
 	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
@@ -26356,8 +26396,17 @@ function reduceTimeline(timeline, knownBlockedRules) {
 }
 //#endregion
 //#region src/core/lib/report/build/inspect.ts
+function resolverAllows(parameters) {
+	let { resolverHosts } = compileRuleSet({
+		httpsRules: parameters.allowedHttpsRules,
+		httpRules: parameters.allowedHttpRules,
+		tlsRules: parameters.allowedTlsRules,
+		urlRules: buildUrlRules(parameters.allowedUrlRules.join("\n"))
+	}), allowed = resolverHosts.map((regex) => RegExp(`^(?:${regex})$`, "i"));
+	return (name) => allowed.some((regex) => regex.test(name));
+}
 async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedLogs) {
-	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanInspectLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
 	return {
 		engine: "inspect",
 		parameters,
@@ -26697,19 +26746,23 @@ const MARK = {
 function renderEvent(event, startedAt) {
 	return `${MARK[event.action] ?? "✅"} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}`;
 }
-const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authtoken.clientsecret.code.idtoken.jwt.key.passwd.password.privatetoken.pwd.refreshtoken.secret.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
+const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
 function credentialName(name) {
 	return name.toLowerCase().replace(/[-_]/g, "");
+}
+const PARAM_NAME = /(^|[;?])([^;?=]*)=/g;
+function redactPart(part) {
+	for (let match of part.matchAll(PARAM_NAME)) {
+		if (!CREDENTIAL_PARAMS.has(credentialName(match[2]))) continue;
+		let value = match.index + match[0].length;
+		return value === part.length ? part : `${part.slice(0, value)}***`;
+	}
+	return part;
 }
 function redactCredentialQuery(url) {
 	let start = url.indexOf("?");
 	if (start === -1) return url;
-	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map((param) => {
-		let eq = param.indexOf("=");
-		if (eq === -1 || eq === param.length - 1) return param;
-		let name = param.slice(0, eq);
-		return CREDENTIAL_PARAMS.has(credentialName(name)) ? `${name}=***` : param;
-	}).join("&");
+	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map(redactPart).join("&");
 	return url.slice(0, start + 1) + query + url.slice(end);
 }
 function subject(event) {
@@ -72237,6 +72290,7 @@ async function runSandboxStep(env, overrides = {}) {
 				allowedHttpRules: httpRules,
 				allowedIpRules: ipRules,
 				allowedTlsRules: tlsRules,
+				allowedUrlRules: urlRules,
 				knownBlockedRules
 			},
 			annotation,
