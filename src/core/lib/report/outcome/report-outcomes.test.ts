@@ -110,13 +110,13 @@ describe("describeReportOutcomes", () => {
       time: 1787471975,
       action: "audit",
       protocol: "https",
-      host: "cloudformation.us-east-1.amazonaws.com",
+      host: "api.example.com",
       port: 443,
       method: "POST",
-      url: "https://cloudformation.us-east-1.amazonaws.com/",
+      url: "https://api.example.com/",
       status: 200,
       bytes: 10,
-      wouldRefuse: "aws-key-not-allowed",
+      wouldRefuse: "example-refusal",
     };
     const outcomes = describeReportOutcomes(
       inspect([audited, audited, { ...audited, wouldRefuse: undefined }]),

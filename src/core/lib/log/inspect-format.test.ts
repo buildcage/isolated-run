@@ -498,20 +498,20 @@ describe("the generated log-format and this parser describe the same line", () =
       const line = render(
         https,
         { "%ST": "403", "%B": "0", "%ts": "PR" },
-        { reason: "aws-key-not-allowed" },
+        { reason: "example-refusal" },
       );
       const [e] = (await scanInspectLog([line])).events;
       expect(e.action).toBe("block");
-      expect(e.reason).toBe("aws-key-not-allowed");
+      expect(e.reason).toBe("example-refusal");
       expect(e.wouldRefuse).toBe(undefined);
     });
 
     it("notes the refusal restrict would have made of a request audit let through", async () => {
-      const line = render(https, { "%[var(txn.would_refuse)]": "aws-no-credential" });
+      const line = render(https, { "%[var(txn.would_refuse)]": "example-refusal" });
       const [e] = (await scanInspectLog([line], true)).events;
       expect(e.action).toBe("audit");
       expect(e.status).toBe(200);
-      expect(e.wouldRefuse).toBe("aws-no-credential");
+      expect(e.wouldRefuse).toBe("example-refusal");
     });
   });
 });

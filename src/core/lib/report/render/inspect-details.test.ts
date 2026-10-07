@@ -64,11 +64,11 @@ describe("renderInspectDetails", () => {
     const audited: TrafficEvent = {
       ...TIMELINE[0],
       action: "audit",
-      wouldRefuse: "aws-key-not-allowed",
+      wouldRefuse: "example-refusal",
     };
     const line = (renderInspectDetails([audited], t).split("```")[1] ?? "").trim();
     expect(line).toBe(
-      "✅ 00:00.000: GET https://a.example.com/pkg -> 200 (708B) (restrict would refuse: aws-key-not-allowed)",
+      "✅ 00:00.000: GET https://a.example.com/pkg -> 200 (708B) (restrict would refuse: example-refusal)",
     );
   });
 
