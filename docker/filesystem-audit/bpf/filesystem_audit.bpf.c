@@ -115,7 +115,10 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	// The file an exec is about to run, before a script hands over to its
 	// interpreter: path components, as for unlink. The reader moves it onto
 	// the exec event that follows.
-	K_EXEC_FILE = 23 };
+	K_EXEC_FILE = 23,
+	// A file, FIFO, device or Unix socket made by mknod(2) or bind(2): path
+	// components, as for unlink.
+	K_MKNOD = 24 };
 
 // Fixed header (mirrored by hdrLen in decode.go), then data_len bytes of data:
 //   open:    d_path result (path_len is its return value)
@@ -467,6 +470,25 @@ int on_backing_exit(u64 *ctx)
 	return 0;
 }
 
+static __always_inline u32 file_walk(struct event *e, struct file *file)
+{
+	return walk(e, 0, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt),
+		    &e->n1, &e->truncated);
+}
+
+// bpf_d_path fails on a path over PATH_LEN; such a path is spelled from its
+// dentries instead, so the access keeps a name (n1 > 0 tells the reader).
+static __always_inline void file_path(struct event *e, struct file *file)
+{
+	long r = bpf_d_path(&file->f_path, e->data, PATH_LEN);
+	e->path_len = r;
+	if (r > 0) {
+		e->data_len = r;
+		return;
+	}
+	e->data_len = file_walk(e, file);
+}
+
 SEC("fentry/security_file_open")
 int BPF_PROG(on_open, struct file *file)
 {
@@ -482,9 +504,7 @@ int BPF_PROG(on_open, struct file *file)
 		return 0;
 	e->flags = file->f_flags;
 	e->mode = file->f_mode;
-	long r = bpf_d_path(&file->f_path, e->data, PATH_LEN);
-	e->path_len = r;
-	e->data_len = r > 0 ? r : 0;
+	file_path(e, file);
 	submit(e);
 	return 0;
 }
@@ -501,8 +521,7 @@ int BPF_PROG(on_exec_file, struct linux_binprm *bprm)
 	if (!e)
 		return 0;
 	struct file *f = BPF_CORE_READ(bprm, file);
-	e->data_len = walk(e, 0, BPF_CORE_READ(f, f_path.dentry), BPF_CORE_READ(f, f_path.mnt),
-			   &e->n1, &e->truncated);
+	e->data_len = file_walk(e, f);
 	submit(e);
 	return 0;
 }
@@ -650,6 +669,21 @@ int BPF_PROG(on_truncate, const struct path *path)
 	return 0;
 }
 
+// From 6.2, ftruncate(2) and a truncating open reach this rather than
+// security_path_truncate; absent before (see main.go).
+SEC("fentry/security_file_truncate")
+int BPF_PROG(on_file_truncate, struct file *file)
+{
+	if (!in_target())
+		return 0;
+	struct event *e = start(K_TRUNCATE);
+	if (!e)
+		return 0;
+	e->data_len = file_walk(e, file);
+	hold(e);
+	return 0;
+}
+
 SEC("fentry/security_path_chown")
 int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int gid)
 {
@@ -708,6 +742,25 @@ struct {
 	__type(key, u64);
 	__type(value, struct name_buf);
 } open_names SEC(".maps");
+
+// mknod(2) and bind(2) to a path. A creating open also passes here, from
+// may_o_create, and is skipped: the open records it.
+SEC("fentry/security_path_mknod")
+int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
+{
+	if (!in_target())
+		return 0;
+	u64 id = bpf_get_current_pid_tgid();
+	if (bpf_map_lookup_elem(&open_names, &id))
+		return 0;
+	struct event *e = start(K_MKNOD);
+	if (!e)
+		return 0;
+	u32 off = leaf(e, 0, dentry, &e->n1);
+	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated);
+	hold(e);
+	return 0;
+}
 
 static __always_inline void open_enter(int dfd)
 {
@@ -851,9 +904,7 @@ int BPF_PROG(on_file_permission, struct file *file, int mask)
 	struct event *e = start(kind);
 	if (!e)
 		return 0;
-	long r = bpf_d_path(&file->f_path, e->data, PATH_LEN);
-	e->path_len = r;
-	e->data_len = r > 0 ? r : 0;
+	file_path(e, file);
 	submit(e);
 	return 0;
 }
@@ -875,7 +926,7 @@ int BPF_PROG(on_mmap, struct file *file, unsigned long prot, unsigned long flags
 		return 0;
 	e->mode = prot;
 	e->flags = flags;
-	e->data_len = walk(e, 0, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), &e->n1, &e->truncated);
+	e->data_len = file_walk(e, file);
 	submit(e);
 	return 0;
 }
@@ -939,7 +990,7 @@ static __always_inline void op_exit(long ret, int failure_only)
 		e->ts = pend->ts;
 		if (ret < 0)
 			e->path_len = -ret;
-		long r = bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1);
+		long r = pend->p1 ? bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1) : 0;
 		u32 off = r > 0 ? r : 0;
 		u32 second = off;
 		// Mark a second path only when both were read, so a failed read never
@@ -953,7 +1004,17 @@ static __always_inline void op_exit(long ret, int failure_only)
 		}
 		// mode and flags count the base components of the first and second name.
 		u8 nb = 0;
-		if (r > 1 && e->data[0] != '/') {
+		if (!pend->p1) {
+			// No name (futimens): the descriptor's path, or no record if it
+			// was not open.
+			e->data[0] = 0;
+			off = add_base(e, 1, pend->dfd1, &nb, &e->truncated, 1);
+			e->mode = nb;
+			if (!(e->args_len & 1)) {
+				bpf_map_delete_elem(&pending_ops, &id);
+				return;
+			}
+		} else if (r > 1 && e->data[0] != '/') {
 			off = add_base(e, off, pend->dfd1, &nb, &e->truncated, 1);
 			e->mode = nb;
 		}
@@ -968,8 +1029,8 @@ static __always_inline void op_exit(long ret, int failure_only)
 	bpf_map_delete_elem(&pending_ops, &id);
 }
 
-// unlinkat covers both unlink and rmdir (rmdir(2) is unlinkat+AT_REMOVEDIR
-// on current kernels); pathname is arg1.
+// unlinkat (pathname=arg1) is unlink and rmdir on architectures without
+// those older syscalls; where they exist they are traced on their own below.
 SEC("tracepoint/syscalls/sys_enter_unlinkat")
 int on_unlinkat_enter(struct trace_event_raw_sys_enter *ctx)
 {
@@ -983,19 +1044,27 @@ int on_unlinkat_exit(struct trace_event_raw_sys_exit *ctx)
 	return 0;
 }
 
-// renameat2(olddfd, oldname=arg1, newdfd, newname=arg3, flags)
-SEC("tracepoint/syscalls/sys_enter_renameat2")
-int on_renameat2_enter(struct trace_event_raw_sys_enter *ctx)
-{
-	op_enter(K_RENAME_FAILED, ctx->args[0], ctx->args[1], ctx->args[2], ctx->args[3]);
-	return 0;
+// A failed move: (old dfd, old name, new dfd, new name) from the syscall's
+// arguments, AT_FDCWD standing in for a dfd the syscall does not take.
+#define FAILED_RENAME(sys, dfd1, p1, dfd2, p2)					\
+SEC("tracepoint/syscalls/sys_enter_" #sys)					\
+int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
+{										\
+	op_enter(K_RENAME_FAILED, dfd1, p1, dfd2, p2);				\
+	return 0;								\
+}										\
+SEC("tracepoint/syscalls/sys_exit_" #sys)					\
+int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
+{										\
+	op_exit(ctx->ret, 1);							\
+	return 0;								\
 }
-SEC("tracepoint/syscalls/sys_exit_renameat2")
-int on_renameat2_exit(struct trace_event_raw_sys_exit *ctx)
-{
-	op_exit(ctx->ret, 1);
-	return 0;
-}
+
+// renameat2(olddfd, oldname, newdfd, newname, flags), and renameat without
+// the flags; rename(oldname, newname) is x86_64's older form.
+FAILED_RENAME(renameat2, ctx->args[0], ctx->args[1], ctx->args[2], ctx->args[3])
+FAILED_RENAME(renameat, ctx->args[0], ctx->args[1], ctx->args[2], ctx->args[3])
+FAILED_RENAME(rename, AT_FDCWD, ctx->args[0], AT_FDCWD, ctx->args[1])
 
 SEC("tracepoint/syscalls/sys_enter_fchmodat")
 int on_fchmodat_enter(struct trace_event_raw_sys_enter *ctx)
@@ -1042,7 +1111,9 @@ int on_fchownat_exit(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_utimensat")
 int on_utimensat_enter(struct trace_event_raw_sys_enter *ctx)
 {
-	if (ctx->args[1]) // NULL path updates a dirfd, not a named file
+	// A NULL path (futimens) changes the file dfd refers to; with AT_FDCWD it
+	// names nothing and fails.
+	if (ctx->args[1] || (int)ctx->args[0] != AT_FDCWD)
 		op_enter2(K_ATTR_FAILED, K_ATTR, ctx->args[0], ctx->args[1], 0, 0);
 	return 0;
 }
@@ -1078,5 +1149,48 @@ int on_lsetxattr_exit(struct trace_event_raw_sys_exit *ctx)
 	op_exit(ctx->ret, 0);
 	return 0;
 }
+
+// The older forms x86_64 keeps beside the *at ones; elsewhere their
+// tracepoints do not exist (see main.go).
+#define FAILED_OP_1(sys, kind)							\
+SEC("tracepoint/syscalls/sys_enter_" #sys)					\
+int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
+{										\
+	op_enter(kind, AT_FDCWD, ctx->args[0], 0, 0);				\
+	return 0;								\
+}										\
+SEC("tracepoint/syscalls/sys_exit_" #sys)					\
+int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
+{										\
+	op_exit(ctx->ret, 1);							\
+	return 0;								\
+}
+
+FAILED_OP_1(unlink, K_DELETE_FAILED)
+FAILED_OP_1(rmdir, K_DELETE_FAILED)
+FAILED_OP_1(chmod, K_CHMOD_FAILED)
+FAILED_OP_1(chown, K_CHOWN_FAILED)
+FAILED_OP_1(lchown, K_CHOWN_FAILED)
+
+// utime and utimes take a name, futimesat a name relative to dfd; recorded
+// like utimensat.
+#define ATTR_OP(sys, dfd, p)							\
+SEC("tracepoint/syscalls/sys_enter_" #sys)					\
+int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
+{										\
+	if (p || (int)(dfd) != AT_FDCWD) /* as for utimensat */			\
+		op_enter2(K_ATTR_FAILED, K_ATTR, dfd, p, 0, 0);			\
+	return 0;								\
+}										\
+SEC("tracepoint/syscalls/sys_exit_" #sys)					\
+int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
+{										\
+	op_exit(ctx->ret, 0);							\
+	return 0;								\
+}
+
+ATTR_OP(utime, AT_FDCWD, ctx->args[0])
+ATTR_OP(utimes, AT_FDCWD, ctx->args[0])
+ATTR_OP(futimesat, ctx->args[0], ctx->args[1])
 
 char LICENSE[] SEC("license") = "GPL";

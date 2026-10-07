@@ -155,6 +155,22 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "open-failed", Comm: "node", Path: "/missing", Err: int32(unix.ENOENT)},
 		},
 		{
+			name: "open, path too long for d_path",
+			ev: event{kind: 1, comm: "sh", flags: unix.O_WRONLY, pathRet: -int32(unix.ENAMETOOLONG),
+				n1: 2, truncated: 1, data: comps("f", "d")},
+			want: record{Kind: "open", Comm: "sh", Path: "…/d/f", Flags: unix.O_WRONLY, Access: "w"},
+		},
+		{
+			name: "mknod",
+			ev:   event{kind: 24, comm: "mkfifo", n1: 2, data: comps("p", "tmp")},
+			want: record{Kind: "mknod", Comm: "mkfifo", Path: "/tmp/p"},
+		},
+		{
+			name: "attr through a descriptor (futimens)",
+			ev:   event{kind: 20, comm: "touch", argsLen: 1, mode: 2, data: append([]byte("\x00"), comps("f", "tmp")...)},
+			want: record{Kind: "attr", Comm: "touch", Path: "/tmp/f"},
+		},
+		{
 			name: "write",
 			ev:   event{kind: 14, comm: "tee", data: []byte("/tmp/out\x00")},
 			want: record{Kind: "write", Comm: "tee", Path: "/tmp/out"},

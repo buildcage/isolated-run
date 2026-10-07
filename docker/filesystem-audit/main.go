@@ -48,6 +48,7 @@ var optionalProgs = map[string]string{
 	"on_backing_enter": "backing_file_open",
 	"on_backing_exit":  "backing_file_open",
 	"on_exec_file":     "security_bprm_creds_for_exec",
+	"on_file_truncate": "security_file_truncate",
 }
 
 // getnameProgs is the subset of optionalProgs that records a failed open's
@@ -195,19 +196,29 @@ func dropAbsentPrograms(spec *ebpf.CollectionSpec) {
 	}
 }
 
+// archSyscalls are syscalls only some architectures have (x86_64's older
+// forms, and renameat, which a few newer ports lack); their missing
+// tracepoints are not reported.
+var archSyscalls = map[string]bool{
+	"unlink": true, "rmdir": true, "rename": true, "renameat": true, "chmod": true,
+	"chown": true, "lchown": true, "utime": true, "utimes": true, "futimesat": true,
+}
+
 // attachAll attaches every loaded program. A classic syscall tracepoint
 // needs tracefs; where it is missing the failed path operations go
 // unrecorded, which is a reduced result, not a failure, so those attach
-// errors only warn. At least one getname spelling must attach, or a failed
-// open would have no name.
+// errors only warn, except for a syscall the architecture lacks. At least
+// one getname spelling must attach, or a failed open would have no name.
 func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, error) {
 	var links []link.Link
 	getnames := 0
 	for name, p := range coll.Programs {
 		var l link.Link
 		var err error
+		var tp string
 		if p.Type() == ebpf.TracePoint {
-			group, tp, _ := strings.Cut(strings.TrimPrefix(spec.Programs[name].SectionName, "tracepoint/"), "/")
+			var group string
+			group, tp, _ = strings.Cut(strings.TrimPrefix(spec.Programs[name].SectionName, "tracepoint/"), "/")
 			l, err = link.Tracepoint(group, tp, p, nil)
 		} else {
 			l, err = link.AttachTracing(link.TracingOptions{Program: p})
@@ -215,7 +226,10 @@ func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, e
 		_, optional := optionalProgs[name]
 		if err != nil {
 			if optional || p.Type() == ebpf.TracePoint {
-				fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
+				sys := strings.TrimPrefix(strings.TrimPrefix(tp, "sys_enter_"), "sys_exit_")
+				if !(errors.Is(err, os.ErrNotExist) && archSyscalls[sys]) {
+					fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
+				}
 				continue
 			}
 			return links, fmt.Errorf("attach %s: %w", name, err)
