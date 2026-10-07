@@ -23249,10 +23249,40 @@ function resolveComposeFile(override) {
 	return override?.composeFile ?? DEFAULT_COMPOSE_FILE;
 }
 //#endregion
-//#region src/core/lib/actions/write-step-summary.ts
-init_core();
-async function writeStepSummary(markdown, summaryFile) {
-	summaryFile ? await summary.addRaw(markdown).write() : console.log(markdown);
+//#region src/core/lib/report/render/fit-step-summary.ts
+const bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
+function withNotices(blocks, noticeFor) {
+	return blocks.map((b) => b.cut === "keep" ? b : {
+		...b,
+		notice: noticeFor(b)
+	});
+}
+function joinSummaryBlocks(blocks) {
+	return blocks.map(whole).join("");
+}
+function fitStepSummary(blocks, { usedBytes = 0, limitBytes = 1048576 } = {}) {
+	let full = blocks.map(whole), all = full.join(""), budget = limitBytes - 8192 - usedBytes;
+	if (bytes(all) <= budget) return all;
+	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
+	for (let i of order) {
+		let b = blocks[i];
+		if ((cutAt.get(b.section) ?? Infinity) < b.level) continue;
+		let size = bytes(full[i]);
+		b.cut === "keep" || size <= budget ? out[i] = full[i] : (out[i] = cutBlock(b, Math.max(0, budget)), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level))), budget -= bytes(out[i]);
+	}
+	return out.join("");
+}
+function cutBlock(b, budget) {
+	let notice = b.notice ?? "";
+	if (b.cut === "atomic") return notice;
+	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
+	for (let line of b.text.split("\n")) {
+		let withNewline = `${line}\n`, lineBytes = bytes(withNewline);
+		if (usedBytes + lineBytes > room) break;
+		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen);
+	}
+	let head = b.head ?? 0;
+	return head > 0 && count <= head ? notice : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
 }
 //#endregion
 //#region node_modules/.pnpm/@actions+artifact@6.2.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/config.js
@@ -30278,7 +30308,7 @@ function shouldDeserializeResponse(parsedResponse) {
 	return result = shouldDeserialize === void 0 ? !0 : typeof shouldDeserialize == "boolean" ? shouldDeserialize : shouldDeserialize(parsedResponse), result;
 }
 async function deserializeResponseBody(jsonContentTypes, xmlContentTypes, response, options, parseXML) {
-	let parsedResponse = await parse$2(jsonContentTypes, xmlContentTypes, response, options, parseXML);
+	let parsedResponse = await parse$3(jsonContentTypes, xmlContentTypes, response, options, parseXML);
 	if (!shouldDeserializeResponse(parsedResponse)) return parsedResponse;
 	let operationSpec = getOperationRequestInfo(parsedResponse.request)?.operationSpec;
 	if (!operationSpec || !operationSpec.responses) return parsedResponse;
@@ -30354,7 +30384,7 @@ function handleErrorResponse(parsedResponse, operationSpec, responseSpec, option
 		shouldReturnResponse: !1
 	};
 }
-async function parse$2(jsonContentTypes, xmlContentTypes, operationResponse, opts, parseXML) {
+async function parse$3(jsonContentTypes, xmlContentTypes, operationResponse, opts, parseXML) {
 	if (!operationResponse.request.streamResponseStatusCodes?.has(operationResponse.status) && operationResponse.bodyAsText) {
 		let text = operationResponse.bodyAsText, contentType = operationResponse.headers.get("Content-Type") || "", contentComponents = contentType ? contentType.split(";").map((component) => component.toLowerCase()) : [];
 		try {
@@ -63904,7 +63934,7 @@ function expand(template, context) {
 		return encodeReserved(literal);
 	}), template === "/" ? template : template.replace(/\/$/, "");
 }
-function parse$1(options) {
+function parse$2(options) {
 	let method = options.method.toUpperCase(), url = (options.url || "/").replace(/:([a-z]\w+)/g, "{$1}"), headers = Object.assign({}, options.headers), body, parameters = omit(options, [
 		"method",
 		"baseUrl",
@@ -63922,7 +63952,7 @@ function parse$1(options) {
 	}, body === void 0 ? null : { body }, options.request ? { request: options.request } : null);
 }
 function endpointWithDefaults(defaults, route, options) {
-	return parse$1(merge(defaults, route, options));
+	return parse$2(merge(defaults, route, options));
 }
 function withDefaults$2(oldDefaults, newDefaults) {
 	let DEFAULTS2 = merge(oldDefaults, newDefaults), endpoint2 = endpointWithDefaults.bind(null, DEFAULTS2);
@@ -63930,7 +63960,7 @@ function withDefaults$2(oldDefaults, newDefaults) {
 		DEFAULTS: DEFAULTS2,
 		defaults: withDefaults$2.bind(null, DEFAULTS2),
 		merge: merge.bind(null, DEFAULTS2),
-		parse: parse$1
+		parse: parse$2
 	});
 }
 var DEFAULTS, urlVariableRegex, endpoint, init_dist_bundle$5 = __esmMin((() => {
@@ -63946,7 +63976,7 @@ var DEFAULTS, urlVariableRegex, endpoint, init_dist_bundle$5 = __esmMin((() => {
 }));
 //#endregion
 //#region node_modules/.pnpm/content-type@3.1.1/node_modules/content-type/dist/index.js
-function parse(header, options) {
+function parse$1(header, options) {
 	let stopFlags = SEMI_FLAG | (options?.comma === !0 ? COMMA_FLAG : 0), len = header.length, valueStart = options?.start ?? 0;
 	for (; (CHAR_MAP[header.charCodeAt(valueStart)] & OWS) !== 0;) valueStart++;
 	let index = valueStart, typeFlags = 0, whitespace = -1, stop = options?.parameters === !1 ? COMMA_FLAG : 0;
@@ -64259,7 +64289,7 @@ async function fetchWrapper(requestOptions) {
 async function getResponseData(response) {
 	let contentType = response.headers.get("content-type");
 	if (!contentType) return response.text().catch(noop$1);
-	let mimetype = parse(contentType);
+	let mimetype = parse$1(contentType);
 	if (isJSONResponse(mimetype)) {
 		let text = "";
 		try {
@@ -68358,6 +68388,24 @@ function formatElapsedFixed(elapsedSeconds) {
 	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
 }
 //#endregion
+//#region src/core/lib/report/render/markdown-table.ts
+const ALIGN_MARKERS = {
+	left: "---",
+	right: "---:",
+	center: ":---:"
+}, alignMarker = (align) => ALIGN_MARKERS[align ?? "left"];
+function escapeCell(value) {
+	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+function markdownTable(formats, rows) {
+	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
+	for (let row of rows) {
+		let cells = formats.map((f) => escapeCell(row[f.key]));
+		lines.push(`| ${cells.join(" | ")} |`);
+	}
+	return lines.join("\n");
+}
+//#endregion
 //#region src/lib/filesystem-audit-summary.ts
 const LETTER = {
 	read: "R",
@@ -68496,9 +68544,14 @@ function fmtFlags(ok, failed, perm) {
 	for (let c of "RWXMDA") ok.has(c) ? out += c : failed.has(c) && (out += c.toLowerCase() + (perm.has(c) ? "!" : ""));
 	return out;
 }
-const LEGEND = "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit";
-function renderFilesystemAuditSummary(jsonl, prefixes) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), seq = 0, ended = !1, lost = !1;
+const HEADING = "### Filesystem audit", SECTION$1 = "filesystem", FILESYSTEM_BLOCK = {
+	executed: "filesystem-executed",
+	paths: "filesystem-paths",
+	log: "filesystem-log"
+};
+Object.fromEntries(Object.values(FILESYSTEM_BLOCK).map((id) => [id, 0]));
+function parse(jsonl) {
+	let records = [], ended = !1, lost = !1;
 	for (let line of jsonl.split("\n")) {
 		if (!line) continue;
 		let r;
@@ -68511,6 +68564,17 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 			ended = !0, lost = !!(r.dropped || r.untracked);
 			continue;
 		}
+		records.push(r);
+	}
+	return {
+		records,
+		ended,
+		lost
+	};
+}
+function buildRows(records, prefixes, byCommand) {
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), seq = 0;
+	for (let r of records) {
 		if (r.kind === "mmap" && r.access === "x") {
 			r.path && libs.add(r.path);
 			continue;
@@ -68518,7 +68582,7 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 		r.kind === "exec" && r.path && execd.add(r.path);
 		let c = classify(r);
 		if (!c) continue;
-		let key = keyOf(r.comm ?? "", c.path), t = Date.parse(r.t ?? "");
+		let key = keyOf(byCommand ? r.comm ?? "" : "", c.path), t = Date.parse(r.t ?? "");
 		Number.isNaN(t) || widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++), c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
 	}
 	let libDrop = new Set([
@@ -68571,23 +68635,498 @@ function renderFilesystemAuditSummary(jsonl, prefixes) {
 			path: escapeForDisplay(relativize(pathOf(lk), prefixes))
 		});
 	}
-	rows.sort((a, b) => {
+	return rows.sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return a.seq - b.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
+	}), rows;
+}
+function executedPaths(records, prefixes) {
+	let seen = new Set();
+	for (let r of records) r.kind === "exec" && r.path && seen.add(r.path);
+	return [...seen].map((p) => escapeForDisplay(relativize(p, prefixes)));
+}
+function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
+	let { records, ended, lost } = parse(jsonl), rows = buildRows(records, prefixes, !0), heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
+> some accesses are missing from this summary and from the artifact.`, frame = (text) => ({
+		priority: 0,
+		level: 1,
+		section: SECTION$1,
+		text,
+		cut: "keep"
 	});
-	let heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
-> some accesses are missing from this summary and from the artifact.`;
-	if (rows.length === 0) return `${heading}\n\nNo file access was recorded.\n`;
+	if (rows.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
+	let blocks = [frame(`${heading}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>\n\n`)], table = (id, title, md) => ({
+		id,
+		priority: priorities[id],
+		level: 2,
+		section: SECTION$1,
+		text: `#### ${title}\n\n${md}\n\n`,
+		cut: "lines",
+		head: 4
+	}), executed = executedPaths(records, prefixes);
+	executed.length > 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, "Executed", markdownTable([{
+		key: "path",
+		title: "Path"
+	}], executed.map((path) => ({ path })))));
+	let byPath = buildRows(records, prefixes, !1).sort((a, b) => {
+		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
+		return ca - cb || (pa < pb ? -1 : 1);
+	});
+	blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", markdownTable([{
+		key: "flags",
+		title: "Access"
+	}, {
+		key: "path",
+		title: "Path"
+	}], byPath.map(({ flags, path }) => ({
+		flags,
+		path
+	})))));
 	let originMs = prefixes.startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.span?.first ?? Infinity), Infinity) : prefixes.startedAt * 1e3, times = rows.map((r) => fmtSpan(r.span, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
-	return `${heading}\n\n<sub>${timeW ? `first-last access · ${LEGEND}` : LEGEND}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
+	return blocks.push({
+		id: FILESYSTEM_BLOCK.log,
+		priority: priorities[FILESYSTEM_BLOCK.log],
+		level: 3,
+		section: SECTION$1,
+		cut: "lines",
+		open: "<details>\n<summary>📂 Filesystem details</summary>\n\n",
+		text: `${timeW ? "<sub>first-last access</sub>\n\n" : ""}\`\`\`\n${body}\n\`\`\`\n\n`,
+		close: "</details>\n"
+	}), blocks;
+}
+function filesystemTruncationNote(artifactName) {
+	return `_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; the ${artifactName} artifact uploaded for this run has every access._\n\n`;
+}
+function usesLine(actionRepo, actionRef, actionVersion) {
+	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
+}
+function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", actionVersion, runCommand } = {}) {
+	let yaml = `- name: ${stepName}\n`;
+	if (yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", runCommand) {
+		yaml += "    run: |\n";
+		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
+	}
+	return yaml;
+}
+function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
+	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "\n<details>\n";
+	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
+}
+function restrictExampleTruncationNote(artifactAvailable) {
+	return `_…omitted: the example restrict step is too large for GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request to write the rules from" : "set upload_traffic_artifact: true to get every request to write the rules from as a downloadable artifact"}._\n\n`;
 }
 //#endregion
-//#region src/lib/filesystem-audit-report.ts
-const realDeps$3 = {
+//#region src/core/lib/report/render/build-example.ts
+const ruleTypeToParam = {
+	HTTPS: "allowed_https_rules",
+	HTTP: "allowed_http_rules",
+	IP: "allowed_ip_rules"
+};
+function buildRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
+	if (!auditedRows || auditedRows.length === 0) return "";
+	let groups = new Map();
+	for (let r of auditedRows) {
+		let param = ruleTypeToParam[r.ruleType];
+		param && (groups.has(param) || groups.set(param, new Set()), groups.get(param).add(`${r.host}:${r.port}`));
+	}
+	if (groups.size === 0) return "";
+	let yaml = exampleStepHead(actionRepo, actionRef, step);
+	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: universal\n";
+	for (let [param, rules] of groups) {
+		yaml += `    ${param}: >-\n`;
+		for (let rule of rules) yaml += `      ${rule}\n`;
+	}
+	return restrictExampleBlock(yaml);
+}
+function communicationTruncationNote(artifactAvailable) {
+	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
+}
+//#endregion
+//#region src/core/lib/report/render/fold-expected-blocked.ts
+function foldExpectedBlockedRows(rows) {
+	let unmatched = [], groups = new Map();
+	for (let row of rows) {
+		if (!row.expected || row.expectedBy === void 0) {
+			unmatched.push(row);
+			continue;
+		}
+		let key = `${row.expectedBy}\t${row.ruleType}\t${row.reason}`, group = groups.get(key);
+		group ? (group.hosts.add(row.host), group.count += row.count) : groups.set(key, {
+			rule: row.expectedBy,
+			ruleType: row.ruleType,
+			reason: row.reason,
+			hosts: new Set([row.host]),
+			count: row.count
+		});
+	}
+	let folded = [...groups.values()].sort(compareGroups).map(toRow);
+	return [...unmatched, ...folded];
+}
+function compareGroups(a, b) {
+	return b.count - a.count || (a.rule < b.rule ? -1 : +(a.rule > b.rule));
+}
+function toRow(group) {
+	return {
+		host: group.rule,
+		port: "-",
+		ruleType: group.ruleType,
+		reason: group.reason,
+		count: group.count,
+		expected: !0,
+		expectedBy: group.rule,
+		display: `${group.rule} (${group.hosts.size} host${group.hosts.size === 1 ? "" : "s"})`
+	};
+}
+//#endregion
+//#region src/core/lib/report/render/host-table.ts
+function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
+	let formats = [{
+		key: "host",
+		title: "Host"
+	}, {
+		key: "ruleType",
+		title: "Rule"
+	}];
+	return showReason && formats.push({
+		key: "reason",
+		title: "Reason"
+	}), formats.push({
+		key: "count",
+		title: "Count",
+		align: "right"
+	}), showExpected && formats.push({
+		key: "expected",
+		title: "Expected",
+		align: "center"
+	}), markdownTable(formats, rows.map((r) => ({
+		host: r.display ?? (r.port === "-" ? r.host : `${r.host}:${r.port}`),
+		ruleType: r.ruleType,
+		reason: r.reason,
+		count: r.count,
+		expected: r.expected ? "✅" : ""
+	})));
+}
+function hostTableTruncationNote(artifactAvailable) {
+	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload_traffic_artifact: true to get every request as a downloadable artifact"}._\n\n`;
+}
+//#endregion
+//#region src/core/lib/log/authority.ts
+const DEFAULT_PORT = {
+	https: "443",
+	http: "80"
+};
+function splitHostPort(authority) {
+	let colon = authority.lastIndexOf(":");
+	return colon <= 0 || authority.slice(colon + 1).includes("]") ? {
+		host: authority,
+		port: void 0
+	} : {
+		host: authority.slice(0, colon),
+		port: authority.slice(colon + 1)
+	};
+}
+function ruleHost(host) {
+	return sniHost(host).replace(/\.$/, "");
+}
+function sniHost(sni) {
+	return sni.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+//#endregion
+//#region src/core/lib/log/traffic-event.ts
+const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
+function clientEndedNoise(timeline) {
+	let completed = new Set();
+	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
+	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason) && completed.has(ruleHost(event.host));
+}
+function connectedHosts(timeline) {
+	let connected = {
+		any: new Set(),
+		blocked: new Set()
+	};
+	for (let event of timeline) {
+		if (event.protocol === "dns" || event.action === "incomplete") continue;
+		let host = ruleHost(event.host);
+		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
+	}
+	return connected;
+}
+function isRedundantDns(event, connected) {
+	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
+}
+//#endregion
+//#region src/core/lib/report/render/inspect-details.ts
+function renderInspectDetailsBody(timeline, startedAt) {
+	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
+	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n\n`;
+}
+const MARK = {
+	block: "🚫",
+	discovery: "ℹ️",
+	incomplete: "⚠️",
+	failed: "⚠️"
+};
+function renderEvent(event, startedAt) {
+	return `${MARK[event.action] ?? "✅"} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}`;
+}
+const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
+function credentialName(name) {
+	return name.toLowerCase().replace(/[-_]/g, "");
+}
+const PARAM_NAME = /(^|[;?])([^;?=]*)=/g;
+function redactPart(part) {
+	for (let match of part.matchAll(PARAM_NAME)) {
+		if (!CREDENTIAL_PARAMS.has(credentialName(match[2]))) continue;
+		let value = match.index + match[0].length;
+		return value === part.length ? part : `${part.slice(0, value)}***`;
+	}
+	return part;
+}
+function redactCredentialQuery(url) {
+	let start = url.indexOf("?");
+	if (start === -1) return url;
+	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map(redactPart).join("&");
+	return url.slice(0, start + 1) + query + url.slice(end);
+}
+function subject(event) {
+	if (event.queryType !== void 0) return `DNS ${event.queryType} ${event.host}`;
+	if (event.protocol === "dns") return `DNS ${event.host}`;
+	if (event.url === void 0) {
+		let authority = event.port === void 0 ? event.host : `${event.host}:${event.port}`, nameAndPort = `${event.protocol.toUpperCase()} ${authority}`;
+		return event.method === void 0 ? nameAndPort : `${event.method} ${nameAndPort}`;
+	}
+	return `${event.method} ${redactCredentialQuery(event.url)}`;
+}
+function outcome(event) {
+	if (event.action === "block") return event.reason ?? "blocked";
+	if (event.action === "incomplete") return event.reason ?? "no request";
+	if (event.action === "failed") return event.reason ?? "failed";
+	if (event.action === "discovery") return `no data (${event.queryType} is never served)`;
+	let parts = [];
+	return event.status !== void 0 && parts.push(String(event.status)), event.bytes !== void 0 && parts.push(`(${formatBytes(event.bytes)})`), parts.length > 0 ? parts.join(" ") : "resolved";
+}
+function formatTime(epochSeconds, startedAt) {
+	return startedAt === void 0 ? new Date(epochSeconds * 1e3).toISOString().slice(11, 23) + "Z" : formatElapsedVariable(epochSeconds - startedAt);
+}
+function formatBytes(bytes) {
+	return bytes < 1024 ? `${bytes}B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1048576).toFixed(1)}MB`;
+}
+//#endregion
+//#region src/core/lib/report/render/inspect-example.ts
+const METHOD_ORDER = [
+	"GET",
+	"HEAD",
+	"POST",
+	"PUT",
+	"PATCH",
+	"DELETE",
+	"OPTIONS"
+], LITERAL_METHOD = /^[A-Z]+$/, LITERAL_HOST = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
+function parseRequest(request) {
+	if (request.url === void 0 || request.method === void 0 || request.port === void 0) return null;
+	let match = /^(https?):\/\/([^/]*)([^?#]*)/.exec(request.url);
+	if (!match) return null;
+	let [, scheme, authority, target] = match, { host } = splitHostPort(authority), path = target || "/", part = LITERAL_METHOD.test(request.method) ? LITERAL_HOST.test(host) ? path.includes("*") ? "path" : void 0 : "host" : "method";
+	if (part) return {
+		method: request.method,
+		url: `${scheme}://${authority}${path}`,
+		part
+	};
+	let port = String(request.port);
+	return {
+		origin: port === DEFAULT_PORT[scheme] ? `${scheme}://${host}` : `${scheme}://${host}:${port}`,
+		method: request.method,
+		path
+	};
+}
+function commonPrefixSegments(paths) {
+	let split = paths.map((p) => p.split("/").slice(1)), prefix = split[0];
+	for (let segments of split.slice(1)) {
+		let i = 0;
+		for (; i < prefix.length && i < segments.length && prefix[i] === segments[i];) i++;
+		prefix = prefix.slice(0, i);
+	}
+	return prefix;
+}
+function pathPatternsFor(paths) {
+	let distinct = [...new Set(paths)].sort();
+	if (distinct.length === 0) return [];
+	if (distinct.length === 1) return distinct;
+	let prefix = commonPrefixSegments(distinct);
+	if (prefix.length === 0) return ["/**"];
+	let base = `/${prefix.join("/")}`, patterns = [`${base}/**`];
+	return distinct.includes(base) && patterns.unshift(base), patterns;
+}
+function sortMethods(methods) {
+	return [...new Set(methods)].sort((a, b) => {
+		let ai = METHOD_ORDER.indexOf(a), bi = METHOD_ORDER.indexOf(b);
+		return ai !== -1 && bi !== -1 ? ai - bi : ai === -1 ? bi === -1 && a < b ? -1 : 1 : -1;
+	});
+}
+function partitionRequests(requests) {
+	let writable = [], leftOut = new Map();
+	for (let request of requests) {
+		if (request.action === "block") continue;
+		let parsed = parseRequest(request);
+		parsed && ("part" in parsed ? leftOut.set(`${parsed.method} ${parsed.url}`, parsed) : writable.push(parsed));
+	}
+	return {
+		writable,
+		leftOut: [...leftOut.values()]
+	};
+}
+function ruleLinesFrom(requests) {
+	let byOriginMethod = new Map();
+	for (let parsed of requests) {
+		let key = `${parsed.origin}\t${parsed.method}`, group = byOriginMethod.get(key);
+		group ? group.paths.push(parsed.path) : byOriginMethod.set(key, {
+			origin: parsed.origin,
+			method: parsed.method,
+			paths: [parsed.path]
+		});
+	}
+	let byPattern = new Map();
+	for (let { origin, method, paths } of byOriginMethod.values()) for (let pattern of pathPatternsFor(paths)) {
+		let key = `${origin}\t${pattern}`, entry = byPattern.get(key);
+		entry ? entry.methods.push(method) : byPattern.set(key, {
+			origin,
+			pattern,
+			methods: [method]
+		});
+	}
+	return [...byPattern.values()].sort((a, b) => a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : a.pattern < b.pattern ? -1 : 1).map(({ origin, pattern, methods }) => `${sortMethods(methods).join("|")} ${origin}${pattern}`);
+}
+function leftOutSection(leftOut) {
+	let shown = leftOut.slice(0, 20), md = "Left out of the rules above: a rule would read part of each request as a pattern, and so permit more than was sent.\n\n";
+	return md += markdownTable([
+		{
+			key: "method",
+			title: "Method"
+		},
+		{
+			key: "url",
+			title: "URL"
+		},
+		{
+			key: "part",
+			title: "Read as a pattern"
+		}
+	], shown.map((r) => ({ ...r }))), md += "\n\n", leftOut.length > shown.length && (md += `…and ${leftOut.length - shown.length} more, listed in Communication details.\n\n`), md;
+}
+function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedIpRules = [], allowedTlsRules = [], ...step } = {}) {
+	let { writable, leftOut } = partitionRequests(requests ?? []), lines = ruleLinesFrom(writable);
+	if (lines.length === 0 && leftOut.length === 0 && allowedIpRules.length === 0 && allowedTlsRules.length === 0) return "";
+	let yaml = exampleStepHead(actionRepo, actionRef, step);
+	if (yaml += "    proxy_mode: restrict\n", lines.length > 0) {
+		yaml += "    allowed_url_rules: |\n";
+		for (let line of lines) yaml += `      ${line}\n`;
+	}
+	if (allowedTlsRules.length > 0) {
+		yaml += "    allowed_tls_rules: |\n";
+		for (let rule of allowedTlsRules) yaml += `      ${rule}\n`;
+	}
+	if (allowedIpRules.length > 0) {
+		yaml += "    allowed_ip_rules: |\n";
+		for (let rule of allowedIpRules) yaml += `      ${rule}\n`;
+	}
+	return restrictExampleBlock(yaml, {
+		appendix: leftOut.length > 0 ? leftOutSection(leftOut) : void 0,
+		footnote: "Permits exactly what this build did; a versioned or dated URL may drift."
+	});
+}
+//#endregion
+//#region src/core/lib/report/render/render-report-markdown.ts
+const SECTION = "traffic", TRAFFIC_BLOCK = {
+	example: "traffic-example",
+	blocked: "traffic-blocked",
+	failed: "traffic-failed",
+	passed: "traffic-passed",
+	log: "traffic-log"
+};
+Object.fromEntries(Object.values(TRAFFIC_BLOCK).map((id) => [id, 0]));
+function trafficNotice(block, artifactAvailable) {
+	switch (block.id) {
+		case TRAFFIC_BLOCK.example: return restrictExampleTruncationNote(artifactAvailable);
+		case TRAFFIC_BLOCK.log: return communicationTruncationNote(artifactAvailable);
+		case TRAFFIC_BLOCK.blocked:
+		case TRAFFIC_BLOCK.failed:
+		case TRAFFIC_BLOCK.passed: return hostTableTruncationNote(artifactAvailable);
+		default: return;
+	}
+}
+function tableBlock(id, priority, before, table, after) {
+	return {
+		id,
+		priority,
+		level: 2,
+		section: SECTION,
+		text: before + table + after,
+		cut: "lines",
+		head: before.split("\n").length + 1
+	};
+}
+const frame = (text) => ({
+	priority: 0,
+	level: 1,
+	section: SECTION,
+	text,
+	cut: "keep"
+});
+function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", ...step } = {}) {
+	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
+	if (report.logLooksPlausible || (top += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(frame(top)), report.passed.length > 0 && blocks.push(tableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), isAudit && blocks.push({
+		id: TRAFFIC_BLOCK.example,
+		priority: priorities[TRAFFIC_BLOCK.example],
+		level: 2,
+		section: `${SECTION}-example`,
+		cut: "atomic",
+		text: report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
+			...step,
+			allowedIpRules: report.parameters.allowedIpRules,
+			allowedTlsRules: report.parameters.allowedTlsRules
+		}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step)
+	}), report.blocked.length > 0) {
+		let blocked = foldExpectedBlockedRows(report.blocked);
+		blocks.push(tableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${report.passed.length > 0 ? "\n" : ""}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
+			showReason: !0,
+			showExpected
+		}), "\n"));
+	}
+	if (report.failed.length > 0) {
+		let gap = report.passed.length > 0 || report.blocked.length > 0 ? "\n" : "";
+		blocks.push(tableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
+	}
+	let bottom = "";
+	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame("_(no communication)_\n\n"));
+	let details = renderInspectDetailsBody(report.timeline, report.startedAt);
+	return details && blocks.push({
+		id: TRAFFIC_BLOCK.log,
+		priority: priorities[TRAFFIC_BLOCK.log],
+		level: 3,
+		section: SECTION,
+		cut: "lines",
+		open: "\n<details>\n<summary>💬 Communication details</summary>\n\n",
+		text: details,
+		close: "</details>\n"
+	}), report.engine === "universal" && (bottom += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), bottom += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, bottom += "\n<hr>\n", blocks.push(frame(bottom)), blocks;
+}
+//#endregion
+//#region src/lib/summary-priorities.ts
+const TRAFFIC_PRIORITIES = {
+	[TRAFFIC_BLOCK.example]: 1,
+	[TRAFFIC_BLOCK.blocked]: 2,
+	[TRAFFIC_BLOCK.failed]: 3,
+	[TRAFFIC_BLOCK.passed]: 4,
+	[TRAFFIC_BLOCK.log]: 7
+}, FILESYSTEM_PRIORITIES = {
+	[FILESYSTEM_BLOCK.executed]: 5,
+	[FILESYSTEM_BLOCK.paths]: 6,
+	[FILESYSTEM_BLOCK.log]: 8
+}, realDeps$3 = {
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
 	writeFile: (path, content) => (0, node_fs.writeFileSync)(path, content),
 	realpath: (path) => (0, node_fs.realpathSync)(path),
-	writeStepSummary,
+	renderBlocks: renderFilesystemAuditBlocks,
 	uploadArtifact: uploadFilesystemAuditArtifact,
 	setOutput: setFilesystemAuditOutput,
 	appendFile: (path, content) => (0, node_fs.appendFileSync)(path, content)
@@ -68601,32 +69140,40 @@ function prefixes(value, realpath) {
 	} catch {}
 	return out;
 }
-async function reportStepFilesystemAudit({ audit, startedAt, retentionDays, containerName, annotation, env }, overrides = {}) {
+function prepareStepFilesystemAudit({ audit, retentionDays, containerName, annotation, env }, overrides = {}) {
 	let deps = {
 		...realDeps$3,
 		...overrides
-	}, artifactName = "", raw = audit && readOptional(audit.outPath, deps.readFile);
-	if (audit && raw !== void 0) {
-		let clean = stripSandboxMachinery(raw, (0, node_path.dirname)(audit.outPath));
-		try {
-			let markdown = renderFilesystemAuditSummary(clean, {
-				workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-				home: prefixes(env.HOME, deps.realpath),
-				startedAt
-			});
-			await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY), deps.appendFile;
-		} catch (e) {
-			annotation.warning(`Failed to write the filesystem audit summary: ${errorMessage(e)}`);
+	}, raw = audit && readOptional(audit.outPath, deps.readFile);
+	if (!audit || raw === void 0) return {
+		blocks: () => [],
+		finish: async () => deps.setOutput("")
+	};
+	let clean = stripSandboxMachinery(raw, (0, node_path.dirname)(audit.outPath)), notice = filesystemTruncationNote(filesystemAuditArtifactName(containerName));
+	return {
+		blocks: (startedAt) => {
+			try {
+				let rendered = deps.renderBlocks(clean, {
+					workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
+					home: prefixes(env.HOME, deps.realpath),
+					startedAt
+				}, FILESYSTEM_PRIORITIES);
+				return deps.appendFile, joinSummaryBlocks(rendered), withNotices(rendered, () => notice);
+			} catch (e) {
+				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
+			}
+		},
+		finish: async () => {
+			let cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl"), wrote = !1;
+			try {
+				deps.writeFile(cleanPath, clean), wrote = !0;
+			} catch (e) {
+				annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
+			}
+			let artifactName = "";
+			wrote && clean && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? ""), deps.setOutput(artifactName);
 		}
-		let cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl"), wrote = !1;
-		try {
-			deps.writeFile(cleanPath, clean), wrote = !0;
-		} catch (e) {
-			annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
-		}
-		wrote && clean && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
-	}
-	deps.setOutput(artifactName);
+	};
 }
 function readOptional(path, readFile) {
 	try {
@@ -71414,6 +71961,12 @@ async function runSandboxedCommand(options, overrides = {}) {
 	});
 }
 //#endregion
+//#region src/core/lib/actions/write-step-summary.ts
+init_core();
+async function writeStepSummary(markdown, summaryFile) {
+	summaryFile ? await summary.addRaw(markdown).write() : console.log(markdown);
+}
+//#endregion
 //#region src/core/lib/docker/container-env.ts
 function parseDockerInspectEnv(inspectOutput) {
 	let entries = JSON.parse(inspectOutput), env = {};
@@ -71578,56 +72131,11 @@ function readActionVersion$1(docker, containerId, proxyEngine) {
 	}
 }
 //#endregion
-//#region src/core/lib/log/authority.ts
-const DEFAULT_PORT = {
-	https: "443",
-	http: "80"
-};
-function splitHostPort(authority) {
-	let colon = authority.lastIndexOf(":");
-	return colon <= 0 || authority.slice(colon + 1).includes("]") ? {
-		host: authority,
-		port: void 0
-	} : {
-		host: authority.slice(0, colon),
-		port: authority.slice(colon + 1)
-	};
-}
-function ruleHost(host) {
-	return sniHost(host).replace(/\.$/, "");
-}
-function sniHost(sni) {
-	return sni.replace(/[A-Z]/g, (c) => c.toLowerCase());
-}
-//#endregion
 //#region src/core/lib/log/start-marker.ts
 const PROXY_START_MARKER = "buildcage haproxy starting", BAD_REQUEST_METHOD = "<BADREQ>";
 function incompleteReason(terminationState, method) {
 	let cause = terminationState[0];
 	if (cause !== "P") return terminationState[1] === "R" ? cause === "C" ? "client-aborted" : cause === "c" ? "client-timeout" : "no-request" : method === "<BADREQ>" ? "no-request" : void 0;
-}
-//#endregion
-//#region src/core/lib/log/traffic-event.ts
-const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
-function clientEndedNoise(timeline) {
-	let completed = new Set();
-	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
-	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason) && completed.has(ruleHost(event.host));
-}
-function connectedHosts(timeline) {
-	let connected = {
-		any: new Set(),
-		blocked: new Set()
-	};
-	for (let event of timeline) {
-		if (event.protocol === "dns" || event.action === "incomplete") continue;
-		let host = ruleHost(event.host);
-		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
-	}
-	return connected;
-}
-function isRedundantDns(event, connected) {
-	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
 }
 //#endregion
 //#region src/core/lib/log/inspect.ts
@@ -72107,428 +72615,6 @@ function describeFailedConnections(report, engineLabel) {
 	};
 }
 //#endregion
-//#region src/core/lib/report/render/fit-step-summary.ts
-const bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
-function withNotices(blocks, noticeFor) {
-	return blocks.map((b) => b.cut === "keep" ? b : {
-		...b,
-		notice: noticeFor(b)
-	});
-}
-function joinSummaryBlocks(blocks) {
-	return blocks.map(whole).join("");
-}
-function fitStepSummary(blocks, { usedBytes = 0, limitBytes = 1048576 } = {}) {
-	let full = blocks.map(whole), all = full.join(""), budget = limitBytes - 8192 - usedBytes;
-	if (bytes(all) <= budget) return all;
-	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
-	for (let i of order) {
-		let b = blocks[i];
-		if ((cutAt.get(b.section) ?? Infinity) < b.level) continue;
-		let size = bytes(full[i]);
-		b.cut === "keep" || size <= budget ? out[i] = full[i] : (out[i] = cutBlock(b, Math.max(0, budget)), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level))), budget -= bytes(out[i]);
-	}
-	return out.join("");
-}
-function cutBlock(b, budget) {
-	let notice = b.notice ?? "";
-	if (b.cut === "atomic") return notice;
-	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
-	for (let line of b.text.split("\n")) {
-		let withNewline = `${line}\n`, lineBytes = bytes(withNewline);
-		if (usedBytes + lineBytes > room) break;
-		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen);
-	}
-	let head = b.head ?? 0;
-	return head > 0 && count <= head ? notice : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
-}
-function usesLine(actionRepo, actionRef, actionVersion) {
-	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
-}
-function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", actionVersion, runCommand } = {}) {
-	let yaml = `- name: ${stepName}\n`;
-	if (yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", runCommand) {
-		yaml += "    run: |\n";
-		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
-	}
-	return yaml;
-}
-function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
-	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "\n<details>\n";
-	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
-}
-function restrictExampleTruncationNote(artifactAvailable) {
-	return `_…omitted: the example restrict step is too large for GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request to write the rules from" : "set upload_traffic_artifact: true to get every request to write the rules from as a downloadable artifact"}._\n\n`;
-}
-//#endregion
-//#region src/core/lib/report/render/build-example.ts
-const ruleTypeToParam = {
-	HTTPS: "allowed_https_rules",
-	HTTP: "allowed_http_rules",
-	IP: "allowed_ip_rules"
-};
-function buildRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
-	if (!auditedRows || auditedRows.length === 0) return "";
-	let groups = new Map();
-	for (let r of auditedRows) {
-		let param = ruleTypeToParam[r.ruleType];
-		param && (groups.has(param) || groups.set(param, new Set()), groups.get(param).add(`${r.host}:${r.port}`));
-	}
-	if (groups.size === 0) return "";
-	let yaml = exampleStepHead(actionRepo, actionRef, step);
-	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: universal\n";
-	for (let [param, rules] of groups) {
-		yaml += `    ${param}: >-\n`;
-		for (let rule of rules) yaml += `      ${rule}\n`;
-	}
-	return restrictExampleBlock(yaml);
-}
-function communicationTruncationNote(artifactAvailable) {
-	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
-}
-//#endregion
-//#region src/core/lib/report/render/fold-expected-blocked.ts
-function foldExpectedBlockedRows(rows) {
-	let unmatched = [], groups = new Map();
-	for (let row of rows) {
-		if (!row.expected || row.expectedBy === void 0) {
-			unmatched.push(row);
-			continue;
-		}
-		let key = `${row.expectedBy}\t${row.ruleType}\t${row.reason}`, group = groups.get(key);
-		group ? (group.hosts.add(row.host), group.count += row.count) : groups.set(key, {
-			rule: row.expectedBy,
-			ruleType: row.ruleType,
-			reason: row.reason,
-			hosts: new Set([row.host]),
-			count: row.count
-		});
-	}
-	let folded = [...groups.values()].sort(compareGroups).map(toRow);
-	return [...unmatched, ...folded];
-}
-function compareGroups(a, b) {
-	return b.count - a.count || (a.rule < b.rule ? -1 : +(a.rule > b.rule));
-}
-function toRow(group) {
-	return {
-		host: group.rule,
-		port: "-",
-		ruleType: group.ruleType,
-		reason: group.reason,
-		count: group.count,
-		expected: !0,
-		expectedBy: group.rule,
-		display: `${group.rule} (${group.hosts.size} host${group.hosts.size === 1 ? "" : "s"})`
-	};
-}
-//#endregion
-//#region src/core/lib/report/render/markdown-table.ts
-const ALIGN_MARKERS = {
-	left: "---",
-	right: "---:",
-	center: ":---:"
-}, alignMarker = (align) => ALIGN_MARKERS[align ?? "left"];
-function escapeCell(value) {
-	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
-}
-function markdownTable(formats, rows) {
-	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
-	for (let row of rows) {
-		let cells = formats.map((f) => escapeCell(row[f.key]));
-		lines.push(`| ${cells.join(" | ")} |`);
-	}
-	return lines.join("\n");
-}
-//#endregion
-//#region src/core/lib/report/render/host-table.ts
-function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
-	let formats = [{
-		key: "host",
-		title: "Host"
-	}, {
-		key: "ruleType",
-		title: "Rule"
-	}];
-	return showReason && formats.push({
-		key: "reason",
-		title: "Reason"
-	}), formats.push({
-		key: "count",
-		title: "Count",
-		align: "right"
-	}), showExpected && formats.push({
-		key: "expected",
-		title: "Expected",
-		align: "center"
-	}), markdownTable(formats, rows.map((r) => ({
-		host: r.display ?? (r.port === "-" ? r.host : `${r.host}:${r.port}`),
-		ruleType: r.ruleType,
-		reason: r.reason,
-		count: r.count,
-		expected: r.expected ? "✅" : ""
-	})));
-}
-function hostTableTruncationNote(artifactAvailable) {
-	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload_traffic_artifact: true to get every request as a downloadable artifact"}._\n\n`;
-}
-//#endregion
-//#region src/core/lib/report/render/inspect-details.ts
-function renderInspectDetailsBody(timeline, startedAt) {
-	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
-	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n\n`;
-}
-const MARK = {
-	block: "🚫",
-	discovery: "ℹ️",
-	incomplete: "⚠️",
-	failed: "⚠️"
-};
-function renderEvent(event, startedAt) {
-	return `${MARK[event.action] ?? "✅"} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}`;
-}
-const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
-function credentialName(name) {
-	return name.toLowerCase().replace(/[-_]/g, "");
-}
-const PARAM_NAME = /(^|[;?])([^;?=]*)=/g;
-function redactPart(part) {
-	for (let match of part.matchAll(PARAM_NAME)) {
-		if (!CREDENTIAL_PARAMS.has(credentialName(match[2]))) continue;
-		let value = match.index + match[0].length;
-		return value === part.length ? part : `${part.slice(0, value)}***`;
-	}
-	return part;
-}
-function redactCredentialQuery(url) {
-	let start = url.indexOf("?");
-	if (start === -1) return url;
-	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map(redactPart).join("&");
-	return url.slice(0, start + 1) + query + url.slice(end);
-}
-function subject(event) {
-	if (event.queryType !== void 0) return `DNS ${event.queryType} ${event.host}`;
-	if (event.protocol === "dns") return `DNS ${event.host}`;
-	if (event.url === void 0) {
-		let authority = event.port === void 0 ? event.host : `${event.host}:${event.port}`, nameAndPort = `${event.protocol.toUpperCase()} ${authority}`;
-		return event.method === void 0 ? nameAndPort : `${event.method} ${nameAndPort}`;
-	}
-	return `${event.method} ${redactCredentialQuery(event.url)}`;
-}
-function outcome(event) {
-	if (event.action === "block") return event.reason ?? "blocked";
-	if (event.action === "incomplete") return event.reason ?? "no request";
-	if (event.action === "failed") return event.reason ?? "failed";
-	if (event.action === "discovery") return `no data (${event.queryType} is never served)`;
-	let parts = [];
-	return event.status !== void 0 && parts.push(String(event.status)), event.bytes !== void 0 && parts.push(`(${formatBytes(event.bytes)})`), parts.length > 0 ? parts.join(" ") : "resolved";
-}
-function formatTime(epochSeconds, startedAt) {
-	return startedAt === void 0 ? new Date(epochSeconds * 1e3).toISOString().slice(11, 23) + "Z" : formatElapsedVariable(epochSeconds - startedAt);
-}
-function formatBytes(bytes) {
-	return bytes < 1024 ? `${bytes}B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1048576).toFixed(1)}MB`;
-}
-//#endregion
-//#region src/core/lib/report/render/inspect-example.ts
-const METHOD_ORDER = [
-	"GET",
-	"HEAD",
-	"POST",
-	"PUT",
-	"PATCH",
-	"DELETE",
-	"OPTIONS"
-], LITERAL_METHOD = /^[A-Z]+$/, LITERAL_HOST = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
-function parseRequest(request) {
-	if (request.url === void 0 || request.method === void 0 || request.port === void 0) return null;
-	let match = /^(https?):\/\/([^/]*)([^?#]*)/.exec(request.url);
-	if (!match) return null;
-	let [, scheme, authority, target] = match, { host } = splitHostPort(authority), path = target || "/", part = LITERAL_METHOD.test(request.method) ? LITERAL_HOST.test(host) ? path.includes("*") ? "path" : void 0 : "host" : "method";
-	if (part) return {
-		method: request.method,
-		url: `${scheme}://${authority}${path}`,
-		part
-	};
-	let port = String(request.port);
-	return {
-		origin: port === DEFAULT_PORT[scheme] ? `${scheme}://${host}` : `${scheme}://${host}:${port}`,
-		method: request.method,
-		path
-	};
-}
-function commonPrefixSegments(paths) {
-	let split = paths.map((p) => p.split("/").slice(1)), prefix = split[0];
-	for (let segments of split.slice(1)) {
-		let i = 0;
-		for (; i < prefix.length && i < segments.length && prefix[i] === segments[i];) i++;
-		prefix = prefix.slice(0, i);
-	}
-	return prefix;
-}
-function pathPatternsFor(paths) {
-	let distinct = [...new Set(paths)].sort();
-	if (distinct.length === 0) return [];
-	if (distinct.length === 1) return distinct;
-	let prefix = commonPrefixSegments(distinct);
-	if (prefix.length === 0) return ["/**"];
-	let base = `/${prefix.join("/")}`, patterns = [`${base}/**`];
-	return distinct.includes(base) && patterns.unshift(base), patterns;
-}
-function sortMethods(methods) {
-	return [...new Set(methods)].sort((a, b) => {
-		let ai = METHOD_ORDER.indexOf(a), bi = METHOD_ORDER.indexOf(b);
-		return ai !== -1 && bi !== -1 ? ai - bi : ai === -1 ? bi === -1 && a < b ? -1 : 1 : -1;
-	});
-}
-function partitionRequests(requests) {
-	let writable = [], leftOut = new Map();
-	for (let request of requests) {
-		if (request.action === "block") continue;
-		let parsed = parseRequest(request);
-		parsed && ("part" in parsed ? leftOut.set(`${parsed.method} ${parsed.url}`, parsed) : writable.push(parsed));
-	}
-	return {
-		writable,
-		leftOut: [...leftOut.values()]
-	};
-}
-function ruleLinesFrom(requests) {
-	let byOriginMethod = new Map();
-	for (let parsed of requests) {
-		let key = `${parsed.origin}\t${parsed.method}`, group = byOriginMethod.get(key);
-		group ? group.paths.push(parsed.path) : byOriginMethod.set(key, {
-			origin: parsed.origin,
-			method: parsed.method,
-			paths: [parsed.path]
-		});
-	}
-	let byPattern = new Map();
-	for (let { origin, method, paths } of byOriginMethod.values()) for (let pattern of pathPatternsFor(paths)) {
-		let key = `${origin}\t${pattern}`, entry = byPattern.get(key);
-		entry ? entry.methods.push(method) : byPattern.set(key, {
-			origin,
-			pattern,
-			methods: [method]
-		});
-	}
-	return [...byPattern.values()].sort((a, b) => a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : a.pattern < b.pattern ? -1 : 1).map(({ origin, pattern, methods }) => `${sortMethods(methods).join("|")} ${origin}${pattern}`);
-}
-function leftOutSection(leftOut) {
-	let shown = leftOut.slice(0, 20), md = "Left out of the rules above: a rule would read part of each request as a pattern, and so permit more than was sent.\n\n";
-	return md += markdownTable([
-		{
-			key: "method",
-			title: "Method"
-		},
-		{
-			key: "url",
-			title: "URL"
-		},
-		{
-			key: "part",
-			title: "Read as a pattern"
-		}
-	], shown.map((r) => ({ ...r }))), md += "\n\n", leftOut.length > shown.length && (md += `…and ${leftOut.length - shown.length} more, listed in Communication details.\n\n`), md;
-}
-function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedIpRules = [], allowedTlsRules = [], ...step } = {}) {
-	let { writable, leftOut } = partitionRequests(requests ?? []), lines = ruleLinesFrom(writable);
-	if (lines.length === 0 && leftOut.length === 0 && allowedIpRules.length === 0 && allowedTlsRules.length === 0) return "";
-	let yaml = exampleStepHead(actionRepo, actionRef, step);
-	if (yaml += "    proxy_mode: restrict\n", lines.length > 0) {
-		yaml += "    allowed_url_rules: |\n";
-		for (let line of lines) yaml += `      ${line}\n`;
-	}
-	if (allowedTlsRules.length > 0) {
-		yaml += "    allowed_tls_rules: |\n";
-		for (let rule of allowedTlsRules) yaml += `      ${rule}\n`;
-	}
-	if (allowedIpRules.length > 0) {
-		yaml += "    allowed_ip_rules: |\n";
-		for (let rule of allowedIpRules) yaml += `      ${rule}\n`;
-	}
-	return restrictExampleBlock(yaml, {
-		appendix: leftOut.length > 0 ? leftOutSection(leftOut) : void 0,
-		footnote: "Permits exactly what this build did; a versioned or dated URL may drift."
-	});
-}
-//#endregion
-//#region src/core/lib/report/render/render-report-markdown.ts
-const SECTION = "traffic", TRAFFIC_BLOCK = {
-	example: "traffic-example",
-	blocked: "traffic-blocked",
-	failed: "traffic-failed",
-	passed: "traffic-passed",
-	log: "traffic-log"
-};
-Object.fromEntries(Object.values(TRAFFIC_BLOCK).map((id) => [id, 0]));
-function trafficNotice(block, artifactAvailable) {
-	switch (block.id) {
-		case TRAFFIC_BLOCK.example: return restrictExampleTruncationNote(artifactAvailable);
-		case TRAFFIC_BLOCK.log: return communicationTruncationNote(artifactAvailable);
-		case TRAFFIC_BLOCK.blocked:
-		case TRAFFIC_BLOCK.failed:
-		case TRAFFIC_BLOCK.passed: return hostTableTruncationNote(artifactAvailable);
-		default: return;
-	}
-}
-function tableBlock(id, priority, before, table, after) {
-	return {
-		id,
-		priority,
-		level: 2,
-		section: SECTION,
-		text: before + table + after,
-		cut: "lines",
-		head: before.split("\n").length + 1
-	};
-}
-const frame = (text) => ({
-	priority: 0,
-	level: 1,
-	section: SECTION,
-	text,
-	cut: "keep"
-});
-function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", ...step } = {}) {
-	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
-	if (report.logLooksPlausible || (top += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(frame(top)), report.passed.length > 0 && blocks.push(tableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), isAudit && blocks.push({
-		id: TRAFFIC_BLOCK.example,
-		priority: priorities[TRAFFIC_BLOCK.example],
-		level: 2,
-		section: `${SECTION}-example`,
-		cut: "atomic",
-		text: report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
-			...step,
-			allowedIpRules: report.parameters.allowedIpRules,
-			allowedTlsRules: report.parameters.allowedTlsRules
-		}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step)
-	}), report.blocked.length > 0) {
-		let blocked = foldExpectedBlockedRows(report.blocked);
-		blocks.push(tableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${report.passed.length > 0 ? "\n" : ""}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
-			showReason: !0,
-			showExpected
-		}), "\n"));
-	}
-	if (report.failed.length > 0) {
-		let gap = report.passed.length > 0 || report.blocked.length > 0 ? "\n" : "";
-		blocks.push(tableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
-	}
-	let bottom = "";
-	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame("_(no communication)_\n\n"));
-	let details = renderInspectDetailsBody(report.timeline, report.startedAt);
-	return details && blocks.push({
-		id: TRAFFIC_BLOCK.log,
-		priority: priorities[TRAFFIC_BLOCK.log],
-		level: 3,
-		section: SECTION,
-		cut: "lines",
-		open: "\n<details>\n<summary>💬 Communication details</summary>\n\n",
-		text: details,
-		close: "</details>\n"
-	}), report.engine === "universal" && (bottom += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), bottom += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, bottom += "\n<hr>\n", blocks.push(frame(bottom)), blocks;
-}
-//#endregion
 //#region src/lib/report.ts
 const HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
 function createHostDocker() {
@@ -72557,13 +72643,6 @@ function fetchReport(containerName, parameters, proxyEngine) {
 function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
 }
-const TRAFFIC_PRIORITIES = {
-	[TRAFFIC_BLOCK.example]: 1,
-	[TRAFFIC_BLOCK.blocked]: 2,
-	[TRAFFIC_BLOCK.failed]: 3,
-	[TRAFFIC_BLOCK.passed]: 4,
-	[TRAFFIC_BLOCK.log]: 5
-};
 function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
@@ -72588,9 +72667,12 @@ function summarySize(path, fileSize) {
 		return 0;
 	}
 }
-async function writeReportSummary(report, annotation, options, artifactAvailable, env, { appendFile = node_fs.appendFileSync, fileSize = (p) => (0, node_fs.statSync)(p).size, writeSummary = writeStepSummary } = {}) {
+async function writeSummaryBlocks(blocks, env, { fileSize = (p) => (0, node_fs.statSync)(p).size, writeSummary = writeStepSummary } = {}) {
+	await writeSummary(fitStepSummary(blocks, { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) }), env.GITHUB_STEP_SUMMARY);
+}
+async function writeReportSummary(report, annotation, { extraBlocks = [], ...options }, artifactAvailable, env, { appendFile = node_fs.appendFileSync, ...deps } = {}) {
 	let outcomes = computeReportOutcomes(report, options);
-	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeSummary(fitStepSummary(withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)), { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) }), env.GITHUB_STEP_SUMMARY);
+	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)), ...extraBlocks], env, deps);
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts
@@ -72645,12 +72727,13 @@ const realDeps$1 = {
 	fetchReport,
 	readActionVersion,
 	writeReportSummary,
+	writeSummaryBlocks,
 	uploadTrafficArtifact,
 	setTrafficArtifactOutput,
 	readStepLabel
 };
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, failOnBlocked, trafficArtifact, env }, overrides = {}) {
-	let { fetchReport, readActionVersion, writeReportSummary, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
+async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, failOnBlocked, trafficArtifact, env, moreBlocks = () => [] }, overrides = {}) {
+	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
 		...realDeps$1,
 		...overrides
 	}, failClosed = parameters.mode !== "audit" && failOnBlocked, fail = (message) => {
@@ -72670,7 +72753,8 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 				runCommand,
 				actionVersion: readActionVersion(containerName, proxyEngine),
 				stepLabel: readStepLabel(),
-				failOnBlocked
+				failOnBlocked,
+				extraBlocks: moreBlocks(report.startedAt)
 			}, trafficArtifact.upload, env);
 		} catch (e) {
 			fail(`Failed to write the report summary: ${errorMessage(e)}`);
@@ -72680,13 +72764,19 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 		} catch (e) {
 			annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
 		}
+	} else {
+		let blocks = moreBlocks(void 0);
+		if (blocks.length > 0) try {
+			await writeSummaryBlocks(blocks, env);
+		} catch (e) {
+			annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
+		}
 	}
 	try {
 		setTrafficArtifactOutput(artifactName);
 	} catch (e) {
 		fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
 	}
-	return report?.startedAt;
 }
 //#endregion
 //#region src/lib/sudo-preflight.ts
@@ -72743,7 +72833,7 @@ const realDeps = {
 	stopSandboxProxy,
 	runSandboxedCommand,
 	reportStepTraffic,
-	reportStepFilesystemAudit,
+	prepareStepFilesystemAudit,
 	onCancel,
 	saveState,
 	info,
@@ -72769,7 +72859,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditRetentionDays, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, reportStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditRetentionDays, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, prepareStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -72858,33 +72948,34 @@ async function runSandboxStep(env, overrides = {}) {
 			cancel: cancel.signal
 		});
 	} finally {
-		await reportStepFilesystemAudit({
+		let filesystemReport = prepareStepFilesystemAudit({
 			audit,
-			startedAt: await reportStepTraffic({
-				containerName,
-				proxyEngine,
-				parameters: {
-					mode: proxyMode,
-					allowedHttpsRules: httpsRules,
-					allowedHttpRules: httpRules,
-					allowedIpRules: ipRules,
-					allowedTlsRules: tlsRules,
-					allowedUrlRules: urlRules,
-					knownBlockedRules
-				},
-				annotation,
-				actionRepo,
-				actionRef: reportActionRef,
-				runCommand: runInput,
-				failOnBlocked,
-				trafficArtifact,
-				env
-			}),
 			retentionDays: filesystemAuditRetentionDays,
 			containerName,
 			annotation,
 			env
-		}), await stopSandboxProxy({
+		});
+		await reportStepTraffic({
+			containerName,
+			proxyEngine,
+			parameters: {
+				mode: proxyMode,
+				allowedHttpsRules: httpsRules,
+				allowedHttpRules: httpRules,
+				allowedIpRules: ipRules,
+				allowedTlsRules: tlsRules,
+				allowedUrlRules: urlRules,
+				knownBlockedRules
+			},
+			annotation,
+			actionRepo,
+			actionRef: reportActionRef,
+			runCommand: runInput,
+			failOnBlocked,
+			trafficArtifact,
+			env,
+			moreBlocks: filesystemReport.blocks
+		}), await filesystemReport.finish(), await stopSandboxProxy({
 			composeFile,
 			projectName,
 			composeEnv,

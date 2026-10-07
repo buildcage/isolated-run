@@ -23,13 +23,12 @@ import {
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
   renderReportBlocks,
-  TRAFFIC_BLOCK,
   trafficNotice,
-  type TrafficPriorities,
 } from "#core/lib/report/render/render-report-markdown.ts";
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
 import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
+import { TRAFFIC_PRIORITIES } from "./summary-priorities.ts";
 
 export type Report = ReportData;
 export type { ProxyEngine };
@@ -105,16 +104,6 @@ export function readActionVersion(
   return readImageActionVersion(client, containerName, proxyEngine);
 }
 
-// The order the report's parts keep their room in when the summary is too
-// large: the example, then the blocked, failed and allowed tables, then the log.
-const TRAFFIC_PRIORITIES: TrafficPriorities = {
-  [TRAFFIC_BLOCK.example]: 1,
-  [TRAFFIC_BLOCK.blocked]: 2,
-  [TRAFFIC_BLOCK.failed]: 3,
-  [TRAFFIC_BLOCK.passed]: 4,
-  [TRAFFIC_BLOCK.log]: 5,
-};
-
 export interface ComputeReportOutcomesOptions {
   stepLabel?: string;
   actionRepo: string;
@@ -183,6 +172,29 @@ function summarySize(path: string | undefined, fileSize: (p: string) => number):
 }
 
 /**
+ * Fits `blocks` into what is left of the step's Job Summary and writes them.
+ * The summary's destination comes from `env`, as in writeReportSummary.
+ */
+export async function writeSummaryBlocks(
+  blocks: SummaryBlock[],
+  env: NodeJS.ProcessEnv,
+  {
+    fileSize = (p) => statSync(p).size,
+    writeSummary = writeStepSummary,
+  }: Pick<WriteReportSummaryDeps, "fileSize" | "writeSummary"> = {},
+): Promise<void> {
+  await writeSummary(
+    fitStepSummary(blocks, { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) }),
+    env.GITHUB_STEP_SUMMARY,
+  );
+}
+
+export interface WriteReportSummaryOptions extends ComputeReportOutcomesOptions {
+  /** The rest of the step's summary, printed after the report and fitted with it. */
+  extraBlocks?: SummaryBlock[];
+}
+
+/**
  * Side-effecting half of the report step: computeReportOutcomes() decides what
  * to say; this sets the annotations and the exit code, then writes the Job
  * Summary.
@@ -196,14 +208,10 @@ function summarySize(path: string | undefined, fileSize: (p: string) => number):
 export async function writeReportSummary(
   report: Report,
   annotation: Annotation,
-  options: ComputeReportOutcomesOptions,
+  { extraBlocks = [], ...options }: WriteReportSummaryOptions,
   artifactAvailable: boolean,
   env: NodeJS.ProcessEnv,
-  {
-    appendFile = appendFileSync,
-    fileSize = (p) => statSync(p).size,
-    writeSummary = writeStepSummary,
-  }: WriteReportSummaryDeps = {},
+  { appendFile = appendFileSync, ...deps }: WriteReportSummaryDeps = {},
 ): Promise<void> {
   const outcomes = computeReportOutcomes(report, options);
 
@@ -211,12 +219,10 @@ export async function writeReportSummary(
   // cannot take the step's outcome down with it.
   applyOutcomeAnnotations(annotation, outcomes.emissions);
 
-  await writeSummary(
-    fitStepSummary(
-      withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)),
-      { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) },
-    ),
-    env.GITHUB_STEP_SUMMARY,
+  await writeSummaryBlocks(
+    [...withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)), ...extraBlocks],
+    env,
+    deps,
   );
 
   // Debug-only mirror: GITHUB_STEP_SUMMARY is unique per step and can't be

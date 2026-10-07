@@ -730,24 +730,42 @@ repository can fetch it through the API, until it expires.
 
 **Experimental.** `filesystem_audit: record` records every file the isolated step opens, reads,
 writes, moves, deletes, changes the attributes of, and executes, and adds a section to the Job
-Summary with one row per command and path, in the order the rows were first touched:
+Summary: a table of what the step executed, a table of every path it touched with the actions on it,
+and, folded under **📂 Filesystem details**, one row per command and path in the order the rows were
+first touched:
 
 ```
 ### Filesystem audit
-first-last access · R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied
+R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied
 
+#### Executed
+| Path                |
+| ------------------- |
+| /usr/local/bin/node |
+
+#### Accessed paths
+| Access | Path                |
+| ------ | ------------------- |
+| RWD    | ./node_modules/**   |
+| R      | ./package.json      |
+| r!     | /etc/shadow         |
+
+📂 Filesystem details
+first-last access
 00:00.412:           R   node ./package.json
 00:00.415:           r!  node /etc/shadow
 00:00.530-00:41.207: RWD node ./node_modules/**
 ```
 
-Each row names the command (its process name) and combines its flags for that path (`RW` read and
-written). The time is when the command first and last touched it, counted from the proxy's start
-like the communication details (from the first access if that start is unknown); a row touched once
-shows one time. It does not say which action came when, and a file kept open counts only its first
-read and first write, so the last time can be earlier than its last write. The artifact has every
-access in order. An action that only ever failed is lowercase, and one the sandbox refused, for want
-of permission or because the location is read-only, is marked `!`. A directory with many touched
+The executed table lists each program once, in the order it first ran. The accessed-paths table
+combines every command's actions on a path in one row, in path order. Each row of the details names
+the command (its process name) and combines its flags for that path (`RW` read and written). The
+time is when the command first and last touched it, counted from the proxy's start like the
+communication details (from the first access if that start is unknown); a row touched once shows one
+time. It does not say which action came when, and a file kept open counts only its first read and
+first write, so the last time can be earlier than its last write. The artifact has every access in
+order. An action that only ever failed is lowercase, and one the sandbox refused, for want of
+permission or because the location is read-only, is marked `!`. A directory with many touched
 children is shown once as `dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and
 `$HOME` (`~/…`), else absolute. A failed access is recorded under the name the command used, joined
 to the directory a relative name resolved against (its working directory, or the directory it passed
@@ -756,6 +774,11 @@ invisible or control character in a path or command name is shown escaped, as `\
 and a backslash as `\\`. A program the step ran is recorded under the file it resolved to, with
 symlinks followed and a script under its own path rather than its interpreter's; the artifact keeps
 the name it was run by as `name`. The libraries a command loads are left out.
+
+When the step's Job Summary would pass GitHub's size limit, its parts give way in this order: the
+filesystem details, the traffic report's communication log, the accessed-paths table, the executed
+table, then the traffic report's own tables and example. Each is cut at a line boundary with a note
+after what is kept, and the filesystem audit's note names its artifact.
 
 The full record is uploaded as JSON lines in an artifact named `buildcage-filesystem-audit-<id>`,
 with absolute paths; `filesystem_audit_artifact_name` carries its name. Treat it as sensitive, like

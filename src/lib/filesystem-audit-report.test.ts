@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, afterEach, type Mock } from "vitest";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
+import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
 
 import {
-  reportStepFilesystemAudit,
+  prepareStepFilesystemAudit,
   type FilesystemAuditReportDeps,
+  type FilesystemAuditReportOptions,
 } from "./filesystem-audit-report.ts";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -22,7 +24,7 @@ function annotation(): Annotation & { warning: Mock; error: Mock } {
 }
 
 function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
-  deps: Partial<FilesystemAuditReportDeps>;
+  deps: Partial<FilesystemAuditReportDeps> & { summaries: string[] };
   summaries: string[];
   uploads: string[];
   outputs: string[];
@@ -41,10 +43,10 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
     appended,
     writes,
     deps: {
+      summaries,
       readFile: () => JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
       writeFile: (path, content) => void writes.push({ path, content }),
       realpath: (p) => p,
-      writeStepSummary: async (md) => void summaries.push(md),
       uploadArtifact: async (outPath) => {
         uploads.push(outPath);
         return "buildcage-filesystem-audit-deadbeef";
@@ -56,9 +58,21 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
   };
 }
 
-describe("reportStepFilesystemAudit", () => {
+// Renders the blocks as the report step would, collecting their text, then
+// finishes the upload.
+async function reportStepFilesystemAudit(
+  options: FilesystemAuditReportOptions & { startedAt?: number },
+  d: Partial<FilesystemAuditReportDeps> & { summaries?: string[] },
+): Promise<void> {
+  const { summaries = [], ...overrides } = d;
+  const report = prepareStepFilesystemAudit(options, overrides);
+  const blocks = report.blocks(options.startedAt);
+  if (blocks.length > 0) summaries.push(joinSummaryBlocks(blocks));
+  await report.finish();
+}
+
+describe("prepareStepFilesystemAudit", () => {
   const base = {
-    startedAt: undefined,
     retentionDays: 3,
     containerName: "buildcage-proxy-deadbeef",
   };
@@ -142,11 +156,12 @@ describe("reportStepFilesystemAudit", () => {
     const note = annotation();
     const {
       deps: d,
+      summaries,
       uploads,
       outputs,
     } = deps({
-      writeStepSummary: async () => {
-        throw new Error("summary disk full");
+      renderBlocks: () => {
+        throw new Error("bad record");
       },
     });
 
@@ -156,10 +171,35 @@ describe("reportStepFilesystemAudit", () => {
     );
 
     expect(note.warning).toHaveBeenCalledWith(
-      "Failed to write the filesystem audit summary: summary disk full",
+      "Failed to render the filesystem audit summary: bad record",
     );
+    expect(summaries).toEqual([]);
     expect(uploads).toEqual([CLEAN]);
     expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
+  });
+
+  it("gives every block a cut can reach the notice naming the artifact", () => {
+    const { deps: d } = deps({
+      readFile: () =>
+        [
+          { kind: "exec", comm: "node", path: "/usr/bin/node" },
+          { kind: "write", comm: "node", path: "/work/a.txt" },
+        ]
+          .map((r) => JSON.stringify(r))
+          .join("\n"),
+    });
+    const blocks = prepareStepFilesystemAudit(
+      { ...base, audit: AUDIT, annotation: annotation(), env: {} },
+      d,
+    ).blocks(undefined);
+
+    expect(blocks.filter((b) => b.cut !== "keep").map((b) => b.notice)).toEqual(
+      Array(3).fill(
+        "_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; " +
+          "the buildcage-filesystem-audit-deadbeef artifact uploaded for this run has every access._\n\n",
+      ),
+    );
+    expect(blocks.find((b) => b.cut === "keep")?.notice).toBeUndefined();
   });
 
   it("warns and uploads nothing when the stripped copy cannot be written", async () => {

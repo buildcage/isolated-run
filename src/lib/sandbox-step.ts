@@ -31,7 +31,7 @@ import { buildComposeEnv } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
-import { reportStepFilesystemAudit } from "./filesystem-audit-report.ts";
+import { prepareStepFilesystemAudit } from "./filesystem-audit-report.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
@@ -107,7 +107,7 @@ export interface SandboxStepDeps {
   stopSandboxProxy: typeof stopSandboxProxy;
   runSandboxedCommand: typeof runSandboxedCommand;
   reportStepTraffic: typeof reportStepTraffic;
-  reportStepFilesystemAudit: typeof reportStepFilesystemAudit;
+  prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
   /** Calls listener on each signal a cancelled run sends this process, and
    *  returns what stops listening. */
   onCancel: (listener: () => void) => () => void;
@@ -167,7 +167,7 @@ const realDeps: SandboxStepDeps = {
   stopSandboxProxy,
   runSandboxedCommand,
   reportStepTraffic,
-  reportStepFilesystemAudit,
+  prepareStepFilesystemAudit,
   onCancel,
   saveState: core.saveState,
   info: core.info,
@@ -252,7 +252,7 @@ export async function runSandboxStep(
     stopSandboxProxy,
     runSandboxedCommand,
     reportStepTraffic,
-    reportStepFilesystemAudit,
+    prepareStepFilesystemAudit,
     onCancel,
     saveState,
     info,
@@ -436,8 +436,15 @@ export async function runSandboxStep(
       cancel: cancel.signal,
     });
   } finally {
-    // Neither throws, so the teardown and stopListening are always reached.
-    const startedAt = await reportStepTraffic({
+    // None throws, so the teardown and stopListening are always reached.
+    const filesystemReport = prepareStepFilesystemAudit({
+      audit,
+      retentionDays: filesystemAuditRetentionDays,
+      containerName,
+      annotation,
+      env,
+    });
+    await reportStepTraffic({
       containerName,
       proxyEngine,
       parameters: {
@@ -456,15 +463,9 @@ export async function runSandboxStep(
       failOnBlocked,
       trafficArtifact,
       env,
+      moreBlocks: filesystemReport.blocks,
     });
-    await reportStepFilesystemAudit({
-      audit,
-      startedAt,
-      retentionDays: filesystemAuditRetentionDays,
-      containerName,
-      annotation,
-      env,
-    });
+    await filesystemReport.finish();
     await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
     stopListening();
   }

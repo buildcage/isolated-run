@@ -11,6 +11,7 @@ const mocks = {
   fetchReport: vi.fn(),
   readActionVersion: vi.fn(),
   writeReportSummary: vi.fn(),
+  writeSummaryBlocks: vi.fn(),
   uploadTrafficArtifact: vi.fn(),
   setTrafficArtifactOutput: vi.fn(),
   readStepLabel: vi.fn(),
@@ -63,10 +64,47 @@ describe("reportStepTraffic", () => {
     );
   });
 
-  it("returns the proxy's start for the filesystem audit to count from", async () => {
+  it("writes the rest of the summary with the report, timed from the proxy's start", async () => {
     mocks.fetchReport.mockResolvedValue({ engine: "inspect", startedAt: 1_791_244_800 });
+    const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
+    const moreBlocks = vi.fn(() => [block]);
 
-    await expect(reportStepTraffic(options(), deps)).resolves.toBe(1_791_244_800);
+    await reportStepTraffic(options({ moreBlocks }), deps);
+
+    expect(moreBlocks).toHaveBeenCalledWith(1_791_244_800);
+    expect(mocks.writeReportSummary.mock.calls[0][2].extraBlocks).toEqual([block]);
+    expect(mocks.writeSummaryBlocks).not.toHaveBeenCalled();
+  });
+
+  it("writes the rest of the summary alone when there is no report", async () => {
+    mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
+    const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
+    const moreBlocks = vi.fn(() => [block]);
+
+    await reportStepTraffic(options({ moreBlocks }), deps);
+
+    expect(moreBlocks).toHaveBeenCalledWith(undefined);
+    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith([block], {});
+  });
+
+  it("writes nothing when there is neither a report nor anything else", async () => {
+    mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
+
+    await reportStepTraffic(options(), deps);
+
+    expect(mocks.writeSummaryBlocks).not.toHaveBeenCalled();
+  });
+
+  it("only warns when the rest of the summary cannot be written", async () => {
+    mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
+    mocks.writeSummaryBlocks.mockRejectedValue(new Error("summary file is gone"));
+    const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
+
+    await reportStepTraffic(options({ moreBlocks: () => [block] }), deps);
+
+    expect(annotation.warning).toHaveBeenCalledWith(
+      "Failed to write the Job Summary: summary file is gone",
+    );
   });
 
   it("hands the summary the step's own labelling and the inputs that shape it", async () => {
@@ -79,6 +117,7 @@ describe("reportStepTraffic", () => {
       actionVersion: "1.2.3",
       stepLabel: "build",
       failOnBlocked: true,
+      extraBlocks: [],
     });
     expect(mocks.readActionVersion).toHaveBeenCalledWith(CONTAINER, "inspect");
   });
