@@ -73,7 +73,7 @@ examples below use the default `inspect` engine; [Engines](#engines) covers the 
 
 ```yaml
 - name: Discover what the command reaches
-  uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+  uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     proxy_mode: audit # Log every destination, block nothing
     run: |
@@ -95,7 +95,7 @@ Paste that allowlist into the step and switch the mode:
 
 ```yaml
 - name: Run tests with outbound network isolation
-  uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+  uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     proxy_mode: restrict
     allowed_url_rules: |
@@ -286,7 +286,7 @@ interpreter, start `run` with a shebang line; the script is then run as written,
 added:
 
 ```yaml
-- uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+- uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     run: |
       #!/usr/bin/env python3
@@ -303,7 +303,7 @@ Use the step's own `env:` (not a `with:` input) to pass values into `run`, exact
 via `env:` is available there too:
 
 ```yaml
-- uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+- uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   env:
     PR_TITLE: ${{ github.event.pull_request.title }}
   with:
@@ -355,13 +355,17 @@ runner user could not write outside the sandbox stays unwritable inside it.
 `$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` stay read-only in either mode, although they sit
 under `$RUNNER_TEMP`; see [`write_through` paths](./docs/reference.md#write_through-paths).
 
-The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) and this action's own
-checkout stay read-only, since the action runs `docker` and its post script from them after the
-command exits. The exceptions are a `write_through:` entry naming the directory itself, and
-`uses: ./`, whose checkout is the workspace. A command that writes docker config (`docker login`,
-`gcloud auth configure-docker`) needs a step of its own. Either directory reached through a symlink
-the command could replace, such as a `~/.docker` that links elsewhere, fails the step before the
-command runs; point `DOCKER_CONFIG` or the runner's work directory at the real path instead.
+The runner's install directory, the runner's `_actions` directory holding every action's checkout,
+and the docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) stay read-only, since
+the runner and this action run code from them after the command exits. The exceptions are a
+`write_through:` entry naming the directory itself, and `uses: ./`, whose checkout is the
+workspace. A command that writes docker config (`docker login`, `gcloud auth configure-docker`)
+needs a step of its own. On a self-hosted runner whose work directory is inside its install
+directory, as `_work` is by default, the rest of `_work`, such as the tool cache in `_work/_tool`,
+is read-only too; the workspace, `$RUNNER_TEMP` and `write_through:` entries stay writable. A
+directory reached through a symlink the command could replace, such as a `~/.docker` that links
+elsewhere, fails the step before the command runs; point `DOCKER_CONFIG` or the runner's work
+directory at the real path instead.
 Under `write_through: /`, only a symlink in one of the four always-writable paths or another
 `write_through:` entry is refused, though the command could replace one anywhere.
 
@@ -378,7 +382,7 @@ something a later, non-isolated step in the same job would pick up: a rewritten 
 is gone.
 
 ```yaml
-- uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+- uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     filesystem_mode: ephemeral
     write_through: |
@@ -407,7 +411,7 @@ If `run` needs to write somewhere else in `persistent` mode, a build output or a
 directory for example, list it under `write_through:`:
 
 ```yaml
-- uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+- uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     write_through: |
       /opt/some-tool/cache
@@ -609,7 +613,7 @@ reported as blocked; see
   system CA store the command sees holds the CA already, so have Node read that store:
 
   ```yaml
-  - uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+  - uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
     env:
       NODE_OPTIONS: --use-system-ca # Node 22.15+ (23.9+ on 23.x); older Node refuses to start
     with:

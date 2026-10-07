@@ -32,7 +32,8 @@ import { ActionError } from "#core/lib/errors.ts";
  *   CONTAINER_NAME_INVALID            a value read back from GITHUB_STATE isn't a name this action generates
  *   SCRATCH_DIR_UNSAFE                the sudo rm -rf fallback's target isn't owned by the runner uid
  *   HOST_COMMAND_UNPINNABLE           `docker` or `sudo` is only on PATH somewhere the sandboxed command can write
- *   HOST_DIR_UNPROTECTABLE            the docker config directory, this action's checkout or the runner's
+ *   HOST_DIR_UNPROTECTABLE            a directory kept read-only (the docker config, an action checkout, the
+ *                                     runner's install directory) or the runner's
  *                                     GITHUB_ENV/GITHUB_PATH/GITHUB_STATE file goes through a symlink the
  *                                     sandboxed command can replace, or through too many symlinks to resolve
  *   NSS_DATABASE_CA_COPIED            inspect engine only: what the command wrote to the runner's NSS database

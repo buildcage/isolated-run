@@ -60,7 +60,8 @@ jobs:
   # lifecycles) are covered more cheaply in test-integration.yml instead.
   #
   # Verifies audit mode's Job Summary includes the auto-generated
-  # restrict-mode example.
+  # restrict-mode example, and that the sandbox cannot write to the runner's
+  # install directory or the action checkouts.
   test_sandbox_audit_mode:
     needs: changes
     # !cancelled() forces this to evaluate when `changes` is skipped (it runs
@@ -114,6 +115,33 @@ jobs:
         env:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-audit-summary.md
         run: ./test/assert-sandbox-audit.sh
+
+      # The shell's parent is the runner's bin/Runner.Worker.
+      - name: Locate the runner's install directory
+        run: |
+          root=$(dirname "$(dirname "$(readlink -f "/proc/$PPID/exe")")")
+          test -d "$root/externals"
+          echo "The runner is installed in $root (HOME is $HOME)"
+          echo "RUNNER_INSTALL_DIR=$root" >> "$GITHUB_ENV"
+
+      - name: Try to write to the runner and the action checkouts
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+        with:
+          proxy_engine: universal
+          proxy_mode: audit
+          run: |
+            rc=0
+            for dir in "$RUNNER_INSTALL_DIR/externals" "$(dirname "$RUNNER_WORKSPACE")/_actions"; do
+              if touch "$dir/.buildcage-probe" 2>/dev/null; then
+                echo "UNEXPECTED: $dir was writable"
+                rc=1
+              else
+                echo "OK: $dir is read-only"
+              fi
+            done
+            exit $rc
 
       # No cleanup step: the action stops its own proxy container in its
       # finally block.

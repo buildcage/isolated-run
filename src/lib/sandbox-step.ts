@@ -423,6 +423,7 @@ export async function runSandboxStep(
         allowedHttpRules: httpRules,
         allowedIpRules: ipRules,
         allowedTlsRules: tlsRules,
+        allowedUrlRules: urlRules,
         knownBlockedRules,
       },
       annotation,

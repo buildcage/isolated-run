@@ -189,8 +189,9 @@ GitHub-hosted runners). The error names the path the symlink leads to, which can
 The part of an entry that is `$HOME`, `$GITHUB_WORKSPACE` or `$RUNNER_TEMP` is taken at its real
 path, as the persistent writable set is, so only what the entry adds below one is checked. A missing
 entry is created by the runner when it can write the nearest existing parent, and fails the step
-otherwise. A step running concurrently as the same user can still swap a directory for a symlink
-between the check and the mount.
+otherwise. A process an earlier step of this job left running, or another job running as the same
+user on the same machine, can still swap a directory for a symlink between the check and the
+mount; see [Threat model](#threat-model) and [Where it will not run](#where-it-will-not-run).
 
 After the command exits, the step keeps running on the host to read the report and tear the
 sandbox down, so what it runs is kept out of those paths:
@@ -215,13 +216,17 @@ sandbox down, so what it runs is kept out of those paths:
   One the runner user cannot write gets no slot, and the step warns. A symlink on the path leaves it
   unmounted, the path is checked again before anything is written back, and the mount point is
   created and removed as the runner user, never through `sudo`.
-- The docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins,
-  and this action's own checkout, which holds the post step's script, are read-only inside the
-  sandbox, unless `write_through:` names the directory itself or `uses: ./` makes the checkout the
-  workspace. A `write_through:` entry inside one stays writable. The writable directories above
-  them are made mount points, so they cannot be renamed away. A read-only mount protects only a
-  symlink's target, so a symlink on the way to either that sits in a writable path, where the
-  command could replace it with a directory of its own, fails the step before the command runs.
+- The runner's install directory, which holds the `node` later JavaScript actions and post steps
+  run on, the runner's `_actions` directory, which holds every action's checkout, and the docker
+  CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins, are
+  read-only inside the sandbox, unless `write_through:` names the directory itself or `uses: ./`
+  makes this action's checkout the workspace. The workspace, `$RUNNER_TEMP` or a `write_through:`
+  entry inside one stays writable. The writable directories above them are made mount points, so
+  they cannot be renamed away. A read-only mount protects only a symlink's target, so a symlink on
+  the way to any of them that sits in a writable path, where the command could replace it with a
+  directory of its own, fails the step before the command runs. Where the host bind-mounts one of
+  them, or a directory above it, to a second path in a writable directory, that path is read-only
+  too.
 - `run-isolated.sh`, which runs as root, runs from a copy the sandbox cannot see.
 
 A command that writes the docker config (`docker login`, `gcloud auth configure-docker`) therefore
@@ -279,7 +284,11 @@ cancelled step goes the same way: the action catches the runner's signal, `SIGTE
 command's process group, the whole sandbox is killed if it is still running 5 seconds later, and
 then the action writes the traffic report and stops the proxy as usual. If the action is killed
 first, a fallback step reads the container's identity back from job state, stops the proxy and
-deletes the scratch directory. The command's own life is tied to `run-isolated.sh`'s by a two-hop
+deletes the scratch directory, but nothing stops the sandbox. `sudo`, `run-isolated.sh` and the
+command are left running, still confined and with no network once the proxy is gone, and the command
+can go on writing to the host's files while an `if: always()` step or a post step runs: every
+writable path in `persistent` mode, the `write_through:` ones in `ephemeral`. That takes the action
+being killed within those 5 seconds, before it kills the sandbox itself. The command's own life is tied to `run-isolated.sh`'s by a two-hop
 `setpriv --pdeathsig=KILL` chain, so an out-of-memory kill on the script takes the whole sandboxed
 process tree with it rather than leaving orphans.
 
@@ -545,11 +554,13 @@ which leaves the ones it does not: a presigned URL's signature, a token minted w
 or a secret whose URL-encoded form no longer matches what was registered.
 
 The value of a query parameter named `access_key`, `access_token`, `api_key`, `api_token`, `auth`,
-`auth_token`, `client_secret`, `code`, `id_token`, `jwt`, `key`, `passwd`, `password`,
-`private_token`, `pwd`, `refresh_token`, `secret`, `session_token`, `sig`, `signature`,
-`subscription-key`, `token`, `x-amz-security-token`, `x-amz-signature`, `x-api-key` or
-`x-goog-signature` is therefore replaced. The name is matched ignoring case, `-` and `_`, so
-`api_key`, `api-key`, `apiKey` and `APIKEY` are one name:
+`authorization`, `auth_token`, `client_secret`, `code`, `id_token`, `jwt`, `key`, `passwd`,
+`password`, `pat`, `private_token`, `pwd`, `refresh_token`, `secret`, `session`, `session_token`,
+`sig`, `signature`, `subscription-key`, `token`, `x-amz-security-token`, `x-amz-signature`,
+`x-api-key` or `x-goog-signature` is therefore replaced. The name is matched ignoring case, `-` and
+`_`, so `api_key`, `api-key`, `apiKey` and `APIKEY` are one name. A parameter starts after `&`, `;`
+or any `?`, so one in a URL carried inside another's value is replaced too. The replaced value runs
+to the next `&`, so a `;` or `?` inside a secret does not leave the rest of it showing:
 
 ```
 ✅ 00:04.212: GET https://cdn.example.com/x.tar.gz?X-Amz-Signature=***&X-Amz-Expires=3600 -> 200 (4.1MB)
@@ -649,7 +660,9 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   `GITHUB_PATH` and `GITHUB_STATE` are the exception: each is read-only inside the sandbox in either
   mode and mounted over itself, and each directory between it and the outermost path above it whose
   writes persist is made a mount point, so none of them can be renamed or replaced. One reached
-  through a symlink in such a path fails the step.
+  through a symlink in such a path fails the step, and one the host also shows at a second path
+  through a bind mount is read-only there too. The runner's install directory and its
+  `_actions` directory, which later steps and post steps run code from, are protected the same way.
   What `GITHUB_ENV` and `GITHUB_PATH` set reaches every later step and post step at once, and
   `write_through:` can open either by naming it. Only this action's post step reads `GITHUB_STATE`.
   Workflow commands printed to stdout are not stopped: in a job that sets
@@ -715,6 +728,16 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   but the bar here is only an ordinary local account, so the base directory's owner, type and mode
   are checked at startup and the action refuses to proceed rather than reuse an unexpected one.
   Prefer a dedicated, single-tenant runner over relying on that check alone.
+- **Not beside another job running as the same user on the same machine.** This can only happen on
+  a self-hosted runner, for example several runners registered under one account on one machine;
+  a GitHub-hosted runner gives every job a fresh virtual machine. The other job's unwrapped steps
+  can write wherever this step can, so the sandbox does not separate the two jobs. They can also
+  swap a path for a symlink after the step has checked it and before the path is used: a
+  `write_through:` entry before runc mounts it, or, under `inspect`, the NSS database before what
+  the command wrote is written back there. That gains them nothing they could not do as the same
+  user directly. Run each job in an environment of its own, as GitHub-hosted runners do (a
+  self-hosted runner that takes one job and is then replaced), or give each runner its own user
+  account.
 
 ### Rough edges
 
@@ -746,10 +769,10 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   runner applies to this action's state. The post step checks that the container name it reads back
   is shaped like one this action generates, computes its own Compose project name rather than
   trusting a stored value, and reads back which step started that container, recorded as a label
-  from environment the runner sets per step and the command cannot forge. Another Buildcage step's
-  container is left alone. A value that fails either check is treated as absent: cleanup is skipped
-  with an `::error::` rather than guessed at, which leaves the proxy container and its scratch
-  directory behind on a self-hosted runner.
+  from environment the runner sets and the command cannot forge. Another Buildcage step's container
+  is left alone, a concurrent matrix leg's on the same host included. A value that fails either
+  check is treated as absent: cleanup is skipped with an `::error::` rather than guessed at, which
+  leaves the proxy container and its scratch directory behind on a self-hosted runner.
 - **Per-step overhead.** Each step starts and stops its own proxy container rather than sharing one
   across the job, which keeps allowlists independently configurable and the report's
   step-to-container mapping unambiguous, at the cost of startup time on jobs with many isolated
