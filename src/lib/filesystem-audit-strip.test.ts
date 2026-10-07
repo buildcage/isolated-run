@@ -90,44 +90,26 @@ describe("stripSandboxMachinery", () => {
     ]);
   });
 
-  it("walks a process back through its fork record, wherever it falls", () => {
-    // pid 13 was made by 12 but, by CLONE_PARENT or once 12 exits, its other
-    // records name the init as its parent, even one recorded before the fork's.
+  it("keeps a process the step detaches, whatever parent it names", () => {
+    // By CLONE_PARENT, or once its parent exits, a step process can name the
+    // init as its parent.
     const read = { pid: 13, ppid: 10, kind: "read", comm: "node", path: "/home/u/.aws/a" };
     const out = stripSandboxMachinery(
       jsonl(
+        { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
-        { pid: 12, ppid: 11, kind: "fork", comm: "run-script.sh" },
-        read,
-        { pid: 13, ppid: 12, kind: "fork", comm: "node" },
-      ),
-      BASE,
-    );
-    expect(records(out)).toContainEqual(read);
-  });
-
-  it("gives a reused pid the parent its latest fork names", () => {
-    // pid 20 is first a sleep the init starts, then a step process.
-    const read = { pid: 20, ppid: 12, kind: "read", comm: "node", path: "/home/u/.aws/a" };
-    const out = stripSandboxMachinery(
-      jsonl(
-        { pid: 11, ppid: 10, kind: "fork", comm: "env-loader.sh" },
-        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
-        { pid: 20, ppid: 10, kind: "fork", comm: "env-loader.sh" },
-        { pid: 20, ppid: 10, kind: "exec", comm: "sleep", path: "/usr/bin/sleep" },
-        { pid: 12, ppid: 11, kind: "fork", comm: "run-script.sh" },
-        { pid: 20, ppid: 12, kind: "fork", comm: "node" },
+        { pid: 13, ppid: 10, kind: "fork", comm: "node" },
         read,
       ),
       BASE,
     );
-    expect(records(out)).not.toContainEqual(expect.objectContaining({ comm: "sleep" }));
     expect(records(out)).toContainEqual(read);
   });
 
   it("leaves a step command named like a wrapper alone, by its pid and exec path", () => {
     const out = stripSandboxMachinery(
       jsonl(
+        { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
         // The step runs its own files that happen to share buildcage's names.
         { pid: 20, ppid: 11, kind: "exec", comm: "setpriv", path: "/work/tools/setpriv" },
@@ -145,23 +127,18 @@ describe("stripSandboxMachinery", () => {
     ]);
   });
 
-  it("drops what the init starts after the anchor, and keeps a process with no recorded fork", () => {
+  it("drops the init's own records after the anchor, and keeps any process it starts", () => {
+    const sleep = { pid: 30, ppid: 10, kind: "exec", comm: "sleep", path: "/usr/bin/sleep" };
     const out = stripSandboxMachinery(
       jsonl(
-        { pid: 11, ppid: 10, kind: "fork", comm: "env-loader.sh" },
+        { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
         { pid: 10, ppid: 1, kind: "write", comm: "env-loader.sh", path: "/dev/null" },
-        // The sleep the init waits with while a stopped step winds down.
-        { pid: 30, ppid: 10, kind: "fork", comm: "env-loader.sh" },
-        { pid: 30, ppid: 10, kind: "exec", comm: "sleep", path: "/usr/bin/sleep" },
-        // Its fork lost, a process naming the init as its parent stays in.
-        { pid: 31, ppid: 10, kind: "read", comm: "node", path: "/work/a" },
+        sleep,
       ),
       BASE,
     );
-    expect(records(out)).toEqual([
-      { pid: 31, ppid: 10, kind: "read", comm: "node", path: "/work/a" },
-    ]);
+    expect(records(out)).toEqual([sleep]);
   });
 
   it("changes nothing but scratch paths when no step shell is found", () => {
