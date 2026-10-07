@@ -171,10 +171,7 @@ function summarySize(path: string | undefined, fileSize: (p: string) => number):
   }
 }
 
-/**
- * Fits `blocks` into what is left of the step's Job Summary and writes them.
- * The summary's destination comes from `env`, as in writeReportSummary.
- */
+/** Fits `blocks` into what is left of the step's Job Summary and writes them. */
 export async function writeSummaryBlocks(
   blocks: SummaryBlock[],
   env: NodeJS.ProcessEnv,

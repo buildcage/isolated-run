@@ -82,11 +82,9 @@ export interface StepFilesystemAudit {
 const NONE: StepFilesystemAudit = { blocks: () => [] };
 
 /**
- * Read and strip the recording once, upload it, set the output, and return
- * the Job Summary blocks to write with the traffic report. The upload comes
- * first so a cut section's notice can say whether the artifact holds the rest.
- * Never throws: a failure here only warns, so the report and the proxy's
- * teardown that follow are always reached.
+ * Uploads the recording before the Job Summary is written, so a cut section's
+ * notice can say whether the artifact holds the rest. Never throws, so the
+ * report and the proxy's teardown that follow are always reached.
  */
 export async function prepareStepFilesystemAudit(
   { audit, retentionDays, containerName, annotation, env }: FilesystemAuditReportOptions,
@@ -151,12 +149,10 @@ export async function prepareStepFilesystemAudit(
   }
 }
 
-// Uploads the stripped copy, written beside the recording under the scratch
-// base, and returns the artifact's name, or "" when there is none. That
-// directory is ours (not $RUNNER_TEMP or /tmp), so the sandbox cannot reach the
-// copy, and writing a new file leaves the root-owned recording in place: a
-// failed write loses nothing and never uploads the raw. The suffix keeps it off
-// the recording's own name.
+// The stripped copy goes beside the recording under the scratch base, which
+// the sandbox cannot reach (unlike $RUNNER_TEMP or /tmp). Writing a new file
+// leaves the root-owned recording in place, so a failed write never uploads
+// the raw. Returns "" when nothing was uploaded.
 async function upload(
   clean: string,
   outPath: string,

@@ -65,8 +65,7 @@ export interface ReportStepOptions {
   env: NodeJS.ProcessEnv;
   /**
    * The rest of the step's Job Summary, given the proxy's start (undefined
-   * when unknown), so it is fitted into GitHub's limit together with the
-   * report rather than written after it.
+   * when unknown), fitted into GitHub's limit together with the report.
    */
   moreBlocks?: (startedAt: number | undefined) => SummaryBlock[];
 }
@@ -124,8 +123,8 @@ export async function reportStepTraffic(
     fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
   }
 
-  // Written alone when there is no report, or when the report's own write
-  // failed: what the report could not say should not take the rest with it.
+  // Written alone when there is no report or its write failed, so the report
+  // cannot take the rest of the summary down with it.
   const extraBlocks = moreBlocks(report?.startedAt);
   const writeRest = async (): Promise<void> => {
     if (extraBlocks.length === 0) return;
