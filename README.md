@@ -74,7 +74,7 @@ examples below use the default `inspect` engine; [Engines](#engines) covers the 
 
 ```yaml
 - name: Discover what the command reaches
-  uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+  uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     proxy_mode: audit # Log every destination, block nothing
     run: |
@@ -96,7 +96,7 @@ Paste that allowlist into the step and switch the mode:
 
 ```yaml
 - name: Run tests with outbound network isolation
-  uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+  uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     proxy_mode: restrict
     allowed_url_rules: |
@@ -287,7 +287,7 @@ interpreter, start `run` with a shebang line; the script is then run as written,
 added:
 
 ```yaml
-- uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+- uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     run: |
       #!/usr/bin/env python3
@@ -304,7 +304,7 @@ Use the step's own `env:` (not a `with:` input) to pass values into `run`, exact
 via `env:` is available there too:
 
 ```yaml
-- uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+- uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   env:
     PR_TITLE: ${{ github.event.pull_request.title }}
   with:
@@ -383,7 +383,7 @@ something a later, non-isolated step in the same job would pick up: a rewritten 
 is gone.
 
 ```yaml
-- uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+- uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     filesystem_mode: ephemeral
     filesystem_audit: record # record what the command touches while discarding its writes
@@ -413,7 +413,7 @@ If `run` needs to write somewhere else in `persistent` mode, a build output or a
 directory for example, list it under `write_through:`:
 
 ```yaml
-- uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+- uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     write_through: |
       /opt/some-tool/cache
@@ -638,7 +638,7 @@ reported as blocked; see
   system CA store the command sees holds the CA already, so have Node read that store:
 
   ```yaml
-  - uses: buildcage/isolated-run@f7db9490a9a3a7e9f448a27009a73727553cb6a2 # v2.0.4
+  - uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
     env:
       NODE_OPTIONS: --use-system-ca # Node 22.15+ (23.9+ on 23.x); older Node refuses to start
     with:
@@ -655,10 +655,14 @@ reported as blocked; see
 
 ### The Job Summary size cap
 
-GitHub caps a Job Summary at 1 MiB per step and drops the whole summary rather than truncating it,
-so if the timeline would push the step over that limit, that section alone is cut at a line boundary
-and a note takes its place. The report is written to the Job Summary only, so a cut section is
-recovered from the [traffic artifact](./docs/reference.md#traffic-artifact) and nowhere else.
+GitHub caps a Job Summary at 1 MiB per step, counting what the command itself wrote there, and drops
+the whole summary rather than truncating it. When the report would push the step over that limit,
+its parts give way in order: the timeline first, then the allowed, failed and blocked tables, and
+last the `restrict` example. A part that does not fit is cut at a line boundary with a note after
+what is kept, or replaced by the note when nothing of it fits; the example is always replaced whole
+rather than printed in part. Once a table is cut, the timeline is left out with it, under that one
+note. The report is written to the Job Summary only, so what was cut is recovered from the
+[traffic artifact](./docs/reference.md#traffic-artifact) and nowhere else.
 
 ## FAQ
 

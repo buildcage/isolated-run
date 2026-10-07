@@ -6,7 +6,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { createAnnotation } from "#core/lib/actions/annotation.ts";
 import type { Docker } from "#core/lib/docker/client.ts";
+import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { annotateKnownBlocked } from "#core/lib/report/build/aggregate.ts";
+import { hostTableTruncationNote } from "#core/lib/report/render/host-table.ts";
+import { restrictExampleTruncationNote } from "#core/lib/report/render/restrict-example.ts";
 import type { InspectReportData, UniversalReportData } from "#core/lib/report/types.ts";
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
@@ -203,6 +206,58 @@ describe("writeReportSummary", () => {
       ),
     });
   }
+
+  it.each([
+    { held: 1024 * 1024, cut: true },
+    { held: undefined, cut: false }, // unreadable: counted as empty
+  ])(
+    "counts what the summary already holds against the limit ($held bytes)",
+    async ({ held, cut }) => {
+      const written: string[] = [];
+      const timeline: TrafficEvent[] = [
+        { time: 1, action: "allow", protocol: "https", host: "a.example.com", port: 443 },
+      ];
+
+      await writeReportSummary(
+        report({ timeline }),
+        createAnnotation(true),
+        options(),
+        false,
+        { GITHUB_STEP_SUMMARY: "/summary.md" },
+        {
+          fileSize: () => {
+            if (held === undefined) throw new Error("EACCES");
+            return held;
+          },
+          writeSummary: async (markdown) => void written.push(markdown),
+        },
+      );
+
+      expect(written[0].includes("truncated")).toBe(cut);
+    },
+  );
+
+  it("gives the example and each host table its own notice when they are cut", async () => {
+    const written: string[] = [];
+    const passed = [
+      { host: "a.example.com", port: "443", ruleType: "HTTPS", reason: "-", count: 1 },
+    ];
+
+    await writeReportSummary(
+      report({ parameters: reportParams({ mode: "audit" }), passed }),
+      createAnnotation(true),
+      options(),
+      true,
+      { GITHUB_STEP_SUMMARY: "/summary.md" },
+      {
+        fileSize: () => 1024 * 1024,
+        writeSummary: async (markdown) => void written.push(markdown),
+      },
+    );
+
+    expect(written[0]).toContain(restrictExampleTruncationNote(true));
+    expect(written[0]).toContain(hostTableTruncationNote(true));
+  });
 
   it("writes the summary to GITHUB_STEP_SUMMARY", async () => {
     const summaryFile = join(scratchDir, "summary.md");
