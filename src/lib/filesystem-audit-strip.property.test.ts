@@ -27,6 +27,7 @@ const recordArb = fc.record(
     kind: fc.constantFrom("exec", "read", "write", "open", "mmap", "unlink", "rename"),
     comm: fc.constantFrom("buildcage-init", "run-script.sh", "env", "setpriv", "cat", "node"),
     path: pathArb,
+    access: fc.constantFrom("r", "rw", "rt", "rx", "w"),
   },
   { requiredKeys: ["pid", "kind", "comm", "path"] }, // ppid sometimes absent
 );
@@ -54,7 +55,16 @@ describe("stripSandboxMachinery: properties", () => {
     const script = `${BASE}/sandbox-x/exec/run-script.sh`;
     fc.assert(
       fc.property(jsonlArb, (jsonl) => {
-        type R = { pid?: number; ppid?: number; kind?: string; path?: string; failed?: boolean };
+        type R = {
+          pid?: number;
+          ppid?: number;
+          kind?: string;
+          path?: string;
+          access?: string;
+          failed?: boolean;
+        };
+        const readsOnly = (r: R): boolean =>
+          r.kind === "read" || ((r.kind === "open" || r.kind === "mmap") && r.access === "r");
         const recs = jsonl
           .split("\n")
           .filter(Boolean)
@@ -62,12 +72,11 @@ describe("stripSandboxMachinery: properties", () => {
         const boundary = recs.findIndex((r) => r.kind === "exec" && r.path === script);
         fc.pre(boundary >= 0);
         const { pid: shell, ppid: init } = recs[boundary];
-        // The generator gives no access, so only a read counts as reading the script.
         const expected = recs.filter(
           (r, i) =>
             i > boundary &&
             r.pid !== init &&
-            !(r.pid === shell && r.path === script && r.kind === "read" && !r.failed),
+            !(r.pid === shell && r.path === script && !r.failed && readsOnly(r)),
         ).length;
         expect(stripSandboxMachinery(jsonl, BASE).split("\n").filter(Boolean)).toHaveLength(
           expected,

@@ -68331,7 +68331,7 @@ function setFilesystemAuditOutput(name) {
 }
 //#endregion
 //#region src/lib/filesystem-audit-strip.ts
-const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && (r.access ?? "").startsWith("r") && !(r.access ?? "").includes("w");
+const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && r.access === "r";
 function stripSandboxMachinery(jsonl, scratchBase) {
 	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), lines = jsonl.split("\n"), recs = lines.map((line) => {
 		try {
@@ -68601,7 +68601,7 @@ function buildRows(records, prefixes, byCommand) {
 	let nok = new Map(), nfailed = new Map(), nperm = new Map(), nspans = new Map(), mergeInto = (dst, src, keepRelative, srcSpans) => {
 		for (let [key, set] of src) {
 			let p = pathOf(key);
-			if (/^(pipe|socket|anon_inode):/.test(p) || !keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
+			if (!keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
 			let nk = keyOf(commOf(key), normalize$2(p));
 			for (let span of srcSpans?.get(key)?.values() ?? []) widen(nspans, nk, span);
 			let dstSet = dst.get(nk);

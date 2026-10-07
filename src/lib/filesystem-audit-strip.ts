@@ -29,13 +29,10 @@
 
 const SHELL_COMM = "run-script.sh"; // buildcage's step shell (sandbox/oci-files.ts)
 const SHELL_LABEL = "bash";
-// How the shell reads its script; anything else it does to the script, such
-// as opening it to write, is kept.
+// How the shell reads its script. Anything else it does to the script, such
+// as an open that writes or truncates, is kept.
 const readsOnly = (r: { kind?: string; access?: string }): boolean =>
-  r.kind === "read" ||
-  ((r.kind === "open" || r.kind === "mmap") &&
-    (r.access ?? "").startsWith("r") &&
-    !(r.access ?? "").includes("w"));
+  r.kind === "read" || ((r.kind === "open" || r.kind === "mmap") && r.access === "r");
 
 interface Record_ {
   pid?: number;
