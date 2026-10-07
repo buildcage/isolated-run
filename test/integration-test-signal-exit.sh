@@ -130,10 +130,10 @@ if [ "$CODE" != "-1" ]; then
   assert_cancelled_cleanly detached "^sleep 304"
 fi
 
-cancel_step ignores "trap '' TERM; sleep 302" "sleep 302"
+cancel_step ignores "trap '' TERM; sleep 302" "^sleep 302"
 if [ "$CODE" != "-1" ]; then
   check_status "ignores: a command that ignores SIGTERM is killed" "$CODE" 137
-  assert_cancelled_cleanly ignores "sleep 302"
+  assert_cancelled_cleanly ignores "^sleep 302"
 fi
 
 assert_results
