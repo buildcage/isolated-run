@@ -68,9 +68,13 @@ func TestDecodeHeldRefusal(t *testing.T) {
 
 func TestTidy(t *testing.T) {
 	for in, want := range map[string]string{
-		"/a/./b//c/":      "/a/b/c",
+		"/a/./b//c":       "/a/b/c",
 		"/a/l/../b":       "/a/l/../b",
+		"/work/l/":        "/work/l/",
+		"/work/./l/.":     "/work/l/.",
 		"/":               "/",
+		".":               ".",
+		"":                "",
 		"x":               "x",
 		"…/deep/./x":      "…/deep/x",
 		"/var/tmp/b/../x": "/var/tmp/b/../x",

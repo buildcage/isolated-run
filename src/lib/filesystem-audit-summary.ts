@@ -200,9 +200,14 @@ const pathOf = (key: string): string => key.slice(key.indexOf(SEP) + 1);
 
 // Maps each path to the line that stands for it: itself, or an ancestor
 // "dir/**" once that ancestor has fanout or more children that saw events.
+// A path spelled with ".." may lead outside the directories it names, through
+// a symlink, so it is never folded into them or credited to them.
+const climbs = (p: string): boolean => p.split("/").includes("..");
+
 function collapse(paths: Set<string>, fanout: number, keep: Set<string>): Map<string, string> {
   const children = new Map<string, Set<string>>();
   for (const p of paths) {
+    if (climbs(p)) continue;
     const parts = p.split("/");
     for (let i = 1; i < parts.length; i++)
       addFlag(children, parts.slice(0, i).join("/") || "/", parts[i]);
@@ -211,14 +216,15 @@ function collapse(paths: Set<string>, fanout: number, keep: Set<string>): Map<st
   for (const p of paths) {
     const parts = p.split("/");
     let line = p;
-    for (let i = 1; i < parts.length; i++) {
-      const d = parts.slice(0, i).join("/") || "/";
-      // d was added to children in the loop above, so it is always present.
-      if (!keep.has(d) && children.get(d)!.size >= fanout) {
-        line = `${d}/**`;
-        break;
+    if (!climbs(p))
+      for (let i = 1; i < parts.length; i++) {
+        const d = parts.slice(0, i).join("/") || "/";
+        // d was added to children in the loop above, so it is always present.
+        if (!keep.has(d) && children.get(d)!.size >= fanout) {
+          line = `${d}/**`;
+          break;
+        }
       }
-    }
     shown.set(p, line);
   }
   // A bare "dir" that also has a "dir/**" folds into it.
@@ -242,7 +248,7 @@ export function dropWalkedDirs(
   const below = new Map<string, Set<string>>();
   for (const d of lines) {
     const path = base(pathOf(d));
-    if (path === "/") continue; // nothing above the root
+    if (path === "/" || climbs(path)) continue; // nothing above the root, or not known to be
     const comm = commOf(d);
     const flags = [...flagsOf(d)];
     // Each "/" ends an ancestor's path; the one at index 0 is the root.

@@ -62,12 +62,12 @@ describe("stripSandboxMachinery: properties", () => {
         const boundary = recs.findIndex((r) => r.kind === "exec" && r.path === script);
         fc.pre(boundary >= 0);
         const { pid: shell, ppid: init } = recs[boundary];
-        const reads = new Set(["open", "read", "mmap"]);
+        // The generator gives no access, so only a read counts as reading the script.
         const expected = recs.filter(
           (r, i) =>
             i > boundary &&
             r.pid !== init &&
-            !(r.pid === shell && r.path === script && reads.has(String(r.kind)) && !r.failed),
+            !(r.pid === shell && r.path === script && r.kind === "read" && !r.failed),
         ).length;
         expect(stripSandboxMachinery(jsonl, BASE).split("\n").filter(Boolean)).toHaveLength(
           expected,

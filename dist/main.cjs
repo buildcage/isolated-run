@@ -68301,11 +68301,7 @@ function setFilesystemAuditOutput(name) {
 }
 //#endregion
 //#region src/lib/filesystem-audit-strip.ts
-const SHELL_COMM = "run-script.sh", SCRIPT_READS = new Set([
-	"open",
-	"read",
-	"mmap"
-]);
+const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && (r.access ?? "").startsWith("r") && !(r.access ?? "").includes("w");
 function stripSandboxMachinery(jsonl, scratchBase) {
 	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), lines = jsonl.split("\n"), recs = lines.map((line) => {
 		try {
@@ -68329,7 +68325,7 @@ function stripSandboxMachinery(jsonl, scratchBase) {
 			return;
 		}
 		r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
-		let readsScript = r.pid === shell && r.path === script && SCRIPT_READS.has(String(r.kind)) && !r.failed;
+		let readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
 		if (!(shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript))) {
 			if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
 				out.push(JSON.stringify({
@@ -68455,17 +68451,18 @@ function fmtSpan(span, originMs) {
 	let first = formatElapsedVariable((span.first - originMs) / 1e3), last = formatElapsedVariable((span.last - originMs) / 1e3);
 	return first === last ? first : `${first}-${last}`;
 }
-const keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1);
+const keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1), climbs = (p) => p.split("/").includes("..");
 function collapse(paths, fanout, keep) {
 	let children = new Map();
 	for (let p of paths) {
+		if (climbs(p)) continue;
 		let parts = p.split("/");
 		for (let i = 1; i < parts.length; i++) addFlag(children, parts.slice(0, i).join("/") || "/", parts[i]);
 	}
 	let shown = new Map();
 	for (let p of paths) {
 		let parts = p.split("/"), line = p;
-		for (let i = 1; i < parts.length; i++) {
+		if (!climbs(p)) for (let i = 1; i < parts.length; i++) {
 			let d = parts.slice(0, i).join("/") || "/";
 			if (!keep.has(d) && children.get(d).size >= fanout) {
 				line = `${d}/**`;
@@ -68483,7 +68480,7 @@ function dropWalkedDirs(lines, flagsOf) {
 	let base = (p) => p.endsWith("/**") ? p.slice(0, -3) : p, below = new Map();
 	for (let d of lines) {
 		let path = base(pathOf(d));
-		if (path === "/") continue;
+		if (path === "/" || climbs(path)) continue;
 		let comm = commOf(d), flags = [...flagsOf(d)];
 		for (let i = path.lastIndexOf("/"); i >= 0; i = i > 0 ? path.lastIndexOf("/", i - 1) : -1) {
 			let dir = keyOf(comm, i === 0 ? "/" : path.slice(0, i)), acc = below.get(dir);

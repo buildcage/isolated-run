@@ -83,6 +83,19 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["w ln ./b", "w! mkdir ./d", "d! rm /tmp/f"]);
   });
 
+  it("never folds a path spelled with .. into the directories it names", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "read", comm: "cat", path: "/work/l/a" },
+        { kind: "read", comm: "cat", path: "/work/l/b" },
+        { kind: "read", comm: "cat", path: "/work/l/c" },
+        { kind: "chmod", comm: "cat", path: "/work/l/../../etc/passwd", err: 1, failed: true },
+      ),
+      PREFIXES,
+    );
+    expect(lines(md)).toContain("a! cat ./l/../../etc/passwd");
+  });
+
   it("combines an action's flags per path and relativizes", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(

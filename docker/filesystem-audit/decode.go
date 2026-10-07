@@ -110,20 +110,19 @@ func joinBase(name string, rest []byte, has bool, n int, truncated bool) (string
 	return strings.TrimSuffix(base, "/") + "/" + name, rest
 }
 
-// tidy drops the spellings that never change where a path leads: "."
-// segments, repeated slashes and a trailing slash. ".." stays, since through
-// a symlink it leads somewhere a lexical clean would not.
+// tidy drops the spellings that never change where a path leads: a "."
+// segment or a repeated slash before the last name. A trailing "/" or "/."
+// stays, since it makes the kernel follow a final symlink, and ".." stays,
+// since through a symlink it leads somewhere a lexical clean would not.
 func tidy(p string) string {
 	parts := strings.Split(p, "/")
-	kept := parts[:0]
+	kept := make([]string, 0, len(parts))
 	for i, part := range parts {
-		if part == "." || (part == "" && i > 0) {
+		last := i == len(parts)-1
+		if !last && i > 0 && (part == "." || part == "") {
 			continue
 		}
 		kept = append(kept, part)
-	}
-	if len(kept) == 1 && kept[0] == "" {
-		return "/"
 	}
 	return strings.Join(kept, "/")
 }
