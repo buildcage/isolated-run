@@ -107,8 +107,9 @@ export function buildEnvBlob(resolved: Record<string, string>): Buffer {
 // guaranteed present, since the sandbox rootfs is the runner's own `/` and
 // run-isolated.sh already runs there under it. Only builtins, and env (and
 // sleep, in the fallback below) by their absolute paths, so the empty
-// environment runc starts this with is enough. It starts no process once the
-// step runs, so the filesystem audit sees nothing of it but its own accesses.
+// environment runc starts this with is enough. Short of that fallback, it
+// starts no process once the step runs, so the filesystem audit sees nothing
+// of it but its own accesses.
 //
 // Stays PID 1 so the command doesn't have to be: the kernel drops any signal
 // PID 1 has no handler for and hands it every orphan, which a user's command
