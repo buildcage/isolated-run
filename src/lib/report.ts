@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, statSync } from "node:fs";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
@@ -15,8 +15,18 @@ import {
   type OutcomeEmission,
 } from "#core/lib/report/outcome/annotate.ts";
 import { describeReportOutcomes } from "#core/lib/report/outcome/report-outcomes.ts";
-import { renderReportMarkdown } from "#core/lib/report/render/render-report-markdown.ts";
-import { truncateForStepSummary } from "#core/lib/report/render/truncate-communication-details.ts";
+import {
+  fitStepSummary,
+  joinSummaryBlocks,
+  withNotices,
+  type SummaryBlock,
+} from "#core/lib/report/render/fit-step-summary.ts";
+import {
+  renderReportBlocks,
+  TRAFFIC_BLOCK,
+  trafficNotice,
+  type TrafficPriorities,
+} from "#core/lib/report/render/render-report-markdown.ts";
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
 import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
@@ -95,6 +105,16 @@ export function readActionVersion(
   return readImageActionVersion(client, containerName, proxyEngine);
 }
 
+// The order the report's parts keep their room in when the summary is too
+// large: the example, then the blocked, failed and allowed tables, then the log.
+const TRAFFIC_PRIORITIES: TrafficPriorities = {
+  [TRAFFIC_BLOCK.example]: 1,
+  [TRAFFIC_BLOCK.blocked]: 2,
+  [TRAFFIC_BLOCK.failed]: 3,
+  [TRAFFIC_BLOCK.passed]: 4,
+  [TRAFFIC_BLOCK.log]: 5,
+};
+
 export interface ComputeReportOutcomesOptions {
   stepLabel?: string;
   actionRepo: string;
@@ -106,6 +126,8 @@ export interface ComputeReportOutcomesOptions {
 
 export interface ReportOutcomes {
   markdown: string;
+  /** The same report as blocks, for fitting it into the Job Summary. */
+  blocks: SummaryBlock[];
   /** Every annotation this report calls for, in the order to emit them. */
   emissions: OutcomeEmission[];
 }
@@ -129,7 +151,7 @@ export function computeReportOutcomes(
     failOnBlocked: failOnBlocked ?? false,
     engineLabel: "sandbox",
   });
-  const markdown = renderReportMarkdown(report, actionRepo, actionRef, {
+  const blocks = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
     // stepLabel is the untrusted `label` input; the renderer escapes the whole
     // title, so it is folded in raw here rather than pre-sanitized twice.
     title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : undefined,
@@ -138,13 +160,26 @@ export function computeReportOutcomes(
     actionVersion,
   });
 
-  return { markdown, emissions };
+  return { markdown: joinSummaryBlocks(blocks), blocks, emissions };
 }
 
-/** The one write this module makes that isn't the Job Summary; injected for
- *  the same reason the Docker client and the Annotation are. */
+/** The file access this module makes for the Job Summary; injected for the
+ *  same reason the Docker client and the Annotation are. */
 export interface WriteReportSummaryDeps {
   appendFile?: (path: string, content: string) => void;
+  fileSize?: (path: string) => number;
+  writeSummary?: typeof writeStepSummary;
+}
+
+// What the summary already holds counts against GitHub's limit too: the
+// isolated command can append to it. A missing or unreadable file holds nothing.
+function summarySize(path: string | undefined, fileSize: (p: string) => number): number {
+  if (!path) return 0;
+  try {
+    return fileSize(path);
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -164,7 +199,11 @@ export async function writeReportSummary(
   options: ComputeReportOutcomesOptions,
   artifactAvailable: boolean,
   env: NodeJS.ProcessEnv,
-  { appendFile = appendFileSync }: WriteReportSummaryDeps = {},
+  {
+    appendFile = appendFileSync,
+    fileSize = (p) => statSync(p).size,
+    writeSummary = writeStepSummary,
+  }: WriteReportSummaryDeps = {},
 ): Promise<void> {
   const outcomes = computeReportOutcomes(report, options);
 
@@ -172,8 +211,11 @@ export async function writeReportSummary(
   // cannot take the step's outcome down with it.
   applyOutcomeAnnotations(annotation, outcomes.emissions);
 
-  await writeStepSummary(
-    truncateForStepSummary(outcomes.markdown, artifactAvailable),
+  await writeSummary(
+    fitStepSummary(
+      withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)),
+      { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) },
+    ),
     env.GITHUB_STEP_SUMMARY,
   );
 
