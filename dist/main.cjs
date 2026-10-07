@@ -68601,7 +68601,7 @@ function buildRows(records, prefixes, byCommand) {
 	let nok = new Map(), nfailed = new Map(), nperm = new Map(), nspans = new Map(), mergeInto = (dst, src, keepRelative, srcSpans) => {
 		for (let [key, set] of src) {
 			let p = pathOf(key);
-			if (/^(pipe|socket|anon_inode):/.test(p) || !keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
+			if (!keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
 			let nk = keyOf(commOf(key), normalize$2(p));
 			for (let span of srcSpans?.get(key)?.values() ?? []) widen(nspans, nk, span);
 			let dstSet = dst.get(nk);
