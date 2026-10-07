@@ -108,7 +108,7 @@ beforeEach(() => {
   mocks.stopSandboxProxy.mockResolvedValue(undefined);
   mocks.runSandboxedCommand.mockResolvedValue(0);
   mocks.reportStepTraffic.mockResolvedValue(undefined);
-  mocks.prepareStepFilesystemAudit.mockReturnValue({ blocks: () => [], finish: async () => {} });
+  mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks: () => [] });
   mocks.onCancel.mockReturnValue(stopListening);
 });
 
@@ -196,15 +196,16 @@ describe("runSandboxStep", () => {
     );
   });
 
-  it("writes the audit's summary with the traffic report, then uploads it", async () => {
+  it("prepares the audit first and writes its summary with the traffic report", async () => {
     const blocks = vi.fn(() => []);
-    const finish = vi.fn(async () => {});
-    mocks.prepareStepFilesystemAudit.mockReturnValue({ blocks, finish });
+    mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks });
 
     await runSandboxStep(ENV, deps);
 
     expect(mocks.reportStepTraffic.mock.calls[0][0].moreBlocks).toBe(blocks);
-    expect(orderOf(finish)).toBeGreaterThan(orderOf(mocks.reportStepTraffic));
+    expect(orderOf(mocks.prepareStepFilesystemAudit)).toBeLessThan(
+      orderOf(mocks.reportStepTraffic),
+    );
   });
 
   it("leaves the audit off by default", async () => {

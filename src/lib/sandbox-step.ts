@@ -437,7 +437,7 @@ export async function runSandboxStep(
     });
   } finally {
     // None throws, so the teardown and stopListening are always reached.
-    const filesystemReport = prepareStepFilesystemAudit({
+    const filesystemReport = await prepareStepFilesystemAudit({
       audit,
       retentionDays: filesystemAuditRetentionDays,
       containerName,
@@ -465,7 +465,6 @@ export async function runSandboxStep(
       env,
       moreBlocks: filesystemReport.blocks,
     });
-    await filesystemReport.finish();
     await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
     stopListening();
   }

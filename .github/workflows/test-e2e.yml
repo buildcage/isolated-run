@@ -239,8 +239,8 @@ jobs:
           d=$(grep -nE ' D +rm +\./probe2\.txt$' "$f" | head -1 | cut -d: -f1)
           [ -n "$w" ] && [ -n "$m" ] && [ -n "$d" ] && [ "$w" -lt "$m" ] && [ "$m" -lt "$d" ]
           # The tables list what ran and what was touched, across commands.
-          grep -qE '^\| /usr/bin/python3 \|$' "$f"
-          grep -qE '^\| W \| \./subshell\.txt \|$' "$f"
+          grep -qF '| `/usr/bin/python3` |' "$f"
+          grep -qF '| W | `./subshell.txt` |' "$f"
           grep -q '<summary>📂 Filesystem details</summary>' "$f"
           # A subshell's command still counts as the step's.
           grep -qE ' W +touch +\./subshell\.txt$' "$f"

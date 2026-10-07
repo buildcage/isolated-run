@@ -6,23 +6,23 @@
 
 | Path |
 | --- |
-| /usr/bin/cat |
-| /usr/bin/mv |
-| /usr/bin/rm |
+| `/usr/bin/cat` |
+| `/usr/bin/mv` |
+| `/usr/bin/rm` |
 
 #### Accessed paths
 
 | Access | Path |
 | --- | --- |
-| WM | ./probe.txt |
-| D | ./probe2.txt |
-| W | /dev/null |
-| r | /dev/tty |
-| R | /etc/\*\* |
-| R | /proc/filesystems |
-| X | /usr/bin/\*\* |
-| R | /usr/lib/locale/\*\* |
-| R | /usr/lib/x86_64-linux-gnu/\*\* |
+| WM | `./probe.txt` |
+| D | `./probe2.txt` |
+| W | `/dev/null` |
+| r | `/dev/tty` |
+| R | `/etc/**` |
+| R | `/proc/filesystems` |
+| X | `/usr/bin/**` |
+| R | `/usr/lib/locale/**` |
+| R | `/usr/lib/x86_64-linux-gnu/**` |
 
 <details>
 <summary>📂 Filesystem details</summary>

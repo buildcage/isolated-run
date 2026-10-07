@@ -58,17 +58,15 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
   };
 }
 
-// Renders the blocks as the report step would, collecting their text, then
-// finishes the upload.
+// Prepares the audit and renders its blocks as the report step would,
+// collecting their text.
 async function reportStepFilesystemAudit(
   options: FilesystemAuditReportOptions & { startedAt?: number },
   d: Partial<FilesystemAuditReportDeps> & { summaries?: string[] },
 ): Promise<void> {
   const { summaries = [], ...overrides } = d;
-  const report = prepareStepFilesystemAudit(options, overrides);
-  const blocks = report.blocks(options.startedAt);
+  const blocks = (await prepareStepFilesystemAudit(options, overrides)).blocks(options.startedAt);
   if (blocks.length > 0) summaries.push(joinSummaryBlocks(blocks));
-  await report.finish();
 }
 
 describe("prepareStepFilesystemAudit", () => {
@@ -178,7 +176,7 @@ describe("prepareStepFilesystemAudit", () => {
     expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
   });
 
-  it("gives every block a cut can reach the notice naming the artifact", () => {
+  it("gives every block a cut can reach the notice naming the artifact", async () => {
     const { deps: d } = deps({
       readFile: () =>
         [
@@ -188,9 +186,11 @@ describe("prepareStepFilesystemAudit", () => {
           .map((r) => JSON.stringify(r))
           .join("\n"),
     });
-    const blocks = prepareStepFilesystemAudit(
-      { ...base, audit: AUDIT, annotation: annotation(), env: {} },
-      d,
+    const blocks = (
+      await prepareStepFilesystemAudit(
+        { ...base, audit: AUDIT, annotation: annotation(), env: {} },
+        d,
+      )
     ).blocks(undefined);
 
     expect(blocks.filter((b) => b.cut !== "keep").map((b) => b.notice)).toEqual(
@@ -327,5 +327,63 @@ describe("prepareStepFilesystemAudit", () => {
     );
 
     expect(appended).toEqual([]);
+  });
+
+  it("says the rest is not kept when the artifact could not be uploaded", async () => {
+    const { deps: d } = deps({ uploadArtifact: async () => undefined });
+    const blocks = (
+      await prepareStepFilesystemAudit(
+        { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
+        d,
+      )
+    ).blocks(undefined);
+
+    expect(blocks.find((b) => b.cut !== "keep")?.notice).toContain(
+      "the recording could not be uploaded as an artifact, so the rest is not kept",
+    );
+  });
+
+  it("warns, writes nothing and sets an empty output when the recording cannot be read", async () => {
+    const note = annotation();
+    const {
+      deps: d,
+      summaries,
+      uploads,
+      outputs,
+    } = deps({
+      strip: () => {
+        throw new RangeError("Invalid string length");
+      },
+    });
+
+    await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+
+    expect(note.warning).toHaveBeenCalledWith(
+      "Failed to read the filesystem audit recording: Invalid string length",
+    );
+    expect(summaries).toEqual([]);
+    expect(uploads).toEqual([]);
+    expect(outputs).toEqual([""]);
+  });
+
+  it("keeps the summary when the debug copy cannot be written", async () => {
+    vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "1");
+    const { deps: d, summaries } = deps({
+      appendFile: () => {
+        throw new Error("EACCES");
+      },
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: { GITHUB_WORKSPACE: "/work", BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: "/tmp/dbg.md" },
+      },
+      d,
+    );
+
+    expect(summaries[0]).toContain("Filesystem audit");
   });
 });

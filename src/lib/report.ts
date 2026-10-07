@@ -232,8 +232,11 @@ export async function writeReportSummary(
   // rolldown.config.js.
   if (process.env.BUILDCAGE_BUILD_TEST_HOOKS === "1") {
     const debugSummaryFile = env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE;
-    if (debugSummaryFile) {
-      appendFile(debugSummaryFile, outcomes.markdown);
+    // A debug copy that cannot be written must not read as a failed summary.
+    try {
+      if (debugSummaryFile) appendFile(debugSummaryFile, outcomes.markdown);
+    } catch {
+      // ignored: test hooks only
     }
   }
 }

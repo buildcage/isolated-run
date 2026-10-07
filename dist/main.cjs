@@ -68388,24 +68388,6 @@ function formatElapsedFixed(elapsedSeconds) {
 	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
 }
 //#endregion
-//#region src/core/lib/report/render/markdown-table.ts
-const ALIGN_MARKERS = {
-	left: "---",
-	right: "---:",
-	center: ":---:"
-}, alignMarker = (align) => ALIGN_MARKERS[align ?? "left"];
-function escapeCell(value) {
-	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
-}
-function markdownTable(formats, rows) {
-	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
-	for (let row of rows) {
-		let cells = formats.map((f) => escapeCell(row[f.key]));
-		lines.push(`| ${cells.join(" | ")} |`);
-	}
-	return lines.join("\n");
-}
-//#endregion
 //#region src/lib/filesystem-audit-summary.ts
 const LETTER = {
 	read: "R",
@@ -68468,6 +68450,25 @@ function relativize(path, prefixes) {
 		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
 	}
 	return !path.startsWith("/") && !path.startsWith("…/") ? `…/${path}` : path;
+}
+function canonical(path, prefixes) {
+	for (let [first, ...rest] of [prefixes.workspace, prefixes.home]) for (let alt of rest) {
+		if (path === alt) return first;
+		if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
+	}
+	return path;
+}
+function codeCell(text) {
+	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
+	return `${fence}${pad}${text.replace(/\|/g, "\\|")}${pad}${fence}`;
+}
+function markdownRows(header, rows) {
+	let line = (cells) => `| ${cells.join(" | ")} |`;
+	return [
+		line(header),
+		line(header.map(() => "---")),
+		...rows.map(line)
+	].join("\n");
 }
 function sortKey(path) {
 	return path === "." || path.startsWith("./") ? [0, path] : path === "~" || path.startsWith("~/") ? [1, path] : [2, path];
@@ -68576,13 +68577,13 @@ function buildRows(records, prefixes, byCommand) {
 	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), seq = 0;
 	for (let r of records) {
 		if (r.kind === "mmap" && r.access === "x") {
-			r.path && libs.add(r.path);
+			r.path && libs.add(canonical(r.path, prefixes));
 			continue;
 		}
-		r.kind === "exec" && r.path && execd.add(r.path);
+		r.kind === "exec" && r.path && execd.add(canonical(r.path, prefixes));
 		let c = classify(r);
 		if (!c) continue;
-		let key = keyOf(byCommand ? r.comm ?? "" : "", c.path), t = Date.parse(r.t ?? "");
+		let key = keyOf(byCommand ? r.comm ?? "" : "", canonical(c.path, prefixes)), t = Date.parse(r.t ?? "");
 		Number.isNaN(t) || widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++), c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
 	}
 	let libDrop = new Set([
@@ -68642,7 +68643,7 @@ function buildRows(records, prefixes, byCommand) {
 }
 function executedPaths(records, prefixes) {
 	let seen = new Set();
-	for (let r of records) r.kind === "exec" && r.path && seen.add(r.path);
+	for (let r of records) r.kind === "exec" && r.path && seen.add(canonical(r.path, prefixes));
 	return [...seen].map((p) => escapeForDisplay(relativize(p, prefixes)));
 }
 function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
@@ -68664,24 +68665,12 @@ function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
 		cut: "lines",
 		head: 4
 	}), executed = executedPaths(records, prefixes);
-	executed.length > 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, "Executed", markdownTable([{
-		key: "path",
-		title: "Path"
-	}], executed.map((path) => ({ path })))));
+	executed.length > 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, "Executed", markdownRows(["Path"], executed.map((path) => [codeCell(path)]))));
 	let byPath = buildRows(records, prefixes, !1).sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return ca - cb || (pa < pb ? -1 : 1);
 	});
-	blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", markdownTable([{
-		key: "flags",
-		title: "Access"
-	}, {
-		key: "path",
-		title: "Path"
-	}], byPath.map(({ flags, path }) => ({
-		flags,
-		path
-	})))));
+	blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", markdownRows(["Access", "Path"], byPath.map(({ flags, path }) => [flags, codeCell(path)]))));
 	let originMs = prefixes.startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.span?.first ?? Infinity), Infinity) : prefixes.startedAt * 1e3, times = rows.map((r) => fmtSpan(r.span, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
 	return blocks.push({
 		id: FILESYSTEM_BLOCK.log,
@@ -68695,7 +68684,7 @@ function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
 	}), blocks;
 }
 function filesystemTruncationNote(artifactName) {
-	return `_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; the ${artifactName} artifact uploaded for this run has every access._\n\n`;
+	return `_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; ${artifactName ? `the ${artifactName} artifact uploaded for this run has every access` : "the recording could not be uploaded as an artifact, so the rest is not kept"}._\n\n`;
 }
 function usesLine(actionRepo, actionRef, actionVersion) {
 	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
@@ -68776,6 +68765,24 @@ function toRow(group) {
 		expectedBy: group.rule,
 		display: `${group.rule} (${group.hosts.size} host${group.hosts.size === 1 ? "" : "s"})`
 	};
+}
+//#endregion
+//#region src/core/lib/report/render/markdown-table.ts
+const ALIGN_MARKERS = {
+	left: "---",
+	right: "---:",
+	center: ":---:"
+}, alignMarker = (align) => ALIGN_MARKERS[align ?? "left"];
+function escapeCell(value) {
+	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+function markdownTable(formats, rows) {
+	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
+	for (let row of rows) {
+		let cells = formats.map((f) => escapeCell(row[f.key]));
+		lines.push(`| ${cells.join(" | ")} |`);
+	}
+	return lines.join("\n");
 }
 //#endregion
 //#region src/core/lib/report/render/host-table.ts
@@ -69127,6 +69134,7 @@ const TRAFFIC_PRIORITIES = {
 	writeFile: (path, content) => (0, node_fs.writeFileSync)(path, content),
 	realpath: (path) => (0, node_fs.realpathSync)(path),
 	renderBlocks: renderFilesystemAuditBlocks,
+	strip: stripSandboxMachinery,
 	uploadArtifact: uploadFilesystemAuditArtifact,
 	setOutput: setFilesystemAuditOutput,
 	appendFile: (path, content) => (0, node_fs.appendFileSync)(path, content)
@@ -69140,40 +69148,46 @@ function prefixes(value, realpath) {
 	} catch {}
 	return out;
 }
-function prepareStepFilesystemAudit({ audit, retentionDays, containerName, annotation, env }, overrides = {}) {
+const NONE = { blocks: () => [] };
+async function prepareStepFilesystemAudit({ audit, retentionDays, containerName, annotation, env }, overrides = {}) {
 	let deps = {
 		...realDeps$3,
 		...overrides
-	}, raw = audit && readOptional(audit.outPath, deps.readFile);
-	if (!audit || raw === void 0) return {
-		blocks: () => [],
-		finish: async () => deps.setOutput("")
-	};
-	let clean = stripSandboxMachinery(raw, (0, node_path.dirname)(audit.outPath)), notice = filesystemTruncationNote(filesystemAuditArtifactName(containerName));
-	return {
-		blocks: (startedAt) => {
+	}, artifactName = "";
+	try {
+		let raw = audit && readOptional(audit.outPath, deps.readFile);
+		if (!audit || raw === void 0) return NONE;
+		let clean = deps.strip(raw, (0, node_path.dirname)(audit.outPath));
+		artifactName = await upload(clean, audit.outPath, retentionDays, containerName, annotation, deps);
+		let notice = filesystemTruncationNote(artifactName || void 0);
+		return { blocks: (startedAt) => {
+			let rendered;
 			try {
-				let rendered = deps.renderBlocks(clean, {
+				rendered = deps.renderBlocks(clean, {
 					workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
 					home: prefixes(env.HOME, deps.realpath),
 					startedAt
 				}, FILESYSTEM_PRIORITIES);
-				return deps.appendFile, joinSummaryBlocks(rendered), withNotices(rendered, () => notice);
 			} catch (e) {
 				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
 			}
-		},
-		finish: async () => {
-			let cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl"), wrote = !1;
-			try {
-				deps.writeFile(cleanPath, clean), wrote = !0;
-			} catch (e) {
-				annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
-			}
-			let artifactName = "";
-			wrote && clean && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? ""), deps.setOutput(artifactName);
-		}
-	};
+			return deps.appendFile, joinSummaryBlocks(rendered), withNotices(rendered, () => notice);
+		} };
+	} catch (e) {
+		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), NONE;
+	} finally {
+		deps.setOutput(artifactName);
+	}
+}
+async function upload(clean, outPath, retentionDays, containerName, annotation, deps) {
+	if (!clean) return "";
+	let cleanPath = outPath.replace(/\.jsonl$/, ".step.jsonl");
+	try {
+		deps.writeFile(cleanPath, clean);
+	} catch (e) {
+		return annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`), "";
+	}
+	return await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "";
 }
 function readOptional(path, readFile) {
 	try {
@@ -72744,8 +72758,15 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	} catch (e) {
 		fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
 	}
-	let artifactName = "";
-	if (report) {
+	let extraBlocks = moreBlocks(report?.startedAt), writeRest = async () => {
+		if (extraBlocks.length !== 0) try {
+			await writeSummaryBlocks(extraBlocks, env);
+		} catch (e) {
+			annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
+		}
+	}, artifactName = "";
+	if (!report) await writeRest();
+	else {
 		try {
 			await writeReportSummary(report, annotation, {
 				actionRepo,
@@ -72754,22 +72775,15 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 				actionVersion: readActionVersion(containerName, proxyEngine),
 				stepLabel: readStepLabel(),
 				failOnBlocked,
-				extraBlocks: moreBlocks(report.startedAt)
+				extraBlocks
 			}, trafficArtifact.upload, env);
 		} catch (e) {
-			fail(`Failed to write the report summary: ${errorMessage(e)}`);
+			fail(`Failed to write the report summary: ${errorMessage(e)}`), await writeRest();
 		}
 		if (trafficArtifact.upload) try {
 			artifactName = await uploadTrafficArtifact(report, containerName, trafficArtifact.retentionDays, annotation) ?? "";
 		} catch (e) {
 			annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
-		}
-	} else {
-		let blocks = moreBlocks(void 0);
-		if (blocks.length > 0) try {
-			await writeSummaryBlocks(blocks, env);
-		} catch (e) {
-			annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
 		}
 	}
 	try {
@@ -72948,7 +72962,7 @@ async function runSandboxStep(env, overrides = {}) {
 			cancel: cancel.signal
 		});
 	} finally {
-		let filesystemReport = prepareStepFilesystemAudit({
+		let filesystemReport = await prepareStepFilesystemAudit({
 			audit,
 			retentionDays: filesystemAuditRetentionDays,
 			containerName,
@@ -72975,7 +72989,7 @@ async function runSandboxStep(env, overrides = {}) {
 			trafficArtifact,
 			env,
 			moreBlocks: filesystemReport.blocks
-		}), await filesystemReport.finish(), await stopSandboxProxy({
+		}), await stopSandboxProxy({
 			composeFile,
 			projectName,
 			composeEnv,

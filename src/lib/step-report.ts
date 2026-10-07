@@ -124,16 +124,21 @@ export async function reportStepTraffic(
     fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
   }
 
+  // Written alone when there is no report, or when the report's own write
+  // failed: what the report could not say should not take the rest with it.
+  const extraBlocks = moreBlocks(report?.startedAt);
+  const writeRest = async (): Promise<void> => {
+    if (extraBlocks.length === 0) return;
+    try {
+      await writeSummaryBlocks(extraBlocks, env);
+    } catch (e) {
+      annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
+    }
+  };
+
   let artifactName = "";
   if (!report) {
-    const blocks = moreBlocks(undefined);
-    if (blocks.length > 0) {
-      try {
-        await writeSummaryBlocks(blocks, env);
-      } catch (e) {
-        annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
-      }
-    }
+    await writeRest();
   } else {
     try {
       await writeReportSummary(
@@ -146,13 +151,14 @@ export async function reportStepTraffic(
           actionVersion: readActionVersion(containerName, proxyEngine),
           stepLabel: readStepLabel(),
           failOnBlocked,
-          extraBlocks: moreBlocks(report.startedAt),
+          extraBlocks,
         },
         trafficArtifact.upload,
         env,
       );
     } catch (e) {
       fail(`Failed to write the report summary: ${errorMessage(e)}`);
+      await writeRest();
     }
 
     // Uploaded even when the summary failed: the command can delete the

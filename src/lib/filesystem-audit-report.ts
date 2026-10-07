@@ -10,7 +10,6 @@ import {
 } from "#core/lib/report/render/fit-step-summary.ts";
 
 import {
-  filesystemAuditArtifactName,
   setFilesystemAuditOutput,
   uploadFilesystemAuditArtifact,
 } from "./filesystem-audit-artifact.ts";
@@ -36,6 +35,7 @@ export interface FilesystemAuditReportDeps {
   writeFile: (path: string, content: string) => void;
   realpath: (path: string) => string;
   renderBlocks: typeof renderFilesystemAuditBlocks;
+  strip: typeof stripSandboxMachinery;
   uploadArtifact: typeof uploadFilesystemAuditArtifact;
   setOutput: typeof setFilesystemAuditOutput;
   appendFile: (path: string, content: string) => void;
@@ -49,6 +49,7 @@ const realDeps: FilesystemAuditReportDeps = {
   writeFile: (path, content) => writeFileSync(path, content),
   realpath: (path) => realpathSync(path),
   renderBlocks: renderFilesystemAuditBlocks,
+  strip: stripSandboxMachinery,
   uploadArtifact: uploadFilesystemAuditArtifact,
   setOutput: setFilesystemAuditOutput,
   appendFile: (path, content) => appendFileSync(path, content),
@@ -76,76 +77,97 @@ export interface StepFilesystemAudit {
    * nothing was recorded or the recording could not be rendered.
    */
   blocks: (startedAt: number | undefined) => SummaryBlock[];
-  /** Uploads the recording and sets the output. Never throws. */
-  finish: () => Promise<void>;
 }
 
+const NONE: StepFilesystemAudit = { blocks: () => [] };
+
 /**
- * Read and strip the recording once, for the Job Summary blocks and the
- * artifact. Never throws: a failure here only warns, and finish still sets the
- * output so a later step can read it.
+ * Read and strip the recording once, upload it, set the output, and return
+ * the Job Summary blocks to write with the traffic report. The upload comes
+ * first so a cut section's notice can say whether the artifact holds the rest.
+ * Never throws: a failure here only warns, so the report and the proxy's
+ * teardown that follow are always reached.
  */
-export function prepareStepFilesystemAudit(
+export async function prepareStepFilesystemAudit(
   { audit, retentionDays, containerName, annotation, env }: FilesystemAuditReportOptions,
   overrides: Partial<FilesystemAuditReportDeps> = {},
-): StepFilesystemAudit {
+): Promise<StepFilesystemAudit> {
   const deps = { ...realDeps, ...overrides };
-  const raw = audit && readOptional(audit.outPath, deps.readFile);
-  // An empty recording is still reported: a tracer that stops cleanly always
-  // writes an end line, so an empty one was cut short and gets the warning.
-  if (!audit || raw === undefined) {
-    return { blocks: () => [], finish: async () => deps.setOutput("") };
-  }
-  // The recording sits under the scratch base (see sandbox/filesystem-audit.ts),
-  // next to the exec wrapper's own files, so its directory is the one holding
-  // buildcage's own machinery. Strip that out once and feed the result to both
-  // the summary and the uploaded artifact.
-  const clean = stripSandboxMachinery(raw, dirname(audit.outPath));
-  const notice = filesystemTruncationNote(filesystemAuditArtifactName(containerName));
+  let artifactName = "";
+  try {
+    const raw = audit && readOptional(audit.outPath, deps.readFile);
+    // An empty recording is still reported: a tracer that stops cleanly always
+    // writes an end line, so an empty one was cut short and gets the warning.
+    if (!audit || raw === undefined) return NONE;
+    // The recording sits under the scratch base (see sandbox/filesystem-audit.ts),
+    // next to the exec wrapper's own files, so its directory is the one holding
+    // buildcage's own machinery. Strip that out once and feed the result to
+    // both the summary and the uploaded artifact.
+    const clean = deps.strip(raw, dirname(audit.outPath));
+    artifactName = await upload(
+      clean,
+      audit.outPath,
+      retentionDays,
+      containerName,
+      annotation,
+      deps,
+    );
+    const notice = filesystemTruncationNote(artifactName || undefined);
 
-  // The summary and the upload are independent: a render failure (e.g. a
-  // line the tracer left truncated) must not also drop the artifact, which is
-  // most wanted when the recording is incomplete.
-  const blocks = (startedAt: number | undefined): SummaryBlock[] => {
-    try {
-      const rendered = deps.renderBlocks(
-        clean,
-        {
-          workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-          home: prefixes(env.HOME, deps.realpath),
-          startedAt,
-        },
-        FILESYSTEM_PRIORITIES,
-      );
+    // The summary and the upload are independent: a render failure (e.g. a
+    // line the tracer left truncated) must not also drop the artifact, which
+    // is most wanted when the recording is incomplete.
+    const blocks = (startedAt: number | undefined): SummaryBlock[] => {
+      let rendered: SummaryBlock[];
+      try {
+        rendered = deps.renderBlocks(
+          clean,
+          {
+            workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
+            home: prefixes(env.HOME, deps.realpath),
+            startedAt,
+          },
+          FILESYSTEM_PRIORITIES,
+        );
+      } catch (e) {
+        annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
+        return [];
+      }
       mirrorForDebug(env, deps.appendFile, raw, joinSummaryBlocks(rendered));
       return withNotices(rendered, () => notice);
-    } catch (e) {
-      annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
-      return [];
-    }
-  };
-
-  const finish = async (): Promise<void> => {
-    // Upload the stripped copy, written beside the recording under the scratch
-    // base. That directory is ours (not $RUNNER_TEMP or /tmp), so the sandbox
-    // cannot reach the copy, and writing a new file leaves the root-owned
-    // recording in place: a failed write loses nothing and never uploads the
-    // raw. The suffix keeps it off the recording's own name.
-    const cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl");
-    let wrote = false;
-    try {
-      deps.writeFile(cleanPath, clean);
-      wrote = true;
-    } catch (e) {
-      annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
-    }
-    let artifactName = "";
-    if (wrote && clean)
-      artifactName =
-        (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
+    };
+    return { blocks };
+  } catch (e) {
+    annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
+    return NONE;
+  } finally {
     deps.setOutput(artifactName);
-  };
-  return { blocks, finish };
+  }
+}
+
+// Uploads the stripped copy, written beside the recording under the scratch
+// base, and returns the artifact's name, or "" when there is none. That
+// directory is ours (not $RUNNER_TEMP or /tmp), so the sandbox cannot reach the
+// copy, and writing a new file leaves the root-owned recording in place: a
+// failed write loses nothing and never uploads the raw. The suffix keeps it off
+// the recording's own name.
+async function upload(
+  clean: string,
+  outPath: string,
+  retentionDays: number | undefined,
+  containerName: string,
+  annotation: Annotation,
+  deps: FilesystemAuditReportDeps,
+): Promise<string> {
+  if (!clean) return "";
+  const cleanPath = outPath.replace(/\.jsonl$/, ".step.jsonl");
+  try {
+    deps.writeFile(cleanPath, clean);
+  } catch (e) {
+    annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
+    return "";
+  }
+  return (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
 }
 
 function readOptional(path: string, readFile: (p: string) => string): string | undefined {
@@ -168,7 +190,12 @@ function mirrorForDebug(
   summary: string,
 ): void {
   if (process.env.BUILDCAGE_BUILD_TEST_HOOKS !== "1") return;
-  if (env.BUILDCAGE_RUN_DEBUG_RAW_FILE) appendFile(env.BUILDCAGE_RUN_DEBUG_RAW_FILE, raw);
-  if (env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE)
-    appendFile(env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE, summary);
+  // A debug copy that cannot be written must not cost the real summary.
+  try {
+    if (env.BUILDCAGE_RUN_DEBUG_RAW_FILE) appendFile(env.BUILDCAGE_RUN_DEBUG_RAW_FILE, raw);
+    if (env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE)
+      appendFile(env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE, summary);
+  } catch {
+    // ignored: test hooks only
+  }
 }

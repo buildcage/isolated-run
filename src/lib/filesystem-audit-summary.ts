@@ -8,7 +8,6 @@
 
 import { formatElapsedVariable } from "#core/lib/report/elapsed-time.ts";
 import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
-import { markdownTable } from "#core/lib/report/render/markdown-table.ts";
 
 interface AuditRecord {
   t?: string;
@@ -136,6 +135,33 @@ function relativize(path: string, prefixes: SummaryOptions): string {
   // (its fd was closed meanwhile); like a truncated walk, its start is unknown.
   if (!path.startsWith("/") && !path.startsWith("…/")) return `…/${path}`;
   return path;
+}
+
+// The workspace and $HOME may each be reached by two spellings (as given and
+// with symlinks resolved); fold a path onto the first so one file keys once.
+function canonical(path: string, prefixes: SummaryOptions): string {
+  for (const [first, ...rest] of [prefixes.workspace, prefixes.home]) {
+    for (const alt of rest) {
+      if (path === alt) return first;
+      if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
+    }
+  }
+  return path;
+}
+
+// A cell holding a path as a code span, so Markdown in a name the step chose
+// (an entity, ~~, a link) prints as itself. GFM still splits a table row on a
+// `|` inside a code span, so that alone is escaped.
+function codeCell(text: string): string {
+  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longest + 1);
+  const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
+  return `${fence}${pad}${text.replace(/\|/g, "\\|")}${pad}${fence}`;
+}
+
+function markdownRows(header: string[], rows: string[][]): string {
+  const line = (cells: string[]): string => `| ${cells.join(" | ")} |`;
+  return [line(header), line(header.map(() => "---")), ...rows.map(line)].join("\n");
 }
 
 // Workspace-relative paths first, then $HOME, then the rest.
@@ -353,13 +379,13 @@ function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: 
   let seq = 0;
   for (const r of records) {
     if (r.kind === "mmap" && r.access === "x") {
-      if (r.path) libs.add(r.path);
+      if (r.path) libs.add(canonical(r.path, prefixes));
       continue;
     }
-    if (r.kind === "exec" && r.path) execd.add(r.path);
+    if (r.kind === "exec" && r.path) execd.add(canonical(r.path, prefixes));
     const c = classify(r);
     if (!c) continue;
-    const key = keyOf(byCommand ? (r.comm ?? "") : "", c.path);
+    const key = keyOf(byCommand ? (r.comm ?? "") : "", canonical(c.path, prefixes));
     const t = Date.parse(r.t ?? "");
     if (!Number.isNaN(t)) {
       widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++);
@@ -485,7 +511,7 @@ function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: 
 // The step's own executables, each once, in the order they were first run.
 function executedPaths(records: AuditRecord[], prefixes: SummaryOptions): string[] {
   const seen = new Set<string>();
-  for (const r of records) if (r.kind === "exec" && r.path) seen.add(r.path);
+  for (const r of records) if (r.kind === "exec" && r.path) seen.add(canonical(r.path, prefixes));
   return [...seen].map((p) => escapeForDisplay(relativize(p, prefixes)));
 }
 
@@ -529,9 +555,9 @@ export function renderFilesystemAuditBlocks(
       table(
         FILESYSTEM_BLOCK.executed,
         "Executed",
-        markdownTable(
-          [{ key: "path", title: "Path" }],
-          executed.map((path) => ({ path })),
+        markdownRows(
+          ["Path"],
+          executed.map((path) => [codeCell(path)]),
         ),
       ),
     );
@@ -546,12 +572,9 @@ export function renderFilesystemAuditBlocks(
     table(
       FILESYSTEM_BLOCK.paths,
       "Accessed paths",
-      markdownTable(
-        [
-          { key: "flags", title: "Access" },
-          { key: "path", title: "Path" },
-        ],
-        byPath.map(({ flags, path }) => ({ flags, path })),
+      markdownRows(
+        ["Access", "Path"],
+        byPath.map(({ flags, path }) => [flags, codeCell(path)]),
       ),
     ),
   );
@@ -594,7 +617,13 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
   return joinSummaryBlocks(renderFilesystemAuditBlocks(jsonl, prefixes, JOINED));
 }
 
-/** What the summary says where the Job Summary's size limit cut it. */
-export function filesystemTruncationNote(artifactName: string): string {
-  return `_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; the ${artifactName} artifact uploaded for this run has every access._\n\n`;
+/**
+ * What the summary says where the Job Summary's size limit cut it: where the
+ * rest is, or that it is nowhere when the artifact could not be uploaded.
+ */
+export function filesystemTruncationNote(artifactName: string | undefined): string {
+  const rest = artifactName
+    ? `the ${artifactName} artifact uploaded for this run has every access`
+    : "the recording could not be uploaded as an artifact, so the rest is not kept";
+  return `_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; ${rest}._\n\n`;
 }

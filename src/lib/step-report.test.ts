@@ -87,6 +87,15 @@ describe("reportStepTraffic", () => {
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith([block], {});
   });
 
+  it("writes the rest of the summary alone when the report's own write fails", async () => {
+    mocks.writeReportSummary.mockRejectedValue(new Error("label read failed"));
+    const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
+
+    await reportStepTraffic(options({ moreBlocks: () => [block] }), deps);
+
+    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith([block], {});
+  });
+
   it("writes nothing when there is neither a report nor anything else", async () => {
     mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
 

@@ -338,6 +338,26 @@ describe("writeReportSummary", () => {
     expect(appendFile.mock.calls[0][1]).toContain("Outbound Traffic Report");
   });
 
+  it("still succeeds when the debug copy cannot be written", async () => {
+    vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "1");
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await expect(
+      writeReportSummary(
+        report(),
+        createAnnotation(false),
+        options(),
+        false,
+        { BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: "/tmp/debug-summary.md" },
+        {
+          appendFile: () => {
+            throw new Error("EACCES");
+          },
+        },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it("writes no mirror in a normal build, whatever the runtime env says", async () => {
     vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "");
     vi.spyOn(console, "log").mockImplementation(() => {});
