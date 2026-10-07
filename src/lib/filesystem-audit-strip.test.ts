@@ -73,7 +73,7 @@ describe("stripSandboxMachinery", () => {
   it("keeps the first run-script.sh exec as the anchor when the step runs it again", () => {
     const out = stripSandboxMachinery(
       jsonl(
-        { pid: 10, ppid: 1, kind: "read", comm: "env-loader.sh", path: "/etc/passwd" },
+        { pid: 10, ppid: 1, kind: "read", comm: "buildcage-init", path: "/etc/passwd" },
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
         { pid: 12, ppid: 11, kind: "fork", comm: "run-script.sh" },
         { pid: 12, ppid: 11, kind: "read", comm: "node", path: "/home/u/.aws/credentials" },
@@ -141,7 +141,7 @@ describe("stripSandboxMachinery", () => {
       jsonl(
         { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
-        { pid: 10, ppid: 1, kind: "write", comm: "env-loader.sh", path: "/dev/null" },
+        { pid: 10, ppid: 1, kind: "write", comm: "buildcage-init", path: "/dev/null" },
         sleep,
       ),
       BASE,
