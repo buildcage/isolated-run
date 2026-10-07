@@ -264,24 +264,25 @@ payload for a later step. See [Filesystem access](../README.md#filesystem-access
   else the runner sets still arrives: this is a named list rather than a sweep over `ACTIONS_*`,
   which would rest on guessing which of them a `run:` step legitimately sees.
 - **A command that is not PID 1.** The kernel drops any signal a PID namespace's PID 1 has no
-  handler for, SIGKILL from inside included, and hands it every orphan to reap. The loader below
+  handler for, SIGKILL from inside included, and hands it every orphan to reap. `buildcage-init`
   stays PID 1 and runs the command as its child, so `kill -TERM $$` works and a python or node
-  shebang leaves no zombies. It forwards `SIGTERM`, `SIGINT`, `SIGHUP`, `SIGQUIT`, `SIGUSR1` and
-  `SIGUSR2` to the command's process group, as a terminal's Ctrl-C does, so what the command runs
-  gets them too. It exits with the command's status, `128+n` if a signal killed it. After
-  forwarding `SIGTERM` or `SIGINT`, it first waits for the rest of that group to exit.
+  shebang leaves no zombies. It forwards `SIGTERM` and `SIGINT` to every other process in the
+  sandbox, one the command moved out of its process group with `setsid` included, and `SIGHUP`,
+  `SIGQUIT`, `SIGUSR1` and `SIGUSR2` to that process group, so what the command runs gets them
+  too. It exits with the command's status, `128+n` if a signal killed it. After forwarding
+  `SIGTERM` or `SIGINT`, it first waits for all of them to exit.
 
 What is left is piped to the sandboxed process over stdin as NUL-delimited `KEY=VALUE` records,
-rather than written into `config.json`, so an `env:` secret never reaches the runner's disk. The
-loader hands them to the run script through `env -i` instead of exporting them itself, so a name
-bash reserves (`UID`, `SECONDS`) arrives as set, as it does in an unwrapped `run:` step.
+rather than written into `config.json`, so an `env:` secret never reaches the runner's disk.
+`buildcage-init` hands them to the run script through `env -i` instead of exporting them itself, so
+a name bash reserves (`UID`, `SECONDS`) arrives as set, as it does in an unwrapped `run:` step.
 
 ### When the step ends
 
 An exit trap tears down the container, the rootfs bind-mount, the veth and the network namespace,
 and force-detaches anything still mounted under the run's scratch directory before deleting it. A
-cancelled step goes the same way: the action catches the runner's signal, `SIGTERM` reaches the
-command's process group, the whole sandbox is killed if it is still running 5 seconds later, and
+cancelled step goes the same way: the action catches the runner's signal, `SIGTERM` reaches every
+process the command started, the whole sandbox is killed if it is still running 5 seconds later, and
 then the action writes the traffic report and stops the proxy as usual. If the action is killed
 first, a fallback step reads the container's identity back from job state, stops the proxy and
 deletes the scratch directory, but nothing stops the sandbox. `sudo`, `run-isolated.sh` and the

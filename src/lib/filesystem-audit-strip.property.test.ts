@@ -13,7 +13,7 @@ const pathArb = fc.constantFrom(
   "/etc/passwd",
   "/usr/bin/cat",
   `${BASE}/sandbox-x/exec/run-script.sh`,
-  `${BASE}/sandbox-x/exec/env-loader.sh`,
+  `${BASE}/sandbox-x/exec/buildcage-init`,
   `${BASE}/sandbox-x/started`,
   BASE,
   "pipe:[1]",
@@ -25,7 +25,7 @@ const recordArb = fc.record(
     pid: fc.integer({ min: 1, max: 4 }),
     ppid: fc.integer({ min: 0, max: 4 }),
     kind: fc.constantFrom("exec", "read", "write", "open", "mmap", "unlink", "rename"),
-    comm: fc.constantFrom("env-loader.sh", "run-script.sh", "env", "setpriv", "cat", "node"),
+    comm: fc.constantFrom("buildcage-init", "run-script.sh", "env", "setpriv", "cat", "node"),
     path: pathArb,
   },
   { requiredKeys: ["pid", "kind", "comm", "path"] }, // ppid sometimes absent

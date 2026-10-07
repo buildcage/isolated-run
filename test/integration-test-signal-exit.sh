@@ -103,7 +103,7 @@ fi
 # The SIGTERM reaches what the run script started too, and the step waits for
 # it to finish its own cleanup after the script itself has died of the signal.
 cancel_step command \
-  "bash -c 'trap \"sleep 1; touch cleaned-up; exit 0\" TERM; sleep 303 & wait'" "sleep 303"
+  "bash -c 'trap \"sleep 1; touch cleaned-up; exit 0\" TERM; sleep 303 & wait'" "^sleep 303"
 if [ "$CODE" != "-1" ]; then
   check_status "command: the run script died of the SIGTERM" "$CODE" 143
   if [ -e "$WORKDIR/command/cleaned-up" ]; then
@@ -112,13 +112,28 @@ if [ "$CODE" != "-1" ]; then
     fail "command: the command the script ran was killed before its cleanup finished"
     cat "$WORKDIR/command/out.log"
   fi
-  assert_cancelled_cleanly command "sleep 303"
+  assert_cancelled_cleanly command "^sleep 303"
 fi
 
-cancel_step ignores "trap '' TERM; sleep 302" "sleep 302"
+# A process the command moved out of its process group with setsid gets the
+# SIGTERM too, and the step waits for its cleanup the same way.
+cancel_step detached \
+  "setsid bash -c 'trap \"sleep 1; touch cleaned-up; exit 0\" TERM; sleep 304 & wait' & wait" "^sleep 304"
+if [ "$CODE" != "-1" ]; then
+  check_status "detached: the run script died of the SIGTERM" "$CODE" 143
+  if [ -e "$WORKDIR/detached/cleaned-up" ]; then
+    pass "detached: the setsid process finished its cleanup"
+  else
+    fail "detached: the setsid process was killed before its cleanup finished"
+    cat "$WORKDIR/detached/out.log"
+  fi
+  assert_cancelled_cleanly detached "^sleep 304"
+fi
+
+cancel_step ignores "trap '' TERM; sleep 302" "^sleep 302"
 if [ "$CODE" != "-1" ]; then
   check_status "ignores: a command that ignores SIGTERM is killed" "$CODE" 137
-  assert_cancelled_cleanly ignores "sleep 302"
+  assert_cancelled_cleanly ignores "^sleep 302"
 fi
 
 assert_results

@@ -233,7 +233,7 @@ jobs:
           grep -qE ' r +cat +\./sub/missing\.txt$' "$f"
           grep -qE ' d +python3 +\./sub/gone$' "$f"
           # buildcage's own wrappers must never reach the summary.
-          ! grep -qE ' (setpriv|env-loader\.sh|run-script\.sh) ' "$f"
+          ! grep -qE ' (setpriv|buildcage-init|run-script\.sh) ' "$f"
 
       - name: Download and check the filesystem audit artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -247,7 +247,7 @@ jobs:
           echo "::group::Recorded events (first lines)"; head -20 "$f"; echo "::endgroup::"
           grep -q '"kind":"write"' "$f"
           # buildcage's own exec wrappers and scratch files must not leak.
-          ! grep -qE '"comm":"(setpriv|env-loader\.sh|run-script\.sh)"' "$f"
+          ! grep -qE '"comm":"(setpriv|buildcage-init|run-script\.sh)"' "$f"
           ! grep -q '/var/tmp/buildcage-' "$f"
 
   # One representative case through the real action wrapper, against real
