@@ -68397,6 +68397,7 @@ const LETTER = {
 	write: "W",
 	exec: "X",
 	mkdir: "W",
+	mknod: "W",
 	truncate: "W",
 	symlink: "W",
 	link: "W",
@@ -68415,6 +68416,7 @@ const LETTER = {
 	unlink: "D",
 	rmdir: "D",
 	mkdir: "W",
+	mknod: "W",
 	truncate: "W",
 	symlink: "W",
 	link: "W"

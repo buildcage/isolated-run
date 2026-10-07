@@ -43,7 +43,7 @@ var kindNames = map[uint32]string{
 	7: "chmod", 8: "symlink", 9: "link", 10: "truncate", 11: "chown",
 	12: "open-failed", 13: "read", 14: "write", 15: "mmap",
 	16: "delete", 17: "rename", 18: "chmod", 19: "chown", 20: "attr", 21: "attr",
-	22: "fork", 23: "exec-file",
+	22: "fork", 23: "exec-file", 24: "mknod",
 }
 
 // Mirrors the fixed header of struct event in bpf/filesystem_audit.bpf.c:
@@ -107,6 +107,9 @@ func joinBase(name string, rest []byte, has bool, n int, truncated bool) (string
 		return name, rest
 	}
 	base, rest := components(rest, n, truncated)
+	if name == "" { // futimens: the descriptor's own path
+		return base, rest
+	}
 	return strings.TrimSuffix(base, "/") + "/" + name, rest
 }
 
@@ -125,6 +128,20 @@ func tidy(p string) string {
 		kept = append(kept, part)
 	}
 	return strings.Join(kept, "/")
+}
+
+// filePath decodes an open, read or write's path: the d_path string, or, for
+// one too long for d_path, the dentry components the BPF side walked instead
+// (n > 0). With neither, the d_path errno is all there is.
+func filePath(data []byte, pathRet int32, n int, truncated bool) (string, int32) {
+	if pathRet >= 0 {
+		return cstr(data), 0
+	}
+	if n > 0 {
+		p, _ := components(data, n, truncated)
+		return p, 0
+	}
+	return "", pathRet
 }
 
 // passedName returns the name the command passed, for Name or ToName, when
@@ -195,22 +212,14 @@ func decode(raw []byte) (record, error) {
 	}
 	switch kind {
 	case 1: // open
-		if pathRet < 0 {
-			r.Err = pathRet
-		} else {
-			r.Path = cstr(data)
-		}
+		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
 	case 12: // failed open
 		r.Path, r.Name = passed(data, argsLen&1 != 0, int(mode), truncated)
 		r.Err = pathRet // the positive errno the BPF side stored as -ret
 	case 13, 14: // read, write
-		if pathRet < 0 {
-			r.Err = pathRet
-		} else {
-			r.Path = cstr(data)
-		}
+		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 	case 15: // mmap
 		r.Path, _ = components(data, n1, truncated)
 		r.Access = mmapAccess(mode, flags)
@@ -220,7 +229,7 @@ func decode(raw []byte) (record, error) {
 			a := data[pathLen : pathLen+argsLen]
 			r.Args = strings.TrimRight(strings.ReplaceAll(string(a), "\x00", " "), " ")
 		}
-	case 3, 4, 6, 10, 23: // unlink, rmdir, mkdir, truncate, exec-file
+	case 3, 4, 6, 10, 23, 24: // unlink, rmdir, mkdir, truncate, exec-file, mknod
 		r.Path, _ = components(data, n1, truncated)
 	case 7: // chmod
 		r.Path, _ = components(data, n1, truncated)

@@ -48,6 +48,19 @@ var optionalProgs = map[string]string{
 	"on_backing_enter": "backing_file_open",
 	"on_backing_exit":  "backing_file_open",
 	"on_exec_file":     "security_bprm_creds_for_exec",
+	"on_file_truncate": "security_file_truncate",
+}
+
+// archOnlyProgs trace syscalls only some architectures have (x86_64 keeps
+// these older forms beside the *at ones; arm64 has none of them), so where
+// one fails to attach the syscall is simply absent and nothing is said.
+var archOnlyProgs = map[string]bool{
+	"on_unlink_enter": true, "on_unlink_exit": true,
+	"on_rmdir_enter": true, "on_rmdir_exit": true,
+	"on_rename_enter": true, "on_rename_exit": true,
+	"on_chmod_enter": true, "on_chmod_exit": true,
+	"on_chown_enter": true, "on_chown_exit": true,
+	"on_lchown_enter": true, "on_lchown_exit": true,
 }
 
 // getnameProgs is the subset of optionalProgs that records a failed open's
@@ -215,7 +228,9 @@ func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, e
 		_, optional := optionalProgs[name]
 		if err != nil {
 			if optional || p.Type() == ebpf.TracePoint {
-				fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
+				if !archOnlyProgs[name] {
+					fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
+				}
 				continue
 			}
 			return links, fmt.Errorf("attach %s: %w", name, err)
