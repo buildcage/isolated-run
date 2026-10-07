@@ -17,9 +17,11 @@
  * run its own run-script.sh, and a later exec of it must not move the anchor
  * away from the shell and drop everything outside the new process.
  *
- * Parents come from each process's first record, its fork, which names the
- * process that made it (see the tracer), so neither CLONE_PARENT nor a later
- * reparent to the init can detach a process from the step.
+ * A process's parent comes from its fork record, which names the process that
+ * made it (see the tracer), so neither CLONE_PARENT nor a later reparent to the
+ * init can detach it from the step; the latest fork wins, so a reused pid takes
+ * its new parent. A process with no fork record, such as the init, keeps the
+ * parent its first record names.
  *
  * It assumes a complete recording: a missing shell exec leaves the step
  * unanchored (machinery stays in), and a process whose ancestor emitted no
@@ -58,7 +60,8 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
   let boundary = -1;
   recs.forEach((r, i) => {
     if (!r || r.pid === undefined) return;
-    if (!parent.has(r.pid) && r.ppid !== undefined) parent.set(r.pid, r.ppid);
+    if (r.ppid !== undefined && (r.kind === "fork" || !parent.has(r.pid)))
+      parent.set(r.pid, r.ppid);
     if (r.kind === "exec" && typeof r.path === "string" && leaf(r.path) === SHELL_COMM) {
       if (!under(r.path)) ownShellPids.add(r.pid);
       else if (shell === undefined) [shell, boundary] = [r.pid, i];

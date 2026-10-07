@@ -108,7 +108,8 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	// (see add_base); path_len holds the errno.
 	K_DELETE_FAILED = 16, K_RENAME_FAILED = 17, K_CHMOD_FAILED = 18,
 	K_CHOWN_FAILED = 19, K_ATTR = 20, K_ATTR_FAILED = 21,
-	// A new process: pid is the child, ppid its parent; no data.
+	// A new process: pid is the child, ppid the process that made it, where
+	// every other kind's ppid is its current parent; no data.
 	K_FORK = 22 };
 
 // Fixed header (mirrored by hdrLen in decode.go), then data_len bytes of data:
