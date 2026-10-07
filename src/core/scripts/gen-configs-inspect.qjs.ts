@@ -9,14 +9,23 @@
  * Usage:
  *   qjs --std -m gen-configs.js <haproxy_out> <corefile_out> <proxy_address> \
  *     <host_address_file> <mode> <https_rules> <http_rules> <ip_rules> \
- *     <tls_rules> <url_rules>
+ *     <tls_rules> <url_rules> [<aws_accounts> <aws_keys>]
  *
  * Host and IP rules are whitespace separated, URL rules newline separated
  * (each carries a method and a space). A name is resolved against the
- * container's own /etc/resolv.conf.
+ * container's own /etc/resolv.conf. AWS accounts and keys are whitespace
+ * separated; with no account the AWS access key check is left out.
  */
 import * as std from "qjs:std";
 
+import {
+  AWS_ACCOUNT_FILE,
+  AWS_KEY_MAP_FILE,
+  awsAccountList,
+  awsKeyMap,
+  parseAwsAccessKeys,
+  parseAwsAccounts,
+} from "#core/lib/acl/aws-keys.js";
 import { generateCorednsConfig } from "#core/lib/acl/coredns-config.js";
 import { generateHaproxyConfig } from "#core/lib/acl/haproxy-config.js";
 import { compileRuleSet } from "#core/lib/acl/haproxy-rules.js";
@@ -34,6 +43,8 @@ const [
   ipInput,
   tlsInput,
   urlInput,
+  awsAccountsInput,
+  awsKeysInput,
 ] = scriptArgs.slice(1);
 
 function writeFile(path: string, content: string): void {
@@ -54,6 +65,16 @@ try {
   const ipRules = splitRuleTokens(ipInput);
   const tlsRules = splitRuleTokens(tlsInput);
   const urlRules = buildUrlRules(urlInput);
+  const awsAccounts = parseAwsAccounts(awsAccountsInput);
+  const awsKeys = parseAwsAccessKeys(awsKeysInput);
+  // An account with no key to start from would refuse every signed request.
+  if (awsAccounts.length > 0 && awsKeys.length === 0) {
+    throw new Error("AWS accounts given without an access key");
+  }
+  const aws =
+    awsAccounts.length > 0
+      ? { accountFile: AWS_ACCOUNT_FILE, keyMapFile: AWS_KEY_MAP_FILE }
+      : undefined;
 
   const haproxy = generateHaproxyConfig({
     httpsRules,
@@ -64,6 +85,7 @@ try {
     mode: mode === "audit" ? "audit" : "restrict",
     proxyAddress,
     hostAddressFile,
+    aws,
   });
   // The same compilation the proxy's own config comes out of, so a name the
   // rules allow cannot be logged as denied, or the other way round.
@@ -72,6 +94,10 @@ try {
     { proxyAddress, mode: mode === "audit" ? "audit" : "restrict" },
   );
 
+  if (aws) {
+    writeFile(aws.accountFile, awsAccountList(awsAccounts));
+    writeFile(aws.keyMapFile, awsKeyMap(awsKeys));
+  }
   writeFile(haproxyOut, haproxy);
   writeFile(corefileOut, coredns);
 } catch (e) {

@@ -209,6 +209,11 @@ reader splitting a URL back apart would take the host for `registry.npmjs.org-`.
 prints as `-` too. The log keeps the `Host` as sent; the report lowercases it and drops one trailing
 dot, as the rules do before matching it.
 
+With `allowed_aws_accounts` set, both request lines carry `aws=<verdict>` after `dst=`: `allowed`,
+`unsigned`, `no-credential`, `ambiguous-credential` or `key-not-allowed`, and `-` for a host
+that is not an AWS API host. `restrict` refuses the last three, logging the verdict as
+`reason=aws-<verdict>`; `audit` only logs it. See [AWS access key check](./aws.md).
+
 `ts` is HAProxy's termination state and `reason` the refusal reason where the rule that refused
 knew one the line could not otherwise show. `tlserr` carries haproxy's own error from the handshake
 with the origin, which is what tells a connection the proxy would not make from one it could not
@@ -321,8 +326,8 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │                              # and *-scenarios.sh run inside the sandbox as a step's own `run:`.
 │                              # helpers.sh carries what both halves share
 ├── dev/                       # Mac dev-loop-only image and scripts, not used in production or CI
-├── docs/                      # development.md, security.md, plus the reference.md/rules.md/
-│                              # inspect-engine.md link stubs
+├── docs/                      # development.md, security.md, aws.md, plus the reference.md/
+│                              # rules.md/inspect-engine.md link stubs
 ├── licenses/                  # gen-license-file.mjs, which regenerates THIRD_PARTY_LICENSES_NPM
 │                              # during `vp run build`, and what .glf.jsonc substitutes in
 ├── compose.yaml               # Local-dev compose config (builds docker/universal/Dockerfile;

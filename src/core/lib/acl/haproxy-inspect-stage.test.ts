@@ -3,8 +3,29 @@ import { inspectStage } from "./haproxy-inspect-stage.ts";
 import { compileRuleSet, INTERNAL_RANGES, type RuleInputs } from "./haproxy-rules.ts";
 import { buildUrlRules } from "./url-rules.ts";
 
+const AWS = { accountFile: "/rules/accounts.lst", keyMapFile: "/rules/keys.map" };
+
+/** The TLS stage, as plainStage gives the plaintext one. */
+function tlsStage(inputs: RuleInputs, mode: "restrict" | "audit", aws?: typeof AWS): string {
+  return inspectStage(
+    {
+      name: "https_in",
+      port: 10025,
+      bindExtra: "",
+      scheme: "https",
+      rules: compileRuleSet(inputs).https,
+      backend: "origin_tls",
+    },
+    { mode, internalAddrs: INTERNAL_RANGES, listenPort: 10024, aws },
+  ).join("\n");
+}
+
 /** The plaintext stage for these rules, as the generated config carries it. */
-function plainStage(inputs: RuleInputs, mode: "restrict" | "audit" = "restrict"): string {
+function plainStage(
+  inputs: RuleInputs,
+  mode: "restrict" | "audit" = "restrict",
+  aws?: typeof AWS,
+): string {
   return inspectStage(
     {
       name: "http_in",
@@ -14,7 +35,7 @@ function plainStage(inputs: RuleInputs, mode: "restrict" | "audit" = "restrict")
       rules: compileRuleSet(inputs).http,
       backend: "origin_plain",
     },
-    { mode, internalAddrs: INTERNAL_RANGES, listenPort: 10024 },
+    { mode, internalAddrs: INTERNAL_RANGES, listenPort: 10024, aws },
   ).join("\n");
 }
 
@@ -98,6 +119,47 @@ describe("inspect stage", () => {
     expect(plain.includes("txn.allowed")).toBe(false);
     expect(plain.includes("-m str 169.254.169.254 } { dst_port 80 }")).toBe(true);
     expect(plain.includes("deny deny_status 403 if dst_internal !named_address")).toBe(true);
+  });
+});
+
+describe("AWS access key check", () => {
+  const rules = { httpRules: ["b.example.com:80"] };
+
+  it("is left out, log field and all, when no account is allowed", () => {
+    const plain = plainStage(rules);
+    expect(plain.includes("aws")).toBe(false);
+  });
+
+  it("logs its verdict ahead of the host", () => {
+    const plain = plainStage(rules, "restrict", AWS);
+    expect(plain.includes("dst=%[dst]:%[dst_port] aws=%[var(txn.aws)] host=")).toBe(true);
+  });
+
+  it("decides after the rules and before the name is resolved", () => {
+    const plain = plainStage(rules, "restrict", AWS);
+    const decided = plain.indexOf("http-request deny unless { var(txn.allowed) -m bool }");
+    const checked = plain.indexOf("acl aws_host");
+    const resolved = plain.indexOf("do-resolve");
+    expect(decided !== -1 && decided < checked && checked < resolved).toBe(true);
+  });
+
+  it("learns keys from answers over TLS, in audit too, where it refuses nothing", () => {
+    const tls = tlsStage({ httpsRules: ["b.example.com:443"] }, "audit", AWS);
+    expect(tls.includes("http-response set-map(/rules/keys.map)")).toBe(true);
+    expect(tls.includes("if aws_refused")).toBe(false);
+  });
+
+  // Nothing vouches for a plaintext answer.
+  it("learns nothing from a plaintext answer", () => {
+    const plain = plainStage(rules, "restrict", AWS);
+    expect(plain.includes("http-response")).toBe(false);
+    expect(plain.includes("if aws_refused")).toBe(true);
+  });
+
+  // Nothing may follow a deny that always fires; see deniesEverything.
+  it("is left out where the rules refuse everything", () => {
+    const plain = plainStage({}, "restrict", AWS);
+    expect(plain.includes("acl aws_host")).toBe(false);
   });
 });
 

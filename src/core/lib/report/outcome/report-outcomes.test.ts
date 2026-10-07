@@ -105,6 +105,29 @@ describe("describeReportOutcomes", () => {
     );
   });
 
+  it("warns about requests audit let through that restrict would refuse, counting each one", () => {
+    const audited: TrafficEvent = {
+      time: 1787471975,
+      action: "audit",
+      protocol: "https",
+      host: "cloudformation.us-east-1.amazonaws.com",
+      port: 443,
+      method: "POST",
+      url: "https://cloudformation.us-east-1.amazonaws.com/",
+      status: 200,
+      bytes: 10,
+      wouldRefuse: "aws-key-not-allowed",
+    };
+    const outcomes = describeReportOutcomes(
+      inspect([audited, audited, { ...audited, wouldRefuse: undefined }]),
+      options,
+    );
+    expect(outcomes.length).toBe(2);
+    expect(outcomes[1].level).toBe("warning");
+    expect(outcomes[1].shouldFail).toBe(false);
+    expect(outcomes[1].message.startsWith("2 request(s) the AWS access key check")).toBe(true);
+  });
+
   it("warns for universal too, whose HTTP stage logs a connection that sent no request", () => {
     const unnamed: TrafficEvent = {
       time: 1787471975,

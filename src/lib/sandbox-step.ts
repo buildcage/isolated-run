@@ -35,6 +35,7 @@ import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
   readProxyInputs,
+  readAwsKeyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
   readFilesystemInputs,
@@ -80,6 +81,7 @@ export interface SandboxStepDeps {
   readRuleInputs: typeof readRuleInputs;
   readFailOnCaResidue: typeof readFailOnCaResidue;
   readFailOnBlocked: typeof readFailOnBlocked;
+  readAwsKeyInputs: typeof readAwsKeyInputs;
   readTrafficArtifactInputs: typeof readTrafficArtifactInputs;
   saveWriteThroughForPost: typeof saveWriteThroughForPost;
   validateFilesystemInputs: typeof validateFilesystemInputs;
@@ -137,6 +139,7 @@ const realDeps: SandboxStepDeps = {
   readRuleInputs,
   readFailOnCaResidue,
   readFailOnBlocked,
+  readAwsKeyInputs,
   readTrafficArtifactInputs,
   saveWriteThroughForPost,
   validateFilesystemInputs,
@@ -219,6 +222,7 @@ export async function runSandboxStep(
     readRuleInputs,
     readFailOnCaResidue,
     readFailOnBlocked,
+    readAwsKeyInputs,
     readTrafficArtifactInputs,
     saveWriteThroughForPost,
     validateFilesystemInputs,
@@ -294,6 +298,7 @@ export async function runSandboxStep(
     },
     annotation.warning,
   );
+  const aws = readAwsKeyInputs({ proxyEngine, proxyMode }, env, annotation.warning);
 
   // Before any privileged setup; see assertNonRootUid.
   assertNonRootUid(process.getuid!());
@@ -349,6 +354,7 @@ export async function runSandboxStep(
     logRules("URL", urlRules);
     logRules("TLS", tlsRules);
     logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
+    if (aws.accounts.length > 0) console.log(`AWS accounts: ${aws.accounts.join(" ")}`);
   });
 
   const containerName = generateContainerName();
@@ -366,6 +372,8 @@ export async function runSandboxStep(
       ipRules: ipRules,
       urlRules,
       tlsRules,
+      awsAccounts: aws.accounts,
+      awsKeys: aws.keys,
     },
     env,
   );

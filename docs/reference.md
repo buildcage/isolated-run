@@ -15,6 +15,7 @@ details.
 - [Blocked service names](#blocked-service-names)
 - [Requests that never arrived whole](#requests-that-never-arrived-whole)
 - [Connections that failed](#connections-that-failed)
+- [AWS access key check](#aws-access-key-check)
 - [Traffic artifact](#traffic-artifact)
 - [CA trust variables](#ca-trust-variables)
 - [`ephemeral` overlays](#ephemeral-overlays)
@@ -32,6 +33,7 @@ details.
 | `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                |
 | `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                       |
 | `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium).          |
+| `allowed_aws_accounts`            | empty        | `inspect` only. AWS accounts whose keys may sign AWS API requests. See [AWS access key check](#aws-access-key-check).         |
 | `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                         |
 | `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                      |
 | `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                     |
@@ -640,6 +642,31 @@ build reaching for something that is up.
 A blocked `DNS` row for the same name means something else entirely: that one is Buildcage's own
 resolver saying no rule allows the name, and it does fail the step.
 
+## AWS access key check
+
+`allowed_aws_accounts` takes 12-digit AWS account IDs, separated by whitespace or newlines, with `#`
+comments as in the rule inputs. In a config file its lines are added to the workflow's. With it
+set, a request to an AWS API host must be signed with a key the proxy knows: the step's own
+`AWS_ACCESS_KEY_ID`, or one an STS `AssumeRole` issued for a role in one of these accounts. An
+unsigned request is left to the URL rules where the host names the resource it is for, such as an S3
+bucket or an ECR registry, and refused everywhere else. If `AWS_ACCESS_KEY_ID` is unset or is not
+an access key ID, `restrict` fails the step before the sandbox is set up and `audit` warns and turns
+the check off. [AWS access key check](./aws.md) covers why,
+what the check does not stop, and the IAM settings that close the rest.
+
+The check refuses after the URL rules have allowed a request, with one of these reasons:
+
+| Reason                     | What happened                                                                                                                 |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `aws-key-not-allowed`      | the request was signed with a key the proxy does not know                                                                     |
+| `aws-no-credential`        | the request carried no AWS credential, to a host that names no resource                                                       |
+| `aws-ambiguous-credential` | the request carried more than one credential: two `Authorization` headers, a header and a query credential, or a repeated one |
+
+These are refusals like `not-allowed`: they are in **🚫 Blocked Hosts** and fail the step under
+`fail_on_blocked: true`. In `audit` mode nothing is refused: a warning annotation counts the requests
+`restrict` would have refused, and **Communication details** adds `(restrict would refuse: <reason>)`
+to each.
+
 ## Traffic artifact
 
 `upload_traffic_artifact: true` uploads the report's timeline as a `traffic.json` inside an artifact
@@ -654,21 +681,22 @@ This is also the form to keep where the report is an audit trail rather than som
 `filesystem_mode: persistent` a later step can add to the Job Summary, but not to an artifact
 already uploaded. See [Known Limitations](./security.md#known-limitations).
 
-| Field         | Always | Notes                                                                                    |
-| ------------- | ------ | ---------------------------------------------------------------------------------------- |
-| `time`        | yes    | ISO 8601 UTC                                                                             |
-| `elapsed`     |        | since the proxy started, fixed `HH:MM:SS.mmm`                                            |
-| `action`      | yes    | `allow`, `block`, `audit` when nothing was enforced, `discovery`, `incomplete`, `failed` |
-| `protocol`    | yes    | `https`, `http`, `tls`, `tcp`, `dns`                                                     |
-| `host`        | yes    | the name asked for, the address when there was none, or `(unknown)`                      |
-| `port`        |        | absent for `dns`, which connects to nothing                                              |
-| `queryType`   |        | the record asked for; `discovery` rows and refused service names                         |
-| `method`      |        | `http` and `https`, and `tcp` for a request with no `Host` sent to an address            |
-| `url`         |        | as `method`; verbatim, unlike the summary's                                              |
-| `status`      |        | only when something answered                                                             |
-| `bytes`       |        | absent for a refusal and for `dns`                                                       |
-| `reason`      |        | only when `action` is `block`, `incomplete` or `failed`                                  |
-| `destination` |        | the address it actually resolved to; `inspect` only, and absent for `dns`                |
+| Field         | Always | Notes                                                                                        |
+| ------------- | ------ | -------------------------------------------------------------------------------------------- |
+| `time`        | yes    | ISO 8601 UTC                                                                                 |
+| `elapsed`     |        | since the proxy started, fixed `HH:MM:SS.mmm`                                                |
+| `action`      | yes    | `allow`, `block`, `audit` when nothing was enforced, `discovery`, `incomplete`, `failed`     |
+| `protocol`    | yes    | `https`, `http`, `tls`, `tcp`, `dns`                                                         |
+| `host`        | yes    | the name asked for, the address when there was none, or `(unknown)`                          |
+| `port`        |        | absent for `dns`, which connects to nothing                                                  |
+| `queryType`   |        | the record asked for; `discovery` rows and refused service names                             |
+| `method`      |        | `http` and `https`, and `tcp` for a request with no `Host` sent to an address                |
+| `url`         |        | as `method`; verbatim, unlike the summary's                                                  |
+| `status`      |        | only when something answered                                                                 |
+| `bytes`       |        | absent for a refusal and for `dns`                                                           |
+| `reason`      |        | only when `action` is `block`, `incomplete` or `failed`                                      |
+| `destination` |        | the address it actually resolved to; `inspect` only, and absent for `dns`                    |
+| `wouldRefuse` |        | `audit` only: the reason `restrict` would have refused it for, from the AWS access key check |
 
 A `dns` row's `host` is the name as the resolver logged it: lowercased, with escapes such as `\ `
 and `\DDD` kept.

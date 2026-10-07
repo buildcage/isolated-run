@@ -209,6 +209,9 @@ allowed_ip_rules: |
   10.0.0.0/8:443
 ```
 
+A step that deploys to AWS can add `allowed_aws_accounts`, so that requests to AWS API hosts are
+signed only with keys from those accounts. See [AWS access key check](./docs/aws.md).
+
 ### Rules for the `universal` engine
 
 `universal` never decrypts, so rules name a host and a port. `allowed_https_rules` and

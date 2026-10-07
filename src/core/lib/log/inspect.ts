@@ -2,8 +2,8 @@
  * Parsers for the `inspect` engine's two logs, whose formats are emitted by
  * haproxy-config.ts and coredns-config.ts. Seven kinds of line:
  *
- *   buildcage <ms> https <method> <status> <bytes> ts=<st> reason=<r> tlserr=<n|-> dst=<addr>:<port> fcerr=<name|-> sni=<name|-> host=<authority|-> <target|->
- *   buildcage <ms> http <method> <status> <bytes> ts=<st> reason=<r> tlserr=<n|-> dst=<addr>:<port> host=<authority|-> <target|->
+ *   buildcage <ms> https <method> <status> <bytes> ts=<st> reason=<r> tlserr=<n|-> dst=<addr>:<port> [aws=<v|->] fcerr=<name|-> sni=<name|-> host=<authority|-> <target|->
+ *   buildcage <ms> http <method> <status> <bytes> ts=<st> reason=<r> tlserr=<n|-> dst=<addr>:<port> [aws=<v|->] host=<authority|-> <target|->
  *   buildcage <ms> pass <tls|tcp> <bytes> ts=<st> reason=<r> dst=<addr>:<port> sni=<name|->
  *   <timestamp>  [INFO] buildcage dns <allowed|denied> name=<name>.
  *   <timestamp>  [INFO] buildcage dns discovery name=<name>. type=<qtype>
@@ -20,6 +20,7 @@
  * handshake that failed writes that line too, with fcerr naming the failure.
  */
 
+import { AWS_REFUSED_VERDICTS } from "#core/lib/acl/haproxy-aws-keys.ts";
 import { DEFAULT_PORT } from "#core/lib/acl/url-rules.ts";
 
 import { ruleHost, sniHost, splitHostPort } from "./authority.ts";
@@ -38,12 +39,13 @@ export type { TrafficAction, TrafficEvent, TrafficProtocol } from "./traffic-eve
 // The trailing field stays \S+ rather than .+: two lines joined by a
 // half-written write would otherwise parse as one event instead of counting
 // as unparsed.
+// aws= is there only where the AWS access key check is on.
 // sni= is optional: the plain stage terminates no TLS and logs no such field.
 // `host=` is a named field for that reason, or a line cut right after the SNI
 // would parse with `sni=<name>` read as the authority instead of counting as
 // unreadable.
 const REQUEST =
-  /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:fcerr=(\S+) )?(?:sni=(\S+) )?host=(\S+) (\S+)$/;
+  /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:aws=(\S+) )?(?:fcerr=(\S+) )?(?:sni=(\S+) )?host=(\S+) (\S+)$/;
 const PASSTHROUGH =
   /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/;
 // CoreDNS escapes a space in a label as `\ `. Names stay escaped, as the
@@ -253,6 +255,13 @@ function hostBeforeRequest(
   return { host: address, byAddress: true };
 }
 
+/** The reason restrict mode would have logged for a request audit forwarded. */
+function awsRefusal(verdict: string | undefined): string | undefined {
+  return verdict !== undefined && AWS_REFUSED_VERDICTS.includes(verdict)
+    ? `aws-${verdict}`
+    : undefined;
+}
+
 /** Parse one proxy-log line, or null if it is not one of ours. */
 function parseProxyLine(line: string, isAudit: boolean): TrafficEvent | null {
   const trimmed = line.trim();
@@ -260,7 +269,7 @@ function parseProxyLine(line: string, isAudit: boolean): TrafficEvent | null {
   const request = REQUEST.exec(trimmed);
   if (request) {
     // Its termination state reads as this proxy's refusal, which it is not.
-    const fcerr = request[11] ?? "";
+    const fcerr = request[12] ?? "";
     const tlsFailed =
       request[3] === BAD_REQUEST_METHOD &&
       fcerr.startsWith("SSL_") &&
@@ -284,10 +293,10 @@ function parseProxyLine(line: string, isAudit: boolean): TrafficEvent | null {
     const scheme = request[2] as "http" | "https";
     // Spelled as the rules saw it, like the logged path, so one host sent two
     // ways is one row and a known_blocked rule matches either spelling.
-    const sent = splitHostPort(request[13]);
+    const sent = splitHostPort(request[14]);
     const host = ruleHost(sent.host);
     const authority = sent.port === undefined ? host : `${host}:${sent.port}`;
-    const unnamed = namedByHandshake ? hostBeforeRequest(request[12], request[9]) : undefined;
+    const unnamed = namedByHandshake ? hostBeforeRequest(request[13], request[9]) : undefined;
     const event: TrafficEvent = {
       // <ms> is milliseconds; TrafficEvent.time is seconds.
       time: Number(request[1]) / 1000,
@@ -304,12 +313,14 @@ function parseProxyLine(line: string, isAudit: boolean): TrafficEvent | null {
       const url = urlOf(
         scheme,
         unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority,
-        request[14],
+        request[15],
       );
       if (url !== undefined) event.url = url;
     }
     if (reason !== undefined) event.reason = reason;
     else {
+      const refusal = awsRefusal(request[11]);
+      if (refusal !== undefined) event.wouldRefuse = refusal;
       event.status = Number(request[4]);
       event.bytes = Number(request[5]);
     }

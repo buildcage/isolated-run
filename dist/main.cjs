@@ -15542,10 +15542,10 @@ function readRetentionDays(getInput) {
 		return Number(days);
 	}
 }
-function readTrafficArtifactInputs(getInput$8 = getInput) {
+function readTrafficArtifactInputs(getInput$9 = getInput) {
 	return {
-		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$8),
-		retentionDays: readRetentionDays(getInput$8)
+		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$9),
+		retentionDays: readRetentionDays(getInput$9)
 	};
 }
 const ENGINES = ["universal", "inspect"];
@@ -15779,6 +15779,62 @@ function detectFrontend(spec) {
 	return l.push("    # `accept` ends content-rule evaluation, so it comes after every rule", "    # that needs the request buffer (the SNI capture and resolution above).", "    # Separate rules: while a ClientHello is incomplete the first one waits", "    # for the rest, where an `||` would accept on its first segment.", "    tcp-request content accept if { req.ssl_hello_type 1 }", "    tcp-request content accept if { req.len gt 0 }", ""), hasPassthrough && l.push("    use_backend passthrough if { var(txn.pass) -m found }", ""), l.push("    acl is_tls req.ssl_hello_type 1", "    use_backend to_tls if is_tls", "    default_backend to_plain", "", "backend passthrough", "    mode tcp", "    server origin 0.0.0.0", "", "backend to_tls", "    mode tcp", `    server s 127.0.0.1:${tlsStagePort} send-proxy-v2`, "", "backend to_plain", "    mode tcp", `    server s 127.0.0.1:${plainStagePort} send-proxy-v2`, ""), l;
 }
 //#endregion
+//#region src/core/lib/acl/haproxy-aws-keys.ts
+const AWS_REFUSED_VERDICTS = [
+	"no-credential",
+	"ambiguous-credential",
+	"key-not-allowed"
+], QUERY_CREDENTIAL = "(x-amz-credential|awsaccesskeyid)";
+function awsLogField(check) {
+	return check ? " aws=%[var(txn.aws)]" : "";
+}
+function awsKeyRequestRules(check, mode) {
+	let l = [
+		"    # AWS access key check. req.fhdr, not req.hdr: Authorization holds commas.",
+		"    acl aws_host var(txn.host) -m reg ^([a-z0-9-]+\\.)+(amazonaws\\.com|amazonaws\\.com\\.cn|api\\.aws|api\\.amazonwebservices\\.com\\.cn)$",
+		"    acl aws_sts_host var(txn.host) -m reg ^sts(-fips)?(\\.[a-z0-9-]+)?\\.(amazonaws\\.com|amazonaws\\.com\\.cn|api\\.aws|api\\.amazonwebservices\\.com\\.cn)$",
+		"    acl aws_resource_host var(txn.host) -m reg (^|\\.)s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.amazonaws\\.com(\\.cn)?$|\\.(dkr\\.ecr|d\\.codeartifact|execute-api|appsync-api|appsync-realtime-api)\\.[a-z0-9-]+\\.amazonaws\\.com(\\.cn)?$|\\.elb(\\.[a-z0-9-]+)?\\.amazonaws\\.com(\\.cn)?$|\\.compute(-1)?\\.amazonaws\\.com(\\.cn)?$|^awscli\\.amazonaws\\.com$",
+		"    # Only AWS's own schemes are a credential here: CodeArtifact and ECR take",
+		"    # Bearer and Basic tokens, which no AWS account signs with. Any case, so a",
+		"    # spelling AWS might accept is never let through unjudged.",
+		"    acl aws_auth req.fhdr(authorization) -m reg -i ^aws",
+		"    acl aws_auth_many req.fhdr_cnt(authorization) gt 1",
+		"    acl aws_auth_many req.fhdr(authorization) -m reg -i credential=.*credential=",
+		"    # Decoded first: a name spelled as X-Amz-Cr%65dential still counts.",
+		`    acl aws_query query,url_dec -m reg -i (^|&)${QUERY_CREDENTIAL}=`,
+		`    acl aws_query_many query,url_dec -m reg -i (^|&)${QUERY_CREDENTIAL}=.*&${QUERY_CREDENTIAL}=`,
+		"    # A header neither pattern matches comes out unchanged, and so never",
+		"    # equals a key in the map.",
+		"    http-request set-var(txn.aws_key) 'req.fhdr(authorization),regsub(\"^AWS4-[A-Z0-9-]+ +Credential=([A-Za-z0-9]+)/.*$\",\"\\1\",i),regsub(\"^AWS ([A-Za-z0-9]+):.*$\",\"\\1\",i)' if aws_host aws_auth !aws_query",
+		"    http-request set-var(txn.aws_key) 'url_param(X-Amz-Credential),url_dec,regsub(\"^([A-Za-z0-9]+)/.*$\",\"\\1\")' if aws_host aws_query !aws_auth { url_param(X-Amz-Credential) -m found }",
+		"    http-request set-var(txn.aws_key) url_param(AWSAccessKeyId) if aws_host aws_query !aws_auth { url_param(AWSAccessKeyId) -m found }",
+		"    http-request set-var(txn.aws) str(ambiguous-credential) if aws_host aws_auth aws_query or aws_host aws_auth aws_auth_many or aws_host aws_query_many",
+		"    # Unsigned, whatever the method: where the host names no resource, the",
+		"    # account it reaches is in the parameters or the body, out of sight.",
+		"    http-request set-var(txn.aws) str(unsigned) if aws_host !aws_auth !aws_query aws_resource_host",
+		"    http-request set-var(txn.aws) str(no-credential) if aws_host !aws_auth !aws_query !aws_resource_host",
+		`    http-request set-var(txn.aws) str(key-not-allowed) if aws_host !{ var(txn.aws) -m found } !{ var(txn.aws_key),map(${check.keyMapFile}) -m found }`,
+		"    http-request set-var(txn.aws) str(allowed) if aws_host !{ var(txn.aws) -m found }"
+	];
+	return mode === "restrict" && l.push(`    acl aws_refused var(txn.aws) -m str ${AWS_REFUSED_VERDICTS.join(" ")}`, "    http-request set-var-fmt(txn.reason) aws-%[var(txn.aws)] if aws_refused", "    http-request deny deny_status 403 if aws_refused"), l.push("    # The body has to be readable to learn a key from it; no Accept-Encoding", "    # at all would mean any coding is acceptable (RFC 9110). Left alone where", "    # it is signed, which rewriting would break: a compressed answer then", "    # teaches nothing, and the key it issues is refused.", "    acl aws_coding_signed req.fhdr(authorization) -m reg -i signedheaders=[^,]*accept-encoding", "    http-request set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed", "    http-request set-var(txn.aws_sts) bool(true) if aws_sts_host", ""), l;
+}
+function awsKeyResponseRules(check) {
+	return [
+		"    acl aws_sts var(txn.aws_sts) -m bool",
+		"    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRoleResponse[\\s>]",
+		"    acl aws_many_keys res.body -m reg (?s)<AccessKeyId>.*<AccessKeyId>",
+		"    acl aws_many_arns res.body -m reg (?s)<Arn>.*<Arn>",
+		"    http-response wait-for-body time 10s if aws_sts { status 200 }",
+		"    http-response set-var(txn.aws_new_key) 'res.body,regsub(\"(?s)^.*<AccessKeyId>(ASIA[A-Z0-9]+)</AccessKeyId>.*$\",\"\\1\")' if aws_sts { status 200 } aws_assume_role !aws_many_keys !aws_many_arns",
+		"    http-response set-var(txn.aws_new_account) 'res.body,regsub(\"(?s)^.*<Arn>arn:aws[a-z-]*:sts::([0-9]{12}):assumed-role/[^<]*</Arn>.*$\",\"\\1\")' if aws_sts { status 200 } aws_assume_role !aws_many_keys !aws_many_arns",
+		"    acl aws_new_key var(txn.aws_new_key) -m reg ^ASIA[A-Z0-9]+$",
+		"    acl aws_new_account var(txn.aws_new_account) -m reg ^[0-9]{12}$",
+		`    acl aws_new_account_allowed var(txn.aws_new_account) -m str -f ${check.accountFile}`,
+		`    http-response set-map(${check.keyMapFile}) %[var(txn.aws_new_key)] 1 if aws_new_key aws_new_account aws_new_account_allowed`,
+		""
+	];
+}
+//#endregion
 //#region src/core/lib/acl/haproxy-rule-block.ts
 function deniesEverything(rules, mode) {
 	return mode !== "audit" && rules.length === 0;
@@ -15992,8 +16048,8 @@ const PLAIN_REQUEST_TIMEOUTS = [
 	"    timeout http-keep-alive 30s"
 ];
 function inspectStage({ name, port, bindExtra, scheme, rules, backend }, ctx) {
-	let { mode } = ctx, logFormat = `"buildcage %[date(0,ms)] ${scheme} %HM %ST %B ts=%ts reason=%[var(txn.reason)] tlserr=%[ssl_bc_err] dst=%[dst]:%[dst_port]${clientTlsFields(scheme)} host=%[var(txn.host_log)] %[var(txn.pathq)]"`, l = [];
-	return l.push(`frontend ${name}`, `    bind 127.0.0.1:${port} accept-proxy${bindExtra}`, "    mode http", ...scheme === "http" ? PLAIN_REQUEST_TIMEOUTS : [], "    http-request set-var(txn.host_log) 'req.hdr(host),regsub(\"[\\s\\\"[:cntrl:]]\",_,g)'", "", "    # Decode before stripping `..`: `.` is unreserved, so `%2e%2e` is not", "    # a dot-dot segment until decoded, and stripping first would miss it.", "    http-request normalize-uri percent-decode-unreserved", "    http-request normalize-uri path-strip-dotdot", "", "    # pathq, not %HU: %HU is the target as sent (a path over HTTP/1.1, an", "    # absolute URI over HTTP/2), and pathq is not readable at log time.", "    # Set after normalization, so the log shows the path the rules matched.", "    http-request set-var(txn.pathq) 'pathq,regsub(\"[\\\"[:cntrl:]]\",_,g)'", "", "    # A request with no Host names nothing: the rules match on it, the", "    # origin is resolved from it, and the log's URL is built from it. Named", "    # here rather than left to the log's own empty fields, which a Host the", "    # client chose can imitate. Refused in `audit` too, as the same check", "    # in the universal engine is: there is nothing to connect to either way.", "    # Ahead of the path denies below, so that a request carrying neither a", "    # Host nor a legal path is named by the one the report can act on: the", "    # other leaves a row named for the `-` the log prints in its place.", "    acl has_host hdr(host) -m found", "    acl host_not_empty hdr_len(host) gt 0", "    http-request set-var(txn.reason) str(missing-host-header) if !has_host or !host_not_empty", "    http-request deny deny_status 400 if !has_host or !host_not_empty", "", "    # The one Host every later step reads. An acl on req.hdr(host) scans", "    # every value while a fetch takes the last, so reading the header twice", "    # could judge one value and connect to another.", `    http-request set-var(txn.host) req.hdr(host),lower,${HOST_ONLY}`, "    # A `:` left in the name could let a `~` rule's port pattern match it.", "    # Refused in `audit` too.", `    acl host_is_name var(txn.host) -m reg ${HOSTNAME_CHARSET}`, "    http-request set-var(txn.reason) str(invalid-host) if !host_is_name", "    http-request deny deny_status 400 if !host_is_name", "", "    # `%2f` and `%5c` survive decoding (both reserved) yet an origin may", "    # read `..%2f` / `..%5c` as a segment, and a raw backslash is not a", "    # valid path char at all. None is stripped, so each is refused. A lone", "    # encoded separator stays legal (e.g. npm's `/@scope%2fpackage`).", "    # `;` (or `%3b`) ends a segment too: Tomcat and Jetty drop what follows", "    # as a path parameter, so they read `..;/` as `../`.", "    # `\\\\` is one literal backslash: HAProxy's parser takes the pair as one.", "    http-request deny deny_status 403 if { path -m reg -i (^|/|%2f|%5c)\\.\\.($|/|;|%2f|%5c|%3b) }", "    http-request deny deny_status 403 if { path -m sub \\\\ }", "", `    log-format ${logFormat}`, ...scheme === "https" ? [`    error-log-format ${logFormat}`] : [], ""), l.push(...ruleBlock(rules, mode, scheme)), deniesEverything(rules, mode) || l.push("    # Connect to the address this proxy resolves the Host to, discarding", "    # the client's address, so a forged Host or doctored /etc/hosts cannot", "    # choose the target.", "    # txn.host has already dropped the port a header carries, which is not", "    # part of the name. An address is taken as-is: no resolver can answer", "    # one, and the rules above already decided, so nothing is loosened.", `    acl host_is_address var(txn.host) -m reg ${HOST_IS_ADDRESS}`, "    http-request set-var(txn.dst) var(txn.host) if host_is_address", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address", "    # A fresh attempt, not a replay: nothing cached the failure.", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address or { var(txn.dst) -m found }", "    http-request set-var(txn.reason) str(dns-failed) unless { var(txn.dst) -m found }", "    http-request deny deny_status 502 unless { var(txn.dst) -m found }", "", "    # Set before the internal-destination check below, not after: %[dst] in", "    # the log-format is this, and a refusal must show the address that", "    # tripped it, not whatever the client's own (fake, unresolved) address", "    # was: CoreDNS never hands out a real one; see coredns-config.ts.", "    http-request set-dst var(txn.dst)", "", "    # A resolved destination may not be internal; see INTERNAL_RANGES.", ...internalDstAcl("dst_internal", ctx), ...internalGuard(rules, ctx.listenPort)), l.push(`    default_backend ${backend}`, ""), l;
+	let { mode, aws } = ctx, logFormat = `"buildcage %[date(0,ms)] ${scheme} %HM %ST %B ts=%ts reason=%[var(txn.reason)] tlserr=%[ssl_bc_err] dst=%[dst]:%[dst_port]${awsLogField(aws)}${clientTlsFields(scheme)} host=%[var(txn.host_log)] %[var(txn.pathq)]"`, l = [];
+	return l.push(`frontend ${name}`, `    bind 127.0.0.1:${port} accept-proxy${bindExtra}`, "    mode http", ...scheme === "http" ? PLAIN_REQUEST_TIMEOUTS : [], "    http-request set-var(txn.host_log) 'req.hdr(host),regsub(\"[\\s\\\"[:cntrl:]]\",_,g)'", "", "    # Decode before stripping `..`: `.` is unreserved, so `%2e%2e` is not", "    # a dot-dot segment until decoded, and stripping first would miss it.", "    http-request normalize-uri percent-decode-unreserved", "    http-request normalize-uri path-strip-dotdot", "", "    # pathq, not %HU: %HU is the target as sent (a path over HTTP/1.1, an", "    # absolute URI over HTTP/2), and pathq is not readable at log time.", "    # Set after normalization, so the log shows the path the rules matched.", "    http-request set-var(txn.pathq) 'pathq,regsub(\"[\\\"[:cntrl:]]\",_,g)'", "", "    # A request with no Host names nothing: the rules match on it, the", "    # origin is resolved from it, and the log's URL is built from it. Named", "    # here rather than left to the log's own empty fields, which a Host the", "    # client chose can imitate. Refused in `audit` too, as the same check", "    # in the universal engine is: there is nothing to connect to either way.", "    # Ahead of the path denies below, so that a request carrying neither a", "    # Host nor a legal path is named by the one the report can act on: the", "    # other leaves a row named for the `-` the log prints in its place.", "    acl has_host hdr(host) -m found", "    acl host_not_empty hdr_len(host) gt 0", "    http-request set-var(txn.reason) str(missing-host-header) if !has_host or !host_not_empty", "    http-request deny deny_status 400 if !has_host or !host_not_empty", "", "    # The one Host every later step reads. An acl on req.hdr(host) scans", "    # every value while a fetch takes the last, so reading the header twice", "    # could judge one value and connect to another.", `    http-request set-var(txn.host) req.hdr(host),lower,${HOST_ONLY}`, "    # A `:` left in the name could let a `~` rule's port pattern match it.", "    # Refused in `audit` too.", `    acl host_is_name var(txn.host) -m reg ${HOSTNAME_CHARSET}`, "    http-request set-var(txn.reason) str(invalid-host) if !host_is_name", "    http-request deny deny_status 400 if !host_is_name", "", "    # `%2f` and `%5c` survive decoding (both reserved) yet an origin may", "    # read `..%2f` / `..%5c` as a segment, and a raw backslash is not a", "    # valid path char at all. None is stripped, so each is refused. A lone", "    # encoded separator stays legal (e.g. npm's `/@scope%2fpackage`).", "    # `;` (or `%3b`) ends a segment too: Tomcat and Jetty drop what follows", "    # as a path parameter, so they read `..;/` as `../`.", "    # `\\\\` is one literal backslash: HAProxy's parser takes the pair as one.", "    http-request deny deny_status 403 if { path -m reg -i (^|/|%2f|%5c)\\.\\.($|/|;|%2f|%5c|%3b) }", "    http-request deny deny_status 403 if { path -m sub \\\\ }", "", `    log-format ${logFormat}`, ...scheme === "https" ? [`    error-log-format ${logFormat}`] : [], ""), l.push(...ruleBlock(rules, mode, scheme)), deniesEverything(rules, mode) || (aws && (l.push(...awsKeyRequestRules(aws, mode)), scheme === "https" && l.push(...awsKeyResponseRules(aws))), l.push("    # Connect to the address this proxy resolves the Host to, discarding", "    # the client's address, so a forged Host or doctored /etc/hosts cannot", "    # choose the target.", "    # txn.host has already dropped the port a header carries, which is not", "    # part of the name. An address is taken as-is: no resolver can answer", "    # one, and the rules above already decided, so nothing is loosened.", `    acl host_is_address var(txn.host) -m reg ${HOST_IS_ADDRESS}`, "    http-request set-var(txn.dst) var(txn.host) if host_is_address", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address", "    # A fresh attempt, not a replay: nothing cached the failure.", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address or { var(txn.dst) -m found }", "    http-request set-var(txn.reason) str(dns-failed) unless { var(txn.dst) -m found }", "    http-request deny deny_status 502 unless { var(txn.dst) -m found }", "", "    # Set before the internal-destination check below, not after: %[dst] in", "    # the log-format is this, and a refusal must show the address that", "    # tripped it, not whatever the client's own (fake, unresolved) address", "    # was: CoreDNS never hands out a real one; see coredns-config.ts.", "    http-request set-dst var(txn.dst)", "", "    # A resolved destination may not be internal; see INTERNAL_RANGES.", ...internalDstAcl("dst_internal", ctx), ...internalGuard(rules, ctx.listenPort))), l.push(`    default_backend ${backend}`, ""), l;
 }
 //#endregion
 //#region src/core/lib/acl/haproxy-sections.ts
@@ -16110,6 +16166,7 @@ function generateHaproxyConfig(options) {
 		}, {
 			mode,
 			listenPort: opts.listenPort,
+			aws: opts.aws,
 			...shared
 		}),
 		...inspectStage({
@@ -16122,6 +16179,7 @@ function generateHaproxyConfig(options) {
 		}, {
 			mode,
 			listenPort: opts.listenPort,
+			aws: opts.aws,
 			...shared
 		}),
 		...originBackends(opts.systemCaFile)
@@ -16375,12 +16433,12 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 //#endregion
 //#region src/core/lib/actions/rule-inputs.ts
 init_core();
-function readRuleInputs(getInput$7 = getInput) {
+function readRuleInputs(getInput$8 = getInput) {
 	let rules = buildACLRules({
-		httpsRulesInput: getInput$7("allowed_https_rules"),
-		httpRulesInput: getInput$7("allowed_http_rules"),
-		ipRulesInput: getInput$7("allowed_ip_rules")
-	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$7("known_blocked_rules")), urlRulesInput = getInput$7("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$7("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
+		httpsRulesInput: getInput$8("allowed_https_rules"),
+		httpRulesInput: getInput$8("allowed_http_rules"),
+		ipRulesInput: getInput$8("allowed_ip_rules")
+	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$8("known_blocked_rules")), urlRulesInput = getInput$8("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$8("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
 	checkRulesCompileOrThrow({
 		...rules,
 		tlsRules,
@@ -23222,7 +23280,7 @@ function getContainerNetns(containerName, { exec = captureDockerViaExec$1 } = {}
 }
 //#endregion
 //#region src/lib/compose-env.ts
-function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, httpsRules, httpRules, ipRules, urlRules, tlsRules }, env, hostAddresses = listHostIpv4Addresses) {
+function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, httpsRules, httpRules, ipRules, urlRules, tlsRules, awsAccounts, awsKeys }, env, hostAddresses = listHostIpv4Addresses) {
 	return {
 		...env,
 		PROXY_CONTAINER_NAME: containerName,
@@ -23234,6 +23292,8 @@ function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, http
 		ALLOWED_IP_RULES: ipRules.join("\n"),
 		ALLOWED_URL_RULES: urlRules.join("\n"),
 		ALLOWED_TLS_RULES: tlsRules.join("\n"),
+		ALLOWED_AWS_ACCOUNTS: awsAccounts.join(" "),
+		ALLOWED_AWS_KEYS: awsKeys.join(" "),
 		BUILDCAGE_PROXY_IMAGE_REF: imageRef,
 		HOST_ADDRESSES: hostAddresses().join(" ")
 	};
@@ -23246,6 +23306,20 @@ async function readLocalImageOverride(env, log = console.log) {
 }
 function resolveComposeFile(override) {
 	return override?.composeFile ?? DEFAULT_COMPOSE_FILE;
+}
+//#endregion
+//#region src/core/lib/acl/aws-keys.ts
+const ACCOUNT_ID = /^\d{12}$/, ACCESS_KEY_ID = /^[A-Z0-9]{16,128}$/;
+function parseList(input, valid, what) {
+	let tokens = splitRuleTokens(input), invalid = tokens.filter((token) => !valid.test(token));
+	if (invalid.length > 0) throw Error(`invalid ${what}: ${invalid.map((t) => JSON.stringify(t)).join(", ")}`);
+	return [...new Set(tokens)];
+}
+function parseAwsAccounts(input) {
+	return parseList(input, ACCOUNT_ID, "AWS account ID");
+}
+function isAwsAccessKeyId(value) {
+	return ACCESS_KEY_ID.test(value);
 }
 //#endregion
 //#region src/lib/filesystem-mode.ts
@@ -23265,6 +23339,7 @@ const LIST_INPUTS = [
 	"allowed_url_rules",
 	"allowed_tls_rules",
 	"known_blocked_rules",
+	"allowed_aws_accounts",
 	"write_through"
 ], CONFIG_FILE_INPUTS = {
 	known: [
@@ -23284,35 +23359,67 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$6 = getInput) {
-	let runInput = getInput$6("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$3 = getInput) {
+	let runInput = getInput$3("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$5 = getInput) {
+function readProxyInputs(getInput$2 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$5("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$5("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$2("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$2("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$1 = getInput) {
+function readFilesystemInputs(notice, getInput$4 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$4("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$1("write_through"),
-			writable: getInput$1("writable"),
-			allowWrite: getInput$1("allow_write")
+			writeThrough: getInput$4("write_through"),
+			writable: getInput$4("writable"),
+			allowWrite: getInput$4("allow_write")
 		}, notice)
 	};
 }
-function readStepLabel(getInput$4 = getInput) {
-	return getInput$4("label") || void 0;
+function readStepLabel(getInput$1 = getInput) {
+	return getInput$1("label") || void 0;
 }
-function readFailOnCaResidue(getInput$2 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$2);
+function readFailOnCaResidue(getInput$5 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$5);
 }
-function readFailOnBlocked(getInput$3 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$3);
+function readFailOnBlocked(getInput$6 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$6);
+}
+function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$7 = getInput) {
+	let accounts;
+	try {
+		accounts = parseAwsAccounts(getInput$7("allowed_aws_accounts"));
+	} catch (e) {
+		throw new SandboxError(`allowed_aws_accounts: ${e.message}. Each entry must be a 12-digit AWS account ID.`, "INVALID_AWS_ACCOUNTS");
+	}
+	if (accounts.length === 0) return {
+		accounts,
+		keys: []
+	};
+	if (proxyEngine !== "inspect") {
+		let reason = `allowed_aws_accounts has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers.`;
+		if (proxyMode === "audit") return warn(`${reason} It is ignored for this run.`), {
+			accounts: [],
+			keys: []
+		};
+		throw new InvalidInputError(`${reason} Switch to proxy_engine: inspect, or remove allowed_aws_accounts.`, "INVALID_PROXY_ENGINE");
+	}
+	let key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
+	if (!isAwsAccessKeyId(key)) {
+		if (proxyMode === "audit") return warn("allowed_aws_accounts is set, but AWS_ACCESS_KEY_ID is unset or is not an access key ID, so the AWS access key check is off for this run."), {
+			accounts: [],
+			keys: []
+		};
+		throw new SandboxError("allowed_aws_accounts is set, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. Set up the credentials in an earlier step, for example with aws-actions/configure-aws-credentials.", "AWS_ACCESS_KEY_MISSING");
+	}
+	return {
+		accounts,
+		keys: [key]
+	};
 }
 //#endregion
 //#region src/lib/retry-briefly.ts
@@ -25320,6 +25427,7 @@ const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-
 	"allowed_ip_rules",
 	"allowed_url_rules",
 	"allowed_tls_rules",
+	"allowed_aws_accounts",
 	"upload_traffic_artifact",
 	"traffic_artifact_retention_days",
 	"fail_on_blocked",
@@ -26093,7 +26201,7 @@ function isRedundantDns(event, connected) {
 }
 //#endregion
 //#region src/core/lib/log/inspect.ts
-const REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:fcerr=(\S+) )?(?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
+const REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:aws=(\S+) )?(?:fcerr=(\S+) )?(?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
 function timeOf(stamp) {
 	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
 	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
@@ -26142,10 +26250,13 @@ function hostBeforeRequest(sni, address) {
 		byAddress: !0
 	};
 }
+function awsRefusal(verdict) {
+	return verdict !== void 0 && AWS_REFUSED_VERDICTS.includes(verdict) ? `aws-${verdict}` : void 0;
+}
 function parseProxyLine(line, isAudit) {
 	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
 	if (request) {
-		let fcerr = request[11] ?? "", incomplete = request[3] === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[13]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[12], request[9]) : void 0, event = {
+		let fcerr = request[12] ?? "", incomplete = request[3] === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[14]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[13], request[9]) : void 0, event = {
 			time: Number(request[1]) / 1e3,
 			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
 			protocol: unnamed?.byAddress ? "tcp" : scheme,
@@ -26155,10 +26266,15 @@ function parseProxyLine(line, isAudit) {
 		};
 		if (parsedRequest) {
 			event.method = request[3];
-			let url = urlOf(scheme, unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority, request[14]);
+			let url = urlOf(scheme, unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority, request[15]);
 			url !== void 0 && (event.url = url);
 		}
-		return reason === void 0 ? (event.status = Number(request[4]), event.bytes = Number(request[5])) : event.reason = reason, event;
+		if (reason !== void 0) event.reason = reason;
+		else {
+			let refusal = awsRefusal(request[11]);
+			refusal !== void 0 && (event.wouldRefuse = refusal), event.status = Number(request[4]), event.bytes = Number(request[5]);
+		}
+		return event;
 	}
 	let pass = PASSTHROUGH.exec(trimmed);
 	if (pass) {
@@ -26550,7 +26666,17 @@ function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 	})], undecided = describeUndecidedRequests(report, engineLabel);
 	undecided && emissions.push(undecided);
 	let failed = describeFailedConnections(report, engineLabel);
-	return failed && emissions.push(failed), emissions;
+	failed && emissions.push(failed);
+	let wouldRefuse = describeWouldRefuse(report);
+	return wouldRefuse && emissions.push(wouldRefuse), emissions;
+}
+function describeWouldRefuse(report) {
+	let count = report.timeline.filter((event) => event.wouldRefuse !== void 0).length;
+	if (count !== 0) return {
+		level: "warning",
+		shouldFail: !1,
+		message: `${count} request(s) the AWS access key check (allowed_aws_accounts) would refuse in restrict mode, marked "restrict would refuse" in Communication details. Audit let them through.`
+	};
 }
 function describeUndecidedRequests(report, engineLabel) {
 	let isNoise = clientEndedNoise(report.timeline), count = report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
@@ -26805,7 +26931,7 @@ function outcome(event) {
 	if (event.action === "failed") return event.reason ?? "failed";
 	if (event.action === "discovery") return `no data (${event.queryType} is never served)`;
 	let parts = [];
-	return event.status !== void 0 && parts.push(String(event.status)), event.bytes !== void 0 && parts.push(`(${formatBytes(event.bytes)})`), parts.length > 0 ? parts.join(" ") : "resolved";
+	return event.status !== void 0 && parts.push(String(event.status)), event.bytes !== void 0 && parts.push(`(${formatBytes(event.bytes)})`), event.wouldRefuse !== void 0 && parts.push(`(restrict would refuse: ${event.wouldRefuse})`), parts.length > 0 ? parts.join(" ") : "resolved";
 }
 function formatTime(epochSeconds, startedAt) {
 	return startedAt === void 0 ? new Date(epochSeconds * 1e3).toISOString().slice(11, 23) + "Z" : formatElapsedVariable(epochSeconds - startedAt);
@@ -27086,7 +27212,7 @@ function buildTrafficRecords(events, startedAt) {
 			protocol: e.protocol,
 			host: e.host
 		};
-		return startedAt !== void 0 && (record.elapsed = formatElapsedFixed(e.time - startedAt)), e.port !== void 0 && (record.port = e.port), e.queryType !== void 0 && (record.queryType = e.queryType), e.method !== void 0 && (record.method = e.method), e.url !== void 0 && (record.url = e.url), e.status !== void 0 && (record.status = e.status), e.bytes !== void 0 && (record.bytes = e.bytes), e.reason !== void 0 && (record.reason = e.reason), e.destination !== void 0 && (record.destination = e.destination), record;
+		return startedAt !== void 0 && (record.elapsed = formatElapsedFixed(e.time - startedAt)), e.port !== void 0 && (record.port = e.port), e.queryType !== void 0 && (record.queryType = e.queryType), e.method !== void 0 && (record.method = e.method), e.url !== void 0 && (record.url = e.url), e.status !== void 0 && (record.status = e.status), e.bytes !== void 0 && (record.bytes = e.bytes), e.reason !== void 0 && (record.reason = e.reason), e.destination !== void 0 && (record.destination = e.destination), e.wouldRefuse !== void 0 && (record.wouldRefuse = e.wouldRefuse), record;
 	});
 }
 function writeTrafficFile(path, records) {
@@ -72226,6 +72352,7 @@ const realDeps = {
 	readRuleInputs,
 	readFailOnCaResidue,
 	readFailOnBlocked,
+	readAwsKeyInputs,
 	readTrafficArtifactInputs,
 	saveWriteThroughForPost,
 	validateFilesystemInputs,
@@ -72272,7 +72399,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -72291,7 +72418,12 @@ async function runSandboxStep(env, overrides = {}) {
 		proxyEngine,
 		proxyMode,
 		knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
-	}, annotation.warning), assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, resolveWriteThroughInput(writeThroughInput, env)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
+	}, annotation.warning);
+	let aws = readAwsKeyInputs({
+		proxyEngine,
+		proxyMode
+	}, env, annotation.warning);
+	assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, resolveWriteThroughInput(writeThroughInput, env)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
 	let { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
 	let localOverride = await readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
@@ -72305,7 +72437,7 @@ async function runSandboxStep(env, overrides = {}) {
 	log(`buildcage: proxy image: ${imageRef}`);
 	let composeFile = resolveComposeFile(localOverride);
 	withLogGroup("buildcage: Configured ACL Rules", () => {
-		logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
+		logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), aws.accounts.length > 0 && console.log(`AWS accounts: ${aws.accounts.join(" ")}`);
 	});
 	let containerName = generateContainerName(), projectName = deriveProjectName(containerName);
 	saveCleanupState(env, {
@@ -72322,7 +72454,9 @@ async function runSandboxStep(env, overrides = {}) {
 		httpRules,
 		ipRules,
 		urlRules,
-		tlsRules
+		tlsRules,
+		awsAccounts: aws.accounts,
+		awsKeys: aws.keys
 	}, env);
 	try {
 		await startSandboxProxy({

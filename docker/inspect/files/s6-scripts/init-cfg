@@ -90,6 +90,8 @@ qjs --std -m /opt/buildcage/scripts/gen-configs.js \
     "$ALLOWED_HTTP_RULES" \
     "$ALLOWED_IP_RULES" \
     "$ALLOWED_TLS_RULES" \
-    "$ALLOWED_URL_RULES"
+    "$ALLOWED_URL_RULES" \
+    "$ALLOWED_AWS_ACCOUNTS" \
+    "$ALLOWED_AWS_KEYS"
 
 echo "init-cfg: configuration generated"

@@ -457,6 +457,12 @@ origin; only the log line reflects the host-only nature of that decision. See
 [Rule syntax](./reference.md#rule-syntax) for how to write a host pattern that doesn't widen this
 more than intended.
 
+An allowed AWS API host serves every AWS account, so a step can sign requests to it with a key of its
+own and have AWS record what it sends in that account's CloudTrail. `allowed_aws_accounts` refuses a
+request signed with any key but the step's own and those STS issues for roles in the named accounts.
+It cannot see which account a request's resource belongs to, so IAM has to close the rest; see
+[AWS access key check](./aws.md).
+
 #### The CA and its private key
 
 The CA and its key are generated fresh when this step's proxy container is created. The CA is valid

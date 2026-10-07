@@ -60,6 +60,9 @@ export interface TrafficEvent {
   reason?: string;
   /** Address it was actually sent to. Absent for dns. */
   destination?: string;
+  /** The refusal restrict mode would have made of a request audit forwarded,
+   *  as the AWS access key check names it. Set only then. */
+  wouldRefuse?: string;
 }
 
 /** The hosts a run connected to, for isRedundantDns. */

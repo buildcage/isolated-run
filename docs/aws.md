@@ -1,0 +1,165 @@
+# AWS access key check
+
+A step that deploys to AWS needs its URL rules to allow AWS API hosts such as
+`cloudformation.us-east-1.amazonaws.com` or `sts.amazonaws.com`. Those hosts serve every AWS account,
+so a rule that allows them lets the step reach any account, not only yours. `allowed_aws_accounts`
+narrows that down to the accounts you name. This page covers what the check does, what it does not
+stop, and what to set up in IAM for the rest.
+
+## Why URL rules are not enough
+
+Code running in the step, such as a compromised dependency, can carry an access key for an account
+its author controls. It signs a request to any AWS API with that key and puts the data it wants to
+take in the query string or the `User-Agent`. The request goes to a host your rules allow, and AWS
+records it in the CloudTrail of the account that owns the key, where the author reads it back.
+
+Nothing in your own account sees this: the call is authorized and logged entirely in the other
+account, so no IAM policy or SCP of yours applies to it. The only place to stop it is the network
+path, before the request leaves the runner.
+
+## What the check does
+
+```yaml
+- uses: aws-actions/configure-aws-credentials@<sha>
+  id: aws
+  with:
+    role-to-assume: arn:aws:iam::111111111111:role/deploy
+    aws-region: us-east-1
+- uses: buildcage/isolated-run@<sha>
+  with:
+    allowed_aws_accounts: ${{ steps.aws.outputs.aws-account-id }}
+    allowed_url_rules: |
+      * https://cloudformation.us-east-1.amazonaws.com/**
+      * https://sts.us-east-1.amazonaws.com/**
+    run: npx cdk deploy
+```
+
+With `allowed_aws_accounts` set, a request to an AWS API host that carries an AWS signature must be
+signed with a key the proxy knows belongs to one of those accounts. The proxy reads the access key ID from the
+`Authorization` header (SigV4, SigV4a or SigV2) or from a presigned URL's `X-Amz-Credential` or
+`AWSAccessKeyId` parameter, and compares it with the keys it knows as a whole string. It never
+decodes a key ID or verifies a signature: a request that copies one of your key IDs without the
+secret is refused by AWS and logged in your own account.
+
+The proxy knows two kinds of key:
+
+- **The key the step starts with**, read from `AWS_ACCESS_KEY_ID` in the step's environment, which
+  is where `aws-actions/configure-aws-credentials` puts it.
+- **Keys an STS `AssumeRole` call issues** for a role in one of the allowed accounts. The proxy reads
+  the role ARN and the new access key ID from the response, which AWS writes, and adds the key. This
+  is what lets tools that switch roles mid-step keep working, such as the CDK assuming its
+  `cdk-hnb659fds-deploy-role-*` roles or Terraform's `assume_role`. A role in any other account
+  issues a key the proxy never learns, so requests signed with it are refused.
+
+AWS API hosts are names under `amazonaws.com`, `amazonaws.com.cn`, `api.aws` (the dual-stack
+endpoints) and `api.amazonwebservices.com.cn`. Other AWS names, such as `public.ecr.aws` or Lambda
+function URLs under `on.aws`, are left to the URL rules alone.
+
+The URL rules still decide first. A request they refuse stays `not-allowed`, and the key check only
+applies to requests they allow.
+
+What happens to a request that carries no AWS signature depends on whether the host names the
+resource it is for. A request with no `Authorization` header, or one with a `Bearer` or `Basic`
+token, counts as unsigned here: only AWS's own schemes are an AWS credential.
+
+| Request                                                                                                          | Result                     |
+| ---------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| Signed with a known key                                                                                          | allowed                    |
+| Signed with any other key                                                                                        | `aws-key-not-allowed`      |
+| Unsigned, to a host that names its resource (below)                                                              | allowed                    |
+| Unsigned, to any other AWS API host, whatever the method                                                         | `aws-no-credential`        |
+| More than one credential: two `Authorization` headers, a header and a query credential, or a credential repeated | `aws-ambiguous-credential` |
+
+These hosts name the resource a request reaches, in the host name or, for S3's path style, in the
+path. The URL rules can pin the account there, so an unsigned request to them is left to the URL
+rules:
+
+| Service                | Host                                                                                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| S3                     | every S3 form: `<bucket>.s3.<region>.amazonaws.com`, `s3.<region>.amazonaws.com/<bucket>/…`, access points, `s3-control`, website and acceleration endpoints |
+| ECR                    | `<account>.dkr.ecr.<region>.amazonaws.com`                                                                                                                   |
+| CodeArtifact           | `<domain>-<owner>.d.codeartifact.<region>.amazonaws.com`                                                                                                     |
+| API Gateway            | `<api-id>.execute-api.<region>.amazonaws.com`                                                                                                                |
+| AppSync                | `<id>.appsync-api.<region>.amazonaws.com`, `<id>.appsync-realtime-api.<region>.amazonaws.com`                                                                |
+| Elastic Load Balancing | `<name>-<id>.elb.<region>.amazonaws.com`, `<name>-<id>.<region>.elb.amazonaws.com`                                                                           |
+| EC2                    | `ec2-<ip>.<region>.compute.amazonaws.com`, `ec2-<ip>.compute-1.amazonaws.com`                                                                                |
+| AWS CLI downloads      | `awscli.amazonaws.com`                                                                                                                                       |
+
+Each also matches under `amazonaws.com.cn`. Every other AWS API host names only a service and a
+region, such as `sts.us-east-1.amazonaws.com` or `sqs.us-east-1.amazonaws.com`. The account a
+request to one of those reaches is in its parameters or its body, where the proxy does not look, so
+an unsigned request there is refused, `GET` included. A host missing from the table above is
+treated the same way; if a legitimate request is refused as `aws-no-credential` for that reason,
+please report it.
+
+These hosts are only as narrow as the URL rules that allow them. A rule such as
+`* https://**.amazonaws.com/**` lets an unsigned request reach anyone's bucket, registry or API, and
+whoever owns it can read what was sent, `User-Agent` and query string included, in their own logs.
+Allow them by name, as you would any other host:
+
+```yaml
+allowed_url_rules: |
+  * https://111111111111.dkr.ecr.us-east-1.amazonaws.com/**
+  GET|PUT https://my-artifacts.s3.us-east-1.amazonaws.com/**
+```
+
+### In `audit` mode
+
+`audit` refuses nothing, and that includes this check. A warning annotation counts the requests it
+would have refused, and **Communication details** names the reason on each, so a step can be
+checked before it is switched to `restrict`:
+
+```
+✅ 00:03.120: POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed)
+```
+
+The traffic artifact carries the same reason in `wouldRefuse`.
+
+## What it does not stop
+
+The check looks at whose key signed a request, not at whose resource the request is for. A request
+signed with your own key that names a resource in another account passes. The target account is in
+the request body, not in the URL, so the proxy cannot see it. Requests like these remain possible:
+
+| Route                                 | Example                                                                                                                                                                                |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cross-account `AssumeRole`            | Assuming a role in another account, with data in the session name, source identity or session tags. A successful call is recorded in the role owner's CloudTrail. A denied one is not. |
+| Services with resource-based policies | Publishing to an SNS topic, sending to an SQS queue, invoking a Lambda function, putting events on an EventBridge bus or writing to an S3 bucket in another account                    |
+| KMS                                   | Encrypting with a key in another account, whose owner sees the encryption context in CloudTrail                                                                                        |
+| CloudFormation itself                 | A custom resource whose `ServiceToken` or a stack whose `NotificationARNs` names a topic or function in another account. AWS makes those calls, so they never pass the proxy.          |
+
+## Closing the rest in IAM
+
+Each route above needs your role to be allowed to act on a resource in another account, so IAM can
+close them. Set these on the role the step assumes, and on the CloudFormation service role if you
+use one:
+
+- **Deny access to resources outside your accounts** with the `aws:ResourceAccount` condition key,
+  or `aws:ResourceOrgID` if you use AWS Organizations. AWS's
+  [data perimeter guidance](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_data-perimeters.html)
+  covers the exceptions a real policy needs, such as resources AWS services own.
+- **Name the account in every `sts:AssumeRole` resource.** A resource such as
+  `arn:aws:iam::*:role/cdk-*`, common in CDK setups, lets the role assume a role of that name in any
+  account, including one someone else creates for the purpose. Write
+  `arn:aws:iam::111111111111:role/cdk-*` instead. A denied `AssumeRole` is not recorded in the target
+  account, so this closes the route entirely.
+
+## Requirements and limits
+
+- `proxy_engine: inspect` only, since `universal` never sees a request's headers. `restrict` fails
+  the step on `universal`; `audit` warns and ignores the input.
+- The step has to start with a key in `AWS_ACCESS_KEY_ID`. In `restrict`, a step with
+  `allowed_aws_accounts` and no such variable fails before the proxy starts; `audit` warns and turns
+  the check off. Credentials read from `~/.aws/credentials`, a profile or a container credentials
+  endpoint are not used as a starting key.
+- Getting credentials inside the step works only through STS `AssumeRole`. The unsigned STS calls,
+  `AssumeRoleWithWebIdentity` and `AssumeRoleWithSAML`, are refused as `aws-no-credential`, and keys
+  from IAM Identity Center's `GetRoleCredentials` or Cognito's `GetCredentialsForIdentity` are never
+  learned. Get those credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
+- Keys are learned only from STS answers over HTTPS. The proxy asks STS for an uncompressed answer,
+  unless the client signed its own `Accept-Encoding`, which the proxy then leaves alone. It reads an
+  answer up to its buffer size (16 KB). A key in a compressed answer or past the buffer is not
+  learned, and requests signed with it are refused.
+- The starting key ID is handed to the proxy container as an environment variable, so it is visible
+  to `docker inspect` on the runner while the step runs. A key ID is not a secret on its own:
+  signing needs the secret access key, which never reaches the proxy.

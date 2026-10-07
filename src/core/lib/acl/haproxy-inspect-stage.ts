@@ -1,4 +1,10 @@
 import { PROXY_SUBNET } from "../log/proxy-address.ts";
+import {
+  awsKeyRequestRules,
+  awsKeyResponseRules,
+  awsLogField,
+  type AwsKeyCheck,
+} from "./haproxy-aws-keys.ts";
 import { internalDstAcl, type InternalDstOptions } from "./haproxy-internal-dst.ts";
 import {
   escapeForHaproxy,
@@ -27,6 +33,8 @@ export interface InspectStageContext extends InternalDstOptions {
   mode: "restrict" | "audit";
   /** The detect frontend's port, bound on every address the proxy holds. */
   listenPort: number;
+  /** Absent where no AWS account is allowed, which leaves the check out. */
+  aws?: AwsKeyCheck;
 }
 
 /** The fields of the stage that terminates TLS. fcerr names a failed client
@@ -108,8 +116,8 @@ export function inspectStage(
   { name, port, bindExtra, scheme, rules, backend }: InspectStageSpec,
   ctx: InspectStageContext,
 ): string[] {
-  const { mode } = ctx;
-  const logFormat = `"buildcage %[date(0,ms)] ${scheme} %HM %ST %B ts=%ts reason=%[var(txn.reason)] tlserr=%[ssl_bc_err] dst=%[dst]:%[dst_port]${clientTlsFields(scheme)} host=%[var(txn.host_log)] %[var(txn.pathq)]"`;
+  const { mode, aws } = ctx;
+  const logFormat = `"buildcage %[date(0,ms)] ${scheme} %HM %ST %B ts=%ts reason=%[var(txn.reason)] tlserr=%[ssl_bc_err] dst=%[dst]:%[dst_port]${awsLogField(aws)}${clientTlsFields(scheme)} host=%[var(txn.host_log)] %[var(txn.pathq)]"`;
   const l: string[] = [];
   l.push(
     `frontend ${name}`,
@@ -193,6 +201,13 @@ export function inspectStage(
   // Skipped entirely when the block above denies unconditionally: HAProxy
   // would never reach these rules, and warns that they are NOOP.
   if (!deniesEverything(rules, mode)) {
+    // After the rules, so a request they refuse keeps their reason, and ahead
+    // of the resolve, so a refused key triggers no DNS query either. Keys are
+    // learned only where the origin's certificate was checked.
+    if (aws) {
+      l.push(...awsKeyRequestRules(aws, mode));
+      if (scheme === "https") l.push(...awsKeyResponseRules(aws));
+    }
     l.push(
       "    # Connect to the address this proxy resolves the Host to, discarding",
       "    # the client's address, so a forged Host or doctored /etc/hosts cannot",
