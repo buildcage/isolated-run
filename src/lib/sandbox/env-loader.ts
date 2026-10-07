@@ -174,7 +174,7 @@ exec 0</dev/null
 
 # A pipe this process holds both ends of, so \`read -t\` on it waits out its
 # timeout: a pause that starts no process, unlike sleep(1). Opened before the
-# step starts, so even this one fork happens before then. Linux reopens the
+# step starts, so its one fork happens before then. Linux reopens the
 # pipe through /dev/fd; where that fails, the wait falls back to sleep(1).
 nap=
 if ! { exec 9<> <(:); } 2>/dev/null; then
