@@ -797,7 +797,8 @@ tracer did not stop cleanly, the section opens with a warning that the record is
 It observes accesses in the kernel, below any library the step links against, and only records; it
 never blocks an access. It needs a cgroup v2 host running Linux 5.17 or newer; where that or the
 kernel's tracing support is missing it warns and the step runs unaudited. See
-[Known Limitations](./security.md#known-limitations) for what it does not record.
+[Filesystem audit](./security.md#filesystem-audit) for what it does not record and what its record
+can be trusted for.
 
 ## CA trust variables
 

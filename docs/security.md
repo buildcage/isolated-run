@@ -14,6 +14,7 @@ the [README](../README.md); for implementation internals, see the
 - [Attempts to get around it](#attempts-to-get-around-it)
 - [What the engines cannot see](#what-the-engines-cannot-see)
 - [Credentials in a URL](#credentials-in-a-url)
+- [Filesystem audit](#filesystem-audit)
 - [Hardening](#hardening)
 - [Known Limitations](#known-limitations)
 - [Image Provenance Verification](#image-provenance-verification)
@@ -579,6 +580,57 @@ out of the summary.
 An `allowed_url_rules` block suggested by an audit run never carries a query at all: rules match on
 the path, and a recorded query is as likely to hold a one-off token as anything reusable.
 
+## Filesystem audit
+
+`filesystem_audit: record` observes what the step touches and reports it; it never blocks an access,
+so it is a visibility aid, not a control. What it can be trusted for depends on what the step
+itself, the party being watched, can do to the record.
+
+**Altering the record.** The tracer runs as root on the runner host, outside the sandbox, and is
+watching the sandbox's cgroup before the step starts. It writes under `/var/tmp/buildcage-<uid>`,
+which every sandbox sees only as a tmpfs it cannot write to, holding nothing but its own read-only
+`exec/` directory, and a `write_through:` entry naming that directory is refused. The step has no
+capability to signal or trace the tracer, which is outside its PID namespace, and the report is
+rendered from the host after the step exits. What remains is a process running as the same user
+outside any sandbox, such as one an earlier unwrapped step left behind, which can replace the
+recording before it is read: the same accepted limitation as the staging directory under [What the
+sandbox does not stop](#what-the-sandbox-does-not-stop).
+
+**Reading another step's record.** For the same reasons no sandbox can read another step's
+recording, a concurrent one included. A process running as the same user outside any sandbox can,
+and so can a job sharing the machine and the user, which
+[Where it will not run](#where-it-will-not-run) already rules out. Once uploaded, the artifact is
+readable by any later job in the run and anyone who can read the repository, until it expires.
+
+**Falsifying what it says.** A successful access is recorded with the path the kernel resolved,
+not the name the command passed. A failed open keeps the name the command passed, as copied by
+the kernel, so it cannot be changed afterwards; a relative one is joined to the working directory
+or directory descriptor when the call returns, so a thread that changes either meanwhile can have
+it recorded elsewhere. A failed move, delete or attribute change, and an attribute change through
+`utimes` or `setxattr`, are recorded from the command's own memory when the call returns, so
+another thread of the command can rewrite the name first: those names are best-effort. The
+command name on each row is the one the process gave itself, so it says which process acted, not
+which binary; the exec record has the binary's path. No name can rewrite the Job Summary, since a
+control, format or separator character, or a backslash, is shown escaped.
+
+**Going unrecorded.** The step cannot leave the cgroup: the sandbox sees the cgroup filesystem
+read-only and holds no capability, so everything it starts is watched. Nor can it change which
+records count as its own: everything after its shell first starts is the step's except the sandbox
+init's own records, whatever it does with its process tree, and a later exec of its own run script
+is shown. What it can do:
+
+- Hand the work to a process outside the sandbox, such as an `ssh-agent` or `gpg-agent` it can
+  reach over a Unix socket. That process's accesses are not recorded.
+- Use an operation the tracer does not record: a change through an already-open descriptor
+  inherited across `exec`, an extended attribute other than through `setxattr`, or a failed
+  `exec`, `mkdir`, `symlink`, `link` or `truncate`.
+- Flood the tracer until its buffers fill. The accesses that did not fit are lost, but the count
+  is kept and the summary then says the record is incomplete; it says so too when the tracer did
+  not stop cleanly. Flooding can hide which accesses happened, not that some are missing.
+
+Where the tracer cannot start, without cgroup v2, BTF or Linux 5.17, the step runs unaudited after a
+warning rather than failing.
+
 ## Hardening
 
 Buildcage runs against the command you already have, and an allowlist generated from an audit run
@@ -700,15 +752,8 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 - **Reading a step's staging directory from outside any sandbox.** `/var/tmp/buildcage-<uid>` is
   hidden from every sandbox, including its own, but a process running as the same user outside one
   can still read it. That is the same accepted limitation as credential retrieval above.
-- **`filesystem_audit` records, it does not enforce.** It observes what the step touches and reports
-  it; it never blocks an access, so it is a visibility aid, not a control. Like the traffic report,
-  its record is produced from the host after the command exits, so a step running as the same user
-  outside the sandbox could tamper with the staging file before it is read, the same accepted
-  limitation as above. It does not record changes made through an already-open descriptor inherited
-  across `exec`, extended attributes other than `setxattr`, or a failed `exec`, `mkdir`, `symlink`,
-  `link` or `truncate`. A failed access, and an attribute change through `utimes` or `setxattr`,
-  is placed in the directory its relative name pointed at when the call returned, so a thread that
-  changes directory or closes that descriptor meanwhile can have it recorded elsewhere.
+- **`filesystem_audit` records, it does not enforce.** It never blocks an access. See
+  [Filesystem audit](#filesystem-audit) for what its record can be trusted for.
 
 ### Where it will not run
 
