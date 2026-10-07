@@ -70,6 +70,47 @@ describe("stripSandboxMachinery", () => {
     ]);
   });
 
+  it("keeps the first run-script.sh exec as the anchor when the step runs it again", () => {
+    const out = stripSandboxMachinery(
+      jsonl(
+        { pid: 10, ppid: 1, kind: "read", comm: "env-loader.sh", path: "/etc/passwd" },
+        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        { pid: 12, ppid: 11, kind: "fork", comm: "run-script.sh" },
+        { pid: 12, ppid: 11, kind: "read", comm: "node", path: "/home/u/.aws/credentials" },
+        // The step finds its own run-script.sh and execs it from a child.
+        { pid: 13, ppid: 12, kind: "fork", comm: "node" },
+        { pid: 13, ppid: 12, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+      ),
+      BASE,
+    );
+    expect(records(out)).toEqual([
+      { pid: 12, ppid: 11, kind: "fork", comm: "bash" },
+      { pid: 12, ppid: 11, kind: "read", comm: "node", path: "/home/u/.aws/credentials" },
+      { pid: 13, ppid: 12, kind: "fork", comm: "node" },
+    ]);
+  });
+
+  it("walks a process back through its fork record, not a later record's parent", () => {
+    // pid 13 was made by 12 but, by CLONE_PARENT or once 12 exits, its other
+    // records name the init as its parent.
+    const out = stripSandboxMachinery(
+      jsonl(
+        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        { pid: 12, ppid: 11, kind: "fork", comm: "run-script.sh" },
+        { pid: 13, ppid: 12, kind: "fork", comm: "node" },
+        { pid: 13, ppid: 10, kind: "read", comm: "node", path: "/home/u/.aws/credentials" },
+      ),
+      BASE,
+    );
+    expect(records(out)).toContainEqual({
+      pid: 13,
+      ppid: 10,
+      kind: "read",
+      comm: "node",
+      path: "/home/u/.aws/credentials",
+    });
+  });
+
   it("leaves a step command named like a wrapper alone, by its pid and exec path", () => {
     const out = stripSandboxMachinery(
       jsonl(

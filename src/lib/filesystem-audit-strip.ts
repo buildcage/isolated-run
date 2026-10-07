@@ -13,7 +13,13 @@
  * The shell is found by the exec of run-script.sh under the scratch base, never
  * by command name, so a step command named setpriv or run-script.sh (run from
  * the workspace, a different pid, exec'd from a non-scratch path) is left alone
- * and keeps its own name.
+ * and keeps its own name. Only the first such exec counts: the step can see and
+ * run its own run-script.sh, and a later exec of it must not move the anchor
+ * away from the shell and drop everything outside the new process.
+ *
+ * Parents come from each process's first record, its fork, which names the
+ * process that made it (see the tracer), so neither CLONE_PARENT nor a later
+ * reparent to the init can detach a process from the step.
  *
  * It assumes a complete recording: a missing shell exec leaves the step
  * unanchored (machinery stays in), and a process whose ancestor emitted no
@@ -48,14 +54,14 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
 
   const parent = new Map<number, number>();
   const ownShellPids = new Set<number>(); // execs its own run-script.sh, not buildcage's
-  let shell: number | undefined; // the pid that execs buildcage's run-script.sh
+  let shell: number | undefined; // the pid that first execs buildcage's run-script.sh
   let boundary = -1;
   recs.forEach((r, i) => {
     if (!r || r.pid === undefined) return;
     if (!parent.has(r.pid) && r.ppid !== undefined) parent.set(r.pid, r.ppid);
     if (r.kind === "exec" && typeof r.path === "string" && leaf(r.path) === SHELL_COMM) {
-      if (under(r.path)) [shell, boundary] = [r.pid, i];
-      else ownShellPids.add(r.pid);
+      if (!under(r.path)) ownShellPids.add(r.pid);
+      else if (shell === undefined) [shell, boundary] = [r.pid, i];
     }
   });
 

@@ -476,7 +476,9 @@ int BPF_PROG(on_exec, struct task_struct *p, int old_pid, struct linux_binprm *b
 }
 
 // Every new process, so a parent that forks and never execs or touches a file
-// (a subshell) still links its children to the processes above it.
+// (a subshell) still links its children to the processes above it. ppid is
+// the process that made it, not real_parent, which CLONE_PARENT sets to that
+// process's own parent.
 SEC("tp_btf/sched_process_fork")
 int BPF_PROG(on_fork, struct task_struct *parent, struct task_struct *child)
 {
@@ -489,7 +491,7 @@ int BPF_PROG(on_fork, struct task_struct *parent, struct task_struct *child)
 	if (!e)
 		return 0;
 	e->pid = tgid;
-	e->ppid = BPF_CORE_READ(child, real_parent, tgid);
+	e->ppid = BPF_CORE_READ(parent, tgid);
 	submit(e);
 	return 0;
 }

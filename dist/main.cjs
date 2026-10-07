@@ -68311,7 +68311,7 @@ function stripSandboxMachinery(jsonl, scratchBase) {
 		}
 	}), parent = new Map(), ownShellPids = new Set(), shell, boundary = -1;
 	recs.forEach((r, i) => {
-		r && r.pid !== void 0 && (!parent.has(r.pid) && r.ppid !== void 0 && parent.set(r.pid, r.ppid), r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? [shell, boundary] = [r.pid, i] : ownShellPids.add(r.pid)));
+		r && r.pid !== void 0 && (!parent.has(r.pid) && r.ppid !== void 0 && parent.set(r.pid, r.ppid), r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 && ([shell, boundary] = [r.pid, i]) : ownShellPids.add(r.pid)));
 	});
 	let inStep = (pid) => {
 		let seen = new Set();
