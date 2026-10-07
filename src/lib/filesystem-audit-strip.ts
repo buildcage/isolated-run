@@ -49,15 +49,16 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
     }
   });
 
-  const ownShellPids = new Set<number>(); // execs a run-script.sh other than buildcage's shell
+  const ownShellPids = new Set<number>(); // runs a run-script.sh as other than buildcage's shell
   let shell: number | undefined; // the pid that first execs buildcage's run-script.sh
   let init: number | undefined; // the shell's parent at that exec
   let boundary = -1;
   recs.forEach((r, i) => {
     if (!r || r.pid === undefined) return;
     if (r.kind === "exec" && typeof r.path === "string" && leaf(r.path) === SHELL_COMM) {
-      if (!under(r.path) || shell !== undefined) ownShellPids.add(r.pid);
-      else [shell, boundary, init] = [r.pid, i, r.ppid];
+      if (!under(r.path)) ownShellPids.add(r.pid);
+      else if (shell === undefined) [shell, boundary, init] = [r.pid, i, r.ppid];
+      else if (r.pid !== shell) ownShellPids.add(r.pid);
     }
   });
 
@@ -67,6 +68,14 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
       if (lines[i] !== "") out.push(lines[i]);
       return;
     }
+    // A child of such a process inherits its run-script.sh name and keeps it too.
+    if (
+      r.kind === "fork" &&
+      r.pid !== undefined &&
+      r.ppid !== undefined &&
+      ownShellPids.has(r.ppid)
+    )
+      ownShellPids.add(r.pid);
     // A buildcage scratch file, unless the step itself execs it.
     if (under(r.path) && !(r.kind === "exec" && shell !== undefined && i > boundary)) return;
     // setpriv, the init, or the shell before its exec; after it, the init.

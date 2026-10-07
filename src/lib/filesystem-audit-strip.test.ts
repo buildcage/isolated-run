@@ -77,9 +77,12 @@ describe("stripSandboxMachinery", () => {
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
         { pid: 12, ppid: 11, kind: "fork", comm: "run-script.sh" },
         { pid: 12, ppid: 11, kind: "read", comm: "node", path: "/home/u/.aws/credentials" },
-        // The step finds its own run-script.sh and execs it from a child.
+        // The step finds its own run-script.sh and execs it from a child,
+        // and the shell itself execs it again too.
         { pid: 13, ppid: 12, kind: "fork", comm: "node" },
         { pid: 13, ppid: 12, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        { pid: 14, ppid: 13, kind: "fork", comm: "run-script.sh" },
+        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
       ),
       BASE,
     );
@@ -87,8 +90,10 @@ describe("stripSandboxMachinery", () => {
       { pid: 12, ppid: 11, kind: "fork", comm: "bash" },
       { pid: 12, ppid: 11, kind: "read", comm: "node", path: "/home/u/.aws/credentials" },
       { pid: 13, ppid: 12, kind: "fork", comm: "node" },
-      // Kept under its own name, so the re-exec shows.
+      // Kept under their own name, a child of the re-exec included, so it shows.
       { pid: 13, ppid: 12, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+      { pid: 14, ppid: 13, kind: "fork", comm: "run-script.sh" },
+      { pid: 11, ppid: 10, kind: "exec", comm: "bash", path: RUN_SCRIPT },
     ]);
   });
 

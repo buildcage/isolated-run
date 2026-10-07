@@ -42,9 +42,22 @@ describe("stripSandboxMachinery: properties", () => {
         const outLines = out.split("\n").filter(Boolean);
         const inLines = jsonl.split("\n").filter(Boolean);
         expect(outLines.length).toBeLessThanOrEqual(inLines.length);
+        const parse = (line: string) => JSON.parse(line) as { kind?: unknown; path?: unknown };
+        const scratchExec = (line: string): boolean => {
+          const { kind, path: p } = parse(line);
+          return (
+            kind === "exec" && typeof p === "string" && (p === BASE || p.startsWith(`${BASE}/`))
+          );
+        };
+        // Only execs after the anchor, the first scratch run-script.sh exec, survive.
+        const anchor = inLines.findIndex(
+          (l) => scratchExec(l) && String(parse(l).path).endsWith("/run-script.sh"),
+        );
+        const allowed = anchor < 0 ? 0 : inLines.slice(anchor + 1).filter(scratchExec).length;
+        expect(outLines.filter(scratchExec).length).toBeLessThanOrEqual(allowed);
         for (const line of outLines) {
-          const { kind, path: p } = JSON.parse(line) as { kind?: unknown; path?: unknown };
-          if (typeof p === "string" && kind !== "exec")
+          const p = parse(line).path;
+          if (typeof p === "string" && !scratchExec(line))
             expect(p === BASE || p.startsWith(`${BASE}/`)).toBe(false);
         }
       }),
