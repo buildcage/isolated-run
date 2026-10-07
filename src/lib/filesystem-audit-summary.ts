@@ -264,6 +264,9 @@ const LEGEND =
   "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied";
 const TIME_LEGEND = "first-last access";
 const HEADING = "### Filesystem audit";
+const INCOMPLETE_NOTE =
+  "> ⚠️ **This record is incomplete.** The tracer's buffers filled up, so some accesses are missing\n" +
+  "> from the list below and from the artifact.";
 
 export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOptions): string {
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
@@ -276,6 +279,7 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
   const failedSpans: LetterSpans = new Map();
 
   let seq = 0;
+  let incomplete = false; // the tracer's closing line when its buffers filled
   for (const line of jsonl.split("\n")) {
     if (!line) continue;
     let r: AuditRecord;
@@ -283,6 +287,10 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
       r = JSON.parse(line) as AuditRecord;
     } catch {
       continue; // a line the tracer left truncated (e.g. a hard kill mid-write)
+    }
+    if (r.kind === "incomplete") {
+      incomplete = true;
+      continue;
     }
     if (r.kind === "mmap" && r.access === "x") {
       if (r.path) libs.add(r.path);
@@ -419,7 +427,8 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
     return a.seq - b.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
   });
 
-  if (rows.length === 0) return `${HEADING}\n\nNo file access was recorded.\n`;
+  const heading = incomplete ? `${HEADING}\n\n${INCOMPLETE_NOTE}` : HEADING;
+  if (rows.length === 0) return `${heading}\n\nNo file access was recorded.\n`;
   // Times count from the proxy's start, as the communication details do, or
   // from the first access shown when that start is unknown.
   const originMs =
@@ -441,5 +450,5 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
     )
     .join("\n");
   const legend = timeW ? `${TIME_LEGEND} · ${LEGEND}` : LEGEND;
-  return `${HEADING}\n\n<sub>${legend}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
+  return `${heading}\n\n<sub>${legend}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
 }

@@ -26,6 +26,19 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual([]);
   });
 
+  it("warns when the tracer's closing line says accesses went unrecorded", () => {
+    const incomplete = { kind: "incomplete", dropped: 3, untracked: 0 };
+    const md = renderFilesystemAuditSummary(
+      jsonl({ kind: "read", comm: "cat", path: "/etc/hostname" }, incomplete),
+      PREFIXES,
+    );
+    expect(md).toContain("### Filesystem audit\n\n> ⚠️ **This record is incomplete.**");
+    expect(lines(md)).toEqual(["R cat /etc/hostname"]);
+    expect(renderFilesystemAuditSummary(jsonl(incomplete), PREFIXES)).toMatch(
+      /incomplete\.\*\*[\s\S]*No file access was recorded\./,
+    );
+  });
+
   it("includes a heading and the flag legend", () => {
     const md = renderFilesystemAuditSummary(
       jsonl({ kind: "read", comm: "cat", path: "/etc/hostname" }),

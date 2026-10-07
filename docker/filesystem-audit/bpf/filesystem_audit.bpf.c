@@ -156,7 +156,7 @@ struct {
 	__uint(max_entries, 1);
 	__type(key, u32);
 	__type(value, u64);
-} drops SEC(".maps"), skipped_internal SEC(".maps");
+} drops SEC(".maps"), untracked SEC(".maps"), skipped_internal SEC(".maps");
 
 static __always_inline void bump(void *counter)
 {
@@ -375,6 +375,7 @@ struct {
 
 // Reports whether bit was newly recorded for file: false if it was already
 // set, or if the map is full (so a saturated map cannot cause re-emission).
+// A full map counts in untracked, since that access then goes unreported.
 static __always_inline int first_time(struct file *file, u8 bit)
 {
 	u64 key = (u64)file;
@@ -385,7 +386,10 @@ static __always_inline int first_time(struct file *file, u8 bit)
 		*v |= bit;
 		return 1;
 	}
-	return bpf_map_update_elem(&seen_files, &key, &bit, BPF_ANY) == 0;
+	if (bpf_map_update_elem(&seen_files, &key, &bit, BPF_ANY) == 0)
+		return 1;
+	bump(&untracked);
+	return 0;
 }
 
 // Marks the thread while it is inside backing_file_open (overlayfs opening a

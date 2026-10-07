@@ -34,6 +34,7 @@ describe("stripSandboxMachinery", () => {
         { pid: 12, ppid: 11, kind: "exec", comm: "cat", path: "/usr/bin/cat" },
         { pid: 12, ppid: 11, kind: "read", comm: "cat", path: "/work/a.txt" },
         { kind: "read", comm: "node", path: "/work/z" }, // a record with no pid, kept
+        { kind: "incomplete", dropped: 1, untracked: 0 }, // the tracer's closing line, kept
       ),
       BASE,
     );
@@ -43,6 +44,7 @@ describe("stripSandboxMachinery", () => {
       { pid: 12, ppid: 11, kind: "exec", comm: "cat", path: "/usr/bin/cat" },
       { pid: 12, ppid: 11, kind: "read", comm: "cat", path: "/work/a.txt" },
       { kind: "read", comm: "node", path: "/work/z" },
+      { kind: "incomplete", dropped: 1, untracked: 0 },
     ]);
   });
 
