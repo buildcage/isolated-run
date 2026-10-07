@@ -213,7 +213,7 @@ jobs:
             python3 -c 'import os, sys; d = os.open(sys.argv[1], os.O_RDONLY)
             try: os.unlink("gone", dir_fd=d)
             except FileNotFoundError: pass' "$GITHUB_WORKSPACE/sub"
-            # A change the kernel refuses after the hook that sees it.
+            # Changes the kernel refuses after the tracer's hook has seen them.
             chmod 777 "$GITHUB_WORKSPACE/root-owned.txt" 2>/dev/null || true
             mkdir "$GITHUB_WORKSPACE/root-owned/x" 2>/dev/null || true
 
