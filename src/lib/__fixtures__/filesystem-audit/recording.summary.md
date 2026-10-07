@@ -1,6 +1,33 @@
 ### Filesystem audit
 
-<sub>first-last access · R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>
+<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>
+
+#### Executed
+
+| Path |
+| --- |
+| `/usr/bin/cat` |
+| `/usr/bin/mv` |
+| `/usr/bin/rm` |
+
+#### Accessed paths
+
+| Access | Path |
+| --- | --- |
+| WM | `./probe.txt` |
+| D | `./probe2.txt` |
+| W | `/dev/null` |
+| r | `/dev/tty` |
+| R | `/etc/**` |
+| R | `/proc/filesystems` |
+| X | `/usr/bin/**` |
+| R | `/usr/lib/locale/**` |
+| R | `/usr/lib/x86_64-linux-gnu/**` |
+
+<details>
+<summary>📂 Filesystem details</summary>
+
+<sub>first-last access</sub>
 
 ```
 00:06.394:           r bash /dev/tty
@@ -26,3 +53,5 @@
 00:06.395:           R rm   /usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache
 00:06.395:           D rm   ./probe2.txt
 ```
+
+</details>

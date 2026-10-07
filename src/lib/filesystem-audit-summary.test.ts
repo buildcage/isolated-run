@@ -359,7 +359,7 @@ describe("renderFilesystemAuditSummary", () => {
         ),
         timed,
       );
-      expect(md).toContain("<sub>first-last access · R read");
+      expect(md).toContain("<sub>first-last access</sub>");
       expect(lines(md)).toEqual([
         "00:00.250-00:04.000: RW node ./a",
         "00:01.500: R node /etc/hosts",
@@ -499,5 +499,126 @@ describe("renderFilesystemAuditSummary", () => {
     // every pair would take minutes at this size.
     const many = new Set(Array.from({ length: 100_000 }, (_, i) => keyOf(`c${i}`, `/work/f${i}`)));
     expect(dropWalkedDirs(many, () => ["R"])).toEqual(many);
+  });
+
+  describe("tables", () => {
+    it("lists each executed path once, in the order first run", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { kind: "exec", comm: "sh", path: "/usr/bin/sh" },
+          { kind: "exec", comm: "node", path: "/work/bin/node" },
+          { kind: "exec", comm: "sh", path: "/usr/bin/sh" },
+        ),
+        PREFIXES,
+      );
+      expect(md).toContain(
+        "#### Executed\n\n| Path |\n| --- |\n| `/usr/bin/sh` |\n| `./bin/node` |\n\n",
+      );
+    });
+
+    it("spells an executed path the way the other views do", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { kind: "exec", comm: "sh", path: "./run.sh" },
+          { kind: "exec", comm: "sh", path: "run.sh" },
+          { kind: "exec", comm: "a", path: "/proc/12/fd/3" },
+          { kind: "exec", comm: "a", path: "/proc/34/fd/3" },
+        ),
+        PREFIXES,
+      );
+      expect(md).toContain("| Path |\n| --- |\n| `…/run.sh` |\n| `/proc/<pid>/fd/3` |\n\n");
+    });
+
+    it("keeps two rows that read alike in a stable order", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { kind: "read", comm: "a", path: "…/x" },
+          { kind: "open-failed", comm: "a", path: "x", err: 2 },
+        ),
+        PREFIXES,
+      );
+      expect(md).toContain("| R | `…/x` |\n| r | `…/x` |\n");
+    });
+
+    it("leaves the executed table out when nothing was run", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl({ kind: "read", comm: "a", path: "/work/x" }),
+        PREFIXES,
+      );
+      expect(md).not.toContain("#### Executed");
+    });
+
+    it("gives each path one row for every command's access, in path order", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { kind: "read", comm: "node", path: "/etc/hosts" },
+          { kind: "read", comm: "node", path: "/work/a" },
+          { kind: "write", comm: "sh", path: "/work/a" },
+        ),
+        PREFIXES,
+      );
+      expect(md).toContain(
+        "#### Accessed paths\n\n| Access | Path |\n| --- | --- |\n| RW | `./a` |\n| R | `/etc/hosts` |\n",
+      );
+    });
+
+    it("prints a path's Markdown as itself and escapes only what would break the row", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { kind: "read", comm: "a", path: "/work/x|y" },
+          { kind: "read", comm: "a", path: "/work/a&#47;~~b~~" },
+          { kind: "read", comm: "a", path: "/work/`c``d" },
+        ),
+        PREFIXES,
+      );
+      expect(md).toContain("| R | `./x\\|y` |");
+      expect(md).toContain("| R | `./a&#47;~~b~~` |");
+      expect(md).toContain("| R | ```./`c``d``` |");
+    });
+
+    it("pads a code span whose path ends with a backtick", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl({ kind: "read", comm: "a", path: "/work/x`" }),
+        PREFIXES,
+      );
+      expect(md).toContain("| R | `` ./x` `` |");
+    });
+
+    it("keys the workspace itself once under either spelling", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { kind: "chmod", comm: "a", path: "/real/work" },
+          { kind: "chmod", comm: "a", path: "/sym/work", failed: true, err: 1 },
+        ),
+        { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
+      );
+      expect(md).toContain("| Access | Path |\n| --- | --- |\n| A | `.` |\n\n");
+    });
+
+    it("keys a path once whether it was reached through the workspace's symlink or not", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl(
+          { kind: "open-failed", comm: "a", path: "/sym/work/x", err: 2 },
+          { kind: "read", comm: "a", path: "/real/work/x" },
+          { kind: "exec", comm: "a", path: "/sym/work/bin" },
+          { kind: "exec", comm: "a", path: "/real/work/bin" },
+        ),
+        { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
+      );
+      expect(md).toContain("| R | `./x` |");
+      expect(md).not.toContain("| r | `./x` |");
+      expect(md).toContain("| Path |\n| --- |\n| `./bin` |\n\n");
+    });
+
+    it("folds the per-command record into a details element after the tables", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl({ kind: "read", comm: "a", path: "/work/x" }),
+        PREFIXES,
+      );
+      expect(md.indexOf("#### Accessed paths")).toBeLessThan(md.indexOf("<details>"));
+      expect(md).toMatch(
+        /<details>\n<summary>📂 Filesystem details<\/summary>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
+      );
+    });
   });
 });

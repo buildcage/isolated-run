@@ -2,22 +2,28 @@ import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:
 import { dirname } from "node:path";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
-import { writeStepSummary } from "#core/lib/actions/write-step-summary.ts";
 import { errorMessage } from "#core/lib/errors.ts";
+import {
+  joinSummaryBlocks,
+  withNotices,
+  type SummaryBlock,
+} from "#core/lib/report/render/fit-step-summary.ts";
 
 import {
   setFilesystemAuditOutput,
   uploadFilesystemAuditArtifact,
 } from "./filesystem-audit-artifact.ts";
 import { stripSandboxMachinery } from "./filesystem-audit-strip.ts";
-import { renderFilesystemAuditSummary } from "./filesystem-audit-summary.ts";
+import {
+  filesystemTruncationNote,
+  renderFilesystemAuditBlocks,
+} from "./filesystem-audit-summary.ts";
 import type { FilesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
+import { FILESYSTEM_PRIORITIES } from "./summary-priorities.ts";
 
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */
   audit: FilesystemAuditPaths | undefined;
-  /** The proxy's start, in epoch seconds; undefined counts from the first access shown. */
-  startedAt: number | undefined;
   retentionDays: number | undefined;
   containerName: string;
   annotation: Annotation;
@@ -28,7 +34,8 @@ export interface FilesystemAuditReportDeps {
   readFile: (path: string) => string;
   writeFile: (path: string, content: string) => void;
   realpath: (path: string) => string;
-  writeStepSummary: typeof writeStepSummary;
+  renderBlocks: typeof renderFilesystemAuditBlocks;
+  strip: typeof stripSandboxMachinery;
   uploadArtifact: typeof uploadFilesystemAuditArtifact;
   setOutput: typeof setFilesystemAuditOutput;
   appendFile: (path: string, content: string) => void;
@@ -41,7 +48,8 @@ const realDeps: FilesystemAuditReportDeps = {
   readFile: (path) => readFileSync(path, "utf8"),
   writeFile: (path, content) => writeFileSync(path, content),
   realpath: (path) => realpathSync(path),
-  writeStepSummary,
+  renderBlocks: renderFilesystemAuditBlocks,
+  strip: stripSandboxMachinery,
   uploadArtifact: uploadFilesystemAuditArtifact,
   setOutput: setFilesystemAuditOutput,
   appendFile: (path, content) => appendFileSync(path, content),
@@ -62,59 +70,106 @@ function prefixes(value: string | undefined, realpath: (p: string) => string): s
   return out;
 }
 
+export interface StepFilesystemAudit {
+  /**
+   * The audit's Job Summary blocks, timed from the proxy's start (undefined
+   * counts from the first access shown), each with its notice, or none when
+   * nothing was recorded or the recording could not be rendered.
+   */
+  blocks: (startedAt: number | undefined) => SummaryBlock[];
+}
+
+const NONE: StepFilesystemAudit = { blocks: () => [] };
+
 /**
- * Render the recording into the Job Summary, upload it as an artifact, and set
- * the output. Runs after reportStepTraffic so its section follows the traffic
- * report. Never throws: a failure here only warns, and the output is still
- * set so a later step can read it. Does nothing when nothing was recorded.
+ * Uploads the recording before the Job Summary is written, so a cut section's
+ * notice can say whether the artifact holds the rest. Never throws, so the
+ * report and the proxy's teardown that follow are always reached.
  */
-export async function reportStepFilesystemAudit(
-  { audit, startedAt, retentionDays, containerName, annotation, env }: FilesystemAuditReportOptions,
+export async function prepareStepFilesystemAudit(
+  { audit, retentionDays, containerName, annotation, env }: FilesystemAuditReportOptions,
   overrides: Partial<FilesystemAuditReportDeps> = {},
-): Promise<void> {
+): Promise<StepFilesystemAudit> {
   const deps = { ...realDeps, ...overrides };
   let artifactName = "";
-  const raw = audit && readOptional(audit.outPath, deps.readFile);
-  // An empty recording is still reported: a tracer that stops cleanly always
-  // writes an end line, so an empty one was cut short and gets the warning.
-  if (audit && raw !== undefined) {
+  try {
+    const raw = audit && readOptional(audit.outPath, deps.readFile);
+    // An empty recording is still reported: a tracer that stops cleanly always
+    // writes an end line, so an empty one was cut short and gets the warning.
+    if (!audit || raw === undefined) return NONE;
     // The recording sits under the scratch base (see sandbox/filesystem-audit.ts),
     // next to the exec wrapper's own files, so its directory is the one holding
-    // buildcage's own machinery. Strip that out once and feed the result to both
-    // the summary and the uploaded artifact.
-    const clean = stripSandboxMachinery(raw, dirname(audit.outPath));
+    // buildcage's own machinery. Strip that out once and feed the result to
+    // both the summary and the uploaded artifact.
+    const clean = deps.strip(raw, dirname(audit.outPath));
+    artifactName = await upload(
+      clean,
+      audit.outPath,
+      retentionDays,
+      containerName,
+      annotation,
+      deps,
+    );
+    const notice = filesystemTruncationNote(artifactName || undefined);
+
     // The summary and the upload are independent: a render failure (e.g. a
-    // line the tracer left truncated) must not also drop the artifact, which is
-    // most wanted when the recording is incomplete.
+    // line the tracer left truncated) must not also drop the artifact, which
+    // is most wanted when the recording is incomplete.
+    const blocks = (startedAt: number | undefined): SummaryBlock[] => {
+      let rendered: SummaryBlock[];
+      try {
+        rendered = deps.renderBlocks(
+          clean,
+          {
+            workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
+            home: prefixes(env.HOME, deps.realpath),
+            startedAt,
+          },
+          FILESYSTEM_PRIORITIES,
+        );
+      } catch (e) {
+        annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
+        return [];
+      }
+      mirrorForDebug(env, deps.appendFile, raw, joinSummaryBlocks(rendered));
+      return withNotices(rendered, () => notice);
+    };
+    return { blocks };
+  } catch (e) {
+    annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
+    return NONE;
+  } finally {
     try {
-      const markdown = renderFilesystemAuditSummary(clean, {
-        workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-        home: prefixes(env.HOME, deps.realpath),
-        startedAt,
-      });
-      await deps.writeStepSummary(markdown, env.GITHUB_STEP_SUMMARY);
-      mirrorForDebug(env, deps.appendFile, raw, markdown);
+      deps.setOutput(artifactName);
     } catch (e) {
-      annotation.warning(`Failed to write the filesystem audit summary: ${errorMessage(e)}`);
+      annotation.warning(
+        `Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`,
+      );
     }
-    // Upload the stripped copy, written beside the recording under the scratch
-    // base. That directory is ours (not $RUNNER_TEMP or /tmp), so the sandbox
-    // cannot reach the copy, and writing a new file leaves the root-owned
-    // recording in place: a failed write loses nothing and never uploads the
-    // raw. The suffix keeps it off the recording's own name.
-    const cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl");
-    let wrote = false;
-    try {
-      deps.writeFile(cleanPath, clean);
-      wrote = true;
-    } catch (e) {
-      annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
-    }
-    if (wrote && clean)
-      artifactName =
-        (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
   }
-  deps.setOutput(artifactName);
+}
+
+// The stripped copy goes beside the recording under the scratch base, which
+// the sandbox cannot reach (unlike $RUNNER_TEMP or /tmp). Writing a new file
+// leaves the root-owned recording in place, so a failed write never uploads
+// the raw. Returns "" when nothing was uploaded.
+async function upload(
+  clean: string,
+  outPath: string,
+  retentionDays: number | undefined,
+  containerName: string,
+  annotation: Annotation,
+  deps: FilesystemAuditReportDeps,
+): Promise<string> {
+  if (!clean) return "";
+  const cleanPath = outPath.replace(/\.jsonl$/, ".step.jsonl");
+  try {
+    deps.writeFile(cleanPath, clean);
+  } catch (e) {
+    annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
+    return "";
+  }
+  return (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
 }
 
 function readOptional(path: string, readFile: (p: string) => string): string | undefined {
@@ -137,7 +192,12 @@ function mirrorForDebug(
   summary: string,
 ): void {
   if (process.env.BUILDCAGE_BUILD_TEST_HOOKS !== "1") return;
-  if (env.BUILDCAGE_RUN_DEBUG_RAW_FILE) appendFile(env.BUILDCAGE_RUN_DEBUG_RAW_FILE, raw);
-  if (env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE)
-    appendFile(env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE, summary);
+  // A debug copy that cannot be written must not cost the real summary.
+  try {
+    if (env.BUILDCAGE_RUN_DEBUG_RAW_FILE) appendFile(env.BUILDCAGE_RUN_DEBUG_RAW_FILE, raw);
+    if (env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE)
+      appendFile(env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE, summary);
+  } catch {
+    // ignored: test hooks only
+  }
 }

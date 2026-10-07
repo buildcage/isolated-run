@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, afterEach, type Mock } from "vitest";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
+import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
 
 import {
-  reportStepFilesystemAudit,
+  prepareStepFilesystemAudit,
   type FilesystemAuditReportDeps,
+  type FilesystemAuditReportOptions,
 } from "./filesystem-audit-report.ts";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -22,7 +24,7 @@ function annotation(): Annotation & { warning: Mock; error: Mock } {
 }
 
 function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
-  deps: Partial<FilesystemAuditReportDeps>;
+  deps: Partial<FilesystemAuditReportDeps> & { summaries: string[] };
   summaries: string[];
   uploads: string[];
   outputs: string[];
@@ -41,10 +43,10 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
     appended,
     writes,
     deps: {
+      summaries,
       readFile: () => JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
       writeFile: (path, content) => void writes.push({ path, content }),
       realpath: (p) => p,
-      writeStepSummary: async (md) => void summaries.push(md),
       uploadArtifact: async (outPath) => {
         uploads.push(outPath);
         return "buildcage-filesystem-audit-deadbeef";
@@ -56,9 +58,19 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
   };
 }
 
-describe("reportStepFilesystemAudit", () => {
+// Prepares the audit and renders its blocks as the report step would,
+// collecting their text.
+async function reportStepFilesystemAudit(
+  options: FilesystemAuditReportOptions & { startedAt?: number },
+  d: Partial<FilesystemAuditReportDeps> & { summaries?: string[] },
+): Promise<void> {
+  const { summaries = [], ...overrides } = d;
+  const blocks = (await prepareStepFilesystemAudit(options, overrides)).blocks(options.startedAt);
+  if (blocks.length > 0) summaries.push(joinSummaryBlocks(blocks));
+}
+
+describe("prepareStepFilesystemAudit", () => {
   const base = {
-    startedAt: undefined,
     retentionDays: 3,
     containerName: "buildcage-proxy-deadbeef",
   };
@@ -142,11 +154,12 @@ describe("reportStepFilesystemAudit", () => {
     const note = annotation();
     const {
       deps: d,
+      summaries,
       uploads,
       outputs,
     } = deps({
-      writeStepSummary: async () => {
-        throw new Error("summary disk full");
+      renderBlocks: () => {
+        throw new Error("bad record");
       },
     });
 
@@ -156,10 +169,37 @@ describe("reportStepFilesystemAudit", () => {
     );
 
     expect(note.warning).toHaveBeenCalledWith(
-      "Failed to write the filesystem audit summary: summary disk full",
+      "Failed to render the filesystem audit summary: bad record",
     );
+    expect(summaries).toEqual([]);
     expect(uploads).toEqual([CLEAN]);
     expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
+  });
+
+  it("gives every block a cut can reach the notice naming the artifact", async () => {
+    const { deps: d } = deps({
+      readFile: () =>
+        [
+          { kind: "exec", comm: "node", path: "/usr/bin/node" },
+          { kind: "write", comm: "node", path: "/work/a.txt" },
+        ]
+          .map((r) => JSON.stringify(r))
+          .join("\n"),
+    });
+    const blocks = (
+      await prepareStepFilesystemAudit(
+        { ...base, audit: AUDIT, annotation: annotation(), env: {} },
+        d,
+      )
+    ).blocks(undefined);
+
+    expect(blocks.filter((b) => b.cut !== "keep").map((b) => b.notice)).toEqual(
+      Array(3).fill(
+        "_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; " +
+          "the buildcage-filesystem-audit-deadbeef artifact uploaded for this run has every access._\n\n",
+      ),
+    );
+    expect(blocks.find((b) => b.cut === "keep")?.notice).toBeUndefined();
   });
 
   it("warns and uploads nothing when the stripped copy cannot be written", async () => {
@@ -287,5 +327,82 @@ describe("reportStepFilesystemAudit", () => {
     );
 
     expect(appended).toEqual([]);
+  });
+
+  it("says the rest is not kept when the artifact could not be uploaded", async () => {
+    const { deps: d } = deps({ uploadArtifact: async () => undefined });
+    const blocks = (
+      await prepareStepFilesystemAudit(
+        { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
+        d,
+      )
+    ).blocks(undefined);
+
+    expect(blocks.find((b) => b.cut !== "keep")?.notice).toContain(
+      "the recording could not be uploaded as an artifact, so the rest is not kept",
+    );
+  });
+
+  it("warns, writes nothing and sets an empty output when the recording cannot be read", async () => {
+    const note = annotation();
+    const {
+      deps: d,
+      summaries,
+      uploads,
+      outputs,
+    } = deps({
+      strip: () => {
+        throw new RangeError("Invalid string length");
+      },
+    });
+
+    await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+
+    expect(note.warning).toHaveBeenCalledWith(
+      "Failed to read the filesystem audit recording: Invalid string length",
+    );
+    expect(summaries).toEqual([]);
+    expect(uploads).toEqual([]);
+    expect(outputs).toEqual([""]);
+  });
+
+  it("keeps the summary when the debug copy cannot be written", async () => {
+    vi.stubEnv("BUILDCAGE_BUILD_TEST_HOOKS", "1");
+    const { deps: d, summaries } = deps({
+      appendFile: () => {
+        throw new Error("EACCES");
+      },
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: { GITHUB_WORKSPACE: "/work", BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: "/tmp/dbg.md" },
+      },
+      d,
+    );
+
+    expect(summaries[0]).toContain("Filesystem audit");
+  });
+
+  it("only warns when the output cannot be set", async () => {
+    const note = annotation();
+    const { deps: d, summaries } = deps({
+      setOutput: () => {
+        throw new Error("GITHUB_OUTPUT is gone");
+      },
+    });
+
+    await reportStepFilesystemAudit(
+      { ...base, audit: AUDIT, annotation: note, env: { GITHUB_WORKSPACE: "/work" } },
+      d,
+    );
+
+    expect(note.warning).toHaveBeenCalledWith(
+      "Failed to set the filesystem_audit_artifact_name output: GITHUB_OUTPUT is gone",
+    );
+    expect(summaries[0]).toContain("Filesystem audit");
   });
 });

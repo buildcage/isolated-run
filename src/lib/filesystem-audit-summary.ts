@@ -7,6 +7,7 @@
  */
 
 import { formatElapsedVariable } from "#core/lib/report/elapsed-time.ts";
+import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 
 interface AuditRecord {
   t?: string;
@@ -134,6 +135,33 @@ function relativize(path: string, prefixes: SummaryOptions): string {
   // (its fd was closed meanwhile); like a truncated walk, its start is unknown.
   if (!path.startsWith("/") && !path.startsWith("…/")) return `…/${path}`;
   return path;
+}
+
+// The workspace and $HOME may each be reached by two spellings (as given and
+// with symlinks resolved); fold a path onto the first so one file keys once.
+function canonical(path: string, prefixes: SummaryOptions): string {
+  for (const [first, ...rest] of [prefixes.workspace, prefixes.home]) {
+    for (const alt of rest) {
+      if (path === alt) return first;
+      if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
+    }
+  }
+  return path;
+}
+
+// A cell holding a path as a code span, so Markdown in a name the step chose
+// (an entity, ~~, a link) prints as itself. GFM still splits a table row on a
+// `|` inside a code span, so that alone is escaped.
+function codeCell(text: string): string {
+  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longest + 1);
+  const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
+  return `${fence}${pad}${text.replace(/\|/g, "\\|")}${pad}${fence}`;
+}
+
+function markdownRows(header: string[], rows: string[][]): string {
+  const line = (cells: string[]): string => `| ${cells.join(" | ")} |`;
+  return [line(header), line(header.map(() => "---")), ...rows.map(line)].join("\n");
 }
 
 // Workspace-relative paths first, then $HOME, then the rest.
@@ -278,19 +306,36 @@ const HEADING = "### Filesystem audit";
 const INCOMPLETE_NOTE =
   "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
   "> some accesses are missing from this summary and from the artifact.";
+const SECTION = "filesystem";
+const DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n";
+const DETAILS_CLOSE = "</details>\n";
 
-export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOptions): string {
-  const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
-  const ok = new Map<string, Set<string>>();
-  const failed = new Map<string, Set<string>>();
-  const perm = new Map<string, Set<string>>();
-  const libs = new Set<string>();
-  const execd = new Set<string>();
-  const okSpans: LetterSpans = new Map();
-  const failedSpans: LetterSpans = new Map();
+/** The ids renderFilesystemAuditBlocks gives its blocks. */
+export const FILESYSTEM_BLOCK = {
+  executed: "filesystem-executed",
+  paths: "filesystem-paths",
+  log: "filesystem-log",
+} as const;
 
-  let seq = 0;
+export type FilesystemBlockId = (typeof FILESYSTEM_BLOCK)[keyof typeof FILESYSTEM_BLOCK];
+
+/** The priority of each block that can be cut; see SummaryBlock.priority. */
+export type FilesystemPriorities = Record<FilesystemBlockId, number>;
+
+// Joined whole, the summary never compares priorities.
+const JOINED = Object.fromEntries(
+  Object.values(FILESYSTEM_BLOCK).map((id) => [id, 0]),
+) as FilesystemPriorities;
+
+interface Parsed {
+  records: AuditRecord[];
   // From the tracer's end line, which a recording cut short lacks.
+  ended: boolean;
+  lost: boolean;
+}
+
+function parse(jsonl: string): Parsed {
+  const records: AuditRecord[] = [];
   let ended = false;
   let lost = false;
   for (const line of jsonl.split("\n")) {
@@ -306,14 +351,41 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
       lost = Boolean(r.dropped || r.untracked);
       continue;
     }
+    records.push(r);
+  }
+  return { records, ended, lost };
+}
+
+interface Row {
+  span: Span | undefined;
+  seq: number;
+  flags: string;
+  comm: string;
+  path: string;
+}
+
+// The rows of the summary in recording order: one per command and path, or
+// one per path alone when byCommand is false.
+function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: boolean): Row[] {
+  const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
+  const ok = new Map<string, Set<string>>();
+  const failed = new Map<string, Set<string>>();
+  const perm = new Map<string, Set<string>>();
+  const libs = new Set<string>();
+  const execd = new Set<string>();
+  const okSpans: LetterSpans = new Map();
+  const failedSpans: LetterSpans = new Map();
+
+  let seq = 0;
+  for (const r of records) {
     if (r.kind === "mmap" && r.access === "x") {
-      if (r.path) libs.add(r.path);
+      if (r.path) libs.add(canonical(r.path, prefixes));
       continue;
     }
-    if (r.kind === "exec" && r.path) execd.add(r.path);
+    if (r.kind === "exec" && r.path) execd.add(canonical(r.path, prefixes));
     const c = classify(r);
     if (!c) continue;
-    const key = keyOf(r.comm ?? "", c.path);
+    const key = keyOf(byCommand ? (r.comm ?? "") : "", canonical(c.path, prefixes));
     const t = Date.parse(r.t ?? "");
     if (!Number.isNaN(t)) {
       widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++);
@@ -325,7 +397,6 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
       addFlag(ok, key, c.letter);
     }
   }
-
   // A library or an exec'd binary is already shown by its X; drop its read.
   const libDrop = new Set([...libs, ...execd, "/etc/ld.so.cache"]);
   for (const key of ok.keys())
@@ -411,13 +482,7 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
     ...(lineFailed.get(l) ?? []),
   ]);
 
-  const rows: {
-    span: Span | undefined;
-    seq: number;
-    flags: string;
-    comm: string;
-    path: string;
-  }[] = [];
+  const rows: Row[] = [];
   for (const lk of keys) {
     const o = lineOk.get(lk) ?? new Set<string>();
     const fl = new Set([...(lineFailed.get(lk) ?? [])].filter((c) => !o.has(c)));
@@ -440,9 +505,80 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
     const [cb, pb] = sortKey(b.path);
     return a.seq - b.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
   });
+  return rows;
+}
 
+// The step's own executables, each once, in the order they were first run.
+function executedPaths(records: AuditRecord[], prefixes: SummaryOptions): string[] {
+  const seen = new Set<string>();
+  for (const r of records)
+    if (r.kind === "exec" && r.path) seen.add(normalize(canonical(r.path, prefixes)));
+  return [...seen].map((p) => escapeForDisplay(relativize(p, prefixes)));
+}
+
+/**
+ * The summary as blocks for fitStepSummary, in print order: a frame (heading
+ * and legend) kept whole, the executed-paths and accessed-paths tables, and
+ * the full per-command record folded into a details element. The tables and
+ * the record take their priorities from `priorities`.
+ */
+export function renderFilesystemAuditBlocks(
+  jsonl: string,
+  prefixes: SummaryOptions,
+  priorities: FilesystemPriorities,
+): SummaryBlock[] {
+  const { records, ended, lost } = parse(jsonl);
+  const rows = buildRows(records, prefixes, true);
   const heading = ended && !lost ? HEADING : `${HEADING}\n\n${INCOMPLETE_NOTE}`;
-  if (rows.length === 0) return `${heading}\n\nNo file access was recorded.\n`;
+  const frame = (text: string): SummaryBlock => ({
+    priority: 0,
+    level: 1,
+    section: SECTION,
+    text,
+    cut: "keep",
+  });
+  if (rows.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
+
+  const blocks: SummaryBlock[] = [frame(`${heading}\n\n<sub>${LEGEND}</sub>\n\n`)];
+  const table = (id: FilesystemBlockId, title: string, md: string): SummaryBlock => ({
+    id,
+    priority: priorities[id],
+    level: 2,
+    section: SECTION,
+    text: `#### ${title}\n\n${md}\n\n`,
+    cut: "lines",
+    head: 4,
+  });
+
+  const executed = executedPaths(records, prefixes);
+  if (executed.length > 0) {
+    blocks.push(
+      table(
+        FILESYSTEM_BLOCK.executed,
+        "Executed",
+        markdownRows(
+          ["Path"],
+          executed.map((path) => [codeCell(path)]),
+        ),
+      ),
+    );
+  }
+  const byPath = buildRows(records, prefixes, false).sort((a, b) => {
+    const [ca, pa] = sortKey(a.path);
+    const [cb, pb] = sortKey(b.path);
+    return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : 0);
+  });
+  blocks.push(
+    table(
+      FILESYSTEM_BLOCK.paths,
+      "Accessed paths",
+      markdownRows(
+        ["Access", "Path"],
+        byPath.map(({ flags, path }) => [flags, codeCell(path)]),
+      ),
+    ),
+  );
+
   // Times count from the proxy's start, as the communication details do, or
   // from the first access shown when that start is unknown.
   const originMs =
@@ -463,6 +599,31 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
         `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`,
     )
     .join("\n");
-  const legend = timeW ? `${TIME_LEGEND} · ${LEGEND}` : LEGEND;
-  return `${heading}\n\n<sub>${legend}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n`;
+  blocks.push({
+    id: FILESYSTEM_BLOCK.log,
+    priority: priorities[FILESYSTEM_BLOCK.log],
+    level: 3,
+    section: SECTION,
+    cut: "lines",
+    open: DETAILS_OPEN,
+    text: `${timeW ? `<sub>${TIME_LEGEND}</sub>\n\n` : ""}\`\`\`\n${body}\n\`\`\`\n\n`,
+    close: DETAILS_CLOSE,
+  });
+  return blocks;
+}
+
+/** The summary as one string, with nothing cut. */
+export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOptions): string {
+  return joinSummaryBlocks(renderFilesystemAuditBlocks(jsonl, prefixes, JOINED));
+}
+
+/**
+ * What the summary says where the Job Summary's size limit cut it: where the
+ * rest is, or that it is nowhere when the artifact could not be uploaded.
+ */
+export function filesystemTruncationNote(artifactName: string | undefined): string {
+  const rest = artifactName
+    ? `the ${artifactName} artifact uploaded for this run has every access`
+    : "the recording could not be uploaded as an artifact, so the rest is not kept";
+  return `_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; ${rest}._\n\n`;
 }

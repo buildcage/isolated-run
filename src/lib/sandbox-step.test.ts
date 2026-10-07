@@ -47,7 +47,7 @@ const mocks = {
   stopSandboxProxy: vi.fn(),
   runSandboxedCommand: vi.fn(),
   reportStepTraffic: vi.fn(),
-  reportStepFilesystemAudit: vi.fn(),
+  prepareStepFilesystemAudit: vi.fn(),
   onCancel: vi.fn(),
   saveState: vi.fn(),
   info: vi.fn(),
@@ -108,6 +108,7 @@ beforeEach(() => {
   mocks.stopSandboxProxy.mockResolvedValue(undefined);
   mocks.runSandboxedCommand.mockResolvedValue(0);
   mocks.reportStepTraffic.mockResolvedValue(undefined);
+  mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks: () => [] });
   mocks.onCancel.mockReturnValue(stopListening);
 });
 
@@ -195,14 +196,16 @@ describe("runSandboxStep", () => {
     );
   });
 
-  it("times the audit from the proxy start the traffic report read", async () => {
-    mocks.reportStepTraffic.mockResolvedValue(1_791_244_800);
+  it("prepares the audit first and writes its summary with the traffic report", async () => {
+    const blocks = vi.fn(() => []);
+    mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks });
 
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.reportStepFilesystemAudit.mock.calls[0][0]).toMatchObject({
-      startedAt: 1_791_244_800,
-    });
+    expect(mocks.reportStepTraffic.mock.calls[0][0].moreBlocks).toBe(blocks);
+    expect(orderOf(mocks.prepareStepFilesystemAudit)).toBeLessThan(
+      orderOf(mocks.reportStepTraffic),
+    );
   });
 
   it("leaves the audit off by default", async () => {
