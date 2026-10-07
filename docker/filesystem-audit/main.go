@@ -47,6 +47,7 @@ var optionalProgs = map[string]string{
 	"on_getname_outer": "getname",
 	"on_backing_enter": "backing_file_open",
 	"on_backing_exit":  "backing_file_open",
+	"on_exec_file":     "security_bprm_creds_for_exec",
 }
 
 // getnameProgs is the subset of optionalProgs that records a failed open's
@@ -256,6 +257,7 @@ func wallTime(boot uint64, offset int64) string {
 func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error {
 	enc := json.NewEncoder(w)
 	counts := map[string]int{}
+	files := execFiles{}
 	preExec, total := 0, 0
 	started := false
 	for {
@@ -278,6 +280,9 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 		r, err := decode(rec.RawSample)
 		if err != nil {
 			return err
+		}
+		if files.attach(&r) {
+			continue
 		}
 		if !started {
 			if r.Kind != "exec" {
