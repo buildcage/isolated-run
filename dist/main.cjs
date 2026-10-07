@@ -26583,7 +26583,7 @@ function withNotices(blocks, noticeFor) {
 function joinSummaryBlocks(blocks) {
 	return blocks.map(whole).join("");
 }
-function fitStepSummary(blocks, limitBytes = 1048576, usedBytes = 0) {
+function fitStepSummary(blocks, { usedBytes = 0, limitBytes = 1048576 } = {}) {
 	let full = blocks.map(whole), all = full.join(""), budget = limitBytes - 8192 - usedBytes;
 	if (bytes(all) <= budget) return all;
 	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => blocks[a].priority - blocks[b].priority || a - b);
@@ -26605,7 +26605,7 @@ function cutBlock(b, budget) {
 		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen);
 	}
 	let head = b.head ?? 0;
-	return count < head ? notice : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
+	return head > 0 && count <= head ? notice : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
 }
 function usesLine(actionRepo, actionRef, actionVersion) {
 	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
@@ -26966,7 +26966,7 @@ function renderReportBlocks(report, actionRepo, actionRef, { title = "Outbound T
 		id: TRAFFIC_BLOCK.example,
 		priority: 2,
 		level: 2,
-		section: SECTION,
+		section: `${SECTION}-example`,
 		cut: "atomic",
 		text: report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 			...step,
@@ -27053,7 +27053,7 @@ function summarySize(path, fileSize) {
 }
 async function writeReportSummary(report, annotation, options, artifactAvailable, env, { appendFile = node_fs.appendFileSync, fileSize = (p) => (0, node_fs.statSync)(p).size, writeSummary = writeStepSummary } = {}) {
 	let outcomes = computeReportOutcomes(report, options);
-	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeSummary(fitStepSummary(withNotices(outcomes.blocks, (b) => b.id === TRAFFIC_BLOCK.example ? restrictExampleTruncationNote(artifactAvailable) : communicationTruncationNote(artifactAvailable)), void 0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize)), env.GITHUB_STEP_SUMMARY);
+	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeSummary(fitStepSummary(withNotices(outcomes.blocks, (b) => b.id === TRAFFIC_BLOCK.example ? restrictExampleTruncationNote(artifactAvailable) : communicationTruncationNote(artifactAvailable)), { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) }), env.GITHUB_STEP_SUMMARY);
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts

@@ -208,8 +208,7 @@ export async function writeReportSummary(
           ? restrictExampleTruncationNote(artifactAvailable)
           : communicationTruncationNote(artifactAvailable),
       ),
-      undefined,
-      summarySize(env.GITHUB_STEP_SUMMARY, fileSize),
+      { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) },
     ),
     env.GITHUB_STEP_SUMMARY,
   );
