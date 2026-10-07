@@ -640,7 +640,7 @@ static __always_inline void open_enter(int dfd)
 	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
 	if (!e)
 		return;
-	// do_sys_open's entry has already made one when do_sys_openat2's fires.
+	// When both hooks fire, do_sys_open's has already made the entry.
 	struct name_buf *nb = bpf_map_lookup_elem(&open_names, &id);
 	if (!nb) {
 		e->data[0] = 0;

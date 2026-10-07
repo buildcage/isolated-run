@@ -281,8 +281,7 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
   const failedSpans: LetterSpans = new Map();
 
   let seq = 0;
-  // The tracer ends the recording with an end line once it has written every
-  // event, counting what found its buffers full.
+  // From the tracer's end line, which a recording cut short lacks.
   let ended = false;
   let lost = false;
   for (const line of jsonl.split("\n")) {
