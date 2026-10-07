@@ -23,7 +23,9 @@ import {
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
   renderReportBlocks,
+  TRAFFIC_BLOCK,
   trafficNotice,
+  type TrafficPriorities,
 } from "#core/lib/report/render/render-report-markdown.ts";
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
@@ -103,6 +105,16 @@ export function readActionVersion(
   return readImageActionVersion(client, containerName, proxyEngine);
 }
 
+// The order the report's parts keep their room in when the summary is too
+// large: the example, then the blocked, failed and allowed tables, then the log.
+const TRAFFIC_PRIORITIES: TrafficPriorities = {
+  [TRAFFIC_BLOCK.example]: 1,
+  [TRAFFIC_BLOCK.blocked]: 2,
+  [TRAFFIC_BLOCK.failed]: 3,
+  [TRAFFIC_BLOCK.passed]: 4,
+  [TRAFFIC_BLOCK.log]: 5,
+};
+
 export interface ComputeReportOutcomesOptions {
   stepLabel?: string;
   actionRepo: string;
@@ -139,7 +151,7 @@ export function computeReportOutcomes(
     failOnBlocked: failOnBlocked ?? false,
     engineLabel: "sandbox",
   });
-  const blocks = renderReportBlocks(report, actionRepo, actionRef, {
+  const blocks = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
     // stepLabel is the untrusted `label` input; the renderer escapes the whole
     // title, so it is folded in raw here rather than pre-sanitized twice.
     title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : undefined,

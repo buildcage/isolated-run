@@ -26570,7 +26570,7 @@ function describeFailedConnections(report, engineLabel) {
 }
 //#endregion
 //#region src/core/lib/report/render/fit-step-summary.ts
-const bytes = (s) => Buffer.byteLength(s, "utf8"), whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
+const bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
 function withNotices(blocks, noticeFor) {
 	return blocks.map((b) => b.cut === "keep" ? b : {
 		...b,
@@ -26583,7 +26583,7 @@ function joinSummaryBlocks(blocks) {
 function fitStepSummary(blocks, { usedBytes = 0, limitBytes = 1048576 } = {}) {
 	let full = blocks.map(whole), all = full.join(""), budget = limitBytes - 8192 - usedBytes;
 	if (bytes(all) <= budget) return all;
-	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => blocks[a].priority - blocks[b].priority || a - b);
+	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
 	for (let i of order) {
 		let b = blocks[i];
 		if ((cutAt.get(b.section) ?? Infinity) < b.level) continue;
@@ -26945,8 +26945,16 @@ const SECTION = "traffic", TRAFFIC_BLOCK = {
 	passed: "traffic-passed",
 	log: "traffic-log"
 };
+Object.fromEntries(Object.values(TRAFFIC_BLOCK).map((id) => [id, 0]));
 function trafficNotice(block, artifactAvailable) {
-	return block.id === TRAFFIC_BLOCK.example ? restrictExampleTruncationNote(artifactAvailable) : block.id === TRAFFIC_BLOCK.log ? communicationTruncationNote(artifactAvailable) : hostTableTruncationNote(artifactAvailable);
+	switch (block.id) {
+		case TRAFFIC_BLOCK.example: return restrictExampleTruncationNote(artifactAvailable);
+		case TRAFFIC_BLOCK.log: return communicationTruncationNote(artifactAvailable);
+		case TRAFFIC_BLOCK.blocked:
+		case TRAFFIC_BLOCK.failed:
+		case TRAFFIC_BLOCK.passed: return hostTableTruncationNote(artifactAvailable);
+		default: return;
+	}
 }
 function tableBlock(id, priority, before, table, after) {
 	return {
@@ -26960,17 +26968,17 @@ function tableBlock(id, priority, before, table, after) {
 	};
 }
 const frame = (text) => ({
-	priority: 1,
+	priority: 0,
 	level: 1,
 	section: SECTION,
 	text,
 	cut: "keep"
 });
-function renderReportBlocks(report, actionRepo, actionRef, { title = "Outbound Traffic Report", ...step } = {}) {
+function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", ...step } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
-	if (report.logLooksPlausible || (top += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(frame(top)), report.passed.length > 0 && blocks.push(tableBlock(TRAFFIC_BLOCK.passed, 5, `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), isAudit && blocks.push({
+	if (report.logLooksPlausible || (top += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(frame(top)), report.passed.length > 0 && blocks.push(tableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), isAudit && blocks.push({
 		id: TRAFFIC_BLOCK.example,
-		priority: 2,
+		priority: priorities[TRAFFIC_BLOCK.example],
 		level: 2,
 		section: `${SECTION}-example`,
 		cut: "atomic",
@@ -26981,21 +26989,21 @@ function renderReportBlocks(report, actionRepo, actionRef, { title = "Outbound T
 		}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step)
 	}), report.blocked.length > 0) {
 		let blocked = foldExpectedBlockedRows(report.blocked);
-		blocks.push(tableBlock(TRAFFIC_BLOCK.blocked, 3, `${report.passed.length > 0 ? "\n" : ""}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
+		blocks.push(tableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${report.passed.length > 0 ? "\n" : ""}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
 			showReason: !0,
 			showExpected
 		}), "\n"));
 	}
 	if (report.failed.length > 0) {
 		let gap = report.passed.length > 0 || report.blocked.length > 0 ? "\n" : "";
-		blocks.push(tableBlock(TRAFFIC_BLOCK.failed, 4, `${gap}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
+		blocks.push(tableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
 	}
 	let bottom = "";
 	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame("_(no communication)_\n\n"));
 	let details = renderInspectDetailsBody(report.timeline, report.startedAt);
 	return details && blocks.push({
 		id: TRAFFIC_BLOCK.log,
-		priority: 6,
+		priority: priorities[TRAFFIC_BLOCK.log],
 		level: 3,
 		section: SECTION,
 		cut: "lines",
@@ -27033,11 +27041,18 @@ function fetchReport(containerName, parameters, proxyEngine) {
 function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
 }
+const TRAFFIC_PRIORITIES = {
+	[TRAFFIC_BLOCK.example]: 1,
+	[TRAFFIC_BLOCK.blocked]: 2,
+	[TRAFFIC_BLOCK.failed]: 3,
+	[TRAFFIC_BLOCK.passed]: 4,
+	[TRAFFIC_BLOCK.log]: 5
+};
 function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
-	}), blocks = renderReportBlocks(report, actionRepo, actionRef, {
+	}), blocks = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
 		title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
 		stepName: "Start isolated-run",
 		runCommand,
