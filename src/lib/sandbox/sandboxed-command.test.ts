@@ -89,7 +89,7 @@ beforeEach(() => {
   mocks.createOverlayScratchDirs.mockReturnValue([]);
   mocks.writeResolvConf.mockReturnValue(`${SCRATCH}/resolv.conf`);
   mocks.writeRunScript.mockReturnValue(`${SCRATCH}/exec/run.sh`);
-  mocks.writeEnvLoader.mockReturnValue(`${SCRATCH}/exec/env-loader.sh`);
+  mocks.writeEnvLoader.mockReturnValue(`${SCRATCH}/exec/buildcage-init`);
   mocks.listHostMounts.mockReturnValue([]);
   mocks.resolveSandboxGid.mockReturnValue({ gid: 1001, substitutedFrom: undefined });
   mocks.buildOciConfig.mockReturnValue({ process: {} });

@@ -20,9 +20,9 @@ describe("stripSandboxMachinery", () => {
   it("drops the init and the shell's exec phase, relabels the shell, keeps the step", () => {
     const out = stripSandboxMachinery(
       jsonl(
-        // env-loader.sh is the sandbox init: it stays alive and is machinery.
-        { pid: 10, ppid: 1, kind: "read", comm: "env-loader.sh", path: "/etc/passwd" },
-        { pid: 10, ppid: 1, kind: "write", comm: "env-loader.sh", path: "/dev/null" },
+        // buildcage-init is the sandbox init: it stays alive and is machinery.
+        { pid: 10, ppid: 1, kind: "read", comm: "buildcage-init", path: "/etc/passwd" },
+        { pid: 10, ppid: 1, kind: "write", comm: "buildcage-init", path: "/dev/null" },
         // The shell it forks: an env phase, then run-script.sh under the scratch base.
         { pid: 11, ppid: 10, kind: "exec", comm: "env", path: "/usr/bin/env" },
         { pid: 11, ppid: 10, kind: "read", comm: "env", path: "/etc/ld.so.cache" },
@@ -51,8 +51,8 @@ describe("stripSandboxMachinery", () => {
   it("keeps a command run from a subshell that recorded nothing but its fork", () => {
     const out = stripSandboxMachinery(
       jsonl(
-        { pid: 10, ppid: 1, kind: "read", comm: "env-loader.sh", path: "/etc/passwd" },
-        { pid: 11, ppid: 10, kind: "fork", comm: "env-loader.sh" },
+        { pid: 10, ppid: 1, kind: "read", comm: "buildcage-init", path: "/etc/passwd" },
+        { pid: 11, ppid: 10, kind: "fork", comm: "buildcage-init" },
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
         // ( cd sub && cat missing ): the subshell only forks.
         { pid: 13, ppid: 11, kind: "fork", comm: "run-script.sh" },

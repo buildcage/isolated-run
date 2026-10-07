@@ -2,7 +2,7 @@
  * Removes buildcage's own sandbox machinery from a recording, so both the
  * summary and the uploaded artifact show only the step's accesses.
  *
- * buildcage runs the step under setpriv and env-loader.sh; env-loader.sh stays
+ * buildcage runs the step under setpriv and buildcage-init; buildcage-init stays
  * alive as the sandbox init (forwarding signals, reaping, propagating the exit
  * status) and forks the step's shell, which execs run-script.sh from the
  * scratch base. So the step is that shell and its descendants, from the

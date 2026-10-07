@@ -6,7 +6,7 @@ import { stripSandboxMachinery } from "./filesystem-audit-strip.ts";
 import { renderFilesystemAuditSummary } from "./filesystem-audit-summary.ts";
 
 // A real recording from the test_sandbox_filesystem_audit e2e, with the runner
-// uid normalized. It carries the actual process tree (env-loader.sh running as
+// uid normalized. It carries the actual process tree (the sandbox init running as
 // the sandbox init and forking the step's shell), which a hand-built sample
 // would not, so it guards against the model drifting from what the tracer emits.
 const DIR = "src/lib/__fixtures__/filesystem-audit";

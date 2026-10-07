@@ -198,7 +198,8 @@ exit $status
 `;
 
 export function writeEnvLoader(execDir: string): string {
-  const loaderPath = join(execDir, "env-loader.sh");
+  // The name the step sees as its PID 1, in ps and /proc/1/cmdline.
+  const loaderPath = join(execDir, "buildcage-init");
   writeFileSync(loaderPath, ENV_LOADER_SCRIPT, { mode: 0o700 });
   return loaderPath;
 }

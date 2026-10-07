@@ -70923,7 +70923,7 @@ fi
 exit $status
 `;
 function writeEnvLoader(execDir) {
-	let loaderPath = (0, node_path.join)(execDir, "env-loader.sh");
+	let loaderPath = (0, node_path.join)(execDir, "buildcage-init");
 	return (0, node_fs.writeFileSync)(loaderPath, ENV_LOADER_SCRIPT, { mode: 448 }), loaderPath;
 }
 //#endregion
