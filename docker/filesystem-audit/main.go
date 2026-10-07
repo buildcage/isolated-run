@@ -196,9 +196,9 @@ func dropAbsentPrograms(spec *ebpf.CollectionSpec) {
 	}
 }
 
-// archSyscalls are syscalls only some architectures have: x86_64 keeps these
-// older forms beside the *at ones, and a few newer ports lack renameat. Where
-// one is absent its tracepoints do not exist, which is said nowhere.
+// archSyscalls are syscalls only some architectures have (x86_64's older
+// forms, and renameat, which a few newer ports lack); their missing
+// tracepoints are not reported.
 var archSyscalls = map[string]bool{
 	"unlink": true, "rmdir": true, "rename": true, "renameat": true, "chmod": true,
 	"chown": true, "lchown": true, "utime": true, "utimes": true, "futimesat": true,

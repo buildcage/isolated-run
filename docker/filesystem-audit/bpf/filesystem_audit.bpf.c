@@ -470,17 +470,14 @@ int on_backing_exit(u64 *ctx)
 	return 0;
 }
 
-// An open file's path as leaf-first components, from its own dentry up.
 static __always_inline u32 file_walk(struct event *e, struct file *file)
 {
 	return walk(e, 0, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt),
 		    &e->n1, &e->truncated);
 }
 
-// An open file's path for an open, read or write event. bpf_d_path refuses a
-// path longer than PATH_LEN, and the access would then go unnamed, so such a
-// path is spelled from its dentries instead and marked cut (n1 tells the
-// reader which form it got).
+// bpf_d_path fails on a path over PATH_LEN; such a path is spelled from its
+// dentries instead, so the access keeps a name (n1 > 0 tells the reader).
 static __always_inline void file_path(struct event *e, struct file *file)
 {
 	long r = bpf_d_path(&file->f_path, e->data, PATH_LEN);
@@ -672,8 +669,8 @@ int BPF_PROG(on_truncate, const struct path *path)
 	return 0;
 }
 
-// ftruncate(2), and an open that truncates, reach this instead from 6.2 on;
-// absent before, where they reach security_path_truncate (see main.go).
+// From 6.2, ftruncate(2) and a truncating open reach this rather than
+// security_path_truncate; absent before (see main.go).
 SEC("fentry/security_file_truncate")
 int BPF_PROG(on_file_truncate, struct file *file)
 {
@@ -746,9 +743,8 @@ struct {
 	__type(value, struct name_buf);
 } open_names SEC(".maps");
 
-// mknod(2) and bind(2) to a path. An open that creates its file passes
-// through here too, from may_o_create, and is skipped: the open records the
-// creation (its c flag), or its own failure.
+// mknod(2) and bind(2) to a path. A creating open also passes here, from
+// may_o_create, and is skipped: the open records it.
 SEC("fentry/security_path_mknod")
 int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 {
@@ -1009,8 +1005,8 @@ static __always_inline void op_exit(long ret, int failure_only)
 		// mode and flags count the base components of the first and second name.
 		u8 nb = 0;
 		if (!pend->p1) {
-			// No name (futimens): an empty one, then the descriptor's own path,
-			// or nothing at all if it was not open.
+			// No name (futimens): the descriptor's path, or no record if it
+			// was not open.
 			e->data[0] = 0;
 			off = add_base(e, 1, pend->dfd1, &nb, &e->truncated, 1);
 			e->mode = nb;
@@ -1154,9 +1150,8 @@ int on_lsetxattr_exit(struct trace_event_raw_sys_exit *ctx)
 	return 0;
 }
 
-// The older forms x86_64 keeps beside the *at ones. A tracepoint for a
-// syscall the architecture lacks does not exist, which the loader skips
-// quietly (see main.go).
+// The older forms x86_64 keeps beside the *at ones; elsewhere their
+// tracepoints do not exist (see main.go).
 #define FAILED_OP_1(sys, kind)							\
 SEC("tracepoint/syscalls/sys_enter_" #sys)					\
 int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
@@ -1177,9 +1172,8 @@ FAILED_OP_1(chmod, K_CHMOD_FAILED)
 FAILED_OP_1(chown, K_CHOWN_FAILED)
 FAILED_OP_1(lchown, K_CHOWN_FAILED)
 
-// utime(filename, times) and utimes(filename, times) change a named file,
-// futimesat(dfd, filename, times) one relative to dfd; recorded either way,
-// as utimensat is.
+// utime and utimes take a name, futimesat a name relative to dfd; recorded
+// like utimensat.
 #define ATTR_OP(sys, dfd, p)							\
 SEC("tracepoint/syscalls/sys_enter_" #sys)					\
 int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\

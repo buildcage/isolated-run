@@ -130,9 +130,9 @@ func tidy(p string) string {
 	return strings.Join(kept, "/")
 }
 
-// filePath decodes an open, read or write's path: the d_path string, or, for
-// one too long for d_path, the dentry components the BPF side walked instead
-// (n > 0). With neither, the d_path errno is all there is.
+// filePath decodes an open, read or write's path: the d_path string, or the
+// dentry components walked for one too long for it (n > 0); with neither,
+// only the errno.
 func filePath(data []byte, pathRet int32, n int, truncated bool) (string, int32) {
 	if pathRet >= 0 {
 		return cstr(data), 0
