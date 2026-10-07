@@ -645,7 +645,7 @@ resolver saying no rule allows the name, and it does fail the step.
 ## AWS access key check
 
 `allowed_aws_accounts` is **experimental**: its behavior and error messages may still change without
-following semver. It takes 12-digit AWS account IDs, separated by whitespace or newlines, with `#`
+following semver. It takes 12-digit AWS account IDs, separated by commas, whitespace or newlines, with `#`
 comments as in the rule inputs. In a config file its lines are added to the workflow's. With it
 set, a request to an AWS API host must be signed with a key the proxy knows: the step's own
 `AWS_ACCESS_KEY_ID`, or one an STS `AssumeRole` issued for a role in one of these accounts. An

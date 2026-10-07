@@ -21,6 +21,14 @@ describe("parseAwsAccounts", () => {
     ]);
   });
 
+  it("splits on commas too, with or without spaces around them", () => {
+    expect(parseAwsAccounts("111111111111,222222222222, 333333333333 ,")).toStrictEqual([
+      "111111111111",
+      "222222222222",
+      "333333333333",
+    ]);
+  });
+
   it("takes an unset input as no account", () => {
     expect(parseAwsAccounts(undefined)).toStrictEqual([]);
     expect(parseAwsAccounts("")).toStrictEqual([]);

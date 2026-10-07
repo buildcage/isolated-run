@@ -23255,7 +23255,7 @@ function resolveComposeFile(override) {
 //#region src/proxy/aws-keys.ts
 const ACCOUNT_ID = /^\d{12}$/, ACCESS_KEY_ID = /^[A-Z0-9]{16,128}$/;
 function parseList(input, valid, what) {
-	let tokens = splitRuleTokens(input), invalid = tokens.filter((token) => !valid.test(token));
+	let tokens = splitRuleTokens(input).flatMap((token) => token.split(",").filter(Boolean)), invalid = tokens.filter((token) => !valid.test(token));
 	if (invalid.length > 0) throw Error(`invalid ${what}: ${invalid.map((t) => JSON.stringify(t)).join(", ")}`);
 	return [...new Set(tokens)];
 }

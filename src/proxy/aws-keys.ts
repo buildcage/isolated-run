@@ -19,7 +19,7 @@ const ACCOUNT_ID = /^\d{12}$/;
 const ACCESS_KEY_ID = /^[A-Z0-9]{16,128}$/;
 
 function parseList(input: string | undefined, valid: RegExp, what: string): string[] {
-  const tokens = splitRuleTokens(input);
+  const tokens = splitRuleTokens(input).flatMap((token) => token.split(",").filter(Boolean));
   const invalid = tokens.filter((token) => !valid.test(token));
   if (invalid.length > 0) {
     throw new Error(`invalid ${what}: ${invalid.map((t) => JSON.stringify(t)).join(", ")}`);
@@ -27,7 +27,7 @@ function parseList(input: string | undefined, valid: RegExp, what: string): stri
   return [...new Set(tokens)];
 }
 
-/** Whitespace- or newline-separated 12-digit account IDs, `#` comments allowed.
+/** 12-digit account IDs separated by commas, whitespace or newlines, `#` comments allowed.
  *  @throws {Error} naming every entry that is not one */
 export function parseAwsAccounts(input: string | undefined): string[] {
   return parseList(input, ACCOUNT_ID, "AWS account ID");
