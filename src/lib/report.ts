@@ -151,8 +151,8 @@ export function computeReportOutcomes(
   return { markdown: joinSummaryBlocks(blocks), blocks, emissions };
 }
 
-/** The file access this module makes besides the Job Summary write; injected
- *  for the same reason the Docker client and the Annotation are. */
+/** The file access this module makes for the Job Summary; injected for the
+ *  same reason the Docker client and the Annotation are. */
 export interface WriteReportSummaryDeps {
   appendFile?: (path: string, content: string) => void;
   fileSize?: (path: string) => number;
