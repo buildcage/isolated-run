@@ -753,8 +753,6 @@ children is shown once as `dir/**`. Paths are shown relative to `$GITHUB_WORKSPA
 to the directory a relative name resolved against (its working directory, or the directory it passed
 by descriptor) without resolving `..`; a name whose directory was closed before it could be read is
 shown as `…/name`. Where its `path` differs from the name as passed, the artifact keeps that name in
-by descriptor) without resolving `..`; a name whose directory was closed before it could be read is
-shown as `…/name`. Where its `path` differs from the name as passed, the artifact keeps that name in
 `name` (`to_name` for a move's target). An invisible or control character in a path or command name
 is shown escaped, as `\n` or `\u{202e}`, and a backslash as `\\`. A program the step ran is
 recorded under the file it resolved to, with symlinks followed and a script under its own path rather
