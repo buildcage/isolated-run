@@ -49,9 +49,11 @@ test_unit_coverage: ## Run every Node unit test once, with coverage
 # qjs can't execute .ts directly, so compile fresh (vp run build:qjs-test)
 # and bind-mount the output in.
 QJS_MOUNTS := \
-	-v "$(CURDIR)/dist/qjs-test/src/core:/opt/buildcage/core:ro"
+	-v "$(CURDIR)/dist/qjs-test/src/core:/opt/buildcage/core:ro" \
+	-v "$(CURDIR)/dist/qjs-test/src/proxy:/opt/buildcage/proxy:ro"
 QJS_TEST_DIRS := \
-	/opt/buildcage/core/lib/acl
+	/opt/buildcage/core/lib/acl \
+	/opt/buildcage/proxy
 
 .PHONY: test_unit_qjs
 test_unit_qjs: ## Run unit tests in Docker

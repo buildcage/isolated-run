@@ -9,6 +9,8 @@
  * whole string and never decoded.
  */
 
+import type { InspectStageExtension } from "#core/lib/acl/haproxy-inspect-stage.ts";
+
 /** Where the two files the check reads are. */
 export interface AwsKeyCheck {
   accountFile: string;
@@ -40,9 +42,12 @@ export const AWS_RESOURCE_HOST =
 // counted as a credential and left unmatched rather than read as none.
 const QUERY_CREDENTIAL = "(x-amz-credential|awsaccesskeyid)";
 
-/** The log field, empty where the check is off. */
-export function awsLogField(check: AwsKeyCheck | undefined): string {
-  return check ? " aws=%[var(txn.aws)]" : "";
+/** The check as the inspect stage takes it. */
+export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
+  return {
+    requestRules: (mode) => awsKeyRequestRules(check, mode),
+    responseRules: () => awsKeyResponseRules(check),
+  };
 }
 
 /**
@@ -77,13 +82,15 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_host !{ var(txn.aws) -m found } !{ var(txn.aws_key),map(${check.keyMapFile}) -m found }`,
     "    http-request set-var(txn.aws) str(allowed) if aws_host !{ var(txn.aws) -m found }",
   ];
-  if (mode === "restrict") {
-    l.push(
-      `    acl aws_refused var(txn.aws) -m str ${AWS_REFUSED_VERDICTS.join(" ")}`,
-      "    http-request set-var-fmt(txn.reason) aws-%[var(txn.aws)] if aws_refused",
-      "    http-request deny deny_status 403 if aws_refused",
-    );
-  }
+  l.push(`    acl aws_refused var(txn.aws) -m str ${AWS_REFUSED_VERDICTS.join(" ")}`);
+  l.push(
+    ...(mode === "restrict"
+      ? [
+          "    http-request set-var-fmt(txn.reason) aws-%[var(txn.aws)] if aws_refused",
+          "    http-request deny deny_status 403 if aws_refused",
+        ]
+      : ["    http-request set-var-fmt(txn.would_refuse) aws-%[var(txn.aws)] if aws_refused"]),
+  );
   l.push(
     "    # The body has to be readable to learn a key from it; no Accept-Encoding",
     "    # at all would mean any coding is acceptable (RFC 9110). Left alone where",

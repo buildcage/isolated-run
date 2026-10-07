@@ -1,10 +1,11 @@
-import { describe, it, expect, reportResults } from "../test/test-shim.ts";
+import { describe, it, expect, reportResults } from "#core/lib/test/test-shim.ts";
+
 import {
   AWS_API_HOST,
   AWS_RESOURCE_HOST,
   awsKeyRequestRules,
   awsKeyResponseRules,
-  awsLogField,
+  awsKeyExtension,
   STS_HOST,
 } from "./haproxy-aws-keys.ts";
 
@@ -116,10 +117,11 @@ describe("hosts that name the resource", () => {
   });
 });
 
-describe("awsLogField", () => {
-  it("is empty with the check off, so the log line is unchanged", () => {
-    expect(awsLogField(undefined)).toBe("");
-    expect(awsLogField(CHECK)).toBe(" aws=%[var(txn.aws)]");
+describe("awsKeyExtension", () => {
+  it("hands the stage this check's own rules", () => {
+    const extension = awsKeyExtension(CHECK);
+    expect(extension.requestRules("audit")).toStrictEqual(awsKeyRequestRules(CHECK, "audit"));
+    expect(extension.responseRules()).toStrictEqual(awsKeyResponseRules(CHECK));
   });
 });
 
@@ -135,9 +137,12 @@ describe("awsKeyRequestRules", () => {
     expect(rules.includes("http-request deny deny_status 403 if aws_refused")).toBe(true);
   });
 
-  it("only decides in audit", () => {
+  it("only names what restrict would refuse in audit", () => {
     const rules = awsKeyRequestRules(CHECK, "audit").join("\n");
     expect(rules.includes("set-var(txn.aws) str(key-not-allowed)")).toBe(true);
+    expect(rules.includes("set-var-fmt(txn.would_refuse) aws-%[var(txn.aws)] if aws_refused")).toBe(
+      true,
+    );
     expect(rules.includes("deny")).toBe(false);
   });
 

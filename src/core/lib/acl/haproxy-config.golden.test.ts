@@ -62,27 +62,6 @@ const CASES: Record<string, HaproxyConfigOptions> = {
     hostAddressFile: "/etc/haproxy/host-addrs.lst",
   },
 
-  // The AWS access key check, in the mode that refuses and the one that does not.
-  "restrict-aws-keys": {
-    urlRules: buildUrlRules(
-      "POST https://sts.us-east-1.amazonaws.com/\nGET https://*.s3.amazonaws.com/**",
-    ),
-    httpRules: ["s3.amazonaws.com:80"],
-    proxyAddress: PROXY,
-    aws: {
-      accountFile: "/etc/haproxy/rules/aws_accounts.lst",
-      keyMapFile: "/etc/haproxy/rules/aws_keys.map",
-    },
-  },
-  "audit-aws-keys": {
-    mode: "audit",
-    proxyAddress: PROXY,
-    aws: {
-      accountFile: "/etc/haproxy/rules/aws_accounts.lst",
-      keyMapFile: "/etc/haproxy/rules/aws_keys.map",
-    },
-  },
-
   // Every wildcard shape plus a raw regex, which pick different matchers.
   "restrict-wildcards": {
     httpsRules: ["*.example.com:443", "**.example.org:*", "plain.example.net:443"],

@@ -92,7 +92,7 @@ fi
 SUMMARY=$(cat "$TMPDIR/audit.md")
 assert_summary_contains "(restrict would refuse: aws-key-not-allowed)" \
   "the timeline says restrict would have refused the request"
-if grep -qF "the AWS access key check (allowed_aws_accounts) would refuse" "$TMPDIR/audit.log"; then
+if grep -qF "restrict mode would refuse" "$TMPDIR/audit.log"; then
   pass "a warning counts the requests restrict would refuse"
 else
   fail "no warning counted the requests restrict would refuse"

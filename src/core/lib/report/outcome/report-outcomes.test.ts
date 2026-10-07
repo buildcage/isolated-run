@@ -125,7 +125,7 @@ describe("describeReportOutcomes", () => {
     expect(outcomes.length).toBe(2);
     expect(outcomes[1].level).toBe("warning");
     expect(outcomes[1].shouldFail).toBe(false);
-    expect(outcomes[1].message.startsWith("2 request(s) the AWS access key check")).toBe(true);
+    expect(outcomes[1].message.startsWith("2 request(s) restrict mode would refuse")).toBe(true);
   });
 
   it("warns for universal too, whose HTTP stage logs a connection that sent no request", () => {

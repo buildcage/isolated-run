@@ -14,7 +14,6 @@
  */
 import * as core from "@actions/core";
 
-import { isAwsAccessKeyId, parseAwsAccounts } from "#core/lib/acl/aws-keys.ts";
 import type { ConfigFileInputs } from "#core/lib/actions/config-file.ts";
 import {
   InvalidInputError,
@@ -25,6 +24,7 @@ import {
   type ProxyMode,
 } from "#core/lib/actions/inputs.ts";
 
+import { isAwsAccessKeyId, parseAwsAccounts } from "../proxy/aws-keys.ts";
 import { SandboxError } from "./errors.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
 

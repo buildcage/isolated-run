@@ -3,10 +3,11 @@
  * request, and the keys known to belong to them when the proxy starts.
  *
  * Runs under QuickJS as well as Node: the action validates these before the
- * proxy starts, and the config generator validates them again, failing closed.
+ * proxy starts, and the config generator (scripts/gen-configs-inspect.qjs.ts)
+ * validates them again, failing closed.
  */
 
-import { splitRuleTokens } from "./wildcard-rules.ts";
+import { splitRuleTokens } from "#core/lib/acl/wildcard-rules.ts";
 
 /** Where the generator writes the two files the haproxy config reads. */
 export const AWS_ACCOUNT_FILE = "/etc/haproxy/rules/aws_accounts.lst";

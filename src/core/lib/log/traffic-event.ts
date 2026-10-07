@@ -60,8 +60,8 @@ export interface TrafficEvent {
   reason?: string;
   /** Address it was actually sent to. Absent for dns. */
   destination?: string;
-  /** The refusal restrict mode would have made of a request audit forwarded,
-   *  as the AWS access key check names it. Set only then. */
+  /** The reason restrict mode would have refused a request audit let through
+   *  for, where an action's own check says so. Set only then. */
   wouldRefuse?: string;
 }
 

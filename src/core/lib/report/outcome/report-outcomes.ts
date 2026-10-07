@@ -43,10 +43,10 @@ export function describeReportOutcomes(
 }
 
 /**
- * The warning for requests audit let through that restrict would refuse under
- * the AWS access key check, or undefined when there were none. No host table
- * holds them, so without this a step would pass audit and fail on its switch
- * to restrict with no warning first.
+ * The warning for requests audit let through that restrict would refuse, or
+ * undefined when there were none. No host table holds them, so without this a
+ * step would pass audit and fail on its switch to restrict with no warning
+ * first.
  */
 function describeWouldRefuse(report: ReportData): OutcomeEmission | undefined {
   const count = report.timeline.filter((event) => event.wouldRefuse !== undefined).length;
@@ -55,9 +55,8 @@ function describeWouldRefuse(report: ReportData): OutcomeEmission | undefined {
     level: "warning",
     shouldFail: false,
     message:
-      `${count} request(s) the AWS access key check (allowed_aws_accounts) would refuse in ` +
-      'restrict mode, marked "restrict would refuse" in Communication details. Audit let them ' +
-      "through.",
+      `${count} request(s) restrict mode would refuse, marked "restrict would refuse" in ` +
+      "Communication details. Audit let them through.",
   };
 }
 

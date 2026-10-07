@@ -209,10 +209,10 @@ reader splitting a URL back apart would take the host for `registry.npmjs.org-`.
 prints as `-` too. The log keeps the `Host` as sent; the report lowercases it and drops one trailing
 dot, as the rules do before matching it.
 
-With `allowed_aws_accounts` set, both request lines carry `aws=<verdict>` after `dst=`: `allowed`,
-`unsigned`, `no-credential`, `ambiguous-credential` or `key-not-allowed`, and `-` for a host
-that is not an AWS API host. `restrict` refuses the last three, logging the verdict as
-`reason=aws-<verdict>`; `audit` only logs it. See [AWS access key check](./aws.md).
+With `allowed_aws_accounts` set, both request lines carry `wr=<reason|->` after `dst=`: in `audit`,
+the reason `restrict` would have refused the request for (`aws-key-not-allowed`, `aws-no-credential`
+or `aws-ambiguous-credential`), and `-` otherwise. `restrict` logs the same reasons as `reason=`.
+See [AWS access key check](./aws.md).
 
 `ts` is HAProxy's termination state and `reason` the refusal reason where the rule that refused
 knew one the line could not otherwise show. `tlserr` carries haproxy's own error from the handshake
@@ -301,6 +301,9 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │   ├── main.ts / post.ts      # Start proxy, run isolated command, report, stop
 │   ├── lib/                   # Action-specific implementation: container, report, sudo-preflight,
 │   │                          # sandbox/ (OCI config, runc bootstrap, netns/mountinfo helpers)
+│   ├── proxy/                 # The AWS access key check, an extension to core's inspect config,
+│   │                          # built for both runtimes; scripts/ holds this action's inspect
+│   │                          # config generator, core's plus the check
 │   └── core/                  # Code shared with the proxy image's QuickJS scripts
 │       ├── lib/               # acl/ (rule parsing and the proxy config generators) is built for
 │       │                      # both runtimes, and so is anything it imports — errors.ts today.
@@ -335,7 +338,9 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 └── Makefile                   # Operational commands
 ```
 
-Each engine's config generator is `src/core/scripts/gen-configs-<engine>.qjs.ts`, which runs under
+Each engine's config generator is `src/core/scripts/gen-configs-<engine>.qjs.ts`, except that the
+`inspect` image takes `src/proxy/scripts/gen-configs-inspect.qjs.ts`, which adds the AWS access key
+check to core's. Each runs under
 QuickJS when the proxy container starts and writes haproxy.cfg and the Corefile from the rules,
 through the generators in `src/core/lib/acl/` (`haproxy-config.ts` for `inspect`,
 `haproxy-universal-config.ts` for `universal`). rolldown bundles it into

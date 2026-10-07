@@ -22,9 +22,8 @@
  */
 
 import { PROXY_SUBNET } from "../log/proxy-address.ts";
-import type { AwsKeyCheck } from "./haproxy-aws-keys.ts";
 import { detectFrontend } from "./haproxy-detect-frontend.ts";
-import { inspectStage } from "./haproxy-inspect-stage.ts";
+import { inspectStage, type InspectStageExtension } from "./haproxy-inspect-stage.ts";
 import { compileRuleSet, INTERNAL_RANGES, type RuleInputs } from "./haproxy-rules.ts";
 import { preamble, resolversSection, originBackends } from "./haproxy-sections.ts";
 
@@ -50,8 +49,8 @@ export interface HaproxyConfigOptions extends RuleInputs {
   caSignFile?: string;
   defaultCertFile?: string;
   systemCaFile?: string;
-  /** The AWS access key check's files; omitted, no check is made. */
-  aws?: AwsKeyCheck;
+  /** An action's own check on top of the URL rules; see InspectStageExtension. */
+  extension?: InspectStageExtension;
 }
 
 const DEFAULTS = {
@@ -120,7 +119,7 @@ export function generateHaproxyConfig(options: HaproxyConfigOptions): string {
         rules: httpsRules,
         backend: "origin_tls",
       },
-      { mode, listenPort: opts.listenPort, aws: opts.aws, ...shared },
+      { mode, listenPort: opts.listenPort, extension: opts.extension, ...shared },
     ),
     ...inspectStage(
       {
@@ -131,7 +130,7 @@ export function generateHaproxyConfig(options: HaproxyConfigOptions): string {
         rules: httpRules,
         backend: "origin_plain",
       },
-      { mode, listenPort: opts.listenPort, aws: opts.aws, ...shared },
+      { mode, listenPort: opts.listenPort, extension: opts.extension, ...shared },
     ),
     ...originBackends(opts.systemCaFile),
   ];
