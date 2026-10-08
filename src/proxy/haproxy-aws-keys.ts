@@ -75,12 +75,13 @@ const QUERY_CREDENTIAL = "(x-amz-credential|awsaccesskeyid)";
 const formName = (name: string) =>
   name
     .split("")
-    .map(
-      (c) =>
-        `(${c}|%${c.charCodeAt(0).toString(16)}|%${c.toUpperCase().charCodeAt(0).toString(16)})`,
-    )
+    .map((c) => {
+      const codes = new Set([c, c.toUpperCase()].map((l) => `%${l.charCodeAt(0).toString(16)}`));
+      return `(${[c, ...codes].join("|")})`;
+    })
     .join("");
 export const FORM_CREDENTIAL = formName("awsaccesskeyid");
+export const FORM_SIGV4_CREDENTIAL = formName("x-amz-credential");
 const FORM_ROLE_ARN = formName("rolearn");
 const FORM_ACTION = formName("action");
 const ROLE_ARN = "^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$";
@@ -95,34 +96,36 @@ export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
 }
 
 /**
- * Request rules: name the key a request was signed with and decide on it.
+ * Request rules: record what a request carries, then decide on it.
  * `audit` decides too, for the log, but refuses nothing.
  */
 export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit"): string[] {
+  const map = `map(${check.keyMapFile}) -m found`;
   const l = [
     "    # AWS access key check. req.fhdr, not req.hdr: Authorization holds commas.",
-    "    # Matched once: an acl is evaluated again on every line that names it.",
+    "    # Each fact is matched once and kept in a variable: an acl is evaluated",
+    "    # again on every line that names it.",
     `    http-request set-var(txn.aws_host) bool(true) if { var(txn.host) -m reg ${AWS_API_HOST} }`,
     "    acl aws_host var(txn.aws_host) -m bool",
-    `    acl aws_resource_host var(txn.host) -m reg ${AWS_RESOURCE_HOST}`,
-    "    # A credential is one of AWS's own schemes, or a Basic login to CodeCommit:",
-    "    # the two aws_auth lines below declare the one acl. CodeCommit's Git",
-    "    # credential helper sends the key ID as the user name, and a static Git",
-    "    # credential names its account, <user>-at-<id>; either way the repository",
-    "    # is looked up in that account. Other Bearer and Basic tokens, such as",
-    "    # CodeArtifact's and ECR's, are signed by no AWS account. Any case, so a",
-    "    # spelling AWS might accept is never let through unjudged.",
-    `    http-request set-var(txn.aws_git_host) bool(true) if { var(txn.host) -m reg ${CODECOMMIT_HOST} }`,
+    `    http-request set-var(txn.aws_resource_host) bool(true) if aws_host { var(txn.host) -m reg ${AWS_RESOURCE_HOST} }`,
+    "    acl aws_resource_host var(txn.aws_resource_host) -m bool",
+    "    # A credential is one of AWS's own schemes, or a Basic login to CodeCommit.",
+    "    # CodeCommit's Git credential helper sends the key ID as the user name,",
+    "    # and a static Git credential names its account, <user>-at-<id>; either",
+    "    # way the repository is looked up in that account. Other Bearer and Basic",
+    "    # tokens, such as CodeArtifact's and ECR's, are signed by no AWS account.",
+    "    # Any case, so a spelling AWS might accept is never let through unjudged.",
+    `    http-request set-var(txn.aws_git_host) bool(true) if aws_host { var(txn.host) -m reg ${CODECOMMIT_HOST} }`,
     "    acl aws_git_host var(txn.aws_git_host) -m bool",
     "    http-request set-var(txn.aws_git) bool(true) if aws_git_host { req.fhdr(authorization) -m reg -i ^basic\\s }",
     "    acl aws_git var(txn.aws_git) -m bool",
-    "    acl aws_auth req.fhdr(authorization) -m reg -i ^aws",
-    "    acl aws_auth var(txn.aws_git) -m bool",
-    `    http-request set-var(txn.aws_git_user) 'req.fhdr(authorization),regsub("^basic\\s+","",i),b64dec,regsub(":.*$","")' if aws_git`,
+    "    http-request set-var(txn.aws_auth) bool(true) if aws_host { req.fhdr(authorization) -m reg -i ^aws } or aws_git",
+    "    acl aws_auth var(txn.aws_auth) -m bool",
     "    acl aws_auth_many req.fhdr_cnt(authorization) gt 1",
     "    acl aws_auth_many req.fhdr(authorization) -m reg -i credential=.*credential=",
     "    # Decoded first: a name spelled as X-Amz-Cr%65dential still counts.",
-    `    acl aws_query query,url_dec -m reg -i (^|&)${QUERY_CREDENTIAL}=`,
+    `    http-request set-var(txn.aws_query) bool(true) if aws_host { query,url_dec -m reg -i (^|&)${QUERY_CREDENTIAL}= }`,
+    "    acl aws_query var(txn.aws_query) -m bool",
     `    acl aws_query_many query,url_dec -m reg -i (?s)(^|&)${QUERY_CREDENTIAL}=.*&${QUERY_CREDENTIAL}=`,
     "    # SigV2 also takes its parameters from a form body, and a key there is",
     "    # judged alongside one in the header or the query. A body counts as a",
@@ -132,67 +135,68 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    http-request set-var(txn.aws_post) bool(true) if aws_host METH_POST !aws_resource_host !aws_git_host",
     "    acl aws_post var(txn.aws_post) -m bool",
     "    http-request wait-for-body time 30s if aws_post",
-    "    http-request set-var(txn.aws_form_post) bool(true) if aws_post { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded } or aws_post { req.body -m reg ^&*[A-Za-z0-9._~%*+!(),:/@-]*= }",
-    "    acl aws_form_post var(txn.aws_form_post) -m bool",
-    "    http-request wait-for-body time 30s use-large-buffer if aws_form_post",
+    "    http-request set-var(txn.aws_form) bool(true) if aws_post { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded } or aws_post { req.body -m reg ^&*[A-Za-z0-9._~%*+!(),:/@-]*= }",
+    "    acl aws_form var(txn.aws_form) -m bool",
+    "    http-request wait-for-body time 30s use-large-buffer if aws_form",
     "    # Matched undecoded, since a value carries & and = encoded, but each",
-    "    # letter of the name may be.",
-    `    http-request set-var(txn.aws_body) bool(true) if aws_form_post { req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`,
+    "    # letter of the name may be. One pass for either credential first: most",
+    "    # form bodies hold neither.",
+    `    http-request set-var(txn.aws_body_credential) bool(true) if aws_form { req.body -m reg -i (^|&)(${FORM_CREDENTIAL}|${FORM_SIGV4_CREDENTIAL})= }`,
+    "    acl aws_body_credential var(txn.aws_body_credential) -m bool",
+    `    http-request set-var(txn.aws_body) bool(true) if aws_body_credential { req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`,
     "    acl aws_body var(txn.aws_body) -m bool",
     `    acl aws_body_many req.body -m reg -i (?s)(^|&)${FORM_CREDENTIAL}=.*&${FORM_CREDENTIAL}=`,
     "    http-request set-var(txn.aws_body_key) req.body_param(AWSAccessKeyId,i) if aws_body",
+    "    # SigV3's header and SigV4's parameters in a form body: no current SDK",
+    "    # sends either, so the key in them is never read, and never matches.",
+    `    http-request set-var(txn.aws_unread) bool(true) if aws_host { req.hdr(x-amzn-authorization) -m found } or aws_body_credential { req.body -m reg -i (^|&)${FORM_SIGV4_CREDENTIAL}= }`,
+    "    acl aws_unread var(txn.aws_unread) -m bool",
     "    # A header neither pattern matches comes out unchanged, and so never",
     "    # equals a key in the map.",
-    `    http-request set-var(txn.aws_key) 'req.fhdr(authorization),regsub("^AWS4-[A-Z0-9-]+ +Credential=([A-Za-z0-9]+)/.*$","\\1",i),regsub("^AWS ([A-Za-z0-9]+):.*$","\\1",i)' if aws_host aws_auth !aws_git !aws_query`,
-    `    http-request set-var(txn.aws_key) 'url_param(X-Amz-Credential),url_dec,regsub("^([A-Za-z0-9]+)/.*$","\\1")' if aws_host aws_query !aws_auth { url_param(X-Amz-Credential) -m found }`,
-    "    http-request set-var(txn.aws_key) url_param(AWSAccessKeyId) if aws_host aws_query !aws_auth { url_param(AWSAccessKeyId) -m found }",
-    "    http-request set-var(txn.aws_key) var(txn.aws_body_key) if aws_body !aws_auth !aws_query",
-    '    http-request set-var(txn.aws_key) \'var(txn.aws_git_user),regsub("%.*$","")\' if aws_git !aws_query',
-    "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_host aws_auth aws_query or aws_host aws_auth aws_auth_many or aws_host aws_query_many or aws_body aws_body_many",
-    "    # Unsigned, whatever the method: where the host names no resource, the",
-    "    # account it reaches is in the parameters or the body, out of sight.",
-    "    # An S3 POST-policy upload carries its credential in a multipart body,",
-    "    # which this does not read, so it counts as unsigned and is refused.",
-    `    http-request set-var(txn.aws_form) bool(true) if METH_POST { var(txn.host) -m reg ${S3_HOST} } { req.hdr(content-type) -m beg -i multipart/form-data }`,
-    "    acl aws_form var(txn.aws_form) -m bool",
+    `    http-request set-var(txn.aws_key) 'req.fhdr(authorization),regsub("^AWS4-[A-Z0-9-]+ +Credential=([A-Za-z0-9]+)/.*$","\\1",i),regsub("^AWS ([A-Za-z0-9]+):.*$","\\1",i)' if aws_auth !aws_git`,
+    `    http-request set-var(txn.aws_key) 'url_param(X-Amz-Credential),url_dec,regsub("^([A-Za-z0-9]+)/.*$","\\1")' if aws_query !aws_auth { url_param(X-Amz-Credential) -m found }`,
+    "    http-request set-var(txn.aws_key) url_param(AWSAccessKeyId) if aws_query !aws_auth { url_param(AWSAccessKeyId) -m found }",
+    `    http-request set-var(txn.aws_git_user) 'req.fhdr(authorization),regsub("^basic\\s+","",i),b64dec,regsub(":.*$","")' if aws_git`,
+    '    http-request set-var(txn.aws_key) \'var(txn.aws_git_user),regsub("%.*$","")\' if aws_git',
+    "    # Unsigned, whatever the method, only where the host names a resource:",
+    "    # elsewhere the account a request reaches is in the parameters or the",
+    "    # body, out of sight. Not an S3 POST-policy upload, though: its",
+    "    # credential is in a multipart body, which this does not read.",
     "    # Git asks CodeCommit with no credential first, and logs in on its 401.",
-    "    http-request set-var(txn.aws_git_bare) bool(true) if aws_git_host !{ req.fhdr(authorization) -m found }",
-    "    acl aws_git_bare var(txn.aws_git_bare) -m bool",
-    "    http-request set-var(txn.aws) str(unsigned) if aws_host !aws_auth !aws_query !aws_body aws_resource_host !aws_form or aws_git_bare !aws_query",
-    "    http-request set-var(txn.aws) str(no-credential) if aws_host !aws_auth !aws_query !aws_body !aws_resource_host !aws_git_bare or aws_host !aws_auth !aws_query !aws_body aws_form",
-    ...(check.accountFile
-      ? [
-          `    acl aws_sts_host var(txn.host) -m reg ${STS_HOST}`,
-          ...federationRules(check.accountFile),
-        ]
-      : []),
+    `    http-request set-var(txn.aws_post_policy) bool(true) if aws_resource_host METH_POST { req.hdr(content-type) -m beg -i multipart/form-data } { var(txn.host) -m reg ${S3_HOST} }`,
+    "    acl aws_post_policy var(txn.aws_post_policy) -m bool",
+    "    http-request set-var(txn.aws_unsigned_ok) bool(true) if aws_resource_host !aws_post_policy or aws_git_host !{ req.fhdr(authorization) -m found }",
+    "    acl aws_unsigned_ok var(txn.aws_unsigned_ok) -m bool",
+    ...(check.accountFile ? accountRules(check.accountFile) : []),
     "    # Where a credential could be out of sight: a query url_dec cannot decode",
     "    # (%00 or a broken escape), or a form body that is compressed, sent",
     "    # chunked, larger than the buffer, or holds a NUL, where matching stops.",
-    "    http-request set-var(txn.aws_body_size) req.body_size if aws_form_post",
-    "    http-request set-var(txn.aws_body_len) req.body_len if aws_form_post",
-    "    http-request set-var(txn.aws) str(unreadable) if aws_host { query -m found } !{ query,url_dec -m found }",
-    "    http-request set-var(txn.aws) str(unreadable) if aws_form_post { req.hdr(content-encoding) -m reg -i ^(?!identity$) } or aws_form_post { req.hdr(transfer-encoding) -m found }",
-    "    http-request set-var(txn.aws) str(unreadable) if aws_form_post { req.body_len,sub(txn.aws_body_size) lt 0 } or aws_form_post { req.body,length,sub(txn.aws_body_len) lt 0 }",
-    "    # A body key next to another one; a body key alone is aws_key below.",
-    `    http-request set-var(txn.aws) str(key-not-allowed) if aws_body aws_auth !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found } or aws_body aws_query !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found }`,
+    "    http-request set-var(txn.aws_body_size) req.body_size if aws_form",
+    "    http-request set-var(txn.aws_body_len) req.body_len if aws_form",
+    "    # The verdict: each line overrides the ones above it, so they run from",
+    "    # the least decisive to the most.",
+    "    http-request set-var(txn.aws) str(allowed) if aws_host",
     ...(check.accountFile
       ? [
-          `    http-request set-var(txn.aws) str(allowed) if { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}\\z } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f ${check.accountFile} } !{ var(txn.aws) -m found }`,
+          `    http-request set-var(txn.aws) str(role-not-allowed) if aws_role_account !{ var(txn.aws_role_account) -m str -f ${check.accountFile} }`,
         ]
       : []),
-    `    http-request set-var(txn.aws) str(key-not-allowed) if aws_host !{ var(txn.aws) -m found } !{ var(txn.aws_key),map(${check.keyMapFile}) -m found }`,
-    "    http-request set-var(txn.aws) str(allowed) if aws_host !{ var(txn.aws) -m found }",
-  ];
-  l.push(`    acl aws_refused var(txn.aws) -m str ${AWS_REFUSED_VERDICTS.join(" ")}`);
-  l.push(
+    "    # A POST-policy upload's own credential is never read, so one next to it",
+    "    # is refused; alone, it is no-credential below.",
+    `    http-request set-var(txn.aws) str(key-not-allowed) if aws_body !{ var(txn.aws_body_key),${map} } or aws_auth !{ var(txn.aws_key),${map} }${check.accountFile ? " !aws_git_account" : ""} or aws_query !{ var(txn.aws_key),${map} } or aws_unread or aws_post_policy`,
+    `    http-request set-var(txn.aws) str(no-credential) if aws_host !aws_auth !aws_query !aws_body !aws_unread !aws_unsigned_ok${check.accountFile ? " !aws_role_account" : ""}`,
+    `    http-request set-var(txn.aws) str(ambiguous-credential) if aws_auth aws_query or aws_auth aws_auth_many or aws_query aws_query_many or aws_body aws_body_many${check.accountFile ? " or aws_fed aws_role_body_many or aws_fed aws_fed_in_query" : ""}`,
+    "    http-request set-var(txn.aws) str(unreadable) if aws_host { query -m found } !{ query,url_dec -m found }",
+    "    http-request set-var(txn.aws) str(unreadable) if aws_form { req.hdr(content-encoding) -m reg -i ^(?!identity$) } or aws_form { req.hdr(transfer-encoding) -m found }",
+    "    http-request set-var(txn.aws) str(unreadable) if aws_form { req.body_len,sub(txn.aws_body_size) lt 0 } or aws_form { req.body,length,sub(txn.aws_body_len) lt 0 }",
+    `    acl aws_refused var(txn.aws) -m str ${AWS_REFUSED_VERDICTS.join(" ")}`,
     ...(mode === "restrict"
       ? [
           "    http-request set-var-fmt(txn.reason) aws-%[var(txn.aws)] if aws_refused",
           "    http-request deny deny_status 403 if aws_refused",
         ]
       : ["    http-request set-var-fmt(txn.would_refuse) aws-%[var(txn.aws)] if aws_refused"]),
-  );
+  ];
   if (check.accountFile) {
     l.push(
       "    # The body has to be readable to learn a key from it; no Accept-Encoding",
@@ -202,7 +206,8 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
       "    acl aws_coding_signed req.fhdr(authorization) -m reg -i signedheaders=[^,]*accept-encoding",
       "    acl aws_coding_signed query,url_dec -m reg -i (^|&)x-amz-signedheaders=[^&]*accept-encoding",
       "    http-request set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed",
-      "    http-request set-var(txn.aws_sts) bool(true) if aws_sts_host",
+      "    # Only an answer to a request the check let through can teach a key.",
+      "    http-request set-var(txn.aws_learn) bool(true) if aws_sts_host { var(txn.aws) -m str allowed }",
     );
   }
   l.push("");
@@ -210,42 +215,47 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
 }
 
 /**
- * AssumeRoleWithWebIdentity takes no signature: the account of the role in
- * RoleArn decides instead. Only a form body naming Action and RoleArn once
- * each, with neither in the query, is judged.
+ * What is judged by a role account: AssumeRoleWithWebIdentity, which takes no
+ * signature, by the account of the role in RoleArn, and a static CodeCommit
+ * Git credential by the account it names. Only a form body naming Action and
+ * RoleArn once each, with neither in the query, is judged.
  */
-function federationRules(accountFile: string): string[] {
+function accountRules(accountFile: string): string[] {
   return [
+    "    # A host that names a resource is never STS, whatever its name: S3",
+    "    # takes a bucket named sts.",
+    `    http-request set-var(txn.aws_sts_host) bool(true) if aws_host !aws_resource_host { var(txn.host) -m reg ${STS_HOST} }`,
+    "    acl aws_sts_host var(txn.aws_sts_host) -m bool",
     `    acl aws_fed_action req.body -m reg -i (^|&)${FORM_ACTION}=AssumeRoleWithWebIdentity(&|$)`,
     `    acl aws_fed_action_many req.body -m reg -i (?s)(^|&)${FORM_ACTION}=.*&${FORM_ACTION}=`,
     `    acl aws_role_body_many req.body -m reg -i (?s)(^|&)${FORM_ROLE_ARN}=.*&${FORM_ROLE_ARN}=`,
     "    acl aws_fed_in_query query,url_dec -m reg -i (^|&)(action|rolearn)=",
-    "    http-request set-var(txn.aws_fed) bool(true) if aws_sts_host aws_form_post !aws_auth !aws_query !aws_body aws_fed_action !aws_fed_action_many",
+    "    http-request set-var(txn.aws_fed) bool(true) if aws_sts_host aws_form !aws_auth !aws_query !aws_body !aws_unread aws_fed_action !aws_fed_action_many",
     "    acl aws_fed var(txn.aws_fed) -m bool",
     `    http-request set-var(txn.aws_role_account) 'req.body_param(RoleArn),url_dec,regsub("${ROLE_ARN}","\\1")' if aws_fed`,
     "    acl aws_role_account var(txn.aws_role_account) -m reg ^[0-9]{12}$",
-    "    http-request set-var(txn.aws) str(role-not-allowed) if aws_fed aws_role_account",
-    `    http-request set-var(txn.aws) str(allowed) if aws_fed aws_role_account { var(txn.aws_role_account) -m str -f ${accountFile} }`,
-    "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_fed aws_role_body_many or aws_fed aws_fed_in_query",
+    `    http-request set-var(txn.aws_git_account) bool(true) if aws_git { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}\\z } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f ${accountFile} }`,
+    "    acl aws_git_account var(txn.aws_git_account) -m bool",
   ];
 }
 
 /**
  * Response rules: learn the key an AssumeRole or AssumeRoleWithWebIdentity
- * answer issues, only when the role's account is allowed. The role ARN is
- * AWS's own, not the caller's. A body larger than the buffer is read only in
- * part, so a key past it is not learned and its requests are refused.
+ * answer issues, only to a request the check let through and only when the
+ * role's account is allowed. The role ARN is AWS's own, not the caller's. A
+ * body larger than the buffer is read only in part, so a key past it is not
+ * learned and its requests are refused.
  */
 export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
   if (!check.accountFile) return [];
   return [
-    "    acl aws_sts var(txn.aws_sts) -m bool",
+    "    acl aws_learn var(txn.aws_learn) -m bool",
     "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity)?Response[\\s>]",
     "    acl aws_many_keys res.body -m reg (?s)<AccessKeyId>.*<AccessKeyId>",
     "    acl aws_many_arns res.body -m reg (?s)<Arn>.*<Arn>",
-    "    http-response wait-for-body time 10s if aws_sts { status 200 }",
-    `    http-response set-var(txn.aws_new_key) 'res.body,regsub("(?s)^.*<AccessKeyId>(ASIA[A-Z0-9]+)</AccessKeyId>.*$","\\1")' if aws_sts { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
-    `    http-response set-var(txn.aws_new_account) 'res.body,regsub("(?s)^.*<Arn>arn:aws[a-z-]*:sts::([0-9]{12}):assumed-role/[^<]*</Arn>.*$","\\1")' if aws_sts { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
+    "    http-response wait-for-body time 10s if aws_learn { status 200 }",
+    `    http-response set-var(txn.aws_new_key) 'res.body,regsub("(?s)^.*<AccessKeyId>(ASIA[A-Z0-9]+)</AccessKeyId>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
+    `    http-response set-var(txn.aws_new_account) 'res.body,regsub("(?s)^.*<Arn>arn:aws[a-z-]*:sts::([0-9]{12}):assumed-role/[^<]*</Arn>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
     "    acl aws_new_key var(txn.aws_new_key) -m reg ^ASIA[A-Z0-9]+$",
     "    acl aws_new_account var(txn.aws_new_account) -m reg ^[0-9]{12}$",
     `    acl aws_new_account_allowed var(txn.aws_new_account) -m str -f ${check.accountFile}`,
