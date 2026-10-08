@@ -173,17 +173,17 @@ export function readAwsKeyInputs(
   warn: Notice,
   getInput: GetInput = core.getInput,
 ): AwsKeyInputs {
-  const accountsInput = getInput("allowed_aws_role_accounts");
   let roleAccounts: string[];
   try {
-    roleAccounts = parseAwsAccounts(accountsInput);
+    roleAccounts = parseAwsAccounts(getInput("allowed_aws_role_accounts"));
   } catch (e) {
+    const { message } = e as Error;
     // YAML reads an unquoted 012345678901 as a number and drops the 0.
-    const hint = /(^|[\s,])\d{1,11}(?=[\s,]|$)/.test(accountsInput)
+    const hint = /"\d{1,11}"/.test(message)
       ? " Quote an ID that begins with 0, which YAML otherwise reads as a number."
       : "";
     throw new SandboxError(
-      `allowed_aws_role_accounts: ${(e as Error).message}. Each entry must be a 12-digit AWS account ID.${hint}`,
+      `allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${hint}`,
       "INVALID_AWS_ACCOUNTS",
     );
   }

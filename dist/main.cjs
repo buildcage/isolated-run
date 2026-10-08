@@ -23344,12 +23344,12 @@ const AWS_KEY_CHECK_OFF = {
 	roleAccounts: []
 };
 function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$4 = getInput) {
-	let accountsInput = getInput$4("allowed_aws_role_accounts"), roleAccounts;
+	let roleAccounts;
 	try {
-		roleAccounts = parseAwsAccounts(accountsInput);
+		roleAccounts = parseAwsAccounts(getInput$4("allowed_aws_role_accounts"));
 	} catch (e) {
-		let hint = /(^|[\s,])\d{1,11}(?=[\s,]|$)/.test(accountsInput) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : "";
-		throw new SandboxError(`allowed_aws_role_accounts: ${e.message}. Each entry must be a 12-digit AWS account ID.${hint}`, "INVALID_AWS_ACCOUNTS");
+		let { message } = e;
+		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{1,11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
 	if (!readBooleanInput("aws_key_check", roleAccounts.length > 0, getInput$4)) return roleAccounts.length > 0 && warn("aws_key_check is false, so allowed_aws_role_accounts is ignored for this run."), AWS_KEY_CHECK_OFF;
 	if (proxyEngine !== "inspect") {
