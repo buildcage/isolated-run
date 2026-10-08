@@ -731,7 +731,6 @@ jobs:
       # The hosted image has no NSS database, so every step below makes
       # ~/.pki/nssdb. The short steps must not remove it under the long one.
       - name: Start without an NSS database
-        id: nssdb-start
         run: rm -rf ~/.pki ~/.local/share/pki "/var/tmp/buildcage-$(id -u)/nssdb-ledger.json"
 
       - name: sandbox-ephemeral-inspect-home-overlay
@@ -746,6 +745,7 @@ jobs:
 
       # Made in HOME's overlay, so neither the runner nor the ledger is touched.
       - name: Verify the ephemeral step made nothing on the runner
+        id: nssdb-ephemeral
         run: |
           for f in ~/.pki "/var/tmp/buildcage-$(id -u)/nssdb-ledger.json"; do
             if [ -e "$f" ]; then
@@ -796,12 +796,16 @@ jobs:
                   exit 1
                 fi
 
-      # Only once the steps above ran: a failure earlier skips them, and this
-      # would then report their missing database instead of that failure.
+      # Only once the parallel steps were reached: a failure earlier skips them,
+      # and this would then report their missing database instead.
       - name: Verify the NSS database's directories were settled
-        if: always() && steps.nssdb-start.outcome == 'success'
+        if: ${{ !cancelled() && steps.nssdb-ephemeral.outcome == 'success' }}
         run: |
           ledger="/var/tmp/buildcage-$(id -u)/nssdb-ledger.json"
+          if [ ! -e "$ledger" ]; then
+            echo "::error::$ledger is missing after the persistent steps"
+            exit 1
+          fi
           cat "$ledger"
           if [ "$(jq -c '[.dirs, .uses]' "$ledger")" != "[{},{}]" ]; then
             echo "::error::$ledger still lists directories or uses after every step ended"
