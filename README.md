@@ -523,9 +523,10 @@ data, or source you do not publish. For the full threat model, see
 
 - UDP is dropped, so QUIC and HTTP/3 either fall back to TCP or fail. Port 53 to the proxy, which is
   the resolver, is the one exception. ICMP is dropped too.
-- IPv6 is not used anywhere. The rule syntax refuses an IPv6 address, forwarded IPv6 is dropped, and
-  the proxy reaches allowed names over IPv4 only, so an allowed name with AAAA records and no A
-  record never resolves and no rule can clear it.
+- IPv6 is not used anywhere. The sandbox's interface toward the proxy has no IPv6 address, the
+  rule syntax refuses an IPv6 address, forwarded IPv6 is dropped, and the proxy reaches allowed
+  names over IPv4 only, so an allowed name with AAAA records and no A record never resolves and no
+  rule can clear it.
 
 ### Service discovery
 
