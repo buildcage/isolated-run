@@ -378,7 +378,8 @@ Under `write_through: /`, only a symlink in one of the four always-writable path
 > [!WARNING]
 > `write_through: /` is for trusted code only. Against a compromised command it gives up the outbound
 > restriction as well as the read-only one: all of `/run` is reachable again, the Docker socket
-> included, and the `docker` and `sudo` this action runs after the command are no longer pinned. See
+> included, `$XDG_RUNTIME_DIR` is no longer masked, and the commands this action runs on the host
+> after the command are no longer kept out of writable paths. See
 > [The `/` opt-out](./docs/reference.md#the--opt-out).
 
 > [!WARNING]

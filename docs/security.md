@@ -208,7 +208,8 @@ sandbox down, so what it runs is kept out of those paths:
 - Under `inspect`, the `keytool` that adds the CA to the JVM keystores is pinned the same way,
   `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so the command's
   `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` stays inside the sandbox. Without one, the step skips the
-  keystores and warns. `java` is never run: its keystore is found by following its symlinks.
+  keystores and warns. `java` is never run: its keystore is found by following its symlinks. `write_through: /` turns
+  this pinning off too.
 - Under `inspect`, Chromium's NSS database gets a read-only slot on one the proxy's `certutil` made
   from the CA certificate alone, appended to a copy of its `pkcs11.txt`. The runner's database, which
   an earlier step may have written, is never parsed: its files are copied, and the slot's bytes are

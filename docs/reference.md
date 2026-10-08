@@ -956,15 +956,17 @@ the one thing that mode exists to prevent. The sentinel is the literal `/` only:
 > - All of `/run` is reachable again, which leaves the outbound restriction nearly pointless. On a
 >   GitHub-hosted runner the runner user can use the Docker socket there to start a container on
 >   the host network, past the proxy.
-> - `docker` and `sudo` are no longer pinned, so the step's teardown and the post step may run one
->   the command put in any directory on `$PATH` that the runner user can write.
+> - `docker`, `sudo` and, under `inspect`, `keytool` are taken from the first match on `$PATH` even
+>   where the command can write, so the host may later run a copy the command replaced. `docker`
+>   also looks for its `docker-credential-*` helpers on the whole `$PATH`, where the command can
+>   plant one.
 > - `$XDG_RUNTIME_DIR` is no longer masked, so a `systemd --user` bus there can start a unit outside
 >   every namespace.
 > - Symlinks are refused only in the four always-writable paths and other `write_through:` entries,
 >   though the command could replace one anywhere.
 >
-> What still holds is the list above, the `/proc` masks and the command's own network namespace. The
-> step prints a warning whenever `write_through: /` is set.
+> What still holds is the read-only paths named at the start of this section, the `/proc` masks and
+> the command's own network namespace. The step warns about all this when `write_through: /` is set.
 
 ### The former input names
 

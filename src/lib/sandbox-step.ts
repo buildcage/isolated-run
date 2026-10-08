@@ -67,8 +67,9 @@ const DEFAULT_ACTION_REF = "v2";
 export const WRITE_THROUGH_ALL_WARNING =
   "write_through: / is for trusted code only. Against a compromised command it gives up the " +
   "outbound restriction as well as the read-only one: all of /run is reachable again, the Docker " +
-  "socket included, and the docker and sudo this action runs after the command are no longer " +
-  'pinned. See "The / opt-out" in docs/reference.md.';
+  "socket included, $XDG_RUNTIME_DIR is no longer masked, and the commands this action runs on " +
+  'the host after the command are no longer kept out of writable paths. See "The / opt-out" in ' +
+  "docs/reference.md.";
 
 /**
  * The steps this function sequences. Declared rather than imported straight
