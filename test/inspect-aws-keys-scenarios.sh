@@ -54,6 +54,19 @@ check_status "two Authorization headers" \
 check_status "a header and a query credential" \
   "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" "$CF?X-Amz-Credential=${AKIA}TESTATTACKER0001%2Fx")" "403"
 
+echo "=== [a SigV2 key in a form body] ==="
+sigv2() { echo "Action=ListQueues&AWSAccessKeyId=$1&SignatureVersion=2&Signature=ab"; }
+check_status "the start key alone" "$($C -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)" $CF)" "200"
+check_status "a key of the build's own alone" "$($C -d "$(sigv2 ${AKIA}TESTATTACKER0001)" $CF)" "403"
+check_status "a key of the build's own under a percent-encoded name" \
+  "$($C -d "Action=ListQueues&AWSAccessK%65yId=${AKIA}TESTATTACKER0001" $CF)" "403"
+check_status "the start key in both the header and the body" \
+  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)" $CF)" "200"
+check_status "the start key in the header, a key of the build's own in the body" \
+  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "$(sigv2 ${AKIA}TESTATTACKER0001)" $CF)" "403"
+check_status "the key repeated in the body" \
+  "$($C -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)&AWSAccessKeyId=${AKIA}TESTSTARTKEY0001" $CF)" "403"
+
 echo "=== [a key AssumeRole issued] ==="
 check_status "unknown until AssumeRole hands it out" \
   "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTLEARNEDKEY01)" $CF)" "403"

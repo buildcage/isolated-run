@@ -41,11 +41,12 @@ path, before the request leaves the runner.
 
 With `allowed_aws_accounts` set, a request to an AWS API host that carries an AWS signature must be
 signed with a key the proxy knows belongs to one of those accounts. The proxy reads the access key ID
-from the `Authorization` header (SigV4, SigV4a or SigV2) or from a presigned URL's
-`X-Amz-Credential` or `AWSAccessKeyId` parameter, and compares it with the keys it knows as a whole
-string. It never
-decodes a key ID or verifies a signature: a request that copies one of your key IDs without the
-secret is refused by AWS and logged in your own account.
+from the `Authorization` header (SigV4, SigV4a or SigV2), from a presigned URL's
+`X-Amz-Credential` or `AWSAccessKeyId` parameter, or from the `AWSAccessKeyId` parameter of a SigV2
+form body, and compares it with the keys it knows as a whole string. It never decodes a key ID or
+verifies a signature: a request that copies one of your key IDs without the secret is refused by AWS
+and logged in your own account. Of a form body, it reads only what fits in its 16 KB buffer after the
+headers.
 
 The proxy knows two kinds of key:
 
@@ -76,6 +77,7 @@ token, counts as unsigned here: only AWS's own schemes are an AWS credential.
 | Unsigned, to a host that names its resource (below)                                                              | allowed                    |
 | Unsigned, to any other AWS API host, whatever the method                                                         | `aws-no-credential`        |
 | More than one credential: two `Authorization` headers, a header and a query credential, or a credential repeated | `aws-ambiguous-credential` |
+| A form-body credential as well as a header or query one: each key is checked, and either being unknown refuses   | `aws-key-not-allowed`      |
 
 These hosts name the resource a request reaches, in the host name or, for S3's path style, in the
 path. The URL rules can pin the account there, so an unsigned request to them is left to the URL
@@ -100,7 +102,7 @@ treated the same way; if a legitimate request is refused as `aws-no-credential` 
 report it.
 
 An S3 POST-policy upload, the browser-style upload that carries its credential in the form body, is
-refused as `aws-no-credential`, since the proxy does not read the body. Upload with `PutObject`
+refused as `aws-no-credential`, since the proxy does not read a multipart body. Upload with `PutObject`
 instead, as the AWS CLI and the SDKs do, or with a presigned `PutObject` URL. Both carry the key
 where the check reads it.
 
