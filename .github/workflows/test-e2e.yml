@@ -146,9 +146,9 @@ jobs:
       # No cleanup step: the action stops its own proxy container in its
       # finally block.
 
-  # Runs a real sandboxed step with filesystem_mode: ephemeral and
-  # filesystem_audit and checks the tracer recorded its file accesses; a
-  # test-hooks build surfaces the recording for the assertion.
+  # Runs a real sandboxed step with filesystem_audit under each filesystem_mode
+  # and checks the tracer recorded its file accesses; a test-hooks build
+  # surfaces the recording for the assertion.
   test_sandbox_filesystem_audit:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
@@ -156,10 +156,11 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-latest, ubuntu-24.04-arm]
+        filesystem_mode: [persistent, ephemeral]
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-    name: "e2e: test (filesystem_audit, ${{ matrix.runner }})"
+    name: "e2e: test (filesystem_audit, ${{ matrix.filesystem_mode }}, ${{ matrix.runner }})"
 
     env:
       PROXY_ENGINE: universal
@@ -197,7 +198,7 @@ jobs:
         with:
           proxy_engine: universal
           proxy_mode: audit
-          filesystem_mode: ephemeral
+          filesystem_mode: ${{ matrix.filesystem_mode }}
           filesystem_audit: record
           run: |
             cat /etc/hostname > /dev/null
