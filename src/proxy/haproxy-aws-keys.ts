@@ -39,9 +39,8 @@ const AMAZONAWS_DOMAINS = "amazonaws\\.(com|com\\.cn|eu)";
 const DUALSTACK_DOMAINS =
   "(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)";
 const AWS_DOMAINS = `(${AMAZONAWS_DOMAINS}|${DUALSTACK_DOMAINS})`;
-// Matched against txn.host, which is lowercased and has no port. Any name under
-// these domains counts, whatever its labels hold: one the patterns below do not
-// describe, such as one with a `_`, falls to the check instead of past it.
+// Matched against txn.host, which is lowercased and has no port. Any name
+// under these domains, whatever its labels hold, so one with a `_` is checked.
 export const AWS_API_HOST = `\\.${AWS_DOMAINS}$`;
 // The names an interface VPC endpoint gives a service.
 const vpceHost = (service: string) =>
