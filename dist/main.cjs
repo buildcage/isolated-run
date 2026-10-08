@@ -26612,7 +26612,7 @@ function describeWouldRefuse(report) {
 	if (count !== 0) return {
 		level: "warning",
 		shouldFail: !1,
-		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section lists each with the reason.`
+		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section lists them with the reason.`
 	};
 }
 function describeUndecidedRequests(report, engineLabel) {
