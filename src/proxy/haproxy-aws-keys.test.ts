@@ -179,40 +179,49 @@ describe("the SigV2 credential in a form body", () => {
   });
 });
 
-describe("AssumeRoleWithWebIdentity and AssumeRoleWithSAML", () => {
+describe("AssumeRoleWithWebIdentity", () => {
   const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
 
-  it("judges the unsigned call by the account in RoleArn, from the query or the body", () => {
+  it("judges the unsigned call by the account in the form body's RoleArn", () => {
     expect(
       rules.includes(
-        "acl aws_fed_query query,url_dec -m reg (^|&)Action=AssumeRoleWith(WebIdentity|SAML)(&|$)",
+        "set-var(txn.aws_fed) bool(true) if aws_sts_host aws_form_post !aws_auth !aws_query !aws_body aws_fed_action !aws_fed_action_many",
       ),
     ).toBe(true);
     expect(
       rules.includes(
-        `'req.body_param(RoleArn),url_dec,regsub("^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$","\\1")' if aws_fed aws_form_post aws_role_body !aws_role_query`,
+        `'req.body_param(RoleArn),url_dec,regsub("^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$","\\1")' if aws_fed`,
       ),
     ).toBe(true);
-    expect(rules.includes("set-var(txn.aws) str(role-not-allowed) if aws_fed")).toBe(true);
+    expect(rules.includes("str(role-not-allowed) if aws_fed aws_role_account")).toBe(true);
     expect(
       rules.includes(
-        "str(allowed) if aws_fed { var(txn.aws_role_account) -m str -f /rules/accounts.lst }",
-      ),
-    ).toBe(true);
-  });
-
-  it("refuses RoleArn named twice, under any spelling, or in both places", () => {
-    expect(
-      rules.includes(
-        "str(ambiguous-credential) if aws_fed aws_role_query_many or aws_fed aws_role_body_many or aws_fed aws_role_query aws_role_body",
+        "str(allowed) if aws_fed aws_role_account { var(txn.aws_role_account) -m str -f /rules/accounts.lst }",
       ),
     ).toBe(true);
   });
 
-  it("learns the key either answer issues", () => {
+  it("matches Action undecoded, so a name hidden in another value does not count", () => {
+    const action = /\(\^\|&\)(.*)=AssumeRoleWithWebIdentity\(&\|\$\)/.exec(rules)![1];
+    const named = new RegExp(`(^|&)${action}=AssumeRoleWithWebIdentity(&|$)`, "i");
+    expect(named.test("Action=AssumeRoleWithWebIdentity&RoleArn=x")).toBe(true);
+    expect(named.test("Action=GetFederationToken&Name=%26Action%3DAssumeRoleWithWebIdentity")).toBe(
+      false,
+    );
+  });
+
+  it("refuses RoleArn named twice, or Action or RoleArn in the query", () => {
+    expect(
+      rules.includes(
+        "str(ambiguous-credential) if aws_fed aws_role_body_many or aws_fed aws_fed_in_query",
+      ),
+    ).toBe(true);
+  });
+
+  it("learns the key a web identity answer issues", () => {
     expect(
       awsKeyResponseRules(CHECK).includes(
-        "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity|WithSAML)?Response[\\s>]",
+        "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity)?Response[\\s>]",
       ),
     ).toBe(true);
   });

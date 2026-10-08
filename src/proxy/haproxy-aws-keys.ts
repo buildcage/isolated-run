@@ -4,9 +4,10 @@
  * data into another account's CloudTrail through any API.
  *
  * The keys come from two places: the one the step started with, taken as
- * given, and, when role accounts are named, the ones an STS AssumeRole answer
- * hands back for a role in one of them, read off the response and added to the
- * map at runtime. A key is matched as a whole string and never decoded.
+ * given, and, when role accounts are named, the ones an STS AssumeRole or
+ * AssumeRoleWithWebIdentity answer hands back for a role in one of them,
+ * read off the response and added to the map at runtime. A key is matched as
+ * a whole string and never decoded.
  */
 
 import type { InspectStageExtension } from "#core/lib/acl/haproxy-inspect-stage.ts";
@@ -81,6 +82,8 @@ const formName = (name: string) =>
     .join("");
 export const FORM_CREDENTIAL = formName("awsaccesskeyid");
 const FORM_ROLE_ARN = formName("rolearn");
+const FORM_ACTION = formName("action");
+const ROLE_ARN = "^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$";
 
 /** The check as the inspect stage takes it. */
 export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
@@ -157,7 +160,12 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    acl aws_git_bare var(txn.aws_git_bare) -m bool",
     "    http-request set-var(txn.aws) str(unsigned) if aws_host !aws_auth !aws_query !aws_body aws_resource_host !aws_form or aws_git_bare !aws_query",
     "    http-request set-var(txn.aws) str(no-credential) if aws_host !aws_auth !aws_query !aws_body !aws_resource_host !aws_git_bare or aws_host !aws_auth !aws_query !aws_body aws_form",
-    ...(check.accountFile ? federationRules(check.accountFile) : []),
+    ...(check.accountFile
+      ? [
+          `    acl aws_sts_host var(txn.host) -m reg ${STS_HOST}`,
+          ...federationRules(check.accountFile),
+        ]
+      : []),
     "    # Where a credential could be out of sight: a query url_dec cannot decode",
     "    # (%00 or a broken escape), or a form body that is compressed, sent",
     "    # chunked, larger than the buffer, or holds a NUL, where matching stops.",
@@ -202,40 +210,37 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
 }
 
 /**
- * AssumeRoleWithWebIdentity and AssumeRoleWithSAML take no signature: the
- * account of the role in RoleArn decides instead. RoleArn is read from the
- * query or the form body alone, and must be named once.
+ * AssumeRoleWithWebIdentity takes no signature: the account of the role in
+ * RoleArn decides instead. Only a form body naming Action and RoleArn once
+ * each, with neither in the query, is judged.
  */
 function federationRules(accountFile: string): string[] {
   return [
-    `    acl aws_sts_host var(txn.host) -m reg ${STS_HOST}`,
-    "    acl aws_fed_query query,url_dec -m reg (^|&)Action=AssumeRoleWith(WebIdentity|SAML)(&|$)",
-    "    acl aws_fed_body req.body,url_dec -m reg (^|&)Action=AssumeRoleWith(WebIdentity|SAML)(&|$)",
-    "    acl aws_role_query query,url_dec -m reg -i (^|&)rolearn=",
-    "    acl aws_role_query_many query,url_dec -m reg -i (?s)(^|&)rolearn=.*&rolearn=",
-    `    acl aws_role_body req.body -m reg -i (^|&)${FORM_ROLE_ARN}=`,
+    `    acl aws_fed_action req.body -m reg -i (^|&)${FORM_ACTION}=AssumeRoleWithWebIdentity(&|$)`,
+    `    acl aws_fed_action_many req.body -m reg -i (?s)(^|&)${FORM_ACTION}=.*&${FORM_ACTION}=`,
     `    acl aws_role_body_many req.body -m reg -i (?s)(^|&)${FORM_ROLE_ARN}=.*&${FORM_ROLE_ARN}=`,
-    "    http-request set-var(txn.aws_fed) bool(true) if aws_sts_host !aws_auth !aws_query !aws_body aws_fed_query or aws_sts_host !aws_auth !aws_query !aws_body aws_form_post aws_fed_body",
+    "    acl aws_fed_in_query query,url_dec -m reg -i (^|&)(action|rolearn)=",
+    "    http-request set-var(txn.aws_fed) bool(true) if aws_sts_host aws_form_post !aws_auth !aws_query !aws_body aws_fed_action !aws_fed_action_many",
     "    acl aws_fed var(txn.aws_fed) -m bool",
-    `    http-request set-var(txn.aws_role_account) 'url_param(RoleArn),url_dec,regsub("^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$","\\1")' if aws_fed aws_role_query !aws_role_body`,
-    `    http-request set-var(txn.aws_role_account) 'req.body_param(RoleArn),url_dec,regsub("^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$","\\1")' if aws_fed aws_form_post aws_role_body !aws_role_query`,
-    "    http-request set-var(txn.aws) str(role-not-allowed) if aws_fed",
-    `    http-request set-var(txn.aws) str(allowed) if aws_fed { var(txn.aws_role_account) -m str -f ${accountFile} }`,
-    "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_fed aws_role_query_many or aws_fed aws_role_body_many or aws_fed aws_role_query aws_role_body",
+    `    http-request set-var(txn.aws_role_account) 'req.body_param(RoleArn),url_dec,regsub("${ROLE_ARN}","\\1")' if aws_fed`,
+    "    acl aws_role_account var(txn.aws_role_account) -m reg ^[0-9]{12}$",
+    "    http-request set-var(txn.aws) str(role-not-allowed) if aws_fed aws_role_account",
+    `    http-request set-var(txn.aws) str(allowed) if aws_fed aws_role_account { var(txn.aws_role_account) -m str -f ${accountFile} }`,
+    "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_fed aws_role_body_many or aws_fed aws_fed_in_query",
   ];
 }
 
 /**
- * Response rules: learn the key an AssumeRole answer issues, only when the
- * role's account is allowed. The role ARN is AWS's own, not the caller's.
- * A body larger than the buffer is read only in part, so a key past it is
- * not learned and its requests are refused.
+ * Response rules: learn the key an AssumeRole or AssumeRoleWithWebIdentity
+ * answer issues, only when the role's account is allowed. The role ARN is
+ * AWS's own, not the caller's. A body larger than the buffer is read only in
+ * part, so a key past it is not learned and its requests are refused.
  */
 export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
   if (!check.accountFile) return [];
   return [
     "    acl aws_sts var(txn.aws_sts) -m bool",
-    "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity|WithSAML)?Response[\\s>]",
+    "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity)?Response[\\s>]",
     "    acl aws_many_keys res.body -m reg (?s)<AccessKeyId>.*<AccessKeyId>",
     "    acl aws_many_arns res.body -m reg (?s)<Arn>.*<Arn>",
     "    http-response wait-for-body time 10s if aws_sts { status 200 }",
