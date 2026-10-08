@@ -46,6 +46,13 @@ export const AWS_RESOURCE_HOST =
 // regard to case, so a spelling the extraction below does not read is still
 // counted as a credential and left unmatched rather than read as none.
 const QUERY_CREDENTIAL = "(x-amz-credential|awsaccesskeyid)";
+// SigV2's name as a form body may spell it, any letter percent-encoded.
+export const FORM_CREDENTIAL = "awsaccesskeyid"
+  .split("")
+  .map(
+    (c) => `(${c}|%${c.charCodeAt(0).toString(16)}|%${c.toUpperCase().charCodeAt(0).toString(16)})`,
+  )
+  .join("");
 
 /** The check as the inspect stage takes it. */
 export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
@@ -76,16 +83,18 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    # Decoded first: a name spelled as X-Amz-Cr%65dential still counts.",
     `    acl aws_query query,url_dec -m reg -i (^|&)${QUERY_CREDENTIAL}=`,
     `    acl aws_query_many query,url_dec -m reg -i (^|&)${QUERY_CREDENTIAL}=.*&${QUERY_CREDENTIAL}=`,
-    "    # A header neither pattern matches comes out unchanged, and so never",
-    "    # equals a key in the map.",
     "    # SigV2 also takes its parameters from a form body, and a key there is",
     "    # judged alongside one in the header or the query. Only as much as fits",
-    "    # in the buffer is read.",
-    "    http-request wait-for-body time 10s if aws_host METH_POST { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded }",
-    "    http-request set-var(txn.aws_body) bool(true) if aws_host METH_POST { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded } { req.body,url_dec -m reg -i (^|&)awsaccesskeyid= }",
+    "    # in the buffer is read. Matched undecoded, since a value carries & and =",
+    "    # encoded, but each letter of the name may be.",
+    "    acl aws_urlencoded req.hdr(content-type) -m beg -i application/x-www-form-urlencoded",
+    "    http-request wait-for-body time 10s if aws_host METH_POST aws_urlencoded",
+    `    http-request set-var(txn.aws_body) bool(true) if aws_host METH_POST aws_urlencoded { req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`,
     "    acl aws_body var(txn.aws_body) -m bool",
-    "    acl aws_body_many req.body,url_dec -m reg -i (^|&)awsaccesskeyid=.*&awsaccesskeyid=",
+    `    acl aws_body_many req.body -m reg -i (?s)(^|&)${FORM_CREDENTIAL}=.*&${FORM_CREDENTIAL}=`,
     "    http-request set-var(txn.aws_body_key) req.body_param(AWSAccessKeyId) if aws_body",
+    "    # A header neither pattern matches comes out unchanged, and so never",
+    "    # equals a key in the map.",
     `    http-request set-var(txn.aws_key) 'req.fhdr(authorization),regsub("^AWS4-[A-Z0-9-]+ +Credential=([A-Za-z0-9]+)/.*$","\\1",i),regsub("^AWS ([A-Za-z0-9]+):.*$","\\1",i)' if aws_host aws_auth !aws_query`,
     `    http-request set-var(txn.aws_key) 'url_param(X-Amz-Credential),url_dec,regsub("^([A-Za-z0-9]+)/.*$","\\1")' if aws_host aws_query !aws_auth { url_param(X-Amz-Credential) -m found }`,
     "    http-request set-var(txn.aws_key) url_param(AWSAccessKeyId) if aws_host aws_query !aws_auth { url_param(AWSAccessKeyId) -m found }",

@@ -64,6 +64,8 @@ check_status "the start key in both the header and the body" \
   "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)" $CF)" "200"
 check_status "the start key in the header, a key of the build's own in the body" \
   "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "$(sigv2 ${AKIA}TESTATTACKER0001)" $CF)" "403"
+check_status "the start key in the header, a SigV2 URL inside a body value" \
+  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "Action=Publish&Message=https%3A%2F%2Fb.s3.amazonaws.com%2Fk%3FAWSAccessKeyId%3D${AKIA}TESTATTACKER0001%26Expires%3D1" $CF)" "200"
 check_status "the key repeated in the body" \
   "$($C -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)&AWSAccessKeyId=${AKIA}TESTSTARTKEY0001" $CF)" "403"
 

@@ -3,6 +3,7 @@ import { describe, it, expect, reportResults } from "#core/lib/test/test-shim.ts
 import {
   AWS_API_HOST,
   AWS_RESOURCE_HOST,
+  FORM_CREDENTIAL,
   awsKeyRequestRules,
   awsKeyResponseRules,
   awsKeyExtension,
@@ -123,6 +124,31 @@ describe("hosts that name the resource", () => {
   });
 });
 
+describe("the SigV2 credential in a form body", () => {
+  const credential = new RegExp(`(^|&)${FORM_CREDENTIAL}=`, "i");
+
+  it("counts the name in any case and with any letter percent-encoded", () => {
+    for (const body of [
+      "AWSAccessKeyId=K&Action=X",
+      "Action=X&AWSAccessKeyId=K",
+      "Action=X&awsaccesskeyid=K",
+      "Action=X&AWSAccessK%65yId=K",
+      "Action=X&%41%57%53AccessKeyId=K",
+    ]) {
+      expect(credential.test(body)).toBe(true);
+    }
+  });
+
+  it("does not count the name inside a value, whose & and = are encoded", () => {
+    for (const body of [
+      "Action=Publish&Message=https%3A%2F%2Fb.s3.amazonaws.com%2Fk%3FExpires%3D1%26AWSAccessKeyId%3DK",
+      "Action=X&MyAWSAccessKeyId=K",
+    ]) {
+      expect(credential.test(body)).toBe(false);
+    }
+  });
+});
+
 describe("awsKeyExtension", () => {
   it("hands the stage this check's own rules", () => {
     const extension = awsKeyExtension(CHECK);
@@ -185,16 +211,15 @@ describe("awsKeyRequestRules", () => {
 
   it("reads a SigV2 key from a form body, and checks it as well as any other", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(
-      rules.includes(
-        "wait-for-body time 10s if aws_host METH_POST { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded }",
-      ),
-    ).toBe(true);
-    expect(rules.includes("{ req.body,url_dec -m reg -i (^|&)awsaccesskeyid= }")).toBe(true);
+    expect(rules.includes("wait-for-body time 10s if aws_host METH_POST aws_urlencoded")).toBe(
+      true,
+    );
+    expect(rules.includes(`{ req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`)).toBe(true);
     expect(
       rules.includes("set-var(txn.aws_key) var(txn.aws_body_key) if aws_body !aws_auth !aws_query"),
     ).toBe(true);
     expect(rules.includes("or aws_body aws_body_many")).toBe(true);
+    expect(rules.includes(`(?s)(^|&)${FORM_CREDENTIAL}=.*&${FORM_CREDENTIAL}=`)).toBe(true);
     expect(
       rules.includes(
         "str(key-not-allowed) if aws_body !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(/rules/keys.map) -m found }",

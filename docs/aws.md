@@ -45,8 +45,8 @@ from the `Authorization` header (SigV4, SigV4a or SigV2), from a presigned URL's
 `X-Amz-Credential` or `AWSAccessKeyId` parameter, or from the `AWSAccessKeyId` parameter of a SigV2
 form body, and compares it with the keys it knows as a whole string. It never decodes a key ID or
 verifies a signature: a request that copies one of your key IDs without the secret is refused by AWS
-and logged in your own account. Of a form body, it reads only what fits in its 16 KB buffer after the
-headers.
+and logged in your own account. Of a form body, it reads only what fits in its buffer, a little under 16 KB
+together with the headers, and a key past that point is not seen.
 
 The proxy knows two kinds of key:
 
@@ -77,7 +77,7 @@ token, counts as unsigned here: only AWS's own schemes are an AWS credential.
 | Unsigned, to a host that names its resource (below)                                                              | allowed                    |
 | Unsigned, to any other AWS API host, whatever the method                                                         | `aws-no-credential`        |
 | More than one credential: two `Authorization` headers, a header and a query credential, or a credential repeated | `aws-ambiguous-credential` |
-| A form-body credential as well as a header or query one: each key is checked, and either being unknown refuses   | `aws-key-not-allowed`      |
+| A key in a form body and another in the header or query, either of them unknown                                  | `aws-key-not-allowed`      |
 
 These hosts name the resource a request reaches, in the host name or, for S3's path style, in the
 path. The URL rules can pin the account there, so an unsigned request to them is left to the URL
