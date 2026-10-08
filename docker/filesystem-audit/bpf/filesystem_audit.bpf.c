@@ -460,9 +460,8 @@ static __always_inline void file_path(struct event *e, struct file *file)
 #define MNT_INTERNAL 0x4000
 
 // overlayfs reaches its layers through private clones of their mounts, which
-// belong to no namespace the step can see or open a file in. An access through
-// such a mount is the overlay working on a layer for the step's own access
-// above it. Kernel-internal mounts (pipes, memfd) are the step's and count.
+// belong to no namespace the step can open a file in, so an access through one
+// is the overlay's, not the step's. Kernel-internal mounts (pipes, memfd) count.
 static __always_inline int on_layer(struct file *file)
 {
 	struct vfsmount *vfs = file->f_path.mnt;
