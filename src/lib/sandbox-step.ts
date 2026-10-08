@@ -54,6 +54,7 @@ import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
+import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 
@@ -62,6 +63,13 @@ import { checkPasswordlessSudo } from "./sudo-preflight.ts";
  * ref. Never verified against; provenance hard-fails on the empty ref instead.
  */
 const DEFAULT_ACTION_REF = "v2";
+
+export const WRITE_THROUGH_ALL_WARNING =
+  "write_through: / is for trusted code only. Against a compromised command it gives up the " +
+  "outbound restriction as well as the read-only one: all of /run is reachable again, the Docker " +
+  "socket included, $XDG_RUNTIME_DIR is no longer masked, and the commands this action runs on " +
+  'the host after the command are no longer kept out of writable paths. See "The / opt-out" in ' +
+  "docs/reference.md.";
 
 /**
  * The steps this function sequences. Declared rather than imported straight
@@ -308,7 +316,9 @@ export async function runSandboxStep(
   // rather than only after the privileged preflight checks below have already
   // run (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
   // probe). resolveFilesystemPlan re-checks the real paths on the host.
-  validateFilesystemInputs(filesystemMode, resolveWriteThroughInput(writeThroughInput, env));
+  const writeThrough = resolveWriteThroughInput(writeThroughInput, env);
+  validateFilesystemInputs(filesystemMode, writeThrough);
+  if (writeThrough.includes(WRITE_THROUGH_ALL)) annotation.warning(WRITE_THROUGH_ALL_WARNING);
 
   // Before the preflights, which already run sudo.
   pinHostCommands(

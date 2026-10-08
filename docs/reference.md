@@ -949,6 +949,25 @@ anything under `persistent` and is rejected under `ephemeral`, where it would pe
 the one thing that mode exists to prevent. The sentinel is the literal `/` only: an entry that merely _resolves_ to `/` (a miscounted
 `../`, say) is an error rather than a silent full opt-out.
 
+> [!WARNING]
+> Use `write_through: /` only for code you trust. Against a compromised command it removes more
+> than the read-only restriction:
+>
+> - All of `/run` is reachable again, which leaves the outbound restriction nearly pointless. On a
+>   GitHub-hosted runner the runner user can use the Docker socket there to start a container on
+>   the host network, past the proxy.
+> - `docker`, `sudo` and, under `inspect`, `keytool` are taken from the first match on `$PATH` even
+>   where the command can write, so the host may later run a copy the command replaced. `docker`
+>   also looks for its `docker-credential-*` helpers on the whole `$PATH`, where the command can
+>   plant one.
+> - `$XDG_RUNTIME_DIR` is no longer masked, so a `systemd --user` bus there can start a unit outside
+>   every namespace.
+> - Symlinks are refused only in the four always-writable paths and other `write_through:` entries,
+>   though the command could replace one anywhere.
+>
+> What still holds is the read-only paths named at the start of this section, the `/proc` masks and
+> the command's own network namespace. The step warns about all this when `write_through: /` is set.
+
 ### The former input names
 
 `write_through:` was called `writable:` before it covered both filesystem modes, and `allow_write:`

@@ -72431,7 +72431,9 @@ async function runSandboxStep(env, overrides = {}) {
 		proxyEngine,
 		proxyMode
 	}, env, annotation.warning);
-	assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, resolveWriteThroughInput(writeThroughInput, env)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
+	assertNonRootUid(process.getuid());
+	let writeThrough = resolveWriteThroughInput(writeThroughInput, env);
+	validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write_through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run is reachable again, the Docker socket included, $XDG_RUNTIME_DIR is no longer masked, and the commands this action runs on the host after the command are no longer kept out of writable paths. See \"The / opt-out\" in docs/reference.md."), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
 	let { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
 	let localOverride = await readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({

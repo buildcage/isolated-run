@@ -376,6 +376,13 @@ Under `write_through: /`, only a symlink in one of the four always-writable path
 `write_through:` entry is refused, though the command could replace one anywhere.
 
 > [!WARNING]
+> `write_through: /` is for trusted code only. Against a compromised command it gives up the outbound
+> restriction as well as the read-only one: all of `/run` is reachable again, the Docker socket
+> included, `$XDG_RUNTIME_DIR` is no longer masked, and the commands this action runs on the host
+> after the command are no longer kept out of writable paths. See
+> [The `/` opt-out](./docs/reference.md#the--opt-out).
+
+> [!WARNING]
 > `filesystem_mode: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
 > change in a future release without following semver, and it has seen less real-world use than the
 > rest of this action. `persistent` (the default) is unaffected and stays stable. Try `ephemeral` in
