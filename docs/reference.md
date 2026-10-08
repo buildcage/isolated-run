@@ -659,7 +659,7 @@ The check refuses after the URL rules have allowed a request, with one of these 
 
 | Reason                     | What happened                                                                                                                                                                          |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `aws-key-not-allowed`      | the request was signed with a key the proxy does not know, an EKS or CodeCommit token carried one, or a static CodeCommit Git credential names another account                         |
+| `aws-key-not-allowed`      | the request was signed with a key the proxy does not know, a CodeCommit login carried one, or a static CodeCommit Git credential names another account                                 |
 | `aws-no-credential`        | the request carried no AWS credential, to a host that names no resource                                                                                                                |
 | `aws-ambiguous-credential` | the request carried more than one credential: two `Authorization` headers, a header and a query credential, or a repeated one                                                          |
 | `aws-unreadable`           | the request could hide a credential where the proxy cannot read: a query that does not decode, or a form body that is compressed, chunked, larger than about 4 MiB or holds a NUL byte |

@@ -6,10 +6,12 @@
 > the action behaves as before. Try it in a non-critical workflow first, and pin this action to a
 > commit SHA rather than a version tag if you adopt it.
 
-A step that deploys to AWS needs its URL rules to allow AWS API hosts such as
-`cloudformation.us-east-1.amazonaws.com` or `sts.amazonaws.com`. Those hosts serve every AWS account,
-so a rule that allows them lets the step reach any account, not only yours. `allowed_aws_accounts`
-narrows that down to the accounts you name.
+Name the AWS resources a step uses in its URL rules wherever the host or path names them: a bucket,
+a registry, a cluster. Those rules already decide whose resource a request reaches. Most AWS APIs,
+though, are hosts such as `cloudformation.us-east-1.amazonaws.com` or `sts.amazonaws.com` that serve
+every AWS account, and the account a request reaches is decided by the key that signs it. A rule
+that allows them lets the step reach any account, not only yours. `allowed_aws_accounts` covers
+those hosts: it checks that the key belongs to one of the accounts you name.
 
 ## Why URL rules are not enough
 
@@ -47,10 +49,10 @@ form body, and compares it with the keys it knows as a whole string. It never de
 verifies a signature: a request that copies one of your key IDs without the secret is refused by AWS
 and logged in your own account.
 
-Two tokens carry a key too, and are checked the same way: the `Bearer` token `kubectl` sends to an
-EKS cluster, a presigned STS URL whose `X-Amz-Credential` the proxy reads, and the `Basic` user name
-CodeCommit's Git credential helper sends, which is the key ID. A static CodeCommit Git credential
-names its account instead (`<user>-at-<account>`), and passes when that account is an allowed one.
+A CodeCommit `Basic` login carries a key too: the user name CodeCommit's Git credential helper
+sends is the key ID, checked the same way. A static CodeCommit Git credential names its account
+instead (`<user>-at-<account>`), and passes when that account is an allowed one. Either way the
+repository is looked up in that account.
 
 A form body is the body of a `POST` to a host that names no resource (below), when its Content-Type
 is `application/x-www-form-urlencoded` or, whatever the Content-Type says, the body starts as a form
@@ -109,6 +111,7 @@ left to the URL rules:
 | Managed Grafana        | `g-<id>.grafana-workspace.<region>.amazonaws.com`                                                                                                            |
 | Amazon MQ              | `b-<id>.mq.<region>.amazonaws.com`                                                                                                                           |
 | OpenSearch Service     | `search-<domain>-<id>.<region>.es.amazonaws.com`, `vpc-<domain>-<id>.<region>.es.amazonaws.com`                                                              |
+| EKS cluster            | `<id>.gr7.<region>.eks.amazonaws.com`, `<id>.<region>.api.aws`                                                                                               |
 | EKS OIDC issuer        | `oidc.eks.<region>.amazonaws.com/id/<id>`, `oidc-eks.<region>.api.aws/id/<id>`                                                                               |
 | Elastic Load Balancing | `<name>-<id>.elb.<region>.amazonaws.com`, `<name>-<id>.<region>.elb.amazonaws.com`                                                                           |
 | EC2                    | `ec2-<ip>.<region>.compute.amazonaws.com`, `ec2-<ip>.compute-1.amazonaws.com`                                                                                |

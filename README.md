@@ -209,8 +209,10 @@ allowed_ip_rules: |
   10.0.0.0/8:443
 ```
 
-A step that deploys to AWS can add `allowed_aws_accounts` (**experimental**), so that requests to AWS API hosts are
-signed only with keys from those accounts. See [AWS access key check](./docs/aws.md).
+A step that deploys to AWS names the buckets, registries and other resources it uses in its URL
+rules. Most AWS APIs name no resource in the URL, though, and reach whichever account signs the
+request; for those, `allowed_aws_accounts` (**experimental**) lets only keys from the accounts you
+name sign. See [AWS access key check](./docs/aws.md).
 
 ### Rules for the `universal` engine
 

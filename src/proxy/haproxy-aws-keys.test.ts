@@ -109,6 +109,9 @@ describe("hosts that name the resource", () => {
       "oidc-eks.us-east-1.api.aws",
       "oidc-eks.cn-north-1.api.amazonwebservices.com.cn",
       "oidc-eks.eusc-de-east-1.api.amazonwebservices.eu",
+      "abcdef0123456789abcdef0123456789.gr7.us-east-1.eks.amazonaws.com",
+      "abcdef0123456789abcdef0123456789.us-east-1.eks.amazonaws.com",
+      "abcdef0123456789abcdef0123456789.us-east-1.api.aws",
     ]) {
       expect(resourceHost.test(host)).toBe(true);
     }
@@ -141,6 +144,8 @@ describe("hosts that name the resource", () => {
       "x.grafana-workspace.us-east-1.amazonaws.com",
       "x.mq.us-east-1.amazonaws.com",
       "x.us-east-1.es.amazonaws.com",
+      "abcdef.us-east-1.eks.amazonaws.com",
+      "eks.us-east-1.api.aws",
     ]) {
       expect(resourceHost.test(host)).toBe(false);
     }
@@ -291,19 +296,6 @@ describe("awsKeyRequestRules", () => {
     ).toBe(true);
   });
 
-  it("reads the key an EKS token was presigned with", () => {
-    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(
-      rules.includes("acl aws_auth req.fhdr(authorization) -m reg -i ^bearer\\s+k8s-aws-v1\\."),
-    ).toBe(true);
-    expect(
-      rules.includes(
-        `set-var(txn.aws_key) 'req.fhdr(authorization),regsub("^bearer\\s+k8s-aws-v1\\.","",i),ub64dec,url_dec,regsub(`,
-      ),
-    ).toBe(true);
-    expect(rules.includes("or aws_host aws_eks_token aws_eks_many")).toBe(true);
-  });
-
   it("reads CodeCommit's Basic user name as a key, or as <user>-at-<account>", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(rules.includes("acl aws_auth var(txn.aws_git) -m bool")).toBe(true);
@@ -312,18 +304,26 @@ describe("awsKeyRequestRules", () => {
     ).toBe(true);
     expect(
       rules.includes(
-        `str(allowed) if { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f /rules/accounts.lst }`,
+        `str(allowed) if { var(txn.aws_git_user) -m reg -- -at-[0-9]{12}$ } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f /rules/accounts.lst }`,
       ),
     ).toBe(true);
     const codecommit = new RegExp(CODECOMMIT_HOST);
     expect(codecommit.test("git-codecommit.us-east-1.amazonaws.com")).toBe(true);
     expect(codecommit.test("git-codecommit-fips.us-east-1.amazonaws.com")).toBe(true);
+    expect(
+      codecommit.test(
+        "vpce-0123456789abcdef0-abcdefgh.git-codecommit.us-east-1.vpce.amazonaws.com",
+      ),
+    ).toBe(true);
     expect(codecommit.test("codecommit.us-east-1.amazonaws.com")).toBe(false);
   });
 
-  it("counts only AWS's own schemes as a credential", () => {
-    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(rules.includes("acl aws_auth req.fhdr(authorization) -m reg -i ^aws")).toBe(true);
+  it("counts AWS's own schemes and a CodeCommit login as a credential, and no other token", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict");
+    expect(rules.filter((l) => l.startsWith("    acl aws_auth "))).toStrictEqual([
+      "    acl aws_auth req.fhdr(authorization) -m reg -i ^aws",
+      "    acl aws_auth var(txn.aws_git) -m bool",
+    ]);
   });
 
   it("asks STS for a body it can read", () => {

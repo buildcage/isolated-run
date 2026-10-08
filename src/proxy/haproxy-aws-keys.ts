@@ -44,8 +44,8 @@ export const STS_HOST =
 // style, an EKS OIDC issuer) the path, so the URL rules can pin it and an
 // unsigned request is left to them: S3 in every form, ECR registries,
 // CodeArtifact repositories, API Gateway, AppSync, Managed Grafana workspaces,
-// Amazon MQ brokers, OpenSearch domains, EKS OIDC issuers, load balancers, EC2
-// public names, and the AWS CLI's download host. Every other API host names
+// Amazon MQ brokers, OpenSearch domains, EKS clusters and OIDC issuers, load
+// balancers, EC2 public names, and the AWS CLI's download host. Every other API host names
 // only a service and a region.
 export const S3_HOST = "(^|\\.)s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.amazonaws\\.(com|com\\.cn|eu)$";
 export const AWS_RESOURCE_HOST =
@@ -54,15 +54,16 @@ export const AWS_RESOURCE_HOST =
   "|^g-[a-z0-9]+\\.grafana-workspace\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|^b-[a-z0-9-]+\\.mq\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|^(search|vpc)-[a-z0-9-]+\\.[a-z0-9-]+\\.es\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  "|^[0-9a-f]{32}\\.([a-z0-9]+\\.)?[a-z0-9-]+\\.eks\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  "|^[0-9a-f]{32}\\.[a-z0-9-]+\\.(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)$" +
   "|^oidc\\.eks\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|^oidc-eks\\.[a-z0-9-]+\\.(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)$" +
   "|\\.elb(\\.[a-z0-9-]+)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|\\.compute(-1)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|^awscli\\.amazonaws\\.com$";
 export const CODECOMMIT_HOST =
-  "^git-codecommit(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$";
-// An EKS token decoded back to the presigned URL it is.
-const EKS_TOKEN_URL = 'regsub("^bearer\\s+k8s-aws-v1\\.","",i),ub64dec,url_dec';
+  "^git-codecommit(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  "|^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.git-codecommit(-fips)?\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$";
 // Both query spellings of a credential: SigV4's and SigV2's. Matched without
 // regard to case, so a spelling the extraction below does not read is still
 // counted as a credential and left unmatched rather than read as none.
@@ -96,18 +97,16 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    acl aws_host var(txn.aws_host) -m bool",
     `    acl aws_sts_host var(txn.host) -m reg ${STS_HOST}`,
     `    acl aws_resource_host var(txn.host) -m reg ${AWS_RESOURCE_HOST}`,
-    "    # Only AWS's own schemes are a credential here: CodeArtifact and ECR take",
-    "    # Bearer and Basic tokens, which no AWS account signs with. Any case, so a",
-    "    # spelling AWS might accept is never let through unjudged.",
+    "    # AWS's own schemes are a credential here, and so is a CodeCommit Basic",
+    "    # login (below). Other Bearer and Basic tokens, such as CodeArtifact's",
+    "    # and ECR's, are signed by no AWS account. Any case, so a spelling AWS",
+    "    # might accept is never let through unjudged.",
     "    acl aws_auth req.fhdr(authorization) -m reg -i ^aws",
     "    acl aws_auth_many req.fhdr_cnt(authorization) gt 1",
     "    acl aws_auth_many req.fhdr(authorization) -m reg -i credential=.*credential=",
-    "    # Two tokens carry a key all the same. EKS's is a presigned STS URL.",
-    "    acl aws_eks_token req.fhdr(authorization) -m reg -i ^bearer\\s+k8s-aws-v1\\.",
-    "    acl aws_auth req.fhdr(authorization) -m reg -i ^bearer\\s+k8s-aws-v1\\.",
-    `    acl aws_eks_many 'req.fhdr(authorization),${EKS_TOKEN_URL}' -m reg -i (?s)x-amz-credential=.*x-amz-credential=`,
     "    # CodeCommit's Git credential helper sends the key ID as the Basic user",
     "    # name, and a static Git credential names its account: <user>-at-<id>.",
+    "    # Either way the repository is looked up in that account.",
     `    http-request set-var(txn.aws_git) bool(true) if { var(txn.host) -m reg ${CODECOMMIT_HOST} } { req.fhdr(authorization) -m reg -i ^basic\\s }`,
     "    acl aws_auth var(txn.aws_git) -m bool",
     `    http-request set-var(txn.aws_git_user) 'req.fhdr(authorization),regsub("^basic\\s+","",i),b64dec,regsub(":.*$","")' if { var(txn.aws_git) -m bool }`,
@@ -136,9 +135,8 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     `    http-request set-var(txn.aws_key) 'url_param(X-Amz-Credential),url_dec,regsub("^([A-Za-z0-9]+)/.*$","\\1")' if aws_host aws_query !aws_auth { url_param(X-Amz-Credential) -m found }`,
     "    http-request set-var(txn.aws_key) url_param(AWSAccessKeyId) if aws_host aws_query !aws_auth { url_param(AWSAccessKeyId) -m found }",
     "    http-request set-var(txn.aws_key) var(txn.aws_body_key) if aws_body !aws_auth !aws_query",
-    `    http-request set-var(txn.aws_key) 'req.fhdr(authorization),${EKS_TOKEN_URL},regsub("^.*[?&]x-amz-credential=([A-Za-z0-9]+)/.*$","\\1",i)' if aws_host aws_eks_token !aws_query`,
     '    http-request set-var(txn.aws_key) \'var(txn.aws_git_user),regsub("%.*$","")\' if { var(txn.aws_git) -m bool } !aws_query',
-    "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_host aws_auth aws_query or aws_host aws_auth aws_auth_many or aws_host aws_query_many or aws_body aws_body_many or aws_host aws_eks_token aws_eks_many",
+    "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_host aws_auth aws_query or aws_host aws_auth aws_auth_many or aws_host aws_query_many or aws_body aws_body_many",
     "    # Unsigned, whatever the method: where the host names no resource, the",
     "    # account it reaches is in the parameters or the body, out of sight.",
     "    # An S3 POST-policy upload carries its credential in a multipart body,",
@@ -157,7 +155,7 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    http-request set-var(txn.aws) str(unreadable) if aws_form_post { req.body_len,sub(txn.aws_body_size) lt 0 } or aws_form_post { req.body,length,sub(txn.aws_body_len) lt 0 }",
     "    # A body key next to another one; a body key alone is aws_key below.",
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_body aws_auth !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found } or aws_body aws_query !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found }`,
-    `    http-request set-var(txn.aws) str(allowed) if { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f ${check.accountFile} } !{ var(txn.aws) -m found }`,
+    `    http-request set-var(txn.aws) str(allowed) if { var(txn.aws_git_user) -m reg -- -at-[0-9]{12}$ } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f ${check.accountFile} } !{ var(txn.aws) -m found }`,
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_host !{ var(txn.aws) -m found } !{ var(txn.aws_key),map(${check.keyMapFile}) -m found }`,
     "    http-request set-var(txn.aws) str(allowed) if aws_host !{ var(txn.aws) -m found }",
   ];
