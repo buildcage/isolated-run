@@ -177,7 +177,12 @@ export function readAwsKeyInputs(
   warn: Notice,
   getInput: GetInput = core.getInput,
 ): AwsKeyInputs {
-  if (getInput("allowed_aws_accounts").trim()) {
+  // A value naming no account, a comment say, left the old check off too.
+  let replacedNamesAccounts = true;
+  try {
+    replacedNamesAccounts = parseAwsAccounts(getInput("allowed_aws_accounts")).length > 0;
+  } catch {}
+  if (replacedNamesAccounts) {
     throw new SandboxError(
       "allowed_aws_accounts has been replaced. Set aws_key_check: true to accept only the step's " +
         "own AWS_ACCESS_KEY_ID, and list in allowed_aws_role_accounts the accounts whose roles the " +
@@ -194,13 +199,11 @@ export function readAwsKeyInputs(
       "INVALID_AWS_ACCOUNTS",
     );
   }
+  // An explicit false wins, so a step can opt out of accounts a shared
+  // config_file names.
   if (!readBooleanInput("aws_key_check", roleAccounts.length > 0, getInput)) {
     if (roleAccounts.length > 0) {
-      throw new SandboxError(
-        "allowed_aws_role_accounts needs the AWS access key check, which aws_key_check: false " +
-          "turns off. Remove one of them.",
-        "AWS_KEY_CHECK_CONFLICT",
-      );
+      warn("aws_key_check is false, so allowed_aws_role_accounts is ignored for this run.");
     }
     return AWS_KEY_CHECK_OFF;
   }

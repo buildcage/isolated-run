@@ -23341,17 +23341,18 @@ const AWS_KEY_CHECK_OFF = {
 	roleAccounts: []
 };
 function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$7 = getInput) {
-	if (getInput$7("allowed_aws_accounts").trim()) throw new SandboxError("allowed_aws_accounts has been replaced. Set aws_key_check: true to accept only the step's own AWS_ACCESS_KEY_ID, and list in allowed_aws_role_accounts the accounts whose roles the step may assume.", "AWS_ACCOUNTS_REMOVED");
+	let replacedNamesAccounts = !0;
+	try {
+		replacedNamesAccounts = parseAwsAccounts(getInput$7("allowed_aws_accounts")).length > 0;
+	} catch {}
+	if (replacedNamesAccounts) throw new SandboxError("allowed_aws_accounts has been replaced. Set aws_key_check: true to accept only the step's own AWS_ACCESS_KEY_ID, and list in allowed_aws_role_accounts the accounts whose roles the step may assume.", "AWS_ACCOUNTS_REMOVED");
 	let roleAccounts;
 	try {
 		roleAccounts = parseAwsAccounts(getInput$7("allowed_aws_role_accounts"));
 	} catch (e) {
 		throw new SandboxError(`allowed_aws_role_accounts: ${e.message}. Each entry must be a 12-digit AWS account ID.`, "INVALID_AWS_ACCOUNTS");
 	}
-	if (!readBooleanInput("aws_key_check", roleAccounts.length > 0, getInput$7)) {
-		if (roleAccounts.length > 0) throw new SandboxError("allowed_aws_role_accounts needs the AWS access key check, which aws_key_check: false turns off. Remove one of them.", "AWS_KEY_CHECK_CONFLICT");
-		return AWS_KEY_CHECK_OFF;
-	}
+	if (!readBooleanInput("aws_key_check", roleAccounts.length > 0, getInput$7)) return roleAccounts.length > 0 && warn("aws_key_check is false, so allowed_aws_role_accounts is ignored for this run."), AWS_KEY_CHECK_OFF;
 	if (proxyEngine !== "inspect") {
 		let reason = `The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers.`;
 		if (proxyMode === "audit") return warn(`${reason} It is ignored for this run.`), AWS_KEY_CHECK_OFF;

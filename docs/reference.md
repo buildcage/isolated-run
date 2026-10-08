@@ -43,8 +43,8 @@ details.
 | `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                                                                                                                   |
 
 `fail_on_blocked`, `fail_on_ca_residue`, `upload_traffic_artifact` and `aws_key_check` take `true`
-or `false`, and `traffic_artifact_retention_days` a whole number above zero. Any other value fails the step before
-the sandbox is set up.
+or `false`, and `traffic_artifact_retention_days` a whole number above zero. Any other value fails
+the step before the sandbox is set up.
 
 ### Rule inputs
 
@@ -651,7 +651,8 @@ API host must be signed with the step's own `AWS_ACCESS_KEY_ID`, taken as given 
 account. `allowed_aws_role_accounts` takes 12-digit AWS account IDs, separated by commas, whitespace
 or newlines, with `#` comments as in the rule inputs, and turns the check on as well: a key an STS
 `AssumeRole` issues for a role in one of these accounts passes too, and with no account named no
-such key does. `aws_key_check: false` with accounts named fails the step. Set in the workflow,
+such key does. `aws_key_check: false` turns the check off even with accounts named, with a warning,
+so a step can opt out of accounts a config file names. Set in the workflow,
 `allowed_aws_role_accounts` replaces a config file's value. An unsigned request is left to the URL
 rules where the host names the resource it is for, such as an S3 bucket or an ECR registry, and
 refused everywhere else. If `AWS_ACCESS_KEY_ID` is unset or is not an access key ID, `restrict`

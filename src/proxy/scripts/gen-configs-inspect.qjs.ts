@@ -29,7 +29,9 @@ runInspectConfigGenerator((write) => {
     return undefined;
   }
   write(AWS_KEY_MAP_FILE, awsKeyMap(keys));
-  if (accounts.length === 0) return awsKeyExtension({ keyMapFile: AWS_KEY_MAP_FILE });
-  write(AWS_ACCOUNT_FILE, awsAccountList(accounts));
-  return awsKeyExtension({ keyMapFile: AWS_KEY_MAP_FILE, accountFile: AWS_ACCOUNT_FILE });
+  if (accounts.length > 0) write(AWS_ACCOUNT_FILE, awsAccountList(accounts));
+  return awsKeyExtension({
+    keyMapFile: AWS_KEY_MAP_FILE,
+    accountFile: accounts.length > 0 ? AWS_ACCOUNT_FILE : undefined,
+  });
 });

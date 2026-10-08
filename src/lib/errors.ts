@@ -46,7 +46,6 @@ import { ActionError } from "#core/lib/errors.ts";
  *   INVALID_AWS_ACCOUNTS              an allowed_aws_role_accounts entry is not a 12-digit account ID
  *   AWS_ACCESS_KEY_MISSING            the AWS access key check is on but the step has no AWS_ACCESS_KEY_ID to start from
  *   AWS_ACCOUNTS_REMOVED              the replaced allowed_aws_accounts input was supplied
- *   AWS_KEY_CHECK_CONFLICT            allowed_aws_role_accounts names accounts while aws_key_check is false
  */
 export type SandboxErrorCode =
   | "MISSING_RUN"
@@ -81,7 +80,6 @@ export type SandboxErrorCode =
   | "SCRATCH_BASE_SYMLINKED"
   | "INVALID_AWS_ACCOUNTS"
   | "AWS_ACCESS_KEY_MISSING"
-  | "AWS_ACCOUNTS_REMOVED"
-  | "AWS_KEY_CHECK_CONFLICT";
+  | "AWS_ACCOUNTS_REMOVED";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}

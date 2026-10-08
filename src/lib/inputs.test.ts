@@ -262,15 +262,25 @@ describe("readAwsKeyInputs", () => {
     ).toStrictEqual({ keys: [KEY], roleAccounts: [] });
   });
 
-  it("refuses role accounts with the check turned off", () => {
-    expect(() =>
+  it("lets an explicit false win over role accounts, warning that they are ignored", () => {
+    const warn = vi.fn();
+    expect(
       readAwsKeyInputs(
         inspect,
         { AWS_ACCESS_KEY_ID: KEY },
-        silent,
+        warn,
         inputs({ aws_key_check: "false", allowed_aws_role_accounts: "111111111111" }),
       ),
-    ).toThrow(expect.objectContaining({ code: "AWS_KEY_CHECK_CONFLICT" }));
+    ).toStrictEqual(OFF);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("allowed_aws_role_accounts is ignored"),
+    );
+  });
+
+  it("lets a replaced allowed_aws_accounts that names no account pass", () => {
+    expect(
+      readAwsKeyInputs(inspect, {}, silent, inputs({ allowed_aws_accounts: "# disabled" })),
+    ).toStrictEqual(OFF);
   });
 
   it("refuses the replaced allowed_aws_accounts from a config file too", () => {
