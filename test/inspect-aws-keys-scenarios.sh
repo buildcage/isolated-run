@@ -112,6 +112,29 @@ check_status "a public read whose query holds a broken escape" "$($C "https://bu
 check_status "a presigned URL with %00 ahead of its credential" \
   "$($C "https://bucket.s3.amazonaws.com/x?a=%00&X-Amz-Credential=${AKIA}TESTATTACKER0001%2Fx")" "403"
 
+echo "=== [an EKS cluster, which the URL rules pin] ==="
+check_status "a kubectl Bearer token to the EKS service API, which names no cluster" \
+  "$($C -H "Authorization: Bearer k8s-aws-v1.token" https://eks.us-east-1.amazonaws.com/clusters)" "403"
+check_status "a kubectl Bearer token to a cluster" \
+  "$($C -H "Authorization: Bearer k8s-aws-v1.token" https://abcdef0123456789abcdef0123456789.gr7.us-east-1.eks.amazonaws.com/api/v1/pods)" "200"
+
+echo "=== [a CodeCommit login, which carries a key or an account] ==="
+CC=https://git-codecommit.us-east-1.amazonaws.com/v1/repos/app/info/refs
+check_status "Git's first CodeCommit request, with no credential" "$($C $CC)" "200"
+check_status "a chunked Git fetch to CodeCommit with the start key" \
+  "$(printf '0014command=fetch0000' | $C -u "${AKIA}TESTSTARTKEY0001:20261008T000000Zab" -H "Transfer-Encoding: chunked" -H "Content-Type: application/x-git-upload-pack-request" --data-binary @- https://git-codecommit.us-east-1.amazonaws.com/v1/repos/app/git-upload-pack)" "200"
+check_status "a CodeCommit credential-helper login with the start key" \
+  "$($C -u "${AKIA}TESTSTARTKEY0001:20261008T000000Zab" $CC)" "200"
+check_status "a CodeCommit credential-helper login with a key of the build's own" \
+  "$($C -u "${AKIA}TESTATTACKER0001:20261008T000000Zab" $CC)" "403"
+check_status "a static CodeCommit Git credential of the allowed account" "$($C -u deploy-at-111111111111:secret $CC)" "200"
+check_status "a static CodeCommit Git credential of another account" "$($C -u deploy-at-222222222222:secret $CC)" "403"
+check_status "a CodeCommit login with the start key and a session token" \
+  "$($C -u "${AKIA}TESTSTARTKEY0001%FQoGZXIvYXdz:20261008T000000Zab" $CC)" "200"
+check_status "a CodeCommit login named only by an allowed account ID" "$($C -u 111111111111:secret $CC)" "403"
+check_status "a static Git credential sent to another AWS API host" \
+  "$($C -u deploy-at-111111111111:secret https://sqs.us-east-1.amazonaws.com/)" "403"
+
 echo "=== [a key AssumeRole issued] ==="
 check_status "unknown until AssumeRole hands it out" \
   "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTLEARNEDKEY01)" $CF)" "403"

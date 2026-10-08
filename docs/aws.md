@@ -6,10 +6,12 @@
 > the action behaves as before. Try it in a non-critical workflow first, and pin this action to a
 > commit SHA rather than a version tag if you adopt it.
 
-A step that deploys to AWS needs its URL rules to allow AWS API hosts such as
-`cloudformation.us-east-1.amazonaws.com` or `sts.amazonaws.com`. Those hosts serve every AWS account,
-so a rule that allows them lets the step reach any account, not only yours. `allowed_aws_accounts`
-narrows that down to the accounts you name.
+Name the AWS resources a step uses in its URL rules wherever the host or path names them: a bucket,
+a registry, a cluster. Those rules already decide whose resource a request reaches. Most AWS APIs,
+though, are hosts such as `cloudformation.us-east-1.amazonaws.com` or `sts.amazonaws.com` that serve
+every AWS account, and the account a request reaches is decided by the key that signs it. A rule
+that allows them lets the step reach any account, not only yours. `allowed_aws_accounts` covers
+those hosts: it checks that the key belongs to one of the accounts you name.
 
 ## Why URL rules are not enough
 
@@ -47,6 +49,11 @@ form body, and compares it with the keys it knows as a whole string. It never de
 verifies a signature: a request that copies one of your key IDs without the secret is refused by AWS
 and logged in your own account.
 
+A CodeCommit `Basic` login carries a key too: the user name CodeCommit's Git credential helper
+sends is the key ID, checked the same way. A static CodeCommit Git credential names its account
+instead (`<user>-at-<account>`), and passes when that account is an allowed one. Either way the
+repository is looked up in that account.
+
 A form body is the body of a `POST` to a host that names no resource (below), when its Content-Type
 is `application/x-www-form-urlencoded` or, whatever the Content-Type says, the body starts as a form
 does (`name=value`). The proxy reads the whole body, up to 4 MiB with the headers, before deciding.
@@ -77,8 +84,10 @@ The URL rules still decide first. A request they refuse stays `not-allowed`, and
 applies to requests they allow.
 
 What happens to a request that carries no AWS signature depends on whether the host names the
-resource it is for. A request with no `Authorization` header, or one with a `Bearer` or `Basic`
-token, counts as unsigned here: only AWS's own schemes are an AWS credential.
+resource it is for. A request with no `Authorization` header, or one with any other `Bearer` or
+`Basic` token, counts as unsigned here. CodeCommit is the exception both ways: a `Basic` login to it
+that carries neither a known key nor an allowed account is `aws-key-not-allowed`, and a request to
+it with no `Authorization` at all, which Git sends first to be told to log in, is let through.
 
 | Request                                                                                                          | Result                     |
 | ---------------------------------------------------------------------------------------------------------------- | -------------------------- |
@@ -86,6 +95,9 @@ token, counts as unsigned here: only AWS's own schemes are an AWS credential.
 | Signed with any other key                                                                                        | `aws-key-not-allowed`      |
 | Unsigned, to a host that names its resource (below)                                                              | allowed                    |
 | Unsigned, to any other AWS API host, whatever the method                                                         | `aws-no-credential`        |
+| A CodeCommit `Basic` login with a known key, or a static Git credential of an allowed account                    | allowed                    |
+| A CodeCommit `Basic` login with any other key or account                                                         | `aws-key-not-allowed`      |
+| A CodeCommit request with no `Authorization`, as Git sends first                                                 | allowed                    |
 | More than one credential: two `Authorization` headers, a header and a query credential, or a credential repeated | `aws-ambiguous-credential` |
 | A key in a form body and another in the header or query, either of them unknown                                  | `aws-key-not-allowed`      |
 | A form body or query string the proxy cannot read through (above)                                                | `aws-unreadable`           |
@@ -104,17 +116,19 @@ left to the URL rules:
 | Managed Grafana        | `g-<id>.grafana-workspace.<region>.amazonaws.com`                                                                                                            |
 | Amazon MQ              | `b-<id>.mq.<region>.amazonaws.com`                                                                                                                           |
 | OpenSearch Service     | `search-<domain>-<id>.<region>.es.amazonaws.com`, `vpc-<domain>-<id>.<region>.es.amazonaws.com`                                                              |
+| EKS cluster            | `<id>.<label>.<region>.eks.amazonaws.com` (such as `gr7` or `yl4`), `<id>.<region>.api.aws`                                                                  |
 | EKS OIDC issuer        | `oidc.eks.<region>.amazonaws.com/id/<id>`, `oidc-eks.<region>.api.aws/id/<id>`                                                                               |
 | Elastic Load Balancing | `<name>-<id>.elb.<region>.amazonaws.com`, `<name>-<id>.<region>.elb.amazonaws.com`                                                                           |
 | EC2                    | `ec2-<ip>.<region>.compute.amazonaws.com`, `ec2-<ip>.compute-1.amazonaws.com`                                                                                |
 | AWS CLI downloads      | `awscli.amazonaws.com`                                                                                                                                       |
 
-Each also matches under `amazonaws.com.cn` and `amazonaws.eu`. Every other AWS API host names only a service and a
-region, such as `sts.us-east-1.amazonaws.com` or `sqs.us-east-1.amazonaws.com`. The account a
-request to one of those reaches is in its parameters or its body, where the proxy does not look, so
-an unsigned request there is refused, `GET` included. A host missing from the table above is
-treated the same way; if a legitimate request is refused as `aws-no-credential` for that reason,
-report it.
+Each `amazonaws.com` name but `awscli.amazonaws.com` also matches under `amazonaws.com.cn` and
+`amazonaws.eu`, and each `api.aws` one under `api.amazonwebservices.com.cn` and
+`api.amazonwebservices.eu`. Every other AWS API host names only a service and a region, such as
+`sts.us-east-1.amazonaws.com` or `sqs.us-east-1.amazonaws.com`. The account a request to one of
+those reaches is in its parameters or its body, where the proxy does not look, so an unsigned
+request there is refused, `GET` included. A host missing from the table above is treated the same
+way; if a legitimate request is refused as `aws-no-credential` for that reason, report it.
 
 Some AWS APIs take a token that ties the request to no account the proxy can see, and are refused
 for that reason too: Cognito user pool calls made without AWS credentials, Bedrock API keys,
@@ -127,9 +141,9 @@ instead, as the AWS CLI and the SDKs do, or with a presigned `PutObject` URL. Bo
 where the check reads it.
 
 These hosts are only as narrow as the URL rules that allow them. A rule such as
-`* https://**.amazonaws.com/**` lets an unsigned request reach anyone's bucket, registry or API, and
-whoever owns it can read what was sent, `User-Agent` and query string included, in their own logs.
-Allow them by name, as you would any other host:
+`* https://**.amazonaws.com/**` lets an unsigned request reach anyone's bucket, registry, cluster or
+API, and whoever owns it can read what was sent, `User-Agent` and query string included, in their
+own logs. Allow them by name, as you would any other host:
 
 ```yaml
 allowed_url_rules: |
