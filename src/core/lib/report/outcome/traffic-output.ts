@@ -34,8 +34,8 @@ export type TrafficRecord<X extends TrafficExtensions = Record<never, never>> = 
   elapsed?: string;
 } & Partial<X>;
 
-// Every field a record may have of its own, set or not, which no action's
-// object may take the name of.
+// The record's own fields, set or not. An action's object never takes one of
+// these names.
 const RECORD_FIELDS: ReadonlySet<string> = new Set([
   "time",
   "elapsed",
