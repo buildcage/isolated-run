@@ -3,6 +3,7 @@ import { describe, it, expect, reportResults } from "#core/lib/test/test-shim.ts
 import {
   AWS_API_HOST,
   AWS_RESOURCE_HOST,
+  CODECOMMIT_HOST,
   FORM_CREDENTIAL,
   awsKeyRequestRules,
   awsKeyResponseRules,
@@ -109,8 +110,9 @@ describe("hosts that name the resource", () => {
       "oidc-eks.cn-north-1.api.amazonwebservices.com.cn",
       "oidc-eks.eusc-de-east-1.api.amazonwebservices.eu",
       "abcdef0123456789abcdef0123456789.gr7.us-east-1.eks.amazonaws.com",
-      "abcdef0123456789abcdef0123456789.us-east-1.eks.amazonaws.com",
+      "abcdef0123456789abcdef0123456789.yl4.us-east-2.eks.amazonaws.com",
       "abcdef0123456789abcdef0123456789.us-east-1.api.aws",
+      "abcdef0123456789abcdef0123456789.gr7.us-east-1.eks.api.aws",
     ]) {
       expect(resourceHost.test(host)).toBe(true);
     }
@@ -144,6 +146,7 @@ describe("hosts that name the resource", () => {
       "x.mq.us-east-1.amazonaws.com",
       "x.us-east-1.es.amazonaws.com",
       "abcdef.us-east-1.eks.amazonaws.com",
+      "abcdef0123456789abcdef0123456789.us-east-1.eks.amazonaws.com",
       "eks.us-east-1.api.aws",
     ]) {
       expect(resourceHost.test(host)).toBe(false);
@@ -221,12 +224,12 @@ describe("awsKeyRequestRules", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(
       rules.includes(
-        "str(unsigned) if aws_host !aws_auth !aws_query !aws_body aws_resource_host !aws_form",
+        "str(unsigned) if aws_host !aws_auth !aws_query !aws_body aws_resource_host !aws_form or aws_git_bare !aws_query",
       ),
     ).toBe(true);
     expect(
       rules.includes(
-        "str(no-credential) if aws_host !aws_auth !aws_query !aws_body !aws_resource_host or",
+        "str(no-credential) if aws_host !aws_auth !aws_query !aws_body !aws_resource_host !aws_git_bare or",
       ),
     ).toBe(true);
   });
@@ -295,9 +298,48 @@ describe("awsKeyRequestRules", () => {
     ).toBe(true);
   });
 
-  it("counts only AWS's own schemes as a credential", () => {
+  it("reads CodeCommit's Basic user name as a key, or as <user>-at-<account>", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(rules.includes("acl aws_auth req.fhdr(authorization) -m reg -i ^aws")).toBe(true);
+    expect(rules.includes("acl aws_auth var(txn.aws_git) -m bool")).toBe(true);
+    expect(
+      rules.includes(`'var(txn.aws_git_user),regsub("%.*$","")' if { var(txn.aws_git) -m bool }`),
+    ).toBe(true);
+    expect(
+      rules.includes(
+        `str(allowed) if { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}$ } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f /rules/accounts.lst }`,
+      ),
+    ).toBe(true);
+    expect(
+      rules.includes(
+        "set-var(txn.aws_git_bare) bool(true) if aws_git_host !{ req.fhdr(authorization) -m found }",
+      ),
+    ).toBe(true);
+    expect(
+      rules.includes(
+        "set-var(txn.aws_post) bool(true) if aws_host METH_POST !aws_resource_host !aws_git_host",
+      ),
+    ).toBe(true);
+    const staticUser = /^((?!-at-).)+-at-[0-9]{12}$/;
+    expect(staticUser.test("deploy-at-111111111111")).toBe(true);
+    expect(staticUser.test("x-at-222222222222-at-111111111111")).toBe(false);
+    expect(staticUser.test("111111111111")).toBe(false);
+    const codecommit = new RegExp(CODECOMMIT_HOST);
+    expect(codecommit.test("git-codecommit.us-east-1.amazonaws.com")).toBe(true);
+    expect(codecommit.test("git-codecommit-fips.us-east-1.amazonaws.com")).toBe(true);
+    expect(
+      codecommit.test(
+        "vpce-0123456789abcdef0-abcdefgh.git-codecommit.us-east-1.vpce.amazonaws.com",
+      ),
+    ).toBe(true);
+    expect(codecommit.test("codecommit.us-east-1.amazonaws.com")).toBe(false);
+  });
+
+  it("counts AWS's own schemes and a CodeCommit login as a credential, and no other token", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict");
+    expect(rules.filter((l) => l.startsWith("    acl aws_auth "))).toStrictEqual([
+      "    acl aws_auth req.fhdr(authorization) -m reg -i ^aws",
+      "    acl aws_auth var(txn.aws_git) -m bool",
+    ]);
   });
 
   it("asks STS for a body it can read", () => {
