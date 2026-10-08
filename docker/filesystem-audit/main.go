@@ -40,13 +40,10 @@ const cgroupRoot = "/sys/fs/cgroup"
 // optionalProgs are programs whose attach target some supported kernels do
 // not expose; each is dropped before load when its function is absent from
 // kernel BTF. getname has two spellings (one inlined into the other) and
-// names a failed open; backing_file_open (added in 6.7) de-duplicates
-// overlayfs layer opens, so on older kernels those opens go unmerged.
+// names a failed open.
 var optionalProgs = map[string]string{
 	"on_getname":       "getname_flags",
 	"on_getname_outer": "getname",
-	"on_backing_enter": "backing_file_open",
-	"on_backing_exit":  "backing_file_open",
 	"on_exec_file":     "security_bprm_creds_for_exec",
 	"on_file_truncate": "security_file_truncate",
 }

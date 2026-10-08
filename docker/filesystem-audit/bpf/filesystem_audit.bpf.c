@@ -3,9 +3,7 @@
 // the first read and write of each open file, mmaps, execs, and the path
 // operations (create, move, delete, attribute change), successes and
 // failures alike. Kernel types are declared locally with preserve_access_index
-// so one CO-RE object runs on any BTF-enabled kernel from 5.17 on. The
-// overlayfs de-duplication uses backing_file_open, added in 6.7; where it is
-// absent the loader drops those two programs (see main.go).
+// so one CO-RE object runs on any BTF-enabled kernel from 5.17 on.
 
 #include <linux/types.h>
 #include <linux/bpf.h>
@@ -29,12 +27,20 @@ struct dentry {
 
 struct vfsmount {
 	struct dentry *mnt_root;
+	int mnt_flags;
 } __attribute__((preserve_access_index));
+
+struct mnt_namespace;
 
 struct mount {
 	struct mount *mnt_parent;
 	struct dentry *mnt_mountpoint;
 	struct vfsmount mnt;
+	struct mnt_namespace *mnt_ns;
+} __attribute__((preserve_access_index));
+
+struct nsproxy {
+	struct mnt_namespace *mnt_ns;
 } __attribute__((preserve_access_index));
 
 struct path {
@@ -66,16 +72,13 @@ struct files_struct {
 	struct fdtable *fdt;
 } __attribute__((preserve_access_index));
 
-struct cred;
-
 struct task_struct {
 	struct task_struct *real_parent;
 	int tgid;
 	struct mm_struct *mm;
 	struct fs_struct *fs;
 	struct files_struct *files;
-	const struct cred *cred;
-	const struct cred *real_cred;
+	struct nsproxy *nsproxy;
 } __attribute__((preserve_access_index));
 
 struct filename {
@@ -435,45 +438,6 @@ static __always_inline int first_time(struct file *file, u8 bit)
 	return 0;
 }
 
-// Marks the thread while it is inside backing_file_open (overlayfs opening a
-// layer's real file), so that open is attributed to the overlay open above
-// it rather than counted again.
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 4096);
-	__type(key, u64);
-	__type(value, u8);
-} in_backing SEC(".maps");
-
-SEC("fentry/backing_file_open")
-int BPF_PROG(on_backing_enter)
-{
-	if (!in_target())
-		return 0;
-	u64 id = bpf_get_current_pid_tgid();
-	u8 one = 1;
-	bpf_map_update_elem(&in_backing, &id, &one, BPF_ANY);
-	return 0;
-}
-
-SEC("fexit/backing_file_open")
-int on_backing_exit(u64 *ctx)
-{
-	if (!in_target())
-		return 0;
-	u64 id = bpf_get_current_pid_tgid();
-	bpf_map_delete_elem(&in_backing, &id);
-	// Reads and writes on the overlay file reach the layer's file too;
-	// mark the latter as already reported in every direction.
-	u64 ret = 0;
-	bpf_get_func_ret(ctx, &ret);
-	if ((long)ret < 0 && (long)ret >= -4095)
-		return 0;
-	u8 all = 0xff;
-	bpf_map_update_elem(&seen_files, &ret, &all, BPF_ANY);
-	return 0;
-}
-
 static __always_inline u32 file_walk(struct event *e, struct file *file)
 {
 	return walk(e, 0, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt),
@@ -493,26 +457,30 @@ static __always_inline void file_path(struct event *e, struct file *file)
 	e->data_len = file_walk(e, file);
 }
 
-// overlayfs works on its layers under the mounter's credentials
-// (ovl_override_creds): opening a layer's real directory to open or list a
-// merged one, copying a file up. The step's own opens, reads and maps never
-// run with their credentials overridden, so those accesses are the overlay's.
-static __always_inline int creds_overridden(void)
+#define MNT_INTERNAL 0x4000
+
+// overlayfs reaches its layers through private clones of their mounts, which
+// belong to no namespace the step can see or open a file in. An access through
+// such a mount is the overlay working on a layer for the step's own access
+// above it. Kernel-internal mounts (pipes, memfd) are the step's and count.
+static __always_inline int on_layer(struct file *file)
 {
+	struct vfsmount *vfs = file->f_path.mnt;
+	if (BPF_CORE_READ(vfs, mnt_flags) & MNT_INTERNAL)
+		return 0;
+	struct mount *m = (void *)vfs - bpf_core_field_offset(struct mount, mnt);
 	struct task_struct *t = bpf_get_current_task_btf();
-	return BPF_CORE_READ(t, cred) != BPF_CORE_READ(t, real_cred);
+	if (BPF_CORE_READ(m, mnt_ns) == t->nsproxy->mnt_ns)
+		return 0;
+	bump(&skipped_internal);
+	return 1;
 }
 
 SEC("fentry/security_file_open")
 int BPF_PROG(on_open, struct file *file)
 {
-	if (!in_target())
+	if (!in_target() || on_layer(file))
 		return 0;
-	u64 id = bpf_get_current_pid_tgid();
-	if (bpf_map_lookup_elem(&in_backing, &id) || creds_overridden()) {
-		bump(&skipped_internal);
-		return 0;
-	}
 	struct event *e = start(K_OPEN);
 	if (!e)
 		return 0;
@@ -900,7 +868,7 @@ int on_open_exit(u64 *ctx)
 SEC("fentry/security_file_permission")
 int BPF_PROG(on_file_permission, struct file *file, int mask)
 {
-	if (!in_target() || creds_overridden())
+	if (!in_target() || on_layer(file))
 		return 0;
 	u32 kind;
 	u8 bit;
@@ -926,7 +894,7 @@ int BPF_PROG(on_file_permission, struct file *file, int mask)
 SEC("fentry/security_mmap_file")
 int BPF_PROG(on_mmap, struct file *file, unsigned long prot, unsigned long flags)
 {
-	if (!file || !in_target() || creds_overridden())
+	if (!file || !in_target() || on_layer(file))
 		return 0;
 	u8 bit = SEEN_READ;
 	if (prot & PROT_EXEC)
