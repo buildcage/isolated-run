@@ -146,9 +146,9 @@ jobs:
       # No cleanup step: the action stops its own proxy container in its
       # finally block.
 
-  # Runs a real sandboxed step with filesystem_audit under each filesystem_mode,
-  # with and without the ephemeral overlay, and checks the tracer recorded its
-  # file accesses; a test-hooks build surfaces the recording for the assertion.
+  # Runs a real sandboxed step with filesystem_audit under each filesystem_mode
+  # and checks the tracer recorded its file accesses; a test-hooks build
+  # surfaces the recording for the assertion.
   test_sandbox_filesystem_audit:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
