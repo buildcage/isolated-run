@@ -13,18 +13,21 @@ import { renderFilesystemAuditSummary } from "./filesystem-audit-summary.ts";
 // guards against the model drifting from what the tracer emits.
 const fixture = (name: string): URL =>
   new URL(`./__fixtures__/filesystem-audit/${name}`, import.meta.url);
-const recording = readFileSync(fixture("recording.jsonl"), "utf8");
-const cleaned = stripSandboxMachinery(recording, "/var/tmp/buildcage-0");
+const stripped = (): { recording: string; cleaned: string } => {
+  const recording = readFileSync(fixture("recording.jsonl"), "utf8");
+  return { recording, cleaned: stripSandboxMachinery(recording, "/var/tmp/buildcage-0") };
+};
 
 describe("filesystem audit: real recording golden", () => {
   it("strips a real recording to only the step's accesses", () => {
-    expectMatchesGolden(`${cleaned}\n`, fixture("recording.cleaned.jsonl"));
+    expectMatchesGolden(`${stripped().cleaned}\n`, fixture("recording.cleaned.jsonl"));
   });
 
   it("renders the stripped recording to the Job Summary", () => {
+    const { recording, cleaned } = stripped();
     // The recording does not carry the proxy's start; a few seconds before its
     // first record stands in for it.
-    const first = (JSON.parse(recording.slice(0, recording.indexOf("\n"))) as { t: string }).t;
+    const first = (JSON.parse(recording.split("\n", 1)[0]) as { t: string }).t;
     expectMatchesGolden(
       renderFilesystemAuditSummary(cleaned, {
         workspace: ["/home/runner/work/isolated-run/isolated-run"],
