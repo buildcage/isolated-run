@@ -26676,7 +26676,7 @@ function fitStepSummary(blocks, { usedBytes = 0, limitBytes = 1048576 } = {}) {
 	return out.join("");
 }
 function cutBlock(b, budget) {
-	let notice = b.notice ?? "", alone = (/^\n*/.exec(b.text)?.[0] ?? "") + notice;
+	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
 	if (b.cut === "atomic") return alone;
 	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
 	for (let line of b.text.split("\n")) {
@@ -27119,7 +27119,7 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 	}
 	report.failed.length > 0 && blocks.push(tableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap()}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
 	let bottom = "";
-	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame("_(no communication)_\n\n"));
+	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame(`${gap()}_(no communication)_\n\n`));
 	let details = renderInspectDetailsBody(report.timeline, report.startedAt);
 	return details && blocks.push({
 		id: TRAFFIC_BLOCK.log,
