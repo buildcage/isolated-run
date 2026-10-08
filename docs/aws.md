@@ -47,6 +47,11 @@ form body, and compares it with the keys it knows as a whole string. It never de
 verifies a signature: a request that copies one of your key IDs without the secret is refused by AWS
 and logged in your own account.
 
+Two tokens carry a key too, and are checked the same way: the `Bearer` token `kubectl` sends to an
+EKS cluster, a presigned STS URL whose `X-Amz-Credential` the proxy reads, and the `Basic` user name
+CodeCommit's Git credential helper sends, which is the key ID. A static CodeCommit Git credential
+names its account instead (`<user>-at-<account>`), and passes when that account is an allowed one.
+
 A form body is the body of a `POST` to a host that names no resource (below), when its Content-Type
 is `application/x-www-form-urlencoded` or, whatever the Content-Type says, the body starts as a form
 does (`name=value`). The proxy reads the whole body, up to 4 MiB with the headers, before deciding.
@@ -77,8 +82,8 @@ The URL rules still decide first. A request they refuse stays `not-allowed`, and
 applies to requests they allow.
 
 What happens to a request that carries no AWS signature depends on whether the host names the
-resource it is for. A request with no `Authorization` header, or one with a `Bearer` or `Basic`
-token, counts as unsigned here: only AWS's own schemes are an AWS credential.
+resource it is for. A request with no `Authorization` header, or one with any other `Bearer` or
+`Basic` token, counts as unsigned here.
 
 | Request                                                                                                          | Result                     |
 | ---------------------------------------------------------------------------------------------------------------- | -------------------------- |

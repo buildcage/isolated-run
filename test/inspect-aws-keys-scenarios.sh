@@ -112,6 +112,24 @@ check_status "a public read whose query holds a broken escape" "$($C "https://bu
 check_status "a presigned URL with %00 ahead of its credential" \
   "$($C "https://bucket.s3.amazonaws.com/x?a=%00&X-Amz-Credential=${AKIA}TESTATTACKER0001%2Fx")" "403"
 
+echo "=== [tokens that carry a key] ==="
+EKS=https://abcdef0123456789abcdef0123456789.gr7.us-east-1.eks.amazonaws.com/api/v1/pods
+eks_token() {
+  local url="https://sts.us-east-1.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=$1%2F20261008%2Fus-east-1%2Fsts%2Faws4_request&X-Amz-Date=20261008T000000Z&X-Amz-SignedHeaders=host%3Bx-k8s-aws-id&X-Amz-Signature=ab"
+  echo "k8s-aws-v1.$(printf '%s' "$url" | base64 -w0 | tr '+/' '-_' | tr -d '=')"
+}
+check_status "an EKS token presigned with the start key" \
+  "$($C -H "Authorization: Bearer $(eks_token ${AKIA}TESTSTARTKEY0001)" $EKS)" "200"
+check_status "an EKS token presigned with a key of the build's own" \
+  "$($C -H "Authorization: Bearer $(eks_token ${AKIA}TESTATTACKER0001)" $EKS)" "403"
+CC=https://git-codecommit.us-east-1.amazonaws.com/v1/repos/app/info/refs
+check_status "a CodeCommit credential-helper login with the start key" \
+  "$($C -u "${AKIA}TESTSTARTKEY0001:20261008T000000Zab" $CC)" "200"
+check_status "a CodeCommit credential-helper login with a key of the build's own" \
+  "$($C -u "${AKIA}TESTATTACKER0001:20261008T000000Zab" $CC)" "403"
+check_status "a static CodeCommit Git credential of the allowed account" "$($C -u deploy-at-111111111111:secret $CC)" "200"
+check_status "a static CodeCommit Git credential of another account" "$($C -u deploy-at-222222222222:secret $CC)" "403"
+
 echo "=== [a key AssumeRole issued] ==="
 check_status "unknown until AssumeRole hands it out" \
   "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTLEARNEDKEY01)" $CF)" "403"

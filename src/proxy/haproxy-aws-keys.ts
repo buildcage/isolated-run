@@ -59,6 +59,10 @@ export const AWS_RESOURCE_HOST =
   "|\\.elb(\\.[a-z0-9-]+)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|\\.compute(-1)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|^awscli\\.amazonaws\\.com$";
+export const CODECOMMIT_HOST =
+  "^git-codecommit(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$";
+// An EKS token decoded back to the presigned URL it is.
+const EKS_TOKEN_URL = 'regsub("^bearer\\s+k8s-aws-v1\\.","",i),ub64dec,url_dec';
 // Both query spellings of a credential: SigV4's and SigV2's. Matched without
 // regard to case, so a spelling the extraction below does not read is still
 // counted as a credential and left unmatched rather than read as none.
@@ -98,6 +102,15 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    acl aws_auth req.fhdr(authorization) -m reg -i ^aws",
     "    acl aws_auth_many req.fhdr_cnt(authorization) gt 1",
     "    acl aws_auth_many req.fhdr(authorization) -m reg -i credential=.*credential=",
+    "    # Two tokens carry a key all the same. EKS's is a presigned STS URL.",
+    "    acl aws_eks_token req.fhdr(authorization) -m reg -i ^bearer\\s+k8s-aws-v1\\.",
+    "    acl aws_auth req.fhdr(authorization) -m reg -i ^bearer\\s+k8s-aws-v1\\.",
+    `    acl aws_eks_many 'req.fhdr(authorization),${EKS_TOKEN_URL}' -m reg -i (?s)x-amz-credential=.*x-amz-credential=`,
+    "    # CodeCommit's Git credential helper sends the key ID as the Basic user",
+    "    # name, and a static Git credential names its account: <user>-at-<id>.",
+    `    http-request set-var(txn.aws_git) bool(true) if { var(txn.host) -m reg ${CODECOMMIT_HOST} } { req.fhdr(authorization) -m reg -i ^basic\\s }`,
+    "    acl aws_auth var(txn.aws_git) -m bool",
+    `    http-request set-var(txn.aws_git_user) 'req.fhdr(authorization),regsub("^basic\\s+","",i),b64dec,regsub(":.*$","")' if { var(txn.aws_git) -m bool }`,
     "    # Decoded first: a name spelled as X-Amz-Cr%65dential still counts.",
     `    acl aws_query query,url_dec -m reg -i (^|&)${QUERY_CREDENTIAL}=`,
     `    acl aws_query_many query,url_dec -m reg -i (?s)(^|&)${QUERY_CREDENTIAL}=.*&${QUERY_CREDENTIAL}=`,
@@ -123,7 +136,9 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     `    http-request set-var(txn.aws_key) 'url_param(X-Amz-Credential),url_dec,regsub("^([A-Za-z0-9]+)/.*$","\\1")' if aws_host aws_query !aws_auth { url_param(X-Amz-Credential) -m found }`,
     "    http-request set-var(txn.aws_key) url_param(AWSAccessKeyId) if aws_host aws_query !aws_auth { url_param(AWSAccessKeyId) -m found }",
     "    http-request set-var(txn.aws_key) var(txn.aws_body_key) if aws_body !aws_auth !aws_query",
-    "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_host aws_auth aws_query or aws_host aws_auth aws_auth_many or aws_host aws_query_many or aws_body aws_body_many",
+    `    http-request set-var(txn.aws_key) 'req.fhdr(authorization),${EKS_TOKEN_URL},regsub("^.*[?&]x-amz-credential=([A-Za-z0-9]+)/.*$","\\1",i)' if aws_host aws_eks_token !aws_query`,
+    '    http-request set-var(txn.aws_key) \'var(txn.aws_git_user),regsub("%.*$","")\' if { var(txn.aws_git) -m bool } !aws_query',
+    "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_host aws_auth aws_query or aws_host aws_auth aws_auth_many or aws_host aws_query_many or aws_body aws_body_many or aws_host aws_eks_token aws_eks_many",
     "    # Unsigned, whatever the method: where the host names no resource, the",
     "    # account it reaches is in the parameters or the body, out of sight.",
     "    # An S3 POST-policy upload carries its credential in a multipart body,",
@@ -142,6 +157,7 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    http-request set-var(txn.aws) str(unreadable) if aws_form_post { req.body_len,sub(txn.aws_body_size) lt 0 } or aws_form_post { req.body,length,sub(txn.aws_body_len) lt 0 }",
     "    # A body key next to another one; a body key alone is aws_key below.",
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_body aws_auth !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found } or aws_body aws_query !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found }`,
+    `    http-request set-var(txn.aws) str(allowed) if { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f ${check.accountFile} } !{ var(txn.aws) -m found }`,
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_host !{ var(txn.aws) -m found } !{ var(txn.aws_key),map(${check.keyMapFile}) -m found }`,
     "    http-request set-var(txn.aws) str(allowed) if aws_host !{ var(txn.aws) -m found }",
   ];

@@ -3,6 +3,7 @@ import { describe, it, expect, reportResults } from "#core/lib/test/test-shim.ts
 import {
   AWS_API_HOST,
   AWS_RESOURCE_HOST,
+  CODECOMMIT_HOST,
   FORM_CREDENTIAL,
   awsKeyRequestRules,
   awsKeyResponseRules,
@@ -288,6 +289,36 @@ describe("awsKeyRequestRules", () => {
     expect(
       rules.includes("set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed"),
     ).toBe(true);
+  });
+
+  it("reads the key an EKS token was presigned with", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
+    expect(
+      rules.includes("acl aws_auth req.fhdr(authorization) -m reg -i ^bearer\\s+k8s-aws-v1\\."),
+    ).toBe(true);
+    expect(
+      rules.includes(
+        `set-var(txn.aws_key) 'req.fhdr(authorization),regsub("^bearer\\s+k8s-aws-v1\\.","",i),ub64dec,url_dec,regsub(`,
+      ),
+    ).toBe(true);
+    expect(rules.includes("or aws_host aws_eks_token aws_eks_many")).toBe(true);
+  });
+
+  it("reads CodeCommit's Basic user name as a key, or as <user>-at-<account>", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
+    expect(rules.includes("acl aws_auth var(txn.aws_git) -m bool")).toBe(true);
+    expect(
+      rules.includes(`'var(txn.aws_git_user),regsub("%.*$","")' if { var(txn.aws_git) -m bool }`),
+    ).toBe(true);
+    expect(
+      rules.includes(
+        `str(allowed) if { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f /rules/accounts.lst }`,
+      ),
+    ).toBe(true);
+    const codecommit = new RegExp(CODECOMMIT_HOST);
+    expect(codecommit.test("git-codecommit.us-east-1.amazonaws.com")).toBe(true);
+    expect(codecommit.test("git-codecommit-fips.us-east-1.amazonaws.com")).toBe(true);
+    expect(codecommit.test("codecommit.us-east-1.amazonaws.com")).toBe(false);
   });
 
   it("counts only AWS's own schemes as a credential", () => {
