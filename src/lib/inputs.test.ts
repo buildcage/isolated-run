@@ -235,7 +235,7 @@ describe("readAwsKeyInputs", () => {
   const KEY = `${ASIA}AAAAAAAAAAAAAAAA`;
   const inspect = { proxyEngine: "inspect", proxyMode: "restrict" } as const;
   const accounts = (value: string) => inputs({ allowed_aws_role_accounts: value });
-  const OFF = { keys: [], roleAccounts: [] };
+  const OFF = { key: "", roleAccounts: [] };
 
   it("leaves the check off when unset, whatever the environment holds", () => {
     expect(readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, inputs())).toStrictEqual(
@@ -259,7 +259,7 @@ describe("readAwsKeyInputs", () => {
         silent,
         inputs({ aws_key_check: "true" }),
       ),
-    ).toStrictEqual({ keys: [KEY], roleAccounts: [] });
+    ).toStrictEqual({ key: KEY, roleAccounts: [] });
   });
 
   it("lets an explicit false win over role accounts, warning that they are ignored", () => {
@@ -319,7 +319,7 @@ describe("readAwsKeyInputs", () => {
         silent,
         accounts("111111111111 222222222222\n111111111111 # prod"),
       ),
-    ).toStrictEqual({ keys: [KEY], roleAccounts: ["111111111111", "222222222222"] });
+    ).toStrictEqual({ key: KEY, roleAccounts: ["111111111111", "222222222222"] });
   });
 
   it("names every entry that is not an account ID", () => {

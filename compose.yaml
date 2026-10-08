@@ -20,7 +20,7 @@ services:
       - ALLOWED_URL_RULES=${ALLOWED_URL_RULES:-}
       - ALLOWED_TLS_RULES=${ALLOWED_TLS_RULES:-}
       # inspect only: the AWS access key check, off when no key is given.
-      - ALLOWED_AWS_KEYS=${ALLOWED_AWS_KEYS:-}
+      - ALLOWED_AWS_KEY=${ALLOWED_AWS_KEY:-}
       - ALLOWED_AWS_ROLE_ACCOUNTS=${ALLOWED_AWS_ROLE_ACCOUNTS:-}
       # Runner addresses the engine refuses as a resolved destination.
       - HOST_ADDRESSES=${HOST_ADDRESSES:-}

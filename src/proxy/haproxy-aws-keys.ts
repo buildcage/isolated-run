@@ -35,6 +35,9 @@ const FORM_BODY_LIMIT = 4 * 1024 * 1024;
 
 // API endpoints only: the commercial, China and European Sovereign Cloud
 // domains, and the dual-stack ones.
+const AMAZONAWS_DOMAINS = "amazonaws\\.(com|com\\.cn|eu)";
+const DUALSTACK_DOMAINS =
+  "(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)";
 const AWS_DOMAINS =
   "(amazonaws\\.com|amazonaws\\.com\\.cn|amazonaws\\.eu|api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)";
 // Matched against txn.host, which is lowercased and has no port.
@@ -50,22 +53,22 @@ export const STS_HOST = `^sts(-fips)?(\\.[a-z0-9-]+)?\\.${AWS_DOMAINS}$|${vpceHo
 // workspaces, Amazon MQ brokers, OpenSearch domains, EKS clusters and OIDC
 // issuers, load balancers, EC2 public names, and the AWS CLI's download host.
 // Every other API host names only a service and a region.
-export const S3_HOST = "(^|\\.)s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.amazonaws\\.(com|com\\.cn|eu)$";
+export const S3_HOST = `(^|\\.)s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.${AMAZONAWS_DOMAINS}$`;
 export const AWS_RESOURCE_HOST =
   S3_HOST +
-  "|\\.(dkr\\.ecr(-fips)?|d\\.codeartifact|execute-api|appsync-api|appsync-realtime-api)\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
-  "|^g-[a-z0-9]+\\.grafana-workspace\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
-  "|^b-[a-z0-9-]+\\.mq\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
-  "|^(search|vpc)-[a-z0-9-]+\\.[a-z0-9-]+\\.es\\.amazonaws\\.(com|com\\.cn|eu)$" +
-  "|^[0-9a-f]{32}\\.[a-z0-9]+\\.[a-z0-9-]+\\.eks\\.amazonaws\\.(com|com\\.cn|eu)$" +
-  "|^[0-9a-f]{32}\\.[a-z0-9-]+\\.(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)$" +
-  "|^oidc\\.eks\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
-  "|^oidc-eks\\.[a-z0-9-]+\\.(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)$" +
-  "|\\.elb(\\.[a-z0-9-]+)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
-  "|\\.compute(-1)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  `|\\.(dkr\\.ecr(-fips)?|d\\.codeartifact|execute-api|appsync-api|appsync-realtime-api)\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$` +
+  `|^g-[a-z0-9]+\\.grafana-workspace\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$` +
+  `|^b-[a-z0-9-]+\\.mq\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$` +
+  `|^(search|vpc)-[a-z0-9-]+\\.[a-z0-9-]+\\.es\\.${AMAZONAWS_DOMAINS}$` +
+  `|^[0-9a-f]{32}\\.[a-z0-9]+\\.[a-z0-9-]+\\.eks\\.${AMAZONAWS_DOMAINS}$` +
+  `|^[0-9a-f]{32}\\.[a-z0-9-]+\\.${DUALSTACK_DOMAINS}$` +
+  `|^oidc\\.eks\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$` +
+  `|^oidc-eks\\.[a-z0-9-]+\\.${DUALSTACK_DOMAINS}$` +
+  `|\\.elb(\\.[a-z0-9-]+)?\\.${AMAZONAWS_DOMAINS}$` +
+  `|\\.compute(-1)?\\.${AMAZONAWS_DOMAINS}$` +
   "|^awscli\\.amazonaws\\.com$";
 export const CODECOMMIT_HOST =
-  "^git-codecommit(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$|" +
+  `^git-codecommit(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$|` +
   vpceHost("git-codecommit(-fips)?");
 // Both query spellings of a credential: SigV4's and SigV2's. Matched without
 // regard to case, so a spelling the extraction below does not read is still

@@ -354,7 +354,7 @@ export async function runSandboxStep(
     logRules("URL", urlRules);
     logRules("TLS", tlsRules);
     logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
-    if (aws.keys.length > 0) console.log("AWS access key check: on");
+    if (aws.key) console.log("AWS access key check: on");
     if (aws.roleAccounts.length > 0)
       console.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
   });
@@ -374,7 +374,7 @@ export async function runSandboxStep(
       ipRules: ipRules,
       urlRules,
       tlsRules,
-      awsKeys: aws.keys,
+      awsKey: aws.key,
       awsRoleAccounts: aws.roleAccounts,
     },
     env,

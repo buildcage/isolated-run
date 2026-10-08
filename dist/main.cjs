@@ -23225,7 +23225,7 @@ function getContainerNetns(containerName, { exec = captureDockerViaExec$1 } = {}
 }
 //#endregion
 //#region src/lib/compose-env.ts
-function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, httpsRules, httpRules, ipRules, urlRules, tlsRules, awsKeys, awsRoleAccounts }, env, hostAddresses = listHostIpv4Addresses) {
+function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, httpsRules, httpRules, ipRules, urlRules, tlsRules, awsKey, awsRoleAccounts }, env, hostAddresses = listHostIpv4Addresses) {
 	return {
 		...env,
 		PROXY_CONTAINER_NAME: containerName,
@@ -23237,7 +23237,7 @@ function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, http
 		ALLOWED_IP_RULES: ipRules.join("\n"),
 		ALLOWED_URL_RULES: urlRules.join("\n"),
 		ALLOWED_TLS_RULES: tlsRules.join("\n"),
-		ALLOWED_AWS_KEYS: awsKeys.join(" "),
+		ALLOWED_AWS_KEY: awsKey,
 		ALLOWED_AWS_ROLE_ACCOUNTS: awsRoleAccounts.join(" "),
 		BUILDCAGE_PROXY_IMAGE_REF: imageRef,
 		HOST_ADDRESSES: hostAddresses().join(" ")
@@ -23255,13 +23255,10 @@ function resolveComposeFile(override) {
 //#endregion
 //#region src/proxy/aws-keys.ts
 const ACCOUNT_ID = /^\d{12}$/, ACCESS_KEY_ID = /^[A-Z0-9]{16,128}$/;
-function parseList(input, valid, what) {
-	let tokens = splitRuleTokens(input).flatMap((token) => token.split(",").filter(Boolean)), invalid = tokens.filter((token) => !valid.test(token));
-	if (invalid.length > 0) throw Error(`invalid ${what}: ${invalid.map((t) => JSON.stringify(t)).join(", ")}`);
-	return [...new Set(tokens)];
-}
 function parseAwsAccounts(input) {
-	return parseList(input, ACCOUNT_ID, "AWS account ID");
+	let tokens = splitRuleTokens(input).flatMap((token) => token.split(",").filter(Boolean)), invalid = tokens.filter((token) => !ACCOUNT_ID.test(token));
+	if (invalid.length > 0) throw Error(`invalid AWS account ID: ${invalid.map((t) => JSON.stringify(t)).join(", ")}`);
+	return [...new Set(tokens)];
 }
 function isAwsAccessKeyId(value) {
 	return ACCESS_KEY_ID.test(value);
@@ -23337,7 +23334,7 @@ function readFailOnBlocked(getInput$1 = getInput) {
 	return readBooleanInput("fail_on_blocked", !0, getInput$1);
 }
 const AWS_KEY_CHECK_OFF = {
-	keys: [],
+	key: "",
 	roleAccounts: []
 };
 function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$7 = getInput) {
@@ -23364,7 +23361,7 @@ function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$7 = ge
 		throw new SandboxError("The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. Set up the credentials in an earlier step, for example with aws-actions/configure-aws-credentials.", "AWS_ACCESS_KEY_MISSING");
 	}
 	return {
-		keys: [key],
+		key,
 		roleAccounts
 	};
 }
@@ -72413,7 +72410,7 @@ async function runSandboxStep(env, overrides = {}) {
 	log(`buildcage: proxy image: ${imageRef}`);
 	let composeFile = resolveComposeFile(localOverride);
 	withLogGroup("buildcage: Configured ACL Rules", () => {
-		logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), aws.keys.length > 0 && console.log("AWS access key check: on"), aws.roleAccounts.length > 0 && console.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
+		logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), aws.key && console.log("AWS access key check: on"), aws.roleAccounts.length > 0 && console.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
 	});
 	let containerName = generateContainerName(), projectName = deriveProjectName(containerName);
 	saveCleanupState(env, {
@@ -72431,7 +72428,7 @@ async function runSandboxStep(env, overrides = {}) {
 		ipRules,
 		urlRules,
 		tlsRules,
-		awsKeys: aws.keys,
+		awsKey: aws.key,
 		awsRoleAccounts: aws.roleAccounts
 	}, env);
 	try {

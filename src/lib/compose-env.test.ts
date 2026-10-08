@@ -29,7 +29,7 @@ function options(overrides: Partial<ComposeEnvOptions> = {}): ComposeEnvOptions 
     ipRules: [],
     urlRules: [],
     tlsRules: [],
-    awsKeys: [],
+    awsKey: "",
     awsRoleAccounts: [],
     ...overrides,
   };
@@ -46,7 +46,7 @@ describe("buildComposeEnv", () => {
         ipRules: ["10.0.0.0/8"],
         urlRules: ["GET https://api.github.com/repos/*"],
         tlsRules: ["*.example.com:443"],
-        awsKeys: [`${ASIA}AAAAAAAAAAAAAAAA`],
+        awsKey: `${ASIA}AAAAAAAAAAAAAAAA`,
         awsRoleAccounts: ["111111111111", "222222222222"],
       }),
       {},
@@ -64,7 +64,7 @@ describe("buildComposeEnv", () => {
       ALLOWED_URL_RULES: "GET https://api.github.com/repos/*",
       ALLOWED_TLS_RULES: "*.example.com:443",
       ALLOWED_AWS_ROLE_ACCOUNTS: "111111111111 222222222222",
-      ALLOWED_AWS_KEYS: `${ASIA}AAAAAAAAAAAAAAAA`,
+      ALLOWED_AWS_KEY: `${ASIA}AAAAAAAAAAAAAAAA`,
       BUILDCAGE_PROXY_IMAGE_REF: "ghcr.io/buildcage/isolated-run@sha256:feedface",
       HOST_ADDRESSES: "10.0.0.4 172.17.0.1",
     });
