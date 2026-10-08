@@ -43,9 +43,8 @@ A step that uses only the credentials it is given needs `aws_key_check` alone:
 ```
 
 A step that assumes roles of its own, as the CDK does, names the accounts those roles are in.
-`aws_key_check: true` keeps the check on even if the expression comes out empty, as it does when the
-`id:` it names is mistyped; the CDK's role switch is then refused instead of the check going off
-silently:
+`aws_key_check: true` keeps the check on if the expression comes out empty, as from a mistyped `id:`,
+so the role switch is refused rather than the check going off unnoticed:
 
 ```yaml
 - uses: aws-actions/configure-aws-credentials@<sha>
