@@ -312,9 +312,12 @@ describe("readAwsKeyInputs", () => {
         (env[`INPUT_${name.toUpperCase()}`] ?? "").trim(),
       ),
     ).toThrow(/"12345678901".*Quote an ID that begins with 0/);
-    expect(() =>
-      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, accounts("abc")),
-    ).not.toThrow(/Quote/);
+    for (const typo of ["abc", "12345"]) {
+      const read = () =>
+        readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, accounts(typo));
+      expect(read).toThrow(SandboxError);
+      expect(read).not.toThrow(/Quote/);
+    }
   });
 
   it.each([

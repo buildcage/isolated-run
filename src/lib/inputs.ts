@@ -178,8 +178,8 @@ export function readAwsKeyInputs(
     roleAccounts = parseAwsAccounts(getInput("allowed_aws_role_accounts"));
   } catch (e) {
     const { message } = e as Error;
-    // YAML reads an unquoted 012345678901 as a number and drops the 0.
-    const hint = /"\d{1,11}"/.test(message)
+    // YAML reads an unquoted 012345678901 as a number, 11 digits long.
+    const hint = /"\d{11}"/.test(message)
       ? " Quote an ID that begins with 0, which YAML otherwise reads as a number."
       : "";
     throw new SandboxError(
