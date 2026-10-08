@@ -656,9 +656,10 @@ so a step can opt out of accounts a config file names. Set in the workflow,
 `allowed_aws_role_accounts` replaces a config file's value. An unsigned request is left to the URL
 rules where the host names the resource it is for, such as an S3 bucket or an ECR registry, and
 refused everywhere else. If `AWS_ACCESS_KEY_ID` is unset or is not an access key ID, `restrict`
-fails the step before the sandbox is set up and `audit` warns and turns the check off. The input
-`allowed_aws_accounts`, which these replace, fails the step. [AWS access key check](./aws.md) covers
-why, what the check does not stop, and the IAM settings that close the rest.
+fails the step before the sandbox is set up and `audit` warns and turns the check off.
+`allowed_aws_accounts`, which these replace, fails the step when it names an account. [AWS access
+key check](./aws.md) covers why, what the check does not stop, and the IAM settings that close the
+rest.
 
 The check refuses after the URL rules have allowed a request, with one of these reasons:
 

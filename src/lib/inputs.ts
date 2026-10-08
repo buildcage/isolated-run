@@ -164,12 +164,10 @@ export interface AwsKeyInputs {
 const AWS_KEY_CHECK_OFF: AwsKeyInputs = { keys: [], roleAccounts: [] };
 
 /**
- * aws_key_check and allowed_aws_role_accounts: the check pins the step to its
- * own AWS_ACCESS_KEY_ID, put there by an earlier step such as
- * aws-actions/configure-aws-credentials, and the accounts let keys AssumeRole
- * issues inside the step through as well. Naming accounts turns the check on.
- * universal never sees a request's headers, so it fails in restrict and is
- * warned about in audit.
+ * The AWS access key check pins the step to its own AWS_ACCESS_KEY_ID; role
+ * accounts also let through the keys AssumeRole issues for them, and turn the
+ * check on. universal never sees a request's headers, so it fails in restrict
+ * and is warned about in audit.
  */
 export function readAwsKeyInputs(
   { proxyEngine, proxyMode }: ProxyInputs,
@@ -177,7 +175,7 @@ export function readAwsKeyInputs(
   warn: Notice,
   getInput: GetInput = core.getInput,
 ): AwsKeyInputs {
-  // A value naming no account, a comment say, left the old check off too.
+  // A value naming no account left the old check off, so it still passes.
   let replacedNamesAccounts = true;
   try {
     replacedNamesAccounts = parseAwsAccounts(getInput("allowed_aws_accounts")).length > 0;
