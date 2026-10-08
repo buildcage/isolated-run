@@ -690,22 +690,23 @@ This is also the form to keep where the report is an audit trail rather than som
 `filesystem_mode: persistent` a later step can add to the Job Summary, but not to an artifact
 already uploaded. See [Known Limitations](./security.md#known-limitations).
 
-| Field         | Always | Notes                                                                                        |
-| ------------- | ------ | -------------------------------------------------------------------------------------------- |
-| `time`        | yes    | ISO 8601 UTC                                                                                 |
-| `elapsed`     |        | since the proxy started, fixed `HH:MM:SS.mmm`                                                |
-| `action`      | yes    | `allow`, `block`, `audit` when nothing was enforced, `discovery`, `incomplete`, `failed`     |
-| `protocol`    | yes    | `https`, `http`, `tls`, `tcp`, `dns`                                                         |
-| `host`        | yes    | the name asked for, the address when there was none, or `(unknown)`                          |
-| `port`        |        | absent for `dns`, which connects to nothing                                                  |
-| `queryType`   |        | the record asked for; `discovery` rows and refused service names                             |
-| `method`      |        | `http` and `https`, and `tcp` for a request with no `Host` sent to an address                |
-| `url`         |        | as `method`; verbatim, unlike the summary's                                                  |
-| `status`      |        | only when something answered                                                                 |
-| `bytes`       |        | absent for a refusal and for `dns`                                                           |
-| `reason`      |        | only when `action` is `block`, `incomplete` or `failed`                                      |
-| `destination` |        | the address it actually resolved to; `inspect` only, and absent for `dns`                    |
-| `wouldRefuse` |        | `audit` only: the reason `restrict` would have refused it for, from the AWS access key check |
+| Field         | Always | Notes                                                                                                 |
+| ------------- | ------ | ----------------------------------------------------------------------------------------------------- |
+| `time`        | yes    | ISO 8601 UTC                                                                                          |
+| `elapsed`     |        | since the proxy started, fixed `HH:MM:SS.mmm`                                                         |
+| `action`      | yes    | `allow`, `block`, `audit` when nothing was enforced, `discovery`, `incomplete`, `failed`              |
+| `protocol`    | yes    | `https`, `http`, `tls`, `tcp`, `dns`                                                                  |
+| `host`        | yes    | the name asked for, the address when there was none, or `(unknown)`                                   |
+| `port`        |        | absent for `dns`, which connects to nothing                                                           |
+| `queryType`   |        | the record asked for; `discovery` rows and refused service names                                      |
+| `method`      |        | `http` and `https`, and `tcp` for a request with no `Host` sent to an address                         |
+| `url`         |        | as `method`; verbatim, unlike the summary's                                                           |
+| `status`      |        | only when something answered                                                                          |
+| `bytes`       |        | absent for a refusal and for `dns`                                                                    |
+| `reason`      |        | only when `action` is `block`, `incomplete` or `failed`                                               |
+| `destination` |        | the address it actually resolved to; `inspect` only, and absent for `dns`                             |
+| `wouldRefuse` |        | `audit` only: the reason `restrict` would have refused it for, from the AWS access key check          |
+| `aws`         |        | a request the AWS access key check let through; see [the AWS check](./aws.md#in-the-traffic-artifact) |
 
 A `dns` row's `host` is the name as the resolver logged it: lowercased, with escapes such as `\ `
 and `\DDD` kept.

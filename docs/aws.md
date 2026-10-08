@@ -188,6 +188,30 @@ step can be checked before it is switched to `restrict`:
 
 The traffic artifact carries the same reason in `wouldRefuse`.
 
+### In the traffic artifact
+
+Each request the check let through has an `aws` object in the
+[traffic artifact](./reference.md#traffic-artifact), so a run shows that the check was on even
+where it refused nothing. A refused request has none; its `reason` or `wouldRefuse` says why.
+
+| Field            | Always | Notes                                                                                                                                 |
+| ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `key`            | yes    | `env` for the key the step started with, `assumed` for one STS issued, `none` for a request carrying no access key                    |
+| `accountId`      |        | an account the check confirmed: the one an `assumed` key came from, or the one a static CodeCommit Git credential or a role ARN names |
+| `assumedAccount` |        | the account of the role an STS answer issued a key for, whether or not that account is allowed                                        |
+
+The starting key's account is never shown, since the proxy does not ask AWS whose key it is. No key
+ID is written either.
+
+```json
+{
+  "action": "allow",
+  "host": "cloudformation.us-east-1.amazonaws.com",
+  "method": "POST",
+  "aws": { "key": "assumed", "accountId": "111111111111" }
+}
+```
+
 ## What it does not stop
 
 The check looks at whose key signed a request, not at whose resource the request is for. A request

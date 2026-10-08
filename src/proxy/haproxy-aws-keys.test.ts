@@ -300,6 +300,45 @@ describe("awsKeyRequestRules", () => {
   });
 });
 
+describe("the traffic record", () => {
+  it("names a field for each value the record's aws object holds", () => {
+    expect(awsKeyExtension(CHECK).logFields).toStrictEqual({
+      name: "aws",
+      fields: {
+        key: "txn.aws_log_key",
+        accountId: "txn.aws_log_account",
+        assumedAccount: "txn.aws_log_assumed",
+      },
+    });
+  });
+
+  it("is filled in only for a request the check let through", () => {
+    for (const rules of [
+      awsKeyRequestRules(CHECK, "audit"),
+      awsKeyRequestRules({ keyMapFile: "/rules/keys.map" }, "restrict"),
+    ]) {
+      for (const line of rules.filter((l) => l.includes("set-var(txn.aws_log_"))) {
+        expect(/ if aws_allowed( |$)/.test(line) || line.includes("{ var(txn.aws_key_owner)")).toBe(
+          true,
+        );
+      }
+      expect(
+        rules
+          .filter((l) => l.includes("set-var(txn.aws_key_owner)"))
+          .every((l) => / if aws_allowed( |$)/.test(l)),
+      ).toBe(true);
+    }
+  });
+
+  it("names the account of the role an STS answer hands a key for, allowed or not", () => {
+    expect(
+      awsKeyResponseRules(CHECK).includes(
+        "    http-response set-var(txn.aws_log_assumed) var(txn.aws_new_account) if aws_new_account",
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("learning a key", () => {
   it("learns only from an STS host that names no resource, after a request it let through", () => {
     const rules = awsKeyRequestRules(CHECK, "audit").join("\n");
@@ -315,16 +354,19 @@ describe("learning a key", () => {
     expect(stsHost.test("sts.s3.amazonaws.com")).toBe(true);
     expect(resourceHost.test("sts.s3.amazonaws.com")).toBe(true);
     for (const line of awsKeyResponseRules(CHECK).filter((l) => l.includes(" if "))) {
-      expect(line.includes(" if aws_learn ") || line.includes("aws_new_account_allowed")).toBe(
-        true,
-      );
+      // aws_new_account is set only under aws_learn.
+      expect(
+        line.includes(" if aws_learn ") ||
+          line.includes("aws_new_account_allowed") ||
+          line.endsWith(" if aws_new_account"),
+      ).toBe(true);
     }
   });
 
   it("adds a key only for a role in an allowed account, from an answer naming one key and role", () => {
     expect(
       awsKeyResponseRules(CHECK).includes(
-        "    http-response set-map(/rules/keys.map) %[var(txn.aws_new_key)] 1 if aws_new_key aws_new_account aws_new_account_allowed",
+        "    http-response set-map(/rules/keys.map) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_new_key aws_new_account aws_new_account_allowed",
       ),
     ).toBe(true);
     expect(
