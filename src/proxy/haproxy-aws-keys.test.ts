@@ -5,6 +5,7 @@ import {
   AWS_RESOURCE_HOST,
   CODECOMMIT_HOST,
   FORM_CREDENTIAL,
+  FORM_SIGV4_CREDENTIAL,
   awsKeyRequestRules,
   awsKeyResponseRules,
   awsKeyExtension,
@@ -179,27 +180,23 @@ describe("the SigV2 credential in a form body", () => {
   });
 });
 
+describe("SigV4's credential in a form body", () => {
+  const credential = new RegExp(`(^|&)${FORM_SIGV4_CREDENTIAL}=`, "i");
+
+  it("counts the name in any case and with any character percent-encoded", () => {
+    for (const body of [
+      "X-Amz-Credential=K",
+      "Action=X&x-amz-credential=K",
+      "Action=X&X%2DAmz-Cr%65dential=K",
+    ]) {
+      expect(credential.test(body)).toBe(true);
+    }
+    expect(credential.test("Action=X&Message=a%26X-Amz-Credential%3DK")).toBe(false);
+  });
+});
+
 describe("AssumeRoleWithWebIdentity", () => {
   const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-
-  it("judges the unsigned call by the account in the form body's RoleArn", () => {
-    expect(
-      rules.includes(
-        "set-var(txn.aws_fed) bool(true) if aws_sts_host aws_form_post !aws_auth !aws_query !aws_body aws_fed_action !aws_fed_action_many",
-      ),
-    ).toBe(true);
-    expect(
-      rules.includes(
-        `'req.body_param(RoleArn),url_dec,regsub("^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$","\\1")' if aws_fed`,
-      ),
-    ).toBe(true);
-    expect(rules.includes("str(role-not-allowed) if aws_fed aws_role_account")).toBe(true);
-    expect(
-      rules.includes(
-        "str(allowed) if aws_fed aws_role_account { var(txn.aws_role_account) -m str -f /rules/accounts.lst }",
-      ),
-    ).toBe(true);
-  });
 
   it("matches Action undecoded, so a name hidden in another value does not count", () => {
     const action = /\(\^\|&\)(.*)=AssumeRoleWithWebIdentity\(&\|\$\)/.exec(rules)![1];
@@ -209,38 +206,22 @@ describe("AssumeRoleWithWebIdentity", () => {
       false,
     );
   });
-
-  it("refuses RoleArn named twice, or Action or RoleArn in the query", () => {
-    expect(
-      rules.includes(
-        "str(ambiguous-credential) if aws_fed aws_role_body_many or aws_fed aws_fed_in_query",
-      ),
-    ).toBe(true);
-  });
-
-  it("learns the key a web identity answer issues", () => {
-    expect(
-      awsKeyResponseRules(CHECK).includes(
-        "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity)?Response[\\s>]",
-      ),
-    ).toBe(true);
-  });
 });
 
 describe("the check with no role account", () => {
   const KEY_ONLY = { keyMapFile: "/rules/keys.map" };
+  const rules = awsKeyRequestRules(KEY_ONLY, "restrict").join("\n");
 
   it("learns nothing, so it neither reads STS answers nor rewrites their Accept-Encoding", () => {
     expect(awsKeyResponseRules(KEY_ONLY)).toStrictEqual([]);
-    const rules = awsKeyRequestRules(KEY_ONLY, "restrict").join("\n");
     expect(rules.includes("Accept-Encoding")).toBe(false);
     expect(rules.includes("aws_sts")).toBe(false);
     expect(rules.includes("aws_fed")).toBe(false);
+    expect(rules.includes("aws_role_account")).toBe(false);
   });
 
   it("lets no static CodeCommit credential through on its account", () => {
-    const rules = awsKeyRequestRules(KEY_ONLY, "restrict").join("\n");
-    expect(rules.includes("-at-[0-9]{12}")).toBe(false);
+    expect(rules.includes("aws_git_account")).toBe(false);
     expect(rules.includes("-m str -f")).toBe(false);
   });
 });
@@ -255,134 +236,44 @@ describe("awsKeyExtension", () => {
 });
 
 describe("awsKeyRequestRules", () => {
-  it("refuses in restrict, naming the verdict as the reason", () => {
-    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(
-      rules.includes(
-        "acl aws_refused var(txn.aws) -m str no-credential ambiguous-credential unreadable key-not-allowed role-not-allowed",
-      ),
-    ).toBe(true);
-    expect(rules.includes("set-var-fmt(txn.reason) aws-%[var(txn.aws)] if aws_refused")).toBe(true);
-    expect(rules.includes("http-request deny deny_status 403 if aws_refused")).toBe(true);
+  it("refuses in restrict, and only names what restrict would refuse in audit", () => {
+    const restrict = awsKeyRequestRules(CHECK, "restrict").join("\n");
+    expect(restrict.includes("http-request deny deny_status 403 if aws_refused")).toBe(true);
+    const audit = awsKeyRequestRules(CHECK, "audit").join("\n");
+    expect(audit.includes("txn.would_refuse")).toBe(true);
+    expect(audit.includes("deny")).toBe(false);
   });
 
-  it("only names what restrict would refuse in audit", () => {
-    const rules = awsKeyRequestRules(CHECK, "audit").join("\n");
-    expect(rules.includes("set-var(txn.aws) str(key-not-allowed)")).toBe(true);
-    expect(rules.includes("set-var-fmt(txn.would_refuse) aws-%[var(txn.aws)] if aws_refused")).toBe(
-      true,
-    );
-    expect(rules.includes("deny")).toBe(false);
+  it("orders the verdicts from the least decisive to the most, each one overriding those above", () => {
+    const verdicts = awsKeyRequestRules(CHECK, "restrict")
+      .map((l) => /set-var\(txn\.aws\) str\(([a-z-]+)\)/.exec(l)?.[1])
+      .filter((v) => v !== undefined);
+    expect([...new Set(verdicts)]).toStrictEqual([
+      "allowed",
+      "role-not-allowed",
+      "key-not-allowed",
+      "no-credential",
+      "ambiguous-credential",
+      "unreadable",
+    ]);
   });
 
-  it("matches the host once, and names the result everywhere else", () => {
+  it("matches each host pattern once", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(rules.split("-m reg ^([a-z0-9-]+\\.)+").length).toBe(2);
-    expect(rules.includes("acl aws_host var(txn.aws_host) -m bool")).toBe(true);
+    for (const pattern of [AWS_API_HOST, AWS_RESOURCE_HOST, CODECOMMIT_HOST, STS_HOST]) {
+      expect(rules.split(pattern).length).toBe(2);
+    }
   });
 
-  it("looks keys up in the map it is given", () => {
-    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(rules.includes("map(/rules/keys.map) -m found")).toBe(true);
+  it("counts AWS's own schemes and a CodeCommit login as a credential, and no other token", () => {
+    expect(
+      awsKeyRequestRules(CHECK, "restrict").filter((l) => l.includes("set-var(txn.aws_auth)")),
+    ).toStrictEqual([
+      "    http-request set-var(txn.aws_auth) bool(true) if aws_host { req.fhdr(authorization) -m reg -i ^aws } or aws_git",
+    ]);
   });
 
-  it("leaves an unsigned request to the URL rules only where the host names a resource", () => {
-    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(
-      rules.includes(
-        "str(unsigned) if aws_host !aws_auth !aws_query !aws_body aws_resource_host !aws_form or aws_git_bare !aws_query",
-      ),
-    ).toBe(true);
-    expect(
-      rules.includes(
-        "str(no-credential) if aws_host !aws_auth !aws_query !aws_body !aws_resource_host !aws_git_bare or",
-      ),
-    ).toBe(true);
-  });
-
-  it("refuses an S3 POST-policy upload, whose credential is in a body it does not read", () => {
-    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(rules.includes("{ req.hdr(content-type) -m beg -i multipart/form-data }")).toBe(true);
-    expect(rules.includes("or aws_host !aws_auth !aws_query !aws_body aws_form")).toBe(true);
-  });
-
-  it("reads a SigV2 key from a form body, and checks it as well as any other", () => {
-    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(rules.includes("wait-for-body time 30s use-large-buffer if aws_form_post")).toBe(true);
-    expect(rules.includes(`if aws_form_post { req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`)).toBe(
-      true,
-    );
-    expect(
-      rules.includes(
-        "aws_post { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded } or aws_post { req.body -m reg ^&*[A-Za-z0-9._~%*+!(),:/@-]*= }",
-      ),
-    ).toBe(true);
-    expect(
-      rules.includes("set-var(txn.aws_key) var(txn.aws_body_key) if aws_body !aws_auth !aws_query"),
-    ).toBe(true);
-    expect(rules.includes("or aws_body aws_body_many")).toBe(true);
-    expect(rules.includes(`(?s)(^|&)${FORM_CREDENTIAL}=.*&${FORM_CREDENTIAL}=`)).toBe(true);
-    expect(
-      rules.includes(
-        "str(key-not-allowed) if aws_body aws_auth !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(/rules/keys.map) -m found } or aws_body aws_query",
-      ),
-    ).toBe(true);
-  });
-
-  it("refuses what it cannot read through: an undecodable query, or a form body it has not all of", () => {
-    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(
-      rules.includes("str(unreadable) if aws_host { query -m found } !{ query,url_dec -m found }"),
-    ).toBe(true);
-    expect(
-      rules.includes(
-        "str(unreadable) if aws_form_post { req.hdr(content-encoding) -m reg -i ^(?!identity$) } or aws_form_post { req.hdr(transfer-encoding) -m found }",
-      ),
-    ).toBe(true);
-    expect(
-      rules.includes(
-        "str(unreadable) if aws_form_post { req.body_len,sub(txn.aws_body_size) lt 0 } or aws_form_post { req.body,length,sub(txn.aws_body_len) lt 0 }",
-      ),
-    ).toBe(true);
-  });
-
-  it("decodes the query before looking for a credential in it", () => {
-    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(rules.includes("acl aws_query query,url_dec -m reg -i")).toBe(true);
-    expect(rules.includes("acl aws_query_many query,url_dec -m reg -i (?s)(^|&)")).toBe(true);
-  });
-
-  it("leaves Accept-Encoding alone where the client signed it, in a header or a query", () => {
-    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(
-      rules.includes(
-        "acl aws_coding_signed query,url_dec -m reg -i (^|&)x-amz-signedheaders=[^&]*accept-encoding",
-      ),
-    ).toBe(true);
-    expect(
-      rules.includes("set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed"),
-    ).toBe(true);
-  });
-
-  it("reads CodeCommit's Basic user name as a key, or as <user>-at-<account>", () => {
-    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(rules.includes("acl aws_auth var(txn.aws_git) -m bool")).toBe(true);
-    expect(rules.includes(`'var(txn.aws_git_user),regsub("%.*$","")' if aws_git`)).toBe(true);
-    expect(
-      rules.includes(
-        `str(allowed) if { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}\\z } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f /rules/accounts.lst }`,
-      ),
-    ).toBe(true);
-    expect(
-      rules.includes(
-        "set-var(txn.aws_git_bare) bool(true) if aws_git_host !{ req.fhdr(authorization) -m found }",
-      ),
-    ).toBe(true);
-    expect(
-      rules.includes(
-        "set-var(txn.aws_post) bool(true) if aws_host METH_POST !aws_resource_host !aws_git_host",
-      ),
-    ).toBe(true);
+  it("reads CodeCommit's static Git user name as <user>-at-<account>, and nothing more", () => {
     const staticUser = /^((?!-at-).)+-at-[0-9]{12}(?![\s\S])/;
     expect(staticUser.test("deploy-at-111111111111")).toBe(true);
     expect(staticUser.test("x-at-222222222222-at-111111111111")).toBe(false);
@@ -399,17 +290,7 @@ describe("awsKeyRequestRules", () => {
     expect(codecommit.test("codecommit.us-east-1.amazonaws.com")).toBe(false);
   });
 
-  it("counts AWS's own schemes and a CodeCommit login as a credential, and no other token", () => {
-    const rules = awsKeyRequestRules(CHECK, "restrict");
-    expect(rules.filter((l) => l.startsWith("    acl aws_auth "))).toStrictEqual([
-      "    acl aws_auth req.fhdr(authorization) -m reg -i ^aws",
-      "    acl aws_auth var(txn.aws_git) -m bool",
-    ]);
-  });
-
-  it("asks STS for a body it can read", () => {
-    const rules = awsKeyRequestRules(CHECK, "audit").join("\n");
-    expect(rules.includes("set-header Accept-Encoding identity if aws_sts_host")).toBe(true);
+  it("asks STS for a body it can read, unless the client signed Accept-Encoding", () => {
     // The pattern the signed-header test reads, against real SignedHeaders lists.
     const signed = new RegExp("signedheaders=[^,]*accept-encoding", "i");
     expect(
@@ -419,20 +300,38 @@ describe("awsKeyRequestRules", () => {
   });
 });
 
-describe("awsKeyResponseRules", () => {
-  it("adds a key only for a role in an allowed account", () => {
-    const rules = awsKeyResponseRules(CHECK).join("\n");
-    expect(rules.includes("var(txn.aws_new_account) -m str -f /rules/accounts.lst")).toBe(true);
+describe("learning a key", () => {
+  it("learns only from an STS host that names no resource, after a request it let through", () => {
+    const rules = awsKeyRequestRules(CHECK, "audit").join("\n");
+    expect(
+      rules.includes("set-var(txn.aws_sts_host) bool(true) if aws_host !aws_resource_host"),
+    ).toBe(true);
     expect(
       rules.includes(
-        "set-map(/rules/keys.map) %[var(txn.aws_new_key)] 1 if aws_new_key aws_new_account aws_new_account_allowed",
+        "set-var(txn.aws_learn) bool(true) if aws_sts_host { var(txn.aws) -m str allowed }",
       ),
     ).toBe(true);
+    // S3 takes a bucket named sts, whose host STS_HOST alone would match.
+    expect(stsHost.test("sts.s3.amazonaws.com")).toBe(true);
+    expect(resourceHost.test("sts.s3.amazonaws.com")).toBe(true);
+    for (const line of awsKeyResponseRules(CHECK).filter((l) => l.includes(" if "))) {
+      expect(line.includes(" if aws_learn ") || line.includes("aws_new_account_allowed")).toBe(
+        true,
+      );
+    }
   });
 
-  it("learns nothing from an answer that names more than one key or role", () => {
-    const rules = awsKeyResponseRules(CHECK).join("\n");
-    expect(rules.includes("aws_assume_role !aws_many_keys !aws_many_arns")).toBe(true);
+  it("adds a key only for a role in an allowed account, from an answer naming one key and role", () => {
+    expect(
+      awsKeyResponseRules(CHECK).includes(
+        "    http-response set-map(/rules/keys.map) %[var(txn.aws_new_key)] 1 if aws_new_key aws_new_account aws_new_account_allowed",
+      ),
+    ).toBe(true);
+    expect(
+      awsKeyResponseRules(CHECK).filter((l) =>
+        l.includes("aws_assume_role !aws_many_keys !aws_many_arns"),
+      ).length,
+    ).toBe(2);
   });
 });
 

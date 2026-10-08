@@ -83,7 +83,8 @@ echo "--- audit: let through, and noted ---"
 run_step audit \
   AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
   INPUT_PROXY_MODE="audit" \
-  INPUT_RUN="curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTATTACKER0001/x' https://cloudformation.us-east-1.amazonaws.com/"
+  INPUT_RUN="curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTATTACKER0001/x' https://sts.us-east-1.amazonaws.com/sts/same-account &&
+    curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTLEARNEDKEY01/x' https://cloudformation.us-east-1.amazonaws.com/"
 RUN_EXIT=$?
 if [ "$RUN_EXIT" = "0" ]; then
   pass "audit refused nothing"
@@ -94,6 +95,11 @@ fi
 SUMMARY=$(cat "$TMPDIR/audit.md")
 assert_summary_contains "(restrict would refuse: aws-key-not-allowed)" \
   "the timeline says restrict would have refused the request"
+if grep -qE "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(restrict would refuse: aws-key-not-allowed\)" <<< "$SUMMARY"; then
+  pass "an AssumeRole answer to a key restrict would refuse taught no key"
+else
+  fail "an AssumeRole answer to a key restrict would refuse taught its key"
+fi
 if grep -qF "restrict mode would refuse" "$TMPDIR/audit.log"; then
   pass "a warning counts the requests restrict would refuse"
 else

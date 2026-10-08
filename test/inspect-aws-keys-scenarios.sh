@@ -83,6 +83,12 @@ check_status "the start key in the header, a SigV2 URL inside a body value" \
 check_status "the key repeated in the body" \
   "$($C -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)&AWSAccessKeyId=${AKIA}TESTSTARTKEY0001" $CF)" "403"
 
+echo "=== [a credential the check does not read] ==="
+check_status "the start key in the header, SigV3's header beside it" \
+  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "X-Amzn-Authorization: AWS3-HTTPS AWSAccessKeyId=${AKIA}TESTATTACKER0001,Algorithm=HmacSHA256,Signature=ab" $CF)" "403"
+check_status "the start key in the header, SigV4's parameters in the body" \
+  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "Action=ListQueues&X-Amz-Credential=${AKIA}TESTATTACKER0001%2F20261008%2Fus-east-1%2Fsqs%2Faws4_request" $CF)" "403"
+
 echo "=== [what the check cannot read through] ==="
 pad() { head -c "$1" /dev/zero | tr '\0' a; }
 check_status "the start key in the header, a key of the build's own past 300 KB of body" \
@@ -91,6 +97,14 @@ check_status "the start key in the header, a key of the build's own past 300 KB 
 check_status "the start key in the header, a 300 KB body" \
   "$({ printf 'Action=X&M='; pad 300000; } |
     $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "200"
+# 413 is the fixture origin's own 1 MiB cap: the proxy read the body to its
+# end, found the start key there, and let it through.
+check_status "the start key in the header and at the end of a body just under 4 MiB" \
+  "$({ printf 'Action=X&M='; pad 4150000; printf '&AWSAccessKeyId=%s' "${AKIA}TESTSTARTKEY0001"; } |
+    $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "413"
+check_status "the start key in the header, a key of the build's own at the end of a body just under 4 MiB" \
+  "$({ printf 'Action=X&M='; pad 4150000; printf '&AWSAccessKeyId=%s' "${AKIA}TESTATTACKER0001"; } |
+    $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "403"
 check_status "the start key in the header, a form body past 4 MiB" \
   "$({ printf 'Action=X&M='; pad 4300000; } |
     $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "403"
@@ -138,6 +152,10 @@ check_status "a static Git credential sent to another AWS API host" \
 echo "=== [a key AssumeRole issued] ==="
 check_status "unknown until AssumeRole hands it out" \
   "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTLEARNEDKEY01)" $CF)" "403"
+check_status "an AssumeRole answer read unsigned from a bucket named sts" "$($C https://sts.s3.amazonaws.com/sts/same-account)" "200"
+check_status "the same answer read with the start key" \
+  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" https://sts.s3.amazonaws.com/sts/same-account)" "200"
+check_status "the key in it, still unknown" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTLEARNEDKEY01)" $CF)" "403"
 check_status "AssumeRole for a role in the allowed account" \
   "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Accept-Encoding: gzip" $STS/sts/same-account)" "200"
 check_status "the key it issued" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTLEARNEDKEY01)" $CF)" "200"

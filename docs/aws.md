@@ -122,6 +122,7 @@ it with no `Authorization` at all, which Git sends first to be told to log in, i
 | A CodeCommit request with no `Authorization`, as Git sends first                                                 | allowed                    |
 | More than one credential: two `Authorization` headers, a header and a query credential, or a credential repeated | `aws-ambiguous-credential` |
 | A key in a form body and another in the header or query, either of them unknown                                  | `aws-key-not-allowed`      |
+| SigV3's `X-Amzn-Authorization` header, or SigV4's `X-Amz-Credential` in a form body, which no current SDK sends  | `aws-key-not-allowed`      |
 | A form body or query string the proxy cannot read through (above)                                                | `aws-unreadable`           |
 | `AssumeRoleWithWebIdentity` for a role in an account not in `allowed_aws_role_accounts`                          | `aws-role-not-allowed`     |
 
@@ -229,10 +230,12 @@ use one:
   stays `aws-no-credential`. `AssumeRoleWithSAML` is refused as `aws-no-credential`, and keys from
   IAM Identity Center's `GetRoleCredentials` or Cognito's `GetCredentialsForIdentity` are never
   learned. Get those credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
-- Keys are learned only from STS answers over HTTPS. The proxy asks STS for an uncompressed answer,
-  unless the client signed its own `Accept-Encoding`, which the proxy then leaves alone. It reads an
-  answer up to its buffer size (16 KB). A key in a compressed answer or past the buffer is not
-  learned, and requests signed with it are refused.
+- Keys are learned only from STS answers over HTTPS, to a request the check allowed, so in audit
+  mode a request restrict would refuse teaches no key. A host that names a resource is never taken
+  for STS, even an S3 bucket named `sts`. The proxy asks STS for an uncompressed answer, unless the
+  client signed its own `Accept-Encoding`, which the proxy then leaves alone. It reads an answer up
+  to its buffer size (16 KB). A key in a compressed answer or past the buffer is not learned, and
+  requests signed with it are refused.
 - A connection `allowed_tls_rules` or `allowed_ip_rules` passes through is never decrypted, so the
   check never sees its requests. Do not pass AWS API hosts through.
 - S3 Express One Zone directory buckets are signed with keys `CreateSession` issues, which the proxy
