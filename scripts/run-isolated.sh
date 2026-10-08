@@ -194,7 +194,8 @@ ip link set "$VETH_P" netns "$PROXY_NETNS_NAME"
 echo "Configuring sandbox namespace network..." >&2
 # Positional arguments, so a value can never become shell syntax.
 # No link-local address on eth0: it would arrive after the command starts,
-# and Chromium fails a request in flight on any address change.
+# and Chromium fails a request in flight on any address change. A kernel
+# without IPv6 gives it none anyway.
 ip netns exec "$NETNS_NAME" sh -c '
   set -e
   ip link set "$1" name eth0
