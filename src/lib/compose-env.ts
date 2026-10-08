@@ -14,7 +14,7 @@ export interface ComposeEnvOptions {
   urlRules: string[];
   tlsRules: string[];
   /** Empty leaves the AWS access key check off. */
-  awsKeys: string[];
+  awsKey: string;
   awsRoleAccounts: string[];
 }
 
@@ -37,7 +37,7 @@ export function buildComposeEnv(
     ipRules,
     urlRules,
     tlsRules,
-    awsKeys,
+    awsKey,
     awsRoleAccounts,
   }: ComposeEnvOptions,
   env: NodeJS.ProcessEnv,
@@ -54,7 +54,7 @@ export function buildComposeEnv(
     ALLOWED_IP_RULES: ipRules.join("\n"),
     ALLOWED_URL_RULES: urlRules.join("\n"),
     ALLOWED_TLS_RULES: tlsRules.join("\n"),
-    ALLOWED_AWS_KEYS: awsKeys.join(" "),
+    ALLOWED_AWS_KEY: awsKey,
     ALLOWED_AWS_ROLE_ACCOUNTS: awsRoleAccounts.join(" "),
     BUILDCAGE_PROXY_IMAGE_REF: imageRef,
     // The compose network's gateway is added engine-side; see

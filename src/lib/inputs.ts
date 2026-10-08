@@ -156,12 +156,12 @@ export function readFailOnBlocked(getInput: GetInput = core.getInput): boolean {
 
 export interface AwsKeyInputs {
   /** The key the step starts with, its own AWS_ACCESS_KEY_ID; empty leaves the check off. */
-  keys: string[];
+  key: string;
   /** Accounts whose roles the step may assume; empty learns no key. */
   roleAccounts: string[];
 }
 
-const AWS_KEY_CHECK_OFF: AwsKeyInputs = { keys: [], roleAccounts: [] };
+const AWS_KEY_CHECK_OFF: AwsKeyInputs = { key: "", roleAccounts: [] };
 
 /**
  * The AWS access key check pins the step to its own AWS_ACCESS_KEY_ID; role
@@ -238,5 +238,5 @@ export function readAwsKeyInputs(
       "AWS_ACCESS_KEY_MISSING",
     );
   }
-  return { keys: [key], roleAccounts };
+  return { key, roleAccounts };
 }
