@@ -75,7 +75,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    name: "integration: test (sandbox)"
+    # The longest job here when it was one, so split in two.
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [filesystem, runtime]
+    name: "integration: test (sandbox, ${{ matrix.part }})"
 
     env:
       PROXY_ENGINE: universal
@@ -103,19 +108,28 @@ jobs:
       - name: Run integration tests
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-        run: make test_integration_sandbox_linux
+        run: make test_integration_sandbox_linux_${{ matrix.part }}
 
-  # Separate job from test_sandbox: this one needs compose.test-universal.yaml's fixtures.
+  # Three groups side by side, each under its own Compose project and test-net
+  # subnet (the names a linked worktree gets): the universal engine's fixture
+  # tests, the inspect engine's CA half, and the listener check, which builds
+  # its own images and attaches no sandbox. The CA half cannot share a job with
+  # the rules half: its cleanup checks wait for every inspect step of the user
+  # to end.
   test_sandbox_universal:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_universal == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_universal == 'true' || needs.changes.outputs.test_sandbox_inspect == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    name: "integration: test (sandbox, universal engine fixture)"
+    name: "integration: test (sandbox, universal engine fixture, inspect CA, listener scope)"
 
+    # The cleanup step below tears these down by the same names.
     env:
-      PROXY_ENGINE: universal
+      UNIVERSAL_SUFFIX: -universal
+      UNIVERSAL_PROJECT: buildcage-test-universal
+      CA_SUFFIX: -ca
+      CA_PROJECT: buildcage-test-inspect-ca
 
     steps:
       - name: Checkout
@@ -125,46 +139,70 @@ jobs:
 
       - uses: ./.github/actions/setup-vp
 
-      - name: Build local sandbox proxy image
-        run: docker compose build proxy
-
-      - name: Resolve local image ref
-        id: local_image
-        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
+      # compose.yaml names the image the same for either engine, so each build
+      # is retagged before the next one overwrites it.
+      - name: Build local proxy images for both engines
+        run: |
+          PROXY_ENGINE=universal docker compose build proxy
+          docker tag "$(PROXY_ENGINE=universal docker compose config --images proxy)" buildcage-it-proxy:universal
+          PROXY_ENGINE=inspect docker compose build proxy --build-arg BUILDCAGE_TEST_HOOKS=1
+          docker tag "$(PROXY_ENGINE=inspect docker compose config --images proxy)" buildcage-it-proxy:inspect
 
       - name: Rebuild the action with the local-image test hook enabled
         env:
           BUILDCAGE_BUILD_TEST_HOOKS: "1"
         run: vp run build
 
-      - name: Run universal-engine fixture-based integration tests
-        env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-        run: make test_integration_sandbox_universal
+      - parallel:
+          - name: Run universal-engine fixture-based integration tests
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: buildcage-it-proxy:universal
+              PROXY_ENGINE: universal
+              BUILDCAGE_WORKTREE_SUFFIX: ${{ env.UNIVERSAL_SUFFIX }}
+              COMPOSE_PROJECT_NAME: ${{ env.UNIVERSAL_PROJECT }}
+              TEST_NET_SUBNET: 10.211.0.0/24
+            run: make test_integration_sandbox_universal
+
+          - name: Run the inspect engine's CA half
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: buildcage-it-proxy:inspect
+              PROXY_ENGINE: inspect
+              BUILDCAGE_WORKTREE_SUFFIX: ${{ env.CA_SUFFIX }}
+              COMPOSE_PROJECT_NAME: ${{ env.CA_PROJECT }}
+              TEST_NET_SUBNET: 10.212.0.0/24
+            run: make test_integration_sandbox_inspect_ca
+
+          - name: Run listener-scope integration tests
+            env:
+              BUILDCAGE_WORKTREE_SUFFIX: -listener
+            run: make test_integration_listener_scope
 
       - name: Verify no leftover fixture/proxy containers or networks
         if: always()
         run: |
-          docker compose -f compose.test-universal.yaml down -v || true
-          LEFTOVER_N=$(docker network ls --filter "name=buildcage-test-universal-net" -q)
-          if [ -n "$LEFTOVER_N" ]; then
-            echo "::error::leftover buildcage-test-universal-net network found"
+          BUILDCAGE_WORKTREE_SUFFIX=$UNIVERSAL_SUFFIX COMPOSE_PROJECT_NAME=$UNIVERSAL_PROJECT \
+            docker compose -f compose.test-universal.yaml down -v || true
+          BUILDCAGE_WORKTREE_SUFFIX=$CA_SUFFIX COMPOSE_PROJECT_NAME=$CA_PROJECT \
+            docker compose -f compose.test-inspect.yaml down -v || true
+          leftover=""
+          for name in buildcage-test- buildcage-listener-scope- buildcage-proxy; do
+            leftover+=$(docker ps -a --filter "name=$name" --format '{{.Names}} ')
+            leftover+=$(docker network ls --filter "name=$name" --format '{{.Name}} ')
+          done
+          if [ -n "$leftover" ]; then
+            echo "::error::leftover containers or networks: $leftover"
             exit 1
           fi
 
-  # Separate job from test_sandbox: this one needs an inspect-engine image and fixtures.
+  # Separate job from test_sandbox: this one needs an inspect-engine image and
+  # fixtures. The CA half runs in test_sandbox_universal.
   test_sandbox_inspect:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_inspect == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    # The longest job here when it was one, so split in two.
-    strategy:
-      fail-fast: false
-      matrix:
-        part: [rules, ca]
-    name: "integration: test (sandbox, inspect engine, ${{ matrix.part }})"
+    name: "integration: test (sandbox, inspect engine)"
 
     steps:
       - name: Checkout
@@ -192,14 +230,13 @@ jobs:
 
       # The runner's python3 is older than 3.13, which the Python scenario needs.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: matrix.part == 'rules'
         with:
           python-version: "3.14"
 
       - name: Run inspect-engine integration tests
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-        run: make test_integration_sandbox_inspect_${{ matrix.part }}
+        run: make test_integration_sandbox_inspect_rules
 
       - name: Verify no leftover fixture/proxy containers or networks
         if: always()
@@ -211,30 +248,11 @@ jobs:
             exit 1
           fi
 
-  # Separate job from the others: it builds both engines' images and attaches no sandbox.
-  test_listener_scope:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    name: "integration: test (listener scope, both engines)"
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Run listener-scope integration tests
-        run: make test_integration_listener_scope
-
   # Single, stably-named required status check for branch protection.
   integration-tests-passed:
     name: Integration tests passed
     runs-on: ubuntu-latest
-    needs:
-      [changes, test_sandbox, test_sandbox_universal, test_sandbox_inspect, test_listener_scope]
+    needs: [changes, test_sandbox, test_sandbox_universal, test_sandbox_inspect]
     if: always()
     permissions: {}
     steps:
