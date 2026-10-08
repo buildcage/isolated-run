@@ -160,7 +160,8 @@ CloudWatch Logs ingestion tokens and the IAM Identity Center portal. Sign those 
 where the API takes it.
 
 An S3 POST-policy upload, the browser-style upload that carries its credential in the form body, is
-refused as `aws-no-credential`, since the proxy does not read a multipart body. Upload with `PutObject`
+refused as `aws-no-credential`, since the proxy does not read a multipart body, and as
+`aws-key-not-allowed` when it also carries a credential the proxy does read. Upload with `PutObject`
 instead, as the AWS CLI and the SDKs do, or with a presigned `PutObject` URL. Both carry the key
 where the check reads it.
 
@@ -230,8 +231,8 @@ use one:
   stays `aws-no-credential`. `AssumeRoleWithSAML` is refused as `aws-no-credential`, and keys from
   IAM Identity Center's `GetRoleCredentials` or Cognito's `GetCredentialsForIdentity` are never
   learned. Get those credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
-- Keys are learned only from STS answers over HTTPS, to a request the check allowed, so in audit
-  mode a request restrict would refuse teaches no key. A host that names a resource is never taken
+- Keys are learned only from STS answers over HTTPS, to a request the key check allowed, so in
+  audit mode a request it would refuse teaches no key. A host that names a resource is never taken
   for STS, even an S3 bucket named `sts`. The proxy asks STS for an uncompressed answer, unless the
   client signed its own `Accept-Encoding`, which the proxy then leaves alone. It reads an answer up
   to its buffer size (16 KB). A key in a compressed answer or past the buffer is not learned, and

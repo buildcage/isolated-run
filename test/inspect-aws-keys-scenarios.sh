@@ -56,6 +56,8 @@ check_status "an unsigned read of an EKS OIDC discovery document" \
   "$($C https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF0123456789/.well-known/openid-configuration)" "200"
 check_status "a POST-policy upload to a bucket, its credential in the form" \
   "$($C -F "x-amz-credential=${AKIA}TESTATTACKER0001/20261008/us-east-1/s3/aws4_request" -F "file=@/dev/null" https://bucket.s3.amazonaws.com/)" "403"
+check_status "a POST-policy upload with the start key in the header too" \
+  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -F "x-amz-credential=${AKIA}TESTATTACKER0001/20261008/us-east-1/s3/aws4_request" -F "file=@/dev/null" https://bucket.s3.amazonaws.com/)" "403"
 check_status "an unsigned STS call" "$($C -X POST $STS/)" "403"
 check_status "an unsigned read from STS" "$($C "$STS/?Action=GetCallerIdentity")" "403"
 check_status "a Bearer token to CloudFormation" "$($C -X POST -H "Authorization: Bearer token" $CF)" "403"

@@ -139,29 +139,33 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    acl aws_form var(txn.aws_form) -m bool",
     "    http-request wait-for-body time 30s use-large-buffer if aws_form",
     "    # Matched undecoded, since a value carries & and = encoded, but each",
-    "    # letter of the name may be.",
-    `    http-request set-var(txn.aws_body) bool(true) if aws_form { req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`,
+    "    # letter of the name may be. One pass for either credential first: most",
+    "    # form bodies hold neither.",
+    `    http-request set-var(txn.aws_body_credential) bool(true) if aws_form { req.body -m reg -i (^|&)(${FORM_CREDENTIAL}|${FORM_SIGV4_CREDENTIAL})= }`,
+    "    acl aws_body_credential var(txn.aws_body_credential) -m bool",
+    `    http-request set-var(txn.aws_body) bool(true) if aws_body_credential { req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`,
     "    acl aws_body var(txn.aws_body) -m bool",
     `    acl aws_body_many req.body -m reg -i (?s)(^|&)${FORM_CREDENTIAL}=.*&${FORM_CREDENTIAL}=`,
     "    http-request set-var(txn.aws_body_key) req.body_param(AWSAccessKeyId,i) if aws_body",
     "    # SigV3's header and SigV4's parameters in a form body: no current SDK",
     "    # sends either, so the key in them is never read, and never matches.",
-    `    http-request set-var(txn.aws_unread) bool(true) if aws_host { req.hdr(x-amzn-authorization) -m found } or aws_form { req.body -m reg -i (^|&)${FORM_SIGV4_CREDENTIAL}= }`,
+    `    http-request set-var(txn.aws_unread) bool(true) if aws_host { req.hdr(x-amzn-authorization) -m found } or aws_body_credential { req.body -m reg -i (^|&)${FORM_SIGV4_CREDENTIAL}= }`,
     "    acl aws_unread var(txn.aws_unread) -m bool",
     "    # A header neither pattern matches comes out unchanged, and so never",
     "    # equals a key in the map.",
     `    http-request set-var(txn.aws_key) 'req.fhdr(authorization),regsub("^AWS4-[A-Z0-9-]+ +Credential=([A-Za-z0-9]+)/.*$","\\1",i),regsub("^AWS ([A-Za-z0-9]+):.*$","\\1",i)' if aws_auth !aws_git`,
-    `    http-request set-var(txn.aws_key) 'url_param(X-Amz-Credential),url_dec,regsub("^([A-Za-z0-9]+)/.*$","\\1")' if aws_query { url_param(X-Amz-Credential) -m found }`,
-    "    http-request set-var(txn.aws_key) url_param(AWSAccessKeyId) if aws_query { url_param(AWSAccessKeyId) -m found }",
+    `    http-request set-var(txn.aws_key) 'url_param(X-Amz-Credential),url_dec,regsub("^([A-Za-z0-9]+)/.*$","\\1")' if aws_query !aws_auth { url_param(X-Amz-Credential) -m found }`,
+    "    http-request set-var(txn.aws_key) url_param(AWSAccessKeyId) if aws_query !aws_auth { url_param(AWSAccessKeyId) -m found }",
     `    http-request set-var(txn.aws_git_user) 'req.fhdr(authorization),regsub("^basic\\s+","",i),b64dec,regsub(":.*$","")' if aws_git`,
     '    http-request set-var(txn.aws_key) \'var(txn.aws_git_user),regsub("%.*$","")\' if aws_git',
     "    # Unsigned, whatever the method, only where the host names a resource:",
     "    # elsewhere the account a request reaches is in the parameters or the",
-    "    # body, out of sight. An S3 POST-policy upload carries its credential in",
-    "    # a multipart body, which this does not read, so it is no exception.",
+    "    # body, out of sight. Not an S3 POST-policy upload, though: its",
+    "    # credential is in a multipart body, which this does not read.",
     "    # Git asks CodeCommit with no credential first, and logs in on its 401.",
     `    http-request set-var(txn.aws_post_policy) bool(true) if aws_resource_host METH_POST { req.hdr(content-type) -m beg -i multipart/form-data } { var(txn.host) -m reg ${S3_HOST} }`,
-    "    http-request set-var(txn.aws_unsigned_ok) bool(true) if aws_resource_host !{ var(txn.aws_post_policy) -m bool } or aws_git_host !{ req.fhdr(authorization) -m found }",
+    "    acl aws_post_policy var(txn.aws_post_policy) -m bool",
+    "    http-request set-var(txn.aws_unsigned_ok) bool(true) if aws_resource_host !aws_post_policy or aws_git_host !{ req.fhdr(authorization) -m found }",
     "    acl aws_unsigned_ok var(txn.aws_unsigned_ok) -m bool",
     ...(check.accountFile ? accountRules(check.accountFile) : []),
     "    # Where a credential could be out of sight: a query url_dec cannot decode",
@@ -177,9 +181,9 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
           `    http-request set-var(txn.aws) str(role-not-allowed) if aws_role_account !{ var(txn.aws_role_account) -m str -f ${check.accountFile} }`,
         ]
       : []),
-    `    http-request set-var(txn.aws) str(key-not-allowed) if aws_body !{ var(txn.aws_body_key),${map} }`,
-    `    http-request set-var(txn.aws) str(key-not-allowed) if aws_auth !{ var(txn.aws_key),${map} }${check.accountFile ? " !aws_git_account" : ""} or aws_query !{ var(txn.aws_key),${map} }`,
-    "    http-request set-var(txn.aws) str(key-not-allowed) if aws_unread",
+    "    # A POST-policy upload's own credential is never read, so one next to it",
+    "    # is refused; alone, it is no-credential below.",
+    `    http-request set-var(txn.aws) str(key-not-allowed) if aws_body !{ var(txn.aws_body_key),${map} } or aws_auth !{ var(txn.aws_key),${map} }${check.accountFile ? " !aws_git_account" : ""} or aws_query !{ var(txn.aws_key),${map} } or aws_unread or aws_post_policy`,
     `    http-request set-var(txn.aws) str(no-credential) if aws_host !aws_auth !aws_query !aws_body !aws_unread !aws_unsigned_ok${check.accountFile ? " !aws_role_account" : ""}`,
     `    http-request set-var(txn.aws) str(ambiguous-credential) if aws_auth aws_query or aws_auth aws_auth_many or aws_query aws_query_many or aws_body aws_body_many${check.accountFile ? " or aws_fed aws_role_body_many or aws_fed aws_fed_in_query" : ""}`,
     "    http-request set-var(txn.aws) str(unreadable) if aws_host { query -m found } !{ query,url_dec -m found }",
@@ -238,9 +242,9 @@ function accountRules(accountFile: string): string[] {
 /**
  * Response rules: learn the key an AssumeRole or AssumeRoleWithWebIdentity
  * answer issues, only to a request the check let through and only when the
- * role's account is allowed. The role ARN is
- * AWS's own, not the caller's. A body larger than the buffer is read only in
- * part, so a key past it is not learned and its requests are refused.
+ * role's account is allowed. The role ARN is AWS's own, not the caller's. A
+ * body larger than the buffer is read only in part, so a key past it is not
+ * learned and its requests are refused.
  */
 export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
   if (!check.accountFile) return [];
