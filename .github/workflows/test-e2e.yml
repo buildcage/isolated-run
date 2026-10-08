@@ -268,6 +268,10 @@ jobs:
           test -s "$f"
           echo "::group::Recorded events (first lines)"; head -20 "$f"; echo "::endgroup::"
           grep -q '"kind":"write"' "$f"
+          # overlayfs opens a layer's directories with O_NOATIME (0o1000000) on
+          # its own behalf; none of those may pass for the step's.
+          n=$(jq -s '[.[] | select(.kind == "open" and ((.flags // 0) / 262144 | floor) % 2 == 1)] | length' "$f")
+          [ "$n" -eq 0 ]
           # buildcage's own exec wrappers and scratch files must not leak.
           ! grep -qE '"comm":"(setpriv|buildcage-init|run-script\.sh)"' "$f"
           # A program run by a relative name is recorded under the file it
