@@ -26846,7 +26846,7 @@ function renderEvent(event, startedAt) {
 }
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
 function credentialName(name) {
-	return name.toLowerCase().replace(/[-_]/g, "");
+	return name.toLowerCase().replace(/(\[[^\]]*\])+$/, "").replace(/[-_.]/g, "");
 }
 const PARAM_NAME = /(^|[;?])([^;?=]*)=/g;
 function redactPart(part) {
