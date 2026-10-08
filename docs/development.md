@@ -70,6 +70,20 @@ the real action wrapper (see `test/integration-test-*.sh`) and is what CI's `tes
 cover or just to keep off the real internet. The CI-only `test_sandbox_*` end-to-end jobs run on a real
 runner host with no nested container, and are the final word on whether a change works.
 
+### Refreshing the filesystem audit fixtures
+
+The filesystem audit's golden test strips and renders a real recording from the
+`test_sandbox_filesystem_audit` e2e job, kept in `src/lib/__fixtures__/filesystem-audit/`. When the
+tracer's output changes, take a new one from a passing run of that job:
+
+```bash
+dev/update-filesystem-audit-fixture.sh <run id of "Test / E2E">
+```
+
+It pulls the raw recording out of the run's log, normalizes the runner's uid in the scratch base to
+0, and regenerates the stripped recording and the summary through the golden test. Read the diff
+before committing: it is the change in what the audit records and shows.
+
 ### Running the integration tests from several git worktrees
 
 `test_integration_sandbox_universal` and `test_integration_sandbox_inspect` use the fixture origins
@@ -321,7 +335,8 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 ├── test/                      # assert-sandbox*.sh + integration-test-*.sh driving dist/main.cjs,
 │                              # and *-scenarios.sh run inside the sandbox as a step's own `run:`.
 │                              # helpers.sh carries what both halves share
-├── dev/                       # Mac dev-loop-only image and scripts, not used in production or CI
+├── dev/                       # Mac dev-loop image and scripts, and the filesystem audit fixture
+│                              # refresh; not used in production or CI
 ├── docs/                      # development.md, security.md, plus the reference.md/rules.md/
 │                              # inspect-engine.md link stubs
 ├── licenses/                  # gen-license-file.mjs, which regenerates THIRD_PARTY_LICENSES_NPM
