@@ -252,20 +252,22 @@ docker compose exec proxy curl -s --unix-socket /var/run/haproxy-health.sock \
 
 `make help` lists every target with its own description. The ones you type most:
 
-| Command                                       | Description                                                                |
-| --------------------------------------------- | -------------------------------------------------------------------------- |
-| `make setup_sandbox_dev`                      | Start the proxy and the mac-friendly dev-loop runner                       |
-| `make test_sandbox_dev`                       | Run a sample isolated command in the dev loop and verify isolation         |
-| `make clean_sandbox_dev`                      | Stop and remove the dev-loop containers                                    |
-| `make test_unit`                              | Every unit test: core, the action's own, and the QuickJS run               |
-| `make test_unit_coverage`                     | Every Node unit test in one run, with a coverage report                    |
-| `make test_integration`                       | Every integration test CI runs, as the four groups below                   |
-| `make test_integration_sandbox_linux`         | The action's integration tests on a Linux host                             |
-| `make test_integration_sandbox_universal`     | The ones that need the universal engine's fixture origin                   |
-| `make test_integration_sandbox_inspect`       | The same for the inspect engine, round trip included                       |
-| `make test_integration_sandbox_inspect_rules` | Its first half: restrict, audit, round trip and the AWS key check          |
-| `make test_integration_sandbox_inspect_ca`    | Its second half: Chromium's NSS database and the CA mount's reserved paths |
-| `make test_integration_listener_scope`        | `:10024`/`:53` stay unreachable outside `buildcage0`, both engines         |
+| Command                                          | Description                                                                |
+| ------------------------------------------------ | -------------------------------------------------------------------------- |
+| `make setup_sandbox_dev`                         | Start the proxy and the mac-friendly dev-loop runner                       |
+| `make test_sandbox_dev`                          | Run a sample isolated command in the dev loop and verify isolation         |
+| `make clean_sandbox_dev`                         | Stop and remove the dev-loop containers                                    |
+| `make test_unit`                                 | Every unit test: core, the action's own, and the QuickJS run               |
+| `make test_unit_coverage`                        | Every Node unit test in one run, with a coverage report                    |
+| `make test_integration`                          | Every integration test CI runs, as the four groups below                   |
+| `make test_integration_sandbox_linux`            | The action's integration tests on a Linux host                             |
+| `make test_integration_sandbox_linux_filesystem` | Its first half: filesystem modes, `write_through:`, scratch, mounts        |
+| `make test_integration_sandbox_linux_runtime`    | Its second half: defaults, processes, signals, the proxy's lifecycle       |
+| `make test_integration_sandbox_universal`        | The ones that need the universal engine's fixture origin                   |
+| `make test_integration_sandbox_inspect`          | The same for the inspect engine, round trip included                       |
+| `make test_integration_sandbox_inspect_rules`    | Its first half: restrict, audit, round trip and the AWS key check          |
+| `make test_integration_sandbox_inspect_ca`       | Its second half: Chromium's NSS database and the CA mount's reserved paths |
+| `make test_integration_listener_scope`           | `:10024`/`:53` stay unreachable outside `buildcage0`, both engines         |
 
 The first three integration groups need `BUILDCAGE_LOCAL_IMAGE_REF` and a test-hook build of
 `dist/main.cjs`; see [Local Development](#local-development) above. They do not all want the same

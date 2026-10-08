@@ -75,7 +75,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    name: "integration: test (sandbox)"
+    # The longest job here when it was one, so split in two.
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [filesystem, runtime]
+    name: "integration: test (sandbox, ${{ matrix.part }})"
 
     env:
       PROXY_ENGINE: universal
@@ -103,7 +108,7 @@ jobs:
       - name: Run integration tests
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-        run: make test_integration_sandbox_linux
+        run: make test_integration_sandbox_linux_${{ matrix.part }}
 
   # Three groups side by side, each under its own Compose project and test-net
   # subnet (the names a linked worktree gets): the universal engine's fixture

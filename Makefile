@@ -109,24 +109,32 @@ clean_sandbox_dev: ## Stop and remove the sandbox dev-loop containers
 .PHONY: test_integration
 test_integration: test_integration_sandbox_linux test_integration_sandbox_universal test_integration_sandbox_inspect test_integration_listener_scope ## Every integration test CI runs; the four groups need different proxy images, so build each one's image first
 
-# Drives dist/main.cjs directly (a host command, not a Docker build).
+# Drives dist/main.cjs directly (a host command, not a Docker build). Two
+# halves so CI can run them as parallel jobs.
 .PHONY: test_integration_sandbox_linux
-test_integration_sandbox_linux: export INPUT_PROXY_ENGINE := universal
-test_integration_sandbox_linux: ## Run the action's integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF and a test-hook build of dist/main.cjs)
+test_integration_sandbox_linux: test_integration_sandbox_linux_filesystem test_integration_sandbox_linux_runtime ## Run the action's integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF and a test-hook build of dist/main.cjs)
+
+.PHONY: test_integration_sandbox_linux_filesystem
+test_integration_sandbox_linux_filesystem: export INPUT_PROXY_ENGINE := universal
+test_integration_sandbox_linux_filesystem: ## The action's filesystem integration tests: modes, write_through:, scratch, mounts
 	@./test/integration-test-ephemeral-fs.sh
 	@./test/integration-test-writable-dir.sh
+	@./test/integration-test-fs-escape.sh
+	@./test/integration-test-scratch-isolation.sh
+	@./test/integration-test-scratch-alias.sh
+	@./test/integration-test-mounts-readonly.sh
+	@./test/integration-test-file-commands.sh
+	@./test/integration-test-symlinked-checkout.sh
+
+.PHONY: test_integration_sandbox_linux_runtime
+test_integration_sandbox_linux_runtime: export INPUT_PROXY_ENGINE := universal
+test_integration_sandbox_linux_runtime: ## The action's remaining integration tests: defaults, processes, signals, the proxy's lifecycle
 	@./test/integration-test-defaults.sh
 	@./test/integration-test-host-parity.sh
 	@./test/integration-test-seccomp.sh
 	@./test/integration-test-die-with-parent.sh
 	@./test/integration-test-signal-exit.sh
-	@./test/integration-test-fs-escape.sh
-	@./test/integration-test-scratch-isolation.sh
-	@./test/integration-test-scratch-alias.sh
-	@./test/integration-test-mounts-readonly.sh
 	@./test/integration-test-host-commands.sh
-	@./test/integration-test-file-commands.sh
-	@./test/integration-test-symlinked-checkout.sh
 	@./test/integration-test-zero-traffic.sh
 	@./test/integration-test-runtime-sockets.sh
 	@./test/integration-test-post-state-tampering.sh
