@@ -90,6 +90,7 @@ describe("hosts that name the resource", () => {
       "bucket.s3.eusc-de-east-1.amazonaws.eu",
       "111111111111.dkr.ecr.us-east-1.amazonaws.com",
       "111111111111.dkr.ecr.cn-north-1.amazonaws.com.cn",
+      "111111111111.dkr.ecr-fips.us-east-1.amazonaws.com",
       "my-domain-111111111111.d.codeartifact.us-east-1.amazonaws.com",
       "b123abcde4.execute-api.us-west-2.amazonaws.com",
       "example1234567890000.appsync-api.us-east-1.amazonaws.com",
@@ -99,6 +100,14 @@ describe("hosts that name the resource", () => {
       "ec2-52-54-55-66.ap-southeast-2.compute.amazonaws.com",
       "ec2-55-41-26-75.compute-1.amazonaws.com",
       "awscli.amazonaws.com",
+      "g-abcdef1234.grafana-workspace.us-east-1.amazonaws.com",
+      "b-1234a5b6-78cd-901e-2fgh-3i45j6k178l9.mq.us-east-2.amazonaws.com",
+      "search-my-domain-abcdefghijklmnop.us-east-1.es.amazonaws.com",
+      "vpc-my-domain-abcdefghijklmnop.us-east-1.es.amazonaws.com",
+      "oidc.eks.us-east-1.amazonaws.com",
+      "oidc-eks.us-east-1.api.aws",
+      "oidc-eks.cn-north-1.api.amazonwebservices.com.cn",
+      "oidc-eks.eusc-de-east-1.api.amazonwebservices.eu",
     ]) {
       expect(resourceHost.test(host)).toBe(true);
     }
@@ -118,6 +127,19 @@ describe("hosts that name the resource", () => {
       "elasticloadbalancing.us-east-1.amazonaws.com",
       "sts.us-east-1.api.aws",
       "evil-s3.amazonaws.com",
+      "grafana.us-east-1.amazonaws.com",
+      "mq.us-east-1.amazonaws.com",
+      "es.us-east-1.amazonaws.com",
+      "abcdef123456.us-east-1.aoss.amazonaws.com",
+      "eks.us-east-1.amazonaws.com",
+      "oidc.us-east-1.amazonaws.com",
+      "ecr-fips.us-east-1.amazonaws.com",
+      "dkr.ecr-fips.us-east-1.amazonaws.com",
+      "es-fips.us-east-1.amazonaws.com",
+      "grafana-fips.us-east-1.amazonaws.com",
+      "x.grafana-workspace.us-east-1.amazonaws.com",
+      "x.mq.us-east-1.amazonaws.com",
+      "x.us-east-1.es.amazonaws.com",
     ]) {
       expect(resourceHost.test(host)).toBe(false);
     }

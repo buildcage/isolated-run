@@ -41,14 +41,21 @@ export const STS_HOST =
   `^sts(-fips)?(\\.[a-z0-9-]+)?\\.${AWS_DOMAINS}$` +
   "|^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.sts\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$";
 // Hosts that name the resource a request is for, in the host or (S3's path
-// style) the path, so the URL rules can pin the account and an unsigned request
-// is left to them: S3 in every form, ECR registries, CodeArtifact repositories,
-// API Gateway, AppSync, load balancers, EC2 public names, and the AWS CLI's
-// download host. Every other API host names only a service and a region.
+// style, an EKS OIDC issuer) the path, so the URL rules can pin it and an
+// unsigned request is left to them: S3 in every form, ECR registries,
+// CodeArtifact repositories, API Gateway, AppSync, Managed Grafana workspaces,
+// Amazon MQ brokers, OpenSearch domains, EKS OIDC issuers, load balancers, EC2
+// public names, and the AWS CLI's download host. Every other API host names
+// only a service and a region.
 export const S3_HOST = "(^|\\.)s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.amazonaws\\.(com|com\\.cn|eu)$";
 export const AWS_RESOURCE_HOST =
   S3_HOST +
-  "|\\.(dkr\\.ecr|d\\.codeartifact|execute-api|appsync-api|appsync-realtime-api)\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  "|\\.(dkr\\.ecr(-fips)?|d\\.codeartifact|execute-api|appsync-api|appsync-realtime-api)\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  "|^g-[a-z0-9]+\\.grafana-workspace\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  "|^b-[a-z0-9-]+\\.mq\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  "|^(search|vpc)-[a-z0-9-]+\\.[a-z0-9-]+\\.es\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  "|^oidc\\.eks\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
+  "|^oidc-eks\\.[a-z0-9-]+\\.(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)$" +
   "|\\.elb(\\.[a-z0-9-]+)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|\\.compute(-1)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|^awscli\\.amazonaws\\.com$";

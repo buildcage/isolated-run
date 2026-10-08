@@ -42,6 +42,18 @@ echo "=== [no AWS credential] ==="
 check_status "an unsigned read from a bucket" "$($C https://bucket.s3.amazonaws.com/public/x)" "200"
 check_status "a Bearer-token push to a registry" \
   "$($C -X POST -H "Authorization: Bearer registry-token" https://111111111111.dkr.ecr.us-east-1.amazonaws.com/v2/app/blobs/uploads/)" "200"
+check_status "a Bearer-token pull from a FIPS registry" \
+  "$($C -H "Authorization: Bearer registry-token" https://111111111111.dkr.ecr-fips.us-east-1.amazonaws.com/v2/)" "200"
+check_status "a Basic-auth search on an OpenSearch domain" \
+  "$($C -u admin:secret https://search-logs-abcdefghijklmnop.us-east-1.es.amazonaws.com/_search)" "200"
+check_status "a Basic-auth search on an OpenSearch VPC domain" \
+  "$($C -u admin:secret https://vpc-logs-abcdefghijklmnop.us-east-1.es.amazonaws.com/_search)" "200"
+check_status "an API-key call to a Managed Grafana workspace" \
+  "$($C -H "Authorization: Bearer glsa_token" https://g-abcdef1234.grafana-workspace.us-east-1.amazonaws.com/api/dashboards)" "200"
+check_status "a Basic-auth call to an Amazon MQ broker console" \
+  "$($C -u admin:secret https://b-0123abcd-4567-89ef-0123-456789abcdef.mq.us-east-1.amazonaws.com/api/overview)" "200"
+check_status "an unsigned read of an EKS OIDC discovery document" \
+  "$($C https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF0123456789/.well-known/openid-configuration)" "200"
 check_status "a POST-policy upload to a bucket, its credential in the form" \
   "$($C -F "x-amz-credential=${AKIA}TESTATTACKER0001/20261008/us-east-1/s3/aws4_request" -F "file=@/dev/null" https://bucket.s3.amazonaws.com/)" "403"
 check_status "an unsigned STS call" "$($C -X POST $STS/)" "403"
