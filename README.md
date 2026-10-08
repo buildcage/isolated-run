@@ -211,8 +211,8 @@ allowed_ip_rules: |
 
 A step that deploys to AWS names the buckets, registries and other resources it uses in its URL
 rules. Most AWS APIs name no resource in the URL, though, and reach whichever account signs the
-request; for those, `allowed_aws_accounts` (**experimental**) accepts only keys from the accounts
-you name. See [AWS access key check](./docs/aws.md).
+request; for those, `allowed_aws_accounts` (**experimental**) accepts only the step's own key and
+keys issued for roles in the accounts you name. See [AWS access key check](./docs/aws.md).
 
 ### Rules for the `universal` engine
 
