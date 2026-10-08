@@ -957,8 +957,7 @@ the one thing that mode exists to prevent. The sentinel is the literal `/` only:
 >   GitHub-hosted runner the runner user can use the Docker socket there to start a container on
 >   the host network, past the proxy.
 > - `docker` and `sudo` are no longer pinned, so the step's teardown and the post step may run one
->   the command put earlier on `$PATH`, in `/usr/local/bin` say, which GitHub-hosted runners leave
->   world-writable.
+>   the command put in any directory on `$PATH` that the runner user can write.
 > - `$XDG_RUNTIME_DIR` is no longer masked, so a `systemd --user` bus there can start a unit outside
 >   every namespace.
 > - Symlinks are refused only in the four always-writable paths and other `write_through:` entries,
