@@ -88,12 +88,26 @@ const FORM_ROLE_ARN = formName("rolearn");
 const FORM_ACTION = formName("action");
 const ROLE_ARN = "^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$";
 
+/** What the traffic record says of a request the check let through; see
+ *  docs/aws.md#in-the-traffic-artifact. */
+export type AwsTrafficFields = {
+  aws: { key: "env" | "assumed" | "none"; accountId?: string; assumedAccount?: string };
+};
+
 /** The check as the inspect stage takes it. */
 export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
   return {
     requestRules: (mode) => awsKeyRequestRules(check, mode),
     responseRules: () => awsKeyResponseRules(check),
     global: [`    tune.bufsize.large ${FORM_BODY_LIMIT}`],
+    logFields: {
+      name: "aws",
+      fields: {
+        key: "txn.aws_log_key",
+        accountId: "txn.aws_log_account",
+        assumedAccount: "txn.aws_log_assumed",
+      },
+    },
   };
 }
 
@@ -198,6 +212,22 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
           "    http-request deny deny_status 403 if aws_refused",
         ]
       : ["    http-request set-var-fmt(txn.would_refuse) aws-%[var(txn.aws)] if aws_refused"]),
+    "    # For the traffic record: what a request the check let through was",
+    "    # signed with. The map holds env for the starting key, and the account",
+    "    # for a learned one.",
+    "    acl aws_allowed var(txn.aws) -m str allowed",
+    "    http-request set-var(txn.aws_log_key) str(none) if aws_allowed",
+    `    http-request set-var(txn.aws_key_owner) var(txn.aws_body_key),map(${check.keyMapFile}) if aws_allowed aws_body`,
+    `    http-request set-var(txn.aws_key_owner) var(txn.aws_key),map(${check.keyMapFile}) if aws_allowed aws_auth or aws_allowed aws_query`,
+    "    http-request set-var(txn.aws_log_key) str(env) if { var(txn.aws_key_owner) -m str env }",
+    "    http-request set-var(txn.aws_log_key) str(assumed) if { var(txn.aws_key_owner) -m reg ^[0-9]{12}$ }",
+    "    http-request set-var(txn.aws_log_account) var(txn.aws_key_owner) if { var(txn.aws_key_owner) -m reg ^[0-9]{12}$ }",
+    ...(check.accountFile
+      ? [
+          `    http-request set-var(txn.aws_log_account) 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' if aws_allowed aws_git_account`,
+          "    http-request set-var(txn.aws_log_account) var(txn.aws_role_account) if aws_allowed aws_role_account",
+        ]
+      : []),
   ];
   if (check.accountFile) {
     l.push(
@@ -261,7 +291,8 @@ export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
     "    acl aws_new_key var(txn.aws_new_key) -m reg ^ASIA[A-Z0-9]+$",
     "    acl aws_new_account var(txn.aws_new_account) -m reg ^[0-9]{12}$",
     `    acl aws_new_account_allowed var(txn.aws_new_account) -m str -f ${check.accountFile}`,
-    `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_new_key)] 1 if aws_new_key aws_new_account aws_new_account_allowed`,
+    `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_new_key aws_new_account aws_new_account_allowed`,
+    "    http-response set-var(txn.aws_log_assumed) var(txn.aws_new_account) if aws_new_account",
     "",
   ];
 }

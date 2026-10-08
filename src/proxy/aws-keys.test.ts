@@ -48,8 +48,8 @@ describe("isAwsAccessKeyId", () => {
 });
 
 describe("file contents", () => {
-  it("maps the key to a placeholder", () => {
-    expect(awsKeyMap(`${ASIA}AAAAAAAAAAAAAAAA`)).toBe(`${ASIA}AAAAAAAAAAAAAAAA 1\n`);
+  it("maps the key to env", () => {
+    expect(awsKeyMap(`${ASIA}AAAAAAAAAAAAAAAA`)).toBe(`${ASIA}AAAAAAAAAAAAAAAA env\n`);
   });
 
   it("refuses to map anything a key ID cannot be spelled as", () => {

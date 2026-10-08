@@ -7,6 +7,7 @@ import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import { buildTrafficRecords, writeTrafficFile } from "#core/lib/report/outcome/traffic-output.ts";
 
+import type { AwsTrafficFields } from "../proxy/haproxy-aws-keys.ts";
 import type { Report } from "./report.ts";
 import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase } from "./sandbox/scratch-dir.ts";
 
@@ -66,7 +67,10 @@ export async function uploadTrafficArtifact(
   const scratchDir = mkdtempSync(join(scratchBase, "traffic-"));
   try {
     const file = join(scratchDir, "traffic.json");
-    writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));
+    writeTrafficFile(
+      file,
+      buildTrafficRecords<AwsTrafficFields>(report.timeline, report.startedAt),
+    );
     const name = trafficArtifactName(containerName);
     await upload(name, [file], scratchDir, { retentionDays });
     console.log(`Uploaded the traffic JSON as ${name}`);

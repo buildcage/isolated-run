@@ -33,11 +33,12 @@ export function isAwsAccessKeyId(value: string): boolean {
   return ACCESS_KEY_ID.test(value);
 }
 
-/** The haproxy map file: the key, mapped to a placeholder value.
+/** The haproxy map file: the key, mapped to `env`, as a learned key is to its
+ *  account.
  *  @throws {Error} if it is not a key ID, which could break the map's line */
 export function awsKeyMap(key: string): string {
   if (!isAwsAccessKeyId(key)) throw new Error("invalid AWS access key ID");
-  return `${key} 1\n`;
+  return `${key} env\n`;
 }
 
 export function awsAccountList(accounts: string[]): string {
