@@ -33,6 +33,9 @@ describe("AWS API hosts", () => {
       "sts.cn-north-1.api.amazonwebservices.com.cn",
       "sts.eusc-de-east-1.amazonaws.eu",
       "sts.eusc-de-east-1.api.amazonwebservices.eu",
+      "my_bucket.s3.amazonaws.com",
+      "a_b.ddb.us-east-1.amazonaws.com",
+      "_x.sqs.us-east-1.amazonaws.com",
     ]) {
       expect(apiHost.test(host)).toBe(true);
     }
@@ -261,7 +264,7 @@ describe("awsKeyRequestRules", () => {
   it("matches each host pattern once", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     for (const pattern of [AWS_API_HOST, AWS_RESOURCE_HOST, CODECOMMIT_HOST, STS_HOST]) {
-      expect(rules.split(pattern).length).toBe(2);
+      expect(rules.split(`-m reg ${pattern} }`).length).toBe(2);
     }
   });
 
