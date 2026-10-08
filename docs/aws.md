@@ -42,8 +42,9 @@ A step that uses only the credentials it is given needs `aws_key_check` alone:
     run: aws ecs update-service --cluster app --service web --force-new-deployment
 ```
 
-A step that assumes roles of its own, as the CDK does, names the accounts those roles are in, which
-turns the check on too:
+A step that assumes roles of its own, as the CDK does, names the accounts those roles are in.
+`aws_key_check: true` keeps the check on if the expression comes out empty, as from a mistyped `id:`,
+so the role switch is refused rather than the check going off unnoticed:
 
 ```yaml
 - uses: aws-actions/configure-aws-credentials@<sha>
@@ -53,6 +54,7 @@ turns the check on too:
     aws-region: us-east-1
 - uses: buildcage/isolated-run@<sha>
   with:
+    aws_key_check: true
     allowed_aws_role_accounts: ${{ steps.aws.outputs.aws-account-id }}
     allowed_url_rules: |
       * https://cloudformation.us-east-1.amazonaws.com/**

@@ -45,7 +45,6 @@ import { ActionError } from "#core/lib/errors.ts";
  *   SCRATCH_BASE_SYMLINKED            /var/tmp, the sandbox scratch base's parent, resolves through a symlink
  *   INVALID_AWS_ACCOUNTS              an allowed_aws_role_accounts entry is not a 12-digit account ID
  *   AWS_ACCESS_KEY_MISSING            the AWS access key check is on but the step has no AWS_ACCESS_KEY_ID to start from
- *   AWS_ACCOUNTS_REMOVED              the replaced allowed_aws_accounts input was supplied
  */
 export type SandboxErrorCode =
   | "MISSING_RUN"
@@ -79,7 +78,6 @@ export type SandboxErrorCode =
   | "SANDBOX_LAUNCH_FAILED"
   | "SCRATCH_BASE_SYMLINKED"
   | "INVALID_AWS_ACCOUNTS"
-  | "AWS_ACCESS_KEY_MISSING"
-  | "AWS_ACCOUNTS_REMOVED";
+  | "AWS_ACCESS_KEY_MISSING";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}

@@ -47,8 +47,6 @@ export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
     "aws_key_check",
     // Not merged: the workflow's accounts replace the file's.
     "allowed_aws_role_accounts",
-    // Replaced, but read so a file that still sets it is told what replaces it.
-    "allowed_aws_accounts",
     "upload_traffic_artifact",
     "traffic_artifact_retention_days",
     "fail_on_blocked",
@@ -175,25 +173,17 @@ export function readAwsKeyInputs(
   warn: Notice,
   getInput: GetInput = core.getInput,
 ): AwsKeyInputs {
-  // A value naming no account left the old check off, so it still passes.
-  let replacedNamesAccounts = true;
-  try {
-    replacedNamesAccounts = parseAwsAccounts(getInput("allowed_aws_accounts")).length > 0;
-  } catch {}
-  if (replacedNamesAccounts) {
-    throw new SandboxError(
-      "allowed_aws_accounts has been replaced. Set aws_key_check: true to accept only the step's " +
-        "own AWS_ACCESS_KEY_ID, and list in allowed_aws_role_accounts the accounts whose roles the " +
-        "step may assume.",
-      "AWS_ACCOUNTS_REMOVED",
-    );
-  }
   let roleAccounts: string[];
   try {
     roleAccounts = parseAwsAccounts(getInput("allowed_aws_role_accounts"));
   } catch (e) {
+    const { message } = e as Error;
+    // YAML reads an unquoted 012345678901 as a number, 11 digits long.
+    const hint = /"\d{11}"/.test(message)
+      ? " Quote an ID that begins with 0, which YAML otherwise reads as a number."
+      : "";
     throw new SandboxError(
-      `allowed_aws_role_accounts: ${(e as Error).message}. Each entry must be a 12-digit AWS account ID.`,
+      `allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${hint}`,
       "INVALID_AWS_ACCOUNTS",
     );
   }

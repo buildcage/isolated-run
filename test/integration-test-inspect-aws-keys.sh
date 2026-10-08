@@ -123,21 +123,6 @@ else
 fi
 
 echo ""
-echo "--- the replaced allowed_aws_accounts ---"
-run_step replaced \
-  AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
-  INPUT_PROXY_MODE="restrict" \
-  INPUT_ALLOWED_AWS_ACCOUNTS="111111111111" \
-  INPUT_RUN="true"
-RUN_EXIT=$?
-if [ "$RUN_EXIT" != "0" ] && grep -qF "allowed_aws_accounts has been replaced" "$TMPDIR/replaced.log"; then
-  pass "the replaced input fails the step, naming what replaces it"
-else
-  fail "the replaced input did not fail as expected (exit $RUN_EXIT)"
-  cat "$TMPDIR/replaced.log"
-fi
-
-echo ""
 echo "--- no key to start from ---"
 run_step nokey \
   INPUT_PROXY_MODE="restrict" \

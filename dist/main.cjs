@@ -23296,7 +23296,6 @@ const LIST_INPUTS = [
 		...LIST_INPUTS,
 		"aws_key_check",
 		"allowed_aws_role_accounts",
-		"allowed_aws_accounts",
 		"upload_traffic_artifact",
 		"traffic_artifact_retention_days",
 		"fail_on_blocked",
@@ -23310,53 +23309,49 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$4 = getInput) {
-	let runInput = getInput$4("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$7 = getInput) {
+	let runInput = getInput$7("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$3 = getInput) {
+function readProxyInputs(getInput$6 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$3("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$3("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$6("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$6("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$5 = getInput) {
+function readFilesystemInputs(notice, getInput$1 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$5("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$5("write_through"),
-			writable: getInput$5("writable"),
-			allowWrite: getInput$5("allow_write")
+			writeThrough: getInput$1("write_through"),
+			writable: getInput$1("writable"),
+			allowWrite: getInput$1("allow_write")
 		}, notice)
 	};
 }
 function readStepLabel(getInput$2 = getInput) {
 	return getInput$2("label") || void 0;
 }
-function readFailOnCaResidue(getInput$6 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$6);
+function readFailOnCaResidue(getInput$3 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$3);
 }
-function readFailOnBlocked(getInput$1 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$1);
+function readFailOnBlocked(getInput$5 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$5);
 }
 const AWS_KEY_CHECK_OFF = {
 	key: "",
 	roleAccounts: []
 };
-function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$7 = getInput) {
-	let replacedNamesAccounts = !0;
-	try {
-		replacedNamesAccounts = parseAwsAccounts(getInput$7("allowed_aws_accounts")).length > 0;
-	} catch {}
-	if (replacedNamesAccounts) throw new SandboxError("allowed_aws_accounts has been replaced. Set aws_key_check: true to accept only the step's own AWS_ACCESS_KEY_ID, and list in allowed_aws_role_accounts the accounts whose roles the step may assume.", "AWS_ACCOUNTS_REMOVED");
+function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$4 = getInput) {
 	let roleAccounts;
 	try {
-		roleAccounts = parseAwsAccounts(getInput$7("allowed_aws_role_accounts"));
+		roleAccounts = parseAwsAccounts(getInput$4("allowed_aws_role_accounts"));
 	} catch (e) {
-		throw new SandboxError(`allowed_aws_role_accounts: ${e.message}. Each entry must be a 12-digit AWS account ID.`, "INVALID_AWS_ACCOUNTS");
+		let { message } = e;
+		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
-	if (!readBooleanInput("aws_key_check", roleAccounts.length > 0, getInput$7)) return roleAccounts.length > 0 && warn("aws_key_check is false, so allowed_aws_role_accounts is ignored for this run."), AWS_KEY_CHECK_OFF;
+	if (!readBooleanInput("aws_key_check", roleAccounts.length > 0, getInput$4)) return roleAccounts.length > 0 && warn("aws_key_check is false, so allowed_aws_role_accounts is ignored for this run."), AWS_KEY_CHECK_OFF;
 	if (proxyEngine !== "inspect") {
 		let reason = `The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers.`;
 		if (proxyMode === "audit") return warn(`${reason} It is ignored for this run.`), AWS_KEY_CHECK_OFF;
