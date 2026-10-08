@@ -47,6 +47,8 @@ export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
     "aws_key_check",
     // Not merged: the workflow's accounts replace the file's.
     "allowed_aws_role_accounts",
+    // Replaced, but read so a file that still sets it is told what replaces it.
+    "allowed_aws_accounts",
     "upload_traffic_artifact",
     "traffic_artifact_retention_days",
     "fail_on_blocked",
@@ -205,14 +207,15 @@ export function readAwsKeyInputs(
 
   if (proxyEngine !== "inspect") {
     const reason =
-      `aws_key_check has no effect with proxy_engine: ${proxyEngine}, which never ` +
+      `The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never ` +
       "sees a request's headers.";
     if (proxyMode === "audit") {
       warn(`${reason} It is ignored for this run.`);
       return AWS_KEY_CHECK_OFF;
     }
     throw new InvalidInputError(
-      `${reason} Switch to proxy_engine: inspect, or turn aws_key_check off.`,
+      `${reason} Switch to proxy_engine: inspect, or remove aws_key_check and ` +
+        "allowed_aws_role_accounts.",
       "INVALID_PROXY_ENGINE",
     );
   }
@@ -222,13 +225,13 @@ export function readAwsKeyInputs(
   if (!isAwsAccessKeyId(key)) {
     if (proxyMode === "audit") {
       warn(
-        "aws_key_check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID, so " +
-          "the AWS access key check is off for this run.",
+        "The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access " +
+          "key ID, so the check is off for this run.",
       );
       return AWS_KEY_CHECK_OFF;
     }
     throw new SandboxError(
-      "aws_key_check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. " +
+      "The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. " +
         "Set up the credentials in an earlier step, for example with " +
         "aws-actions/configure-aws-credentials.",
       "AWS_ACCESS_KEY_MISSING",

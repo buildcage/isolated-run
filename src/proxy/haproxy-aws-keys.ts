@@ -1,12 +1,12 @@
 /**
  * The AWS access key check: a request to an AWS API host must be signed with a
- * key that belongs to an allowed account, or a build could sign with keys of
- * its own and write data into another account's CloudTrail through any API.
+ * key the proxy knows, or a build could sign with keys of its own and write
+ * data into another account's CloudTrail through any API.
  *
- * The keys come from two places: the ones the step started with, and the ones
- * an STS AssumeRole answer hands back for a role in an allowed account, read
- * off the response and added to the map at runtime. A key is matched as a
- * whole string and never decoded.
+ * The keys come from two places: the one the step started with, taken as
+ * given, and, when role accounts are named, the ones an STS AssumeRole answer
+ * hands back for a role in one of them, read off the response and added to the
+ * map at runtime. A key is matched as a whole string and never decoded.
  */
 
 import type { InspectStageExtension } from "#core/lib/acl/haproxy-inspect-stage.ts";

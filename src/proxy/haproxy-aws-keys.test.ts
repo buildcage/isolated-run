@@ -192,7 +192,7 @@ describe("the check with no role account", () => {
   it("lets no static CodeCommit credential through on its account", () => {
     const rules = awsKeyRequestRules(KEY_ONLY, "restrict").join("\n");
     expect(rules.includes("-at-[0-9]{12}")).toBe(false);
-    expect(rules.includes("map(/rules/keys.map) -m found")).toBe(true);
+    expect(rules.includes("-m str -f")).toBe(false);
   });
 });
 

@@ -33,7 +33,9 @@ describe("CONFIG_FILE_INPUTS", () => {
     const inputs = Object.keys(actionYml.inputs).filter(
       (n) => !["run", "writable", "config_file"].includes(n),
     );
-    expect([...CONFIG_FILE_INPUTS.known].sort()).toEqual(inputs.sort());
+    expect(
+      [...CONFIG_FILE_INPUTS.known].filter((n) => n !== "allowed_aws_accounts").sort(),
+    ).toEqual(inputs.sort());
   });
 
   it("merges only inputs it knows", () => {
@@ -269,6 +271,22 @@ describe("readAwsKeyInputs", () => {
         inputs({ aws_key_check: "false", allowed_aws_role_accounts: "111111111111" }),
       ),
     ).toThrow(expect.objectContaining({ code: "AWS_KEY_CHECK_CONFLICT" }));
+  });
+
+  it("refuses the replaced allowed_aws_accounts from a config file too", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "config-file-"));
+    writeFileSync(join(workspace, "buildcage.yml"), 'allowed_aws_accounts: "111111111111"\n');
+    const env: NodeJS.ProcessEnv = {
+      GITHUB_WORKSPACE: workspace,
+      GITHUB_EVENT_NAME: "push",
+      INPUT_CONFIG_FILE: "buildcage.yml",
+    };
+    applyConfigFile(env, CONFIG_FILE_INPUTS);
+    expect(() =>
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, (name) =>
+        (env[`INPUT_${name.toUpperCase()}`] ?? "").trim(),
+      ),
+    ).toThrow(expect.objectContaining({ code: "AWS_ACCOUNTS_REMOVED" }));
   });
 
   it("refuses the replaced allowed_aws_accounts, naming what replaces it", () => {

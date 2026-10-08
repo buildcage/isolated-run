@@ -3,8 +3,8 @@
 > [!WARNING]
 > `aws_key_check` and `allowed_aws_role_accounts` are **experimental**: their behavior, inputs, and
 > error messages may still change in a future release without following semver. Without them,
-> nothing on this page applies and the action behaves as before. Try it in a non-critical workflow first, and pin this action to a
-> commit SHA rather than a version tag if you adopt it.
+> nothing on this page applies and the action behaves as before. Try them in a non-critical workflow
+> first, and pin this action to a commit SHA rather than a version tag if you adopt it.
 
 Name the AWS resources a step uses in its URL rules wherever the host or path names them: a bucket,
 a registry, a cluster. Those rules already decide whose resource a request reaches. Most AWS APIs,
@@ -27,7 +27,7 @@ path, before the request leaves the runner.
 
 ## What the check does
 
-A step that uses only the credentials it is given turns the check on by itself:
+A step that uses only the credentials it is given needs `aws_key_check` alone:
 
 ```yaml
 - uses: aws-actions/configure-aws-credentials@<sha>
