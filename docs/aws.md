@@ -90,17 +90,21 @@ token, counts as unsigned here: only AWS's own schemes are an AWS credential.
 | A key in a form body and another in the header or query, either of them unknown                                  | `aws-key-not-allowed`      |
 | A form body or query string the proxy cannot read through (above)                                                | `aws-unreadable`           |
 
-These hosts name the resource a request reaches, in the host name or, for S3's path style, in the
-path. The URL rules can pin the account there, so an unsigned request to them is left to the URL
-rules:
+These hosts name the resource a request reaches, in the host name or, for S3's path style and an EKS
+OIDC issuer, in the path. The URL rules can pin the account there, so an unsigned request to them is
+left to the URL rules:
 
 | Service                | Host                                                                                                                                                         |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | S3                     | every S3 form: `<bucket>.s3.<region>.amazonaws.com`, `s3.<region>.amazonaws.com/<bucket>/…`, access points, `s3-control`, website and acceleration endpoints |
-| ECR                    | `<account>.dkr.ecr.<region>.amazonaws.com`                                                                                                                   |
+| ECR                    | `<account>.dkr.ecr.<region>.amazonaws.com`, `<account>.dkr.ecr-fips.<region>.amazonaws.com`                                                                  |
 | CodeArtifact           | `<domain>-<owner>.d.codeartifact.<region>.amazonaws.com`                                                                                                     |
 | API Gateway            | `<api-id>.execute-api.<region>.amazonaws.com`                                                                                                                |
 | AppSync                | `<id>.appsync-api.<region>.amazonaws.com`, `<id>.appsync-realtime-api.<region>.amazonaws.com`                                                                |
+| Managed Grafana        | `g-<id>.grafana-workspace.<region>.amazonaws.com`                                                                                                            |
+| Amazon MQ              | `b-<id>.mq.<region>.amazonaws.com`                                                                                                                           |
+| OpenSearch Service     | `search-<domain>-<id>.<region>.es.amazonaws.com`, `vpc-<domain>-<id>.<region>.es.amazonaws.com`                                                              |
+| EKS OIDC issuer        | `oidc.eks.<region>.amazonaws.com/id/<id>`, `oidc-eks.<region>.api.aws/id/<id>`                                                                               |
 | Elastic Load Balancing | `<name>-<id>.elb.<region>.amazonaws.com`, `<name>-<id>.<region>.elb.amazonaws.com`                                                                           |
 | EC2                    | `ec2-<ip>.<region>.compute.amazonaws.com`, `ec2-<ip>.compute-1.amazonaws.com`                                                                                |
 | AWS CLI downloads      | `awscli.amazonaws.com`                                                                                                                                       |
@@ -111,6 +115,11 @@ request to one of those reaches is in its parameters or its body, where the prox
 an unsigned request there is refused, `GET` included. A host missing from the table above is
 treated the same way; if a legitimate request is refused as `aws-no-credential` for that reason,
 report it.
+
+Some AWS APIs take a token that ties the request to no account the proxy can see, and are refused
+for that reason too: Cognito user pool calls made without AWS credentials, Bedrock API keys,
+CloudWatch Logs ingestion tokens and the IAM Identity Center portal. Sign those calls with SigV4
+where the API takes it.
 
 An S3 POST-policy upload, the browser-style upload that carries its credential in the form body, is
 refused as `aws-no-credential`, since the proxy does not read a multipart body. Upload with `PutObject`
