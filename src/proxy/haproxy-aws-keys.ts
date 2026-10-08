@@ -88,14 +88,8 @@ const FORM_ROLE_ARN = formName("rolearn");
 const FORM_ACTION = formName("action");
 const ROLE_ARN = "^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$";
 
-/**
- * What the traffic record says of a request the check let through. `key` is
- * the kind of key it was signed with: the one the step started with, one STS
- * issued, or none. `accountId` is an account the check confirmed: the one a
- * learned key came from, or the one a role ARN or a static CodeCommit Git
- * credential names. `assumedAccount` is the account of the role an STS answer
- * hands out a key for, allowed or not.
- */
+/** What the traffic record says of a request the check let through; see
+ *  docs/aws.md#in-the-traffic-artifact. */
 export type AwsTrafficFields = {
   aws: { key: "env" | "assumed" | "none"; accountId?: string; assumedAccount?: string };
 };

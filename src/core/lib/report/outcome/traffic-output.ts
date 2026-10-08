@@ -34,6 +34,25 @@ export type TrafficRecord<X extends TrafficExtensions = Record<never, never>> = 
   elapsed?: string;
 } & Partial<X>;
 
+// Every field a record may have of its own, set or not, which no action's
+// object may take the name of.
+const RECORD_FIELDS: ReadonlySet<string> = new Set([
+  "time",
+  "elapsed",
+  "action",
+  "protocol",
+  "host",
+  "port",
+  "queryType",
+  "method",
+  "url",
+  "status",
+  "bytes",
+  "reason",
+  "destination",
+  "wouldRefuse",
+] satisfies (keyof TrafficRecord)[]);
+
 /**
  * Build the records for one run, oldest first.
  *
@@ -66,11 +85,10 @@ export function buildTrafficRecords<X extends TrafficExtensions = Record<never, 
       if (e.reason !== undefined) record.reason = e.reason;
       if (e.destination !== undefined) record.destination = e.destination;
       if (e.wouldRefuse !== undefined) record.wouldRefuse = e.wouldRefuse;
-      // Never over a field of the record's own.
       for (const [name, fields] of Object.entries(e.extensions ?? {})) {
-        if (!(name in record)) Object.assign(record, { [name]: fields });
+        if (!RECORD_FIELDS.has(name)) Object.assign(record, { [name]: fields });
       }
-      // X is the action's word for what its own fields hold.
+      // Unchecked: X is what the action says its own log fields hold.
       return record as TrafficRecord<X>;
     });
 }

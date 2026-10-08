@@ -192,7 +192,8 @@ The traffic artifact carries the same reason in `wouldRefuse`.
 
 Each request the check let through has an `aws` object in the
 [traffic artifact](./reference.md#traffic-artifact), so a run shows that the check was on even
-where it refused nothing. A refused request has none; its `reason` or `wouldRefuse` says why.
+where it refused nothing. A request the check refused has none; its `reason` or `wouldRefuse`
+says why.
 
 | Field            | Always | Notes                                                                                                                                 |
 | ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------- |

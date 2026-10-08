@@ -15955,8 +15955,9 @@ function resolverHosts(inputs) {
 //#region src/core/lib/acl/haproxy-inspect-stage.ts
 const LOG_FIELD_NAME = /^[a-z][A-Za-z0-9]*$/, LOG_FIELD_VAR = /^txn\.[a-z0-9_]+$/;
 function logFieldTokens({ name, fields }) {
+	if (!LOG_FIELD_NAME.test(name)) throw Error(`invalid log field object: ${name}`);
 	let entries = Object.entries(fields);
-	for (let [field, variable] of entries) if (!LOG_FIELD_NAME.test(name) || !LOG_FIELD_NAME.test(field) || !LOG_FIELD_VAR.test(variable)) throw Error(`invalid log field: ${name}.${field} from ${variable}`);
+	for (let [field, variable] of entries) if (!LOG_FIELD_NAME.test(field) || !LOG_FIELD_VAR.test(variable)) throw Error(`invalid log field: ${name}.${field} from ${variable}`);
 	return entries.map(([field, variable]) => ` ${name}.${field}=%[var(${variable}),regsub([^A-Za-z0-9._-],_,g)]`).join("");
 }
 function clientTlsFields(scheme) {
@@ -26202,12 +26203,14 @@ function hostBeforeRequest(sni, address) {
 	};
 }
 function extensionFields(tokens) {
-	let objects;
+	let objects = new Map();
 	for (let token of tokens.split(" ")) {
 		let match = /^([^.]+)\.([^=]+)=(.*)$/.exec(token);
-		match && match[3] !== "-" && (objects ??= {}, (objects[match[1]] ??= {})[match[2]] = match[3]);
+		if (!match || match[3] === "-") continue;
+		let fields = objects.get(match[1]) ?? new Map();
+		objects.set(match[1], fields.set(match[2], match[3]));
 	}
-	return objects;
+	if (objects.size !== 0) return Object.fromEntries([...objects].map(([name, fields]) => [name, Object.fromEntries(fields)]));
 }
 function parseProxyLine(line, isAudit) {
 	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
@@ -27193,6 +27196,22 @@ async function writeReportSummary(report, annotation, options, artifactAvailable
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts
+const RECORD_FIELDS = new Set([
+	"time",
+	"elapsed",
+	"action",
+	"protocol",
+	"host",
+	"port",
+	"queryType",
+	"method",
+	"url",
+	"status",
+	"bytes",
+	"reason",
+	"destination",
+	"wouldRefuse"
+]);
 function buildTrafficRecords(events, startedAt) {
 	return [...events].sort((a, b) => a.time - b.time).map((e) => {
 		let record = {
@@ -27202,7 +27221,7 @@ function buildTrafficRecords(events, startedAt) {
 			host: e.host
 		};
 		startedAt !== void 0 && (record.elapsed = formatElapsedFixed(e.time - startedAt)), e.port !== void 0 && (record.port = e.port), e.queryType !== void 0 && (record.queryType = e.queryType), e.method !== void 0 && (record.method = e.method), e.url !== void 0 && (record.url = e.url), e.status !== void 0 && (record.status = e.status), e.bytes !== void 0 && (record.bytes = e.bytes), e.reason !== void 0 && (record.reason = e.reason), e.destination !== void 0 && (record.destination = e.destination), e.wouldRefuse !== void 0 && (record.wouldRefuse = e.wouldRefuse);
-		for (let [name, fields] of Object.entries(e.extensions ?? {})) name in record || Object.assign(record, { [name]: fields });
+		for (let [name, fields] of Object.entries(e.extensions ?? {})) RECORD_FIELDS.has(name) || Object.assign(record, { [name]: fields });
 		return record;
 	});
 }
