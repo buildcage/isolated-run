@@ -209,7 +209,7 @@ reader splitting a URL back apart would take the host for `registry.npmjs.org-`.
 prints as `-` too. The log keeps the `Host` as sent; the report lowercases it and drops one trailing
 dot, as the rules do before matching it.
 
-With `allowed_aws_accounts` set, both request lines carry `wr=<reason|->` after `dst=`: in `audit`,
+With the AWS access key check on, both request lines carry `wr=<reason|->` after `dst=`: in `audit`,
 the reason `restrict` would have refused the request for (`aws-key-not-allowed`, `aws-no-credential`,
 `aws-ambiguous-credential` or `aws-unreadable`), and `-` otherwise. `restrict` logs the same reasons
 as `reason=`.

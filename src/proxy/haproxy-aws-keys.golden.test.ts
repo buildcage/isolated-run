@@ -8,6 +8,8 @@ import { AWS_ACCOUNT_FILE, AWS_KEY_MAP_FILE } from "./aws-keys.ts";
 import { awsKeyExtension } from "./haproxy-aws-keys.ts";
 
 const extension = awsKeyExtension({ accountFile: AWS_ACCOUNT_FILE, keyMapFile: AWS_KEY_MAP_FILE });
+// aws_key_check with no role account: nothing to learn, so no STS rules.
+const keyOnly = awsKeyExtension({ keyMapFile: AWS_KEY_MAP_FILE });
 
 // The whole config with the check on, in the mode that refuses and the one that
 // does not.
@@ -21,6 +23,11 @@ const CASES: Record<string, HaproxyConfigOptions> = {
     extension,
   },
   "audit-aws-keys": { mode: "audit", proxyAddress: "198.19.255.1", extension },
+  "restrict-aws-key-only": {
+    urlRules: buildUrlRules("POST https://cloudformation.us-east-1.amazonaws.com/"),
+    proxyAddress: "198.19.255.1",
+    extension: keyOnly,
+  },
 };
 
 describe("haproxy.cfg with the AWS access key check", () => {

@@ -15,9 +15,9 @@ services:
       # inspect only: it is the one engine that can see a method or a path.
       - ALLOWED_URL_RULES=${ALLOWED_URL_RULES:-}
       - ALLOWED_TLS_RULES=${ALLOWED_TLS_RULES:-}
-      # inspect only: the AWS access key check, off when no account is given.
-      - ALLOWED_AWS_ACCOUNTS=${ALLOWED_AWS_ACCOUNTS:-}
+      # inspect only: the AWS access key check, off when no key is given.
       - ALLOWED_AWS_KEYS=${ALLOWED_AWS_KEYS:-}
+      - ALLOWED_AWS_ROLE_ACCOUNTS=${ALLOWED_AWS_ROLE_ACCOUNTS:-}
       # Runner addresses the engine refuses as a resolved destination.
       - HOST_ADDRESSES=${HOST_ADDRESSES:-}
     labels:

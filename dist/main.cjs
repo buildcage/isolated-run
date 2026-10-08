@@ -23225,7 +23225,7 @@ function getContainerNetns(containerName, { exec = captureDockerViaExec$1 } = {}
 }
 //#endregion
 //#region src/lib/compose-env.ts
-function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, httpsRules, httpRules, ipRules, urlRules, tlsRules, awsAccounts, awsKeys }, env, hostAddresses = listHostIpv4Addresses) {
+function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, httpsRules, httpRules, ipRules, urlRules, tlsRules, awsKeys, awsRoleAccounts }, env, hostAddresses = listHostIpv4Addresses) {
 	return {
 		...env,
 		PROXY_CONTAINER_NAME: containerName,
@@ -23237,8 +23237,8 @@ function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, http
 		ALLOWED_IP_RULES: ipRules.join("\n"),
 		ALLOWED_URL_RULES: urlRules.join("\n"),
 		ALLOWED_TLS_RULES: tlsRules.join("\n"),
-		ALLOWED_AWS_ACCOUNTS: awsAccounts.join(" "),
 		ALLOWED_AWS_KEYS: awsKeys.join(" "),
+		ALLOWED_AWS_ROLE_ACCOUNTS: awsRoleAccounts.join(" "),
 		BUILDCAGE_PROXY_IMAGE_REF: imageRef,
 		HOST_ADDRESSES: hostAddresses().join(" ")
 	};
@@ -23290,7 +23290,8 @@ const LIST_INPUTS = [
 		"proxy_mode",
 		"proxy_engine",
 		...LIST_INPUTS,
-		"allowed_aws_accounts",
+		"aws_key_check",
+		"allowed_aws_role_accounts",
 		"upload_traffic_artifact",
 		"traffic_artifact_retention_days",
 		"fail_on_blocked",
@@ -23304,66 +23305,65 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$3 = getInput) {
-	let runInput = getInput$3("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$7 = getInput) {
+	let runInput = getInput$7("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$2 = getInput) {
+function readProxyInputs(getInput$6 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$2("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$2("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$6("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$6("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$4 = getInput) {
+function readFilesystemInputs(notice, getInput$1 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$4("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$4("write_through"),
-			writable: getInput$4("writable"),
-			allowWrite: getInput$4("allow_write")
+			writeThrough: getInput$1("write_through"),
+			writable: getInput$1("writable"),
+			allowWrite: getInput$1("allow_write")
 		}, notice)
 	};
 }
-function readStepLabel(getInput$1 = getInput) {
-	return getInput$1("label") || void 0;
+function readStepLabel(getInput$2 = getInput) {
+	return getInput$2("label") || void 0;
 }
-function readFailOnCaResidue(getInput$5 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$5);
+function readFailOnCaResidue(getInput$3 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$3);
 }
-function readFailOnBlocked(getInput$6 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$6);
+function readFailOnBlocked(getInput$5 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$5);
 }
-function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$7 = getInput) {
-	let accounts;
+const AWS_KEY_CHECK_OFF = {
+	keys: [],
+	roleAccounts: []
+};
+function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$4 = getInput) {
+	if (getInput$4("allowed_aws_accounts").trim()) throw new SandboxError("allowed_aws_accounts has been replaced. Set aws_key_check: true to accept only the step's own AWS_ACCESS_KEY_ID, and list in allowed_aws_role_accounts the accounts whose roles the step may assume.", "AWS_ACCOUNTS_REMOVED");
+	let roleAccounts;
 	try {
-		accounts = parseAwsAccounts(getInput$7("allowed_aws_accounts"));
+		roleAccounts = parseAwsAccounts(getInput$4("allowed_aws_role_accounts"));
 	} catch (e) {
-		throw new SandboxError(`allowed_aws_accounts: ${e.message}. Each entry must be a 12-digit AWS account ID.`, "INVALID_AWS_ACCOUNTS");
+		throw new SandboxError(`allowed_aws_role_accounts: ${e.message}. Each entry must be a 12-digit AWS account ID.`, "INVALID_AWS_ACCOUNTS");
 	}
-	if (accounts.length === 0) return {
-		accounts,
-		keys: []
-	};
+	if (!readBooleanInput("aws_key_check", roleAccounts.length > 0, getInput$4)) {
+		if (roleAccounts.length > 0) throw new SandboxError("allowed_aws_role_accounts needs the AWS access key check, which aws_key_check: false turns off. Remove one of them.", "AWS_KEY_CHECK_CONFLICT");
+		return AWS_KEY_CHECK_OFF;
+	}
 	if (proxyEngine !== "inspect") {
-		let reason = `allowed_aws_accounts has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers.`;
-		if (proxyMode === "audit") return warn(`${reason} It is ignored for this run.`), {
-			accounts: [],
-			keys: []
-		};
-		throw new InvalidInputError(`${reason} Switch to proxy_engine: inspect, or remove allowed_aws_accounts.`, "INVALID_PROXY_ENGINE");
+		let reason = `aws_key_check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers.`;
+		if (proxyMode === "audit") return warn(`${reason} It is ignored for this run.`), AWS_KEY_CHECK_OFF;
+		throw new InvalidInputError(`${reason} Switch to proxy_engine: inspect, or turn aws_key_check off.`, "INVALID_PROXY_ENGINE");
 	}
 	let key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
 	if (!isAwsAccessKeyId(key)) {
-		if (proxyMode === "audit") return warn("allowed_aws_accounts is set, but AWS_ACCESS_KEY_ID is unset or is not an access key ID, so the AWS access key check is off for this run."), {
-			accounts: [],
-			keys: []
-		};
-		throw new SandboxError("allowed_aws_accounts is set, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. Set up the credentials in an earlier step, for example with aws-actions/configure-aws-credentials.", "AWS_ACCESS_KEY_MISSING");
+		if (proxyMode === "audit") return warn("aws_key_check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID, so the AWS access key check is off for this run."), AWS_KEY_CHECK_OFF;
+		throw new SandboxError("aws_key_check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. Set up the credentials in an earlier step, for example with aws-actions/configure-aws-credentials.", "AWS_ACCESS_KEY_MISSING");
 	}
 	return {
-		accounts,
-		keys: [key]
+		keys: [key],
+		roleAccounts
 	};
 }
 //#endregion
@@ -25372,7 +25372,8 @@ const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-
 	"allowed_ip_rules",
 	"allowed_url_rules",
 	"allowed_tls_rules",
-	"allowed_aws_accounts",
+	"aws_key_check",
+	"allowed_aws_role_accounts",
 	"upload_traffic_artifact",
 	"traffic_artifact_retention_days",
 	"fail_on_blocked",
@@ -72410,7 +72411,7 @@ async function runSandboxStep(env, overrides = {}) {
 	log(`buildcage: proxy image: ${imageRef}`);
 	let composeFile = resolveComposeFile(localOverride);
 	withLogGroup("buildcage: Configured ACL Rules", () => {
-		logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), aws.accounts.length > 0 && console.log(`AWS accounts: ${aws.accounts.join(" ")}`);
+		logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), aws.keys.length > 0 && console.log("AWS access key check: on"), aws.roleAccounts.length > 0 && console.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
 	});
 	let containerName = generateContainerName(), projectName = deriveProjectName(containerName);
 	saveCleanupState(env, {
@@ -72428,8 +72429,8 @@ async function runSandboxStep(env, overrides = {}) {
 		ipRules,
 		urlRules,
 		tlsRules,
-		awsAccounts: aws.accounts,
-		awsKeys: aws.keys
+		awsKeys: aws.keys,
+		awsRoleAccounts: aws.roleAccounts
 	}, env);
 	try {
 		await startSandboxProxy({

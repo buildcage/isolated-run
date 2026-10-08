@@ -179,6 +179,23 @@ describe("the SigV2 credential in a form body", () => {
   });
 });
 
+describe("the check with no role account", () => {
+  const KEY_ONLY = { keyMapFile: "/rules/keys.map" };
+
+  it("learns nothing, so it neither reads STS answers nor rewrites their Accept-Encoding", () => {
+    expect(awsKeyResponseRules(KEY_ONLY)).toStrictEqual([]);
+    const rules = awsKeyRequestRules(KEY_ONLY, "restrict").join("\n");
+    expect(rules.includes("Accept-Encoding")).toBe(false);
+    expect(rules.includes("aws_sts")).toBe(false);
+  });
+
+  it("lets no static CodeCommit credential through on its account", () => {
+    const rules = awsKeyRequestRules(KEY_ONLY, "restrict").join("\n");
+    expect(rules.includes("-at-[0-9]{12}")).toBe(false);
+    expect(rules.includes("map(/rules/keys.map) -m found")).toBe(true);
+  });
+});
+
 describe("awsKeyExtension", () => {
   it("hands the stage this check's own rules", () => {
     const extension = awsKeyExtension(CHECK);

@@ -92,7 +92,7 @@ beforeEach(() => {
   });
   mocks.readFailOnCaResidue.mockReturnValue(true);
   mocks.readFailOnBlocked.mockReturnValue(true);
-  mocks.readAwsKeyInputs.mockReturnValue({ accounts: [], keys: [] });
+  mocks.readAwsKeyInputs.mockReturnValue({ keys: [], roleAccounts: [] });
   mocks.readTrafficArtifactInputs.mockReturnValue({ upload: false });
   mocks.createAnnotation.mockReturnValue(annotation);
   mocks.resolveFilesystemPlan.mockReturnValue({
@@ -351,10 +351,10 @@ describe("runSandboxStep", () => {
     ]);
   });
 
-  it("hands the AWS accounts and the starting key to the proxy, and logs only the accounts", async () => {
+  it("hands the starting key and the role accounts to the proxy, and logs no key", async () => {
     mocks.readAwsKeyInputs.mockReturnValue({
-      accounts: ["111111111111"],
       keys: [`${ASIA}AAAAAAAAAAAAAAAA`],
+      roleAccounts: ["111111111111"],
     });
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -366,10 +366,11 @@ describe("runSandboxStep", () => {
       annotation.warning,
     );
     expect(mocks.startSandboxProxy.mock.calls[0][0].composeEnv).toMatchObject({
-      ALLOWED_AWS_ACCOUNTS: "111111111111",
       ALLOWED_AWS_KEYS: `${ASIA}AAAAAAAAAAAAAAAA`,
+      ALLOWED_AWS_ROLE_ACCOUNTS: "111111111111",
     });
-    expect(log).toHaveBeenCalledWith("AWS accounts: 111111111111");
+    expect(log).toHaveBeenCalledWith("AWS access key check: on");
+    expect(log).toHaveBeenCalledWith("AWS role accounts: 111111111111");
     expect(log.mock.calls.flat().join("\n").includes(`${ASIA}AAAAAAAAAAAAAAAA`)).toBe(false);
     log.mockRestore();
   });

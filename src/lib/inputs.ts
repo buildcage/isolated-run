@@ -44,8 +44,9 @@ export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
     "proxy_mode",
     "proxy_engine",
     ...LIST_INPUTS,
+    "aws_key_check",
     // Not merged: the workflow's accounts replace the file's.
-    "allowed_aws_accounts",
+    "allowed_aws_role_accounts",
     "upload_traffic_artifact",
     "traffic_artifact_retention_days",
     "fail_on_blocked",
@@ -152,17 +153,21 @@ export function readFailOnBlocked(getInput: GetInput = core.getInput): boolean {
 }
 
 export interface AwsKeyInputs {
-  /** Empty when allowed_aws_accounts is unset, which leaves the check off. */
-  accounts: string[];
-  /** The key the step starts with: its own AWS_ACCESS_KEY_ID. */
+  /** The key the step starts with, its own AWS_ACCESS_KEY_ID; empty leaves the check off. */
   keys: string[];
+  /** Accounts whose roles the step may assume; empty learns no key. */
+  roleAccounts: string[];
 }
 
+const AWS_KEY_CHECK_OFF: AwsKeyInputs = { keys: [], roleAccounts: [] };
+
 /**
- * allowed_aws_accounts, and the key the AWS access key check starts from: the
- * step's AWS_ACCESS_KEY_ID, put there by an earlier step such as
- * aws-actions/configure-aws-credentials. universal never sees a request's
- * headers, so it fails in restrict and is warned about in audit.
+ * aws_key_check and allowed_aws_role_accounts: the check pins the step to its
+ * own AWS_ACCESS_KEY_ID, put there by an earlier step such as
+ * aws-actions/configure-aws-credentials, and the accounts let keys AssumeRole
+ * issues inside the step through as well. Naming accounts turns the check on.
+ * universal never sees a request's headers, so it fails in restrict and is
+ * warned about in audit.
  */
 export function readAwsKeyInputs(
   { proxyEngine, proxyMode }: ProxyInputs,
@@ -170,27 +175,44 @@ export function readAwsKeyInputs(
   warn: Notice,
   getInput: GetInput = core.getInput,
 ): AwsKeyInputs {
-  let accounts: string[];
+  if (getInput("allowed_aws_accounts").trim()) {
+    throw new SandboxError(
+      "allowed_aws_accounts has been replaced. Set aws_key_check: true to accept only the step's " +
+        "own AWS_ACCESS_KEY_ID, and list in allowed_aws_role_accounts the accounts whose roles the " +
+        "step may assume.",
+      "AWS_ACCOUNTS_REMOVED",
+    );
+  }
+  let roleAccounts: string[];
   try {
-    accounts = parseAwsAccounts(getInput("allowed_aws_accounts"));
+    roleAccounts = parseAwsAccounts(getInput("allowed_aws_role_accounts"));
   } catch (e) {
     throw new SandboxError(
-      `allowed_aws_accounts: ${(e as Error).message}. Each entry must be a 12-digit AWS account ID.`,
+      `allowed_aws_role_accounts: ${(e as Error).message}. Each entry must be a 12-digit AWS account ID.`,
       "INVALID_AWS_ACCOUNTS",
     );
   }
-  if (accounts.length === 0) return { accounts, keys: [] };
+  if (!readBooleanInput("aws_key_check", roleAccounts.length > 0, getInput)) {
+    if (roleAccounts.length > 0) {
+      throw new SandboxError(
+        "allowed_aws_role_accounts needs the AWS access key check, which aws_key_check: false " +
+          "turns off. Remove one of them.",
+        "AWS_KEY_CHECK_CONFLICT",
+      );
+    }
+    return AWS_KEY_CHECK_OFF;
+  }
 
   if (proxyEngine !== "inspect") {
     const reason =
-      `allowed_aws_accounts has no effect with proxy_engine: ${proxyEngine}, which never ` +
+      `aws_key_check has no effect with proxy_engine: ${proxyEngine}, which never ` +
       "sees a request's headers.";
     if (proxyMode === "audit") {
       warn(`${reason} It is ignored for this run.`);
-      return { accounts: [], keys: [] };
+      return AWS_KEY_CHECK_OFF;
     }
     throw new InvalidInputError(
-      `${reason} Switch to proxy_engine: inspect, or remove allowed_aws_accounts.`,
+      `${reason} Switch to proxy_engine: inspect, or turn aws_key_check off.`,
       "INVALID_PROXY_ENGINE",
     );
   }
@@ -200,17 +222,17 @@ export function readAwsKeyInputs(
   if (!isAwsAccessKeyId(key)) {
     if (proxyMode === "audit") {
       warn(
-        "allowed_aws_accounts is set, but AWS_ACCESS_KEY_ID is unset or is not an access key " +
-          "ID, so the AWS access key check is off for this run.",
+        "aws_key_check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID, so " +
+          "the AWS access key check is off for this run.",
       );
-      return { accounts: [], keys: [] };
+      return AWS_KEY_CHECK_OFF;
     }
     throw new SandboxError(
-      "allowed_aws_accounts is set, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. " +
+      "aws_key_check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. " +
         "Set up the credentials in an earlier step, for example with " +
         "aws-actions/configure-aws-credentials.",
       "AWS_ACCESS_KEY_MISSING",
     );
   }
-  return { accounts, keys: [key] };
+  return { keys: [key], roleAccounts };
 }

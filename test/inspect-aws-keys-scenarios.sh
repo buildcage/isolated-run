@@ -7,7 +7,7 @@
 #
 # ---------------------------------------------------------------------------
 # Under test:
-#   allowed_aws_accounts: 111111111111
+#   allowed_aws_role_accounts: 111111111111
 #   AWS_ACCESS_KEY_ID:    ${AKIA}TESTSTARTKEY0001
 #   allowed_url_rules:
 #     * https://**.amazonaws.com/**

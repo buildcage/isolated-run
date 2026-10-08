@@ -1,18 +1,18 @@
 # AWS access key check
 
 > [!WARNING]
-> `allowed_aws_accounts` is **experimental**: its behavior, inputs, and error messages may still
-> change in a future release without following semver. Without it, nothing on this page applies and
-> the action behaves as before. Try it in a non-critical workflow first, and pin this action to a
+> `aws_key_check` and `allowed_aws_role_accounts` are **experimental**: their behavior, inputs, and
+> error messages may still change in a future release without following semver. Without them,
+> nothing on this page applies and the action behaves as before. Try it in a non-critical workflow first, and pin this action to a
 > commit SHA rather than a version tag if you adopt it.
 
 Name the AWS resources a step uses in its URL rules wherever the host or path names them: a bucket,
 a registry, a cluster. Those rules already decide whose resource a request reaches. Most AWS APIs,
 though, are hosts such as `cloudformation.us-east-1.amazonaws.com` or `sts.amazonaws.com` that serve
 every AWS account, and the account a request reaches is decided by the key that signs it. A rule
-that allows them lets the step reach any account, not only yours. `allowed_aws_accounts` covers
-those hosts: it accepts only the key the step starts with and keys issued for roles in the accounts
-you name.
+that allows them lets the step reach any account, not only yours. `aws_key_check` covers those
+hosts: it accepts only the key the step starts with. `allowed_aws_role_accounts` adds the keys
+issued for roles the step assumes in the accounts you name.
 
 ## Why URL rules are not enough
 
@@ -27,6 +27,24 @@ path, before the request leaves the runner.
 
 ## What the check does
 
+A step that uses only the credentials it is given turns the check on by itself:
+
+```yaml
+- uses: aws-actions/configure-aws-credentials@<sha>
+  with:
+    role-to-assume: arn:aws:iam::111111111111:role/deploy
+    aws-region: us-east-1
+- uses: buildcage/isolated-run@<sha>
+  with:
+    aws_key_check: true
+    allowed_url_rules: |
+      * https://ecs.us-east-1.amazonaws.com/**
+    run: aws ecs update-service --cluster app --service web --force-new-deployment
+```
+
+A step that assumes roles of its own, as the CDK does, names the accounts those roles are in, which
+turns the check on too:
+
 ```yaml
 - uses: aws-actions/configure-aws-credentials@<sha>
   id: aws
@@ -35,14 +53,14 @@ path, before the request leaves the runner.
     aws-region: us-east-1
 - uses: buildcage/isolated-run@<sha>
   with:
-    allowed_aws_accounts: ${{ steps.aws.outputs.aws-account-id }}
+    allowed_aws_role_accounts: ${{ steps.aws.outputs.aws-account-id }}
     allowed_url_rules: |
       * https://cloudformation.us-east-1.amazonaws.com/**
       * https://sts.us-east-1.amazonaws.com/**
     run: npx cdk deploy
 ```
 
-With `allowed_aws_accounts` set, a request to an AWS API host that carries an AWS signature must be
+With the check on, a request to an AWS API host that carries an AWS signature must be
 signed with a key the proxy knows (below). The proxy reads the access key ID from the
 `Authorization` header (SigV4, SigV4a or SigV2), from a presigned URL's `X-Amz-Credential` or
 `AWSAccessKeyId` parameter, or from the `AWSAccessKeyId` parameter of a SigV2 form body, and
@@ -50,10 +68,10 @@ compares it with the keys it knows as a whole string. It never decodes a key ID 
 signature: a request that copies one of your key IDs without the secret is refused by AWS and logged
 in your own account.
 
-A CodeCommit `Basic` login carries a key too: the user name CodeCommit's Git credential helper
-sends is the key ID, checked the same way. A static CodeCommit Git credential names its account
-instead (`<user>-at-<account>`), and passes when that account is an allowed one. Either way the
-repository is looked up in that account.
+A CodeCommit `Basic` login carries a key too: the user name CodeCommit's Git credential helper sends
+is the key ID, checked the same way. A static CodeCommit Git credential names its account instead
+(`<user>-at-<account>`), and passes when that account is in `allowed_aws_role_accounts`. Either way
+the repository is looked up in that account.
 
 A form body is the body of a `POST` to a host that names no resource (below), when its Content-Type
 is `application/x-www-form-urlencoded` or, whatever the Content-Type says, the body starts as a form
@@ -69,15 +87,14 @@ the proxy cannot tell it is a form.
 The proxy knows two kinds of key:
 
 - **The key the step starts with**, read from `AWS_ACCESS_KEY_ID` in the step's environment, which
-  is where `aws-actions/configure-aws-credentials` puts it. It is taken as given: the proxy does
-  not ask AWS whose key it is, so a key of another account set there by mistake passes too. Set
-  `allowed_aws_accounts` to the account those credentials come from, as the example above does with
-  the action's `aws-account-id` output.
-- **Keys an STS `AssumeRole` call issues** for a role in one of the allowed accounts. The proxy reads
-  the role ARN and the new access key ID from the response, which AWS writes, and adds the key. This
-  is what lets tools that switch roles mid-step keep working, such as the CDK assuming its
-  `cdk-hnb659fds-deploy-role-*` roles or Terraform's `assume_role`. A role in any other account
-  issues a key the proxy never learns, so requests signed with it are refused.
+  is where `aws-actions/configure-aws-credentials` puts it. It is taken as given: the proxy does not
+  ask AWS whose key it is, so a key of another account set there by mistake passes too.
+- **Keys an STS `AssumeRole` call issues** for a role in one of the `allowed_aws_role_accounts`. The
+  proxy reads the role ARN and the new access key ID from the response, which AWS writes, and adds
+  the key. This is what lets tools that switch roles mid-step keep working, such as the CDK assuming
+  its `cdk-hnb659fds-deploy-role-*` roles or Terraform's `assume_role`. A role in any other account
+  issues a key the proxy never learns, so requests signed with it are refused. With no account
+  named, no key is learned at all, and the proxy leaves STS answers alone.
 
 AWS API hosts are names under `amazonaws.com`, `amazonaws.com.cn` and `amazonaws.eu` (the European
 Sovereign Cloud), and under their dual-stack counterparts `api.aws`, `api.amazonwebservices.com.cn`
@@ -200,8 +217,8 @@ use one:
 
 - `proxy_engine: inspect` only, since `universal` never sees a request's headers. `restrict` fails
   the step on `universal`; `audit` warns and ignores the input.
-- The step has to start with a key in `AWS_ACCESS_KEY_ID`. In `restrict`, a step with
-  `allowed_aws_accounts` and no such variable fails before the proxy starts; `audit` warns and turns
+- The step has to start with a key in `AWS_ACCESS_KEY_ID`. In `restrict`, a step with the check on
+  and no such variable fails before the proxy starts; `audit` warns and turns
   the check off. Credentials read from `~/.aws/credentials`, a profile or a container credentials
   endpoint are not used as a starting key.
 - Getting credentials inside the step works only through STS `AssumeRole`. The unsigned STS calls,

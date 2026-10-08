@@ -43,7 +43,7 @@ run_step() {
     BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-inspect.yaml" \
     BUILDCAGE_TEST_CERT_PATH="$REPO_ROOT/test/test-server-inspect/cert.pem" \
     INPUT_PROXY_ENGINE="inspect" \
-    INPUT_ALLOWED_AWS_ACCOUNTS="111111111111" \
+    INPUT_ALLOWED_AWS_ROLE_ACCOUNTS="111111111111" \
     INPUT_ALLOWED_URL_RULES="* https://**.amazonaws.com/**
 GET https://allowed.example.com/public/**" \
     INPUT_FAIL_ON_BLOCKED="false" \
@@ -97,6 +97,37 @@ if grep -qF "restrict mode would refuse" "$TMPDIR/audit.log"; then
   pass "a warning counts the requests restrict would refuse"
 else
   fail "no warning counted the requests restrict would refuse"
+fi
+
+echo ""
+echo "--- aws_key_check alone: the step's own key, and no role's ---"
+run_step keyonly \
+  AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
+  INPUT_PROXY_MODE="restrict" \
+  INPUT_AWS_KEY_CHECK="true" \
+  INPUT_ALLOWED_AWS_ROLE_ACCOUNTS="" \
+  INPUT_RUN="bash $REPO_ROOT/test/inspect-aws-key-only-scenarios.sh"
+RUN_EXIT=$?
+cat "$TMPDIR/keyonly.log"
+if [ "$RUN_EXIT" = "0" ]; then
+  pass "all key-only scenarios passed"
+else
+  fail "one or more key-only scenarios failed (exit $RUN_EXIT)"
+fi
+
+echo ""
+echo "--- the replaced allowed_aws_accounts ---"
+run_step replaced \
+  AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
+  INPUT_PROXY_MODE="restrict" \
+  INPUT_ALLOWED_AWS_ACCOUNTS="111111111111" \
+  INPUT_RUN="true"
+RUN_EXIT=$?
+if [ "$RUN_EXIT" != "0" ] && grep -qF "allowed_aws_accounts has been replaced" "$TMPDIR/replaced.log"; then
+  pass "the replaced input fails the step, naming what replaces it"
+else
+  fail "the replaced input did not fail as expected (exit $RUN_EXIT)"
+  cat "$TMPDIR/replaced.log"
 fi
 
 echo ""

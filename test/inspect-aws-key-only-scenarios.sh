@@ -1,0 +1,33 @@
+#!/bin/bash
+# Runs inside the sandbox with aws_key_check on and no allowed_aws_role_accounts
+# (see test/integration-test-inspect-aws-keys.sh): the step's own key passes,
+# and a key AssumeRole issues, even for a role in the start key's account, is
+# never learned.
+#
+# ---------------------------------------------------------------------------
+# Under test:
+#   aws_key_check:        true
+#   AWS_ACCESS_KEY_ID:    ${AKIA}TESTSTARTKEY0001
+#   allowed_url_rules:
+#     * https://**.amazonaws.com/**
+# ---------------------------------------------------------------------------
+set -uo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+
+# Assembled at runtime: a literal shaped like an AWS access key ID trips secret
+# scanning on push.
+AKIA="AK""IA"
+ASIA="AS""IA"
+
+C="curl -sS -o /dev/null -w %{http_code} --max-time 10"
+CF=https://cloudformation.us-east-1.amazonaws.com/
+STS=https://sts.us-east-1.amazonaws.com
+sigv4() { echo "AWS4-HMAC-SHA256 Credential=$1/20261008/us-east-1/cloudformation/aws4_request, SignedHeaders=host, Signature=ab"; }
+
+check_status "a request signed with the start key" "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" $CF)" "200"
+check_status "a request signed with a key of the build's own" "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTATTACKER0001)" $CF)" "403"
+check_status "AssumeRole for a role in the start key's account" \
+  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" $STS/sts/same-account)" "200"
+check_status "the key it issued, learned by no role account" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTLEARNEDKEY01)" $CF)" "403"
+
+scenario_results "AWS key-only scenarios"
