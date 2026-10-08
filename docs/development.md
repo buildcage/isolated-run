@@ -210,8 +210,9 @@ prints as `-` too. The log keeps the `Host` as sent; the report lowercases it an
 dot, as the rules do before matching it.
 
 With `allowed_aws_accounts` set, both request lines carry `wr=<reason|->` after `dst=`: in `audit`,
-the reason `restrict` would have refused the request for (`aws-key-not-allowed`, `aws-no-credential`
-or `aws-ambiguous-credential`), and `-` otherwise. `restrict` logs the same reasons as `reason=`.
+the reason `restrict` would have refused the request for (`aws-key-not-allowed`, `aws-no-credential`,
+`aws-ambiguous-credential` or `aws-unreadable`), and `-` otherwise. `restrict` logs the same reasons
+as `reason=`.
 See [AWS access key check](./aws.md).
 
 `ts` is HAProxy's termination state and `reason` the refusal reason where the rule that refused

@@ -18,7 +18,17 @@ export interface AwsKeyCheck {
 }
 
 /** The verdicts restrict mode refuses on, each logged as `reason=aws-<verdict>`. */
-export const AWS_REFUSED_VERDICTS = ["no-credential", "ambiguous-credential", "key-not-allowed"];
+export const AWS_REFUSED_VERDICTS = [
+  "no-credential",
+  "ambiguous-credential",
+  "unreadable",
+  "key-not-allowed",
+];
+
+// A form body is read whole up to this size, less its headers, so a credential
+// cannot sit past what was read. SQS SendMessage, the largest form request, is
+// 1 MiB before URL encoding at most triples it.
+const FORM_BODY_LIMIT = 4 * 1024 * 1024;
 
 // API endpoints only: the commercial, China and European Sovereign Cloud
 // domains, and the dual-stack ones.
@@ -46,12 +56,20 @@ export const AWS_RESOURCE_HOST =
 // regard to case, so a spelling the extraction below does not read is still
 // counted as a credential and left unmatched rather than read as none.
 const QUERY_CREDENTIAL = "(x-amz-credential|awsaccesskeyid)";
+// SigV2's name as a form body may spell it, any letter percent-encoded.
+export const FORM_CREDENTIAL = "awsaccesskeyid"
+  .split("")
+  .map(
+    (c) => `(${c}|%${c.charCodeAt(0).toString(16)}|%${c.toUpperCase().charCodeAt(0).toString(16)})`,
+  )
+  .join("");
 
 /** The check as the inspect stage takes it. */
 export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
   return {
     requestRules: (mode) => awsKeyRequestRules(check, mode),
     responseRules: () => awsKeyResponseRules(check),
+    global: [`    tune.bufsize.large ${FORM_BODY_LIMIT}`],
   };
 }
 
@@ -75,21 +93,48 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    acl aws_auth_many req.fhdr(authorization) -m reg -i credential=.*credential=",
     "    # Decoded first: a name spelled as X-Amz-Cr%65dential still counts.",
     `    acl aws_query query,url_dec -m reg -i (^|&)${QUERY_CREDENTIAL}=`,
-    `    acl aws_query_many query,url_dec -m reg -i (^|&)${QUERY_CREDENTIAL}=.*&${QUERY_CREDENTIAL}=`,
+    `    acl aws_query_many query,url_dec -m reg -i (?s)(^|&)${QUERY_CREDENTIAL}=.*&${QUERY_CREDENTIAL}=`,
+    "    # SigV2 also takes its parameters from a form body, and a key there is",
+    "    # judged alongside one in the header or the query. A body counts as a",
+    "    # form by its Content-Type or, whatever that says, by starting as one.",
+    "    # Hosts that name a resource are left out.",
+    "    http-request set-var(txn.aws_post) bool(true) if aws_host METH_POST !aws_resource_host",
+    "    acl aws_post var(txn.aws_post) -m bool",
+    "    http-request wait-for-body time 30s if aws_post",
+    "    http-request set-var(txn.aws_form_post) bool(true) if aws_post { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded } or aws_post { req.body -m reg ^&*[A-Za-z0-9._~%*+!(),:/@-]*= }",
+    "    acl aws_form_post var(txn.aws_form_post) -m bool",
+    "    http-request wait-for-body time 30s use-large-buffer if aws_form_post",
+    "    # Matched undecoded, since a value carries & and = encoded, but each",
+    "    # letter of the name may be.",
+    `    http-request set-var(txn.aws_body) bool(true) if aws_form_post { req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`,
+    "    acl aws_body var(txn.aws_body) -m bool",
+    `    acl aws_body_many req.body -m reg -i (?s)(^|&)${FORM_CREDENTIAL}=.*&${FORM_CREDENTIAL}=`,
+    "    http-request set-var(txn.aws_body_key) req.body_param(AWSAccessKeyId,i) if aws_body",
     "    # A header neither pattern matches comes out unchanged, and so never",
     "    # equals a key in the map.",
     `    http-request set-var(txn.aws_key) 'req.fhdr(authorization),regsub("^AWS4-[A-Z0-9-]+ +Credential=([A-Za-z0-9]+)/.*$","\\1",i),regsub("^AWS ([A-Za-z0-9]+):.*$","\\1",i)' if aws_host aws_auth !aws_query`,
     `    http-request set-var(txn.aws_key) 'url_param(X-Amz-Credential),url_dec,regsub("^([A-Za-z0-9]+)/.*$","\\1")' if aws_host aws_query !aws_auth { url_param(X-Amz-Credential) -m found }`,
     "    http-request set-var(txn.aws_key) url_param(AWSAccessKeyId) if aws_host aws_query !aws_auth { url_param(AWSAccessKeyId) -m found }",
-    "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_host aws_auth aws_query or aws_host aws_auth aws_auth_many or aws_host aws_query_many",
+    "    http-request set-var(txn.aws_key) var(txn.aws_body_key) if aws_body !aws_auth !aws_query",
+    "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_host aws_auth aws_query or aws_host aws_auth aws_auth_many or aws_host aws_query_many or aws_body aws_body_many",
     "    # Unsigned, whatever the method: where the host names no resource, the",
     "    # account it reaches is in the parameters or the body, out of sight.",
-    "    # An S3 POST-policy upload carries its credential in the form body,",
+    "    # An S3 POST-policy upload carries its credential in a multipart body,",
     "    # which this does not read, so it counts as unsigned and is refused.",
     `    http-request set-var(txn.aws_form) bool(true) if METH_POST { var(txn.host) -m reg ${S3_HOST} } { req.hdr(content-type) -m beg -i multipart/form-data }`,
     "    acl aws_form var(txn.aws_form) -m bool",
-    "    http-request set-var(txn.aws) str(unsigned) if aws_host !aws_auth !aws_query aws_resource_host !aws_form",
-    "    http-request set-var(txn.aws) str(no-credential) if aws_host !aws_auth !aws_query !aws_resource_host or aws_host !aws_auth !aws_query aws_form",
+    "    http-request set-var(txn.aws) str(unsigned) if aws_host !aws_auth !aws_query !aws_body aws_resource_host !aws_form",
+    "    http-request set-var(txn.aws) str(no-credential) if aws_host !aws_auth !aws_query !aws_body !aws_resource_host or aws_host !aws_auth !aws_query !aws_body aws_form",
+    "    # Where a credential could be out of sight: a query url_dec cannot decode",
+    "    # (%00 or a broken escape), or a form body that is compressed, sent",
+    "    # chunked, larger than the buffer, or holds a NUL, where matching stops.",
+    "    http-request set-var(txn.aws_body_size) req.body_size if aws_form_post",
+    "    http-request set-var(txn.aws_body_len) req.body_len if aws_form_post",
+    "    http-request set-var(txn.aws) str(unreadable) if aws_host { query -m found } !{ query,url_dec -m found }",
+    "    http-request set-var(txn.aws) str(unreadable) if aws_form_post { req.hdr(content-encoding) -m reg -i ^(?!identity$) } or aws_form_post { req.hdr(transfer-encoding) -m found }",
+    "    http-request set-var(txn.aws) str(unreadable) if aws_form_post { req.body_len,sub(txn.aws_body_size) lt 0 } or aws_form_post { req.body,length,sub(txn.aws_body_len) lt 0 }",
+    "    # A body key next to another one; a body key alone is aws_key below.",
+    `    http-request set-var(txn.aws) str(key-not-allowed) if aws_body aws_auth !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found } or aws_body aws_query !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found }`,
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_host !{ var(txn.aws) -m found } !{ var(txn.aws_key),map(${check.keyMapFile}) -m found }`,
     "    http-request set-var(txn.aws) str(allowed) if aws_host !{ var(txn.aws) -m found }",
   ];

@@ -3,6 +3,7 @@ import { describe, it, expect, reportResults } from "#core/lib/test/test-shim.ts
 import {
   AWS_API_HOST,
   AWS_RESOURCE_HOST,
+  FORM_CREDENTIAL,
   awsKeyRequestRules,
   awsKeyResponseRules,
   awsKeyExtension,
@@ -123,11 +124,37 @@ describe("hosts that name the resource", () => {
   });
 });
 
+describe("the SigV2 credential in a form body", () => {
+  const credential = new RegExp(`(^|&)${FORM_CREDENTIAL}=`, "i");
+
+  it("counts the name in any case and with any letter percent-encoded", () => {
+    for (const body of [
+      "AWSAccessKeyId=K&Action=X",
+      "Action=X&AWSAccessKeyId=K",
+      "Action=X&awsaccesskeyid=K",
+      "Action=X&AWSAccessK%65yId=K",
+      "Action=X&%41%57%53AccessKeyId=K",
+    ]) {
+      expect(credential.test(body)).toBe(true);
+    }
+  });
+
+  it("does not count the name inside a value, whose & and = are encoded", () => {
+    for (const body of [
+      "Action=Publish&Message=https%3A%2F%2Fb.s3.amazonaws.com%2Fk%3FExpires%3D1%26AWSAccessKeyId%3DK",
+      "Action=X&MyAWSAccessKeyId=K",
+    ]) {
+      expect(credential.test(body)).toBe(false);
+    }
+  });
+});
+
 describe("awsKeyExtension", () => {
   it("hands the stage this check's own rules", () => {
     const extension = awsKeyExtension(CHECK);
     expect(extension.requestRules("audit")).toStrictEqual(awsKeyRequestRules(CHECK, "audit"));
     expect(extension.responseRules()).toStrictEqual(awsKeyResponseRules(CHECK));
+    expect(extension.global).toStrictEqual(["    tune.bufsize.large 4194304"]);
   });
 });
 
@@ -136,7 +163,7 @@ describe("awsKeyRequestRules", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(
       rules.includes(
-        "acl aws_refused var(txn.aws) -m str no-credential ambiguous-credential key-not-allowed",
+        "acl aws_refused var(txn.aws) -m str no-credential ambiguous-credential unreadable key-not-allowed",
       ),
     ).toBe(true);
     expect(rules.includes("set-var-fmt(txn.reason) aws-%[var(txn.aws)] if aws_refused")).toBe(true);
@@ -166,23 +193,67 @@ describe("awsKeyRequestRules", () => {
   it("leaves an unsigned request to the URL rules only where the host names a resource", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(
-      rules.includes("str(unsigned) if aws_host !aws_auth !aws_query aws_resource_host !aws_form"),
+      rules.includes(
+        "str(unsigned) if aws_host !aws_auth !aws_query !aws_body aws_resource_host !aws_form",
+      ),
     ).toBe(true);
     expect(
-      rules.includes("str(no-credential) if aws_host !aws_auth !aws_query !aws_resource_host or"),
+      rules.includes(
+        "str(no-credential) if aws_host !aws_auth !aws_query !aws_body !aws_resource_host or",
+      ),
     ).toBe(true);
   });
 
   it("refuses an S3 POST-policy upload, whose credential is in a body it does not read", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(rules.includes("{ req.hdr(content-type) -m beg -i multipart/form-data }")).toBe(true);
-    expect(rules.includes("or aws_host !aws_auth !aws_query aws_form")).toBe(true);
+    expect(rules.includes("or aws_host !aws_auth !aws_query !aws_body aws_form")).toBe(true);
+  });
+
+  it("reads a SigV2 key from a form body, and checks it as well as any other", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
+    expect(rules.includes("wait-for-body time 30s use-large-buffer if aws_form_post")).toBe(true);
+    expect(rules.includes(`if aws_form_post { req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`)).toBe(
+      true,
+    );
+    expect(
+      rules.includes(
+        "aws_post { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded } or aws_post { req.body -m reg ^&*[A-Za-z0-9._~%*+!(),:/@-]*= }",
+      ),
+    ).toBe(true);
+    expect(
+      rules.includes("set-var(txn.aws_key) var(txn.aws_body_key) if aws_body !aws_auth !aws_query"),
+    ).toBe(true);
+    expect(rules.includes("or aws_body aws_body_many")).toBe(true);
+    expect(rules.includes(`(?s)(^|&)${FORM_CREDENTIAL}=.*&${FORM_CREDENTIAL}=`)).toBe(true);
+    expect(
+      rules.includes(
+        "str(key-not-allowed) if aws_body aws_auth !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(/rules/keys.map) -m found } or aws_body aws_query",
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses what it cannot read through: an undecodable query, or a form body it has not all of", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
+    expect(
+      rules.includes("str(unreadable) if aws_host { query -m found } !{ query,url_dec -m found }"),
+    ).toBe(true);
+    expect(
+      rules.includes(
+        "str(unreadable) if aws_form_post { req.hdr(content-encoding) -m reg -i ^(?!identity$) } or aws_form_post { req.hdr(transfer-encoding) -m found }",
+      ),
+    ).toBe(true);
+    expect(
+      rules.includes(
+        "str(unreadable) if aws_form_post { req.body_len,sub(txn.aws_body_size) lt 0 } or aws_form_post { req.body,length,sub(txn.aws_body_len) lt 0 }",
+      ),
+    ).toBe(true);
   });
 
   it("decodes the query before looking for a credential in it", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(rules.includes("acl aws_query query,url_dec -m reg -i")).toBe(true);
-    expect(rules.includes("acl aws_query_many query,url_dec -m reg -i")).toBe(true);
+    expect(rules.includes("acl aws_query_many query,url_dec -m reg -i (?s)(^|&)")).toBe(true);
   });
 
   it("leaves Accept-Encoding alone where the client signed it, in a header or a query", () => {
