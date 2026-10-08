@@ -8,6 +8,6 @@ This page holds no content of its own. The `inspect` engine is documented in the
 - [Rule syntax](./reference.md#rule-syntax): the grammar those rules are written in
 - [CA trust and compatibility](../README.md#ca-trust-and-compatibility) and [Limitations](../README.md#limitations): the CA it mounts, and what it cannot work with
 - [CA trust variables](./reference.md#ca-trust-variables): each variable it sets and what it points at
-- [AWS access key check](./aws.md): `allowed_aws_accounts`, what it stops, and what IAM has to close instead
+- [AWS access key check](./aws.md): `aws_key_check` and `allowed_aws_role_accounts`, what they stop, and what IAM has to close instead
 - [The report](../README.md#the-report): what the Job Summary shows, and what the traffic artifact holds
 - [Inspect Proxy Engine](./security.md#inspect-proxy-engine): architecture, threat model, attack resistance

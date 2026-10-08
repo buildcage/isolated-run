@@ -1,20 +1,21 @@
 /**
  * The AWS access key check: a request to an AWS API host must be signed with a
- * key that belongs to an allowed account, or a build could sign with keys of
- * its own and write data into another account's CloudTrail through any API.
+ * key the proxy knows, or a build could sign with keys of its own and write
+ * data into another account's CloudTrail through any API.
  *
- * The keys come from two places: the ones the step started with, and the ones
- * an STS AssumeRole answer hands back for a role in an allowed account, read
- * off the response and added to the map at runtime. A key is matched as a
- * whole string and never decoded.
+ * The keys come from two places: the one the step started with, taken as
+ * given, and, when role accounts are named, the ones an STS AssumeRole answer
+ * hands back for a role in one of them, read off the response and added to the
+ * map at runtime. A key is matched as a whole string and never decoded.
  */
 
 import type { InspectStageExtension } from "#core/lib/acl/haproxy-inspect-stage.ts";
 
-/** Where the two files the check reads are. */
+/** Where the files the check reads are. */
 export interface AwsKeyCheck {
-  accountFile: string;
   keyMapFile: string;
+  /** The accounts whose roles may issue keys; absent, no key is learned. */
+  accountFile?: string;
 }
 
 /** The verdicts restrict mode refuses on, each logged as `reason=aws-<verdict>`. */
@@ -95,15 +96,14 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    # Matched once: an acl is evaluated again on every line that names it.",
     `    http-request set-var(txn.aws_host) bool(true) if { var(txn.host) -m reg ${AWS_API_HOST} }`,
     "    acl aws_host var(txn.aws_host) -m bool",
-    `    acl aws_sts_host var(txn.host) -m reg ${STS_HOST}`,
     `    acl aws_resource_host var(txn.host) -m reg ${AWS_RESOURCE_HOST}`,
     "    # A credential is one of AWS's own schemes, or a Basic login to CodeCommit:",
-    "    # the two aws_auth lines below declare the one acl. CodeCommit's Git credential helper",
-    "    # sends the key ID as the user name, and a static Git credential names",
-    "    # its account, <user>-at-<id>; either way the repository is looked up in",
-    "    # that account. Other Bearer and Basic tokens, such as CodeArtifact's and",
-    "    # ECR's, are signed by no AWS account. Any case, so a spelling AWS might",
-    "    # accept is never let through unjudged.",
+    "    # the two aws_auth lines below declare the one acl. CodeCommit's Git",
+    "    # credential helper sends the key ID as the user name, and a static Git",
+    "    # credential names its account, <user>-at-<id>; either way the repository",
+    "    # is looked up in that account. Other Bearer and Basic tokens, such as",
+    "    # CodeArtifact's and ECR's, are signed by no AWS account. Any case, so a",
+    "    # spelling AWS might accept is never let through unjudged.",
     `    http-request set-var(txn.aws_git_host) bool(true) if { var(txn.host) -m reg ${CODECOMMIT_HOST} }`,
     "    acl aws_git_host var(txn.aws_git_host) -m bool",
     "    http-request set-var(txn.aws_git) bool(true) if aws_git_host { req.fhdr(authorization) -m reg -i ^basic\\s }",
@@ -162,7 +162,11 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    http-request set-var(txn.aws) str(unreadable) if aws_form_post { req.body_len,sub(txn.aws_body_size) lt 0 } or aws_form_post { req.body,length,sub(txn.aws_body_len) lt 0 }",
     "    # A body key next to another one; a body key alone is aws_key below.",
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_body aws_auth !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found } or aws_body aws_query !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found }`,
-    `    http-request set-var(txn.aws) str(allowed) if { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}\\z } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f ${check.accountFile} } !{ var(txn.aws) -m found }`,
+    ...(check.accountFile
+      ? [
+          `    http-request set-var(txn.aws) str(allowed) if { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}\\z } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f ${check.accountFile} } !{ var(txn.aws) -m found }`,
+        ]
+      : []),
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_host !{ var(txn.aws) -m found } !{ var(txn.aws_key),map(${check.keyMapFile}) -m found }`,
     "    http-request set-var(txn.aws) str(allowed) if aws_host !{ var(txn.aws) -m found }",
   ];
@@ -175,17 +179,20 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
         ]
       : ["    http-request set-var-fmt(txn.would_refuse) aws-%[var(txn.aws)] if aws_refused"]),
   );
-  l.push(
-    "    # The body has to be readable to learn a key from it; no Accept-Encoding",
-    "    # at all would mean any coding is acceptable (RFC 9110). Left alone where",
-    "    # it is signed, which rewriting would break: a compressed answer then",
-    "    # teaches nothing, and the key it issues is refused.",
-    "    acl aws_coding_signed req.fhdr(authorization) -m reg -i signedheaders=[^,]*accept-encoding",
-    "    acl aws_coding_signed query,url_dec -m reg -i (^|&)x-amz-signedheaders=[^&]*accept-encoding",
-    "    http-request set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed",
-    "    http-request set-var(txn.aws_sts) bool(true) if aws_sts_host",
-    "",
-  );
+  if (check.accountFile) {
+    l.push(
+      "    # The body has to be readable to learn a key from it; no Accept-Encoding",
+      "    # at all would mean any coding is acceptable (RFC 9110). Left alone where",
+      "    # it is signed, which rewriting would break: a compressed answer then",
+      "    # teaches nothing, and the key it issues is refused.",
+      `    acl aws_sts_host var(txn.host) -m reg ${STS_HOST}`,
+      "    acl aws_coding_signed req.fhdr(authorization) -m reg -i signedheaders=[^,]*accept-encoding",
+      "    acl aws_coding_signed query,url_dec -m reg -i (^|&)x-amz-signedheaders=[^&]*accept-encoding",
+      "    http-request set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed",
+      "    http-request set-var(txn.aws_sts) bool(true) if aws_sts_host",
+    );
+  }
+  l.push("");
   return l;
 }
 
@@ -196,6 +203,7 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
  * not learned and its requests are refused.
  */
 export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
+  if (!check.accountFile) return [];
   return [
     "    acl aws_sts var(txn.aws_sts) -m bool",
     "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRoleResponse[\\s>]",

@@ -33,18 +33,20 @@ describe("CONFIG_FILE_INPUTS", () => {
     const inputs = Object.keys(actionYml.inputs).filter(
       (n) => !["run", "writable", "config_file"].includes(n),
     );
-    expect([...CONFIG_FILE_INPUTS.known].sort()).toEqual(inputs.sort());
+    expect(
+      [...CONFIG_FILE_INPUTS.known].filter((n) => n !== "allowed_aws_accounts").sort(),
+    ).toEqual(inputs.sort());
   });
 
   it("merges only inputs it knows", () => {
     expect(CONFIG_FILE_INPUTS.known).toEqual(expect.arrayContaining([...CONFIG_FILE_INPUTS.lists]));
   });
 
-  it("lets the workflow's allowed_aws_accounts replace the file's, and adds rule lines", () => {
+  it("lets the workflow's allowed_aws_role_accounts replace the file's, and adds rule lines", () => {
     const workspace = mkdtempSync(join(tmpdir(), "config-file-"));
     writeFileSync(
       join(workspace, "buildcage.yml"),
-      'allowed_aws_accounts: "222222222222"\nallowed_url_rules: GET https://b.example.com/**\n',
+      'allowed_aws_role_accounts: "222222222222"\nallowed_url_rules: GET https://b.example.com/**\n',
     );
     const env = (inline: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
       GITHUB_WORKSPACE: workspace,
@@ -53,17 +55,17 @@ describe("CONFIG_FILE_INPUTS", () => {
       ...inline,
     });
     const set = env({
-      INPUT_ALLOWED_AWS_ACCOUNTS: "111111111111",
+      INPUT_ALLOWED_AWS_ROLE_ACCOUNTS: "111111111111",
       INPUT_ALLOWED_URL_RULES: "GET https://a.example.com/**",
     });
     applyConfigFile(set, CONFIG_FILE_INPUTS);
-    expect(set.INPUT_ALLOWED_AWS_ACCOUNTS).toBe("111111111111");
+    expect(set.INPUT_ALLOWED_AWS_ROLE_ACCOUNTS).toBe("111111111111");
     expect(set.INPUT_ALLOWED_URL_RULES).toBe(
       "GET https://a.example.com/**\nGET https://b.example.com/**",
     );
     const unset = env({});
     applyConfigFile(unset, CONFIG_FILE_INPUTS);
-    expect(unset.INPUT_ALLOWED_AWS_ACCOUNTS).toBe("222222222222");
+    expect(unset.INPUT_ALLOWED_AWS_ROLE_ACCOUNTS).toBe("222222222222");
   });
 });
 
@@ -232,16 +234,84 @@ describe.each([
 describe("readAwsKeyInputs", () => {
   const KEY = `${ASIA}AAAAAAAAAAAAAAAA`;
   const inspect = { proxyEngine: "inspect", proxyMode: "restrict" } as const;
-  const accounts = (value: string) => inputs({ allowed_aws_accounts: value });
+  const accounts = (value: string) => inputs({ allowed_aws_role_accounts: value });
+  const OFF = { keys: [], roleAccounts: [] };
 
   it("leaves the check off when unset, whatever the environment holds", () => {
-    expect(readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, inputs())).toStrictEqual({
-      accounts: [],
-      keys: [],
-    });
+    expect(readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, inputs())).toStrictEqual(
+      OFF,
+    );
+    expect(
+      readAwsKeyInputs(
+        inspect,
+        { AWS_ACCESS_KEY_ID: KEY },
+        silent,
+        inputs({ aws_key_check: "false" }),
+      ),
+    ).toStrictEqual(OFF);
   });
 
-  it("reads the accounts, deduplicated, and starts from the step's key", () => {
+  it("pins the step's key with aws_key_check alone, learning no role's key", () => {
+    expect(
+      readAwsKeyInputs(
+        inspect,
+        { AWS_ACCESS_KEY_ID: KEY },
+        silent,
+        inputs({ aws_key_check: "true" }),
+      ),
+    ).toStrictEqual({ keys: [KEY], roleAccounts: [] });
+  });
+
+  it("lets an explicit false win over role accounts, warning that they are ignored", () => {
+    const warn = vi.fn();
+    expect(
+      readAwsKeyInputs(
+        inspect,
+        { AWS_ACCESS_KEY_ID: KEY },
+        warn,
+        inputs({ aws_key_check: "false", allowed_aws_role_accounts: "111111111111" }),
+      ),
+    ).toStrictEqual(OFF);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("allowed_aws_role_accounts is ignored"),
+    );
+  });
+
+  it("lets a replaced allowed_aws_accounts that names no account pass", () => {
+    expect(
+      readAwsKeyInputs(inspect, {}, silent, inputs({ allowed_aws_accounts: "# disabled" })),
+    ).toStrictEqual(OFF);
+  });
+
+  it("refuses the replaced allowed_aws_accounts from a config file too", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "config-file-"));
+    writeFileSync(join(workspace, "buildcage.yml"), 'allowed_aws_accounts: "111111111111"\n');
+    const env: NodeJS.ProcessEnv = {
+      GITHUB_WORKSPACE: workspace,
+      GITHUB_EVENT_NAME: "push",
+      INPUT_CONFIG_FILE: "buildcage.yml",
+    };
+    applyConfigFile(env, CONFIG_FILE_INPUTS);
+    expect(() =>
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, (name) =>
+        (env[`INPUT_${name.toUpperCase()}`] ?? "").trim(),
+      ),
+    ).toThrow(expect.objectContaining({ code: "AWS_ACCOUNTS_REMOVED" }));
+  });
+
+  it("refuses the replaced allowed_aws_accounts, naming what replaces it", () => {
+    const read = () =>
+      readAwsKeyInputs(
+        inspect,
+        { AWS_ACCESS_KEY_ID: KEY },
+        silent,
+        inputs({ allowed_aws_accounts: "111111111111" }),
+      );
+    expect(read).toThrow(expect.objectContaining({ code: "AWS_ACCOUNTS_REMOVED" }));
+    expect(read).toThrow(/aws_key_check.*allowed_aws_role_accounts/);
+  });
+
+  it("reads the role accounts, deduplicated, and turns the check on from the step's key", () => {
     expect(
       readAwsKeyInputs(
         inspect,
@@ -249,7 +319,7 @@ describe("readAwsKeyInputs", () => {
         silent,
         accounts("111111111111 222222222222\n111111111111 # prod"),
       ),
-    ).toStrictEqual({ accounts: ["111111111111", "222222222222"], keys: [KEY] });
+    ).toStrictEqual({ keys: [KEY], roleAccounts: ["111111111111", "222222222222"] });
   });
 
   it("names every entry that is not an account ID", () => {
@@ -283,7 +353,7 @@ describe("readAwsKeyInputs", () => {
         warn,
         accounts("111111111111"),
       ),
-    ).toStrictEqual({ accounts: [], keys: [] });
+    ).toStrictEqual(OFF);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("check is off for this run"));
   });
 
@@ -318,7 +388,7 @@ describe("readAwsKeyInputs", () => {
         warn,
         accounts("111111111111"),
       ),
-    ).toStrictEqual({ accounts: [], keys: [] });
+    ).toStrictEqual(OFF);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("ignored for this run"));
   });
 });

@@ -25,25 +25,26 @@ details.
 
 `run` is the only required input.
 
-| Input                             | Default      | Description                                                                                                                                                                             |
-| --------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`                             | required     | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed).                                                           |
-| `config_file`                     | empty        | A YAML file, relative to the workspace, that sets the other inputs. See [Config file](#config-file).                                                                                    |
-| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                                                                                         |
-| `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                                                                          |
-| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                                                                                 |
-| `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium).                                                                    |
-| `allowed_aws_accounts`            | empty        | `inspect` only, **experimental**. AWS accounts whose roles may issue the keys that sign AWS API requests, beside the step's own key. See [AWS access key check](#aws-access-key-check). |
-| `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                                                                                   |
-| `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                                                                                |
-| `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                                                                               |
-| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                                                                          |
-| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                                                                              |
-| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                                                                                      |
+| Input                             | Default      | Description                                                                                                                                                                                                          |
+| --------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`                             | required     | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed).                                                                                        |
+| `config_file`                     | empty        | A YAML file, relative to the workspace, that sets the other inputs. See [Config file](#config-file).                                                                                                                 |
+| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                                                                                                                      |
+| `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                                                                                                       |
+| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                                                                                                              |
+| `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium).                                                                                                 |
+| `aws_key_check`                   | `false`      | `inspect` only, **experimental**. Refuse AWS API requests signed with any key but the step's own `AWS_ACCESS_KEY_ID`. On when `allowed_aws_role_accounts` is set. See [AWS access key check](#aws-access-key-check). |
+| `allowed_aws_role_accounts`       | empty        | `inspect` only, **experimental**. AWS accounts whose roles the step may assume; the keys those roles issue pass the check too. See [AWS access key check](#aws-access-key-check).                                    |
+| `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                                                                                                                |
+| `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                                                                                                             |
+| `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                                                                                                            |
+| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                                                                                                       |
+| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                                                                                                           |
+| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                                                                                                                   |
 
-`fail_on_blocked`, `fail_on_ca_residue` and `upload_traffic_artifact` take `true` or `false`, and
-`traffic_artifact_retention_days` a whole number above zero. Any other value fails the step before
-the sandbox is set up.
+`fail_on_blocked`, `fail_on_ca_residue`, `upload_traffic_artifact` and `aws_key_check` take `true`
+or `false`, and `traffic_artifact_retention_days` a whole number above zero. Any other value fails
+the step before the sandbox is set up.
 
 ### Rule inputs
 
@@ -644,16 +645,21 @@ resolver saying no rule allows the name, and it does fail the step.
 
 ## AWS access key check
 
-`allowed_aws_accounts` is **experimental**: its behavior and error messages may still change without
-following semver. It takes 12-digit AWS account IDs, separated by commas, whitespace or newlines,
-with `#` comments as in the rule inputs. Set in the workflow, it replaces a config file's value.
-With it set, a request to an AWS API host must be signed with a key the proxy knows: the step's own
-`AWS_ACCESS_KEY_ID`, taken as given without checking its account, or one an STS `AssumeRole` issued
-for a role in one of these accounts. An unsigned request is left to the URL rules where the host
-names the resource it is for, such as an S3 bucket or an ECR registry, and refused everywhere else.
-If `AWS_ACCESS_KEY_ID` is unset or is not an access key ID, `restrict` fails the step before the
-sandbox is set up and `audit` warns and turns the check off. [AWS access key check](./aws.md) covers
-why, what the check does not stop, and the IAM settings that close the rest.
+`aws_key_check` and `allowed_aws_role_accounts` are **experimental**: their behavior and error
+messages may still change without following semver. With `aws_key_check: true`, a request to an AWS
+API host must be signed with the step's own `AWS_ACCESS_KEY_ID`, taken as given without checking its
+account. `allowed_aws_role_accounts` takes 12-digit AWS account IDs, separated by commas, whitespace
+or newlines, with `#` comments as in the rule inputs, and turns the check on as well: a key an STS
+`AssumeRole` issues for a role in one of these accounts passes too, and with no account named no
+such key does. `aws_key_check: false` turns the check off even with accounts named, with a warning,
+so a step can opt out of accounts a config file names. Set in the workflow,
+`allowed_aws_role_accounts` replaces a config file's value. An unsigned request is left to the URL
+rules where the host names the resource it is for, such as an S3 bucket or an ECR registry, and
+refused everywhere else. If `AWS_ACCESS_KEY_ID` is unset or is not an access key ID, `restrict`
+fails the step before the sandbox is set up and `audit` warns and turns the check off.
+`allowed_aws_accounts`, which these replace, fails the step when it names an account. [AWS access
+key check](./aws.md) covers why, what the check does not stop, and the IAM settings that close the
+rest.
 
 The check refuses after the URL rules have allowed a request, with one of these reasons:
 
