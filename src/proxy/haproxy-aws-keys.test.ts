@@ -38,6 +38,16 @@ describe("AWS API hosts", () => {
     }
   });
 
+  it("covers a name whose labels hold a character AWS's own names do not", () => {
+    for (const host of [
+      "my_bucket.s3.amazonaws.com",
+      "a_b.ddb.us-east-1.amazonaws.com",
+      "_x.sqs.us-east-1.amazonaws.com",
+    ]) {
+      expect(apiHost.test(host)).toBe(true);
+    }
+  });
+
   it("leaves out AWS names that are no API endpoint, and lookalikes", () => {
     for (const host of [
       "amazonaws.com",
@@ -261,7 +271,7 @@ describe("awsKeyRequestRules", () => {
   it("matches each host pattern once", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     for (const pattern of [AWS_API_HOST, AWS_RESOURCE_HOST, CODECOMMIT_HOST, STS_HOST]) {
-      expect(rules.split(pattern).length).toBe(2);
+      expect(rules.split(`-m reg ${pattern} }`).length).toBe(2);
     }
   });
 
