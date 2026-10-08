@@ -51,6 +51,8 @@ check_status "a Bearer token to CloudFormation" "$($C -X POST -H "Authorization:
 echo "=== [more than one credential] ==="
 check_status "two Authorization headers" \
   "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Authorization: $(sigv4 ${AKIA}TESTATTACKER0001)" $CF)" "403"
+check_status "a query credential repeated across an encoded newline" \
+  "$($C "https://bucket.s3.amazonaws.com/x?X-Amz-Credential=${AKIA}TESTSTARTKEY0001%2Fx&a=%0A&X-Amz-Credential=${AKIA}TESTATTACKER0001%2Fx")" "403"
 check_status "a header and a query credential" \
   "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" "$CF?X-Amz-Credential=${AKIA}TESTATTACKER0001%2Fx")" "403"
 

@@ -82,7 +82,7 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    acl aws_auth_many req.fhdr(authorization) -m reg -i credential=.*credential=",
     "    # Decoded first: a name spelled as X-Amz-Cr%65dential still counts.",
     `    acl aws_query query,url_dec -m reg -i (^|&)${QUERY_CREDENTIAL}=`,
-    `    acl aws_query_many query,url_dec -m reg -i (^|&)${QUERY_CREDENTIAL}=.*&${QUERY_CREDENTIAL}=`,
+    `    acl aws_query_many query,url_dec -m reg -i (?s)(^|&)${QUERY_CREDENTIAL}=.*&${QUERY_CREDENTIAL}=`,
     "    # SigV2 also takes its parameters from a form body, and a key there is",
     "    # judged alongside one in the header or the query. Only as much as fits",
     "    # in the buffer is read. Matched undecoded, since a value carries & and =",

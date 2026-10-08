@@ -230,7 +230,7 @@ describe("awsKeyRequestRules", () => {
   it("decodes the query before looking for a credential in it", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(rules.includes("acl aws_query query,url_dec -m reg -i")).toBe(true);
-    expect(rules.includes("acl aws_query_many query,url_dec -m reg -i")).toBe(true);
+    expect(rules.includes("acl aws_query_many query,url_dec -m reg -i (?s)(^|&)")).toBe(true);
   });
 
   it("leaves Accept-Encoding alone where the client signed it, in a header or a query", () => {
