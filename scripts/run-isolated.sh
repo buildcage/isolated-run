@@ -193,9 +193,17 @@ ip link set "$VETH_P" netns "$PROXY_NETNS_NAME"
 # that could plausibly consume any of it, hence the /dev/null redirects.
 echo "Configuring sandbox namespace network..." >&2
 # Positional arguments, so a value can never become shell syntax.
+# IPv6 is off on eth0 before it comes up: its link-local address would
+# otherwise land about two seconds later, after DAD, while the command runs,
+# and Chromium fails a request in flight on any address change with
+# ERR_NETWORK_CHANGED. Nothing here routes IPv6. A kernel without IPv6 has no
+# such setting to write.
 ip netns exec "$NETNS_NAME" sh -c '
   set -e
   ip link set "$1" name eth0
+  if [ -e /proc/sys/net/ipv6/conf/eth0/disable_ipv6 ]; then
+    echo 1 >/proc/sys/net/ipv6/conf/eth0/disable_ipv6
+  fi
   ip addr add "$2/24" dev eth0
   ip link set eth0 up
   ip link set lo up
