@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 
 import { SandboxError } from "./errors.ts";
-import { runSandboxStep, type SandboxStepDeps } from "./sandbox-step.ts";
+import { runSandboxStep, WRITE_THROUGH_ALL_WARNING, type SandboxStepDeps } from "./sandbox-step.ts";
 
 // Assembled at runtime: a literal shaped like an AWS access key ID trips
 // secret scanning on push.
@@ -301,6 +301,28 @@ describe("runSandboxStep", () => {
       "/home/runner/work/repo/repo/dist",
       "/",
     ]);
+  });
+
+  it("warns that write_through: / gives up the outbound restriction too", async () => {
+    mocks.readFilesystemInputs.mockReturnValue({
+      filesystemMode: "persistent",
+      writeThroughInput: "/opt/cache\n/",
+    });
+
+    await runSandboxStep(ENV, deps);
+
+    expect(annotation.warning).toHaveBeenCalledExactlyOnceWith(WRITE_THROUGH_ALL_WARNING);
+  });
+
+  it("does not warn when write_through names only narrower paths", async () => {
+    mocks.readFilesystemInputs.mockReturnValue({
+      filesystemMode: "persistent",
+      writeThroughInput: "/opt/cache",
+    });
+
+    await runSandboxStep(ENV, deps);
+
+    expect(annotation.warning).not.toHaveBeenCalled();
   });
 
   it("fails on a write_through entry that does not parse before any setup", async () => {

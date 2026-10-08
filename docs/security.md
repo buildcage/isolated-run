@@ -204,7 +204,7 @@ sandbox down, so what it runs is kept out of those paths:
   there when sudoers sets no `secure_path`, and `docker` finds its `docker-credential-*` helpers
   there. `sudo` gets the system directories and `docker` the step's own `$PATH`, so a helper
   installed only under those paths is not found. A helper that is a symlink into them is not
-  caught.
+  caught. `write_through: /` turns all of this off, since no path is left outside them.
 - Under `inspect`, the `keytool` that adds the CA to the JVM keystores is pinned the same way,
   `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so the command's
   `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` stays inside the sandbox. Without one, the step skips the
