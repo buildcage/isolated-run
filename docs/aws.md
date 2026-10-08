@@ -118,8 +118,8 @@ allowed_url_rules: |
 ### In `audit` mode
 
 `audit` refuses nothing, and that includes this check. A warning annotation counts the requests it
-would have refused, and **Communication details** marks each with 🚨 and names the reason, so a step
-can be checked before it is switched to `restrict`:
+would have refused, and the report lists each under **🚨 Restrict Would Refuse** with the reason, so a
+step can be checked before it is switched to `restrict`:
 
 ```
 🚨 00:03.120: POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed)

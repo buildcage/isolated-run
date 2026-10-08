@@ -665,8 +665,8 @@ The check refuses after the URL rules have allowed a request, with one of these 
 
 These are refusals like `not-allowed`: they are in **🚫 Blocked Hosts** and fail the step under
 `fail_on_blocked: true`. In `audit` mode nothing is refused: a warning annotation counts the requests
-`restrict` would have refused, and **Communication details** marks each with 🚨 and adds
-`(restrict would refuse: <reason>)`.
+`restrict` would have refused, and the report lists each under **🚨 Restrict Would Refuse**, ending in
+`(restrict would refuse: <reason>)`. They also stay in **Communication details** among the other requests.
 
 ## Traffic artifact
 

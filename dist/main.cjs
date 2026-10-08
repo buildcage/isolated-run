@@ -26612,7 +26612,7 @@ function describeWouldRefuse(report) {
 	if (count !== 0) return {
 		level: "warning",
 		shouldFail: !1,
-		message: `${count} request(s) restrict mode would refuse. Communication details notes each with "restrict would refuse", and marks with 🚨 the ones audit let through.`
+		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section lists them with the reason.`
 	};
 }
 function describeUndecidedRequests(report, engineLabel) {
@@ -26822,8 +26822,17 @@ function formatElapsedFixed(elapsedSeconds) {
 //#endregion
 //#region src/core/lib/report/render/inspect-details.ts
 function renderInspectDetailsBody(timeline, startedAt) {
-	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
-	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n\n`;
+	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), body = fenced(relevant.filter((e) => !isRedundantDns(e, connected)), startedAt);
+	return body && `${body}\n`;
+}
+function renderWouldRefuseBody(timeline, startedAt) {
+	return fenced(timeline.filter((e) => e.wouldRefuse !== void 0), startedAt);
+}
+function fenced(events, startedAt) {
+	return events.length === 0 ? "" : `\`\`\`\n${events.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n`;
+}
+function wouldRefuseTruncationNote(artifactAvailable) {
+	return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
 }
 const MARK = {
 	block: "🚫",
@@ -27004,6 +27013,7 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 //#region src/core/lib/report/render/render-report-markdown.ts
 const SECTION = "traffic", TRAFFIC_BLOCK = {
 	example: "traffic-example",
+	wouldRefuse: "traffic-would-refuse",
 	blocked: "traffic-blocked",
 	failed: "traffic-failed",
 	passed: "traffic-passed",
@@ -27013,6 +27023,7 @@ Object.fromEntries(Object.values(TRAFFIC_BLOCK).map((id) => [id, 0]));
 function trafficNotice(block, artifactAvailable) {
 	switch (block.id) {
 		case TRAFFIC_BLOCK.example: return restrictExampleTruncationNote(artifactAvailable);
+		case TRAFFIC_BLOCK.wouldRefuse: return wouldRefuseTruncationNote(artifactAvailable);
 		case TRAFFIC_BLOCK.log: return communicationTruncationNote(artifactAvailable);
 		case TRAFFIC_BLOCK.blocked:
 		case TRAFFIC_BLOCK.failed:
@@ -27058,8 +27069,21 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 			showExpected
 		}), "\n"));
 	}
+	let wouldRefuse = renderWouldRefuseBody(report.timeline, report.startedAt);
+	if (wouldRefuse) {
+		let before = `${report.passed.length > 0 || report.blocked.length > 0 ? "\n" : ""}### 🚨 Restrict Would Refuse\n\n`;
+		blocks.push({
+			id: TRAFFIC_BLOCK.wouldRefuse,
+			priority: priorities[TRAFFIC_BLOCK.wouldRefuse],
+			level: 2,
+			section: SECTION,
+			text: before + wouldRefuse,
+			cut: "lines",
+			head: before.split("\n").length
+		});
+	}
 	if (report.failed.length > 0) {
-		let gap = report.passed.length > 0 || report.blocked.length > 0 ? "\n" : "";
+		let gap = report.passed.length > 0 || report.blocked.length > 0 || wouldRefuse ? "\n" : "";
 		blocks.push(tableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
 	}
 	let bottom = "";
@@ -27107,10 +27131,11 @@ function readActionVersion(containerName, proxyEngine, docker) {
 }
 const TRAFFIC_PRIORITIES = {
 	[TRAFFIC_BLOCK.example]: 1,
-	[TRAFFIC_BLOCK.blocked]: 2,
-	[TRAFFIC_BLOCK.failed]: 3,
-	[TRAFFIC_BLOCK.passed]: 4,
-	[TRAFFIC_BLOCK.log]: 5
+	[TRAFFIC_BLOCK.wouldRefuse]: 2,
+	[TRAFFIC_BLOCK.blocked]: 3,
+	[TRAFFIC_BLOCK.failed]: 4,
+	[TRAFFIC_BLOCK.passed]: 5,
+	[TRAFFIC_BLOCK.log]: 6
 };
 function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
