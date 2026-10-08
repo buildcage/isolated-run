@@ -33,6 +33,13 @@ describe("AWS API hosts", () => {
       "sts.cn-north-1.api.amazonwebservices.com.cn",
       "sts.eusc-de-east-1.amazonaws.eu",
       "sts.eusc-de-east-1.api.amazonwebservices.eu",
+    ]) {
+      expect(apiHost.test(host)).toBe(true);
+    }
+  });
+
+  it("covers a name whose labels hold a character AWS's own names do not", () => {
+    for (const host of [
       "my_bucket.s3.amazonaws.com",
       "a_b.ddb.us-east-1.amazonaws.com",
       "_x.sqs.us-east-1.amazonaws.com",

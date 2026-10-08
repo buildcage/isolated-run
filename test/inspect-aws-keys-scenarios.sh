@@ -37,6 +37,8 @@ check_status "a presigned URL carrying it" \
   "$($C "https://bucket.s3.amazonaws.com/x?X-Amz-Credential=${AKIA}TESTATTACKER0001%2F20261008%2Fus-east-1%2Fs3%2Faws4_request")" "403"
 check_status "a presigned URL carrying it under a percent-encoded name" \
   "$($C "https://bucket.s3.amazonaws.com/x?X-Amz-Cr%65dential=${AKIA}TESTATTACKER0001%2F20261008%2Fus-east-1%2Fs3%2Faws4_request")" "403"
+check_status "a request signed with it, to a name with a _" \
+  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTATTACKER0001)" https://a_b.us-east-1.amazonaws.com/)" "403"
 
 echo "=== [no AWS credential] ==="
 check_status "an unsigned read from a bucket" "$($C https://bucket.s3.amazonaws.com/public/x)" "200"
