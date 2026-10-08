@@ -36,6 +36,10 @@ describe("CONFIG_FILE_INPUTS", () => {
   it("merges only inputs it knows", () => {
     expect(CONFIG_FILE_INPUTS.known).toEqual(expect.arrayContaining([...CONFIG_FILE_INPUTS.lists]));
   });
+
+  it("lets the workflow's allowed_aws_accounts replace the file's", () => {
+    expect(CONFIG_FILE_INPUTS.lists).not.toContain("allowed_aws_accounts");
+  });
 });
 
 describe("resolveWriteThroughInput", () => {

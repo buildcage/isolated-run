@@ -35,7 +35,6 @@ const LIST_INPUTS = [
   "allowed_url_rules",
   "allowed_tls_rules",
   "known_blocked_rules",
-  "allowed_aws_accounts",
   "write_through",
 ];
 
@@ -45,6 +44,8 @@ export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
     "proxy_mode",
     "proxy_engine",
     ...LIST_INPUTS,
+    // Not a list: the workflow's accounts replace the file's rather than grow.
+    "allowed_aws_accounts",
     "upload_traffic_artifact",
     "traffic_artifact_retention_days",
     "fail_on_blocked",

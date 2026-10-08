@@ -92,7 +92,8 @@ known_blocked_rules: |
 - Each key is an input name and each value is written as it would be under `with:`. A key that is
   not an input, `writable` (use `write_through`), a list or a nested mapping fails the step.
 - An input the workflow sets wins over the file. The rule inputs and `write_through` are the
-  exception: the file's lines are added to the workflow's.
+  exception: the file's lines are added to the workflow's. `allowed_aws_accounts` is not one of
+  them: the workflow's accounts replace the file's.
 - The path is relative to `$GITHUB_WORKSPACE` and must stay inside it, through symlinks too. The
   repository has to be checked out by an earlier step.
 - `config_file` fails the step on `pull_request_target`, and on `workflow_run` triggered by a pull
