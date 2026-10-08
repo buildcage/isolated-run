@@ -222,12 +222,12 @@ describe("awsKeyRequestRules", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(
       rules.includes(
-        "str(unsigned) if aws_host !aws_auth !aws_query !aws_body aws_resource_host !aws_form",
+        "str(unsigned) if aws_host !aws_auth !aws_query !aws_body aws_resource_host !aws_form or aws_git_bare !aws_query",
       ),
     ).toBe(true);
     expect(
       rules.includes(
-        "str(no-credential) if aws_host !aws_auth !aws_query !aws_body !aws_resource_host or",
+        "str(no-credential) if aws_host !aws_auth !aws_query !aws_body !aws_resource_host !aws_git_bare or",
       ),
     ).toBe(true);
   });
@@ -304,9 +304,23 @@ describe("awsKeyRequestRules", () => {
     ).toBe(true);
     expect(
       rules.includes(
-        `str(allowed) if { var(txn.aws_git_user) -m reg -- -at-[0-9]{12}$ } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f /rules/accounts.lst }`,
+        `str(allowed) if { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}$ } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f /rules/accounts.lst }`,
       ),
     ).toBe(true);
+    expect(
+      rules.includes(
+        "set-var(txn.aws_git_bare) bool(true) if aws_git_host !{ req.fhdr(authorization) -m found }",
+      ),
+    ).toBe(true);
+    expect(
+      rules.includes(
+        "set-var(txn.aws_post) bool(true) if aws_host METH_POST !aws_resource_host !aws_git_host",
+      ),
+    ).toBe(true);
+    const staticUser = /^((?!-at-).)+-at-[0-9]{12}$/;
+    expect(staticUser.test("deploy-at-111111111111")).toBe(true);
+    expect(staticUser.test("x-at-222222222222-at-111111111111")).toBe(false);
+    expect(staticUser.test("111111111111")).toBe(false);
     const codecommit = new RegExp(CODECOMMIT_HOST);
     expect(codecommit.test("git-codecommit.us-east-1.amazonaws.com")).toBe(true);
     expect(codecommit.test("git-codecommit-fips.us-east-1.amazonaws.com")).toBe(true);

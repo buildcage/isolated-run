@@ -85,7 +85,9 @@ applies to requests they allow.
 
 What happens to a request that carries no AWS signature depends on whether the host names the
 resource it is for. A request with no `Authorization` header, or one with any other `Bearer` or
-`Basic` token, counts as unsigned here.
+`Basic` token, counts as unsigned here. CodeCommit is the exception both ways: a `Basic` login to it
+that carries neither a known key nor an allowed account is `aws-key-not-allowed`, and a request to
+it with no `Authorization` at all, which Git sends first to be told to log in, is let through.
 
 | Request                                                                                                          | Result                     |
 | ---------------------------------------------------------------------------------------------------------------- | -------------------------- |

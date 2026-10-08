@@ -118,6 +118,9 @@ check_status "a kubectl Bearer token to a cluster" \
 
 echo "=== [a CodeCommit login, which carries a key or an account] ==="
 CC=https://git-codecommit.us-east-1.amazonaws.com/v1/repos/app/info/refs
+check_status "Git's first CodeCommit request, with no credential" "$($C $CC)" "200"
+check_status "a chunked Git fetch to CodeCommit with the start key" \
+  "$(printf '0014command=fetch0000' | $C -u "${AKIA}TESTSTARTKEY0001:20261008T000000Zab" -H "Transfer-Encoding: chunked" -H "Content-Type: application/x-git-upload-pack-request" --data-binary @- https://git-codecommit.us-east-1.amazonaws.com/v1/repos/app/git-upload-pack)" "200"
 check_status "a CodeCommit credential-helper login with the start key" \
   "$($C -u "${AKIA}TESTSTARTKEY0001:20261008T000000Zab" $CC)" "200"
 check_status "a CodeCommit credential-helper login with a key of the build's own" \
