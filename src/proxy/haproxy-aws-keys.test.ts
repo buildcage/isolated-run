@@ -179,6 +179,45 @@ describe("the SigV2 credential in a form body", () => {
   });
 });
 
+describe("AssumeRoleWithWebIdentity and AssumeRoleWithSAML", () => {
+  const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
+
+  it("judges the unsigned call by the account in RoleArn, from the query or the body", () => {
+    expect(
+      rules.includes(
+        "acl aws_fed_query query,url_dec -m reg (^|&)Action=AssumeRoleWith(WebIdentity|SAML)(&|$)",
+      ),
+    ).toBe(true);
+    expect(
+      rules.includes(
+        `'req.body_param(RoleArn),url_dec,regsub("^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$","\\1")' if aws_fed aws_form_post aws_role_body !aws_role_query`,
+      ),
+    ).toBe(true);
+    expect(rules.includes("set-var(txn.aws) str(role-not-allowed) if aws_fed")).toBe(true);
+    expect(
+      rules.includes(
+        "str(allowed) if aws_fed { var(txn.aws_role_account) -m str -f /rules/accounts.lst }",
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses RoleArn named twice, under any spelling, or in both places", () => {
+    expect(
+      rules.includes(
+        "str(ambiguous-credential) if aws_fed aws_role_query_many or aws_fed aws_role_body_many or aws_fed aws_role_query aws_role_body",
+      ),
+    ).toBe(true);
+  });
+
+  it("learns the key either answer issues", () => {
+    expect(
+      awsKeyResponseRules(CHECK).includes(
+        "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity|WithSAML)?Response[\\s>]",
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("the check with no role account", () => {
   const KEY_ONLY = { keyMapFile: "/rules/keys.map" };
 
@@ -187,6 +226,7 @@ describe("the check with no role account", () => {
     const rules = awsKeyRequestRules(KEY_ONLY, "restrict").join("\n");
     expect(rules.includes("Accept-Encoding")).toBe(false);
     expect(rules.includes("aws_sts")).toBe(false);
+    expect(rules.includes("aws_fed")).toBe(false);
   });
 
   it("lets no static CodeCommit credential through on its account", () => {
@@ -210,7 +250,7 @@ describe("awsKeyRequestRules", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(
       rules.includes(
-        "acl aws_refused var(txn.aws) -m str no-credential ambiguous-credential unreadable key-not-allowed",
+        "acl aws_refused var(txn.aws) -m str no-credential ambiguous-credential unreadable key-not-allowed role-not-allowed",
       ),
     ).toBe(true);
     expect(rules.includes("set-var-fmt(txn.reason) aws-%[var(txn.aws)] if aws_refused")).toBe(true);

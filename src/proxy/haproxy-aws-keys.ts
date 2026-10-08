@@ -24,6 +24,7 @@ export const AWS_REFUSED_VERDICTS = [
   "ambiguous-credential",
   "unreadable",
   "key-not-allowed",
+  "role-not-allowed",
 ];
 
 // A form body is read whole up to this size, less its headers, so a credential
@@ -69,13 +70,17 @@ export const CODECOMMIT_HOST =
 // regard to case, so a spelling the extraction below does not read is still
 // counted as a credential and left unmatched rather than read as none.
 const QUERY_CREDENTIAL = "(x-amz-credential|awsaccesskeyid)";
-// SigV2's name as a form body may spell it, any letter percent-encoded.
-export const FORM_CREDENTIAL = "awsaccesskeyid"
-  .split("")
-  .map(
-    (c) => `(${c}|%${c.charCodeAt(0).toString(16)}|%${c.toUpperCase().charCodeAt(0).toString(16)})`,
-  )
-  .join("");
+// A parameter name as a form body may spell it, any letter percent-encoded.
+const formName = (name: string) =>
+  name
+    .split("")
+    .map(
+      (c) =>
+        `(${c}|%${c.charCodeAt(0).toString(16)}|%${c.toUpperCase().charCodeAt(0).toString(16)})`,
+    )
+    .join("");
+export const FORM_CREDENTIAL = formName("awsaccesskeyid");
+const FORM_ROLE_ARN = formName("rolearn");
 
 /** The check as the inspect stage takes it. */
 export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
@@ -152,6 +157,7 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    acl aws_git_bare var(txn.aws_git_bare) -m bool",
     "    http-request set-var(txn.aws) str(unsigned) if aws_host !aws_auth !aws_query !aws_body aws_resource_host !aws_form or aws_git_bare !aws_query",
     "    http-request set-var(txn.aws) str(no-credential) if aws_host !aws_auth !aws_query !aws_body !aws_resource_host !aws_git_bare or aws_host !aws_auth !aws_query !aws_body aws_form",
+    ...(check.accountFile ? federationRules(check.accountFile) : []),
     "    # Where a credential could be out of sight: a query url_dec cannot decode",
     "    # (%00 or a broken escape), or a form body that is compressed, sent",
     "    # chunked, larger than the buffer, or holds a NUL, where matching stops.",
@@ -185,7 +191,6 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
       "    # at all would mean any coding is acceptable (RFC 9110). Left alone where",
       "    # it is signed, which rewriting would break: a compressed answer then",
       "    # teaches nothing, and the key it issues is refused.",
-      `    acl aws_sts_host var(txn.host) -m reg ${STS_HOST}`,
       "    acl aws_coding_signed req.fhdr(authorization) -m reg -i signedheaders=[^,]*accept-encoding",
       "    acl aws_coding_signed query,url_dec -m reg -i (^|&)x-amz-signedheaders=[^&]*accept-encoding",
       "    http-request set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed",
@@ -194,6 +199,30 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
   }
   l.push("");
   return l;
+}
+
+/**
+ * AssumeRoleWithWebIdentity and AssumeRoleWithSAML take no signature: the
+ * account of the role in RoleArn decides instead. RoleArn is read from the
+ * query or the form body alone, and must be named once.
+ */
+function federationRules(accountFile: string): string[] {
+  return [
+    `    acl aws_sts_host var(txn.host) -m reg ${STS_HOST}`,
+    "    acl aws_fed_query query,url_dec -m reg (^|&)Action=AssumeRoleWith(WebIdentity|SAML)(&|$)",
+    "    acl aws_fed_body req.body,url_dec -m reg (^|&)Action=AssumeRoleWith(WebIdentity|SAML)(&|$)",
+    "    acl aws_role_query query,url_dec -m reg -i (^|&)rolearn=",
+    "    acl aws_role_query_many query,url_dec -m reg -i (?s)(^|&)rolearn=.*&rolearn=",
+    `    acl aws_role_body req.body -m reg -i (^|&)${FORM_ROLE_ARN}=`,
+    `    acl aws_role_body_many req.body -m reg -i (?s)(^|&)${FORM_ROLE_ARN}=.*&${FORM_ROLE_ARN}=`,
+    "    http-request set-var(txn.aws_fed) bool(true) if aws_sts_host !aws_auth !aws_query !aws_body aws_fed_query or aws_sts_host !aws_auth !aws_query !aws_body aws_form_post aws_fed_body",
+    "    acl aws_fed var(txn.aws_fed) -m bool",
+    `    http-request set-var(txn.aws_role_account) 'url_param(RoleArn),url_dec,regsub("^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$","\\1")' if aws_fed aws_role_query !aws_role_body`,
+    `    http-request set-var(txn.aws_role_account) 'req.body_param(RoleArn),url_dec,regsub("^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$","\\1")' if aws_fed aws_form_post aws_role_body !aws_role_query`,
+    "    http-request set-var(txn.aws) str(role-not-allowed) if aws_fed",
+    `    http-request set-var(txn.aws) str(allowed) if aws_fed { var(txn.aws_role_account) -m str -f ${accountFile} }`,
+    "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_fed aws_role_query_many or aws_fed aws_role_body_many or aws_fed aws_role_query aws_role_body",
+  ];
 }
 
 /**
@@ -206,7 +235,7 @@ export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
   if (!check.accountFile) return [];
   return [
     "    acl aws_sts var(txn.aws_sts) -m bool",
-    "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRoleResponse[\\s>]",
+    "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity|WithSAML)?Response[\\s>]",
     "    acl aws_many_keys res.body -m reg (?s)<AccessKeyId>.*<AccessKeyId>",
     "    acl aws_many_arns res.body -m reg (?s)<Arn>.*<Arn>",
     "    http-response wait-for-body time 10s if aws_sts { status 200 }",

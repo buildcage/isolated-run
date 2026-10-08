@@ -145,6 +145,19 @@ check_status "AssumeRole for a role in another account" \
   "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" $STS/sts/other-account)" "200"
 check_status "the key that one issued" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTFOREIGNKEY01)" $CF)" "403"
 
+echo "=== [AssumeRoleWithWebIdentity, judged by the role's account] ==="
+form() { $C -X POST -H "Content-Type: application/x-www-form-urlencoded" --data "$1" "$2"; }
+ROLE="arn%3Aaws%3Aiam%3A%3A111111111111%3Arole%2Fdeploy"
+check_status "unknown until a web identity call hands it out" \
+  "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTWEBIDKEY0001)" $CF)" "403"
+check_status "a web identity call for a role in the allowed account" \
+  "$(form "Action=AssumeRoleWithWebIdentity&RoleArn=$ROLE&RoleSessionName=gh&WebIdentityToken=eyJ" $STS/sts/web-identity)" "200"
+check_status "the key it issued" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTWEBIDKEY0001)" $CF)" "200"
+check_status "a web identity call for a role in another account" \
+  "$(form "Action=AssumeRoleWithWebIdentity&RoleArn=arn%3Aaws%3Aiam%3A%3A999999999999%3Arole%2Fevil&RoleSessionName=gh&WebIdentityToken=eyJ" $STS/)" "403"
+check_status "a web identity call naming two roles" \
+  "$(form "Action=AssumeRoleWithWebIdentity&RoleArn=$ROLE&RoleArn=arn%3Aaws%3Aiam%3A%3A999999999999%3Arole%2Fevil" $STS/)" "403"
+
 echo "=== [hosts that are not AWS] ==="
 check_status "an unsigned read the URL rules allow" "$($C https://allowed.example.com/public/x)" "200"
 

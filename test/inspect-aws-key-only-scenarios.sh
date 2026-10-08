@@ -30,4 +30,7 @@ check_status "AssumeRole for a role in the start key's account" \
   "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" $STS/sts/same-account)" "200"
 check_status "the key it issued, learned by no role account" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTLEARNEDKEY01)" $CF)" "403"
 
+check_status "a web identity call, with no role account to judge it by" \
+  "$($C -X POST -H "Content-Type: application/x-www-form-urlencoded" --data "Action=AssumeRoleWithWebIdentity&RoleArn=arn%3Aaws%3Aiam%3A%3A111111111111%3Arole%2Fdeploy" $STS/sts/web-identity)" "403"
+
 scenario_results "AWS key-only scenarios"
