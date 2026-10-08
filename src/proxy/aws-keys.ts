@@ -1,6 +1,6 @@
 /**
  * The AWS access key check's inputs: the key the step starts with, and the
- * accounts whose roles may issue more.
+ * accounts whose roles may issue more keys.
  *
  * Runs under QuickJS as well as Node: the action validates these before the
  * proxy starts, and the config generator (scripts/gen-configs-inspect.qjs.ts)
@@ -33,8 +33,10 @@ export function isAwsAccessKeyId(value: string): boolean {
   return ACCESS_KEY_ID.test(value);
 }
 
-/** The haproxy map file: the key, mapped to a placeholder value. */
+/** The haproxy map file: the key, mapped to a placeholder value.
+ *  @throws {Error} if it is not a key ID, which could break the map's line */
 export function awsKeyMap(key: string): string {
+  if (!isAwsAccessKeyId(key)) throw new Error("invalid AWS access key ID");
   return `${key} 1\n`;
 }
 

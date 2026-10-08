@@ -52,6 +52,11 @@ describe("file contents", () => {
     expect(awsKeyMap(`${ASIA}AAAAAAAAAAAAAAAA`)).toBe(`${ASIA}AAAAAAAAAAAAAAAA 1\n`);
   });
 
+  it("refuses to map anything a key ID cannot be spelled as", () => {
+    expect(() => awsKeyMap("asiaaaaaaaaaaaaaaaaa")).toThrow(/invalid AWS access key ID/);
+    expect(() => awsKeyMap(`${ASIA}AAAAAAAA 1\nX`)).toThrow(/invalid AWS access key ID/);
+  });
+
   it("lists each account on its own line", () => {
     expect(awsAccountList(["111111111111", "222222222222"])).toBe("111111111111\n222222222222\n");
   });
