@@ -124,7 +124,7 @@ it with no `Authorization` at all, which Git sends first to be told to log in, i
 | More than one credential: two `Authorization` headers, a header and a query credential, or a credential repeated | `aws-ambiguous-credential` |
 | A key in a form body and another in the header or query, either of them unknown                                  | `aws-key-not-allowed`      |
 | A form body or query string the proxy cannot read through (above)                                                | `aws-unreadable`           |
-| `AssumeRoleWithWebIdentity` or `AssumeRoleWithSAML` for a role in an account not listed (below)                  | `aws-role-not-allowed`     |
+| `AssumeRoleWithWebIdentity` or `AssumeRoleWithSAML` for a role in an account not in `allowed_aws_role_accounts`  | `aws-role-not-allowed`     |
 
 These hosts name the resource a request reaches, in the host name or, for S3's path style and an EKS
 OIDC issuer, in the path. The URL rules can pin the resource there, so an unsigned request to them is
