@@ -662,7 +662,7 @@ The check refuses after the URL rules have allowed a request, with one of these 
 | `aws-key-not-allowed`      | the request was signed with a key the proxy does not know                                                                                                                              |
 | `aws-no-credential`        | the request carried no AWS credential, to a host that names no resource                                                                                                                |
 | `aws-ambiguous-credential` | the request carried more than one credential: two `Authorization` headers, a header and a query credential, or a repeated one                                                          |
-| `aws-unreadable`           | the request could hide a credential where the proxy cannot read: a query that does not decode, or a form body that is compressed, chunked, larger than about 1 MiB or holds a NUL byte |
+| `aws-unreadable`           | the request could hide a credential where the proxy cannot read: a query that does not decode, or a form body that is compressed, chunked, larger than about 4 MiB or holds a NUL byte |
 
 These are refusals like `not-allowed`: they are in **🚫 Blocked Hosts** and fail the step under
 `fail_on_blocked: true`. In `audit` mode nothing is refused: a warning annotation counts the requests

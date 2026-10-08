@@ -79,14 +79,16 @@ check_status "the start key in the header, a key of the build's own past 300 KB 
 check_status "the start key in the header, a 300 KB body" \
   "$({ printf 'Action=X&M='; pad 300000; } |
     $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "200"
-check_status "the start key in the header, a body past 1 MiB" \
-  "$({ printf 'Action=X&M='; pad 1200000; } |
+check_status "the start key in the header, a form body past 4 MiB" \
+  "$({ printf 'Action=X&M='; pad 4300000; } |
     $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "403"
 check_status "the start key in the header, a compressed form body" \
   "$(printf 'Action=X' | gzip | $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Encoding: gzip" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "403"
 check_status "the start key in the header, a NUL ahead of a key of the build's own in the body" \
   "$(printf 'Action=X\0&AWSAccessKeyId=%s' "${AKIA}TESTATTACKER0001" |
     $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "403"
+check_status "the start key in the header, a form body compressed and marked identity too" \
+  "$(printf 'Action=X' | gzip | $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Encoding: gzip, identity" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "403"
 check_status "the start key in the header, a chunked form body" \
   "$(printf 'Action=X' | $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Transfer-Encoding: chunked" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "403"
 check_status "the start key in the header, a key of the build's own in a form body sent as text/plain" \

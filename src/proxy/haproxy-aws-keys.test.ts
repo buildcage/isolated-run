@@ -154,7 +154,7 @@ describe("awsKeyExtension", () => {
     const extension = awsKeyExtension(CHECK);
     expect(extension.requestRules("audit")).toStrictEqual(awsKeyRequestRules(CHECK, "audit"));
     expect(extension.responseRules()).toStrictEqual(awsKeyResponseRules(CHECK));
-    expect(extension.global).toStrictEqual(["    tune.bufsize.large 1048576"]);
+    expect(extension.global).toStrictEqual(["    tune.bufsize.large 4194304"]);
   });
 });
 
@@ -212,13 +212,13 @@ describe("awsKeyRequestRules", () => {
 
   it("reads a SigV2 key from a form body, and checks it as well as any other", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(rules.includes("wait-for-body time 10s use-large-buffer if aws_post")).toBe(true);
+    expect(rules.includes("wait-for-body time 30s use-large-buffer if aws_form_post")).toBe(true);
     expect(rules.includes(`if aws_form_post { req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`)).toBe(
       true,
     );
     expect(
       rules.includes(
-        "aws_post { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded } or aws_post { req.body -m reg ^[A-Za-z0-9._~%*+-]*= }",
+        "aws_post { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded } or aws_post { req.body -m reg ^&*[A-Za-z0-9._~%*+!(),:/@-]*= }",
       ),
     ).toBe(true);
     expect(
@@ -240,7 +240,7 @@ describe("awsKeyRequestRules", () => {
     ).toBe(true);
     expect(
       rules.includes(
-        "str(unreadable) if aws_form_post { req.hdr(content-encoding) -m found } !{ req.hdr(content-encoding) -m str -i identity } or aws_form_post { req.hdr(transfer-encoding) -m found }",
+        "str(unreadable) if aws_form_post { req.hdr(content-encoding) -m reg -i ^(?!identity$) } or aws_form_post { req.hdr(transfer-encoding) -m found }",
       ),
     ).toBe(true);
     expect(

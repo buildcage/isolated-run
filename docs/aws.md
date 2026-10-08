@@ -49,10 +49,14 @@ and logged in your own account.
 
 A form body is the body of a `POST` to a host that names no resource (below), when its Content-Type
 is `application/x-www-form-urlencoded` or, whatever the Content-Type says, the body starts as a form
-does (`name=value`). The proxy reads the whole body, up to 1 MiB with the headers, before deciding.
+does (`name=value`). The proxy reads the whole body, up to 4 MiB with the headers, before deciding.
 It refuses what it cannot read through as `aws-unreadable`: a form body that is larger, compressed,
-sent chunked or holds a NUL byte, and a query string that does not URL-decode. The AWS SDKs send
-none of these.
+sent chunked or holds a NUL byte, and a query string that does not URL-decode.
+
+Current AWS SDKs send none of these. Older ones that still call CloudWatch over its form protocol
+compress a `PutMetricData` body over 10 KB; set `AWS_DISABLE_REQUEST_COMPRESSION=true` for such a
+step, or update the SDK. A compressed body whose Content-Type is not a form one is left alone, as
+the proxy cannot tell it is a form.
 
 The proxy knows two kinds of key:
 

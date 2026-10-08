@@ -26,9 +26,9 @@ export const AWS_REFUSED_VERDICTS = [
 ];
 
 // A form body is read whole up to this size, less its headers, so a credential
-// cannot sit past what was read. SNS Publish, the largest form request, is
-// 256 KiB before URL encoding at most triples it.
-const FORM_BODY_LIMIT = 1024 * 1024;
+// cannot sit past what was read. SQS SendMessage, the largest form request, is
+// 1 MiB before URL encoding at most triples it.
+const FORM_BODY_LIMIT = 4 * 1024 * 1024;
 
 // API endpoints only: the commercial, China and European Sovereign Cloud
 // domains, and the dual-stack ones.
@@ -100,9 +100,10 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    # Hosts that name a resource are left out.",
     "    http-request set-var(txn.aws_post) bool(true) if aws_host METH_POST !aws_resource_host",
     "    acl aws_post var(txn.aws_post) -m bool",
-    "    http-request wait-for-body time 10s use-large-buffer if aws_post",
-    "    http-request set-var(txn.aws_form_post) bool(true) if aws_post { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded } or aws_post { req.body -m reg ^[A-Za-z0-9._~%*+-]*= }",
+    "    http-request wait-for-body time 30s if aws_post",
+    "    http-request set-var(txn.aws_form_post) bool(true) if aws_post { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded } or aws_post { req.body -m reg ^&*[A-Za-z0-9._~%*+!(),:/@-]*= }",
     "    acl aws_form_post var(txn.aws_form_post) -m bool",
+    "    http-request wait-for-body time 30s use-large-buffer if aws_form_post",
     "    # Matched undecoded, since a value carries & and = encoded, but each",
     "    # letter of the name may be.",
     `    http-request set-var(txn.aws_body) bool(true) if aws_form_post { req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`,
@@ -130,7 +131,7 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    http-request set-var(txn.aws_body_size) req.body_size if aws_form_post",
     "    http-request set-var(txn.aws_body_len) req.body_len if aws_form_post",
     "    http-request set-var(txn.aws) str(unreadable) if aws_host { query -m found } !{ query,url_dec -m found }",
-    "    http-request set-var(txn.aws) str(unreadable) if aws_form_post { req.hdr(content-encoding) -m found } !{ req.hdr(content-encoding) -m str -i identity } or aws_form_post { req.hdr(transfer-encoding) -m found }",
+    "    http-request set-var(txn.aws) str(unreadable) if aws_form_post { req.hdr(content-encoding) -m reg -i ^(?!identity$) } or aws_form_post { req.hdr(transfer-encoding) -m found }",
     "    http-request set-var(txn.aws) str(unreadable) if aws_form_post { req.body_len,sub(txn.aws_body_size) lt 0 } or aws_form_post { req.body,length,sub(txn.aws_body_len) lt 0 }",
     "    # A body key next to another one; a body key alone is aws_key below.",
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_body aws_auth !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found } or aws_body aws_query !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found }`,
