@@ -124,6 +124,13 @@ jobs:
       contents: read
     name: "integration: test (sandbox, universal engine fixture, inspect CA, listener scope)"
 
+    # The cleanup step below tears these down by the same names.
+    env:
+      UNIVERSAL_SUFFIX: -universal
+      UNIVERSAL_PROJECT: buildcage-test-universal
+      CA_SUFFIX: -ca
+      CA_PROJECT: buildcage-test-inspect-ca
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -151,8 +158,8 @@ jobs:
             env:
               BUILDCAGE_LOCAL_IMAGE_REF: buildcage-it-proxy:universal
               PROXY_ENGINE: universal
-              BUILDCAGE_WORKTREE_SUFFIX: -universal
-              COMPOSE_PROJECT_NAME: buildcage-test-universal
+              BUILDCAGE_WORKTREE_SUFFIX: ${{ env.UNIVERSAL_SUFFIX }}
+              COMPOSE_PROJECT_NAME: ${{ env.UNIVERSAL_PROJECT }}
               TEST_NET_SUBNET: 10.211.0.0/24
             run: make test_integration_sandbox_universal
 
@@ -160,8 +167,8 @@ jobs:
             env:
               BUILDCAGE_LOCAL_IMAGE_REF: buildcage-it-proxy:inspect
               PROXY_ENGINE: inspect
-              BUILDCAGE_WORKTREE_SUFFIX: -ca
-              COMPOSE_PROJECT_NAME: buildcage-test-inspect-ca
+              BUILDCAGE_WORKTREE_SUFFIX: ${{ env.CA_SUFFIX }}
+              COMPOSE_PROJECT_NAME: ${{ env.CA_PROJECT }}
               TEST_NET_SUBNET: 10.212.0.0/24
             run: make test_integration_sandbox_inspect_ca
 
@@ -173,13 +180,17 @@ jobs:
       - name: Verify no leftover fixture/proxy containers or networks
         if: always()
         run: |
-          BUILDCAGE_WORKTREE_SUFFIX=-universal COMPOSE_PROJECT_NAME=buildcage-test-universal \
+          BUILDCAGE_WORKTREE_SUFFIX=$UNIVERSAL_SUFFIX COMPOSE_PROJECT_NAME=$UNIVERSAL_PROJECT \
             docker compose -f compose.test-universal.yaml down -v || true
-          BUILDCAGE_WORKTREE_SUFFIX=-ca COMPOSE_PROJECT_NAME=buildcage-test-inspect-ca \
+          BUILDCAGE_WORKTREE_SUFFIX=$CA_SUFFIX COMPOSE_PROJECT_NAME=$CA_PROJECT \
             docker compose -f compose.test-inspect.yaml down -v || true
-          LEFTOVER_N=$(docker network ls --filter "name=buildcage-test-" -q)
-          if [ -n "$LEFTOVER_N" ]; then
-            echo "::error::leftover buildcage-test-* network found"
+          leftover=""
+          for name in buildcage-test- buildcage-listener-scope- buildcage-proxy; do
+            leftover+=$(docker ps -a --filter "name=$name" --format '{{.Names}} ')
+            leftover+=$(docker network ls --filter "name=$name" --format '{{.Name}} ')
+          done
+          if [ -n "$leftover" ]; then
+            echo "::error::leftover containers or networks: $leftover"
             exit 1
           fi
 

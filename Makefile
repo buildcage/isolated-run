@@ -105,14 +105,17 @@ clean_sandbox_dev: ## Stop and remove the sandbox dev-loop containers
 # under BUILDCAGE_LOCAL_IMAGE_REF: universal for the first two, an inspect
 # image built with BUILDCAGE_TEST_HOOKS=1 for the third, and none at all for
 # the fourth, which builds both images itself and wants the variable unset.
-# Build the image a group needs, then run that group, the way each CI job does.
+# Build the image a group needs, then run that group.
 .PHONY: test_integration
 test_integration: test_integration_sandbox_linux test_integration_sandbox_universal test_integration_sandbox_inspect test_integration_listener_scope ## Every integration test CI runs; the four groups need different proxy images, so build each one's image first
 
 # Drives dist/main.cjs directly (a host command, not a Docker build). Two
-# halves so CI can run them as parallel jobs.
+# halves, which CI runs as separate jobs; here they run one after the other,
+# even under -j, since both check host state of the user they run as.
 .PHONY: test_integration_sandbox_linux
-test_integration_sandbox_linux: test_integration_sandbox_linux_filesystem test_integration_sandbox_linux_runtime ## Run the action's integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF and a test-hook build of dist/main.cjs)
+test_integration_sandbox_linux: ## Run the action's integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF and a test-hook build of dist/main.cjs)
+	@$(MAKE) --no-print-directory test_integration_sandbox_linux_filesystem
+	@$(MAKE) --no-print-directory test_integration_sandbox_linux_runtime
 
 .PHONY: test_integration_sandbox_linux_filesystem
 test_integration_sandbox_linux_filesystem: export INPUT_PROXY_ENGINE := universal
@@ -157,9 +160,13 @@ test_integration_sandbox_universal: ## Run the universal-engine fixture-based in
 
 # Separate from the above: these need an inspect-engine image (a different
 # Dockerfile/build) and the fixture origin network in compose.test-inspect.yaml.
-# Two halves so CI can run them as parallel jobs.
+# Two halves, which CI runs in different jobs; here they run one after the
+# other, even under -j: the CA half's cleanup checks wait for every inspect
+# step of the user to end.
 .PHONY: test_integration_sandbox_inspect
-test_integration_sandbox_inspect: test_integration_sandbox_inspect_rules test_integration_sandbox_inspect_ca ## Run the inspect-engine integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF built from docker/inspect with test hooks)
+test_integration_sandbox_inspect: ## Run the inspect-engine integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF built from docker/inspect with test hooks)
+	@$(MAKE) --no-print-directory test_integration_sandbox_inspect_rules
+	@$(MAKE) --no-print-directory test_integration_sandbox_inspect_ca
 
 .PHONY: test_integration_sandbox_inspect_rules
 test_integration_sandbox_inspect_rules: ## Inspect-engine restrict, audit, round trip and AWS key check
