@@ -154,6 +154,7 @@ describe("awsKeyExtension", () => {
     const extension = awsKeyExtension(CHECK);
     expect(extension.requestRules("audit")).toStrictEqual(awsKeyRequestRules(CHECK, "audit"));
     expect(extension.responseRules()).toStrictEqual(awsKeyResponseRules(CHECK));
+    expect(extension.global).toStrictEqual(["    tune.bufsize.large 1048576"]);
   });
 });
 
@@ -162,7 +163,7 @@ describe("awsKeyRequestRules", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(
       rules.includes(
-        "acl aws_refused var(txn.aws) -m str no-credential ambiguous-credential key-not-allowed",
+        "acl aws_refused var(txn.aws) -m str no-credential ambiguous-credential unreadable key-not-allowed",
       ),
     ).toBe(true);
     expect(rules.includes("set-var-fmt(txn.reason) aws-%[var(txn.aws)] if aws_refused")).toBe(true);
@@ -211,10 +212,15 @@ describe("awsKeyRequestRules", () => {
 
   it("reads a SigV2 key from a form body, and checks it as well as any other", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(rules.includes("wait-for-body time 10s if aws_host METH_POST aws_urlencoded")).toBe(
+    expect(rules.includes("wait-for-body time 10s use-large-buffer if aws_form_post")).toBe(true);
+    expect(rules.includes(`if aws_form_post { req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`)).toBe(
       true,
     );
-    expect(rules.includes(`{ req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`)).toBe(true);
+    expect(
+      rules.includes(
+        "if aws_host METH_POST !aws_resource_host aws_form_type or aws_host METH_POST !aws_resource_host !aws_typed",
+      ),
+    ).toBe(true);
     expect(
       rules.includes("set-var(txn.aws_key) var(txn.aws_body_key) if aws_body !aws_auth !aws_query"),
     ).toBe(true);
@@ -223,6 +229,23 @@ describe("awsKeyRequestRules", () => {
     expect(
       rules.includes(
         "str(key-not-allowed) if aws_body !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(/rules/keys.map) -m found }",
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses what it cannot read through: an undecodable query, or a form body it has not all of", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
+    expect(
+      rules.includes("str(unreadable) if aws_host { query -m found } !{ query,url_dec -m found }"),
+    ).toBe(true);
+    expect(
+      rules.includes(
+        "str(unreadable) if aws_form_post { req.hdr(content-encoding) -m found } or aws_form_post { req.hdr(transfer-encoding) -m found }",
+      ),
+    ).toBe(true);
+    expect(
+      rules.includes(
+        "str(unreadable) if aws_form_post { req.body_len,sub(txn.aws_body_size) lt 0 } or aws_form_post { req.body,length,sub(txn.aws_body_len) lt 0 }",
       ),
     ).toBe(true);
   });

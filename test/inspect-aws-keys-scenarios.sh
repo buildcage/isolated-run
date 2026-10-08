@@ -71,6 +71,22 @@ check_status "the start key in the header, a SigV2 URL inside a body value" \
 check_status "the key repeated in the body" \
   "$($C -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)&AWSAccessKeyId=${AKIA}TESTSTARTKEY0001" $CF)" "403"
 
+echo "=== [what the check cannot read through] ==="
+pad() { head -c "$1" /dev/zero | tr '\0' a; }
+check_status "the start key in the header, a key of the build's own past 300 KB of body" \
+  "$({ printf 'Action=X&M='; pad 300000; printf '&AWSAccessKeyId=%s' "${AKIA}TESTATTACKER0001"; } |
+    $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "403"
+check_status "the start key in the header, a 300 KB body" \
+  "$({ printf 'Action=X&M='; pad 300000; } |
+    $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "200"
+check_status "the start key in the header, a body past 1 MiB" \
+  "$({ printf 'Action=X&M='; pad 1200000; } |
+    $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "403"
+check_status "the start key in the header, a compressed form body" \
+  "$(printf 'Action=X' | gzip | $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Encoding: gzip" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "403"
+check_status "a presigned URL with %00 ahead of its credential" \
+  "$($C "https://bucket.s3.amazonaws.com/x?a=%00&X-Amz-Credential=${AKIA}TESTATTACKER0001%2Fx")" "403"
+
 echo "=== [a key AssumeRole issued] ==="
 check_status "unknown until AssumeRole hands it out" \
   "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTLEARNEDKEY01)" $CF)" "403"

@@ -16081,7 +16081,8 @@ function generateHaproxyConfig(options) {
 			global: [
 				"    # normalize-uri is still marked experimental upstream.",
 				"    expose-experimental-directives",
-				"    tune.ssl.default-dh-param 2048"
+				"    tune.ssl.default-dh-param 2048",
+				...opts.extension?.global ?? []
 			],
 			defaults: [
 				"    timeout client 30s",
