@@ -92,8 +92,7 @@ known_blocked_rules: |
 - Each key is an input name and each value is written as it would be under `with:`. A key that is
   not an input, `writable` (use `write_through`), a list or a nested mapping fails the step.
 - An input the workflow sets wins over the file. The rule inputs and `write_through` are the
-  exception: the file's lines are added to the workflow's. `allowed_aws_accounts` is not one of
-  them: the workflow's accounts replace the file's.
+  exception: the file's lines are added to the workflow's.
 - The path is relative to `$GITHUB_WORKSPACE` and must stay inside it, through symlinks too. The
   repository has to be checked out by an earlier step.
 - `config_file` fails the step on `pull_request_target`, and on `workflow_run` triggered by a pull
@@ -647,7 +646,7 @@ resolver saying no rule allows the name, and it does fail the step.
 
 `allowed_aws_accounts` is **experimental**: its behavior and error messages may still change without
 following semver. It takes 12-digit AWS account IDs, separated by commas, whitespace or newlines, with `#`
-comments as in the rule inputs. In a config file its lines are added to the workflow's. With it
+comments as in the rule inputs. Set in the workflow, it replaces a config file's value. With it
 set, a request to an AWS API host must be signed with a key the proxy knows: the step's own
 `AWS_ACCESS_KEY_ID`, or one an STS `AssumeRole` issued for a role in one of these accounts. An
 unsigned request is left to the URL rules where the host names the resource it is for, such as an S3

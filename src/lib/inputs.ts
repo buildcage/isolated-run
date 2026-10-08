@@ -44,7 +44,7 @@ export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
     "proxy_mode",
     "proxy_engine",
     ...LIST_INPUTS,
-    // Not a list: the workflow's accounts replace the file's rather than grow.
+    // Not merged: the workflow's accounts replace the file's.
     "allowed_aws_accounts",
     "upload_traffic_artifact",
     "traffic_artifact_retention_days",
