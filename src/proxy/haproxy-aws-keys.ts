@@ -55,7 +55,7 @@ export const AWS_RESOURCE_HOST =
   "|^b-[a-z0-9-]+\\.mq\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|^(search|vpc)-[a-z0-9-]+\\.[a-z0-9-]+\\.es\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|^[0-9a-f]{32}\\.[a-z0-9]+\\.[a-z0-9-]+\\.eks\\.amazonaws\\.(com|com\\.cn|eu)$" +
-  "|^[0-9a-f]{32}\\.([a-z0-9-]+\\.){1,3}(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)$" +
+  "|^[0-9a-f]{32}\\.[a-z0-9-]+\\.(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)$" +
   "|^oidc\\.eks\\.[a-z0-9-]+\\.amazonaws\\.(com|com\\.cn|eu)$" +
   "|^oidc-eks\\.[a-z0-9-]+\\.(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)$" +
   "|\\.elb(\\.[a-z0-9-]+)?\\.amazonaws\\.(com|com\\.cn|eu)$" +
@@ -97,8 +97,8 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    acl aws_host var(txn.aws_host) -m bool",
     `    acl aws_sts_host var(txn.host) -m reg ${STS_HOST}`,
     `    acl aws_resource_host var(txn.host) -m reg ${AWS_RESOURCE_HOST}`,
-    "    # A credential is one of AWS's own schemes, or a Basic login to CodeCommit,",
-    "    # two lines declaring the one acl. CodeCommit's Git credential helper",
+    "    # A credential is one of AWS's own schemes, or a Basic login to CodeCommit:",
+    "    # the two aws_auth lines below declare the one acl. CodeCommit's Git credential helper",
     "    # sends the key ID as the user name, and a static Git credential names",
     "    # its account, <user>-at-<id>; either way the repository is looked up in",
     "    # that account. Other Bearer and Basic tokens, such as CodeArtifact's and",
@@ -107,9 +107,10 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     `    http-request set-var(txn.aws_git_host) bool(true) if { var(txn.host) -m reg ${CODECOMMIT_HOST} }`,
     "    acl aws_git_host var(txn.aws_git_host) -m bool",
     "    http-request set-var(txn.aws_git) bool(true) if aws_git_host { req.fhdr(authorization) -m reg -i ^basic\\s }",
+    "    acl aws_git var(txn.aws_git) -m bool",
     "    acl aws_auth req.fhdr(authorization) -m reg -i ^aws",
     "    acl aws_auth var(txn.aws_git) -m bool",
-    `    http-request set-var(txn.aws_git_user) 'req.fhdr(authorization),regsub("^basic\\s+","",i),b64dec,regsub(":.*$","")' if { var(txn.aws_git) -m bool }`,
+    `    http-request set-var(txn.aws_git_user) 'req.fhdr(authorization),regsub("^basic\\s+","",i),b64dec,regsub(":.*$","")' if aws_git`,
     "    acl aws_auth_many req.fhdr_cnt(authorization) gt 1",
     "    acl aws_auth_many req.fhdr(authorization) -m reg -i credential=.*credential=",
     "    # Decoded first: a name spelled as X-Amz-Cr%65dential still counts.",
@@ -134,11 +135,11 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    http-request set-var(txn.aws_body_key) req.body_param(AWSAccessKeyId,i) if aws_body",
     "    # A header neither pattern matches comes out unchanged, and so never",
     "    # equals a key in the map.",
-    `    http-request set-var(txn.aws_key) 'req.fhdr(authorization),regsub("^AWS4-[A-Z0-9-]+ +Credential=([A-Za-z0-9]+)/.*$","\\1",i),regsub("^AWS ([A-Za-z0-9]+):.*$","\\1",i)' if aws_host aws_auth !aws_query`,
+    `    http-request set-var(txn.aws_key) 'req.fhdr(authorization),regsub("^AWS4-[A-Z0-9-]+ +Credential=([A-Za-z0-9]+)/.*$","\\1",i),regsub("^AWS ([A-Za-z0-9]+):.*$","\\1",i)' if aws_host aws_auth !aws_git !aws_query`,
     `    http-request set-var(txn.aws_key) 'url_param(X-Amz-Credential),url_dec,regsub("^([A-Za-z0-9]+)/.*$","\\1")' if aws_host aws_query !aws_auth { url_param(X-Amz-Credential) -m found }`,
     "    http-request set-var(txn.aws_key) url_param(AWSAccessKeyId) if aws_host aws_query !aws_auth { url_param(AWSAccessKeyId) -m found }",
     "    http-request set-var(txn.aws_key) var(txn.aws_body_key) if aws_body !aws_auth !aws_query",
-    '    http-request set-var(txn.aws_key) \'var(txn.aws_git_user),regsub("%.*$","")\' if { var(txn.aws_git) -m bool } !aws_query',
+    '    http-request set-var(txn.aws_key) \'var(txn.aws_git_user),regsub("%.*$","")\' if aws_git !aws_query',
     "    http-request set-var(txn.aws) str(ambiguous-credential) if aws_host aws_auth aws_query or aws_host aws_auth aws_auth_many or aws_host aws_query_many or aws_body aws_body_many",
     "    # Unsigned, whatever the method: where the host names no resource, the",
     "    # account it reaches is in the parameters or the body, out of sight.",
@@ -161,7 +162,7 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    http-request set-var(txn.aws) str(unreadable) if aws_form_post { req.body_len,sub(txn.aws_body_size) lt 0 } or aws_form_post { req.body,length,sub(txn.aws_body_len) lt 0 }",
     "    # A body key next to another one; a body key alone is aws_key below.",
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_body aws_auth !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found } or aws_body aws_query !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(${check.keyMapFile}) -m found }`,
-    `    http-request set-var(txn.aws) str(allowed) if { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}$ } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f ${check.accountFile} } !{ var(txn.aws) -m found }`,
+    `    http-request set-var(txn.aws) str(allowed) if { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}\\z } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f ${check.accountFile} } !{ var(txn.aws) -m found }`,
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_host !{ var(txn.aws) -m found } !{ var(txn.aws_key),map(${check.keyMapFile}) -m found }`,
     "    http-request set-var(txn.aws) str(allowed) if aws_host !{ var(txn.aws) -m found }",
   ];

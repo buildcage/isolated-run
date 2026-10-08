@@ -112,7 +112,6 @@ describe("hosts that name the resource", () => {
       "abcdef0123456789abcdef0123456789.gr7.us-east-1.eks.amazonaws.com",
       "abcdef0123456789abcdef0123456789.yl4.us-east-2.eks.amazonaws.com",
       "abcdef0123456789abcdef0123456789.us-east-1.api.aws",
-      "abcdef0123456789abcdef0123456789.gr7.us-east-1.eks.api.aws",
     ]) {
       expect(resourceHost.test(host)).toBe(true);
     }
@@ -148,6 +147,7 @@ describe("hosts that name the resource", () => {
       "abcdef.us-east-1.eks.amazonaws.com",
       "abcdef0123456789abcdef0123456789.us-east-1.eks.amazonaws.com",
       "eks.us-east-1.api.aws",
+      "abcdef0123456789abcdef0123456789.gr7.us-east-1.api.aws",
     ]) {
       expect(resourceHost.test(host)).toBe(false);
     }
@@ -301,12 +301,10 @@ describe("awsKeyRequestRules", () => {
   it("reads CodeCommit's Basic user name as a key, or as <user>-at-<account>", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(rules.includes("acl aws_auth var(txn.aws_git) -m bool")).toBe(true);
-    expect(
-      rules.includes(`'var(txn.aws_git_user),regsub("%.*$","")' if { var(txn.aws_git) -m bool }`),
-    ).toBe(true);
+    expect(rules.includes(`'var(txn.aws_git_user),regsub("%.*$","")' if aws_git`)).toBe(true);
     expect(
       rules.includes(
-        `str(allowed) if { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}$ } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f /rules/accounts.lst }`,
+        `str(allowed) if { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}\\z } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f /rules/accounts.lst }`,
       ),
     ).toBe(true);
     expect(
@@ -319,10 +317,11 @@ describe("awsKeyRequestRules", () => {
         "set-var(txn.aws_post) bool(true) if aws_host METH_POST !aws_resource_host !aws_git_host",
       ),
     ).toBe(true);
-    const staticUser = /^((?!-at-).)+-at-[0-9]{12}$/;
+    const staticUser = /^((?!-at-).)+-at-[0-9]{12}(?![\s\S])/;
     expect(staticUser.test("deploy-at-111111111111")).toBe(true);
     expect(staticUser.test("x-at-222222222222-at-111111111111")).toBe(false);
     expect(staticUser.test("111111111111")).toBe(false);
+    expect(staticUser.test("deploy-at-111111111111\n")).toBe(false);
     const codecommit = new RegExp(CODECOMMIT_HOST);
     expect(codecommit.test("git-codecommit.us-east-1.amazonaws.com")).toBe(true);
     expect(codecommit.test("git-codecommit-fips.us-east-1.amazonaws.com")).toBe(true);

@@ -95,6 +95,9 @@ it with no `Authorization` at all, which Git sends first to be told to log in, i
 | Signed with any other key                                                                                        | `aws-key-not-allowed`      |
 | Unsigned, to a host that names its resource (below)                                                              | allowed                    |
 | Unsigned, to any other AWS API host, whatever the method                                                         | `aws-no-credential`        |
+| A CodeCommit `Basic` login with a known key, or a static Git credential of an allowed account                    | allowed                    |
+| A CodeCommit `Basic` login with any other key or account                                                         | `aws-key-not-allowed`      |
+| A CodeCommit request with no `Authorization`, as Git sends first                                                 | allowed                    |
 | More than one credential: two `Authorization` headers, a header and a query credential, or a credential repeated | `aws-ambiguous-credential` |
 | A key in a form body and another in the header or query, either of them unknown                                  | `aws-key-not-allowed`      |
 | A form body or query string the proxy cannot read through (above)                                                | `aws-unreadable`           |
@@ -113,19 +116,19 @@ left to the URL rules:
 | Managed Grafana        | `g-<id>.grafana-workspace.<region>.amazonaws.com`                                                                                                            |
 | Amazon MQ              | `b-<id>.mq.<region>.amazonaws.com`                                                                                                                           |
 | OpenSearch Service     | `search-<domain>-<id>.<region>.es.amazonaws.com`, `vpc-<domain>-<id>.<region>.es.amazonaws.com`                                                              |
-| EKS cluster            | `<id>.<label>.<region>.eks.amazonaws.com` (such as `gr7` or `yl4`), `<id>.…<region>.api.aws`                                                                 |
+| EKS cluster            | `<id>.<label>.<region>.eks.amazonaws.com` (such as `gr7` or `yl4`), `<id>.<region>.api.aws`                                                                  |
 | EKS OIDC issuer        | `oidc.eks.<region>.amazonaws.com/id/<id>`, `oidc-eks.<region>.api.aws/id/<id>`                                                                               |
 | Elastic Load Balancing | `<name>-<id>.elb.<region>.amazonaws.com`, `<name>-<id>.<region>.elb.amazonaws.com`                                                                           |
 | EC2                    | `ec2-<ip>.<region>.compute.amazonaws.com`, `ec2-<ip>.compute-1.amazonaws.com`                                                                                |
 | AWS CLI downloads      | `awscli.amazonaws.com`                                                                                                                                       |
 
-Each `amazonaws.com` name also matches under `amazonaws.com.cn` and `amazonaws.eu`, and each
-`api.aws` one under `api.amazonwebservices.com.cn` and `api.amazonwebservices.eu`. Every other AWS
-API host names only a service and a region, such as `sts.us-east-1.amazonaws.com` or
-`sqs.us-east-1.amazonaws.com`. The account a request to one of those reaches is in its parameters or
-its body, where the proxy does not look, so an unsigned request there is refused, `GET` included. A
-host missing from the table above is treated the same way; if a legitimate request is refused as
-`aws-no-credential` for that reason, report it.
+Each `amazonaws.com` name but `awscli.amazonaws.com` also matches under `amazonaws.com.cn` and
+`amazonaws.eu`, and each `api.aws` one under `api.amazonwebservices.com.cn` and
+`api.amazonwebservices.eu`. Every other AWS API host names only a service and a region, such as
+`sts.us-east-1.amazonaws.com` or `sqs.us-east-1.amazonaws.com`. The account a request to one of
+those reaches is in its parameters or its body, where the proxy does not look, so an unsigned
+request there is refused, `GET` included. A host missing from the table above is treated the same
+way; if a legitimate request is refused as `aws-no-credential` for that reason, report it.
 
 Some AWS APIs take a token that ties the request to no account the proxy can see, and are refused
 for that reason too: Cognito user pool calls made without AWS credentials, Bedrock API keys,
