@@ -42,7 +42,7 @@ path, before the request leaves the runner.
 ```
 
 With `allowed_aws_accounts` set, a request to an AWS API host that carries an AWS signature must be
-signed with a key the proxy knows belongs to one of those accounts. The proxy reads the access key ID
+signed with a key the proxy knows (below). The proxy reads the access key ID
 from the `Authorization` header (SigV4, SigV4a or SigV2), from a presigned URL's
 `X-Amz-Credential` or `AWSAccessKeyId` parameter, or from the `AWSAccessKeyId` parameter of a SigV2
 form body, and compares it with the keys it knows as a whole string. It never decodes a key ID or
@@ -68,7 +68,10 @@ the proxy cannot tell it is a form.
 The proxy knows two kinds of key:
 
 - **The key the step starts with**, read from `AWS_ACCESS_KEY_ID` in the step's environment, which
-  is where `aws-actions/configure-aws-credentials` puts it.
+  is where `aws-actions/configure-aws-credentials` puts it. It is trusted as given: the proxy does
+  not ask AWS whose key it is, so a key of another account set there by mistake passes too. Set
+  `allowed_aws_accounts` to the account those credentials come from, as the example above does with
+  the action's `aws-account-id` output.
 - **Keys an STS `AssumeRole` call issues** for a role in one of the allowed accounts. The proxy reads
   the role ARN and the new access key ID from the response, which AWS writes, and adds the key. This
   is what lets tools that switch roles mid-step keep working, such as the CDK assuming its

@@ -645,14 +645,15 @@ resolver saying no rule allows the name, and it does fail the step.
 ## AWS access key check
 
 `allowed_aws_accounts` is **experimental**: its behavior and error messages may still change without
-following semver. It takes 12-digit AWS account IDs, separated by commas, whitespace or newlines, with `#`
-comments as in the rule inputs. Set in the workflow, it replaces a config file's value. With it
-set, a request to an AWS API host must be signed with a key the proxy knows: the step's own
-`AWS_ACCESS_KEY_ID`, or one an STS `AssumeRole` issued for a role in one of these accounts. An
-unsigned request is left to the URL rules where the host names the resource it is for, such as an S3
-bucket or an ECR registry, and refused everywhere else. If `AWS_ACCESS_KEY_ID` is unset or is not
-an access key ID, `restrict` fails the step before the sandbox is set up and `audit` warns and turns
-the check off. [AWS access key check](./aws.md) covers why,
+following semver. It takes 12-digit AWS account IDs, separated by commas, whitespace or newlines,
+with `#` comments as in the rule inputs. Set in the workflow, it replaces a config file's value.
+With it set, a request to an AWS API host must be signed with a key the proxy knows: the step's own
+`AWS_ACCESS_KEY_ID`, taken as it stands without checking its account, or one an STS `AssumeRole`
+issued for a role in one of these accounts. An unsigned request is left to the URL rules where the
+host names the resource it is for, such as an S3 bucket or an ECR registry, and refused everywhere
+else. If `AWS_ACCESS_KEY_ID` is unset or is not an access key ID, `restrict` fails the step before
+the sandbox is set up and `audit` warns and turns the check off. [AWS access key check](./aws.md)
+covers why,
 what the check does not stop, and the IAM settings that close the rest.
 
 The check refuses after the URL rules have allowed a request, with one of these reasons:
