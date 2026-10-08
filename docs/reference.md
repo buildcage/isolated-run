@@ -649,17 +649,17 @@ resolver saying no rule allows the name, and it does fail the step.
 messages may still change without following semver. With `aws_key_check: true`, a request to an AWS
 API host must be signed with the step's own `AWS_ACCESS_KEY_ID`, taken as given without checking its
 account. `allowed_aws_role_accounts` takes 12-digit AWS account IDs, separated by commas, whitespace
-or newlines, with `#` comments as in the rule inputs, and turns the check on as well: a key an STS
-`AssumeRole` issues for a role in one of these accounts passes too, and with no account named no
-such key does. `aws_key_check: false` turns the check off even with accounts named, with a warning,
-so a step can opt out of accounts a config file names. Set in the workflow,
-`allowed_aws_role_accounts` replaces a config file's value. An unsigned request is left to the URL
-rules where the host names the resource it is for, such as an S3 bucket or an ECR registry, and
-refused everywhere else. If `AWS_ACCESS_KEY_ID` is unset or is not an access key ID, `restrict`
-fails the step before the sandbox is set up and `audit` warns and turns the check off.
-`allowed_aws_accounts`, which these replace, fails the step when it names an account. [AWS access
-key check](./aws.md) covers why, what the check does not stop, and the IAM settings that close the
-rest.
+or newlines, with `#` comments as in the rule inputs, and turns the check on as well: a key STS
+issues through `AssumeRole` or `AssumeRoleWithWebIdentity` for a role in one of these accounts
+passes too, and with no account named no such key does. `aws_key_check: false` turns the check off
+even with accounts named, with a warning, so a step can opt out of accounts a config file names. Set
+in the workflow, `allowed_aws_role_accounts` replaces a config file's value. An unsigned request is
+left to the URL rules where the host names the resource it is for, such as an S3 bucket or an ECR
+registry, and refused everywhere else but an `AssumeRoleWithWebIdentity` call for a role in one of
+these accounts. If `AWS_ACCESS_KEY_ID` is unset or is not an access key ID, `restrict` fails the
+step before the sandbox is set up and `audit` warns and turns the check off. `allowed_aws_accounts`,
+which these replace, fails the step when it names an account. [AWS access key check](./aws.md)
+covers why, what the check does not stop, and the IAM settings that close the rest.
 
 The check refuses after the URL rules have allowed a request, with one of these reasons:
 
@@ -669,6 +669,7 @@ The check refuses after the URL rules have allowed a request, with one of these 
 | `aws-no-credential`        | the request carried no AWS credential, to a host that names no resource                                                                                                                |
 | `aws-ambiguous-credential` | the request carried more than one credential: two `Authorization` headers, a header and a query credential, or a repeated one                                                          |
 | `aws-unreadable`           | the request could hide a credential where the proxy cannot read: a query that does not decode, or a form body that is compressed, chunked, larger than about 4 MiB or holds a NUL byte |
+| `aws-role-not-allowed`     | an unsigned `AssumeRoleWithWebIdentity` named a role in an account not in `allowed_aws_role_accounts`                                                                                  |
 
 These are refusals like `not-allowed`: they are in **🚫 Blocked Hosts** and fail the step under
 `fail_on_blocked: true`. In `audit` mode nothing is refused: a warning annotation counts the requests

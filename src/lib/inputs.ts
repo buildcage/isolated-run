@@ -165,7 +165,7 @@ const AWS_KEY_CHECK_OFF: AwsKeyInputs = { keys: [], roleAccounts: [] };
 
 /**
  * The AWS access key check pins the step to its own AWS_ACCESS_KEY_ID; role
- * accounts also let through the keys AssumeRole issues for them, and turn the
+ * accounts also let through the keys STS issues for their roles, and turn the
  * check on. universal never sees a request's headers, so it fails in restrict
  * and is warned about in audit.
  */

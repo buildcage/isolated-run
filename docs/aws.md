@@ -89,12 +89,13 @@ The proxy knows two kinds of key:
 - **The key the step starts with**, read from `AWS_ACCESS_KEY_ID` in the step's environment, which
   is where `aws-actions/configure-aws-credentials` puts it. It is taken as given: the proxy does not
   ask AWS whose key it is, so a key of another account set there by mistake passes too.
-- **Keys an STS `AssumeRole` call issues** for a role in one of the `allowed_aws_role_accounts`. The
-  proxy reads the role ARN and the new access key ID from the response, which AWS writes, and adds
-  the key. This is what lets tools that switch roles mid-step keep working, such as the CDK assuming
-  its `cdk-hnb659fds-deploy-role-*` roles or Terraform's `assume_role`. A role in any other account
-  issues a key the proxy never learns, so requests signed with it are refused. With no account
-  named, no key is learned at all, and the proxy leaves STS answers alone.
+- **Keys STS issues for a role in one of the `allowed_aws_role_accounts`**, through `AssumeRole` or
+  `AssumeRoleWithWebIdentity`. The proxy reads the role ARN and the new access key ID from the
+  response, which AWS writes, and adds the key. This is what lets tools that switch roles mid-step
+  keep working, such as the CDK assuming its `cdk-hnb659fds-deploy-role-*` roles, Terraform's
+  `assume_role`, or an SDK using a GitHub OIDC token through `AWS_WEB_IDENTITY_TOKEN_FILE`. A role
+  in any other account issues a key the proxy never learns, so requests signed with it are refused.
+  With no account named, no key is learned at all, and the proxy leaves STS answers alone.
 
 AWS API hosts are names under `amazonaws.com`, `amazonaws.com.cn` and `amazonaws.eu` (the European
 Sovereign Cloud), and under their dual-stack counterparts `api.aws`, `api.amazonwebservices.com.cn`
@@ -122,6 +123,7 @@ it with no `Authorization` at all, which Git sends first to be told to log in, i
 | More than one credential: two `Authorization` headers, a header and a query credential, or a credential repeated | `aws-ambiguous-credential` |
 | A key in a form body and another in the header or query, either of them unknown                                  | `aws-key-not-allowed`      |
 | A form body or query string the proxy cannot read through (above)                                                | `aws-unreadable`           |
+| `AssumeRoleWithWebIdentity` for a role in an account not in `allowed_aws_role_accounts`                          | `aws-role-not-allowed`     |
 
 These hosts name the resource a request reaches, in the host name or, for S3's path style and an EKS
 OIDC issuer, in the path. The URL rules can pin the resource there, so an unsigned request to them is
@@ -145,11 +147,11 @@ left to the URL rules:
 
 Each `amazonaws.com` name but `awscli.amazonaws.com` also matches under `amazonaws.com.cn` and
 `amazonaws.eu`, and each `api.aws` one under `api.amazonwebservices.com.cn` and
-`api.amazonwebservices.eu`. Every other AWS API host names only a service and a region, such as
-`sts.us-east-1.amazonaws.com` or `sqs.us-east-1.amazonaws.com`. The account a request to one of
-those reaches is in its parameters or its body, where the proxy does not look, so an unsigned
-request there is refused, `GET` included. A host missing from the table above is treated the same
-way; if a legitimate request is refused as `aws-no-credential` for that reason, report it.
+`api.amazonwebservices.eu`. Every other AWS API host names only a service and a region, such as `sts.us-east-1.amazonaws.com` or
+`sqs.us-east-1.amazonaws.com`. The account a request to one of those reaches is in its parameters or
+its body, where the proxy does not look, so an unsigned request there is refused, `GET` included,
+`AssumeRoleWithWebIdentity` excepted (below). A host missing from the table above is treated the
+same way; if a legitimate request is refused as `aws-no-credential` for that reason, report it.
 
 Some AWS APIs take a token that ties the request to no account the proxy can see, and are refused
 for that reason too: Cognito user pool calls made without AWS credentials, Bedrock API keys,
@@ -221,9 +223,11 @@ use one:
   and no such variable fails before the proxy starts; `audit` warns and turns
   the check off. Credentials read from `~/.aws/credentials`, a profile or a container credentials
   endpoint are not used as a starting key.
-- Getting credentials inside the step works only through STS `AssumeRole`. The unsigned STS calls,
-  `AssumeRoleWithWebIdentity` and `AssumeRoleWithSAML`, are refused as `aws-no-credential`, and keys
-  from IAM Identity Center's `GetRoleCredentials` or Cognito's `GetCredentialsForIdentity` are never
+- `AssumeRoleWithWebIdentity` takes no signature, so the proxy judges it by the account of the role
+  in `RoleArn`, read from the form body. A role in an account not listed in
+  `allowed_aws_role_accounts` is refused as `aws-role-not-allowed`, and with none listed the call
+  stays `aws-no-credential`. `AssumeRoleWithSAML` is refused as `aws-no-credential`, and keys from
+  IAM Identity Center's `GetRoleCredentials` or Cognito's `GetCredentialsForIdentity` are never
   learned. Get those credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
 - Keys are learned only from STS answers over HTTPS. The proxy asks STS for an uncompressed answer,
   unless the client signed its own `Accept-Encoding`, which the proxy then leaves alone. It reads an
