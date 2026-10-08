@@ -53,6 +53,8 @@ export const ACTION_INPUT_ENV_KEYS = new Set(
     "allowed_ip_rules",
     "allowed_url_rules",
     "allowed_tls_rules",
+    "aws_key_check",
+    "allowed_aws_role_accounts",
     "upload_traffic_artifact",
     "traffic_artifact_retention_days",
     "fail_on_blocked",

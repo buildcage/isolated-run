@@ -49,9 +49,11 @@ test_unit_coverage: ## Run every Node unit test once, with coverage
 # qjs can't execute .ts directly, so compile fresh (vp run build:qjs-test)
 # and bind-mount the output in.
 QJS_MOUNTS := \
-	-v "$(CURDIR)/dist/qjs-test/src/core:/opt/buildcage/core:ro"
+	-v "$(CURDIR)/dist/qjs-test/src/core:/opt/buildcage/core:ro" \
+	-v "$(CURDIR)/dist/qjs-test/src/proxy:/opt/buildcage/proxy:ro"
 QJS_TEST_DIRS := \
-	/opt/buildcage/core/lib/acl
+	/opt/buildcage/core/lib/acl \
+	/opt/buildcage/proxy
 
 .PHONY: test_unit_qjs
 test_unit_qjs: ## Run unit tests in Docker
@@ -103,28 +105,39 @@ clean_sandbox_dev: ## Stop and remove the sandbox dev-loop containers
 # under BUILDCAGE_LOCAL_IMAGE_REF: universal for the first two, an inspect
 # image built with BUILDCAGE_TEST_HOOKS=1 for the third, and none at all for
 # the fourth, which builds both images itself and wants the variable unset.
-# Build the image a group needs, then run that group, the way each CI job does.
+# Build the image a group needs, then run that group.
 .PHONY: test_integration
 test_integration: test_integration_sandbox_linux test_integration_sandbox_universal test_integration_sandbox_inspect test_integration_listener_scope ## Every integration test CI runs; the four groups need different proxy images, so build each one's image first
 
-# Drives dist/main.cjs directly (a host command, not a Docker build).
+# Drives dist/main.cjs directly (a host command, not a Docker build). Two
+# halves, which CI runs as separate jobs; here they run one after the other,
+# even under -j, since both check host state of the user they run as.
 .PHONY: test_integration_sandbox_linux
-test_integration_sandbox_linux: export INPUT_PROXY_ENGINE := universal
 test_integration_sandbox_linux: ## Run the action's integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF and a test-hook build of dist/main.cjs)
+	@$(MAKE) --no-print-directory test_integration_sandbox_linux_filesystem
+	@$(MAKE) --no-print-directory test_integration_sandbox_linux_runtime
+
+.PHONY: test_integration_sandbox_linux_filesystem
+test_integration_sandbox_linux_filesystem: export INPUT_PROXY_ENGINE := universal
+test_integration_sandbox_linux_filesystem: ## The action's filesystem integration tests: modes, write_through:, scratch, mounts
 	@./test/integration-test-ephemeral-fs.sh
 	@./test/integration-test-writable-dir.sh
+	@./test/integration-test-fs-escape.sh
+	@./test/integration-test-scratch-isolation.sh
+	@./test/integration-test-scratch-alias.sh
+	@./test/integration-test-mounts-readonly.sh
+	@./test/integration-test-file-commands.sh
+	@./test/integration-test-symlinked-checkout.sh
+
+.PHONY: test_integration_sandbox_linux_runtime
+test_integration_sandbox_linux_runtime: export INPUT_PROXY_ENGINE := universal
+test_integration_sandbox_linux_runtime: ## The action's remaining integration tests: defaults, processes, signals, the proxy's lifecycle
 	@./test/integration-test-defaults.sh
 	@./test/integration-test-host-parity.sh
 	@./test/integration-test-seccomp.sh
 	@./test/integration-test-die-with-parent.sh
 	@./test/integration-test-signal-exit.sh
-	@./test/integration-test-fs-escape.sh
-	@./test/integration-test-scratch-isolation.sh
-	@./test/integration-test-scratch-alias.sh
-	@./test/integration-test-mounts-readonly.sh
 	@./test/integration-test-host-commands.sh
-	@./test/integration-test-file-commands.sh
-	@./test/integration-test-symlinked-checkout.sh
 	@./test/integration-test-zero-traffic.sh
 	@./test/integration-test-runtime-sockets.sh
 	@./test/integration-test-post-state-tampering.sh
@@ -147,11 +160,23 @@ test_integration_sandbox_universal: ## Run the universal-engine fixture-based in
 
 # Separate from the above: these need an inspect-engine image (a different
 # Dockerfile/build) and the fixture origin network in compose.test-inspect.yaml.
+# Two halves, which CI runs in different jobs; here they run one after the
+# other, even under -j: the CA half's cleanup checks wait for every inspect
+# step of the user to end.
 .PHONY: test_integration_sandbox_inspect
 test_integration_sandbox_inspect: ## Run the inspect-engine integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF built from docker/inspect with test hooks)
+	@$(MAKE) --no-print-directory test_integration_sandbox_inspect_rules
+	@$(MAKE) --no-print-directory test_integration_sandbox_inspect_ca
+
+.PHONY: test_integration_sandbox_inspect_rules
+test_integration_sandbox_inspect_rules: ## Inspect-engine restrict, audit, round trip and AWS key check
 	@./test/integration-test-inspect-restrict.sh
 	@./test/integration-test-inspect-audit.sh
 	@./test/integration-test-inspect-roundtrip.sh
+	@./test/integration-test-inspect-aws-keys.sh
+
+.PHONY: test_integration_sandbox_inspect_ca
+test_integration_sandbox_inspect_ca: ## Inspect-engine CA trust in Chromium's NSS database and the CA mount's reserved paths
 	@./test/integration-test-inspect-chromium.sh
 	@./test/integration-test-inspect-reserved-mounts.sh
 

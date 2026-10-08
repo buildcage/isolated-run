@@ -270,4 +270,14 @@ echo "=== [HTTP - Host holding a colon] ==="
  | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true)
 echo "  request sent (an invalid-host row expected in the report)"
 
+# Last, by which time a link-local address would have arrived.
+echo "=== [no IPv6 address on the sandbox's interface] ==="
+if [ ! -r /proc/net/if_inet6 ]; then
+  fail "/proc/net/if_inet6 is not readable"
+elif grep -q ' eth0$' /proc/net/if_inet6; then
+  fail "eth0 holds an IPv6 address: $(grep ' eth0$' /proc/net/if_inet6)"
+else
+  pass "eth0 holds no IPv6 address"
+fi
+
 scenario_results

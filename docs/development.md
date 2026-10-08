@@ -223,6 +223,13 @@ reader splitting a URL back apart would take the host for `registry.npmjs.org-`.
 prints as `-` too. The log keeps the `Host` as sent; the report lowercases it and drops one trailing
 dot, as the rules do before matching it.
 
+With the AWS access key check on, both request lines carry `wr=<reason|->` after `dst=`: in `audit`,
+the reason `restrict` would have refused the request for (`aws-key-not-allowed`,
+`aws-no-credential`, `aws-ambiguous-credential`, `aws-unreadable` or `aws-role-not-allowed`), and
+`-` otherwise. `restrict` logs the same reasons as `reason=`. Then come `aws.key=`, `aws.accountId=`
+and `aws.assumedAccount=`, which the parser reads back as the traffic artifact's `aws` object, each
+`-` where it has no value. See [AWS access key check](./aws.md).
+
 `ts` is HAProxy's termination state and `reason` the refusal reason where the rule that refused
 knew one the line could not otherwise show. `tlserr` carries haproxy's own error from the handshake
 with the origin, which is what tells a connection the proxy would not make from one it could not
@@ -259,18 +266,22 @@ docker compose exec proxy curl -s --unix-socket /var/run/haproxy-health.sock \
 
 `make help` lists every target with its own description. The ones you type most:
 
-| Command                                   | Description                                                        |
-| ----------------------------------------- | ------------------------------------------------------------------ |
-| `make setup_sandbox_dev`                  | Start the proxy and the mac-friendly dev-loop runner               |
-| `make test_sandbox_dev`                   | Run a sample isolated command in the dev loop and verify isolation |
-| `make clean_sandbox_dev`                  | Stop and remove the dev-loop containers                            |
-| `make test_unit`                          | Every unit test: core, the action's own, and the QuickJS run       |
-| `make test_unit_coverage`                 | Every Node unit test in one run, with a coverage report            |
-| `make test_integration`                   | Every integration test CI runs, as the four groups below           |
-| `make test_integration_sandbox_linux`     | The action's integration tests on a Linux host                     |
-| `make test_integration_sandbox_universal` | The ones that need the universal engine's fixture origin           |
-| `make test_integration_sandbox_inspect`   | The same for the inspect engine, round trip included               |
-| `make test_integration_listener_scope`    | `:10024`/`:53` stay unreachable outside `buildcage0`, both engines |
+| Command                                          | Description                                                                |
+| ------------------------------------------------ | -------------------------------------------------------------------------- |
+| `make setup_sandbox_dev`                         | Start the proxy and the mac-friendly dev-loop runner                       |
+| `make test_sandbox_dev`                          | Run a sample isolated command in the dev loop and verify isolation         |
+| `make clean_sandbox_dev`                         | Stop and remove the dev-loop containers                                    |
+| `make test_unit`                                 | Every unit test: core, the action's own, and the QuickJS run               |
+| `make test_unit_coverage`                        | Every Node unit test in one run, with a coverage report                    |
+| `make test_integration`                          | Every integration test CI runs, as the four groups below                   |
+| `make test_integration_sandbox_linux`            | The action's integration tests on a Linux host                             |
+| `make test_integration_sandbox_linux_filesystem` | Its first half: filesystem modes, `write_through:`, scratch, mounts        |
+| `make test_integration_sandbox_linux_runtime`    | Its second half: defaults, processes, signals, the proxy's lifecycle       |
+| `make test_integration_sandbox_universal`        | The ones that need the universal engine's fixture origin                   |
+| `make test_integration_sandbox_inspect`          | The same for the inspect engine, round trip included                       |
+| `make test_integration_sandbox_inspect_rules`    | Its first half: restrict, audit, round trip and the AWS key check          |
+| `make test_integration_sandbox_inspect_ca`       | Its second half: Chromium's NSS database and the CA mount's reserved paths |
+| `make test_integration_listener_scope`           | `:10024`/`:53` stay unreachable outside `buildcage0`, both engines         |
 
 The first three integration groups need `BUILDCAGE_LOCAL_IMAGE_REF` and a test-hook build of
 `dist/main.cjs`; see [Local Development](#local-development) above. They do not all want the same
@@ -310,6 +321,9 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │   ├── main.ts / post.ts      # Start proxy, run isolated command, report, stop
 │   ├── lib/                   # Action-specific implementation: container, report, sudo-preflight,
 │   │                          # sandbox/ (OCI config, runc bootstrap, netns/mountinfo helpers)
+│   ├── proxy/                 # The AWS access key check, an extension to core's inspect config,
+│   │                          # built for both runtimes; scripts/ holds this action's inspect
+│   │                          # config generator, core's plus the check
 │   └── core/                  # Code shared with the proxy image's QuickJS scripts
 │       ├── lib/               # acl/ (rule parsing and the proxy config generators) is built for
 │       │                      # both runtimes, and so is anything it imports — errors.ts today.
@@ -337,8 +351,8 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │                              # helpers.sh carries what both halves share
 ├── dev/                       # Mac dev-loop image and scripts, and the filesystem audit fixture
 │                              # refresh; not used in production or CI
-├── docs/                      # development.md, security.md, plus the reference.md/rules.md/
-│                              # inspect-engine.md link stubs
+├── docs/                      # development.md, security.md, aws.md, plus the reference.md/
+│                              # rules.md/inspect-engine.md link stubs
 ├── licenses/                  # gen-license-file.mjs, which regenerates THIRD_PARTY_LICENSES_NPM
 │                              # during `vp run build`, and what .glf.jsonc substitutes in
 ├── compose.yaml               # Local-dev compose config (builds docker/universal/Dockerfile;
@@ -346,7 +360,9 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 └── Makefile                   # Operational commands
 ```
 
-Each engine's config generator is `src/core/scripts/gen-configs-<engine>.qjs.ts`, which runs under
+Each engine's config generator is `src/core/scripts/gen-configs-<engine>.qjs.ts`, except that the
+`inspect` image takes `src/proxy/scripts/gen-configs-inspect.qjs.ts`, which adds the AWS access key
+check to core's. Each runs under
 QuickJS when the proxy container starts and writes haproxy.cfg and the Corefile from the rules,
 through the generators in `src/core/lib/acl/` (`haproxy-config.ts` for `inspect`,
 `haproxy-universal-config.ts` for `universal`). rolldown bundles it into

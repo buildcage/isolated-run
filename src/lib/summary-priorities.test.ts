@@ -9,6 +9,7 @@ describe("summary priorities", () => {
   it("keeps room for the traffic tables, then the audit's tables, then the two logs", () => {
     const order = [
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.example],
+      TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.wouldRefuse],
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.blocked],
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.failed],
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.passed],

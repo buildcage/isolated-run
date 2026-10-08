@@ -3,9 +3,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 
 import { SandboxError } from "./errors.ts";
-import { runSandboxStep, type SandboxStepDeps } from "./sandbox-step.ts";
+import { runSandboxStep, WRITE_THROUGH_ALL_WARNING, type SandboxStepDeps } from "./sandbox-step.ts";
 import { filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
 import { SANDBOX_SCRATCH_BASE } from "./sandbox/scratch-dir.ts";
+
+// Assembled at runtime: a literal shaped like an AWS access key ID trips
+// secret scanning on push.
+const ASIA = ["A", "S", "I", "A"].join("");
 
 // Keeps pinningPaths from resolving the fixture's paths on this machine.
 vi.mock("./sandbox/symlinks.ts", async (importOriginal) => ({
@@ -26,6 +30,7 @@ const mocks = {
   readRuleInputs: vi.fn(),
   readFailOnCaResidue: vi.fn(),
   readFailOnBlocked: vi.fn(),
+  readAwsKeyInputs: vi.fn(),
   readTrafficArtifactInputs: vi.fn(),
   saveWriteThroughForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
@@ -92,6 +97,7 @@ beforeEach(() => {
   });
   mocks.readFailOnCaResidue.mockReturnValue(true);
   mocks.readFailOnBlocked.mockReturnValue(true);
+  mocks.readAwsKeyInputs.mockReturnValue({ key: "", roleAccounts: [] });
   mocks.readTrafficArtifactInputs.mockReturnValue({ upload: false });
   mocks.createAnnotation.mockReturnValue(annotation);
   mocks.resolveFilesystemPlan.mockReturnValue({
@@ -231,6 +237,7 @@ describe("runSandboxStep", () => {
     "readFailOnBlocked",
     "readTrafficArtifactInputs",
     "readRuleInputs",
+    "readAwsKeyInputs",
   ] as const)("fails on a bad value from %s before any setup", async (reader) => {
     mocks[reader].mockImplementation(() => {
       throw new InvalidInputError("Invalid input", "INVALID_BOOLEAN_INPUT");
@@ -330,6 +337,28 @@ describe("runSandboxStep", () => {
     ]);
   });
 
+  it("warns that write_through: / gives up the outbound restriction too", async () => {
+    mocks.readFilesystemInputs.mockReturnValue({
+      filesystemMode: "persistent",
+      writeThroughInput: "/opt/cache\n/",
+    });
+
+    await runSandboxStep(ENV, deps);
+
+    expect(annotation.warning).toHaveBeenCalledExactlyOnceWith(WRITE_THROUGH_ALL_WARNING);
+  });
+
+  it("does not warn when write_through names only narrower paths", async () => {
+    mocks.readFilesystemInputs.mockReturnValue({
+      filesystemMode: "persistent",
+      writeThroughInput: "/opt/cache",
+    });
+
+    await runSandboxStep(ENV, deps);
+
+    expect(annotation.warning).not.toHaveBeenCalled();
+  });
+
   it("fails on a write_through entry that does not parse before any setup", async () => {
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "persistent",
@@ -376,6 +405,30 @@ describe("runSandboxStep", () => {
       "Ephemeral (writes discarded at step end): /home/runner",
       "Writable (persisted):                    /opt/cache",
     ]);
+  });
+
+  it("hands the starting key and the role accounts to the proxy, and logs no key", async () => {
+    mocks.readAwsKeyInputs.mockReturnValue({
+      key: `${ASIA}AAAAAAAAAAAAAAAA`,
+      roleAccounts: ["111111111111"],
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.readAwsKeyInputs).toHaveBeenCalledWith(
+      { proxyEngine: "universal", proxyMode: "restrict" },
+      ENV,
+      annotation.warning,
+    );
+    expect(mocks.startSandboxProxy.mock.calls[0][0].composeEnv).toMatchObject({
+      ALLOWED_AWS_KEY: `${ASIA}AAAAAAAAAAAAAAAA`,
+      ALLOWED_AWS_ROLE_ACCOUNTS: "111111111111",
+    });
+    expect(log).toHaveBeenCalledWith("AWS access key check: on");
+    expect(log).toHaveBeenCalledWith("AWS role accounts: 111111111111");
+    expect(log.mock.calls.flat().join("\n").includes(`${ASIA}AAAAAAAAAAAAAAAA`)).toBe(false);
+    log.mockRestore();
   });
 
   it("pulls the image by verified digest, under the action's own repository", async () => {

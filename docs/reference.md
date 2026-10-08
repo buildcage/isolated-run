@@ -15,6 +15,7 @@ details.
 - [Blocked service names](#blocked-service-names)
 - [Requests that never arrived whole](#requests-that-never-arrived-whole)
 - [Connections that failed](#connections-that-failed)
+- [AWS access key check](#aws-access-key-check)
 - [Traffic artifact](#traffic-artifact)
 - [Filesystem audit](#filesystem-audit)
 - [CA trust variables](#ca-trust-variables)
@@ -25,26 +26,28 @@ details.
 
 `run` is the only required input.
 
-| Input                             | Default      | Description                                                                                                                   |
-| --------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `run`                             | required     | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed). |
-| `config_file`                     | empty        | A YAML file, relative to the workspace, that sets the other inputs. See [Config file](#config-file).                          |
-| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                               |
-| `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                |
-| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                       |
-| `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium).          |
-| `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                         |
-| `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                      |
-| `filesystem_audit`                | `off`        | `record` logs the step's file accesses (**experimental**). See [Filesystem audit](#filesystem-audit).                         |
-| `filesystem_audit_retention_days` | empty        | How long to keep the filesystem audit artifact, as a whole number of days; empty uses the repository's own default            |
-| `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                     |
-| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                |
-| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                    |
-| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                            |
+| Input                             | Default      | Description                                                                                                                                                                                                                          |
+| --------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `run`                             | required     | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed).                                                                                                        |
+| `config_file`                     | empty        | A YAML file, relative to the workspace, that sets the other inputs. See [Config file](#config-file).                                                                                                                                 |
+| `proxy_mode`                      | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                                                                                                                                      |
+| `proxy_engine`                    | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                                                                                                                       |
+| `fail_on_blocked`                 | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                                                                                                                              |
+| `fail_on_ca_residue`              | `true`       | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium).                                                                                                                 |
+| `aws_key_check`                   | `false`      | `inspect` only, **experimental**. Refuse AWS API requests signed with any key but the step's own `AWS_ACCESS_KEY_ID`. Defaults to `true` when `allowed_aws_role_accounts` is set. See [AWS access key check](#aws-access-key-check). |
+| `allowed_aws_role_accounts`       | empty        | `inspect` only, **experimental**. AWS accounts whose roles the step may assume; the keys those roles issue pass the check too. See [AWS access key check](#aws-access-key-check).                                                    |
+| `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                                                                                                                                |
+| `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                                                                                                                             |
+| `filesystem_audit`                | `off`        | `record` logs the step's file accesses (**experimental**). See [Filesystem audit](#filesystem-audit).                                                                                                                                |
+| `filesystem_audit_retention_days` | empty        | How long to keep the filesystem audit artifact, as a whole number of days; empty uses the repository's own default                                                                                                                   |
+| `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                                                                                                                            |
+| `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                                                                                                                       |
+| `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                                                                                                                           |
+| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                                                                                                                                   |
 
-`fail_on_blocked`, `fail_on_ca_residue` and `upload_traffic_artifact` take `true` or `false`, and
-`traffic_artifact_retention_days` a whole number above zero. Any other value fails the step before
-the sandbox is set up.
+`fail_on_blocked`, `fail_on_ca_residue`, `upload_traffic_artifact` and `aws_key_check` take `true`
+or `false`, and `traffic_artifact_retention_days` a whole number above zero. Any other value fails
+the step before the sandbox is set up.
 
 ### Rule inputs
 
@@ -644,6 +647,40 @@ build reaching for something that is up.
 A blocked `DNS` row for the same name means something else entirely: that one is Buildcage's own
 resolver saying no rule allows the name, and it does fail the step.
 
+## AWS access key check
+
+`aws_key_check` and `allowed_aws_role_accounts` are **experimental**: their behavior and error
+messages may still change without following semver. With `aws_key_check: true`, a request to an AWS
+API host must be signed with the step's own `AWS_ACCESS_KEY_ID`, taken as given without checking its
+account. `allowed_aws_role_accounts` takes 12-digit AWS account IDs, separated by commas, whitespace
+or newlines, with `#` comments as in the rule inputs, and turns the check on as well: a key STS
+issues through `AssumeRole` or `AssumeRoleWithWebIdentity` for a role in one of these accounts
+passes too, and with no account named no such key does. The accounts turn it on only when
+`aws_key_check` is unset in both the workflow and a config file; `aws_key_check: false` from either
+keeps it off, with a warning, so a step can opt out of accounts a config file names. Set in the
+workflow, `allowed_aws_role_accounts` replaces a config file's value. Quote an account ID that
+begins with `0`, which YAML otherwise reads as a number. An unsigned request is left to the URL
+rules where the host names the resource it is for, such as an S3 bucket or an ECR registry, and
+refused everywhere else but an `AssumeRoleWithWebIdentity` call for a role in one of these accounts.
+If `AWS_ACCESS_KEY_ID` is unset or is not an access key ID, `restrict` fails the step before the
+sandbox is set up and `audit` warns and turns the check off. [AWS access key check](./aws.md) covers
+why, what the check does not stop, and the IAM settings that close the rest.
+
+The check refuses after the URL rules have allowed a request, with one of these reasons:
+
+| Reason                     | What happened                                                                                                                                                                                                                                                                |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `aws-key-not-allowed`      | the request was signed with a key the proxy does not know, a CodeCommit login carried such a key, a static CodeCommit Git credential names another account, or the request carried `X-Amzn-Authorization` or a form body's `X-Amz-Credential`, which the proxy does not read |
+| `aws-no-credential`        | the request carried no AWS credential, to a host that names no resource                                                                                                                                                                                                      |
+| `aws-ambiguous-credential` | the request carried more than one credential: two `Authorization` headers, a header and a query credential, or a repeated one                                                                                                                                                |
+| `aws-unreadable`           | the request could hide a credential where the proxy cannot read: a query that does not decode, or a form body that is compressed, chunked, larger than about 4 MiB or holds a NUL byte                                                                                       |
+| `aws-role-not-allowed`     | an unsigned `AssumeRoleWithWebIdentity` named a role in an account not in `allowed_aws_role_accounts`                                                                                                                                                                        |
+
+These are refusals like `not-allowed`: they are in **🚫 Blocked Hosts** and fail the step under
+`fail_on_blocked: true`. In `audit` mode nothing is refused: a warning annotation counts the requests
+`restrict` would have refused, and the report lists each under **🚨 Restrict Would Refuse**, ending in
+`(restrict would refuse: <reason>)`. They also stay in **Communication details** among the other requests.
+
 ## Traffic artifact
 
 `upload_traffic_artifact: true` uploads the report's timeline as a `traffic.json` inside an artifact
@@ -658,21 +695,23 @@ This is also the form to keep where the report is an audit trail rather than som
 `filesystem_mode: persistent` a later step can add to the Job Summary, but not to an artifact
 already uploaded. See [Known Limitations](./security.md#known-limitations).
 
-| Field         | Always | Notes                                                                                    |
-| ------------- | ------ | ---------------------------------------------------------------------------------------- |
-| `time`        | yes    | ISO 8601 UTC                                                                             |
-| `elapsed`     |        | since the proxy started, fixed `HH:MM:SS.mmm`                                            |
-| `action`      | yes    | `allow`, `block`, `audit` when nothing was enforced, `discovery`, `incomplete`, `failed` |
-| `protocol`    | yes    | `https`, `http`, `tls`, `tcp`, `dns`                                                     |
-| `host`        | yes    | the name asked for, the address when there was none, or `(unknown)`                      |
-| `port`        |        | absent for `dns`, which connects to nothing                                              |
-| `queryType`   |        | the record asked for; `discovery` rows and refused service names                         |
-| `method`      |        | `http` and `https`, and `tcp` for a request with no `Host` sent to an address            |
-| `url`         |        | as `method`; verbatim, unlike the summary's                                              |
-| `status`      |        | only when something answered                                                             |
-| `bytes`       |        | absent for a refusal and for `dns`                                                       |
-| `reason`      |        | only when `action` is `block`, `incomplete` or `failed`                                  |
-| `destination` |        | the address it actually resolved to; `inspect` only, and absent for `dns`                |
+| Field         | Always | Notes                                                                                                 |
+| ------------- | ------ | ----------------------------------------------------------------------------------------------------- |
+| `time`        | yes    | ISO 8601 UTC                                                                                          |
+| `elapsed`     |        | since the proxy started, fixed `HH:MM:SS.mmm`                                                         |
+| `action`      | yes    | `allow`, `block`, `audit` when nothing was enforced, `discovery`, `incomplete`, `failed`              |
+| `protocol`    | yes    | `https`, `http`, `tls`, `tcp`, `dns`                                                                  |
+| `host`        | yes    | the name asked for, the address when there was none, or `(unknown)`                                   |
+| `port`        |        | absent for `dns`, which connects to nothing                                                           |
+| `queryType`   |        | the record asked for; `discovery` rows and refused service names                                      |
+| `method`      |        | `http` and `https`, and `tcp` for a request with no `Host` sent to an address                         |
+| `url`         |        | as `method`; verbatim, unlike the summary's                                                           |
+| `status`      |        | only when something answered                                                                          |
+| `bytes`       |        | absent for a refusal and for `dns`                                                                    |
+| `reason`      |        | only when `action` is `block`, `incomplete` or `failed`                                               |
+| `destination` |        | the address it actually resolved to; `inspect` only, and absent for `dns`                             |
+| `wouldRefuse` |        | `audit` only: the reason `restrict` would have refused it for, from the AWS access key check          |
+| `aws`         |        | a request the AWS access key check let through; see [the AWS check](./aws.md#in-the-traffic-artifact) |
 
 A `dns` row's `host` is the name as the resolver logged it: lowercased, with escapes such as `\ `
 and `\DDD` kept.
@@ -987,6 +1026,25 @@ runner's install directory, its `_actions` directory and the reserved paths abov
 anything under `persistent` and is rejected under `ephemeral`, where it would persist every write,
 the one thing that mode exists to prevent. The sentinel is the literal `/` only: an entry that merely _resolves_ to `/` (a miscounted
 `../`, say) is an error rather than a silent full opt-out.
+
+> [!WARNING]
+> Use `write_through: /` only for code you trust. Against a compromised command it removes more
+> than the read-only restriction:
+>
+> - All of `/run` is reachable again, which leaves the outbound restriction nearly pointless. On a
+>   GitHub-hosted runner the runner user can use the Docker socket there to start a container on
+>   the host network, past the proxy.
+> - `docker`, `sudo` and, under `inspect`, `keytool` are taken from the first match on `$PATH` even
+>   where the command can write, so the host may later run a copy the command replaced. `docker`
+>   also looks for its `docker-credential-*` helpers on the whole `$PATH`, where the command can
+>   plant one.
+> - `$XDG_RUNTIME_DIR` is no longer masked, so a `systemd --user` bus there can start a unit outside
+>   every namespace.
+> - Symlinks are refused only in the four always-writable paths and other `write_through:` entries,
+>   though the command could replace one anywhere.
+>
+> What still holds is the read-only paths named at the start of this section, the `/proc` masks and
+> the command's own network namespace. The step warns about all this when `write_through: /` is set.
 
 ### The former input names
 

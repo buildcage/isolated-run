@@ -205,11 +205,12 @@ sandbox down, so what it runs is kept out of those paths:
   there when sudoers sets no `secure_path`, and `docker` finds its `docker-credential-*` helpers
   there. `sudo` gets the system directories and `docker` the step's own `$PATH`, so a helper
   installed only under those paths is not found. A helper that is a symlink into them is not
-  caught.
+  caught. `write_through: /` turns all of this off, since no path is left outside them.
 - Under `inspect`, the `keytool` that adds the CA to the JVM keystores is pinned the same way,
   `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so the command's
   `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` stays inside the sandbox. Without one, the step skips the
-  keystores and warns. `java` is never run: its keystore is found by following its symlinks.
+  keystores and warns. `java` is never run: its keystore is found by following its symlinks. `write_through: /` turns
+  this pinning off too.
 - Under `inspect`, Chromium's NSS database gets a read-only slot on one the proxy's `certutil` made
   from the CA certificate alone, appended to a copy of its `pkcs11.txt`. The runner's database, which
   an earlier step may have written, is never parsed: its files are copied, and the slot's bytes are
@@ -459,6 +460,12 @@ origin; only the log line reflects the host-only nature of that decision. See
 [Rule syntax](./reference.md#rule-syntax) for how to write a host pattern that doesn't widen this
 more than intended.
 
+An allowed AWS API host serves every AWS account, so a step can sign requests to it with a key of its
+own and have AWS record what it sends in that account's CloudTrail. `aws_key_check` refuses a request
+signed with any key but the step's own and those STS issues for roles in `allowed_aws_role_accounts`.
+It cannot see which account a request's resource belongs to, so IAM has to close the rest; see
+[AWS access key check](./aws.md).
+
 #### The CA and its private key
 
 The CA and its key are generated fresh when this step's proxy container is created. The CA is valid
@@ -556,13 +563,15 @@ which leaves the ones it does not: a presigned URL's signature, a token minted w
 or a secret whose URL-encoded form no longer matches what was registered.
 
 The value of a query parameter named `access_key`, `access_token`, `api_key`, `api_token`, `auth`,
-`authorization`, `auth_token`, `client_secret`, `code`, `id_token`, `jwt`, `key`, `passwd`,
-`password`, `pat`, `private_token`, `pwd`, `refresh_token`, `secret`, `session`, `session_token`,
-`sig`, `signature`, `subscription-key`, `token`, `x-amz-security-token`, `x-amz-signature`,
-`x-api-key` or `x-goog-signature` is therefore replaced. The name is matched ignoring case, `-` and
-`_`, so `api_key`, `api-key`, `apiKey` and `APIKEY` are one name. A parameter starts after `&`, `;`
-or any `?`, so one in a URL carried inside another's value is replaced too. The replaced value runs
-to the next `&`, so a `;` or `?` inside a secret does not leave the rest of it showing:
+`authorization`, `auth_token`, `client_secret`, `code`, `credential`, `credentials`, `id_token`,
+`jwt`, `key`, `passwd`, `password`, `pat`, `private_token`, `pwd`, `refresh_token`, `secret`,
+`session`, `session_token`, `sig`, `signature`, `subscription-key`, `token`, `x-amz-security-token`,
+`x-amz-signature`, `x-api-key` or `x-goog-signature` is therefore replaced. The name is matched
+ignoring case, `-`, `_`, `.` and any trailing `[...]`, so `api_key`, `api-key`, `api.key`, `apiKey`,
+`APIKEY` and `api_key[0][]` are one name. What the brackets hold is not looked at, so `user[password]`
+keeps its value. A parameter starts after `&`, `;` or any `?`, so one in a URL carried inside
+another's value is replaced too. The replaced value runs to the next `&`, so a `;` or `?` inside a
+secret does not leave the rest of it showing:
 
 ```
 ✅ 00:04.212: GET https://cdn.example.com/x.tar.gz?X-Amz-Signature=***&X-Amz-Expires=3600 -> 200 (4.1MB)

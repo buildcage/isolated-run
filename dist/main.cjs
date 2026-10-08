@@ -15543,10 +15543,10 @@ function readRetentionDays(getInput) {
 		return Number(days);
 	}
 }
-function readTrafficArtifactInputs(getInput$10 = getInput) {
+function readTrafficArtifactInputs(getInput$11 = getInput) {
 	return {
-		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$10),
-		retentionDays: readRetentionDays(getInput$10)
+		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$11),
+		retentionDays: readRetentionDays(getInput$11)
 	};
 }
 const ENGINES = ["universal", "inspect"];
@@ -15954,6 +15954,13 @@ function resolverHosts(inputs) {
 }
 //#endregion
 //#region src/core/lib/acl/haproxy-inspect-stage.ts
+const LOG_FIELD_NAME = /^[a-z][A-Za-z0-9]*$/, LOG_FIELD_VAR = /^txn\.[a-z0-9_]+$/;
+function logFieldTokens({ name, fields }) {
+	if (!LOG_FIELD_NAME.test(name)) throw Error(`invalid log field object: ${name}`);
+	let entries = Object.entries(fields);
+	for (let [field, variable] of entries) if (!LOG_FIELD_NAME.test(field) || !LOG_FIELD_VAR.test(variable)) throw Error(`invalid log field: ${name}.${field} from ${variable}`);
+	return entries.map(([field, variable]) => ` ${name}.${field}=%[var(${variable}),regsub([^A-Za-z0-9._-],_,g)]`).join("");
+}
 function clientTlsFields(scheme) {
 	return scheme === "https" ? " fcerr=%[fc_err_name] sni=%[ssl_fc_sni,regsub([^A-Za-z0-9._-],_,g)]" : "";
 }
@@ -15993,8 +16000,8 @@ const PLAIN_REQUEST_TIMEOUTS = [
 	"    timeout http-keep-alive 30s"
 ];
 function inspectStage({ name, port, bindExtra, scheme, rules, backend }, ctx) {
-	let { mode } = ctx, logFormat = `"buildcage %[date(0,ms)] ${scheme} %HM %ST %B ts=%ts reason=%[var(txn.reason)] tlserr=%[ssl_bc_err] dst=%[dst]:%[dst_port]${clientTlsFields(scheme)} host=%[var(txn.host_log)] %[var(txn.pathq)]"`, l = [];
-	return l.push(`frontend ${name}`, `    bind 127.0.0.1:${port} accept-proxy${bindExtra}`, "    mode http", ...scheme === "http" ? PLAIN_REQUEST_TIMEOUTS : [], "    http-request set-var(txn.host_log) 'req.hdr(host),regsub(\"[\\s\\\"[:cntrl:]]\",_,g)'", "", "    # Decode before stripping `..`: `.` is unreserved, so `%2e%2e` is not", "    # a dot-dot segment until decoded, and stripping first would miss it.", "    http-request normalize-uri percent-decode-unreserved", "    http-request normalize-uri path-strip-dotdot", "", "    # pathq, not %HU: %HU is the target as sent (a path over HTTP/1.1, an", "    # absolute URI over HTTP/2), and pathq is not readable at log time.", "    # Set after normalization, so the log shows the path the rules matched.", "    http-request set-var(txn.pathq) 'pathq,regsub(\"[\\\"[:cntrl:]]\",_,g)'", "", "    # A request with no Host names nothing: the rules match on it, the", "    # origin is resolved from it, and the log's URL is built from it. Named", "    # here rather than left to the log's own empty fields, which a Host the", "    # client chose can imitate. Refused in `audit` too, as the same check", "    # in the universal engine is: there is nothing to connect to either way.", "    # Ahead of the path denies below, so that a request carrying neither a", "    # Host nor a legal path is named by the one the report can act on: the", "    # other leaves a row named for the `-` the log prints in its place.", "    acl has_host hdr(host) -m found", "    acl host_not_empty hdr_len(host) gt 0", "    http-request set-var(txn.reason) str(missing-host-header) if !has_host or !host_not_empty", "    http-request deny deny_status 400 if !has_host or !host_not_empty", "", "    # The one Host every later step reads. An acl on req.hdr(host) scans", "    # every value while a fetch takes the last, so reading the header twice", "    # could judge one value and connect to another.", `    http-request set-var(txn.host) req.hdr(host),lower,${HOST_ONLY}`, "    # A `:` left in the name could let a `~` rule's port pattern match it.", "    # Refused in `audit` too.", `    acl host_is_name var(txn.host) -m reg ${HOSTNAME_CHARSET}`, "    http-request set-var(txn.reason) str(invalid-host) if !host_is_name", "    http-request deny deny_status 400 if !host_is_name", "", "    # `%2f` and `%5c` survive decoding (both reserved) yet an origin may", "    # read `..%2f` / `..%5c` as a segment, and a raw backslash is not a", "    # valid path char at all. None is stripped, so each is refused. A lone", "    # encoded separator stays legal (e.g. npm's `/@scope%2fpackage`).", "    # `;` (or `%3b`) ends a segment too: Tomcat and Jetty drop what follows", "    # as a path parameter, so they read `..;/` as `../`.", "    # `\\\\` is one literal backslash: HAProxy's parser takes the pair as one.", "    http-request deny deny_status 403 if { path -m reg -i (^|/|%2f|%5c)\\.\\.($|/|;|%2f|%5c|%3b) }", "    http-request deny deny_status 403 if { path -m sub \\\\ }", "", `    log-format ${logFormat}`, ...scheme === "https" ? [`    error-log-format ${logFormat}`] : [], ""), l.push(...ruleBlock(rules, mode, scheme)), deniesEverything(rules, mode) || l.push("    # Connect to the address this proxy resolves the Host to, discarding", "    # the client's address, so a forged Host or doctored /etc/hosts cannot", "    # choose the target.", "    # txn.host has already dropped the port a header carries, which is not", "    # part of the name. An address is taken as-is: no resolver can answer", "    # one, and the rules above already decided, so nothing is loosened.", `    acl host_is_address var(txn.host) -m reg ${HOST_IS_ADDRESS}`, "    http-request set-var(txn.dst) var(txn.host) if host_is_address", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address", "    # A fresh attempt, not a replay: nothing cached the failure.", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address or { var(txn.dst) -m found }", "    http-request set-var(txn.reason) str(dns-failed) unless { var(txn.dst) -m found }", "    http-request deny deny_status 502 unless { var(txn.dst) -m found }", "", "    # Set before the internal-destination check below, not after: %[dst] in", "    # the log-format is this, and a refusal must show the address that", "    # tripped it, not whatever the client's own (fake, unresolved) address", "    # was: CoreDNS never hands out a real one; see coredns-config.ts.", "    http-request set-dst var(txn.dst)", "", "    # A resolved destination may not be internal; see INTERNAL_RANGES.", ...internalDstAcl("dst_internal", ctx), ...internalGuard(rules, ctx.listenPort)), l.push(`    default_backend ${backend}`, ""), l;
+	let { mode, extension } = ctx, logFormat = `"buildcage %[date(0,ms)] ${scheme} %HM %ST %B ts=%ts reason=%[var(txn.reason)] tlserr=%[ssl_bc_err] dst=%[dst]:%[dst_port]${extension ? " wr=%[var(txn.would_refuse),regsub([^A-Za-z0-9._-],_,g)]" + (extension.logFields ? logFieldTokens(extension.logFields) : "") : ""}${clientTlsFields(scheme)} host=%[var(txn.host_log)] %[var(txn.pathq)]"`, l = [];
+	return l.push(`frontend ${name}`, `    bind 127.0.0.1:${port} accept-proxy${bindExtra}`, "    mode http", ...scheme === "http" ? PLAIN_REQUEST_TIMEOUTS : [], "    http-request set-var(txn.host_log) 'req.hdr(host),regsub(\"[\\s\\\"[:cntrl:]]\",_,g)'", "", "    # Decode before stripping `..`: `.` is unreserved, so `%2e%2e` is not", "    # a dot-dot segment until decoded, and stripping first would miss it.", "    http-request normalize-uri percent-decode-unreserved", "    http-request normalize-uri path-strip-dotdot", "", "    # pathq, not %HU: %HU is the target as sent (a path over HTTP/1.1, an", "    # absolute URI over HTTP/2), and pathq is not readable at log time.", "    # Set after normalization, so the log shows the path the rules matched.", "    http-request set-var(txn.pathq) 'pathq,regsub(\"[\\\"[:cntrl:]]\",_,g)'", "", "    # A request with no Host names nothing: the rules match on it, the", "    # origin is resolved from it, and the log's URL is built from it. Named", "    # here rather than left to the log's own empty fields, which a Host the", "    # client chose can imitate. Refused in `audit` too, as the same check", "    # in the universal engine is: there is nothing to connect to either way.", "    # Ahead of the path denies below, so that a request carrying neither a", "    # Host nor a legal path is named by the one the report can act on: the", "    # other leaves a row named for the `-` the log prints in its place.", "    acl has_host hdr(host) -m found", "    acl host_not_empty hdr_len(host) gt 0", "    http-request set-var(txn.reason) str(missing-host-header) if !has_host or !host_not_empty", "    http-request deny deny_status 400 if !has_host or !host_not_empty", "", "    # The one Host every later step reads. An acl on req.hdr(host) scans", "    # every value while a fetch takes the last, so reading the header twice", "    # could judge one value and connect to another.", `    http-request set-var(txn.host) req.hdr(host),lower,${HOST_ONLY}`, "    # A `:` left in the name could let a `~` rule's port pattern match it.", "    # Refused in `audit` too.", `    acl host_is_name var(txn.host) -m reg ${HOSTNAME_CHARSET}`, "    http-request set-var(txn.reason) str(invalid-host) if !host_is_name", "    http-request deny deny_status 400 if !host_is_name", "", "    # `%2f` and `%5c` survive decoding (both reserved) yet an origin may", "    # read `..%2f` / `..%5c` as a segment, and a raw backslash is not a", "    # valid path char at all. None is stripped, so each is refused. A lone", "    # encoded separator stays legal (e.g. npm's `/@scope%2fpackage`).", "    # `;` (or `%3b`) ends a segment too: Tomcat and Jetty drop what follows", "    # as a path parameter, so they read `..;/` as `../`.", "    # `\\\\` is one literal backslash: HAProxy's parser takes the pair as one.", "    http-request deny deny_status 403 if { path -m reg -i (^|/|%2f|%5c)\\.\\.($|/|;|%2f|%5c|%3b) }", "    http-request deny deny_status 403 if { path -m sub \\\\ }", "", `    log-format ${logFormat}`, ...scheme === "https" ? [`    error-log-format ${logFormat}`] : [], ""), l.push(...ruleBlock(rules, mode, scheme)), deniesEverything(rules, mode) || (extension && (l.push(...extension.requestRules(mode)), scheme === "https" && l.push(...extension.responseRules())), l.push("    # Connect to the address this proxy resolves the Host to, discarding", "    # the client's address, so a forged Host or doctored /etc/hosts cannot", "    # choose the target.", "    # txn.host has already dropped the port a header carries, which is not", "    # part of the name. An address is taken as-is: no resolver can answer", "    # one, and the rules above already decided, so nothing is loosened.", `    acl host_is_address var(txn.host) -m reg ${HOST_IS_ADDRESS}`, "    http-request set-var(txn.dst) var(txn.host) if host_is_address", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address", "    # A fresh attempt, not a replay: nothing cached the failure.", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address or { var(txn.dst) -m found }", "    http-request set-var(txn.reason) str(dns-failed) unless { var(txn.dst) -m found }", "    http-request deny deny_status 502 unless { var(txn.dst) -m found }", "", "    # Set before the internal-destination check below, not after: %[dst] in", "    # the log-format is this, and a refusal must show the address that", "    # tripped it, not whatever the client's own (fake, unresolved) address", "    # was: CoreDNS never hands out a real one; see coredns-config.ts.", "    http-request set-dst var(txn.dst)", "", "    # A resolved destination may not be internal; see INTERNAL_RANGES.", ...internalDstAcl("dst_internal", ctx), ...internalGuard(rules, ctx.listenPort))), l.push(`    default_backend ${backend}`, ""), l;
 }
 //#endregion
 //#region src/core/lib/acl/haproxy-sections.ts
@@ -16082,7 +16089,8 @@ function generateHaproxyConfig(options) {
 			global: [
 				"    # normalize-uri is still marked experimental upstream.",
 				"    expose-experimental-directives",
-				"    tune.ssl.default-dh-param 2048"
+				"    tune.ssl.default-dh-param 2048",
+				...opts.extension?.global ?? []
 			],
 			defaults: [
 				"    timeout client 30s",
@@ -16111,6 +16119,7 @@ function generateHaproxyConfig(options) {
 		}, {
 			mode,
 			listenPort: opts.listenPort,
+			extension: opts.extension,
 			...shared
 		}),
 		...inspectStage({
@@ -16123,6 +16132,7 @@ function generateHaproxyConfig(options) {
 		}, {
 			mode,
 			listenPort: opts.listenPort,
+			extension: opts.extension,
 			...shared
 		}),
 		...originBackends(opts.systemCaFile)
@@ -16376,12 +16386,12 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 //#endregion
 //#region src/core/lib/actions/rule-inputs.ts
 init_core();
-function readRuleInputs(getInput$9 = getInput) {
+function readRuleInputs(getInput$10 = getInput) {
 	let rules = buildACLRules({
-		httpsRulesInput: getInput$9("allowed_https_rules"),
-		httpRulesInput: getInput$9("allowed_http_rules"),
-		ipRulesInput: getInput$9("allowed_ip_rules")
-	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$9("known_blocked_rules")), urlRulesInput = getInput$9("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$9("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
+		httpsRulesInput: getInput$10("allowed_https_rules"),
+		httpRulesInput: getInput$10("allowed_http_rules"),
+		ipRulesInput: getInput$10("allowed_ip_rules")
+	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$10("known_blocked_rules")), urlRulesInput = getInput$10("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$10("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
 	checkRulesCompileOrThrow({
 		...rules,
 		tlsRules,
@@ -23223,7 +23233,7 @@ function getContainerNetns(containerName, { exec = captureDockerViaExec$1 } = {}
 }
 //#endregion
 //#region src/lib/compose-env.ts
-function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, httpsRules, httpRules, ipRules, urlRules, tlsRules }, env, hostAddresses = listHostIpv4Addresses) {
+function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, httpsRules, httpRules, ipRules, urlRules, tlsRules, awsKey, awsRoleAccounts }, env, hostAddresses = listHostIpv4Addresses) {
 	return {
 		...env,
 		PROXY_CONTAINER_NAME: containerName,
@@ -23235,6 +23245,8 @@ function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, http
 		ALLOWED_IP_RULES: ipRules.join("\n"),
 		ALLOWED_URL_RULES: urlRules.join("\n"),
 		ALLOWED_TLS_RULES: tlsRules.join("\n"),
+		ALLOWED_AWS_KEY: awsKey,
+		ALLOWED_AWS_ROLE_ACCOUNTS: awsRoleAccounts.join(" "),
 		BUILDCAGE_PROXY_IMAGE_REF: imageRef,
 		HOST_ADDRESSES: hostAddresses().join(" ")
 	};
@@ -23273,8 +23285,8 @@ function fitStepSummary(blocks, { usedBytes = 0, limitBytes = 1048576 } = {}) {
 	return out.join("");
 }
 function cutBlock(b, budget) {
-	let notice = b.notice ?? "";
-	if (b.cut === "atomic") return notice;
+	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
+	if (b.cut === "atomic") return alone;
 	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
 	for (let line of b.text.split("\n")) {
 		let withNewline = `${line}\n`, lineBytes = bytes(withNewline);
@@ -23282,7 +23294,7 @@ function cutBlock(b, budget) {
 		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen);
 	}
 	let head = b.head ?? 0;
-	return head > 0 && count <= head ? notice : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
+	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
 }
 //#endregion
 //#region node_modules/.pnpm/@actions+artifact@6.2.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/config.js
@@ -68870,8 +68882,17 @@ function isRedundantDns(event, connected) {
 //#endregion
 //#region src/core/lib/report/render/inspect-details.ts
 function renderInspectDetailsBody(timeline, startedAt) {
-	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
-	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n\n`;
+	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), body = fenced(relevant.filter((e) => !isRedundantDns(e, connected)), startedAt);
+	return body && `${body}\n`;
+}
+function renderWouldRefuseBody(timeline, startedAt) {
+	return fenced(timeline.filter((e) => e.wouldRefuse !== void 0), startedAt);
+}
+function fenced(events, startedAt) {
+	return events.length === 0 ? "" : `\`\`\`\n${events.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n`;
+}
+function wouldRefuseTruncationNote(artifactAvailable) {
+	return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
 }
 const MARK = {
 	block: "🚫",
@@ -68880,11 +68901,21 @@ const MARK = {
 	failed: "⚠️"
 };
 function renderEvent(event, startedAt) {
-	return `${MARK[event.action] ?? "✅"} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}`;
+	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "🚨" : MARK[event.action] ?? "✅", note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${event.wouldRefuse})`;
+	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}${note}`;
 }
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
 function credentialName(name) {
-	return name.toLowerCase().replace(/[-_]/g, "");
+	return withoutIndexes(name).toLowerCase().replace(/[-_.]/g, "");
+}
+function withoutIndexes(name) {
+	let end = name.length;
+	for (; name[end - 1] === "]";) {
+		let open = name.lastIndexOf("[", end - 1);
+		if (open < 0) break;
+		end = open;
+	}
+	return name.slice(0, end);
 }
 const PARAM_NAME = /(^|[;?])([^;?=]*)=/g;
 function redactPart(part) {
@@ -69051,6 +69082,7 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 //#region src/core/lib/report/render/render-report-markdown.ts
 const SECTION = "traffic", TRAFFIC_BLOCK = {
 	example: "traffic-example",
+	wouldRefuse: "traffic-would-refuse",
 	blocked: "traffic-blocked",
 	failed: "traffic-failed",
 	passed: "traffic-passed",
@@ -69060,6 +69092,7 @@ Object.fromEntries(Object.values(TRAFFIC_BLOCK).map((id) => [id, 0]));
 function trafficNotice(block, artifactAvailable) {
 	switch (block.id) {
 		case TRAFFIC_BLOCK.example: return restrictExampleTruncationNote(artifactAvailable);
+		case TRAFFIC_BLOCK.wouldRefuse: return wouldRefuseTruncationNote(artifactAvailable);
 		case TRAFFIC_BLOCK.log: return communicationTruncationNote(artifactAvailable);
 		case TRAFFIC_BLOCK.blocked:
 		case TRAFFIC_BLOCK.failed:
@@ -69087,30 +69120,46 @@ const frame = (text) => ({
 });
 function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", ...step } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
-	if (report.logLooksPlausible || (top += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(frame(top)), report.passed.length > 0 && blocks.push(tableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), isAudit && blocks.push({
-		id: TRAFFIC_BLOCK.example,
-		priority: priorities[TRAFFIC_BLOCK.example],
-		level: 2,
-		section: `${SECTION}-example`,
-		cut: "atomic",
-		text: report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
+	report.logLooksPlausible || (top += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(frame(top));
+	let wrote = !1, gap = () => wrote ? "\n" : "";
+	if (report.passed.length > 0 && (blocks.push(tableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), isAudit) {
+		let example = report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 			...step,
 			allowedIpRules: report.parameters.allowedIpRules,
 			allowedTlsRules: report.parameters.allowedTlsRules
-		}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step)
-	}), report.blocked.length > 0) {
+		}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step);
+		blocks.push({
+			id: TRAFFIC_BLOCK.example,
+			priority: priorities[TRAFFIC_BLOCK.example],
+			level: 2,
+			section: `${SECTION}-example`,
+			cut: "atomic",
+			text: example
+		}), wrote ||= example !== "";
+	}
+	if (report.blocked.length > 0) {
 		let blocked = foldExpectedBlockedRows(report.blocked);
-		blocks.push(tableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${report.passed.length > 0 ? "\n" : ""}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
+		blocks.push(tableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${gap()}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
 			showReason: !0,
 			showExpected
-		}), "\n"));
+		}), "\n")), wrote = !0;
 	}
-	if (report.failed.length > 0) {
-		let gap = report.passed.length > 0 || report.blocked.length > 0 ? "\n" : "";
-		blocks.push(tableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
+	let wouldRefuse = renderWouldRefuseBody(report.timeline, report.startedAt);
+	if (wouldRefuse) {
+		let before = `${gap()}### 🚨 Restrict Would Refuse\n\n`;
+		blocks.push({
+			id: TRAFFIC_BLOCK.wouldRefuse,
+			priority: priorities[TRAFFIC_BLOCK.wouldRefuse],
+			level: 2,
+			section: SECTION,
+			text: before + wouldRefuse,
+			cut: "lines",
+			head: before.split("\n").length
+		}), wrote = !0;
 	}
+	report.failed.length > 0 && blocks.push(tableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap()}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
 	let bottom = "";
-	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame("_(no communication)_\n\n"));
+	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame(`${gap()}_(no communication)_\n\n`));
 	let details = renderInspectDetailsBody(report.timeline, report.startedAt);
 	return details && blocks.push({
 		id: TRAFFIC_BLOCK.log,
@@ -69127,14 +69176,15 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 //#region src/lib/summary-priorities.ts
 const TRAFFIC_PRIORITIES = {
 	[TRAFFIC_BLOCK.example]: 1,
-	[TRAFFIC_BLOCK.blocked]: 2,
-	[TRAFFIC_BLOCK.failed]: 3,
-	[TRAFFIC_BLOCK.passed]: 4,
-	[TRAFFIC_BLOCK.log]: 7
+	[TRAFFIC_BLOCK.wouldRefuse]: 2,
+	[TRAFFIC_BLOCK.blocked]: 3,
+	[TRAFFIC_BLOCK.failed]: 4,
+	[TRAFFIC_BLOCK.passed]: 5,
+	[TRAFFIC_BLOCK.log]: 8
 }, FILESYSTEM_PRIORITIES = {
-	[FILESYSTEM_BLOCK.executed]: 5,
-	[FILESYSTEM_BLOCK.paths]: 6,
-	[FILESYSTEM_BLOCK.log]: 8
+	[FILESYSTEM_BLOCK.executed]: 6,
+	[FILESYSTEM_BLOCK.paths]: 7,
+	[FILESYSTEM_BLOCK.log]: 9
 }, realDeps$3 = {
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
 	writeFile: (path, content) => (0, node_fs.writeFileSync)(path, content),
@@ -69207,6 +69257,17 @@ function readOptional(path, readFile) {
 	}
 }
 //#endregion
+//#region src/proxy/aws-keys.ts
+const ACCOUNT_ID = /^\d{12}$/, ACCESS_KEY_ID = /^[A-Z0-9]{16,128}$/;
+function parseAwsAccounts(input) {
+	let tokens = splitRuleTokens(input).flatMap((token) => token.split(",").filter(Boolean)), invalid = tokens.filter((token) => !ACCOUNT_ID.test(token));
+	if (invalid.length > 0) throw Error(`invalid AWS account ID: ${invalid.map((t) => JSON.stringify(t)).join(", ")}`);
+	return [...new Set(tokens)];
+}
+function isAwsAccessKeyId(value) {
+	return ACCESS_KEY_ID.test(value);
+}
+//#endregion
 //#region src/lib/filesystem-audit-mode.ts
 const FILESYSTEM_AUDIT = ["off", "record"];
 function resolveFilesystemAudit(input) {
@@ -69238,6 +69299,8 @@ const LIST_INPUTS = [
 		"proxy_mode",
 		"proxy_engine",
 		...LIST_INPUTS,
+		"aws_key_check",
+		"allowed_aws_role_accounts",
 		"upload_traffic_artifact",
 		"traffic_artifact_retention_days",
 		"fail_on_blocked",
@@ -69253,45 +69316,73 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$4 = getInput) {
-	let runInput = getInput$4("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$9 = getInput) {
+	let runInput = getInput$9("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$3 = getInput) {
+function readProxyInputs(getInput$8 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$3("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$3("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$8("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$8("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$8 = getInput) {
+function readFilesystemInputs(notice, getInput$5 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$8("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$5("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$8("write_through"),
-			writable: getInput$8("writable"),
-			allowWrite: getInput$8("allow_write")
+			writeThrough: getInput$5("write_through"),
+			writable: getInput$5("writable"),
+			allowWrite: getInput$5("allow_write")
 		}, notice)
 	};
 }
-function readFilesystemAuditInput(getInput$7 = getInput) {
-	return resolveFilesystemAudit(getInput$7("filesystem_audit"));
+function readFilesystemAuditInput(getInput$3 = getInput) {
+	return resolveFilesystemAudit(getInput$3("filesystem_audit"));
 }
-function readFilesystemAuditRetentionDays(getInput$1 = getInput) {
-	let days = getInput$1("filesystem_audit_retention_days");
+function readFilesystemAuditRetentionDays(getInput$6 = getInput) {
+	let days = getInput$6("filesystem_audit_retention_days");
 	if (days !== "") {
 		if (!/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
 		return Number(days);
 	}
 }
-function readStepLabel(getInput$6 = getInput) {
-	return getInput$6("label") || void 0;
+function readStepLabel(getInput$2 = getInput) {
+	return getInput$2("label") || void 0;
 }
-function readFailOnCaResidue(getInput$2 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$2);
+function readFailOnCaResidue(getInput$7 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$7);
 }
-function readFailOnBlocked(getInput$5 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$5);
+function readFailOnBlocked(getInput$1 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$1);
+}
+const AWS_KEY_CHECK_OFF = {
+	key: "",
+	roleAccounts: []
+};
+function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$4 = getInput) {
+	let roleAccounts;
+	try {
+		roleAccounts = parseAwsAccounts(getInput$4("allowed_aws_role_accounts"));
+	} catch (e) {
+		let { message } = e;
+		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
+	}
+	if (!readBooleanInput("aws_key_check", roleAccounts.length > 0, getInput$4)) return roleAccounts.length > 0 && warn("aws_key_check is false, so allowed_aws_role_accounts is ignored for this run."), AWS_KEY_CHECK_OFF;
+	if (proxyEngine !== "inspect") {
+		let reason = `The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers.`;
+		if (proxyMode === "audit") return warn(`${reason} It is ignored for this run.`), AWS_KEY_CHECK_OFF;
+		throw new InvalidInputError(`${reason} Switch to proxy_engine: inspect, or remove aws_key_check and allowed_aws_role_accounts.`, "INVALID_PROXY_ENGINE");
+	}
+	let key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
+	if (!isAwsAccessKeyId(key)) {
+		if (proxyMode === "audit") return warn("The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID, so the check is off for this run."), AWS_KEY_CHECK_OFF;
+		throw new SandboxError("The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. Set up the credentials in an earlier step, for example with aws-actions/configure-aws-credentials.", "AWS_ACCESS_KEY_MISSING");
+	}
+	return {
+		key,
+		roleAccounts
+	};
 }
 //#endregion
 //#region src/lib/retry-briefly.ts
@@ -71385,6 +71476,8 @@ const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-
 	"allowed_ip_rules",
 	"allowed_url_rules",
 	"allowed_tls_rules",
+	"aws_key_check",
+	"allowed_aws_role_accounts",
 	"upload_traffic_artifact",
 	"traffic_artifact_retention_days",
 	"fail_on_blocked",
@@ -72163,7 +72256,7 @@ function incompleteReason(terminationState, method) {
 }
 //#endregion
 //#region src/core/lib/log/inspect.ts
-const REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:fcerr=(\S+) )?(?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
+const REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:wr=(\S+) )?((?:[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*=\S+ )*)(?:fcerr=(\S+) )?(?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
 function timeOf(stamp) {
 	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
 	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
@@ -72212,10 +72305,20 @@ function hostBeforeRequest(sni, address) {
 		byAddress: !0
 	};
 }
+function extensionFields(tokens) {
+	let objects = new Map();
+	for (let token of tokens.split(" ")) {
+		let match = /^([^.]+)\.([^=]+)=(.*)$/.exec(token);
+		if (!match || match[3] === "-") continue;
+		let fields = objects.get(match[1]) ?? new Map();
+		objects.set(match[1], fields.set(match[2], match[3]));
+	}
+	if (objects.size !== 0) return Object.fromEntries([...objects].map(([name, fields]) => [name, Object.fromEntries(fields)]));
+}
 function parseProxyLine(line, isAudit) {
 	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
 	if (request) {
-		let fcerr = request[11] ?? "", incomplete = request[3] === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[13]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[12], request[9]) : void 0, event = {
+		let fcerr = request[13] ?? "", incomplete = request[3] === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[15]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[14], request[9]) : void 0, event = {
 			time: Number(request[1]) / 1e3,
 			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
 			protocol: unnamed?.byAddress ? "tcp" : scheme,
@@ -72225,10 +72328,13 @@ function parseProxyLine(line, isAudit) {
 		};
 		if (parsedRequest) {
 			event.method = request[3];
-			let url = urlOf(scheme, unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority, request[14]);
+			let url = urlOf(scheme, unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority, request[16]);
 			url !== void 0 && (event.url = url);
 		}
-		return reason === void 0 ? (event.status = Number(request[4]), event.bytes = Number(request[5])) : event.reason = reason, event;
+		let wouldRefuse = request[11];
+		wouldRefuse !== void 0 && wouldRefuse !== "-" && (event.wouldRefuse = wouldRefuse);
+		let extensions = extensionFields(request[12]);
+		return extensions && (event.extensions = extensions), reason === void 0 ? (event.status = Number(request[4]), event.bytes = Number(request[5])) : event.reason = reason, event;
 	}
 	let pass = PASSTHROUGH.exec(trimmed);
 	if (pass) {
@@ -72620,7 +72726,17 @@ function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 	})], undecided = describeUndecidedRequests(report, engineLabel);
 	undecided && emissions.push(undecided);
 	let failed = describeFailedConnections(report, engineLabel);
-	return failed && emissions.push(failed), emissions;
+	failed && emissions.push(failed);
+	let wouldRefuse = describeWouldRefuse(report);
+	return wouldRefuse && emissions.push(wouldRefuse), emissions;
+}
+function describeWouldRefuse(report) {
+	let count = report.timeline.filter((event) => event.wouldRefuse !== void 0).length;
+	if (count !== 0) return {
+		level: "warning",
+		shouldFail: !1,
+		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section lists them with the reason.`
+	};
 }
 function describeUndecidedRequests(report, engineLabel) {
 	let isNoise = clientEndedNoise(report.timeline), count = report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
@@ -72700,6 +72816,22 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], ...opt
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts
+const RECORD_FIELDS = new Set([
+	"time",
+	"elapsed",
+	"action",
+	"protocol",
+	"host",
+	"port",
+	"queryType",
+	"method",
+	"url",
+	"status",
+	"bytes",
+	"reason",
+	"destination",
+	"wouldRefuse"
+]);
 function buildTrafficRecords(events, startedAt) {
 	return [...events].sort((a, b) => a.time - b.time).map((e) => {
 		let record = {
@@ -72708,7 +72840,9 @@ function buildTrafficRecords(events, startedAt) {
 			protocol: e.protocol,
 			host: e.host
 		};
-		return startedAt !== void 0 && (record.elapsed = formatElapsedFixed(e.time - startedAt)), e.port !== void 0 && (record.port = e.port), e.queryType !== void 0 && (record.queryType = e.queryType), e.method !== void 0 && (record.method = e.method), e.url !== void 0 && (record.url = e.url), e.status !== void 0 && (record.status = e.status), e.bytes !== void 0 && (record.bytes = e.bytes), e.reason !== void 0 && (record.reason = e.reason), e.destination !== void 0 && (record.destination = e.destination), record;
+		startedAt !== void 0 && (record.elapsed = formatElapsedFixed(e.time - startedAt)), e.port !== void 0 && (record.port = e.port), e.queryType !== void 0 && (record.queryType = e.queryType), e.method !== void 0 && (record.method = e.method), e.url !== void 0 && (record.url = e.url), e.status !== void 0 && (record.status = e.status), e.bytes !== void 0 && (record.bytes = e.bytes), e.reason !== void 0 && (record.reason = e.reason), e.destination !== void 0 && (record.destination = e.destination), e.wouldRefuse !== void 0 && (record.wouldRefuse = e.wouldRefuse);
+		for (let [name, fields] of Object.entries(e.extensions ?? {})) RECORD_FIELDS.has(name) || Object.assign(record, { [name]: fields });
+		return record;
 	});
 }
 function writeTrafficFile(path, records) {
@@ -72836,6 +72970,7 @@ const realDeps = {
 	readRuleInputs,
 	readFailOnCaResidue,
 	readFailOnBlocked,
+	readAwsKeyInputs,
 	readTrafficArtifactInputs,
 	saveWriteThroughForPost,
 	validateFilesystemInputs,
@@ -72883,7 +73018,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditRetentionDays, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, prepareStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditRetentionDays, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, prepareStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -72902,7 +73037,14 @@ async function runSandboxStep(env, overrides = {}) {
 		proxyEngine,
 		proxyMode,
 		knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
-	}, annotation.warning), assertNonRootUid(process.getuid()), validateFilesystemInputs(filesystemMode, resolveWriteThroughInput(writeThroughInput, env)), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
+	}, annotation.warning);
+	let aws = readAwsKeyInputs({
+		proxyEngine,
+		proxyMode
+	}, env, annotation.warning);
+	assertNonRootUid(process.getuid());
+	let writeThrough = resolveWriteThroughInput(writeThroughInput, env);
+	validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write_through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run is reachable again, the Docker socket included, $XDG_RUNTIME_DIR is no longer masked, and the commands this action runs on the host after the command are no longer kept out of writable paths. See \"The / opt-out\" in docs/reference.md."), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
 	let { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
 	let localOverride = await readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
@@ -72916,7 +73058,7 @@ async function runSandboxStep(env, overrides = {}) {
 	log(`buildcage: proxy image: ${imageRef}`);
 	let composeFile = resolveComposeFile(localOverride);
 	withLogGroup("buildcage: Configured ACL Rules", () => {
-		logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
+		logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), aws.key && console.log("AWS access key check: on"), aws.roleAccounts.length > 0 && console.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
 	});
 	let containerName = generateContainerName(), projectName = deriveProjectName(containerName), audit = filesystemAudit === "record" ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE) : void 0;
 	saveCleanupState(env, {
@@ -72933,7 +73075,9 @@ async function runSandboxStep(env, overrides = {}) {
 		httpRules,
 		ipRules,
 		urlRules,
-		tlsRules
+		tlsRules,
+		awsKey: aws.key,
+		awsRoleAccounts: aws.roleAccounts
 	}, env);
 	try {
 		await startSandboxProxy({

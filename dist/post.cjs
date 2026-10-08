@@ -227,6 +227,10 @@ function errorMessage(e) {
 	return e instanceof Error ? e.message : String(e);
 }
 //#endregion
+//#region src/core/lib/acl/ipv4.ts
+const OCTET = "(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])", PREFIX = "(3[0-2]|[12]?[0-9])", IPV4 = `${OCTET}\\.${OCTET}\\.${OCTET}\\.${OCTET}`;
+RegExp(`^${OCTET}$`), RegExp(`^${IPV4}(?:/${PREFIX})?$`), RegExp(`^${IPV4}/${PREFIX}$`);
+//#endregion
 //#region src/lib/errors.ts
 var SandboxError = class extends ActionError {};
 //#endregion
@@ -241,13 +245,13 @@ function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readFilesystemInputs(notice, getInput$8 = getInput) {
+function readFilesystemInputs(notice, getInput$5 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$8("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$5("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput({
-			writeThrough: getInput$8("write_through"),
-			writable: getInput$8("writable"),
-			allowWrite: getInput$8("allow_write")
+			writeThrough: getInput$5("write_through"),
+			writable: getInput$5("writable"),
+			allowWrite: getInput$5("allow_write")
 		}, notice)
 	};
 }

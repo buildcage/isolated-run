@@ -36,6 +36,7 @@ import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
   readProxyInputs,
+  readAwsKeyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
   readFilesystemAuditInput,
@@ -57,6 +58,7 @@ import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
+import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 
@@ -65,6 +67,13 @@ import { checkPasswordlessSudo } from "./sudo-preflight.ts";
  * ref. Never verified against; provenance hard-fails on the empty ref instead.
  */
 const DEFAULT_ACTION_REF = "v2";
+
+export const WRITE_THROUGH_ALL_WARNING =
+  "write_through: / is for trusted code only. Against a compromised command it gives up the " +
+  "outbound restriction as well as the read-only one: all of /run is reachable again, the Docker " +
+  "socket included, $XDG_RUNTIME_DIR is no longer masked, and the commands this action runs on " +
+  'the host after the command are no longer kept out of writable paths. See "The / opt-out" in ' +
+  "docs/reference.md.";
 
 /**
  * The steps this function sequences. Declared rather than imported straight
@@ -86,6 +95,7 @@ export interface SandboxStepDeps {
   readRuleInputs: typeof readRuleInputs;
   readFailOnCaResidue: typeof readFailOnCaResidue;
   readFailOnBlocked: typeof readFailOnBlocked;
+  readAwsKeyInputs: typeof readAwsKeyInputs;
   readTrafficArtifactInputs: typeof readTrafficArtifactInputs;
   saveWriteThroughForPost: typeof saveWriteThroughForPost;
   validateFilesystemInputs: typeof validateFilesystemInputs;
@@ -146,6 +156,7 @@ const realDeps: SandboxStepDeps = {
   readRuleInputs,
   readFailOnCaResidue,
   readFailOnBlocked,
+  readAwsKeyInputs,
   readTrafficArtifactInputs,
   saveWriteThroughForPost,
   validateFilesystemInputs,
@@ -231,6 +242,7 @@ export async function runSandboxStep(
     readRuleInputs,
     readFailOnCaResidue,
     readFailOnBlocked,
+    readAwsKeyInputs,
     readTrafficArtifactInputs,
     saveWriteThroughForPost,
     validateFilesystemInputs,
@@ -312,6 +324,7 @@ export async function runSandboxStep(
     },
     annotation.warning,
   );
+  const aws = readAwsKeyInputs({ proxyEngine, proxyMode }, env, annotation.warning);
 
   // Before any privileged setup; see assertNonRootUid.
   assertNonRootUid(process.getuid!());
@@ -321,7 +334,9 @@ export async function runSandboxStep(
   // rather than only after the privileged preflight checks below have already
   // run (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
   // probe). resolveFilesystemPlan re-checks the real paths on the host.
-  validateFilesystemInputs(filesystemMode, resolveWriteThroughInput(writeThroughInput, env));
+  const writeThrough = resolveWriteThroughInput(writeThroughInput, env);
+  validateFilesystemInputs(filesystemMode, writeThrough);
+  if (writeThrough.includes(WRITE_THROUGH_ALL)) annotation.warning(WRITE_THROUGH_ALL_WARNING);
 
   // Before the preflights, which already run sudo.
   pinHostCommands(
@@ -367,6 +382,9 @@ export async function runSandboxStep(
     logRules("URL", urlRules);
     logRules("TLS", tlsRules);
     logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
+    if (aws.key) console.log("AWS access key check: on");
+    if (aws.roleAccounts.length > 0)
+      console.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
   });
 
   const containerName = generateContainerName();
@@ -388,6 +406,8 @@ export async function runSandboxStep(
       ipRules: ipRules,
       urlRules,
       tlsRules,
+      awsKey: aws.key,
+      awsRoleAccounts: aws.roleAccounts,
     },
     env,
   );

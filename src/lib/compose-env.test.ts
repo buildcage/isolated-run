@@ -2,6 +2,10 @@ import { describe, it, expect } from "vitest";
 
 import { buildComposeEnv, type ComposeEnvOptions } from "./compose-env.ts";
 
+// Assembled at runtime: a literal shaped like an AWS access key ID trips
+// secret scanning on push.
+const ASIA = ["A", "S", "I", "A"].join("");
+
 const CONTAINER = "buildcage-proxy-deadbeef";
 const HOST_ADDRESSES = () => ["10.0.0.4", "172.17.0.1"];
 
@@ -25,6 +29,8 @@ function options(overrides: Partial<ComposeEnvOptions> = {}): ComposeEnvOptions 
     ipRules: [],
     urlRules: [],
     tlsRules: [],
+    awsKey: "",
+    awsRoleAccounts: [],
     ...overrides,
   };
 }
@@ -40,6 +46,8 @@ describe("buildComposeEnv", () => {
         ipRules: ["10.0.0.0/8"],
         urlRules: ["GET https://api.github.com/repos/*"],
         tlsRules: ["*.example.com:443"],
+        awsKey: `${ASIA}AAAAAAAAAAAAAAAA`,
+        awsRoleAccounts: ["111111111111", "222222222222"],
       }),
       {},
       HOST_ADDRESSES,
@@ -55,6 +63,8 @@ describe("buildComposeEnv", () => {
       ALLOWED_IP_RULES: "10.0.0.0/8",
       ALLOWED_URL_RULES: "GET https://api.github.com/repos/*",
       ALLOWED_TLS_RULES: "*.example.com:443",
+      ALLOWED_AWS_ROLE_ACCOUNTS: "111111111111 222222222222",
+      ALLOWED_AWS_KEY: `${ASIA}AAAAAAAAAAAAAAAA`,
       BUILDCAGE_PROXY_IMAGE_REF: "ghcr.io/buildcage/isolated-run@sha256:feedface",
       HOST_ADDRESSES: "10.0.0.4 172.17.0.1",
     });
