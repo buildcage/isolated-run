@@ -26676,8 +26676,8 @@ function fitStepSummary(blocks, { usedBytes = 0, limitBytes = 1048576 } = {}) {
 	return out.join("");
 }
 function cutBlock(b, budget) {
-	let notice = b.notice ?? "";
-	if (b.cut === "atomic") return notice;
+	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
+	if (b.cut === "atomic") return alone;
 	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
 	for (let line of b.text.split("\n")) {
 		let withNewline = `${line}\n`, lineBytes = bytes(withNewline);
@@ -26685,7 +26685,7 @@ function cutBlock(b, budget) {
 		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen);
 	}
 	let head = b.head ?? 0;
-	return head > 0 && count <= head ? notice : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
+	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
 }
 function usesLine(actionRepo, actionRef, actionVersion) {
 	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
@@ -27080,27 +27080,33 @@ const frame = (text) => ({
 });
 function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", ...step } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
-	if (report.logLooksPlausible || (top += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(frame(top)), report.passed.length > 0 && blocks.push(tableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), isAudit && blocks.push({
-		id: TRAFFIC_BLOCK.example,
-		priority: priorities[TRAFFIC_BLOCK.example],
-		level: 2,
-		section: `${SECTION}-example`,
-		cut: "atomic",
-		text: report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
+	report.logLooksPlausible || (top += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(frame(top));
+	let wrote = !1, gap = () => wrote ? "\n" : "";
+	if (report.passed.length > 0 && (blocks.push(tableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), isAudit) {
+		let example = report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 			...step,
 			allowedIpRules: report.parameters.allowedIpRules,
 			allowedTlsRules: report.parameters.allowedTlsRules
-		}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step)
-	}), report.blocked.length > 0) {
+		}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step);
+		blocks.push({
+			id: TRAFFIC_BLOCK.example,
+			priority: priorities[TRAFFIC_BLOCK.example],
+			level: 2,
+			section: `${SECTION}-example`,
+			cut: "atomic",
+			text: example
+		}), wrote ||= example !== "";
+	}
+	if (report.blocked.length > 0) {
 		let blocked = foldExpectedBlockedRows(report.blocked);
-		blocks.push(tableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${report.passed.length > 0 ? "\n" : ""}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
+		blocks.push(tableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${gap()}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
 			showReason: !0,
 			showExpected
-		}), "\n"));
+		}), "\n")), wrote = !0;
 	}
 	let wouldRefuse = renderWouldRefuseBody(report.timeline, report.startedAt);
 	if (wouldRefuse) {
-		let before = `${report.passed.length > 0 || report.blocked.length > 0 ? "\n" : ""}### 🚨 Restrict Would Refuse\n\n`;
+		let before = `${gap()}### 🚨 Restrict Would Refuse\n\n`;
 		blocks.push({
 			id: TRAFFIC_BLOCK.wouldRefuse,
 			priority: priorities[TRAFFIC_BLOCK.wouldRefuse],
@@ -27109,14 +27115,11 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 			text: before + wouldRefuse,
 			cut: "lines",
 			head: before.split("\n").length
-		});
+		}), wrote = !0;
 	}
-	if (report.failed.length > 0) {
-		let gap = report.passed.length > 0 || report.blocked.length > 0 || wouldRefuse ? "\n" : "";
-		blocks.push(tableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
-	}
+	report.failed.length > 0 && blocks.push(tableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap()}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
 	let bottom = "";
-	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame("_(no communication)_\n\n"));
+	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame(`${gap()}_(no communication)_\n\n`));
 	let details = renderInspectDetailsBody(report.timeline, report.startedAt);
 	return details && blocks.push({
 		id: TRAFFIC_BLOCK.log,
