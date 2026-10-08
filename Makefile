@@ -149,14 +149,21 @@ test_integration_sandbox_universal: ## Run the universal-engine fixture-based in
 
 # Separate from the above: these need an inspect-engine image (a different
 # Dockerfile/build) and the fixture origin network in compose.test-inspect.yaml.
+# Two halves so CI can run them as parallel jobs.
 .PHONY: test_integration_sandbox_inspect
-test_integration_sandbox_inspect: ## Run the inspect-engine integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF built from docker/inspect with test hooks)
+test_integration_sandbox_inspect: test_integration_sandbox_inspect_rules test_integration_sandbox_inspect_ca ## Run the inspect-engine integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF built from docker/inspect with test hooks)
+
+.PHONY: test_integration_sandbox_inspect_rules
+test_integration_sandbox_inspect_rules: ## Inspect-engine restrict, audit, round trip and AWS key check
 	@./test/integration-test-inspect-restrict.sh
 	@./test/integration-test-inspect-audit.sh
 	@./test/integration-test-inspect-roundtrip.sh
+	@./test/integration-test-inspect-aws-keys.sh
+
+.PHONY: test_integration_sandbox_inspect_ca
+test_integration_sandbox_inspect_ca: ## Inspect-engine CA trust in Chromium's NSS database and the CA mount's reserved paths
 	@./test/integration-test-inspect-chromium.sh
 	@./test/integration-test-inspect-reserved-mounts.sh
-	@./test/integration-test-inspect-aws-keys.sh
 
 # Builds each engine's proxy image itself (docker compose build), unlike the
 # two groups above which reuse a pre-built BUILDCAGE_LOCAL_IMAGE_REF.

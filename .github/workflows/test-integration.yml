@@ -159,7 +159,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    name: "integration: test (sandbox, inspect engine)"
+    # The longest job here when it was one, so split in two.
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [rules, ca]
+    name: "integration: test (sandbox, inspect engine, ${{ matrix.part }})"
 
     steps:
       - name: Checkout
@@ -187,13 +192,14 @@ jobs:
 
       # The runner's python3 is older than 3.13, which the Python scenario needs.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: matrix.part == 'rules'
         with:
           python-version: "3.14"
 
       - name: Run inspect-engine integration tests
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-        run: make test_integration_sandbox_inspect
+        run: make test_integration_sandbox_inspect_${{ matrix.part }}
 
       - name: Verify no leftover fixture/proxy containers or networks
         if: always()

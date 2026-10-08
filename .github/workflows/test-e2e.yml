@@ -54,8 +54,8 @@ jobs:
   # host; none of this can be validated inside a nested container (see dev/
   # and docs/development.md).
   #
-  # Split into one job per case (test_sandbox_*) so each gets its own Job
-  # Summary section and status check. run-isolated.sh's own mechanics
+  # Cases that need the same image share a job: runners, not job length, are
+  # what a run waits on. run-isolated.sh's own mechanics
   # (privilege drop, filesystem defaults, write_through: variations, concurrent
   # lifecycles) are covered more cheaply in test-integration.yml instead.
   #
@@ -159,7 +159,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    name: "e2e: test (sandbox, enforcement)"
+    name: "e2e: test (sandbox, enforcement, config_file, fail_on_blocked)"
 
     env:
       PROXY_ENGINE: universal
@@ -232,41 +232,9 @@ jobs:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
         run: ./test/assert-sandbox.sh
 
-  # config_file through the real action: the engine, the rules and
-  # fail_on_blocked it sets all reach the step. The image is universal either
-  # way, so the step checks for the CA inspect would have put in the sandbox.
-  test_sandbox_config_file:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    name: "e2e: test (sandbox, config_file)"
-
-    # Builds the universal image the file asks for.
-    env:
-      PROXY_ENGINE: universal
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/setup-vp
-
-      - name: Build local sandbox proxy image
-        run: docker compose build proxy
-
-      - name: Resolve local image ref
-        id: local_image
-        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
-
-      - name: Rebuild the action with the local-image test hook enabled
-        env:
-          BUILDCAGE_BUILD_TEST_HOOKS: "1"
-        run: vp run build
-
+      # config_file through the real action: the engine, the rules and
+      # fail_on_blocked it sets all reach the step. The image is universal either
+      # way, so the step checks for the CA inspect would have put in the sandbox.
       - name: Write the config file
         run: |
           mkdir -p e2e-config
@@ -300,171 +268,10 @@ jobs:
               exit 1
             fi
 
-  # One representative case through the real action wrapper, against real
-  # internet hosts (no fixture network), proves proxy_engine: inspect wiring
-  # end-to-end: engine selection, method/path enforcement via
-  # allowed_url_rules, TLS passthrough via allowed_tls_rules, and CA trust (a
-  # plain https GET succeeding with no --insecure, despite the proxy
-  # terminating TLS). Deeper scenario coverage (SSRF/forged-Host/DNS
-  # non-leak/wildcard host+path/CA residue) lives in
-  # test/integration-test-inspect-restrict.sh, which needs a fixture network
-  # this job deliberately does not set up.
-  test_sandbox_inspect_enforcement:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    name: "e2e: test (sandbox, inspect engine)"
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/setup-vp
-
-      - name: Build local inspect-engine proxy image
-        env:
-          PROXY_ENGINE: inspect
-        run: docker compose build proxy
-
-      - name: Resolve local image ref
-        id: local_image
-        env:
-          PROXY_ENGINE: inspect
-        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
-
-      - name: Rebuild the action with the local-image test hook enabled
-        env:
-          BUILDCAGE_BUILD_TEST_HOOKS: "1"
-        run: vp run build
-
-      - name: "Run an isolated command via the real action (proxy_engine: inspect)"
-        id: sandbox
-        uses: ./
-        env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-inspect-summary.md
-        with:
-          proxy_engine: inspect
-          allowed_url_rules: "GET|HEAD https://example.com/**"
-          allowed_tls_rules: "github.com:443"
-          # Blocked connections below are expected, not a failure.
-          fail_on_blocked: false
-          # Short retention: this e2e run's own artifacts shouldn't linger.
-          upload_traffic_artifact: true
-          traffic_artifact_retention_days: 1
-          run: |
-            echo "=== URL-allowed host, over TLS the proxy terminated (proves CA trust) ==="
-            curl -fsS --max-time 10 https://example.com/ > /dev/null
-
-            echo "=== method outside the rule must be refused ==="
-            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -X POST https://example.com/)
-            if [ "$CODE" != "403" ]; then
-              echo "UNEXPECTED: POST https://example.com/ returned $CODE, not 403"
-              exit 1
-            fi
-
-            echo "=== host outside allowed_url_rules must be refused ==="
-            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://neverssl.com/)
-            if [ "$CODE" != "403" ]; then
-              echo "UNEXPECTED: https://neverssl.com/ returned $CODE, not 403"
-              exit 1
-            fi
-
-            echo "=== allowed_tls_rules host: passed through undecrypted, real cert visible ==="
-            curl -fsS --max-time 10 https://github.com/ > /dev/null
-
-      - name: Verify the sandbox report contains the expected allowed/blocked entries
-        if: always()
-        env:
-          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-inspect-summary.md
-        run: ./test/assert-sandbox-inspect.sh
-
-      - name: Check the traffic_artifact_name output was set
-        run: |
-          if [ -z "${{ steps.sandbox.outputs.traffic_artifact_name }}" ]; then
-            echo "::error::traffic_artifact_name output was empty despite upload_traffic_artifact: true"
-            exit 1
-          fi
-
-      # Downloading by the exact name from the output above, rather than
-      # matching buildcage-traffic-* by pattern, proves the output itself is
-      # both set and correct.
-      - name: Download the traffic artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ steps.sandbox.outputs.traffic_artifact_name }}
-          path: ${{ runner.temp }}/buildcage-traffic
-
-      - name: Verify the traffic artifact
-        run: |
-          node -e '
-            const fs = require("node:fs");
-            const rows = JSON.parse(
-              fs.readFileSync(process.env.RUNNER_TEMP + "/buildcage-traffic/traffic.json", "utf8"),
-            );
-            const methodRefused = rows.some(
-              (r) => r.action === "block" && r.host === "example.com" && r.method === "POST",
-            );
-            const hostRefused = rows.some(
-              (r) => r.action === "block" && r.host === "neverssl.com",
-            );
-            const passthrough = rows.some(
-              (r) => r.protocol === "tls" && r.host === "github.com" && r.bytes > 0,
-            );
-            if (!methodRefused) {
-              console.log("::error::POST to example.com was not recorded as blocked in the traffic artifact");
-              process.exit(1);
-            }
-            if (!hostRefused) {
-              console.log("::error::neverssl.com was not recorded as blocked in the traffic artifact");
-              process.exit(1);
-            }
-            if (!passthrough) {
-              console.log("::error::the github.com TLS passthrough was not recorded in the traffic artifact");
-              process.exit(1);
-            }
-            console.log("Traffic artifact verified.");
-          '
-
-  # fail_on_blocked defaults to true and should fail on a blocked
-  # connection; known_blocked_rules should exempt a matching one. Both are
-  # unit-tested at the logic level: this proves the wiring end-to-end,
-  # reusing the same built image for both cases.
-  test_sandbox_fail_on_blocked:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    name: "e2e: test (sandbox, fail_on_blocked & known_blocked_rules)"
-
-    env:
-      PROXY_ENGINE: universal
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/setup-vp
-
-      - name: Build local sandbox proxy image
-        run: docker compose build proxy
-
-      - name: Resolve local image ref
-        id: local_image
-        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
-
-      - name: Rebuild the action with the local-image test hook enabled
-        env:
-          BUILDCAGE_BUILD_TEST_HOOKS: "1"
-        run: vp run build
-
+      # fail_on_blocked defaults to true and should fail on a blocked
+      # connection; known_blocked_rules should exempt a matching one. Both are
+      # unit-tested at the logic level: this proves the wiring end-to-end,
+      # reusing the same built image for both cases.
       - name: Run an isolated command that triggers a blocked connection
         id: blocked_connection
         continue-on-error: true
@@ -479,7 +286,7 @@ jobs:
           run: wget -q -T 5 -O /dev/null http://neverssl.com/ || true
 
       - name: Verify fail_on_blocked actually failed the step
-        if: always()
+        if: always() && steps.blocked_connection.outcome != 'skipped'
         run: |
           if [ "${{ steps.blocked_connection.outcome }}" != "failure" ]; then
             echo "::error::Expected the blocked-connection step to fail (fail_on_blocked defaults to true), but it reported '${{ steps.blocked_connection.outcome }}'"
@@ -501,7 +308,7 @@ jobs:
           run: wget -q -T 5 -O /dev/null http://neverssl.com/ || true
 
       - name: Verify known_blocked_rules kept the step from failing
-        if: always()
+        if: always() && steps.known_blocked_connection.outcome != 'skipped'
         run: |
           if [ "${{ steps.known_blocked_connection.outcome }}" != "success" ]; then
             echo "::error::Expected the step to succeed (the only blocked connection matches known_blocked_rules), but it reported '${{ steps.known_blocked_connection.outcome }}'"
@@ -655,7 +462,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    name: "e2e: test (sandbox, concurrency, inspect)"
+    name: "e2e: test (sandbox, inspect engine, concurrency)"
 
     steps:
       - name: Checkout
@@ -678,6 +485,104 @@ jobs:
         env:
           BUILDCAGE_BUILD_TEST_HOOKS: "1"
         run: vp run build
+
+      # One representative case through the real action wrapper, against real
+      # internet hosts (no fixture network), proves proxy_engine: inspect wiring
+      # end-to-end: engine selection, method/path enforcement via
+      # allowed_url_rules, TLS passthrough via allowed_tls_rules, and CA trust (a
+      # plain https GET succeeding with no --insecure, despite the proxy
+      # terminating TLS). Deeper scenario coverage (SSRF/forged-Host/DNS
+      # non-leak/wildcard host+path/CA residue) lives in
+      # test/integration-test-inspect-restrict.sh, which needs a fixture network
+      # this job deliberately does not set up.
+      - name: "Run an isolated command via the real action (proxy_engine: inspect)"
+        id: sandbox
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: buildcage-e2e-proxy:inspect
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-inspect-summary.md
+        with:
+          proxy_engine: inspect
+          allowed_url_rules: "GET|HEAD https://example.com/**"
+          allowed_tls_rules: "github.com:443"
+          # Blocked connections below are expected, not a failure.
+          fail_on_blocked: false
+          # Short retention: this e2e run's own artifacts shouldn't linger.
+          upload_traffic_artifact: true
+          traffic_artifact_retention_days: 1
+          run: |
+            echo "=== URL-allowed host, over TLS the proxy terminated (proves CA trust) ==="
+            curl -fsS --max-time 10 https://example.com/ > /dev/null
+
+            echo "=== method outside the rule must be refused ==="
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -X POST https://example.com/)
+            if [ "$CODE" != "403" ]; then
+              echo "UNEXPECTED: POST https://example.com/ returned $CODE, not 403"
+              exit 1
+            fi
+
+            echo "=== host outside allowed_url_rules must be refused ==="
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://neverssl.com/)
+            if [ "$CODE" != "403" ]; then
+              echo "UNEXPECTED: https://neverssl.com/ returned $CODE, not 403"
+              exit 1
+            fi
+
+            echo "=== allowed_tls_rules host: passed through undecrypted, real cert visible ==="
+            curl -fsS --max-time 10 https://github.com/ > /dev/null
+
+      - name: Verify the sandbox report contains the expected allowed/blocked entries
+        if: always()
+        env:
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-inspect-summary.md
+        run: ./test/assert-sandbox-inspect.sh
+
+      - name: Check the traffic_artifact_name output was set
+        run: |
+          if [ -z "${{ steps.sandbox.outputs.traffic_artifact_name }}" ]; then
+            echo "::error::traffic_artifact_name output was empty despite upload_traffic_artifact: true"
+            exit 1
+          fi
+
+      # Downloading by the exact name from the output above, rather than
+      # matching buildcage-traffic-* by pattern, proves the output itself is
+      # both set and correct.
+      - name: Download the traffic artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ steps.sandbox.outputs.traffic_artifact_name }}
+          path: ${{ runner.temp }}/buildcage-traffic
+
+      - name: Verify the traffic artifact
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const rows = JSON.parse(
+              fs.readFileSync(process.env.RUNNER_TEMP + "/buildcage-traffic/traffic.json", "utf8"),
+            );
+            const methodRefused = rows.some(
+              (r) => r.action === "block" && r.host === "example.com" && r.method === "POST",
+            );
+            const hostRefused = rows.some(
+              (r) => r.action === "block" && r.host === "neverssl.com",
+            );
+            const passthrough = rows.some(
+              (r) => r.protocol === "tls" && r.host === "github.com" && r.bytes > 0,
+            );
+            if (!methodRefused) {
+              console.log("::error::POST to example.com was not recorded as blocked in the traffic artifact");
+              process.exit(1);
+            }
+            if (!hostRefused) {
+              console.log("::error::neverssl.com was not recorded as blocked in the traffic artifact");
+              process.exit(1);
+            }
+            if (!passthrough) {
+              console.log("::error::the github.com TLS passthrough was not recorded in the traffic artifact");
+              process.exit(1);
+            }
+            console.log("Traffic artifact verified.");
+          '
 
       - parallel:
           - name: sandbox-parallel-short-universal
@@ -829,9 +734,6 @@ jobs:
         changes,
         test_sandbox_audit_mode,
         test_sandbox_enforcement,
-        test_sandbox_config_file,
-        test_sandbox_inspect_enforcement,
-        test_sandbox_fail_on_blocked,
         test_sandbox_concurrency,
         test_sandbox_concurrency_inspect,
       ]
