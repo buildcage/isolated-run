@@ -646,7 +646,7 @@ resolver saying no rule allows the name, and it does fail the step.
 
 `allowed_aws_accounts` is **experimental**: its behavior and error messages may still change without
 following semver. It takes 12-digit AWS account IDs, separated by commas, whitespace or newlines, with `#`
-comments as in the rule inputs. In a config file its lines are added to the workflow's. With it
+comments as in the rule inputs. Set in the workflow, it replaces a config file's value. With it
 set, a request to an AWS API host must be signed with a key the proxy knows: the step's own
 `AWS_ACCESS_KEY_ID`, or one an STS `AssumeRole` issued for a role in one of these accounts. An
 unsigned request is left to the URL rules where the host names the resource it is for, such as an S3

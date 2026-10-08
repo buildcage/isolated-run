@@ -1,8 +1,11 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, it, expect, vi } from "vitest";
 import { parse } from "yaml";
 
+import { applyConfigFile } from "#core/lib/actions/config-file.ts";
 import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 
 import { SandboxError } from "./errors.ts";
@@ -35,6 +38,32 @@ describe("CONFIG_FILE_INPUTS", () => {
 
   it("merges only inputs it knows", () => {
     expect(CONFIG_FILE_INPUTS.known).toEqual(expect.arrayContaining([...CONFIG_FILE_INPUTS.lists]));
+  });
+
+  it("lets the workflow's allowed_aws_accounts replace the file's, and adds rule lines", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "config-file-"));
+    writeFileSync(
+      join(workspace, "buildcage.yml"),
+      'allowed_aws_accounts: "222222222222"\nallowed_url_rules: GET https://b.example.com/**\n',
+    );
+    const env = (inline: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
+      GITHUB_WORKSPACE: workspace,
+      GITHUB_EVENT_NAME: "push",
+      INPUT_CONFIG_FILE: "buildcage.yml",
+      ...inline,
+    });
+    const set = env({
+      INPUT_ALLOWED_AWS_ACCOUNTS: "111111111111",
+      INPUT_ALLOWED_URL_RULES: "GET https://a.example.com/**",
+    });
+    applyConfigFile(set, CONFIG_FILE_INPUTS);
+    expect(set.INPUT_ALLOWED_AWS_ACCOUNTS).toBe("111111111111");
+    expect(set.INPUT_ALLOWED_URL_RULES).toBe(
+      "GET https://a.example.com/**\nGET https://b.example.com/**",
+    );
+    const unset = env({});
+    applyConfigFile(unset, CONFIG_FILE_INPUTS);
+    expect(unset.INPUT_ALLOWED_AWS_ACCOUNTS).toBe("222222222222");
   });
 });
 
