@@ -37,17 +37,46 @@ export function renderInspectDetailsBody(
   const relevant = timeline.filter((e) => !isNoise(e));
   const connected = connectedHosts(relevant);
   const shown = relevant.filter((e) => !isRedundantDns(e, connected));
-  if (shown.length === 0) return "";
+  const body = fenced(shown, startedAt);
+  return body && `${body}\n`;
+}
 
-  const body = shown.map((event) => renderEvent(event, startedAt)).join("\n") + "\n";
-  // A fenced block, so URLs need no markdown escaping and stay copy-pastable.
-  return `\`\`\`\n${body}\`\`\`\n\n`;
+/**
+ * The requests restrict would refuse alone, a fenced block, or "" if there
+ * were none. They reach no host table, so a cut communication log would
+ * otherwise drop them from the summary.
+ */
+export function renderWouldRefuseBody(
+  timeline: TrafficEvent[],
+  startedAt: number | undefined,
+): string {
+  return fenced(
+    timeline.filter((e) => e.wouldRefuse !== undefined),
+    startedAt,
+  );
+}
+
+// A fenced block, so URLs need no markdown escaping and stay copy-pastable.
+function fenced(events: TrafficEvent[], startedAt: number | undefined): string {
+  if (events.length === 0) return "";
+  const body = events.map((event) => renderEvent(event, startedAt)).join("\n") + "\n";
+  return `\`\`\`\n${body}\`\`\`\n`;
+}
+
+/** What a traffic report says where the Job Summary's size limit cut its list of requests restrict would refuse. */
+export function wouldRefuseTruncationNote(artifactAvailable: boolean): string {
+  const rest = artifactAvailable
+    ? "the buildcage-traffic artifact uploaded for this run has every one"
+    : "set upload_traffic_artifact: true to get every one as a downloadable artifact";
+  return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${rest}._\n\n`;
 }
 
 // ⚠️ covers both of the outcomes no rule decided that went wrong: a request
 // that never arrived whole, and a connection the origin broke. The reason
 // tells them apart. `discovery` keeps ℹ️: a lookup nothing can answer is
 // harmless.
+// 🚨 is a request audit let through that restrict would refuse; one that
+// came to nothing anyway keeps its own mark.
 const MARK: Record<string, string> = {
   block: "🚫",
   discovery: "ℹ️",
@@ -56,8 +85,13 @@ const MARK: Record<string, string> = {
 };
 
 function renderEvent(event: TrafficEvent, startedAt: number | undefined): string {
-  const mark = MARK[event.action] ?? "✅";
-  return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}`;
+  const mark =
+    event.action === "audit" && event.wouldRefuse !== undefined
+      ? "🚨"
+      : (MARK[event.action] ?? "✅");
+  const note =
+    event.wouldRefuse === undefined ? "" : ` (restrict would refuse: ${event.wouldRefuse})`;
+  return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}${note}`;
 }
 
 /**
@@ -66,11 +100,12 @@ function renderEvent(event: TrafficEvent, startedAt: number | undefined): string
  * everyone who can read the run, and GitHub masks only values registered as
  * workflow secrets.
  *
- * Matched on the name alone, ignoring case, `-` and `_`, so a parameter this
- * does not name keeps its value. That covers most of what a refused request
- * was trying to send, but not an exfiltration payload the sender happened to
- * call `code` or `key`; the traffic artifact and the proxy's own log keep every
- * value verbatim, and are where a suspected payload is read.
+ * Matched on the name alone, ignoring case, `-`, `_`, `.` and any trailing
+ * `[...]`, so a parameter this does not name keeps its value. That covers most
+ * of what a refused request was trying to send, but not an exfiltration
+ * payload the sender happened to call `code` or `key`; the traffic artifact and
+ * the proxy's own log keep every value verbatim, and are where a suspected
+ * payload is read.
  */
 const CREDENTIAL_PARAMS = new Set([
   "accesskey",
@@ -106,9 +141,21 @@ const CREDENTIAL_PARAMS = new Set([
   "xgoogsignature",
 ]);
 
-/** `api-key`, `api_key`, `apiKey` and `APIKEY` all read as one name. */
+/** `api-key`, `api_key`, `api.key`, `apiKey`, `APIKEY` and `api_key[0][]` all read as one name. */
 function credentialName(name: string): string {
-  return name.toLowerCase().replace(/[-_]/g, "");
+  return withoutIndexes(name).toLowerCase().replace(/[-_.]/g, "");
+}
+
+// A scan back from the end rather than a regex, which backtracks
+// quadratically on a long run of unclosed `[`.
+function withoutIndexes(name: string): string {
+  let end = name.length;
+  while (name[end - 1] === "]") {
+    const open = name.lastIndexOf("[", end - 1);
+    if (open < 0) break;
+    end = open;
+  }
+  return name.slice(0, end);
 }
 
 /**

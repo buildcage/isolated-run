@@ -38,6 +38,13 @@ inputs:
     description: "TLS destinations passed through undecrypted, judged on SNI alone, separated by whitespace. Port required. Requires proxy_engine: inspect. e.g., 'db.example.com:5432'"
     required: false
     default: ""
+  aws_key_check:
+    description: "Experimental. Refuse AWS API requests signed with any key but the step's own AWS_ACCESS_KEY_ID. Default false, true when allowed_aws_role_accounts is set. Requires proxy_engine: inspect and AWS_ACCESS_KEY_ID in the step's environment. See docs/reference.md#aws-access-key-check."
+    required: false
+  allowed_aws_role_accounts:
+    description: "Experimental. AWS account IDs whose roles the step may assume, whose keys then pass aws_key_check too, separated by commas or whitespace. Turns aws_key_check on, with its requirements. See docs/reference.md#aws-access-key-check."
+    required: false
+    default: ""
   upload_traffic_artifact:
     description: "Upload the observed traffic as a JSON artifact. It keeps every URL verbatim, so treat it as sensitive. Default false. See docs/reference.md#traffic-artifact."
     required: false

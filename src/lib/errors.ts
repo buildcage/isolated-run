@@ -45,6 +45,8 @@ import { ActionError } from "#core/lib/errors.ts";
  *   SANDBOX_TERMINATED                a signal ended run-isolated.sh, so the command's exit status is unknown
  *   SANDBOX_LAUNCH_FAILED             `sudo run-isolated.sh` could not be started at all
  *   SCRATCH_BASE_SYMLINKED            /var/tmp, the sandbox scratch base's parent, resolves through a symlink
+ *   INVALID_AWS_ACCOUNTS              an allowed_aws_role_accounts entry is not a 12-digit account ID
+ *   AWS_ACCESS_KEY_MISSING            the AWS access key check is on but the step has no AWS_ACCESS_KEY_ID to start from
  */
 export type SandboxErrorCode =
   | "MISSING_RUN"
@@ -78,6 +80,8 @@ export type SandboxErrorCode =
   | "NSS_DATABASE_WRITE_BACK_FAILED"
   | "SANDBOX_TERMINATED"
   | "SANDBOX_LAUNCH_FAILED"
-  | "SCRATCH_BASE_SYMLINKED";
+  | "SCRATCH_BASE_SYMLINKED"
+  | "INVALID_AWS_ACCOUNTS"
+  | "AWS_ACCESS_KEY_MISSING";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}

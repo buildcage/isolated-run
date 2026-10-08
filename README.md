@@ -210,6 +210,12 @@ allowed_ip_rules: |
   10.0.0.0/8:443
 ```
 
+A step that deploys to AWS names the buckets, registries and other resources it uses in its URL
+rules. Most AWS APIs name no resource in the URL, though, and reach whichever account signs the
+request; for those, `aws_key_check` (**experimental**) accepts only the step's own key, and
+`allowed_aws_role_accounts` adds the keys issued for roles in the accounts you name. See
+[AWS access key check](./docs/aws.md).
+
 ### Rules for the `universal` engine
 
 `universal` never decrypts, so rules name a host and a port. `allowed_https_rules` and
@@ -369,6 +375,13 @@ elsewhere, fails the step before the command runs; point `DOCKER_CONFIG` or the 
 directory at the real path instead.
 Under `write_through: /`, only a symlink in one of the four always-writable paths or another
 `write_through:` entry is refused, though the command could replace one anywhere.
+
+> [!WARNING]
+> `write_through: /` is for trusted code only. Against a compromised command it gives up the outbound
+> restriction as well as the read-only one: all of `/run` is reachable again, the Docker socket
+> included, `$XDG_RUNTIME_DIR` is no longer masked, and the commands this action runs on the host
+> after the command are no longer kept out of writable paths. See
+> [The `/` opt-out](./docs/reference.md#the--opt-out).
 
 > [!WARNING]
 > `filesystem_mode: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
@@ -544,9 +557,10 @@ data, or source you do not publish. For the full threat model, see
 
 - UDP is dropped, so QUIC and HTTP/3 either fall back to TCP or fail. Port 53 to the proxy, which is
   the resolver, is the one exception. ICMP is dropped too.
-- IPv6 is not used anywhere. The rule syntax refuses an IPv6 address, forwarded IPv6 is dropped, and
-  the proxy reaches allowed names over IPv4 only, so an allowed name with AAAA records and no A
-  record never resolves and no rule can clear it.
+- IPv6 is not used anywhere. The sandbox's interface toward the proxy has no IPv6 address, the
+  rule syntax refuses an IPv6 address, forwarded IPv6 is dropped, and the proxy reaches allowed
+  names over IPv4 only, so an allowed name with AAAA records and no A record never resolves and no
+  rule can clear it.
 
 ### Service discovery
 
@@ -661,12 +675,13 @@ GitHub caps a Job Summary at 1 MiB per step, counting what the command itself wr
 the whole summary rather than truncating it. When the report, with the filesystem audit's section if
 one was recorded, would push the step over that limit, its parts give way in order: the filesystem
 audit's details, the timeline, the filesystem audit's tables, then the allowed, failed and blocked
-tables, and last the `restrict` example. A part that does not fit is cut at a line boundary with a
-note after what is kept, or replaced by the note when nothing of it fits; the example is always
-replaced whole rather than printed in part. Once a table is cut, the timeline is left out with it,
-under that one note. The report is written to the Job Summary only, so what was cut is recovered
-from the [traffic artifact](./docs/reference.md#traffic-artifact), or the filesystem audit's own
-artifact for its section, and nowhere else.
+tables, then the 🚨 list of requests `restrict` would refuse, and last the `restrict` example. A part
+that does not fit is cut at a line boundary with a note after what is kept, or replaced by the note
+when nothing of it fits; the example is always replaced whole rather than printed in part. Once a
+table or the 🚨 list is cut, the timeline is left out with it, under that one note. The report is
+written to the Job Summary only, so what was cut is recovered from the [traffic
+artifact](./docs/reference.md#traffic-artifact), or the filesystem audit's own artifact for its
+section, and nowhere else.
 
 ## FAQ
 

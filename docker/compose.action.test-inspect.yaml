@@ -24,6 +24,9 @@ services:
       - ALLOWED_IP_RULES=${ALLOWED_IP_RULES:-}
       - ALLOWED_URL_RULES=${ALLOWED_URL_RULES:-}
       - ALLOWED_TLS_RULES=${ALLOWED_TLS_RULES:-}
+      # inspect only: the AWS access key check, off when no key is given.
+      - ALLOWED_AWS_KEY=${ALLOWED_AWS_KEY:-}
+      - ALLOWED_AWS_ROLE_ACCOUNTS=${ALLOWED_AWS_ROLE_ACCOUNTS:-}
       - TEST_NET_ADDR=10.200.0.2/24
       - TEST_NET_SUBNET=${TEST_NET_SUBNET:-10.210.0.0/24}
       # What the action computed, plus a fixture address nothing answers on so

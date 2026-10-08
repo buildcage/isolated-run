@@ -16,6 +16,7 @@ import * as core from "@actions/core";
 
 import type { ConfigFileInputs } from "#core/lib/actions/config-file.ts";
 import {
+  InvalidInputError,
   readBooleanInput,
   resolveProxyEngine,
   resolveProxyMode,
@@ -23,6 +24,7 @@ import {
   type ProxyMode,
 } from "#core/lib/actions/inputs.ts";
 
+import { isAwsAccessKeyId, parseAwsAccounts } from "../proxy/aws-keys.ts";
 import { SandboxError } from "./errors.ts";
 import { resolveFilesystemAudit, type FilesystemAudit } from "./filesystem-audit-mode.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
@@ -43,6 +45,9 @@ export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
     "proxy_mode",
     "proxy_engine",
     ...LIST_INPUTS,
+    "aws_key_check",
+    // Not merged: the workflow's accounts replace the file's.
+    "allowed_aws_role_accounts",
     "upload_traffic_artifact",
     "traffic_artifact_retention_days",
     "fail_on_blocked",
@@ -168,4 +173,83 @@ export function readFailOnCaResidue(getInput: GetInput = core.getInput): boolean
 
 export function readFailOnBlocked(getInput: GetInput = core.getInput): boolean {
   return readBooleanInput("fail_on_blocked", true, getInput);
+}
+
+export interface AwsKeyInputs {
+  /** The key the step starts with, its own AWS_ACCESS_KEY_ID; empty leaves the check off. */
+  key: string;
+  /** Accounts whose roles the step may assume; empty learns no key. */
+  roleAccounts: string[];
+}
+
+const AWS_KEY_CHECK_OFF: AwsKeyInputs = { key: "", roleAccounts: [] };
+
+/**
+ * The AWS access key check pins the step to its own AWS_ACCESS_KEY_ID; role
+ * accounts also let through the keys STS issues for their roles, and turn the
+ * check on. universal never sees a request's headers, so it fails in restrict
+ * and is warned about in audit.
+ */
+export function readAwsKeyInputs(
+  { proxyEngine, proxyMode }: ProxyInputs,
+  env: NodeJS.ProcessEnv,
+  warn: Notice,
+  getInput: GetInput = core.getInput,
+): AwsKeyInputs {
+  let roleAccounts: string[];
+  try {
+    roleAccounts = parseAwsAccounts(getInput("allowed_aws_role_accounts"));
+  } catch (e) {
+    const { message } = e as Error;
+    // YAML reads an unquoted 012345678901 as a number, 11 digits long.
+    const hint = /"\d{11}"/.test(message)
+      ? " Quote an ID that begins with 0, which YAML otherwise reads as a number."
+      : "";
+    throw new SandboxError(
+      `allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${hint}`,
+      "INVALID_AWS_ACCOUNTS",
+    );
+  }
+  // An explicit false wins, so a step can opt out of accounts a shared
+  // config_file names.
+  if (!readBooleanInput("aws_key_check", roleAccounts.length > 0, getInput)) {
+    if (roleAccounts.length > 0) {
+      warn("aws_key_check is false, so allowed_aws_role_accounts is ignored for this run.");
+    }
+    return AWS_KEY_CHECK_OFF;
+  }
+
+  if (proxyEngine !== "inspect") {
+    const reason =
+      `The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never ` +
+      "sees a request's headers.";
+    if (proxyMode === "audit") {
+      warn(`${reason} It is ignored for this run.`);
+      return AWS_KEY_CHECK_OFF;
+    }
+    throw new InvalidInputError(
+      `${reason} Switch to proxy_engine: inspect, or remove aws_key_check and ` +
+        "allowed_aws_role_accounts.",
+      "INVALID_PROXY_ENGINE",
+    );
+  }
+
+  // Not echoed back: configure-aws-credentials masks it.
+  const key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
+  if (!isAwsAccessKeyId(key)) {
+    if (proxyMode === "audit") {
+      warn(
+        "The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access " +
+          "key ID, so the check is off for this run.",
+      );
+      return AWS_KEY_CHECK_OFF;
+    }
+    throw new SandboxError(
+      "The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. " +
+        "Set up the credentials in an earlier step, for example with " +
+        "aws-actions/configure-aws-credentials.",
+      "AWS_ACCESS_KEY_MISSING",
+    );
+  }
+  return { key, roleAccounts };
 }

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
-import { renderInspectDetails } from "./inspect-details.ts";
+import { renderInspectDetails, renderWouldRefuseBody } from "./inspect-details.ts";
 
 const t = 1787471975;
 const TIMELINE: TrafficEvent[] = [
@@ -45,6 +45,25 @@ const TIMELINE: TrafficEvent[] = [
   { time: t + 4, action: "allow", protocol: "dns", host: "a.example.com" },
 ];
 
+describe("renderWouldRefuseBody", () => {
+  it("lists only the requests restrict would refuse, in a fenced block", () => {
+    const audited: TrafficEvent = {
+      ...TIMELINE[0],
+      action: "audit",
+      wouldRefuse: "example-refusal",
+    };
+    expect(renderWouldRefuseBody([...TIMELINE, audited], t)).toBe(
+      "```\n" +
+        "🚨 00:00.000: GET https://a.example.com/pkg -> 200 (708B) (restrict would refuse: example-refusal)\n" +
+        "```\n",
+    );
+  });
+
+  it("is empty when restrict would refuse nothing", () => {
+    expect(renderWouldRefuseBody(TIMELINE, t)).toBe("");
+  });
+});
+
 describe("renderInspectDetails", () => {
   const md = renderInspectDetails(TIMELINE, t);
   const body = md.split("```")[1] ?? "";
@@ -58,6 +77,29 @@ describe("renderInspectDetails", () => {
 
   it("shows the URL and method of a refused request", () => {
     expect(md.includes("POST https://evil.example.com/exfil?token=***")).toBe(true);
+  });
+
+  it("says what restrict would have refused of a request audit let through", () => {
+    const audited: TrafficEvent = {
+      ...TIMELINE[0],
+      action: "audit",
+      wouldRefuse: "example-refusal",
+    };
+    const line = (renderInspectDetails([audited], t).split("```")[1] ?? "").trim();
+    expect(line).toBe(
+      "🚨 00:00.000: GET https://a.example.com/pkg -> 200 (708B) (restrict would refuse: example-refusal)",
+    );
+  });
+
+  it("says what restrict would have refused after a reason too", () => {
+    const failed: TrafficEvent = {
+      ...TIMELINE[2],
+      action: "failed",
+      reason: "dns-failed",
+      wouldRefuse: "example-refusal",
+    };
+    const line = (renderInspectDetails([failed], t).split("```")[1] ?? "").trim();
+    expect(line.endsWith("-> dns-failed (restrict would refuse: example-refusal)")).toBe(true);
   });
 
   it("names the reason after the arrow instead of a status", () => {
@@ -458,6 +500,27 @@ describe("renderInspectDetails credential parameters", () => {
     expect(subjectOf("https://h/v1?PRIVATE-TOKEN=t&access_key=k&passwd=p&pwd=p")).toBe(
       "GET https://h/v1?PRIVATE-TOKEN=***&access_key=***&passwd=***&pwd=***",
     );
+  });
+
+  it("matches a name split by dots or sent as an array", () => {
+    expect(subjectOf("https://h/v1?api.key=a&token[]=b&token[0]=c&Token[a][b]=d")).toBe(
+      "GET https://h/v1?api.key=***&token[]=***&token[0]=***&Token[a][b]=***",
+    );
+  });
+
+  it("matches a name ending in a bracket that closes nothing as it is", () => {
+    expect(subjectOf("https://h/v1?token]=a")).toBe("GET https://h/v1?token]=a");
+  });
+
+  it("reads a long run of unclosed brackets in one pass", () => {
+    const name = "[".repeat(65536);
+    const started = performance.now();
+    expect(subjectOf(`https://h/v1?${name}=a`)).toBe(`GET https://h/v1?${name}=a`);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it("ignores what an array name's brackets hold", () => {
+    expect(subjectOf("https://h/v1?user[password]=a")).toBe("GET https://h/v1?user[password]=a");
   });
 
   it("matches the name however its words are joined, keeping the spelling sent", () => {

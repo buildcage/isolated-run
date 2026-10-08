@@ -11,9 +11,6 @@ allowed_url_rules: |
   # Go module proxy for the seccomp-profile generator build
   GET https://proxy.golang.org/**
 
-  # HAProxy source tarball for the inspect image
-  GET https://www.haproxy.org/download/**
-
   # Node.js runtime for the QuickJS scripts build stage
   GET https://nodejs.org/download/release/**
 
