@@ -47,11 +47,12 @@ form body, and compares it with the keys it knows as a whole string. It never de
 verifies a signature: a request that copies one of your key IDs without the secret is refused by AWS
 and logged in your own account.
 
-A form body is a `POST` to a host that names no resource (below) with an
-`application/x-www-form-urlencoded` Content-Type or none at all. The proxy reads the whole body, up
-to 1 MiB, before deciding. It refuses what it cannot read through as `aws-unreadable`: a form body
-that is larger, compressed, sent chunked or holds a NUL byte, and a query string that does not
-URL-decode. The AWS SDKs send none of these.
+A form body is the body of a `POST` to a host that names no resource (below), when its Content-Type
+is `application/x-www-form-urlencoded` or, whatever the Content-Type says, the body starts as a form
+does (`name=value`). The proxy reads the whole body, up to 1 MiB with the headers, before deciding.
+It refuses what it cannot read through as `aws-unreadable`: a form body that is larger, compressed,
+sent chunked or holds a NUL byte, and a query string that does not URL-decode. The AWS SDKs send
+none of these.
 
 The proxy knows two kinds of key:
 

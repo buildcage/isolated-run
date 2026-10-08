@@ -212,13 +212,13 @@ describe("awsKeyRequestRules", () => {
 
   it("reads a SigV2 key from a form body, and checks it as well as any other", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(rules.includes("wait-for-body time 10s use-large-buffer if aws_form_post")).toBe(true);
+    expect(rules.includes("wait-for-body time 10s use-large-buffer if aws_post")).toBe(true);
     expect(rules.includes(`if aws_form_post { req.body -m reg -i (^|&)${FORM_CREDENTIAL}= }`)).toBe(
       true,
     );
     expect(
       rules.includes(
-        "if aws_host METH_POST !aws_resource_host aws_form_type or aws_host METH_POST !aws_resource_host !aws_typed",
+        "aws_post { req.hdr(content-type) -m beg -i application/x-www-form-urlencoded } or aws_post { req.body -m reg ^[A-Za-z0-9._~%*+-]*= }",
       ),
     ).toBe(true);
     expect(
@@ -228,7 +228,7 @@ describe("awsKeyRequestRules", () => {
     expect(rules.includes(`(?s)(^|&)${FORM_CREDENTIAL}=.*&${FORM_CREDENTIAL}=`)).toBe(true);
     expect(
       rules.includes(
-        "str(key-not-allowed) if aws_body !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(/rules/keys.map) -m found }",
+        "str(key-not-allowed) if aws_body aws_auth !{ var(txn.aws) -m found } !{ var(txn.aws_body_key),map(/rules/keys.map) -m found } or aws_body aws_query",
       ),
     ).toBe(true);
   });
@@ -240,7 +240,7 @@ describe("awsKeyRequestRules", () => {
     ).toBe(true);
     expect(
       rules.includes(
-        "str(unreadable) if aws_form_post { req.hdr(content-encoding) -m found } or aws_form_post { req.hdr(transfer-encoding) -m found }",
+        "str(unreadable) if aws_form_post { req.hdr(content-encoding) -m found } !{ req.hdr(content-encoding) -m str -i identity } or aws_form_post { req.hdr(transfer-encoding) -m found }",
       ),
     ).toBe(true);
     expect(
