@@ -66,12 +66,16 @@ struct files_struct {
 	struct fdtable *fdt;
 } __attribute__((preserve_access_index));
 
+struct cred;
+
 struct task_struct {
 	struct task_struct *real_parent;
 	int tgid;
 	struct mm_struct *mm;
 	struct fs_struct *fs;
 	struct files_struct *files;
+	const struct cred *cred;
+	const struct cred *real_cred;
 } __attribute__((preserve_access_index));
 
 struct filename {
@@ -489,13 +493,23 @@ static __always_inline void file_path(struct event *e, struct file *file)
 	e->data_len = file_walk(e, file);
 }
 
+// overlayfs works on its layers under the mounter's credentials
+// (ovl_override_creds): opening a layer's real directory to open or list a
+// merged one, copying a file up. The step's own opens, reads and maps never
+// run with their credentials overridden, so those accesses are the overlay's.
+static __always_inline int creds_overridden(void)
+{
+	struct task_struct *t = bpf_get_current_task_btf();
+	return BPF_CORE_READ(t, cred) != BPF_CORE_READ(t, real_cred);
+}
+
 SEC("fentry/security_file_open")
 int BPF_PROG(on_open, struct file *file)
 {
 	if (!in_target())
 		return 0;
 	u64 id = bpf_get_current_pid_tgid();
-	if (bpf_map_lookup_elem(&in_backing, &id)) {
+	if (bpf_map_lookup_elem(&in_backing, &id) || creds_overridden()) {
 		bump(&skipped_internal);
 		return 0;
 	}
@@ -886,7 +900,7 @@ int on_open_exit(u64 *ctx)
 SEC("fentry/security_file_permission")
 int BPF_PROG(on_file_permission, struct file *file, int mask)
 {
-	if (!in_target())
+	if (!in_target() || creds_overridden())
 		return 0;
 	u32 kind;
 	u8 bit;
@@ -912,7 +926,7 @@ int BPF_PROG(on_file_permission, struct file *file, int mask)
 SEC("fentry/security_mmap_file")
 int BPF_PROG(on_mmap, struct file *file, unsigned long prot, unsigned long flags)
 {
-	if (!file || !in_target())
+	if (!file || !in_target() || creds_overridden())
 		return 0;
 	u8 bit = SEEN_READ;
 	if (prot & PROT_EXEC)
