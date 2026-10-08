@@ -107,6 +107,7 @@ describe("hosts that name the resource", () => {
       "oidc.eks.us-east-1.amazonaws.com",
       "oidc-eks.us-east-1.api.aws",
       "oidc-eks.cn-north-1.api.amazonwebservices.com.cn",
+      "oidc-eks.eusc-de-east-1.api.amazonwebservices.eu",
     ]) {
       expect(resourceHost.test(host)).toBe(true);
     }
@@ -132,6 +133,13 @@ describe("hosts that name the resource", () => {
       "abcdef123456.us-east-1.aoss.amazonaws.com",
       "eks.us-east-1.amazonaws.com",
       "oidc.us-east-1.amazonaws.com",
+      "ecr-fips.us-east-1.amazonaws.com",
+      "dkr.ecr-fips.us-east-1.amazonaws.com",
+      "es-fips.us-east-1.amazonaws.com",
+      "grafana-fips.us-east-1.amazonaws.com",
+      "x.grafana-workspace.us-east-1.amazonaws.com",
+      "x.mq.us-east-1.amazonaws.com",
+      "x.us-east-1.es.amazonaws.com",
     ]) {
       expect(resourceHost.test(host)).toBe(false);
     }

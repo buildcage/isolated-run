@@ -91,7 +91,7 @@ token, counts as unsigned here: only AWS's own schemes are an AWS credential.
 | A form body or query string the proxy cannot read through (above)                                                | `aws-unreadable`           |
 
 These hosts name the resource a request reaches, in the host name or, for S3's path style and an EKS
-OIDC issuer, in the path. The URL rules can pin the account there, so an unsigned request to them is
+OIDC issuer, in the path. The URL rules can pin the resource there, so an unsigned request to them is
 left to the URL rules:
 
 | Service                | Host                                                                                                                                                         |
