@@ -33,9 +33,7 @@ describe("CONFIG_FILE_INPUTS", () => {
     const inputs = Object.keys(actionYml.inputs).filter(
       (n) => !["run", "writable", "config_file"].includes(n),
     );
-    expect(
-      [...CONFIG_FILE_INPUTS.known].filter((n) => n !== "allowed_aws_accounts").sort(),
-    ).toEqual(inputs.sort());
+    expect([...CONFIG_FILE_INPUTS.known].sort()).toEqual(inputs.sort());
   });
 
   it("merges only inputs it knows", () => {
@@ -277,40 +275,6 @@ describe("readAwsKeyInputs", () => {
     );
   });
 
-  it("lets a replaced allowed_aws_accounts that names no account pass", () => {
-    expect(
-      readAwsKeyInputs(inspect, {}, silent, inputs({ allowed_aws_accounts: "# disabled" })),
-    ).toStrictEqual(OFF);
-  });
-
-  it("refuses the replaced allowed_aws_accounts from a config file too", () => {
-    const workspace = mkdtempSync(join(tmpdir(), "config-file-"));
-    writeFileSync(join(workspace, "buildcage.yml"), 'allowed_aws_accounts: "111111111111"\n');
-    const env: NodeJS.ProcessEnv = {
-      GITHUB_WORKSPACE: workspace,
-      GITHUB_EVENT_NAME: "push",
-      INPUT_CONFIG_FILE: "buildcage.yml",
-    };
-    applyConfigFile(env, CONFIG_FILE_INPUTS);
-    expect(() =>
-      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, (name) =>
-        (env[`INPUT_${name.toUpperCase()}`] ?? "").trim(),
-      ),
-    ).toThrow(expect.objectContaining({ code: "AWS_ACCOUNTS_REMOVED" }));
-  });
-
-  it("refuses the replaced allowed_aws_accounts, naming what replaces it", () => {
-    const read = () =>
-      readAwsKeyInputs(
-        inspect,
-        { AWS_ACCESS_KEY_ID: KEY },
-        silent,
-        inputs({ allowed_aws_accounts: "111111111111" }),
-      );
-    expect(read).toThrow(expect.objectContaining({ code: "AWS_ACCOUNTS_REMOVED" }));
-    expect(read).toThrow(/aws_key_check.*allowed_aws_role_accounts/);
-  });
-
   it("reads the role accounts, deduplicated, and turns the check on from the step's key", () => {
     expect(
       readAwsKeyInputs(
@@ -332,6 +296,25 @@ describe("readAwsKeyInputs", () => {
       );
     expect(read).toThrow(SandboxError);
     expect(read).toThrow('invalid AWS account ID: "12345", "abc"');
+  });
+
+  it("asks for quotes when a config file read an ID that begins with 0 as a number", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "config-file-"));
+    writeFileSync(join(workspace, "buildcage.yml"), "allowed_aws_role_accounts: 012345678901\n");
+    const env: NodeJS.ProcessEnv = {
+      GITHUB_WORKSPACE: workspace,
+      GITHUB_EVENT_NAME: "push",
+      INPUT_CONFIG_FILE: "buildcage.yml",
+    };
+    applyConfigFile(env, CONFIG_FILE_INPUTS);
+    expect(() =>
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, (name) =>
+        (env[`INPUT_${name.toUpperCase()}`] ?? "").trim(),
+      ),
+    ).toThrow(/"12345678901".*Quote an ID that begins with 0/);
+    expect(() =>
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, accounts("abc")),
+    ).not.toThrow(/Quote/);
   });
 
   it.each([
