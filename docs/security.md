@@ -606,7 +606,8 @@ accepted limitation as the staging directory under
 **Reading another step's record.** No sandbox can, a concurrent one included. A process running as
 the same user outside any sandbox can, as can a job sharing the machine and the user, which
 [Where it will not run](#where-it-will-not-run) rules out. The uploaded artifact can be downloaded
-by any job in the run and anyone who can read the repository until it expires.
+by any job in the run and anyone who can read the repository until it expires. It holds no command's
+arguments, so a secret passed on a command line stays out of it; a secret in a file name does not.
 
 **Falsifying what it says.** A successful access and a program the step ran are recorded with the
 path the kernel resolved. A delete, move, mkdir, mknod, symlink, link, chmod, chown or truncate

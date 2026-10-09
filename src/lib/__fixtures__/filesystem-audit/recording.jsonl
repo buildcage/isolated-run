@@ -1,4 +1,4 @@
-{"t":"2026-10-07T23:36:17.615Z","kind":"exec","pid":8754,"ppid":8738,"comm":"setpriv","path":"/usr/bin/setpriv","name":"/usr/bin/setpriv","args":"/usr/bin/setpriv --pdeathsig=KILL -- /var/tmp/buildcage-0/sandbox-20d1d48a/exec/buildcage-init /var/tmp/buildcage-0/sandbox-20d1d48a/exec/run-script.sh"}
+{"t":"2026-10-07T23:36:17.615Z","kind":"exec","pid":8754,"ppid":8738,"comm":"setpriv","path":"/usr/bin/setpriv","name":"/usr/bin/setpriv"}
 {"t":"2026-10-07T23:36:17.615Z","kind":"open","pid":8754,"ppid":8738,"comm":"setpriv","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.615Z","kind":"mmap","pid":8754,"ppid":8738,"comm":"setpriv","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.615Z","kind":"open","pid":8754,"ppid":8738,"comm":"setpriv","path":"/usr/lib/x86_64-linux-gnu/libcap-ng.so.0.0.0","access":"r","flags":32768}
@@ -21,7 +21,7 @@
 {"t":"2026-10-07T23:36:17.616Z","kind":"read","pid":8754,"ppid":8738,"comm":"setpriv","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.616Z","kind":"mmap","pid":8754,"ppid":8738,"comm":"buildcage-init","path":"/usr/bin/bash","access":"x"}
 {"t":"2026-10-07T23:36:17.616Z","kind":"mmap","pid":8754,"ppid":8738,"comm":"buildcage-init","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.616Z","kind":"exec","pid":8754,"ppid":8738,"comm":"buildcage-init","path":"/var/tmp/buildcage-0/sandbox-20d1d48a/exec/buildcage-init","name":"/var/tmp/buildcage-0/sandbox-20d1d48a/exec/buildcage-init","args":"/bin/bash /var/tmp/buildcage-0/sandbox-20d1d48a/exec/buildcage-init /var/tmp/buildcage-0/sandbox-20d1d48a/exec/run-script.sh"}
+{"t":"2026-10-07T23:36:17.616Z","kind":"exec","pid":8754,"ppid":8738,"comm":"buildcage-init","path":"/var/tmp/buildcage-0/sandbox-20d1d48a/exec/buildcage-init","name":"/var/tmp/buildcage-0/sandbox-20d1d48a/exec/buildcage-init"}
 {"t":"2026-10-07T23:36:17.616Z","kind":"open","pid":8754,"ppid":8738,"comm":"buildcage-init","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.616Z","kind":"mmap","pid":8754,"ppid":8738,"comm":"buildcage-init","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.616Z","kind":"open","pid":8754,"ppid":8738,"comm":"buildcage-init","path":"/usr/lib/x86_64-linux-gnu/libtinfo.so.6.4","access":"r","flags":32768}
@@ -55,7 +55,7 @@
 {"t":"2026-10-07T23:36:17.624Z","kind":"read","pid":8761,"ppid":8754,"comm":"buildcage-init","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.624Z","kind":"mmap","pid":8761,"ppid":8754,"comm":"env","path":"/usr/bin/env","access":"x"}
 {"t":"2026-10-07T23:36:17.624Z","kind":"mmap","pid":8761,"ppid":8754,"comm":"env","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.624Z","kind":"exec","pid":8761,"ppid":8754,"comm":"env","path":"/usr/bin/env","name":"/usr/bin/env","args":"/usr/bin/env -i -- ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE=/opt/actionarchivecache SHELL=/bin/bash ANT_HOME=/usr/share/ant JAVA_HOME_11_X64=/usr/lib/jvm/temurin-11-jdk-amd64 HOMEBREW_NO_AUTO_UPDATE=1 ANDROID_SDK_ROOT=/usr/local/lib/android/sdk HOMEBREW_CLEANUP_PERIODIC_FULL_DAYS=3650 PIPX_HOME=/opt/pipx GHCUP_INSTALL_BASE_PREFIX=/usr/local JAVA_HOME_17_X64=/usr/lib/jvm/temurin-17-jdk-amd64 CHROME_BIN=/usr/bin/google-chrome EDGEWEBDRIVER=/usr/local/share/edge_driver PATH=/home/runner/.local/share/vite-plus/bin:"}
+{"t":"2026-10-07T23:36:17.624Z","kind":"exec","pid":8761,"ppid":8754,"comm":"env","path":"/usr/bin/env","name":"/usr/bin/env"}
 {"t":"2026-10-07T23:36:17.624Z","kind":"open","pid":8761,"ppid":8754,"comm":"env","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.624Z","kind":"mmap","pid":8761,"ppid":8754,"comm":"env","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.624Z","kind":"open","pid":8761,"ppid":8754,"comm":"env","path":"/usr/lib/x86_64-linux-gnu/libc.so.6","access":"r","flags":32768}
@@ -69,7 +69,7 @@
 {"t":"2026-10-07T23:36:17.625Z","kind":"read","pid":8761,"ppid":8754,"comm":"env","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.625Z","kind":"mmap","pid":8761,"ppid":8754,"comm":"run-script.sh","path":"/usr/bin/bash","access":"x"}
 {"t":"2026-10-07T23:36:17.625Z","kind":"mmap","pid":8761,"ppid":8754,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.625Z","kind":"exec","pid":8761,"ppid":8754,"comm":"run-script.sh","path":"/var/tmp/buildcage-0/sandbox-20d1d48a/exec/run-script.sh","name":"/var/tmp/buildcage-0/sandbox-20d1d48a/exec/run-script.sh","args":"/bin/bash /var/tmp/buildcage-0/sandbox-20d1d48a/exec/run-script.sh"}
+{"t":"2026-10-07T23:36:17.625Z","kind":"exec","pid":8761,"ppid":8754,"comm":"run-script.sh","path":"/var/tmp/buildcage-0/sandbox-20d1d48a/exec/run-script.sh","name":"/var/tmp/buildcage-0/sandbox-20d1d48a/exec/run-script.sh"}
 {"t":"2026-10-07T23:36:17.625Z","kind":"open","pid":8761,"ppid":8754,"comm":"run-script.sh","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.625Z","kind":"mmap","pid":8761,"ppid":8754,"comm":"run-script.sh","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.625Z","kind":"open","pid":8761,"ppid":8754,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/libtinfo.so.6.4","access":"r","flags":32768}
@@ -133,7 +133,7 @@
 {"t":"2026-10-07T23:36:17.626Z","kind":"read","pid":8762,"ppid":8761,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.626Z","kind":"mmap","pid":8762,"ppid":8761,"comm":"cat","path":"/usr/bin/cat","access":"x"}
 {"t":"2026-10-07T23:36:17.627Z","kind":"mmap","pid":8762,"ppid":8761,"comm":"cat","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.627Z","kind":"exec","pid":8762,"ppid":8761,"comm":"cat","path":"/usr/bin/cat","name":"/usr/bin/cat","args":"cat /etc/hostname"}
+{"t":"2026-10-07T23:36:17.627Z","kind":"exec","pid":8762,"ppid":8761,"comm":"cat","path":"/usr/bin/cat","name":"/usr/bin/cat"}
 {"t":"2026-10-07T23:36:17.627Z","kind":"open","pid":8762,"ppid":8761,"comm":"cat","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.627Z","kind":"mmap","pid":8762,"ppid":8761,"comm":"cat","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.627Z","kind":"open","pid":8762,"ppid":8761,"comm":"cat","path":"/usr/lib/x86_64-linux-gnu/libc.so.6","access":"r","flags":32768}
@@ -197,7 +197,7 @@
 {"t":"2026-10-07T23:36:17.629Z","kind":"read","pid":8763,"ppid":8761,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.629Z","kind":"mmap","pid":8763,"ppid":8761,"comm":"mv","path":"/usr/bin/mv","access":"x"}
 {"t":"2026-10-07T23:36:17.629Z","kind":"mmap","pid":8763,"ppid":8761,"comm":"mv","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.629Z","kind":"exec","pid":8763,"ppid":8761,"comm":"mv","path":"/usr/bin/mv","name":"/usr/bin/mv","args":"mv /home/runner/work/isolated-run/isolated-run/probe.txt /home/runner/work/isolated-run/isolated-run/probe2.txt"}
+{"t":"2026-10-07T23:36:17.629Z","kind":"exec","pid":8763,"ppid":8761,"comm":"mv","path":"/usr/bin/mv","name":"/usr/bin/mv"}
 {"t":"2026-10-07T23:36:17.629Z","kind":"open","pid":8763,"ppid":8761,"comm":"mv","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.629Z","kind":"mmap","pid":8763,"ppid":8761,"comm":"mv","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.629Z","kind":"open","pid":8763,"ppid":8761,"comm":"mv","path":"/usr/lib/x86_64-linux-gnu/libselinux.so.1","access":"r","flags":32768}
@@ -268,7 +268,7 @@
 {"t":"2026-10-07T23:36:17.630Z","kind":"read","pid":8764,"ppid":8761,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.630Z","kind":"mmap","pid":8764,"ppid":8761,"comm":"rm","path":"/usr/bin/rm","access":"x"}
 {"t":"2026-10-07T23:36:17.630Z","kind":"mmap","pid":8764,"ppid":8761,"comm":"rm","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.630Z","kind":"exec","pid":8764,"ppid":8761,"comm":"rm","path":"/usr/bin/rm","name":"/usr/bin/rm","args":"rm /home/runner/work/isolated-run/isolated-run/probe2.txt"}
+{"t":"2026-10-07T23:36:17.630Z","kind":"exec","pid":8764,"ppid":8761,"comm":"rm","path":"/usr/bin/rm","name":"/usr/bin/rm"}
 {"t":"2026-10-07T23:36:17.630Z","kind":"open","pid":8764,"ppid":8761,"comm":"rm","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.630Z","kind":"mmap","pid":8764,"ppid":8761,"comm":"rm","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.630Z","kind":"open","pid":8764,"ppid":8761,"comm":"rm","path":"/usr/lib/x86_64-linux-gnu/libc.so.6","access":"r","flags":32768}
@@ -326,7 +326,7 @@
 {"t":"2026-10-07T23:36:17.632Z","kind":"read","pid":8766,"ppid":8765,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.632Z","kind":"mmap","pid":8766,"ppid":8765,"comm":"touch","path":"/usr/bin/touch","access":"x"}
 {"t":"2026-10-07T23:36:17.632Z","kind":"mmap","pid":8766,"ppid":8765,"comm":"touch","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.632Z","kind":"exec","pid":8766,"ppid":8765,"comm":"touch","path":"/usr/bin/touch","name":"/usr/bin/touch","args":"touch subshell.txt"}
+{"t":"2026-10-07T23:36:17.632Z","kind":"exec","pid":8766,"ppid":8765,"comm":"touch","path":"/usr/bin/touch","name":"/usr/bin/touch"}
 {"t":"2026-10-07T23:36:17.632Z","kind":"open","pid":8766,"ppid":8765,"comm":"touch","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.632Z","kind":"mmap","pid":8766,"ppid":8765,"comm":"touch","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.632Z","kind":"open","pid":8766,"ppid":8765,"comm":"touch","path":"/usr/lib/x86_64-linux-gnu/libc.so.6","access":"r","flags":32768}
@@ -384,7 +384,7 @@
 {"t":"2026-10-07T23:36:17.633Z","kind":"read","pid":8767,"ppid":8761,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.633Z","kind":"mmap","pid":8767,"ppid":8761,"comm":"mkdir","path":"/usr/bin/mkdir","access":"x"}
 {"t":"2026-10-07T23:36:17.633Z","kind":"mmap","pid":8767,"ppid":8761,"comm":"mkdir","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.633Z","kind":"exec","pid":8767,"ppid":8761,"comm":"mkdir","path":"/usr/bin/mkdir","name":"/usr/bin/mkdir","args":"mkdir -p /home/runner/work/isolated-run/isolated-run/sub"}
+{"t":"2026-10-07T23:36:17.633Z","kind":"exec","pid":8767,"ppid":8761,"comm":"mkdir","path":"/usr/bin/mkdir","name":"/usr/bin/mkdir"}
 {"t":"2026-10-07T23:36:17.633Z","kind":"open","pid":8767,"ppid":8761,"comm":"mkdir","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.633Z","kind":"mmap","pid":8767,"ppid":8761,"comm":"mkdir","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.633Z","kind":"open","pid":8767,"ppid":8761,"comm":"mkdir","path":"/usr/lib/x86_64-linux-gnu/libselinux.so.1","access":"r","flags":32768}
@@ -451,7 +451,7 @@
 {"t":"2026-10-07T23:36:17.635Z","kind":"read","pid":8769,"ppid":8768,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.635Z","kind":"mmap","pid":8769,"ppid":8768,"comm":"cat","path":"/usr/bin/cat","access":"x"}
 {"t":"2026-10-07T23:36:17.635Z","kind":"mmap","pid":8769,"ppid":8768,"comm":"cat","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.635Z","kind":"exec","pid":8769,"ppid":8768,"comm":"cat","path":"/usr/bin/cat","name":"/usr/bin/cat","args":"cat missing.txt"}
+{"t":"2026-10-07T23:36:17.635Z","kind":"exec","pid":8769,"ppid":8768,"comm":"cat","path":"/usr/bin/cat","name":"/usr/bin/cat"}
 {"t":"2026-10-07T23:36:17.635Z","kind":"open","pid":8769,"ppid":8768,"comm":"cat","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.635Z","kind":"mmap","pid":8769,"ppid":8768,"comm":"cat","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.635Z","kind":"open","pid":8769,"ppid":8768,"comm":"cat","path":"/usr/lib/x86_64-linux-gnu/libc.so.6","access":"r","flags":32768}
@@ -509,7 +509,7 @@
 {"t":"2026-10-07T23:36:17.636Z","kind":"read","pid":8770,"ppid":8761,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.636Z","kind":"mmap","pid":8770,"ppid":8761,"comm":"python3","path":"/usr/bin/python3.12","access":"x"}
 {"t":"2026-10-07T23:36:17.636Z","kind":"mmap","pid":8770,"ppid":8761,"comm":"python3","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.636Z","kind":"exec","pid":8770,"ppid":8761,"comm":"python3","path":"/usr/bin/python3.12","name":"/usr/bin/python3","args":"python3 -c import os, sys; d = os.open(sys.argv[1], os.O_RDONLY)\ntry: os.unlink(\"gone\", dir_fd=d)\nexcept FileNotFoundError: pass /home/runner/work/isolated-run/isolated-run/sub"}
+{"t":"2026-10-07T23:36:17.636Z","kind":"exec","pid":8770,"ppid":8761,"comm":"python3","path":"/usr/bin/python3.12","name":"/usr/bin/python3"}
 {"t":"2026-10-07T23:36:17.636Z","kind":"open","pid":8770,"ppid":8761,"comm":"python3","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.636Z","kind":"mmap","pid":8770,"ppid":8761,"comm":"python3","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.636Z","kind":"open","pid":8770,"ppid":8761,"comm":"python3","path":"/usr/lib/x86_64-linux-gnu/libm.so.6","access":"r","flags":32768}
@@ -605,7 +605,7 @@
 {"t":"2026-10-07T23:36:17.654Z","kind":"read","pid":8771,"ppid":8761,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.654Z","kind":"mmap","pid":8771,"ppid":8761,"comm":"chmod","path":"/usr/bin/chmod","access":"x"}
 {"t":"2026-10-07T23:36:17.654Z","kind":"mmap","pid":8771,"ppid":8761,"comm":"chmod","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.654Z","kind":"exec","pid":8771,"ppid":8761,"comm":"chmod","path":"/usr/bin/chmod","name":"/usr/bin/chmod","args":"chmod 777 /home/runner/work/isolated-run/isolated-run/root-owned.txt"}
+{"t":"2026-10-07T23:36:17.654Z","kind":"exec","pid":8771,"ppid":8761,"comm":"chmod","path":"/usr/bin/chmod","name":"/usr/bin/chmod"}
 {"t":"2026-10-07T23:36:17.654Z","kind":"open","pid":8771,"ppid":8761,"comm":"chmod","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.654Z","kind":"mmap","pid":8771,"ppid":8761,"comm":"chmod","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.654Z","kind":"open","pid":8771,"ppid":8761,"comm":"chmod","path":"/usr/lib/x86_64-linux-gnu/libc.so.6","access":"r","flags":32768}
@@ -664,7 +664,7 @@
 {"t":"2026-10-07T23:36:17.655Z","kind":"read","pid":8772,"ppid":8761,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.655Z","kind":"mmap","pid":8772,"ppid":8761,"comm":"mkdir","path":"/usr/bin/mkdir","access":"x"}
 {"t":"2026-10-07T23:36:17.655Z","kind":"mmap","pid":8772,"ppid":8761,"comm":"mkdir","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.655Z","kind":"exec","pid":8772,"ppid":8761,"comm":"mkdir","path":"/usr/bin/mkdir","name":"/usr/bin/mkdir","args":"mkdir /home/runner/work/isolated-run/isolated-run/root-owned/x"}
+{"t":"2026-10-07T23:36:17.655Z","kind":"exec","pid":8772,"ppid":8761,"comm":"mkdir","path":"/usr/bin/mkdir","name":"/usr/bin/mkdir"}
 {"t":"2026-10-07T23:36:17.655Z","kind":"open","pid":8772,"ppid":8761,"comm":"mkdir","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.655Z","kind":"mmap","pid":8772,"ppid":8761,"comm":"mkdir","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.655Z","kind":"open","pid":8772,"ppid":8761,"comm":"mkdir","path":"/usr/lib/x86_64-linux-gnu/libselinux.so.1","access":"r","flags":32768}
@@ -730,7 +730,7 @@
 {"t":"2026-10-07T23:36:17.656Z","kind":"read","pid":8773,"ppid":8761,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.656Z","kind":"mmap","pid":8773,"ppid":8761,"comm":"mkdir","path":"/usr/bin/mkdir","access":"x"}
 {"t":"2026-10-07T23:36:17.656Z","kind":"mmap","pid":8773,"ppid":8761,"comm":"mkdir","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.656Z","kind":"exec","pid":8773,"ppid":8761,"comm":"mkdir","path":"/usr/bin/mkdir","name":"/usr/bin/mkdir","args":"mkdir -p /home/runner/work/isolated-run/isolated-run/A"}
+{"t":"2026-10-07T23:36:17.656Z","kind":"exec","pid":8773,"ppid":8761,"comm":"mkdir","path":"/usr/bin/mkdir","name":"/usr/bin/mkdir"}
 {"t":"2026-10-07T23:36:17.656Z","kind":"open","pid":8773,"ppid":8761,"comm":"mkdir","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.656Z","kind":"mmap","pid":8773,"ppid":8761,"comm":"mkdir","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.656Z","kind":"open","pid":8773,"ppid":8761,"comm":"mkdir","path":"/usr/lib/x86_64-linux-gnu/libselinux.so.1","access":"r","flags":32768}
@@ -797,7 +797,7 @@
 {"t":"2026-10-07T23:36:17.658Z","kind":"read","pid":8774,"ppid":8761,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.658Z","kind":"mmap","pid":8774,"ppid":8761,"comm":"chmod","path":"/usr/bin/chmod","access":"x"}
 {"t":"2026-10-07T23:36:17.658Z","kind":"mmap","pid":8774,"ppid":8761,"comm":"chmod","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.658Z","kind":"exec","pid":8774,"ppid":8761,"comm":"chmod","path":"/usr/bin/chmod","name":"/usr/bin/chmod","args":"chmod +x /home/runner/work/isolated-run/isolated-run/A/run.sh"}
+{"t":"2026-10-07T23:36:17.658Z","kind":"exec","pid":8774,"ppid":8761,"comm":"chmod","path":"/usr/bin/chmod","name":"/usr/bin/chmod"}
 {"t":"2026-10-07T23:36:17.658Z","kind":"open","pid":8774,"ppid":8761,"comm":"chmod","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.658Z","kind":"mmap","pid":8774,"ppid":8761,"comm":"chmod","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.658Z","kind":"open","pid":8774,"ppid":8761,"comm":"chmod","path":"/usr/lib/x86_64-linux-gnu/libc.so.6","access":"r","flags":32768}
@@ -856,7 +856,7 @@
 {"t":"2026-10-07T23:36:17.659Z","kind":"read","pid":8775,"ppid":8761,"comm":"run-script.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"}
 {"t":"2026-10-07T23:36:17.659Z","kind":"mmap","pid":8775,"ppid":8761,"comm":"run.sh","path":"/usr/bin/dash","access":"x"}
 {"t":"2026-10-07T23:36:17.659Z","kind":"mmap","pid":8775,"ppid":8761,"comm":"run.sh","path":"/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","access":"x"}
-{"t":"2026-10-07T23:36:17.659Z","kind":"exec","pid":8775,"ppid":8761,"comm":"run.sh","path":"/home/runner/work/isolated-run/isolated-run/A/run.sh","name":"./run.sh","args":"/bin/sh ./run.sh"}
+{"t":"2026-10-07T23:36:17.659Z","kind":"exec","pid":8775,"ppid":8761,"comm":"run.sh","path":"/home/runner/work/isolated-run/isolated-run/A/run.sh","name":"./run.sh"}
 {"t":"2026-10-07T23:36:17.659Z","kind":"open","pid":8775,"ppid":8761,"comm":"run.sh","path":"/etc/ld.so.cache","access":"r","flags":32768}
 {"t":"2026-10-07T23:36:17.659Z","kind":"mmap","pid":8775,"ppid":8761,"comm":"run.sh","path":"/etc/ld.so.cache","access":"r"}
 {"t":"2026-10-07T23:36:17.659Z","kind":"open","pid":8775,"ppid":8761,"comm":"run.sh","path":"/usr/lib/x86_64-linux-gnu/libc.so.6","access":"r","flags":32768}

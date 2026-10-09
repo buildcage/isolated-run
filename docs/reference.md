@@ -824,7 +824,8 @@ table is cut, the details are left out with it, under that one note. The filesys
 names its artifact, or says the record was not kept when the artifact could not be uploaded.
 
 The full record is uploaded as JSON lines in an artifact named `buildcage-filesystem-audit-<id>`,
-with absolute paths; `filesystem_audit_artifact_name` carries its name. Treat it as sensitive, like
+with absolute paths; `filesystem_audit_artifact_name` carries its name. It names each program the
+step ran but not the arguments it was given, which can carry secrets. Treat it as sensitive, like
 the traffic artifact. `filesystem_audit_retention_days` sets how long it is kept.
 
 The artifact ends with a line such as `{"kind":"end","dropped":0,"untracked":0}`, which the

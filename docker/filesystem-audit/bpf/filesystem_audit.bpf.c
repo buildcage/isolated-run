@@ -102,7 +102,6 @@ struct trace_event_raw_sys_exit {
 
 #define DATA_SZ 8192
 #define PATH_LEN 4096
-#define ARGS_LEN 512
 #define NAME_LEN 256
 #define MAX_COMPONENTS 254 // n1 and n2 are u8; a longer walk is marked cut
 #define WAKEUP_BYTES (1 << 20)
@@ -133,7 +132,7 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 //            it is relative (see add_base); path_len holds the errno
 //   read/write: d_path result, once per open file and direction
 //   mmap:    path components; mode holds prot, flags the map flags
-//   exec:    filename at 0, argv (NUL-separated) at PATH_LEN
+//   exec:    filename; its arguments are not read, as they can hold secrets
 //   symlink: link body at 0, then the link's own path components
 //   others:  leaf-first NUL-terminated path components, n1 of them, then
 //            n2 more for a rename or link target
@@ -144,7 +143,7 @@ struct event {
 	u32 flags;
 	u32 mode;
 	s32 path_len;
-	u32 args_len;
+	u32 bases; // which relative names add_base found a directory for
 	u32 data_len;
 	u8 n1;
 	u8 n2;
@@ -225,7 +224,7 @@ static __always_inline struct event *start(u32 kind)
 	e->flags = 0;
 	e->mode = 0;
 	e->path_len = 0;
-	e->args_len = 0;
+	e->bases = 0;
 	e->data_len = 0;
 	e->n1 = 0;
 	e->n2 = 0;
@@ -369,7 +368,7 @@ static __always_inline u32 leaf(struct event *e, u32 off, struct dentry *d, u8 *
 
 // A relative name in a syscall resolves against dfd: the calling task's
 // working directory for AT_FDCWD, else that open directory. Appends the
-// directory's leaf-first components at off and sets bit in e->args_len, or
+// directory's leaf-first components at off and sets bit in e->bases, or
 // leaves both alone when the fd is not open. Read at the syscall's exit, so a
 // thread that closes the fd or changes directory meanwhile can give another
 // directory.
@@ -395,7 +394,7 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 	}
 	if (!d || !m)
 		return off;
-	e->args_len |= bit;
+	e->bases |= bit;
 	return walk(e, off, d, m, n, trunc);
 }
 
@@ -516,14 +515,7 @@ int BPF_PROG(on_exec, struct task_struct *p, int old_pid, struct linux_binprm *b
 	if (!e)
 		return 0;
 	e->path_len = bpf_probe_read_kernel_str(e->data, PATH_LEN, BPF_CORE_READ(bprm, filename));
-	unsigned long a = BPF_CORE_READ(p, mm, arg_start);
-	unsigned long b = BPF_CORE_READ(p, mm, arg_end);
-	u32 len = b - a;
-	if (len > ARGS_LEN - 1)
-		len = ARGS_LEN - 1;
-	if (bpf_probe_read_user(&e->data[PATH_LEN], len & (ARGS_LEN - 1), (void *)a) == 0)
-		e->args_len = len;
-	e->data_len = PATH_LEN + e->args_len;
+	e->data_len = e->path_len > 0 ? e->path_len : 0;
 	submit(e);
 	return 0;
 }
@@ -991,7 +983,7 @@ static __always_inline void op_exit(long ret, int failure_only)
 			e->data[0] = 0;
 			off = add_base(e, 1, pend->dfd1, &nb, &e->truncated, 1);
 			e->mode = nb;
-			if (!(e->args_len & 1)) {
+			if (!(e->bases & 1)) {
 				bpf_map_delete_elem(&pending_ops, &id);
 				return;
 			}
