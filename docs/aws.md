@@ -108,7 +108,7 @@ applies to requests they allow.
 
 What happens to a request that carries no AWS signature depends on whether the host names the
 resource it is for. On such a host, a `Bearer` or `Basic` token, such as ECR's or CodeArtifact's,
-counts as no signature. CodeCommit is the exception both ways: a `Basic` login to it that carries
+counts as no signature, though a scheme starting with `AWS` does not. CodeCommit is the exception both ways: a `Basic` login to it that carries
 neither a known key nor an allowed account is `aws-key-not-allowed`, and a request to it with no
 `Authorization` at all, which Git sends first to be told to log in, is let through.
 
@@ -152,7 +152,8 @@ Each `amazonaws.com` name but `awscli.amazonaws.com` also matches under `amazona
 `sqs.us-east-1.amazonaws.com`. The account a request to one of those reaches is in its parameters or
 its body, where the proxy does not look, so an unsigned request there is refused, `GET` included,
 `AssumeRoleWithWebIdentity` excepted (below). A host missing from the table above is treated the
-same way; if a legitimate request is refused as `aws-no-credential` for that reason, report it.
+same way; if a legitimate request is refused for that reason, as `aws-no-credential` or, carrying a
+token, `aws-unsupported-credential`, report it.
 
 These hosts are only as narrow as the URL rules that allow them. A rule such as
 `* https://**.amazonaws.com/**` lets an unsigned request reach anyone's bucket, registry, cluster or
@@ -167,16 +168,15 @@ allowed_url_rules: |
 
 ### What it works with
 
-A step passes the check when its AWS calls are:
+A step passes the check when:
 
-- Signed with SigV4 or SigV4a, as current AWS SDKs and the AWS CLI v2 sign them, and the tools
-  built on them, such as the CDK and Terraform.
-- Signed once, in the `Authorization` header or a SigV4 presigned URL.
-- For the form bodies of Query-protocol APIs, 4 MiB at most, with a `Content-Length`, and not
-  compressed.
-- Switching roles through STS `AssumeRole` or `AssumeRoleWithWebIdentity`, into the
+- Its AWS calls are signed with SigV4 or SigV4a, as current AWS SDKs and the AWS CLI v2 sign them,
+  and the tools built on them, such as the CDK and Terraform.
+- Each call is signed once, in the `Authorization` header or a SigV4 presigned URL.
+- A Query-protocol API's form body is 4 MiB at most, has a `Content-Length`, and is not compressed.
+- It switches roles only through STS `AssumeRole` or `AssumeRoleWithWebIdentity`, into the
   `allowed_aws_role_accounts`.
-- For CodeCommit over Git, a `Basic` login with the key ID or `<user>-at-<account>`.
+- It reaches CodeCommit over Git with a `Basic` login carrying the key ID or `<user>-at-<account>`.
 
 ### What it stops
 

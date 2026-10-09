@@ -86,12 +86,16 @@ check_status "SigV2 in a form body, the start key in the header too" \
   "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)" $CF)" "403"
 check_status "SigV2's header, with the start key" \
   "$($C -X POST -H "Authorization: AWS ${AKIA}TESTSTARTKEY0001:c2lnbmF0dXJl" $CF)" "403"
+check_status "SigV2's header to a bucket, with the start key" \
+  "$($C -H "Authorization: AWS ${AKIA}TESTSTARTKEY0001:c2lnbmF0dXJl" https://bucket.s3.amazonaws.com/x)" "403"
 check_status "a SigV2 presigned URL, with the start key" \
   "$($C "https://bucket.s3.amazonaws.com/x?AWSAccessKeyId=${AKIA}TESTSTARTKEY0001&Expires=1&Signature=ab")" "403"
 check_status "SigV3's header beside the start key's" \
   "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "X-Amzn-Authorization: AWS3-HTTPS AWSAccessKeyId=${AKIA}TESTSTARTKEY0001,Algorithm=HmacSHA256,Signature=ab" $CF)" "403"
 check_status "SigV4's parameters in a form body, the start key in the header" \
   "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "Action=ListQueues&X-Amz-Credential=${AKIA}TESTSTARTKEY0001%2F20261008%2Fus-east-1%2Fsqs%2Faws4_request" $CF)" "403"
+check_status "a presigned URL with the start key, a SigV2 URL inside a query value" \
+  "$($C "https://bucket.s3.amazonaws.com/x?X-Amz-Credential=${AKIA}TESTSTARTKEY0001%2Fx&response-content-disposition=https%3A%2F%2Fb.s3.amazonaws.com%2Fk%3FAWSAccessKeyId%3D${AKIA}TESTATTACKER0001%26Expires%3D1")" "200"
 check_status "the start key in the header, a SigV2 URL inside a body value" \
   "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "Action=Publish&Message=https%3A%2F%2Fb.s3.amazonaws.com%2Fk%3FAWSAccessKeyId%3D${AKIA}TESTATTACKER0001%26Expires%3D1" $CF)" "200"
 # AWS reads a body as a form only under that Content-Type.

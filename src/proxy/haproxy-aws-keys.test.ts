@@ -4,8 +4,8 @@ import {
   AWS_API_HOST,
   AWS_RESOURCE_HOST,
   CODECOMMIT_HOST,
-  FORM_CREDENTIAL,
-  FORM_SIGV4_CREDENTIAL,
+  SIGV2_PARAM,
+  SIGV4_PARAM,
   awsKeyRequestRules,
   awsKeyResponseRules,
   awsKeyExtension,
@@ -167,7 +167,7 @@ describe("hosts that name the resource", () => {
 });
 
 describe("the SigV2 credential in a form body", () => {
-  const credential = new RegExp(`(^|&)${FORM_CREDENTIAL}=`, "i");
+  const credential = new RegExp(`(^|&)${SIGV2_PARAM}=`, "i");
 
   it("counts the name in any case and with any letter percent-encoded", () => {
     for (const body of [
@@ -192,7 +192,7 @@ describe("the SigV2 credential in a form body", () => {
 });
 
 describe("SigV4's credential in a form body", () => {
-  const credential = new RegExp(`(^|&)${FORM_SIGV4_CREDENTIAL}=`, "i");
+  const credential = new RegExp(`(^|&)${SIGV4_PARAM}=`, "i");
 
   it("counts the name in any case and with any character percent-encoded", () => {
     for (const body of [
