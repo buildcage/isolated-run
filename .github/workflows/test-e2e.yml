@@ -222,7 +222,7 @@ jobs:
             printf '#!/bin/sh\n' > "$GITHUB_WORKSPACE/A/run.sh"
             chmod +x "$GITHUB_WORKSPACE/A/run.sh"
             (cd "$GITHUB_WORKSPACE/A" && ./run.sh)
-            # An argument the record must not keep.
+            # A program, not the builtin, with an argument the record must not keep.
             /usr/bin/true buildcage-audit-sentinel-arg
 
       - name: Verify the Job Summary has the filesystem audit
@@ -281,7 +281,6 @@ jobs:
           # the name it was run by beside it.
           grep -qE '"kind":"exec",[^}]*"path":"/[^"]*/A/run\.sh","name":"\./run\.sh"' "$f"
           ! grep -q '/var/tmp/buildcage-' "$f"
-          # Arguments can carry secrets, so none is recorded.
           ! grep -q 'buildcage-audit-sentinel-arg' "$f"
 
   # One representative case through the real action wrapper, against real
