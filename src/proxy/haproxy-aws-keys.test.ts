@@ -9,6 +9,7 @@ import {
   awsKeyRequestRules,
   awsKeyResponseRules,
   awsKeyExtension,
+  SIGV4_HEADER,
   STS_HOST,
 } from "./haproxy-aws-keys.ts";
 
@@ -264,6 +265,7 @@ describe("awsKeyRequestRules", () => {
       "key-not-allowed",
       "no-credential",
       "ambiguous-credential",
+      "unsupported-credential",
       "unreadable",
     ]);
   });
@@ -275,12 +277,23 @@ describe("awsKeyRequestRules", () => {
     }
   });
 
-  it("counts AWS's own schemes and a CodeCommit login as a credential, and no other token", () => {
-    expect(
-      awsKeyRequestRules(CHECK, "restrict").filter((l) => l.includes("set-var(txn.aws_auth)")),
-    ).toStrictEqual([
-      "    http-request set-var(txn.aws_auth) bool(true) if aws_host { req.fhdr(authorization) -m reg -i ^aws } or aws_git",
-    ]);
+  it("matches SigV4's and SigV4a's header as SDKs spell it, and no other scheme", () => {
+    const sigv4 = new RegExp(SIGV4_HEADER);
+    for (const header of [
+      "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261008/us-east-1/sts/aws4_request, SignedHeaders=host, Signature=a",
+      "AWS4-ECDSA-P256-SHA256 Credential=AKIDEXAMPLE/20261008/sts/aws4_request, SignedHeaders=host, Signature=a",
+    ]) {
+      expect(sigv4.test(header)).toBe(true);
+    }
+    for (const header of [
+      "aws4-hmac-sha256 Credential=AKIDEXAMPLE/20261008/us-east-1/sts/aws4_request",
+      "AWS4-HMAC-SHA256 SignedHeaders=host, Credential=AKIDEXAMPLE/20261008/us-east-1/sts/aws4_request",
+      "AWS4-HMAC-SHA512 Credential=AKIDEXAMPLE/20261008/us-east-1/sts/aws4_request",
+      "AWS AKIDEXAMPLE:c2lnbmF0dXJl",
+      "Bearer token",
+    ]) {
+      expect(sigv4.test(header)).toBe(false);
+    }
   });
 
   it("reads CodeCommit's static Git user name as <user>-at-<account>, and nothing more", () => {

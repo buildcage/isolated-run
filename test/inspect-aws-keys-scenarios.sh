@@ -31,6 +31,8 @@ echo "=== [the key the step started with] ==="
 check_status "a request signed with it" "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" $CF)" "200"
 check_status "a presigned URL carrying it" \
   "$($C "https://bucket.s3.amazonaws.com/x?X-Amz-Credential=${AKIA}TESTSTARTKEY0001%2F20261008%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=ab")" "200"
+check_status "a request signed with it under SigV4a" \
+  "$($C -H "Authorization: AWS4-ECDSA-P256-SHA256 Credential=${AKIA}TESTSTARTKEY0001/20261008/s3/aws4_request, SignedHeaders=host, Signature=ab" https://bucket.s3.amazonaws.com/x)" "200"
 
 echo "=== [a key of the build's own] ==="
 check_status "a request signed with it" "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTATTACKER0001)" $CF)" "403"
@@ -75,26 +77,26 @@ check_status "a query credential repeated across an encoded newline" \
 check_status "a header and a query credential" \
   "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" "$CF?X-Amz-Credential=${AKIA}TESTATTACKER0001%2Fx")" "403"
 
-echo "=== [a SigV2 key in a form body] ==="
+echo "=== [a credential other than SigV4's, whatever its key] ==="
 sigv2() { echo "Action=ListQueues&AWSAccessKeyId=$1&SignatureVersion=2&Signature=ab"; }
-check_status "the start key alone" "$($C -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)" $CF)" "200"
-check_status "a key of the build's own alone" "$($C -d "$(sigv2 ${AKIA}TESTATTACKER0001)" $CF)" "403"
-check_status "a key of the build's own under a percent-encoded name" \
-  "$($C -d "Action=ListQueues&AWSAccessK%65yId=${AKIA}TESTATTACKER0001" $CF)" "403"
-check_status "the start key in both the header and the body" \
-  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)" $CF)" "200"
-check_status "the start key in the header, a key of the build's own in the body" \
-  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "$(sigv2 ${AKIA}TESTATTACKER0001)" $CF)" "403"
+check_status "SigV2 in a form body, with the start key" "$($C -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)" $CF)" "403"
+check_status "SigV2 in a form body under a percent-encoded name" \
+  "$($C -d "Action=ListQueues&AWSAccessK%65yId=${AKIA}TESTSTARTKEY0001" $CF)" "403"
+check_status "SigV2 in a form body, the start key in the header too" \
+  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)" $CF)" "403"
+check_status "SigV2's header, with the start key" \
+  "$($C -X POST -H "Authorization: AWS ${AKIA}TESTSTARTKEY0001:c2lnbmF0dXJl" $CF)" "403"
+check_status "a SigV2 presigned URL, with the start key" \
+  "$($C "https://bucket.s3.amazonaws.com/x?AWSAccessKeyId=${AKIA}TESTSTARTKEY0001&Expires=1&Signature=ab")" "403"
+check_status "SigV3's header beside the start key's" \
+  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "X-Amzn-Authorization: AWS3-HTTPS AWSAccessKeyId=${AKIA}TESTSTARTKEY0001,Algorithm=HmacSHA256,Signature=ab" $CF)" "403"
+check_status "SigV4's parameters in a form body, the start key in the header" \
+  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "Action=ListQueues&X-Amz-Credential=${AKIA}TESTSTARTKEY0001%2F20261008%2Fus-east-1%2Fsqs%2Faws4_request" $CF)" "403"
 check_status "the start key in the header, a SigV2 URL inside a body value" \
   "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "Action=Publish&Message=https%3A%2F%2Fb.s3.amazonaws.com%2Fk%3FAWSAccessKeyId%3D${AKIA}TESTATTACKER0001%26Expires%3D1" $CF)" "200"
-check_status "the key repeated in the body" \
-  "$($C -d "$(sigv2 ${AKIA}TESTSTARTKEY0001)&AWSAccessKeyId=${AKIA}TESTSTARTKEY0001" $CF)" "403"
-
-echo "=== [a credential the check does not read] ==="
-check_status "the start key in the header, SigV3's header beside it" \
-  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "X-Amzn-Authorization: AWS3-HTTPS AWSAccessKeyId=${AKIA}TESTATTACKER0001,Algorithm=HmacSHA256,Signature=ab" $CF)" "403"
-check_status "the start key in the header, SigV4's parameters in the body" \
-  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -d "Action=ListQueues&X-Amz-Credential=${AKIA}TESTATTACKER0001%2F20261008%2Fus-east-1%2Fsqs%2Faws4_request" $CF)" "403"
+# AWS reads a body as a form only under that Content-Type.
+check_status "the start key in the header, SigV2 in a body sent as text/plain" \
+  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: text/plain" -d "$(sigv2 ${AKIA}TESTATTACKER0001)" $CF)" "200"
 
 echo "=== [what the check cannot read through] ==="
 pad() { head -c "$1" /dev/zero | tr '\0' a; }
@@ -105,9 +107,9 @@ check_status "the start key in the header, a 300 KB body" \
   "$({ printf 'Action=X&M='; pad 300000; } |
     $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "200"
 # 413 is the fixture origin's own 1 MiB cap: the proxy read the body to its
-# end, found the start key there, and let it through.
-check_status "the start key in the header and at the end of a body just under 4 MiB" \
-  "$({ printf 'Action=X&M='; pad 4150000; printf '&AWSAccessKeyId=%s' "${AKIA}TESTSTARTKEY0001"; } |
+# end and let it through.
+check_status "the start key in the header, a body just under 4 MiB" \
+  "$({ printf 'Action=X&M='; pad 4150000; } |
     $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "413"
 check_status "the start key in the header, a key of the build's own at the end of a body just under 4 MiB" \
   "$({ printf 'Action=X&M='; pad 4150000; printf '&AWSAccessKeyId=%s' "${AKIA}TESTATTACKER0001"; } |
@@ -124,8 +126,6 @@ check_status "the start key in the header, a form body compressed and marked ide
   "$(printf 'Action=X' | gzip | $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Encoding: gzip, identity" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "403"
 check_status "the start key in the header, a chunked form body" \
   "$(printf 'Action=X' | $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Transfer-Encoding: chunked" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- $CF)" "403"
-check_status "the start key in the header, a key of the build's own in a form body sent as text/plain" \
-  "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: text/plain" -d "$(sigv2 ${AKIA}TESTATTACKER0001)" $CF)" "403"
 # 413 is the fixture origin's own 1 MiB cap: the proxy let the body through.
 check_status "the start key in the header, a 2 MB binary body with no Content-Type" \
   "$({ printf '\x89PNG'; pad 2000000; } | $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type:" --data-binary @- $CF)" "413"

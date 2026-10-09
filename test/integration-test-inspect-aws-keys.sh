@@ -73,6 +73,8 @@ assert_summary_contains "POST https://sts.us-east-1.amazonaws.com/ -> aws-no-cre
 assert_summary_contains "-> aws-ambiguous-credential" "a request with two credentials is refused as aws-ambiguous-credential"
 assert_summary_contains "-> aws-role-not-allowed" "a web identity call for another account's role is refused as aws-role-not-allowed"
 assert_summary_contains "-> aws-unreadable" "a body the check cannot read through is refused as aws-unreadable"
+assert_summary_contains "-> aws-unsupported-credential" \
+  "a credential other than SigV4's is refused as aws-unsupported-credential"
 if grep -qF "${AKIA}TESTSTARTKEY0001" "$TMPDIR/restrict.log"; then
   fail "the starting key reached the step's log"
 else
