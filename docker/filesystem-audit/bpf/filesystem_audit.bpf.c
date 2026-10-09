@@ -64,8 +64,8 @@ struct file {
 	unsigned int f_mode;
 } __attribute__((preserve_access_index));
 
-// Since 6.7 a backing file's own f_path is the layer's; user_path is the one
-// the step opened. Absent before then, when f_path was that one itself.
+// Since 6.7 a backing file's f_path is on the layer and user_path is the path
+// the step opened; before, f_path was that path.
 struct backing_file {
 	struct file file;
 	struct path user_path;
@@ -949,8 +949,6 @@ int BPF_PROG(on_file_permission, struct file *file, int mask)
 	return 0;
 }
 
-// d and mnt name the path to record, the file's own when d is 0; image marks
-// a mapping mmap made while an exec was in progress, the program image.
 static __always_inline void map_event(struct file *file, struct dentry *d, struct vfsmount *mnt,
 				     unsigned long prot, unsigned long flags, u8 bit, int image)
 {
@@ -967,9 +965,7 @@ static __always_inline void map_event(struct file *file, struct dentry *d, struc
 	submit(e);
 }
 
-// A mapping both executable and shared-writable is recorded as each; the
-// write's mode drops PROT_EXEC so it decodes as a write. Only mmap records a
-// mapping that allows neither, as a read.
+// The write drops PROT_EXEC from its mode so it decodes as a write.
 static __always_inline void map_events(struct file *file, struct dentry *d, struct vfsmount *mnt,
 				      unsigned long prot, unsigned long flags, int at_mmap)
 {
@@ -992,12 +988,8 @@ int BPF_PROG(on_mmap, struct file *file, unsigned long prot, unsigned long flags
 	return 0;
 }
 
-// mprotect can make a file mapping writable or executable after
-// security_mmap_file saw it read-only; recorded, once the LSMs allow it, as
-// the mapping it becomes. reqprot is what the caller asked for, as mmap sees;
-// prot may add PROT_EXEC for a READ_IMPLIES_EXEC process. overlayfs maps its
-// backing file in the step's file's place. The file behind shared anonymous
-// memory is fs-internal and not one the step opened.
+// fexit, so only a change the LSMs allowed is recorded. reqprot is what the
+// caller asked for, as mmap sees it; prot may add PROT_EXEC.
 SEC("fexit/security_file_mprotect")
 int BPF_PROG(on_mprotect, struct vm_area_struct *vma, unsigned long reqprot, unsigned long prot,
 	     int ret)
@@ -1008,17 +1000,19 @@ int BPF_PROG(on_mprotect, struct vm_area_struct *vma, unsigned long reqprot, uns
 	if (!(reqprot & PROT_EXEC) && !((reqprot & PROT_WRITE) && flags))
 		return 0;
 	struct file *file = BPF_CORE_READ(vma, vm_file);
+	// S_PRIVATE marks the file behind shared anonymous memory.
 	if (!file || BPF_CORE_READ(file, f_inode, i_flags) & S_PRIVATE)
 		return 0;
 	struct dentry *d = BPF_CORE_READ(file, f_path.dentry);
 	struct vfsmount *mnt = BPF_CORE_READ(file, f_path.mnt);
+	// overlayfs maps its backing file in place of the step's file.
 	if (!in_step_ns(mnt)) {
 		if (!bpf_core_field_exists(struct backing_file, user_path)) {
 			bump(&skipped_internal);
 			return 0;
 		}
-		// FMODE_BACKING's value changes between releases, so the cast is
-		// checked by the filesystem user_path is on instead.
+		// FMODE_BACKING's value differs between releases; check the
+		// filesystem instead.
 		struct backing_file *bf = (void *)file;
 		d = BPF_CORE_READ(bf, user_path.dentry);
 		mnt = BPF_CORE_READ(bf, user_path.mnt);

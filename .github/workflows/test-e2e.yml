@@ -226,8 +226,7 @@ jobs:
             echo data > "$GITHUB_WORKSPACE/mapped.bin"
             python3 -c 'import mmap, sys; f = open(sys.argv[1], "rb")
             mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ | mmap.PROT_EXEC)' "$GITHUB_WORKSPACE/mapped.bin"
-            # Shared mappings made writable, or writable and executable, only
-            # after they were mapped, and shared anonymous memory made writable.
+            # mprotect adding PROT_WRITE (and PROT_EXEC) to shared mappings.
             echo data > "$GITHUB_WORKSPACE/mprotected.bin"
             echo data > "$GITHUB_WORKSPACE/mprotected-rwx.bin"
             python3 -c 'import ctypes, os, sys
@@ -281,9 +280,7 @@ jobs:
           # A file mapped executable shows as read unless it is a library or
           # an exec mapped it, as it does run.sh's interpreter.
           grep -qE ' R +python3 +\./mapped\.bin$' "$f"
-          # A write through a mapping made writable later is still a write,
-          # whether or not it is also executable; shared anonymous memory
-          # names no file.
+          # Shared anonymous memory names no file.
           grep -qE ' RW +python3 +\./mprotected\.bin$' "$f"
           grep -qE ' RW +python3 +\./mprotected-rwx\.bin$' "$f"
           ! grep -q '/dev/zero' "$f"
