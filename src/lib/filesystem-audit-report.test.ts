@@ -1,13 +1,20 @@
-import { describe, it, expect, vi, afterEach, type Mock } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { describe, it, expect, vi, afterEach, beforeEach, type Mock } from "vitest";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
 
 import {
+  openWriter,
   prepareStepFilesystemAudit,
+  readLines,
   type FilesystemAuditReportDeps,
   type FilesystemAuditReportOptions,
 } from "./filesystem-audit-report.ts";
+import { createAuditSummary } from "./filesystem-audit-summary.ts";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -23,7 +30,14 @@ function annotation(): Annotation & { warning: Mock; error: Mock } {
   return { notice: vi.fn(), warning: vi.fn(), error: vi.fn() };
 }
 
-function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
+// A recording held as a string, read a line at a time as readLines would.
+const recording =
+  (text: string): FilesystemAuditReportDeps["readLines"] =>
+  (_path, onLine) => {
+    for (const line of text.split("\n")) onLine(line);
+  };
+
+function deps(overrides: Partial<FilesystemAuditReportDeps> & { raw?: string } = {}): {
   deps: Partial<FilesystemAuditReportDeps> & { summaries: string[] };
   summaries: string[];
   uploads: string[];
@@ -36,6 +50,8 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
   const outputs: string[] = [];
   const appended: string[] = [];
   const writes: { path: string; content: string }[] = [];
+  const { raw = JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }), ...rest } =
+    overrides;
   return {
     summaries,
     uploads,
@@ -44,8 +60,15 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
     writes,
     deps: {
       summaries,
-      readFile: () => JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
-      writeFile: (path, content) => void writes.push({ path, content }),
+      readLines: recording(raw),
+      readFile: () => raw,
+      openWriter: (path) => {
+        const lines: string[] = [];
+        return {
+          write: (line) => void lines.push(line),
+          close: () => void writes.push({ path, content: lines.join("\n") }),
+        };
+      },
       realpath: (p) => p,
       uploadArtifact: async (outPath) => {
         uploads.push(outPath);
@@ -53,7 +76,7 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> = {}): {
       },
       setOutput: (name) => void outputs.push(name),
       appendFile: (_path, content) => void appended.push(content),
-      ...overrides,
+      ...rest,
     },
   };
 }
@@ -99,8 +122,7 @@ describe("prepareStepFilesystemAudit", () => {
 
   it("counts the summary's times from the proxy's start", async () => {
     const { deps: d, summaries } = deps({
-      readFile: () =>
-        JSON.stringify({ t: "2026-10-06T00:00:02.500Z", kind: "read", comm: "a", path: "/w/x" }),
+      raw: JSON.stringify({ t: "2026-10-06T00:00:02.500Z", kind: "read", comm: "a", path: "/w/x" }),
     });
 
     await reportStepFilesystemAudit(
@@ -130,22 +152,21 @@ describe("prepareStepFilesystemAudit", () => {
     expect(outputs).toEqual([""]);
   });
 
-  it("sets an empty output when the recording is missing or empty", async () => {
+  it("reports nothing and sets an empty output when the recording is missing", async () => {
+    const note = annotation();
     const {
       deps: d,
       summaries,
       outputs,
     } = deps({
-      readFile: () => {
-        throw new Error("ENOENT");
+      readLines: () => {
+        throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
       },
     });
 
-    await reportStepFilesystemAudit(
-      { ...base, audit: AUDIT, annotation: annotation(), env: {} },
-      d,
-    );
+    await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
 
+    expect(note.warning).not.toHaveBeenCalled();
     expect(summaries).toEqual([]);
     expect(outputs).toEqual([""]);
   });
@@ -178,13 +199,12 @@ describe("prepareStepFilesystemAudit", () => {
 
   it("gives every block a cut can reach the notice naming the artifact", async () => {
     const { deps: d } = deps({
-      readFile: () =>
-        [
-          { kind: "exec", comm: "node", path: "/usr/bin/node" },
-          { kind: "write", comm: "node", path: "/work/a.txt" },
-        ]
-          .map((r) => JSON.stringify(r))
-          .join("\n"),
+      raw: [
+        { kind: "exec", comm: "node", path: "/usr/bin/node" },
+        { kind: "write", comm: "node", path: "/work/a.txt" },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join("\n"),
     });
     const blocks = (
       await prepareStepFilesystemAudit(
@@ -209,7 +229,7 @@ describe("prepareStepFilesystemAudit", () => {
       uploads,
       outputs,
     } = deps({
-      writeFile: () => {
+      openWriter: () => {
         throw new Error("EACCES");
       },
     });
@@ -228,7 +248,7 @@ describe("prepareStepFilesystemAudit", () => {
 
   it("matches a recorded canonical path against the realpath of the workspace", async () => {
     const { deps: d, summaries } = deps({
-      readFile: () => JSON.stringify({ kind: "write", comm: "node", path: "/real/work/a.txt" }),
+      raw: JSON.stringify({ kind: "write", comm: "node", path: "/real/work/a.txt" }),
       realpath: (p) => (p === "/sym/work" ? "/real/work" : p),
     });
 
@@ -256,7 +276,7 @@ describe("prepareStepFilesystemAudit", () => {
   });
 
   it("warns of a cut-short recording when the file is empty, and uploads nothing", async () => {
-    const { deps: d, summaries, uploads, outputs } = deps({ readFile: () => "" });
+    const { deps: d, summaries, uploads, outputs } = deps({ raw: "" });
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: {} },
@@ -343,7 +363,7 @@ describe("prepareStepFilesystemAudit", () => {
     );
   });
 
-  it("warns, writes nothing and sets an empty output when the recording cannot be read", async () => {
+  it("warns and says so in the summary when the recording cannot be read", async () => {
     const note = annotation();
     const {
       deps: d,
@@ -351,17 +371,17 @@ describe("prepareStepFilesystemAudit", () => {
       uploads,
       outputs,
     } = deps({
-      strip: () => {
-        throw new RangeError("Invalid string length");
+      readLines: () => {
+        throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" });
       },
     });
 
     await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
 
     expect(note.warning).toHaveBeenCalledWith(
-      "Failed to read the filesystem audit recording: Invalid string length",
+      "Failed to read the filesystem audit recording: EIO: i/o error",
     );
-    expect(summaries).toEqual([]);
+    expect(summaries).toEqual([expect.stringContaining("**The recording could not be read**")]);
     expect(uploads).toEqual([]);
     expect(outputs).toEqual([""]);
   });
@@ -404,5 +424,229 @@ describe("prepareStepFilesystemAudit", () => {
       "Failed to set the filesystem_audit_artifact_name output: GITHUB_OUTPUT is gone",
     );
     expect(summaries[0]).toContain("Filesystem audit");
+  });
+
+  it("strips buildcage's own records from both the copy and the summary", async () => {
+    const step = { pid: 3, ppid: 2, kind: "write", comm: "run-script.sh", path: "/work/a.txt" };
+    const {
+      deps: d,
+      summaries,
+      writes,
+    } = deps({
+      raw: [
+        { pid: 2, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
+        { pid: 3, ppid: 2, kind: "fork", comm: "buildcage-init" },
+        {
+          pid: 3,
+          ppid: 2,
+          kind: "exec",
+          comm: "run-script.sh",
+          path: "/var/tmp/buildcage-0/run-script.sh",
+        },
+        step,
+      ]
+        .map((r) => JSON.stringify(r))
+        .join("\n"),
+    });
+
+    await reportStepFilesystemAudit(
+      { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
+      d,
+    );
+
+    expect(writes).toEqual([{ path: CLEAN, content: JSON.stringify({ ...step, comm: "bash" }) }]);
+    expect(summaries[0]).toContain("W bash ./a.txt");
+    expect(summaries[0]).not.toContain("setpriv");
+  });
+
+  it.each(["write", "close"])(
+    "warns and uploads nothing when the copy's %s fails",
+    async (step) => {
+      const note = annotation();
+      const fail = (key: string) => (): void => {
+        if (key === step) throw new Error("ENOSPC");
+      };
+      const {
+        deps: d,
+        summaries,
+        uploads,
+      } = deps({
+        openWriter: () => ({ write: fail("write"), close: fail("close") }),
+      });
+
+      await reportStepFilesystemAudit(
+        { ...base, audit: AUDIT, annotation: note, env: { GITHUB_WORKSPACE: "/work" } },
+        d,
+      );
+
+      expect(note.warning).toHaveBeenCalledWith(
+        "Failed to prepare the filesystem audit artifact: ENOSPC",
+      );
+      expect(uploads).toEqual([]);
+      expect(summaries[0]).toContain("W node ./a.txt");
+    },
+  );
+});
+
+describe("prepareStepFilesystemAudit: failures while reading", () => {
+  const base = {
+    retentionDays: 3,
+    containerName: "buildcage-proxy-deadbeef",
+    audit: AUDIT,
+    env: { GITHUB_WORKSPACE: "/work" },
+  };
+  const line = JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" });
+
+  it("still uploads the copy when the summary fails while reducing", async () => {
+    const note = annotation();
+    const {
+      deps: d,
+      summaries,
+      uploads,
+    } = deps({
+      createSummary: (options) => ({
+        ...createAuditSummary(options),
+        add: () => {
+          throw new Error("bad record");
+        },
+      }),
+    });
+
+    await reportStepFilesystemAudit({ ...base, annotation: note }, d);
+
+    expect(note.warning).toHaveBeenCalledWith(
+      "Failed to render the filesystem audit summary: bad record",
+    );
+    expect(summaries).toEqual([]);
+    expect(uploads).toEqual([CLEAN]);
+  });
+
+  it("closes the copy when writing it fails", async () => {
+    const closed: string[] = [];
+    const { deps: d, uploads } = deps({
+      openWriter: () => ({
+        write: () => {
+          throw new Error("ENOSPC");
+        },
+        close: () => void closed.push("closed"),
+      }),
+    });
+
+    await reportStepFilesystemAudit({ ...base, annotation: annotation() }, d);
+
+    expect(closed).toEqual(["closed"]);
+    expect(uploads).toEqual([]);
+  });
+
+  it.each([
+    [
+      "the recording is gone by the second read",
+      (pass: number): string[] => {
+        if (pass === 2) throw Object.assign(new Error("ENOENT: gone"), { code: "ENOENT" });
+        return [line];
+      },
+      "ENOENT: gone",
+    ],
+    [
+      "the two reads see different lines",
+      (pass: number): string[] => (pass === 2 ? [line, line] : [line]),
+      "the recording changed while it was being read",
+    ],
+  ])("warns and uploads nothing when %s", async (_, linesOf, message) => {
+    const note = annotation();
+    let pass = 0;
+    const closed: string[] = [];
+    const {
+      deps: d,
+      summaries,
+      uploads,
+    } = deps({
+      readLines: (_path, onLine) => {
+        for (const l of linesOf(++pass)) onLine(l);
+      },
+      openWriter: () => ({ write: () => {}, close: () => void closed.push("closed") }),
+    });
+
+    await reportStepFilesystemAudit({ ...base, annotation: note }, d);
+
+    expect(note.warning).toHaveBeenCalledWith(
+      `Failed to read the filesystem audit recording: ${message}`,
+    );
+    expect(summaries).toEqual([expect.stringContaining("**The recording could not be read**")]);
+    expect(uploads).toEqual([]);
+    expect(closed).toEqual(["closed"]);
+  });
+});
+
+describe("prepareStepFilesystemAudit: an upload that throws", () => {
+  it("only warns, and still sets the output", async () => {
+    const note = annotation();
+    const {
+      deps: d,
+      summaries,
+      outputs,
+    } = deps({
+      uploadArtifact: () => Promise.reject(new Error("network down")),
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        retentionDays: 3,
+        containerName: "buildcage-proxy-deadbeef",
+        audit: AUDIT,
+        annotation: note,
+        env: {},
+      },
+      d,
+    );
+
+    expect(note.warning).toHaveBeenCalledWith(
+      "Failed to report the filesystem audit: network down",
+    );
+    expect(summaries).toEqual([]);
+    expect(outputs).toEqual([""]);
+  });
+});
+
+describe("readLines and openWriter", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "filesystem-audit-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("give back the lines split would, across chunk boundaries", () => {
+    const path = join(dir, "lines");
+    // A three-byte character straddles the first 4-byte chunk's end.
+    const text = "ab\n€x\n\nlast";
+    writeFileSync(path, text);
+    const got: string[] = [];
+    readLines(path, (line) => got.push(line), 4);
+    expect(got).toEqual(text.split("\n"));
+  });
+
+  it("write lines joined by newlines, flushing as they go", () => {
+    const path = join(dir, "out");
+    const w = openWriter(path, 10);
+    for (const line of ["first", "second", "third"]) w.write(line);
+    expect(readFileSync(path, "utf8")).toBe("first\nsecond");
+    w.close();
+    expect(readFileSync(path, "utf8")).toBe("first\nsecond\nthird");
+    openWriter(path).close();
+    expect(readFileSync(path, "utf8")).toBe("");
+  });
+
+  it("join a line that spans several chunks", () => {
+    const path = join(dir, "long");
+    writeFileSync(path, "abcdefghijklmnop\nq");
+    const got: string[] = [];
+    readLines(path, (line) => got.push(line), 3);
+    expect(got).toEqual(["abcdefghijklmnop", "q"]);
+  });
+
+  it("throw when the file is missing, with the error's code", () => {
+    expect(() => readLines(join(dir, "missing"), () => {})).toThrow(
+      expect.objectContaining({ code: "ENOENT" }),
+    );
   });
 });

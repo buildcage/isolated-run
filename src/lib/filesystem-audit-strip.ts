@@ -27,6 +27,8 @@
  * marked incomplete in the summary.
  */
 
+import { parseLine } from "./filesystem-audit-summary.ts";
+
 const SHELL_COMM = "run-script.sh"; // buildcage's step shell (sandbox/oci-files.ts)
 const SHELL_LABEL = "bash";
 // How the shell reads its script. Anything else it does to the script, such
@@ -44,40 +46,45 @@ interface Record_ {
   failed?: boolean;
 }
 
-export function stripSandboxMachinery(jsonl: string, scratchBase: string): string {
+/**
+ * Strips a recording in two passes over its lines: `observe` each in order,
+ * then `filter` each in the same order, which gives the line to keep (with the
+ * record it now holds) or undefined to drop it. A line is passed with its
+ * parsed record, undefined when it does not parse.
+ */
+export function createStripper(scratchBase: string): {
+  observe: (r: unknown) => void;
+  filter: (line: string, r: unknown) => { line: string; record: unknown } | undefined;
+} {
   const under = (p: unknown): boolean =>
     typeof p === "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`));
   const leaf = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
-
-  const lines = jsonl.split("\n");
-  const recs = lines.map((line) => {
-    try {
-      return JSON.parse(line) as Record_ & Record<string, unknown>;
-    } catch {
-      return undefined; // a line the tracer left truncated; kept verbatim
-    }
-  });
+  const asRecord = (r: unknown): (Record_ & Record<string, unknown>) | undefined =>
+    typeof r === "object" && r !== null ? (r as Record_ & Record<string, unknown>) : undefined;
 
   const ownShellPids = new Set<number>(); // runs a run-script.sh as other than buildcage's shell
   let shell: number | undefined; // the pid that first execs buildcage's run-script.sh
   let script: string | undefined; // that run-script.sh
   let init: number | undefined; // the shell's parent at that exec
   let boundary = -1;
-  recs.forEach((r, i) => {
+  let observed = 0;
+  let filtered = 0;
+
+  const observe = (rec: unknown): void => {
+    const i = observed++;
+    const r = asRecord(rec);
     if (!r || r.pid === undefined) return;
     if (r.kind === "exec" && typeof r.path === "string" && leaf(r.path) === SHELL_COMM) {
       if (!under(r.path)) ownShellPids.add(r.pid);
       else if (shell === undefined) [shell, script, boundary, init] = [r.pid, r.path, i, r.ppid];
       else if (r.pid !== shell) ownShellPids.add(r.pid);
     }
-  });
+  };
 
-  const out: string[] = [];
-  recs.forEach((r, i) => {
-    if (r === undefined) {
-      if (lines[i] !== "") out.push(lines[i]);
-      return;
-    }
+  const filter = (line: string, rec: unknown): { line: string; record: unknown } | undefined => {
+    const i = filtered++;
+    const r = asRecord(rec);
+    if (r === undefined) return line === "" ? undefined : { line, record: rec };
     // A child of an ownShellPids process inherits its run-script.sh name, so it keeps it too.
     if (
       r.kind === "fork" &&
@@ -94,17 +101,31 @@ export function stripSandboxMachinery(jsonl: string, scratchBase: string): strin
       r.pid !== undefined &&
       (i <= boundary || r.pid === init || readsScript)
     )
-      return;
+      return undefined;
     if (
       shell !== undefined &&
       r.comm === SHELL_COMM &&
       r.pid !== undefined &&
       !ownShellPids.has(r.pid)
     ) {
-      out.push(JSON.stringify({ ...r, comm: SHELL_LABEL })); // the step's shell
-      return;
+      const record = { ...r, comm: SHELL_LABEL }; // the step's shell
+      return { line: JSON.stringify(record), record };
     }
-    out.push(lines[i]); // a step process, verbatim
+    return { line, record: rec }; // a step process, verbatim
+  };
+  return { observe, filter };
+}
+
+/** A recording held as a string, stripped. */
+export function stripSandboxMachinery(jsonl: string, scratchBase: string): string {
+  const lines = jsonl.split("\n");
+  const parsed = lines.map(parseLine);
+  const stripper = createStripper(scratchBase);
+  for (const r of parsed) stripper.observe(r);
+  const out: string[] = [];
+  lines.forEach((line, i) => {
+    const kept = stripper.filter(line, parsed[i]);
+    if (kept) out.push(kept.line);
   });
   return out.join("\n");
 }

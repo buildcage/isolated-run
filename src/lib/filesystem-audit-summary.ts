@@ -7,7 +7,11 @@
  */
 
 import { formatElapsedVariable } from "#core/lib/report/elapsed-time.ts";
-import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
+import {
+  joinSummaryBlocks,
+  STEP_SUMMARY_LIMIT_BYTES,
+  type SummaryBlock,
+} from "#core/lib/report/render/fit-step-summary.ts";
 
 interface AuditRecord {
   t?: string;
@@ -126,6 +130,8 @@ export interface SummaryOptions {
   /** The proxy's start, in epoch seconds. */
   startedAt?: number;
   fanout?: number;
+  /** The limits below; a test lowers them. */
+  limits?: Partial<Limits>;
 }
 
 function relativize(path: string, prefixes: SummaryOptions): string {
@@ -177,51 +183,71 @@ function sortKey(path: string): [number, string] {
   return [2, path];
 }
 
-function addFlag(m: Map<string, Set<string>>, key: string, flag: string): void {
-  let set = m.get(key);
-  if (!set) m.set(key, (set = new Set()));
-  set.add(flag);
-}
+// Actions as bits, in ORDER's order.
+const BIT: Record<string, number> = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i]));
 
-// The first and last access a row stands for, in epoch milliseconds, and the
-// earliest one's place in the recording, which orders the rows.
-interface Span {
+// What the accesses folded into one line did: the actions that succeeded,
+// failed and were refused, as bits, and the first and last access in epoch
+// milliseconds with the earliest one's place in the recording, which orders
+// the rows.
+interface Agg {
+  ok: number;
+  failed: number;
+  perm: number;
   first: number;
   last: number;
   seq: number;
 }
 
-function widen(m: Map<string, Span>, key: string, span: Span | undefined): void {
-  if (!span) return;
-  const cur = m.get(key);
-  if (!cur) m.set(key, { ...span });
-  else {
-    cur.first = Math.min(cur.first, span.first);
-    cur.last = Math.max(cur.last, span.last);
-    cur.seq = Math.min(cur.seq, span.seq);
-  }
+const newAgg = (): Agg => ({
+  ok: 0,
+  failed: 0,
+  perm: 0,
+  first: Infinity,
+  last: -Infinity,
+  seq: Infinity,
+});
+
+const flagBits = (a: Agg): number => a.ok | a.failed;
+
+function mergeAgg(dst: Agg, src: Agg): void {
+  dst.ok |= src.ok;
+  dst.failed |= src.failed;
+  dst.perm |= src.perm;
+  dst.first = Math.min(dst.first, src.first);
+  dst.last = Math.max(dst.last, src.last);
+  dst.seq = Math.min(dst.seq, src.seq);
 }
 
-// Spans per key and action letter, so an action the summary drops (a library's
-// read, a success under a relative name) takes its times with it.
-type LetterSpans = Map<string, Map<string, Span>>;
-
-// The first record seen for a key and letter has the lowest seq.
-function widenLetter(m: LetterSpans, key: string, letter: string, t: number, seq: number): void {
-  let byLetter = m.get(key);
-  if (!byLetter) m.set(key, (byLetter = new Map()));
-  const cur = byLetter.get(letter);
-  if (!cur) byLetter.set(letter, { first: t, last: t, seq });
-  else {
-    cur.first = Math.min(cur.first, t);
-    cur.last = Math.max(cur.last, t);
-  }
+// One access, as a line records it. bit is 0 for a read of what the process
+// loaded, which still counts toward a directory's fold but prints nothing.
+interface Access {
+  comm: string;
+  path: string;
+  bit: number;
+  failed: boolean;
+  perm: boolean;
+  t: number;
+  seq: number;
 }
 
-function fmtSpan(span: Span | undefined, originMs: number): string {
-  if (!span) return "";
-  const first = formatElapsedVariable((span.first - originMs) / 1000);
-  const last = formatElapsedVariable((span.last - originMs) / 1000);
+function apply(a: Agg, x: Access): void {
+  if (!x.bit) return;
+  if (!x.failed) a.ok |= x.bit;
+  else {
+    a.failed |= x.bit;
+    if (x.perm) a.perm |= x.bit;
+  }
+  if (Number.isNaN(x.t)) return;
+  a.first = Math.min(a.first, x.t);
+  a.last = Math.max(a.last, x.t);
+  a.seq = Math.min(a.seq, x.seq);
+}
+
+function fmtSpan(a: Agg, originMs: number): string {
+  if (a.first === Infinity) return "";
+  const first = formatElapsedVariable((a.first - originMs) / 1000);
+  const last = formatElapsedVariable((a.last - originMs) / 1000);
   return first === last ? first : `${first}-${last}`;
 }
 
@@ -232,13 +258,17 @@ export const keyOf = (comm: string, path: string): string => `${comm}${SEP}${pat
 const commOf = (key: string): string => key.slice(0, key.indexOf(SEP));
 const pathOf = (key: string): string => key.slice(key.indexOf(SEP) + 1);
 
-// A directory in a tree of paths keyed by component, so no ancestor's whole
-// path is ever spelled out: doing that at every level costs the square of a
-// path's depth.
-interface DirNode {
-  kids: Map<string, DirNode>;
-  /** The flags of the lines below it, for dropWalkedDirs. */
-  below?: Set<string>;
+// A path in a tree keyed by component, so no ancestor's whole path is ever
+// spelled out: doing that at every level costs the square of a path's depth.
+interface Node {
+  kids?: Map<string, Node>;
+  /** The accesses of this path itself. */
+  own?: Agg;
+  /** Once folded, everything at and below it, shown as "path/**". */
+  folded?: Agg;
+  kept?: boolean;
+  /** What its line adds to the size estimate, while it is counted. */
+  bytes: number;
 }
 
 // A path's components as tree keys, "/" first for an absolute path, which
@@ -248,118 +278,263 @@ function components(p: string): string[] {
   return p.startsWith("/") ? ["/", ...p.slice(1).split("/")] : p.split("/");
 }
 
-// The path of the directory named by parts[0..end).
-function spell(parts: string[], end: number): string {
-  return parts[0] === "/" ? `/${parts.slice(1, end).join("/")}` : parts.slice(0, end).join("/");
+// The path of the node at the end of parts.
+function spell(parts: string[]): string {
+  return parts[0] === "/" ? `/${parts.slice(1).join("/")}` : parts.join("/");
 }
 
-// Adds the path to the tree, calling visit on each directory above it.
-function addPath(top: Map<string, DirNode>, parts: string[], visit?: (dir: DirNode) => void): void {
-  let kids = top;
-  for (let i = 0; i < parts.length; i++) {
-    let node = kids.get(parts[i]);
-    if (!node) kids.set(parts[i], (node = { kids: new Map() }));
-    if (i < parts.length - 1) visit?.(node);
-    kids = node.kids;
-  }
-}
-
-function findPath(top: Map<string, DirNode> | undefined, parts: string[]): DirNode | undefined {
-  let node: DirNode | undefined;
-  for (const part of parts) {
-    node = top?.get(part);
-    top = node?.kids;
-  }
-  return node;
-}
-
-// Maps each path to the line that stands for it: itself, or an ancestor
-// "dir/**" once that ancestor has fanout or more children that saw events.
-// A path spelled with ".." may lead outside the directories it names, through
-// a symlink, so it is never folded into them or credited to them.
-function collapse(paths: Set<string>, fanout: number, keep: Set<string>): Map<string, string> {
-  const top = new Map<string, DirNode>();
-  const split = new Map<string, string[]>(); // the paths not spelled with ".."
-  for (const p of paths) {
-    const parts = components(p);
-    if (parts.includes("..")) continue;
-    split.set(p, parts);
-    addPath(top, parts);
-  }
-  const kept = new Set<DirNode>();
-  for (const k of keep) {
-    const node = findPath(top, components(k));
-    if (node) kept.add(node);
-  }
-  const shown = new Map<string, string>();
-  for (const p of paths) {
-    const parts = split.get(p);
-    let line = p;
-    if (parts) {
-      // Every node on the way was added in the loop above.
-      let node = top.get(parts[0])!;
-      for (let i = 1; i < parts.length; i++) {
-        if (!kept.has(node) && node.kids.size >= fanout) {
-          line = `${spell(parts, i)}/**`;
-          break;
-        }
-        node = node.kids.get(parts[i])!;
-      }
+/**
+ * The nodes whose own line only walks to lines below it: every flag it has,
+ * one of the lines under it in the same tree has too.
+ */
+function walkedNodes(top: Map<string, Node>): Set<Node> {
+  const walked = new Set<Node>();
+  const below = new Map<Node, number>();
+  // Post-order without recursion, as a path can be thousands of components deep.
+  const stack: [Node, boolean][] = [...top.values()].map((n) => [n, false]);
+  while (stack.length > 0) {
+    const [node, done] = stack.pop()!;
+    if (!done) {
+      stack.push([node, true]);
+      for (const kid of node.kids?.values() ?? []) stack.push([kid, false]);
+      continue;
     }
-    shown.set(p, line);
+    let bits = 0;
+    for (const kid of node.kids?.values() ?? []) {
+      bits |= below.get(kid)!;
+      if (kid.own) bits |= flagBits(kid.own);
+      if (kid.folded) bits |= flagBits(kid.folded);
+    }
+    below.set(node, bits);
+    if (node.own && node.kids?.size && (flagBits(node.own) & ~bits) === 0) walked.add(node);
   }
-  // A bare "dir" that also has a "dir/**" folds into it.
-  const collapsed = new Set<string>();
-  for (const line of shown.values()) if (line.endsWith("/**")) collapsed.add(line.slice(0, -3));
-  for (const [p, line] of shown) if (collapsed.has(line)) shown.set(p, `${line}/**`);
-  return shown;
+  return walked;
+}
+
+// Every line of a tree that prints, with its path, but walked directories.
+// Each node links to its parent's entry, so only a printed line's path is
+// ever spelled out.
+function* treeLines(top: Map<string, Node>): Generator<[string, Agg]> {
+  interface Entry {
+    node: Node;
+    part: string;
+    up?: Entry;
+  }
+  const walked = walkedNodes(top);
+  const pathTo = (e: Entry): string => {
+    const parts: string[] = [];
+    for (let at: Entry | undefined = e; at; at = at.up) parts.push(at.part);
+    return spell(parts.reverse());
+  };
+  // Reversed onto the stack, so lines come out in the order they were added.
+  const stack: Entry[] = [...top].reverse().map(([part, node]) => ({ node, part }));
+  while (stack.length > 0) {
+    const e = stack.pop()!;
+    const { folded, own, kids } = e.node;
+    if (folded && flagBits(folded)) yield [`${pathTo(e)}/**`, folded];
+    if (own && flagBits(own) && !walked.has(e.node)) yield [pathTo(e), own];
+    for (const [part, node] of [...(kids ?? [])].reverse()) stack.push({ node, part, up: e });
+  }
 }
 
 /**
  * Drops each bare directory line whose flags the same command's lines below it
- * already carry: its read is only the walk that reached them. Each line's flags
- * are credited once to every directory above it, so the cost is the lines
- * times their depth.
+ * already carry: its read is only the walk that reached them.
  */
 export function dropWalkedDirs(
   lines: Set<string>,
   flagsOf: (line: string) => Iterable<string>,
 ): Set<string> {
-  const base = (p: string): string => (p.endsWith("/**") ? p.slice(0, -3) : p);
-  const trees = new Map<string, Map<string, DirNode>>();
-  const flagsByLine = new Map<string, string[]>();
-  for (const d of lines) {
-    const flags = [...flagsOf(d)];
-    flagsByLine.set(d, flags);
-    const parts = components(base(pathOf(d)));
-    // The root has nothing above it, and a path with ".." is not known to sit
-    // under the directories it names.
-    if (parts.length === 1 && parts[0] === "/") continue;
-    if (parts.includes("..")) continue;
-    let top = trees.get(commOf(d));
-    if (!top) trees.set(commOf(d), (top = new Map()));
-    addPath(top, parts, (dir) => {
-      dir.below ??= new Set();
-      for (const c of flags) dir.below.add(c);
-    });
-  }
+  const trees = new Map<string, Map<string, Node>>();
+  const nodeOf = new Map<string, Node>();
   const kept = new Set<string>();
   for (const l of lines) {
     const path = pathOf(l);
-    const node = path.endsWith("/**")
-      ? undefined
-      : findPath(trees.get(commOf(l)), components(path));
-    const below = node?.below;
-    if (!below || !flagsByLine.get(l)!.every((c) => below.has(c))) kept.add(l);
+    const folded = path.endsWith("/**");
+    const parts = components(folded ? path.slice(0, -3) : path);
+    // A path with ".." is not known to sit under the directories it names.
+    if (parts.includes("..")) {
+      kept.add(l);
+      continue;
+    }
+    let kids = trees.get(commOf(l));
+    if (!kids) trees.set(commOf(l), (kids = new Map()));
+    let node: Node | undefined;
+    for (const part of parts) {
+      node = kids.get(part);
+      if (!node) kids.set(part, (node = { bytes: 0 }));
+      kids = node.kids ??= new Map();
+    }
+    const agg = newAgg();
+    for (const c of flagsOf(l)) agg.ok |= BIT[c];
+    if (folded) node!.folded = agg;
+    else node!.own = agg;
+    if (!folded) nodeOf.set(l, node!);
+    else kept.add(l);
   }
+  const walked = new Set<Node>();
+  for (const top of trees.values()) for (const n of walkedNodes(top)) walked.add(n);
+  for (const [l, node] of nodeOf) if (!walked.has(node)) kept.add(l);
   return kept;
 }
 
-function fmtFlags(ok: Set<string>, failed: Set<string>, perm: Set<string>): string {
+interface LinesOptions {
+  fanout: number;
+  /** The directories never folded, as components. */
+  keep: string[][];
+  limit: number;
+  nodes: number;
+  /** The fewest bytes the line of a path prints in. */
+  rowBytes: (path: string, comm: string) => number;
+}
+
+/**
+ * The lines of one table as the accesses arrive, a directory folding into
+ * "dir/**" as soon as it has `fanout` children, so a tree of any size costs
+ * no more than its folded lines. Stops, dropping what it holds, once the
+ * lines no fold can take away outgrow `limit` bytes, or it holds more than
+ * `nodes` paths.
+ */
+class Lines {
+  private trees = new Map<string, Map<string, Node>>();
+  // Paths spelled with "..", which may lead outside the directories they
+  // name through a symlink, so are never folded into them or credited to them.
+  private climbing = new Map<string, Agg>();
+  private bytes = 0;
+  private nodes = 0;
+  stopped = false;
+
+  private readonly opts: LinesOptions;
+
+  constructor(opts: LinesOptions) {
+    this.opts = opts;
+  }
+
+  add(x: Access): void {
+    if (this.stopped) return;
+    const parts = components(x.path);
+    if (parts.includes("..")) {
+      const key = keyOf(x.comm, x.path);
+      let a = this.climbing.get(key);
+      if (!a) this.climbing.set(key, (a = newAgg()));
+      const shown = flagBits(a) !== 0;
+      apply(a, x);
+      if (!shown && flagBits(a)) this.count(this.opts.rowBytes(x.path, x.comm));
+      return;
+    }
+    let kids: Map<string, Node> | undefined = this.trees.get(x.comm);
+    if (!kids) this.trees.set(x.comm, (kids = new Map()));
+    let parent: Node | undefined;
+    // Whether every directory above the node is kept, so no fold can ever
+    // take its line away, and the estimate may count it.
+    let settled = true;
+    let parentSettled = true;
+    for (let i = 0; i < parts.length; i++) {
+      let node: Node | undefined = kids.get(parts[i]);
+      if (!node) {
+        node = { bytes: 0, kept: this.isKept(parts, i + 1) || undefined };
+        kids.set(parts[i], node);
+        if (++this.nodes > this.opts.nodes) return this.stop();
+        if (parent) {
+          // No longer a leaf, its own line may be only the walk to this one.
+          this.setBytes(parent, 0);
+          if (!parent.kept && kids.size >= this.opts.fanout) {
+            this.fold(parent);
+            return this.addFolded(parent, parts.slice(0, i), x, parentSettled);
+          }
+        }
+      }
+      if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x, settled);
+      if (i === parts.length - 1) {
+        node.own ??= newAgg();
+        const shown = flagBits(node.own) !== 0;
+        apply(node.own, x);
+        if (settled && !shown && flagBits(node.own) && !node.kids?.size)
+          this.setBytes(node, this.opts.rowBytes(x.path, x.comm));
+        return;
+      }
+      node.kids ??= new Map();
+      kids = node.kids;
+      parent = node;
+      parentSettled = settled;
+      settled &&= Boolean(node.kept);
+    }
+  }
+
+  private isKept(parts: string[], depth: number): boolean {
+    return this.opts.keep.some(
+      (k) => k.length === depth && k.every((part, i) => part === parts[i]),
+    );
+  }
+
+  // Folds the node's own accesses and everything below it into "node/**".
+  private fold(node: Node): void {
+    const agg = newAgg();
+    const stack = [node];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (n.own) mergeAgg(agg, n.own);
+      if (n.folded) mergeAgg(agg, n.folded);
+      this.setBytes(n, 0);
+      for (const kid of n.kids?.values() ?? []) {
+        this.nodes--;
+        stack.push(kid);
+      }
+    }
+    node.folded = agg;
+    node.own = undefined;
+    node.kids = undefined;
+  }
+
+  private addFolded(node: Node, parts: string[], x: Access, settled: boolean): void {
+    apply(node.folded!, x);
+    if (settled && flagBits(node.folded!) && !node.bytes)
+      this.setBytes(node, this.opts.rowBytes(`${spell(parts)}/**`, x.comm));
+  }
+
+  private setBytes(node: Node, bytes: number): void {
+    this.count(bytes - node.bytes);
+    node.bytes = bytes;
+  }
+
+  private count(bytes: number): void {
+    this.bytes += bytes;
+    if (this.bytes > this.opts.limit) this.stop();
+  }
+
+  private stop(): void {
+    this.stopped = true;
+    this.trees = new Map();
+    this.climbing = new Map();
+  }
+
+  /** Every line with its command, or undefined once it stopped or its lines outgrew the limit. */
+  finish(): { comm: string; path: string; agg: Agg }[] | undefined {
+    if (this.stopped) return undefined;
+    const out: { comm: string; path: string; agg: Agg }[] = [];
+    let bytes = 0;
+    for (const line of this.lines()) {
+      out.push(line);
+      bytes += this.opts.rowBytes(line.path, line.comm);
+      if (bytes > this.opts.limit) return undefined;
+    }
+    return out;
+  }
+
+  private *lines(): Generator<{ comm: string; path: string; agg: Agg }> {
+    for (const [key, agg] of this.climbing)
+      if (flagBits(agg)) yield { comm: commOf(key), path: pathOf(key), agg };
+    for (const [comm, top] of this.trees)
+      for (const [path, agg] of treeLines(top)) yield { comm, path, agg };
+  }
+}
+
+function fmtFlags(a: Agg): string {
+  const failed = a.failed & ~a.ok;
   let out = "";
   for (const c of ORDER) {
-    if (ok.has(c)) out += c;
-    else if (failed.has(c)) out += c.toLowerCase() + (perm.has(c) ? "!" : "");
+    if (a.ok & BIT[c]) out += c;
+    else if (failed & BIT[c]) out += c.toLowerCase() + (a.perm & BIT[c] ? "!" : "");
   }
   return out;
 }
@@ -371,6 +546,9 @@ const HEADING = "### Filesystem audit";
 const INCOMPLETE_NOTE =
   "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
   "> some accesses are missing from this summary and from the artifact.";
+const UNREADABLE_NOTE =
+  "> ⚠️ **The recording could not be read**, so this summary has none of its accesses and no\n" +
+  "> artifact was uploaded.";
 const SECTION = "filesystem";
 const DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n";
 const DETAILS_CLOSE = "</details>\n";
@@ -392,178 +570,107 @@ const JOINED = Object.fromEntries(
   Object.values(FILESYSTEM_BLOCK).map((id) => [id, 0]),
 ) as FilesystemPriorities;
 
-interface Parsed {
-  records: AuditRecord[];
-  // From the tracer's end line, which a recording cut short lacks.
-  ended: boolean;
-  lost: boolean;
+interface Limits {
+  /** The Job Summary's size limit, past which a part is not printed. */
+  bytes: number;
+  /** How many paths a part holds unfolded before it gives up. */
+  nodes: number;
+  /**
+   * How many loaded files the first pass remembers across all processes.
+   * Past it, a library read shows as a read: more rows, never fewer.
+   */
+  loads: number;
 }
 
-function parse(jsonl: string): Parsed {
-  const records: AuditRecord[] = [];
-  let ended = false;
-  let lost = false;
-  for (const line of jsonl.split("\n")) {
-    if (!line) continue;
-    let r: AuditRecord;
-    try {
-      r = JSON.parse(line) as AuditRecord;
-    } catch {
-      continue; // a line the tracer left truncated (e.g. a hard kill mid-write)
-    }
-    if (r.kind === "end") {
-      ended = true;
-      lost = Boolean(r.dropped || r.untracked);
-      continue;
-    }
-    records.push(r);
-  }
-  return { records, ended, lost };
-}
+const LIMITS: Limits = { bytes: STEP_SUMMARY_LIMIT_BYTES, nodes: 200_000, loads: 200_000 };
 
 interface Row {
-  span: Span | undefined;
-  seq: number;
+  agg: Agg;
   flags: string;
   comm: string;
   path: string;
 }
 
-interface Loads {
-  /** The mmap records of libraries and of what an exec mapped. */
-  libraries: Set<AuditRecord>;
-  /** The reads a process made of what it loaded or ran. */
-  loadReads: Set<AuditRecord>;
+/** What the summary is rendered from, reduced from the recording. */
+export interface AuditSummary {
+  // From the tracer's end line, which a recording cut short lacks.
+  ended: boolean;
+  lost: boolean;
+  /** Each part, or undefined where it outgrew the Job Summary. */
+  executed: string[] | undefined;
+  paths: Row[] | undefined;
+  details: Row[] | undefined;
 }
 
-// Libraries are left out and an exec'd binary is shown by its X, so a process
-// that mapped or ran one has its reads of it dropped, and of /etc/ld.so.cache
-// once it maps a library; another process's reads stay. A pid handed out again
-// by a fork, or running a new program, counts as a new process. Any file can be
-// mapped executable and read through the mapping, so such a mapping counts as a
-// library only by its name or when the tracer saw an exec make it.
-function findLoads(records: AuditRecord[], prefixes: SummaryOptions): Loads {
-  const procs: string[] = [];
+// A process: its pid and how many forks and execs have handed that pid a new
+// one. Call once per record, in order.
+function procOf(gens: Map<number | undefined, number>, r: AuditRecord): string {
+  if (r.kind === "fork") gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
+  const gen = gens.get(r.pid) ?? 0;
+  if (r.kind === "exec") gens.set(r.pid, gen + 1);
+  return `${r.pid}/${gen}`;
+}
+
+const isRecord = (r: unknown): r is AuditRecord =>
+  typeof r === "object" && r !== null && typeof (r as AuditRecord).kind === "string";
+
+/**
+ * Reduces a recording to an AuditSummary in two passes over its records:
+ * `observe` each in order, then `add` each in the same order, with `counted`
+ * false for one that is not the step's, so the processes stay in step.
+ *
+ * Libraries are left out and an exec'd binary is shown by its X, so a process
+ * that mapped or ran one has its reads of it dropped, and of /etc/ld.so.cache
+ * once it maps a library; another process's reads stay. A pid handed out again
+ * by a fork, or running a new program, counts as a new process. Any file can be
+ * mapped executable and read through the mapping, so such a mapping counts as a
+ * library only by its name or when the tracer saw an exec make it. The first
+ * pass finds what each process loaded, as its reads come before the mapping.
+ */
+export function createAuditSummary(prefixes: SummaryOptions): {
+  observe: (r: unknown) => void;
+  add: (r: unknown, counted?: boolean) => void;
+  finish: () => AuditSummary;
+} {
+  const limits = { ...LIMITS, ...prefixes.limits };
+  const limit = limits.bytes;
   const loaded = new Set<string>();
-  const libraries = new Set<AuditRecord>();
-  const gens = new Map<number | undefined, number>();
-  // What each process's exec in progress has mapped: the program, its
-  // dynamic loader, a script's interpreter.
   const images = new Map<string, string[]>();
+  const observed = new Map<number | undefined, number>();
   const load = (proc: string, path: string, library: boolean): void => {
+    if (loaded.size >= limits.loads) return;
     loaded.add(keyOf(proc, canonical(path, prefixes)));
     if (library) loaded.add(keyOf(proc, "/etc/ld.so.cache"));
   };
-  for (const r of records) {
-    if (r.kind === "fork") gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
-    const gen = gens.get(r.pid) ?? 0;
-    const proc = `${r.pid}/${gen}`;
-    procs.push(proc);
-    if (r.kind === "mmap" && r.access === "x" && r.path) {
+  const isLibraryMap = (r: AuditRecord): boolean =>
+    r.kind === "mmap" &&
+    r.access === "x" &&
+    Boolean(r.path) &&
+    Boolean(r.image || LIBRARY_NAME.test(r.path!));
+
+  const observe = (r: unknown): void => {
+    if (!isRecord(r)) return;
+    const proc = procOf(observed, r);
+    if (isLibraryMap(r)) {
       if (r.image) {
-        libraries.add(r);
         let paths = images.get(proc);
         if (!paths) images.set(proc, (paths = []));
-        paths.push(r.path);
-      } else if (LIBRARY_NAME.test(r.path)) {
-        libraries.add(r);
-        load(proc, r.path, true);
-      }
+        paths.push(r.path!);
+      } else load(proc, r.path!, true);
     } else if (r.kind === "exec") {
       // The kernel reads these before the exec record, so they count as
       // loaded on both sides of it.
-      const next = `${r.pid}/${gen + 1}`;
-      gens.set(r.pid, gen + 1);
+      const next = `${r.pid}/${observed.get(r.pid)}`;
       for (const path of [...(images.get(proc) ?? []), ...(r.path ? [r.path] : [])]) {
         load(proc, path, false);
         load(next, path, LIBRARY_NAME.test(path));
       }
       images.delete(proc);
     }
-  }
-  const loadReads = new Set<AuditRecord>();
-  records.forEach((r, i) => {
-    const c = classify(r);
-    if (
-      c &&
-      !c.failed &&
-      c.letter === "R" &&
-      loaded.has(keyOf(procs[i], canonical(c.path, prefixes)))
-    )
-      loadReads.add(r);
-  });
-  return { libraries, loadReads };
-}
-
-// The rows of the summary in recording order: one per command and path, or
-// one per path alone when byCommand is false.
-function buildRows(
-  records: AuditRecord[],
-  loads: Loads,
-  prefixes: SummaryOptions,
-  byCommand: boolean,
-): Row[] {
-  const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
-  const ok = new Map<string, Set<string>>();
-  const failed = new Map<string, Set<string>>();
-  const perm = new Map<string, Set<string>>();
-  const okSpans: LetterSpans = new Map();
-  const failedSpans: LetterSpans = new Map();
-
-  let seq = 0;
-  for (const r of records) {
-    if (loads.libraries.has(r)) continue;
-    const c = classify(r);
-    if (!c) continue;
-    const key = keyOf(byCommand ? (r.comm ?? "") : "", canonical(c.path, prefixes));
-    if (loads.loadReads.has(r)) {
-      if (!ok.has(key)) ok.set(key, new Set());
-      continue;
-    }
-    const t = Date.parse(r.t ?? "");
-    if (!Number.isNaN(t)) {
-      widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++);
-    }
-    if (c.failed) {
-      addFlag(failed, key, c.letter);
-      if (PERM_ERRNO.has(r.err ?? 0)) addFlag(perm, key, c.letter);
-    } else {
-      addFlag(ok, key, c.letter);
-    }
-  }
-
-  // Re-key on the normalized path, dropping non-file targets.
-  const nok = new Map<string, Set<string>>();
-  const nfailed = new Map<string, Set<string>>();
-  const nperm = new Map<string, Set<string>>();
-  const nspans = new Map<string, Span>();
-  const mergeInto = (
-    dst: Map<string, Set<string>>,
-    src: Map<string, Set<string>>,
-    keepRelative: boolean,
-    srcSpans?: LetterSpans,
-  ): void => {
-    for (const [key, set] of src) {
-      const p = pathOf(key);
-      // A succeeding record resolves to an absolute path or a "…/" walk, so a
-      // relative one there is d_path's pipe:, socket: or anon_inode: target,
-      // or an attribute change whose directory descriptor closed meanwhile,
-      // which is lost; a failed one may keep the relative name it was given.
-      if (!keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
-      // Keep the key even with no flags left (a read-then-dropped library): it
-      // still counts toward a directory's collapse, though it prints no row.
-      const nk = keyOf(commOf(key), normalize(p));
-      for (const span of srcSpans?.get(key)?.values() ?? []) widen(nspans, nk, span);
-      let dstSet = dst.get(nk);
-      if (!dstSet) dst.set(nk, (dstSet = new Set()));
-      for (const c of set) dstSet.add(c);
-    }
   };
-  mergeInto(nok, ok, false, okSpans);
-  mergeInto(nfailed, failed, true, failedSpans);
-  mergeInto(nperm, perm, true);
 
-  const keep = new Set([
+  const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
+  const keep = [
     "/",
     "/home",
     "/tmp",
@@ -571,92 +678,119 @@ function buildRows(
     "/proc/<pid>",
     ...prefixes.workspace,
     ...prefixes.home,
-  ]);
-
-  // Collapse each command's paths on their own, so one command's many touches
-  // of a tree fold without pulling in another's.
-  const byComm = new Map<string, Set<string>>();
-  for (const key of new Set([...nok.keys(), ...nfailed.keys()])) {
-    let set = byComm.get(commOf(key));
-    if (!set) byComm.set(commOf(key), (set = new Set()));
-    set.add(pathOf(key));
-  }
-  const shown = new Map<string, string>(); // (comm, path) -> (comm, line)
-  for (const [comm, paths] of byComm)
-    for (const [p, line] of collapse(paths, fanout, keep))
-      shown.set(keyOf(comm, p), keyOf(comm, line));
-
-  const lineOk = new Map<string, Set<string>>();
-  const lineFailed = new Map<string, Set<string>>();
-  const linePerm = new Map<string, Set<string>>();
-  const lineSpans = new Map<string, Span>();
-  const union = (
-    dst: Map<string, Set<string>>,
-    key: string,
-    src: Set<string> | undefined,
-  ): void => {
-    if (src) for (const c of src) addFlag(dst, key, c);
-  };
-  for (const [pk, lk] of shown) {
-    union(lineOk, lk, nok.get(pk));
-    union(lineFailed, lk, nfailed.get(pk));
-    union(linePerm, lk, nperm.get(pk));
-    widen(lineSpans, lk, nspans.get(pk));
-  }
-
-  const keys = dropWalkedDirs(new Set(shown.values()), (l) => [
-    ...(lineOk.get(l) ?? []),
-    ...(lineFailed.get(l) ?? []),
-  ]);
-
-  const rows: Row[] = [];
-  for (const lk of keys) {
-    const o = lineOk.get(lk) ?? new Set<string>();
-    const fl = new Set([...(lineFailed.get(lk) ?? [])].filter((c) => !o.has(c)));
-    const flags = fmtFlags(o, fl, new Set([...(linePerm.get(lk) ?? [])].filter((c) => fl.has(c))));
-    if (!flags) continue; // a binary seen only as a mapped library
-    const span = lineSpans.get(lk);
-    rows.push({
-      span,
-      // A row with no timestamped record (never from the tracer) goes last.
-      seq: span?.seq ?? Infinity,
-      flags,
-      comm: escapeForDisplay(commOf(lk)),
-      path: escapeForDisplay(relativize(pathOf(lk), prefixes)),
-    });
-  }
-  // In recording order, not by time, which a clock step could reorder. Rows
-  // with no time keep the path order.
-  rows.sort((a, b) => {
-    const [ca, pa] = sortKey(a.path);
-    const [cb, pb] = sortKey(b.path);
-    return a.seq - b.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
+  ].map(components);
+  const relLength = (path: string): number => relativize(path, prefixes).length;
+  // The fewest bytes a row of each part prints in.
+  const paths = new Lines({
+    fanout,
+    keep,
+    limit,
+    nodes: limits.nodes,
+    rowBytes: (p) => relLength(p) + 11,
   });
-  return rows;
+  const details = new Lines({
+    fanout,
+    keep,
+    limit,
+    nodes: limits.nodes,
+    rowBytes: (p, comm) => relLength(p) + comm.length + 3,
+  });
+  let executed: Set<string> | undefined = new Set<string>();
+  let executedBytes = 0;
+  let ended = false;
+  let lost = false;
+  let seq = 0;
+  const added = new Map<number | undefined, number>();
+
+  const add = (r: unknown, counted = true): void => {
+    if (!isRecord(r)) return;
+    const proc = procOf(added, r);
+    if (!counted) return;
+    if (r.kind === "end") {
+      ended = true;
+      lost = Boolean(r.dropped || r.untracked);
+      return;
+    }
+    if (r.kind === "exec" && r.path && executed) {
+      const p = normalize(canonical(r.path, prefixes));
+      if (!executed.has(p)) {
+        executed.add(p);
+        executedBytes += relLength(p) + 7;
+        if (executedBytes > limit) executed = undefined;
+      }
+    }
+    if (isLibraryMap(r)) return;
+    const c = classify(r);
+    if (!c) return;
+    const path = canonical(c.path, prefixes);
+    // A succeeding record resolves to an absolute path or a "…/" walk, so a
+    // relative one there is d_path's pipe:, socket: or anon_inode: target, or
+    // an attribute change whose directory descriptor closed meanwhile, which
+    // is lost; a failed one may keep the relative name it was given.
+    if (!c.failed && !path.startsWith("/") && !path.startsWith("…/")) return;
+    const loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path));
+    const t = loadRead ? NaN : Date.parse(r.t ?? "");
+    const x: Access = {
+      comm: r.comm ?? "",
+      path: normalize(path),
+      bit: loadRead ? 0 : BIT[c.letter],
+      failed: c.failed,
+      perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
+      t,
+      seq: Number.isNaN(t) ? Infinity : seq++,
+    };
+    details.add(x);
+    paths.add({ ...x, comm: "" });
+  };
+
+  const rows = (lines: { comm: string; path: string; agg: Agg }[] | undefined): Row[] | undefined =>
+    lines?.map(({ comm, path, agg }) => ({
+      agg,
+      flags: fmtFlags(agg),
+      comm: escapeForDisplay(comm),
+      path: escapeForDisplay(relativize(path, prefixes)),
+    }));
+
+  const finish = (): AuditSummary => {
+    const byPath = rows(paths.finish());
+    return {
+      ended,
+      lost,
+      executed: executed && [...executed].map((p) => escapeForDisplay(relativize(p, prefixes))),
+      paths: byPath,
+      // A table too large to print leaves no room for the details either.
+      details: byPath && rows(details.finish()),
+    };
+  };
+  return { observe, add, finish };
 }
 
-// The step's own executables, each once, in the order they were first run.
-function executedPaths(records: AuditRecord[], prefixes: SummaryOptions): string[] {
-  const seen = new Set<string>();
-  for (const r of records)
-    if (r.kind === "exec" && r.path) seen.add(normalize(canonical(r.path, prefixes)));
-  return [...seen].map((p) => escapeForDisplay(relativize(p, prefixes)));
+// In recording order, not by time, which a clock step could reorder. Rows
+// with no time go last, in path order.
+function inRecordingOrder(rows: Row[]): Row[] {
+  return rows.toSorted((a, b) => {
+    const [ca, pa] = sortKey(a.path);
+    const [cb, pb] = sortKey(b.path);
+    return (
+      a.agg.seq - b.agg.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1)
+    );
+  });
 }
 
 /**
  * The summary as blocks for fitStepSummary, in print order: a frame (heading
  * and legend) kept whole, the executed-paths and accessed-paths tables, and
  * the full per-command record folded into a details element. The tables and
- * the record take their priorities from `priorities`.
+ * the record take their priorities from `priorities`; one too large to print
+ * at all says `cutNote` in its place.
  */
-export function renderFilesystemAuditBlocks(
-  jsonl: string,
-  prefixes: SummaryOptions,
+export function renderAuditSummaryBlocks(
+  summary: AuditSummary,
+  startedAt: number | undefined,
   priorities: FilesystemPriorities,
+  cutNote: string,
 ): SummaryBlock[] {
-  const { records, ended, lost } = parse(jsonl);
-  const loads = findLoads(records, prefixes);
-  const rows = buildRows(records, loads, prefixes, true);
+  const { ended, lost, executed, paths, details } = summary;
   const heading = ended && !lost ? HEADING : `${HEADING}\n\n${INCOMPLETE_NOTE}`;
   const frame = (text: string): SummaryBlock => ({
     priority: 0,
@@ -665,55 +799,85 @@ export function renderFilesystemAuditBlocks(
     text,
     cut: "keep",
   });
-  if (rows.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
+  if (details?.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
 
   const blocks: SummaryBlock[] = [frame(`${heading}\n\n<sub>${LEGEND}</sub>\n\n`)];
-  const table = (id: FilesystemBlockId, title: string, md: string): SummaryBlock => ({
-    id,
-    priority: priorities[id],
-    level: 2,
-    section: SECTION,
-    text: `#### ${title}\n\n${md}\n\n`,
-    cut: "lines",
-    head: 4,
-  });
+  const table = (id: FilesystemBlockId, title: string, md: string | undefined): SummaryBlock =>
+    md === undefined
+      ? {
+          id,
+          priority: priorities[id],
+          level: 2,
+          section: SECTION,
+          text: `#### ${title}\n\n${cutNote}`,
+          cut: "atomic",
+        }
+      : {
+          id,
+          priority: priorities[id],
+          level: 2,
+          section: SECTION,
+          text: `#### ${title}\n\n${md}\n\n`,
+          cut: "lines",
+          head: 4,
+        };
 
-  const executed = executedPaths(records, prefixes);
-  if (executed.length > 0) {
+  if (executed?.length !== 0) {
     blocks.push(
       table(
         FILESYSTEM_BLOCK.executed,
         "Executed",
-        markdownRows(
-          ["Path"],
-          executed.map((path) => [codeCell(path)]),
-        ),
+        executed &&
+          markdownRows(
+            ["Path"],
+            executed.map((path) => [codeCell(path)]),
+          ),
       ),
     );
   }
-  const byPath = buildRows(records, loads, prefixes, false).sort((a, b) => {
-    const [ca, pa] = sortKey(a.path);
-    const [cb, pb] = sortKey(b.path);
-    return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : 0);
-  });
+  // Two paths can print alike ("x" and "…/x"), so they keep their recording
+  // order between them.
+  const byPath =
+    paths &&
+    inRecordingOrder(paths).sort((a, b) => {
+      const [ca, pa] = sortKey(a.path);
+      const [cb, pb] = sortKey(b.path);
+      return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : 0);
+    });
   blocks.push(
     table(
       FILESYSTEM_BLOCK.paths,
       "Accessed paths",
-      markdownRows(
-        ["Access", "Path"],
-        byPath.map(({ flags, path }) => [flags, codeCell(path)]),
-      ),
+      byPath &&
+        markdownRows(
+          ["Access", "Path"],
+          byPath.map(({ flags, path }) => [flags, codeCell(path)]),
+        ),
     ),
   );
 
+  // The table's note stands for the details too.
+  if (!byPath) return blocks;
+  const log = { id: FILESYSTEM_BLOCK.log, priority: priorities[FILESYSTEM_BLOCK.log], level: 3 };
+  if (!details) {
+    blocks.push({
+      ...log,
+      section: SECTION,
+      cut: "atomic",
+      open: DETAILS_OPEN,
+      text: cutNote,
+      close: DETAILS_CLOSE,
+    });
+    return blocks;
+  }
+  const rows = inRecordingOrder(details);
   // Times count from the proxy's start, as the communication details do, or
   // from the first access shown when that start is unknown.
   const originMs =
-    prefixes.startedAt === undefined
-      ? rows.reduce((m, r) => Math.min(m, r.span?.first ?? Infinity), Infinity)
-      : prefixes.startedAt * 1000;
-  const times = rows.map((r) => fmtSpan(r.span, originMs));
+    startedAt === undefined
+      ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity)
+      : startedAt * 1000;
+  const times = rows.map((r) => fmtSpan(r.agg, originMs));
   // Fixed-width columns. reduce, not Math.max(...spread), which overflows the
   // argument limit on very many rows. The time ends in a colon, as in the
   // communication details.
@@ -728,9 +892,7 @@ export function renderFilesystemAuditBlocks(
     )
     .join("\n");
   blocks.push({
-    id: FILESYSTEM_BLOCK.log,
-    priority: priorities[FILESYSTEM_BLOCK.log],
-    level: 3,
+    ...log,
     section: SECTION,
     cut: "lines",
     open: DETAILS_OPEN,
@@ -738,6 +900,42 @@ export function renderFilesystemAuditBlocks(
     close: DETAILS_CLOSE,
   });
   return blocks;
+}
+
+/** A line of the recording parsed, or undefined where it does not parse. */
+export function parseLine(line: string): unknown {
+  try {
+    return JSON.parse(line) as unknown;
+  } catch {
+    return undefined; // a line the tracer left truncated (e.g. a hard kill mid-write)
+  }
+}
+
+/** The summary of a recording held as a string, as blocks. */
+export function renderFilesystemAuditBlocks(
+  jsonl: string,
+  prefixes: SummaryOptions,
+  priorities: FilesystemPriorities,
+  cutNote = filesystemTruncationNote(undefined),
+): SummaryBlock[] {
+  const summary = createAuditSummary(prefixes);
+  const records = jsonl.split("\n").map(parseLine);
+  for (const r of records) summary.observe(r);
+  for (const r of records) summary.add(r);
+  return renderAuditSummaryBlocks(summary.finish(), prefixes.startedAt, priorities, cutNote);
+}
+
+/** The summary of a recording that could not be read. */
+export function unreadableSummaryBlocks(): SummaryBlock[] {
+  return [
+    {
+      priority: 0,
+      level: 1,
+      section: SECTION,
+      text: `${HEADING}\n\n${UNREADABLE_NOTE}\n`,
+      cut: "keep",
+    },
+  ];
 }
 
 /** The summary as one string, with nothing cut. */

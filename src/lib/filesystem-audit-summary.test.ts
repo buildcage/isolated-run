@@ -674,6 +674,26 @@ describe("renderFilesystemAuditSummary", () => {
     expect(dropWalkedDirs(many, () => ["R"])).toEqual(many);
   });
 
+  it("neither drops a climbing line nor credits it to the directories it names", () => {
+    const got = dropWalkedDirs(new Set([keyOf("c", "/work/d"), keyOf("c", "/work/d/../x")]), () => [
+      "R",
+    ]);
+    expect(got).toEqual(new Set([keyOf("c", "/work/d"), keyOf("c", "/work/d/../x")]));
+  });
+
+  it("joins a climbing path's accesses, and leaves out its library reads", () => {
+    expect(
+      lines(
+        render(
+          { kind: "read", pid: 2, comm: "c", path: "/work/../x" },
+          { kind: "write", pid: 2, comm: "c", path: "/work/../x" },
+          { kind: "read", pid: 2, comm: "c", path: "/lib/../lib/libz.so.1" },
+          { kind: "mmap", pid: 2, comm: "c", path: "/lib/../lib/libz.so.1", access: "x" },
+        ),
+      ),
+    ).toEqual(["RW c ./../x"]);
+  });
+
   describe("tables", () => {
     it("lists each executed path once, in the order first run", () => {
       const md = render(
@@ -769,5 +789,99 @@ describe("renderFilesystemAuditSummary", () => {
         /<details>\n<summary>📂 Filesystem details<\/summary>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
       );
     });
+  });
+});
+
+describe("renderFilesystemAuditSummary: limits", () => {
+  const CUT = "_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit";
+  const limited = (limits: SummaryOptions["limits"], ...records: object[]): string =>
+    renderFilesystemAuditSummary(jsonl(...records), { ...PREFIXES, limits });
+  const section = (md: string, from: string, to?: string): string =>
+    md.slice(md.indexOf(from), to ? md.indexOf(to) : undefined);
+  const tmpFiles = (n: number): object[] =>
+    Array.from({ length: n }, (_, i) => ({ kind: "write", comm: "c", path: `/tmp/f${i}` }));
+
+  it("puts the note in place of a table and the details too large to print", () => {
+    const md = limited(
+      { bytes: 200 },
+      { kind: "exec", comm: "c", path: "/usr/bin/c" },
+      ...tmpFiles(20),
+    );
+    expect(section(md, "#### Executed", "#### Accessed paths")).toContain("`/usr/bin/c`");
+    // The table's note stands for the details too.
+    expect(section(md, "#### Accessed paths")).toContain(CUT);
+    expect(md.split(CUT)).toHaveLength(2);
+    expect(md).not.toContain("<details>");
+    expect(md).not.toContain("/tmp/f0");
+  });
+
+  it("does not count a line that a later fold can still take away", () => {
+    const long = "x".repeat(40);
+    const md = limited(
+      { bytes: 100 },
+      { kind: "read", comm: "c", path: `/work/a/${long}1` },
+      { kind: "read", comm: "c", path: `/work/a/${long}2` },
+      { kind: "read", comm: "c", path: "/work/a/3" },
+    );
+    expect(md).not.toContain(CUT);
+    expect(lines(md)).toEqual(["R c ./a/**"]);
+  });
+
+  it("cuts only the details when the table still fits", () => {
+    const records = Array.from({ length: 20 }, (_, i) => ({
+      kind: "read",
+      comm: `command-${i}`,
+      path: "/tmp/x",
+    }));
+    const md = limited({ bytes: 200 }, ...records);
+    expect(section(md, "#### Accessed paths", "<details>")).toContain("| R | `/tmp/x` |");
+    expect(section(md, "<details>")).toContain(CUT);
+  });
+
+  it("cuts the executed table on its own", () => {
+    const execs = Array.from({ length: 20 }, (_, i) => ({
+      kind: "exec",
+      comm: "c",
+      path: `/usr/bin/tool-${i}`,
+    }));
+    const md = limited({ bytes: 200 }, ...execs);
+    expect(section(md, "#### Executed", "#### Accessed paths")).toContain(CUT);
+    expect(section(md, "#### Accessed paths", "<details>")).toContain("| X | `/usr/bin/**` |");
+  });
+
+  it("cuts a part whose unfolded paths outgrow the bound", () => {
+    const md = limited({ nodes: 5 }, ...tmpFiles(5));
+    expect(section(md, "#### Accessed paths", "<details>")).toContain(CUT);
+  });
+
+  it("counts the directories a walk does not explain once the lines are spelled out", () => {
+    // Each directory's attribute change keeps its own line, which the size
+    // estimate leaves out while it has a child.
+    const records = Array.from({ length: 5 }, (_, i) => [
+      { kind: "chmod", comm: "c", path: `/tmp/d${i}` },
+      { kind: "read", comm: "c", path: `/tmp/d${i}/f` },
+    ]).flat();
+    expect(section(limited({ bytes: 1000 }, ...records), "#### Accessed paths")).not.toContain(CUT);
+    expect(section(limited({ bytes: 150 }, ...records), "#### Accessed paths")).toContain(CUT);
+  });
+
+  it("shows a library's read once it remembers no more loads", () => {
+    const records = [
+      { kind: "read", pid: 2, comm: "c", path: "/lib/libz.so.1" },
+      { kind: "mmap", pid: 2, comm: "c", path: "/lib/libz.so.1", access: "x" },
+    ];
+    expect(lines(limited({}, ...records))).toEqual([]);
+    expect(lines(limited({ loads: 0 }, ...records))).toEqual(["R c /lib/libz.so.1"]);
+  });
+
+  it("folds a directory into its parent's fold once the parent fills up", () => {
+    const md = render(
+      { kind: "read", comm: "c", path: "/work/a/b/1" },
+      { kind: "write", comm: "c", path: "/work/a/b/2" },
+      { kind: "read", comm: "c", path: "/work/a/b/3" },
+      { kind: "read", comm: "c", path: "/work/a/c" },
+      { kind: "chmod", comm: "c", path: "/work/a/d" },
+    );
+    expect(lines(md)).toEqual(["RWA c ./a/**"]);
   });
 });
