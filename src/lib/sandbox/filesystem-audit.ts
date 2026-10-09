@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 
 import { SandboxError } from "../errors.ts";
+import { realHostProbes, type HostProbes } from "./host-probes.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 const CGROUP_ROOT = "/sys/fs/cgroup";
@@ -44,6 +45,17 @@ export function filesystemAuditPaths(
  *  subtree, which runc then puts the sandboxed process into. */
 export function cgroupFsPath(cgroupsPath: string): string {
   return join(CGROUP_ROOT, cgroupsPath);
+}
+
+export const NO_CGROUP_V2 = "filesystem_audit needs a cgroup v2 host; the command was not run.";
+
+/** Fails the step before the proxy starts on a host the tracer cannot watch. */
+export function checkFilesystemAuditHost(
+  probes: Pick<HostProbes, "cgroupPath"> = realHostProbes,
+): void {
+  if (probes.cgroupPath() === undefined) {
+    throw new SandboxError(NO_CGROUP_V2, "FILESYSTEM_AUDIT_UNAVAILABLE");
+  }
 }
 
 export type SpawnAudit = (command: string, args: string[]) => AuditChild;

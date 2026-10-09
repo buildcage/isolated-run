@@ -22,6 +22,7 @@ import {
   extractTracer,
   startFilesystemAudit,
   noAudit,
+  NO_CGROUP_V2,
   type AuditHandle,
   type FilesystemAuditPaths,
 } from "./filesystem-audit.ts";
@@ -525,10 +526,7 @@ async function startAudit(
   if (filesystemAudit === undefined) return noAudit;
   const cgroupsPath = config.linux.cgroupsPath;
   if (cgroupsPath === undefined) {
-    throw new SandboxError(
-      "filesystem_audit needs a cgroup v2 host; the command was not run.",
-      "FILESYSTEM_AUDIT_UNAVAILABLE",
-    );
+    throw new SandboxError(NO_CGROUP_V2, "FILESYSTEM_AUDIT_UNAVAILABLE");
   }
   let tracerPath: string;
   try {

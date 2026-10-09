@@ -48,7 +48,7 @@ import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { saveWriteThroughForPost } from "./post-write-through.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
-import { filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
+import { checkFilesystemAuditHost, filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
 import {
   resolveFilesystemPlan,
   resolveWriteThroughInput,
@@ -102,6 +102,7 @@ export interface SandboxStepDeps {
   checkScratchBaseParent: typeof checkScratchBaseParent;
   checkPasswordlessSudo: typeof checkPasswordlessSudo;
   checkOverlayfsSupport: typeof checkOverlayfsSupport;
+  checkFilesystemAuditHost: typeof checkFilesystemAuditHost;
   createAnnotation: typeof createAnnotation;
   resolveFilesystemPlan: typeof resolveFilesystemPlan;
   pinHostCommands: typeof pinHostCommands;
@@ -163,6 +164,7 @@ const realDeps: SandboxStepDeps = {
   checkScratchBaseParent,
   checkPasswordlessSudo,
   checkOverlayfsSupport,
+  checkFilesystemAuditHost,
   createAnnotation,
   resolveFilesystemPlan,
   pinHostCommands,
@@ -249,6 +251,7 @@ export async function runSandboxStep(
     checkScratchBaseParent,
     checkPasswordlessSudo,
     checkOverlayfsSupport,
+    checkFilesystemAuditHost,
     createAnnotation,
     resolveFilesystemPlan,
     pinHostCommands,
@@ -348,6 +351,7 @@ export async function runSandboxStep(
   // the runner can't support the isolation setup at all.
   checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") checkOverlayfsSupport();
+  if (filesystemAudit === "record") checkFilesystemAuditHost();
 
   // Resolved/pre-created here (not inside runSandboxedCommand) so a bad
   // write_through entry, or a target that can't be created, fails before the

@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { SandboxError } from "../errors.ts";
 import {
   cgroupFsPath,
+  checkFilesystemAuditHost,
   exitReason,
   extractTracer,
   filesystemAuditPaths,
@@ -19,6 +20,20 @@ describe("filesystemAuditPaths", () => {
       outPath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.jsonl",
       pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.pid",
     });
+  });
+});
+
+describe("checkFilesystemAuditHost", () => {
+  it("passes on a cgroup v2 host and fails the step elsewhere", () => {
+    expect(() =>
+      checkFilesystemAuditHost({ cgroupPath: () => "/system.slice/runner.service" }),
+    ).not.toThrow();
+    expect(() => checkFilesystemAuditHost({ cgroupPath: () => undefined })).toThrow(
+      new SandboxError(
+        "filesystem_audit needs a cgroup v2 host; the command was not run.",
+        "FILESYSTEM_AUDIT_UNAVAILABLE",
+      ),
+    );
   });
 });
 

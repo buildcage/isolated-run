@@ -37,6 +37,7 @@ const mocks = {
   checkScratchBaseParent: vi.fn(),
   checkPasswordlessSudo: vi.fn(),
   checkOverlayfsSupport: vi.fn(),
+  checkFilesystemAuditHost: vi.fn(),
   createAnnotation: vi.fn(),
   resolveFilesystemPlan: vi.fn(),
   pinHostCommands: vi.fn(),
@@ -384,6 +385,19 @@ describe("runSandboxStep", () => {
     });
     await runSandboxStep(ENV, deps);
     expect(mocks.checkOverlayfsSupport).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks the host for the filesystem audit only under record, before the proxy starts", async () => {
+    await runSandboxStep(ENV, deps);
+    expect(mocks.checkFilesystemAuditHost).not.toHaveBeenCalled();
+
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+    mocks.checkFilesystemAuditHost.mockImplementation(() => {
+      throw new SandboxError("no cgroup v2", "FILESYSTEM_AUDIT_UNAVAILABLE");
+    });
+    mocks.startSandboxProxy.mockClear();
+    await expect(runSandboxStep(ENV, deps)).rejects.toThrow("no cgroup v2");
+    expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });
 
   it("logs the filesystem plan only in ephemeral mode", async () => {
