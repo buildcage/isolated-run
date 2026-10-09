@@ -15520,7 +15520,11 @@ function applyConfigFile(env, { known, lists }) {
 //#endregion
 //#region src/core/lib/actions/inputs.ts
 init_core();
-var InvalidInputError = class extends ActionError {};
+var InvalidInputError = class extends ActionError {
+	constructor(message, code) {
+		super(message, code);
+	}
+};
 function readBooleanInput(name, fallback, getInput) {
 	let value = getInput(name);
 	if (value === "") return fallback;
