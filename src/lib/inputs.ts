@@ -186,9 +186,9 @@ const AWS_KEY_CHECK_OFF: AwsKeyInputs = { key: "", roleAccounts: [] };
 
 /**
  * The AWS access key check pins the step to its own AWS_ACCESS_KEY_ID; role
- * accounts also let through the keys STS issues for their roles, and turn the
- * check on. universal never sees a request's headers, so it fails in restrict
- * and is warned about in audit.
+ * accounts also let through the keys STS issues for their roles, and need the
+ * check set on explicitly. universal never sees a request's headers, so it
+ * fails in restrict and is warned about in audit.
  */
 export function readAwsKeyInputs(
   { proxyEngine, proxyMode }: ProxyInputs,
@@ -210,14 +210,17 @@ export function readAwsKeyInputs(
       "INVALID_AWS_ACCOUNTS",
     );
   }
-  // An explicit false wins, so a step can opt out of accounts a shared
-  // config_file names.
-  if (!readBooleanInput("aws_key_check", roleAccounts.length > 0, getInput)) {
-    if (roleAccounts.length > 0) {
-      warn("aws_key_check is false, so allowed_aws_role_accounts is ignored for this run.");
-    }
-    return AWS_KEY_CHECK_OFF;
+  const check = readBooleanInput("aws_key_check", false, getInput);
+  // Not a default that follows the accounts: a config_file's false would then
+  // switch off accounts the workflow names, which the workflow cannot show.
+  if (roleAccounts.length > 0 && !check) {
+    throw new SandboxError(
+      "allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove " +
+        "allowed_aws_role_accounts.",
+      "AWS_KEY_CHECK_NOT_SET",
+    );
   }
+  if (!check) return AWS_KEY_CHECK_OFF;
 
   if (proxyEngine !== "inspect") {
     const reason =

@@ -69422,7 +69422,9 @@ function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$4 = ge
 		let { message } = e;
 		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
-	if (!readBooleanInput("aws_key_check", roleAccounts.length > 0, getInput$4)) return roleAccounts.length > 0 && warn("aws_key_check is false, so allowed_aws_role_accounts is ignored for this run."), AWS_KEY_CHECK_OFF;
+	let check = readBooleanInput("aws_key_check", !1, getInput$4);
+	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove allowed_aws_role_accounts.", "AWS_KEY_CHECK_NOT_SET");
+	if (!check) return AWS_KEY_CHECK_OFF;
 	if (proxyEngine !== "inspect") {
 		let reason = `The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers.`;
 		if (proxyMode === "audit") return warn(`${reason} It is ignored for this run.`), AWS_KEY_CHECK_OFF;

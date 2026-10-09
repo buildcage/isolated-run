@@ -46,6 +46,7 @@ import { ActionError } from "#core/lib/errors.ts";
  *   SANDBOX_LAUNCH_FAILED             `sudo run-isolated.sh` could not be started at all
  *   SCRATCH_BASE_SYMLINKED            /var/tmp, the sandbox scratch base's parent, resolves through a symlink
  *   INVALID_AWS_ACCOUNTS              an allowed_aws_role_accounts entry is not a 12-digit account ID
+ *   AWS_KEY_CHECK_NOT_SET             allowed_aws_role_accounts is set without aws_key_check: true
  *   AWS_ACCESS_KEY_MISSING            the AWS access key check is on but the step has no AWS_ACCESS_KEY_ID to start from
  */
 export type SandboxErrorCode =
@@ -82,6 +83,7 @@ export type SandboxErrorCode =
   | "SANDBOX_LAUNCH_FAILED"
   | "SCRATCH_BASE_SYMLINKED"
   | "INVALID_AWS_ACCOUNTS"
+  | "AWS_KEY_CHECK_NOT_SET"
   | "AWS_ACCESS_KEY_MISSING";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}
