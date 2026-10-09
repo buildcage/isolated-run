@@ -282,8 +282,8 @@ function fmtSpan(a: Agg, originMs: number): string {
   return first === last ? first : `${first}-${last}`;
 }
 
-// Rows are keyed per (command, path). NUL cannot occur in either, so it joins
-// them unambiguously.
+// Rows are keyed per (command, path). NUL cannot occur in a command name, so
+// the first one ends it; a marked path may hold another.
 const SEP = "\0";
 export const keyOf = (comm: string, path: string): string => `${comm}${SEP}${path}`;
 const commOf = (key: string): string => key.slice(0, key.indexOf(SEP));
@@ -697,7 +697,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const next = `${r.pid}/${observed.get(r.pid)}`;
       for (const path of [...(images.get(proc) ?? []), ...(r.path ? [marked(r, r.path)] : [])]) {
         load(proc, path, false);
-        load(next, path, LIBRARY_NAME.test(unmarked(path)));
+        load(next, path, !path.startsWith(MEMFD) && LIBRARY_NAME.test(unmarked(path)));
       }
       images.delete(proc);
     }

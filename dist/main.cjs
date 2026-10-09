@@ -68647,7 +68647,7 @@ function createAuditSummary(prefixes) {
 			} else load(proc, r.path, !0);
 		} else if (r.kind === "exec") {
 			let next = `${r.pid}/${observed.get(r.pid)}`;
-			for (let path of [...images.get(proc) ?? [], ...r.path ? [marked(r, r.path)] : []]) load(proc, path, !1), load(next, path, LIBRARY_NAME.test(unmarked(path)));
+			for (let path of [...images.get(proc) ?? [], ...r.path ? [marked(r, r.path)] : []]) load(proc, path, !1), load(next, path, !path.startsWith(MEMFD) && LIBRARY_NAME.test(unmarked(path)));
 			images.delete(proc);
 		}
 	}, fanout = prefixes.fanout ?? 3, keep = [

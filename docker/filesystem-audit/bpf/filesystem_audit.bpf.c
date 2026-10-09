@@ -443,9 +443,9 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 	if (!d || !m)
 		return off;
 	e->bases |= bit;
-	// The reader applies the mark only where the path is the descriptor's own
-	// file (futimens).
-	if (mark_file(e, d, m))
+	// A descriptor's own file is marked; the reader applies it only where the
+	// path is that file (futimens).
+	if (dfd != AT_FDCWD && mark_file(e, d, m))
 		return leaf(e, off, d, n);
 	return walk(e, off, d, m, n, trunc);
 }

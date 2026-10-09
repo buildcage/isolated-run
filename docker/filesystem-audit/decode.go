@@ -260,7 +260,9 @@ func decode(raw []byte) (record, error) {
 		r.Image = pathRet == 1
 	case 2: // exec
 		r.Path = cstr(data)
-	case 3, 4, 6, 10, 23, 24: // unlink, rmdir, mkdir, truncate, exec-file, mknod
+	case 3, 4, 6, 24: // unlink, rmdir, mkdir, mknod
+		r.Path, _ = components(data, n1, truncated)
+	case 10, 23: // truncate, exec-file
 		r.Path, _ = components(data, n1, truncated)
 		applyMarks(&r, marks, false)
 	case 7: // chmod
@@ -284,7 +286,7 @@ func decode(raw []byte) (record, error) {
 		var rest []byte
 		r.Path, rest = components(data, n1, truncated)
 		r.To, _ = components(rest, n2, truncated2)
-		applyMarks(&r, marks, false)
+		applyMarks(&r, marks, false) // only a link's source is marked
 	case 16, 18, 19: // failed delete / chmod / chown
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet
