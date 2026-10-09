@@ -814,7 +814,8 @@ shown as `…/name`, as is a path too deep to record in full. Where its `path` d
 is shown escaped, as `\n` or `\u{202e}`, and a backslash as `\\`. A program the step ran is
 recorded under the file it resolved to, with symlinks followed and a script under its own path rather
 than its interpreter's; the artifact keeps the name it was run by as `name`. The libraries a command
-loads are left out, along with that process's reads of them and of the program it runs.
+loads are left out, as are that process's reads of them, of `/etc/ld.so.cache` and of the program
+it runs, including reads made before it ran it. Another process's reads of those files are shown.
 
 When the step's Job Summary would pass GitHub's size limit, its parts give way in this order: the
 filesystem details, the traffic report's communication log, the accessed-paths table, the executed

@@ -171,18 +171,27 @@ describe("renderFilesystemAuditSummary", () => {
   });
 
   it("drops a library's or program's read only in the process that mapped or ran it", () => {
-    expect(
-      lines(
-        render(
-          { kind: "read", pid: 2, comm: "cat", path: "/home/u/.ssh/id_rsa" },
-          { kind: "read", pid: 3, comm: "cat", path: "/usr/bin/tool" },
-          { kind: "read", pid: 4, comm: "x", path: "/home/u/.ssh/id_rsa" },
-          { kind: "mmap", pid: 4, comm: "x", path: "/home/u/.ssh/id_rsa", access: "x" },
-          { kind: "read", pid: 5, comm: "tool", path: "/usr/bin/tool" },
-          { kind: "exec", pid: 5, comm: "tool", path: "/usr/bin/tool" },
-        ),
-      ),
-    ).toEqual(["R cat ~/.ssh/id_rsa", "R cat /usr/bin/tool", "X tool /usr/bin/tool"]);
+    const md = render(
+      { kind: "read", pid: 2, comm: "cat", path: "/home/u/.ssh/id_rsa" },
+      { kind: "read", pid: 3, comm: "cat", path: "/usr/bin/tool" },
+      { kind: "read", pid: 3, comm: "cat", path: "/etc/ld.so.cache" },
+      { kind: "read", pid: 4, comm: "x", path: "/home/u/.ssh/id_rsa" },
+      { kind: "read", pid: 4, comm: "x", path: "/etc/ld.so.cache" },
+      { kind: "mmap", pid: 4, comm: "x", path: "/home/u/.ssh/id_rsa", access: "x" },
+      { kind: "read", pid: 5, comm: "tool", path: "/usr/bin/tool" },
+      { kind: "exec", pid: 5, comm: "tool", path: "/usr/bin/tool" },
+    );
+    expect(lines(md)).toEqual([
+      "R cat ~/.ssh/id_rsa",
+      "R cat /etc/ld.so.cache",
+      "R cat /usr/bin/tool",
+      "X tool /usr/bin/tool",
+    ]);
+    expect(tableRows(md)).toEqual([
+      "| R | `~/.ssh/id_rsa` |",
+      "| R | `/etc/ld.so.cache` |",
+      "| RX | `/usr/bin/tool` |",
+    ]);
   });
 
   it("tells a process from a later one given the same pid", () => {
@@ -534,6 +543,7 @@ describe("renderFilesystemAuditSummary", () => {
     it("counts from the first access shown, not a dropped library read", () => {
       const md = render(
         { t: at(0), kind: "read", comm: "sh", path: "/etc/ld.so.cache" },
+        { t: at(0), kind: "mmap", comm: "sh", path: "/lib/libc.so.6", access: "x" },
         { t: at(3), kind: "read", comm: "sh", path: "/work/x" },
       );
       expect(lines(md)).toEqual(["00:00.000: R sh ./x"]);

@@ -383,35 +383,36 @@ function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: 
   const okSpans: LetterSpans = new Map();
   const failedSpans: LetterSpans = new Map();
 
-  // A library or an exec'd binary is already shown by its X, so the reads of
-  // the process that mapped or ran it are dropped; another process's read of
-  // the same file is not. A process is its pid, told from an earlier holder of
-  // that pid by how many forks have handed the pid out.
-  const forks = new Map<number | undefined, number>();
-  const procs = records.map((r) => {
-    if (r.kind === "fork") forks.set(r.pid, (forks.get(r.pid) ?? 0) + 1);
-    return `${r.pid}/${forks.get(r.pid) ?? 0}`;
-  });
+  // Libraries are left out and an exec'd binary is shown by its X, so a process
+  // that mapped or ran a file has its reads of that file and of
+  // /etc/ld.so.cache dropped; another process's reads stay. A pid handed out
+  // again by a fork counts as a new process.
+  const procOf = (gens: Map<number | undefined, number>, r: AuditRecord): string => {
+    if (r.kind === "fork") gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
+    return `${r.pid}/${gens.get(r.pid) ?? 0}`;
+  };
   const loaded = new Set<string>();
-  records.forEach((r, i) => {
-    if (r.path && (r.kind === "exec" || (r.kind === "mmap" && r.access === "x")))
-      loaded.add(keyOf(procs[i], canonical(r.path, prefixes)));
-  });
+  const gens = new Map<number | undefined, number>();
+  for (const r of records) {
+    const proc = procOf(gens, r);
+    if (r.path && (r.kind === "exec" || (r.kind === "mmap" && r.access === "x"))) {
+      loaded.add(keyOf(proc, canonical(r.path, prefixes)));
+      loaded.add(keyOf(proc, "/etc/ld.so.cache"));
+    }
+  }
 
   let seq = 0;
-  records.forEach((r, i) => {
-    if (r.kind === "mmap" && r.access === "x") return;
+  gens.clear();
+  for (const r of records) {
+    const proc = procOf(gens, r);
+    if (r.kind === "mmap" && r.access === "x") continue;
     const c = classify(r);
-    if (!c) return;
+    if (!c) continue;
     const path = canonical(c.path, prefixes);
     const key = keyOf(byCommand ? (r.comm ?? "") : "", path);
-    if (
-      !c.failed &&
-      c.letter === "R" &&
-      (path === "/etc/ld.so.cache" || loaded.has(keyOf(procs[i], path)))
-    ) {
+    if (!c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) {
       if (!ok.has(key)) ok.set(key, new Set());
-      return;
+      continue;
     }
     const t = Date.parse(r.t ?? "");
     if (!Number.isNaN(t)) {
@@ -423,7 +424,7 @@ function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: 
     } else {
       addFlag(ok, key, c.letter);
     }
-  });
+  }
 
   // Re-key on the normalized path, dropping non-file targets.
   const nok = new Map<string, Set<string>>();

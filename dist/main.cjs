@@ -68592,23 +68592,26 @@ function parse(jsonl) {
 	};
 }
 function buildRows(records, prefixes, byCommand) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), okSpans = new Map(), failedSpans = new Map(), forks = new Map(), procs = records.map((r) => (r.kind === "fork" && forks.set(r.pid, (forks.get(r.pid) ?? 0) + 1), `${r.pid}/${forks.get(r.pid) ?? 0}`)), loaded = new Set();
-	records.forEach((r, i) => {
-		r.path && (r.kind === "exec" || r.kind === "mmap" && r.access === "x") && loaded.add(keyOf(procs[i], canonical(r.path, prefixes)));
-	});
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), okSpans = new Map(), failedSpans = new Map(), procOf = (gens, r) => (r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1), `${r.pid}/${gens.get(r.pid) ?? 0}`), loaded = new Set(), gens = new Map();
+	for (let r of records) {
+		let proc = procOf(gens, r);
+		r.path && (r.kind === "exec" || r.kind === "mmap" && r.access === "x") && (loaded.add(keyOf(proc, canonical(r.path, prefixes))), loaded.add(keyOf(proc, "/etc/ld.so.cache")));
+	}
 	let seq = 0;
-	records.forEach((r, i) => {
-		if (r.kind === "mmap" && r.access === "x") return;
+	gens.clear();
+	for (let r of records) {
+		let proc = procOf(gens, r);
+		if (r.kind === "mmap" && r.access === "x") continue;
 		let c = classify(r);
-		if (!c) return;
+		if (!c) continue;
 		let path = canonical(c.path, prefixes), key = keyOf(byCommand ? r.comm ?? "" : "", path);
-		if (!c.failed && c.letter === "R" && (path === "/etc/ld.so.cache" || loaded.has(keyOf(procs[i], path)))) {
+		if (!c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) {
 			ok.has(key) || ok.set(key, new Set());
-			return;
+			continue;
 		}
 		let t = Date.parse(r.t ?? "");
 		Number.isNaN(t) || widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++), c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
-	});
+	}
 	let nok = new Map(), nfailed = new Map(), nperm = new Map(), nspans = new Map(), mergeInto = (dst, src, keepRelative, srcSpans) => {
 		for (let [key, set] of src) {
 			let p = pathOf(key);
