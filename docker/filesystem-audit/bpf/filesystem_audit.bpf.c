@@ -54,11 +54,6 @@ struct file {
 	unsigned int f_mode;
 } __attribute__((preserve_access_index));
 
-struct mm_struct {
-	unsigned long arg_start;
-	unsigned long arg_end;
-} __attribute__((preserve_access_index));
-
 struct fs_struct {
 	struct path pwd;
 } __attribute__((preserve_access_index));
@@ -75,7 +70,6 @@ struct files_struct {
 struct task_struct {
 	struct task_struct *real_parent;
 	int tgid;
-	struct mm_struct *mm;
 	struct fs_struct *fs;
 	struct files_struct *files;
 	struct nsproxy *nsproxy;

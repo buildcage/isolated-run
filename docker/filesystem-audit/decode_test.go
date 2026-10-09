@@ -261,7 +261,7 @@ func TestDecode(t *testing.T) {
 		{
 			name: "chown",
 			ev:   event{kind: 11, comm: "chown", flags: 1001, mode: 121, n1: 2, data: comps("f", "tmp")},
-			want: record{Kind: "chown", Comm: "chown", Path: "/tmp/f", Flags: 1001, Owner: "1001:121"},
+			want: record{Kind: "chown", Comm: "chown", Path: "/tmp/f", Owner: "1001:121"},
 		},
 		{
 			name: "exec file, resolved",

@@ -229,7 +229,6 @@ func decode(raw []byte) (record, error) {
 		r.Flags = mode
 	case 11: // chown
 		r.Path, _ = components(data, n1, truncated)
-		r.Flags = flags
 		r.Owner = fmt.Sprintf("%d:%d", flags, mode)
 	case 8: // symlink
 		r.To = cstr(data)
