@@ -818,7 +818,7 @@ the program itself, including those made just before running it. Other programs'
 files are shown. A file mapped executable counts as a library only when its name ends in `.so`
 (optionally followed by version numbers, as in `.so.6`) or `.node`, or when the kernel maps it to
 start a program, which the artifact marks `"image":true`; any other is shown as read. A file mapped
-shared and writable is shown as written, as is one `mprotect` makes so after it was mapped.
+shared and writable is shown as written, including one made so with `mprotect` after it was mapped.
 
 When the step's Job Summary would pass GitHub's size limit, its parts give way in this order: the
 filesystem details, the traffic report's communication log, the accessed-paths table, the executed

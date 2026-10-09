@@ -282,7 +282,8 @@ jobs:
           # an exec mapped it, as it does run.sh's interpreter.
           grep -qE ' R +python3 +\./mapped\.bin$' "$f"
           # A write through a mapping made writable later is still a write,
-          # executable too or not; shared anonymous memory names no file.
+          # whether or not it is also executable; shared anonymous memory
+          # names no file.
           grep -qE ' RW +python3 +\./mprotected\.bin$' "$f"
           grep -qE ' RW +python3 +\./mprotected-rwx\.bin$' "$f"
           ! grep -q '/dev/zero' "$f"
