@@ -96,6 +96,7 @@ func run(cgPath, outPath, readyPath, pidPath string) error {
 		return fmt.Errorf("load: %w", err)
 	}
 	defer coll.Close()
+	// Before attaching: an empty slot matches no task.
 	if err := coll.Maps["target"].Put(uint32(0), uint32(cg.Fd())); err != nil {
 		return fmt.Errorf("set watched cgroup: %w", err)
 	}
@@ -165,11 +166,15 @@ func prepareCgroup(cgPath string) (*os.File, error) {
 	if err := os.MkdirAll(abs, 0o755); err != nil {
 		return nil, err
 	}
+	var st unix.Stat_t
+	if err := unix.Stat(abs, &st); err != nil {
+		return nil, err
+	}
 	f, err := os.Open(abs)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(os.Stderr, "filesystem-audit: cgroup %s\n", abs)
+	fmt.Fprintf(os.Stderr, "filesystem-audit: cgroup %s id=%d\n", abs, st.Ino)
 	return f, nil
 }
 
