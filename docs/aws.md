@@ -70,9 +70,9 @@ secret is refused by AWS and logged in your own account.
 
 Any other AWS credential is refused as `aws-unsupported-credential` without its key being read:
 SigV2 (an `Authorization: AWS <key>:<signature>` header, or `AWSAccessKeyId` in the query or a form
-body), SigV3's `X-Amzn-Authorization` header, `X-Amz-Credential` in a form body, any other
-`Authorization` scheme on a host that serves every account, and an S3 POST-policy upload, whose
-credential is in a multipart body.
+body), SigV3's `X-Amzn-Authorization` header, `X-Amz-Credential` in a form body or spelled otherwise
+in the query, any other `Authorization` scheme on a host that serves every account, and an S3
+POST-policy upload, whose credential is in a multipart body.
 
 A CodeCommit `Basic` login carries a key too: the user name CodeCommit's Git credential helper sends
 is the key ID, checked the same way. A static CodeCommit Git credential names its account instead
@@ -83,7 +83,7 @@ A form body is the body of a `POST` whose Content-Type is `application/x-www-for
 host that names no resource (below): the only body AWS reads parameters from. The proxy reads it
 whole, up to 4 MiB with the headers, before deciding. It refuses what it cannot read through as
 `aws-unreadable`: a form body that is larger, compressed, has no `Content-Length` or holds a NUL
-byte, and a query string that does not URL-decode.
+byte.
 
 The proxy knows two kinds of key:
 
@@ -123,7 +123,7 @@ neither a known key nor an allowed account is `aws-key-not-allowed`, and a reque
 | A CodeCommit request with no `Authorization`, as Git sends first                                                 | allowed                      |
 | More than one credential: two `Authorization` headers, a header and a query credential, or a credential repeated | `aws-ambiguous-credential`   |
 | A credential other than SigV4's or SigV4a's, or an S3 POST-policy upload (above)                                 | `aws-unsupported-credential` |
-| A form body or query string the proxy cannot read through (above)                                                | `aws-unreadable`             |
+| A form body the proxy cannot read through (above)                                                                | `aws-unreadable`             |
 | `AssumeRoleWithWebIdentity` for a role in an account not in `allowed_aws_role_accounts`                          | `aws-role-not-allowed`       |
 
 These hosts name the resource a request reaches, in the host name or, for S3's path style and an EKS

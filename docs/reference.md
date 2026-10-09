@@ -673,7 +673,7 @@ The check refuses after the URL rules have allowed a request, with one of these 
 | `aws-no-credential`          | the request carried no AWS credential, to a host that names no resource                                                                                                                                          |
 | `aws-ambiguous-credential`   | the request carried more than one credential: two `Authorization` headers, a header and a query credential, or a repeated one                                                                                    |
 | `aws-unsupported-credential` | the request carried an AWS credential other than SigV4's or SigV4a's: SigV2, SigV3, another `Authorization` scheme on a host that serves every account, a credential in a form body, or an S3 POST-policy upload |
-| `aws-unreadable`             | the request could hide a credential where the proxy cannot read: a query that does not decode, or a form body that is compressed, has no `Content-Length`, is larger than about 4 MiB or holds a NUL byte        |
+| `aws-unreadable`             | the request could hide a credential where the proxy cannot read: a form body that is compressed, has no `Content-Length`, is larger than about 4 MiB or holds a NUL byte                                         |
 | `aws-role-not-allowed`       | an unsigned `AssumeRoleWithWebIdentity` named a role in an account not in `allowed_aws_role_accounts`                                                                                                            |
 
 These are refusals like `not-allowed`: they are in **🚫 Blocked Hosts** and fail the step under

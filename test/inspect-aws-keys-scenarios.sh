@@ -133,7 +133,7 @@ check_status "the start key in the header, a chunked form body" \
 # 413 is the fixture origin's own 1 MiB cap: the proxy let the body through.
 check_status "the start key in the header, a 2 MB binary body with no Content-Type" \
   "$({ printf '\x89PNG'; pad 2000000; } | $C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type:" --data-binary @- $CF)" "413"
-check_status "a public read whose query holds a broken escape" "$($C "https://bucket.s3.amazonaws.com/public/x?a=%zz")" "403"
+check_status "a public read whose query holds a broken escape" "$($C "https://bucket.s3.amazonaws.com/public/x?a=%zz")" "200"
 check_status "a presigned URL with %00 ahead of its credential" \
   "$($C "https://bucket.s3.amazonaws.com/x?a=%00&X-Amz-Credential=${AKIA}TESTATTACKER0001%2Fx")" "403"
 
