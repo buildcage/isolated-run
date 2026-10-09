@@ -68533,7 +68533,7 @@ var Lines = class {
 		}
 		let kids = this.trees.get(x.comm);
 		kids || this.trees.set(x.comm, kids = new Map());
-		let parent;
+		let parent, settled = !0, parentSettled = !0;
 		for (let i = 0; i < parts.length; i++) {
 			let node = kids.get(parts[i]);
 			if (!node) {
@@ -68541,16 +68541,16 @@ var Lines = class {
 					bytes: 0,
 					kept: this.isKept(parts, i + 1) || void 0
 				}, kids.set(parts[i], node), ++this.nodes > this.opts.nodes) return this.stop();
-				if (parent && (this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout)) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x);
+				if (parent && (this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout)) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
 			}
-			if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x);
+			if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x, settled);
 			if (i === parts.length - 1) {
 				node.own ??= newAgg();
 				let shown = flagBits(node.own) !== 0;
-				apply(node.own, x), !shown && flagBits(node.own) && !node.kids?.size && this.setBytes(node, this.opts.rowBytes(x.path, x.comm));
+				apply(node.own, x), settled && !shown && flagBits(node.own) && !node.kids?.size && this.setBytes(node, this.opts.rowBytes(x.path, x.comm));
 				return;
 			}
-			node.kids ??= new Map(), kids = node.kids, parent = node;
+			node.kids ??= new Map(), kids = node.kids, parent = node, parentSettled = settled, settled &&= !!node.kept;
 		}
 	}
 	isKept(parts, depth) {
@@ -68565,8 +68565,8 @@ var Lines = class {
 		}
 		node.folded = agg, node.own = void 0, node.kids = void 0;
 	}
-	addFolded(node, parts, x) {
-		apply(node.folded, x), flagBits(node.folded) && !node.bytes && this.setBytes(node, this.opts.rowBytes(`${spell(parts)}/**`, x.comm));
+	addFolded(node, parts, x, settled) {
+		apply(node.folded, x), settled && flagBits(node.folded) && !node.bytes && this.setBytes(node, this.opts.rowBytes(`${spell(parts)}/**`, x.comm));
 	}
 	setBytes(node, bytes) {
 		this.count(bytes - node.bytes), node.bytes = bytes;
@@ -68609,7 +68609,7 @@ const HEADING = "### Filesystem audit", SECTION$1 = "filesystem", DETAILS_OPEN =
 Object.fromEntries(Object.values(FILESYSTEM_BLOCK).map((id) => [id, 0]));
 const LIMITS = {
 	bytes: STEP_SUMMARY_LIMIT_BYTES,
-	nodes: 1e6,
+	nodes: 2e5,
 	loads: 2e5
 };
 function procOf(gens, r) {
@@ -68745,7 +68745,7 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote) {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return ca - cb || (pa < pb ? -1 : +(pa > pb));
 	});
-	blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map(({ flags, path }) => [flags, codeCell(path)]))));
+	if (blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map(({ flags, path }) => [flags, codeCell(path)])))), !byPath) return blocks;
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
@@ -69319,7 +69319,7 @@ function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
 		let buf = Buffer.alloc(chunkBytes), carry = [];
 		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
 			let chunk = buf.subarray(0, n), start = 0;
-			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
+			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) carry.length === 0 ? onLine(chunk.toString("utf8", start, nl)) : onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
 			start < n && carry.push(Buffer.from(chunk.subarray(start)));
 		}
 		onLine(Buffer.concat(carry).toString("utf8"));
@@ -69335,7 +69335,7 @@ function openWriter(path, chunkBytes = CHUNK_BYTES) {
 	};
 	return {
 		write: (line) => {
-			pending.push(first ? line : `\n${line}`), first = !1, size += line.length, size >= chunkBytes && flush();
+			pending.push(first ? line : `\n${line}`), first = !1, size += line.length + 1, size >= chunkBytes && flush();
 		},
 		close: () => {
 			try {
@@ -69414,10 +69414,10 @@ function reduce(outPath, cleanPath, options, annotation, deps) {
 		} catch (e) {
 			[failedSummary, summaryError] = [!0, e];
 		}
-	}, lines = 0;
+	}, lines = 0, length = 0;
 	try {
 		deps.readLines(outPath, (line) => {
-			lines++;
+			lines++, length += line.length;
 			let r = parseLine(line);
 			stripper.observe(r), summarize(() => summary.observe(r));
 		});
@@ -69438,10 +69438,10 @@ function reduce(outPath, cleanPath, options, annotation, deps) {
 	} catch (e) {
 		dropCopy(e);
 	}
-	let again = 0;
+	let again = 0, lengthAgain = 0;
 	try {
 		deps.readLines(outPath, (line) => {
-			again++;
+			again++, lengthAgain += line.length;
 			let r = parseLine(line), kept = stripper.filter(line, r);
 			if (summarize(() => summary.add(kept ? kept.record : r, kept !== void 0)), kept && writer) try {
 				writer.write(kept.line), written = !0;
@@ -69458,7 +69458,7 @@ function reduce(outPath, cleanPath, options, annotation, deps) {
 			dropCopy(e);
 		}
 	}
-	if (again !== lines) throw Error("the recording changed while it was being read");
+	if (again !== lines || lengthAgain !== length) throw Error("the recording changed while it was being read");
 	let result;
 	return summarize(() => result = summary.finish()), {
 		summary: result,

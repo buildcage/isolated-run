@@ -75,7 +75,8 @@ export function readLines(
       const chunk = buf.subarray(0, n);
       let start = 0;
       for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) {
-        onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8"));
+        if (carry.length === 0) onLine(chunk.toString("utf8", start, nl));
+        else onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8"));
         carry = [];
       }
       if (start < n) carry.push(Buffer.from(chunk.subarray(start)));
@@ -106,7 +107,7 @@ export function openWriter(
     write: (line) => {
       pending.push(first ? line : `\n${line}`);
       first = false;
-      size += line.length;
+      size += line.length + 1; // UTF-16 units, close enough to bytes to pace the flushes
       if (size >= chunkBytes) flush();
     },
     close: () => {
@@ -263,9 +264,11 @@ function reduce(
   };
 
   let lines = 0;
+  let length = 0;
   try {
     deps.readLines(outPath, (line) => {
       lines++;
+      length += line.length;
       const r = parseLine(line);
       stripper.observe(r);
       summarize(() => summary.observe(r));
@@ -295,9 +298,11 @@ function reduce(
     dropCopy(e);
   }
   let again = 0;
+  let lengthAgain = 0;
   try {
     deps.readLines(outPath, (line) => {
       again++;
+      lengthAgain += line.length;
       const r = parseLine(line);
       const kept = stripper.filter(line, r);
       summarize(() => summary.add(kept ? kept.record : r, kept !== undefined));
@@ -320,7 +325,8 @@ function reduce(
   }
   // The tracer has stopped, so the two reads see the same lines, which the
   // line positions the first pass found depend on.
-  if (again !== lines) throw new Error("the recording changed while it was being read");
+  if (again !== lines || lengthAgain !== length)
+    throw new Error("the recording changed while it was being read");
 
   let result: AuditSummary | undefined;
   summarize(() => (result = summary.finish()));

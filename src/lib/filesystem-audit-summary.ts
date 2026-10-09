@@ -392,7 +392,7 @@ interface LinesOptions {
  * The lines of one table as the accesses arrive, a directory folding into
  * "dir/**" as soon as it has `fanout` children, so a tree of any size costs
  * no more than its folded lines. Stops, dropping what it holds, once the
- * lines that will print certainly outgrow `limit` bytes, or the tree outgrows
+ * lines no fold can take away outgrow `limit` bytes, or it holds more than
  * `nodes` paths.
  */
 class Lines {
@@ -425,6 +425,10 @@ class Lines {
     let kids: Map<string, Node> | undefined = this.trees.get(x.comm);
     if (!kids) this.trees.set(x.comm, (kids = new Map()));
     let parent: Node | undefined;
+    // Whether every directory above the node is kept, so no fold can ever
+    // take its line away, and the estimate may count it.
+    let settled = true;
+    let parentSettled = true;
     for (let i = 0; i < parts.length; i++) {
       let node: Node | undefined = kids.get(parts[i]);
       if (!node) {
@@ -436,22 +440,24 @@ class Lines {
           this.setBytes(parent, 0);
           if (!parent.kept && kids.size >= this.opts.fanout) {
             this.fold(parent);
-            return this.addFolded(parent, parts.slice(0, i), x);
+            return this.addFolded(parent, parts.slice(0, i), x, parentSettled);
           }
         }
       }
-      if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x);
+      if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x, settled);
       if (i === parts.length - 1) {
         node.own ??= newAgg();
         const shown = flagBits(node.own) !== 0;
         apply(node.own, x);
-        if (!shown && flagBits(node.own) && !node.kids?.size)
+        if (settled && !shown && flagBits(node.own) && !node.kids?.size)
           this.setBytes(node, this.opts.rowBytes(x.path, x.comm));
         return;
       }
       node.kids ??= new Map();
       kids = node.kids;
       parent = node;
+      parentSettled = settled;
+      settled &&= Boolean(node.kept);
     }
   }
 
@@ -480,9 +486,9 @@ class Lines {
     node.kids = undefined;
   }
 
-  private addFolded(node: Node, parts: string[], x: Access): void {
+  private addFolded(node: Node, parts: string[], x: Access, settled: boolean): void {
     apply(node.folded!, x);
-    if (flagBits(node.folded!) && !node.bytes)
+    if (settled && flagBits(node.folded!) && !node.bytes)
       this.setBytes(node, this.opts.rowBytes(`${spell(parts)}/**`, x.comm));
   }
 
@@ -576,7 +582,7 @@ interface Limits {
   loads: number;
 }
 
-const LIMITS: Limits = { bytes: STEP_SUMMARY_LIMIT_BYTES, nodes: 1_000_000, loads: 200_000 };
+const LIMITS: Limits = { bytes: STEP_SUMMARY_LIMIT_BYTES, nodes: 200_000, loads: 200_000 };
 
 interface Row {
   agg: Agg;
@@ -829,6 +835,8 @@ export function renderAuditSummaryBlocks(
       ),
     );
   }
+  // Two paths can print alike ("x" and "…/x"), so they keep their recording
+  // order between them.
   const byPath =
     paths &&
     inRecordingOrder(paths).sort((a, b) => {
@@ -848,6 +856,8 @@ export function renderAuditSummaryBlocks(
     ),
   );
 
+  // The table's note stands for the details too.
+  if (!byPath) return blocks;
   const log = { id: FILESYSTEM_BLOCK.log, priority: priorities[FILESYSTEM_BLOCK.log], level: 3 };
   if (!details) {
     blocks.push({

@@ -808,9 +808,23 @@ describe("renderFilesystemAuditSummary: limits", () => {
       ...tmpFiles(20),
     );
     expect(section(md, "#### Executed", "#### Accessed paths")).toContain("`/usr/bin/c`");
-    expect(section(md, "#### Accessed paths", "<details>")).toContain(CUT);
-    expect(section(md, "<details>")).toContain(CUT);
+    // The table's note stands for the details too.
+    expect(section(md, "#### Accessed paths")).toContain(CUT);
+    expect(md.split(CUT)).toHaveLength(2);
+    expect(md).not.toContain("<details>");
     expect(md).not.toContain("/tmp/f0");
+  });
+
+  it("does not count a line that a later fold can still take away", () => {
+    const long = "x".repeat(40);
+    const md = limited(
+      { bytes: 100 },
+      { kind: "read", comm: "c", path: `/work/a/${long}1` },
+      { kind: "read", comm: "c", path: `/work/a/${long}2` },
+      { kind: "read", comm: "c", path: "/work/a/3" },
+    );
+    expect(md).not.toContain(CUT);
+    expect(lines(md)).toEqual(["R c ./a/**"]);
   });
 
   it("cuts only the details when the table still fits", () => {
