@@ -130,7 +130,7 @@ export interface SummaryOptions {
   /** The proxy's start, in epoch seconds. */
   startedAt?: number;
   fanout?: number;
-  /** The bounds below, which a test lowers. */
+  /** The limits below; a test lowers them. */
   limits?: Partial<Limits>;
 }
 
@@ -219,7 +219,7 @@ function mergeAgg(dst: Agg, src: Agg): void {
   dst.seq = Math.min(dst.seq, src.seq);
 }
 
-// One access as a line takes it. bit is 0 for a read of what the process
+// One access, as a line records it. bit is 0 for a read of what the process
 // loaded, which still counts toward a directory's fold but prints nothing.
 interface Access {
   comm: string;
@@ -502,7 +502,7 @@ class Lines {
     this.climbing = new Map();
   }
 
-  /** Every line with its command, or undefined once it has stopped. */
+  /** Every line with its command, or undefined once it stopped or its lines outgrew the limit. */
   finish(): { comm: string; path: string; agg: Agg }[] | undefined {
     if (this.stopped) return undefined;
     const out: { comm: string; path: string; agg: Agg }[] = [];
@@ -892,15 +892,12 @@ export function renderAuditSummaryBlocks(
   return blocks;
 }
 
-// The records of a recording held as a string, each parsed once per pass.
-function* records(jsonl: string): Generator<unknown> {
-  for (const line of jsonl.split("\n")) {
-    if (!line) continue;
-    try {
-      yield JSON.parse(line);
-    } catch {
-      // a line the tracer left truncated (e.g. a hard kill mid-write)
-    }
+/** A line of the recording parsed, or undefined where it does not parse. */
+export function parseLine(line: string): unknown {
+  try {
+    return JSON.parse(line) as unknown;
+  } catch {
+    return undefined; // a line the tracer left truncated (e.g. a hard kill mid-write)
   }
 }
 
@@ -912,8 +909,9 @@ export function renderFilesystemAuditBlocks(
   cutNote = filesystemTruncationNote(undefined),
 ): SummaryBlock[] {
   const summary = createAuditSummary(prefixes);
-  for (const r of records(jsonl)) summary.observe(r);
-  for (const r of records(jsonl)) summary.add(r);
+  const records = jsonl.split("\n").map(parseLine);
+  for (const r of records) summary.observe(r);
+  for (const r of records) summary.add(r);
   return renderAuditSummaryBlocks(summary.finish(), prefixes.startedAt, priorities, cutNote);
 }
 

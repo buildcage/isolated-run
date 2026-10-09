@@ -25,6 +25,7 @@ import { createStripper } from "./filesystem-audit-strip.ts";
 import {
   createAuditSummary,
   filesystemTruncationNote,
+  parseLine,
   renderAuditSummaryBlocks,
   unreadableSummaryBlocks,
   type AuditSummary,
@@ -44,6 +45,7 @@ export interface FilesystemAuditReportOptions {
 
 export interface FilesystemAuditReportDeps {
   readLines: typeof readLines;
+  createSummary: typeof createAuditSummary;
   openWriter: typeof openWriter;
   readFile: (path: string) => string;
   realpath: (path: string) => string;
@@ -67,16 +69,18 @@ export function readLines(
   const fd = openSync(path, "r");
   try {
     const buf = Buffer.alloc(chunkBytes);
-    let carry = Buffer.alloc(0);
+    // The start of a line no chunk has ended yet, joined once it does.
+    let carry: Buffer[] = [];
     for (let n; (n = readSync(fd, buf, 0, buf.length, null)) > 0;) {
-      const chunk =
-        carry.length > 0 ? Buffer.concat([carry, buf.subarray(0, n)]) : buf.subarray(0, n);
+      const chunk = buf.subarray(0, n);
       let start = 0;
-      for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1)
-        onLine(chunk.toString("utf8", start, nl));
-      carry = Buffer.from(chunk.subarray(start));
+      for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) {
+        onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8"));
+        carry = [];
+      }
+      if (start < n) carry.push(Buffer.from(chunk.subarray(start)));
     }
-    onLine(carry.toString("utf8"));
+    onLine(Buffer.concat(carry).toString("utf8"));
   } finally {
     closeSync(fd);
   }
@@ -92,7 +96,9 @@ export function openWriter(
   let size = 0;
   let first = true;
   const flush = (): void => {
-    if (pending.length > 0) writeSync(fd, pending.join(""));
+    // writeSync may write less than it is given.
+    const data = Buffer.from(pending.join(""));
+    for (let off = 0; off < data.length;) off += writeSync(fd, data, off);
     pending = [];
     size = 0;
   };
@@ -118,6 +124,7 @@ export function openWriter(
 /* v8 ignore start */
 const realDeps: FilesystemAuditReportDeps = {
   readLines,
+  createSummary: createAuditSummary,
   openWriter,
   readFile: (path) => readFileSync(path, "utf8"),
   realpath: (path) => realpathSync(path),
@@ -175,15 +182,15 @@ export async function prepareStepFilesystemAudit(
     // new file leaves the root-owned recording in place, so a failed write
     // never uploads the raw.
     const cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl");
-    let reduced: { summary: AuditSummary; written: boolean };
+    let reduced: Reduced | undefined;
     try {
       reduced = reduce(audit.outPath, cleanPath, options, annotation, deps);
     } catch (e) {
-      // The tracer never started, or the file is already gone.
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") return NONE;
       annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
       return { blocks: () => unreadableSummaryBlocks() };
     }
+    if (!reduced) return NONE;
+    const { summary, summaryError } = reduced;
     if (reduced.written)
       artifactName =
         (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
@@ -195,7 +202,8 @@ export async function prepareStepFilesystemAudit(
     const blocks = (startedAt: number | undefined): SummaryBlock[] => {
       let rendered: SummaryBlock[];
       try {
-        rendered = deps.renderBlocks(reduced.summary, startedAt, FILESYSTEM_PRIORITIES, notice);
+        if (!summary) throw summaryError;
+        rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, notice);
       } catch (e) {
         annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
         return [];
@@ -218,67 +226,105 @@ export async function prepareStepFilesystemAudit(
   }
 }
 
-const parse = (line: string): unknown => {
-  try {
-    return JSON.parse(line) as unknown;
-  } catch {
-    return undefined; // a line the tracer left truncated (e.g. a hard kill mid-write)
-  }
-};
+interface Reduced {
+  /** Undefined when reducing failed, for summaryError. */
+  summary: AuditSummary | undefined;
+  summaryError?: unknown;
+  /** False when the copy holds nothing or could not be written. */
+  written: boolean;
+}
 
 // Reads the recording twice, a line at a time: first to find buildcage's own
 // machinery and what each process loaded, then to write the step's lines to
-// the stripped copy and reduce them to the summary. Throws only when the
-// recording cannot be read; written is false when the copy holds nothing or
-// could not be written.
+// the stripped copy and reduce them to the summary. Undefined when there is no
+// recording; throws when it cannot be read. A summary that fails is reported
+// on its own, so it never costs the artifact.
 function reduce(
   outPath: string,
   cleanPath: string,
   options: SummaryOptions,
   annotation: Annotation,
   deps: FilesystemAuditReportDeps,
-): { summary: AuditSummary; written: boolean } {
+): Reduced | undefined {
   // The recording sits under the scratch base (see sandbox/filesystem-audit.ts),
   // next to the exec wrapper's own files, so its directory is the one holding
   // buildcage's own machinery.
   const stripper = createStripper(dirname(outPath));
-  const summary = createAuditSummary(options);
-  deps.readLines(outPath, (line) => {
-    const r = parse(line);
-    stripper.observe(r);
-    summary.observe(r);
-  });
+  const summary = deps.createSummary(options);
+  let summaryError: unknown;
+  let failedSummary = false;
+  const summarize = (step: () => void): void => {
+    if (failedSummary) return;
+    try {
+      step();
+    } catch (e) {
+      [failedSummary, summaryError] = [true, e];
+    }
+  };
+
+  let lines = 0;
+  try {
+    deps.readLines(outPath, (line) => {
+      lines++;
+      const r = parseLine(line);
+      stripper.observe(r);
+      summarize(() => summary.observe(r));
+    });
+  } catch (e) {
+    // The tracer never started, or the file is already gone.
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw e;
+  }
 
   let writer: ReturnType<typeof openWriter> | undefined;
   let written = false;
-  const failed = (e: unknown): void => {
+  const dropCopy = (e: unknown): void => {
     annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
+    const open = writer;
     writer = undefined;
     written = false;
+    try {
+      open?.close();
+    } catch {
+      // already reported
+    }
   };
   try {
     writer = deps.openWriter(cleanPath);
   } catch (e) {
-    failed(e);
+    dropCopy(e);
   }
-  deps.readLines(outPath, (line) => {
-    const r = parse(line);
-    const kept = stripper.filter(line, r);
-    summary.add(kept ? kept.record : r, kept !== undefined);
-    if (!kept || !writer) return;
-    try {
-      writer.write(kept.line);
-      written = true;
-    } catch (e) {
-      failed(e);
-    }
-  });
+  let again = 0;
   try {
-    writer?.close();
-  } catch (e) {
-    failed(e);
+    deps.readLines(outPath, (line) => {
+      again++;
+      const r = parseLine(line);
+      const kept = stripper.filter(line, r);
+      summarize(() => summary.add(kept ? kept.record : r, kept !== undefined));
+      if (!kept || !writer) return;
+      try {
+        writer.write(kept.line);
+        written = true;
+      } catch (e) {
+        dropCopy(e);
+      }
+    });
+  } finally {
+    const open = writer;
+    writer = undefined;
+    try {
+      open?.close();
+    } catch (e) {
+      dropCopy(e);
+    }
   }
-  return { summary: summary.finish(), written };
+  // The tracer has stopped, so the two reads see the same lines, which the
+  // line positions the first pass found depend on.
+  if (again !== lines) throw new Error("the recording changed while it was being read");
+
+  let result: AuditSummary | undefined;
+  summarize(() => (result = summary.finish()));
+  return { summary: result, summaryError, written };
 }
 
 // Debug-only mirror, matching writeReportSummary's: GITHUB_STEP_SUMMARY is

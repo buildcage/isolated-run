@@ -14,6 +14,7 @@ import {
   type FilesystemAuditReportDeps,
   type FilesystemAuditReportOptions,
 } from "./filesystem-audit-report.ts";
+import { createAuditSummary } from "./filesystem-audit-summary.ts";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -487,6 +488,96 @@ describe("prepareStepFilesystemAudit", () => {
   );
 });
 
+describe("prepareStepFilesystemAudit: failures while reading", () => {
+  const base = {
+    retentionDays: 3,
+    containerName: "buildcage-proxy-deadbeef",
+    audit: AUDIT,
+    env: { GITHUB_WORKSPACE: "/work" },
+  };
+  const line = JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" });
+
+  it("still uploads the copy when the summary fails while reducing", async () => {
+    const note = annotation();
+    const {
+      deps: d,
+      summaries,
+      uploads,
+    } = deps({
+      createSummary: (options) => ({
+        ...createAuditSummary(options),
+        add: () => {
+          throw new Error("bad record");
+        },
+      }),
+    });
+
+    await reportStepFilesystemAudit({ ...base, annotation: note }, d);
+
+    expect(note.warning).toHaveBeenCalledWith(
+      "Failed to render the filesystem audit summary: bad record",
+    );
+    expect(summaries).toEqual([]);
+    expect(uploads).toEqual([CLEAN]);
+  });
+
+  it("closes the copy when writing it fails", async () => {
+    const closed: string[] = [];
+    const { deps: d, uploads } = deps({
+      openWriter: () => ({
+        write: () => {
+          throw new Error("ENOSPC");
+        },
+        close: () => void closed.push("closed"),
+      }),
+    });
+
+    await reportStepFilesystemAudit({ ...base, annotation: annotation() }, d);
+
+    expect(closed).toEqual(["closed"]);
+    expect(uploads).toEqual([]);
+  });
+
+  it.each([
+    [
+      "the recording is gone by the second read",
+      (pass: number): string[] => {
+        if (pass === 2) throw Object.assign(new Error("ENOENT: gone"), { code: "ENOENT" });
+        return [line];
+      },
+      "ENOENT: gone",
+    ],
+    [
+      "the two reads see different lines",
+      (pass: number): string[] => (pass === 2 ? [line, line] : [line]),
+      "the recording changed while it was being read",
+    ],
+  ])("warns and uploads nothing when %s", async (_, linesOf, message) => {
+    const note = annotation();
+    let pass = 0;
+    const closed: string[] = [];
+    const {
+      deps: d,
+      summaries,
+      uploads,
+    } = deps({
+      readLines: (_path, onLine) => {
+        for (const l of linesOf(++pass)) onLine(l);
+      },
+      openWriter: () => ({ write: () => {}, close: () => void closed.push("closed") }),
+    });
+
+    await reportStepFilesystemAudit({ ...base, annotation: note }, d);
+
+    expect(note.warning).toHaveBeenCalledWith(
+      `Failed to read the filesystem audit recording: ${message}`,
+    );
+    expect(summaries).toEqual([expect.stringContaining("**The recording could not be read**")]);
+    expect(uploads).toEqual([]);
+    expect(closed).toEqual(["closed"]);
+  });
+});
+
 describe("prepareStepFilesystemAudit: an upload that throws", () => {
   it("only warns, and still sets the output", async () => {
     const note = annotation();
@@ -543,6 +634,14 @@ describe("readLines and openWriter", () => {
     expect(readFileSync(path, "utf8")).toBe("first\nsecond\nthird");
     openWriter(path).close();
     expect(readFileSync(path, "utf8")).toBe("");
+  });
+
+  it("join a line that spans several chunks", () => {
+    const path = join(dir, "long");
+    writeFileSync(path, "abcdefghijklmnop\nq");
+    const got: string[] = [];
+    readLines(path, (line) => got.push(line), 3);
+    expect(got).toEqual(["abcdefghijklmnop", "q"]);
   });
 
   it("throw when the file is missing, with the error's code", () => {

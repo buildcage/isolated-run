@@ -27,6 +27,8 @@
  * marked incomplete in the summary.
  */
 
+import { parseLine } from "./filesystem-audit-summary.ts";
+
 const SHELL_COMM = "run-script.sh"; // buildcage's step shell (sandbox/oci-files.ts)
 const SHELL_LABEL = "bash";
 // How the shell reads its script. Anything else it does to the script, such
@@ -117,13 +119,7 @@ export function createStripper(scratchBase: string): {
 /** A recording held as a string, stripped. */
 export function stripSandboxMachinery(jsonl: string, scratchBase: string): string {
   const lines = jsonl.split("\n");
-  const parsed = lines.map((line) => {
-    try {
-      return JSON.parse(line) as unknown;
-    } catch {
-      return undefined; // a line the tracer left truncated; kept verbatim
-    }
-  });
+  const parsed = lines.map(parseLine);
   const stripper = createStripper(scratchBase);
   for (const r of parsed) stripper.observe(r);
   const out: string[] = [];

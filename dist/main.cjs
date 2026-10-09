@@ -30320,7 +30320,7 @@ function shouldDeserializeResponse(parsedResponse) {
 	return result = shouldDeserialize === void 0 ? !0 : typeof shouldDeserialize == "boolean" ? shouldDeserialize : shouldDeserialize(parsedResponse), result;
 }
 async function deserializeResponseBody(jsonContentTypes, xmlContentTypes, response, options, parseXML) {
-	let parsedResponse = await parse$3(jsonContentTypes, xmlContentTypes, response, options, parseXML);
+	let parsedResponse = await parse$2(jsonContentTypes, xmlContentTypes, response, options, parseXML);
 	if (!shouldDeserializeResponse(parsedResponse)) return parsedResponse;
 	let operationSpec = getOperationRequestInfo(parsedResponse.request)?.operationSpec;
 	if (!operationSpec || !operationSpec.responses) return parsedResponse;
@@ -30396,7 +30396,7 @@ function handleErrorResponse(parsedResponse, operationSpec, responseSpec, option
 		shouldReturnResponse: !1
 	};
 }
-async function parse$3(jsonContentTypes, xmlContentTypes, operationResponse, opts, parseXML) {
+async function parse$2(jsonContentTypes, xmlContentTypes, operationResponse, opts, parseXML) {
 	if (!operationResponse.request.streamResponseStatusCodes?.has(operationResponse.status) && operationResponse.bodyAsText) {
 		let text = operationResponse.bodyAsText, contentType = operationResponse.headers.get("Content-Type") || "", contentComponents = contentType ? contentType.split(";").map((component) => component.toLowerCase()) : [];
 		try {
@@ -63946,7 +63946,7 @@ function expand(template, context) {
 		return encodeReserved(literal);
 	}), template === "/" ? template : template.replace(/\/$/, "");
 }
-function parse$2(options) {
+function parse$1(options) {
 	let method = options.method.toUpperCase(), url = (options.url || "/").replace(/:([a-z]\w+)/g, "{$1}"), headers = Object.assign({}, options.headers), body, parameters = omit(options, [
 		"method",
 		"baseUrl",
@@ -63964,7 +63964,7 @@ function parse$2(options) {
 	}, body === void 0 ? null : { body }, options.request ? { request: options.request } : null);
 }
 function endpointWithDefaults(defaults, route, options) {
-	return parse$2(merge(defaults, route, options));
+	return parse$1(merge(defaults, route, options));
 }
 function withDefaults$2(oldDefaults, newDefaults) {
 	let DEFAULTS2 = merge(oldDefaults, newDefaults), endpoint2 = endpointWithDefaults.bind(null, DEFAULTS2);
@@ -63972,7 +63972,7 @@ function withDefaults$2(oldDefaults, newDefaults) {
 		DEFAULTS: DEFAULTS2,
 		defaults: withDefaults$2.bind(null, DEFAULTS2),
 		merge: merge.bind(null, DEFAULTS2),
-		parse: parse$2
+		parse: parse$1
 	});
 }
 var DEFAULTS, urlVariableRegex, endpoint, init_dist_bundle$5 = __esmMin((() => {
@@ -63988,7 +63988,7 @@ var DEFAULTS, urlVariableRegex, endpoint, init_dist_bundle$5 = __esmMin((() => {
 }));
 //#endregion
 //#region node_modules/.pnpm/content-type@3.1.1/node_modules/content-type/dist/index.js
-function parse$1(header, options) {
+function parse(header, options) {
 	let stopFlags = SEMI_FLAG | (options?.comma === !0 ? COMMA_FLAG : 0), len = header.length, valueStart = options?.start ?? 0;
 	for (; (CHAR_MAP[header.charCodeAt(valueStart)] & OWS) !== 0;) valueStart++;
 	let index = valueStart, typeFlags = 0, whitespace = -1, stop = options?.parameters === !1 ? COMMA_FLAG : 0;
@@ -64301,7 +64301,7 @@ async function fetchWrapper(requestOptions) {
 async function getResponseData(response) {
 	let contentType = response.headers.get("content-type");
 	if (!contentType) return response.text().catch(noop$1);
-	let mimetype = parse$1(contentType);
+	let mimetype = parse(contentType);
 	if (isJSONResponse(mimetype)) {
 		let text = "";
 		try {
@@ -68342,48 +68342,6 @@ function setFilesystemAuditOutput(name) {
 	setOutput("filesystem_audit_artifact_name", name);
 }
 //#endregion
-//#region src/lib/filesystem-audit-strip.ts
-const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && r.access === "r";
-function createStripper(scratchBase) {
-	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), asRecord = (r) => typeof r == "object" && r ? r : void 0, ownShellPids = new Set(), shell, script, init, boundary = -1, observed = 0, filtered = 0;
-	return {
-		observe: (rec) => {
-			let i = observed++, r = asRecord(rec);
-			r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 ? [shell, script, boundary, init] = [
-				r.pid,
-				r.path,
-				i,
-				r.ppid
-			] : r.pid !== shell && ownShellPids.add(r.pid) : ownShellPids.add(r.pid));
-		},
-		filter: (line, rec) => {
-			let i = filtered++, r = asRecord(rec);
-			if (r === void 0) return line === "" ? void 0 : {
-				line,
-				record: rec
-			};
-			r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
-			let readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
-			if (!(shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript))) {
-				if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
-					let record = {
-						...r,
-						comm: "bash"
-					};
-					return {
-						line: JSON.stringify(record),
-						record
-					};
-				}
-				return {
-					line,
-					record: rec
-				};
-			}
-		}
-	};
-}
-//#endregion
 //#region src/core/lib/report/elapsed-time.ts
 function toParts(elapsedSeconds) {
 	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
@@ -68811,6 +68769,13 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote) {
 		close: DETAILS_CLOSE
 	}), blocks;
 }
+function parseLine(line) {
+	try {
+		return JSON.parse(line);
+	} catch {
+		return;
+	}
+}
 function unreadableSummaryBlocks() {
 	return [{
 		priority: 0,
@@ -68823,6 +68788,48 @@ function unreadableSummaryBlocks() {
 }
 function filesystemTruncationNote(artifactName) {
 	return `_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; ${artifactName ? `the ${artifactName} artifact uploaded for this run has every access` : "the recording could not be uploaded as an artifact, so the rest is not kept"}._\n\n`;
+}
+//#endregion
+//#region src/lib/filesystem-audit-strip.ts
+const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && r.access === "r";
+function createStripper(scratchBase) {
+	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), asRecord = (r) => typeof r == "object" && r ? r : void 0, ownShellPids = new Set(), shell, script, init, boundary = -1, observed = 0, filtered = 0;
+	return {
+		observe: (rec) => {
+			let i = observed++, r = asRecord(rec);
+			r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 ? [shell, script, boundary, init] = [
+				r.pid,
+				r.path,
+				i,
+				r.ppid
+			] : r.pid !== shell && ownShellPids.add(r.pid) : ownShellPids.add(r.pid));
+		},
+		filter: (line, rec) => {
+			let i = filtered++, r = asRecord(rec);
+			if (r === void 0) return line === "" ? void 0 : {
+				line,
+				record: rec
+			};
+			r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
+			let readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
+			if (!(shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript))) {
+				if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
+					let record = {
+						...r,
+						comm: "bash"
+					};
+					return {
+						line: JSON.stringify(record),
+						record
+					};
+				}
+				return {
+					line,
+					record: rec
+				};
+			}
+		}
+	};
 }
 function usesLine(actionRepo, actionRef, actionVersion) {
 	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
@@ -69309,20 +69316,22 @@ const TRAFFIC_PRIORITIES = {
 function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
 	let fd = (0, node_fs.openSync)(path, "r");
 	try {
-		let buf = Buffer.alloc(chunkBytes), carry = Buffer.alloc(0);
+		let buf = Buffer.alloc(chunkBytes), carry = [];
 		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
-			let chunk = carry.length > 0 ? Buffer.concat([carry, buf.subarray(0, n)]) : buf.subarray(0, n), start = 0;
-			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) onLine(chunk.toString("utf8", start, nl));
-			carry = Buffer.from(chunk.subarray(start));
+			let chunk = buf.subarray(0, n), start = 0;
+			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
+			start < n && carry.push(Buffer.from(chunk.subarray(start)));
 		}
-		onLine(carry.toString("utf8"));
+		onLine(Buffer.concat(carry).toString("utf8"));
 	} finally {
 		(0, node_fs.closeSync)(fd);
 	}
 }
 function openWriter(path, chunkBytes = CHUNK_BYTES) {
 	let fd = (0, node_fs.openSync)(path, "w"), pending = [], size = 0, first = !0, flush = () => {
-		pending.length > 0 && (0, node_fs.writeSync)(fd, pending.join("")), pending = [], size = 0;
+		let data = Buffer.from(pending.join(""));
+		for (let off = 0; off < data.length;) off += (0, node_fs.writeSync)(fd, data, off);
+		pending = [], size = 0;
 	};
 	return {
 		write: (line) => {
@@ -69339,6 +69348,7 @@ function openWriter(path, chunkBytes = CHUNK_BYTES) {
 }
 const realDeps$3 = {
 	readLines,
+	createSummary: createAuditSummary,
 	openWriter,
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
 	realpath: (path) => (0, node_fs.realpathSync)(path),
@@ -69371,14 +69381,17 @@ async function prepareStepFilesystemAudit({ audit, retentionDays, containerName,
 		try {
 			reduced = reduce(audit.outPath, cleanPath, options, annotation, deps);
 		} catch (e) {
-			return e.code === "ENOENT" ? NONE : (annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), { blocks: () => unreadableSummaryBlocks() });
+			return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), { blocks: () => unreadableSummaryBlocks() };
 		}
+		if (!reduced) return NONE;
+		let { summary, summaryError } = reduced;
 		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
 		let notice = filesystemTruncationNote(artifactName || void 0);
 		return { blocks: (startedAt) => {
 			let rendered;
 			try {
-				rendered = deps.renderBlocks(reduced.summary, startedAt, FILESYSTEM_PRIORITIES, notice);
+				if (!summary) throw summaryError;
+				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, notice);
 			} catch (e) {
 				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
 			}
@@ -69394,42 +69407,62 @@ async function prepareStepFilesystemAudit({ audit, retentionDays, containerName,
 		}
 	}
 }
-const parse = (line) => {
-	try {
-		return JSON.parse(line);
-	} catch {
-		return;
-	}
-};
 function reduce(outPath, cleanPath, options, annotation, deps) {
-	let stripper = createStripper((0, node_path.dirname)(outPath)), summary = createAuditSummary(options);
-	deps.readLines(outPath, (line) => {
-		let r = parse(line);
-		stripper.observe(r), summary.observe(r);
-	});
-	let writer, written = !1, failed = (e) => {
-		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`), writer = void 0, written = !1;
+	let stripper = createStripper((0, node_path.dirname)(outPath)), summary = deps.createSummary(options), summaryError, failedSummary = !1, summarize = (step) => {
+		if (!failedSummary) try {
+			step();
+		} catch (e) {
+			[failedSummary, summaryError] = [!0, e];
+		}
+	}, lines = 0;
+	try {
+		deps.readLines(outPath, (line) => {
+			lines++;
+			let r = parseLine(line);
+			stripper.observe(r), summarize(() => summary.observe(r));
+		});
+	} catch (e) {
+		if (e.code === "ENOENT") return;
+		throw e;
+	}
+	let writer, written = !1, dropCopy = (e) => {
+		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
+		let open = writer;
+		writer = void 0, written = !1;
+		try {
+			open?.close();
+		} catch {}
 	};
 	try {
 		writer = deps.openWriter(cleanPath);
 	} catch (e) {
-		failed(e);
+		dropCopy(e);
 	}
-	deps.readLines(outPath, (line) => {
-		let r = parse(line), kept = stripper.filter(line, r);
-		if (summary.add(kept ? kept.record : r, kept !== void 0), kept && writer) try {
-			writer.write(kept.line), written = !0;
-		} catch (e) {
-			failed(e);
-		}
-	});
+	let again = 0;
 	try {
-		writer?.close();
-	} catch (e) {
-		failed(e);
+		deps.readLines(outPath, (line) => {
+			again++;
+			let r = parseLine(line), kept = stripper.filter(line, r);
+			if (summarize(() => summary.add(kept ? kept.record : r, kept !== void 0)), kept && writer) try {
+				writer.write(kept.line), written = !0;
+			} catch (e) {
+				dropCopy(e);
+			}
+		});
+	} finally {
+		let open = writer;
+		writer = void 0;
+		try {
+			open?.close();
+		} catch (e) {
+			dropCopy(e);
+		}
 	}
-	return {
-		summary: summary.finish(),
+	if (again !== lines) throw Error("the recording changed while it was being read");
+	let result;
+	return summarize(() => result = summary.finish()), {
+		summary: result,
+		summaryError,
 		written
 	};
 }
