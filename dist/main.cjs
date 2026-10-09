@@ -68611,26 +68611,29 @@ function findLoads(records, prefixes) {
 			images.delete(proc);
 		}
 	}
-	return {
-		procs,
-		loaded,
-		libraries
+	let loadReads = new Set();
+	return records.forEach((r, i) => {
+		let c = classify(r);
+		c && !c.failed && c.letter === "R" && loaded.has(keyOf(procs[i], canonical(c.path, prefixes))) && loadReads.add(r);
+	}), {
+		libraries,
+		loadReads
 	};
 }
 function buildRows(records, loads, prefixes, byCommand) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), okSpans = new Map(), failedSpans = new Map(), { procs, loaded, libraries } = loads, seq = 0;
-	records.forEach((r, i) => {
-		if (libraries.has(r)) return;
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), okSpans = new Map(), failedSpans = new Map(), seq = 0;
+	for (let r of records) {
+		if (loads.libraries.has(r)) continue;
 		let c = classify(r);
-		if (!c) return;
-		let path = canonical(c.path, prefixes), key = keyOf(byCommand ? r.comm ?? "" : "", path);
-		if (!c.failed && c.letter === "R" && loaded.has(keyOf(procs[i], path))) {
+		if (!c) continue;
+		let key = keyOf(byCommand ? r.comm ?? "" : "", canonical(c.path, prefixes));
+		if (loads.loadReads.has(r)) {
 			ok.has(key) || ok.set(key, new Set());
-			return;
+			continue;
 		}
 		let t = Date.parse(r.t ?? "");
 		Number.isNaN(t) || widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++), c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
-	});
+	}
 	let nok = new Map(), nfailed = new Map(), nperm = new Map(), nspans = new Map(), mergeInto = (dst, src, keepRelative, srcSpans) => {
 		for (let [key, set] of src) {
 			let p = pathOf(key);

@@ -263,7 +263,7 @@ jobs:
           # A file mapped executable shows as read unless it is a library or
           # an exec mapped it, as it does run.sh's interpreter.
           grep -qE ' R +python3 +\./mapped\.bin$' "$f"
-          ! grep -qE ' /usr/bin/dash$' "$f"
+          ! grep -q '/usr/bin/dash' "$f"
           # buildcage's own wrappers must never reach the summary.
           ! grep -qE ' (setpriv|buildcage-init|run-script\.sh) ' "$f"
 
@@ -288,7 +288,7 @@ jobs:
           # resolved to, the script itself rather than its interpreter, with
           # the name it was run by beside it.
           grep -qE '"kind":"exec",[^}]*"path":"/[^"]*/A/run\.sh","name":"\./run\.sh"' "$f"
-          grep -qE '"kind":"mmap",[^}]*"path":"/usr/bin/dash","access":"x","image":true' "$f"
+          jq -se 'any(.[]; .kind == "mmap" and .path == "/usr/bin/dash" and .image == true)' "$f" > /dev/null
           ! grep -q '/var/tmp/buildcage-' "$f"
           ! grep -q 'buildcage-audit-sentinel-arg' "$f"
 

@@ -9,7 +9,7 @@ set -euo pipefail
 run=${1:?usage: dev/update-filesystem-audit-fixture.sh <run id of "Test / E2E">}
 cd "$(dirname "$0")/.."
 dir=src/lib/__fixtures__/filesystem-audit
-job="e2e: test (filesystem_audit, ubuntu-latest)"
+job="e2e: test (filesystem_audit, persistent, ubuntu-latest)"
 step="Verify the Job Summary has the filesystem audit"
 
 read -r job_id conclusion < <(gh run view "$run" --json jobs \

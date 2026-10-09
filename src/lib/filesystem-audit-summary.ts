@@ -377,12 +377,10 @@ interface Row {
 }
 
 interface Loads {
-  /** Each record's process: its pid and how many forks and execs it has seen. */
-  procs: string[];
-  /** keyOf(process, path) for each file that process loaded or ran. */
-  loaded: Set<string>;
   /** The mmap records of libraries and of what an exec mapped. */
   libraries: Set<AuditRecord>;
+  /** The reads a process made of what it loaded or ran. */
+  loadReads: Set<AuditRecord>;
 }
 
 // Libraries are left out and an exec'd binary is shown by its X, so a process
@@ -430,7 +428,18 @@ function findLoads(records: AuditRecord[], prefixes: SummaryOptions): Loads {
       images.delete(proc);
     }
   }
-  return { procs, loaded, libraries };
+  const loadReads = new Set<AuditRecord>();
+  records.forEach((r, i) => {
+    const c = classify(r);
+    if (
+      c &&
+      !c.failed &&
+      c.letter === "R" &&
+      loaded.has(keyOf(procs[i], canonical(c.path, prefixes)))
+    )
+      loadReads.add(r);
+  });
+  return { libraries, loadReads };
 }
 
 // The rows of the summary in recording order: one per command and path, or
@@ -448,17 +457,15 @@ function buildRows(
   const okSpans: LetterSpans = new Map();
   const failedSpans: LetterSpans = new Map();
 
-  const { procs, loaded, libraries } = loads;
   let seq = 0;
-  records.forEach((r, i) => {
-    if (libraries.has(r)) return;
+  for (const r of records) {
+    if (loads.libraries.has(r)) continue;
     const c = classify(r);
-    if (!c) return;
-    const path = canonical(c.path, prefixes);
-    const key = keyOf(byCommand ? (r.comm ?? "") : "", path);
-    if (!c.failed && c.letter === "R" && loaded.has(keyOf(procs[i], path))) {
+    if (!c) continue;
+    const key = keyOf(byCommand ? (r.comm ?? "") : "", canonical(c.path, prefixes));
+    if (loads.loadReads.has(r)) {
       if (!ok.has(key)) ok.set(key, new Set());
-      return;
+      continue;
     }
     const t = Date.parse(r.t ?? "");
     if (!Number.isNaN(t)) {
@@ -470,7 +477,7 @@ function buildRows(
     } else {
       addFlag(ok, key, c.letter);
     }
-  });
+  }
 
   // Re-key on the normalized path, dropping non-file targets.
   const nok = new Map<string, Set<string>>();
