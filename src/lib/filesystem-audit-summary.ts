@@ -375,9 +375,78 @@ interface Row {
   path: string;
 }
 
+interface Loads {
+  /** Each record's process: its pid and how many forks and execs it has seen. */
+  procs: string[];
+  /** keyOf(process, path) for each file that process loaded or ran. */
+  loaded: Set<string>;
+  /** The mmap records of libraries and of what an exec mapped. */
+  libraries: Set<AuditRecord>;
+}
+
+// Libraries are left out and an exec'd binary is shown by its X, so a process
+// that mapped or ran one has its reads of it dropped, and of /etc/ld.so.cache
+// once it maps a library; another process's reads stay. A pid handed out again
+// by a fork, or running a new program, counts as a new process. Any file can be
+// mapped executable and read through the mapping, so such a mapping counts as a
+// library only by its name or as part of an exec.
+function findLoads(records: AuditRecord[], prefixes: SummaryOptions): Loads {
+  const procs: string[] = [];
+  const loaded = new Set<string>();
+  const libraries = new Set<AuditRecord>();
+  const gens = new Map<number | undefined, number>();
+  // The executable mappings each process made since its last other record: the
+  // kernel maps a program and its interpreter (a script's included) just
+  // before the exec record, with none of the program's code run in between.
+  const pending = new Map<string, AuditRecord[]>();
+  const load = (proc: string, path: string, library: boolean): void => {
+    loaded.add(keyOf(proc, canonical(path, prefixes)));
+    if (library) loaded.add(keyOf(proc, "/etc/ld.so.cache"));
+  };
+  for (const r of records) {
+    if (r.kind === "fork") gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
+    const gen = gens.get(r.pid) ?? 0;
+    const proc = `${r.pid}/${gen}`;
+    procs.push(proc);
+    if (r.kind === "mmap") {
+      if (r.access !== "x" || !r.path) continue;
+      if (LIBRARY_NAME.test(r.path)) {
+        libraries.add(r);
+        load(proc, r.path, true);
+      }
+      let run = pending.get(proc);
+      if (!run) pending.set(proc, (run = []));
+      run.push(r);
+      continue;
+    }
+    if (r.kind === "exec") {
+      // The kernel reads the program and its interpreter before the exec
+      // record, so the process both before and after it gets them.
+      const next = `${r.pid}/${gen + 1}`;
+      gens.set(r.pid, gen + 1);
+      for (const m of pending.get(proc) ?? []) {
+        libraries.add(m);
+        load(proc, m.path!, false);
+        load(next, m.path!, LIBRARY_NAME.test(m.path!));
+      }
+      if (r.path) {
+        load(proc, r.path, false);
+        load(next, r.path, false);
+      }
+    }
+    pending.delete(proc);
+  }
+  return { procs, loaded, libraries };
+}
+
 // The rows of the summary in recording order: one per command and path, or
 // one per path alone when byCommand is false.
-function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: boolean): Row[] {
+function buildRows(
+  records: AuditRecord[],
+  loads: Loads,
+  prefixes: SummaryOptions,
+  byCommand: boolean,
+): Row[] {
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
   const ok = new Map<string, Set<string>>();
   const failed = new Map<string, Set<string>>();
@@ -385,63 +454,17 @@ function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: 
   const okSpans: LetterSpans = new Map();
   const failedSpans: LetterSpans = new Map();
 
-  // Libraries are left out and an exec'd binary is shown by its X, so a process
-  // that mapped or ran one has its reads of it and of /etc/ld.so.cache
-  // dropped; another process's reads stay. A pid handed out again by a fork
-  // counts as a new process. An executable mapping counts as a library only by
-  // its name or as part of an exec, since any file can be mapped executable
-  // and read through the mapping.
-  const procOf = (gens: Map<number | undefined, number>, r: AuditRecord): string => {
-    if (r.kind === "fork") gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
-    return `${r.pid}/${gens.get(r.pid) ?? 0}`;
-  };
-  const loaded = new Set<string>();
-  const libraries = new Set<AuditRecord>(); // their mmap records
-  const load = (proc: string, path: string): void => {
-    loaded.add(keyOf(proc, canonical(path, prefixes)));
-    loaded.add(keyOf(proc, "/etc/ld.so.cache"));
-  };
-  // The mappings each process made since its last other record: the kernel
-  // maps a program and its interpreter (a script's included) just before the
-  // exec record, with none of the program's code run in between.
-  const pending = new Map<string, AuditRecord[]>();
-  const gens = new Map<number | undefined, number>();
-  for (const r of records) {
-    const proc = procOf(gens, r);
-    if (r.kind === "mmap") {
-      if (r.access !== "x" || !r.path) continue;
-      if (LIBRARY_NAME.test(r.path)) {
-        libraries.add(r);
-        load(proc, r.path);
-      } else {
-        let run = pending.get(proc);
-        if (!run) pending.set(proc, (run = []));
-        run.push(r);
-      }
-      continue;
-    }
-    if (r.kind === "exec") {
-      for (const m of pending.get(proc) ?? []) {
-        libraries.add(m);
-        load(proc, m.path!);
-      }
-      if (r.path) load(proc, r.path);
-    }
-    pending.delete(proc);
-  }
-
+  const { procs, loaded, libraries } = loads;
   let seq = 0;
-  gens.clear();
-  for (const r of records) {
-    const proc = procOf(gens, r);
-    if (libraries.has(r)) continue;
+  records.forEach((r, i) => {
+    if (libraries.has(r)) return;
     const c = classify(r);
-    if (!c) continue;
+    if (!c) return;
     const path = canonical(c.path, prefixes);
     const key = keyOf(byCommand ? (r.comm ?? "") : "", path);
-    if (!c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) {
+    if (!c.failed && c.letter === "R" && loaded.has(keyOf(procs[i], path))) {
       if (!ok.has(key)) ok.set(key, new Set());
-      continue;
+      return;
     }
     const t = Date.parse(r.t ?? "");
     if (!Number.isNaN(t)) {
@@ -453,7 +476,7 @@ function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: 
     } else {
       addFlag(ok, key, c.letter);
     }
-  }
+  });
 
   // Re-key on the normalized path, dropping non-file targets.
   const nok = new Map<string, Set<string>>();
@@ -578,7 +601,8 @@ export function renderFilesystemAuditBlocks(
   priorities: FilesystemPriorities,
 ): SummaryBlock[] {
   const { records, ended, lost } = parse(jsonl);
-  const rows = buildRows(records, prefixes, true);
+  const loads = findLoads(records, prefixes);
+  const rows = buildRows(records, loads, prefixes, true);
   const heading = ended && !lost ? HEADING : `${HEADING}\n\n${INCOMPLETE_NOTE}`;
   const frame = (text: string): SummaryBlock => ({
     priority: 0,
@@ -613,7 +637,7 @@ export function renderFilesystemAuditBlocks(
       ),
     );
   }
-  const byPath = buildRows(records, prefixes, false).sort((a, b) => {
+  const byPath = buildRows(records, loads, prefixes, false).sort((a, b) => {
     const [ca, pa] = sortKey(a.path);
     const [cb, pb] = sortKey(b.path);
     return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : 0);

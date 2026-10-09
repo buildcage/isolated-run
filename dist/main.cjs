@@ -68591,42 +68591,48 @@ function parse(jsonl) {
 		lost
 	};
 }
-function buildRows(records, prefixes, byCommand) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), okSpans = new Map(), failedSpans = new Map(), procOf = (gens, r) => (r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1), `${r.pid}/${gens.get(r.pid) ?? 0}`), loaded = new Set(), libraries = new Set(), load = (proc, path) => {
-		loaded.add(keyOf(proc, canonical(path, prefixes))), loaded.add(keyOf(proc, "/etc/ld.so.cache"));
-	}, pending = new Map(), gens = new Map();
+function findLoads(records, prefixes) {
+	let procs = [], loaded = new Set(), libraries = new Set(), gens = new Map(), pending = new Map(), load = (proc, path, library) => {
+		loaded.add(keyOf(proc, canonical(path, prefixes))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache"));
+	};
 	for (let r of records) {
-		let proc = procOf(gens, r);
-		if (r.kind === "mmap") {
+		r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
+		let gen = gens.get(r.pid) ?? 0, proc = `${r.pid}/${gen}`;
+		if (procs.push(proc), r.kind === "mmap") {
 			if (r.access !== "x" || !r.path) continue;
-			if (LIBRARY_NAME.test(r.path)) libraries.add(r), load(proc, r.path);
-			else {
-				let run = pending.get(proc);
-				run || pending.set(proc, run = []), run.push(r);
-			}
+			LIBRARY_NAME.test(r.path) && (libraries.add(r), load(proc, r.path, !0));
+			let run = pending.get(proc);
+			run || pending.set(proc, run = []), run.push(r);
 			continue;
 		}
 		if (r.kind === "exec") {
-			for (let m of pending.get(proc) ?? []) libraries.add(m), load(proc, m.path);
-			r.path && load(proc, r.path);
+			let next = `${r.pid}/${gen + 1}`;
+			gens.set(r.pid, gen + 1);
+			for (let m of pending.get(proc) ?? []) libraries.add(m), load(proc, m.path, !1), load(next, m.path, LIBRARY_NAME.test(m.path));
+			r.path && (load(proc, r.path, !1), load(next, r.path, !1));
 		}
 		pending.delete(proc);
 	}
-	let seq = 0;
-	gens.clear();
-	for (let r of records) {
-		let proc = procOf(gens, r);
-		if (libraries.has(r)) continue;
+	return {
+		procs,
+		loaded,
+		libraries
+	};
+}
+function buildRows(records, loads, prefixes, byCommand) {
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), okSpans = new Map(), failedSpans = new Map(), { procs, loaded, libraries } = loads, seq = 0;
+	records.forEach((r, i) => {
+		if (libraries.has(r)) return;
 		let c = classify(r);
-		if (!c) continue;
+		if (!c) return;
 		let path = canonical(c.path, prefixes), key = keyOf(byCommand ? r.comm ?? "" : "", path);
-		if (!c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) {
+		if (!c.failed && c.letter === "R" && loaded.has(keyOf(procs[i], path))) {
 			ok.has(key) || ok.set(key, new Set());
-			continue;
+			return;
 		}
 		let t = Date.parse(r.t ?? "");
 		Number.isNaN(t) || widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++), c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
-	}
+	});
 	let nok = new Map(), nfailed = new Map(), nperm = new Map(), nspans = new Map(), mergeInto = (dst, src, keepRelative, srcSpans) => {
 		for (let [key, set] of src) {
 			let p = pathOf(key);
@@ -68682,7 +68688,7 @@ function executedPaths(records, prefixes) {
 	return [...seen].map((p) => escapeForDisplay(relativize(p, prefixes)));
 }
 function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
-	let { records, ended, lost } = parse(jsonl), rows = buildRows(records, prefixes, !0), heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
+	let { records, ended, lost } = parse(jsonl), loads = findLoads(records, prefixes), rows = buildRows(records, loads, prefixes, !0), heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
 > some accesses are missing from this summary and from the artifact.`, frame = (text) => ({
 		priority: 0,
 		level: 1,
@@ -68701,7 +68707,7 @@ function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
 		head: 4
 	}), executed = executedPaths(records, prefixes);
 	executed.length > 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, "Executed", markdownRows(["Path"], executed.map((path) => [codeCell(path)]))));
-	let byPath = buildRows(records, prefixes, !1).sort((a, b) => {
+	let byPath = buildRows(records, loads, prefixes, !1).sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return ca - cb || (pa < pb ? -1 : +(pa > pb));
 	});

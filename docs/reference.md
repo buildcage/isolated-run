@@ -813,11 +813,12 @@ shown as `…/name`, as is a path too deep to record in full. Where its `path` d
 `name` (`to_name` for a move's target). An invisible or control character in a path or command name
 is shown escaped, as `\n` or `\u{202e}`, and a backslash as `\\`. A program the step ran is
 recorded under the file it resolved to, with symlinks followed and a script under its own path rather
-than its interpreter's; the artifact keeps the name it was run by as `name`. The libraries a command
-loads are left out, as are that process's reads of them, of `/etc/ld.so.cache` and of the program
-it runs, including reads made before it ran it. Another process's reads of those files are shown.
-A file mapped executable counts as a library only when its name ends in `.so`, `.so.<number>` or
-`.node`, or when the kernel maps it to start a program; any other is shown as read.
+than its interpreter's; the artifact keeps the name it was run by as `name`. The libraries a program
+loads are left out, as are its reads of them and of `/etc/ld.so.cache`, and its process's reads of
+the program itself, including those made just before running it. Other programs' reads of those
+files are shown. A file mapped executable counts as a library only when its name ends in `.so`
+(optionally followed by version numbers, as in `.so.6`) or `.node`, or when the kernel maps it to
+start a program; any other is shown as read.
 
 When the step's Job Summary would pass GitHub's size limit, its parts give way in this order: the
 filesystem details, the traffic report's communication log, the accessed-paths table, the executed

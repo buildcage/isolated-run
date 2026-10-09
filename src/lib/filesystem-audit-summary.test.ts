@@ -235,6 +235,22 @@ describe("renderFilesystemAuditSummary", () => {
     ).toEqual(["X run.sh ./run.sh"]);
   });
 
+  it("starts a process's loads afresh when it runs a new program", () => {
+    expect(
+      lines(
+        render(
+          { kind: "mmap", pid: 2, comm: "bash", path: "/lib/libtinfo.so.6", access: "x" },
+          { kind: "read", pid: 2, comm: "bash", path: "/etc/ld.so.cache" },
+          { kind: "mmap", pid: 2, comm: "cp", path: "/usr/bin/cp", access: "x" },
+          { kind: "exec", pid: 2, comm: "cp", path: "/usr/bin/cp" },
+          { kind: "read", pid: 2, comm: "cp", path: "/lib/libtinfo.so.6" },
+          { kind: "read", pid: 2, comm: "cp", path: "/etc/ld.so.cache" },
+          { kind: "read", pid: 2, comm: "cp", path: "/usr/bin/cp" },
+        ),
+      ),
+    ).toEqual(["R cp /etc/ld.so.cache", "R cp /lib/libtinfo.so.6", "X cp /usr/bin/cp"]);
+  });
+
   it("merges two spellings of one relative name into a row", () => {
     expect(
       lines(
