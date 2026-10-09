@@ -70171,7 +70171,7 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		} catch {}
 		await child.exited, remove(pidFilePath);
 	};
-	for (let i = 0; i < 150; i++) {
+	for (let i = 0; i < 300; i++) {
 		if (exists(readyPath)) return { stop };
 		if (exited) break;
 		await sleep(100);
