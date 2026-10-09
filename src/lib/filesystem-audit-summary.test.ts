@@ -404,7 +404,7 @@ describe("renderFilesystemAuditSummary", () => {
       err: 2,
     }));
     expect(lines(render(...records))).toEqual([`r c ./${"a/".repeat(2000)}**`]);
-  }, 3000); // the quadratic version took over 30 s
+  }, 3000);
 
   it("keeps a path the tracer could not walk to the top", () => {
     const md = render({ kind: "unlink", comm: "rm", path: "…/deep/x", err: 2 });

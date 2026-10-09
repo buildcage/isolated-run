@@ -332,7 +332,8 @@ export function dropWalkedDirs(
     const flags = [...flagsOf(d)];
     flagsByLine.set(d, flags);
     const parts = components(base(pathOf(d)));
-    // Nothing is above the root, or known to be above a path spelled with "..".
+    // The root has nothing above it, and a path with ".." is not known to sit
+    // under the directories it names.
     if (parts.length === 1 && parts[0] === "/") continue;
     if (parts.includes("..")) continue;
     let top = trees.get(commOf(d));
