@@ -222,6 +222,8 @@ jobs:
             printf '#!/bin/sh\n' > "$GITHUB_WORKSPACE/A/run.sh"
             chmod +x "$GITHUB_WORKSPACE/A/run.sh"
             (cd "$GITHUB_WORKSPACE/A" && ./run.sh)
+            # A program, not the builtin, with an argument the record must not keep.
+            /usr/bin/true buildcage-audit-sentinel-arg
 
       - name: Verify the Job Summary has the filesystem audit
         run: |
@@ -279,6 +281,7 @@ jobs:
           # the name it was run by beside it.
           grep -qE '"kind":"exec",[^}]*"path":"/[^"]*/A/run\.sh","name":"\./run\.sh"' "$f"
           ! grep -q '/var/tmp/buildcage-' "$f"
+          ! grep -q 'buildcage-audit-sentinel-arg' "$f"
 
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network), proves proxy_engine: universal

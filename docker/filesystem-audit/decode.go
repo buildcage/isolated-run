@@ -28,7 +28,7 @@ type record struct {
 	ToName string `json:"to_name,omitempty"`
 	Access string `json:"access,omitempty"`
 	Flags  uint32 `json:"flags,omitempty"`
-	Args   string `json:"args,omitempty"`
+	Owner  string `json:"owner,omitempty"`
 	Err    int32  `json:"err,omitempty"`
 	Failed bool   `json:"failed,omitempty"`
 	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the reader
@@ -49,10 +49,7 @@ var kindNames = map[uint32]string{
 // Mirrors the fixed header of struct event in bpf/filesystem_audit.bpf.c:
 // eight u32 fields, four u8 fields, comm[16], a u32 err, the u64 timestamp,
 // then the data bytes.
-const (
-	hdrLen  = 8*4 + 4 + 16 + 4 + 8
-	pathLen = 4096
-)
+const hdrLen = 8*4 + 4 + 16 + 4 + 8
 
 const fmodeExec = 0x20 // FMODE_EXEC
 
@@ -193,7 +190,7 @@ func decode(raw []byte) (record, error) {
 	flags := le.Uint32(raw[12:])
 	mode := le.Uint32(raw[16:])
 	pathRet := int32(le.Uint32(raw[20:]))
-	argsLen := le.Uint32(raw[24:])
+	bases := le.Uint32(raw[24:])
 	n1, n2 := int(raw[32]), int(raw[33])
 	truncated, truncated2 := raw[34] != 0, raw[35] != 0
 	data := raw[hdrLen:]
@@ -216,7 +213,7 @@ func decode(raw []byte) (record, error) {
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
 	case 12: // failed open
-		r.Path, r.Name = passed(data, argsLen&1 != 0, int(mode), truncated)
+		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet // the positive errno the BPF side stored as -ret
 	case 13, 14: // read, write
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
@@ -225,10 +222,6 @@ func decode(raw []byte) (record, error) {
 		r.Access = mmapAccess(mode, flags)
 	case 2: // exec
 		r.Path = cstr(data)
-		if int(pathLen+argsLen) <= len(data) {
-			a := data[pathLen : pathLen+argsLen]
-			r.Args = strings.TrimRight(strings.ReplaceAll(string(a), "\x00", " "), " ")
-		}
 	case 3, 4, 6, 10, 23, 24: // unlink, rmdir, mkdir, truncate, exec-file, mknod
 		r.Path, _ = components(data, n1, truncated)
 	case 7: // chmod
@@ -236,8 +229,7 @@ func decode(raw []byte) (record, error) {
 		r.Flags = mode
 	case 11: // chown
 		r.Path, _ = components(data, n1, truncated)
-		r.Flags = flags
-		r.Args = fmt.Sprintf("%d:%d", flags, mode)
+		r.Owner = fmt.Sprintf("%d:%d", flags, mode)
 	case 8: // symlink
 		r.To = cstr(data)
 		// pathRet is the link body's length, i.e. the offset of the path
@@ -252,7 +244,7 @@ func decode(raw []byte) (record, error) {
 		r.Path, rest = components(data, n1, truncated)
 		r.To, _ = components(rest, n2, truncated2)
 	case 16, 18, 19: // failed delete / chmod / chown
-		r.Path, r.Name = passed(data, argsLen&1 != 0, int(mode), truncated)
+		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
 	case 17: // failed rename
@@ -265,20 +257,20 @@ func decode(raw []byte) (record, error) {
 			to = cstr(rest)
 			rest = after(rest, len(to))
 		}
-		r.Path, rest = joinBase(name, rest, argsLen&1 != 0, int(mode), truncated)
+		r.Path, rest = joinBase(name, rest, bases&1 != 0, int(mode), truncated)
 		r.Path = tidy(r.Path)
 		r.Name = passedName(name, r.Path)
 		if n1 == 1 {
-			r.To, _ = joinBase(to, rest, argsLen&2 != 0, int(flags), truncated2)
+			r.To, _ = joinBase(to, rest, bases&2 != 0, int(flags), truncated2)
 			r.To = tidy(r.To)
 			r.ToName = passedName(to, r.To)
 		}
 		r.Err = pathRet
 		r.Failed = true
 	case 20: // attr via utimes / setxattr
-		r.Path, r.Name = passed(data, argsLen&1 != 0, int(mode), truncated)
+		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 	case 21: // failed attr via utimes / setxattr
-		r.Path, r.Name = passed(data, argsLen&1 != 0, int(mode), truncated)
+		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
 	}
