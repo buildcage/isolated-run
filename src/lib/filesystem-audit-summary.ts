@@ -12,12 +12,14 @@ import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fi
 interface AuditRecord {
   t?: string;
   kind: string;
+  pid?: number;
   comm?: string;
   path?: string;
   to?: string;
   access?: string;
   err?: number;
   failed?: boolean;
+  image?: boolean;
   dropped?: number;
   untracked?: number;
 }
@@ -56,6 +58,8 @@ const FAILED_LETTER: Record<string, string> = {
   link: "W",
 };
 const PERM_ERRNO = new Set([1, 13, 30]); // EPERM, EACCES, EROFS
+// A shared object or a Node.js addon, by file name.
+const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
 const DEFAULT_FANOUT = 3;
 
 interface Classified {
@@ -372,28 +376,97 @@ interface Row {
   path: string;
 }
 
+interface Loads {
+  /** The mmap records of libraries and of what an exec mapped. */
+  libraries: Set<AuditRecord>;
+  /** The reads a process made of what it loaded or ran. */
+  loadReads: Set<AuditRecord>;
+}
+
+// Libraries are left out and an exec'd binary is shown by its X, so a process
+// that mapped or ran one has its reads of it dropped, and of /etc/ld.so.cache
+// once it maps a library; another process's reads stay. A pid handed out again
+// by a fork, or running a new program, counts as a new process. Any file can be
+// mapped executable and read through the mapping, so such a mapping counts as a
+// library only by its name or when the tracer saw an exec make it.
+function findLoads(records: AuditRecord[], prefixes: SummaryOptions): Loads {
+  const procs: string[] = [];
+  const loaded = new Set<string>();
+  const libraries = new Set<AuditRecord>();
+  const gens = new Map<number | undefined, number>();
+  // What each process's exec in progress has mapped: the program, its
+  // dynamic loader, a script's interpreter.
+  const images = new Map<string, string[]>();
+  const load = (proc: string, path: string, library: boolean): void => {
+    loaded.add(keyOf(proc, canonical(path, prefixes)));
+    if (library) loaded.add(keyOf(proc, "/etc/ld.so.cache"));
+  };
+  for (const r of records) {
+    if (r.kind === "fork") gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
+    const gen = gens.get(r.pid) ?? 0;
+    const proc = `${r.pid}/${gen}`;
+    procs.push(proc);
+    if (r.kind === "mmap" && r.access === "x" && r.path) {
+      if (r.image) {
+        libraries.add(r);
+        let paths = images.get(proc);
+        if (!paths) images.set(proc, (paths = []));
+        paths.push(r.path);
+      } else if (LIBRARY_NAME.test(r.path)) {
+        libraries.add(r);
+        load(proc, r.path, true);
+      }
+    } else if (r.kind === "exec") {
+      // The kernel reads these before the exec record, so they count as
+      // loaded on both sides of it.
+      const next = `${r.pid}/${gen + 1}`;
+      gens.set(r.pid, gen + 1);
+      for (const path of [...(images.get(proc) ?? []), ...(r.path ? [r.path] : [])]) {
+        load(proc, path, false);
+        load(next, path, LIBRARY_NAME.test(path));
+      }
+      images.delete(proc);
+    }
+  }
+  const loadReads = new Set<AuditRecord>();
+  records.forEach((r, i) => {
+    const c = classify(r);
+    if (
+      c &&
+      !c.failed &&
+      c.letter === "R" &&
+      loaded.has(keyOf(procs[i], canonical(c.path, prefixes)))
+    )
+      loadReads.add(r);
+  });
+  return { libraries, loadReads };
+}
+
 // The rows of the summary in recording order: one per command and path, or
 // one per path alone when byCommand is false.
-function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: boolean): Row[] {
+function buildRows(
+  records: AuditRecord[],
+  loads: Loads,
+  prefixes: SummaryOptions,
+  byCommand: boolean,
+): Row[] {
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
   const ok = new Map<string, Set<string>>();
   const failed = new Map<string, Set<string>>();
   const perm = new Map<string, Set<string>>();
-  const libs = new Set<string>();
-  const execd = new Set<string>();
   const okSpans: LetterSpans = new Map();
   const failedSpans: LetterSpans = new Map();
 
   let seq = 0;
   for (const r of records) {
-    if (r.kind === "mmap" && r.access === "x") {
-      if (r.path) libs.add(canonical(r.path, prefixes));
-      continue;
-    }
-    if (r.kind === "exec" && r.path) execd.add(canonical(r.path, prefixes));
+    if (loads.libraries.has(r)) continue;
     const c = classify(r);
     if (!c) continue;
     const key = keyOf(byCommand ? (r.comm ?? "") : "", canonical(c.path, prefixes));
+    if (loads.loadReads.has(r)) {
+      if (!ok.has(key)) ok.set(key, new Set());
+      continue;
+    }
     const t = Date.parse(r.t ?? "");
     if (!Number.isNaN(t)) {
       widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++);
@@ -405,13 +478,6 @@ function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: 
       addFlag(ok, key, c.letter);
     }
   }
-  // A library or an exec'd binary is already shown by its X; drop its read.
-  const libDrop = new Set([...libs, ...execd, "/etc/ld.so.cache"]);
-  for (const key of ok.keys())
-    if (libDrop.has(pathOf(key))) {
-      ok.get(key)!.delete("R");
-      okSpans.get(key)?.delete("R");
-    }
 
   // Re-key on the normalized path, dropping non-file targets.
   const nok = new Map<string, Set<string>>();
@@ -536,7 +602,8 @@ export function renderFilesystemAuditBlocks(
   priorities: FilesystemPriorities,
 ): SummaryBlock[] {
   const { records, ended, lost } = parse(jsonl);
-  const rows = buildRows(records, prefixes, true);
+  const loads = findLoads(records, prefixes);
+  const rows = buildRows(records, loads, prefixes, true);
   const heading = ended && !lost ? HEADING : `${HEADING}\n\n${INCOMPLETE_NOTE}`;
   const frame = (text: string): SummaryBlock => ({
     priority: 0,
@@ -571,7 +638,7 @@ export function renderFilesystemAuditBlocks(
       ),
     );
   }
-  const byPath = buildRows(records, prefixes, false).sort((a, b) => {
+  const byPath = buildRows(records, loads, prefixes, false).sort((a, b) => {
     const [ca, pa] = sortKey(a.path);
     const [cb, pb] = sortKey(b.path);
     return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : 0);

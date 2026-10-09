@@ -170,6 +170,95 @@ describe("renderFilesystemAuditSummary", () => {
     ).toEqual(["R c ./data"]);
   });
 
+  it("drops a library's or program's read only in the process that mapped or ran it", () => {
+    const md = render(
+      { kind: "read", pid: 2, comm: "cat", path: "/work/libx.so" },
+      { kind: "read", pid: 3, comm: "cat", path: "/usr/bin/tool" },
+      { kind: "read", pid: 3, comm: "cat", path: "/etc/ld.so.cache" },
+      { kind: "read", pid: 4, comm: "x", path: "/work/libx.so" },
+      { kind: "read", pid: 4, comm: "x", path: "/etc/ld.so.cache" },
+      { kind: "mmap", pid: 4, comm: "x", path: "/work/libx.so", access: "x" },
+      { kind: "read", pid: 5, comm: "tool", path: "/usr/bin/tool" },
+      { kind: "exec", pid: 5, comm: "tool", path: "/usr/bin/tool" },
+    );
+    expect(lines(md)).toEqual([
+      "R cat ./libx.so",
+      "R cat /etc/ld.so.cache",
+      "R cat /usr/bin/tool",
+      "X tool /usr/bin/tool",
+    ]);
+    expect(tableRows(md)).toEqual([
+      "| R | `./libx.so` |",
+      "| R | `/etc/ld.so.cache` |",
+      "| RX | `/usr/bin/tool` |",
+    ]);
+  });
+
+  it("tells a process from a later one given the same pid", () => {
+    expect(
+      lines(
+        render(
+          { kind: "read", pid: 2, comm: "cat", path: "/work/libx.so" },
+          { kind: "fork", pid: 2, ppid: 1, comm: "sh" },
+          { kind: "mmap", pid: 2, comm: "x", path: "/work/libx.so", access: "x" },
+        ),
+      ),
+    ).toEqual(["R cat ./libx.so"]);
+  });
+
+  it("shows a file mapped executable that is neither a library nor mapped by an exec", () => {
+    expect(
+      lines(
+        render(
+          { kind: "mmap", pid: 2, comm: "x", path: "/home/u/.ssh/id_rsa", access: "x" },
+          // Another thread's mapping just before an exec's own.
+          { kind: "mmap", pid: 3, comm: "y", path: "/work/blob", access: "x" },
+          { kind: "mmap", pid: 3, comm: "tool", path: "/usr/bin/tool", access: "x", image: true },
+          { kind: "exec", pid: 3, comm: "tool", path: "/usr/bin/tool" },
+          { kind: "exec", pid: 4, comm: "z" },
+        ),
+      ),
+    ).toEqual(["R y ./blob", "R x ~/.ssh/id_rsa", "X tool /usr/bin/tool"]);
+  });
+
+  it("leaves out the program and interpreter an exec maps, and their reads", () => {
+    expect(
+      lines(
+        render(
+          { kind: "read", pid: 2, comm: "sh", path: "/work/run.sh" },
+          { kind: "read", pid: 2, comm: "sh", path: "/usr/bin/bash" },
+          { kind: "mmap", pid: 2, comm: "run.sh", path: "/usr/bin/bash", access: "x", image: true },
+          { kind: "mmap", pid: 2, comm: "run.sh", path: "/usr/bin/bash", access: "r", image: true },
+          {
+            kind: "mmap",
+            pid: 2,
+            comm: "run.sh",
+            path: "/lib/ld-linux.so.2",
+            access: "x",
+            image: true,
+          },
+          { kind: "exec", pid: 2, comm: "run.sh", path: "/work/run.sh" },
+        ),
+      ),
+    ).toEqual(["X run.sh ./run.sh"]);
+  });
+
+  it("starts a process's loads afresh when it runs a new program", () => {
+    expect(
+      lines(
+        render(
+          { kind: "mmap", pid: 2, comm: "bash", path: "/lib/libtinfo.so.6", access: "x" },
+          { kind: "read", pid: 2, comm: "bash", path: "/etc/ld.so.cache" },
+          { kind: "mmap", pid: 2, comm: "cp", path: "/usr/bin/cp", access: "x", image: true },
+          { kind: "exec", pid: 2, comm: "cp", path: "/usr/bin/cp" },
+          { kind: "read", pid: 2, comm: "cp", path: "/lib/libtinfo.so.6" },
+          { kind: "read", pid: 2, comm: "cp", path: "/etc/ld.so.cache" },
+          { kind: "read", pid: 2, comm: "cp", path: "/usr/bin/cp" },
+        ),
+      ),
+    ).toEqual(["R cp /etc/ld.so.cache", "R cp /lib/libtinfo.so.6", "X cp /usr/bin/cp"]);
+  });
+
   it("merges two spellings of one relative name into a row", () => {
     expect(
       lines(
@@ -507,6 +596,7 @@ describe("renderFilesystemAuditSummary", () => {
     it("counts from the first access shown, not a dropped library read", () => {
       const md = render(
         { t: at(0), kind: "read", comm: "sh", path: "/etc/ld.so.cache" },
+        { t: at(0), kind: "mmap", comm: "sh", path: "/lib/libc.so.6", access: "x" },
         { t: at(3), kind: "read", comm: "sh", path: "/work/x" },
       );
       expect(lines(md)).toEqual(["00:00.000: R sh ./x"]);

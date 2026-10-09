@@ -125,7 +125,8 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 //   open-failed: the name as passed to open(2), then its base directory if
 //            it is relative (see add_base); path_len holds the errno
 //   read/write: d_path result, once per open file and direction
-//   mmap:    path components; mode holds prot, flags the map flags
+//   mmap:    path components; mode holds prot, flags the map flags, and
+//            path_len is 1 when an exec mapped it (see in_exec)
 //   exec:    filename; its arguments are not read, as they can hold secrets
 //   symlink: link body at 0, then the link's own path components
 //   others:  leaf-first NUL-terminated path components, n1 of them, then
@@ -500,11 +501,47 @@ int BPF_PROG(on_exec_file, struct linux_binprm *bprm)
 	return 0;
 }
 
+// Threads past an exec's point of no return and not yet through it. Its other
+// threads are gone by then and this one runs no code of its own, so whatever
+// it maps meanwhile is the kernel loading the new program, its dynamic
+// loader and a script's interpreter.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 65536);
+	__type(key, u64);
+	__type(value, u8);
+} in_exec SEC(".maps");
+
+SEC("fentry/security_bprm_committing_creds")
+int BPF_PROG(on_exec_commit, const struct linux_binprm *bprm)
+{
+	if (!in_target())
+		return 0;
+	u64 id = bpf_get_current_pid_tgid();
+	u8 one = 1;
+	if (bpf_map_update_elem(&in_exec, &id, &one, BPF_ANY) != 0)
+		bump(&untracked);
+	return 0;
+}
+
+// A thread killed inside an exec never reaches sched_process_exec.
+SEC("tp_btf/sched_process_exit")
+int BPF_PROG(on_task_exit, struct task_struct *p)
+{
+	if (!in_target())
+		return 0;
+	u64 id = bpf_get_current_pid_tgid();
+	bpf_map_delete_elem(&in_exec, &id);
+	return 0;
+}
+
 SEC("tp_btf/sched_process_exec")
 int BPF_PROG(on_exec, struct task_struct *p, int old_pid, struct linux_binprm *bprm)
 {
 	if (!in_target())
 		return 0;
+	u64 id = bpf_get_current_pid_tgid();
+	bpf_map_delete_elem(&in_exec, &id);
 	struct event *e = start(K_EXEC);
 	if (!e)
 		return 0;
@@ -893,6 +930,8 @@ int BPF_PROG(on_mmap, struct file *file, unsigned long prot, unsigned long flags
 		return 0;
 	e->mode = prot;
 	e->flags = flags;
+	u64 id = bpf_get_current_pid_tgid();
+	e->path_len = bpf_map_lookup_elem(&in_exec, &id) ? 1 : 0;
 	e->data_len = file_walk(e, file);
 	submit(e);
 	return 0;

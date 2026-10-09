@@ -222,6 +222,10 @@ jobs:
             printf '#!/bin/sh\n' > "$GITHUB_WORKSPACE/A/run.sh"
             chmod +x "$GITHUB_WORKSPACE/A/run.sh"
             (cd "$GITHUB_WORKSPACE/A" && ./run.sh)
+            # A file mapped executable that is no library.
+            echo data > "$GITHUB_WORKSPACE/mapped.bin"
+            python3 -c 'import mmap, sys; f = open(sys.argv[1], "rb")
+            mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ | mmap.PROT_EXEC)' "$GITHUB_WORKSPACE/mapped.bin"
             # A program, not the builtin, with an argument the record must not keep.
             /usr/bin/true buildcage-audit-sentinel-arg
 
@@ -256,6 +260,10 @@ jobs:
           # A refused change shows only as failed.
           grep -qE ' a!? +chmod +\./root-owned\.txt$' "$f"
           grep -qE ' w!? +mkdir +\./root-owned/x$' "$f"
+          # A file mapped executable shows as read unless it is a library or
+          # an exec mapped it, as it does run.sh's interpreter.
+          grep -qE ' R +python3 +\./mapped\.bin$' "$f"
+          ! grep -q '/usr/bin/dash' "$f"
           # buildcage's own wrappers must never reach the summary.
           ! grep -qE ' (setpriv|buildcage-init|run-script\.sh) ' "$f"
 
@@ -280,6 +288,7 @@ jobs:
           # resolved to, the script itself rather than its interpreter, with
           # the name it was run by beside it.
           grep -qE '"kind":"exec",[^}]*"path":"/[^"]*/A/run\.sh","name":"\./run\.sh"' "$f"
+          jq -se 'any(.[]; .kind == "mmap" and .path == "/usr/bin/dash" and .image == true)' "$f" > /dev/null
           ! grep -q '/var/tmp/buildcage-' "$f"
           ! grep -q 'buildcage-audit-sentinel-arg' "$f"
 

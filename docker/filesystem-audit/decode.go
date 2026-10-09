@@ -31,6 +31,9 @@ type record struct {
 	Owner  string `json:"owner,omitempty"`
 	Err    int32  `json:"err,omitempty"`
 	Failed bool   `json:"failed,omitempty"`
+	// Image marks a mapping the kernel made while starting a program: the
+	// program itself, its dynamic loader, or a script's interpreter.
+	Image bool `json:"image,omitempty"`
 	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the reader
 	// turns it into Time.
 	boot uint64
@@ -220,6 +223,7 @@ func decode(raw []byte) (record, error) {
 	case 15: // mmap
 		r.Path, _ = components(data, n1, truncated)
 		r.Access = mmapAccess(mode, flags)
+		r.Image = pathRet == 1
 	case 2: // exec
 		r.Path = cstr(data)
 	case 3, 4, 6, 10, 23, 24: // unlink, rmdir, mkdir, truncate, exec-file, mknod

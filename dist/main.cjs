@@ -68436,7 +68436,7 @@ const LETTER = {
 	1,
 	13,
 	30
-]);
+]), LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
 function classify(r) {
 	let letter, path = r.path, failed = !1;
 	return r.kind === "open-failed" ? (letter = "R", failed = !0) : r.failed ? (letter = FAILED_LETTER[r.kind], r.kind === "link" && (path = r.to), failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : r.kind === "link" ? (letter = "W", path = r.to) : letter = LETTER[r.kind], letter && path ? {
@@ -68591,25 +68591,49 @@ function parse(jsonl) {
 		lost
 	};
 }
-function buildRows(records, prefixes, byCommand) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), seq = 0;
+function findLoads(records, prefixes) {
+	let procs = [], loaded = new Set(), libraries = new Set(), gens = new Map(), images = new Map(), load = (proc, path, library) => {
+		loaded.add(keyOf(proc, canonical(path, prefixes))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache"));
+	};
 	for (let r of records) {
-		if (r.kind === "mmap" && r.access === "x") {
-			r.path && libs.add(canonical(r.path, prefixes));
-			continue;
+		r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
+		let gen = gens.get(r.pid) ?? 0, proc = `${r.pid}/${gen}`;
+		if (procs.push(proc), r.kind === "mmap" && r.access === "x" && r.path) {
+			if (r.image) {
+				libraries.add(r);
+				let paths = images.get(proc);
+				paths || images.set(proc, paths = []), paths.push(r.path);
+			} else LIBRARY_NAME.test(r.path) && (libraries.add(r), load(proc, r.path, !0));
+		} else if (r.kind === "exec") {
+			let next = `${r.pid}/${gen + 1}`;
+			gens.set(r.pid, gen + 1);
+			for (let path of [...images.get(proc) ?? [], ...r.path ? [r.path] : []]) load(proc, path, !1), load(next, path, LIBRARY_NAME.test(path));
+			images.delete(proc);
 		}
-		r.kind === "exec" && r.path && execd.add(canonical(r.path, prefixes));
+	}
+	let loadReads = new Set();
+	return records.forEach((r, i) => {
+		let c = classify(r);
+		c && !c.failed && c.letter === "R" && loaded.has(keyOf(procs[i], canonical(c.path, prefixes))) && loadReads.add(r);
+	}), {
+		libraries,
+		loadReads
+	};
+}
+function buildRows(records, loads, prefixes, byCommand) {
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), okSpans = new Map(), failedSpans = new Map(), seq = 0;
+	for (let r of records) {
+		if (loads.libraries.has(r)) continue;
 		let c = classify(r);
 		if (!c) continue;
-		let key = keyOf(byCommand ? r.comm ?? "" : "", canonical(c.path, prefixes)), t = Date.parse(r.t ?? "");
+		let key = keyOf(byCommand ? r.comm ?? "" : "", canonical(c.path, prefixes));
+		if (loads.loadReads.has(r)) {
+			ok.has(key) || ok.set(key, new Set());
+			continue;
+		}
+		let t = Date.parse(r.t ?? "");
 		Number.isNaN(t) || widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++), c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
 	}
-	let libDrop = new Set([
-		...libs,
-		...execd,
-		"/etc/ld.so.cache"
-	]);
-	for (let key of ok.keys()) libDrop.has(pathOf(key)) && (ok.get(key).delete("R"), okSpans.get(key)?.delete("R"));
 	let nok = new Map(), nfailed = new Map(), nperm = new Map(), nspans = new Map(), mergeInto = (dst, src, keepRelative, srcSpans) => {
 		for (let [key, set] of src) {
 			let p = pathOf(key);
@@ -68665,7 +68689,7 @@ function executedPaths(records, prefixes) {
 	return [...seen].map((p) => escapeForDisplay(relativize(p, prefixes)));
 }
 function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
-	let { records, ended, lost } = parse(jsonl), rows = buildRows(records, prefixes, !0), heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
+	let { records, ended, lost } = parse(jsonl), loads = findLoads(records, prefixes), rows = buildRows(records, loads, prefixes, !0), heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
 > some accesses are missing from this summary and from the artifact.`, frame = (text) => ({
 		priority: 0,
 		level: 1,
@@ -68684,7 +68708,7 @@ function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
 		head: 4
 	}), executed = executedPaths(records, prefixes);
 	executed.length > 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, "Executed", markdownRows(["Path"], executed.map((path) => [codeCell(path)]))));
-	let byPath = buildRows(records, prefixes, !1).sort((a, b) => {
+	let byPath = buildRows(records, loads, prefixes, !1).sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return ca - cb || (pa < pb ? -1 : +(pa > pb));
 	});

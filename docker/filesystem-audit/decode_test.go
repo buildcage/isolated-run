@@ -181,6 +181,11 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "mmap", Comm: "ld", Path: "/lib/libc.so", Access: "x"},
 		},
 		{
+			name: "mmap by an exec",
+			ev:   event{kind: 15, comm: "sh", mode: unix.PROT_READ | unix.PROT_EXEC, pathRet: 1, n1: 3, data: comps("bash", "bin", "usr")},
+			want: record{Kind: "mmap", Comm: "sh", Path: "/usr/bin/bash", Access: "x", Image: true},
+		},
+		{
 			name: "rename",
 			ev:   event{kind: 5, comm: "mv", n1: 2, n2: 2, data: append(comps("a", "tmp"), comps("b", "tmp")...)},
 			want: record{Kind: "rename", Comm: "mv", Path: "/tmp/a", To: "/tmp/b"},
