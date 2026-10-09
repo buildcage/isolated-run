@@ -226,6 +226,16 @@ jobs:
             echo data > "$GITHUB_WORKSPACE/mapped.bin"
             python3 -c 'import mmap, sys; f = open(sys.argv[1], "rb")
             mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ | mmap.PROT_EXEC)' "$GITHUB_WORKSPACE/mapped.bin"
+            # A shared mapping made writable only after it was mapped.
+            echo data > "$GITHUB_WORKSPACE/mprotected.bin"
+            python3 -c 'import ctypes, os, sys
+            libc = ctypes.CDLL(None, use_errno=True)
+            libc.mmap.restype = ctypes.c_void_p
+            libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+            fd = os.open(sys.argv[1], os.O_RDWR)
+            p = libc.mmap(None, 4096, 1, 1, fd, 0)  # PROT_READ, MAP_SHARED
+            assert libc.mprotect(ctypes.c_void_p(p), 4096, 3) == 0  # + PROT_WRITE
+            ctypes.memmove(p, b"X", 1)' "$GITHUB_WORKSPACE/mprotected.bin"
             # A program, not the builtin, with an argument the record must not keep.
             /usr/bin/true buildcage-audit-sentinel-arg
 
@@ -263,6 +273,8 @@ jobs:
           # A file mapped executable shows as read unless it is a library or
           # an exec mapped it, as it does run.sh's interpreter.
           grep -qE ' R +python3 +\./mapped\.bin$' "$f"
+          # A write through a mapping made writable later is still a write.
+          grep -qE ' RW +python3 +\./mprotected\.bin$' "$f"
           ! grep -q '/usr/bin/dash' "$f"
           # buildcage's own wrappers must never reach the summary.
           ! grep -qE ' (setpriv|buildcage-init|run-script\.sh) ' "$f"
