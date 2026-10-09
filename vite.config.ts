@@ -42,6 +42,7 @@ export default defineConfig({
     "*.{ts,tsx,js,jsx,json,jsonc,yaml,yml,md}": "vp check --fix",
     "dist/**/*.cjs": "sh .github/actions/verify-dist/check-test-hooks.sh",
     "docker/gen-seccomp-profile/**/*.go": "gofmt -w",
+    "docker/filesystem-audit/**/*.go": "gofmt -w",
   },
   test: {
     include: ["src/**/*.test.ts"],

@@ -31,6 +31,7 @@ import { buildComposeEnv } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
+import { prepareStepFilesystemAudit } from "./filesystem-audit-report.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
@@ -38,6 +39,8 @@ import {
   readAwsKeyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
+  readFilesystemAuditInput,
+  readFilesystemAuditRetentionDays,
   readFilesystemInputs,
   readRunCommand,
 } from "./inputs.ts";
@@ -45,6 +48,7 @@ import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { saveWriteThroughForPost } from "./post-write-through.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
+import { filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
 import {
   resolveFilesystemPlan,
   resolveWriteThroughInput,
@@ -53,7 +57,7 @@ import {
 import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
-import { checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
+import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
@@ -86,6 +90,8 @@ export interface SandboxStepDeps {
   readRunCommand: typeof readRunCommand;
   readProxyInputs: typeof readProxyInputs;
   readFilesystemInputs: typeof readFilesystemInputs;
+  readFilesystemAuditInput: typeof readFilesystemAuditInput;
+  readFilesystemAuditRetentionDays: typeof readFilesystemAuditRetentionDays;
   readRuleInputs: typeof readRuleInputs;
   readFailOnCaResidue: typeof readFailOnCaResidue;
   readFailOnBlocked: typeof readFailOnBlocked;
@@ -111,6 +117,7 @@ export interface SandboxStepDeps {
   stopSandboxProxy: typeof stopSandboxProxy;
   runSandboxedCommand: typeof runSandboxedCommand;
   reportStepTraffic: typeof reportStepTraffic;
+  prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
   /** Calls listener on each signal a cancelled run sends this process, and
    *  returns what stops listening. */
   onCancel: (listener: () => void) => () => void;
@@ -144,6 +151,8 @@ const realDeps: SandboxStepDeps = {
   readRunCommand,
   readProxyInputs,
   readFilesystemInputs,
+  readFilesystemAuditInput,
+  readFilesystemAuditRetentionDays,
   readRuleInputs,
   readFailOnCaResidue,
   readFailOnBlocked,
@@ -169,6 +178,7 @@ const realDeps: SandboxStepDeps = {
   stopSandboxProxy,
   runSandboxedCommand,
   reportStepTraffic,
+  prepareStepFilesystemAudit,
   onCancel,
   saveState: core.saveState,
   info: core.info,
@@ -227,6 +237,8 @@ export async function runSandboxStep(
     readRunCommand,
     readProxyInputs,
     readFilesystemInputs,
+    readFilesystemAuditInput,
+    readFilesystemAuditRetentionDays,
     readRuleInputs,
     readFailOnCaResidue,
     readFailOnBlocked,
@@ -252,6 +264,7 @@ export async function runSandboxStep(
     stopSandboxProxy,
     runSandboxedCommand,
     reportStepTraffic,
+    prepareStepFilesystemAudit,
     onCancel,
     saveState,
     info,
@@ -280,6 +293,8 @@ export async function runSandboxStep(
   // `notice`, not `annotation`: readFilesystemInputs reads a renamed input (see
   // SandboxStepDeps).
   const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
+  const filesystemAudit = readFilesystemAuditInput();
+  const filesystemAuditRetentionDays = readFilesystemAuditRetentionDays();
   // Before the first write under the scratch base, the one just below.
   checkScratchBaseParent();
   // Before the command runs, for the post step's pinning; see post-write-through.ts.
@@ -294,6 +309,9 @@ export async function runSandboxStep(
   // Same gate as writeReportSummary(): suppresses annotations when this
   // script isn't running as the real action.
   const annotation = createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
+  if (filesystemAudit === "record") {
+    annotation.warning("filesystem_audit is experimental and may change.");
+  }
 
   // Pure checks, so a rule the engine cannot enforce fails (or, in audit,
   // warns) before any privileged setup.
@@ -371,6 +389,10 @@ export async function runSandboxStep(
 
   const containerName = generateContainerName();
   const projectName = deriveProjectName(containerName);
+  const audit =
+    filesystemAudit === "record"
+      ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE)
+      : undefined;
   saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, saveState);
 
   const composeEnv = buildComposeEnv(
@@ -429,11 +451,19 @@ export async function runSandboxStep(
       filesystemMode,
       overlayRoots,
       failOnCaResidue,
+      filesystemAudit: audit,
       warn,
       cancel: cancel.signal,
     });
   } finally {
-    // Neither throws, so the teardown and stopListening are always reached.
+    // None throws, so the teardown and stopListening are always reached.
+    const filesystemReport = await prepareStepFilesystemAudit({
+      audit,
+      retentionDays: filesystemAuditRetentionDays,
+      containerName,
+      annotation,
+      env,
+    });
     await reportStepTraffic({
       containerName,
       proxyEngine,
@@ -453,6 +483,7 @@ export async function runSandboxStep(
       failOnBlocked,
       trafficArtifact,
       env,
+      moreBlocks: filesystemReport.blocks,
     });
     await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
     stopListening();

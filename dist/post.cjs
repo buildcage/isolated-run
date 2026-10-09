@@ -245,13 +245,13 @@ function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readFilesystemInputs(notice, getInput$1 = getInput) {
+function readFilesystemInputs(notice, getInput$5 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$1("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$5("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput({
-			writeThrough: getInput$1("write_through"),
-			writable: getInput$1("writable"),
-			allowWrite: getInput$1("allow_write")
+			writeThrough: getInput$5("write_through"),
+			writable: getInput$5("writable"),
+			allowWrite: getInput$5("allow_write")
 		}, notice)
 	};
 }
@@ -379,6 +379,15 @@ function parseEphemeralRoots(raw) {
 		return;
 	}
 	if (Array.isArray(parsed)) return parsed.every((p) => typeof p == "string" && (0, node_path.isAbsolute)(p) && !/[\x00-\x1f\x7f]/.test(p)) ? parsed : void 0;
+}
+//#endregion
+//#region src/lib/sandbox/filesystem-audit.ts
+function filesystemAuditPaths(containerName, scratchBase) {
+	let suffix = containerName.split("-").at(-1);
+	return {
+		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
+		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`)
+	};
 }
 //#endregion
 //#region src/lib/retry-briefly.ts
@@ -654,15 +663,54 @@ function releaseNssDb(name, deps = {}) {
 }
 //#endregion
 //#region src/lib/post-cleanup.ts
+function defaultKillTracer(pid) {
+	runPinnedHostCommand("sudo", [
+		"-n",
+		"kill",
+		"-KILL",
+		String(pid)
+	]);
+}
+function defaultReadFile(path) {
+	return (0, node_fs.readFileSync)(path, "utf8");
+}
+function defaultRemoveFile(path) {
+	(0, node_fs.rmSync)(path, { force: !0 });
+}
+function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.existsSync, readFile = defaultReadFile, killTracer = defaultKillTracer, removeFile = defaultRemoveFile }) {
+	let { outPath, pidFilePath } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
+	if (fileExists(pidFilePath)) {
+		try {
+			let pid = Number(readFile(pidFilePath).trim());
+			Number.isInteger(pid) && pid > 0 && isTracer(pid, readFile) && killTracer(pid);
+		} catch (e) {
+			annotation.warning(`run post-cleanup: failed to stop the file-audit tracer: ${errorMessage(e)}`);
+		}
+		removeFile(pidFilePath);
+	}
+	removeFile(outPath);
+}
+function isTracer(pid, readFile) {
+	try {
+		return readFile(`/proc/${pid}/comm`).startsWith("filesystem-audi");
+	} catch {
+		return !1;
+	}
+}
 function startedByThisStep(containerName, env, readOwner) {
 	let owner = readOwner(containerName);
 	return owner === null || owner === ownerToken(env);
 }
-function planPostCleanup(state, env, annotation, { readOwner = readContainerOwner, fileExists = node_fs.existsSync, removeScratchDir = cleanupScratchDir, releaseNssDb: releaseNssDbUse = releaseNssDb } = {}) {
-	let { targets, problems } = resolvePostState(state);
+function planPostCleanup(state, env, annotation, deps = {}) {
+	let { readOwner = readContainerOwner, fileExists = node_fs.existsSync, removeScratchDir = cleanupScratchDir, releaseNssDb: releaseNssDbUse = releaseNssDb } = deps, { targets, problems } = resolvePostState(state);
 	for (let problem of problems) annotation.error(`run post-cleanup: ${problem}`);
 	if (!targets) return null;
 	if (!startedByThisStep(targets.containerName, env, readOwner)) return annotation.error("run post-cleanup: the proxy container named in GITHUB_STATE was started by a different step. Skipping all post-step cleanup: tearing it down would stop that step's proxy and delete its sandbox scratch directory."), null;
+	try {
+		cleanupLeftoverAudit(targets.containerName, annotation, deps);
+	} catch (e) {
+		annotation.warning(`run post-cleanup: filesystem_audit cleanup failed: ${errorMessage(e)}`);
+	}
 	let reclaimed = !1;
 	try {
 		let scratchDir = scratchDirFor(targets.containerName);

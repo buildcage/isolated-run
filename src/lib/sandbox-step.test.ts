@@ -4,6 +4,8 @@ import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 
 import { SandboxError } from "./errors.ts";
 import { runSandboxStep, WRITE_THROUGH_ALL_WARNING, type SandboxStepDeps } from "./sandbox-step.ts";
+import { filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
+import { SANDBOX_SCRATCH_BASE } from "./sandbox/scratch-dir.ts";
 
 // Assembled at runtime: a literal shaped like an AWS access key ID trips
 // secret scanning on push.
@@ -24,6 +26,7 @@ const mocks = {
   readRunCommand: vi.fn(),
   readProxyInputs: vi.fn(),
   readFilesystemInputs: vi.fn(),
+  readFilesystemAuditInput: vi.fn(),
   readRuleInputs: vi.fn(),
   readFailOnCaResidue: vi.fn(),
   readFailOnBlocked: vi.fn(),
@@ -49,6 +52,7 @@ const mocks = {
   stopSandboxProxy: vi.fn(),
   runSandboxedCommand: vi.fn(),
   reportStepTraffic: vi.fn(),
+  prepareStepFilesystemAudit: vi.fn(),
   onCancel: vi.fn(),
   saveState: vi.fn(),
   info: vi.fn(),
@@ -82,6 +86,7 @@ beforeEach(() => {
     filesystemMode: "persistent",
     writeThroughInput: "",
   });
+  mocks.readFilesystemAuditInput.mockReturnValue("off");
   mocks.readRuleInputs.mockReturnValue({
     httpsRules: ["example.com:443"],
     httpRules: [],
@@ -109,6 +114,7 @@ beforeEach(() => {
   mocks.stopSandboxProxy.mockResolvedValue(undefined);
   mocks.runSandboxedCommand.mockResolvedValue(0);
   mocks.reportStepTraffic.mockResolvedValue(undefined);
+  mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks: () => [] });
   mocks.onCancel.mockReturnValue(stopListening);
 });
 
@@ -184,6 +190,34 @@ describe("runSandboxStep", () => {
       writeThroughPaths: ["/home/runner/work/repo/repo/dist"],
       failOnCaResidue: false,
     });
+  });
+
+  it("passes the audit output paths to the command under filesystem_audit: record", async () => {
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.runSandboxedCommand.mock.calls[0][0].filesystemAudit).toStrictEqual(
+      filesystemAuditPaths("buildcage-proxy-deadbeef", SANDBOX_SCRATCH_BASE),
+    );
+  });
+
+  it("prepares the audit first and writes its summary with the traffic report", async () => {
+    const blocks = vi.fn(() => []);
+    mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks });
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.reportStepTraffic.mock.calls[0][0].moreBlocks).toBe(blocks);
+    expect(orderOf(mocks.prepareStepFilesystemAudit)).toBeLessThan(
+      orderOf(mocks.reportStepTraffic),
+    );
+  });
+
+  it("leaves the audit off by default", async () => {
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.runSandboxedCommand.mock.calls[0][0].filesystemAudit).toBeUndefined();
   });
 
   it("hands the report the inputs read up front", async () => {

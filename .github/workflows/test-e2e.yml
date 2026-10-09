@@ -146,6 +146,140 @@ jobs:
       # No cleanup step: the action stops its own proxy container in its
       # finally block.
 
+  # Runs a real sandboxed step with filesystem_audit under each filesystem_mode
+  # and checks the tracer recorded its file accesses; a test-hooks build
+  # surfaces the recording for the assertion.
+  test_sandbox_filesystem_audit:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        filesystem_mode: [persistent, ephemeral]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    name: "e2e: test (filesystem_audit, ${{ matrix.filesystem_mode }}, ${{ matrix.runner }})"
+
+    env:
+      PROXY_ENGINE: universal
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-vp
+
+      - name: Build local sandbox proxy image
+        run: docker compose build proxy
+
+      - name: Resolve local image ref
+        id: local_image
+        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild the action with the local-image test hook enabled
+        env:
+          BUILDCAGE_BUILD_TEST_HOOKS: "1"
+        run: vp run build
+
+      - name: Leave a file and a directory in the workspace the step does not own
+        run: sudo touch "$GITHUB_WORKSPACE/root-owned.txt" && sudo mkdir "$GITHUB_WORKSPACE/root-owned"
+
+      - name: Run a step with filesystem_audit enabled
+        id: audit
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/summary.md
+          BUILDCAGE_RUN_DEBUG_RAW_FILE: ${{ runner.temp }}/raw.jsonl
+        with:
+          proxy_engine: universal
+          proxy_mode: audit
+          filesystem_mode: ${{ matrix.filesystem_mode }}
+          filesystem_audit: record
+          run: |
+            cat /etc/hostname > /dev/null
+            echo probe > "$GITHUB_WORKSPACE/probe.txt"
+            mv "$GITHUB_WORKSPACE/probe.txt" "$GITHUB_WORKSPACE/probe2.txt"
+            rm "$GITHUB_WORKSPACE/probe2.txt"
+            # A command run from a subshell that itself touches nothing.
+            (cd "$GITHUB_WORKSPACE" && touch subshell.txt || true)
+            # Failed calls on relative names: one against a changed working
+            # directory, one against a directory passed by descriptor.
+            mkdir -p "$GITHUB_WORKSPACE/sub"
+            (cd "$GITHUB_WORKSPACE/sub" && cat missing.txt 2>/dev/null || true)
+            python3 -c 'import os, sys; d = os.open(sys.argv[1], os.O_RDONLY)
+            try: os.unlink("gone", dir_fd=d)
+            except FileNotFoundError: pass' "$GITHUB_WORKSPACE/sub"
+            # Changes the kernel refuses after the tracer's hook has seen them.
+            chmod 777 "$GITHUB_WORKSPACE/root-owned.txt" 2>/dev/null || true
+            mkdir "$GITHUB_WORKSPACE/root-owned/x" 2>/dev/null || true
+            # A script run by a relative name from the directory it sits in.
+            mkdir -p "$GITHUB_WORKSPACE/A"
+            printf '#!/bin/sh\n' > "$GITHUB_WORKSPACE/A/run.sh"
+            chmod +x "$GITHUB_WORKSPACE/A/run.sh"
+            (cd "$GITHUB_WORKSPACE/A" && ./run.sh)
+
+      - name: Verify the Job Summary has the filesystem audit
+        run: |
+          f="${{ runner.temp }}/summary.md"
+          echo "::group::Filesystem audit summary"; cat "$f"; echo "::endgroup::"
+          # The raw recording (before stripping) feeds the committed fixtures.
+          echo "::group::Raw recording"; cat "${{ runner.temp }}/raw.jsonl" 2>/dev/null || true; echo "::endgroup::"
+          grep -q "Filesystem audit" "$f"
+          # The probe writes show as a flagged, command-tagged line under the
+          # workspace, led by its elapsed time (MM:SS.mmm) and a colon.
+          t='[0-9]{2}:[0-9]{2}\.[0-9]{3}'
+          grep -qE "^$t(-$t)?: +[RWXMDArwxmda!]+ +\S+ +\./probe" "$f" || exit 1
+          # Rows run in the order they were first touched: write, move, delete.
+          w=$(grep -nE ' W +bash +\./probe\.txt$' "$f" | head -1 | cut -d: -f1)
+          m=$(grep -nE ' M +mv +\./probe\.txt$' "$f" | head -1 | cut -d: -f1)
+          d=$(grep -nE ' D +rm +\./probe2\.txt$' "$f" | head -1 | cut -d: -f1)
+          [ -n "$w" ] && [ -n "$m" ] && [ -n "$d" ] && [ "$w" -lt "$m" ] && [ "$m" -lt "$d" ]
+          # The tables list what ran and what was touched, across commands.
+          # python3 is a symlink, so it shows as the versioned file it runs.
+          grep -qE '^\| `/usr/bin/python3[.0-9]*` \|$' "$f"
+          grep -qF '| `./A/run.sh` |' "$f"
+          # touch creates its file, then sets its times through the descriptor.
+          grep -qF '| WA | `./subshell.txt` |' "$f"
+          grep -q '<summary>📂 Filesystem details</summary>' "$f"
+          # A subshell's command still counts as the step's.
+          grep -qE ' WA +touch +\./subshell\.txt$' "$f"
+          # Relative names show under the directory they resolved against.
+          grep -qE ' r +cat +\./sub/missing\.txt$' "$f"
+          grep -qE ' d +python3 +\./sub/gone$' "$f"
+          # A refused change shows only as failed.
+          grep -qE ' a!? +chmod +\./root-owned\.txt$' "$f"
+          grep -qE ' w!? +mkdir +\./root-owned/x$' "$f"
+          # buildcage's own wrappers must never reach the summary.
+          ! grep -qE ' (setpriv|buildcage-init|run-script\.sh) ' "$f"
+
+      - name: Download and check the filesystem audit artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ steps.audit.outputs.filesystem_audit_artifact_name }}
+          path: ${{ runner.temp }}/audit
+      - name: The artifact holds the step's events with buildcage's own stripped out
+        run: |
+          f=$(ls ${{ runner.temp }}/audit/*.jsonl)
+          test -s "$f"
+          echo "::group::Recorded events (first lines)"; head -20 "$f"; echo "::endgroup::"
+          grep -q '"kind":"write"' "$f"
+          # overlayfs opens a layer's directories with O_NOATIME (0o1000000) on
+          # its own behalf; none of those may pass for the step's.
+          n=$(jq -s '[.[] | select(.kind == "open" and ((.flags // 0) / 262144 | floor) % 2 == 1)] | length' "$f")
+          [ "$n" -eq 0 ]
+          # buildcage's own exec wrappers and scratch files must not leak.
+          ! grep -qE '"comm":"(setpriv|buildcage-init|run-script\.sh)"' "$f"
+          # A program run by a relative name is recorded under the file it
+          # resolved to, the script itself rather than its interpreter, with
+          # the name it was run by beside it.
+          grep -qE '"kind":"exec",[^}]*"path":"/[^"]*/A/run\.sh","name":"\./run\.sh"' "$f"
+          ! grep -q '/var/tmp/buildcage-' "$f"
+
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network), proves proxy_engine: universal
   # wiring end-to-end: an allowed host reaches its origin, a blocked one does
@@ -733,6 +867,7 @@ jobs:
       [
         changes,
         test_sandbox_audit_mode,
+        test_sandbox_filesystem_audit,
         test_sandbox_enforcement,
         test_sandbox_concurrency,
         test_sandbox_concurrency_inspect,

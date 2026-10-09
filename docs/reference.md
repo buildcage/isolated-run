@@ -17,6 +17,7 @@ details.
 - [Connections that failed](#connections-that-failed)
 - [AWS access key check](#aws-access-key-check)
 - [Traffic artifact](#traffic-artifact)
+- [Filesystem audit](#filesystem-audit)
 - [CA trust variables](#ca-trust-variables)
 - [`ephemeral` overlays](#ephemeral-overlays)
 - [`write_through` paths](#write_through-paths)
@@ -37,6 +38,8 @@ details.
 | `allowed_aws_role_accounts`       | empty        | `inspect` only, **experimental**. AWS accounts whose roles the step may assume; the keys those roles issue pass the check too. See [AWS access key check](#aws-access-key-check).                                                    |
 | `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                                                                                                                                |
 | `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                                                                                                                             |
+| `filesystem_audit`                | `off`        | `record` logs the step's file accesses (**experimental**). See [Filesystem audit](#filesystem-audit).                                                                                                                                |
+| `filesystem_audit_retention_days` | empty        | How long to keep the filesystem audit artifact, as a whole number of days; empty uses the repository's own default                                                                                                                   |
 | `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                                                                                                                            |
 | `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                                                                                                                       |
 | `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                                                                                                                           |
@@ -105,9 +108,10 @@ known_blocked_rules: |
 
 ## Outputs
 
-| Output                  | Description                                                                                                                                                                    |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `traffic_artifact_name` | Name of the uploaded traffic artifact, when `upload_traffic_artifact` produced one. Empty otherwise, so a later step can tell an upload apart from none having been requested. |
+| Output                           | Description                                                                                                                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `traffic_artifact_name`          | Name of the uploaded traffic artifact, when `upload_traffic_artifact` produced one. Empty otherwise, so a later step can tell an upload apart from none having been requested. |
+| `filesystem_audit_artifact_name` | Name of the uploaded filesystem audit artifact, when `filesystem_audit: record` recorded something. Empty otherwise.                                                           |
 
 ## Operation modes
 
@@ -760,6 +764,80 @@ Job Summary is the exception: it replaces credential query parameters, see
 Treat the artifact as sensitive: it keeps any credential a build put in a query or a path. A later
 job in the same run can fetch it with `actions/download-artifact`, and anyone who can read the
 repository can fetch it through the API, until it expires.
+
+## Filesystem audit
+
+**Experimental.** `filesystem_audit: record` records every file the isolated step opens, reads,
+writes, moves, deletes, changes the attributes of, and executes, and adds a section to the Job
+Summary: a table of what the step executed, a table of every path it touched with the actions on it,
+and, folded under **📂 Filesystem details**, one row per command and path in the order the rows were
+first touched:
+
+```
+### Filesystem audit
+R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied
+
+#### Executed
+| Path                  |
+| --------------------- |
+| `/usr/local/bin/node` |
+
+#### Accessed paths
+| Access | Path                  |
+| ------ | --------------------- |
+| RWD    | `./node_modules/**`   |
+| R      | `./package.json`      |
+| r!     | `/etc/shadow`         |
+
+📂 Filesystem details
+first-last access
+00:00.412:           R   node ./package.json
+00:00.415:           r!  node /etc/shadow
+00:00.530-00:41.207: RWD node ./node_modules/**
+```
+
+The executed table lists each program once, in the order it first ran. The accessed-paths table
+combines every command's actions on a path in one row, in path order. Each row of the details names
+the command (its process name) and combines its flags for that path (`RW` read and written). The
+time is when the command first and last touched it, counted from the proxy's start like the
+communication details (from the first access if that start is unknown); a row touched once shows one
+time. It does not say which action came when, and a file kept open counts only its first read and
+first write, so the last time can be earlier than its last write. The artifact has every access in
+order. An action that only ever failed is lowercase, and one the sandbox refused, for want of
+permission or because the location is read-only, is marked `!`. A directory with many touched
+children is shown once as `dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and
+`$HOME` (`~/…`), else absolute. A failed access is recorded under the name the command used, joined
+to the directory a relative name resolved against (its working directory, or the directory it passed
+by descriptor) without resolving `..`; a name whose directory was closed before it could be read is
+shown as `…/name`, as is a path too deep to record in full. Where its `path` differs from the name as passed, the artifact keeps that name in
+`name` (`to_name` for a move's target). An invisible or control character in a path or command name
+is shown escaped, as `\n` or `\u{202e}`, and a backslash as `\\`. A program the step ran is
+recorded under the file it resolved to, with symlinks followed and a script under its own path rather
+than its interpreter's; the artifact keeps the name it was run by as `name`. The libraries a command
+loads are left out.
+
+When the step's Job Summary would pass GitHub's size limit, its parts give way in this order: the
+filesystem details, the traffic report's communication log, the accessed-paths table, the executed
+table, then the traffic report's own tables and example. Each is cut at a line boundary with a note
+after what is kept, except the example, which is replaced whole by its note. Once a filesystem audit
+table is cut, the details are left out with it, under that one note. The filesystem audit's note
+names its artifact, or says the record was not kept when the artifact could not be uploaded.
+
+The full record is uploaded as JSON lines in an artifact named `buildcage-filesystem-audit-<id>`,
+with absolute paths; `filesystem_audit_artifact_name` carries its name. Treat it as sensitive, like
+the traffic artifact. `filesystem_audit_retention_days` sets how long it is kept.
+
+The artifact ends with a line such as `{"kind":"end","dropped":0,"untracked":0}`, which the
+tracer writes only after every access it caught. `dropped` counts accesses that found its event
+buffer full, and `untracked` the calls it could not follow because too many files were open, or too
+many calls were in progress, at once. If either is nonzero, or the line is missing because the
+tracer did not stop cleanly, the section opens with a warning that the record is incomplete.
+
+It observes accesses in the kernel, below any library the step links against, and only records; it
+never blocks an access. It needs a cgroup v2 host running Linux 5.17 or newer; where that or the
+kernel's tracing support is missing it warns and the step runs unaudited. See
+[Filesystem audit](./security.md#filesystem-audit) for what it does not record and what its record
+can be trusted for.
 
 ## CA trust variables
 

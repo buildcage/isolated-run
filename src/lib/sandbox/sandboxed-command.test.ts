@@ -34,6 +34,8 @@ const mocks = {
   resolveSandboxGid: vi.fn(),
   listHostMounts: vi.fn(),
   runIsolated: vi.fn(),
+  extractTracer: vi.fn(),
+  startFilesystemAudit: vi.fn(),
   mkdir: vi.fn(),
   touch: vi.fn(),
   readFile: vi.fn(),
@@ -42,6 +44,8 @@ const mocks = {
   readlink: vi.fn(),
   info: vi.fn(),
   warn: vi.fn(),
+  // The handle startFilesystemAudit resolves to; kept here to assert its stop.
+  auditStop: vi.fn(),
 };
 
 // A bag of doubles, not a partially-typed stand-in: every step is replaced, so
@@ -85,13 +89,16 @@ beforeEach(() => {
   mocks.createOverlayScratchDirs.mockReturnValue([]);
   mocks.writeResolvConf.mockReturnValue(`${SCRATCH}/resolv.conf`);
   mocks.writeRunScript.mockReturnValue(`${SCRATCH}/exec/run.sh`);
-  mocks.writeEnvLoader.mockReturnValue(`${SCRATCH}/exec/env-loader.sh`);
+  mocks.writeEnvLoader.mockReturnValue(`${SCRATCH}/exec/buildcage-init`);
   mocks.listHostMounts.mockReturnValue([]);
   mocks.resolveSandboxGid.mockReturnValue({ gid: 1001, substitutedFrom: undefined });
   mocks.buildOciConfig.mockReturnValue({ process: {} });
   mocks.resolveSandboxEnv.mockReturnValue({ PATH: "/usr/bin" });
   mocks.buildEnvBlob.mockReturnValue(Buffer.from(""));
   mocks.runIsolated.mockResolvedValue(0);
+  mocks.extractTracer.mockReturnValue(`${SCRATCH}/filesystem-audit`);
+  mocks.auditStop = vi.fn().mockResolvedValue(undefined);
+  mocks.startFilesystemAudit.mockResolvedValue({ stop: mocks.auditStop });
   mocks.realpath.mockImplementation((p: string) => p);
   mocks.lstat.mockReturnValue(undefined);
 });
@@ -126,6 +133,73 @@ describe("runSandboxedCommand", () => {
     await runSandboxedCommand(options({ cancel }), deps);
 
     expect(mocks.runIsolated.mock.calls[0][0].cancel).toBe(cancel);
+  });
+
+  describe("filesystem_audit", () => {
+    const AUDIT = {
+      outPath: "/var/tmp/buildcage-1001/filesystem-audit-deadbeef.jsonl",
+      pidFilePath: "/var/tmp/buildcage-1001/filesystem-audit-deadbeef.pid",
+    };
+
+    function auditing() {
+      mocks.buildOciConfig.mockReturnValue({
+        process: {},
+        linux: { cgroupsPath: "/system.slice/runner.service/buildcage-proxy-deadbeef" },
+      });
+      return options({ filesystemAudit: AUDIT });
+    }
+
+    it("starts the tracer over the sandbox cgroup and stops it after the command", async () => {
+      await runSandboxedCommand(auditing(), deps);
+
+      expect(mocks.extractTracer).toHaveBeenCalledWith(CONTAINER, SCRATCH);
+      expect(mocks.startFilesystemAudit.mock.calls[0][0]).toStrictEqual({
+        tracerPath: `${SCRATCH}/filesystem-audit`,
+        cgroupsPath: "/system.slice/runner.service/buildcage-proxy-deadbeef",
+        outPath: AUDIT.outPath,
+        pidFilePath: AUDIT.pidFilePath,
+        readyPath: `${SCRATCH}/filesystem-audit.ready`,
+      });
+      expect(mocks.startFilesystemAudit.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.runIsolated.mock.invocationCallOrder[0],
+      );
+      expect(mocks.auditStop.mock.invocationCallOrder[0]).toBeGreaterThan(
+        mocks.runIsolated.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("stops the tracer even when the command's run fails", async () => {
+      mocks.runIsolated.mockRejectedValue(new SandboxError("x", "SANDBOX_TERMINATED"));
+
+      await expect(runSandboxedCommand(auditing(), deps)).rejects.toThrow("x");
+      expect(mocks.auditStop).toHaveBeenCalledOnce();
+    });
+
+    it("does nothing when filesystem_audit is off", async () => {
+      await runSandboxedCommand(options(), deps);
+
+      expect(mocks.extractTracer).not.toHaveBeenCalled();
+      expect(mocks.startFilesystemAudit).not.toHaveBeenCalled();
+    });
+
+    it("warns and skips the tracer without a cgroup v2 host", async () => {
+      // buildOciConfig leaves cgroupsPath undefined on a non-v2 host.
+      mocks.buildOciConfig.mockReturnValue({ process: {}, linux: {} });
+      await runSandboxedCommand(options({ filesystemAudit: AUDIT }), deps);
+
+      expect(mocks.startFilesystemAudit).not.toHaveBeenCalled();
+      expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("cgroup v2"));
+    });
+
+    it("leaves the exit code untouched when the tracer cannot start", async () => {
+      mocks.runIsolated.mockResolvedValue(7);
+      mocks.extractTracer.mockImplementation(() => {
+        throw new Error("docker cp failed");
+      });
+
+      await expect(runSandboxedCommand(auditing(), deps)).resolves.toBe(7);
+      expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("could not start"));
+    });
   });
 
   // The netns is a different ID namespace from Docker's, but derived from the

@@ -55,6 +55,22 @@ RUN go mod download
 COPY docker/gen-seccomp-profile/main.go ./
 RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" go build -trimpath -ldflags="-s -w" -o /out/gen-seccomp-profile .
 
+# filesystem-audit, the file-access tracer, is compiled here and, like runc
+# and gen-seccomp-profile, extracted onto the runner host and run there; see
+# docker/filesystem-audit/main.go. bpf2go compiles its eBPF object with clang
+# (architecture-independent, -target bpfel) and embeds it, so the Go loader
+# cross-compiles via BUILDPLATFORM without QEMU.
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:4cb7ac979db5fcc41cae44b2227ba5ab8a51e8807f40d9ba4dee20a0ad960b5b AS filesystem-audit-build
+RUN apk add --no-cache clang llvm libbpf-dev linux-headers
+ARG TARGETARCH
+WORKDIR /src
+COPY docker/filesystem-audit/go.mod docker/filesystem-audit/go.sum ./
+RUN go mod download
+COPY docker/filesystem-audit/ ./
+RUN go generate ./... && \
+    CGO_ENABLED=0 go test ./... && \
+    CGO_ENABLED=0 GOARCH="${TARGETARCH}" go build -trimpath -ldflags="-s -w" -o /out/filesystem-audit .
+
 # Bundle the QuickJS scripts (rolldown; see rolldown.scripts.config.js),
 # since qjs has no TypeScript support. Architecture-independent output, so
 # pinned to --platform=$BUILDPLATFORM like gen-seccomp-profile-build above
@@ -134,6 +150,9 @@ COPY --from=deps /opt/buildcage/bin/runc /opt/buildcage/bin/runc
 # there (not inside this container) to produce the seccomp filter embedded
 # in runc's config.json; see the build stage comment above for why.
 COPY --from=gen-seccomp-profile-build /out/gen-seccomp-profile /opt/buildcage/bin/gen-seccomp-profile
+# filesystem-audit, extracted onto the runner host like runc (see
+# docker/filesystem-audit/main.go).
+COPY --from=filesystem-audit-build /out/filesystem-audit /opt/buildcage/bin/filesystem-audit
 
 COPY docker/inspect/files/THIRD_PARTY_LICENSES /opt/buildcage/THIRD_PARTY_LICENSES
 

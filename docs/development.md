@@ -30,7 +30,7 @@ The action's own isolation mechanism (`run-isolated.sh`) uses Linux-only primiti
 which is enough to reach the proxy container's `SandboxKey` netns the same way production does.
 That is close enough to the real "runner host + separate proxy container"
 arrangement for day-to-day iteration, though it can't validate the container-boundary parts of
-production. `runc` and `gen-seccomp-profile` are
+production. `runc`, `gen-seccomp-profile` and `filesystem-audit` are
 built directly into the dev-loop image (mirroring `docker/universal/Dockerfile`) rather than
 `docker cp`-extracted from the proxy image at runtime, so the dev loop doesn't need the Docker
 socket mounted in just to reach a sibling container; `dev/build-test-bundle.sh` stands in for
@@ -69,6 +69,20 @@ the real action wrapper (see `test/integration-test-*.sh`) and is what CI's `tes
 `test_integration_sandbox_universal` instead, whether they need it for what only a fixture can
 cover or just to keep off the real internet. The CI-only `test_sandbox_*` end-to-end jobs run on a real
 runner host with no nested container, and are the final word on whether a change works.
+
+### Refreshing the filesystem audit fixtures
+
+The filesystem audit's golden test strips and renders a real recording from the
+`test_sandbox_filesystem_audit` e2e job, kept in `src/lib/__fixtures__/filesystem-audit/`. When the
+tracer's output changes, take a new one from a passing run of that job:
+
+```bash
+dev/update-filesystem-audit-fixture.sh <run id of "Test / E2E">
+```
+
+It pulls the raw recording out of the run's log, normalizes the runner's uid in the scratch base to
+0, and regenerates the stripped recording and the summary through the golden test. Read the diff
+before committing: it is the change in what the audit records and shows.
 
 ### Running the integration tests from several git worktrees
 
@@ -323,9 +337,10 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 ├── docker/                    # Proxy image build contexts, one per proxy_engine
 │   ├── common/                # Image files both engines share: s6 services, init-iptables
 │   ├── universal/             # alpine + haproxy/CoreDNS/iptables/s6-overlay + pinned runc +
-│   │                          # gen-seccomp-profile
+│   │                          # gen-seccomp-profile + filesystem-audit
 │   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay
 │   ├── gen-seccomp-profile/   # Go module: derives a seccomp filter from Docker's default profile
+│   ├── filesystem-audit/      # Go+eBPF module: records a sandboxed step's file accesses (experimental)
 │   ├── compose.action.yaml    # Runtime compose file the action uses (verified, digest-pinned
 │   │                          # image ref), distinct from the top-level compose.yaml below
 │   ├── compose.action.test-inspect.yaml  # Same, for the inspect-engine integration tests
@@ -334,7 +349,8 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 ├── test/                      # assert-sandbox*.sh + integration-test-*.sh driving dist/main.cjs,
 │                              # and *-scenarios.sh run inside the sandbox as a step's own `run:`.
 │                              # helpers.sh carries what both halves share
-├── dev/                       # Mac dev-loop-only image and scripts, not used in production or CI
+├── dev/                       # Mac dev-loop image and scripts, and the filesystem audit fixture
+│                              # refresh; not used in production or CI
 ├── docs/                      # development.md, security.md, aws.md, plus the reference.md/
 │                              # rules.md/inspect-engine.md link stubs
 ├── licenses/                  # gen-license-file.mjs, which regenerates THIRD_PARTY_LICENSES_NPM

@@ -35,6 +35,7 @@ Docker build's `RUN` steps rather than a workflow step, use
 - [How `run` is executed](#how-run-is-executed)
 - [Passing values to `run`](#passing-values-to-run)
 - [Filesystem access](#filesystem-access)
+- [Filesystem audit](#filesystem-audit)
 - [How it works](#how-it-works)
 - [CA trust and compatibility](#ca-trust-and-compatibility)
 - [Scope](#scope)
@@ -398,6 +399,7 @@ is gone.
 - uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     filesystem_mode: ephemeral
+    filesystem_audit: record # record what the command touches while discarding its writes
     write_through: |
       $GITHUB_OUTPUT
       ./dist
@@ -434,6 +436,31 @@ directory for example, list it under `write_through:`:
 How an entry is resolved, which paths are reserved, what `write_through: /` does, and what happened
 to the old `writable:` and `allow_write:` inputs are all in
 [Reference](./docs/reference.md#write_through-paths).
+
+## Filesystem audit
+
+> [!WARNING]
+> `filesystem_audit` is **experimental**: its behavior, inputs, and output format may still change.
+
+`filesystem_audit: record` records what the isolated step reads, writes, moves, deletes, changes the
+attributes of, and executes, and adds a section to the Job Summary: a table of the programs it ran,
+a table of every path it touched with a flag for each action (`R` read, `W` write, `X` exec, `M`
+move, `D` delete, `A` attr; lowercase for an action that only failed, `!` for one the sandbox
+refused), and, folded below them, one line per command and path with the first and last time it was
+touched. The full record is uploaded as a `buildcage-filesystem-audit-<id>` artifact; treat it as
+sensitive.
+
+```yaml
+- uses: buildcage/isolated-run@v2
+  with:
+    filesystem_audit: record
+    run: npm ci
+```
+
+It observes accesses in the kernel, below the libraries a command links against, and only records;
+it never blocks an access. It needs a cgroup v2 host on Linux 5.17 or newer; elsewhere it warns and
+the step runs unaudited. The flag format, the artifact, and what it does not record are in
+[Reference](./docs/reference.md#filesystem-audit).
 
 ## How it works
 
@@ -645,13 +672,16 @@ reported as blocked; see
 ### The Job Summary size cap
 
 GitHub caps a Job Summary at 1 MiB per step, counting what the command itself wrote there, and drops
-the whole summary rather than truncating it. When the report would push the step over that limit,
-its parts give way in order: the timeline first, then the allowed, failed and blocked tables, then
-the 🚨 list of requests `restrict` would refuse, and last the `restrict` example. A part that does
-not fit is cut at a line boundary with a note after what is kept, or replaced by the note when
-nothing of it fits; the example is always replaced whole rather than printed in part. Once a table
-or the 🚨 list is cut, the timeline is left out with it, under that one note. The report is written to the Job Summary only, so what was cut is recovered from the
-[traffic artifact](./docs/reference.md#traffic-artifact) and nowhere else.
+the whole summary rather than truncating it. When the report, with the filesystem audit's section if
+one was recorded, would push the step over that limit, its parts give way in order: the filesystem
+audit's details, the timeline, the filesystem audit's tables, then the allowed, failed and blocked
+tables, then the 🚨 list of requests `restrict` would refuse, and last the `restrict` example. A part
+that does not fit is cut at a line boundary with a note after what is kept, or replaced by the note
+when nothing of it fits; the example is always replaced whole rather than printed in part. Once a
+table or the 🚨 list is cut, the timeline is left out with it, under that one note. The report is
+written to the Job Summary only, so what was cut is recovered from the [traffic
+artifact](./docs/reference.md#traffic-artifact), or the filesystem audit's own artifact for its
+section, and nowhere else.
 
 ## FAQ
 

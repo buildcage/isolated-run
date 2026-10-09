@@ -218,7 +218,7 @@ nsenter --net="$PROXY_NETNS" -- sh -c '
 ' sh "$VETH_P" "$GATEWAY" </dev/null
 
 echo "Executing isolated command via runc..." >&2
-# env-loader.sh writes to fd 3 just before it runs the command, so a `runc run`
+# buildcage-init writes to fd 3 just before it runs the command, so a `runc run`
 # that fails before then is told apart from the command exiting.
 STARTED_FILE="${BUNDLE_DIR}/started"
 exec 3>"$STARTED_FILE"

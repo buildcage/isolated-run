@@ -26,6 +26,7 @@ import {
 
 import { isAwsAccessKeyId, parseAwsAccounts } from "../proxy/aws-keys.ts";
 import { SandboxError } from "./errors.ts";
+import { resolveFilesystemAudit, type FilesystemAudit } from "./filesystem-audit-mode.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
 
 const LIST_INPUTS = [
@@ -52,6 +53,8 @@ export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
     "fail_on_blocked",
     "fail_on_ca_residue",
     "filesystem_mode",
+    "filesystem_audit",
+    "filesystem_audit_retention_days",
     "label",
   ],
   lists: LIST_INPUTS,
@@ -137,6 +140,26 @@ export function readFilesystemInputs(
       notice,
     ),
   };
+}
+
+export function readFilesystemAuditInput(getInput: GetInput = core.getInput): FilesystemAudit {
+  return resolveFilesystemAudit(getInput("filesystem_audit"));
+}
+
+/** Undefined when unset, which leaves the retention to the repository default. */
+export function readFilesystemAuditRetentionDays(
+  getInput: GetInput = core.getInput,
+): number | undefined {
+  const days = getInput("filesystem_audit_retention_days");
+  if (days === "") return undefined;
+  if (!/^[1-9]\d*$/.test(days)) {
+    throw new SandboxError(
+      `Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. ` +
+        "Must be a whole number of days above zero.",
+      "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS",
+    );
+  }
+  return Number(days);
 }
 
 /** The optional `label:`, which only titles the report heading. */

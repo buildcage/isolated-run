@@ -11,10 +11,17 @@ import type { Annotation } from "#core/lib/actions/annotation.ts";
 import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import type { TrafficArtifactInputs } from "#core/lib/actions/inputs.ts";
 import { errorMessage } from "#core/lib/errors.ts";
+import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import type { GenReportParameters } from "#core/lib/report/types.ts";
 
 import { readStepLabel } from "./inputs.ts";
-import { fetchReport, readActionVersion, writeReportSummary, type Report } from "./report.ts";
+import {
+  fetchReport,
+  readActionVersion,
+  writeReportSummary,
+  writeSummaryBlocks,
+  type Report,
+} from "./report.ts";
 import { setTrafficArtifactOutput, uploadTrafficArtifact } from "./traffic-artifact.ts";
 
 /**
@@ -26,6 +33,7 @@ export interface ReportStepDeps {
   fetchReport: typeof fetchReport;
   readActionVersion: typeof readActionVersion;
   writeReportSummary: typeof writeReportSummary;
+  writeSummaryBlocks: typeof writeSummaryBlocks;
   uploadTrafficArtifact: typeof uploadTrafficArtifact;
   setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
   readStepLabel: typeof readStepLabel;
@@ -35,6 +43,7 @@ const realDeps: ReportStepDeps = {
   fetchReport,
   readActionVersion,
   writeReportSummary,
+  writeSummaryBlocks,
   uploadTrafficArtifact,
   setTrafficArtifactOutput,
   readStepLabel,
@@ -54,11 +63,17 @@ export interface ReportStepOptions {
   /** The step's own environment, which is where the summary's destinations
    *  come from; see writeReportSummary. */
   env: NodeJS.ProcessEnv;
+  /**
+   * The rest of the step's Job Summary, given the proxy's start (undefined
+   * when unknown), fitted into GitHub's limit together with the report.
+   */
+  moreBlocks?: (startedAt: number | undefined) => SummaryBlock[];
 }
 
 /**
  * Fetch the proxy's report, write the Job Summary, and upload the traffic
- * artifact if one was asked for.
+ * artifact if one was asked for. The rest of the summary, `moreBlocks`, is
+ * written with the report, or alone when there is no report to write.
  *
  * Never throws. A failure here is a warning naming the step that failed, and
  * under `restrict` with fail_on_blocked it also fails the step: a report that
@@ -77,6 +92,7 @@ export async function reportStepTraffic(
     failOnBlocked,
     trafficArtifact,
     env,
+    moreBlocks = () => [],
   }: ReportStepOptions,
   overrides: Partial<ReportStepDeps> = {},
 ): Promise<void> {
@@ -84,6 +100,7 @@ export async function reportStepTraffic(
     fetchReport,
     readActionVersion,
     writeReportSummary,
+    writeSummaryBlocks,
     uploadTrafficArtifact,
     setTrafficArtifactOutput,
     readStepLabel,
@@ -106,8 +123,22 @@ export async function reportStepTraffic(
     fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
   }
 
+  // Written alone when there is no report or its write failed, so the report
+  // cannot take the rest of the summary down with it.
+  const extraBlocks = moreBlocks(report?.startedAt);
+  const writeRest = async (): Promise<void> => {
+    if (extraBlocks.length === 0) return;
+    try {
+      await writeSummaryBlocks(extraBlocks, env);
+    } catch (e) {
+      annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
+    }
+  };
+
   let artifactName = "";
-  if (report) {
+  if (!report) {
+    await writeRest();
+  } else {
     try {
       await writeReportSummary(
         report,
@@ -119,12 +150,14 @@ export async function reportStepTraffic(
           actionVersion: readActionVersion(containerName, proxyEngine),
           stepLabel: readStepLabel(),
           failOnBlocked,
+          extraBlocks,
         },
         trafficArtifact.upload,
         env,
       );
     } catch (e) {
       fail(`Failed to write the report summary: ${errorMessage(e)}`);
+      await writeRest();
     }
 
     // Uploaded even when the summary failed: the command can delete the

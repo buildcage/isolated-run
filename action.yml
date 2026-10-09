@@ -73,6 +73,13 @@ inputs:
   filesystem_mode:
     description: "persistent (default) keeps writes to $HOME/$RUNNER_TEMP/$GITHUB_WORKSPACE/tmp on the host after the step ends. ephemeral discards them instead (via an overlay), except for paths listed in write_through. Use this to stop a step from planting files (e.g. ~/.bashrc, ~/.npmrc) that a later, non-isolated step would pick up."
     required: false
+  filesystem_audit:
+    description: "Experimental. record logs the file accesses of the isolated step; off (default) does not. Needs a cgroup v2 host. See docs/reference.md#filesystem-audit."
+    required: false
+  filesystem_audit_retention_days:
+    description: "How long to keep the filesystem audit artifact, in days. Empty uses the repository's own default."
+    required: false
+    default: ""
   label:
     description: "Label appended to this step's Job Summary heading, e.g. 'npm install'. Useful to tell steps apart when `run` is used more than once in the same job"
     required: false
@@ -81,6 +88,8 @@ inputs:
 outputs:
   traffic_artifact_name:
     description: "Name of the uploaded traffic artifact, when upload_traffic_artifact produced one. Empty otherwise, so a later step can tell an upload apart from none having been requested."
+  filesystem_audit_artifact_name:
+    description: "Name of the uploaded filesystem audit artifact, when filesystem_audit: record recorded something. Empty otherwise."
 
 runs:
   using: node24
