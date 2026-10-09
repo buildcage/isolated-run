@@ -1036,15 +1036,17 @@ the one thing that mode exists to prevent. The sentinel is the literal `/` only:
 > Use `write_through: /` only for code you trust. Against a compromised command it removes more
 > than the read-only restriction:
 >
-> - All of `/run` is reachable again, which leaves the outbound restriction nearly pointless. On a
->   GitHub-hosted runner the runner user can use the Docker socket there to start a container on
->   the host network, past the proxy.
+> - All of `/run` is reachable again, which leaves the outbound restriction nearly pointless. A
+>   `systemd --user` bus there (`/run/user/<uid>/bus`) starts a unit outside the sandbox with all
+>   of the runner's groups. On a GitHub-hosted runner the command cannot open the Docker socket
+>   itself, since `docker` is only a supplementary group there, but such a unit can, and it reaches
+>   the network past the proxy, directly or from a container on the host network.
 > - `docker`, `sudo` and, under `inspect`, `keytool` are taken from the first match on `$PATH` even
 >   where the command can write, so the host may later run a copy the command replaced. `docker`
 >   also looks for its `docker-credential-*` helpers on the whole `$PATH`, where the command can
 >   plant one.
-> - `$XDG_RUNTIME_DIR` is no longer masked, so a `systemd --user` bus there can start a unit outside
->   every namespace.
+> - `$XDG_RUNTIME_DIR` is no longer masked where it sits outside `/run`, so a `systemd --user` bus
+>   there is reachable too.
 > - Symlinks are refused only in the four always-writable paths and other `write_through:` entries,
 >   though the command could replace one anywhere.
 >
