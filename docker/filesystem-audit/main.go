@@ -69,10 +69,11 @@ func main() {
 }
 
 func run(cgPath, outPath, readyPath, pidPath string) error {
-	cgid, level, err := prepareCgroup(cgPath)
+	cg, err := prepareCgroup(cgPath)
 	if err != nil {
 		return err
 	}
+	defer cg.Close()
 	if lsm, err := os.ReadFile("/sys/kernel/security/lsm"); err == nil {
 		fmt.Fprintf(os.Stderr, "filesystem-audit: active LSMs: %s\n", strings.TrimSpace(string(lsm)))
 	}
@@ -82,12 +83,6 @@ func run(cgPath, outPath, readyPath, pidPath string) error {
 	}
 	spec, err := loadFilesystemAudit()
 	if err != nil {
-		return err
-	}
-	if err := spec.Variables["target_cgid"].Set(cgid); err != nil {
-		return err
-	}
-	if err := spec.Variables["target_level"].Set(level); err != nil {
 		return err
 	}
 	dropAbsentPrograms(spec)
@@ -101,6 +96,10 @@ func run(cgPath, outPath, readyPath, pidPath string) error {
 		return fmt.Errorf("load: %w", err)
 	}
 	defer coll.Close()
+	// Before attaching: an empty slot matches no task.
+	if err := coll.Maps["target"].Put(uint32(0), uint32(cg.Fd())); err != nil {
+		return fmt.Errorf("set watched cgroup: %w", err)
+	}
 
 	links, err := attachAll(coll, spec)
 	for _, l := range links {
@@ -150,31 +149,33 @@ func run(cgPath, outPath, readyPath, pidPath string) error {
 }
 
 // prepareCgroup verifies the host is cgroup v2, creates the watched cgroup
-// if missing, and returns its id and its depth below the cgroup root (the
-// ancestor level the programs compare against).
-func prepareCgroup(cgPath string) (cgid uint64, level uint32, err error) {
+// if missing, and opens it for the programs' cgroup array.
+func prepareCgroup(cgPath string) (*os.File, error) {
 	var sfs unix.Statfs_t
-	if err = unix.Statfs(cgroupRoot, &sfs); err != nil {
-		return 0, 0, err
+	if err := unix.Statfs(cgroupRoot, &sfs); err != nil {
+		return nil, err
 	}
 	if sfs.Type != unix.CGROUP2_SUPER_MAGIC {
-		return 0, 0, fmt.Errorf("%s is not cgroup v2 (magic %#x)", cgroupRoot, sfs.Type)
+		return nil, fmt.Errorf("%s is not cgroup v2 (magic %#x)", cgroupRoot, sfs.Type)
 	}
 	abs := filepath.Clean(cgPath)
 	rel, err := filepath.Rel(cgroupRoot, abs)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return 0, 0, fmt.Errorf("cgroup path must be below %s: %s", cgroupRoot, cgPath)
+		return nil, fmt.Errorf("cgroup path must be below %s: %s", cgroupRoot, cgPath)
 	}
-	if err = os.MkdirAll(abs, 0o755); err != nil {
-		return 0, 0, err
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		return nil, err
 	}
 	var st unix.Stat_t
-	if err = unix.Stat(abs, &st); err != nil {
-		return 0, 0, err
+	if err := unix.Stat(abs, &st); err != nil {
+		return nil, err
 	}
-	level = uint32(len(strings.Split(rel, "/")))
-	fmt.Fprintf(os.Stderr, "filesystem-audit: cgroup %s id=%d level=%d\n", abs, st.Ino, level)
-	return st.Ino, level, nil
+	f, err := os.Open(abs)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(os.Stderr, "filesystem-audit: cgroup %s id=%d\n", abs, st.Ino)
+	return f, nil
 }
 
 // dropAbsentPrograms removes optional programs whose attach target the
