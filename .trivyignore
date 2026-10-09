@@ -30,7 +30,9 @@ CVE-2026-25681
 # github.com/cilium/ebpf: integer overflow parsing a crafted BTF blob in
 # LoadCollectionSpec/loadRawSpec. runc here uses this library only to load
 # its own bundled cgroup-device BPF programs, never a BTF blob derived from
-# external input.
+# external input. The filesystem audit tracer (opt/buildcage/bin/filesystem-audit)
+# links its own copy of the library and parses only the BPF object compiled
+# into it and the kernel's own BTF from /sys/kernel/btf.
 CVE-2026-10722
 
 # --- opt/buildcage/bin/gen-seccomp-profile ---

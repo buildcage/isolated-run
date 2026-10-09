@@ -61,6 +61,10 @@ RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" go build -trimpath -
 # (architecture-independent, -target bpfel) and embeds it, so the Go loader
 # cross-compiles via BUILDPLATFORM without QEMU.
 FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:4cb7ac979db5fcc41cae44b2227ba5ab8a51e8807f40d9ba4dee20a0ad960b5b AS filesystem-audit-build
+# The toolchain is not pinned: an Alpine branch serves only the latest build of
+# each package, so a pinned version would stop the build at its next fix. The
+# digest above picks the branch, so a digest bump can bring a newer clang; the
+# filesystem audit e2e loads what it compiles on the CI runners' kernels.
 RUN apk add --no-cache clang llvm libbpf-dev linux-headers
 ARG TARGETARCH
 WORKDIR /src

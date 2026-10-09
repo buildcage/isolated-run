@@ -841,10 +841,11 @@ tracer did not stop cleanly, the section opens with a warning that the record is
 the recording cannot be read, the section says so, a warning is logged, and no artifact is uploaded.
 
 It observes accesses in the kernel, below any library the step links against, and only records; it
-never blocks an access. It needs a cgroup v2 host running Linux 5.17 or newer, with kernel BTF and
-tracefs mounted. Where any of these is missing, the step fails with the reason before the command
-runs. See [Filesystem audit](./security.md#filesystem-audit) for what it does not record and what
-its record can be trusted for.
+never blocks an access. It needs a cgroup v2 host running Linux 5.17 or newer (6.4 on arm64, the
+first release there where a BPF program can attach to a kernel function with fentry), with kernel
+BTF and tracefs mounted. Where any of these is missing, the step fails with the reason before the
+command runs. See [Filesystem audit](./security.md#filesystem-audit) for what it does not record
+and what its record can be trusted for.
 
 ## CA trust variables
 

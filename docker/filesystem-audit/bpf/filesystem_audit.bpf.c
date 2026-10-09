@@ -3,7 +3,8 @@
 // the first read and write of each open file, mmaps, execs, and the path
 // operations (create, move, delete, attribute change), successes and
 // failures alike. Kernel types are declared locally with preserve_access_index
-// so one CO-RE object runs on any BTF-enabled kernel from 5.17 on.
+// so one CO-RE object runs on any BTF-enabled kernel from 5.17 on, 6.4 on
+// arm64, the first to let fentry attach to a kernel function there.
 
 #include <linux/types.h>
 #include <linux/bpf.h>

@@ -645,8 +645,8 @@ the step arranges its processes or spells a path. What it can do:
   part is replaced by a note naming the artifact, which still holds every access.
 
 Where the tracer cannot start or cannot attach a probe the kernel offers, for want of cgroup v2,
-BTF, tracefs or Linux 5.17, the step fails before the command runs rather than keep a partial
-record.
+BTF, tracefs or Linux 5.17 (6.4 on arm64), the step fails before the command runs rather than keep
+a partial record.
 
 ## Hardening
 
