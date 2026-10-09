@@ -21,9 +21,14 @@ struct qstr {
 	const unsigned char *name;
 } __attribute__((preserve_access_index));
 
+struct super_block {
+	unsigned long s_magic;
+} __attribute__((preserve_access_index));
+
 struct dentry {
 	struct dentry *d_parent;
 	struct qstr d_name;
+	struct super_block *d_sb;
 } __attribute__((preserve_access_index));
 
 struct vfsmount {
@@ -49,10 +54,27 @@ struct path {
 	struct dentry *dentry;
 } __attribute__((preserve_access_index));
 
+struct inode {
+	unsigned int i_flags;
+} __attribute__((preserve_access_index));
+
 struct file {
 	struct path f_path;
+	struct inode *f_inode;
 	unsigned int f_flags;
 	unsigned int f_mode;
+} __attribute__((preserve_access_index));
+
+// Since 6.7 a backing file's f_path is on the layer and user_path is the path
+// the step opened; before, f_path was that path.
+struct backing_file {
+	struct file file;
+	struct path user_path;
+} __attribute__((preserve_access_index));
+
+struct vm_area_struct {
+	unsigned long vm_flags;
+	struct file *vm_file;
 } __attribute__((preserve_access_index));
 
 struct fs_struct {
@@ -412,6 +434,10 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 #define PROT_WRITE 2
 #define PROT_EXEC 4
 #define MAP_SHARED 1
+#define VM_SHARED 8
+#define S_PRIVATE (1 << 9)
+#define OVERLAYFS_SUPER_MAGIC 0x794c7630
+#define FUSE_SUPER_MAGIC 0x65735546
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -463,14 +489,18 @@ static __always_inline void file_path(struct event *e, struct file *file)
 // overlayfs reaches its layers through private clones of their mounts, which
 // belong to no namespace the step can open a file in, so an access through one
 // is the overlay's, not the step's. Kernel-internal mounts (pipes, memfd) count.
-static __always_inline int on_layer(struct file *file)
+static __always_inline int in_step_ns(struct vfsmount *vfs)
 {
-	struct vfsmount *vfs = file->f_path.mnt;
 	if (BPF_CORE_READ(vfs, mnt_flags) & MNT_INTERNAL)
-		return 0;
+		return 1;
 	struct mount *m = (void *)vfs - bpf_core_field_offset(struct mount, mnt);
 	struct task_struct *t = bpf_get_current_task_btf();
-	if (BPF_CORE_READ(m, mnt_ns) == t->nsproxy->mnt_ns)
+	return BPF_CORE_READ(m, mnt_ns) == t->nsproxy->mnt_ns;
+}
+
+static __always_inline int on_layer(struct file *file)
+{
+	if (in_step_ns(file->f_path.mnt))
 		return 0;
 	bump(&skipped_internal);
 	return 1;
@@ -920,27 +950,80 @@ int BPF_PROG(on_file_permission, struct file *file, int mask)
 	return 0;
 }
 
+static __always_inline void map_event(struct file *file, struct dentry *d, struct vfsmount *mnt,
+				     unsigned long prot, unsigned long flags, u8 bit, int image)
+{
+	if (!first_time(file, bit))
+		return;
+	struct event *e = start(K_MMAP);
+	if (!e)
+		return;
+	e->mode = prot;
+	e->flags = flags;
+	u64 id = bpf_get_current_pid_tgid();
+	e->path_len = image && bpf_map_lookup_elem(&in_exec, &id) ? 1 : 0;
+	e->data_len = d ? walk(e, 0, d, mnt, &e->n1, &e->truncated) : file_walk(e, file);
+	submit(e);
+}
+
+// The write drops PROT_EXEC from its mode so it decodes as a write.
+static __always_inline void map_events(struct file *file, struct dentry *d, struct vfsmount *mnt,
+				      unsigned long prot, unsigned long flags, int at_mmap)
+{
+	int exec = prot & PROT_EXEC;
+	int write = (prot & PROT_WRITE) && (flags & MAP_SHARED);
+	if (exec)
+		map_event(file, d, mnt, prot, flags, SEEN_EXEC, at_mmap);
+	if (write)
+		map_event(file, d, mnt, prot & ~PROT_EXEC, flags, SEEN_WRITE, 0);
+	if (!exec && !write && at_mmap)
+		map_event(file, d, mnt, prot, flags, SEEN_READ, 1);
+}
+
 SEC("fentry/security_mmap_file")
 int BPF_PROG(on_mmap, struct file *file, unsigned long prot, unsigned long flags)
 {
 	if (!file || !in_target() || on_layer(file))
 		return 0;
-	u8 bit = SEEN_READ;
-	if (prot & PROT_EXEC)
-		bit = SEEN_EXEC;
-	else if ((prot & PROT_WRITE) && (flags & MAP_SHARED))
-		bit = SEEN_WRITE;
-	if (!first_time(file, bit))
+	map_events(file, 0, 0, prot, flags, 1);
+	return 0;
+}
+
+// fexit, so only a change the LSMs allowed is recorded. reqprot is what the
+// caller asked for, as mmap sees it; prot may add PROT_EXEC.
+SEC("fexit/security_file_mprotect")
+int BPF_PROG(on_mprotect, struct vm_area_struct *vma, unsigned long reqprot, unsigned long prot,
+	     int ret)
+{
+	if (ret != 0 || !in_target())
 		return 0;
-	struct event *e = start(K_MMAP);
-	if (!e)
+	unsigned long flags = BPF_CORE_READ(vma, vm_flags) & VM_SHARED ? MAP_SHARED : 0;
+	if (!(reqprot & PROT_EXEC) && !((reqprot & PROT_WRITE) && flags))
 		return 0;
-	e->mode = prot;
-	e->flags = flags;
-	u64 id = bpf_get_current_pid_tgid();
-	e->path_len = bpf_map_lookup_elem(&in_exec, &id) ? 1 : 0;
-	e->data_len = file_walk(e, file);
-	submit(e);
+	struct file *file = BPF_CORE_READ(vma, vm_file);
+	// S_PRIVATE marks the file behind shared anonymous memory.
+	if (!file || BPF_CORE_READ(file, f_inode, i_flags) & S_PRIVATE)
+		return 0;
+	struct dentry *d = BPF_CORE_READ(file, f_path.dentry);
+	struct vfsmount *mnt = BPF_CORE_READ(file, f_path.mnt);
+	// overlayfs maps its backing file in place of the step's file.
+	if (!in_step_ns(mnt)) {
+		if (!bpf_core_field_exists(struct backing_file, user_path)) {
+			bump(&skipped_internal);
+			return 0;
+		}
+		// FMODE_BACKING's value differs between releases; check the
+		// filesystem instead.
+		struct backing_file *bf = (void *)file;
+		d = BPF_CORE_READ(bf, user_path.dentry);
+		mnt = BPF_CORE_READ(bf, user_path.mnt);
+		unsigned long magic = d ? BPF_CORE_READ(d, d_sb, s_magic) : 0;
+		if ((magic != OVERLAYFS_SUPER_MAGIC && magic != FUSE_SUPER_MAGIC) || !in_step_ns(mnt)) {
+			bump(&skipped_internal);
+			return 0;
+		}
+	}
+	map_events(file, d, mnt, reqprot, flags, 0);
 	return 0;
 }
 

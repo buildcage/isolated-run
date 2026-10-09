@@ -226,6 +226,23 @@ jobs:
             echo data > "$GITHUB_WORKSPACE/mapped.bin"
             python3 -c 'import mmap, sys; f = open(sys.argv[1], "rb")
             mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ | mmap.PROT_EXEC)' "$GITHUB_WORKSPACE/mapped.bin"
+            # mprotect adding PROT_WRITE (and PROT_EXEC) to shared mappings.
+            echo data > "$GITHUB_WORKSPACE/mprotected.bin"
+            echo data > "$GITHUB_WORKSPACE/mprotected-rwx.bin"
+            python3 -c 'import ctypes, os, sys
+            libc = ctypes.CDLL(None)
+            libc.mmap.restype = ctypes.c_void_p
+            libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+            failed = ctypes.c_void_p(-1).value
+            def remap(path, prot):
+                p = libc.mmap(None, 4096, 1, 1, os.open(path, os.O_RDWR), 0)  # PROT_READ, MAP_SHARED
+                assert p != failed and libc.mprotect(ctypes.c_void_p(p), 4096, prot) == 0
+                ctypes.memmove(p, b"X", 1)
+            remap(sys.argv[1], 3)  # PROT_READ | PROT_WRITE
+            remap(sys.argv[2], 7)  # PROT_READ | PROT_WRITE | PROT_EXEC
+            p = libc.mmap(None, 4096, 0, 0x21, -1, 0)  # PROT_NONE, MAP_SHARED | MAP_ANONYMOUS
+            assert p != failed and libc.mprotect(ctypes.c_void_p(p), 4096, 3) == 0' \
+              "$GITHUB_WORKSPACE/mprotected.bin" "$GITHUB_WORKSPACE/mprotected-rwx.bin"
             # A program, not the builtin, with an argument the record must not keep.
             /usr/bin/true buildcage-audit-sentinel-arg
 
@@ -263,6 +280,10 @@ jobs:
           # A file mapped executable shows as read unless it is a library or
           # an exec mapped it, as it does run.sh's interpreter.
           grep -qE ' R +python3 +\./mapped\.bin$' "$f"
+          # Shared anonymous memory names no file.
+          grep -qE ' RW +python3 +\./mprotected\.bin$' "$f"
+          grep -qE ' RW +python3 +\./mprotected-rwx\.bin$' "$f"
+          ! grep -q '/dev/zero' "$f"
           ! grep -q '/usr/bin/dash' "$f"
           # buildcage's own wrappers must never reach the summary.
           ! grep -qE ' (setpriv|buildcage-init|run-script\.sh) ' "$f"
