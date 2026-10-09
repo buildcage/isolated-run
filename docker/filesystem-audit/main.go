@@ -331,15 +331,16 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 	for _, k := range kinds {
 		fmt.Fprintf(os.Stderr, "filesystem-audit: %-11s %d\n", k, counts[k])
 	}
-	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d internal-skipped=%d pre-exec-skipped=%d\n",
-		total, dropped, untracked, internal, preExec)
-	// Without both counts the recording cannot claim to be complete, so it is
+	missed, errMissed := missedRuns(coll)
+	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d missed=%d internal-skipped=%d pre-exec-skipped=%d\n",
+		total, dropped, untracked, missed, internal, preExec)
+	// Without every count the recording cannot claim to be complete, so it is
 	// left without its end line.
-	if err := errors.Join(errDropped, errUntracked); err != nil {
+	if err := errors.Join(errDropped, errUntracked, errMissed); err != nil {
 		fmt.Fprintln(os.Stderr, "filesystem-audit: read loss counters:", err)
 		return w.Flush()
 	}
-	if err := enc.Encode(end{Kind: "end", Dropped: dropped, Untracked: untracked}); err != nil {
+	if err := enc.Encode(end{Kind: "end", Dropped: dropped, Untracked: untracked, Missed: missed}); err != nil {
 		return err
 	}
 	return w.Flush()
@@ -347,11 +348,28 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 
 // end is the recording's last line, written only once every queued event is
 // out, so a recording without it was cut short. Dropped events found the ring
-// buffer full, and Untracked calls found a tracking map full.
+// buffer full, Untracked calls found a tracking map full, and Missed runs of a
+// program the kernel skipped.
 type end struct {
 	Kind      string `json:"kind"`
 	Dropped   uint64 `json:"dropped"`
 	Untracked uint64 `json:"untracked"`
+	Missed    uint64 `json:"missed"`
+}
+
+// missedRuns sums the runs the kernel skipped because the program was already
+// running on that CPU, as one preempted mid-run can be. A skip anywhere on the
+// host counts, since it cannot say whose access it was.
+func missedRuns(coll *ebpf.Collection) (uint64, error) {
+	var sum uint64
+	for _, p := range coll.Programs {
+		s, err := p.Stats()
+		if err != nil {
+			return 0, err
+		}
+		sum += s.RecursionMisses
+	}
+	return sum, nil
 }
 
 func sumPerCPU(m *ebpf.Map) (uint64, error) {

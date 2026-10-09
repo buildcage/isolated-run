@@ -68675,7 +68675,7 @@ function createAuditSummary(prefixes) {
 		let proc = procOf(added, r);
 		if (!counted) return;
 		if (r.kind === "end") {
-			ended = !0, lost = !!(r.dropped || r.untracked);
+			ended = !0, lost = !!(r.dropped || r.untracked || r.missed);
 			return;
 		}
 		if (r.kind === "exec" && r.path && executed) {
@@ -68683,23 +68683,27 @@ function createAuditSummary(prefixes) {
 			executed.has(p) || (executed.add(p), executedBytes += relLength(p) + 7, executedBytes > limit && (executed = void 0));
 		}
 		if (isLibraryMap(r)) return;
-		let c = classify(r);
-		if (!c) return;
-		let path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
-		if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) return;
-		let loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path)), t = loadRead ? NaN : Date.parse(r.t ?? ""), x = {
-			comm: r.comm ?? "",
-			path: normalize$2(path),
-			bit: loadRead ? 0 : BIT[c.letter],
-			failed: c.failed,
-			perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
-			t,
-			seq: Number.isNaN(t) ? Infinity : seq++
-		};
-		details.add(x), paths.add({
-			...x,
-			comm: ""
-		});
+		let first = classify(r);
+		if (first) for (let c of r.exchange && r.to ? [first, {
+			...first,
+			path: r.to
+		}] : [first]) {
+			let path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
+			if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) continue;
+			let loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path)), t = loadRead ? NaN : Date.parse(r.t ?? ""), x = {
+				comm: r.comm ?? "",
+				path: normalize$2(path),
+				bit: loadRead ? 0 : BIT[c.letter],
+				failed: c.failed,
+				perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
+				t,
+				seq: Number.isNaN(t) ? Infinity : seq++
+			};
+			details.add(x), paths.add({
+				...x,
+				comm: ""
+			});
+		}
 	}, shown = (path) => {
 		if (path.startsWith(MEMFD)) {
 			let name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
@@ -68737,8 +68741,9 @@ function inRecordingOrder(rows) {
 	});
 }
 function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote) {
-	let { ended, lost, executed, paths, details } = summary, heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
-> some accesses are missing from this summary and from the artifact.`, frame = (text) => ({
+	let { ended, lost, executed, paths, details } = summary, heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up, the kernel skipped some of its
+> runs, or it did not stop cleanly, so some accesses are missing from this summary and from the
+> artifact.`, frame = (text) => ({
 		priority: 0,
 		level: 1,
 		section: SECTION$1,

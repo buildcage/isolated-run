@@ -824,6 +824,8 @@ maps it to start a program, which the artifact marks `"image":true`, or when its
 (optionally followed by version numbers, as in `.so.6`) or `.node` and it is neither a memfd nor
 deleted; any other is shown as read. A file mapped
 shared and writable is shown as written, including one made so with `mprotect` after it was mapped.
+A rename with `RENAME_EXCHANGE` swaps two paths, so both show `M`; the artifact marks it
+`"exchange":true`.
 
 When the step's Job Summary would pass GitHub's size limit, its parts give way in this order: the
 filesystem details, the traffic report's communication log, the accessed-paths table, the executed
@@ -839,12 +841,15 @@ with absolute paths; `filesystem_audit_artifact_name` carries its name. It names
 step ran but not its arguments, which can carry secrets. Treat it as sensitive, like the traffic
 artifact. `filesystem_audit_retention_days` sets how long it is kept.
 
-The artifact ends with a line such as `{"kind":"end","dropped":0,"untracked":0}`, which the
-tracer writes only after every access it caught. `dropped` counts accesses that found its event
-buffer full, and `untracked` the calls it could not follow because too many files were open, or too
-many calls were in progress, at once. If either is nonzero, or the line is missing because the
-tracer did not stop cleanly, the section opens with a warning that the record is incomplete. If
-the recording cannot be read, the section says so, a warning is logged, and no artifact is uploaded.
+The artifact ends with a line such as `{"kind":"end","dropped":0,"untracked":0,"missed":0}`, which
+the tracer writes only after every access it caught. `dropped` counts accesses that found its event
+buffer full, `untracked` the calls it could not follow because too many files were open, or too
+many calls were in progress, at once, and `missed` the times the kernel skipped one of its hooks
+because it was already running on that CPU, as it can be when preempted. `missed` counts skips
+anywhere on the host, since a skip cannot say whose access it was. If any is nonzero, or the line is
+missing because the tracer did not stop cleanly, the section opens with a warning that the record
+is incomplete. If the recording cannot be read, the section says so, a warning is logged, and no
+artifact is uploaded.
 
 It observes accesses in the kernel, below any library the step links against, and only records; it
 never blocks an access. It needs a cgroup v2 host running Linux 5.17 or newer (6.4 on arm64, the

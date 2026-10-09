@@ -46,6 +46,7 @@ describe("renderFilesystemAuditSummary", () => {
     expect(render({ kind: "end", dropped: 0, untracked: 2 })).toMatch(
       /incomplete\.\*\*[\s\S]*No file access was recorded\./,
     );
+    expect(render(read, { kind: "end", dropped: 0, untracked: 0, missed: 1 })).toContain(warning);
   });
 
   it("includes a heading and the flag legend", () => {
@@ -769,6 +770,17 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "exec", pid: 1, comm: "p", path: "/tmp/p", deleted: true },
       );
       expect(tableRows(md)).toEqual(["| X | `/tmp/p` (deleted) |"]);
+    });
+
+    it("shows an exchange as a move of both paths", () => {
+      const md = render({
+        kind: "rename",
+        comm: "mv",
+        path: "/srv/a",
+        to: "/srv/b",
+        exchange: true,
+      });
+      expect(tableRows(md)).toEqual(["| M | `/srv/a` |", "| M | `/srv/b` |"]);
     });
 
     it("leaves the executed table out when nothing was run", () => {

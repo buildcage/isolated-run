@@ -28,6 +28,8 @@ interface AuditRecord {
   deleted?: boolean;
   dropped?: number;
   untracked?: number;
+  missed?: number;
+  exchange?: boolean;
 }
 
 const LETTER: Record<string, string> = {
@@ -573,8 +575,9 @@ const LEGEND =
 const TIME_LEGEND = "first-last access";
 const HEADING = "### Filesystem audit";
 const INCOMPLETE_NOTE =
-  "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
-  "> some accesses are missing from this summary and from the artifact.";
+  "> ⚠️ **This record is incomplete.** The tracer's buffers filled up, the kernel skipped some of its\n" +
+  "> runs, or it did not stop cleanly, so some accesses are missing from this summary and from the\n" +
+  "> artifact.";
 const UNREADABLE_NOTE =
   "> ⚠️ **The recording could not be read**, so this summary has none of its accesses and no\n" +
   "> artifact was uploaded.";
@@ -742,7 +745,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (!counted) return;
     if (r.kind === "end") {
       ended = true;
-      lost = Boolean(r.dropped || r.untracked);
+      lost = Boolean(r.dropped || r.untracked || r.missed);
       return;
     }
     if (r.kind === "exec" && r.path && executed) {
@@ -754,27 +757,30 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       }
     }
     if (isLibraryMap(r)) return;
-    const c = classify(r);
-    if (!c) return;
-    const path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
-    // A succeeding record resolves to an absolute path or a "…/" walk, so a
-    // relative one there is d_path's pipe:, socket: or anon_inode: target, or
-    // an attribute change whose directory descriptor closed meanwhile, which
-    // is lost; a failed one may keep the relative name it was given.
-    if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) return;
-    const loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path));
-    const t = loadRead ? NaN : Date.parse(r.t ?? "");
-    const x: Access = {
-      comm: r.comm ?? "",
-      path: normalize(path),
-      bit: loadRead ? 0 : BIT[c.letter],
-      failed: c.failed,
-      perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
-      t,
-      seq: Number.isNaN(t) ? Infinity : seq++,
-    };
-    details.add(x);
-    paths.add({ ...x, comm: "" });
+    const first = classify(r);
+    if (!first) return;
+    // An exchange moves each path to the other.
+    for (const c of r.exchange && r.to ? [first, { ...first, path: r.to }] : [first]) {
+      const path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
+      // A succeeding record resolves to an absolute path or a "…/" walk, so a
+      // relative one there is d_path's pipe:, socket: or anon_inode: target, or
+      // an attribute change whose directory descriptor closed meanwhile, which
+      // is lost; a failed one may keep the relative name it was given.
+      if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) continue;
+      const loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path));
+      const t = loadRead ? NaN : Date.parse(r.t ?? "");
+      const x: Access = {
+        comm: r.comm ?? "",
+        path: normalize(path),
+        bit: loadRead ? 0 : BIT[c.letter],
+        failed: c.failed,
+        perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
+        t,
+        seq: Number.isNaN(t) ? Infinity : seq++,
+      };
+      details.add(x);
+      paths.add({ ...x, comm: "" });
+    }
   };
 
   // A memfd shows its name quoted, as one its creator chose; a deleted file

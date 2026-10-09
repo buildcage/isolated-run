@@ -324,7 +324,13 @@ static __always_inline void *rd_ptr(void *base, u32 off)
 	return v;
 }
 
-static long walk_step(u64 i, struct walk_ctx *c)
+// The first of two paths gets half the buffer, so a deep one leaves the
+// second room.
+#define FIRST_PATH_END (DATA_SZ / 2)
+
+// end is a constant in each caller below: compared with a value from the
+// context instead, the verifier tracks off exactly and runs out of states.
+static __always_inline long walk_step_to(struct walk_ctx *c, u32 end)
 {
 	void *root = rd_ptr(c->vfs, c->off_mnt_root);
 	void *parent = rd_ptr(c->d, c->off_d_parent);
@@ -339,7 +345,7 @@ static long walk_step(u64 i, struct walk_ctx *c)
 		c->vfs = up + c->off_mnt;
 		return 0;
 	}
-	if (c->off >= DATA_SZ) {
+	if (c->off >= end) {
 		*c->trunc = 1;
 		c->done = 1;
 		return 1;
@@ -356,10 +362,21 @@ static long walk_step(u64 i, struct walk_ctx *c)
 	return 0;
 }
 
+static long walk_step(u64 i, struct walk_ctx *c)
+{
+	return walk_step_to(c, DATA_SZ);
+}
+
+static long walk_step_first(u64 i, struct walk_ctx *c)
+{
+	return walk_step_to(c, FIRST_PATH_END);
+}
+
 // Appends the leaf-first path components of a dentry under a mount to
-// e->data at off, crossing mounts up to the namespace root like d_path.
-static __always_inline u32 walk(struct event *e, u32 off, struct dentry *d,
-				struct vfsmount *vfs, u8 *n, u8 *trunc)
+// e->data at off, crossing mounts up to the namespace root like d_path; the
+// first of two paths stops at FIRST_PATH_END and is marked cut there.
+static __always_inline u32 walk_path(struct event *e, u32 off, int first, struct dentry *d,
+				     struct vfsmount *vfs, u8 *n, u8 *trunc)
 {
 	u32 off_mnt = bpf_core_field_offset(struct mount, mnt);
 	struct walk_ctx c = {
@@ -377,7 +394,10 @@ static __always_inline u32 walk(struct event *e, u32 off, struct dentry *d,
 		.off_mountpoint = bpf_core_field_offset(struct mount, mnt_mountpoint),
 		.off_mnt = off_mnt,
 	};
-	bpf_loop(MAX_COMPONENTS, walk_step, &c, 0);
+	if (first)
+		bpf_loop(MAX_COMPONENTS, walk_step_first, &c, 0);
+	else
+		bpf_loop(MAX_COMPONENTS, walk_step, &c, 0);
 	// Out of iterations short of the root, or before checking for it: the path
 	// is treated as cut there, which keeps a deeper one from passing as the
 	// shorter path it ends with.
@@ -387,8 +407,16 @@ static __always_inline u32 walk(struct event *e, u32 off, struct dentry *d,
 	return c.off;
 }
 
+static __always_inline u32 walk(struct event *e, u32 off, struct dentry *d,
+				struct vfsmount *vfs, u8 *n, u8 *trunc)
+{
+	return walk_path(e, off, 0, d, vfs, n, trunc);
+}
+
 static __always_inline u32 leaf(struct event *e, u32 off, struct dentry *d, u8 *n)
 {
+	if (off >= DATA_SZ)
+		return off; // no room, rather than wrap onto what is stored
 	long r = bpf_probe_read_kernel_str(&e->data[off & (DATA_SZ - 1)], NAME_LEN,
 					   BPF_CORE_READ(d, d_name.name));
 	if (r <= 0)
@@ -684,15 +712,17 @@ int BPF_PROG(on_symlink, const struct path *dir, struct dentry *dentry, const ch
 
 SEC("fentry/security_path_rename")
 int BPF_PROG(on_rename, const struct path *old_dir, struct dentry *old_dentry,
-	     const struct path *new_dir, struct dentry *new_dentry)
+	     const struct path *new_dir, struct dentry *new_dentry, unsigned int flags)
 {
 	if (!in_target())
 		return 0;
 	struct event *e = start(K_RENAME);
 	if (!e)
 		return 0;
+	e->flags = flags;
 	u32 off = leaf(e, 0, old_dentry, &e->n1);
-	off = walk(e, off, BPF_CORE_READ(old_dir, dentry), BPF_CORE_READ(old_dir, mnt), &e->n1, &e->truncated);
+	off = walk_path(e, off, 1, BPF_CORE_READ(old_dir, dentry), BPF_CORE_READ(old_dir, mnt),
+			&e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
 	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), BPF_CORE_READ(new_dir, mnt), &e->n2, &e->trunc2);
 	hold(e);
@@ -726,7 +756,7 @@ int BPF_PROG(on_link, struct dentry *old_dentry, const struct path *new_dir,
 		return 0;
 	struct vfsmount *mnt = BPF_CORE_READ(new_dir, mnt); // link(2) stays on one mount
 	mark_file(e, old_dentry, mnt); // an O_TMPFILE given its first name
-	u32 off = walk(e, 0, old_dentry, mnt, &e->n1, &e->truncated);
+	u32 off = walk_path(e, 0, 1, old_dentry, mnt, &e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
 	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), mnt, &e->n2, &e->trunc2);
 	hold(e);
