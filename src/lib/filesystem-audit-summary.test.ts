@@ -206,13 +206,14 @@ describe("renderFilesystemAuditSummary", () => {
     ).toEqual(["R cat ./libx.so"]);
   });
 
-  it("shows a file mapped executable that is neither a library nor part of an exec", () => {
+  it("shows a file mapped executable that is neither a library nor mapped by an exec", () => {
     expect(
       lines(
         render(
           { kind: "mmap", pid: 2, comm: "x", path: "/home/u/.ssh/id_rsa", access: "x" },
+          // Another thread's mapping just before an exec's own.
           { kind: "mmap", pid: 3, comm: "y", path: "/work/blob", access: "x" },
-          { kind: "open", pid: 3, comm: "y", path: "/usr/bin/tool", access: "r" },
+          { kind: "mmap", pid: 3, comm: "tool", path: "/usr/bin/tool", access: "x", image: true },
           { kind: "exec", pid: 3, comm: "tool", path: "/usr/bin/tool" },
           { kind: "exec", pid: 4, comm: "z" },
         ),
@@ -226,9 +227,16 @@ describe("renderFilesystemAuditSummary", () => {
         render(
           { kind: "read", pid: 2, comm: "sh", path: "/work/run.sh" },
           { kind: "read", pid: 2, comm: "sh", path: "/usr/bin/bash" },
-          { kind: "mmap", pid: 2, comm: "run.sh", path: "/usr/bin/bash", access: "x" },
-          { kind: "mmap", pid: 2, comm: "run.sh", path: "/usr/bin/bash", access: "r" },
-          { kind: "mmap", pid: 2, comm: "run.sh", path: "/lib/ld-linux.so.2", access: "x" },
+          { kind: "mmap", pid: 2, comm: "run.sh", path: "/usr/bin/bash", access: "x", image: true },
+          { kind: "mmap", pid: 2, comm: "run.sh", path: "/usr/bin/bash", access: "r", image: true },
+          {
+            kind: "mmap",
+            pid: 2,
+            comm: "run.sh",
+            path: "/lib/ld-linux.so.2",
+            access: "x",
+            image: true,
+          },
           { kind: "exec", pid: 2, comm: "run.sh", path: "/work/run.sh" },
         ),
       ),
@@ -241,7 +249,7 @@ describe("renderFilesystemAuditSummary", () => {
         render(
           { kind: "mmap", pid: 2, comm: "bash", path: "/lib/libtinfo.so.6", access: "x" },
           { kind: "read", pid: 2, comm: "bash", path: "/etc/ld.so.cache" },
-          { kind: "mmap", pid: 2, comm: "cp", path: "/usr/bin/cp", access: "x" },
+          { kind: "mmap", pid: 2, comm: "cp", path: "/usr/bin/cp", access: "x", image: true },
           { kind: "exec", pid: 2, comm: "cp", path: "/usr/bin/cp" },
           { kind: "read", pid: 2, comm: "cp", path: "/lib/libtinfo.so.6" },
           { kind: "read", pid: 2, comm: "cp", path: "/etc/ld.so.cache" },

@@ -68592,26 +68592,24 @@ function parse(jsonl) {
 	};
 }
 function findLoads(records, prefixes) {
-	let procs = [], loaded = new Set(), libraries = new Set(), gens = new Map(), pending = new Map(), load = (proc, path, library) => {
+	let procs = [], loaded = new Set(), libraries = new Set(), gens = new Map(), images = new Map(), load = (proc, path, library) => {
 		loaded.add(keyOf(proc, canonical(path, prefixes))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache"));
 	};
 	for (let r of records) {
 		r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
 		let gen = gens.get(r.pid) ?? 0, proc = `${r.pid}/${gen}`;
-		if (procs.push(proc), r.kind === "mmap") {
-			if (r.access !== "x" || !r.path) continue;
-			LIBRARY_NAME.test(r.path) && (libraries.add(r), load(proc, r.path, !0));
-			let run = pending.get(proc);
-			run || pending.set(proc, run = []), run.push(r);
-			continue;
-		}
-		if (r.kind === "exec") {
+		if (procs.push(proc), r.kind === "mmap" && r.access === "x" && r.path) {
+			if (r.image) {
+				libraries.add(r);
+				let paths = images.get(proc);
+				paths || images.set(proc, paths = []), paths.push(r.path);
+			} else LIBRARY_NAME.test(r.path) && (libraries.add(r), load(proc, r.path, !0));
+		} else if (r.kind === "exec") {
 			let next = `${r.pid}/${gen + 1}`;
 			gens.set(r.pid, gen + 1);
-			for (let m of pending.get(proc) ?? []) libraries.add(m), load(proc, m.path, !1), load(next, m.path, LIBRARY_NAME.test(m.path));
-			r.path && (load(proc, r.path, !1), load(next, r.path, !1));
+			for (let path of [...images.get(proc) ?? [], ...r.path ? [r.path] : []]) load(proc, path, !1), load(next, path, LIBRARY_NAME.test(path));
+			images.delete(proc);
 		}
-		pending.delete(proc);
 	}
 	return {
 		procs,

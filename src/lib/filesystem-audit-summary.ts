@@ -19,6 +19,7 @@ interface AuditRecord {
   access?: string;
   err?: number;
   failed?: boolean;
+  image?: boolean;
   dropped?: number;
   untracked?: number;
 }
@@ -389,16 +390,15 @@ interface Loads {
 // once it maps a library; another process's reads stay. A pid handed out again
 // by a fork, or running a new program, counts as a new process. Any file can be
 // mapped executable and read through the mapping, so such a mapping counts as a
-// library only by its name or as part of an exec.
+// library only by its name or when the tracer saw an exec make it.
 function findLoads(records: AuditRecord[], prefixes: SummaryOptions): Loads {
   const procs: string[] = [];
   const loaded = new Set<string>();
   const libraries = new Set<AuditRecord>();
   const gens = new Map<number | undefined, number>();
-  // The executable mappings each process made since its last other record: the
-  // kernel maps a program and its interpreter (a script's included) just
-  // before the exec record, with none of the program's code run in between.
-  const pending = new Map<string, AuditRecord[]>();
+  // What each process's exec in progress has mapped: the program, its
+  // interpreter, a script's interpreter.
+  const images = new Map<string, string[]>();
   const load = (proc: string, path: string, library: boolean): void => {
     loaded.add(keyOf(proc, canonical(path, prefixes)));
     if (library) loaded.add(keyOf(proc, "/etc/ld.so.cache"));
@@ -408,33 +408,27 @@ function findLoads(records: AuditRecord[], prefixes: SummaryOptions): Loads {
     const gen = gens.get(r.pid) ?? 0;
     const proc = `${r.pid}/${gen}`;
     procs.push(proc);
-    if (r.kind === "mmap") {
-      if (r.access !== "x" || !r.path) continue;
-      if (LIBRARY_NAME.test(r.path)) {
+    if (r.kind === "mmap" && r.access === "x" && r.path) {
+      if (r.image) {
+        libraries.add(r);
+        let paths = images.get(proc);
+        if (!paths) images.set(proc, (paths = []));
+        paths.push(r.path);
+      } else if (LIBRARY_NAME.test(r.path)) {
         libraries.add(r);
         load(proc, r.path, true);
       }
-      let run = pending.get(proc);
-      if (!run) pending.set(proc, (run = []));
-      run.push(r);
-      continue;
-    }
-    if (r.kind === "exec") {
+    } else if (r.kind === "exec") {
       // The kernel reads the program and its interpreter before the exec
       // record, so the process both before and after it gets them.
       const next = `${r.pid}/${gen + 1}`;
       gens.set(r.pid, gen + 1);
-      for (const m of pending.get(proc) ?? []) {
-        libraries.add(m);
-        load(proc, m.path!, false);
-        load(next, m.path!, LIBRARY_NAME.test(m.path!));
+      for (const path of [...(images.get(proc) ?? []), ...(r.path ? [r.path] : [])]) {
+        load(proc, path, false);
+        load(next, path, LIBRARY_NAME.test(path));
       }
-      if (r.path) {
-        load(proc, r.path, false);
-        load(next, r.path, false);
-      }
+      images.delete(proc);
     }
-    pending.delete(proc);
   }
   return { procs, loaded, libraries };
 }
