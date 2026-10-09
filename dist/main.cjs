@@ -68514,22 +68514,33 @@ function fmtSpan(span, originMs) {
 	let first = formatElapsedVariable((span.first - originMs) / 1e3), last = formatElapsedVariable((span.last - originMs) / 1e3);
 	return first === last ? first : `${first}-${last}`;
 }
-const keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1), climbs = (p) => p.split("/").includes("..");
-function collapse(paths, fanout, keep) {
-	let children = new Map();
-	for (let p of paths) {
-		if (climbs(p)) continue;
-		let parts = p.split("/");
-		for (let i = 1; i < parts.length; i++) addFlag(children, parts.slice(0, i).join("/") || "/", parts[i]);
+const keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1), climbs = (p) => p.split("/").includes(".."), components = (p) => p === "/" ? [""] : p.split("/");
+function addPath(top, parts, visit) {
+	let kids = top;
+	for (let i = 0; i < parts.length; i++) {
+		let node = kids.get(parts[i]);
+		node || kids.set(parts[i], node = { kids: new Map() }), i < parts.length - 1 && visit?.(node), kids = node.kids;
 	}
-	let shown = new Map();
+}
+function findPath(top, parts) {
+	let node;
+	for (let part of parts) node = top?.get(part), top = node?.kids;
+	return node;
+}
+function collapse(paths, fanout, keep) {
+	let top = new Map();
+	for (let p of paths) climbs(p) || addPath(top, p.split("/"));
+	let kept = new Set([...keep].map((k) => findPath(top, components(k)))), shown = new Map();
 	for (let p of paths) {
 		let parts = p.split("/"), line = p;
-		if (!climbs(p)) for (let i = 1; i < parts.length; i++) {
-			let d = parts.slice(0, i).join("/") || "/";
-			if (!keep.has(d) && children.get(d).size >= fanout) {
-				line = `${d}/**`;
-				break;
+		if (!climbs(p)) {
+			let node = top.get(parts[0]);
+			for (let i = 1; i < parts.length; i++) {
+				if (!kept.has(node) && node.kids.size >= fanout) {
+					line = `${parts.slice(0, i).join("/")}/**`;
+					break;
+				}
+				node = node.kids.get(parts[i]);
 			}
 		}
 		shown.set(p, line);
@@ -68540,21 +68551,23 @@ function collapse(paths, fanout, keep) {
 	return shown;
 }
 function dropWalkedDirs(lines, flagsOf) {
-	let base = (p) => p.endsWith("/**") ? p.slice(0, -3) : p, below = new Map();
+	let base = (p) => p.endsWith("/**") ? p.slice(0, -3) : p, trees = new Map(), below = new Map();
 	for (let d of lines) {
 		let path = base(pathOf(d));
 		if (path === "/" || climbs(path)) continue;
-		let comm = commOf(d), flags = [...flagsOf(d)];
-		for (let i = path.lastIndexOf("/"); i >= 0; i = i > 0 ? path.lastIndexOf("/", i - 1) : -1) {
-			let dir = keyOf(comm, i === 0 ? "/" : path.slice(0, i)), acc = below.get(dir);
+		let top = trees.get(commOf(d));
+		top || trees.set(commOf(d), top = new Map());
+		let flags = [...flagsOf(d)];
+		addPath(top, path.split("/"), (dir) => {
+			let acc = below.get(dir);
 			acc || below.set(dir, acc = new Set());
 			for (let c of flags) acc.add(c);
-		}
+		});
 	}
 	let kept = new Set();
 	for (let l of lines) {
-		let acc = below.get(l);
-		!pathOf(l).endsWith("/**") && acc && [...flagsOf(l)].every((c) => acc.has(c)) || kept.add(l);
+		let path = pathOf(l), node = path.endsWith("/**") ? void 0 : findPath(trees.get(commOf(l)), components(path)), acc = node && below.get(node);
+		(!acc || ![...flagsOf(l)].every((c) => acc.has(c))) && kept.add(l);
 	}
 	return kept;
 }

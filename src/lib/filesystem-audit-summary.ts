@@ -238,27 +238,58 @@ const pathOf = (key: string): string => key.slice(key.indexOf(SEP) + 1);
 // a symlink, so it is never folded into them or credited to them.
 const climbs = (p: string): boolean => p.split("/").includes("..");
 
+// A directory in a tree of paths built one component at a time, so that no
+// step spells out an ancestor's whole path: on a path thousands of components
+// deep, doing that at every level costs the square of its depth.
+interface DirNode {
+  kids: Map<string, DirNode>;
+}
+
+// A path's components as tree keys: "" first for an absolute path, so the
+// root is [""].
+const components = (p: string): string[] => (p === "/" ? [""] : p.split("/"));
+
+// Adds the path to the tree, calling visit on each directory above it.
+function addPath(top: Map<string, DirNode>, parts: string[], visit?: (dir: DirNode) => void): void {
+  let kids = top;
+  for (let i = 0; i < parts.length; i++) {
+    let node = kids.get(parts[i]);
+    if (!node) kids.set(parts[i], (node = { kids: new Map() }));
+    if (i < parts.length - 1) visit?.(node);
+    kids = node.kids;
+  }
+}
+
+function findPath(top: Map<string, DirNode> | undefined, parts: string[]): DirNode | undefined {
+  let node: DirNode | undefined;
+  for (const part of parts) {
+    node = top?.get(part);
+    top = node?.kids;
+  }
+  return node;
+}
+
 function collapse(paths: Set<string>, fanout: number, keep: Set<string>): Map<string, string> {
-  const children = new Map<string, Set<string>>();
+  const top = new Map<string, DirNode>();
   for (const p of paths) {
     if (climbs(p)) continue;
-    const parts = p.split("/");
-    for (let i = 1; i < parts.length; i++)
-      addFlag(children, parts.slice(0, i).join("/") || "/", parts[i]);
+    addPath(top, p.split("/"));
   }
+  const kept = new Set([...keep].map((k) => findPath(top, components(k))));
   const shown = new Map<string, string>();
   for (const p of paths) {
     const parts = p.split("/");
     let line = p;
-    if (!climbs(p))
+    if (!climbs(p)) {
+      let node = top.get(parts[0])!;
       for (let i = 1; i < parts.length; i++) {
-        const d = parts.slice(0, i).join("/") || "/";
-        // d was added to children in the loop above, so it is always present.
-        if (!keep.has(d) && children.get(d)!.size >= fanout) {
-          line = `${d}/**`;
+        if (!kept.has(node) && node.kids.size >= fanout) {
+          line = `${parts.slice(0, i).join("/")}/**`;
           break;
         }
+        node = node.kids.get(parts[i])!;
       }
+    }
     shown.set(p, line);
   }
   // A bare "dir" that also has a "dir/**" folds into it.
@@ -279,25 +310,28 @@ export function dropWalkedDirs(
   flagsOf: (line: string) => Iterable<string>,
 ): Set<string> {
   const base = (p: string): string => (p.endsWith("/**") ? p.slice(0, -3) : p);
-  const below = new Map<string, Set<string>>();
+  const trees = new Map<string, Map<string, DirNode>>();
+  const below = new Map<DirNode, Set<string>>();
   for (const d of lines) {
     const path = base(pathOf(d));
     if (path === "/" || climbs(path)) continue; // nothing above the root, or not known to be
-    const comm = commOf(d);
+    let top = trees.get(commOf(d));
+    if (!top) trees.set(commOf(d), (top = new Map()));
     const flags = [...flagsOf(d)];
-    // Each "/" ends an ancestor's path; the one at index 0 is the root.
-    for (let i = path.lastIndexOf("/"); i >= 0; i = i > 0 ? path.lastIndexOf("/", i - 1) : -1) {
-      const dir = keyOf(comm, i === 0 ? "/" : path.slice(0, i));
+    addPath(top, path.split("/"), (dir) => {
       let acc = below.get(dir);
       if (!acc) below.set(dir, (acc = new Set()));
       for (const c of flags) acc.add(c);
-    }
+    });
   }
   const kept = new Set<string>();
   for (const l of lines) {
-    const acc = below.get(l);
-    const walked = !pathOf(l).endsWith("/**") && acc && [...flagsOf(l)].every((c) => acc.has(c));
-    if (!walked) kept.add(l);
+    const path = pathOf(l);
+    const node = path.endsWith("/**")
+      ? undefined
+      : findPath(trees.get(commOf(l)), components(path));
+    const acc = node && below.get(node);
+    if (!acc || ![...flagsOf(l)].every((c) => acc.has(c))) kept.add(l);
   }
   return kept;
 }

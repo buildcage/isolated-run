@@ -376,6 +376,25 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["R node ./dir/**", "R sh ./dir/a"]);
   });
 
+  it("counts only touched children toward the fanout, not a kept directory below", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl({ kind: "read", comm: "c", path: "/w/a" }, { kind: "read", comm: "c", path: "/w/b" }),
+      { workspace: ["/w/x/y"], home: [] },
+    );
+    expect(lines(md)).toEqual(["R c /w/a", "R c /w/b"]);
+  });
+
+  it("renders paths thousands of components deep without stalling", () => {
+    const deep = `/work/${"a/".repeat(2000)}`;
+    const records = Array.from({ length: 500 }, (_, i) => ({
+      kind: "open-failed",
+      comm: "c",
+      path: `${deep}${i}`,
+      err: 2,
+    }));
+    expect(lines(render(...records))).toEqual([`r c ./${"a/".repeat(2000)}**`]);
+  });
+
   it("keeps a path the tracer could not walk to the top", () => {
     const md = render({ kind: "unlink", comm: "rm", path: "…/deep/x", err: 2 });
     expect(lines(md)).toEqual(["D rm …/deep/x"]);
