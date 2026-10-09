@@ -641,6 +641,8 @@ the step arranges its processes or spells a path. What it can do:
 - Flood the tracer until its buffers fill. What did not fit is lost, but the summary then says the
   record is incomplete, as it does when the tracer did not stop cleanly. Flooding can hide which
   accesses happened, not that some are missing.
+- Touch so many paths that a table or the details would pass GitHub's Job Summary size limit. That
+  part is replaced by a note naming the artifact, which still holds every access.
 
 Where the tracer cannot start, without cgroup v2, BTF or Linux 5.17, the step runs unaudited after a
 warning.

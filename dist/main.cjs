@@ -23262,7 +23262,7 @@ function resolveComposeFile(override) {
 }
 //#endregion
 //#region src/core/lib/report/render/fit-step-summary.ts
-const bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
+const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
 function withNotices(blocks, noticeFor) {
 	return blocks.map((b) => b.cut === "keep" ? b : {
 		...b,
@@ -23272,7 +23272,7 @@ function withNotices(blocks, noticeFor) {
 function joinSummaryBlocks(blocks) {
 	return blocks.map(whole).join("");
 }
-function fitStepSummary(blocks, { usedBytes = 0, limitBytes = 1048576 } = {}) {
+function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES } = {}) {
 	let full = blocks.map(whole), all = full.join(""), budget = limitBytes - 8192 - usedBytes;
 	if (bytes(all) <= budget) return all;
 	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
@@ -68344,41 +68344,44 @@ function setFilesystemAuditOutput(name) {
 //#endregion
 //#region src/lib/filesystem-audit-strip.ts
 const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && r.access === "r";
-function stripSandboxMachinery(jsonl, scratchBase) {
-	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), lines = jsonl.split("\n"), recs = lines.map((line) => {
-		try {
-			return JSON.parse(line);
-		} catch {
-			return;
-		}
-	}), ownShellPids = new Set(), shell, script, init, boundary = -1;
-	recs.forEach((r, i) => {
-		r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 ? [shell, script, boundary, init] = [
-			r.pid,
-			r.path,
-			i,
-			r.ppid
-		] : r.pid !== shell && ownShellPids.add(r.pid) : ownShellPids.add(r.pid));
-	});
-	let out = [];
-	return recs.forEach((r, i) => {
-		if (r === void 0) {
-			lines[i] !== "" && out.push(lines[i]);
-			return;
-		}
-		r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
-		let readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
-		if (!(shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript))) {
-			if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
-				out.push(JSON.stringify({
-					...r,
-					comm: "bash"
-				}));
-				return;
+function createStripper(scratchBase) {
+	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), asRecord = (r) => typeof r == "object" && r ? r : void 0, ownShellPids = new Set(), shell, script, init, boundary = -1, observed = 0, filtered = 0;
+	return {
+		observe: (rec) => {
+			let i = observed++, r = asRecord(rec);
+			r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 ? [shell, script, boundary, init] = [
+				r.pid,
+				r.path,
+				i,
+				r.ppid
+			] : r.pid !== shell && ownShellPids.add(r.pid) : ownShellPids.add(r.pid));
+		},
+		filter: (line, rec) => {
+			let i = filtered++, r = asRecord(rec);
+			if (r === void 0) return line === "" ? void 0 : {
+				line,
+				record: rec
+			};
+			r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
+			let readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
+			if (!(shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript))) {
+				if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
+					let record = {
+						...r,
+						comm: "bash"
+					};
+					return {
+						line: JSON.stringify(record),
+						record
+					};
+				}
+				return {
+					line,
+					record: rec
+				};
 			}
-			out.push(lines[i]);
 		}
-	}), out.join("\n");
+	};
 }
 //#endregion
 //#region src/core/lib/report/elapsed-time.ts
@@ -68419,7 +68422,7 @@ const LETTER = {
 	chmod: "A",
 	chown: "A",
 	attr: "A"
-}, FAILED_LETTER = {
+}, ORDER = "RWXMDA", FAILED_LETTER = {
 	delete: "D",
 	rename: "M",
 	chmod: "A",
@@ -68490,189 +68493,193 @@ function markdownRows(header, rows) {
 function sortKey(path) {
 	return path === "." || path.startsWith("./") ? [0, path] : path === "~" || path.startsWith("~/") ? [1, path] : [2, path];
 }
-function addFlag(m, key, flag) {
-	let set = m.get(key);
-	set || m.set(key, set = new Set()), set.add(flag);
+const BIT = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i])), newAgg = () => ({
+	ok: 0,
+	failed: 0,
+	perm: 0,
+	first: Infinity,
+	last: -Infinity,
+	seq: Infinity
+}), flagBits = (a) => a.ok | a.failed;
+function mergeAgg(dst, src) {
+	dst.ok |= src.ok, dst.failed |= src.failed, dst.perm |= src.perm, dst.first = Math.min(dst.first, src.first), dst.last = Math.max(dst.last, src.last), dst.seq = Math.min(dst.seq, src.seq);
 }
-function widen(m, key, span) {
-	if (!span) return;
-	let cur = m.get(key);
-	cur ? (cur.first = Math.min(cur.first, span.first), cur.last = Math.max(cur.last, span.last), cur.seq = Math.min(cur.seq, span.seq)) : m.set(key, { ...span });
+function apply(a, x) {
+	x.bit && (x.failed ? (a.failed |= x.bit, x.perm && (a.perm |= x.bit)) : a.ok |= x.bit, !Number.isNaN(x.t) && (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq)));
 }
-function widenLetter(m, key, letter, t, seq) {
-	let byLetter = m.get(key);
-	byLetter || m.set(key, byLetter = new Map());
-	let cur = byLetter.get(letter);
-	cur ? (cur.first = Math.min(cur.first, t), cur.last = Math.max(cur.last, t)) : byLetter.set(letter, {
-		first: t,
-		last: t,
-		seq
-	});
-}
-function fmtSpan(span, originMs) {
-	if (!span) return "";
-	let first = formatElapsedVariable((span.first - originMs) / 1e3), last = formatElapsedVariable((span.last - originMs) / 1e3);
+function fmtSpan(a, originMs) {
+	if (a.first === Infinity) return "";
+	let first = formatElapsedVariable((a.first - originMs) / 1e3), last = formatElapsedVariable((a.last - originMs) / 1e3);
 	return first === last ? first : `${first}-${last}`;
 }
 const keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1);
 function components(p) {
 	return p === "/" ? ["/"] : p.startsWith("/") ? ["/", ...p.slice(1).split("/")] : p.split("/");
 }
-function spell(parts, end) {
-	return parts[0] === "/" ? `/${parts.slice(1, end).join("/")}` : parts.slice(0, end).join("/");
+function spell(parts) {
+	return parts[0] === "/" ? `/${parts.slice(1).join("/")}` : parts.join("/");
 }
-function addPath(top, parts, visit) {
-	let kids = top;
-	for (let i = 0; i < parts.length; i++) {
-		let node = kids.get(parts[i]);
-		node || kids.set(parts[i], node = { kids: new Map() }), i < parts.length - 1 && visit?.(node), kids = node.kids;
-	}
-}
-function findPath(top, parts) {
-	let node;
-	for (let part of parts) node = top?.get(part), top = node?.kids;
-	return node;
-}
-function collapse(paths, fanout, keep) {
-	let top = new Map(), split = new Map();
-	for (let p of paths) {
-		let parts = components(p);
-		parts.includes("..") || (split.set(p, parts), addPath(top, parts));
-	}
-	let kept = new Set();
-	for (let k of keep) {
-		let node = findPath(top, components(k));
-		node && kept.add(node);
-	}
-	let shown = new Map();
-	for (let p of paths) {
-		let parts = split.get(p), line = p;
-		if (parts) {
-			let node = top.get(parts[0]);
-			for (let i = 1; i < parts.length; i++) {
-				if (!kept.has(node) && node.kids.size >= fanout) {
-					line = `${spell(parts, i)}/**`;
-					break;
-				}
-				node = node.kids.get(parts[i]);
-			}
+function walkedNodes(top) {
+	let walked = new Set(), below = new Map(), stack = [...top.values()].map((n) => [n, !1]);
+	for (; stack.length > 0;) {
+		let [node, done] = stack.pop();
+		if (!done) {
+			stack.push([node, !0]);
+			for (let kid of node.kids?.values() ?? []) stack.push([kid, !1]);
+			continue;
 		}
-		shown.set(p, line);
+		let bits = 0;
+		for (let kid of node.kids?.values() ?? []) bits |= below.get(kid), kid.own && (bits |= flagBits(kid.own)), kid.folded && (bits |= flagBits(kid.folded));
+		below.set(node, bits), node.own && node.kids?.size && (flagBits(node.own) & ~bits) === 0 && walked.add(node);
 	}
-	let collapsed = new Set();
-	for (let line of shown.values()) line.endsWith("/**") && collapsed.add(line.slice(0, -3));
-	for (let [p, line] of shown) collapsed.has(line) && shown.set(p, `${line}/**`);
-	return shown;
+	return walked;
 }
-function dropWalkedDirs(lines, flagsOf) {
-	let base = (p) => p.endsWith("/**") ? p.slice(0, -3) : p, trees = new Map(), flagsByLine = new Map();
-	for (let d of lines) {
-		let flags = [...flagsOf(d)];
-		flagsByLine.set(d, flags);
-		let parts = components(base(pathOf(d)));
-		if (parts.length === 1 && parts[0] === "/" || parts.includes("..")) continue;
-		let top = trees.get(commOf(d));
-		top || trees.set(commOf(d), top = new Map()), addPath(top, parts, (dir) => {
-			dir.below ??= new Set();
-			for (let c of flags) dir.below.add(c);
+function* treeLines(top) {
+	let walked = walkedNodes(top), pathTo = (e) => {
+		let parts = [];
+		for (let at = e; at; at = at.up) parts.push(at.part);
+		return spell(parts.reverse());
+	}, stack = [...top].reverse().map(([part, node]) => ({
+		node,
+		part
+	}));
+	for (; stack.length > 0;) {
+		let e = stack.pop(), { folded, own, kids } = e.node;
+		folded && flagBits(folded) && (yield [`${pathTo(e)}/**`, folded]), own && flagBits(own) && !walked.has(e.node) && (yield [pathTo(e), own]);
+		for (let [part, node] of [...kids ?? []].reverse()) stack.push({
+			node,
+			part,
+			up: e
 		});
 	}
-	let kept = new Set();
-	for (let l of lines) {
-		let path = pathOf(l), below = (path.endsWith("/**") ? void 0 : findPath(trees.get(commOf(l)), components(path)))?.below;
-		(!below || !flagsByLine.get(l).every((c) => below.has(c))) && kept.add(l);
-	}
-	return kept;
 }
-function fmtFlags(ok, failed, perm) {
-	let out = "";
-	for (let c of "RWXMDA") ok.has(c) ? out += c : failed.has(c) && (out += c.toLowerCase() + (perm.has(c) ? "!" : ""));
+var Lines = class {
+	trees = new Map();
+	climbing = new Map();
+	bytes = 0;
+	nodes = 0;
+	stopped = !1;
+	opts;
+	constructor(opts) {
+		this.opts = opts;
+	}
+	add(x) {
+		if (this.stopped) return;
+		let parts = components(x.path);
+		if (parts.includes("..")) {
+			let key = keyOf(x.comm, x.path), a = this.climbing.get(key);
+			a || this.climbing.set(key, a = newAgg());
+			let shown = flagBits(a) !== 0;
+			apply(a, x), !shown && flagBits(a) && this.count(this.opts.rowBytes(x.path, x.comm));
+			return;
+		}
+		let kids = this.trees.get(x.comm);
+		kids || this.trees.set(x.comm, kids = new Map());
+		let parent;
+		for (let i = 0; i < parts.length; i++) {
+			let node = kids.get(parts[i]);
+			if (!node) {
+				if (node = {
+					bytes: 0,
+					kept: this.isKept(parts, i + 1) || void 0
+				}, kids.set(parts[i], node), ++this.nodes > this.opts.nodes) return this.stop();
+				if (parent && (this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout)) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x);
+			}
+			if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x);
+			if (i === parts.length - 1) {
+				node.own ??= newAgg();
+				let shown = flagBits(node.own) !== 0;
+				apply(node.own, x), !shown && flagBits(node.own) && !node.kids?.size && this.setBytes(node, this.opts.rowBytes(x.path, x.comm));
+				return;
+			}
+			node.kids ??= new Map(), kids = node.kids, parent = node;
+		}
+	}
+	isKept(parts, depth) {
+		return this.opts.keep.some((k) => k.length === depth && k.every((part, i) => part === parts[i]));
+	}
+	fold(node) {
+		let agg = newAgg(), stack = [node];
+		for (; stack.length > 0;) {
+			let n = stack.pop();
+			n.own && mergeAgg(agg, n.own), n.folded && mergeAgg(agg, n.folded), this.setBytes(n, 0);
+			for (let kid of n.kids?.values() ?? []) this.nodes--, stack.push(kid);
+		}
+		node.folded = agg, node.own = void 0, node.kids = void 0;
+	}
+	addFolded(node, parts, x) {
+		apply(node.folded, x), flagBits(node.folded) && !node.bytes && this.setBytes(node, this.opts.rowBytes(`${spell(parts)}/**`, x.comm));
+	}
+	setBytes(node, bytes) {
+		this.count(bytes - node.bytes), node.bytes = bytes;
+	}
+	count(bytes) {
+		this.bytes += bytes, this.bytes > this.opts.limit && this.stop();
+	}
+	stop() {
+		this.stopped = !0, this.trees = new Map(), this.climbing = new Map();
+	}
+	finish() {
+		if (this.stopped) return;
+		let out = [], bytes = 0;
+		for (let line of this.lines()) if (out.push(line), bytes += this.opts.rowBytes(line.path, line.comm), bytes > this.opts.limit) return;
+		return out;
+	}
+	*lines() {
+		for (let [key, agg] of this.climbing) flagBits(agg) && (yield {
+			comm: commOf(key),
+			path: pathOf(key),
+			agg
+		});
+		for (let [comm, top] of this.trees) for (let [path, agg] of treeLines(top)) yield {
+			comm,
+			path,
+			agg
+		};
+	}
+};
+function fmtFlags(a) {
+	let failed = a.failed & ~a.ok, out = "";
+	for (let c of ORDER) a.ok & BIT[c] ? out += c : failed & BIT[c] && (out += c.toLowerCase() + (a.perm & BIT[c] ? "!" : ""));
 	return out;
 }
-const HEADING = "### Filesystem audit", SECTION$1 = "filesystem", FILESYSTEM_BLOCK = {
+const HEADING = "### Filesystem audit", SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
 	executed: "filesystem-executed",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
 };
 Object.fromEntries(Object.values(FILESYSTEM_BLOCK).map((id) => [id, 0]));
-function parse(jsonl) {
-	let records = [], ended = !1, lost = !1;
-	for (let line of jsonl.split("\n")) {
-		if (!line) continue;
-		let r;
-		try {
-			r = JSON.parse(line);
-		} catch {
-			continue;
-		}
-		if (r.kind === "end") {
-			ended = !0, lost = !!(r.dropped || r.untracked);
-			continue;
-		}
-		records.push(r);
-	}
-	return {
-		records,
-		ended,
-		lost
-	};
+const LIMITS = {
+	bytes: STEP_SUMMARY_LIMIT_BYTES,
+	nodes: 1e6,
+	loads: 2e5
+};
+function procOf(gens, r) {
+	r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
+	let gen = gens.get(r.pid) ?? 0;
+	return r.kind === "exec" && gens.set(r.pid, gen + 1), `${r.pid}/${gen}`;
 }
-function findLoads(records, prefixes) {
-	let procs = [], loaded = new Set(), libraries = new Set(), gens = new Map(), images = new Map(), load = (proc, path, library) => {
-		loaded.add(keyOf(proc, canonical(path, prefixes))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache"));
-	};
-	for (let r of records) {
-		r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
-		let gen = gens.get(r.pid) ?? 0, proc = `${r.pid}/${gen}`;
-		if (procs.push(proc), r.kind === "mmap" && r.access === "x" && r.path) {
+const isRecord = (r) => typeof r == "object" && !!r && typeof r.kind == "string";
+function createAuditSummary(prefixes) {
+	let limits = {
+		...LIMITS,
+		...prefixes.limits
+	}, limit = limits.bytes, loaded = new Set(), images = new Map(), observed = new Map(), load = (proc, path, library) => {
+		loaded.size >= limits.loads || (loaded.add(keyOf(proc, canonical(path, prefixes))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache")));
+	}, isLibraryMap = (r) => r.kind === "mmap" && r.access === "x" && !!r.path && !!(r.image || LIBRARY_NAME.test(r.path)), observe = (r) => {
+		if (!isRecord(r)) return;
+		let proc = procOf(observed, r);
+		if (isLibraryMap(r)) {
 			if (r.image) {
-				libraries.add(r);
 				let paths = images.get(proc);
 				paths || images.set(proc, paths = []), paths.push(r.path);
-			} else LIBRARY_NAME.test(r.path) && (libraries.add(r), load(proc, r.path, !0));
+			} else load(proc, r.path, !0);
 		} else if (r.kind === "exec") {
-			let next = `${r.pid}/${gen + 1}`;
-			gens.set(r.pid, gen + 1);
+			let next = `${r.pid}/${observed.get(r.pid)}`;
 			for (let path of [...images.get(proc) ?? [], ...r.path ? [r.path] : []]) load(proc, path, !1), load(next, path, LIBRARY_NAME.test(path));
 			images.delete(proc);
 		}
-	}
-	let loadReads = new Set();
-	return records.forEach((r, i) => {
-		let c = classify(r);
-		c && !c.failed && c.letter === "R" && loaded.has(keyOf(procs[i], canonical(c.path, prefixes))) && loadReads.add(r);
-	}), {
-		libraries,
-		loadReads
-	};
-}
-function buildRows(records, loads, prefixes, byCommand) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), okSpans = new Map(), failedSpans = new Map(), seq = 0;
-	for (let r of records) {
-		if (loads.libraries.has(r)) continue;
-		let c = classify(r);
-		if (!c) continue;
-		let key = keyOf(byCommand ? r.comm ?? "" : "", canonical(c.path, prefixes));
-		if (loads.loadReads.has(r)) {
-			ok.has(key) || ok.set(key, new Set());
-			continue;
-		}
-		let t = Date.parse(r.t ?? "");
-		Number.isNaN(t) || widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++), c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
-	}
-	let nok = new Map(), nfailed = new Map(), nperm = new Map(), nspans = new Map(), mergeInto = (dst, src, keepRelative, srcSpans) => {
-		for (let [key, set] of src) {
-			let p = pathOf(key);
-			if (!keepRelative && !p.startsWith("/") && !p.startsWith("…/")) continue;
-			let nk = keyOf(commOf(key), normalize$2(p));
-			for (let span of srcSpans?.get(key)?.values() ?? []) widen(nspans, nk, span);
-			let dstSet = dst.get(nk);
-			dstSet || dst.set(nk, dstSet = new Set());
-			for (let c of set) dstSet.add(c);
-		}
-	};
-	mergeInto(nok, ok, !1, okSpans), mergeInto(nfailed, failed, !0, failedSpans), mergeInto(nperm, perm, !0);
-	let keep = new Set([
+	}, fanout = prefixes.fanout ?? 3, keep = [
 		"/",
 		"/home",
 		"/tmp",
@@ -68680,42 +68687,77 @@ function buildRows(records, loads, prefixes, byCommand) {
 		"/proc/<pid>",
 		...prefixes.workspace,
 		...prefixes.home
-	]), byComm = new Map();
-	for (let key of new Set([...nok.keys(), ...nfailed.keys()])) {
-		let set = byComm.get(commOf(key));
-		set || byComm.set(commOf(key), set = new Set()), set.add(pathOf(key));
-	}
-	let shown = new Map();
-	for (let [comm, paths] of byComm) for (let [p, line] of collapse(paths, fanout, keep)) shown.set(keyOf(comm, p), keyOf(comm, line));
-	let lineOk = new Map(), lineFailed = new Map(), linePerm = new Map(), lineSpans = new Map(), union = (dst, key, src) => {
-		if (src) for (let c of src) addFlag(dst, key, c);
-	};
-	for (let [pk, lk] of shown) union(lineOk, lk, nok.get(pk)), union(lineFailed, lk, nfailed.get(pk)), union(linePerm, lk, nperm.get(pk)), widen(lineSpans, lk, nspans.get(pk));
-	let keys = dropWalkedDirs(new Set(shown.values()), (l) => [...lineOk.get(l) ?? [], ...lineFailed.get(l) ?? []]), rows = [];
-	for (let lk of keys) {
-		let o = lineOk.get(lk) ?? new Set(), fl = new Set([...lineFailed.get(lk) ?? []].filter((c) => !o.has(c))), flags = fmtFlags(o, fl, new Set([...linePerm.get(lk) ?? []].filter((c) => fl.has(c))));
-		if (!flags) continue;
-		let span = lineSpans.get(lk);
-		rows.push({
-			span,
-			seq: span?.seq ?? Infinity,
-			flags,
-			comm: escapeForDisplay(commOf(lk)),
-			path: escapeForDisplay(relativize(pathOf(lk), prefixes))
+	].map(components), relLength = (path) => relativize(path, prefixes).length, paths = new Lines({
+		fanout,
+		keep,
+		limit,
+		nodes: limits.nodes,
+		rowBytes: (p) => relLength(p) + 11
+	}), details = new Lines({
+		fanout,
+		keep,
+		limit,
+		nodes: limits.nodes,
+		rowBytes: (p, comm) => relLength(p) + comm.length + 3
+	}), executed = new Set(), executedBytes = 0, ended = !1, lost = !1, seq = 0, added = new Map(), add = (r, counted = !0) => {
+		if (!isRecord(r)) return;
+		let proc = procOf(added, r);
+		if (!counted) return;
+		if (r.kind === "end") {
+			ended = !0, lost = !!(r.dropped || r.untracked);
+			return;
+		}
+		if (r.kind === "exec" && r.path && executed) {
+			let p = normalize$2(canonical(r.path, prefixes));
+			executed.has(p) || (executed.add(p), executedBytes += relLength(p) + 7, executedBytes > limit && (executed = void 0));
+		}
+		if (isLibraryMap(r)) return;
+		let c = classify(r);
+		if (!c) return;
+		let path = canonical(c.path, prefixes);
+		if (!c.failed && !path.startsWith("/") && !path.startsWith("…/")) return;
+		let loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path)), t = loadRead ? NaN : Date.parse(r.t ?? ""), x = {
+			comm: r.comm ?? "",
+			path: normalize$2(path),
+			bit: loadRead ? 0 : BIT[c.letter],
+			failed: c.failed,
+			perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
+			t,
+			seq: Number.isNaN(t) ? Infinity : seq++
+		};
+		details.add(x), paths.add({
+			...x,
+			comm: ""
 		});
-	}
-	return rows.sort((a, b) => {
+	}, rows = (lines) => lines?.map(({ comm, path, agg }) => ({
+		agg,
+		flags: fmtFlags(agg),
+		comm: escapeForDisplay(comm),
+		path: escapeForDisplay(relativize(path, prefixes))
+	}));
+	return {
+		observe,
+		add,
+		finish: () => {
+			let byPath = rows(paths.finish());
+			return {
+				ended,
+				lost,
+				executed: executed && [...executed].map((p) => escapeForDisplay(relativize(p, prefixes))),
+				paths: byPath,
+				details: byPath && rows(details.finish())
+			};
+		}
+	};
+}
+function inRecordingOrder(rows) {
+	return rows.toSorted((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
-		return a.seq - b.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
-	}), rows;
+		return a.agg.seq - b.agg.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
+	});
 }
-function executedPaths(records, prefixes) {
-	let seen = new Set();
-	for (let r of records) r.kind === "exec" && r.path && seen.add(normalize$2(canonical(r.path, prefixes)));
-	return [...seen].map((p) => escapeForDisplay(relativize(p, prefixes)));
-}
-function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
-	let { records, ended, lost } = parse(jsonl), loads = findLoads(records, prefixes), rows = buildRows(records, loads, prefixes, !0), heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
+function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote) {
+	let { ended, lost, executed, paths, details } = summary, heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
 > some accesses are missing from this summary and from the artifact.`, frame = (text) => ({
 		priority: 0,
 		level: 1,
@@ -68723,8 +68765,15 @@ function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
 		text,
 		cut: "keep"
 	});
-	if (rows.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
-	let blocks = [frame(`${heading}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>\n\n`)], table = (id, title, md) => ({
+	if (details?.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
+	let blocks = [frame(`${heading}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>\n\n`)], table = (id, title, md) => md === void 0 ? {
+		id,
+		priority: priorities[id],
+		level: 2,
+		section: SECTION$1,
+		text: `#### ${title}\n\n${cutNote}`,
+		cut: "atomic"
+	} : {
 		id,
 		priority: priorities[id],
 		level: 2,
@@ -68732,24 +68781,45 @@ function renderFilesystemAuditBlocks(jsonl, prefixes, priorities) {
 		text: `#### ${title}\n\n${md}\n\n`,
 		cut: "lines",
 		head: 4
-	}), executed = executedPaths(records, prefixes);
-	executed.length > 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, "Executed", markdownRows(["Path"], executed.map((path) => [codeCell(path)]))));
-	let byPath = buildRows(records, loads, prefixes, !1).sort((a, b) => {
+	};
+	executed?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, "Executed", executed && markdownRows(["Path"], executed.map((path) => [codeCell(path)]))));
+	let byPath = paths && inRecordingOrder(paths).sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return ca - cb || (pa < pb ? -1 : +(pa > pb));
 	});
-	blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", markdownRows(["Access", "Path"], byPath.map(({ flags, path }) => [flags, codeCell(path)]))));
-	let originMs = prefixes.startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.span?.first ?? Infinity), Infinity) : prefixes.startedAt * 1e3, times = rows.map((r) => fmtSpan(r.span, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
-	return blocks.push({
+	blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map(({ flags, path }) => [flags, codeCell(path)]))));
+	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
-		level: 3,
+		level: 3
+	};
+	if (!details) return blocks.push({
+		...log,
+		section: SECTION$1,
+		cut: "atomic",
+		open: DETAILS_OPEN,
+		text: cutNote,
+		close: DETAILS_CLOSE
+	}), blocks;
+	let rows = inRecordingOrder(details), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
+	return blocks.push({
+		...log,
 		section: SECTION$1,
 		cut: "lines",
-		open: "<details>\n<summary>📂 Filesystem details</summary>\n\n",
+		open: DETAILS_OPEN,
 		text: `${timeW ? "<sub>first-last access</sub>\n\n" : ""}\`\`\`\n${body}\n\`\`\`\n\n`,
-		close: "</details>\n"
+		close: DETAILS_CLOSE
 	}), blocks;
+}
+function unreadableSummaryBlocks() {
+	return [{
+		priority: 0,
+		level: 1,
+		section: SECTION$1,
+		text: `${HEADING}\n\n> ⚠️ **The recording could not be read**, so this summary has none of its accesses and no
+> artifact was uploaded.\n`,
+		cut: "keep"
+	}];
 }
 function filesystemTruncationNote(artifactName) {
 	return `_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; ${artifactName ? `the ${artifactName} artifact uploaded for this run has every access` : "the recording could not be uploaded as an artifact, so the rest is not kept"}._\n\n`;
@@ -69235,12 +69305,44 @@ const TRAFFIC_PRIORITIES = {
 	[FILESYSTEM_BLOCK.executed]: 6,
 	[FILESYSTEM_BLOCK.paths]: 7,
 	[FILESYSTEM_BLOCK.log]: 9
-}, realDeps$3 = {
+}, CHUNK_BYTES = 1 << 20;
+function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
+	let fd = (0, node_fs.openSync)(path, "r");
+	try {
+		let buf = Buffer.alloc(chunkBytes), carry = Buffer.alloc(0);
+		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
+			let chunk = carry.length > 0 ? Buffer.concat([carry, buf.subarray(0, n)]) : buf.subarray(0, n), start = 0;
+			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) onLine(chunk.toString("utf8", start, nl));
+			carry = Buffer.from(chunk.subarray(start));
+		}
+		onLine(carry.toString("utf8"));
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function openWriter(path, chunkBytes = CHUNK_BYTES) {
+	let fd = (0, node_fs.openSync)(path, "w"), pending = [], size = 0, first = !0, flush = () => {
+		pending.length > 0 && (0, node_fs.writeSync)(fd, pending.join("")), pending = [], size = 0;
+	};
+	return {
+		write: (line) => {
+			pending.push(first ? line : `\n${line}`), first = !1, size += line.length, size >= chunkBytes && flush();
+		},
+		close: () => {
+			try {
+				flush();
+			} finally {
+				(0, node_fs.closeSync)(fd);
+			}
+		}
+	};
+}
+const realDeps$3 = {
+	readLines,
+	openWriter,
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
-	writeFile: (path, content) => (0, node_fs.writeFileSync)(path, content),
 	realpath: (path) => (0, node_fs.realpathSync)(path),
-	renderBlocks: renderFilesystemAuditBlocks,
-	strip: stripSandboxMachinery,
+	renderBlocks: renderAuditSummaryBlocks,
 	uploadArtifact: uploadFilesystemAuditArtifact,
 	setOutput: setFilesystemAuditOutput,
 	appendFile: (path, content) => (0, node_fs.appendFileSync)(path, content)
@@ -69261,26 +69363,29 @@ async function prepareStepFilesystemAudit({ audit, retentionDays, containerName,
 		...overrides
 	}, artifactName = "";
 	try {
-		let raw = audit && readOptional(audit.outPath, deps.readFile);
-		if (!audit || raw === void 0) return NONE;
-		let clean = deps.strip(raw, (0, node_path.dirname)(audit.outPath));
-		artifactName = await upload(clean, audit.outPath, retentionDays, containerName, annotation, deps);
+		if (!audit) return NONE;
+		let options = {
+			workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
+			home: prefixes(env.HOME, deps.realpath)
+		}, cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl"), reduced;
+		try {
+			reduced = reduce(audit.outPath, cleanPath, options, annotation, deps);
+		} catch (e) {
+			return e.code === "ENOENT" ? NONE : (annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), { blocks: () => unreadableSummaryBlocks() });
+		}
+		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
 		let notice = filesystemTruncationNote(artifactName || void 0);
 		return { blocks: (startedAt) => {
 			let rendered;
 			try {
-				rendered = deps.renderBlocks(clean, {
-					workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-					home: prefixes(env.HOME, deps.realpath),
-					startedAt
-				}, FILESYSTEM_PRIORITIES);
+				rendered = deps.renderBlocks(reduced.summary, startedAt, FILESYSTEM_PRIORITIES, notice);
 			} catch (e) {
 				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
 			}
-			return deps.appendFile, joinSummaryBlocks(rendered), withNotices(rendered, () => notice);
+			return audit.outPath, joinSummaryBlocks(rendered), withNotices(rendered, () => notice);
 		} };
 	} catch (e) {
-		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), NONE;
+		return annotation.warning(`Failed to report the filesystem audit: ${errorMessage(e)}`), NONE;
 	} finally {
 		try {
 			deps.setOutput(artifactName);
@@ -69289,22 +69394,44 @@ async function prepareStepFilesystemAudit({ audit, retentionDays, containerName,
 		}
 	}
 }
-async function upload(clean, outPath, retentionDays, containerName, annotation, deps) {
-	if (!clean) return "";
-	let cleanPath = outPath.replace(/\.jsonl$/, ".step.jsonl");
+const parse = (line) => {
 	try {
-		deps.writeFile(cleanPath, clean);
-	} catch (e) {
-		return annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`), "";
-	}
-	return await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "";
-}
-function readOptional(path, readFile) {
-	try {
-		return readFile(path);
+		return JSON.parse(line);
 	} catch {
 		return;
 	}
+};
+function reduce(outPath, cleanPath, options, annotation, deps) {
+	let stripper = createStripper((0, node_path.dirname)(outPath)), summary = createAuditSummary(options);
+	deps.readLines(outPath, (line) => {
+		let r = parse(line);
+		stripper.observe(r), summary.observe(r);
+	});
+	let writer, written = !1, failed = (e) => {
+		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`), writer = void 0, written = !1;
+	};
+	try {
+		writer = deps.openWriter(cleanPath);
+	} catch (e) {
+		failed(e);
+	}
+	deps.readLines(outPath, (line) => {
+		let r = parse(line), kept = stripper.filter(line, r);
+		if (summary.add(kept ? kept.record : r, kept !== void 0), kept && writer) try {
+			writer.write(kept.line), written = !0;
+		} catch (e) {
+			failed(e);
+		}
+	});
+	try {
+		writer?.close();
+	} catch (e) {
+		failed(e);
+	}
+	return {
+		summary: summary.finish(),
+		written
+	};
 }
 //#endregion
 //#region src/proxy/aws-keys.ts

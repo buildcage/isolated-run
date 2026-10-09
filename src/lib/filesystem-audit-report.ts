@@ -1,4 +1,12 @@
-import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  writeSync,
+} from "node:fs";
 import { dirname } from "node:path";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
@@ -13,10 +21,14 @@ import {
   setFilesystemAuditOutput,
   uploadFilesystemAuditArtifact,
 } from "./filesystem-audit-artifact.ts";
-import { stripSandboxMachinery } from "./filesystem-audit-strip.ts";
+import { createStripper } from "./filesystem-audit-strip.ts";
 import {
+  createAuditSummary,
   filesystemTruncationNote,
-  renderFilesystemAuditBlocks,
+  renderAuditSummaryBlocks,
+  unreadableSummaryBlocks,
+  type AuditSummary,
+  type SummaryOptions,
 } from "./filesystem-audit-summary.ts";
 import type { FilesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
 import { FILESYSTEM_PRIORITIES } from "./summary-priorities.ts";
@@ -31,25 +43,85 @@ export interface FilesystemAuditReportOptions {
 }
 
 export interface FilesystemAuditReportDeps {
+  readLines: typeof readLines;
+  openWriter: typeof openWriter;
   readFile: (path: string) => string;
-  writeFile: (path: string, content: string) => void;
   realpath: (path: string) => string;
-  renderBlocks: typeof renderFilesystemAuditBlocks;
-  strip: typeof stripSandboxMachinery;
+  renderBlocks: typeof renderAuditSummaryBlocks;
   uploadArtifact: typeof uploadFilesystemAuditArtifact;
   setOutput: typeof setFilesystemAuditOutput;
   appendFile: (path: string, content: string) => void;
+}
+
+const CHUNK_BYTES = 1 << 20;
+
+/**
+ * Calls onLine with each line of the file, as split("\n") would give them,
+ * reading it a chunk at a time so no file is too large to read.
+ */
+export function readLines(
+  path: string,
+  onLine: (line: string) => void,
+  chunkBytes = CHUNK_BYTES,
+): void {
+  const fd = openSync(path, "r");
+  try {
+    const buf = Buffer.alloc(chunkBytes);
+    let carry = Buffer.alloc(0);
+    for (let n; (n = readSync(fd, buf, 0, buf.length, null)) > 0;) {
+      const chunk =
+        carry.length > 0 ? Buffer.concat([carry, buf.subarray(0, n)]) : buf.subarray(0, n);
+      let start = 0;
+      for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1)
+        onLine(chunk.toString("utf8", start, nl));
+      carry = Buffer.from(chunk.subarray(start));
+    }
+    onLine(carry.toString("utf8"));
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Writes lines to a new file, joined by newlines, a chunk at a time. */
+export function openWriter(
+  path: string,
+  chunkBytes = CHUNK_BYTES,
+): { write: (line: string) => void; close: () => void } {
+  const fd = openSync(path, "w");
+  let pending: string[] = [];
+  let size = 0;
+  let first = true;
+  const flush = (): void => {
+    if (pending.length > 0) writeSync(fd, pending.join(""));
+    pending = [];
+    size = 0;
+  };
+  return {
+    write: (line) => {
+      pending.push(first ? line : `\n${line}`);
+      first = false;
+      size += line.length;
+      if (size >= chunkBytes) flush();
+    },
+    close: () => {
+      try {
+        flush();
+      } finally {
+        closeSync(fd);
+      }
+    },
+  };
 }
 
 // Untested by design: the defaults behind the seams, which only hand node:fs
 // and @actions what the tested caller decided.
 /* v8 ignore start */
 const realDeps: FilesystemAuditReportDeps = {
+  readLines,
+  openWriter,
   readFile: (path) => readFileSync(path, "utf8"),
-  writeFile: (path, content) => writeFileSync(path, content),
   realpath: (path) => realpathSync(path),
-  renderBlocks: renderFilesystemAuditBlocks,
-  strip: stripSandboxMachinery,
+  renderBlocks: renderAuditSummaryBlocks,
   uploadArtifact: uploadFilesystemAuditArtifact,
   setOutput: setFilesystemAuditOutput,
   appendFile: (path, content) => appendFileSync(path, content),
@@ -93,50 +165,47 @@ export async function prepareStepFilesystemAudit(
   const deps = { ...realDeps, ...overrides };
   let artifactName = "";
   try {
-    const raw = audit && readOptional(audit.outPath, deps.readFile);
-    // An empty recording is still reported: a tracer that stops cleanly always
-    // writes an end line, so an empty one was cut short and gets the warning.
-    if (!audit || raw === undefined) return NONE;
-    // The recording sits under the scratch base (see sandbox/filesystem-audit.ts),
-    // next to the exec wrapper's own files, so its directory is the one holding
-    // buildcage's own machinery. Strip that out once and feed the result to
-    // both the summary and the uploaded artifact.
-    const clean = deps.strip(raw, dirname(audit.outPath));
-    artifactName = await upload(
-      clean,
-      audit.outPath,
-      retentionDays,
-      containerName,
-      annotation,
-      deps,
-    );
+    if (!audit) return NONE;
+    const options: SummaryOptions = {
+      workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
+      home: prefixes(env.HOME, deps.realpath),
+    };
+    // The stripped copy goes beside the recording under the scratch base,
+    // which the sandbox cannot reach (unlike $RUNNER_TEMP or /tmp). Writing a
+    // new file leaves the root-owned recording in place, so a failed write
+    // never uploads the raw.
+    const cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl");
+    let reduced: { summary: AuditSummary; written: boolean };
+    try {
+      reduced = reduce(audit.outPath, cleanPath, options, annotation, deps);
+    } catch (e) {
+      // The tracer never started, or the file is already gone.
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return NONE;
+      annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
+      return { blocks: () => unreadableSummaryBlocks() };
+    }
+    if (reduced.written)
+      artifactName =
+        (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
     const notice = filesystemTruncationNote(artifactName || undefined);
 
-    // The summary and the upload are independent: a render failure (e.g. a
-    // line the tracer left truncated) must not also drop the artifact, which
-    // is most wanted when the recording is incomplete.
+    // The summary and the upload are independent: a render failure must not
+    // also drop the artifact, which is most wanted when the recording is
+    // incomplete.
     const blocks = (startedAt: number | undefined): SummaryBlock[] => {
       let rendered: SummaryBlock[];
       try {
-        rendered = deps.renderBlocks(
-          clean,
-          {
-            workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-            home: prefixes(env.HOME, deps.realpath),
-            startedAt,
-          },
-          FILESYSTEM_PRIORITIES,
-        );
+        rendered = deps.renderBlocks(reduced.summary, startedAt, FILESYSTEM_PRIORITIES, notice);
       } catch (e) {
         annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
         return [];
       }
-      mirrorForDebug(env, deps.appendFile, raw, joinSummaryBlocks(rendered));
+      mirrorForDebug(env, deps, audit.outPath, joinSummaryBlocks(rendered));
       return withNotices(rendered, () => notice);
     };
     return { blocks };
   } catch (e) {
-    annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
+    annotation.warning(`Failed to report the filesystem audit: ${errorMessage(e)}`);
     return NONE;
   } finally {
     try {
@@ -149,35 +218,67 @@ export async function prepareStepFilesystemAudit(
   }
 }
 
-// The stripped copy goes beside the recording under the scratch base, which
-// the sandbox cannot reach (unlike $RUNNER_TEMP or /tmp). Writing a new file
-// leaves the root-owned recording in place, so a failed write never uploads
-// the raw. Returns "" when nothing was uploaded.
-async function upload(
-  clean: string,
+const parse = (line: string): unknown => {
+  try {
+    return JSON.parse(line) as unknown;
+  } catch {
+    return undefined; // a line the tracer left truncated (e.g. a hard kill mid-write)
+  }
+};
+
+// Reads the recording twice, a line at a time: first to find buildcage's own
+// machinery and what each process loaded, then to write the step's lines to
+// the stripped copy and reduce them to the summary. Throws only when the
+// recording cannot be read; written is false when the copy holds nothing or
+// could not be written.
+function reduce(
   outPath: string,
-  retentionDays: number | undefined,
-  containerName: string,
+  cleanPath: string,
+  options: SummaryOptions,
   annotation: Annotation,
   deps: FilesystemAuditReportDeps,
-): Promise<string> {
-  if (!clean) return "";
-  const cleanPath = outPath.replace(/\.jsonl$/, ".step.jsonl");
-  try {
-    deps.writeFile(cleanPath, clean);
-  } catch (e) {
-    annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
-    return "";
-  }
-  return (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
-}
+): { summary: AuditSummary; written: boolean } {
+  // The recording sits under the scratch base (see sandbox/filesystem-audit.ts),
+  // next to the exec wrapper's own files, so its directory is the one holding
+  // buildcage's own machinery.
+  const stripper = createStripper(dirname(outPath));
+  const summary = createAuditSummary(options);
+  deps.readLines(outPath, (line) => {
+    const r = parse(line);
+    stripper.observe(r);
+    summary.observe(r);
+  });
 
-function readOptional(path: string, readFile: (p: string) => string): string | undefined {
+  let writer: ReturnType<typeof openWriter> | undefined;
+  let written = false;
+  const failed = (e: unknown): void => {
+    annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
+    writer = undefined;
+    written = false;
+  };
   try {
-    return readFile(path);
-  } catch {
-    return undefined; // the tracer never started, or the file is already gone
+    writer = deps.openWriter(cleanPath);
+  } catch (e) {
+    failed(e);
   }
+  deps.readLines(outPath, (line) => {
+    const r = parse(line);
+    const kept = stripper.filter(line, r);
+    summary.add(kept ? kept.record : r, kept !== undefined);
+    if (!kept || !writer) return;
+    try {
+      writer.write(kept.line);
+      written = true;
+    } catch (e) {
+      failed(e);
+    }
+  });
+  try {
+    writer?.close();
+  } catch (e) {
+    failed(e);
+  }
+  return { summary: summary.finish(), written };
 }
 
 // Debug-only mirror, matching writeReportSummary's: GITHUB_STEP_SUMMARY is
@@ -187,16 +288,17 @@ function readOptional(path: string, readFile: (p: string) => string): string | u
 // the whole body out and dist carries neither variable (see rolldown.config.js).
 function mirrorForDebug(
   env: NodeJS.ProcessEnv,
-  appendFile: (path: string, content: string) => void,
-  raw: string,
+  deps: FilesystemAuditReportDeps,
+  outPath: string,
   summary: string,
 ): void {
   if (process.env.BUILDCAGE_BUILD_TEST_HOOKS !== "1") return;
   // A debug copy that cannot be written must not cost the real summary.
   try {
-    if (env.BUILDCAGE_RUN_DEBUG_RAW_FILE) appendFile(env.BUILDCAGE_RUN_DEBUG_RAW_FILE, raw);
+    if (env.BUILDCAGE_RUN_DEBUG_RAW_FILE)
+      deps.appendFile(env.BUILDCAGE_RUN_DEBUG_RAW_FILE, deps.readFile(outPath));
     if (env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE)
-      appendFile(env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE, summary);
+      deps.appendFile(env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE, summary);
   } catch {
     // ignored: test hooks only
   }
