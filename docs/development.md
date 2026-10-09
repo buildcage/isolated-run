@@ -225,7 +225,8 @@ dot, as the rules do before matching it.
 
 With the AWS access key check on, both request lines carry `wr=<reason|->` after `dst=`: in `audit`,
 the reason `restrict` would have refused the request for (`aws-key-not-allowed`,
-`aws-no-credential`, `aws-ambiguous-credential`, `aws-unreadable` or `aws-role-not-allowed`), and
+`aws-no-credential`, `aws-ambiguous-credential`, `aws-unsupported-credential`, `aws-unreadable` or
+`aws-role-not-allowed`), and
 `-` otherwise. `restrict` logs the same reasons as `reason=`. Then come `aws.key=`, `aws.accountId=`
 and `aws.assumedAccount=`, which the parser reads back as the traffic artifact's `aws` object, each
 `-` where it has no value. See [AWS access key check](./aws.md).
