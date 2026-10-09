@@ -813,7 +813,10 @@ shown as `…/name`, as is a path too deep to record in full. Where its `path` d
 `name` (`to_name` for a move's target). An invisible or control character in a path or command name
 is shown escaped, as `\n` or `\u{202e}`, and a backslash as `\\`. A program the step ran is
 recorded under the file it resolved to, with symlinks followed and a script under its own path rather
-than its interpreter's; the artifact keeps the name it was run by as `name`. The libraries a program
+than its interpreter's; the artifact keeps the name it was run by as `name`. A memfd, a file with
+no path, is shown as `memfd:"name"` with the name its creator gave it, and a file deleted while in
+use, or created with `O_TMPFILE` and never linked, has `(deleted)` after its path; the artifact marks
+them `"memfd":true` and `"deleted":true`. The libraries a program
 loads are left out, as are its reads of them and of `/etc/ld.so.cache`, and its process's reads of
 the program itself, including those made just before running it. Other programs' reads of those
 files are shown. A file mapped executable counts as a library only when its name ends in `.so`

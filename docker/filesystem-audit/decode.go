@@ -34,6 +34,10 @@ type record struct {
 	// Image marks a mapping the kernel made while starting a program: the
 	// program itself, its dynamic loader, or a script's interpreter.
 	Image bool `json:"image,omitempty"`
+	// Memfd marks a memfd, whose Path is "memfd:" and the name its creator
+	// chose; Deleted a file unlinked while in use, or an O_TMPFILE.
+	Memfd   bool `json:"memfd,omitempty"`
+	Deleted bool `json:"deleted,omitempty"`
 	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the reader
 	// turns it into Time.
 	boot uint64
@@ -50,9 +54,14 @@ var kindNames = map[uint32]string{
 }
 
 // Mirrors the fixed header of struct event in bpf/filesystem_audit.bpf.c:
-// eight u32 fields, four u8 fields, comm[16], a u32 err, the u64 timestamp,
-// then the data bytes.
-const hdrLen = 8*4 + 4 + 16 + 4 + 8
+// eight u32 fields, four u8 fields, comm[16], u32 err and marks, padding to
+// align the u64 timestamp, then the data bytes.
+const hdrLen = 8*4 + 4 + 16 + 4 + 4 + 4 + 8
+
+const (
+	markInternal = 1
+	markUnlinked = 2
+)
 
 const fmodeExec = 0x20 // FMODE_EXEC
 
@@ -162,9 +171,31 @@ func passed(data []byte, has bool, n int, truncated bool) (string, string) {
 	return p, passedName(name, p)
 }
 
+// applyMarks sets Memfd or Deleted from the BPF side's marks and drops the
+// " (deleted)" d_path appended (dpath), so Path holds the name alone. Another
+// kernel-internal file, such as a pipe, keeps its path.
+func applyMarks(r *record, marks uint32, dpath bool) {
+	if marks&markInternal != 0 {
+		name := strings.TrimPrefix(r.Path, "/")
+		if dpath {
+			name = strings.TrimSuffix(name, " (deleted)")
+		}
+		if strings.HasPrefix(name, "memfd:") {
+			r.Path, r.Memfd = name, true
+		}
+		return
+	}
+	if marks&markUnlinked != 0 {
+		if dpath {
+			r.Path = strings.TrimSuffix(r.Path, " (deleted)")
+		}
+		r.Deleted = true
+	}
+}
+
 // execFiles holds each process's resolved exec target until its exec record
 // arrives.
-type execFiles map[uint32]string
+type execFiles map[uint32]record
 
 // attach takes in an exec-file record, keeping its path for the exec that
 // follows, and reports true so the caller drops it. An exec record gets that
@@ -172,12 +203,12 @@ type execFiles map[uint32]string
 func (f execFiles) attach(r *record) bool {
 	switch r.Kind {
 	case "exec-file":
-		f[r.PID] = r.Path
+		f[r.PID] = *r
 		return true
 	case "exec":
-		if p, ok := f[r.PID]; ok {
+		if t, ok := f[r.PID]; ok {
 			delete(f, r.PID)
-			r.Name, r.Path = r.Path, p
+			r.Name, r.Path, r.Memfd, r.Deleted = r.Path, t.Path, t.Memfd, t.Deleted
 		}
 	}
 	return false
@@ -197,12 +228,13 @@ func decode(raw []byte) (record, error) {
 	n1, n2 := int(raw[32]), int(raw[33])
 	truncated, truncated2 := raw[34] != 0, raw[35] != 0
 	data := raw[hdrLen:]
+	marks := le.Uint32(raw[56:])
 	r := record{
 		Kind: kindNames[kind],
 		PID:  le.Uint32(raw[4:]),
 		PPID: le.Uint32(raw[8:]),
 		Comm: cstr(raw[36:52]),
-		boot: le.Uint64(raw[56:]),
+		boot: le.Uint64(raw[64:]),
 	}
 	// A held path change its syscall refused carries the errno; its path and
 	// kind are as for one that succeeded.
@@ -213,6 +245,7 @@ func decode(raw []byte) (record, error) {
 	switch kind {
 	case 1: // open
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
+		applyMarks(&r, marks, pathRet >= 0)
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
 	case 12: // failed open
@@ -220,14 +253,17 @@ func decode(raw []byte) (record, error) {
 		r.Err = pathRet // the positive errno the BPF side stored as -ret
 	case 13, 14: // read, write
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
+		applyMarks(&r, marks, pathRet >= 0)
 	case 15: // mmap
 		r.Path, _ = components(data, n1, truncated)
+		applyMarks(&r, marks, false)
 		r.Access = mmapAccess(mode, flags)
 		r.Image = pathRet == 1
 	case 2: // exec
 		r.Path = cstr(data)
 	case 3, 4, 6, 10, 23, 24: // unlink, rmdir, mkdir, truncate, exec-file, mknod
 		r.Path, _ = components(data, n1, truncated)
+		applyMarks(&r, marks, false)
 	case 7: // chmod
 		r.Path, _ = components(data, n1, truncated)
 		r.Flags = mode

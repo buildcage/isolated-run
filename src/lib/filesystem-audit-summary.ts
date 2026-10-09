@@ -24,6 +24,8 @@ interface AuditRecord {
   err?: number;
   failed?: boolean;
   image?: boolean;
+  memfd?: boolean;
+  deleted?: boolean;
   dropped?: number;
   untracked?: number;
 }
@@ -118,6 +120,22 @@ function escapeForDisplay(name: string): string {
   );
 }
 
+// A memfd and a file deleted while in use key under marks no path can spell,
+// as a name never holds a NUL, so neither folds into a directory nor passes
+// for a file still there.
+const MEMFD = "\0memfd:";
+const DELETED = "\0 (deleted)";
+
+function marked(r: AuditRecord, path: string): string {
+  if (r.memfd) return MEMFD + path.slice("memfd:".length);
+  return r.deleted ? path + DELETED : path;
+}
+
+// Never folded, nor credited to the directories it names: a path with "..",
+// which may lead elsewhere through a symlink, and a marked one.
+const unfoldable = (parts: string[], path: string): boolean =>
+  parts.includes("..") || path.includes("\0");
+
 function normalize(path: string): string {
   // Unify a relative name's "./x" and "x" spellings before anything keys on
   // the path.
@@ -169,6 +187,12 @@ function codeCell(text: string): string {
   const fence = "`".repeat(longest + 1);
   const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
   return `${fence}${pad}${text.replace(/\|/g, "\\|")}${pad}${fence}`;
+}
+
+const DELETED_MARK = " (deleted)";
+
+function pathCell({ path, deleted }: Shown): string {
+  return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
 }
 
 function markdownRows(header: string[], rows: string[][]): string {
@@ -352,8 +376,7 @@ export function dropWalkedDirs(
     const path = pathOf(l);
     const folded = path.endsWith("/**");
     const parts = components(folded ? path.slice(0, -3) : path);
-    // A path with ".." is not known to sit under the directories it names.
-    if (parts.includes("..")) {
+    if (unfoldable(parts, path)) {
       kept.add(l);
       continue;
     }
@@ -397,8 +420,7 @@ interface LinesOptions {
  */
 class Lines {
   private trees = new Map<string, Map<string, Node>>();
-  // Paths spelled with "..", which may lead outside the directories they
-  // name through a symlink, so are never folded into them or credited to them.
+  // The unfoldable paths, each a line of its own.
   private climbing = new Map<string, Agg>();
   private bytes = 0;
   private nodes = 0;
@@ -413,7 +435,7 @@ class Lines {
   add(x: Access): void {
     if (this.stopped) return;
     const parts = components(x.path);
-    if (parts.includes("..")) {
+    if (unfoldable(parts, x.path)) {
       const key = keyOf(x.comm, x.path);
       let a = this.climbing.get(key);
       if (!a) this.climbing.set(key, (a = newAgg()));
@@ -584,11 +606,15 @@ interface Limits {
 
 const LIMITS: Limits = { bytes: STEP_SUMMARY_LIMIT_BYTES, nodes: 200_000, loads: 200_000 };
 
-interface Row {
+interface Shown {
+  path: string;
+  deleted?: boolean;
+}
+
+interface Row extends Shown {
   agg: Agg;
   flags: string;
   comm: string;
-  path: string;
 }
 
 /** What the summary is rendered from, reduced from the recording. */
@@ -597,7 +623,7 @@ export interface AuditSummary {
   ended: boolean;
   lost: boolean;
   /** Each part, or undefined where it outgrew the Job Summary. */
-  executed: string[] | undefined;
+  executed: Shown[] | undefined;
   paths: Row[] | undefined;
   details: Row[] | undefined;
 }
@@ -712,7 +738,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       return;
     }
     if (r.kind === "exec" && r.path && executed) {
-      const p = normalize(canonical(r.path, prefixes));
+      const p = normalize(canonical(marked(r, r.path), prefixes));
       if (!executed.has(p)) {
         executed.add(p);
         executedBytes += relLength(p) + 7;
@@ -722,12 +748,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (isLibraryMap(r)) return;
     const c = classify(r);
     if (!c) return;
-    const path = canonical(c.path, prefixes);
+    const path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
     // A succeeding record resolves to an absolute path or a "…/" walk, so a
     // relative one there is d_path's pipe:, socket: or anon_inode: target, or
     // an attribute change whose directory descriptor closed meanwhile, which
     // is lost; a failed one may keep the relative name it was given.
-    if (!c.failed && !path.startsWith("/") && !path.startsWith("…/")) return;
+    if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) return;
     const loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path));
     const t = loadRead ? NaN : Date.parse(r.t ?? "");
     const x: Access = {
@@ -743,12 +769,24 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     paths.add({ ...x, comm: "" });
   };
 
+  // A memfd shows its name quoted, as one its creator chose; a deleted file
+  // shows the mark outside its path.
+  const shown = (path: string): Shown => {
+    if (path.startsWith(MEMFD)) {
+      const name = escapeForDisplay(path.slice(MEMFD.length)).replace(/"/g, '\\"');
+      return { path: `memfd:"${name}"` };
+    }
+    if (!path.endsWith(DELETED)) return { path: escapeForDisplay(relativize(path, prefixes)) };
+    const p = relativize(path.slice(0, -DELETED.length), prefixes);
+    return { path: escapeForDisplay(p), deleted: true };
+  };
+
   const rows = (lines: { comm: string; path: string; agg: Agg }[] | undefined): Row[] | undefined =>
     lines?.map(({ comm, path, agg }) => ({
       agg,
       flags: fmtFlags(agg),
       comm: escapeForDisplay(comm),
-      path: escapeForDisplay(relativize(path, prefixes)),
+      ...shown(path),
     }));
 
   const finish = (): AuditSummary => {
@@ -756,7 +794,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return {
       ended,
       lost,
-      executed: executed && [...executed].map((p) => escapeForDisplay(relativize(p, prefixes))),
+      executed: executed && [...executed].map(shown),
       paths: byPath,
       // A table too large to print leaves no room for the details either.
       details: byPath && rows(details.finish()),
@@ -830,7 +868,7 @@ export function renderAuditSummaryBlocks(
         executed &&
           markdownRows(
             ["Path"],
-            executed.map((path) => [codeCell(path)]),
+            executed.map((e) => [pathCell(e)]),
           ),
       ),
     );
@@ -851,7 +889,7 @@ export function renderAuditSummaryBlocks(
       byPath &&
         markdownRows(
           ["Access", "Path"],
-          byPath.map(({ flags, path }) => [flags, codeCell(path)]),
+          byPath.map((r) => [r.flags, pathCell(r)]),
         ),
     ),
   );
@@ -888,7 +926,7 @@ export function renderAuditSummaryBlocks(
     .map(
       (r, i) =>
         `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}` +
-        `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`,
+        `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`,
     )
     .join("\n");
   blocks.push({

@@ -68419,6 +68419,11 @@ const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\]/gu, NAMED_ESCAPES = {
 function escapeForDisplay(name) {
 	return name.replace(UNSAFE_CHARS, (c) => NAMED_ESCAPES[c] ?? `\\u{${Number(c.codePointAt(0)).toString(16)}}`);
 }
+const MEMFD = "\0memfd:", DELETED = "\0 (deleted)";
+function marked(r, path) {
+	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
+}
+const unfoldable = (parts, path) => parts.includes("..") || path.includes("\0");
 function normalize$2(path) {
 	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
 }
@@ -68443,6 +68448,10 @@ function canonical(path, prefixes) {
 function codeCell(text) {
 	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
 	return `${fence}${pad}${text.replace(/\|/g, "\\|")}${pad}${fence}`;
+}
+const DELETED_MARK = " (deleted)";
+function pathCell({ path, deleted }) {
+	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
 }
 function markdownRows(header, rows) {
 	let line = (cells) => `| ${cells.join(" | ")} |`;
@@ -68528,7 +68537,7 @@ var Lines = class {
 	add(x) {
 		if (this.stopped) return;
 		let parts = components(x.path);
-		if (parts.includes("..")) {
+		if (unfoldable(parts, x.path)) {
 			let key = keyOf(x.comm, x.path), a = this.climbing.get(key);
 			a || this.climbing.set(key, a = newAgg());
 			let shown = flagBits(a) !== 0;
@@ -68670,14 +68679,14 @@ function createAuditSummary(prefixes) {
 			return;
 		}
 		if (r.kind === "exec" && r.path && executed) {
-			let p = normalize$2(canonical(r.path, prefixes));
+			let p = normalize$2(canonical(marked(r, r.path), prefixes));
 			executed.has(p) || (executed.add(p), executedBytes += relLength(p) + 7, executedBytes > limit && (executed = void 0));
 		}
 		if (isLibraryMap(r)) return;
 		let c = classify(r);
 		if (!c) return;
-		let path = canonical(c.path, prefixes);
-		if (!c.failed && !path.startsWith("/") && !path.startsWith("…/")) return;
+		let path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
+		if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) return;
 		let loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path)), t = loadRead ? NaN : Date.parse(r.t ?? ""), x = {
 			comm: r.comm ?? "",
 			path: normalize$2(path),
@@ -68691,11 +68700,14 @@ function createAuditSummary(prefixes) {
 			...x,
 			comm: ""
 		});
-	}, rows = (lines) => lines?.map(({ comm, path, agg }) => ({
+	}, shown = (path) => path.startsWith(MEMFD) ? { path: `memfd:"${escapeForDisplay(path.slice(7)).replace(/"/g, "\\\"")}"` } : path.endsWith(DELETED) ? {
+		path: escapeForDisplay(relativize(path.slice(0, -11), prefixes)),
+		deleted: !0
+	} : { path: escapeForDisplay(relativize(path, prefixes)) }, rows = (lines) => lines?.map(({ comm, path, agg }) => ({
 		agg,
 		flags: fmtFlags(agg),
 		comm: escapeForDisplay(comm),
-		path: escapeForDisplay(relativize(path, prefixes))
+		...shown(path)
 	}));
 	return {
 		observe,
@@ -68705,7 +68717,7 @@ function createAuditSummary(prefixes) {
 			return {
 				ended,
 				lost,
-				executed: executed && [...executed].map((p) => escapeForDisplay(relativize(p, prefixes))),
+				executed: executed && [...executed].map(shown),
 				paths: byPath,
 				details: byPath && rows(details.finish())
 			};
@@ -68744,12 +68756,12 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote) {
 		cut: "lines",
 		head: 4
 	};
-	executed?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, "Executed", executed && markdownRows(["Path"], executed.map((path) => [codeCell(path)]))));
+	executed?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, "Executed", executed && markdownRows(["Path"], executed.map((e) => [pathCell(e)]))));
 	let byPath = paths && inRecordingOrder(paths).sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return ca - cb || (pa < pb ? -1 : +(pa > pb));
 	});
-	if (blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map(({ flags, path }) => [flags, codeCell(path)])))), !byPath) return blocks;
+	if (blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map((r) => [r.flags, pathCell(r)])))), !byPath) return blocks;
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
@@ -68763,7 +68775,7 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote) {
 		text: cutNote,
 		close: DETAILS_CLOSE
 	}), blocks;
-	let rows = inRecordingOrder(details), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`).join("\n");
+	let rows = inRecordingOrder(details), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`).join("\n");
 	return blocks.push({
 		...log,
 		section: SECTION$1,

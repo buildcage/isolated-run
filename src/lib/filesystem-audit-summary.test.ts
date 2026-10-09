@@ -724,6 +724,37 @@ describe("renderFilesystemAuditSummary", () => {
       expect(md).toContain("| R | `…/x` |\n| r | `…/x` |\n");
     });
 
+    it("shows a memfd by its quoted name and a deleted file with a mark outside its path", () => {
+      const md = render(
+        { kind: "write", comm: "py", path: 'memfd:/usr/bin/a"b', memfd: true },
+        { kind: "exec", comm: "x", path: 'memfd:/usr/bin/a"b', memfd: true },
+        { kind: "write", comm: "py", path: "/tmp/p", deleted: true },
+        { kind: "exec", comm: "p", path: "/tmp/p", deleted: true },
+        { kind: "write", comm: "py", path: "/tmp/q (deleted)" },
+      );
+      expect(md).toContain(
+        '| Path |\n| --- |\n| `memfd:"/usr/bin/a\\"b"` |\n| `/tmp/p` (deleted) |\n\n',
+      );
+      expect(md).toContain(
+        '| WX | `/tmp/p` (deleted) |\n| W | `/tmp/q (deleted)` |\n| WX | `memfd:"/usr/bin/a\\"b"` |\n',
+      );
+      expect(lines(md)).toContain('W py memfd:"/usr/bin/a\\"b"');
+      expect(lines(md)).toContain("W py /tmp/p (deleted)");
+    });
+
+    it("keeps a deleted file and a memfd out of a folded directory", () => {
+      const md = render(
+        { kind: "write", comm: "a", path: "/srv/d/1" },
+        { kind: "write", comm: "a", path: "/srv/d/2" },
+        { kind: "write", comm: "a", path: "/srv/d/3" },
+        { kind: "write", comm: "a", path: "/srv/d/4", deleted: true },
+        { kind: "write", comm: "a", path: "memfd:/srv/d/5", memfd: true },
+      );
+      expect(md).toContain("| W | `/srv/d/**` |");
+      expect(md).toContain("| W | `/srv/d/4` (deleted) |");
+      expect(md).toContain('| W | `memfd:"/srv/d/5"` |');
+    });
+
     it("leaves the executed table out when nothing was run", () => {
       const md = render({ kind: "read", comm: "a", path: "/work/x" });
       expect(md).not.toContain("#### Executed");

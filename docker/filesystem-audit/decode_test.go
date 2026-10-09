@@ -14,6 +14,7 @@ type event struct {
 	kind, flags, mode         uint32
 	pathRet                   int32
 	err                       uint32
+	marks                     uint32
 	bases                     uint32
 	n1, n2, truncated, trunc2 uint8
 	pid, ppid                 uint32
@@ -35,7 +36,8 @@ func (e event) bytes() []byte {
 	b[32], b[33], b[34], b[35] = e.n1, e.n2, e.truncated, e.trunc2
 	copy(b[36:52], e.comm)
 	le.PutUint32(b[52:], e.err)
-	le.PutUint64(b[56:], e.boot)
+	le.PutUint32(b[56:], e.marks)
+	le.PutUint64(b[64:], e.boot)
 	return append(b, e.data...)
 }
 
@@ -125,8 +127,11 @@ func TestBootOffset(t *testing.T) {
 // compiler gave struct event.
 func TestHeaderMatchesEvent(t *testing.T) {
 	var e filesystemAuditEvent
-	if got := unsafe.Offsetof(e.Ts); got != 56 {
-		t.Fatalf("ts at %d, decode reads 56", got)
+	if got := unsafe.Offsetof(e.Marks); got != 56 {
+		t.Fatalf("marks at %d, decode reads 56", got)
+	}
+	if got := unsafe.Offsetof(e.Ts); got != 64 {
+		t.Fatalf("ts at %d, decode reads 64", got)
 	}
 	if got := unsafe.Offsetof(e.Data); got != hdrLen {
 		t.Fatalf("data at %d, hdrLen is %d", got, hdrLen)
@@ -274,6 +279,33 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "exec-file", PID: 9, Comm: "sh", Path: "/work/A/gradlew"},
 		},
 		{
+			name: "write to a memfd",
+			ev: event{kind: 14, comm: "python3", marks: markInternal,
+				data: []byte("/memfd:/usr/bin/x (deleted)\x00")},
+			want: record{Kind: "write", Comm: "python3", Path: "memfd:/usr/bin/x", Memfd: true},
+		},
+		{
+			name: "exec file, a memfd",
+			ev:   event{kind: 23, comm: "python3", marks: markInternal, n1: 1, data: comps("memfd:/usr/bin/x")},
+			want: record{Kind: "exec-file", Comm: "python3", Path: "memfd:/usr/bin/x", Memfd: true},
+		},
+		{
+			name: "write to a pipe",
+			ev:   event{kind: 14, comm: "sh", marks: markInternal, data: []byte("pipe:[123]\x00")},
+			want: record{Kind: "write", Comm: "sh", Path: "pipe:[123]"},
+		},
+		{
+			name: "write to a deleted file named like a deleted one",
+			ev: event{kind: 14, comm: "sh", marks: markUnlinked,
+				data: []byte("/tmp/x (deleted) (deleted)\x00")},
+			want: record{Kind: "write", Comm: "sh", Path: "/tmp/x (deleted)", Deleted: true},
+		},
+		{
+			name: "exec file, deleted",
+			ev:   event{kind: 23, comm: "sh", marks: markUnlinked, n1: 2, data: comps("payload", "tmp")},
+			want: record{Kind: "exec-file", Comm: "sh", Path: "/tmp/payload", Deleted: true},
+		},
+		{
 			name: "attr ok",
 			ev:   event{kind: 20, comm: "touch", data: []byte("/tmp/t\x00")},
 			want: record{Kind: "attr", Comm: "touch", Path: "/tmp/t"},
@@ -360,5 +392,11 @@ func TestExecFilesAttach(t *testing.T) {
 	}
 	if files.attach(&record{Kind: "read", PID: 9, Path: "/etc/hosts"}) {
 		t.Fatal("other records should be kept")
+	}
+	files.attach(&record{Kind: "exec-file", PID: 9, Path: "memfd:x", Memfd: true})
+	memfd := record{Kind: "exec", PID: 9, Path: "/dev/fd/3"}
+	files.attach(&memfd)
+	if memfd.Path != "memfd:x" || !memfd.Memfd || memfd.Name != "/dev/fd/3" {
+		t.Fatalf("exec = %+v, want the memfd it ran", memfd)
 	}
 }
