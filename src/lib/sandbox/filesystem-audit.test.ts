@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 
+import { SandboxError } from "../errors.ts";
 import {
   cgroupFsPath,
   extractTracer,
@@ -60,7 +61,7 @@ function liveChild(): { child: AuditChild; kill: ReturnType<typeof vi.fn> } {
     resolveExit = r;
   });
   kill.mockImplementation(() => resolveExit());
-  return { child: { exited, kill }, kill };
+  return { child: { exited, kill, lastError: () => "" }, kill };
 }
 
 describe("startFilesystemAudit", () => {
@@ -68,9 +69,8 @@ describe("startFilesystemAudit", () => {
     const { child, kill } = liveChild();
     const spawn = vi.fn(() => child);
     const remove = vi.fn();
-    const warn = vi.fn();
 
-    const handle = await startFilesystemAudit(START_OPTIONS, warn, {
+    const handle = await startFilesystemAudit(START_OPTIONS, {
       spawn,
       exists: () => true,
       remove,
@@ -89,7 +89,6 @@ describe("startFilesystemAudit", () => {
       "--ready",
       START_OPTIONS.readyPath,
     ]);
-    expect(warn).not.toHaveBeenCalled();
 
     await handle.stop();
     expect(kill).toHaveBeenCalledWith("SIGTERM");
@@ -104,49 +103,69 @@ describe("startFilesystemAudit", () => {
       ready = true;
     });
 
-    await startFilesystemAudit(START_OPTIONS, vi.fn(), { spawn: () => child, exists, sleep });
+    await startFilesystemAudit(START_OPTIONS, { spawn: () => child, exists, sleep });
 
     expect(exists).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledTimes(1);
   });
 
-  it("warns and records nothing when the tracer never becomes ready", async () => {
+  it("fails the step when the tracer never becomes ready", async () => {
     const { child, kill } = liveChild();
-    const warn = vi.fn();
     const remove = vi.fn();
 
-    const handle = await startFilesystemAudit(START_OPTIONS, warn, {
+    const start = startFilesystemAudit(START_OPTIONS, {
       spawn: () => child,
       exists: () => false,
       sleep: async () => {},
       remove,
     });
 
-    expect(warn).toHaveBeenCalledOnce();
+    await expect(start).rejects.toThrow(
+      new SandboxError(
+        "filesystem_audit could not start (the tracer did not attach in time); the command was not run.",
+        "FILESYSTEM_AUDIT_UNAVAILABLE",
+      ),
+    );
     expect(kill).toHaveBeenCalledWith("SIGTERM");
     expect(remove).toHaveBeenCalledWith(START_OPTIONS.pidFilePath);
     expect(remove).toHaveBeenCalledWith(START_OPTIONS.outPath);
-    await handle.stop(); // the returned no-op handle does nothing more
-    expect(remove).toHaveBeenCalledTimes(2);
   });
 
-  it("stops waiting as soon as the tracer exits on its own", async () => {
-    const kill = vi.fn();
-    const child: AuditChild = { exited: Promise.resolve(), kill };
-    const warn = vi.fn();
+  it("stops waiting as soon as the tracer exits on its own, and names why", async () => {
+    const child: AuditChild = {
+      exited: Promise.resolve(),
+      kill: vi.fn(),
+      lastError: () =>
+        "filesystem-audit: attach on_unlinkat_enter: neither debugfs nor tracefs are mounted",
+    };
     const sleep = vi.fn(async () => {});
 
-    await startFilesystemAudit(START_OPTIONS, warn, {
+    const start = startFilesystemAudit(START_OPTIONS, {
       spawn: () => child,
       exists: () => false,
       sleep,
       remove: vi.fn(),
     });
 
+    await expect(start).rejects.toThrow(
+      "filesystem_audit could not start (filesystem-audit: attach on_unlinkat_enter: neither debugfs nor tracefs are mounted); the command was not run.",
+    );
     // One yield in the ready loop before the exit is seen, then one in stop's
     // grace race.
     expect(sleep).toHaveBeenCalledTimes(2);
-    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("says only that the tracer exited when it wrote nothing", async () => {
+    const child: AuditChild = { exited: Promise.resolve(), kill: vi.fn(), lastError: () => "" };
+
+    await expect(
+      startFilesystemAudit(START_OPTIONS, {
+        spawn: () => child,
+        exists: () => false,
+        sleep: async () => {},
+        remove: vi.fn(),
+      }),
+    ).rejects.toThrow("filesystem_audit could not start (the tracer exited);");
   });
 
   it("kills the tracer directly when it outlives the SIGTERM grace", async () => {
@@ -161,8 +180,8 @@ describe("startFilesystemAudit", () => {
     });
     const remove = vi.fn();
 
-    const handle = await startFilesystemAudit(START_OPTIONS, vi.fn(), {
-      spawn: () => ({ exited, kill }),
+    const handle = await startFilesystemAudit(START_OPTIONS, {
+      spawn: () => ({ exited, kill, lastError: () => "" }),
       exists: () => true,
       sleep: async () => {},
       remove,
@@ -183,8 +202,8 @@ describe("startFilesystemAudit", () => {
     });
     const exec = vi.fn();
 
-    const handle = await startFilesystemAudit(START_OPTIONS, vi.fn(), {
-      spawn: () => ({ exited, kill: vi.fn() }),
+    const handle = await startFilesystemAudit(START_OPTIONS, {
+      spawn: () => ({ exited, kill: vi.fn(), lastError: () => "" }),
       exists: () => true,
       sleep: async () => {},
       remove: vi.fn(),
@@ -207,8 +226,8 @@ describe("startFilesystemAudit", () => {
     });
     const exec = vi.fn();
 
-    const handle = await startFilesystemAudit(START_OPTIONS, vi.fn(), {
-      spawn: () => ({ exited, kill: vi.fn() }),
+    const handle = await startFilesystemAudit(START_OPTIONS, {
+      spawn: () => ({ exited, kill: vi.fn(), lastError: () => "" }),
       exists: () => true,
       sleep: async () => {},
       remove: vi.fn(),

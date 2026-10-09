@@ -69977,15 +69977,18 @@ function defaultSpawn$1(command, args) {
 		stdio: [
 			"ignore",
 			"inherit",
-			"inherit"
+			"pipe"
 		],
 		env: hostCommandEnv(command)
-	});
-	return {
+	}), tail = "";
+	return child.stderr.on("data", (chunk) => {
+		process.stderr.write(chunk), tail = (tail + chunk.toString()).slice(-4096);
+	}), {
 		exited: new Promise((resolve) => {
 			child.on("error", () => resolve()), child.on("close", () => resolve());
 		}),
-		kill: (signal) => child.kill(signal)
+		kill: (signal) => child.kill(signal),
+		lastError: () => tail.trimEnd().split("\n").at(-1) ?? ""
 	};
 }
 function defaultSleep(ms) {
@@ -70006,7 +70009,7 @@ function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = n
 		hostPath: tracerPath
 	})), chmod(tracerPath, 493), tracerPath;
 }
-async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath }, warn, deps = {}) {
+async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath }, deps = {}) {
 	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2 } = deps, child = spawn("sudo", [
 		"-n",
 		"--",
@@ -70040,7 +70043,8 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		if (exited) break;
 		await sleep(100);
 	}
-	return warn("buildcage: filesystem_audit did not start; the step's file accesses were not recorded."), await stop(), remove(outPath), noAudit;
+	let reason = exited ? child.lastError() || "the tracer exited" : "the tracer did not attach in time";
+	throw await stop(), remove(outPath), new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
@@ -72078,22 +72082,23 @@ function finishNssDb(caTrust, options, deps) {
 	}
 }
 async function startAudit(dir, config, options, deps) {
-	let { filesystemAudit, containerName, warn } = options;
+	let { filesystemAudit, containerName } = options;
 	if (filesystemAudit === void 0) return noAudit;
 	let cgroupsPath = config.linux.cgroupsPath;
-	if (cgroupsPath === void 0) return warn("buildcage: filesystem_audit needs a cgroup v2 host; the step's file accesses were not recorded."), noAudit;
+	if (cgroupsPath === void 0) throw new SandboxError("filesystem_audit needs a cgroup v2 host; the command was not run.", "FILESYSTEM_AUDIT_UNAVAILABLE");
+	let tracerPath;
 	try {
-		let tracerPath = deps.extractTracer(containerName, dir);
-		return await deps.startFilesystemAudit({
-			tracerPath,
-			cgroupsPath,
-			outPath: filesystemAudit.outPath,
-			pidFilePath: filesystemAudit.pidFilePath,
-			readyPath: (0, node_path.join)(dir, "filesystem-audit.ready")
-		}, warn);
+		tracerPath = deps.extractTracer(containerName, dir);
 	} catch (e) {
-		return warn(`buildcage: filesystem_audit could not start (${errorMessage(e)}); the step's file accesses were not recorded.`), noAudit;
+		throw new SandboxError(`filesystem_audit could not start (${errorMessage(e)}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
 	}
+	return deps.startFilesystemAudit({
+		tracerPath,
+		cgroupsPath,
+		outPath: filesystemAudit.outPath,
+		pidFilePath: filesystemAudit.pidFilePath,
+		readyPath: (0, node_path.join)(dir, "filesystem-audit.ready")
+	});
 }
 async function runSandboxedCommand(options, overrides = {}) {
 	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {

@@ -512,8 +512,8 @@ function finishNssDb(
 
 /**
  * Resolve the sandbox cgroup from the built config and the extracted tracer,
- * then hand off to startFilesystemAudit. A host without cgroup v2, or a failed
- * extraction, warns and skips the audit; the step runs unaffected either way.
+ * then hand off to startFilesystemAudit. Anything that keeps the tracer from
+ * starting fails the step before the command runs.
  */
 async function startAudit(
   dir: string,
@@ -521,33 +521,31 @@ async function startAudit(
   options: AssembleBundleOptions,
   deps: RunSandboxedCommandDeps,
 ): Promise<AuditHandle> {
-  const { filesystemAudit, containerName, warn } = options;
+  const { filesystemAudit, containerName } = options;
   if (filesystemAudit === undefined) return noAudit;
   const cgroupsPath = config.linux.cgroupsPath;
   if (cgroupsPath === undefined) {
-    warn(
-      "buildcage: filesystem_audit needs a cgroup v2 host; the step's file accesses were not recorded.",
+    throw new SandboxError(
+      "filesystem_audit needs a cgroup v2 host; the command was not run.",
+      "FILESYSTEM_AUDIT_UNAVAILABLE",
     );
-    return noAudit;
   }
+  let tracerPath: string;
   try {
-    const tracerPath = deps.extractTracer(containerName, dir);
-    return await deps.startFilesystemAudit(
-      {
-        tracerPath,
-        cgroupsPath,
-        outPath: filesystemAudit.outPath,
-        pidFilePath: filesystemAudit.pidFilePath,
-        readyPath: join(dir, "filesystem-audit.ready"),
-      },
-      warn,
-    );
+    tracerPath = deps.extractTracer(containerName, dir);
   } catch (e) {
-    warn(
-      `buildcage: filesystem_audit could not start (${errorMessage(e)}); the step's file accesses were not recorded.`,
+    throw new SandboxError(
+      `filesystem_audit could not start (${errorMessage(e)}); the command was not run.`,
+      "FILESYSTEM_AUDIT_UNAVAILABLE",
     );
-    return noAudit;
   }
+  return deps.startFilesystemAudit({
+    tracerPath,
+    cgroupsPath,
+    outPath: filesystemAudit.outPath,
+    pidFilePath: filesystemAudit.pidFilePath,
+    readyPath: join(dir, "filesystem-audit.ready"),
+  });
 }
 
 /**

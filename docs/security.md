@@ -642,8 +642,8 @@ the step arranges its processes or spells a path. What it can do:
   record is incomplete, as it does when the tracer did not stop cleanly. Flooding can hide which
   accesses happened, not that some are missing.
 
-Where the tracer cannot start, without cgroup v2, BTF or Linux 5.17, the step runs unaudited after a
-warning.
+Where the tracer cannot start or cannot attach every probe, for want of cgroup v2, BTF, tracefs or
+Linux 5.17, the step fails before the command runs rather than keep a partial record.
 
 ## Hardening
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 
+import { SandboxError } from "../errors.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 const CGROUP_ROOT = "/sys/fs/cgroup";
@@ -43,14 +44,14 @@ export function cgroupFsPath(cgroupsPath: string): string {
   return join(CGROUP_ROOT, cgroupsPath);
 }
 
-export type Warn = (message: string) => void;
-
 export type SpawnAudit = (command: string, args: string[]) => AuditChild;
 
 /** The part of the tracer process the lifecycle needs. */
 export interface AuditChild {
   exited: Promise<void>;
   kill: (signal: NodeJS.Signals) => void;
+  /** The last line it wrote to stderr, which names why it exited early. */
+  lastError: () => string;
 }
 
 export interface FilesystemAuditDeps {
@@ -75,14 +76,23 @@ function defaultExec(command: string, args: string[]): string {
 
 function defaultSpawn(command: string, args: string[]): AuditChild {
   const child = spawn(hostCommand(command), args, {
-    stdio: ["ignore", "inherit", "inherit"],
+    stdio: ["ignore", "inherit", "pipe"],
     env: hostCommandEnv(command),
+  });
+  let tail = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    process.stderr.write(chunk);
+    tail = (tail + chunk.toString()).slice(-4096);
   });
   const exited = new Promise<void>((resolve) => {
     child.on("error", () => resolve());
     child.on("close", () => resolve());
   });
-  return { exited, kill: (signal) => child.kill(signal) };
+  return {
+    exited,
+    kill: (signal) => child.kill(signal),
+    lastError: () => tail.trimEnd().split("\n").at(-1) ?? "",
+  };
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -144,13 +154,12 @@ export interface StartFilesystemAuditOptions {
  * watching before runc puts the sandboxed process in that cgroup. Needs root,
  * so it goes through `sudo -n` like run-isolated.sh.
  *
- * Best-effort: if it never attaches, this warns and returns a handle that
- * records nothing, so the step still runs. The caller stops the returned
- * handle once the step is done.
+ * A tracer that does not attach fails the step before the command runs, since
+ * the step asked for a record. The caller stops the returned handle once the
+ * step is done.
  */
 export async function startFilesystemAudit(
   { tracerPath, cgroupsPath, outPath, pidFilePath, readyPath }: StartFilesystemAuditOptions,
-  warn: Warn,
   deps: FilesystemAuditDeps = {},
 ): Promise<AuditHandle> {
   const {
@@ -201,10 +210,15 @@ export async function startFilesystemAudit(
     if (exited) break;
     await sleep(READY_POLL_MS);
   }
-  warn("buildcage: filesystem_audit did not start; the step's file accesses were not recorded.");
+  const reason = exited
+    ? child.lastError() || "the tracer exited"
+    : "the tracer did not attach in time";
   await stop();
   // A tracer that attached just too late may have created the recording; the
   // report would otherwise read it as one cut short.
   remove(outPath);
-  return noAudit;
+  throw new SandboxError(
+    `filesystem_audit could not start (${reason}); the command was not run.`,
+    "FILESYSTEM_AUDIT_UNAVAILABLE",
+  );
 }

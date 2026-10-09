@@ -18,6 +18,7 @@ import { ActionError } from "#core/lib/errors.ts";
  *   ROOT_RUNNER                       the runner is uid 0, where DAC alone would guard root-owned host sockets
  *   INVALID_FILESYSTEM_AUDIT          filesystem_audit input was neither off nor record
  *   INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS  filesystem_audit_retention_days was not a whole number above zero
+ *   FILESYSTEM_AUDIT_UNAVAILABLE      filesystem_audit: record, but the tracer could not be started on this host
  *   FILESYSTEM_INPUT_CONFLICT         filesystem_mode/write_through inputs combined in a disallowed way, or a
  *                                     writable path that collides with a mount the sandbox needs itself
  *   INVALID_WRITE_THROUGH_PATH        a write_through entry failed path-resolution rules (unknown $VAR, etc.)
@@ -63,6 +64,7 @@ export type SandboxErrorCode =
   | "INVALID_FILESYSTEM_MODE"
   | "INVALID_FILESYSTEM_AUDIT"
   | "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS"
+  | "FILESYSTEM_AUDIT_UNAVAILABLE"
   | "INVALID_WRITE_THROUGH_PATH"
   | "WRITE_THROUGH_TARGET_MISSING"
   | "WRITE_THROUGH_TARGET_UNCREATABLE"

@@ -182,23 +182,41 @@ describe("runSandboxedCommand", () => {
       expect(mocks.startFilesystemAudit).not.toHaveBeenCalled();
     });
 
-    it("warns and skips the tracer without a cgroup v2 host", async () => {
+    it("fails before the command without a cgroup v2 host", async () => {
       // buildOciConfig leaves cgroupsPath undefined on a non-v2 host.
       mocks.buildOciConfig.mockReturnValue({ process: {}, linux: {} });
-      await runSandboxedCommand(options({ filesystemAudit: AUDIT }), deps);
 
+      await expect(runSandboxedCommand(options({ filesystemAudit: AUDIT }), deps)).rejects.toThrow(
+        new SandboxError(
+          "filesystem_audit needs a cgroup v2 host; the command was not run.",
+          "FILESYSTEM_AUDIT_UNAVAILABLE",
+        ),
+      );
       expect(mocks.startFilesystemAudit).not.toHaveBeenCalled();
-      expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("cgroup v2"));
+      expect(mocks.runIsolated).not.toHaveBeenCalled();
     });
 
-    it("leaves the exit code untouched when the tracer cannot start", async () => {
-      mocks.runIsolated.mockResolvedValue(7);
+    it("fails before the command when the tracer cannot be extracted", async () => {
       mocks.extractTracer.mockImplementation(() => {
         throw new Error("docker cp failed");
       });
 
-      await expect(runSandboxedCommand(auditing(), deps)).resolves.toBe(7);
-      expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("could not start"));
+      await expect(runSandboxedCommand(auditing(), deps)).rejects.toThrow(
+        new SandboxError(
+          "filesystem_audit could not start (docker cp failed); the command was not run.",
+          "FILESYSTEM_AUDIT_UNAVAILABLE",
+        ),
+      );
+      expect(mocks.runIsolated).not.toHaveBeenCalled();
+    });
+
+    it("fails before the command when the tracer does not start", async () => {
+      mocks.startFilesystemAudit.mockRejectedValue(
+        new SandboxError("no tracer", "FILESYSTEM_AUDIT_UNAVAILABLE"),
+      );
+
+      await expect(runSandboxedCommand(auditing(), deps)).rejects.toThrow("no tracer");
+      expect(mocks.runIsolated).not.toHaveBeenCalled();
     });
   });
 

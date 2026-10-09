@@ -203,10 +203,10 @@ var archSyscalls = map[string]bool{
 }
 
 // attachAll attaches every loaded program. A classic syscall tracepoint
-// needs tracefs; where it is missing the failed path operations go
-// unrecorded, which is a reduced result, not a failure, so those attach
-// errors only warn, except for a syscall the architecture lacks. At least
-// one getname spelling must attach, or a failed open would have no name.
+// needs tracefs, and without it the failed path operations and the timestamp
+// and xattr changes go unrecorded, so its attach error is fatal unless the
+// architecture lacks that syscall. At least one getname spelling must attach, or a failed
+// open would have no name.
 func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, error) {
 	var links []link.Link
 	getnames := 0
@@ -221,13 +221,13 @@ func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, e
 		} else {
 			l, err = link.AttachTracing(link.TracingOptions{Program: p})
 		}
-		_, optional := optionalProgs[name]
 		if err != nil {
-			if optional || p.Type() == ebpf.TracePoint {
-				sys := strings.TrimPrefix(strings.TrimPrefix(tp, "sys_enter_"), "sys_exit_")
-				if !(errors.Is(err, os.ErrNotExist) && archSyscalls[sys]) {
-					fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
-				}
+			sys := strings.TrimPrefix(strings.TrimPrefix(tp, "sys_enter_"), "sys_exit_")
+			if p.Type() == ebpf.TracePoint && errors.Is(err, os.ErrNotExist) && archSyscalls[sys] {
+				continue
+			}
+			if _, optional := optionalProgs[name]; optional {
+				fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
 				continue
 			}
 			return links, fmt.Errorf("attach %s: %w", name, err)
