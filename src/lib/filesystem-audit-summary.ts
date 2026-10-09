@@ -106,16 +106,19 @@ function classify(r: AuditRecord): Classified | undefined {
 // Format and separator characters are escaped too, since they can make one
 // path read as another, and a backslash so each escape reads one way only.
 const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\]/gu;
+// A name shown inside quotes escapes the quote too.
+const UNSAFE_QUOTED = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\"]/gu;
 const NAMED_ESCAPES: Record<string, string> = {
   "\n": "\\n",
   "\r": "\\r",
   "\t": "\\t",
   "\\": "\\\\",
+  '"': '\\"',
 };
 
-function escapeForDisplay(name: string): string {
+function escapeForDisplay(name: string, unsafe = UNSAFE_CHARS): string {
   return name.replace(
-    UNSAFE_CHARS,
+    unsafe,
     (c) => NAMED_ESCAPES[c] ?? `\\u{${Number(c.codePointAt(0)).toString(16)}}`,
   );
 }
@@ -773,8 +776,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // shows the mark outside its path.
   const shown = (path: string): Shown => {
     if (path.startsWith(MEMFD)) {
-      const name = escapeForDisplay(path.slice(MEMFD.length)).replace(/"/g, '\\"');
-      return { path: `memfd:"${name}"` };
+      return { path: `memfd:"${escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED)}"` };
     }
     if (!path.endsWith(DELETED)) return { path: escapeForDisplay(relativize(path, prefixes)) };
     const p = relativize(path.slice(0, -DELETED.length), prefixes);

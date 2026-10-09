@@ -68410,14 +68410,15 @@ function classify(r) {
 		failed
 	} : void 0;
 }
-const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\]/gu, NAMED_ESCAPES = {
+const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\]/gu, UNSAFE_QUOTED = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\"]/gu, NAMED_ESCAPES = {
 	"\n": "\\n",
 	"\r": "\\r",
 	"	": "\\t",
-	"\\": "\\\\"
+	"\\": "\\\\",
+	"\"": "\\\""
 };
-function escapeForDisplay(name) {
-	return name.replace(UNSAFE_CHARS, (c) => NAMED_ESCAPES[c] ?? `\\u{${Number(c.codePointAt(0)).toString(16)}}`);
+function escapeForDisplay(name, unsafe = UNSAFE_CHARS) {
+	return name.replace(unsafe, (c) => NAMED_ESCAPES[c] ?? `\\u{${Number(c.codePointAt(0)).toString(16)}}`);
 }
 const MEMFD = "\0memfd:", DELETED = "\0 (deleted)";
 function marked(r, path) {
@@ -68700,7 +68701,7 @@ function createAuditSummary(prefixes) {
 			...x,
 			comm: ""
 		});
-	}, shown = (path) => path.startsWith(MEMFD) ? { path: `memfd:"${escapeForDisplay(path.slice(7)).replace(/"/g, "\\\"")}"` } : path.endsWith(DELETED) ? {
+	}, shown = (path) => path.startsWith(MEMFD) ? { path: `memfd:"${escapeForDisplay(path.slice(7), UNSAFE_QUOTED)}"` } : path.endsWith(DELETED) ? {
 		path: escapeForDisplay(relativize(path.slice(0, -11), prefixes)),
 		deleted: !0
 	} : { path: escapeForDisplay(relativize(path, prefixes)) }, rows = (lines) => lines?.map(({ comm, path, agg }) => ({
