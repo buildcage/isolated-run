@@ -25,7 +25,12 @@ struct super_block {
 	unsigned long s_magic;
 } __attribute__((preserve_access_index));
 
+struct hlist_bl_node {
+	struct hlist_bl_node *next, **pprev;
+} __attribute__((preserve_access_index));
+
 struct dentry {
+	struct hlist_bl_node d_hash;
 	struct dentry *d_parent;
 	struct qstr d_name;
 	struct super_block *d_sb;
@@ -169,6 +174,7 @@ struct event {
 	u8 trunc2;     // the second path of a rename or link
 	char comm[16];
 	u32 err; // a held path change's errno when its syscall refused it
+	u32 marks; // MARK_* for the file a path was taken from
 	u64 ts; // CLOCK_BOOTTIME at the access; a failed syscall at its entry
 	char data[DATA_SZ + NAME_LEN]; // slack: masked offset + one component
 };
@@ -254,6 +260,7 @@ static __always_inline struct event *start(u32 kind)
 	e->n2 = 0;
 	e->truncated = 0;
 	e->trunc2 = 0;
+	e->marks = 0;
 	bpf_get_current_comm(e->comm, sizeof(e->comm));
 	e->err = 0;
 	e->ts = bpf_ktime_get_boot_ns();
@@ -390,6 +397,23 @@ static __always_inline u32 leaf(struct event *e, u32 off, struct dentry *d, u8 *
 	return off + r;
 }
 
+#define MNT_INTERNAL 0x4000
+#define MARK_INTERNAL 1 // on a kernel-internal mount, as a memfd is
+#define MARK_UNLINKED 2 // deleted, or an O_TMPFILE never linked
+
+// Marks a file as d_path would show it (the unlinked test is d_unlinked's),
+// and reports whether it is kernel-internal.
+static __always_inline int mark_file(struct event *e, struct dentry *d, struct vfsmount *mnt)
+{
+	if (BPF_CORE_READ(mnt, mnt_flags) & MNT_INTERNAL) {
+		e->marks |= MARK_INTERNAL;
+		return 1;
+	}
+	if (!BPF_CORE_READ(d, d_hash.pprev) && BPF_CORE_READ(d, d_parent) != d)
+		e->marks |= MARK_UNLINKED;
+	return 0;
+}
+
 // A relative name in a syscall resolves against dfd: the calling task's
 // working directory for AT_FDCWD, else that open directory. Appends the
 // directory's leaf-first components at off and sets bit in e->bases, or
@@ -419,6 +443,10 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 	if (!d || !m)
 		return off;
 	e->bases |= bit;
+	// A descriptor's own file is marked; the reader applies it only where the
+	// path is that file (futimens).
+	if (dfd != AT_FDCWD && mark_file(e, d, m))
+		return leaf(e, off, d, n);
 	return walk(e, off, d, m, n, trunc);
 }
 
@@ -465,16 +493,26 @@ static __always_inline int first_time(struct file *file, u8 bit)
 	return 0;
 }
 
+static __always_inline u32 path_walk(struct event *e, struct dentry *d, struct vfsmount *mnt)
+{
+	// A memfd's dentry has no parent to walk; its name is the whole of it.
+	if (mark_file(e, d, mnt))
+		return leaf(e, 0, d, &e->n1);
+	return walk(e, 0, d, mnt, &e->n1, &e->truncated);
+}
+
 static __always_inline u32 file_walk(struct event *e, struct file *file)
 {
-	return walk(e, 0, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt),
-		    &e->n1, &e->truncated);
+	return path_walk(e, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt));
 }
 
 // bpf_d_path fails on a path over PATH_LEN; such a path is spelled from its
 // dentries instead, so the access keeps a name (n1 > 0 tells the reader).
 static __always_inline void file_path(struct event *e, struct file *file)
 {
+	// Marked first: a file unlinked in between keeps d_path's suffix in its
+	// path rather than lose a real one.
+	mark_file(e, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt));
 	long r = bpf_d_path(&file->f_path, e->data, PATH_LEN);
 	e->path_len = r;
 	if (r > 0) {
@@ -483,8 +521,6 @@ static __always_inline void file_path(struct event *e, struct file *file)
 	}
 	e->data_len = file_walk(e, file);
 }
-
-#define MNT_INTERNAL 0x4000
 
 // overlayfs reaches its layers through private clones of their mounts, which
 // belong to no namespace the step can open a file in, so an access through one
@@ -672,7 +708,7 @@ int BPF_PROG(on_chmod, const struct path *path, unsigned short mode)
 	if (!e)
 		return 0;
 	e->mode = mode;
-	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
+	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
 	hold(e);
 	return 0;
 }
@@ -689,6 +725,7 @@ int BPF_PROG(on_link, struct dentry *old_dentry, const struct path *new_dir,
 	if (!e)
 		return 0;
 	struct vfsmount *mnt = BPF_CORE_READ(new_dir, mnt); // link(2) stays on one mount
+	mark_file(e, old_dentry, mnt); // an O_TMPFILE given its first name
 	u32 off = walk(e, 0, old_dentry, mnt, &e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
 	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), mnt, &e->n2, &e->trunc2);
@@ -705,7 +742,7 @@ int BPF_PROG(on_truncate, const struct path *path)
 	struct event *e = start(K_TRUNCATE);
 	if (!e)
 		return 0;
-	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
+	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
 	hold(e);
 	return 0;
 }
@@ -735,7 +772,7 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 		return 0;
 	e->flags = uid;
 	e->mode = gid;
-	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
+	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
 	hold(e);
 	return 0;
 }
@@ -962,7 +999,7 @@ static __always_inline void map_event(struct file *file, struct dentry *d, struc
 	e->flags = flags;
 	u64 id = bpf_get_current_pid_tgid();
 	e->path_len = image && bpf_map_lookup_elem(&in_exec, &id) ? 1 : 0;
-	e->data_len = d ? walk(e, 0, d, mnt, &e->n1, &e->truncated) : file_walk(e, file);
+	e->data_len = d ? path_walk(e, d, mnt) : file_walk(e, file);
 	submit(e);
 }
 

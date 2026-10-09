@@ -621,8 +621,9 @@ open's, which the kernel copied, they are read from the command's memory when th
 another thread can rewrite one first, or change directory so that a relative one is joined to
 another. A path too deep to record in full is shown cut, with `…/`. A row's command name is the one
 the process gave itself, so it says which process acted, not which binary, and a process named
-`run-script.sh` is shown as the step's shell, `bash`. A control, format or separator character, or
-a backslash, in a name is shown escaped, so no name can rewrite the Job Summary.
+`run-script.sh` is shown as the step's shell, `bash`. A memfd's name is whatever its creator chose,
+so it is quoted after `memfd:` and never reads as a path. A control, format or separator character,
+or a backslash, in a name is shown escaped, so no name can rewrite the Job Summary.
 
 **Going unrecorded.** The step cannot leave the cgroup: it sees the cgroup filesystem read-only and
 holds no capability. Nor can it change which records count as its own: after its shell starts,

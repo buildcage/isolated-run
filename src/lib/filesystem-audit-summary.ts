@@ -24,6 +24,8 @@ interface AuditRecord {
   err?: number;
   failed?: boolean;
   image?: boolean;
+  memfd?: boolean;
+  deleted?: boolean;
   dropped?: number;
   untracked?: number;
 }
@@ -103,20 +105,45 @@ function classify(r: AuditRecord): Classified | undefined {
 // close the code block and write Markdown of its own into the Job Summary.
 // Format and separator characters are escaped too, since they can make one
 // path read as another, and a backslash so each escape reads one way only.
-const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\]/gu;
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\`;
+const UNSAFE_CHARS = new RegExp(`[${UNSAFE}]`, "gu");
+// A name shown inside quotes escapes the quote too.
+const UNSAFE_QUOTED = new RegExp(`[${UNSAFE}"]`, "gu");
 const NAMED_ESCAPES: Record<string, string> = {
   "\n": "\\n",
   "\r": "\\r",
   "\t": "\\t",
   "\\": "\\\\",
+  '"': '\\"',
 };
 
-function escapeForDisplay(name: string): string {
+function escapeForDisplay(name: string, unsafe = UNSAFE_CHARS): string {
   return name.replace(
-    UNSAFE_CHARS,
+    unsafe,
     (c) => NAMED_ESCAPES[c] ?? `\\u{${Number(c.codePointAt(0)).toString(16)}}`,
   );
 }
+
+// A memfd and a file deleted while in use key under marks no path can spell,
+// as a name never holds a NUL, so neither passes for a file still there.
+const MEMFD_PREFIX = "memfd:";
+const MEMFD = `\0${MEMFD_PREFIX}`;
+const DELETED_MARK = " (deleted)";
+const DELETED = `\0${DELETED_MARK}`;
+
+function marked(r: AuditRecord, path: string): string {
+  if (r.memfd) return MEMFD + path.slice(MEMFD_PREFIX.length);
+  return r.deleted ? path + DELETED : path;
+}
+
+const unmarked = (path: string): string =>
+  path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path;
+
+// Never folded, nor credited to the directories it names: a path with "..",
+// which may lead elsewhere through a symlink, and a memfd, whose name only
+// looks like a path.
+const unfoldable = (parts: string[], path: string): boolean =>
+  parts.includes("..") || path.startsWith(MEMFD);
 
 function normalize(path: string): string {
   // Unify a relative name's "./x" and "x" spellings before anything keys on
@@ -169,6 +196,10 @@ function codeCell(text: string): string {
   const fence = "`".repeat(longest + 1);
   const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
   return `${fence}${pad}${text.replace(/\|/g, "\\|")}${pad}${fence}`;
+}
+
+function pathCell({ path, deleted }: Shown): string {
+  return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
 }
 
 function markdownRows(header: string[], rows: string[][]): string {
@@ -251,8 +282,8 @@ function fmtSpan(a: Agg, originMs: number): string {
   return first === last ? first : `${first}-${last}`;
 }
 
-// Rows are keyed per (command, path). NUL cannot occur in either, so it joins
-// them unambiguously.
+// Rows are keyed per (command, path). NUL cannot occur in a command name, so
+// the first one ends it; a marked path may hold another.
 const SEP = "\0";
 export const keyOf = (comm: string, path: string): string => `${comm}${SEP}${path}`;
 const commOf = (key: string): string => key.slice(0, key.indexOf(SEP));
@@ -352,8 +383,7 @@ export function dropWalkedDirs(
     const path = pathOf(l);
     const folded = path.endsWith("/**");
     const parts = components(folded ? path.slice(0, -3) : path);
-    // A path with ".." is not known to sit under the directories it names.
-    if (parts.includes("..")) {
+    if (unfoldable(parts, path)) {
       kept.add(l);
       continue;
     }
@@ -397,8 +427,7 @@ interface LinesOptions {
  */
 class Lines {
   private trees = new Map<string, Map<string, Node>>();
-  // Paths spelled with "..", which may lead outside the directories they
-  // name through a symlink, so are never folded into them or credited to them.
+  // The unfoldable paths, each a line of its own.
   private climbing = new Map<string, Agg>();
   private bytes = 0;
   private nodes = 0;
@@ -413,7 +442,7 @@ class Lines {
   add(x: Access): void {
     if (this.stopped) return;
     const parts = components(x.path);
-    if (parts.includes("..")) {
+    if (unfoldable(parts, x.path)) {
       const key = keyOf(x.comm, x.path);
       let a = this.climbing.get(key);
       if (!a) this.climbing.set(key, (a = newAgg()));
@@ -584,11 +613,15 @@ interface Limits {
 
 const LIMITS: Limits = { bytes: STEP_SUMMARY_LIMIT_BYTES, nodes: 200_000, loads: 200_000 };
 
-interface Row {
+interface Shown {
+  path: string;
+  deleted?: boolean;
+}
+
+interface Row extends Shown {
   agg: Agg;
   flags: string;
   comm: string;
-  path: string;
 }
 
 /** What the summary is rendered from, reduced from the recording. */
@@ -597,7 +630,7 @@ export interface AuditSummary {
   ended: boolean;
   lost: boolean;
   /** Each part, or undefined where it outgrew the Job Summary. */
-  executed: string[] | undefined;
+  executed: Shown[] | undefined;
   paths: Row[] | undefined;
   details: Row[] | undefined;
 }
@@ -642,11 +675,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     loaded.add(keyOf(proc, canonical(path, prefixes)));
     if (library) loaded.add(keyOf(proc, "/etc/ld.so.cache"));
   };
+  // A memfd's or deleted file's name proves nothing about what it holds.
   const isLibraryMap = (r: AuditRecord): boolean =>
     r.kind === "mmap" &&
     r.access === "x" &&
     Boolean(r.path) &&
-    Boolean(r.image || LIBRARY_NAME.test(r.path!));
+    Boolean(r.image || (!r.memfd && !r.deleted && LIBRARY_NAME.test(r.path!)));
 
   const observe = (r: unknown): void => {
     if (!isRecord(r)) return;
@@ -655,15 +689,15 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       if (r.image) {
         let paths = images.get(proc);
         if (!paths) images.set(proc, (paths = []));
-        paths.push(r.path!);
+        paths.push(marked(r, r.path!));
       } else load(proc, r.path!, true);
     } else if (r.kind === "exec") {
       // The kernel reads these before the exec record, so they count as
       // loaded on both sides of it.
       const next = `${r.pid}/${observed.get(r.pid)}`;
-      for (const path of [...(images.get(proc) ?? []), ...(r.path ? [r.path] : [])]) {
+      for (const path of [...(images.get(proc) ?? []), ...(r.path ? [marked(r, r.path)] : [])]) {
         load(proc, path, false);
-        load(next, path, LIBRARY_NAME.test(path));
+        load(next, path, !path.startsWith(MEMFD) && LIBRARY_NAME.test(unmarked(path)));
       }
       images.delete(proc);
     }
@@ -712,7 +746,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       return;
     }
     if (r.kind === "exec" && r.path && executed) {
-      const p = normalize(canonical(r.path, prefixes));
+      const p = normalize(canonical(marked(r, r.path), prefixes));
       if (!executed.has(p)) {
         executed.add(p);
         executedBytes += relLength(p) + 7;
@@ -722,12 +756,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (isLibraryMap(r)) return;
     const c = classify(r);
     if (!c) return;
-    const path = canonical(c.path, prefixes);
+    const path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
     // A succeeding record resolves to an absolute path or a "…/" walk, so a
     // relative one there is d_path's pipe:, socket: or anon_inode: target, or
     // an attribute change whose directory descriptor closed meanwhile, which
     // is lost; a failed one may keep the relative name it was given.
-    if (!c.failed && !path.startsWith("/") && !path.startsWith("…/")) return;
+    if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) return;
     const loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path));
     const t = loadRead ? NaN : Date.parse(r.t ?? "");
     const x: Access = {
@@ -743,12 +777,24 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     paths.add({ ...x, comm: "" });
   };
 
+  // A memfd shows its name quoted, as one its creator chose; a deleted file
+  // shows the mark outside its path.
+  const shown = (path: string): Shown => {
+    if (path.startsWith(MEMFD)) {
+      const name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
+      return { path: `${MEMFD_PREFIX}"${name}"` };
+    }
+    if (!path.endsWith(DELETED)) return { path: escapeForDisplay(relativize(path, prefixes)) };
+    const p = relativize(path.slice(0, -DELETED.length), prefixes);
+    return { path: escapeForDisplay(p), deleted: true };
+  };
+
   const rows = (lines: { comm: string; path: string; agg: Agg }[] | undefined): Row[] | undefined =>
     lines?.map(({ comm, path, agg }) => ({
       agg,
       flags: fmtFlags(agg),
       comm: escapeForDisplay(comm),
-      path: escapeForDisplay(relativize(path, prefixes)),
+      ...shown(path),
     }));
 
   const finish = (): AuditSummary => {
@@ -756,7 +802,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return {
       ended,
       lost,
-      executed: executed && [...executed].map((p) => escapeForDisplay(relativize(p, prefixes))),
+      executed: executed && [...executed].map(shown),
       paths: byPath,
       // A table too large to print leaves no room for the details either.
       details: byPath && rows(details.finish()),
@@ -830,7 +876,7 @@ export function renderAuditSummaryBlocks(
         executed &&
           markdownRows(
             ["Path"],
-            executed.map((path) => [codeCell(path)]),
+            executed.map((e) => [pathCell(e)]),
           ),
       ),
     );
@@ -851,7 +897,7 @@ export function renderAuditSummaryBlocks(
       byPath &&
         markdownRows(
           ["Access", "Path"],
-          byPath.map(({ flags, path }) => [flags, codeCell(path)]),
+          byPath.map((r) => [r.flags, pathCell(r)]),
         ),
     ),
   );
@@ -888,7 +934,7 @@ export function renderAuditSummaryBlocks(
     .map(
       (r, i) =>
         `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}` +
-        `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}`,
+        `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`,
     )
     .join("\n");
   blocks.push({

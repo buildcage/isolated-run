@@ -243,6 +243,17 @@ jobs:
             p = libc.mmap(None, 4096, 0, 0x21, -1, 0)  # PROT_NONE, MAP_SHARED | MAP_ANONYMOUS
             assert p != failed and libc.mprotect(ctypes.c_void_p(p), 4096, 3) == 0' \
               "$GITHUB_WORKSPACE/mprotected.bin" "$GITHUB_WORKSPACE/mprotected-rwx.bin"
+            # A memfd and a deleted file, each run with no path left to it.
+            python3 -c 'import os, shutil, sys
+            m = os.memfd_create("probe-memfd")
+            os.write(m, open("/usr/bin/true", "rb").read())
+            shutil.copy("/usr/bin/true", sys.argv[1])
+            d = os.open(sys.argv[1], os.O_RDONLY)
+            os.unlink(sys.argv[1])
+            for fd in (m, d):
+                if os.fork() == 0:
+                    os.execve(fd, ["true"], {})
+                os.wait()' "$GITHUB_WORKSPACE/gone-bin"
             # A program, not the builtin, with an argument the record must not keep.
             /usr/bin/true buildcage-audit-sentinel-arg
 
@@ -285,6 +296,10 @@ jobs:
           grep -qE ' RW +python3 +\./mprotected-rwx\.bin$' "$f"
           ! grep -q '/dev/zero' "$f"
           ! grep -q '/usr/bin/dash' "$f"
+          # Run without a path: a memfd by its quoted name, a deleted file marked.
+          sed -n '/^#### Executed/,/^#### Accessed/p' "$f" > executed.md
+          grep -qF '| `memfd:"probe-memfd"` |' executed.md
+          grep -qF '| `./gone-bin` (deleted) |' executed.md
           # buildcage's own wrappers must never reach the summary.
           ! grep -qE ' (setpriv|buildcage-init|run-script\.sh) ' "$f"
 

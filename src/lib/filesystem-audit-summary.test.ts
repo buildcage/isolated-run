@@ -724,6 +724,53 @@ describe("renderFilesystemAuditSummary", () => {
       expect(md).toContain("| R | `…/x` |\n| r | `…/x` |\n");
     });
 
+    it("shows a memfd by its quoted name and a deleted file with a mark outside its path", () => {
+      const md = render(
+        { kind: "write", comm: "py", path: 'memfd:/usr/bin/a"b', memfd: true },
+        { kind: "exec", comm: "x", path: 'memfd:/usr/bin/a"b', memfd: true },
+        { kind: "write", comm: "py", path: "/tmp/p", deleted: true },
+        { kind: "exec", comm: "p", path: "/tmp/p", deleted: true },
+        { kind: "write", comm: "py", path: "/tmp/q (deleted)" },
+      );
+      expect(md).toContain(
+        '| Path |\n| --- |\n| `memfd:"/usr/bin/a\\"b"` |\n| `/tmp/p` (deleted) |\n\n',
+      );
+      expect(md).toContain(
+        '| WX | `/tmp/p` (deleted) |\n| W | `/tmp/q (deleted)` |\n| WX | `memfd:"/usr/bin/a\\"b"` |\n',
+      );
+      expect(lines(md)).toContain('W py memfd:"/usr/bin/a\\"b"');
+      expect(lines(md)).toContain("W py /tmp/p (deleted)");
+    });
+
+    it("folds a deleted file with its siblings but keeps a memfd on its own line", () => {
+      const md = render(
+        { kind: "write", comm: "a", path: "/srv/d/1" },
+        { kind: "write", comm: "a", path: "/srv/d/2" },
+        { kind: "write", comm: "a", path: "/srv/d/3", deleted: true },
+        { kind: "write", comm: "a", path: "memfd:/srv/d/4", memfd: true },
+      );
+      expect(tableRows(md)).toEqual(["| W | `/srv/d/**` |", '| W | `memfd:"/srv/d/4"` |']);
+    });
+
+    it("shows a memfd or deleted file mapped executable whatever its name", () => {
+      const md = render(
+        { kind: "mmap", comm: "a", path: "memfd:libx.so", access: "x", memfd: true },
+        { kind: "mmap", comm: "a", path: "/tmp/liby.so", access: "x", deleted: true },
+      );
+      expect(tableRows(md)).toEqual([
+        "| R | `/tmp/liby.so` (deleted) |",
+        '| R | `memfd:"libx.so"` |',
+      ]);
+    });
+
+    it("leaves out a process's reads of the deleted program it runs", () => {
+      const md = render(
+        { kind: "read", pid: 1, comm: "p", path: "/tmp/p", deleted: true },
+        { kind: "exec", pid: 1, comm: "p", path: "/tmp/p", deleted: true },
+      );
+      expect(tableRows(md)).toEqual(["| X | `/tmp/p` (deleted) |"]);
+    });
+
     it("leaves the executed table out when nothing was run", () => {
       const md = render({ kind: "read", comm: "a", path: "/work/x" });
       expect(md).not.toContain("#### Executed");
