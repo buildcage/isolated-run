@@ -33,6 +33,12 @@ CVE-2026-25681
 # external input.
 CVE-2026-10722
 
+# --- opt/buildcage/bin/filesystem-audit ---
+# github.com/cilium/ebpf, as above. The tracer parses only the BPF object
+# compiled into it and the kernel's own BTF from /sys/kernel/btf, never a blob
+# from the step or the network.
+CVE-2026-10722
+
 # --- opt/buildcage/bin/gen-seccomp-profile ---
 # Same class of Go stdlib CVEs. This binary (docker/gen-seccomp-profile/main.go)
 # takes no input at all: it just prints a hardcoded seccomp profile as JSON.
