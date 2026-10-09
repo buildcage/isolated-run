@@ -69966,6 +69966,17 @@ function filesystemAuditPaths(containerName, scratchBase) {
 function cgroupFsPath(cgroupsPath) {
 	return (0, node_path.join)("/sys/fs/cgroup", cgroupsPath);
 }
+function exitReason() {
+	let partial = "", fatal = "", last = "";
+	return {
+		push(chunk) {
+			let lines = (partial + chunk).split("\n");
+			partial = lines.pop();
+			for (let line of lines) line.startsWith("filesystem-audit: fatal: ") ? fatal = line.slice(25) : line.trim() && (last = line);
+		},
+		value: () => fatal || last || partial.trim()
+	};
+}
 function defaultExec$3(command, args) {
 	return (0, node_child_process.execFileSync)(hostCommand(command), args, {
 		encoding: "utf8",
@@ -69980,18 +69991,17 @@ function defaultSpawn$1(command, args) {
 			"pipe"
 		],
 		env: hostCommandEnv(command)
-	}), partial = "", fatal = "";
+	}), reason = exitReason();
 	return child.stderr.setEncoding("utf8"), child.stderr.on("data", (chunk) => {
-		process.stderr.write(chunk);
-		let lines = (partial + chunk).split("\n");
-		partial = lines.pop();
-		for (let line of lines) line.startsWith("filesystem-audit: fatal: ") && (fatal = line.slice(25));
+		process.stderr.write(chunk), reason.push(chunk);
 	}), {
 		exited: new Promise((resolve) => {
-			child.on("error", () => resolve()), child.on("close", () => resolve());
+			child.on("error", (e) => {
+				reason.push(`${e.message}\n`), resolve();
+			}), child.on("close", () => resolve());
 		}),
 		kill: (signal) => child.kill(signal),
-		fatal: () => fatal
+		reason: reason.value
 	};
 }
 function defaultSleep(ms) {
@@ -70046,7 +70056,7 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		if (exited) break;
 		await sleep(100);
 	}
-	let reason = exited ? child.fatal() || "the tracer exited" : "the tracer did not attach in time";
+	let reason = exited ? child.reason() || "the tracer exited" : "the tracer did not attach in time";
 	throw await stop(), remove(outPath), new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
 }
 //#endregion

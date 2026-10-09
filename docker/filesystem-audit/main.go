@@ -206,11 +206,11 @@ var archSyscalls = map[string]bool{
 	"chown": true, "lchown": true, "utime": true, "utimes": true, "futimesat": true,
 }
 
-// attachAll attaches every loaded program, and any that fails is fatal, so a
-// recording never silently lacks a kind of access. The exceptions: a syscall
-// tracepoint the architecture lacks, and one of the two getname spellings,
-// of which at least one must attach or a failed open would have no name.
-// A classic syscall tracepoint needs tracefs.
+// attachAll attaches every loaded program, and any that fails is fatal; those
+// the kernel does not offer were dropped before load. The exceptions: a
+// syscall tracepoint the architecture lacks, and one of the two getname
+// spellings, of which at least one must attach or a failed open would have no
+// name. A classic syscall tracepoint needs tracefs.
 func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, error) {
 	var links []link.Link
 	getnames := 0

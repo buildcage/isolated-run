@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { SandboxError } from "../errors.ts";
 import {
   cgroupFsPath,
+  exitReason,
   extractTracer,
   filesystemAuditPaths,
   startFilesystemAudit,
@@ -26,6 +27,25 @@ describe("cgroupFsPath", () => {
     expect(cgroupFsPath("/system.slice/runner.service/buildcage-proxy-abcd1234")).toBe(
       "/sys/fs/cgroup/system.slice/runner.service/buildcage-proxy-abcd1234",
     );
+  });
+});
+
+describe("exitReason", () => {
+  it("prefers the tracer's own fatal line, joined across chunks", () => {
+    const reason = exitReason();
+    reason.push("filesystem-audit: cgroup /sys/fs/cgroup/x id=1\nfilesystem-audit: fat");
+    reason.push("al: attach on_unlinkat_enter: no tracefs\nfilesystem-audit: total=0\n");
+
+    expect(reason.value()).toBe("attach on_unlinkat_enter: no tracefs");
+  });
+
+  it("falls back to the last line written, then to an unterminated one", () => {
+    const reason = exitReason();
+    expect(reason.value()).toBe("");
+    reason.push("sudo: a pass");
+    expect(reason.value()).toBe("sudo: a pass");
+    reason.push("word is required\n\n");
+    expect(reason.value()).toBe("sudo: a password is required");
   });
 });
 
@@ -61,7 +81,7 @@ function liveChild(): { child: AuditChild; kill: ReturnType<typeof vi.fn> } {
     resolveExit = r;
   });
   kill.mockImplementation(() => resolveExit());
-  return { child: { exited, kill, fatal: () => "" }, kill };
+  return { child: { exited, kill, reason: () => "" }, kill };
 }
 
 describe("startFilesystemAudit", () => {
@@ -135,7 +155,7 @@ describe("startFilesystemAudit", () => {
     const child: AuditChild = {
       exited: Promise.resolve(),
       kill: vi.fn(),
-      fatal: () => "attach on_unlinkat_enter: neither debugfs nor tracefs are mounted",
+      reason: () => "attach on_unlinkat_enter: neither debugfs nor tracefs are mounted",
     };
     const sleep = vi.fn(async () => {});
 
@@ -155,7 +175,7 @@ describe("startFilesystemAudit", () => {
   });
 
   it("says only that the tracer exited when it wrote nothing", async () => {
-    const child: AuditChild = { exited: Promise.resolve(), kill: vi.fn(), fatal: () => "" };
+    const child: AuditChild = { exited: Promise.resolve(), kill: vi.fn(), reason: () => "" };
 
     await expect(
       startFilesystemAudit(START_OPTIONS, {
@@ -180,7 +200,7 @@ describe("startFilesystemAudit", () => {
     const remove = vi.fn();
 
     const handle = await startFilesystemAudit(START_OPTIONS, {
-      spawn: () => ({ exited, kill, fatal: () => "" }),
+      spawn: () => ({ exited, kill, reason: () => "" }),
       exists: () => true,
       sleep: async () => {},
       remove,
@@ -202,7 +222,7 @@ describe("startFilesystemAudit", () => {
     const exec = vi.fn();
 
     const handle = await startFilesystemAudit(START_OPTIONS, {
-      spawn: () => ({ exited, kill: vi.fn(), fatal: () => "" }),
+      spawn: () => ({ exited, kill: vi.fn(), reason: () => "" }),
       exists: () => true,
       sleep: async () => {},
       remove: vi.fn(),
@@ -226,7 +246,7 @@ describe("startFilesystemAudit", () => {
     const exec = vi.fn();
 
     const handle = await startFilesystemAudit(START_OPTIONS, {
-      spawn: () => ({ exited, kill: vi.fn(), fatal: () => "" }),
+      spawn: () => ({ exited, kill: vi.fn(), reason: () => "" }),
       exists: () => true,
       sleep: async () => {},
       remove: vi.fn(),

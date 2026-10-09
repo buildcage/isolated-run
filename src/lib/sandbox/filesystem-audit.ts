@@ -52,8 +52,29 @@ export type SpawnAudit = (command: string, args: string[]) => AuditChild;
 export interface AuditChild {
   exited: Promise<void>;
   kill: (signal: NodeJS.Signals) => void;
-  /** The reason it gave on stderr for exiting, or "" if it gave none. */
-  fatal: () => string;
+  /** Why it exited, as far as its stderr says (see exitReason). */
+  reason: () => string;
+}
+
+/**
+ * Follows the tracer's stderr for why it exited: its own fatal line, else the
+ * last line anything wrote there, such as sudo refusing to run it.
+ */
+export function exitReason(): { push: (chunk: string) => void; value: () => string } {
+  let partial = "";
+  let fatal = "";
+  let last = "";
+  return {
+    push(chunk) {
+      const lines = (partial + chunk).split("\n");
+      partial = lines.pop()!;
+      for (const line of lines) {
+        if (line.startsWith(FATAL)) fatal = line.slice(FATAL.length);
+        else if (line.trim()) last = line;
+      }
+    },
+    value: () => fatal || last || partial.trim(),
+  };
 }
 
 export interface FilesystemAuditDeps {
@@ -81,24 +102,20 @@ function defaultSpawn(command: string, args: string[]): AuditChild {
     stdio: ["ignore", "inherit", "pipe"],
     env: hostCommandEnv(command),
   });
-  let partial = "";
-  let fatal = "";
+  const reason = exitReason();
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => {
     process.stderr.write(chunk);
-    const lines = (partial + chunk).split("\n");
-    partial = lines.pop()!;
-    for (const line of lines) if (line.startsWith(FATAL)) fatal = line.slice(FATAL.length);
+    reason.push(chunk);
   });
   const exited = new Promise<void>((resolve) => {
-    child.on("error", () => resolve());
+    child.on("error", (e) => {
+      reason.push(`${e.message}\n`);
+      resolve();
+    });
     child.on("close", () => resolve());
   });
-  return {
-    exited,
-    kill: (signal) => child.kill(signal),
-    fatal: () => fatal,
-  };
+  return { exited, kill: (signal) => child.kill(signal), reason: reason.value };
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -217,7 +234,7 @@ export async function startFilesystemAudit(
     await sleep(READY_POLL_MS);
   }
   const reason = exited
-    ? child.fatal() || "the tracer exited"
+    ? child.reason() || "the tracer exited"
     : "the tracer did not attach in time";
   await stop();
   // A tracer that attached just too late may have created the recording; the

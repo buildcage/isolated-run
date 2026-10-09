@@ -74,7 +74,7 @@ inputs:
     description: "persistent (default) keeps writes to $HOME/$RUNNER_TEMP/$GITHUB_WORKSPACE/tmp on the host after the step ends. ephemeral discards them instead (via an overlay), except for paths listed in write_through. Use this to stop a step from planting files (e.g. ~/.bashrc, ~/.npmrc) that a later, non-isolated step would pick up."
     required: false
   filesystem_audit:
-    description: "Experimental. record logs the file accesses of the isolated step; off (default) does not. Needs a cgroup v2 host. See docs/reference.md#filesystem-audit."
+    description: "Experimental. record logs the file accesses of the isolated step; off (default) does not. Fails the step on a host that cannot run it. See docs/reference.md#filesystem-audit."
     required: false
   filesystem_audit_retention_days:
     description: "How long to keep the filesystem audit artifact, in days. Empty uses the repository's own default."
