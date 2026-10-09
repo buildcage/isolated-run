@@ -395,7 +395,7 @@ function findLoads(records: AuditRecord[], prefixes: SummaryOptions): Loads {
   const libraries = new Set<AuditRecord>();
   const gens = new Map<number | undefined, number>();
   // What each process's exec in progress has mapped: the program, its
-  // interpreter, a script's interpreter.
+  // dynamic loader, a script's interpreter.
   const images = new Map<string, string[]>();
   const load = (proc: string, path: string, library: boolean): void => {
     loaded.add(keyOf(proc, canonical(path, prefixes)));
@@ -417,8 +417,8 @@ function findLoads(records: AuditRecord[], prefixes: SummaryOptions): Loads {
         load(proc, r.path, true);
       }
     } else if (r.kind === "exec") {
-      // The kernel reads the program and its interpreter before the exec
-      // record, so the process both before and after it gets them.
+      // The kernel reads these before the exec record, so they count as
+      // loaded on both sides of it.
       const next = `${r.pid}/${gen + 1}`;
       gens.set(r.pid, gen + 1);
       for (const path of [...(images.get(proc) ?? []), ...(r.path ? [r.path] : [])]) {

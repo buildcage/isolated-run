@@ -503,8 +503,8 @@ int BPF_PROG(on_exec_file, struct linux_binprm *bprm)
 
 // Threads past an exec's point of no return and not yet through it. Its other
 // threads are gone by then and this one runs no code of its own, so whatever
-// it maps meanwhile is the kernel loading the new program and its
-// interpreter, a script's included.
+// it maps meanwhile is the kernel loading the new program, its dynamic
+// loader and a script's interpreter.
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 65536);
