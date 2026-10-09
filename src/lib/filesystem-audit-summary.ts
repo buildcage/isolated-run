@@ -57,6 +57,8 @@ const FAILED_LETTER: Record<string, string> = {
   link: "W",
 };
 const PERM_ERRNO = new Set([1, 13, 30]); // EPERM, EACCES, EROFS
+// A shared object or a Node.js addon, by file name.
+const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
 const DEFAULT_FANOUT = 3;
 
 interface Classified {
@@ -384,28 +386,55 @@ function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: 
   const failedSpans: LetterSpans = new Map();
 
   // Libraries are left out and an exec'd binary is shown by its X, so a process
-  // that mapped or ran a file has its reads of that file and of
-  // /etc/ld.so.cache dropped; another process's reads stay. A pid handed out
-  // again by a fork counts as a new process.
+  // that mapped or ran one has its reads of it and of /etc/ld.so.cache
+  // dropped; another process's reads stay. A pid handed out again by a fork
+  // counts as a new process. An executable mapping counts as a library only by
+  // its name or as part of an exec, since any file can be mapped executable
+  // and read through the mapping.
   const procOf = (gens: Map<number | undefined, number>, r: AuditRecord): string => {
     if (r.kind === "fork") gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
     return `${r.pid}/${gens.get(r.pid) ?? 0}`;
   };
   const loaded = new Set<string>();
+  const libraries = new Set<AuditRecord>(); // their mmap records
+  const load = (proc: string, path: string): void => {
+    loaded.add(keyOf(proc, canonical(path, prefixes)));
+    loaded.add(keyOf(proc, "/etc/ld.so.cache"));
+  };
+  // The mappings each process made since its last other record: the kernel
+  // maps a program and its interpreter (a script's included) just before the
+  // exec record, with none of the program's code run in between.
+  const pending = new Map<string, AuditRecord[]>();
   const gens = new Map<number | undefined, number>();
   for (const r of records) {
     const proc = procOf(gens, r);
-    if (r.path && (r.kind === "exec" || (r.kind === "mmap" && r.access === "x"))) {
-      loaded.add(keyOf(proc, canonical(r.path, prefixes)));
-      loaded.add(keyOf(proc, "/etc/ld.so.cache"));
+    if (r.kind === "mmap") {
+      if (r.access !== "x" || !r.path) continue;
+      if (LIBRARY_NAME.test(r.path)) {
+        libraries.add(r);
+        load(proc, r.path);
+      } else {
+        let run = pending.get(proc);
+        if (!run) pending.set(proc, (run = []));
+        run.push(r);
+      }
+      continue;
     }
+    if (r.kind === "exec") {
+      for (const m of pending.get(proc) ?? []) {
+        libraries.add(m);
+        load(proc, m.path!);
+      }
+      if (r.path) load(proc, r.path);
+    }
+    pending.delete(proc);
   }
 
   let seq = 0;
   gens.clear();
   for (const r of records) {
     const proc = procOf(gens, r);
-    if (r.kind === "mmap" && r.access === "x") continue;
+    if (libraries.has(r)) continue;
     const c = classify(r);
     if (!c) continue;
     const path = canonical(c.path, prefixes);

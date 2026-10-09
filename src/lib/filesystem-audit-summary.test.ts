@@ -172,23 +172,23 @@ describe("renderFilesystemAuditSummary", () => {
 
   it("drops a library's or program's read only in the process that mapped or ran it", () => {
     const md = render(
-      { kind: "read", pid: 2, comm: "cat", path: "/home/u/.ssh/id_rsa" },
+      { kind: "read", pid: 2, comm: "cat", path: "/work/libx.so" },
       { kind: "read", pid: 3, comm: "cat", path: "/usr/bin/tool" },
       { kind: "read", pid: 3, comm: "cat", path: "/etc/ld.so.cache" },
-      { kind: "read", pid: 4, comm: "x", path: "/home/u/.ssh/id_rsa" },
+      { kind: "read", pid: 4, comm: "x", path: "/work/libx.so" },
       { kind: "read", pid: 4, comm: "x", path: "/etc/ld.so.cache" },
-      { kind: "mmap", pid: 4, comm: "x", path: "/home/u/.ssh/id_rsa", access: "x" },
+      { kind: "mmap", pid: 4, comm: "x", path: "/work/libx.so", access: "x" },
       { kind: "read", pid: 5, comm: "tool", path: "/usr/bin/tool" },
       { kind: "exec", pid: 5, comm: "tool", path: "/usr/bin/tool" },
     );
     expect(lines(md)).toEqual([
-      "R cat ~/.ssh/id_rsa",
+      "R cat ./libx.so",
       "R cat /etc/ld.so.cache",
       "R cat /usr/bin/tool",
       "X tool /usr/bin/tool",
     ]);
     expect(tableRows(md)).toEqual([
-      "| R | `~/.ssh/id_rsa` |",
+      "| R | `./libx.so` |",
       "| R | `/etc/ld.so.cache` |",
       "| RX | `/usr/bin/tool` |",
     ]);
@@ -198,12 +198,41 @@ describe("renderFilesystemAuditSummary", () => {
     expect(
       lines(
         render(
-          { kind: "read", pid: 2, comm: "cat", path: "/home/u/.ssh/id_rsa" },
+          { kind: "read", pid: 2, comm: "cat", path: "/work/libx.so" },
           { kind: "fork", pid: 2, ppid: 1, comm: "sh" },
-          { kind: "mmap", pid: 2, comm: "x", path: "/home/u/.ssh/id_rsa", access: "x" },
+          { kind: "mmap", pid: 2, comm: "x", path: "/work/libx.so", access: "x" },
         ),
       ),
-    ).toEqual(["R cat ~/.ssh/id_rsa"]);
+    ).toEqual(["R cat ./libx.so"]);
+  });
+
+  it("shows a file mapped executable that is neither a library nor part of an exec", () => {
+    expect(
+      lines(
+        render(
+          { kind: "mmap", pid: 2, comm: "x", path: "/home/u/.ssh/id_rsa", access: "x" },
+          { kind: "mmap", pid: 3, comm: "y", path: "/work/blob", access: "x" },
+          { kind: "open", pid: 3, comm: "y", path: "/usr/bin/tool", access: "r" },
+          { kind: "exec", pid: 3, comm: "tool", path: "/usr/bin/tool" },
+          { kind: "exec", pid: 4, comm: "z" },
+        ),
+      ),
+    ).toEqual(["R y ./blob", "R x ~/.ssh/id_rsa", "X tool /usr/bin/tool"]);
+  });
+
+  it("leaves out the program and interpreter an exec maps, and their reads", () => {
+    expect(
+      lines(
+        render(
+          { kind: "read", pid: 2, comm: "sh", path: "/work/run.sh" },
+          { kind: "read", pid: 2, comm: "sh", path: "/usr/bin/bash" },
+          { kind: "mmap", pid: 2, comm: "run.sh", path: "/usr/bin/bash", access: "x" },
+          { kind: "mmap", pid: 2, comm: "run.sh", path: "/usr/bin/bash", access: "r" },
+          { kind: "mmap", pid: 2, comm: "run.sh", path: "/lib/ld-linux.so.2", access: "x" },
+          { kind: "exec", pid: 2, comm: "run.sh", path: "/work/run.sh" },
+        ),
+      ),
+    ).toEqual(["X run.sh ./run.sh"]);
   });
 
   it("merges two spellings of one relative name into a row", () => {

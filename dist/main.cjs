@@ -68436,7 +68436,7 @@ const LETTER = {
 	1,
 	13,
 	30
-]);
+]), LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
 function classify(r) {
 	let letter, path = r.path, failed = !1;
 	return r.kind === "open-failed" ? (letter = "R", failed = !0) : r.failed ? (letter = FAILED_LETTER[r.kind], r.kind === "link" && (path = r.to), failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : r.kind === "link" ? (letter = "W", path = r.to) : letter = LETTER[r.kind], letter && path ? {
@@ -68592,16 +68592,31 @@ function parse(jsonl) {
 	};
 }
 function buildRows(records, prefixes, byCommand) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), okSpans = new Map(), failedSpans = new Map(), procOf = (gens, r) => (r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1), `${r.pid}/${gens.get(r.pid) ?? 0}`), loaded = new Set(), gens = new Map();
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), okSpans = new Map(), failedSpans = new Map(), procOf = (gens, r) => (r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1), `${r.pid}/${gens.get(r.pid) ?? 0}`), loaded = new Set(), libraries = new Set(), load = (proc, path) => {
+		loaded.add(keyOf(proc, canonical(path, prefixes))), loaded.add(keyOf(proc, "/etc/ld.so.cache"));
+	}, pending = new Map(), gens = new Map();
 	for (let r of records) {
 		let proc = procOf(gens, r);
-		r.path && (r.kind === "exec" || r.kind === "mmap" && r.access === "x") && (loaded.add(keyOf(proc, canonical(r.path, prefixes))), loaded.add(keyOf(proc, "/etc/ld.so.cache")));
+		if (r.kind === "mmap") {
+			if (r.access !== "x" || !r.path) continue;
+			if (LIBRARY_NAME.test(r.path)) libraries.add(r), load(proc, r.path);
+			else {
+				let run = pending.get(proc);
+				run || pending.set(proc, run = []), run.push(r);
+			}
+			continue;
+		}
+		if (r.kind === "exec") {
+			for (let m of pending.get(proc) ?? []) libraries.add(m), load(proc, m.path);
+			r.path && load(proc, r.path);
+		}
+		pending.delete(proc);
 	}
 	let seq = 0;
 	gens.clear();
 	for (let r of records) {
 		let proc = procOf(gens, r);
-		if (r.kind === "mmap" && r.access === "x") continue;
+		if (libraries.has(r)) continue;
 		let c = classify(r);
 		if (!c) continue;
 		let path = canonical(c.path, prefixes), key = keyOf(byCommand ? r.comm ?? "" : "", path);
