@@ -170,6 +170,33 @@ describe("renderFilesystemAuditSummary", () => {
     ).toEqual(["R c ./data"]);
   });
 
+  it("drops a library's or program's read only in the process that mapped or ran it", () => {
+    expect(
+      lines(
+        render(
+          { kind: "read", pid: 2, comm: "cat", path: "/home/u/.ssh/id_rsa" },
+          { kind: "read", pid: 3, comm: "cat", path: "/usr/bin/tool" },
+          { kind: "read", pid: 4, comm: "x", path: "/home/u/.ssh/id_rsa" },
+          { kind: "mmap", pid: 4, comm: "x", path: "/home/u/.ssh/id_rsa", access: "x" },
+          { kind: "read", pid: 5, comm: "tool", path: "/usr/bin/tool" },
+          { kind: "exec", pid: 5, comm: "tool", path: "/usr/bin/tool" },
+        ),
+      ),
+    ).toEqual(["R cat ~/.ssh/id_rsa", "R cat /usr/bin/tool", "X tool /usr/bin/tool"]);
+  });
+
+  it("tells a process from a later one given the same pid", () => {
+    expect(
+      lines(
+        render(
+          { kind: "read", pid: 2, comm: "cat", path: "/home/u/.ssh/id_rsa" },
+          { kind: "fork", pid: 2, ppid: 1, comm: "sh" },
+          { kind: "mmap", pid: 2, comm: "x", path: "/home/u/.ssh/id_rsa", access: "x" },
+        ),
+      ),
+    ).toEqual(["R cat ~/.ssh/id_rsa"]);
+  });
+
   it("merges two spellings of one relative name into a row", () => {
     expect(
       lines(

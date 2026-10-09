@@ -12,6 +12,7 @@ import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fi
 interface AuditRecord {
   t?: string;
   kind: string;
+  pid?: number;
   comm?: string;
   path?: string;
   to?: string;
@@ -379,21 +380,39 @@ function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: 
   const ok = new Map<string, Set<string>>();
   const failed = new Map<string, Set<string>>();
   const perm = new Map<string, Set<string>>();
-  const libs = new Set<string>();
-  const execd = new Set<string>();
   const okSpans: LetterSpans = new Map();
   const failedSpans: LetterSpans = new Map();
 
+  // A library or an exec'd binary is already shown by its X, so the reads of
+  // the process that mapped or ran it are dropped; another process's read of
+  // the same file is not. A process is its pid, told from an earlier holder of
+  // that pid by how many forks have handed the pid out.
+  const forks = new Map<number | undefined, number>();
+  const procs = records.map((r) => {
+    if (r.kind === "fork") forks.set(r.pid, (forks.get(r.pid) ?? 0) + 1);
+    return `${r.pid}/${forks.get(r.pid) ?? 0}`;
+  });
+  const loaded = new Set<string>();
+  records.forEach((r, i) => {
+    if (r.path && (r.kind === "exec" || (r.kind === "mmap" && r.access === "x")))
+      loaded.add(keyOf(procs[i], canonical(r.path, prefixes)));
+  });
+
   let seq = 0;
-  for (const r of records) {
-    if (r.kind === "mmap" && r.access === "x") {
-      if (r.path) libs.add(canonical(r.path, prefixes));
-      continue;
-    }
-    if (r.kind === "exec" && r.path) execd.add(canonical(r.path, prefixes));
+  records.forEach((r, i) => {
+    if (r.kind === "mmap" && r.access === "x") return;
     const c = classify(r);
-    if (!c) continue;
-    const key = keyOf(byCommand ? (r.comm ?? "") : "", canonical(c.path, prefixes));
+    if (!c) return;
+    const path = canonical(c.path, prefixes);
+    const key = keyOf(byCommand ? (r.comm ?? "") : "", path);
+    if (
+      !c.failed &&
+      c.letter === "R" &&
+      (path === "/etc/ld.so.cache" || loaded.has(keyOf(procs[i], path)))
+    ) {
+      if (!ok.has(key)) ok.set(key, new Set());
+      return;
+    }
     const t = Date.parse(r.t ?? "");
     if (!Number.isNaN(t)) {
       widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++);
@@ -404,14 +423,7 @@ function buildRows(records: AuditRecord[], prefixes: SummaryOptions, byCommand: 
     } else {
       addFlag(ok, key, c.letter);
     }
-  }
-  // A library or an exec'd binary is already shown by its X; drop its read.
-  const libDrop = new Set([...libs, ...execd, "/etc/ld.so.cache"]);
-  for (const key of ok.keys())
-    if (libDrop.has(pathOf(key))) {
-      ok.get(key)!.delete("R");
-      okSpans.get(key)?.delete("R");
-    }
+  });
 
   // Re-key on the normalized path, dropping non-file targets.
   const nok = new Map<string, Set<string>>();

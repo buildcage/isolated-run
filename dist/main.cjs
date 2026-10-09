@@ -68592,24 +68592,23 @@ function parse(jsonl) {
 	};
 }
 function buildRows(records, prefixes, byCommand) {
-	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), libs = new Set(), execd = new Set(), okSpans = new Map(), failedSpans = new Map(), seq = 0;
-	for (let r of records) {
-		if (r.kind === "mmap" && r.access === "x") {
-			r.path && libs.add(canonical(r.path, prefixes));
-			continue;
-		}
-		r.kind === "exec" && r.path && execd.add(canonical(r.path, prefixes));
+	let fanout = prefixes.fanout ?? 3, ok = new Map(), failed = new Map(), perm = new Map(), okSpans = new Map(), failedSpans = new Map(), forks = new Map(), procs = records.map((r) => (r.kind === "fork" && forks.set(r.pid, (forks.get(r.pid) ?? 0) + 1), `${r.pid}/${forks.get(r.pid) ?? 0}`)), loaded = new Set();
+	records.forEach((r, i) => {
+		r.path && (r.kind === "exec" || r.kind === "mmap" && r.access === "x") && loaded.add(keyOf(procs[i], canonical(r.path, prefixes)));
+	});
+	let seq = 0;
+	records.forEach((r, i) => {
+		if (r.kind === "mmap" && r.access === "x") return;
 		let c = classify(r);
-		if (!c) continue;
-		let key = keyOf(byCommand ? r.comm ?? "" : "", canonical(c.path, prefixes)), t = Date.parse(r.t ?? "");
+		if (!c) return;
+		let path = canonical(c.path, prefixes), key = keyOf(byCommand ? r.comm ?? "" : "", path);
+		if (!c.failed && c.letter === "R" && (path === "/etc/ld.so.cache" || loaded.has(keyOf(procs[i], path)))) {
+			ok.has(key) || ok.set(key, new Set());
+			return;
+		}
+		let t = Date.parse(r.t ?? "");
 		Number.isNaN(t) || widenLetter(c.failed ? failedSpans : okSpans, key, c.letter, t, seq++), c.failed ? (addFlag(failed, key, c.letter), PERM_ERRNO.has(r.err ?? 0) && addFlag(perm, key, c.letter)) : addFlag(ok, key, c.letter);
-	}
-	let libDrop = new Set([
-		...libs,
-		...execd,
-		"/etc/ld.so.cache"
-	]);
-	for (let key of ok.keys()) libDrop.has(pathOf(key)) && (ok.get(key).delete("R"), okSpans.get(key)?.delete("R"));
+	});
 	let nok = new Map(), nfailed = new Map(), nperm = new Map(), nspans = new Map(), mergeInto = (dst, src, keepRelative, srcSpans) => {
 		for (let [key, set] of src) {
 			let p = pathOf(key);
