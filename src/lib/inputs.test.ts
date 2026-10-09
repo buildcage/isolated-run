@@ -268,7 +268,8 @@ describe.each([
 describe("readAwsKeyInputs", () => {
   const KEY = `${ASIA}AAAAAAAAAAAAAAAA`;
   const inspect = { proxyEngine: "inspect", proxyMode: "restrict" } as const;
-  const accounts = (value: string) => inputs({ allowed_aws_role_accounts: value });
+  const accounts = (value: string) =>
+    inputs({ aws_key_check: "true", allowed_aws_role_accounts: value });
   const OFF = { key: "", roleAccounts: [] };
 
   it("leaves the check off when unset, whatever the environment holds", () => {
@@ -296,22 +297,44 @@ describe("readAwsKeyInputs", () => {
     ).toStrictEqual({ key: KEY, roleAccounts: [] });
   });
 
-  it("lets an explicit false win over role accounts, warning that they are ignored", () => {
-    const warn = vi.fn();
-    expect(
-      readAwsKeyInputs(
-        inspect,
-        { AWS_ACCESS_KEY_ID: KEY },
-        warn,
-        inputs({ aws_key_check: "false", allowed_aws_role_accounts: "111111111111" }),
+  // Ahead of the engine and key checks, which only warn in audit.
+  it.each([
+    ["unset", "inspect", "restrict", {}],
+    ["false", "inspect", "restrict", { aws_key_check: "false" }],
+    ["unset", "inspect", "audit", {}],
+    ["unset", "universal", "audit", {}],
+  ] as const)(
+    "refuses role accounts with aws_key_check %s on %s in %s",
+    (_, proxyEngine, proxyMode, check) => {
+      expect(() =>
+        readAwsKeyInputs(
+          { proxyEngine, proxyMode },
+          {},
+          silent,
+          inputs({ ...check, allowed_aws_role_accounts: "111111111111" }),
+        ),
+      ).toThrow(expect.objectContaining({ code: "AWS_KEY_CHECK_NOT_SET" }));
+    },
+  );
+
+  it("refuses a config_file's accounts when the workflow sets aws_key_check: false", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "config-file-"));
+    writeFileSync(join(workspace, "buildcage.yml"), "allowed_aws_role_accounts: '111111111111'\n");
+    const env: NodeJS.ProcessEnv = {
+      GITHUB_WORKSPACE: workspace,
+      GITHUB_EVENT_NAME: "push",
+      INPUT_CONFIG_FILE: "buildcage.yml",
+      INPUT_AWS_KEY_CHECK: "false",
+    };
+    applyConfigFile(env, CONFIG_FILE_INPUTS);
+    expect(() =>
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, (name) =>
+        (env[`INPUT_${name.toUpperCase()}`] ?? "").trim(),
       ),
-    ).toStrictEqual(OFF);
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("allowed_aws_role_accounts is ignored"),
-    );
+    ).toThrow(/use a file without them/);
   });
 
-  it("reads the role accounts, deduplicated, and turns the check on from the step's key", () => {
+  it("reads the role accounts, deduplicated, and pins the step's key", () => {
     expect(
       readAwsKeyInputs(
         inspect,
@@ -336,7 +359,10 @@ describe("readAwsKeyInputs", () => {
 
   it("asks for quotes when a config file read an ID that begins with 0 as a number", () => {
     const workspace = mkdtempSync(join(tmpdir(), "config-file-"));
-    writeFileSync(join(workspace, "buildcage.yml"), "allowed_aws_role_accounts: 012345678901\n");
+    writeFileSync(
+      join(workspace, "buildcage.yml"),
+      "aws_key_check: true\nallowed_aws_role_accounts: 012345678901\n",
+    );
     const env: NodeJS.ProcessEnv = {
       GITHUB_WORKSPACE: workspace,
       GITHUB_EVENT_NAME: "push",
