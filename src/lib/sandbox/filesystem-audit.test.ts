@@ -61,7 +61,7 @@ function liveChild(): { child: AuditChild; kill: ReturnType<typeof vi.fn> } {
     resolveExit = r;
   });
   kill.mockImplementation(() => resolveExit());
-  return { child: { exited, kill, lastError: () => "" }, kill };
+  return { child: { exited, kill, fatal: () => "" }, kill };
 }
 
 describe("startFilesystemAudit", () => {
@@ -135,8 +135,7 @@ describe("startFilesystemAudit", () => {
     const child: AuditChild = {
       exited: Promise.resolve(),
       kill: vi.fn(),
-      lastError: () =>
-        "filesystem-audit: attach on_unlinkat_enter: neither debugfs nor tracefs are mounted",
+      fatal: () => "attach on_unlinkat_enter: neither debugfs nor tracefs are mounted",
     };
     const sleep = vi.fn(async () => {});
 
@@ -148,7 +147,7 @@ describe("startFilesystemAudit", () => {
     });
 
     await expect(start).rejects.toThrow(
-      "filesystem_audit could not start (filesystem-audit: attach on_unlinkat_enter: neither debugfs nor tracefs are mounted); the command was not run.",
+      "filesystem_audit could not start (attach on_unlinkat_enter: neither debugfs nor tracefs are mounted); the command was not run.",
     );
     // One yield in the ready loop before the exit is seen, then one in stop's
     // grace race.
@@ -156,7 +155,7 @@ describe("startFilesystemAudit", () => {
   });
 
   it("says only that the tracer exited when it wrote nothing", async () => {
-    const child: AuditChild = { exited: Promise.resolve(), kill: vi.fn(), lastError: () => "" };
+    const child: AuditChild = { exited: Promise.resolve(), kill: vi.fn(), fatal: () => "" };
 
     await expect(
       startFilesystemAudit(START_OPTIONS, {
@@ -181,7 +180,7 @@ describe("startFilesystemAudit", () => {
     const remove = vi.fn();
 
     const handle = await startFilesystemAudit(START_OPTIONS, {
-      spawn: () => ({ exited, kill, lastError: () => "" }),
+      spawn: () => ({ exited, kill, fatal: () => "" }),
       exists: () => true,
       sleep: async () => {},
       remove,
@@ -203,7 +202,7 @@ describe("startFilesystemAudit", () => {
     const exec = vi.fn();
 
     const handle = await startFilesystemAudit(START_OPTIONS, {
-      spawn: () => ({ exited, kill: vi.fn(), lastError: () => "" }),
+      spawn: () => ({ exited, kill: vi.fn(), fatal: () => "" }),
       exists: () => true,
       sleep: async () => {},
       remove: vi.fn(),
@@ -227,7 +226,7 @@ describe("startFilesystemAudit", () => {
     const exec = vi.fn();
 
     const handle = await startFilesystemAudit(START_OPTIONS, {
-      spawn: () => ({ exited, kill: vi.fn(), lastError: () => "" }),
+      spawn: () => ({ exited, kill: vi.fn(), fatal: () => "" }),
       exists: () => true,
       sleep: async () => {},
       remove: vi.fn(),

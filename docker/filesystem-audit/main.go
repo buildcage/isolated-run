@@ -62,8 +62,12 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
+	// stderr is a pipe the action reads; once the action is gone, a write to
+	// it must fail rather than kill the tracer before it flushes the record.
+	signal.Ignore(syscall.SIGPIPE)
 	if err := run(*cgPath, *out, *ready, *pidfile); err != nil {
-		fmt.Fprintln(os.Stderr, "filesystem-audit:", err)
+		// The action reports the "fatal:" line as the reason the step failed.
+		fmt.Fprintln(os.Stderr, "filesystem-audit: fatal:", err)
 		os.Exit(1)
 	}
 }
@@ -202,11 +206,11 @@ var archSyscalls = map[string]bool{
 	"chown": true, "lchown": true, "utime": true, "utimes": true, "futimesat": true,
 }
 
-// attachAll attaches every loaded program. A classic syscall tracepoint
-// needs tracefs, and without it the failed path operations and the timestamp
-// and xattr changes go unrecorded, so its attach error is fatal unless the
-// architecture lacks that syscall. At least one getname spelling must attach, or a failed
-// open would have no name.
+// attachAll attaches every loaded program, and any that fails is fatal, so a
+// recording never silently lacks a kind of access. The exceptions: a syscall
+// tracepoint the architecture lacks, and one of the two getname spellings,
+// of which at least one must attach or a failed open would have no name.
+// A classic syscall tracepoint needs tracefs.
 func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, error) {
 	var links []link.Link
 	getnames := 0
@@ -226,7 +230,7 @@ func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, e
 			if p.Type() == ebpf.TracePoint && errors.Is(err, os.ErrNotExist) && archSyscalls[sys] {
 				continue
 			}
-			if _, optional := optionalProgs[name]; optional {
+			if getnameProgs[name] {
 				fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
 				continue
 			}

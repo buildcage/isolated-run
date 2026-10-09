@@ -459,9 +459,9 @@ sensitive.
 ```
 
 It observes accesses in the kernel, below the libraries a command links against, and only records;
-it never blocks an access. It needs a cgroup v2 host on Linux 5.17 or newer with tracefs mounted;
-elsewhere the step fails before the command runs. The flag format, the artifact, and what it does
-not record are in [Reference](./docs/reference.md#filesystem-audit).
+it never blocks an access. It needs a cgroup v2 host on Linux 5.17 or newer with kernel BTF and
+tracefs mounted; elsewhere the step fails before the command runs. The flag format, the artifact,
+and what it does not record are in [Reference](./docs/reference.md#filesystem-audit).
 
 ## How it works
 

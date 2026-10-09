@@ -69980,15 +69980,18 @@ function defaultSpawn$1(command, args) {
 			"pipe"
 		],
 		env: hostCommandEnv(command)
-	}), tail = "";
-	return child.stderr.on("data", (chunk) => {
-		process.stderr.write(chunk), tail = (tail + chunk.toString()).slice(-4096);
+	}), partial = "", fatal = "";
+	return child.stderr.setEncoding("utf8"), child.stderr.on("data", (chunk) => {
+		process.stderr.write(chunk);
+		let lines = (partial + chunk).split("\n");
+		partial = lines.pop();
+		for (let line of lines) line.startsWith("filesystem-audit: fatal: ") && (fatal = line.slice(25));
 	}), {
 		exited: new Promise((resolve) => {
 			child.on("error", () => resolve()), child.on("close", () => resolve());
 		}),
 		kill: (signal) => child.kill(signal),
-		lastError: () => tail.trimEnd().split("\n").at(-1) ?? ""
+		fatal: () => fatal
 	};
 }
 function defaultSleep(ms) {
@@ -70043,7 +70046,7 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		if (exited) break;
 		await sleep(100);
 	}
-	let reason = exited ? child.lastError() || "the tracer exited" : "the tracer did not attach in time";
+	let reason = exited ? child.fatal() || "the tracer exited" : "the tracer did not attach in time";
 	throw await stop(), remove(outPath), new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
 }
 //#endregion

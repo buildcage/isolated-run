@@ -840,10 +840,9 @@ tracer did not stop cleanly, the section opens with a warning that the record is
 
 It observes accesses in the kernel, below any library the step links against, and only records; it
 never blocks an access. It needs a cgroup v2 host running Linux 5.17 or newer, with kernel BTF and
-tracefs (`/sys/kernel/tracing`) mounted. Where any of these is missing, the step fails with the
-reason before the command runs. See
-[Filesystem audit](./security.md#filesystem-audit) for what it does not record and what its record
-can be trusted for.
+tracefs mounted. Where any of these is missing, the step fails with the reason before the command
+runs. See [Filesystem audit](./security.md#filesystem-audit) for what it does not record and what
+its record can be trusted for.
 
 ## CA trust variables
 

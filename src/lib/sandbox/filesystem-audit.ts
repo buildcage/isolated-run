@@ -17,6 +17,8 @@ const READY_TRIES = 150;
 /** How long the tracer has to exit on SIGTERM before it is killed, so a wedged
  *  tracer cannot hang the step's own teardown. */
 const STOP_GRACE_MS = 2_000;
+/** How the tracer starts the line naming why it exited (see its main.go). */
+const FATAL = "filesystem-audit: fatal: ";
 
 /** Where the tracer writes, under the scratch base so the post step can read
  *  them after the per-step scratch dir is gone. The suffix matches the
@@ -50,8 +52,8 @@ export type SpawnAudit = (command: string, args: string[]) => AuditChild;
 export interface AuditChild {
   exited: Promise<void>;
   kill: (signal: NodeJS.Signals) => void;
-  /** The last line it wrote to stderr, which names why it exited early. */
-  lastError: () => string;
+  /** The reason it gave on stderr for exiting, or "" if it gave none. */
+  fatal: () => string;
 }
 
 export interface FilesystemAuditDeps {
@@ -79,10 +81,14 @@ function defaultSpawn(command: string, args: string[]): AuditChild {
     stdio: ["ignore", "inherit", "pipe"],
     env: hostCommandEnv(command),
   });
-  let tail = "";
-  child.stderr.on("data", (chunk: Buffer) => {
+  let partial = "";
+  let fatal = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
     process.stderr.write(chunk);
-    tail = (tail + chunk.toString()).slice(-4096);
+    const lines = (partial + chunk).split("\n");
+    partial = lines.pop()!;
+    for (const line of lines) if (line.startsWith(FATAL)) fatal = line.slice(FATAL.length);
   });
   const exited = new Promise<void>((resolve) => {
     child.on("error", () => resolve());
@@ -91,7 +97,7 @@ function defaultSpawn(command: string, args: string[]): AuditChild {
   return {
     exited,
     kill: (signal) => child.kill(signal),
-    lastError: () => tail.trimEnd().split("\n").at(-1) ?? "",
+    fatal: () => fatal,
   };
 }
 
@@ -211,7 +217,7 @@ export async function startFilesystemAudit(
     await sleep(READY_POLL_MS);
   }
   const reason = exited
-    ? child.lastError() || "the tracer exited"
+    ? child.fatal() || "the tracer exited"
     : "the tracer did not attach in time";
   await stop();
   // A tracer that attached just too late may have created the recording; the
