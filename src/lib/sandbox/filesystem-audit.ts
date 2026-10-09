@@ -4,18 +4,23 @@ import { join } from "node:path";
 
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 
+import { SandboxError } from "../errors.ts";
+import { realHostProbes, type HostProbes } from "./host-probes.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 const CGROUP_ROOT = "/sys/fs/cgroup";
 const READY_POLL_MS = 100;
-// Up to 15s for the tracer to load and attach its programs, which a cold or
-// arm64 runner can need. A failed attach exits the tracer and ends the wait
-// early (see the loop in startFilesystemAudit); this cap only matters if it
-// spawns but neither attaches nor exits.
-const READY_TRIES = 150;
+// Up to 30s for the tracer to load and attach its programs, generous for a
+// cold or loaded runner since running out fails the step. A failed attach
+// exits the tracer and ends the wait early (see the loop in
+// startFilesystemAudit); this cap only matters if it spawns but neither
+// attaches nor exits.
+const READY_TRIES = 300;
 /** How long the tracer has to exit on SIGTERM before it is killed, so a wedged
  *  tracer cannot hang the step's own teardown. */
 const STOP_GRACE_MS = 2_000;
+/** How the tracer starts the line naming why it exited (see its main.go). */
+const FATAL = "filesystem-audit: fatal: ";
 
 /** Where the tracer writes, under the scratch base so the post step can read
  *  them after the per-step scratch dir is gone. The suffix matches the
@@ -43,7 +48,16 @@ export function cgroupFsPath(cgroupsPath: string): string {
   return join(CGROUP_ROOT, cgroupsPath);
 }
 
-export type Warn = (message: string) => void;
+export const NO_CGROUP_V2 = "filesystem_audit needs a cgroup v2 host; the command was not run.";
+
+/** Fails the step before the proxy starts on a host the tracer cannot watch. */
+export function checkFilesystemAuditHost(
+  probes: Pick<HostProbes, "cgroupPath"> = realHostProbes,
+): void {
+  if (probes.cgroupPath() === undefined) {
+    throw new SandboxError(NO_CGROUP_V2, "FILESYSTEM_AUDIT_UNAVAILABLE");
+  }
+}
 
 export type SpawnAudit = (command: string, args: string[]) => AuditChild;
 
@@ -51,6 +65,29 @@ export type SpawnAudit = (command: string, args: string[]) => AuditChild;
 export interface AuditChild {
   exited: Promise<void>;
   kill: (signal: NodeJS.Signals) => void;
+  /** Why it exited, as far as its stderr says (see exitReason). */
+  reason: () => string;
+}
+
+/**
+ * Follows the tracer's stderr for why it exited: its own fatal line, else the
+ * last line anything wrote there, such as sudo refusing to run it.
+ */
+export function exitReason(): { push: (chunk: string) => void; value: () => string } {
+  let partial = "";
+  let fatal = "";
+  let last = "";
+  return {
+    push(chunk) {
+      const lines = (partial + chunk).split("\n");
+      partial = lines.pop()!;
+      for (const line of lines) {
+        if (line.startsWith(FATAL)) fatal = line.slice(FATAL.length);
+        else if (line.trim()) last = line;
+      }
+    },
+    value: () => fatal || last || partial.trim(),
+  };
 }
 
 export interface FilesystemAuditDeps {
@@ -75,14 +112,23 @@ function defaultExec(command: string, args: string[]): string {
 
 function defaultSpawn(command: string, args: string[]): AuditChild {
   const child = spawn(hostCommand(command), args, {
-    stdio: ["ignore", "inherit", "inherit"],
+    stdio: ["ignore", "inherit", "pipe"],
     env: hostCommandEnv(command),
   });
+  const reason = exitReason();
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    process.stderr.write(chunk);
+    reason.push(chunk);
+  });
   const exited = new Promise<void>((resolve) => {
-    child.on("error", () => resolve());
+    child.on("error", (e) => {
+      reason.push(`${e.message}\n`);
+      resolve();
+    });
     child.on("close", () => resolve());
   });
-  return { exited, kill: (signal) => child.kill(signal) };
+  return { exited, kill: (signal) => child.kill(signal), reason: reason.value };
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -144,13 +190,12 @@ export interface StartFilesystemAuditOptions {
  * watching before runc puts the sandboxed process in that cgroup. Needs root,
  * so it goes through `sudo -n` like run-isolated.sh.
  *
- * Best-effort: if it never attaches, this warns and returns a handle that
- * records nothing, so the step still runs. The caller stops the returned
- * handle once the step is done.
+ * A tracer that does not attach fails the step before the command runs, since
+ * the step asked for a record. The caller stops the returned handle once the
+ * step is done.
  */
 export async function startFilesystemAudit(
   { tracerPath, cgroupsPath, outPath, pidFilePath, readyPath }: StartFilesystemAuditOptions,
-  warn: Warn,
   deps: FilesystemAuditDeps = {},
 ): Promise<AuditHandle> {
   const {
@@ -201,10 +246,15 @@ export async function startFilesystemAudit(
     if (exited) break;
     await sleep(READY_POLL_MS);
   }
-  warn("buildcage: filesystem_audit did not start; the step's file accesses were not recorded.");
+  const reason = exited
+    ? child.reason() || "the tracer exited"
+    : "the tracer did not attach in time";
   await stop();
   // A tracer that attached just too late may have created the recording; the
   // report would otherwise read it as one cut short.
   remove(outPath);
-  return noAudit;
+  throw new SandboxError(
+    `filesystem_audit could not start (${reason}); the command was not run.`,
+    "FILESYSTEM_AUDIT_UNAVAILABLE",
+  );
 }

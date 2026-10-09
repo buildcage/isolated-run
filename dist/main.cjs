@@ -70118,6 +70118,122 @@ function formatFilesystemPlanLog(mode, overlayRoots, writeThrough) {
 	for (let entry of writeThrough) lines.push(`Writable (persisted):                    ${entry}`);
 	return lines;
 }
+//#endregion
+//#region src/lib/sandbox/symlinks.ts
+const realSymlinkDeps = {
+	lstat: (path) => {
+		try {
+			return (0, node_fs.lstatSync)(path);
+		} catch {
+			return;
+		}
+	},
+	readlink: (path) => (0, node_fs.readlinkSync)(path)
+};
+function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
+	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
+	for (; pending.length > 0;) {
+		let name = pending.shift();
+		if (name === "..") {
+			current = (0, node_path.dirname)(current);
+			continue;
+		}
+		let next = (0, node_path.join)(current, name);
+		if (!lstat(next)?.isSymbolicLink()) {
+			current = next;
+			continue;
+		}
+		let target = readlink(next);
+		if (links.push({
+			at: next,
+			target
+		}), links.length > 40) return {
+			loop: !0,
+			links
+		};
+		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
+	}
+	return {
+		real: current,
+		links
+	};
+}
+function realPathOf(path, deps = realSymlinkDeps) {
+	let resolved = resolveHostPath(path, deps);
+	return "real" in resolved ? resolved.real : path;
+}
+//#endregion
+//#region src/lib/sandbox/host-probes.ts
+const SETPRIV_CANDIDATE_PATHS = [
+	"/usr/bin/setpriv",
+	"/bin/setpriv",
+	"/usr/sbin/setpriv",
+	"/sbin/setpriv"
+];
+function resolveSetprivPath(exists) {
+	return SETPRIV_CANDIDATE_PATHS.find((p) => exists(p)) ?? "setpriv";
+}
+function parseNofileLimit(procLimits, nrOpen) {
+	let line = procLimits.split("\n").find((l) => l.startsWith("Max open files"));
+	if (!line) return;
+	let [soft, hard] = line.slice(14).trim().split(/\s+/).map((c) => /^\d+$/.test(c) ? Number(c) : c === "unlimited" ? nrOpen : void 0);
+	return soft !== void 0 && hard !== void 0 ? {
+		soft,
+		hard
+	} : void 0;
+}
+function shmSizeFromStatfs({ type, bsize, blocks }) {
+	if (type !== 16914836) return;
+	let size = bsize * blocks;
+	return Number.isFinite(size) && size > 0 ? size : void 0;
+}
+function parseCgroupV2Path(procCgroup) {
+	let lines = procCgroup.split("\n").filter((line) => line !== "");
+	if (lines.length !== 1 || !lines[0].startsWith("0::/")) return;
+	let path = lines[0].slice(3);
+	if (!(/\s/.test(path) || path.split("/").includes(".."))) return path;
+}
+function readOptionalFile(path) {
+	try {
+		return (0, node_fs.readFileSync)(path, "utf8");
+	} catch {
+		return;
+	}
+}
+function readNumericFile(path) {
+	let raw = readOptionalFile(path)?.trim();
+	return raw !== void 0 && /^\d+$/.test(raw) ? Number(raw) : void 0;
+}
+const realHostProbes = {
+	setprivPath: () => resolveSetprivPath(node_fs.existsSync),
+	nofileRlimit: () => {
+		let nrOpen = readNumericFile("/proc/sys/fs/nr_open");
+		for (let pid of [process.ppid, "self"]) {
+			let limits = readOptionalFile(`/proc/${pid}/limits`), parsed = limits === void 0 ? void 0 : parseNofileLimit(limits, nrOpen);
+			if (parsed) return parsed;
+		}
+	},
+	shmSizeBytes: () => {
+		try {
+			return shmSizeFromStatfs((0, node_fs.statfsSync)("/dev/shm"));
+		} catch {
+			return;
+		}
+	},
+	hostname: () => node_os.default.hostname(),
+	varRunRealPath: () => {
+		try {
+			return (0, node_fs.realpathSync)("/var/run");
+		} catch {
+			return;
+		}
+	},
+	realpath: (path) => realPathOf(path),
+	cgroupPath: () => {
+		let procCgroup = readOptionalFile("/proc/self/cgroup");
+		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
+	}
+};
 function filesystemAuditPaths(containerName, scratchBase) {
 	let suffix = containerName.split("-").at(-1);
 	return {
@@ -70127,6 +70243,21 @@ function filesystemAuditPaths(containerName, scratchBase) {
 }
 function cgroupFsPath(cgroupsPath) {
 	return (0, node_path.join)("/sys/fs/cgroup", cgroupsPath);
+}
+const NO_CGROUP_V2 = "filesystem_audit needs a cgroup v2 host; the command was not run.";
+function checkFilesystemAuditHost(probes = realHostProbes) {
+	if (probes.cgroupPath() === void 0) throw new SandboxError(NO_CGROUP_V2, "FILESYSTEM_AUDIT_UNAVAILABLE");
+}
+function exitReason() {
+	let partial = "", fatal = "", last = "";
+	return {
+		push(chunk) {
+			let lines = (partial + chunk).split("\n");
+			partial = lines.pop();
+			for (let line of lines) line.startsWith("filesystem-audit: fatal: ") ? fatal = line.slice(25) : line.trim() && (last = line);
+		},
+		value: () => fatal || last || partial.trim()
+	};
 }
 function defaultExec$3(command, args) {
 	return (0, node_child_process.execFileSync)(hostCommand(command), args, {
@@ -70139,15 +70270,20 @@ function defaultSpawn$1(command, args) {
 		stdio: [
 			"ignore",
 			"inherit",
-			"inherit"
+			"pipe"
 		],
 		env: hostCommandEnv(command)
-	});
-	return {
+	}), reason = exitReason();
+	return child.stderr.setEncoding("utf8"), child.stderr.on("data", (chunk) => {
+		process.stderr.write(chunk), reason.push(chunk);
+	}), {
 		exited: new Promise((resolve) => {
-			child.on("error", () => resolve()), child.on("close", () => resolve());
+			child.on("error", (e) => {
+				reason.push(`${e.message}\n`), resolve();
+			}), child.on("close", () => resolve());
 		}),
-		kill: (signal) => child.kill(signal)
+		kill: (signal) => child.kill(signal),
+		reason: reason.value
 	};
 }
 function defaultSleep(ms) {
@@ -70168,7 +70304,7 @@ function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = n
 		hostPath: tracerPath
 	})), chmod(tracerPath, 493), tracerPath;
 }
-async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath }, warn, deps = {}) {
+async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath }, deps = {}) {
 	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2 } = deps, child = spawn("sudo", [
 		"-n",
 		"--",
@@ -70197,12 +70333,13 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		} catch {}
 		await child.exited, remove(pidFilePath);
 	};
-	for (let i = 0; i < 150; i++) {
+	for (let i = 0; i < 300; i++) {
 		if (exists(readyPath)) return { stop };
 		if (exited) break;
 		await sleep(100);
 	}
-	return warn("buildcage: filesystem_audit did not start; the step's file accesses were not recorded."), await stop(), remove(outPath), noAudit;
+	let reason = exited ? child.reason() || "the tracer exited" : "the tracer did not attach in time";
+	throw await stop(), remove(outPath), new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
@@ -71021,122 +71158,6 @@ function caTrustAdditions(files, env) {
 		env: extraEnv
 	};
 }
-//#endregion
-//#region src/lib/sandbox/symlinks.ts
-const realSymlinkDeps = {
-	lstat: (path) => {
-		try {
-			return (0, node_fs.lstatSync)(path);
-		} catch {
-			return;
-		}
-	},
-	readlink: (path) => (0, node_fs.readlinkSync)(path)
-};
-function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
-	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
-	for (; pending.length > 0;) {
-		let name = pending.shift();
-		if (name === "..") {
-			current = (0, node_path.dirname)(current);
-			continue;
-		}
-		let next = (0, node_path.join)(current, name);
-		if (!lstat(next)?.isSymbolicLink()) {
-			current = next;
-			continue;
-		}
-		let target = readlink(next);
-		if (links.push({
-			at: next,
-			target
-		}), links.length > 40) return {
-			loop: !0,
-			links
-		};
-		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
-	}
-	return {
-		real: current,
-		links
-	};
-}
-function realPathOf(path, deps = realSymlinkDeps) {
-	let resolved = resolveHostPath(path, deps);
-	return "real" in resolved ? resolved.real : path;
-}
-//#endregion
-//#region src/lib/sandbox/host-probes.ts
-const SETPRIV_CANDIDATE_PATHS = [
-	"/usr/bin/setpriv",
-	"/bin/setpriv",
-	"/usr/sbin/setpriv",
-	"/sbin/setpriv"
-];
-function resolveSetprivPath(exists) {
-	return SETPRIV_CANDIDATE_PATHS.find((p) => exists(p)) ?? "setpriv";
-}
-function parseNofileLimit(procLimits, nrOpen) {
-	let line = procLimits.split("\n").find((l) => l.startsWith("Max open files"));
-	if (!line) return;
-	let [soft, hard] = line.slice(14).trim().split(/\s+/).map((c) => /^\d+$/.test(c) ? Number(c) : c === "unlimited" ? nrOpen : void 0);
-	return soft !== void 0 && hard !== void 0 ? {
-		soft,
-		hard
-	} : void 0;
-}
-function shmSizeFromStatfs({ type, bsize, blocks }) {
-	if (type !== 16914836) return;
-	let size = bsize * blocks;
-	return Number.isFinite(size) && size > 0 ? size : void 0;
-}
-function parseCgroupV2Path(procCgroup) {
-	let lines = procCgroup.split("\n").filter((line) => line !== "");
-	if (lines.length !== 1 || !lines[0].startsWith("0::/")) return;
-	let path = lines[0].slice(3);
-	if (!(/\s/.test(path) || path.split("/").includes(".."))) return path;
-}
-function readOptionalFile(path) {
-	try {
-		return (0, node_fs.readFileSync)(path, "utf8");
-	} catch {
-		return;
-	}
-}
-function readNumericFile(path) {
-	let raw = readOptionalFile(path)?.trim();
-	return raw !== void 0 && /^\d+$/.test(raw) ? Number(raw) : void 0;
-}
-const realHostProbes = {
-	setprivPath: () => resolveSetprivPath(node_fs.existsSync),
-	nofileRlimit: () => {
-		let nrOpen = readNumericFile("/proc/sys/fs/nr_open");
-		for (let pid of [process.ppid, "self"]) {
-			let limits = readOptionalFile(`/proc/${pid}/limits`), parsed = limits === void 0 ? void 0 : parseNofileLimit(limits, nrOpen);
-			if (parsed) return parsed;
-		}
-	},
-	shmSizeBytes: () => {
-		try {
-			return shmSizeFromStatfs((0, node_fs.statfsSync)("/dev/shm"));
-		} catch {
-			return;
-		}
-	},
-	hostname: () => node_os.default.hostname(),
-	varRunRealPath: () => {
-		try {
-			return (0, node_fs.realpathSync)("/var/run");
-		} catch {
-			return;
-		}
-	},
-	realpath: (path) => realPathOf(path),
-	cgroupPath: () => {
-		let procCgroup = readOptionalFile("/proc/self/cgroup");
-		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
-	}
-};
 //#endregion
 //#region src/lib/sandbox/oci-mounts.ts
 function freshMountDestinationsFrom(baseSpec) {
@@ -72240,22 +72261,23 @@ function finishNssDb(caTrust, options, deps) {
 	}
 }
 async function startAudit(dir, config, options, deps) {
-	let { filesystemAudit, containerName, warn } = options;
+	let { filesystemAudit, containerName } = options;
 	if (filesystemAudit === void 0) return noAudit;
 	let cgroupsPath = config.linux.cgroupsPath;
-	if (cgroupsPath === void 0) return warn("buildcage: filesystem_audit needs a cgroup v2 host; the step's file accesses were not recorded."), noAudit;
+	if (cgroupsPath === void 0) throw new SandboxError(NO_CGROUP_V2, "FILESYSTEM_AUDIT_UNAVAILABLE");
+	let tracerPath;
 	try {
-		let tracerPath = deps.extractTracer(containerName, dir);
-		return await deps.startFilesystemAudit({
-			tracerPath,
-			cgroupsPath,
-			outPath: filesystemAudit.outPath,
-			pidFilePath: filesystemAudit.pidFilePath,
-			readyPath: (0, node_path.join)(dir, "filesystem-audit.ready")
-		}, warn);
+		tracerPath = deps.extractTracer(containerName, dir);
 	} catch (e) {
-		return warn(`buildcage: filesystem_audit could not start (${errorMessage(e)}); the step's file accesses were not recorded.`), noAudit;
+		throw new SandboxError(`filesystem_audit could not start (${errorMessage(e)}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
 	}
+	return deps.startFilesystemAudit({
+		tracerPath,
+		cgroupsPath,
+		outPath: filesystemAudit.outPath,
+		pidFilePath: filesystemAudit.pidFilePath,
+		readyPath: (0, node_path.join)(dir, "filesystem-audit.ready")
+	});
 }
 async function runSandboxedCommand(options, overrides = {}) {
 	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {
@@ -73193,6 +73215,7 @@ const realDeps = {
 	checkScratchBaseParent,
 	checkPasswordlessSudo,
 	checkOverlayfsSupport,
+	checkFilesystemAuditHost,
 	createAnnotation,
 	resolveFilesystemPlan,
 	pinHostCommands,
@@ -73234,7 +73257,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditRetentionDays, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, prepareStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditRetentionDays, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, prepareStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -73260,7 +73283,7 @@ async function runSandboxStep(env, overrides = {}) {
 	}, env, annotation.warning);
 	assertNonRootUid(process.getuid());
 	let writeThrough = resolveWriteThroughInput(writeThroughInput, env);
-	validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write_through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport();
+	validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write_through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport(), filesystemAudit === "record" && checkFilesystemAuditHost();
 	let { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
 	let localOverride = await readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({

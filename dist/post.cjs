@@ -381,6 +381,50 @@ function parseEphemeralRoots(raw) {
 	if (Array.isArray(parsed)) return parsed.every((p) => typeof p == "string" && (0, node_path.isAbsolute)(p) && !/[\x00-\x1f\x7f]/.test(p)) ? parsed : void 0;
 }
 //#endregion
+//#region src/lib/sandbox/symlinks.ts
+const realSymlinkDeps = {
+	lstat: (path) => {
+		try {
+			return (0, node_fs.lstatSync)(path);
+		} catch {
+			return;
+		}
+	},
+	readlink: (path) => (0, node_fs.readlinkSync)(path)
+};
+function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
+	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
+	for (; pending.length > 0;) {
+		let name = pending.shift();
+		if (name === "..") {
+			current = (0, node_path.dirname)(current);
+			continue;
+		}
+		let next = (0, node_path.join)(current, name);
+		if (!lstat(next)?.isSymbolicLink()) {
+			current = next;
+			continue;
+		}
+		let target = readlink(next);
+		if (links.push({
+			at: next,
+			target
+		}), links.length > 40) return {
+			loop: !0,
+			links
+		};
+		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
+	}
+	return {
+		real: current,
+		links
+	};
+}
+function realPathOf(path, deps = realSymlinkDeps) {
+	let resolved = resolveHostPath(path, deps);
+	return "real" in resolved ? resolved.real : path;
+}
+//#endregion
 //#region src/lib/sandbox/filesystem-audit.ts
 function filesystemAuditPaths(containerName, scratchBase) {
 	let suffix = containerName.split("-").at(-1);
@@ -746,50 +790,6 @@ function takeWriteThroughForPost(env, scratchBase = SANDBOX_SCRATCH_BASE) {
 //#region src/lib/sandbox/paths.ts
 function isAtOrUnder(path, ancestor) {
 	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
-}
-//#endregion
-//#region src/lib/sandbox/symlinks.ts
-const realSymlinkDeps = {
-	lstat: (path) => {
-		try {
-			return (0, node_fs.lstatSync)(path);
-		} catch {
-			return;
-		}
-	},
-	readlink: (path) => (0, node_fs.readlinkSync)(path)
-};
-function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
-	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
-	for (; pending.length > 0;) {
-		let name = pending.shift();
-		if (name === "..") {
-			current = (0, node_path.dirname)(current);
-			continue;
-		}
-		let next = (0, node_path.join)(current, name);
-		if (!lstat(next)?.isSymbolicLink()) {
-			current = next;
-			continue;
-		}
-		let target = readlink(next);
-		if (links.push({
-			at: next,
-			target
-		}), links.length > 40) return {
-			loop: !0,
-			links
-		};
-		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
-	}
-	return {
-		real: current,
-		links
-	};
-}
-function realPathOf(path, deps = realSymlinkDeps) {
-	let resolved = resolveHostPath(path, deps);
-	return "real" in resolved ? resolved.real : path;
 }
 //#endregion
 //#region src/lib/sandbox/oci-mounts.ts

@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 
+import { SandboxError } from "../errors.ts";
 import {
   cgroupFsPath,
+  checkFilesystemAuditHost,
+  exitReason,
   extractTracer,
   filesystemAuditPaths,
   startFilesystemAudit,
@@ -20,11 +23,44 @@ describe("filesystemAuditPaths", () => {
   });
 });
 
+describe("checkFilesystemAuditHost", () => {
+  it("passes on a cgroup v2 host and fails the step elsewhere", () => {
+    expect(() =>
+      checkFilesystemAuditHost({ cgroupPath: () => "/system.slice/runner.service" }),
+    ).not.toThrow();
+    expect(() => checkFilesystemAuditHost({ cgroupPath: () => undefined })).toThrow(
+      new SandboxError(
+        "filesystem_audit needs a cgroup v2 host; the command was not run.",
+        "FILESYSTEM_AUDIT_UNAVAILABLE",
+      ),
+    );
+  });
+});
+
 describe("cgroupFsPath", () => {
   it("joins the cgroupsPath onto the cgroup root", () => {
     expect(cgroupFsPath("/system.slice/runner.service/buildcage-proxy-abcd1234")).toBe(
       "/sys/fs/cgroup/system.slice/runner.service/buildcage-proxy-abcd1234",
     );
+  });
+});
+
+describe("exitReason", () => {
+  it("prefers the tracer's own fatal line, joined across chunks", () => {
+    const reason = exitReason();
+    reason.push("filesystem-audit: cgroup /sys/fs/cgroup/x id=1\nfilesystem-audit: fat");
+    reason.push("al: attach on_unlinkat_enter: no tracefs\nfilesystem-audit: total=0\n");
+
+    expect(reason.value()).toBe("attach on_unlinkat_enter: no tracefs");
+  });
+
+  it("falls back to the last line written, then to an unterminated one", () => {
+    const reason = exitReason();
+    expect(reason.value()).toBe("");
+    reason.push("sudo: a pass");
+    expect(reason.value()).toBe("sudo: a pass");
+    reason.push("word is required\n\n");
+    expect(reason.value()).toBe("sudo: a password is required");
   });
 });
 
@@ -60,7 +96,7 @@ function liveChild(): { child: AuditChild; kill: ReturnType<typeof vi.fn> } {
     resolveExit = r;
   });
   kill.mockImplementation(() => resolveExit());
-  return { child: { exited, kill }, kill };
+  return { child: { exited, kill, reason: () => "" }, kill };
 }
 
 describe("startFilesystemAudit", () => {
@@ -68,9 +104,8 @@ describe("startFilesystemAudit", () => {
     const { child, kill } = liveChild();
     const spawn = vi.fn(() => child);
     const remove = vi.fn();
-    const warn = vi.fn();
 
-    const handle = await startFilesystemAudit(START_OPTIONS, warn, {
+    const handle = await startFilesystemAudit(START_OPTIONS, {
       spawn,
       exists: () => true,
       remove,
@@ -89,7 +124,6 @@ describe("startFilesystemAudit", () => {
       "--ready",
       START_OPTIONS.readyPath,
     ]);
-    expect(warn).not.toHaveBeenCalled();
 
     await handle.stop();
     expect(kill).toHaveBeenCalledWith("SIGTERM");
@@ -104,49 +138,68 @@ describe("startFilesystemAudit", () => {
       ready = true;
     });
 
-    await startFilesystemAudit(START_OPTIONS, vi.fn(), { spawn: () => child, exists, sleep });
+    await startFilesystemAudit(START_OPTIONS, { spawn: () => child, exists, sleep });
 
     expect(exists).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledTimes(1);
   });
 
-  it("warns and records nothing when the tracer never becomes ready", async () => {
+  it("fails the step when the tracer never becomes ready", async () => {
     const { child, kill } = liveChild();
-    const warn = vi.fn();
     const remove = vi.fn();
 
-    const handle = await startFilesystemAudit(START_OPTIONS, warn, {
+    const start = startFilesystemAudit(START_OPTIONS, {
       spawn: () => child,
       exists: () => false,
       sleep: async () => {},
       remove,
     });
 
-    expect(warn).toHaveBeenCalledOnce();
+    await expect(start).rejects.toThrow(
+      new SandboxError(
+        "filesystem_audit could not start (the tracer did not attach in time); the command was not run.",
+        "FILESYSTEM_AUDIT_UNAVAILABLE",
+      ),
+    );
     expect(kill).toHaveBeenCalledWith("SIGTERM");
     expect(remove).toHaveBeenCalledWith(START_OPTIONS.pidFilePath);
     expect(remove).toHaveBeenCalledWith(START_OPTIONS.outPath);
-    await handle.stop(); // the returned no-op handle does nothing more
-    expect(remove).toHaveBeenCalledTimes(2);
   });
 
-  it("stops waiting as soon as the tracer exits on its own", async () => {
-    const kill = vi.fn();
-    const child: AuditChild = { exited: Promise.resolve(), kill };
-    const warn = vi.fn();
+  it("stops waiting as soon as the tracer exits on its own, and names why", async () => {
+    const child: AuditChild = {
+      exited: Promise.resolve(),
+      kill: vi.fn(),
+      reason: () => "attach on_unlinkat_enter: neither debugfs nor tracefs are mounted",
+    };
     const sleep = vi.fn(async () => {});
 
-    await startFilesystemAudit(START_OPTIONS, warn, {
+    const start = startFilesystemAudit(START_OPTIONS, {
       spawn: () => child,
       exists: () => false,
       sleep,
       remove: vi.fn(),
     });
 
+    await expect(start).rejects.toThrow(
+      "filesystem_audit could not start (attach on_unlinkat_enter: neither debugfs nor tracefs are mounted); the command was not run.",
+    );
     // One yield in the ready loop before the exit is seen, then one in stop's
     // grace race.
     expect(sleep).toHaveBeenCalledTimes(2);
-    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("says only that the tracer exited when it wrote nothing", async () => {
+    const child: AuditChild = { exited: Promise.resolve(), kill: vi.fn(), reason: () => "" };
+
+    await expect(
+      startFilesystemAudit(START_OPTIONS, {
+        spawn: () => child,
+        exists: () => false,
+        sleep: async () => {},
+        remove: vi.fn(),
+      }),
+    ).rejects.toThrow("filesystem_audit could not start (the tracer exited);");
   });
 
   it("kills the tracer directly when it outlives the SIGTERM grace", async () => {
@@ -161,8 +214,8 @@ describe("startFilesystemAudit", () => {
     });
     const remove = vi.fn();
 
-    const handle = await startFilesystemAudit(START_OPTIONS, vi.fn(), {
-      spawn: () => ({ exited, kill }),
+    const handle = await startFilesystemAudit(START_OPTIONS, {
+      spawn: () => ({ exited, kill, reason: () => "" }),
       exists: () => true,
       sleep: async () => {},
       remove,
@@ -183,8 +236,8 @@ describe("startFilesystemAudit", () => {
     });
     const exec = vi.fn();
 
-    const handle = await startFilesystemAudit(START_OPTIONS, vi.fn(), {
-      spawn: () => ({ exited, kill: vi.fn() }),
+    const handle = await startFilesystemAudit(START_OPTIONS, {
+      spawn: () => ({ exited, kill: vi.fn(), reason: () => "" }),
       exists: () => true,
       sleep: async () => {},
       remove: vi.fn(),
@@ -207,8 +260,8 @@ describe("startFilesystemAudit", () => {
     });
     const exec = vi.fn();
 
-    const handle = await startFilesystemAudit(START_OPTIONS, vi.fn(), {
-      spawn: () => ({ exited, kill: vi.fn() }),
+    const handle = await startFilesystemAudit(START_OPTIONS, {
+      spawn: () => ({ exited, kill: vi.fn(), reason: () => "" }),
       exists: () => true,
       sleep: async () => {},
       remove: vi.fn(),

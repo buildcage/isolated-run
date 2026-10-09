@@ -644,8 +644,9 @@ the step arranges its processes or spells a path. What it can do:
 - Touch so many paths that a table or the details would pass GitHub's Job Summary size limit. That
   part is replaced by a note naming the artifact, which still holds every access.
 
-Where the tracer cannot start, without cgroup v2, BTF or Linux 5.17, the step runs unaudited after a
-warning.
+Where the tracer cannot start or cannot attach a probe the kernel offers, for want of cgroup v2,
+BTF, tracefs or Linux 5.17, the step fails before the command runs rather than keep a partial
+record.
 
 ## Hardening
 
