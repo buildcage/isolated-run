@@ -489,24 +489,29 @@ static __always_inline int mark_file(struct event *e, struct dentry *d, struct v
 	return 0;
 }
 
-static __always_inline u32 file_walk(struct event *e, struct file *file)
+static __always_inline u32 path_walk(struct event *e, struct dentry *d, struct vfsmount *mnt)
 {
-	struct dentry *d = BPF_CORE_READ(file, f_path.dentry);
-	struct vfsmount *mnt = BPF_CORE_READ(file, f_path.mnt);
 	// A memfd's dentry has no parent to walk; its name is the whole of it.
 	if (mark_file(e, d, mnt))
 		return leaf(e, 0, d, &e->n1);
 	return walk(e, 0, d, mnt, &e->n1, &e->truncated);
 }
 
+static __always_inline u32 file_walk(struct event *e, struct file *file)
+{
+	return path_walk(e, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt));
+}
+
 // bpf_d_path fails on a path over PATH_LEN; such a path is spelled from its
 // dentries instead, so the access keeps a name (n1 > 0 tells the reader).
 static __always_inline void file_path(struct event *e, struct file *file)
 {
+	// Marked first: a file unlinked in between keeps d_path's suffix in its
+	// path rather than lose a real one.
+	mark_file(e, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt));
 	long r = bpf_d_path(&file->f_path, e->data, PATH_LEN);
 	e->path_len = r;
 	if (r > 0) {
-		mark_file(e, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt));
 		e->data_len = r;
 		return;
 	}
@@ -699,7 +704,7 @@ int BPF_PROG(on_chmod, const struct path *path, unsigned short mode)
 	if (!e)
 		return 0;
 	e->mode = mode;
-	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
+	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
 	hold(e);
 	return 0;
 }
@@ -732,7 +737,7 @@ int BPF_PROG(on_truncate, const struct path *path)
 	struct event *e = start(K_TRUNCATE);
 	if (!e)
 		return 0;
-	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
+	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
 	hold(e);
 	return 0;
 }
@@ -762,7 +767,7 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 		return 0;
 	e->flags = uid;
 	e->mode = gid;
-	e->data_len = walk(e, 0, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt), &e->n1, &e->truncated);
+	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
 	hold(e);
 	return 0;
 }
@@ -989,12 +994,7 @@ static __always_inline void map_event(struct file *file, struct dentry *d, struc
 	e->flags = flags;
 	u64 id = bpf_get_current_pid_tgid();
 	e->path_len = image && bpf_map_lookup_elem(&in_exec, &id) ? 1 : 0;
-	if (d) {
-		mark_file(e, d, mnt);
-		e->data_len = walk(e, 0, d, mnt, &e->n1, &e->truncated);
-	} else {
-		e->data_len = file_walk(e, file);
-	}
+	e->data_len = d ? path_walk(e, d, mnt) : file_walk(e, file);
 	submit(e);
 }
 

@@ -742,17 +742,33 @@ describe("renderFilesystemAuditSummary", () => {
       expect(lines(md)).toContain("W py /tmp/p (deleted)");
     });
 
-    it("keeps a deleted file and a memfd out of a folded directory", () => {
+    it("folds a deleted file with its siblings but keeps a memfd on its own line", () => {
       const md = render(
         { kind: "write", comm: "a", path: "/srv/d/1" },
         { kind: "write", comm: "a", path: "/srv/d/2" },
-        { kind: "write", comm: "a", path: "/srv/d/3" },
-        { kind: "write", comm: "a", path: "/srv/d/4", deleted: true },
-        { kind: "write", comm: "a", path: "memfd:/srv/d/5", memfd: true },
+        { kind: "write", comm: "a", path: "/srv/d/3", deleted: true },
+        { kind: "write", comm: "a", path: "memfd:/srv/d/4", memfd: true },
       );
-      expect(md).toContain("| W | `/srv/d/**` |");
-      expect(md).toContain("| W | `/srv/d/4` (deleted) |");
-      expect(md).toContain('| W | `memfd:"/srv/d/5"` |');
+      expect(tableRows(md)).toEqual(["| W | `/srv/d/**` |", '| W | `memfd:"/srv/d/4"` |']);
+    });
+
+    it("shows a memfd or deleted file mapped executable whatever its name", () => {
+      const md = render(
+        { kind: "mmap", comm: "a", path: "memfd:libx.so", access: "x", memfd: true },
+        { kind: "mmap", comm: "a", path: "/tmp/liby.so", access: "x", deleted: true },
+      );
+      expect(tableRows(md)).toEqual([
+        "| R | `/tmp/liby.so` (deleted) |",
+        '| R | `memfd:"libx.so"` |',
+      ]);
+    });
+
+    it("leaves out a process's reads of the deleted program it runs", () => {
+      const md = render(
+        { kind: "read", pid: 1, comm: "p", path: "/tmp/p", deleted: true },
+        { kind: "exec", pid: 1, comm: "p", path: "/tmp/p", deleted: true },
+      );
+      expect(tableRows(md)).toEqual(["| X | `/tmp/p` (deleted) |"]);
     });
 
     it("leaves the executed table out when nothing was run", () => {

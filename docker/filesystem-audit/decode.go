@@ -173,16 +173,15 @@ func passed(data []byte, has bool, n int, truncated bool) (string, string) {
 
 // applyMarks sets Memfd or Deleted from the BPF side's marks and drops the
 // " (deleted)" d_path appended (dpath), so Path holds the name alone. Another
-// kernel-internal file, such as a pipe, keeps its path.
+// kernel-internal file, such as a pipe or an io_uring ring, is left relative,
+// as no path leads to it.
 func applyMarks(r *record, marks uint32, dpath bool) {
 	if marks&markInternal != 0 {
 		name := strings.TrimPrefix(r.Path, "/")
 		if dpath {
 			name = strings.TrimSuffix(name, " (deleted)")
 		}
-		if strings.HasPrefix(name, "memfd:") {
-			r.Path, r.Memfd = name, true
-		}
+		r.Path, r.Memfd = name, strings.HasPrefix(name, "memfd:")
 		return
 	}
 	if marks&markUnlinked != 0 {
@@ -266,9 +265,11 @@ func decode(raw []byte) (record, error) {
 		applyMarks(&r, marks, false)
 	case 7: // chmod
 		r.Path, _ = components(data, n1, truncated)
+		applyMarks(&r, marks, false)
 		r.Flags = mode
 	case 11: // chown
 		r.Path, _ = components(data, n1, truncated)
+		applyMarks(&r, marks, false)
 		r.Owner = fmt.Sprintf("%d:%d", flags, mode)
 	case 8: // symlink
 		r.To = cstr(data)

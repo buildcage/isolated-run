@@ -295,6 +295,16 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "write", Comm: "sh", Path: "pipe:[123]"},
 		},
 		{
+			name: "mmap of an io_uring ring",
+			ev:   event{kind: 15, comm: "node", marks: markInternal, n1: 1, data: comps("[io_uring]")},
+			want: record{Kind: "mmap", Comm: "node", Path: "[io_uring]", Access: "r"},
+		},
+		{
+			name: "chmod of a memfd",
+			ev:   event{kind: 7, comm: "py", mode: 0o755, marks: markInternal, n1: 1, data: comps("memfd:x")},
+			want: record{Kind: "chmod", Comm: "py", Path: "memfd:x", Flags: 0o755, Memfd: true},
+		},
+		{
 			name: "write to a deleted file named like a deleted one",
 			ev: event{kind: 14, comm: "sh", marks: markUnlinked,
 				data: []byte("/tmp/x (deleted) (deleted)\x00")},

@@ -124,20 +124,22 @@ function escapeForDisplay(name: string, unsafe = UNSAFE_CHARS): string {
 }
 
 // A memfd and a file deleted while in use key under marks no path can spell,
-// as a name never holds a NUL, so neither folds into a directory nor passes
-// for a file still there.
-const MEMFD = "\0memfd:";
-const DELETED = "\0 (deleted)";
+// as a name never holds a NUL, so neither passes for a file still there.
+const MEMFD_PREFIX = "memfd:";
+const MEMFD = `\0${MEMFD_PREFIX}`;
+const DELETED_MARK = " (deleted)";
+const DELETED = `\0${DELETED_MARK}`;
 
 function marked(r: AuditRecord, path: string): string {
-  if (r.memfd) return MEMFD + path.slice("memfd:".length);
+  if (r.memfd) return MEMFD + path.slice(MEMFD_PREFIX.length);
   return r.deleted ? path + DELETED : path;
 }
 
 // Never folded, nor credited to the directories it names: a path with "..",
-// which may lead elsewhere through a symlink, and a marked one.
+// which may lead elsewhere through a symlink, and a memfd, whose name only
+// looks like a path.
 const unfoldable = (parts: string[], path: string): boolean =>
-  parts.includes("..") || path.includes("\0");
+  parts.includes("..") || path.startsWith(MEMFD);
 
 function normalize(path: string): string {
   // Unify a relative name's "./x" and "x" spellings before anything keys on
@@ -191,8 +193,6 @@ function codeCell(text: string): string {
   const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
   return `${fence}${pad}${text.replace(/\|/g, "\\|")}${pad}${fence}`;
 }
-
-const DELETED_MARK = " (deleted)";
 
 function pathCell({ path, deleted }: Shown): string {
   return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
@@ -671,11 +671,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     loaded.add(keyOf(proc, canonical(path, prefixes)));
     if (library) loaded.add(keyOf(proc, "/etc/ld.so.cache"));
   };
+  // A memfd's or deleted file's name proves nothing about what it holds.
   const isLibraryMap = (r: AuditRecord): boolean =>
     r.kind === "mmap" &&
     r.access === "x" &&
     Boolean(r.path) &&
-    Boolean(r.image || LIBRARY_NAME.test(r.path!));
+    Boolean(r.image || (!r.memfd && !r.deleted && LIBRARY_NAME.test(r.path!)));
 
   const observe = (r: unknown): void => {
     if (!isRecord(r)) return;
@@ -684,13 +685,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       if (r.image) {
         let paths = images.get(proc);
         if (!paths) images.set(proc, (paths = []));
-        paths.push(r.path!);
+        paths.push(marked(r, r.path!));
       } else load(proc, r.path!, true);
     } else if (r.kind === "exec") {
       // The kernel reads these before the exec record, so they count as
       // loaded on both sides of it.
       const next = `${r.pid}/${observed.get(r.pid)}`;
-      for (const path of [...(images.get(proc) ?? []), ...(r.path ? [r.path] : [])]) {
+      for (const path of [...(images.get(proc) ?? []), ...(r.path ? [marked(r, r.path)] : [])]) {
         load(proc, path, false);
         load(next, path, LIBRARY_NAME.test(path));
       }
@@ -776,7 +777,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // shows the mark outside its path.
   const shown = (path: string): Shown => {
     if (path.startsWith(MEMFD)) {
-      return { path: `memfd:"${escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED)}"` };
+      const name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
+      return { path: `${MEMFD_PREFIX}"${name}"` };
     }
     if (!path.endsWith(DELETED)) return { path: escapeForDisplay(relativize(path, prefixes)) };
     const p = relativize(path.slice(0, -DELETED.length), prefixes);

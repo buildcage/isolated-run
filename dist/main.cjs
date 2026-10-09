@@ -68420,11 +68420,11 @@ const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\]/gu, UNSAFE_QUOTED = /[\p{Cc}\
 function escapeForDisplay(name, unsafe = UNSAFE_CHARS) {
 	return name.replace(unsafe, (c) => NAMED_ESCAPES[c] ?? `\\u{${Number(c.codePointAt(0)).toString(16)}}`);
 }
-const MEMFD = "\0memfd:", DELETED = "\0 (deleted)";
+const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, DELETED_MARK = " (deleted)", DELETED = `\0${DELETED_MARK}`;
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
-const unfoldable = (parts, path) => parts.includes("..") || path.includes("\0");
+const unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD);
 function normalize$2(path) {
 	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
 }
@@ -68450,7 +68450,6 @@ function codeCell(text) {
 	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
 	return `${fence}${pad}${text.replace(/\|/g, "\\|")}${pad}${fence}`;
 }
-const DELETED_MARK = " (deleted)";
 function pathCell({ path, deleted }) {
 	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
 }
@@ -68638,17 +68637,17 @@ function createAuditSummary(prefixes) {
 		...prefixes.limits
 	}, limit = limits.bytes, loaded = new Set(), images = new Map(), observed = new Map(), load = (proc, path, library) => {
 		loaded.size >= limits.loads || (loaded.add(keyOf(proc, canonical(path, prefixes))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache")));
-	}, isLibraryMap = (r) => r.kind === "mmap" && r.access === "x" && !!r.path && !!(r.image || LIBRARY_NAME.test(r.path)), observe = (r) => {
+	}, isLibraryMap = (r) => r.kind === "mmap" && r.access === "x" && !!r.path && !!(r.image || !r.memfd && !r.deleted && LIBRARY_NAME.test(r.path)), observe = (r) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(observed, r);
 		if (isLibraryMap(r)) {
 			if (r.image) {
 				let paths = images.get(proc);
-				paths || images.set(proc, paths = []), paths.push(r.path);
+				paths || images.set(proc, paths = []), paths.push(marked(r, r.path));
 			} else load(proc, r.path, !0);
 		} else if (r.kind === "exec") {
 			let next = `${r.pid}/${observed.get(r.pid)}`;
-			for (let path of [...images.get(proc) ?? [], ...r.path ? [r.path] : []]) load(proc, path, !1), load(next, path, LIBRARY_NAME.test(path));
+			for (let path of [...images.get(proc) ?? [], ...r.path ? [marked(r, r.path)] : []]) load(proc, path, !1), load(next, path, LIBRARY_NAME.test(path));
 			images.delete(proc);
 		}
 	}, fanout = prefixes.fanout ?? 3, keep = [
@@ -68701,10 +68700,16 @@ function createAuditSummary(prefixes) {
 			...x,
 			comm: ""
 		});
-	}, shown = (path) => path.startsWith(MEMFD) ? { path: `memfd:"${escapeForDisplay(path.slice(7), UNSAFE_QUOTED)}"` } : path.endsWith(DELETED) ? {
-		path: escapeForDisplay(relativize(path.slice(0, -11), prefixes)),
-		deleted: !0
-	} : { path: escapeForDisplay(relativize(path, prefixes)) }, rows = (lines) => lines?.map(({ comm, path, agg }) => ({
+	}, shown = (path) => {
+		if (path.startsWith(MEMFD)) {
+			let name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
+			return { path: `${MEMFD_PREFIX}"${name}"` };
+		}
+		return path.endsWith(DELETED) ? {
+			path: escapeForDisplay(relativize(path.slice(0, -DELETED.length), prefixes)),
+			deleted: !0
+		} : { path: escapeForDisplay(relativize(path, prefixes)) };
+	}, rows = (lines) => lines?.map(({ comm, path, agg }) => ({
 		agg,
 		flags: fmtFlags(agg),
 		comm: escapeForDisplay(comm),
