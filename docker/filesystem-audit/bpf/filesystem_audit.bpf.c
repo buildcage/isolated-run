@@ -153,8 +153,14 @@ struct event {
 // Keeps struct event in BTF for bpf2go's -type.
 const struct event *unused_event __attribute__((unused));
 
-const volatile u64 target_cgid = 0;
-const volatile u32 target_level = 0;
+// The watched cgroup, set by the loader. Descent is checked in the kernel's
+// own hierarchy, whatever cgroup namespace the loader runs in.
+struct {
+	__uint(type, BPF_MAP_TYPE_CGROUP_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, u32);
+} target SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -203,7 +209,7 @@ struct {
 
 static __always_inline int in_target(void)
 {
-	return bpf_get_current_ancestor_cgroup_id(target_level) == target_cgid;
+	return bpf_current_task_under_cgroup(&target, 0) == 1;
 }
 
 static __always_inline struct event *start(u32 kind)
