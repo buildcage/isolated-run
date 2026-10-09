@@ -232,33 +232,80 @@ export const keyOf = (comm: string, path: string): string => `${comm}${SEP}${pat
 const commOf = (key: string): string => key.slice(0, key.indexOf(SEP));
 const pathOf = (key: string): string => key.slice(key.indexOf(SEP) + 1);
 
+// A directory in a tree of paths keyed by component, so no ancestor's whole
+// path is ever spelled out: doing that at every level costs the square of a
+// path's depth.
+interface DirNode {
+  kids: Map<string, DirNode>;
+  /** The flags of the lines below it, for dropWalkedDirs. */
+  below?: Set<string>;
+}
+
+// A path's components as tree keys, "/" first for an absolute path, which
+// no component of a relative one can be.
+function components(p: string): string[] {
+  if (p === "/") return ["/"];
+  return p.startsWith("/") ? ["/", ...p.slice(1).split("/")] : p.split("/");
+}
+
+// The path of the directory named by parts[0..end).
+function spell(parts: string[], end: number): string {
+  return parts[0] === "/" ? `/${parts.slice(1, end).join("/")}` : parts.slice(0, end).join("/");
+}
+
+// Adds the path to the tree, calling visit on each directory above it.
+function addPath(top: Map<string, DirNode>, parts: string[], visit?: (dir: DirNode) => void): void {
+  let kids = top;
+  for (let i = 0; i < parts.length; i++) {
+    let node = kids.get(parts[i]);
+    if (!node) kids.set(parts[i], (node = { kids: new Map() }));
+    if (i < parts.length - 1) visit?.(node);
+    kids = node.kids;
+  }
+}
+
+function findPath(top: Map<string, DirNode> | undefined, parts: string[]): DirNode | undefined {
+  let node: DirNode | undefined;
+  for (const part of parts) {
+    node = top?.get(part);
+    top = node?.kids;
+  }
+  return node;
+}
+
 // Maps each path to the line that stands for it: itself, or an ancestor
 // "dir/**" once that ancestor has fanout or more children that saw events.
 // A path spelled with ".." may lead outside the directories it names, through
 // a symlink, so it is never folded into them or credited to them.
-const climbs = (p: string): boolean => p.split("/").includes("..");
-
 function collapse(paths: Set<string>, fanout: number, keep: Set<string>): Map<string, string> {
-  const children = new Map<string, Set<string>>();
+  const top = new Map<string, DirNode>();
+  const split = new Map<string, string[]>(); // the paths not spelled with ".."
   for (const p of paths) {
-    if (climbs(p)) continue;
-    const parts = p.split("/");
-    for (let i = 1; i < parts.length; i++)
-      addFlag(children, parts.slice(0, i).join("/") || "/", parts[i]);
+    const parts = components(p);
+    if (parts.includes("..")) continue;
+    split.set(p, parts);
+    addPath(top, parts);
+  }
+  const kept = new Set<DirNode>();
+  for (const k of keep) {
+    const node = findPath(top, components(k));
+    if (node) kept.add(node);
   }
   const shown = new Map<string, string>();
   for (const p of paths) {
-    const parts = p.split("/");
+    const parts = split.get(p);
     let line = p;
-    if (!climbs(p))
+    if (parts) {
+      // Every node on the way was added in the loop above.
+      let node = top.get(parts[0])!;
       for (let i = 1; i < parts.length; i++) {
-        const d = parts.slice(0, i).join("/") || "/";
-        // d was added to children in the loop above, so it is always present.
-        if (!keep.has(d) && children.get(d)!.size >= fanout) {
-          line = `${d}/**`;
+        if (!kept.has(node) && node.kids.size >= fanout) {
+          line = `${spell(parts, i)}/**`;
           break;
         }
+        node = node.kids.get(parts[i])!;
       }
+    }
     shown.set(p, line);
   }
   // A bare "dir" that also has a "dir/**" folds into it.
@@ -279,25 +326,31 @@ export function dropWalkedDirs(
   flagsOf: (line: string) => Iterable<string>,
 ): Set<string> {
   const base = (p: string): string => (p.endsWith("/**") ? p.slice(0, -3) : p);
-  const below = new Map<string, Set<string>>();
+  const trees = new Map<string, Map<string, DirNode>>();
+  const flagsByLine = new Map<string, string[]>();
   for (const d of lines) {
-    const path = base(pathOf(d));
-    if (path === "/" || climbs(path)) continue; // nothing above the root, or not known to be
-    const comm = commOf(d);
     const flags = [...flagsOf(d)];
-    // Each "/" ends an ancestor's path; the one at index 0 is the root.
-    for (let i = path.lastIndexOf("/"); i >= 0; i = i > 0 ? path.lastIndexOf("/", i - 1) : -1) {
-      const dir = keyOf(comm, i === 0 ? "/" : path.slice(0, i));
-      let acc = below.get(dir);
-      if (!acc) below.set(dir, (acc = new Set()));
-      for (const c of flags) acc.add(c);
-    }
+    flagsByLine.set(d, flags);
+    const parts = components(base(pathOf(d)));
+    // The root has nothing above it, and a path with ".." is not known to sit
+    // under the directories it names.
+    if (parts.length === 1 && parts[0] === "/") continue;
+    if (parts.includes("..")) continue;
+    let top = trees.get(commOf(d));
+    if (!top) trees.set(commOf(d), (top = new Map()));
+    addPath(top, parts, (dir) => {
+      dir.below ??= new Set();
+      for (const c of flags) dir.below.add(c);
+    });
   }
   const kept = new Set<string>();
   for (const l of lines) {
-    const acc = below.get(l);
-    const walked = !pathOf(l).endsWith("/**") && acc && [...flagsOf(l)].every((c) => acc.has(c));
-    if (!walked) kept.add(l);
+    const path = pathOf(l);
+    const node = path.endsWith("/**")
+      ? undefined
+      : findPath(trees.get(commOf(l)), components(path));
+    const below = node?.below;
+    if (!below || !flagsByLine.get(l)!.every((c) => below.has(c))) kept.add(l);
   }
   return kept;
 }
