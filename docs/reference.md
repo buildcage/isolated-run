@@ -1037,8 +1037,10 @@ the one thing that mode exists to prevent. The sentinel is the literal `/` only:
 > than the read-only restriction:
 >
 > - All of `/run` is reachable again, which leaves the outbound restriction nearly pointless. On a
->   GitHub-hosted runner the runner user can use the Docker socket there to start a container on
->   the host network, past the proxy.
+>   GitHub-hosted runner the `systemd --user` bus is there. The command cannot open the Docker
+>   socket itself, since it runs without the runner's supplementary groups, but a unit it starts
+>   through that bus has them all, `docker` included, and reaches the network past the proxy,
+>   directly or from a container on the host network.
 > - `docker`, `sudo` and, under `inspect`, `keytool` are taken from the first match on `$PATH` even
 >   where the command can write, so the host may later run a copy the command replaced. `docker`
 >   also looks for its `docker-credential-*` helpers on the whole `$PATH`, where the command can
