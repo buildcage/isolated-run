@@ -384,6 +384,17 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["R c /w/a", "R c /w/b"]);
   });
 
+  it("folds relative names apart from absolute ones", () => {
+    const md = render(
+      { kind: "open-failed", comm: "c", path: "./", err: 2 },
+      { kind: "read", comm: "c", path: "/etc/hosts" },
+      { kind: "open-failed", comm: "c", path: "d/1", err: 2 },
+      { kind: "open-failed", comm: "c", path: "d/2", err: 2 },
+      { kind: "open-failed", comm: "c", path: "d/3", err: 2 },
+    );
+    expect(lines(md)).toEqual(["R c /etc/hosts", "r c …/", "r c …/d/**"]);
+  });
+
   it("renders paths thousands of components deep without stalling", () => {
     const deep = `/work/${"a/".repeat(2000)}`;
     const records = Array.from({ length: 500 }, (_, i) => ({
@@ -393,7 +404,7 @@ describe("renderFilesystemAuditSummary", () => {
       err: 2,
     }));
     expect(lines(render(...records))).toEqual([`r c ./${"a/".repeat(2000)}**`]);
-  });
+  }, 3000); // the quadratic version took over 30 s
 
   it("keeps a path the tracer could not walk to the top", () => {
     const md = render({ kind: "unlink", comm: "rm", path: "…/deep/x", err: 2 });
