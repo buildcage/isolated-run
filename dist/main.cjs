@@ -68410,7 +68410,7 @@ function classify(r) {
 		failed
 	} : void 0;
 }
-const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\]/gu, UNSAFE_QUOTED = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\"]/gu, NAMED_ESCAPES = {
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\`, UNSAFE_CHARS = RegExp(`[${UNSAFE}]`, "gu"), UNSAFE_QUOTED = RegExp(`[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
 	"\n": "\\n",
 	"\r": "\\r",
 	"	": "\\t",
@@ -68424,7 +68424,7 @@ const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, DELETED_MARK = " (de
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
-const unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD);
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD);
 function normalize$2(path) {
 	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
 }
@@ -68647,7 +68647,7 @@ function createAuditSummary(prefixes) {
 			} else load(proc, r.path, !0);
 		} else if (r.kind === "exec") {
 			let next = `${r.pid}/${observed.get(r.pid)}`;
-			for (let path of [...images.get(proc) ?? [], ...r.path ? [marked(r, r.path)] : []]) load(proc, path, !1), load(next, path, LIBRARY_NAME.test(path));
+			for (let path of [...images.get(proc) ?? [], ...r.path ? [marked(r, r.path)] : []]) load(proc, path, !1), load(next, path, LIBRARY_NAME.test(unmarked(path)));
 			images.delete(proc);
 		}
 	}, fanout = prefixes.fanout ?? 3, keep = [

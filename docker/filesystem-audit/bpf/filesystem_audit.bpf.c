@@ -397,6 +397,23 @@ static __always_inline u32 leaf(struct event *e, u32 off, struct dentry *d, u8 *
 	return off + r;
 }
 
+#define MNT_INTERNAL 0x4000
+#define MARK_INTERNAL 1 // on a kernel-internal mount, as a memfd is
+#define MARK_UNLINKED 2 // deleted, or an O_TMPFILE never linked
+
+// Marks a file as d_path would show it (the unlinked test is d_unlinked's),
+// and reports whether it is kernel-internal.
+static __always_inline int mark_file(struct event *e, struct dentry *d, struct vfsmount *mnt)
+{
+	if (BPF_CORE_READ(mnt, mnt_flags) & MNT_INTERNAL) {
+		e->marks |= MARK_INTERNAL;
+		return 1;
+	}
+	if (!BPF_CORE_READ(d, d_hash.pprev) && BPF_CORE_READ(d, d_parent) != d)
+		e->marks |= MARK_UNLINKED;
+	return 0;
+}
+
 // A relative name in a syscall resolves against dfd: the calling task's
 // working directory for AT_FDCWD, else that open directory. Appends the
 // directory's leaf-first components at off and sets bit in e->bases, or
@@ -426,6 +443,10 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 	if (!d || !m)
 		return off;
 	e->bases |= bit;
+	// The reader applies the mark only where the path is the descriptor's own
+	// file (futimens).
+	if (mark_file(e, d, m))
+		return leaf(e, off, d, n);
 	return walk(e, off, d, m, n, trunc);
 }
 
@@ -469,23 +490,6 @@ static __always_inline int first_time(struct file *file, u8 bit)
 	if (bpf_map_update_elem(&seen_files, &key, &bit, BPF_ANY) == 0)
 		return 1;
 	bump(&untracked);
-	return 0;
-}
-
-#define MNT_INTERNAL 0x4000
-#define MARK_INTERNAL 1 // on a kernel-internal mount, as a memfd is
-#define MARK_UNLINKED 2 // deleted, or an O_TMPFILE never linked
-
-// Marks a file as d_path would show it (the unlinked test is d_unlinked's),
-// and reports whether it is kernel-internal.
-static __always_inline int mark_file(struct event *e, struct dentry *d, struct vfsmount *mnt)
-{
-	if (BPF_CORE_READ(mnt, mnt_flags) & MNT_INTERNAL) {
-		e->marks |= MARK_INTERNAL;
-		return 1;
-	}
-	if (!BPF_CORE_READ(d, d_hash.pprev) && BPF_CORE_READ(d, d_parent) != d)
-		e->marks |= MARK_UNLINKED;
 	return 0;
 }
 
@@ -721,6 +725,7 @@ int BPF_PROG(on_link, struct dentry *old_dentry, const struct path *new_dir,
 	if (!e)
 		return 0;
 	struct vfsmount *mnt = BPF_CORE_READ(new_dir, mnt); // link(2) stays on one mount
+	mark_file(e, old_dentry, mnt); // an O_TMPFILE given its first name
 	u32 off = walk(e, 0, old_dentry, mnt, &e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
 	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), mnt, &e->n2, &e->trunc2);

@@ -105,9 +105,10 @@ function classify(r: AuditRecord): Classified | undefined {
 // close the code block and write Markdown of its own into the Job Summary.
 // Format and separator characters are escaped too, since they can make one
 // path read as another, and a backslash so each escape reads one way only.
-const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\]/gu;
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\`;
+const UNSAFE_CHARS = new RegExp(`[${UNSAFE}]`, "gu");
 // A name shown inside quotes escapes the quote too.
-const UNSAFE_QUOTED = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\"]/gu;
+const UNSAFE_QUOTED = new RegExp(`[${UNSAFE}"]`, "gu");
 const NAMED_ESCAPES: Record<string, string> = {
   "\n": "\\n",
   "\r": "\\r",
@@ -134,6 +135,9 @@ function marked(r: AuditRecord, path: string): string {
   if (r.memfd) return MEMFD + path.slice(MEMFD_PREFIX.length);
   return r.deleted ? path + DELETED : path;
 }
+
+const unmarked = (path: string): string =>
+  path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path;
 
 // Never folded, nor credited to the directories it names: a path with "..",
 // which may lead elsewhere through a symlink, and a memfd, whose name only
@@ -693,7 +697,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const next = `${r.pid}/${observed.get(r.pid)}`;
       for (const path of [...(images.get(proc) ?? []), ...(r.path ? [marked(r, r.path)] : [])]) {
         load(proc, path, false);
-        load(next, path, LIBRARY_NAME.test(path));
+        load(next, path, LIBRARY_NAME.test(unmarked(path)));
       }
       images.delete(proc);
     }

@@ -295,6 +295,24 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "write", Comm: "sh", Path: "pipe:[123]"},
 		},
 		{
+			name: "attr through a memfd's descriptor (futimens)",
+			ev: event{kind: 20, comm: "touch", bases: 1, mode: 1, marks: markInternal,
+				data: append([]byte("\x00"), comps("memfd:x")...)},
+			want: record{Kind: "attr", Comm: "touch", Path: "memfd:x", Memfd: true},
+		},
+		{
+			name: "attr on a name under a deleted directory keeps it unmarked",
+			ev: event{kind: 20, comm: "touch", bases: 1, mode: 2, marks: markUnlinked,
+				data: append([]byte("f\x00"), comps("d", "tmp")...)},
+			want: record{Kind: "attr", Comm: "touch", Path: "/tmp/d/f", Name: "f"},
+		},
+		{
+			name: "link of an O_TMPFILE",
+			ev: event{kind: 9, comm: "py", marks: markUnlinked, n1: 2, n2: 2,
+				data: append(comps("#12", "tmp"), comps("x", "tmp")...)},
+			want: record{Kind: "link", Comm: "py", Path: "/tmp/#12", To: "/tmp/x", Deleted: true},
+		},
+		{
 			name: "mmap of an io_uring ring",
 			ev:   event{kind: 15, comm: "node", marks: markInternal, n1: 1, data: comps("[io_uring]")},
 			want: record{Kind: "mmap", Comm: "node", Path: "[io_uring]", Access: "r"},

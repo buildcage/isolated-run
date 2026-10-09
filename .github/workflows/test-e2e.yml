@@ -297,8 +297,9 @@ jobs:
           ! grep -q '/dev/zero' "$f"
           ! grep -q '/usr/bin/dash' "$f"
           # Run without a path: a memfd by its quoted name, a deleted file marked.
-          grep -qF '| `memfd:"probe-memfd"` |' "$f"
-          grep -qF '| `./gone-bin` (deleted) |' "$f"
+          sed -n '/^#### Executed/,/^#### Accessed/p' "$f" > executed.md
+          grep -qF '| `memfd:"probe-memfd"` |' executed.md
+          grep -qF '| `./gone-bin` (deleted) |' executed.md
           # buildcage's own wrappers must never reach the summary.
           ! grep -qE ' (setpriv|buildcage-init|run-script\.sh) ' "$f"
 

@@ -284,6 +284,7 @@ func decode(raw []byte) (record, error) {
 		var rest []byte
 		r.Path, rest = components(data, n1, truncated)
 		r.To, _ = components(rest, n2, truncated2)
+		applyMarks(&r, marks, false)
 	case 16, 18, 19: // failed delete / chmod / chown
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet
@@ -314,6 +315,10 @@ func decode(raw []byte) (record, error) {
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
+	}
+	// futimens names no file, so its path is the descriptor's own.
+	if (kind == 20 || kind == 21) && cstr(data) == "" {
+		applyMarks(&r, marks, false)
 	}
 	return r, nil
 }
