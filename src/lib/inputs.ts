@@ -215,8 +215,8 @@ export function readAwsKeyInputs(
   // does not show can never be what turns the check off.
   if (roleAccounts.length > 0 && !check) {
     throw new SandboxError(
-      "allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts " +
-        "from the workflow or config_file that names them.",
+      "allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts. " +
+        "A workflow cannot clear accounts its config_file names: use a file without them.",
       "AWS_KEY_CHECK_NOT_SET",
     );
   }

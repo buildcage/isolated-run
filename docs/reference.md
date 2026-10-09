@@ -656,7 +656,7 @@ account. `allowed_aws_role_accounts` takes 12-digit AWS account IDs, separated b
 or newlines, with `#` comments as in the rule inputs: a key STS issues through `AssumeRole` or
 `AssumeRoleWithWebIdentity` for a role in one of these accounts passes too, and with no account
 named no such key does. Any account named needs `aws_key_check: true`, from the workflow or a config
-file; unset or `false`, the step fails. Set in the workflow, `allowed_aws_role_accounts` replaces a
+file; unset or `false`, the step fails, in `audit` too. Set in the workflow, `allowed_aws_role_accounts` replaces a
 config file's value. Quote an account ID that begins with `0`, which YAML otherwise reads as a
 number. An unsigned request is left to the URL rules where the host names the resource it is for,
 such as an S3 bucket or an ECR registry, and refused everywhere else but an
