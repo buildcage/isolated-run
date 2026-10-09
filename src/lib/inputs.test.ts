@@ -298,12 +298,13 @@ describe("readAwsKeyInputs", () => {
   });
 
   it.each([
-    ["unset", {}],
-    ["false", { aws_key_check: "false" }],
-  ])("refuses role accounts with aws_key_check %s", (_, check) => {
+    ["unset", "restrict", {}],
+    ["false", "restrict", { aws_key_check: "false" }],
+    ["unset", "audit", {}],
+  ] as const)("refuses role accounts with aws_key_check %s in %s", (_, proxyMode, check) => {
     expect(() =>
       readAwsKeyInputs(
-        inspect,
+        { proxyEngine: "universal", proxyMode },
         { AWS_ACCESS_KEY_ID: KEY },
         silent,
         inputs({ ...check, allowed_aws_role_accounts: "111111111111" }),

@@ -211,12 +211,12 @@ export function readAwsKeyInputs(
     );
   }
   const check = readBooleanInput("aws_key_check", false, getInput);
-  // Not a default that follows the accounts: a config_file's false would then
-  // switch off accounts the workflow names, which the workflow cannot show.
+  // Required rather than implied by the accounts, so a config_file the workflow
+  // does not show can never be what turns the check off.
   if (roleAccounts.length > 0 && !check) {
     throw new SandboxError(
-      "allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove " +
-        "allowed_aws_role_accounts.",
+      "allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts " +
+        "from the workflow or config_file that names them.",
       "AWS_KEY_CHECK_NOT_SET",
     );
   }
