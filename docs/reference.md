@@ -683,10 +683,9 @@ These are refusals like `not-allowed`: they are in **🚫 Blocked Hosts** and fa
 host or URL whatever the reason, and in `restrict` the report no longer links to
 [Troubleshooting](./aws.md#troubleshooting) once every one is expected. In `audit` mode nothing is
 refused: a warning annotation counts the requests `restrict` would have refused, and the report
-shows the first of them for each host and reason under **🚨 Restrict Would Refuse**, ending in
-`(restrict would refuse: <reason>)` and the count of the rest, and `aws-key-not-allowed` once for
-each key. **Communication details** and the
-traffic artifact list them among the other requests.
+shows the first of them for each host and reason, or for each key under `aws-key-not-allowed`,
+under **🚨 Restrict Would Refuse**, ending in `(restrict would refuse: <reason>)` and the count of
+the rest. **Communication details** and the traffic artifact list them among the other requests.
 
 ## Traffic artifact
 

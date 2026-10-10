@@ -221,7 +221,7 @@ function withWouldRefuseGrouped(
     "or for each key under `aws-key-not-allowed`.";
   if (
     extraInputs?.some((l) => l.endsWith(ASSUMED_ACCOUNT_MARK)) &&
-    counts.some((events) => events[0].wouldRefuse?.startsWith(keyNotAllowed))
+    report.timeline.some((e) => e.wouldRefuse === keyNotAllowed)
   ) {
     note +=
       " The Switch to restrict mode example marks an account `# assumed in this run`: requests " +

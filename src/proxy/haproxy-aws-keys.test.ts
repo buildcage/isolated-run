@@ -414,11 +414,11 @@ describe("the traffic record", () => {
   });
 
   it("references the key of every request signed with one, whatever the verdict", () => {
-    const ref = `'var(txn.aws_key),hmac(sha256,${REF_SECRET}),bytes(0,4),hex,lower'`;
+    const ref = `'var(txn.aws_key),hmac(sha256,${REF_SECRET}),bytes(0,8),hex,lower'`;
     for (const mode of ["restrict", "audit"] as const) {
       expect(
         awsKeyRequestRules(CHECK, mode).includes(
-          `    http-request set-var(txn.aws_log_key_ref) ${ref} if { var(txn.aws_key) -m reg ^[A-Z0-9]{16,128}$ }`,
+          `    http-request set-var(txn.aws_log_key_ref) ${ref} if { var(txn.aws_key) -m reg ^[A-Za-z0-9]+$ }`,
         ),
       ).toBe(true);
     }
@@ -432,7 +432,7 @@ describe("the traffic record", () => {
     ]) {
       expect(
         response.includes(
-          `    http-response set-var(txn.aws_log_issued_ref) 'var(${variable}),hmac(sha256,${REF_SECRET}),bytes(0,4),hex,lower' if ${acl}`,
+          `    http-response set-var(txn.aws_log_issued_ref) 'var(${variable}),hmac(sha256,${REF_SECRET}),bytes(0,8),hex,lower' if ${acl}`,
         ),
       ).toBe(true);
     }

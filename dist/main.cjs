@@ -73183,7 +73183,7 @@ function withWouldRefuseGrouped(blocks, report, extraInputs) {
 		let rest = counts[i].length - 1;
 		return line.replace(/^(\S+) \S+: /, "$1 ") + (rest > 0 ? ` (+${rest} more)` : "");
 	}), note = "Requests audit let through that restrict would refuse, the first for each host and reason, or for each key under `aws-key-not-allowed`.";
-	extraInputs?.some((l) => l.endsWith(" # assumed in this run, check it is yours")) && counts.some((events) => events[0].wouldRefuse?.startsWith(keyNotAllowed)) && (note += " The Switch to restrict mode example marks an account `# assumed in this run`: requests signed with the keys of its roles show here as `aws-key-not-allowed` until it is listed, so check it first.");
+	extraInputs?.some((l) => l.endsWith(" # assumed in this run, check it is yours")) && report.timeline.some((e) => e.wouldRefuse === keyNotAllowed) && (note += " The Switch to restrict mode example marks an account `# assumed in this run`: requests signed with the keys of its roles show here as `aws-key-not-allowed` until it is listed, so check it first.");
 	let { text } = blocks[at], before = `${text.slice(0, text.indexOf("###"))}### 🚨 Restrict Would Refuse\n\n<sub>*${note}*</sub>\n\n`;
 	return blocks.with(at, {
 		...blocks[at],

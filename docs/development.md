@@ -229,7 +229,8 @@ the reason `restrict` would have refused the request for (`aws-key-not-allowed`,
 `aws-role-not-allowed`), and
 `-` otherwise. `restrict` logs the same reasons as `reason=`. Then come `aws.key=`,
 `aws.accountId=`, `aws.assumedAccount=`, `aws.keyRef=` and `aws.issuedKeyRef=`, which the parser
-reads back as the traffic artifact's `aws` object, each `-` where it has no value. See [AWS access key check](./aws.md).
+reads back as the traffic artifact's `aws` object, each `-` where it has no value. See
+[AWS access key check](./aws.md).
 
 `ts` is HAProxy's termination state and `reason` the refusal reason where the rule that refused
 knew one the line could not otherwise show. `tlserr` carries haproxy's own error from the handshake

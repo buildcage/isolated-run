@@ -128,7 +128,7 @@ const REF_SECRET = /^[A-Za-z0-9+/]{40}$/;
  *  same for a key throughout a run, and unrelated across runs. */
 function keyRef(variable: string, secret: string): string {
   if (!REF_SECRET.test(secret)) throw new Error("invalid AWS key reference secret");
-  return `'var(${variable}),hmac(sha256,${secret}),bytes(0,4),hex,lower'`;
+  return `'var(${variable}),hmac(sha256,${secret}),bytes(0,8),hex,lower'`;
 }
 
 /** The check as the inspect stage takes it. */
@@ -205,7 +205,7 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     `    http-request set-var(txn.aws_git_user) 'req.fhdr(authorization),regsub("^basic\\s+","",i),b64dec,regsub(":.*$","")' if aws_git`,
     '    http-request set-var(txn.aws_key) \'var(txn.aws_git_user),regsub("%.*$","")\' if aws_git',
     "    # A static Git credential's user name is no key ID.",
-    `    http-request set-var(txn.aws_log_key_ref) ${keyRef("txn.aws_key", check.refSecret)} if { var(txn.aws_key) -m reg ^[A-Z0-9]{16,128}$ }`,
+    `    http-request set-var(txn.aws_log_key_ref) ${keyRef("txn.aws_key", check.refSecret)} if { var(txn.aws_key) -m reg ^[A-Za-z0-9]+$ }`,
     "    # Unsigned, whatever the method, only where the host names a resource:",
     "    # elsewhere the account a request reaches is in the parameters or the",
     "    # body, out of sight. Git asks CodeCommit with no credential first, and",
