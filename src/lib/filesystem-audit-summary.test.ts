@@ -384,6 +384,24 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["R c /w/a", "R c /w/b"]);
   });
 
+  it("never folds a directory above a kept one, however many children it has", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "read", comm: "c", path: "/h/work/r/r/a" },
+        { kind: "read", comm: "c", path: "/h/work/_temp/out" },
+        { kind: "read", comm: "c", path: "/h/work/_actions/x" },
+        { kind: "read", comm: "c", path: "/h/work/_tool/y" },
+      ),
+      { workspace: ["/h/work/r/r"], home: ["/h"] },
+    );
+    expect(lines(md)).toEqual([
+      "R c ./a",
+      "R c ~/work/_actions/x",
+      "R c ~/work/_temp/out",
+      "R c ~/work/_tool/y",
+    ]);
+  });
+
   it("folds relative names apart from absolute ones", () => {
     const md = render(
       { kind: "open-failed", comm: "c", path: "./", err: 2 },

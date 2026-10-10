@@ -491,9 +491,10 @@ class Lines {
     }
   }
 
+  // A kept directory's ancestors are kept too, or folding one would hide it.
   private isKept(parts: string[], depth: number): boolean {
     return this.opts.keep.some(
-      (k) => k.length === depth && k.every((part, i) => part === parts[i]),
+      (k) => k.length >= depth && k.every((part, i) => i >= depth || part === parts[i]),
     );
   }
 
