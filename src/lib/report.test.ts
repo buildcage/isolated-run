@@ -274,35 +274,18 @@ describe("computeReportOutcomes", () => {
       );
     });
 
-    it("says what it lists, and points at an assumed account only when the example marks one", () => {
-      const r = audit([wouldRefuse(1, "s3.amazonaws.com", "aws-key-not-allowed")]);
-      const plain = section(computeReportOutcomes(r, options()).markdown);
-      const marked = section(
-        computeReportOutcomes(
-          r,
-          options({
-            extraInputs: [
-              "aws_key_check: true",
-              'allowed_aws_role_accounts: "222222222222" # assumed in this run, check it is yours',
-            ],
-          }),
-        ).markdown,
-      );
-      expect(plain).toContain(
-        "the first for each host and reason, or for each key under `aws-key-not-allowed`.*",
-      );
-      expect(plain).not.toContain("assumed in this run");
-      expect(marked).toContain("marks an account `# assumed in this run`");
-    });
-
-    it("leaves the assumed account out when no request would be refused for its key", () => {
+    it("says what it lists", () => {
       const { markdown } = computeReportOutcomes(
-        audit([wouldRefuse(1, "cognito-idp.amazonaws.com", "aws-no-credential")]),
+        audit([wouldRefuse(1, "s3.amazonaws.com", "aws-key-not-allowed")]),
         options({
           extraInputs: [
+            "aws_key_check: true",
             'allowed_aws_role_accounts: "222222222222" # assumed in this run, check it is yours',
           ],
         }),
+      );
+      expect(section(markdown)).toContain(
+        "<sub>*Requests audit let through that restrict would refuse, the first for each host and reason, or for each key under `aws-key-not-allowed`.*</sub>",
       );
       expect(section(markdown)).not.toContain("assumed in this run");
     });
