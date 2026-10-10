@@ -377,7 +377,7 @@ jobs:
           if grep -q '/var/tmp/buildcage-' "$f"; then exit 1; fi
           if grep -q 'buildcage-audit-sentinel-arg' "$f"; then exit 1; fi
 
-      - name: The tracer and the sandbox's cgroup are gone once the step is
+      - name: The tracer and the sandbox's cgroup are gone after the step
         run: |
           if pgrep -x filesystem-audi; then echo "::error::the tracer outlived its step"; exit 1; fi
           cg="/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup)"
@@ -389,7 +389,8 @@ jobs:
         run: |
           base="/var/tmp/buildcage-$(id -u)"
           rec=$(ls "$base"/filesystem-audit-*.jsonl | head -1)
-          suffix=$(basename "$rec" | sed -E 's/^filesystem-audit-([0-9a-f]{8})\..*/\1/')
+          suffix=$(basename "$rec" | sed -nE 's/^filesystem-audit-([0-9a-f]{8})\..*/\1/p')
+          if [ -z "$suffix" ]; then echo "::error::no recording left for the post step"; exit 1; fi
           STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs
           if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
 
@@ -416,7 +417,7 @@ jobs:
           filesystem_audit: record
           run: touch "$GITHUB_WORKSPACE/should-not-run"
 
-      - name: The step failed before its command, and left no tracer or cgroup
+      - name: The step failed before its command, and left no tracer, cgroup or file
         env:
           OUTCOME: ${{ steps.unstarted.outcome }}
         run: |
@@ -425,6 +426,9 @@ jobs:
           if pgrep -x filesystem-audi; then echo "::error::the tracer outlived its step"; exit 1; fi
           cg="/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup)"
           if ls -d "$cg"/buildcage-proxy-* 2>/dev/null; then echo "::error::the sandbox's cgroup was left"; exit 1; fi
+          if ls "/var/tmp/buildcage-$(id -u)"/filesystem-audit-* 2>/dev/null; then
+            echo "::error::the failed start left the audit's files"; exit 1
+          fi
 
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network), proves proxy_engine: universal

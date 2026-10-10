@@ -70359,8 +70359,11 @@ function defaultSpawn$1(command, args) {
 		reason: reason.value
 	};
 }
-function defaultSleep(ms) {
-	return new Promise((resolve) => setTimeout(resolve, ms).unref());
+function defaultSleep(ms, detached = !1) {
+	return new Promise((resolve) => {
+		let t = setTimeout(resolve, ms);
+		detached && t.unref();
+	});
 }
 function defaultRemove(path) {
 	(0, node_fs.rmSync)(path, { force: !0 });
@@ -70420,7 +70423,7 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		let grace = () => untilRecorded && !cancel?.aborted ? 3e4 : 2e3;
 		for (let waited = 0; !exited; waited += 100) {
 			if (untilRecorded && recordComplete(readTail, outPath)) {
-				Promise.race([child.exited, sleep(1e4)]).then(() => (exited || kill(), child.exited)).then(() => remove(pidFilePath)).catch(() => {});
+				Promise.race([child.exited, sleep(1e4, !0)]).then(() => (exited || kill(), child.exited)).then(() => remove(pidFilePath)).catch(() => {});
 				return;
 			}
 			if (waited >= grace()) break;

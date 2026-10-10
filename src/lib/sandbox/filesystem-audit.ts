@@ -152,7 +152,8 @@ export interface FilesystemAuditDeps {
   chmod?: (path: string, mode: number) => void;
   spawn?: SpawnAudit;
   exists?: (path: string) => boolean;
-  sleep?: (ms: number) => Promise<void>;
+  /** detached: a backstop that must not hold the action process open. */
+  sleep?: (ms: number, detached?: boolean) => Promise<void>;
   remove?: (path: string) => void;
   readFile?: (path: string) => string;
   /** The last few hundred bytes of a file. */
@@ -199,10 +200,14 @@ function defaultSpawn(command: string, args: string[]): AuditChild {
   return { exited, kill: (signal) => child.kill(signal), reason: reason.value };
 }
 
-function defaultSleep(ms: number): Promise<void> {
-  // unref so the grace timer, once it has lost the race in stop(), does not
-  // hold the action process open for its full duration.
-  return new Promise((resolve) => setTimeout(resolve, ms).unref());
+function defaultSleep(ms: number, detached = false): Promise<void> {
+  // A wait the action is in the middle of holds the process open, or Node
+  // would exit with status 0 mid-await once the tracer has gone. Only a
+  // backstop raced against the tracer's exit lets it go.
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    if (detached) t.unref();
+  });
 }
 
 function defaultRemove(path: string): void {
@@ -339,7 +344,7 @@ export async function startFilesystemAudit(
     const grace = () => (untilRecorded && !cancel?.aborted ? STOP_GRACE_MS : SHORT_STOP_GRACE_MS);
     for (let waited = 0; !exited; waited += READY_POLL_MS) {
       if (untilRecorded && recordComplete(readTail, outPath)) {
-        void Promise.race([child.exited, sleep(DETACH_GRACE_MS)])
+        void Promise.race([child.exited, sleep(DETACH_GRACE_MS, true)])
           .then(() => {
             if (!exited) kill();
             return child.exited;
