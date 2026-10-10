@@ -106,6 +106,7 @@ struct task_struct {
 	u64 start_time;
 	u64 self_exec_id;
 	int tgid;
+	char comm[16];
 	struct fs_struct *fs;
 	struct files_struct *files;
 	struct nsproxy *nsproxy;
@@ -269,7 +270,9 @@ static __always_inline struct event *start(u32 kind)
 	e->truncated = 0;
 	e->trunc2 = 0;
 	e->marks = 0;
-	bpf_get_current_comm(e->comm, sizeof(e->comm));
+	// The process's name, as ps shows it, not the thread's: a JVM or tokio
+	// worker thread names itself after its pool.
+	BPF_CORE_READ_STR_INTO(&e->comm, t, group_leader, comm);
 	e->err = 0;
 	e->ts = bpf_ktime_get_boot_ns();
 	return e;
