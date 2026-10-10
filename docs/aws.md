@@ -116,7 +116,7 @@ neither a known key nor an allowed account is `aws-key-not-allowed`, and a reque
 | ---------------------------------------------------------------------------------------------------------------- | ---------------------------- |
 | Signed with a known key                                                                                          | allowed                      |
 | Signed with any other key                                                                                        | `aws-key-not-allowed`        |
-| Unsigned, to a host that names its resource (below)                                                              | allowed                      |
+| Unsigned, to a host that names its resource or a public host (below)                                             | allowed                      |
 | Unsigned, to any other AWS API host, whatever the method                                                         | `aws-no-credential`          |
 | A CodeCommit `Basic` login with a known key, or a static Git credential of an allowed account                    | allowed                      |
 | A CodeCommit `Basic` login with any other key or account                                                         | `aws-key-not-allowed`        |
@@ -144,14 +144,19 @@ left to the URL rules:
 | EKS OIDC issuer        | `oidc.eks.<region>.amazonaws.com/id/<id>`, `oidc-eks.<region>.api.aws/id/<id>`                                                                               |
 | Elastic Load Balancing | `<name>-<id>.elb.<region>.amazonaws.com`, `<name>-<id>.<region>.elb.amazonaws.com`                                                                           |
 | EC2                    | `ec2-<ip>.<region>.compute.amazonaws.com`, `ec2-<ip>.compute-1.amazonaws.com`                                                                                |
-| AWS CLI downloads      | `awscli.amazonaws.com`                                                                                                                                       |
 
-Each `amazonaws.com` name but `awscli.amazonaws.com` also matches under `amazonaws.com.cn` and
-`amazonaws.eu`, and each `api.aws` one under `api.amazonwebservices.com.cn` and
-`api.amazonwebservices.eu`. Every other AWS API host names only a service and a region, such as `sts.us-east-1.amazonaws.com` or
+Each `amazonaws.com` name also matches under `amazonaws.com.cn` and `amazonaws.eu`, and each
+`api.aws` one under `api.amazonwebservices.com.cn` and `api.amazonwebservices.eu`.
+
+An unsigned request to these public hosts, which reach no account, is left to the URL rules too:
+`awscli.amazonaws.com` (AWS CLI downloads), `checkip.amazonaws.com`, `ip-ranges.amazonaws.com`, and
+the Price List Bulk API's files on `pricing.us-east-1.amazonaws.com` and
+`pricing.cn-northwest-1.amazonaws.com.cn`.
+
+Every other AWS API host names only a service and a region, such as `sts.us-east-1.amazonaws.com` or
 `sqs.us-east-1.amazonaws.com`. The account a request to one of those reaches is in its parameters or
 its body, where the proxy does not look, so an unsigned request there is refused, `GET` included,
-`AssumeRoleWithWebIdentity` excepted (below). A host missing from the table above is treated the
+`AssumeRoleWithWebIdentity` excepted (below). A host missing from the lists above is treated the
 same way; if a legitimate request is refused for that reason, as `aws-no-credential` or, carrying a
 token, `aws-unsupported-credential`, report it.
 
