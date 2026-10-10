@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"testing"
 	"time"
 	"unsafe"
@@ -417,6 +418,37 @@ func FuzzDecode(f *testing.F) {
 	f.Fuzz(func(_ *testing.T, raw []byte) {
 		_, _ = decode(raw)
 	})
+}
+
+func TestRecordJSONKeepsBytesThatAreNotUTF8(t *testing.T) {
+	r := record{Kind: "open", Comm: "c\xff", Path: "/tmp/a\xfe\xc3\xa9<", To: "\xed\xb3\xbf"}
+	got, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"t":"","kind":"open","pid":0,"ppid":0,"comm":"c\udcff","path":"/tmp/a\udcfeé\u003c","to":"\udced\udcb3\udcbf"}`
+	if string(got) != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+// Every field of record comes out as encoding/json would write it.
+func TestRecordJSONMatchesItsFields(t *testing.T) {
+	type plain record
+	r := record{Time: "t", Kind: "k", PID: 1, PPID: 2, Comm: "c", Path: "p", Name: "n", To: "o",
+		ToName: "on", Access: "r", Flags: 3, Mode: "0644", Owner: "0:0", Err: 4, Failed: true,
+		Image: true, Memfd: true, Deleted: true, Exchange: true}
+	got, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(plain(r))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
 }
 
 func TestExecFilesAttach(t *testing.T) {

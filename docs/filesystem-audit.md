@@ -150,6 +150,7 @@ artifact has every access in order.
 | `memfd:"name"`         | A file that exists only in memory and has no path; the name is whatever its creator chose                        |
 | `path (deleted)`       | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row |
 | `\n`, `\u{202e}`, `\\` | A control or invisible character, or a backslash, in a path or command name                                      |
+| `\xff`                 | A byte that is not UTF-8 in a path or command name                                                               |
 
 `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME` and the directories above them are never
 folded into a `dir/**` row, nor is `/proc/<pid>`, which stands for any process's own directory.
@@ -218,6 +219,10 @@ jq -c 'select(.kind == "open" and .failed and (.err == 1 or .err == 13 or .err =
 
 A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted` and `exchange`
 are absent rather than `false`.
+
+A byte of a name that is not UTF-8 is written as a lone surrogate, `\udcff` for the byte `0xff`, as
+Python's `surrogateescape` does, so `os.fsencode` gives back the name's exact bytes. jq prints it as
+`�`; the summary shows it as `\xff`.
 
 ### Kinds
 
