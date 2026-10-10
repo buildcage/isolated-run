@@ -158,19 +158,21 @@ artifact has every access in order.
 
 ### Paths
 
-| Shown as               | Means                                                                                                                                                                                                  |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `./…`                  | Under `$GITHUB_WORKSPACE`                                                                                                                                                                              |
-| `~/…`                  | Under `$HOME`                                                                                                                                                                                          |
-| `dir/**`               | Three or more entries directly under `dir` were touched, so it is shown as one row with every flag below it. A file a program loaded and a program run do not count, and a program run is never folded |
-| `…/name`               | A relative name whose directory was closed before it could be read, or a path too deep to record in full                                                                                               |
-| `memfd:"name"`         | A file that exists only in memory and has no path; the name is whatever its creator chose                                                                                                              |
-| `path (deleted)`       | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row                                                                                       |
-| `\n`, `\u{202e}`, `\\` | A control or invisible character, or a backslash, in a path or command name                                                                                                                            |
-| `\xff`                 | A byte that is not UTF-8 in a path or command name                                                                                                                                                     |
+| Shown as               | Means                                                                                                            |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `./…`                  | Under `$GITHUB_WORKSPACE`                                                                                        |
+| `~/…`                  | Under `$HOME`                                                                                                    |
+| `dir/**`               | Three or more entries directly under `dir` were touched, so it is shown as one row with every flag below it      |
+| `…/name`               | A relative name whose directory was closed before it could be read, or a path too deep to record in full         |
+| `memfd:"name"`         | A file that exists only in memory and has no path; the name is whatever its creator chose                        |
+| `path (deleted)`       | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row |
+| `\n`, `\u{202e}`, `\\` | A control or invisible character, or a backslash, in a path or command name                                      |
+| `\xff`                 | A byte that is not UTF-8 in a path or command name                                                               |
 
 `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME` and the directories above them are never
-folded into a `dir/**` row, nor is `/proc/<pid>`, which stands for any process's own directory.
+folded into a `dir/**` row, nor is `/proc/<pid>`, which stands for any process's own directory. A
+program run is never folded either, and neither it nor a file a program loaded counts toward the
+three.
 
 A program is shown under the file it ran, with symlinks followed, and a script under its own path
 rather than its interpreter's. A failed access is shown under the name the command passed, joined to
