@@ -298,6 +298,28 @@ describe("prepareStepFilesystemAudit", () => {
     expect(outputs).toEqual([""]);
   });
 
+  it("names the artifact in the note for a part given up, with why", async () => {
+    const notes: string[] = [];
+    const { deps: d } = deps({
+      renderBlocks: (_summary, _startedAt, _priorities, cutNote) => {
+        notes.push(cutNote("paths"), cutNote());
+        return [];
+      },
+    });
+
+    await reportStepFilesystemAudit(
+      { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
+      d,
+    );
+
+    expect(notes).toEqual([
+      "_…truncated: the filesystem audit touched too many distinct paths to summarize; " +
+        "the buildcage-filesystem-audit-deadbeef artifact uploaded for this run has every access._\n\n",
+      "_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; " +
+        "the buildcage-filesystem-audit-deadbeef artifact uploaded for this run has every access._\n\n",
+    ]);
+  });
+
   it("leaves the output empty, and says so in the legend, when nothing was uploaded", async () => {
     const { deps: d, outputs, summaries } = deps({ uploadArtifact: async () => undefined });
 

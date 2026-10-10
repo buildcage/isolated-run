@@ -151,7 +151,7 @@ export interface RunSandboxedCommandOptions {
   /** inspect only: whether a write to the NSS database fails the step. */
   failOnCaResidue: boolean;
   /** Present only under filesystem_audit: record: where the tracer writes.
-   *  The step runs normally if it cannot be started. */
+   *  The step fails before its command runs if it cannot be started. */
   filesystemAudit?: FilesystemAuditPaths;
   /** Where this module's own warnings go: a scratch dir that would not
    *  unmount, the environment variables a shell cannot export, and NSS not
