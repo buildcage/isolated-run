@@ -68387,30 +68387,17 @@ const LETTER = {
 	chmod: "A",
 	chown: "A",
 	attr: "A"
-}, ORDER = "RWXMDA", FAILED_LETTER = {
-	delete: "D",
-	rename: "M",
-	chmod: "A",
-	chown: "A",
-	attr: "A",
-	unlink: "D",
-	rmdir: "D",
-	mkdir: "W",
-	mknod: "W",
-	truncate: "W",
-	symlink: "W",
-	link: "W"
-}, PERM_ERRNO = new Set([
+}, ORDER = "RWXMDA", PERM_ERRNO = new Set([
 	1,
 	13,
 	30
 ]), LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
 function classify(r) {
 	let letter, path = r.path, failed = !1;
-	if (r.kind === "open-failed") {
+	if (r.failed && r.kind === "open") {
 		let access = r.access ?? "r";
 		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
-	} else r.failed ? (letter = FAILED_LETTER[r.kind], r.kind === "link" && (path = r.to), failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : r.kind === "link" ? (letter = "W", path = r.to) : letter = LETTER[r.kind];
+	} else r.failed ? (letter = LETTER[r.kind], r.kind === "link" && (path = r.to), failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : r.kind === "link" ? (letter = "W", path = r.to) : letter = LETTER[r.kind];
 	return letter && path ? {
 		letter,
 		path,

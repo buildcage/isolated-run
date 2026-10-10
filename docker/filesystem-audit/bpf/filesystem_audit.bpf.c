@@ -136,6 +136,7 @@ struct trace_event_raw_sys_exit {
 #define MAX_COMPONENTS 254 // n1 and n2 are u8; a longer walk is marked cut
 #define WAKEUP_BYTES (1 << 20)
 #define AT_FDCWD -100
+#define AT_REMOVEDIR 0x200
 
 enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	K_MKDIR = 6, K_CHMOD = 7, K_SYMLINK = 8, K_LINK = 9, K_TRUNCATE = 10, K_CHOWN = 11,
@@ -143,7 +144,7 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	// Failed path syscalls: data holds the user path(s), NUL-separated (old
 	// then new for rename), then the base directories of the relative ones
 	// (see add_base); path_len holds the errno.
-	K_DELETE_FAILED = 16, K_RENAME_FAILED = 17, K_CHMOD_FAILED = 18,
+	K_UNLINK_FAILED = 16, K_RENAME_FAILED = 17, K_CHMOD_FAILED = 18,
 	K_CHOWN_FAILED = 19, K_ATTR = 20, K_ATTR_FAILED = 21,
 	// A new process: pid is the child, ppid the process that made it, where
 	// every other kind's ppid is its current parent; no data.
@@ -154,11 +155,13 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	K_EXEC_FILE = 23,
 	// A file, FIFO, device or Unix socket made by mknod(2) or bind(2): path
 	// components, as for unlink.
-	K_MKNOD = 24 };
+	K_MKNOD = 24,
+	// A failed rmdir, or unlinkat with AT_REMOVEDIR; as K_UNLINK_FAILED.
+	K_RMDIR_FAILED = 25 };
 
 // Fixed header (mirrored by hdrLen in decode.go), then data_len bytes of data:
 //   open:    d_path result (path_len is its return value)
-//   open-failed: the name as passed to open(2), then its base directory if
+//   failed open: the name as passed to open(2), then its base directory if
 //            it is relative (see add_base); path_len holds the errno
 //   read/write: d_path result, once per open file, direction and program
 //   mmap:    path components; mode holds prot, flags the map flags, and
@@ -1301,7 +1304,8 @@ static __always_inline void op_exit(long ret, int failure_only)
 SEC("tracepoint/syscalls/sys_enter_unlinkat")
 int on_unlinkat_enter(struct trace_event_raw_sys_enter *ctx)
 {
-	op_enter(K_DELETE_FAILED, ctx->args[0], ctx->args[1], 0, 0);
+	u32 kind = ctx->args[2] & AT_REMOVEDIR ? K_RMDIR_FAILED : K_UNLINK_FAILED;
+	op_enter(kind, ctx->args[0], ctx->args[1], 0, 0);
 	return 0;
 }
 SEC("tracepoint/syscalls/sys_exit_unlinkat")
@@ -1434,8 +1438,8 @@ int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
 	return 0;								\
 }
 
-FAILED_OP_1(unlink, K_DELETE_FAILED)
-FAILED_OP_1(rmdir, K_DELETE_FAILED)
+FAILED_OP_1(unlink, K_UNLINK_FAILED)
+FAILED_OP_1(rmdir, K_RMDIR_FAILED)
 FAILED_OP_1(chmod, K_CHMOD_FAILED)
 FAILED_OP_1(chown, K_CHOWN_FAILED)
 FAILED_OP_1(lchown, K_CHOWN_FAILED)

@@ -157,14 +157,14 @@ func TestDecode(t *testing.T) {
 		{
 			name: "failed open",
 			ev:   event{kind: 12, comm: "node", pathRet: int32(unix.ENOENT), data: []byte("/missing\x00")},
-			want: record{Kind: "open-failed", Comm: "node", Path: "/missing", Access: "r", Err: int32(unix.ENOENT)},
+			want: record{Kind: "open", Comm: "node", Path: "/missing", Access: "r", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
 			name: "failed open to write",
 			ev: event{kind: 12, comm: "cp", pathRet: int32(unix.EACCES), flags: unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC,
 				data: []byte("/usr/local/bin/tool\x00")},
-			want: record{Kind: "open-failed", Comm: "cp", Path: "/usr/local/bin/tool",
-				Flags: unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC, Access: "wct", Err: int32(unix.EACCES)},
+			want: record{Kind: "open", Comm: "cp", Path: "/usr/local/bin/tool",
+				Flags: unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC, Access: "wct", Err: int32(unix.EACCES), Failed: true},
 		},
 		{
 			name: "open, path too long for d_path",
@@ -208,9 +208,14 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "unlink", Comm: "rm", Path: "/tmp/f"},
 		},
 		{
-			name: "failed delete, read-only",
+			name: "failed unlink, read-only",
 			ev:   event{kind: 16, comm: "rm", pathRet: int32(unix.EROFS), data: []byte("/etc\x00")},
-			want: record{Kind: "delete", Comm: "rm", Path: "/etc", Err: int32(unix.EROFS), Failed: true},
+			want: record{Kind: "unlink", Comm: "rm", Path: "/etc", Err: int32(unix.EROFS), Failed: true},
+		},
+		{
+			name: "failed rmdir",
+			ev:   event{kind: 25, comm: "rmdir", pathRet: int32(unix.ENOTEMPTY), data: []byte("/tmp/d\x00")},
+			want: record{Kind: "rmdir", Comm: "rmdir", Path: "/tmp/d", Err: int32(unix.ENOTEMPTY), Failed: true},
 		},
 		{
 			name: "failed rename, two paths",
@@ -223,16 +228,16 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "fork", PID: 9, PPID: 7, Comm: "bash"},
 		},
 		{
-			name: "failed delete, relative to a dirfd",
+			name: "failed unlink, relative to a dirfd",
 			ev: event{kind: 16, comm: "go", pathRet: int32(unix.ENOENT), bases: 1, mode: 2,
 				data: append([]byte("b001\x00"), comps("go-build1", "tmp")...)},
-			want: record{Kind: "delete", Comm: "go", Path: "/tmp/go-build1/b001", Name: "b001", Err: int32(unix.ENOENT), Failed: true},
+			want: record{Kind: "unlink", Comm: "go", Path: "/tmp/go-build1/b001", Name: "b001", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
 			name: "failed open, relative to the cwd",
 			ev: event{kind: 12, comm: "asm", pathRet: int32(unix.ENOENT), bases: 1, mode: 2,
 				data: append([]byte("./textflag.h\x00"), comps("runtime", "src")...)},
-			want: record{Kind: "open-failed", Comm: "asm", Path: "/src/runtime/textflag.h", Name: "./textflag.h", Access: "r", Err: int32(unix.ENOENT)},
+			want: record{Kind: "open", Comm: "asm", Path: "/src/runtime/textflag.h", Name: "./textflag.h", Access: "r", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
 			// Joined as passed: cleaning would drop "link/..", and with it the
@@ -251,12 +256,12 @@ func TestDecode(t *testing.T) {
 			name: "relative under a truncated base",
 			ev: event{kind: 16, comm: "rm", pathRet: int32(unix.ENOENT), bases: 1, mode: 1, truncated: 1,
 				data: append([]byte("x\x00"), comps("deep")...)},
-			want: record{Kind: "delete", Comm: "rm", Path: "…/deep/x", Name: "x", Err: int32(unix.ENOENT), Failed: true},
+			want: record{Kind: "unlink", Comm: "rm", Path: "…/deep/x", Name: "x", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
 			name: "relative with no base walked",
 			ev:   event{kind: 16, comm: "rm", pathRet: int32(unix.EBADF), data: []byte("x\x00")},
-			want: record{Kind: "delete", Comm: "rm", Path: "x", Err: int32(unix.EBADF), Failed: true},
+			want: record{Kind: "unlink", Comm: "rm", Path: "x", Err: int32(unix.EBADF), Failed: true},
 		},
 		{
 			name: "failed rename, each name on its own base",
@@ -327,7 +332,7 @@ func TestDecode(t *testing.T) {
 		{
 			name: "chmod of a memfd",
 			ev:   event{kind: 7, comm: "py", mode: 0o755, marks: markInternal, n1: 1, data: comps("memfd:x")},
-			want: record{Kind: "chmod", Comm: "py", Path: "memfd:x", Flags: 0o755, Memfd: true},
+			want: record{Kind: "chmod", Comm: "py", Path: "memfd:x", Mode: "0755", Memfd: true},
 		},
 		{
 			name: "write to a deleted file named like a deleted one",

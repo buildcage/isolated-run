@@ -58,7 +58,15 @@ describe("stripSandboxMachinery", () => {
         { pid: 13, ppid: 11, kind: "fork", comm: "run-script.sh" },
         { pid: 14, ppid: 13, kind: "fork", comm: "run-script.sh" },
         { pid: 14, ppid: 13, kind: "exec", comm: "cat", path: "/usr/bin/cat" },
-        { pid: 14, ppid: 13, kind: "open-failed", comm: "cat", path: "/work/sub/missing", err: 2 },
+        {
+          pid: 14,
+          ppid: 13,
+          kind: "open",
+          failed: true,
+          comm: "cat",
+          path: "/work/sub/missing",
+          err: 2,
+        },
       ),
       BASE,
     );
@@ -66,7 +74,15 @@ describe("stripSandboxMachinery", () => {
       { pid: 13, ppid: 11, kind: "fork", comm: "bash" },
       { pid: 14, ppid: 13, kind: "fork", comm: "bash" },
       { pid: 14, ppid: 13, kind: "exec", comm: "cat", path: "/usr/bin/cat" },
-      { pid: 14, ppid: 13, kind: "open-failed", comm: "cat", path: "/work/sub/missing", err: 2 },
+      {
+        pid: 14,
+        ppid: 13,
+        kind: "open",
+        failed: true,
+        comm: "cat",
+        path: "/work/sub/missing",
+        err: 2,
+      },
     ]);
   });
 
@@ -175,7 +191,8 @@ describe("stripSandboxMachinery", () => {
         {
           pid: 11,
           ppid: 10,
-          kind: "open-failed",
+          kind: "open",
+          failed: true,
           comm: "run-script.sh",
           path: RUN_SCRIPT,
           err: 30,
@@ -186,7 +203,7 @@ describe("stripSandboxMachinery", () => {
     );
     expect(records(out)).toEqual([
       sneaky,
-      { pid: 11, ppid: 10, kind: "open-failed", comm: "bash", path: RUN_SCRIPT, err: 30 },
+      { pid: 11, ppid: 10, kind: "open", failed: true, comm: "bash", path: RUN_SCRIPT, err: 30 },
       { pid: 11, ppid: 10, kind: "open", comm: "bash", path: RUN_SCRIPT, access: "wt" },
     ]);
   });
