@@ -3,8 +3,11 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -432,12 +435,31 @@ func TestRecordJSONKeepsBytesThatAreNotUTF8(t *testing.T) {
 	}
 }
 
-// Every field of record comes out as encoding/json would write it.
+// A record with a name that is not UTF-8 is written field for field as
+// encoding/json writes record, every field set, but for that name's byte.
 func TestRecordJSONMatchesItsFields(t *testing.T) {
 	type plain record
-	r := record{Time: "t", Kind: "k", PID: 1, PPID: 2, Comm: "c", Path: "p", Name: "n", To: "o",
-		ToName: "on", Access: "r", Flags: 3, Mode: "0644", Owner: "0:0", Err: 4, Failed: true,
-		Image: true, Memfd: true, Deleted: true, Exchange: true}
+	var r record
+	v := reflect.ValueOf(&r).Elem()
+	for i := range v.NumField() {
+		f := v.Field(i)
+		if !f.CanSet() {
+			continue
+		}
+		switch f.Kind() {
+		case reflect.String:
+			f.SetString(v.Type().Field(i).Name)
+		case reflect.Uint32:
+			f.SetUint(1)
+		case reflect.Int32:
+			f.SetInt(1)
+		case reflect.Bool:
+			f.SetBool(true)
+		default:
+			t.Fatalf("field %s: set it here", v.Type().Field(i).Name)
+		}
+	}
+	r.Comm = "c\xff"
 	got, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
@@ -446,8 +468,8 @@ func TestRecordJSONMatchesItsFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != string(want) {
-		t.Fatalf("got  %s\nwant %s", got, want)
+	if w := strings.Replace(string(want), "c"+string(utf8.RuneError), `c\udcff`, 1); string(got) != w {
+		t.Fatalf("got  %s\nwant %s", got, w)
 	}
 }
 

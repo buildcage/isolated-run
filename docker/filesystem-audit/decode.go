@@ -53,6 +53,11 @@ type record struct {
 // except that the names the step chose are rawName, so a byte in them that
 // is not UTF-8 is kept rather than turned into U+FFFD.
 func (r record) MarshalJSON() ([]byte, error) {
+	type plain record // without this method
+	if utf8.ValidString(r.Comm) && utf8.ValidString(r.Path) && utf8.ValidString(r.Name) &&
+		utf8.ValidString(r.To) && utf8.ValidString(r.ToName) {
+		return json.Marshal(plain(r))
+	}
 	return json.Marshal(struct {
 		Time     string  `json:"t"`
 		Kind     string  `json:"kind"`
