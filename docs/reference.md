@@ -860,8 +860,9 @@ It observes accesses in the kernel, below any library the step links against, an
 never blocks an access. It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64, the
 first release there where a BPF program can attach to a kernel function with fentry), with kernel
 BTF and tracefs mounted. Where any of these is missing, the step fails with the reason before the
-command runs. See [Filesystem audit](./security.md#filesystem-audit) for what it does not record
-and what its record can be trusted for.
+command runs: cgroup v2 and BTF are checked before the proxy starts, the kernel version and tracefs
+only when the tracer starts. See [Filesystem audit](./security.md#filesystem-audit) for what it
+does not record and what its record can be trusted for.
 
 While the step runs, the tracer's hooks run on every system call and every file read or write on
 the runner host, not only the step's, since a hook has to run to tell whose call it is. That adds

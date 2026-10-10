@@ -34,6 +34,7 @@ function pinnedProbes({ absent = [] }: { absent?: ("setpriv" | "nofile")[] } = {
     varRunRealPath: () => "/run",
     realpath: (path) => path,
     cgroupPath: () => RUNNER_CGROUP,
+    kernelBtf: () => true,
   };
 }
 

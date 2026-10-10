@@ -51,15 +51,34 @@ export function cgroupFsPath(cgroupsPath: string): string {
   return join(CGROUP_ROOT, cgroupsPath);
 }
 
-export const NO_CGROUP_V2 = "filesystem_audit needs a cgroup v2 host; the command was not run.";
+const REQUIREMENTS =
+  "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and " +
+  "tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/reference.md#filesystem-audit";
 
-/** Fails the step before the proxy starts on a host the tracer cannot watch. */
+/** The step's failure when the tracer could not start. */
+export function auditUnavailable(reason: string): SandboxError {
+  return new SandboxError(
+    `filesystem_audit could not start (${reason}); the command was not run.`,
+    "FILESYSTEM_AUDIT_UNAVAILABLE",
+  );
+}
+
+/** auditUnavailable for a host the tracer cannot run on, naming what it needs. */
+export function hostCannotAudit(reason: string): SandboxError {
+  const e = auditUnavailable(reason);
+  return new SandboxError(`${e.message} ${REQUIREMENTS}`, e.code);
+}
+
+export const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2";
+
+/** Fails the step before the proxy starts on a host the tracer cannot watch.
+ *  The kernel version and tracefs are left to the tracer, which checks the
+ *  kernel by feature and, as root, can see where tracefs is mounted. */
 export function checkFilesystemAuditHost(
-  probes: Pick<HostProbes, "cgroupPath"> = realHostProbes,
+  probes: Pick<HostProbes, "cgroupPath" | "kernelBtf"> = realHostProbes,
 ): void {
-  if (probes.cgroupPath() === undefined) {
-    throw new SandboxError(NO_CGROUP_V2, "FILESYSTEM_AUDIT_UNAVAILABLE");
-  }
+  if (probes.cgroupPath() === undefined) throw hostCannotAudit(NO_CGROUP_V2_REASON);
+  if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
 }
 
 export type SpawnAudit = (command: string, args: string[]) => AuditChild;
@@ -266,16 +285,13 @@ export async function startFilesystemAudit(
   }
   // A tracer that failed on its own names a problem a cancel would hide.
   const cancelled = !exited && cancel?.aborted;
-  const reason = exited
-    ? child.reason() || "the tracer exited"
-    : "the tracer did not attach in time";
+  // Only a tracer that exited points at the host; a timeout is more likely load.
+  const failure = exited
+    ? hostCannotAudit(child.reason() || "the tracer exited")
+    : auditUnavailable("the tracer did not attach in time");
   await stop();
   // A tracer that attached just too late may have created the recording; the
   // report would otherwise read it as one cut short.
   remove(outPath);
-  if (cancelled) throw cancelledBeforeRun();
-  throw new SandboxError(
-    `filesystem_audit could not start (${reason}); the command was not run.`,
-    "FILESYSTEM_AUDIT_UNAVAILABLE",
-  );
+  throw cancelled ? cancelledBeforeRun() : failure;
 }
