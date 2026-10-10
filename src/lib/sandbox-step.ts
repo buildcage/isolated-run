@@ -48,7 +48,6 @@ import {
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { saveWriteThroughForPost } from "./post-write-through.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
-import { writeSummaryBlocks } from "./report.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
 import { checkFilesystemAuditHost, filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
 import {
@@ -507,7 +506,7 @@ export async function runSandboxStep(
     });
     if (cancelled) {
       const late = await prepareAudit();
-      await writeMoreSummary(late.blocks(startedAt), env, annotation, writeSummaryBlocks);
+      await writeMoreSummary(late.blocks(startedAt), env, annotation);
     }
     await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
     stopListening();

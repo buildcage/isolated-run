@@ -123,7 +123,7 @@ export async function reportStepTraffic(
   // Written alone when there is no report or its write failed, so the report
   // cannot take the rest of the summary down with it.
   const extraBlocks = moreBlocks(report?.startedAt);
-  const writeRest = () => writeMoreSummary(extraBlocks, env, annotation, writeSummaryBlocks);
+  const writeRest = () => writeMoreSummary(extraBlocks, env, annotation, { writeSummaryBlocks });
 
   let artifactName = "";
   if (!report) {
@@ -182,11 +182,12 @@ export async function writeMoreSummary(
   blocks: SummaryBlock[],
   env: NodeJS.ProcessEnv,
   annotation: Annotation,
-  write: typeof writeSummaryBlocks,
+  overrides: Partial<ReportStepDeps> = {},
 ): Promise<void> {
+  const { writeSummaryBlocks } = { ...realDeps, ...overrides };
   if (blocks.length === 0) return;
   try {
-    await write(blocks, env);
+    await writeSummaryBlocks(blocks, env);
   } catch (e) {
     annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
   }

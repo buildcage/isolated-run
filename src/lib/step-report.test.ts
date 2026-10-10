@@ -295,20 +295,18 @@ describe("writeMoreSummary", () => {
   const ann = annotation as unknown as ReportStepOptions["annotation"];
 
   it("writes the blocks into what the summary has left", async () => {
-    await writeMoreSummary([block], { GITHUB_STEP_SUMMARY: "/s" }, ann, mocks.writeSummaryBlocks);
+    await writeMoreSummary([block], { GITHUB_STEP_SUMMARY: "/s" }, ann, deps);
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith([block], { GITHUB_STEP_SUMMARY: "/s" });
   });
 
   it("writes nothing for no blocks", async () => {
-    await writeMoreSummary([], {}, ann, mocks.writeSummaryBlocks);
+    await writeMoreSummary([], {}, ann, deps);
     expect(mocks.writeSummaryBlocks).not.toHaveBeenCalled();
   });
 
   it("warns rather than throws when the write fails", async () => {
     mocks.writeSummaryBlocks.mockRejectedValue(new Error("summary file is gone"));
-    await expect(
-      writeMoreSummary([block], {}, ann, mocks.writeSummaryBlocks),
-    ).resolves.toBeUndefined();
+    await expect(writeMoreSummary([block], {}, ann, deps)).resolves.toBeUndefined();
     expect(annotation.warning).toHaveBeenCalledWith(
       "Failed to write the Job Summary: summary file is gone",
     );
