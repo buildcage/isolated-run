@@ -69598,7 +69598,7 @@ function readFailOnBlocked(getInput$1 = getInput) {
 const AWS_KEY_CHECK_OFF = {
 	key: "",
 	roleAccounts: []
-}, STARTING_KEY_ONLY = "The check starts from that variable alone, never from a profile or a credentials file.";
+}, STARTING_KEY_HELP = "The check starts from that variable alone, never from a profile, a credentials file or any other credential source. Put the key to check there in an earlier step, for example with aws-actions/configure-aws-credentials, or run the AWS commands in a step without the check.";
 function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$5 = getInput) {
 	let roleAccounts;
 	try {
@@ -69617,8 +69617,8 @@ function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$5 = ge
 	}
 	let key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
 	if (!isAwsAccessKeyId(key)) {
-		if (proxyMode === "audit") return warn(`The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID, so the check is off for this run. ${STARTING_KEY_ONLY}`), AWS_KEY_CHECK_OFF;
-		throw new SandboxError(`The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. ${STARTING_KEY_ONLY} Put the key to check there in an earlier step, for example with aws-actions/configure-aws-credentials, or run the AWS commands in a separate step.`, "AWS_ACCESS_KEY_MISSING");
+		if (proxyMode === "audit") return warn(`The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID, so the check is off for this run. ${STARTING_KEY_HELP}`), AWS_KEY_CHECK_OFF;
+		throw new SandboxError(`The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. ${STARTING_KEY_HELP}`, "AWS_ACCESS_KEY_MISSING");
 	}
 	return {
 		key,
