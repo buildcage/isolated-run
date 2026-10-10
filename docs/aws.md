@@ -233,6 +233,12 @@ With `aws_key_check` on, these are refused:
   does not learn.
 - Presigned URLs someone else signed that reach the step other than through an ECR registry's
   redirect, such as the `Code.Location` of Lambda `GetFunction` or a vendor's download link.
+  Download one in a step without the check. A tool that fetches such a URL in the same command as
+  the rest of its work leaves nothing to split off, so that command cannot run with the check:
+  `sam local invoke` with a layer, which downloads it from `GetLayerVersion`'s `Content.Location`,
+  or `crane` pulling from a registry other than ECR that keeps its layers in S3 and redirects to
+  them. If a tool you need does this,
+  [open an issue](https://github.com/buildcage/isolated-run/issues).
 - S3 Express One Zone directory buckets, signed with keys `CreateSession` issues, which the proxy
   does not learn.
 
@@ -328,7 +334,7 @@ the two comes last, the report links here, unless `known_blocked_rules` expects 
 | `aws-key-not-allowed`        | The step assumed a role in an account `allowed_aws_role_accounts` does not name, and signed with that role's key                                                                                         | Add the account if it is yours. The restrict example and the STS answer's `aws.assumedAccount` name it; see [Getting started](#getting-started)                                     |
 |                              | The request was signed with a key from a profile, `~/.aws/credentials` or `credential_process` rather than `AWS_ACCESS_KEY_ID`                                                                           | Put the key to check in `AWS_ACCESS_KEY_ID`, or run those commands in a step without the check                                                                                      |
 |                              | The key came from `GetSessionToken`, SAML or IAM Identity Center, which the proxy does not learn                                                                                                         | Get the credentials before the step and pass them in `AWS_ACCESS_KEY_ID`                                                                                                            |
-|                              | A presigned URL someone else signed, such as Lambda `GetFunction`'s `Code.Location` or a vendor's download link                                                                                          | Download it in a step without the check. `aws sts get-access-key-info --access-key-id <key-id>`, with the key ID from the URL's `X-Amz-Credential`, names the account it belongs to |
+|                              | A presigned URL someone else signed, such as Lambda `GetFunction`'s `Code.Location` or a vendor's download link                                                                                          | Download it in a step without the check, [where you can](#what-it-stops). `aws sts get-access-key-info --access-key-id <key-id>` on the `X-Amz-Credential` key ID names its account |
 |                              | An S3 Express One Zone directory bucket                                                                                                                                                                  | Use it from a step without the check                                                                                                                                                |
 |                              | The STS answer that issued the key could not be read, because the client signed its own `Accept-Encoding` and got it compressed, or it was unusually large                                               | Let the SDK send its default headers to STS; shorten a large session policy or tag set                                                                                              |
 |                              | A CodeCommit static Git credential of an account not listed                                                                                                                                              | Add the account, or use CodeCommit's credential helper                                                                                                                              |
