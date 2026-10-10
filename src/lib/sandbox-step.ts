@@ -468,6 +468,8 @@ export async function runSandboxStep(
       containerName,
       annotation,
       env,
+      actionRepo,
+      actionRef: reportActionRef,
     });
     await reportStepTraffic({
       containerName,

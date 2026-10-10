@@ -97,6 +97,8 @@ describe("prepareStepFilesystemAudit", () => {
   const base = {
     retentionDays: 3,
     containerName: "buildcage-proxy-deadbeef",
+    actionRepo: "buildcage/isolated-run",
+    actionRef: "v2",
   };
 
   it("renders, uploads and sets the output when a recording exists", async () => {
@@ -109,6 +111,11 @@ describe("prepareStepFilesystemAudit", () => {
 
     expect(summaries[0]).toContain("Filesystem audit");
     expect(summaries[0]).toContain("W node ./a.txt");
+    expect(summaries[0]).toContain(
+      "<br>`./` workspace · `~/` $HOME · `dir/**` a folded directory · " +
+        "the full record is in the `buildcage-filesystem-audit-deadbeef` artifact · " +
+        "[how to read this](https://github.com/buildcage/isolated-run/blob/v2/docs/filesystem-audit.md#reading-the-summary)</sub>",
+    );
     // The stripped copy is written beside the recording and uploaded; the
     // root-owned recording itself is left untouched.
     expect(writes).toEqual([
@@ -291,8 +298,8 @@ describe("prepareStepFilesystemAudit", () => {
     expect(outputs).toEqual([""]);
   });
 
-  it("leaves the output empty when nothing was uploaded", async () => {
-    const { deps: d, outputs } = deps({ uploadArtifact: async () => undefined });
+  it("leaves the output empty, and says so in the legend, when nothing was uploaded", async () => {
+    const { deps: d, outputs, summaries } = deps({ uploadArtifact: async () => undefined });
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
@@ -300,6 +307,9 @@ describe("prepareStepFilesystemAudit", () => {
     );
 
     expect(outputs).toEqual([""]);
+    expect(summaries[0]).toContain(
+      " · the full record could not be uploaded · [how to read this](",
+    );
   });
 
   it("mirrors the summary to the debug file in a test-hooks build", async () => {
@@ -493,6 +503,8 @@ describe("prepareStepFilesystemAudit: failures while reading", () => {
   const base = {
     retentionDays: 3,
     containerName: "buildcage-proxy-deadbeef",
+    actionRepo: "buildcage/isolated-run",
+    actionRef: "v2",
     audit: AUDIT,
     env: { GITHUB_WORKSPACE: "/work" },
   };
@@ -594,6 +606,8 @@ describe("prepareStepFilesystemAudit: an upload that throws", () => {
       {
         retentionDays: 3,
         containerName: "buildcage-proxy-deadbeef",
+        actionRepo: "buildcage/isolated-run",
+        actionRef: "v2",
         audit: AUDIT,
         annotation: note,
         env: {},

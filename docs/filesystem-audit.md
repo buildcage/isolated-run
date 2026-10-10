@@ -90,6 +90,8 @@ open, so treat it as sensitive, like the traffic artifact.
 ```
 ### Filesystem audit
 R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied
+./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
+buildcage-filesystem-audit-<id> artifact · how to read this
 
 #### Executed
 | Path                  |
@@ -105,12 +107,14 @@ R read · W write · X exec · M move · D delete · A attr · lowercase = faile
 | w!     | `/usr/local/bin/node` |
 
 📂 Filesystem details
-first-last access
+first-last access since the proxy started · flags · command · path
 00:00.412:           R   node ./package.json
 00:00.415-00:00.418: Rr! node /etc/**
 00:00.420:           w!  node /usr/local/bin/node
 00:00.530-00:41.207: RWD node ./node_modules/**
 ```
+
+When the artifact could not be uploaded, the legend says so in place of its name.
 
 - **Executed** lists each program once, in the order it first ran.
 - **Accessed paths** combines every command's actions on a path in one row, in path order: the

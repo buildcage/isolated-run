@@ -39,7 +39,7 @@
 <details>
 <summary>📂 Filesystem details</summary>
 
-<sub>first-last access</sub>
+<sub>first-last access since the proxy started · flags · command · path</sub>
 
 ```
 00:06.468:           r  bash    /dev/tty

@@ -24,6 +24,7 @@ import {
 import { createStripper } from "./filesystem-audit-strip.ts";
 import {
   createAuditSummary,
+  filesystemLegendNote,
   filesystemTruncationNote,
   parseLine,
   renderAuditSummaryBlocks,
@@ -41,6 +42,9 @@ export interface FilesystemAuditReportOptions {
   containerName: string;
   annotation: Annotation;
   env: NodeJS.ProcessEnv;
+  /** Where the guide the summary links to is read from. */
+  actionRepo: string;
+  actionRef: string;
 }
 
 export interface FilesystemAuditReportDeps {
@@ -167,7 +171,15 @@ const NONE: StepFilesystemAudit = { blocks: () => [] };
  * report and the proxy's teardown that follow are always reached.
  */
 export async function prepareStepFilesystemAudit(
-  { audit, retentionDays, containerName, annotation, env }: FilesystemAuditReportOptions,
+  {
+    audit,
+    retentionDays,
+    containerName,
+    annotation,
+    env,
+    actionRepo,
+    actionRef,
+  }: FilesystemAuditReportOptions,
   overrides: Partial<FilesystemAuditReportDeps> = {},
 ): Promise<StepFilesystemAudit> {
   const deps = { ...realDeps, ...overrides };
@@ -196,6 +208,8 @@ export async function prepareStepFilesystemAudit(
       artifactName =
         (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
     const notice = filesystemTruncationNote(artifactName || undefined);
+    const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`;
+    const legendNote = filesystemLegendNote(artifactName || undefined, guide);
 
     // The summary and the upload are independent: a render failure must not
     // also drop the artifact, which is most wanted when the recording is
@@ -204,7 +218,7 @@ export async function prepareStepFilesystemAudit(
       let rendered: SummaryBlock[];
       try {
         if (!summary) throw summaryError;
-        rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, notice);
+        rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, notice, legendNote);
       } catch (e) {
         annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
         return [];
