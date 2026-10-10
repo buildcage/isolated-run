@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { errorMessage } from "#core/lib/errors.ts";
 
-import { SandboxError } from "../errors.ts";
+import { SandboxError, cancelledBeforeRun } from "../errors.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 // rollup's cjs output doesn't convert import.meta.dirname (it silently
@@ -141,14 +141,15 @@ export async function runIsolated(
     targetIp,
   ];
 
+  // A sandbox stopped right after it starts would still run part of the command.
+  if (cancel?.aborted) throw cancelledBeforeRun();
   const child = spawn("sudo", args, envBlob);
   let escalation: ReturnType<typeof setTimeout> | undefined;
   const stop = () => {
     child.kill("SIGTERM");
     escalation = setTimeout(() => child.kill("SIGTERM"), CANCEL_GRACE_MS);
   };
-  if (cancel?.aborted) stop();
-  else cancel?.addEventListener("abort", stop, { once: true });
+  cancel?.addEventListener("abort", stop, { once: true });
   let exit: Exit;
   try {
     exit = await child.exited;

@@ -170,6 +170,45 @@ describe("startFilesystemAudit", () => {
     expect(remove).toHaveBeenCalledWith(START_OPTIONS.outPath);
   });
 
+  it("stops waiting and the tracer once the step is cancelled", async () => {
+    const { child, kill } = liveChild();
+    const remove = vi.fn();
+    const cancel = new AbortController();
+    const sleep = vi.fn(async () => cancel.abort());
+
+    const start = startFilesystemAudit(
+      { ...START_OPTIONS, cancel: cancel.signal },
+      { spawn: () => child, exists: () => false, sleep, remove },
+    );
+
+    await expect(start).rejects.toThrow(
+      new SandboxError("The step was cancelled before the command ran.", "CANCELLED_BEFORE_RUN"),
+    );
+    expect(kill).toHaveBeenCalledWith("SIGTERM");
+    expect(remove).toHaveBeenCalledWith(START_OPTIONS.outPath);
+    // One wait before the cancel is seen, then one in stop's grace race.
+    expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it("names why the tracer failed even if the step was cancelled too", async () => {
+    const cancel = new AbortController();
+    const child: AuditChild = {
+      exited: Promise.resolve(),
+      kill: vi.fn(),
+      reason: () => "read kernel BTF: no such file",
+    };
+    // Both are seen in the same poll.
+    const sleep = async () => cancel.abort();
+    const start = startFilesystemAudit(
+      { ...START_OPTIONS, cancel: cancel.signal },
+      { spawn: () => child, exists: () => false, sleep, remove: vi.fn() },
+    );
+
+    await expect(start).rejects.toThrow(
+      "filesystem_audit could not start (read kernel BTF: no such file); the command was not run.",
+    );
+  });
+
   it("stops waiting as soon as the tracer exits on its own, and names why", async () => {
     const child: AuditChild = {
       exited: Promise.resolve(),

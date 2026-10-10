@@ -23156,6 +23156,9 @@ function isLikelySlimRunner(_env = process.env, _exists = node_fs.existsSync) {
 //#endregion
 //#region src/lib/errors.ts
 var SandboxError = class extends ActionError {};
+function cancelledBeforeRun() {
+	return new SandboxError("The step was cancelled before the command ran.", "CANCELLED_BEFORE_RUN");
+}
 //#endregion
 //#region src/lib/sandbox/pinned-commands.ts
 const pinned = new Map();
@@ -70335,7 +70338,7 @@ function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = n
 		hostPath: tracerPath
 	})), chmod(tracerPath, 493), tracerPath;
 }
-async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath, watchPid }, deps = {}) {
+async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath, watchPid, cancel }, deps = {}) {
 	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2 } = deps, child = spawn("sudo", [
 		"-n",
 		"--",
@@ -70366,13 +70369,13 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		} catch {}
 		await child.exited, remove(pidFilePath);
 	};
-	for (let i = 0; i < 300; i++) {
+	for (let i = 0; i < 300 && !cancel?.aborted; i++) {
 		if (exists(readyPath)) return { stop };
 		if (exited) break;
 		await sleep(100);
 	}
-	let reason = exited ? child.reason() || "the tracer exited" : "the tracer did not attach in time";
-	throw await stop(), remove(outPath), new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
+	let cancelled = !exited && cancel?.aborted, reason = exited ? child.reason() || "the tracer exited" : "the tracer did not attach in time";
+	throw await stop(), remove(outPath), cancelled ? cancelledBeforeRun() : new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
@@ -72055,7 +72058,7 @@ function defaultCopyScript(from, to) {
 async function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, targetIp, envBlob, cancel }, { spawn = defaultSpawn, copyScript = defaultCopyScript } = {}) {
 	let runIsolatedShPath = (0, node_path.join)(bundleDir, "run-isolated.sh");
 	copyScript((0, node_path.join)(__dirname$1, "..", "scripts", "run-isolated.sh"), runIsolatedShPath);
-	let child = spawn("sudo", [
+	let args = [
 		"-n",
 		"--",
 		runIsolatedShPath,
@@ -72075,10 +72078,12 @@ async function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netns
 		gateway,
 		"--target-ip",
 		targetIp
-	], envBlob), escalation, stop = () => {
+	];
+	if (cancel?.aborted) throw cancelledBeforeRun();
+	let child = spawn("sudo", args, envBlob), escalation, stop = () => {
 		child.kill("SIGTERM"), escalation = setTimeout(() => child.kill("SIGTERM"), 5e3);
 	};
-	cancel?.aborted ? stop() : cancel?.addEventListener("abort", stop, { once: !0 });
+	cancel?.addEventListener("abort", stop, { once: !0 });
 	let exit;
 	try {
 		exit = await child.exited;
@@ -72310,7 +72315,8 @@ async function startAudit(dir, config, options, deps) {
 		outPath: filesystemAudit.outPath,
 		pidFilePath: filesystemAudit.pidFilePath,
 		readyPath: (0, node_path.join)(dir, "filesystem-audit.ready"),
-		watchPid: process.pid
+		watchPid: process.pid,
+		cancel: options.cancel
 	});
 }
 async function runSandboxedCommand(options, overrides = {}) {

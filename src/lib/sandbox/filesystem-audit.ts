@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 
-import { SandboxError } from "../errors.ts";
+import { SandboxError, cancelledBeforeRun } from "../errors.ts";
 import { realHostProbes, type HostProbes } from "./host-probes.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
@@ -188,6 +188,8 @@ export interface StartFilesystemAuditOptions {
   readyPath: string;
   /** The action's own process, whose exit stops the tracer if nothing else did. */
   watchPid: number;
+  /** Aborted when the step is cancelled, which ends the wait. */
+  cancel?: AbortSignal;
 }
 
 /**
@@ -207,6 +209,7 @@ export async function startFilesystemAudit(
     pidFilePath,
     readyPath,
     watchPid,
+    cancel,
   }: StartFilesystemAuditOptions,
   deps: FilesystemAuditDeps = {},
 ): Promise<AuditHandle> {
@@ -256,10 +259,13 @@ export async function startFilesystemAudit(
     remove(pidFilePath);
   };
   for (let i = 0; i < READY_TRIES; i++) {
+    if (cancel?.aborted) break;
     if (exists(readyPath)) return { stop };
     if (exited) break;
     await sleep(READY_POLL_MS);
   }
+  // A tracer that failed on its own names a problem a cancel would hide.
+  const cancelled = !exited && cancel?.aborted;
   const reason = exited
     ? child.reason() || "the tracer exited"
     : "the tracer did not attach in time";
@@ -267,6 +273,7 @@ export async function startFilesystemAudit(
   // A tracer that attached just too late may have created the recording; the
   // report would otherwise read it as one cut short.
   remove(outPath);
+  if (cancelled) throw cancelledBeforeRun();
   throw new SandboxError(
     `filesystem_audit could not start (${reason}); the command was not run.`,
     "FILESYSTEM_AUDIT_UNAVAILABLE",

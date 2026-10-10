@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 
+import { SandboxError } from "../errors.ts";
 import { CANCEL_GRACE_MS, runIsolated, type Exit, type RunIsolatedOptions } from "./run.ts";
 
 // run-isolated.sh is the process under `sudo` here, so what this module can be
@@ -195,14 +196,14 @@ describe("runIsolated", () => {
     expect(signals).toStrictEqual(["SIGTERM"]);
   });
 
-  it("stops the sandbox straight away when the step was cancelled before it started", async () => {
-    const { signals, exit, deps } = recorder();
+  it("does not start the sandbox when the step was cancelled before it", async () => {
+    const { calls, deps } = recorder();
     const cancel = new AbortController();
     cancel.abort();
-    const run = runIsolated(options({ cancel: cancel.signal }), deps);
 
-    expect(signals).toStrictEqual(["SIGTERM"]);
-    exit({ status: 143 });
-    await run;
+    await expect(runIsolated(options({ cancel: cancel.signal }), deps)).rejects.toThrow(
+      new SandboxError("The step was cancelled before the command ran.", "CANCELLED_BEFORE_RUN"),
+    );
+    expect(calls).toStrictEqual([]);
   });
 });
