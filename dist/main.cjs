@@ -69627,12 +69627,8 @@ function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$5 = ge
 }
 function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 	if (!key) return [];
-	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => e.extensions?.aws?.assumedAccount ?? []).filter((a) => /^\d{12}$/.test(a)), added = [...new Set(assumed)].filter((a) => !roleAccounts.includes(a)).sort(), accounts = [...roleAccounts, ...added].sort();
-	if (accounts.length > 0) {
-		let note = added.length > 0 ? ` # assumed in this run, check they are yours: ${added.join(" ")}` : "";
-		lines.push(`allowed_aws_role_accounts: "${accounts.join(" ")}"${note}`);
-	}
-	return lines;
+	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => e.extensions?.aws?.assumedAccount ?? []).filter((a) => /^\d{12}$/.test(a)), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), mark = (a) => added.has(a) ? " # assumed in this run, check it is yours" : "";
+	return accounts.length === 1 ? lines.push(`allowed_aws_role_accounts: "${accounts[0]}"${mark(accounts[0])}`) : accounts.length > 1 && lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${a}${mark(a)}`)), lines;
 }
 //#endregion
 //#region src/lib/retry-briefly.ts

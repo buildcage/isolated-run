@@ -264,9 +264,10 @@ export function readAwsKeyInputs(
 /**
  * The check's inputs for the report's restrict example, only when it was on
  * for this run: the accounts given, and every account the run assumed a role
- * in. A build's own AssumeRole names an account too, so the ones not given are
- * named again in a comment asking for a look. Quoted, since YAML reads an ID
- * that begins with 0 as a number.
+ * in. A build's own AssumeRole names an account too, so each one not given is
+ * marked for a look. One account is quoted, since YAML reads an ID that begins
+ * with 0 as a number; more are a block, one to a line, which needs no quotes
+ * and lets each carry its own comment.
  */
 export function awsExampleInputs(
   { key, roleAccounts }: AwsKeyInputs,
@@ -278,12 +279,13 @@ export function awsExampleInputs(
   const assumed = timeline
     .flatMap((e) => e.extensions?.aws?.assumedAccount ?? [])
     .filter((a) => /^\d{12}$/.test(a));
-  const added = [...new Set(assumed)].filter((a) => !roleAccounts.includes(a)).sort();
+  const added = new Set(assumed.filter((a) => !roleAccounts.includes(a)));
   const accounts = [...roleAccounts, ...added].sort();
-  if (accounts.length > 0) {
-    const note =
-      added.length > 0 ? ` # assumed in this run, check they are yours: ${added.join(" ")}` : "";
-    lines.push(`allowed_aws_role_accounts: "${accounts.join(" ")}"${note}`);
+  const mark = (a: string) => (added.has(a) ? " # assumed in this run, check it is yours" : "");
+  if (accounts.length === 1) {
+    lines.push(`allowed_aws_role_accounts: "${accounts[0]}"${mark(accounts[0])}`);
+  } else if (accounts.length > 1) {
+    lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${a}${mark(a)}`));
   }
   return lines;
 }

@@ -9,6 +9,7 @@ import { applyConfigFile } from "#core/lib/actions/config-file.ts";
 import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
+import { parseAwsAccounts } from "../proxy/aws-keys.ts";
 import { SandboxError } from "./errors.ts";
 import {
   CONFIG_FILE_INPUTS,
@@ -484,11 +485,21 @@ describe("awsExampleInputs", () => {
     ] as TrafficEvent[];
     expect(awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline)).toStrictEqual([
       "aws_key_check: true",
-      'allowed_aws_role_accounts: "012345678901 111111111111 222222222222" # assumed in this run, check they are yours: 012345678901 222222222222',
+      "allowed_aws_role_accounts: |",
+      "  012345678901 # assumed in this run, check it is yours",
+      "  111111111111",
+      "  222222222222 # assumed in this run, check it is yours",
+    ]);
+    // The block reads back as the accounts alone.
+    const block = awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline).slice(2);
+    expect(parseAwsAccounts(block.join("\n"))).toStrictEqual([
+      "012345678901",
+      "111111111111",
+      "222222222222",
     ]);
     expect(awsExampleInputs({ key: KEY, roleAccounts: [] }, timeline.slice(0, 1))).toStrictEqual([
       "aws_key_check: true",
-      'allowed_aws_role_accounts: "222222222222" # assumed in this run, check they are yours: 222222222222',
+      'allowed_aws_role_accounts: "222222222222" # assumed in this run, check it is yours',
     ]);
   });
 });

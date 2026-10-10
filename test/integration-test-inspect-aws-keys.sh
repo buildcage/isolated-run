@@ -104,8 +104,14 @@ if grep -qE "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(rest
 else
   fail "an AssumeRole answer to a key restrict would refuse taught its key"
 fi
-assert_summary_contains 'allowed_aws_role_accounts: "111111111111 999999999999" # assumed in this run, check they are yours: 999999999999' \
-  "the restrict example names the account given, and the one a role was assumed in apart"
+assert_summary_contains "allowed_aws_role_accounts: |" "the restrict example lists the accounts one to a line"
+if grep -qE "^ +111111111111$" <<< "$SUMMARY"; then
+  pass "the restrict example names the account given, unmarked"
+else
+  fail "the restrict example does not name the account given on a line of its own"
+fi
+assert_summary_contains "999999999999 # assumed in this run, check it is yours" \
+  "the restrict example marks the account a role was assumed in"
 if grep -qF "restrict mode would refuse" "$TMPDIR/audit.log"; then
   pass "a warning counts the requests restrict would refuse"
 else
@@ -141,8 +147,10 @@ if [ "$RUN_EXIT" != "0" ]; then
   cat "$TMPDIR/keyonlyaudit.log"
 fi
 SUMMARY=$(cat "$TMPDIR/keyonlyaudit.md")
-assert_summary_contains 'allowed_aws_role_accounts: "111111111111 999999999999" # assumed in this run, check they are yours: 111111111111 999999999999' \
-  "with no account named, the restrict example names both roles of a chain"
+assert_summary_contains "111111111111 # assumed in this run, check it is yours" \
+  "with no account named, the restrict example names the first role of a chain"
+assert_summary_contains "999999999999 # assumed in this run, check it is yours" \
+  "with no account named, the restrict example names the second role of a chain"
 
 echo ""
 echo "--- no key to start from ---"
