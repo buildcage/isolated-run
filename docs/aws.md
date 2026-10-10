@@ -349,9 +349,20 @@ the two comes last, the report links here, unless `known_blocked_rules` expects 
 |                              | A form body sent without a `Content-Length`                                                                                                                                                              | Send the body with a known length                                                                                                                                                                                                    |
 | `aws-ambiguous-credential`   | More than one credential on one request: two `Authorization` headers, a header and a presigned URL credential, or one repeated. Or an `AssumeRoleWithWebIdentity` naming its role twice, or in the query | Send one credential, and the role in the body only; a current SDK does                                                                                                                                                               |
 
-A role switch into an account not listed is not refused itself: STS answers it, but the proxy does
-not learn the key it issues. What shows is a run of `aws-key-not-allowed` on the requests signed
-with that key, after an STS call that went through.
+To tell the causes of `aws-key-not-allowed` apart, look first at which requests are refused:
+
+- **Requests of one kind**, while others signed in the step pass:
+  - to a host containing `--x-s3`: an S3 Express One Zone directory bucket.
+  - to a URL carrying `X-Amz-Credential`: a presigned URL someone else signed.
+  - to a `git-codecommit` host: a CodeCommit static Git credential of an account not listed.
+- **Every request signed after some point**, whatever its host: a key the proxy did not learn.
+  - After an STS call that was not refused itself: a role switch. STS answers it, but the proxy
+    learns the key only for a role in a listed account. If the restrict example marks an account
+    `# assumed in this run`, or the call's `aws.assumedAccount` in the traffic artifact is an
+    account not listed, add it once you have checked it is yours. Otherwise the STS answer could not
+    be read, or the call was `GetSessionToken`.
+  - With no such STS call before them: a key from a profile, `~/.aws/credentials`,
+    `credential_process`, SAML or IAM Identity Center.
 
 ## What it does not stop
 
