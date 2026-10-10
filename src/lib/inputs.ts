@@ -184,8 +184,10 @@ export interface AwsKeyInputs {
 
 const AWS_KEY_CHECK_OFF: AwsKeyInputs = { key: "", roleAccounts: [] };
 
-const STARTING_KEY_ONLY =
-  "The check starts from that variable alone, never from a profile or a credentials file.";
+const STARTING_KEY_HELP =
+  "The check starts from that variable alone, never from a profile, a credentials file or any " +
+  "other credential source. Put the key to check there in an earlier step, for example with " +
+  "aws-actions/configure-aws-credentials, or run the AWS commands in a step without the check.";
 
 /**
  * The AWS access key check pins the step to its own AWS_ACCESS_KEY_ID; role
@@ -246,14 +248,12 @@ export function readAwsKeyInputs(
     if (proxyMode === "audit") {
       warn(
         "The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access " +
-          `key ID, so the check is off for this run. ${STARTING_KEY_ONLY}`,
+          `key ID, so the check is off for this run. ${STARTING_KEY_HELP}`,
       );
       return AWS_KEY_CHECK_OFF;
     }
     throw new SandboxError(
-      "The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. " +
-        `${STARTING_KEY_ONLY} Put the key to check there in an earlier step, for example with ` +
-        "aws-actions/configure-aws-credentials, or run the AWS commands in a separate step.",
+      `The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. ${STARTING_KEY_HELP}`,
       "AWS_ACCESS_KEY_MISSING",
     );
   }

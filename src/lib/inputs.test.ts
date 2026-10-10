@@ -391,7 +391,7 @@ describe("readAwsKeyInputs", () => {
     expect(() => readAwsKeyInputs(inspect, env, silent, accounts("111111111111"))).toThrow(
       expect.objectContaining({
         code: "AWS_ACCESS_KEY_MISSING",
-        message: expect.stringContaining("never from a profile"),
+        message: expect.stringContaining("run the AWS commands in a step without the check"),
       }),
     );
   });
@@ -407,7 +407,9 @@ describe("readAwsKeyInputs", () => {
       ),
     ).toStrictEqual(OFF);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("check is off for this run"));
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("never from a profile"));
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("run the AWS commands in a step without the check"),
+    );
   });
 
   it("does not echo the key it refuses", () => {
