@@ -310,7 +310,8 @@ ID is written either.
 
 Each refusal has a reason that starts with `aws-`. In `restrict` the check judges only the requests
 the URL rules allowed, and its refusals show under **🚫 Blocked Hosts**. In `audit` it judges every
-request, and lists the ones it would refuse under **🚨 Restrict Would Refuse**.
+request, and lists the ones it would refuse under **🚨 Restrict Would Refuse**. Under whichever of
+the two comes last, the report links here.
 
 | Reason                       | Usual cause                                                                                                                                                                                              | What to do                                                                                                                                                                          |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

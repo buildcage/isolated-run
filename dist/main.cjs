@@ -73026,6 +73026,10 @@ function describeFailedConnections(report, engineLabel) {
 		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed under Failed Connections. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
 	};
 }
+const vpceHost = (service) => `^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.${service}\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$`;
+`${vpceHost("sts")}`, "" + vpceHost("git-codecommit(-fips)?");
+const formName = (name) => name.split("").map((c) => `(${[c, ...new Set([c, c.toUpperCase()].map((l) => `%${l.charCodeAt(0).toString(16)}`))].join("|")})`).join("");
+formName("awsaccesskeyid"), formName("x-amz-credential"), formName("rolearn"), formName("action");
 //#endregion
 //#region src/lib/report.ts
 const HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
@@ -73056,8 +73060,9 @@ function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
 }
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
-	let refusedByAwsCheck = report.timeline.some((e) => (e.wouldRefuse ?? e.reason ?? "").startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, TRAFFIC_BLOCK.wouldRefuse]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
-	if (!refusedByAwsCheck || at === -1) return blocks;
+	if (!report.timeline.some((e) => (e.wouldRefuse ?? e.reason ?? "").startsWith("aws-"))) return blocks;
+	let tables = new Set([TRAFFIC_BLOCK.blocked, TRAFFIC_BLOCK.wouldRefuse]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
+	if (at === -1) return blocks;
 	let link = {
 		priority: 0,
 		level: 1,

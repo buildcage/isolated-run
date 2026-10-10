@@ -28,6 +28,7 @@ import {
 } from "#core/lib/report/render/render-report-markdown.ts";
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
+import { AWS_REASON_PREFIX } from "../proxy/haproxy-aws-keys.ts";
 import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
 import { TRAFFIC_PRIORITIES } from "./summary-priorities.ts";
 
@@ -135,11 +136,12 @@ function withAwsTroubleshootingLink(
   actionRef: string,
 ): SummaryBlock[] {
   const refusedByAwsCheck = report.timeline.some((e) =>
-    (e.wouldRefuse ?? e.reason ?? "").startsWith("aws-"),
+    (e.wouldRefuse ?? e.reason ?? "").startsWith(AWS_REASON_PREFIX),
   );
+  if (!refusedByAwsCheck) return blocks;
   const tables = new Set<string>([TRAFFIC_BLOCK.blocked, TRAFFIC_BLOCK.wouldRefuse]);
   const at = blocks.findLastIndex((b) => b.id !== undefined && tables.has(b.id));
-  if (!refusedByAwsCheck || at === -1) return blocks;
+  if (at === -1) return blocks;
   const url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`;
   const link: SummaryBlock = {
     priority: 0,

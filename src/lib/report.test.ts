@@ -149,7 +149,9 @@ describe("computeReportOutcomes", () => {
         ],
       };
       const { markdown } = computeReportOutcomes(r, options());
-      expect(markdown.indexOf(LINK)).toBeGreaterThan(markdown.indexOf("Restrict Would Refuse"));
+      expect(markdown).toMatch(
+        /### 🚨 Restrict Would Refuse\n\n```\n.*\n```\n\n<sub>\*For an `aws-`/,
+      );
     });
 
     it("is left out when no refusal is the check's", () => {
