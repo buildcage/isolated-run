@@ -135,13 +135,14 @@ func run(cgPath, outPath, readyPath, pidPath string) error {
 			return err
 		}
 	}
+	// Before the ready file, which lets the step start.
+	base, errBase := missedRuns(coll)
 	if readyPath != "" {
 		if err := os.WriteFile(readyPath, nil, 0o644); err != nil {
 			return err
 		}
 	}
 	fmt.Fprintln(os.Stderr, "filesystem-audit: attached")
-	base, errBase := missedRuns(coll)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -150,7 +151,10 @@ func run(cgPath, outPath, readyPath, pidPath string) error {
 	go func() {
 		<-sig
 		n, err := missedRuns(coll)
-		missed <- count{n - base, errors.Join(errBase, err)}
+		if err = errors.Join(errBase, err); err != nil {
+			n, base = 0, 0
+		}
+		missed <- count{n - base, err}
 		rd.Flush() // Read drains what is queued, then returns ErrFlushed.
 	}()
 
