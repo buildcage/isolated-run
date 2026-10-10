@@ -93,7 +93,7 @@ function classify(r: AuditRecord): Classified | undefined {
 // close the code block and write Markdown of its own into the Job Summary.
 // Format and separator characters are escaped too, since they can make one
 // path read as another, and a backslash so each escape reads one way only.
-const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\`;
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\\`;
 const UNSAFE_CHARS = new RegExp(`[${UNSAFE}]`, "gu");
 // A name shown inside quotes escapes the quote too.
 const UNSAFE_QUOTED = new RegExp(`[${UNSAFE}"]`, "gu");
@@ -105,11 +105,19 @@ const NAMED_ESCAPES: Record<string, string> = {
   '"': '\\"',
 };
 
+// The tracer writes a byte 0xNN that is not UTF-8 as a lone surrogate U+DCNN
+// (see its decode.go).
+const RAW_BYTE_FIRST = 0xdc80;
+const RAW_BYTE_LAST = 0xdcff;
+
 function escapeForDisplay(name: string, unsafe = UNSAFE_CHARS): string {
-  return name.replace(
-    unsafe,
-    (c) => NAMED_ESCAPES[c] ?? `\\u{${Number(c.codePointAt(0)).toString(16)}}`,
-  );
+  return name.replace(unsafe, (c) => {
+    const named = NAMED_ESCAPES[c];
+    if (named !== undefined) return named;
+    const cp = Number(c.codePointAt(0));
+    if (cp >= RAW_BYTE_FIRST && cp <= RAW_BYTE_LAST) return `\\x${(cp & 0xff).toString(16)}`;
+    return `\\u{${cp.toString(16)}}`;
+  });
 }
 
 // A memfd and a file deleted while in use key under marks no path can spell,

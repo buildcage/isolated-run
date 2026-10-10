@@ -71,6 +71,15 @@ describe("renderFilesystemAuditSummary", () => {
     ]);
   });
 
+  it("shows a byte that is not UTF-8, which the tracer writes as U+DC00 plus it, as \\xNN", () => {
+    const byte = (b: number): string => String.fromCharCode(0xdc00 + b);
+    const md = render(
+      { kind: "read", comm: `c${byte(0xff)}`, path: `/work/a${byte(0x80)}` },
+      { kind: "read", comm: "c", path: `/work/b${String.fromCharCode(0xd800)}` },
+    );
+    expect(lines(md)).toEqual(["R c\\xff ./a\\x80", "R c ./b\\u{d800}"]);
+  });
+
   it("shows a path change the kernel refused after the tracer saw it as failed", () => {
     const md = render(
       { kind: "unlink", comm: "rm", path: "/tmp/f", err: 1, failed: true },

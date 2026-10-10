@@ -68404,7 +68404,7 @@ function classify(r) {
 		failed
 	} : void 0;
 }
-const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\`, UNSAFE_CHARS = RegExp(`[${UNSAFE}]`, "gu"), UNSAFE_QUOTED = RegExp(`[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\\`, UNSAFE_CHARS = RegExp(`[${UNSAFE}]`, "gu"), UNSAFE_QUOTED = RegExp(`[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
 	"\n": "\\n",
 	"\r": "\\r",
 	"	": "\\t",
@@ -68412,7 +68412,12 @@ const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Zl}\p{Zp}\\`, UNSAFE_CHARS = RegExp(`[$
 	"\"": "\\\""
 };
 function escapeForDisplay(name, unsafe = UNSAFE_CHARS) {
-	return name.replace(unsafe, (c) => NAMED_ESCAPES[c] ?? `\\u{${Number(c.codePointAt(0)).toString(16)}}`);
+	return name.replace(unsafe, (c) => {
+		let named = NAMED_ESCAPES[c];
+		if (named !== void 0) return named;
+		let cp = Number(c.codePointAt(0));
+		return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
+	});
 }
 const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, DELETED_MARK = " (deleted)", DELETED = `\0${DELETED_MARK}`;
 function marked(r, path) {

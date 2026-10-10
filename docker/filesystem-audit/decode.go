@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 )
@@ -45,6 +47,73 @@ type record struct {
 	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the reader
 	// turns it into Time.
 	boot uint64
+}
+
+// MarshalJSON writes record as encoding/json would, except that a name the
+// step chose keeps a byte that is not UTF-8 (see rawName) rather than having
+// it turned into U+FFFD.
+func (r record) MarshalJSON() ([]byte, error) {
+	type plain record // without this method
+	if utf8.ValidString(r.Comm) && utf8.ValidString(r.Path) && utf8.ValidString(r.Name) &&
+		utf8.ValidString(r.To) && utf8.ValidString(r.ToName) {
+		return json.Marshal(plain(r))
+	}
+	return json.Marshal(struct {
+		Time     string  `json:"t"`
+		Kind     string  `json:"kind"`
+		PID      uint32  `json:"pid"`
+		PPID     uint32  `json:"ppid"`
+		Comm     rawName `json:"comm"`
+		Path     rawName `json:"path,omitempty"`
+		Name     rawName `json:"name,omitempty"`
+		To       rawName `json:"to,omitempty"`
+		ToName   rawName `json:"to_name,omitempty"`
+		Access   string  `json:"access,omitempty"`
+		Flags    uint32  `json:"flags,omitempty"`
+		Mode     string  `json:"mode,omitempty"`
+		Owner    string  `json:"owner,omitempty"`
+		Err      int32   `json:"err,omitempty"`
+		Failed   bool    `json:"failed,omitempty"`
+		Image    bool    `json:"image,omitempty"`
+		Memfd    bool    `json:"memfd,omitempty"`
+		Deleted  bool    `json:"deleted,omitempty"`
+		Exchange bool    `json:"exchange,omitempty"`
+	}{r.Time, r.Kind, r.PID, r.PPID, rawName(r.Comm), rawName(r.Path), rawName(r.Name),
+		rawName(r.To), rawName(r.ToName), r.Access, r.Flags, r.Mode, r.Owner, r.Err,
+		r.Failed, r.Image, r.Memfd, r.Deleted, r.Exchange})
+}
+
+// rawName is a file or process name as the kernel holds it: bytes, not
+// necessarily UTF-8. Each byte that is not part of valid UTF-8 is written as
+// the lone surrogate U+DC00 plus the byte, as Python's surrogateescape does,
+// so the name can be restored exactly and no two names read alike.
+type rawName string
+
+func (n rawName) MarshalJSON() ([]byte, error) {
+	s := string(n)
+	out := []byte{'"'}
+	for len(s) > 0 {
+		valid := 0
+		for valid < len(s) {
+			r, size := utf8.DecodeRuneInString(s[valid:])
+			if r == utf8.RuneError && size == 1 {
+				break
+			}
+			valid += size
+		}
+		if valid > 0 {
+			q, err := json.Marshal(s[:valid])
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, q[1:len(q)-1]...)
+			s = s[valid:]
+			continue
+		}
+		out = fmt.Appendf(out, `\udc%02x`, s[0])
+		s = s[1:]
+	}
+	return append(out, '"'), nil
 }
 
 // kindNames maps the kind field of struct event to a name. A failed operation
