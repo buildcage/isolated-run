@@ -70359,8 +70359,11 @@ function defaultSpawn$1(command, args) {
 		reason: reason.value
 	};
 }
-function defaultSleep(ms) {
-	return new Promise((resolve) => setTimeout(resolve, ms).unref());
+function defaultSleep(ms, detached = !1) {
+	return new Promise((resolve) => {
+		let t = setTimeout(resolve, ms);
+		detached && t.unref();
+	});
 }
 function defaultRemove(path) {
 	(0, node_fs.rmSync)(path, { force: !0 });
@@ -70420,7 +70423,7 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		let grace = () => untilRecorded && !cancel?.aborted ? 3e4 : 2e3;
 		for (let waited = 0; !exited; waited += 100) {
 			if (untilRecorded && recordComplete(readTail, outPath)) {
-				Promise.race([child.exited, sleep(1e4)]).then(() => (exited || kill(), child.exited)).then(() => remove(pidFilePath)).catch(() => {});
+				Promise.race([child.exited, sleep(1e4, !0)]).then(() => (exited || kill(), child.exited)).then(() => remove(pidFilePath)).catch(() => {});
 				return;
 			}
 			if (waited >= grace()) break;
@@ -73554,7 +73557,14 @@ async function runSandboxStep(env, overrides = {}) {
 }
 //#endregion
 //#region src/main.ts
-process.argv[1] && (0, node_fs.realpathSync)(process.argv[1]) === (0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href) && runSandboxStep(process.env).then((exitCode) => {
-	exitCode !== 0 && (process.exitCode = exitCode);
-}).catch(exitOnFatalError("sandbox"));
+if (process.argv[1] && (0, node_fs.realpathSync)(process.argv[1]) === (0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)) {
+	let settled = !1;
+	process.on("beforeExit", () => {
+		settled || (process.stdout.write("::error::The step stopped partway through; failing it.\n"), process.exitCode = 1);
+	}), runSandboxStep(process.env).then((exitCode) => {
+		exitCode !== 0 && (process.exitCode = exitCode);
+	}).catch(exitOnFatalError("sandbox")).finally(() => {
+		settled = !0;
+	});
+}
 //#endregion

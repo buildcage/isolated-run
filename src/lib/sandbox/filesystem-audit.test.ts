@@ -357,7 +357,7 @@ describe("startFilesystemAudit", () => {
     });
     await handle.stop();
 
-    expect(sleep.mock.calls).toStrictEqual([[100], [10_000]]);
+    expect(sleep.mock.calls).toStrictEqual([[100], [10_000, true]]);
     expect(remove).not.toHaveBeenCalled();
     resolveExit!();
     await vi.waitFor(() => expect(remove).toHaveBeenCalledWith(START_OPTIONS.pidFilePath));

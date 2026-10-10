@@ -377,6 +377,60 @@ jobs:
           if grep -q '/var/tmp/buildcage-' "$f"; then exit 1; fi
           if grep -q 'buildcage-audit-sentinel-arg' "$f"; then exit 1; fi
 
+      - name: The tracer and the sandbox's cgroup are gone after the step
+        run: |
+          if pgrep -x filesystem-audi; then echo "::error::the tracer outlived its step"; exit 1; fi
+          cg="/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup)"
+          if ls -d "$cg"/buildcage-proxy-* 2>/dev/null; then echo "::error::the sandbox's cgroup was left"; exit 1; fi
+
+      # The real post step runs only once the job ends, so it is driven here
+      # with the state it would be handed (see integration-test-post-state-tampering.sh).
+      - name: The post step removes the audit's files
+        run: |
+          base="/var/tmp/buildcage-$(id -u)"
+          rec=$(ls "$base"/filesystem-audit-*.jsonl | head -1)
+          suffix=$(basename "$rec" | sed -nE 's/^filesystem-audit-([0-9a-f]{8})\..*/\1/p')
+          if [ -z "$suffix" ]; then echo "::error::no recording left for the post step"; exit 1; fi
+          STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs
+          if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
+
+      # After every other check, as it leaves the runner without tracefs for the
+      # rest of the job, post steps included: the tracer then cannot attach its
+      # syscall tracepoints, after it has made the sandbox's cgroup.
+      - name: Take tracefs away
+        run: |
+          sudo umount -R /sys/kernel/debug || true
+          sudo umount /sys/kernel/tracing || true
+          if sudo test -e /sys/kernel/tracing/events || sudo test -e /sys/kernel/debug/tracing/events; then
+            echo "::error::tracefs is still reachable"; exit 1
+          fi
+
+      - name: Run a step whose tracer cannot start
+        id: unstarted
+        continue-on-error: true
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+        with:
+          proxy_engine: universal
+          proxy_mode: audit
+          filesystem_mode: ${{ matrix.filesystem_mode }}
+          filesystem_audit: record
+          run: touch "$GITHUB_WORKSPACE/should-not-run"
+
+      - name: The step failed before its command, and left no tracer, cgroup or file
+        env:
+          OUTCOME: ${{ steps.unstarted.outcome }}
+        run: |
+          if [ "$OUTCOME" != failure ]; then echo "::error::the step did not fail ($OUTCOME)"; exit 1; fi
+          if [ -e "$GITHUB_WORKSPACE/should-not-run" ]; then echo "::error::the command ran"; exit 1; fi
+          if pgrep -x filesystem-audi; then echo "::error::the tracer outlived its step"; exit 1; fi
+          cg="/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup)"
+          if ls -d "$cg"/buildcage-proxy-* 2>/dev/null; then echo "::error::the sandbox's cgroup was left"; exit 1; fi
+          if ls "/var/tmp/buildcage-$(id -u)"/filesystem-audit-* 2>/dev/null; then
+            echo "::error::the failed start left the audit's files"; exit 1
+          fi
+
   # One representative case through the real action wrapper, against real
   # internet hosts (no fixture network), proves proxy_engine: universal
   # wiring end-to-end: an allowed host reaches its origin, a blocked one does
