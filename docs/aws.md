@@ -48,9 +48,9 @@ With `aws_key_check` on, these are refused:
   signing.
 - Very old SDKs and hand-written clients that still sign one of the older ways (Signature Version 2
   or 3).
-- Calls over about 4 MiB to APIs that take their parameters as a form, such as STS, IAM,
-  CloudFormation, SNS, EC2 and SES v1: SES v1 `SendRawEmail` with large attachments, for one. Use
-  SES v2 (`sesv2`).
+- Calls over about 4 MiB to APIs that take their parameters as a form (STS, IAM, CloudFormation,
+  SNS, EC2, SES v1 and others), such as SES v1 `SendRawEmail` with large attachments. Use SES v2
+  (`sesv2`).
 - The same calls compressed, such as CloudWatch `PutMetricData` from older SDKs, which compress a
   body over 10 KB. Set `AWS_DISABLE_REQUEST_COMPRESSION=true` for the step, or update the SDK.
 - Uploads to S3 from an HTML form (a POST policy). Upload with `PutObject` or a presigned
