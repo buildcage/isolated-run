@@ -57,6 +57,7 @@ export const ACTION_INPUT_ENV_KEYS = new Set(
     "allowed_aws_role_accounts",
     "upload_traffic_artifact",
     "traffic_artifact_retention_days",
+    "upload_filesystem_audit_artifact",
     "fail_on_blocked",
     "fail_on_ca_residue",
     "known_blocked_rules",

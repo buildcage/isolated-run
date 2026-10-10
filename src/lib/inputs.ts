@@ -55,6 +55,7 @@ export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
     "fail_on_ca_residue",
     "filesystem_mode",
     "filesystem_audit",
+    "upload_filesystem_audit_artifact",
     "filesystem_audit_retention_days",
     "label",
   ],
@@ -147,20 +148,31 @@ export function readFilesystemAuditInput(getInput: GetInput = core.getInput): Fi
   return resolveFilesystemAudit(getInput("filesystem_audit"));
 }
 
-/** Undefined when unset, which leaves the retention to the repository default. */
-export function readFilesystemAuditRetentionDays(
+/**
+ * Whether to upload the record, off unless asked for as the traffic artifact
+ * is, and how long to keep it, undefined leaving the repository default. The
+ * retention is checked even when nothing is uploaded, as the traffic one is.
+ */
+export function readFilesystemAuditArtifactInputs(
   getInput: GetInput = core.getInput,
-): number | undefined {
+): FilesystemAuditArtifactInputs {
   const days = getInput("filesystem_audit_retention_days");
-  if (days === "") return undefined;
-  if (!/^[1-9]\d*$/.test(days)) {
+  if (days !== "" && !/^[1-9]\d*$/.test(days)) {
     throw new SandboxError(
       `Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. ` +
         "Must be a whole number of days above zero.",
       "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS",
     );
   }
-  return Number(days);
+  return {
+    upload: readBooleanInput("upload_filesystem_audit_artifact", false, getInput),
+    retentionDays: days === "" ? undefined : Number(days),
+  };
+}
+
+export interface FilesystemAuditArtifactInputs {
+  upload: boolean;
+  retentionDays?: number;
 }
 
 /** The optional `label:`, which only titles the report heading. */

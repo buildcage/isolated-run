@@ -19,7 +19,7 @@ import {
   readFailOnBlocked,
   readFailOnCaResidue,
   readFilesystemAuditInput,
-  readFilesystemAuditRetentionDays,
+  readFilesystemAuditArtifactInputs,
   readFilesystemInputs,
   readRunCommand,
   readStepLabel,
@@ -221,20 +221,31 @@ describe("readFilesystemAuditInput", () => {
   });
 });
 
-describe("readFilesystemAuditRetentionDays", () => {
-  it("is undefined when unset", () => {
-    expect(readFilesystemAuditRetentionDays(inputs())).toBeUndefined();
+describe("readFilesystemAuditArtifactInputs", () => {
+  it("uploads nothing and leaves the retention to the repository when unset", () => {
+    expect(readFilesystemAuditArtifactInputs(inputs())).toStrictEqual({
+      upload: false,
+      retentionDays: undefined,
+    });
   });
 
-  it("reads a whole number of days", () => {
-    expect(readFilesystemAuditRetentionDays(inputs({ filesystem_audit_retention_days: "7" }))).toBe(
-      7,
-    );
+  it("reads the upload switch and a whole number of days", () => {
+    expect(
+      readFilesystemAuditArtifactInputs(
+        inputs({ upload_filesystem_audit_artifact: "true", filesystem_audit_retention_days: "7" }),
+      ),
+    ).toStrictEqual({ upload: true, retentionDays: 7 });
   });
 
-  it("rejects a non-positive or non-numeric value", () => {
+  it("rejects a value that is not true or false", () => {
     expect(() =>
-      readFilesystemAuditRetentionDays(inputs({ filesystem_audit_retention_days: "0" })),
+      readFilesystemAuditArtifactInputs(inputs({ upload_filesystem_audit_artifact: "yes" })),
+    ).toThrow('Invalid upload_filesystem_audit_artifact: "yes". Must be true or false.');
+  });
+
+  it("rejects a non-positive or non-numeric retention even with nothing to upload", () => {
+    expect(() =>
+      readFilesystemAuditArtifactInputs(inputs({ filesystem_audit_retention_days: "0" })),
     ).toThrow(/Invalid filesystem_audit_retention_days/);
   });
 });

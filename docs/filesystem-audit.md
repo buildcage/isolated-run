@@ -6,10 +6,11 @@
 > this action to a commit SHA rather than a version tag if you adopt it.
 
 `filesystem_audit: record` records every file the isolated step reads, writes, moves,
-deletes, changes the attributes of, and executes. It adds a section to the Job Summary and uploads
-the full record as an artifact. It watches from the kernel, so a static binary or a tool that
-bypasses libc is seen like any other, and it only records: it never blocks an access. What the step
-may write is decided by [`filesystem_mode` and `write_through`](../README.md#filesystem-access).
+deletes, changes the attributes of, and executes. It adds a section to the Job Summary and, with
+`upload_filesystem_audit_artifact: true`, uploads the full record as an artifact. It watches from
+the kernel, so a static binary or a tool that bypasses libc is seen like any other, and it only
+records: it never blocks an access. What the step may write is decided by
+[`filesystem_mode` and `write_through`](../README.md#filesystem-access).
 
 ## What it is for
 
@@ -32,7 +33,7 @@ may write is decided by [`filesystem_mode` and `write_through`](../README.md#fil
 
 - **Checking what a dependency read.** A row such as `R ~/.npmrc`, `R ~/.ssh/**` or
   `R ~/.docker/config.json` says a command in the step opened a credential file. The details say
-  which command, and the artifact says when and from which process.
+  which command, and the artifact, if uploaded, says when and from which process.
 - **Seeing what an install ran.** The executed table lists every program the step started, so a
   `postinstall` script that runs `curl` or a binary it just downloaded shows up there.
 - **Seeing what was refused.** A lowercase flag with `!` is an access the sandbox, a file's
@@ -60,30 +61,38 @@ A host that falls short fails the step before the command runs, with the reason;
 ### Turning it on
 
 ```yaml
-- id: build
-  uses: buildcage/isolated-run@<sha>
+- uses: buildcage/isolated-run@<sha>
   with:
     filesystem_audit: record
     run: npm ci
 ```
 
-The step's Job Summary gets a **Filesystem audit** section after the traffic report, and the
-`filesystem_audit_artifact_name` output names the uploaded record:
+The step's Job Summary gets a **Filesystem audit** section after the traffic report. The full
+record, with every access in order, is uploaded only when asked for, as the traffic artifact is:
 
 ```yaml
+- id: build
+  uses: buildcage/isolated-run@<sha>
+  with:
+    filesystem_audit: record
+    upload_filesystem_audit_artifact: true
+    run: npm ci
+
 - if: steps.build.outputs.filesystem_audit_artifact_name != ''
   uses: actions/download-artifact@v5
   with:
     name: ${{ steps.build.outputs.filesystem_audit_artifact_name }}
 ```
 
-The output is empty when nothing was recorded or the upload failed, and without the `if:`,
-`download-artifact` would then download every artifact of the run.
+The `filesystem_audit_artifact_name` output names the uploaded artifact. It is empty when nothing
+was uploaded, and without the `if:`, `download-artifact` would then download every artifact of the
+run.
 
 `filesystem_audit_retention_days` sets how long the artifact is kept; empty uses the repository's
-default. The artifact names each program the step ran but not its arguments, which can carry
-secrets. It still holds every path the step touched, including the names of files it only tried to
-open, so treat it as sensitive, like the traffic artifact.
+default, and a value above the repository's maximum is lowered to it, with a warning. It is checked
+even when nothing is uploaded. The artifact names each program the step ran but not its arguments,
+which can carry secrets. It still holds every path the step touched, including the names of files
+it only tried to open, so treat it as sensitive, like the traffic artifact.
 
 ## Reading the summary
 
@@ -114,7 +123,7 @@ first-last access since the proxy started · flags · command · path
 00:00.530-00:41.207: RWD node ./node_modules/**
 ```
 
-When the artifact could not be uploaded, the legend says so in place of its name.
+Where there is no artifact, the legend says how to ask for one, or that the upload failed.
 
 - **Executed** lists each program once, in the order it first ran.
 - **Accessed paths** combines every command's actions on a path in one row, in path order: the
@@ -178,7 +187,8 @@ last time in the details can be earlier than its last write.
 
 ## The artifact
 
-The artifact named `buildcage-filesystem-audit-<id>` holds one file,
+With `upload_filesystem_audit_artifact: true`, the artifact named `buildcage-filesystem-audit-<id>`
+holds one file,
 `filesystem-audit-<id>.step.jsonl`: one JSON object per line, in the order the accesses happened,
 with absolute paths. It holds only the step's own accesses, as the summary does: the sandbox's setup
 is left out, and the step's shell is named `bash`. A record marked incomplete can hold the setup too.
@@ -337,7 +347,7 @@ itself can do to the record, and what the record can be trusted for.
   the filesystem details give way first and this section's tables after the traffic report's
   communication log; [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the full
   order. What is cut is replaced by a note naming the artifact, which still holds every access, or
-  saying the record was not kept when the upload failed.
+  saying how to ask for one, or that the record was not kept when the upload failed.
 - **Distinct paths.** The accessed-paths table or the details is left out the same way, under a
   note that says why, once its folded tree holds more than 200,000 files and directories, every
   directory on the way counted, and each command's counted apart in the details.

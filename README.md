@@ -447,8 +447,9 @@ to the old `writable:` and `allow_write:` inputs are all in
 
 `filesystem_audit: record` records what the isolated step reads, writes, moves, deletes, changes the
 attributes of, and executes, and adds a section to the Job Summary: the programs it ran, every path
-it touched with a flag for each action, and, folded below them, one line per command and path. The
-full record is uploaded as a `buildcage-filesystem-audit-<id>` artifact; treat it as sensitive.
+it touched with a flag for each action, and, folded below them, one line per command and path.
+`upload_filesystem_audit_artifact: true` also uploads the full record as a
+`buildcage-filesystem-audit-<id>` artifact; treat it as sensitive.
 
 ```yaml
 - uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
@@ -682,7 +683,7 @@ when nothing of it fits; the example is always replaced whole rather than printe
 table or the 🚨 list is cut, the timeline is left out with it, under that one note. The report is
 written to the Job Summary only, so what was cut is recovered from the [traffic
 artifact](./docs/reference.md#traffic-artifact), or the filesystem audit's own artifact for its
-section, and nowhere else.
+section, and nowhere else when neither was uploaded.
 
 ## FAQ
 

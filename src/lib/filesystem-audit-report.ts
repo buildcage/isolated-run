@@ -32,6 +32,7 @@ import {
   unreadableSummaryBlocks,
   type AuditSummary,
   type CutCause,
+  type RecordArtifact,
   type SummaryOptions,
 } from "./filesystem-audit-summary.ts";
 import type { FilesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
@@ -40,6 +41,8 @@ import { FILESYSTEM_PRIORITIES } from "./summary-priorities.ts";
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */
   audit: FilesystemAuditPaths | undefined;
+  /** upload_filesystem_audit_artifact: whether to upload the record at all. */
+  upload: boolean;
   retentionDays: number | undefined;
   containerName: string;
   annotation: Annotation;
@@ -177,6 +180,7 @@ const NONE: StepFilesystemAudit = { blocks: () => [] };
 export async function prepareStepFilesystemAudit(
   {
     audit,
+    upload,
     retentionDays,
     containerName,
     annotation,
@@ -209,10 +213,14 @@ export async function prepareStepFilesystemAudit(
     }
     if (!reduced) return NONE;
     const { summary, summaryError } = reduced;
-    if (reduced.written)
+    if (reduced.written && upload)
       artifactName =
         (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
-    const uploaded = artifactName || undefined;
+    const uploaded: RecordArtifact = !upload
+      ? "not-requested"
+      : artifactName
+        ? { name: artifactName }
+        : "upload-failed";
     const cutNote = (cause?: CutCause): string => filesystemTruncationNote(uploaded, cause);
     const notice = cutNote();
     const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`;

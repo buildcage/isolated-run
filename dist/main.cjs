@@ -68829,11 +68829,11 @@ function unreadableSummaryBlocks() {
 		cut: "keep"
 	}];
 }
-function filesystemLegendNote(artifactName, guideUrl) {
-	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifactName ? `the full record is in the \`${artifactName}\` artifact` : "the full record could not be uploaded"} · [how to read this](${guideUrl})`;
+function filesystemLegendNote(artifact, guideUrl) {
+	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifact === "not-requested" ? "set `upload_filesystem_audit_artifact: true` for the full record" : artifact === "upload-failed" ? "the full record could not be uploaded" : `the full record is in the \`${artifact.name}\` artifact`} · [how to read this](${guideUrl})`;
 }
-function filesystemTruncationNote(artifactName, cause = "size") {
-	let rest = artifactName ? `the ${artifactName} artifact uploaded for this run has every access` : "the recording could not be uploaded as an artifact, so the rest is not kept";
+function filesystemTruncationNote(artifact, cause = "size") {
+	let rest = artifact === "not-requested" ? "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact" : artifact === "upload-failed" ? "the recording could not be uploaded as an artifact, so the rest is not kept" : `the ${artifact.name} artifact uploaded for this run has every access`;
 	return `_…truncated: ${cause === "paths" ? "the filesystem audit touched too many distinct paths to summarize" : "the filesystem audit exceeded GitHub's Job Summary size limit"}; ${rest}._\n\n`;
 }
 //#endregion
@@ -69417,7 +69417,7 @@ function prefixes(value, realpath) {
 	return out;
 }
 const NONE = { blocks: () => [] };
-async function prepareStepFilesystemAudit({ audit, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
+async function prepareStepFilesystemAudit({ audit, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
 	let deps = {
 		...realDeps$3,
 		...overrides
@@ -69435,8 +69435,8 @@ async function prepareStepFilesystemAudit({ audit, retentionDays, containerName,
 		}
 		if (!reduced) return NONE;
 		let { summary, summaryError } = reduced;
-		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
-		let uploaded = artifactName || void 0, cutNote = (cause) => filesystemTruncationNote(uploaded, cause), notice = cutNote(), legendNote = filesystemLegendNote(uploaded, `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`);
+		reduced.written && upload && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
+		let uploaded = upload ? artifactName ? { name: artifactName } : "upload-failed" : "not-requested", cutNote = (cause) => filesystemTruncationNote(uploaded, cause), notice = cutNote(), legendNote = filesystemLegendNote(uploaded, `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`);
 		return { blocks: (startedAt) => {
 			let rendered;
 			try {
@@ -69567,6 +69567,7 @@ const LIST_INPUTS = [
 		"fail_on_ca_residue",
 		"filesystem_mode",
 		"filesystem_audit",
+		"upload_filesystem_audit_artifact",
 		"filesystem_audit_retention_days",
 		"label"
 	],
@@ -69576,59 +69577,60 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$9 = getInput) {
-	let runInput = getInput$9("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$3 = getInput) {
+	let runInput = getInput$3("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$8 = getInput) {
+function readProxyInputs(getInput$2 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$8("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$8("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$2("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$2("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$5 = getInput) {
+function readFilesystemInputs(notice, getInput$6 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$5("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$6("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$5("write_through"),
-			writable: getInput$5("writable"),
-			allowWrite: getInput$5("allow_write")
+			writeThrough: getInput$6("write_through"),
+			writable: getInput$6("writable"),
+			allowWrite: getInput$6("allow_write")
 		}, notice)
 	};
 }
 function readFilesystemAuditInput(getInput$4 = getInput) {
 	return resolveFilesystemAudit(getInput$4("filesystem_audit"));
 }
-function readFilesystemAuditRetentionDays(getInput$6 = getInput) {
-	let days = getInput$6("filesystem_audit_retention_days");
-	if (days !== "") {
-		if (!/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
-		return Number(days);
-	}
+function readFilesystemAuditArtifactInputs(getInput$8 = getInput) {
+	let days = getInput$8("filesystem_audit_retention_days");
+	if (days !== "" && !/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
+	return {
+		upload: readBooleanInput("upload_filesystem_audit_artifact", !1, getInput$8),
+		retentionDays: days === "" ? void 0 : Number(days)
+	};
 }
-function readStepLabel(getInput$2 = getInput) {
-	return getInput$2("label") || void 0;
+function readStepLabel(getInput$9 = getInput) {
+	return getInput$9("label") || void 0;
 }
-function readFailOnCaResidue(getInput$7 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$7);
+function readFailOnCaResidue(getInput$5 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$5);
 }
-function readFailOnBlocked(getInput$1 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$1);
+function readFailOnBlocked(getInput$7 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$7);
 }
 const AWS_KEY_CHECK_OFF = {
 	key: "",
 	roleAccounts: []
 };
-function readAwsKeyInputs({ proxyEngine }, env, getInput$3 = getInput) {
+function readAwsKeyInputs({ proxyEngine }, env, getInput$1 = getInput) {
 	let roleAccounts;
 	try {
-		roleAccounts = parseAwsAccounts(getInput$3("allowed_aws_role_accounts"));
+		roleAccounts = parseAwsAccounts(getInput$1("allowed_aws_role_accounts"));
 	} catch (e) {
 		let { message } = e;
 		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
-	let check = readBooleanInput("aws_key_check", !1, getInput$3);
+	let check = readBooleanInput("aws_key_check", !1, getInput$1);
 	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config_file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
 	if (!check) return AWS_KEY_CHECK_OFF;
 	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy_engine: inspect, or remove aws_key_check and allowed_aws_role_accounts.`, "INVALID_PROXY_ENGINE");
@@ -71800,6 +71802,7 @@ const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-
 	"allowed_aws_role_accounts",
 	"upload_traffic_artifact",
 	"traffic_artifact_retention_days",
+	"upload_filesystem_audit_artifact",
 	"fail_on_blocked",
 	"fail_on_ca_residue",
 	"known_blocked_rules",
@@ -73349,7 +73352,7 @@ const realDeps = {
 	readProxyInputs,
 	readFilesystemInputs,
 	readFilesystemAuditInput,
-	readFilesystemAuditRetentionDays,
+	readFilesystemAuditArtifactInputs,
 	readRuleInputs,
 	readFailOnCaResidue,
 	readFailOnBlocked,
@@ -73403,14 +73406,14 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditRetentionDays, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
 	for (let line of configFile?.summary ?? []) log(line);
 	let runInput = readRunCommand(), { proxyEngine, proxyMode } = readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), filesystemAudit = readFilesystemAuditInput(), filesystemAuditRetentionDays = readFilesystemAuditRetentionDays();
+	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), filesystemAudit = readFilesystemAuditInput(), filesystemAuditArtifact = readFilesystemAuditArtifactInputs();
 	checkScratchBaseParent(), configFile && saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs(), { httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs(), annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY);
 	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), checkUrlAndTlsRuleSupport({
@@ -73500,7 +73503,8 @@ async function runSandboxStep(env, overrides = {}) {
 	} finally {
 		let prepareAudit = () => prepareStepFilesystemAudit({
 			audit,
-			retentionDays: filesystemAuditRetentionDays,
+			upload: filesystemAuditArtifact.upload,
+			retentionDays: filesystemAuditArtifact.retentionDays,
 			containerName,
 			annotation,
 			env,

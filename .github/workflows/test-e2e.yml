@@ -204,6 +204,7 @@ jobs:
           proxy_mode: audit
           filesystem_mode: ${{ matrix.filesystem_mode }}
           filesystem_audit: record
+          upload_filesystem_audit_artifact: true
           run: |
             cat /etc/hostname > /dev/null
             echo probe > "$GITHUB_WORKSPACE/probe.txt"
