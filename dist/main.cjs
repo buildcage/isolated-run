@@ -69569,18 +69569,18 @@ function readProxyInputs(getInput$8 = getInput) {
 		proxyMode: resolveProxyMode(getInput$8("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$4 = getInput) {
+function readFilesystemInputs(notice, getInput$5 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$4("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$5("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$4("write_through"),
-			writable: getInput$4("writable"),
-			allowWrite: getInput$4("allow_write")
+			writeThrough: getInput$5("write_through"),
+			writable: getInput$5("writable"),
+			allowWrite: getInput$5("allow_write")
 		}, notice)
 	};
 }
-function readFilesystemAuditInput(getInput$3 = getInput) {
-	return resolveFilesystemAudit(getInput$3("filesystem_audit"));
+function readFilesystemAuditInput(getInput$4 = getInput) {
+	return resolveFilesystemAudit(getInput$4("filesystem_audit"));
 }
 function readFilesystemAuditRetentionDays(getInput$6 = getInput) {
 	let days = getInput$6("filesystem_audit_retention_days");
@@ -69601,28 +69601,21 @@ function readFailOnBlocked(getInput$1 = getInput) {
 const AWS_KEY_CHECK_OFF = {
 	key: "",
 	roleAccounts: []
-}, STARTING_KEY_HELP = "The check starts from that variable alone, never from a profile, a credentials file or any other credential source. Put the key to check there in an earlier step, for example with aws-actions/configure-aws-credentials, or run the AWS commands in a step without the check.";
-function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$5 = getInput) {
+};
+function readAwsKeyInputs({ proxyEngine }, env, getInput$3 = getInput) {
 	let roleAccounts;
 	try {
-		roleAccounts = parseAwsAccounts(getInput$5("allowed_aws_role_accounts"));
+		roleAccounts = parseAwsAccounts(getInput$3("allowed_aws_role_accounts"));
 	} catch (e) {
 		let { message } = e;
 		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
-	let check = readBooleanInput("aws_key_check", !1, getInput$5);
+	let check = readBooleanInput("aws_key_check", !1, getInput$3);
 	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config_file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
 	if (!check) return AWS_KEY_CHECK_OFF;
-	if (proxyEngine !== "inspect") {
-		let reason = `The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers.`;
-		if (proxyMode === "audit") return warn(`${reason} It is ignored for this run.`), AWS_KEY_CHECK_OFF;
-		throw new InvalidInputError(`${reason} Switch to proxy_engine: inspect, or remove aws_key_check and allowed_aws_role_accounts.`, "INVALID_PROXY_ENGINE");
-	}
+	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy_engine: inspect, or remove aws_key_check and allowed_aws_role_accounts.`, "INVALID_PROXY_ENGINE");
 	let key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
-	if (!isAwsAccessKeyId(key)) {
-		if (proxyMode === "audit") return warn(`The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID, so the check is off for this run. ${STARTING_KEY_HELP}`), AWS_KEY_CHECK_OFF;
-		throw new SandboxError(`The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. ${STARTING_KEY_HELP}`, "AWS_ACCESS_KEY_MISSING");
-	}
+	if (!isAwsAccessKeyId(key)) throw new SandboxError("The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. The check starts from that variable alone, never from a profile, a credentials file or any other credential source. Put the key to check there in an earlier step, for example with aws-actions/configure-aws-credentials, or run the AWS commands in a step without the check.", "AWS_ACCESS_KEY_MISSING");
 	return {
 		key,
 		roleAccounts
@@ -73348,10 +73341,7 @@ async function runSandboxStep(env, overrides = {}) {
 		proxyMode,
 		knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
 	}, annotation.warning);
-	let aws = readAwsKeyInputs({
-		proxyEngine,
-		proxyMode
-	}, env, annotation.warning);
+	let aws = readAwsKeyInputs({ proxyEngine }, env);
 	assertNonRootUid(process.getuid());
 	let writeThrough = resolveWriteThroughInput(writeThroughInput, env);
 	validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write_through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport(), filesystemAudit === "record" && checkFilesystemAuditHost();

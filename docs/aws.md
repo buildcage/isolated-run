@@ -280,7 +280,7 @@ step can be checked before it is switched to `restrict`:
 
 The traffic artifact carries the same reason in `wouldRefuse`.
 
-When the check was on for the run, the report's **Switch to restrict mode** example includes
+With the check on, the report's **Switch to restrict mode** example includes
 `aws_key_check: true`, and `allowed_aws_role_accounts` with the accounts given and each account the
 run assumed a role in, read from every STS answer, including one to a request restrict would refuse.
 A chain of roles, as the CDK assumes them, shows in full after one audit run. An answer the proxy
@@ -395,10 +395,10 @@ use one:
 
 ## Requirements and limits
 
-- `proxy_engine: inspect` only, since `universal` never sees a request's headers. `restrict` fails
-  the step on `universal`; `audit` warns and ignores the input.
-- The step has to start with a key in `AWS_ACCESS_KEY_ID`. In `restrict`, a step with the check on
-  and no access key ID there fails before the proxy starts; `audit` warns and turns the check off.
+- `proxy_engine: inspect` only, since `universal` never sees a request's headers. The check on
+  `universal` fails the step, in `audit` too.
+- The step has to start with a key in `AWS_ACCESS_KEY_ID`. A step with the check on and no access
+  key ID there fails before the proxy starts, in `audit` too.
   Credentials read from `~/.aws/credentials`, a profile or a container credentials endpoint are not
   used as a starting key, so a step that signs with a profile's key, or switches between two static
   keys, cannot use the check: put the key to check in `AWS_ACCESS_KEY_ID`, or run the AWS commands
