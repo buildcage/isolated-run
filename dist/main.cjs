@@ -68474,7 +68474,7 @@ const BIT = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i])), newA
 	first: Infinity,
 	last: -Infinity,
 	seq: Infinity
-}), flagBits = (a) => a.ok | a.failed, shownBits = (a) => a.ok | (a.failed & ~a.ok & ~a.perm) << 8 | a.perm << 16;
+}), flagBits = (a) => a.ok | a.failed, walkBits = (a) => flagBits(a) | a.perm << 8;
 function mergeAgg(dst, src) {
 	dst.ok |= src.ok, dst.failed |= src.failed, dst.perm |= src.perm, dst.first = Math.min(dst.first, src.first), dst.last = Math.max(dst.last, src.last), dst.seq = Math.min(dst.seq, src.seq);
 }
@@ -68503,8 +68503,8 @@ function walkedNodes(top) {
 			continue;
 		}
 		let bits = 0;
-		for (let kid of node.kids?.values() ?? []) bits |= below.get(kid), kid.own && (bits |= shownBits(kid.own)), kid.folded && (bits |= shownBits(kid.folded));
-		below.set(node, bits), node.own && node.kids?.size && (shownBits(node.own) & ~bits) === 0 && walked.add(node);
+		for (let kid of node.kids?.values() ?? []) bits |= below.get(kid), kid.own && (bits |= walkBits(kid.own)), kid.folded && (bits |= walkBits(kid.folded));
+		below.set(node, bits), node.own && node.kids?.size && (walkBits(node.own) & ~bits) === 0 && walked.add(node);
 	}
 	return walked;
 }

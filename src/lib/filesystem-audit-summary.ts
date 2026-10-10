@@ -242,9 +242,9 @@ const newAgg = (): Agg => ({
 
 const flagBits = (a: Agg): number => a.ok | a.failed;
 
-// The flags fmtFlags prints, one bit each: "R" succeeded, "r" only ever
-// failed, "r!" refused.
-const shownBits = (a: Agg): number => a.ok | ((a.failed & ~a.ok & ~a.perm) << 8) | (a.perm << 16);
+// What the lines below a directory must show for its own line to be dropped
+// as walked: its actions, and its refusals apart from them.
+const walkBits = (a: Agg): number => flagBits(a) | (a.perm << 8);
 
 function mergeAgg(dst: Agg, src: Agg): void {
   dst.ok |= src.ok;
@@ -338,11 +338,11 @@ function walkedNodes(top: Map<string, Node>): Set<Node> {
     let bits = 0;
     for (const kid of node.kids?.values() ?? []) {
       bits |= below.get(kid)!;
-      if (kid.own) bits |= shownBits(kid.own);
-      if (kid.folded) bits |= shownBits(kid.folded);
+      if (kid.own) bits |= walkBits(kid.own);
+      if (kid.folded) bits |= walkBits(kid.folded);
     }
     below.set(node, bits);
-    if (node.own && node.kids?.size && (shownBits(node.own) & ~bits) === 0) walked.add(node);
+    if (node.own && node.kids?.size && (walkBits(node.own) & ~bits) === 0) walked.add(node);
   }
   return walked;
 }

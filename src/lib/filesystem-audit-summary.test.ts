@@ -356,6 +356,14 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["r! c ./d", "R c ./d/f"]);
   });
 
+  it("still drops a directory read whose only lines below are misses", () => {
+    const md = render(
+      { kind: "read", comm: "c", path: "/work/d" },
+      { kind: "open-failed", comm: "c", path: "/work/d/a.json", err: 2 },
+    );
+    expect(lines(md)).toEqual(["r c ./d/a.json"]);
+  });
+
   it("drops libraries, exec'd binaries and non-file targets from reads", () => {
     const md = render(
       { kind: "mmap", comm: "sh", path: "/usr/lib/libc.so", access: "x" },

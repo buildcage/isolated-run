@@ -126,9 +126,14 @@ describe("renderFilesystemAuditSummary: properties", () => {
         const below = [...lines.values()].filter(
           (d) => d.comm === l.comm && base(d.path) !== lb && base(d.path).startsWith(prefix),
         );
-        const carried = new Set(below.flatMap((d) => d.flags));
+        // "R" and "r" both count as the action; "r!" is the action and a refusal.
+        const marks = (flags: string[]): string[] =>
+          flags.flatMap((f) => (f.endsWith("!") ? [f[0].toUpperCase(), f] : [f.toUpperCase()]));
+        const carried = new Set(below.flatMap((d) => marks(d.flags)));
         const walked =
-          !l.path.endsWith("/**") && below.length > 0 && l.flags.every((c) => carried.has(c));
+          !l.path.endsWith("/**") &&
+          below.length > 0 &&
+          marks(l.flags).every((c) => carried.has(c));
         if (!walked) kept.add(k);
       }
       return kept;
