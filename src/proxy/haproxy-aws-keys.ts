@@ -25,6 +25,9 @@ export interface AwsKeyCheck {
   accountFile?: string;
 }
 
+/** Starts every reason the check refuses with. */
+export const AWS_REASON_PREFIX = "aws-";
+
 /** The verdicts restrict mode refuses on, each logged as `reason=aws-<verdict>`. */
 export const AWS_REFUSED_VERDICTS = [
   "no-credential",
@@ -221,10 +224,12 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     `    acl aws_refused var(txn.aws) -m str ${AWS_REFUSED_VERDICTS.join(" ")}`,
     ...(mode === "restrict"
       ? [
-          "    http-request set-var-fmt(txn.reason) aws-%[var(txn.aws)] if aws_refused",
+          `    http-request set-var-fmt(txn.reason) ${AWS_REASON_PREFIX}%[var(txn.aws)] if aws_refused`,
           "    http-request deny deny_status 403 if aws_refused",
         ]
-      : ["    http-request set-var-fmt(txn.would_refuse) aws-%[var(txn.aws)] if aws_refused"]),
+      : [
+          `    http-request set-var-fmt(txn.would_refuse) ${AWS_REASON_PREFIX}%[var(txn.aws)] if aws_refused`,
+        ]),
     "    # For the traffic record: what a request the check let through was",
     "    # signed with. The map holds env for the starting key, the account for",
     "    # one STS issued, and issued for one ECR did.",

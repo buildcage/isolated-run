@@ -106,6 +106,77 @@ describe("computeReportOutcomes", () => {
     );
   });
 
+  describe("the AWS key check's troubleshooting link", () => {
+    const LINK =
+      "\n<sub>*For an `aws-` reason, see [what to do](https://github.com/buildcage/isolated-run/blob/v1/docs/aws.md#troubleshooting).*</sub>\n";
+    const refused = (reason: string): TrafficEvent => ({
+      time: 1,
+      action: "block",
+      protocol: "https",
+      host: "sts.amazonaws.com",
+      port: 443,
+      reason,
+    });
+    const restrict = (reason: string): InspectReportData => {
+      const timeline = [refused(reason)];
+      return {
+        ...report({ blockedCount: 1, blocked: annotateKnownBlocked(timeline, []), timeline }),
+        engine: "inspect",
+      };
+    };
+
+    it("follows the Blocked Hosts table when the check refused a request", () => {
+      const { markdown } = computeReportOutcomes(restrict("aws-key-not-allowed"), options());
+      expect(markdown).toMatch(/### 🚫 Blocked Hosts\n\n(\|.*\n)+\n<sub>\*For an `aws-` reason/);
+      expect(markdown).toContain(LINK);
+    });
+
+    it("follows Restrict Would Refuse in audit", () => {
+      const r: InspectReportData = {
+        ...report({ parameters: reportParams({ mode: "audit" }) }),
+        engine: "inspect",
+        timeline: [
+          {
+            time: 1,
+            action: "audit",
+            protocol: "https",
+            host: "sts.amazonaws.com",
+            port: 443,
+            method: "POST",
+            url: "https://sts.amazonaws.com/",
+            wouldRefuse: "aws-no-credential",
+          },
+        ],
+      };
+      const { markdown } = computeReportOutcomes(r, options());
+      expect(markdown).toMatch(
+        /### 🚨 Restrict Would Refuse\n\n```\n.*\n```\n\n<sub>\*For an `aws-`/,
+      );
+    });
+
+    it("is left out when known_blocked_rules expects every such refusal", () => {
+      const knownBlockedRules = ["sts.amazonaws.com"];
+      const timeline = [refused("aws-key-not-allowed")];
+      const r: InspectReportData = {
+        ...report({
+          parameters: reportParams({ knownBlockedRules }),
+          blockedCount: 1,
+          blocked: annotateKnownBlocked(timeline, knownBlockedRules),
+          timeline,
+        }),
+        engine: "inspect",
+      };
+      const { markdown } = computeReportOutcomes(r, options());
+      expect(markdown).toContain("aws-key-not-allowed");
+      expect(markdown).not.toContain("aws.md");
+    });
+
+    it("is left out when no refusal is the check's", () => {
+      const { markdown } = computeReportOutcomes(restrict("not-allowed"), options());
+      expect(markdown).not.toContain("aws.md");
+    });
+  });
+
   it("warns about a request no rule decided, naming this action", () => {
     const r: InspectReportData = {
       ...report(),
