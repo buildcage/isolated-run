@@ -865,6 +865,14 @@ BTF and tracefs mounted. Where any of these is missing, the step fails with the 
 command runs. See [Filesystem audit](./security.md#filesystem-audit) for what it does not record
 and what its record can be trusted for.
 
+While the step runs, the tracer's hooks run on every system call and every file read or write on
+the runner host, not only the step's, since a hook has to run to tell whose call it is. That adds
+roughly 100 nanoseconds to each system call of every process on the machine, the proxy, Docker and
+other jobs on a shared runner included. Copying a file a byte at a time outside the step took nearly
+twice as long in a test, while a typical build, which spends little of its time in system calls,
+barely changes. Inside the step, each program's first read or write of a file is also recorded,
+which costs more.
+
 ## CA trust variables
 
 `proxy_engine: inspect` terminates TLS and re-signs it with a CA generated for the step, so the
