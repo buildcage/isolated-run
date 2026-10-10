@@ -804,7 +804,7 @@ communication details (from the first access if that start is unknown); a row to
 time. It does not say which action came when, and a file kept open counts only the first read and
 first write through it by each program a process runs, so the last time can be earlier than its last
 write; a command reading or writing through a descriptor it inherited, or was passed, is shown under
-its own name, except on a device such as `/dev/null`, which counts once. The artifact has every
+its own name, except on a pipe, socket or device such as `/dev/null`, which counts once. The artifact has every
 access in order. An action that only ever failed is lowercase, and one the sandbox refused, for want
 of permission or because the location is read-only, is marked `!`. A directory with many touched
 children is shown once as `dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and

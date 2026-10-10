@@ -507,9 +507,6 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 #define S_PRIVATE (1 << 9)
 #define OVERLAYFS_SUPER_MAGIC 0x794c7630
 #define FUSE_SUPER_MAGIC 0x65735546
-#define PIPEFS_MAGIC 0x50495045
-#define SOCKFS_MAGIC 0x534F434B
-#define ANON_INODE_FS_MAGIC 0x09041934
 
 // A program run by a process: its tgid, its leader's start time, which a
 // reused pid does not share, and how many execs it has been through, so a
@@ -553,7 +550,8 @@ struct {
 } shared_seen SEC(".maps");
 
 #define S_IFMT 0170000
-#define S_IFCHR 0020000
+#define S_IFREG 0100000
+#define S_IFDIR 0040000
 
 // Sets bit in *bits, reporting whether it was clear. Not atomic: two processes
 // racing on a shared entry can each report the same bit, never neither.
@@ -565,31 +563,33 @@ static __always_inline int set_first(u32 *bits, u32 bit)
 	return 1;
 }
 
-// Reports whether bit was newly recorded for file and the current process:
-// false if it was already set, or if seen_files is full (so a saturated map
-// cannot cause re-emission). A full map counts in untracked, since that
-// access then goes unreported.
+// Reports whether bit was newly recorded for file and the current program:
+// false if it was already set, or if a map could not take the entry (so a
+// saturated map cannot cause re-emission). That counts in untracked, since
+// the access then goes unreported.
 static __always_inline int first_time(struct file *file, u8 bit)
 {
+	u64 key = (u64)file;
+	struct seen *v = bpf_map_lookup_elem(&seen_files, &key);
+	if (v && v->once)
+		return set_first(&v->bits, bit);
 	struct task_struct *t = bpf_get_current_task_btf();
 	struct proc me = {
 		.start = BPF_CORE_READ(t, group_leader, start_time),
 		.exec = BPF_CORE_READ(t, group_leader, self_exec_id),
 		.tgid = bpf_get_current_pid_tgid() >> 32,
 	};
-	u64 key = (u64)file;
-	struct seen *v = bpf_map_lookup_elem(&seen_files, &key);
 	if (!v) {
 		struct seen s;
 		__builtin_memset(&s, 0, sizeof(s));
 		s.gen = bpf_ktime_get_ns();
 		s.owner = me;
 		s.bits = bit;
-		// Pipes, sockets, anon inodes and devices such as /dev/null are
-		// shared by whole process trees, and say nothing per command.
-		unsigned long magic = BPF_CORE_READ(file, f_path.dentry, d_sb, s_magic);
-		s.once = magic == PIPEFS_MAGIC || magic == SOCKFS_MAGIC || magic == ANON_INODE_FS_MAGIC ||
-			 (BPF_CORE_READ(file, f_inode, i_mode) & S_IFMT) == S_IFCHR;
+		// Anything but a regular file or a directory, such as a pipe, a
+		// socket or /dev/null, is shared by whole process trees and says
+		// nothing per command.
+		u32 type = BPF_CORE_READ(file, f_inode, i_mode) & S_IFMT;
+		s.once = type != S_IFREG && type != S_IFDIR;
 		if (bpf_map_update_elem(&seen_files, &key, &s, BPF_NOEXIST) == 0)
 			return 1;
 		// Another process made the entry first; share it.
@@ -598,9 +598,10 @@ static __always_inline int first_time(struct file *file, u8 bit)
 			bump(&untracked);
 			return 0;
 		}
+		if (v->once)
+			return set_first(&v->bits, bit);
 	}
-	if (v->once || (v->owner.tgid == me.tgid && v->owner.start == me.start &&
-			v->owner.exec == me.exec))
+	if (v->owner.tgid == me.tgid && v->owner.start == me.start && v->owner.exec == me.exec)
 		return set_first(&v->bits, bit);
 	struct shared_key k;
 	__builtin_memset(&k, 0, sizeof(k));
@@ -611,8 +612,10 @@ static __always_inline int first_time(struct file *file, u8 bit)
 	if (b)
 		return set_first(b, bit);
 	u32 nb = bit;
-	bpf_map_update_elem(&shared_seen, &k, &nb, BPF_ANY);
-	return 1;
+	if (bpf_map_update_elem(&shared_seen, &k, &nb, BPF_ANY) == 0)
+		return 1;
+	bump(&untracked);
+	return 0;
 }
 
 static __always_inline u32 path_walk(struct event *e, struct dentry *d, struct vfsmount *mnt)
