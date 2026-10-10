@@ -243,7 +243,7 @@ Python's `surrogateescape` does, so `os.fsencode` gives back the name's exact by
 A failed operation keeps the kind it would have had, with `"failed":true` and `err`, and shows its
 letter lowercase in the summary. A failed `open`, `unlink`, `rmdir`, `rename`, `chmod`, `chown` or
 `attr` is recorded however it failed; a `mkdir`, `mknod`, `symlink`, `link` or `truncate` only when
-the kernel refused it after reaching its file, and a failed `exec` not at all.
+the kernel refused it after reaching its file, and a failed `exec` or `mmap` not at all.
 
 | `kind`                                          | Records                                                                                          | Summary                                   |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------- |
