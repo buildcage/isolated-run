@@ -252,6 +252,30 @@ describe("AssumeRoleWithWebIdentity", () => {
       false,
     );
   });
+
+  // STS decodes a parameter's name, so R%6FleArn is RoleArn to it.
+  const acl = (name: string) => {
+    const line = rules.split("\n").find((l) => l.startsWith(`    acl ${name} `))!;
+    const source = line.replace(/^.* -m reg -i /, "");
+    return new RegExp(source.replace("(?s)", ""), source.startsWith("(?s)") ? "is" : "i");
+  };
+
+  it("counts Action and RoleArn under a percent-encoded name", () => {
+    expect(acl("aws_fed_action").test("%41ction=AssumeRoleWithWebIdentity&RoleArn=x")).toBe(true);
+    expect(acl("aws_fed_action_many").test("Action=AssumeRoleWithWebIdentity&%41ction=X")).toBe(
+      true,
+    );
+    expect(acl("aws_role_body_many").test("Action=X&R%6FleArn=evil&RoleArn=ok")).toBe(true);
+    expect(acl("aws_role_body_many").test("Action=X&RoleArn=ok&RoleSessionName=gh")).toBe(false);
+  });
+
+  it("counts Action and RoleArn in the query under any spelling, as STS takes it over the body", () => {
+    const inQuery = acl("aws_fed_in_query");
+    for (const query of ["R%6FleArn=evil", "Version=1&RoleArn=evil", "%41ction=X"]) {
+      expect(inQuery.test(query)).toBe(true);
+    }
+    expect(inQuery.test("Version=2011-06-15")).toBe(false);
+  });
 });
 
 describe("the check with no role account", () => {

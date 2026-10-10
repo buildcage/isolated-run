@@ -291,7 +291,9 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
  * What is judged by a role account: AssumeRoleWithWebIdentity, which takes no
  * signature, by the account of the role in RoleArn, and a static CodeCommit
  * Git credential by the account it names. Only a form body naming Action and
- * RoleArn once each, with neither in the query, is judged.
+ * RoleArn once each, with neither in the query, is judged. Names are counted
+ * in any spelling: STS decodes a name, and takes the query's value over the
+ * body's even for a POST.
  */
 function accountRules(accountFile: string): string[] {
   return [

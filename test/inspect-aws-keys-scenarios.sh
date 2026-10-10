@@ -212,6 +212,14 @@ check_status "a web identity call for a role in another account" \
   "$(form "Action=AssumeRoleWithWebIdentity&RoleArn=arn%3Aaws%3Aiam%3A%3A999999999999%3Arole%2Fevil&RoleSessionName=gh&WebIdentityToken=eyJ" $STS/)" "403"
 check_status "a web identity call naming two roles" \
   "$(form "Action=AssumeRoleWithWebIdentity&RoleArn=$ROLE&RoleArn=arn%3Aaws%3Aiam%3A%3A999999999999%3Arole%2Fevil" $STS/)" "403"
+# STS decodes a parameter's name, and takes the query's value over the body's.
+EVIL="arn%3Aaws%3Aiam%3A%3A999999999999%3Arole%2Fevil"
+check_status "a web identity call naming a second role under an encoded name" \
+  "$(form "Action=AssumeRoleWithWebIdentity&R%6FleArn=$EVIL&RoleArn=$ROLE&RoleSessionName=gh&WebIdentityToken=eyJ" $STS/)" "403"
+check_status "a web identity call naming its role only under an encoded name" \
+  "$(form "Action=AssumeRoleWithWebIdentity&R%6FleArn=$EVIL&RoleSessionName=gh&WebIdentityToken=eyJ" $STS/)" "403"
+check_status "a web identity call naming a second role in the query" \
+  "$(form "Action=AssumeRoleWithWebIdentity&RoleArn=$ROLE&RoleSessionName=gh&WebIdentityToken=eyJ" "$STS/?R%6FleArn=$EVIL")" "403"
 
 echo "=== [hosts that are not AWS] ==="
 check_status "an unsigned read the URL rules allow" "$($C https://allowed.example.com/public/x)" "200"
