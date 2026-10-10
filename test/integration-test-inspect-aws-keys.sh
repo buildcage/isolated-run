@@ -46,6 +46,7 @@ run_step() {
     INPUT_AWS_KEY_CHECK="true" \
     INPUT_ALLOWED_AWS_ROLE_ACCOUNTS="111111111111" \
     INPUT_ALLOWED_URL_RULES="* https://**.amazonaws.com/**
+POST http://sts.us-east-1.amazonaws.com/sts/**
 GET https://allowed.example.com/public/**" \
     INPUT_FAIL_ON_BLOCKED="false" \
     "$@" \
@@ -140,7 +141,8 @@ run_step keyonlyaudit \
   INPUT_PROXY_MODE="audit" \
   INPUT_ALLOWED_AWS_ROLE_ACCOUNTS="" \
   INPUT_RUN="curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTSTARTKEY0001/x' https://sts.us-east-1.amazonaws.com/sts/same-account &&
-    curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTLEARNEDKEY01/x' https://sts.us-east-1.amazonaws.com/sts/other-account"
+    curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTLEARNEDKEY01/x' https://sts.us-east-1.amazonaws.com/sts/other-account &&
+    curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTSTARTKEY0001/x' http://sts.us-east-1.amazonaws.com/sts/plain-other-account"
 RUN_EXIT=$?
 if [ "$RUN_EXIT" != "0" ]; then
   fail "the key-only audit step failed (exit $RUN_EXIT)"
@@ -151,6 +153,11 @@ assert_summary_contains "111111111111 # assumed in this run, check it is yours" 
   "with no account named, the restrict example names the first role of a chain"
 assert_summary_contains "999999999999 # assumed in this run, check it is yours" \
   "with no account named, the restrict example names the second role of a chain"
+if grep -qF "333333333333" <<< "$SUMMARY"; then
+  fail "the restrict example names the account of an AssumeRole answer over plaintext"
+else
+  pass "the restrict example leaves out the account of an AssumeRole answer over plaintext"
+fi
 
 echo ""
 echo "--- no key to start from ---"

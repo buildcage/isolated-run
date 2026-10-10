@@ -413,20 +413,22 @@ describe("the traffic record", () => {
 });
 
 describe("learning a key", () => {
-  it("learns only from an STS host that names no resource, after a request it let through, but reads the account from any answer", () => {
+  it("learns only over TLS from an STS host that names no resource, after a request it let through, but reads the account from any answer over TLS", () => {
     const rules = awsKeyRequestRules(CHECK, "audit").join("\n");
     expect(
       rules.includes("set-var(txn.aws_sts_host) bool(true) if aws_host !aws_resource_host"),
     ).toBe(true);
     expect(
       rules.includes(
-        "set-var(txn.aws_learn) bool(true) if aws_sts_host { var(txn.aws) -m str allowed }",
+        "set-var(txn.aws_learn) bool(true) if { ssl_fc } aws_sts_host { var(txn.aws) -m str allowed }",
       ),
     ).toBe(true);
     // S3 takes a bucket named sts, whose host STS_HOST alone would match.
     expect(stsHost.test("sts.s3.amazonaws.com")).toBe(true);
     expect(resourceHost.test("sts.s3.amazonaws.com")).toBe(true);
-    expect(rules.includes("set-var(txn.aws_sts_read) bool(true) if aws_sts_host\n")).toBe(true);
+    expect(
+      rules.includes("set-var(txn.aws_sts_read) bool(true) if { ssl_fc } aws_sts_host\n"),
+    ).toBe(true);
     const response = awsKeyResponseRules(CHECK);
     const line = (variable: string) => response.find((l) => l.includes(variable))!;
     expect(line("set-var(txn.aws_new_key)").includes(" if aws_learn ")).toBe(true);

@@ -257,10 +257,11 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    acl aws_coding_signed req.fhdr(authorization) -m reg -i signedheaders=[^,]*accept-encoding",
     "    acl aws_coding_signed query,url_dec -m reg -i (^|&)x-amz-signedheaders=[^&]*accept-encoding",
     "    http-request set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed",
-    "    # Any answer names the account of its role, but only one to a request",
-    "    # the check let through can teach a key.",
-    "    http-request set-var(txn.aws_sts_read) bool(true) if aws_sts_host",
-    "    http-request set-var(txn.aws_learn) bool(true) if aws_sts_host { var(txn.aws) -m str allowed }",
+    "    # Any answer over TLS names the account of its role, but only one to a",
+    "    # request the check let through can teach a key. A plaintext answer",
+    "    # could have been rewritten on the way.",
+    "    http-request set-var(txn.aws_sts_read) bool(true) if { ssl_fc } aws_sts_host",
+    "    http-request set-var(txn.aws_learn) bool(true) if { ssl_fc } aws_sts_host { var(txn.aws) -m str allowed }",
     "",
   ];
 }
@@ -290,10 +291,10 @@ function accountRules(accountFile: string): string[] {
  * Response rules: learn the key in the presigned URL an ECR registry
  * redirects a layer download to, and, when role accounts are named, the key
  * an AssumeRole or AssumeRoleWithWebIdentity answer issues for a role in one
- * of them. Only an answer to a request the check did not refuse teaches one.
- * The account of the role is recorded from any answer, named or not and
- * allowed or not, so one run shows every account to name, a chain of roles
- * included.
+ * of them. Only an answer over TLS to a request the check did not refuse
+ * teaches one. The account of the role is recorded from any answer over TLS,
+ * named or not and allowed or not, so one run shows every account to name, a
+ * chain of roles included.
  *
  * Only ECR writes that Location, over a connection whose certificate the
  * proxy verified, so a build cannot put its own key there. The role ARN is
