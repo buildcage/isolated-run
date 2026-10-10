@@ -121,13 +121,15 @@ struct linux_binprm {
 	struct file *file;
 } __attribute__((preserve_access_index));
 
-// The registers each architecture passes a syscall's first arguments in.
+// The registers each architecture passes a syscall's number and first
+// arguments in.
 struct pt_regs___x86 {
-	unsigned long di, si, dx, r10;
+	unsigned long di, si, dx, r10, orig_ax;
 } __attribute__((preserve_access_index));
 
 struct pt_regs___arm64 {
 	unsigned long regs[31];
+	int syscallno;
 } __attribute__((preserve_access_index));
 
 #define DATA_SZ 8192
@@ -242,6 +244,7 @@ struct pending {
 	u32 quiet_err; // an errno that changed nothing, so is not recorded
 	s32 dfd1;      // what p1 and p2 resolve against when relative
 	s32 dfd2;
+	u32 nr;        // the syscall, so only its own exit takes the entry
 };
 
 // One entry per thread inside a path syscall.
@@ -1263,42 +1266,6 @@ int BPF_PROG(on_file_free, struct file *file)
 // the user buffer, which a concurrent thread could rewrite between entry and
 // exit, so a failed op's recorded path is not tamper-proof the way the open
 // path's getname copy is.
-static __always_inline void stash(u32 kind, u32 kind_ok, u32 quiet_err, int dfd1, u64 p1, int dfd2, u64 p2)
-{
-	u64 id = bpf_get_current_pid_tgid();
-	struct pending pend = {
-		.p1 = p1, .p2 = p2, .ts = bpf_ktime_get_boot_ns(), .kind = kind, .kind_ok = kind_ok,
-		.quiet_err = quiet_err, .dfd1 = dfd1, .dfd2 = dfd2,
-	};
-	// Counted before the outcome is known: the call goes unfollowed either way.
-	if (bpf_map_update_elem(&pending_ops, &id, &pend, BPF_ANY) != 0)
-		bump(&untracked);
-}
-
-static __always_inline void failed_op(u32 kind, int dfd1, u64 p1, int dfd2, u64 p2)
-{
-	stash(kind, 0, 0, dfd1, p1, dfd2, p2);
-}
-
-// Making a name. The kernel refuses one on a read-only mount before the
-// security_path_* hook, so the failure is caught here. A name that is already
-// there changed nothing, and mkdir -p meets one at every level it keeps, so
-// EEXIST is not recorded.
-#define EEXIST 17
-static __always_inline void create_op(u32 kind, int dfd1, u64 p1, int dfd2, u64 p2)
-{
-	stash(kind, 0, EEXIST, dfd1, p1, dfd2, p2);
-}
-
-// utimensat, utime, utimes, futimesat and {,l}setxattr are the attribute
-// changes with no security_path_* hook of their own; recorded here, success
-// and failure alike. A NULL path (futimens) changes the file dfd refers to;
-// with AT_FDCWD it names nothing and fails.
-static __always_inline void attr_op(int dfd, u64 p)
-{
-	if (p || dfd != AT_FDCWD)
-		stash(K_ATTR_FAILED, K_ATTR, 0, dfd, p, 0, 0);
-}
 
 // The syscall numbers of the architecture the tracer runs on, set by the
 // loader; -1 for one it lacks (x86_64's older forms on arm64). A negative
@@ -1316,65 +1283,118 @@ const volatile long nr_mkdirat = -1, nr_mkdir = -1, nr_mknodat = -1, nr_mknod = 
 const volatile long nr_symlinkat = -1, nr_symlink = -1, nr_linkat = -1, nr_link = -1;
 const volatile long nr_truncate = -1;
 
-// A syscall's argument i (0 to 3), from the register it is passed in.
+// A syscall's argument i (0 to 3), from the register it is passed in; 0
+// without the registers.
 static __always_inline u64 sys_arg(struct pt_regs *regs, int i)
 {
+	if (!regs)
+		return 0;
 	struct pt_regs___x86 *x = (void *)regs;
 	if (bpf_core_field_exists(x->di))
 		return i == 0 ? x->di : i == 1 ? x->si : i == 2 ? x->dx : x->r10;
 	return ((struct pt_regs___arm64 *)regs)->regs[i];
 }
 
+// The number of the syscall returning, as tp_btf/sys_exit sees it.
+static __always_inline long sys_nr(struct pt_regs *regs)
+{
+	struct pt_regs___x86 *x = (void *)regs;
+	if (bpf_core_field_exists(x->orig_ax))
+		return x->orig_ax;
+	return ((struct pt_regs___arm64 *)regs)->syscallno;
+}
+
 #define ARG(i) sys_arg(regs, i)
+#define OP(k, ok, quiet, d1, a1, d2, a2)						\
+	({ p->kind = k; p->kind_ok = ok; p->quiet_err = quiet;				\
+	   p->dfd1 = d1; p->p1 = a1; p->dfd2 = d2; p->p2 = a2; 1; })
+
+// Making a name. The kernel refuses one on a read-only mount before the
+// security_path_* hook, so the failure is caught here. A name that is already
+// there changed nothing, and mkdir -p meets one at every level it keeps, so
+// EEXIST is not recorded.
+#define EEXIST 17
+#define CREATE(k, d1, a1, d2, a2) OP(k, 0, EEXIST, d1, a1, d2, a2)
 #define ENOSYS 38
+
+// utimensat, utime, utimes, futimesat and {,l}setxattr are the attribute
+// changes with no security_path_* hook of their own; recorded here, success
+// and failure alike. A NULL path (futimens) changes the file dfd refers to;
+// with AT_FDCWD it names nothing and fails.
+static __always_inline int attr_op(struct pending *p, struct pt_regs *regs, int dfd, u64 path)
+{
+	if (regs && !path && dfd == AT_FDCWD)
+		return 0;
+	return OP(K_ATTR_FAILED, K_ATTR, 0, dfd, path, 0, 0);
+}
+
+// Fills p with what syscall nr records, and its arguments from regs, and
+// reports whether it is watched. Without regs, as at the exit, only what it
+// records.
+static __always_inline int classify(long nr, struct pt_regs *regs, struct pending *p)
+{
+	if (nr < 0)
+		return 0;
+	if (nr == nr_unlinkat)
+		return OP(ARG(2) & AT_REMOVEDIR ? K_RMDIR_FAILED : K_UNLINK_FAILED, 0, 0, ARG(0), ARG(1), 0, 0);
+	if (nr == nr_unlink)
+		return OP(K_UNLINK_FAILED, 0, 0, AT_FDCWD, ARG(0), 0, 0);
+	if (nr == nr_rmdir)
+		return OP(K_RMDIR_FAILED, 0, 0, AT_FDCWD, ARG(0), 0, 0);
+	if (nr == nr_renameat2 || nr == nr_renameat)
+		return OP(K_RENAME_FAILED, 0, 0, ARG(0), ARG(1), ARG(2), ARG(3));
+	if (nr == nr_rename)
+		return OP(K_RENAME_FAILED, 0, 0, AT_FDCWD, ARG(0), AT_FDCWD, ARG(1));
+	if (nr == nr_fchmodat)
+		return OP(K_CHMOD_FAILED, 0, 0, ARG(0), ARG(1), 0, 0);
+	if (nr == nr_fchmodat2) // ENOSYS: a kernel before 6.6, so nothing was tried
+		return OP(K_CHMOD_FAILED, 0, ENOSYS, ARG(0), ARG(1), 0, 0);
+	if (nr == nr_chmod)
+		return OP(K_CHMOD_FAILED, 0, 0, AT_FDCWD, ARG(0), 0, 0);
+	if (nr == nr_fchownat)
+		return OP(K_CHOWN_FAILED, 0, 0, ARG(0), ARG(1), 0, 0);
+	if (nr == nr_chown || nr == nr_lchown)
+		return OP(K_CHOWN_FAILED, 0, 0, AT_FDCWD, ARG(0), 0, 0);
+	if (nr == nr_utimensat || nr == nr_futimesat)
+		return attr_op(p, regs, ARG(0), ARG(1));
+	if (nr == nr_utime || nr == nr_utimes || nr == nr_setxattr || nr == nr_lsetxattr)
+		return attr_op(p, regs, AT_FDCWD, ARG(0));
+	if (nr == nr_mkdirat)
+		return CREATE(K_MKDIR_FAILED, ARG(0), ARG(1), 0, 0);
+	if (nr == nr_mkdir)
+		return CREATE(K_MKDIR_FAILED, AT_FDCWD, ARG(0), 0, 0);
+	if (nr == nr_mknodat)
+		return CREATE(K_MKNOD_FAILED, ARG(0), ARG(1), 0, 0);
+	if (nr == nr_mknod)
+		return CREATE(K_MKNOD_FAILED, AT_FDCWD, ARG(0), 0, 0);
+	if (nr == nr_symlinkat) // (target, newdfd, name): the link's name
+		return CREATE(K_SYMLINK_FAILED, ARG(1), ARG(2), 0, 0);
+	if (nr == nr_symlink)
+		return CREATE(K_SYMLINK_FAILED, AT_FDCWD, ARG(1), 0, 0);
+	if (nr == nr_linkat)
+		return CREATE(K_LINK_FAILED, ARG(0), ARG(1), ARG(2), ARG(3));
+	if (nr == nr_link)
+		return CREATE(K_LINK_FAILED, AT_FDCWD, ARG(0), AT_FDCWD, ARG(1));
+	if (nr == nr_truncate)
+		return CREATE(K_TRUNCATE_FAILED, AT_FDCWD, ARG(0), 0, 0);
+	return 0;
+}
 
 SEC("tp_btf/sys_enter")
 int BPF_PROG(on_sys_enter, struct pt_regs *regs, long nr)
 {
-	if (nr < 0 || !in_target())
+	struct pending p;
+	// The number first, which rules out nearly every syscall on the host
+	// more cheaply than the cgroup check.
+	if (!classify(nr, regs, &p) || !in_target())
 		return 0;
-	if (nr == nr_unlinkat)
-		failed_op(ARG(2) & AT_REMOVEDIR ? K_RMDIR_FAILED : K_UNLINK_FAILED, ARG(0), ARG(1), 0, 0);
-	else if (nr == nr_unlink)
-		failed_op(K_UNLINK_FAILED, AT_FDCWD, ARG(0), 0, 0);
-	else if (nr == nr_rmdir)
-		failed_op(K_RMDIR_FAILED, AT_FDCWD, ARG(0), 0, 0);
-	else if (nr == nr_renameat2 || nr == nr_renameat)
-		failed_op(K_RENAME_FAILED, ARG(0), ARG(1), ARG(2), ARG(3));
-	else if (nr == nr_rename)
-		failed_op(K_RENAME_FAILED, AT_FDCWD, ARG(0), AT_FDCWD, ARG(1));
-	else if (nr == nr_fchmodat)
-		failed_op(K_CHMOD_FAILED, ARG(0), ARG(1), 0, 0);
-	else if (nr == nr_fchmodat2) // ENOSYS: a kernel before 6.6, so nothing was tried
-		stash(K_CHMOD_FAILED, 0, ENOSYS, ARG(0), ARG(1), 0, 0);
-	else if (nr == nr_chmod)
-		failed_op(K_CHMOD_FAILED, AT_FDCWD, ARG(0), 0, 0);
-	else if (nr == nr_fchownat)
-		failed_op(K_CHOWN_FAILED, ARG(0), ARG(1), 0, 0);
-	else if (nr == nr_chown || nr == nr_lchown)
-		failed_op(K_CHOWN_FAILED, AT_FDCWD, ARG(0), 0, 0);
-	else if (nr == nr_utimensat || nr == nr_futimesat)
-		attr_op(ARG(0), ARG(1));
-	else if (nr == nr_utime || nr == nr_utimes || nr == nr_setxattr || nr == nr_lsetxattr)
-		attr_op(AT_FDCWD, ARG(0));
-	else if (nr == nr_mkdirat)
-		create_op(K_MKDIR_FAILED, ARG(0), ARG(1), 0, 0);
-	else if (nr == nr_mkdir)
-		create_op(K_MKDIR_FAILED, AT_FDCWD, ARG(0), 0, 0);
-	else if (nr == nr_mknodat)
-		create_op(K_MKNOD_FAILED, ARG(0), ARG(1), 0, 0);
-	else if (nr == nr_mknod)
-		create_op(K_MKNOD_FAILED, AT_FDCWD, ARG(0), 0, 0);
-	else if (nr == nr_symlinkat) // (target, newdfd, name): the link's name
-		create_op(K_SYMLINK_FAILED, ARG(1), ARG(2), 0, 0);
-	else if (nr == nr_symlink)
-		create_op(K_SYMLINK_FAILED, AT_FDCWD, ARG(1), 0, 0);
-	else if (nr == nr_linkat)
-		create_op(K_LINK_FAILED, ARG(0), ARG(1), ARG(2), ARG(3));
-	else if (nr == nr_link)
-		create_op(K_LINK_FAILED, AT_FDCWD, ARG(0), AT_FDCWD, ARG(1));
-	else if (nr == nr_truncate)
-		create_op(K_TRUNCATE_FAILED, AT_FDCWD, ARG(0), 0, 0);
+	p.nr = nr;
+	p.ts = bpf_ktime_get_boot_ns();
+	u64 id = bpf_get_current_pid_tgid();
+	// An op recorded on success too is lost either way; one recorded only on
+	// failure is counted at the exit, once the result is known.
+	if (bpf_map_update_elem(&pending_ops, &id, &p, BPF_ANY) != 0 && p.kind_ok)
+		bump(&untracked);
 	return 0;
 }
 
@@ -1437,7 +1457,20 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	if (!in_target())
 		return 0;
 	u64 id = bpf_get_current_pid_tgid();
-	struct pending *pend = bpf_map_lookup_elem(&pending_ops, &id);
+	long nr = sys_nr(regs);
+	struct pending want;
+	struct pending *pend = 0;
+	if (classify(nr, 0, &want)) {
+		pend = bpf_map_lookup_elem(&pending_ops, &id);
+		// Only this syscall's own entry: one another left is dropped.
+		if (pend && pend->nr != nr) {
+			bpf_map_delete_elem(&pending_ops, &id);
+			pend = 0;
+		}
+		// A failure-only op whose entry the full map did not take.
+		if (!pend && !want.kind_ok && ret < 0 && -ret != want.quiet_err)
+			bump(&untracked);
+	}
 	struct event *e = bpf_map_lookup_elem(&held_ops, &id);
 	if (e) {
 		if (ret >= 0) {
