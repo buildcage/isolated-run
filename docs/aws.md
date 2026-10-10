@@ -46,7 +46,8 @@ With `aws_key_check` on, these are refused:
 
 - Amazon SimpleDB (`sdb`) and the retired AWS Import/Export, which take only an older way of
   signing.
-- Very old SDKs and hand-written clients that still sign that older way.
+- Very old SDKs and hand-written clients that still sign one of the older ways (Signature Version 2
+  or 3).
 - Calls over about 4 MiB to APIs that take their parameters as a form, such as STS, IAM,
   CloudFormation, SNS, EC2 and SES v1: SES v1 `SendRawEmail` with large attachments, for one. Use
   SES v2 (`sesv2`).
@@ -177,6 +178,31 @@ aws_key_check: true
 allowed_aws_role_accounts: |
   111111111111
   222222222222 # assumed in this run, check it is yours
+```
+
+### In the traffic artifact
+
+Each request the check let through has an `aws` object in the
+[traffic artifact](./reference.md#traffic-artifact), so a run shows that the check was on even
+where it refused nothing. A request the check refused has none, save an STS call in audit mode,
+whose answer still gives `assumedAccount`. Its `reason` or `wouldRefuse` says why.
+
+| Field            | Always | Notes                                                                                                                                                                        |
+| ---------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `key`            | yes    | `env` for the key the step started with, `assumed` for one STS issued, `issued` for one ECR signed a layer's presigned URL with, `none` for a request carrying no access key |
+| `accountId`      |        | an account the check confirmed: the one an `assumed` key came from, or the one a static CodeCommit Git credential or a role ARN names                                        |
+| `assumedAccount` |        | the account of the role an STS answer issued a key for, whether or not that account is allowed or named                                                                      |
+
+The starting key's account is never shown, since the proxy does not ask AWS whose key it is. No key
+ID is written either.
+
+```json
+{
+  "action": "allow",
+  "host": "cloudformation.us-east-1.amazonaws.com",
+  "method": "POST",
+  "aws": { "key": "assumed", "accountId": "111111111111" }
+}
 ```
 
 ## Troubleshooting
@@ -372,9 +398,9 @@ the Price List Bulk API's files on `pricing.us-east-1.amazonaws.com` and
 Every other AWS API host names only a service and a region, such as `sts.us-east-1.amazonaws.com` or
 `sqs.us-east-1.amazonaws.com`. The account a request to one of those reaches is in its parameters or
 its body, where the proxy does not look, so an unsigned request there is refused, `GET` included,
-`AssumeRoleWithWebIdentity` excepted. A host missing from the lists above is treated the same way;
-if a legitimate request is refused for that reason, as `aws-no-credential` or, carrying a token,
-`aws-unsupported-credential`, report it.
+`AssumeRoleWithWebIdentity` excepted (see [Host and credential](#host-and-credential)). A host
+missing from the lists above is treated the same way; if a legitimate request is refused for that
+reason, as `aws-no-credential` or, carrying a token, `aws-unsupported-credential`, report it.
 
 These hosts are only as narrow as the URL rules that allow them. A rule such as
 `* https://**.amazonaws.com/**` lets an unsigned request reach anyone's bucket, registry, cluster or
@@ -392,47 +418,24 @@ allowed_url_rules: |
 What the check does with a request the URL rules allowed, by the kind of host and the credential it
 carries:
 
-| Host                                                           | No credential              | `Bearer` or `Basic` token    | Signed with a [known key](#which-keys-pass) | Signed with another key | Other AWS credential         |
-| -------------------------------------------------------------- | -------------------------- | ---------------------------- | ------------------------------------------- | ----------------------- | ---------------------------- |
-| Serves every account, such as STS or CloudFormation            | `aws-no-credential`¹       | `aws-unsupported-credential` | allowed²                                    | `aws-key-not-allowed`   | `aws-unsupported-credential` |
-| A [public host](#which-hosts), such as `checkip.amazonaws.com` | allowed                    | `aws-unsupported-credential` | allowed²                                    | `aws-key-not-allowed`   | `aws-unsupported-credential` |
-| Names its resource, such as an S3 bucket or ECR                | allowed                    | allowed                      | allowed²                                    | `aws-key-not-allowed`   | `aws-unsupported-credential` |
-| CodeCommit                                                     | allowed, as Git asks first | see note 3                   | allowed²                                    | `aws-key-not-allowed`   | `aws-unsupported-credential` |
+| Host                                                           | No credential              | Other `Authorization`, such as `Bearer` or `Basic` | Signed with a [known key](#which-keys-pass) | Signed with another key | Other AWS credential         |
+| -------------------------------------------------------------- | -------------------------- | -------------------------------------------------- | ------------------------------------------- | ----------------------- | ---------------------------- |
+| Serves every account, such as STS or CloudFormation            | `aws-no-credential`¹       | `aws-unsupported-credential`                       | allowed²                                    | `aws-key-not-allowed`   | `aws-unsupported-credential` |
+| A [public host](#which-hosts), such as `checkip.amazonaws.com` | allowed                    | `aws-unsupported-credential`                       | allowed²                                    | `aws-key-not-allowed`   | `aws-unsupported-credential` |
+| Names its resource, such as an S3 bucket or ECR                | allowed                    | allowed                                            | allowed²                                    | `aws-key-not-allowed`   | `aws-unsupported-credential` |
+| CodeCommit                                                     | allowed, as Git asks first | `Basic`: known key or listed account³              | allowed²                                    | `aws-key-not-allowed`   | `aws-unsupported-credential` |
 
 "Signed" covers both the `Authorization` header and a presigned URL; "other AWS credential" is any
 of those [the proxy does not read](#which-credentials-it-reads). Whatever the host, a request
 carrying more than one credential is `aws-ambiguous-credential`. On a host that is not CodeCommit
-and does not name its resource, a form body the proxy cannot read through is `aws-unreadable`.
+and does not name its resource, a form body the proxy cannot read through is `aws-unreadable`. Where
+more than one reason applies, `aws-unreadable` comes first, then `aws-unsupported-credential`, then
+`aws-ambiguous-credential`.
 
 1. `AssumeRoleWithWebIdentity` for a role in a listed account is allowed, and for one in any other
-   account is `aws-role-not-allowed`.
+   account is `aws-role-not-allowed`. With no account listed it stays `aws-no-credential`.
 2. A key ECR issued passes only as the credential of a presigned URL to S3, and is
    `aws-key-not-allowed` anywhere else.
 3. A `Basic` login passes with a known key as its user name, as CodeCommit's credential helper sends
    it, or with a static Git credential of a listed account, and is `aws-key-not-allowed` otherwise.
    A `Bearer` token is `aws-unsupported-credential`.
-
-### In the traffic artifact
-
-Each request the check let through has an `aws` object in the
-[traffic artifact](./reference.md#traffic-artifact), so a run shows that the check was on even
-where it refused nothing. A request the check refused has none, save an STS call in audit mode,
-whose answer still gives `assumedAccount`. Its `reason` or `wouldRefuse` says why.
-
-| Field            | Always | Notes                                                                                                                                                                        |
-| ---------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `key`            | yes    | `env` for the key the step started with, `assumed` for one STS issued, `issued` for one ECR signed a layer's presigned URL with, `none` for a request carrying no access key |
-| `accountId`      |        | an account the check confirmed: the one an `assumed` key came from, or the one a static CodeCommit Git credential or a role ARN names                                        |
-| `assumedAccount` |        | the account of the role an STS answer issued a key for, whether or not that account is allowed or named                                                                      |
-
-The starting key's account is never shown, since the proxy does not ask AWS whose key it is. No key
-ID is written either.
-
-```json
-{
-  "action": "allow",
-  "host": "cloudformation.us-east-1.amazonaws.com",
-  "method": "POST",
-  "aws": { "key": "assumed", "accountId": "111111111111" }
-}
-```
