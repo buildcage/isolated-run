@@ -441,7 +441,9 @@ to the old `writable:` and `allow_write:` inputs are all in
 ## Filesystem audit
 
 > [!WARNING]
-> `filesystem_audit` is **experimental**: its behavior, inputs, and output format may still change.
+> `filesystem_audit` is **experimental**: its behavior, inputs, and output format may still change in
+> a future release without following semver. Try it in a non-critical workflow first, and pin this
+> action to a commit SHA rather than a version tag if you adopt it.
 
 `filesystem_audit: record` records what the isolated step reads, writes, moves, deletes, changes the
 attributes of, and executes, and adds a section to the Job Summary: the programs it ran, every path
@@ -449,7 +451,7 @@ it touched with a flag for each action, and, folded below them, one line per com
 full record is uploaded as a `buildcage-filesystem-audit-<id>` artifact; treat it as sensitive.
 
 ```yaml
-- uses: buildcage/isolated-run@v2
+- uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     filesystem_audit: record
     run: npm ci
