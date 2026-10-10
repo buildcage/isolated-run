@@ -85,7 +85,7 @@ whole, up to 4 MiB with the headers, before deciding. It refuses what it cannot 
 `aws-unreadable`: a form body that is larger, compressed, has no `Content-Length` or holds a NUL
 byte.
 
-The proxy knows two kinds of key:
+The proxy knows three kinds of key:
 
 - **The key the step starts with**, read from `AWS_ACCESS_KEY_ID` in the step's environment, which
   is where `aws-actions/configure-aws-credentials` puts it. It is taken as given: the proxy does not
@@ -96,8 +96,15 @@ The proxy knows two kinds of key:
   keep working, such as the CDK assuming its `cdk-hnb659fds-deploy-role-*` roles, Terraform's
   `assume_role`, or the AWS CLI run with a `--profile` that sets `role_arn` and
   `web_identity_token_file`. A role in any other account issues a key the proxy never learns, so
-  requests signed with it are refused. With no account named, no key is learned at all, and the
-  proxy leaves STS answers alone.
+  requests signed with it are refused. With no account named, no STS key is learned, and the proxy
+  leaves STS answers alone.
+- **Keys ECR signs a layer's presigned URL with.** An ECR registry,
+  `<account>.dkr.ecr.<region>.amazonaws.com` or its dual-stack `<account>.dkr-ecr.<region>.on.aws`,
+  answers a layer download with a redirect to a presigned S3 URL, signed with a key of ECR's own.
+  The proxy reads that key from the redirect's `Location`, which only ECR writes, over HTTPS, and
+  adds it whether or not any account is named, so a registry client in the step, such as `crane`,
+  `skopeo` or Jib, can follow the redirect. The key passes only as the credential of a presigned URL
+  to S3. Whoever holds its ID cannot sign with it: the secret stays with ECR.
 
 AWS API hosts are names under `amazonaws.com`, `amazonaws.com.cn` and `amazonaws.eu` (the European
 Sovereign Cloud), and under their dual-stack counterparts `api.aws`, `api.amazonwebservices.com.cn`
@@ -183,6 +190,7 @@ A step passes the check when:
 - It switches roles only through STS `AssumeRole` or `AssumeRoleWithWebIdentity`, into the
   `allowed_aws_role_accounts`.
 - It reaches CodeCommit over Git with a `Basic` login carrying the key ID or `<user>-at-<account>`.
+- It pulls from ECR through the registry API, whose layer redirects teach the proxy their key.
 
 ### What it stops
 
@@ -199,6 +207,11 @@ With `aws_key_check` on, these are refused:
   API keys, CloudWatch Logs ingestion tokens and the IAM Identity Center portal.
 - Keys the step switches to through `GetSessionToken`, SAML or IAM Identity Center, which the proxy
   does not learn.
+- Presigned URLs someone else signed that reach the step other than through an ECR registry's
+  redirect, such as the `Code.Location` of Lambda `GetFunction` or a vendor's download link. They
+  are refused as `aws-key-not-allowed`. The report shows the URL, and its `X-Amz-Credential` the key
+  ID; `aws sts get-access-key-info --access-key-id <key-id>` names the account it belongs to.
+  Download them in a step of their own without the check.
 
 Two of these come up often in CI.
 
@@ -251,11 +264,11 @@ Each request the check let through has an `aws` object in the
 where it refused nothing. A request the check refused has none; its `reason` or `wouldRefuse`
 says why.
 
-| Field            | Always | Notes                                                                                                                                 |
-| ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `key`            | yes    | `env` for the key the step started with, `assumed` for one STS issued, `none` for a request carrying no access key                    |
-| `accountId`      |        | an account the check confirmed: the one an `assumed` key came from, or the one a static CodeCommit Git credential or a role ARN names |
-| `assumedAccount` |        | the account of the role an STS answer issued a key for, whether or not that account is allowed                                        |
+| Field            | Always | Notes                                                                                                                                                                        |
+| ---------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `key`            | yes    | `env` for the key the step started with, `assumed` for one STS issued, `issued` for one ECR signed a layer's presigned URL with, `none` for a request carrying no access key |
+| `accountId`      |        | an account the check confirmed: the one an `assumed` key came from, or the one a static CodeCommit Git credential or a role ARN names                                        |
+| `assumedAccount` |        | the account of the role an STS answer issued a key for, whether or not that account is allowed                                                                               |
 
 The starting key's account is never shown, since the proxy does not ask AWS whose key it is. No key
 ID is written either.
@@ -315,12 +328,12 @@ use one:
   stays `aws-no-credential`. `AssumeRoleWithSAML` is refused as `aws-no-credential`, and keys from
   IAM Identity Center's `GetRoleCredentials` or Cognito's `GetCredentialsForIdentity` are never
   learned. Get those credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
-- Keys are learned only from STS answers over HTTPS, to a request the key check allowed, so in
-  audit mode a request it would refuse teaches no key. A host that names a resource is never taken
-  for STS, even an S3 bucket named `sts`. The proxy asks STS for an uncompressed answer, unless the
-  client signed its own `Accept-Encoding`, which the proxy then leaves alone. It reads an answer up
-  to its buffer size (16 KB). A key in a compressed answer or past the buffer is not learned, and
-  requests signed with it are refused.
+- Keys are learned only from STS answers and ECR registry redirects over HTTPS, to a request the key
+  check did not refuse, so in audit mode a request it would refuse teaches no key. A host that names
+  a resource is never taken for STS, even an S3 bucket named `sts`. The proxy asks STS for an
+  uncompressed answer, unless the client signed its own `Accept-Encoding`, which the proxy then
+  leaves alone. It reads an answer up to its buffer size (16 KB). A key in a compressed answer or
+  past the buffer is not learned, and requests signed with it are refused.
 - A connection `allowed_tls_rules` or `allowed_ip_rules` passes through is never decrypted, so the
   check never sees its requests. Do not pass AWS API hosts through.
 - S3 Express One Zone directory buckets are signed with keys `CreateSession` issues, which the proxy

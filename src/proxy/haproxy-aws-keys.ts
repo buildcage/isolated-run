@@ -3,11 +3,12 @@
  * key the proxy knows, or a build could sign with keys of its own and write
  * data into another account's CloudTrail through any API.
  *
- * The keys come from two places: the one the step started with, taken as
- * given, and, when role accounts are named, the ones an STS AssumeRole or
- * AssumeRoleWithWebIdentity answer hands back for a role in one of them,
- * read off the response and added to the map at runtime. A key is matched as
- * a whole string and never decoded.
+ * The keys come from three places: the one the step started with, taken as
+ * given; when role accounts are named, the ones an STS AssumeRole or
+ * AssumeRoleWithWebIdentity answer hands back for a role in one of them; and
+ * the ones in the presigned URLs ECR's registry redirects a layer download
+ * to. The last two are read off the response and added to the map at runtime.
+ * A key is matched as a whole string and never decoded.
  *
  * Only one credential is matched, SigV4's or SigV4a's, in the Authorization
  * header or a presigned URL, as current SDKs send it. Any other AWS
@@ -19,7 +20,7 @@ import type { InspectStageExtension } from "#core/lib/acl/haproxy-inspect-stage.
 /** Where the files the check reads are. */
 export interface AwsKeyCheck {
   keyMapFile: string;
-  /** The accounts whose roles may issue keys; absent, no key is learned. */
+  /** The accounts whose roles may issue keys; absent, no STS key is learned. */
   accountFile?: string;
 }
 
@@ -75,6 +76,12 @@ export const AWS_RESOURCE_HOST =
 // to the URL rules too.
 export const AWS_PUBLIC_HOST =
   "^(awscli|checkip|ip-ranges|pricing\\.us-east-1)\\.amazonaws\\.com$|^pricing\\.cn-northwest-1\\.amazonaws\\.com\\.cn$";
+// An ECR registry, whose redirect to a layer's presigned URL teaches its key:
+// the AWS API names, and the dual-stack one under on.aws, which the check
+// otherwise leaves to the URL rules.
+export const ECR_REGISTRY_HOST = `\\.dkr\\.ecr(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$|^[0-9]{12}\\.dkr-ecr\\.[a-z0-9-]+\\.on\\.aws$`;
+// The key ID in a Location's query credential.
+export const LOCATION_CREDENTIAL = "^[^?#]*[?]([^#]*&)?X-Amz-Credential=([A-Za-z0-9]+)(%2F|/).*$";
 export const CODECOMMIT_HOST =
   `^git-codecommit(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$|` +
   vpceHost("git-codecommit(-fips)?");
@@ -100,7 +107,7 @@ const ROLE_ARN = "^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$";
 /** What the traffic record says of a request the check let through; see
  *  docs/aws.md#in-the-traffic-artifact. */
 export type AwsTrafficFields = {
-  aws: { key: "env" | "assumed" | "none"; accountId?: string; assumedAccount?: string };
+  aws: { key: "env" | "assumed" | "issued" | "none"; accountId?: string; assumedAccount?: string };
 };
 
 /** The check as the inspect stage takes it. */
@@ -197,6 +204,10 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
         ]
       : []),
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_sigv4 !{ var(txn.aws_key),${map} } or aws_git !{ var(txn.aws_key),${map} }${check.accountFile ? " !aws_git_account" : ""} or aws_query !{ var(txn.aws_key),${map} }`,
+    "    # A key ECR issued passes only as a presigned URL's credential to S3.",
+    `    http-request set-var(txn.aws_issued) bool(true) if { var(txn.aws_key),map(${check.keyMapFile}) -m str issued }`,
+    "    acl aws_issued var(txn.aws_issued) -m bool",
+    `    http-request set-var(txn.aws) str(key-not-allowed) if aws_issued !aws_query or aws_issued !{ var(txn.host) -m reg ${S3_HOST} }`,
     `    http-request set-var(txn.aws) str(no-credential) if aws_host !aws_sigv4 !aws_git !aws_query !aws_unsupported !aws_unsigned_ok${check.accountFile ? " !aws_role_account" : ""}`,
     `    http-request set-var(txn.aws) str(ambiguous-credential) if aws_host { req.fhdr_cnt(authorization) gt 1 } or aws_sigv4 aws_query or aws_git aws_query or aws_query aws_query_many or aws_sigv4 { req.fhdr(authorization) -m reg -i credential=.*credential= }${check.accountFile ? " or aws_fed aws_role_body_many or aws_fed aws_fed_in_query" : ""}`,
     "    http-request set-var(txn.aws) str(unsupported-credential) if aws_unsupported",
@@ -210,13 +221,14 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
         ]
       : ["    http-request set-var-fmt(txn.would_refuse) aws-%[var(txn.aws)] if aws_refused"]),
     "    # For the traffic record: what a request the check let through was",
-    "    # signed with. The map holds env for the starting key, and the account",
-    "    # for a learned one.",
+    "    # signed with. The map holds env for the starting key, the account for",
+    "    # one STS issued, and issued for one ECR did.",
     "    acl aws_allowed var(txn.aws) -m str allowed",
     "    http-request set-var(txn.aws_log_key) str(none) if aws_allowed",
     `    http-request set-var(txn.aws_key_owner) var(txn.aws_key),map(${check.keyMapFile}) if aws_allowed aws_sigv4 or aws_allowed aws_git or aws_allowed aws_query`,
     "    http-request set-var(txn.aws_log_key) str(env) if { var(txn.aws_key_owner) -m str env }",
     "    http-request set-var(txn.aws_log_key) str(assumed) if { var(txn.aws_key_owner) -m reg ^[0-9]{12}$ }",
+    "    http-request set-var(txn.aws_log_key) str(issued) if { var(txn.aws_key_owner) -m str issued }",
     "    http-request set-var(txn.aws_log_account) var(txn.aws_key_owner) if { var(txn.aws_key_owner) -m reg ^[0-9]{12}$ }",
     ...(check.accountFile
       ? [
@@ -224,6 +236,10 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
           "    http-request set-var(txn.aws_log_account) var(txn.aws_role_account) if aws_allowed aws_role_account",
         ]
       : []),
+    "    # Only a redirect answering a registry request the check did not refuse",
+    "    # can teach a key, and only over TLS, where the registry's certificate",
+    "    # was verified.",
+    `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
   ];
   if (check.accountFile) {
     l.push(
@@ -268,27 +284,42 @@ function accountRules(accountFile: string): string[] {
 }
 
 /**
- * Response rules: learn the key an AssumeRole or AssumeRoleWithWebIdentity
- * answer issues, only to a request the check let through and only when the
- * role's account is allowed. The role ARN is AWS's own, not the caller's. A
- * body larger than the buffer is read only in part, so a key past it is not
- * learned and its requests are refused.
+ * Response rules: learn the key in the presigned URL an ECR registry
+ * redirects a layer download to, and, when role accounts are named, the key
+ * an AssumeRole or AssumeRoleWithWebIdentity answer issues for a role in one
+ * of them. Only an answer to a request the check did not refuse teaches one.
+ *
+ * Only ECR writes that Location, over a connection whose certificate the
+ * proxy verified, so a build cannot put its own key there. The role ARN is
+ * AWS's own, not the caller's. A body larger than the
+ * buffer is read only in part, so a key past it is not learned and its
+ * requests are refused.
  */
 export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
-  if (!check.accountFile) return [];
-  return [
-    "    acl aws_learn var(txn.aws_learn) -m bool",
-    "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity)?Response[\\s>]",
-    "    acl aws_many_keys res.body -m reg (?s)<AccessKeyId>.*<AccessKeyId>",
-    "    acl aws_many_arns res.body -m reg (?s)<Arn>.*<Arn>",
-    "    http-response wait-for-body time 10s if aws_learn { status 200 }",
-    `    http-response set-var(txn.aws_new_key) 'res.body,regsub("(?s)^.*<AccessKeyId>(ASIA[A-Z0-9]+)</AccessKeyId>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
-    `    http-response set-var(txn.aws_new_account) 'res.body,regsub("(?s)^.*<Arn>arn:aws[a-z-]*:sts::([0-9]{12}):assumed-role/[^<]*</Arn>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
-    "    acl aws_new_key var(txn.aws_new_key) -m reg ^ASIA[A-Z0-9]+$",
-    "    acl aws_new_account var(txn.aws_new_account) -m reg ^[0-9]{12}$",
-    `    acl aws_new_account_allowed var(txn.aws_new_account) -m str -f ${check.accountFile}`,
-    `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_new_key aws_new_account aws_new_account_allowed`,
-    "    http-response set-var(txn.aws_log_assumed) var(txn.aws_new_account) if aws_new_account",
-    "",
+  const l = [
+    "    acl aws_ecr_learn var(txn.aws_ecr_learn) -m bool",
+    "    acl aws_location_many res.fhdr(location) -m reg -i x-amz-credential=.*x-amz-credential=",
+    `    http-response set-var(txn.aws_issued_key) 'res.fhdr(location),regsub("${LOCATION_CREDENTIAL}","\\2",i)' if aws_ecr_learn { status 300:399 } { res.fhdr_cnt(location) eq 1 } !aws_location_many`,
+    "    acl aws_issued_key var(txn.aws_issued_key) -m reg ^ASIA[A-Z0-9]+$",
+    "    # A key the proxy already knows keeps what it was learned as.",
+    `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_issued_key)] issued if aws_issued_key !{ var(txn.aws_issued_key),map(${check.keyMapFile}) -m found }`,
   ];
+  if (check.accountFile) {
+    l.push(
+      "    acl aws_learn var(txn.aws_learn) -m bool",
+      "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity)?Response[\\s>]",
+      "    acl aws_many_keys res.body -m reg (?s)<AccessKeyId>.*<AccessKeyId>",
+      "    acl aws_many_arns res.body -m reg (?s)<Arn>.*<Arn>",
+      "    http-response wait-for-body time 10s if aws_learn { status 200 }",
+      `    http-response set-var(txn.aws_new_key) 'res.body,regsub("(?s)^.*<AccessKeyId>(ASIA[A-Z0-9]+)</AccessKeyId>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
+      `    http-response set-var(txn.aws_new_account) 'res.body,regsub("(?s)^.*<Arn>arn:aws[a-z-]*:sts::([0-9]{12}):assumed-role/[^<]*</Arn>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
+      "    acl aws_new_key var(txn.aws_new_key) -m reg ^ASIA[A-Z0-9]+$",
+      "    acl aws_new_account var(txn.aws_new_account) -m reg ^[0-9]{12}$",
+      `    acl aws_new_account_allowed var(txn.aws_new_account) -m str -f ${check.accountFile}`,
+      `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_new_key aws_new_account aws_new_account_allowed`,
+      "    http-response set-var(txn.aws_log_assumed) var(txn.aws_new_account) if aws_new_account",
+    );
+  }
+  l.push("");
+  return l;
 }
