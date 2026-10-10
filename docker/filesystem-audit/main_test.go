@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestCreateRefusesALinkOrAnExistingFile(t *testing.T) {
@@ -63,5 +65,26 @@ func TestStopOnExit(t *testing.T) {
 	case <-sig:
 	case <-time.After(5 * time.Second):
 		t.Fatal("not stopped after the process exited")
+	}
+}
+
+func TestRunRefusesAnActionAlreadyGone(t *testing.T) {
+	if fd, err := unix.PidfdOpen(os.Getpid(), 0); err != nil {
+		t.Skip("pidfd_open unavailable:", err)
+	} else {
+		unix.Close(fd)
+	}
+	child := exec.Command("true")
+	if err := child.Run(); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	pidfile := filepath.Join(dir, "pid")
+	err := run(filepath.Join(dir, "cgroup"), filepath.Join(dir, "out"), "", pidfile, child.Process.Pid)
+	if err == nil || err.Error() != "the action that started it has already exited" {
+		t.Fatalf("run: %v", err)
+	}
+	if _, err := os.Stat(pidfile); !os.IsNotExist(err) {
+		t.Fatal("wrote a pidfile for a tracer that never started")
 	}
 }

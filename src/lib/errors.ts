@@ -44,6 +44,7 @@ import { ActionError } from "#core/lib/errors.ts";
  *   NSS_DATABASE_WRITE_BACK_FAILED    inspect engine only: what the command wrote to the runner's NSS database
  *                                     could not be written back
  *   SANDBOX_TERMINATED                a signal ended run-isolated.sh, so the command's exit status is unknown
+ *   CANCELLED_BEFORE_RUN              the step was cancelled while the sandbox was being prepared
  *   SANDBOX_LAUNCH_FAILED             `sudo run-isolated.sh` could not be started at all
  *   SCRATCH_BASE_SYMLINKED            /var/tmp, the sandbox scratch base's parent, resolves through a symlink
  *   INVALID_AWS_ACCOUNTS              an allowed_aws_role_accounts entry is not a 12-digit account ID
@@ -82,6 +83,7 @@ export type SandboxErrorCode =
   | "NSS_DATABASE_CA_COPIED"
   | "NSS_DATABASE_WRITE_BACK_FAILED"
   | "SANDBOX_TERMINATED"
+  | "CANCELLED_BEFORE_RUN"
   | "SANDBOX_LAUNCH_FAILED"
   | "SCRATCH_BASE_SYMLINKED"
   | "INVALID_AWS_ACCOUNTS"

@@ -17,6 +17,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -74,11 +75,37 @@ func main() {
 }
 
 func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
-	cg, err := prepareCgroup(cgPath)
+	// Before loading, which takes a while: an action killed meanwhile, or one
+	// that stops the tracer meanwhile, must not leave it recording.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	if watchPid > 0 {
+		err := stopOnExit(watchPid, sig)
+		if errors.Is(err, unix.ESRCH) {
+			return errors.New("the action that started it has already exited")
+		}
+		// Otherwise only a backstop for the action's own stop, so not worth failing over.
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "filesystem-audit: cannot watch pid %d: %v\n", watchPid, err)
+		}
+	}
+	// This early so the post step can stop a tracer still loading.
+	if pidPath != "" {
+		if err := writeNew(pidPath, []byte(fmt.Sprintln(os.Getpid()))); err != nil {
+			return err
+		}
+	}
+
+	cg, created, err := prepareCgroup(cgPath)
 	if err != nil {
 		return err
 	}
 	defer cg.Close()
+	if created {
+		// For a start that never ran the sandbox; runc's delete removes it
+		// otherwise. rmdir fails on a cgroup still in use.
+		defer os.Remove(cg.Name())
+	}
 	if lsm, err := os.ReadFile("/sys/kernel/security/lsm"); err == nil {
 		fmt.Fprintf(os.Stderr, "filesystem-audit: active LSMs: %s\n", strings.TrimSpace(string(lsm)))
 	}
@@ -120,6 +147,11 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
 	if err != nil {
 		return err
 	}
+	select {
+	case <-sig:
+		return errors.New("stopped before it attached")
+	default:
+	}
 
 	rd, err := ringbuf.NewReader(coll.Maps["events"])
 	if err != nil {
@@ -133,19 +165,6 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
 	bw := bufio.NewWriterSize(f, 1<<20)
 	defer bw.Flush()
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	// Only a backstop for the action's own stop, so not worth failing over.
-	if watchPid > 0 {
-		if err := stopOnExit(watchPid, sig); err != nil {
-			fmt.Fprintf(os.Stderr, "filesystem-audit: cannot watch pid %d: %v\n", watchPid, err)
-		}
-	}
-	if pidPath != "" {
-		if err := writeNew(pidPath, []byte(fmt.Sprintln(os.Getpid()))); err != nil {
-			return err
-		}
-	}
 	// Before the ready file, which lets the step start.
 	base, errBase := missedRuns(coll)
 	if readyPath != "" {
@@ -244,33 +263,41 @@ func stopOnExit(pid int, sig chan<- os.Signal) error {
 }
 
 // prepareCgroup verifies the host is cgroup v2, creates the watched cgroup
-// if missing, and opens it for the programs' cgroup array.
-func prepareCgroup(cgPath string) (*os.File, error) {
+// if missing, and opens it for the programs' cgroup array. created says
+// whether it made the cgroup itself.
+func prepareCgroup(cgPath string) (f *os.File, created bool, err error) {
 	var sfs unix.Statfs_t
 	if err := unix.Statfs(cgroupRoot, &sfs); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if sfs.Type != unix.CGROUP2_SUPER_MAGIC {
-		return nil, fmt.Errorf("%s is not cgroup v2 (magic %#x)", cgroupRoot, sfs.Type)
+		return nil, false, fmt.Errorf("%s is not cgroup v2 (magic %#x)", cgroupRoot, sfs.Type)
 	}
 	abs := filepath.Clean(cgPath)
 	rel, err := filepath.Rel(cgroupRoot, abs)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return nil, fmt.Errorf("cgroup path must be below %s: %s", cgroupRoot, cgPath)
+		return nil, false, fmt.Errorf("cgroup path must be below %s: %s", cgroupRoot, cgPath)
 	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
-		return nil, err
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return nil, false, err
 	}
+	err = os.Mkdir(abs, 0o755)
+	if err != nil && !errors.Is(err, fs.ErrExist) {
+		return nil, false, err
+	}
+	created = err == nil
 	var st unix.Stat_t
-	if err := unix.Stat(abs, &st); err != nil {
-		return nil, err
+	if err = unix.Stat(abs, &st); err == nil {
+		f, err = os.Open(abs)
 	}
-	f, err := os.Open(abs)
 	if err != nil {
-		return nil, err
+		if created {
+			os.Remove(abs)
+		}
+		return nil, false, err
 	}
 	fmt.Fprintf(os.Stderr, "filesystem-audit: cgroup %s id=%d\n", abs, st.Ino)
-	return f, nil
+	return f, created, nil
 }
 
 // requireRuntimeAlloc refuses a kernel without the BPF memory allocator added

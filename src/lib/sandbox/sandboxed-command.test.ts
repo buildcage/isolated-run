@@ -151,7 +151,8 @@ describe("runSandboxedCommand", () => {
     }
 
     it("starts the tracer over the sandbox cgroup and stops it after the command", async () => {
-      await runSandboxedCommand(auditing(), deps);
+      const cancel = new AbortController().signal;
+      await runSandboxedCommand({ ...auditing(), cancel }, deps);
 
       expect(mocks.extractTracer).toHaveBeenCalledWith(CONTAINER, SCRATCH);
       expect(mocks.startFilesystemAudit.mock.calls[0][0]).toStrictEqual({
@@ -161,6 +162,7 @@ describe("runSandboxedCommand", () => {
         pidFilePath: AUDIT.pidFilePath,
         readyPath: `${SCRATCH}/filesystem-audit.ready`,
         watchPid: process.pid,
+        cancel,
       });
       expect(mocks.startFilesystemAudit.mock.invocationCallOrder[0]).toBeLessThan(
         mocks.runIsolated.mock.invocationCallOrder[0],

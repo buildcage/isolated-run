@@ -48,6 +48,10 @@ export interface RunIsolatedDeps {
  */
 export const CANCEL_GRACE_MS = 5_000;
 
+export function cancelledBeforeRun(): SandboxError {
+  return new SandboxError("The step was cancelled before the command ran.", "CANCELLED_BEFORE_RUN");
+}
+
 // Untested by design: the default behind runIsolated's seam, which only hands
 // node:child_process what the tested caller assembled.
 /* v8 ignore start */
@@ -141,14 +145,15 @@ export async function runIsolated(
     targetIp,
   ];
 
+  // A sandbox stopped right after it starts would still run part of the command.
+  if (cancel?.aborted) throw cancelledBeforeRun();
   const child = spawn("sudo", args, envBlob);
   let escalation: ReturnType<typeof setTimeout> | undefined;
   const stop = () => {
     child.kill("SIGTERM");
     escalation = setTimeout(() => child.kill("SIGTERM"), CANCEL_GRACE_MS);
   };
-  if (cancel?.aborted) stop();
-  else cancel?.addEventListener("abort", stop, { once: true });
+  cancel?.addEventListener("abort", stop, { once: true });
   let exit: Exit;
   try {
     exit = await child.exited;

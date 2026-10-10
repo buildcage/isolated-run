@@ -544,6 +544,7 @@ async function startAudit(
     pidFilePath: filesystemAudit.pidFilePath,
     readyPath: join(dir, "filesystem-audit.ready"),
     watchPid: process.pid,
+    cancel: options.cancel,
   });
 }
 
