@@ -804,29 +804,30 @@ communication details (from the first access if that start is unknown); a row to
 time. It does not say which action came when, and a file kept open counts only the first read and
 first write through it by each program a process runs, so the last time can be earlier than its last
 write; a command reading or writing through a descriptor it inherited, or was passed, is shown under
-its own name. The artifact has every access in order. An action that only ever failed is lowercase,
-and one the sandbox refused, for want of permission or because the location is read-only, is marked
-`!`. A directory with many touched children is shown once as `dir/**`. Paths are shown relative to
-`$GITHUB_WORKSPACE` (`./…`) and `$HOME` (`~/…`), else absolute. A failed access is recorded under
-the name the command used, joined to the directory a relative name resolved against (its working
-directory, or the directory it passed by descriptor) without resolving `..`; a name whose directory
-was closed before it could be read is shown as `…/name`, as is a path too deep to record in full.
-Where its `path` differs from the name as passed, the artifact keeps that name in `name` (`to_name`
-for a move's target). An invisible or control character in a path or command name is shown escaped,
-as `\n` or `\u{202e}`, and a backslash as `\\`. A program the step ran is recorded under the file it
-resolved to, with symlinks followed and a script under its own path rather than its interpreter's;
-the artifact keeps the name it was run by as `name`. A memfd, a file with no path, is shown as
-`memfd:"name"` with the name its creator gave it, and a file deleted while in use, or created with
-`O_TMPFILE` and never linked, has `(deleted)` after its path unless it is folded into a `dir/**`
-row; the artifact marks them `"memfd":true` and `"deleted":true`. The libraries a program loads are
-left out, as are its reads of them and of `/etc/ld.so.cache`, and its process's reads of the program
-itself, including those made just before running it. Other programs' reads of those files are shown.
-A file mapped executable counts as a library only when the kernel maps it to start a program, which
-the artifact marks `"image":true`, or when its name ends in `.so` (optionally followed by version
-numbers, as in `.so.6`) or `.node` and it is neither a memfd nor deleted; any other is shown as
-read. A file mapped shared and writable is shown as written, including one made so with `mprotect`
-after it was mapped. A rename with `RENAME_EXCHANGE` swaps two paths, so both show `M`; the artifact
-marks it `"exchange":true`.
+its own name, except on a device such as `/dev/null`, which counts once. The artifact has every
+access in order. An action that only ever failed is lowercase, and one the sandbox refused, for want
+of permission or because the location is read-only, is marked `!`. A directory with many touched
+children is shown once as `dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and
+`$HOME` (`~/…`), else absolute. A failed access is recorded under the name the command used, joined
+to the directory a relative name resolved against (its working directory, or the directory it passed
+by descriptor) without resolving `..`; a name whose directory was closed before it could be read is
+shown as `…/name`, as is a path too deep to record in full. Where its `path` differs from the name
+as passed, the artifact keeps that name in `name` (`to_name` for a move's target). An invisible or
+control character in a path or command name is shown escaped, as `\n` or `\u{202e}`, and a backslash
+as `\\`. A program the step ran is recorded under the file it resolved to, with symlinks followed
+and a script under its own path rather than its interpreter's; the artifact keeps the name it was
+run by as `name`. A memfd, a file with no path, is shown as `memfd:"name"` with the name its creator
+gave it, and a file deleted while in use, or created with `O_TMPFILE` and never linked, has
+`(deleted)` after its path unless it is folded into a `dir/**` row; the artifact marks them
+`"memfd":true` and `"deleted":true`. The libraries a program loads are left out, as are its reads of
+them and of `/etc/ld.so.cache`, and its process's reads of the program itself, including those made
+just before running it. Other programs' reads of those files are shown. A file mapped executable
+counts as a library only when the kernel maps it to start a program, which the artifact marks
+`"image":true`, or when its name ends in `.so` (optionally followed by version numbers, as in
+`.so.6`) or `.node` and it is neither a memfd nor deleted; any other is shown as read. A file mapped
+shared and writable is shown as written, including one made so with `mprotect` after it was mapped.
+A rename with `RENAME_EXCHANGE` swaps two paths, so both show `M`; the artifact marks it
+`"exchange":true`.
 
 When the step's Job Summary would pass GitHub's size limit, its parts give way in this order: the
 filesystem details, the traffic report's communication log, the accessed-paths table, the executed

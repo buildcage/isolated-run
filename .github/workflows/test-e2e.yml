@@ -254,8 +254,11 @@ jobs:
                 if os.fork() == 0:
                     os.execve(fd, ["true"], {})
                 os.wait()' "$GITHUB_WORKSPACE/gone-bin"
-            # A child writing through a descriptor its shell already wrote through.
-            (exec 3> "$GITHUB_WORKSPACE/shared.txt"; echo head >&3; sh -c 'echo body >&3')
+            # Writing through a descriptor a shell already wrote through: a forked
+            # child (the trailing true keeps bash from exec'ing it), then a
+            # program the shell execs in place.
+            (exec 3> "$GITHUB_WORKSPACE/shared.txt"; echo head >&3; sh -c 'echo body >&3'; true)
+            (exec 3> "$GITHUB_WORKSPACE/execd.txt"; echo head >&3; exec cat /etc/hostname >&3)
             # A program, not the builtin, with an argument the record must not keep.
             /usr/bin/true buildcage-audit-sentinel-arg
 
@@ -289,9 +292,11 @@ jobs:
           grep -qE ' d +python3 +\./sub/gone$' "$f"
           # A refused change shows only as failed.
           grep -qE ' a!? +chmod +\./root-owned\.txt$' "$f"
-          # Each process sharing a descriptor gets its own row.
+          # Each program sharing a descriptor gets its own row.
           grep -qE ' W +bash +\./shared\.txt$' "$f"
           grep -qE ' W +sh +\./shared\.txt$' "$f"
+          grep -qE ' W +bash +\./execd\.txt$' "$f"
+          grep -qE ' W +cat +\./execd\.txt$' "$f"
           grep -qE ' w!? +mkdir +\./root-owned/x$' "$f"
           # A file mapped executable shows as read unless it is a library or
           # an exec mapped it, as it does run.sh's interpreter.
