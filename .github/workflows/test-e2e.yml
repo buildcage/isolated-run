@@ -157,6 +157,10 @@ jobs:
       matrix:
         runner: [ubuntu-latest, ubuntu-24.04-arm]
         filesystem_mode: [persistent, ephemeral]
+        # The oldest kernels of the GitHub-hosted images the docs name, once each.
+        include:
+          - { runner: ubuntu-22.04, filesystem_mode: persistent }
+          - { runner: ubuntu-22.04-arm, filesystem_mode: persistent }
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
