@@ -295,8 +295,13 @@ func TestDecode(t *testing.T) {
 		},
 		{
 			name: "failed chown",
-			ev:   event{kind: 19, comm: "chown", pathRet: int32(unix.ENOENT), flags: 0, gid: 121, data: []byte("/etc/x\x00")},
-			want: record{Kind: "chown", Comm: "chown", Path: "/etc/x", Owner: "0:121", Err: int32(unix.ENOENT), Failed: true},
+			ev:   event{kind: 19, comm: "chown", pathRet: int32(unix.ENOENT), flags: 1001, mode: 7, gid: 121, data: []byte("/etc/x\x00")},
+			want: record{Kind: "chown", Comm: "chown", Path: "/etc/x", Owner: "1001:121", Err: int32(unix.ENOENT), Failed: true},
+		},
+		{
+			name: "chown of the group alone",
+			ev:   event{kind: 11, comm: "chgrp", flags: 0xffffffff, mode: 121, n1: 2, data: comps("f", "tmp")},
+			want: record{Kind: "chown", Comm: "chgrp", Path: "/tmp/f", Owner: "-1:121"},
 		},
 		{
 			name: "relative to the root",

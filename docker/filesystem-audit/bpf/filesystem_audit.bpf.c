@@ -1433,7 +1433,8 @@ static __always_inline void op_exit(struct pending *pend, long ret)
 			off += r2;
 		}
 	}
-	// mode and flags count the base components of the first and second name.
+	// mode and flags count the base components of the first and second name;
+	// flags holds val1 instead for an op with one name.
 	u8 nb = 0;
 	if (!pend->p1) {
 		// No name (futimens): the descriptor's path, or no record if it

@@ -306,6 +306,7 @@ func decode(raw []byte) (record, error) {
 	truncated, truncated2 := raw[34] != 0, raw[35] != 0
 	data := raw[hdrLen:]
 	marks := le.Uint32(raw[56:])
+	gid := le.Uint32(raw[60:]) // a failed chown's; a held one's is in mode
 	r := record{
 		Kind: kindNames[kind],
 		PID:  le.Uint32(raw[4:]),
@@ -353,7 +354,7 @@ func decode(raw []byte) (record, error) {
 	case 11: // chown
 		r.Path, _ = components(data, n1, truncated)
 		applyMarks(&r, marks, false)
-		r.Owner = fmt.Sprintf("%d:%d", flags, mode)
+		r.Owner = owner(flags, mode)
 	case 8: // symlink
 		r.To = cstr(data)
 		// pathRet is the link body's length, i.e. the offset of the path
@@ -377,7 +378,7 @@ func decode(raw []byte) (record, error) {
 		case 18:
 			r.Mode = fmt.Sprintf("%04o", flags&0o7777)
 		case 19:
-			r.Owner = fmt.Sprintf("%d:%d", flags, le.Uint32(raw[60:]))
+			r.Owner = owner(flags, gid)
 		}
 	case 17, 29: // a failed rename or link: from one name to another
 		// n1 == 1 marks a second name after the first; both come before the
@@ -411,6 +412,17 @@ func decode(raw []byte) (record, error) {
 		applyMarks(&r, marks, false)
 	}
 	return r, nil
+}
+
+// owner renders a chown's new uid:gid, with -1 for a side it leaves as is.
+func owner(uid, gid uint32) string {
+	id := func(v uint32) string {
+		if v == ^uint32(0) {
+			return "-1"
+		}
+		return fmt.Sprint(v)
+	}
+	return id(uid) + ":" + id(gid)
 }
 
 // openAccess renders an open's flags as letters: r/w/rw, plus c (create),
