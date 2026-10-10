@@ -154,6 +154,15 @@ describe("computeReportOutcomes", () => {
       );
     });
 
+    it("is left out when no table lists the refusal", () => {
+      const r: InspectReportData = {
+        ...report({ timeline: [refused("aws-unreadable")] }),
+        engine: "inspect",
+      };
+      const { markdown } = computeReportOutcomes(r, options());
+      expect(markdown).not.toContain("aws.md");
+    });
+
     it("is left out when no refusal is the check's", () => {
       const { markdown } = computeReportOutcomes(restrict("not-allowed"), options());
       expect(markdown).not.toContain("aws.md");
