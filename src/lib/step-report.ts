@@ -14,6 +14,7 @@ import { errorMessage } from "#core/lib/errors.ts";
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import type { GenReportParameters } from "#core/lib/report/types.ts";
 
+import { failOrWarn } from "./fail-or-warn.ts";
 import { readStepLabel } from "./inputs.ts";
 import {
   fetchReport,
@@ -109,15 +110,7 @@ export async function reportStepTraffic(
     readStepLabel,
   } = { ...realDeps, ...overrides };
 
-  const failClosed = parameters.mode !== "audit" && failOnBlocked;
-  const fail = (message: string): void => {
-    if (failClosed) {
-      annotation.error(`${message}; failing the step under restrict with fail_on_blocked`);
-      process.exitCode = 1;
-    } else {
-      annotation.warning(message);
-    }
-  };
+  const fail = failOrWarn(annotation, parameters.mode !== "audit" && failOnBlocked);
 
   let report: Report | undefined;
   try {

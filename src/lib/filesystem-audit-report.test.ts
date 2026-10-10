@@ -99,6 +99,7 @@ describe("prepareStepFilesystemAudit", () => {
     containerName: "buildcage-proxy-deadbeef",
     actionRepo: "buildcage/isolated-run",
     actionRef: "v2",
+    failClosed: false,
   };
 
   it("renders, uploads and sets the output when a recording exists", async () => {
@@ -440,7 +441,55 @@ describe("prepareStepFilesystemAudit", () => {
     expect(summaries[0]).toContain("Filesystem audit");
   });
 
-  it("only warns when the output cannot be set", async () => {
+  it("fails the step under restrict with fail_on_blocked when the output cannot be set", async () => {
+    const exitCode = process.exitCode;
+    const note = annotation();
+    const { deps: d, summaries } = deps({
+      setOutput: () => {
+        throw new Error("EACCES");
+      },
+    });
+
+    try {
+      await reportStepFilesystemAudit(
+        { ...base, failClosed: true, audit: AUDIT, annotation: note, env: {} },
+        d,
+      );
+
+      expect(note.error).toHaveBeenCalledWith(
+        "Failed to set the filesystem_audit_artifact_name output: EACCES; " +
+          "failing the step under restrict with fail_on_blocked",
+      );
+      expect(note.warning).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+      expect(summaries[0]).toContain("Filesystem audit");
+    } finally {
+      process.exitCode = exitCode;
+    }
+  });
+
+  it("only warns when the output cannot be cleared and the audit was off", async () => {
+    const exitCode = process.exitCode;
+    const note = annotation();
+    const { deps: d } = deps({
+      setOutput: () => {
+        throw new Error("EACCES");
+      },
+    });
+
+    await reportStepFilesystemAudit(
+      { ...base, failClosed: true, audit: undefined, annotation: note, env: {} },
+      d,
+    );
+
+    expect(note.error).not.toHaveBeenCalled();
+    expect(note.warning).toHaveBeenCalledWith(
+      "Failed to set the filesystem_audit_artifact_name output: EACCES",
+    );
+    expect(process.exitCode).toBe(exitCode);
+  });
+
+  it("only warns when the output cannot be set outside restrict with fail_on_blocked", async () => {
     const note = annotation();
     const { deps: d, summaries } = deps({
       setOutput: () => {
@@ -527,6 +576,7 @@ describe("prepareStepFilesystemAudit: failures while reading", () => {
     containerName: "buildcage-proxy-deadbeef",
     actionRepo: "buildcage/isolated-run",
     actionRef: "v2",
+    failClosed: false,
     audit: AUDIT,
     env: { GITHUB_WORKSPACE: "/work" },
   };
@@ -630,6 +680,7 @@ describe("prepareStepFilesystemAudit: an upload that throws", () => {
         containerName: "buildcage-proxy-deadbeef",
         actionRepo: "buildcage/isolated-run",
         actionRef: "v2",
+        failClosed: false,
         audit: AUDIT,
         annotation: note,
         env: {},

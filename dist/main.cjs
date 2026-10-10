@@ -23304,6 +23304,13 @@ function cutBlock(b, budget) {
 	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
 }
 //#endregion
+//#region src/lib/fail-or-warn.ts
+function failOrWarn(annotation, failClosed) {
+	return (message) => {
+		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail_on_blocked`), process.exitCode = 1) : annotation.warning(message);
+	};
+}
+//#endregion
 //#region node_modules/.pnpm/@actions+artifact@6.2.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/config.js
 function getUploadChunkSize() {
 	return 8388608;
@@ -69410,7 +69417,7 @@ function prefixes(value, realpath) {
 	return out;
 }
 const NONE = { blocks: () => [] };
-async function prepareStepFilesystemAudit({ audit, retentionDays, containerName, annotation, env, actionRepo, actionRef }, overrides = {}) {
+async function prepareStepFilesystemAudit({ audit, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
 	let deps = {
 		...realDeps$3,
 		...overrides
@@ -69446,7 +69453,7 @@ async function prepareStepFilesystemAudit({ audit, retentionDays, containerName,
 		try {
 			deps.setOutput(artifactName);
 		} catch (e) {
-			annotation.warning(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
+			failOrWarn(annotation, failClosed && audit !== void 0)(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
 		}
 	}
 }
@@ -73206,9 +73213,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
 		...realDeps$1,
 		...overrides
-	}, failClosed = parameters.mode !== "audit" && failOnBlocked, fail = (message) => {
-		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail_on_blocked`), process.exitCode = 1) : annotation.warning(message);
-	}, report;
+	}, fail = failOrWarn(annotation, parameters.mode !== "audit" && failOnBlocked), report;
 	try {
 		report = await fetchReport(containerName, parameters, proxyEngine);
 	} catch (e) {
@@ -73434,7 +73439,8 @@ async function runSandboxStep(env, overrides = {}) {
 			annotation,
 			env,
 			actionRepo,
-			actionRef: reportActionRef
+			actionRef: reportActionRef,
+			failClosed: proxyMode !== "audit" && failOnBlocked
 		});
 		await reportStepTraffic({
 			containerName,
