@@ -102,9 +102,10 @@ R read · W write · X exec · M move · D delete · A attr · lowercase = faile
 buildcage-filesystem-audit-<id> artifact · how to read this
 
 #### Executed
-| Path                  |
-| --------------------- |
-| `/usr/local/bin/node` |
+| Path                  | Runs |
+| --------------------- | ---- |
+| `/usr/local/bin/node` | 1    |
+| `/usr/bin/dash`       | 12   |
 
 #### Accessed paths
 | Access | Path                  |
@@ -116,17 +117,21 @@ buildcage-filesystem-audit-<id> artifact · how to read this
 
 📂 Filesystem details
 first-last access since the proxy started · flags · command · path
+00:00.401:           X   node /usr/local/bin/node
 00:00.412:           R   node ./package.json
 00:00.415-00:00.418: Rr! node /etc/**
 00:00.420:           w!  node /usr/local/bin/node
 00:00.530-00:41.207: RWD node ./node_modules/**
+00:00.531-00:40.982: X   sh   /usr/bin/dash
 ```
 
 Where there is no artifact, the legend says how to ask for one, or that the upload failed.
 
-- **Executed** lists each program once, in the order it first ran.
+- **Executed** lists each program once, in the order it first ran, with how many times it ran.
 - **Accessed paths** combines every command's actions on a path in one row, in path order: the
-  workspace first, then `$HOME`, then the rest.
+  workspace first, then `$HOME`, then the rest. Running a program is left to the executed table.
+  A path the step was refused under a `dir/**` row is in the details when that command touched
+  little else there, and otherwise only in the artifact.
 - **📂 Filesystem details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
   that command first and last touched the path, counted from the proxy's start like the
@@ -138,7 +143,7 @@ Where there is no artifact, the legend says how to ask for one, or that the uplo
 | ---- | ---------------------------------------------------------------------------------------------- |
 | `R`  | Read, or mapped for reading                                                                    |
 | `W`  | Written, mapped shared and writable, created or truncated: a file, a directory, a link         |
-| `X`  | Run as a program                                                                               |
+| `X`  | Run as a program; in the details only, as the executed table lists every program run           |
 | `M`  | Moved (renamed), from or to this path                                                          |
 | `D`  | Deleted                                                                                        |
 | `A`  | Attributes changed: mode, owner, times, extended attributes                                    |
@@ -153,16 +158,16 @@ artifact has every access in order.
 
 ### Paths
 
-| Shown as               | Means                                                                                                            |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `./…`                  | Under `$GITHUB_WORKSPACE`                                                                                        |
-| `~/…`                  | Under `$HOME`                                                                                                    |
-| `dir/**`               | Three or more entries directly under `dir` were touched, so it is shown as one row with every flag below it      |
-| `…/name`               | A relative name whose directory was closed before it could be read, or a path too deep to record in full         |
-| `memfd:"name"`         | A file that exists only in memory and has no path; the name is whatever its creator chose                        |
-| `path (deleted)`       | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row |
-| `\n`, `\u{202e}`, `\\` | A control or invisible character, or a backslash, in a path or command name                                      |
-| `\xff`                 | A byte that is not UTF-8 in a path or command name                                                               |
+| Shown as               | Means                                                                                                                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `./…`                  | Under `$GITHUB_WORKSPACE`                                                                                                                                                                              |
+| `~/…`                  | Under `$HOME`                                                                                                                                                                                          |
+| `dir/**`               | Three or more entries directly under `dir` were touched, so it is shown as one row with every flag below it. A file a program loaded and a program run do not count, and a program run is never folded |
+| `…/name`               | A relative name whose directory was closed before it could be read, or a path too deep to record in full                                                                                               |
+| `memfd:"name"`         | A file that exists only in memory and has no path; the name is whatever its creator chose                                                                                                              |
+| `path (deleted)`       | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row                                                                                       |
+| `\n`, `\u{202e}`, `\\` | A control or invisible character, or a backslash, in a path or command name                                                                                                                            |
+| `\xff`                 | A byte that is not UTF-8 in a path or command name                                                                                                                                                     |
 
 `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME` and the directories above them are never
 folded into a `dir/**` row, nor is `/proc/<pid>`, which stands for any process's own directory.

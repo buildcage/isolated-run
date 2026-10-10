@@ -68482,7 +68482,7 @@ function mergeAgg(dst, src) {
 	dst.ok |= src.ok, dst.failed |= src.failed, dst.perm |= src.perm, dst.first = Math.min(dst.first, src.first), dst.last = Math.max(dst.last, src.last), dst.seq = Math.min(dst.seq, src.seq);
 }
 function apply(a, x) {
-	x.bit && (x.failed ? (a.failed |= x.bit, x.perm && (a.perm |= x.bit)) : a.ok |= x.bit, !Number.isNaN(x.t) && (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq)));
+	x.failed ? (a.failed |= x.bit, x.perm && (a.perm |= x.bit)) : a.ok |= x.bit, !Number.isNaN(x.t) && (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq));
 }
 function fmtSpan(a, originMs) {
 	if (a.first === Infinity) return "";
@@ -68541,13 +68541,11 @@ var Lines = class {
 		this.opts = opts;
 	}
 	add(x) {
-		if (this.stopped) return;
+		if (this.stopped || !x.bit) return;
 		let parts = components(x.path);
-		if (unfoldable(parts, x.path)) {
+		if (unfoldable(parts, x.path) || x.bit === BIT.X) {
 			let key = keyOf(x.comm, x.path), a = this.climbing.get(key);
-			a || this.climbing.set(key, a = newAgg());
-			let shown = flagBits(a) !== 0;
-			apply(a, x), !shown && flagBits(a) && this.count(this.opts.rowBytes(x.path, x.comm));
+			a || (this.climbing.set(key, a = newAgg()), this.count(this.opts.rowBytes(x.path, x.comm))), apply(a, x);
 			return;
 		}
 		let kids = this.trees.get(x.comm);
@@ -68606,11 +68604,11 @@ var Lines = class {
 		return out;
 	}
 	*lines() {
-		for (let [key, agg] of this.climbing) flagBits(agg) && (yield {
+		for (let [key, agg] of this.climbing) yield {
 			comm: commOf(key),
 			path: pathOf(key),
 			agg
-		});
+		};
 		for (let [comm, top] of this.trees) for (let [path, agg] of treeLines(top)) yield {
 			comm,
 			path,
@@ -68680,7 +68678,7 @@ function createAuditSummary(prefixes) {
 		limit,
 		nodes: limits.nodes,
 		rowBytes: (p, comm) => relLength(p) + comm.length + 3
-	}), executed = new Set(), executedBytes = 0, ended = !1, lost = !1, seq = 0, added = new Map(), add = (r, counted = !0) => {
+	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, seq = 0, added = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (!counted) return;
@@ -68689,8 +68687,8 @@ function createAuditSummary(prefixes) {
 			return;
 		}
 		if (r.kind === "exec" && r.path && executed) {
-			let p = normalize$2(canonical(marked(r, r.path), prefixes));
-			executed.has(p) || (executed.add(p), executedBytes += relLength(p) + 7, executedBytes > limit && (executed = void 0));
+			let p = normalize$2(canonical(marked(r, r.path), prefixes)), runs = executed.get(p);
+			executed.set(p, (runs ?? 0) + 1), runs === void 0 && (executedBytes += relLength(p) + 11, executedBytes > limit && (executed = void 0));
 		}
 		if (isLibraryMap(r)) return;
 		let first = classify(r);
@@ -68711,7 +68709,8 @@ function createAuditSummary(prefixes) {
 			};
 			details.add(x), paths.add({
 				...x,
-				comm: ""
+				comm: "",
+				bit: x.bit & ~BIT.X
 			});
 		}
 	}, shown = (path) => {
@@ -68737,7 +68736,10 @@ function createAuditSummary(prefixes) {
 			return {
 				ended,
 				lost,
-				executed: executed && [...executed].map(shown),
+				executed: executed && [...executed].map(([path, runs]) => ({
+					...shown(path),
+					runs
+				})),
 				paths: byPath,
 				details: log,
 				pathsCut: paths.stopped,
@@ -68762,32 +68764,40 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		cut: "keep"
 	});
 	if (details?.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
-	let blocks = [frame(`${heading}\n\n<sub>${legendNote ? `${LEGEND}<br>${legendNote}` : LEGEND}</sub>\n\n`)], table = (id, title, md, cause) => md === void 0 ? {
+	let blocks = [frame(`${heading}\n\n<sub>${legendNote ? `${LEGEND}<br>${legendNote}` : LEGEND}</sub>\n\n`)], table = (id, level, title, md, cause) => md === void 0 ? {
 		id,
 		priority: priorities[id],
-		level: 2,
+		level,
 		section: SECTION$1,
 		text: `#### ${title}\n\n${cutNote(cause)}`,
 		cut: "atomic"
 	} : {
 		id,
 		priority: priorities[id],
-		level: 2,
+		level,
 		section: SECTION$1,
 		text: `#### ${title}\n\n${md}\n\n`,
 		cut: "lines",
 		head: 4
 	};
-	executed?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, "Executed", executed && markdownRows(["Path"], executed.map((e) => [pathCell(e)]))));
+	if (!executed) return blocks.push({
+		id: FILESYSTEM_BLOCK.executed,
+		priority: priorities[FILESYSTEM_BLOCK.executed],
+		level: 2,
+		section: SECTION$1,
+		text: cutNote(),
+		cut: "atomic"
+	}), blocks;
+	executed.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, 2, "Executed", markdownRows(["Path", "Runs"], executed.map((e) => [pathCell(e), String(e.runs)]))));
 	let byPath = paths && inRecordingOrder(paths).sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return ca - cb || (pa < pb ? -1 : +(pa > pb));
 	});
-	if (blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map((r) => [r.flags, pathCell(r)])), pathsCut)), !byPath) return blocks;
+	if (byPath?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.paths, 3, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map((r) => [r.flags, pathCell(r)])), pathsCut)), !byPath) return blocks;
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
-		level: 3
+		level: 4
 	};
 	if (!details) return blocks.push({
 		...log,

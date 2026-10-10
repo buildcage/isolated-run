@@ -314,10 +314,15 @@ jobs:
           m=$(grep -nE ' M +mv +\./probe\.txt$' "$f" | head -1 | cut -d: -f1)
           d=$(grep -nE ' D +rm +\./probe2\.txt$' "$f" | head -1 | cut -d: -f1)
           [ -n "$w" ] && [ -n "$m" ] && [ -n "$d" ] && [ "$w" -lt "$m" ] && [ "$m" -lt "$d" ]
-          # The tables list what ran and what was touched, across commands.
-          # python3 is a symlink, so it shows as the versioned file it runs.
-          grep -qE '^\| `/usr/bin/python3[.0-9]*` \|$' "$f"
-          grep -qF '| `./A/run.sh` |' "$f"
+          # The tables list what ran, with how often, and what was touched,
+          # across commands. python3 is a symlink, so it shows as the
+          # versioned file it runs.
+          grep -qE '^\| `/usr/bin/python3[.0-9]*` \| [0-9]+ \|$' "$f"
+          grep -qF '| `./A/run.sh` | 1 |' "$f"
+          # Running a program is left to the executed table.
+          if sed -n '/^#### Accessed/,/<details>/p' "$f" | grep -qE '^\| [A-Za-z!]*X'; then exit 1; fi
+          # A program run does not fold /usr, so the refusal under it shows.
+          grep -qE ' w! +mkdir +/usr/local/buildcage-ro-probe$' "$f"
           # touch creates its file, then sets its times through the descriptor.
           grep -qF '| WA | `./subshell.txt` |' "$f"
           grep -q '<summary>📂 Filesystem details</summary>' "$f"

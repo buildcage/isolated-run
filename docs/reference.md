@@ -780,8 +780,8 @@ short form.
 - `filesystem_audit: record` records the step's file accesses from the kernel and never blocks one.
   It needs a cgroup v2 host on Linux 6.1 or newer (6.4 on arm64) with kernel BTF; elsewhere the step
   fails before the command runs.
-- The step's Job Summary gets a section listing the programs it ran and every path it touched, with
-  a flag for each action, and folded below them one row per command and path.
+- The step's Job Summary gets a section listing the programs it ran and how often, and every path it
+  touched, with a flag for each action, and folded below them one row per command and path.
 - `upload_filesystem_audit_artifact: true` uploads the full record as JSON lines in an artifact
   named `buildcage-filesystem-audit-<id>`, whose name the `filesystem_audit_artifact_name` output
   carries; `filesystem_audit_retention_days` sets how long it is kept. It leaves out each program's
