@@ -303,12 +303,12 @@ use one:
 - `proxy_engine: inspect` only, since `universal` never sees a request's headers. `restrict` fails
   the step on `universal`; `audit` warns and ignores the input.
 - The step has to start with a key in `AWS_ACCESS_KEY_ID`. In `restrict`, a step with the check on
-  and no such variable fails before the proxy starts; `audit` warns and turns
-  the check off. Credentials read from `~/.aws/credentials`, a profile or a container credentials
-  endpoint are not used as a starting key, and neither is a web identity token: a step that gets its
-  credentials only through `AWS_WEB_IDENTITY_TOKEN_FILE` cannot turn the check on, and with
-  `AWS_ACCESS_KEY_ID` set beside it, AWS SDKs sign with that key and leave the token unused. Exchange
-  the token before the step instead, as `configure-aws-credentials` does with GitHub's OIDC token.
+  and no access key ID there fails before the proxy starts; `audit` warns and turns the check off.
+  Credentials read from `~/.aws/credentials`, a profile or a container credentials endpoint are not
+  used as a starting key, and neither is a web identity token: a step that gets its credentials only
+  through `AWS_WEB_IDENTITY_TOKEN_FILE` cannot turn the check on, and a key set beside it comes
+  first in the SDKs' default credential chain, ahead of the token. Exchange the token before the
+  step instead, as `configure-aws-credentials` does with GitHub's OIDC token.
 - `AssumeRoleWithWebIdentity` takes no signature, so the proxy judges it by the account of the role
   in `RoleArn`, read from the form body. A role in an account not listed in
   `allowed_aws_role_accounts` is refused as `aws-role-not-allowed`, and with none listed the call
