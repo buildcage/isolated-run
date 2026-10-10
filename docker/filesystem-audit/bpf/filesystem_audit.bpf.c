@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Records the file accesses of every task in one cgroup v2 subtree: opens,
-// the first read and write of each open file, mmaps, execs, and the path
+// each program's first read and write of each open file, mmaps, execs, and the path
 // operations (create, move, delete, attribute change), successes and
 // failures alike. Kernel types are declared locally with preserve_access_index
 // so one CO-RE object runs on any BTF-enabled kernel from 5.17 on, 6.4 on
@@ -60,6 +60,7 @@ struct path {
 } __attribute__((preserve_access_index));
 
 struct inode {
+	unsigned short i_mode;
 	unsigned int i_flags;
 } __attribute__((preserve_access_index));
 
@@ -97,6 +98,9 @@ struct files_struct {
 
 struct task_struct {
 	struct task_struct *real_parent;
+	struct task_struct *group_leader;
+	u64 start_time;
+	u64 self_exec_id;
 	int tgid;
 	struct fs_struct *fs;
 	struct files_struct *files;
@@ -152,7 +156,7 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 //   open:    d_path result (path_len is its return value)
 //   open-failed: the name as passed to open(2), then its base directory if
 //            it is relative (see add_base); path_len holds the errno
-//   read/write: d_path result, once per open file and direction
+//   read/write: d_path result, once per open file, direction and program
 //   mmap:    path components; mode holds prot, flags the map flags, and
 //            path_len is 1 when an exec mapped it (see in_exec)
 //   exec:    filename; its arguments are not read, as they can hold secrets
@@ -488,9 +492,9 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 }
 
 // Open files already reported as read (1), written (2) or mapped
-// executable (4), so each is reported once per direction rather than per
-// read(2). Keyed by the struct file and cleared when it is freed, before
-// the address can be reused.
+// executable (4), so each is reported once per direction and program rather
+// than per read(2). Keyed by the struct file and cleared when it is freed,
+// before the address can be reused.
 #define SEEN_READ 1
 #define SEEN_WRITE 2
 #define SEEN_EXEC 4
@@ -504,27 +508,111 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 #define OVERLAYFS_SUPER_MAGIC 0x794c7630
 #define FUSE_SUPER_MAGIC 0x65735546
 
+// A program run by a process: its tgid, its leader's start time, which a
+// reused pid does not share, and how many execs it has been through, so a
+// program exec'd in place counts as its own.
+struct proc {
+	u64 start;
+	u64 exec;
+	u32 tgid;
+	u32 pad;
+};
+
+struct seen {
+	u64 gen;	  // when the entry was made, so a reused address is a new file
+	struct proc owner; // the first process to use the file
+	u32 bits;	  // what the owner has been reported doing with it
+	u32 once;	  // reported once whoever uses it: see first_time
+};
+
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 65536);
 	__type(key, u64);
-	__type(value, u8);
+	__type(value, struct seen);
 } seen_files SEC(".maps");
 
-// Reports whether bit was newly recorded for file: false if it was already
-// set, or if the map is full (so a saturated map cannot cause re-emission).
-// A full map counts in untracked, since that access then goes unreported.
+// What each other process sharing an open file, such as a child that
+// inherited it, has been reported doing with it. An entry outlives its file,
+// but gen keeps it from matching the next file at that address; losing one to
+// eviction only reports that access again.
+struct shared_key {
+	u64 file;
+	u64 gen;
+	struct proc proc;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 65536);
+	__type(key, struct shared_key);
+	__type(value, u32);
+} shared_seen SEC(".maps");
+
+#define S_IFMT 0170000
+#define S_IFREG 0100000
+#define S_IFDIR 0040000
+
+// Sets bit in *bits, reporting whether it was clear. Not atomic: two processes
+// racing on a shared entry can each report the same bit, never neither.
+static __always_inline int set_first(u32 *bits, u32 bit)
+{
+	if (*bits & bit)
+		return 0;
+	*bits |= bit;
+	return 1;
+}
+
+// Reports whether bit was newly recorded for file and the current program:
+// false if it was already set, or if a map could not take the entry (so a
+// saturated map cannot cause re-emission). That counts in untracked, since
+// the access then goes unreported.
 static __always_inline int first_time(struct file *file, u8 bit)
 {
 	u64 key = (u64)file;
-	u8 *v = bpf_map_lookup_elem(&seen_files, &key);
-	if (v) {
-		if (*v & bit)
+	struct seen *v = bpf_map_lookup_elem(&seen_files, &key);
+	if (v && v->once)
+		return set_first(&v->bits, bit);
+	struct task_struct *t = bpf_get_current_task_btf();
+	struct proc me = {
+		.start = BPF_CORE_READ(t, group_leader, start_time),
+		.exec = BPF_CORE_READ(t, group_leader, self_exec_id),
+		.tgid = bpf_get_current_pid_tgid() >> 32,
+	};
+	if (!v) {
+		struct seen s;
+		__builtin_memset(&s, 0, sizeof(s));
+		s.gen = bpf_ktime_get_ns();
+		s.owner = me;
+		s.bits = bit;
+		// Anything but a regular file or a directory, such as a pipe, a
+		// socket or /dev/null, is shared by whole process trees and says
+		// nothing per command.
+		u32 type = BPF_CORE_READ(file, f_inode, i_mode) & S_IFMT;
+		s.once = type != S_IFREG && type != S_IFDIR;
+		if (bpf_map_update_elem(&seen_files, &key, &s, BPF_NOEXIST) == 0)
+			return 1;
+		// Another process made the entry first; share it.
+		v = bpf_map_lookup_elem(&seen_files, &key);
+		if (!v) {
+			bump(&untracked);
 			return 0;
-		*v |= bit;
-		return 1;
+		}
+		if (v->once)
+			return set_first(&v->bits, bit);
 	}
-	if (bpf_map_update_elem(&seen_files, &key, &bit, BPF_ANY) == 0)
+	if (v->owner.tgid == me.tgid && v->owner.start == me.start && v->owner.exec == me.exec)
+		return set_first(&v->bits, bit);
+	struct shared_key k;
+	__builtin_memset(&k, 0, sizeof(k));
+	k.file = key;
+	k.gen = v->gen;
+	k.proc = me;
+	u32 *b = bpf_map_lookup_elem(&shared_seen, &k);
+	if (b)
+		return set_first(b, bit);
+	u32 nb = bit;
+	if (bpf_map_update_elem(&shared_seen, &k, &nb, BPF_ANY) == 0)
 		return 1;
 	bump(&untracked);
 	return 0;
