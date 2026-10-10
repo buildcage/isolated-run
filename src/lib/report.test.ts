@@ -17,6 +17,7 @@ import {
   computeReportOutcomes,
   readActionVersion,
   writeReportSummary,
+  writeSummaryBlocks,
   type ComputeReportOutcomesOptions,
 } from "./report.ts";
 
@@ -235,11 +236,35 @@ describe("computeReportOutcomes", () => {
           }),
         ).markdown,
       );
-      expect(plain).toContain(
-        "one for each host and reason; Communication details lists every one.*",
-      );
+      expect(plain).toContain("the first for each host and reason.*");
       expect(plain).not.toContain("assumed in this run");
       expect(marked).toContain("marks an account `# assumed in this run`");
+    });
+
+    it("leaves the assumed account out when no request would be refused for its key", () => {
+      const { markdown } = computeReportOutcomes(
+        audit([wouldRefuse(1, "cognito-idp.amazonaws.com", "aws-no-credential")]),
+        options({
+          extraInputs: [
+            'allowed_aws_role_accounts: "222222222222" # assumed in this run, check it is yours',
+          ],
+        }),
+      );
+      expect(section(markdown)).not.toContain("assumed in this run");
+    });
+
+    it("keeps a request that came to nothing on a line of its own", () => {
+      const { markdown } = computeReportOutcomes(
+        audit([
+          { ...wouldRefuse(1, "s3.amazonaws.com", "aws-key-not-allowed"), action: "incomplete" },
+          wouldRefuse(2, "s3.amazonaws.com", "aws-key-not-allowed"),
+          wouldRefuse(3, "s3.amazonaws.com", "aws-key-not-allowed"),
+        ]),
+        options(),
+      );
+      const lines = section(markdown).split("```\n")[1].trimEnd().split("\n");
+      expect(lines).toHaveLength(2);
+      expect(lines[1]).toMatch(/^🚨 GET https:\/\/s3\.amazonaws\.com\/2 .*\(\+1 more\)$/);
     });
   });
 
@@ -306,6 +331,18 @@ describe("computeReportOutcomes", () => {
     expect(heading).toBe(
       "## Outbound Traffic Report — \\[x\\](javascript:alert(1)) # owned \\<b\\>\\|\\* (audit mode)",
     );
+  });
+});
+
+describe("writeSummaryBlocks", () => {
+  it("writes the blocks fitted into what is left of the summary", async () => {
+    const written: string[] = [];
+    await writeSummaryBlocks(
+      [{ priority: 1, level: 1, section: "s", cut: "lines", text: "a\nb\n", notice: "cut\n" }],
+      { GITHUB_STEP_SUMMARY: "/summary.md" },
+      { fileSize: () => 1024 * 1024, writeSummary: async (m) => void written.push(m) },
+    );
+    expect(written).toStrictEqual(["cut\n"]);
   });
 });
 

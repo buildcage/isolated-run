@@ -176,21 +176,30 @@ function withWouldRefuseGrouped(
   const groups = new Map<string, TrafficEvent[]>();
   for (const e of report.timeline) {
     if (e.wouldRefuse === undefined) continue;
-    const key = `${e.host} ${e.wouldRefuse}`;
+    // The action too, so a line's mark and outcome hold for the requests it stands for.
+    const key = [e.action, e.protocol, e.host, e.port, e.wouldRefuse].join(" ");
     const group = groups.get(key);
     if (group) group.push(e);
     else groups.set(key, [e]);
   }
-  const lines = [...groups.values()].map((events) => {
-    const line = renderWouldRefuseBody(events.slice(0, 1), report.startedAt)
-      .split("\n")[1]
-      .replace(/^(\S+) \S+: /, "$1 ");
-    return events.length > 1 ? `${line} (+${events.length - 1} more)` : line;
-  });
+  const counts = [...groups.values()];
+  // One line per request inside the fence, each starting with its mark and time.
+  const lines = renderWouldRefuseBody(
+    counts.map((events) => events[0]),
+    report.startedAt,
+  )
+    .split("\n")
+    .slice(1, -2)
+    .map((line, i) => {
+      const rest = counts[i].length - 1;
+      return line.replace(/^(\S+) \S+: /, "$1 ") + (rest > 0 ? ` (+${rest} more)` : "");
+    });
   let note =
-    "Requests audit let through that restrict would refuse, one for each host and reason; " +
-    "Communication details lists every one.";
-  if (extraInputs?.some((l) => l.endsWith(ASSUMED_ACCOUNT_MARK))) {
+    "Requests audit let through that restrict would refuse, the first for each host and reason.";
+  if (
+    extraInputs?.some((l) => l.endsWith(ASSUMED_ACCOUNT_MARK)) &&
+    counts.some((events) => events[0].wouldRefuse === `${AWS_REASON_PREFIX}key-not-allowed`)
+  ) {
     note +=
       " The Switch to restrict mode example marks an account `# assumed in this run`: requests " +
       "signed with the keys of its roles show here as `aws-key-not-allowed` until it is listed, " +
@@ -263,20 +272,25 @@ function summarySize(path: string | undefined, fileSize: (p: string) => number):
   }
 }
 
-/** Fits `blocks` into what is left of the step's Job Summary and writes them, returning what was written. */
+/** `blocks` fitted into what is left of the step's Job Summary. */
+function fitSummaryBlocks(
+  blocks: SummaryBlock[],
+  env: NodeJS.ProcessEnv,
+  fileSize: (p: string) => number = (p) => statSync(p).size,
+): string {
+  return fitStepSummary(blocks, { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) });
+}
+
+/** Fits `blocks` into what is left of the step's Job Summary and writes them. */
 export async function writeSummaryBlocks(
   blocks: SummaryBlock[],
   env: NodeJS.ProcessEnv,
   {
-    fileSize = (p) => statSync(p).size,
+    fileSize,
     writeSummary = writeStepSummary,
   }: Pick<WriteReportSummaryDeps, "fileSize" | "writeSummary"> = {},
-): Promise<string> {
-  const summary = fitStepSummary(blocks, {
-    usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize),
-  });
-  await writeSummary(summary, env.GITHUB_STEP_SUMMARY);
-  return summary;
+): Promise<void> {
+  await writeSummary(fitSummaryBlocks(blocks, env, fileSize), env.GITHUB_STEP_SUMMARY);
 }
 
 export interface WriteReportSummaryOptions extends ComputeReportOutcomesOptions {
@@ -309,10 +323,10 @@ export async function writeReportSummary(
   // cannot take the step's outcome down with it.
   applyOutcomeAnnotations(annotation, outcomes.emissions);
 
-  const summary = await writeSummaryBlocks(
+  const summary = fitSummaryBlocks(
     [...withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)), ...extraBlocks],
     env,
-    deps,
+    deps.fileSize,
   );
   // The section's own notice is easy to miss below the fold.
   if (summary.includes(wouldRefuseTruncationNote(artifactAvailable))) {
@@ -323,6 +337,7 @@ export async function writeReportSummary(
           : "Set upload_traffic_artifact: true to get every request as an artifact."),
     );
   }
+  await (deps.writeSummary ?? writeStepSummary)(summary, env.GITHUB_STEP_SUMMARY);
 
   // Debug-only mirror: GITHUB_STEP_SUMMARY is unique per step and can't be
   // reassigned, so a later step has no way to read this step's copy back.

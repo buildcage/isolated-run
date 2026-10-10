@@ -281,8 +281,8 @@ how many more there were:
 🚨 POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed) (+12 more)
 ```
 
-**Communication details** lists every one. If the section still has to be cut to fit the Job
-Summary, a warning annotation says so and points to the traffic artifact.
+The traffic artifact has every one. If the section still has to be cut to fit the Job Summary, a
+warning annotation says so.
 
 The traffic artifact carries the same reason in `wouldRefuse`.
 

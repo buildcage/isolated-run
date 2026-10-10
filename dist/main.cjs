@@ -73088,14 +73088,20 @@ function withWouldRefuseGrouped(blocks, report, extraInputs) {
 	let groups = new Map();
 	for (let e of report.timeline) {
 		if (e.wouldRefuse === void 0) continue;
-		let key = `${e.host} ${e.wouldRefuse}`, group = groups.get(key);
+		let key = [
+			e.action,
+			e.protocol,
+			e.host,
+			e.port,
+			e.wouldRefuse
+		].join(" "), group = groups.get(key);
 		group ? group.push(e) : groups.set(key, [e]);
 	}
-	let lines = [...groups.values()].map((events) => {
-		let line = renderWouldRefuseBody(events.slice(0, 1), report.startedAt).split("\n")[1].replace(/^(\S+) \S+: /, "$1 ");
-		return events.length > 1 ? `${line} (+${events.length - 1} more)` : line;
-	}), note = "Requests audit let through that restrict would refuse, one for each host and reason; Communication details lists every one.";
-	extraInputs?.some((l) => l.endsWith(" # assumed in this run, check it is yours")) && (note += " The Switch to restrict mode example marks an account `# assumed in this run`: requests signed with the keys of its roles show here as `aws-key-not-allowed` until it is listed, so check it first.");
+	let counts = [...groups.values()], lines = renderWouldRefuseBody(counts.map((events) => events[0]), report.startedAt).split("\n").slice(1, -2).map((line, i) => {
+		let rest = counts[i].length - 1;
+		return line.replace(/^(\S+) \S+: /, "$1 ") + (rest > 0 ? ` (+${rest} more)` : "");
+	}), note = "Requests audit let through that restrict would refuse, the first for each host and reason.";
+	extraInputs?.some((l) => l.endsWith(" # assumed in this run, check it is yours")) && counts.some((events) => events[0].wouldRefuse === "aws-key-not-allowed") && (note += " The Switch to restrict mode example marks an account `# assumed in this run`: requests signed with the keys of its roles show here as `aws-key-not-allowed` until it is listed, so check it first.");
 	let { text } = blocks[at], before = `${text.slice(0, text.indexOf("###"))}### 🚨 Restrict Would Refuse\n\n<sub>*${note}*</sub>\n\n`;
 	return blocks.with(at, {
 		...blocks[at],
@@ -73128,13 +73134,17 @@ function summarySize(path, fileSize) {
 		return 0;
 	}
 }
-async function writeSummaryBlocks(blocks, env, { fileSize = (p) => (0, node_fs.statSync)(p).size, writeSummary = writeStepSummary } = {}) {
-	let summary = fitStepSummary(blocks, { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) });
-	return await writeSummary(summary, env.GITHUB_STEP_SUMMARY), summary;
+function fitSummaryBlocks(blocks, env, fileSize = (p) => (0, node_fs.statSync)(p).size) {
+	return fitStepSummary(blocks, { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) });
+}
+async function writeSummaryBlocks(blocks, env, { fileSize, writeSummary = writeStepSummary } = {}) {
+	await writeSummary(fitSummaryBlocks(blocks, env, fileSize), env.GITHUB_STEP_SUMMARY);
 }
 async function writeReportSummary(report, annotation, { extraBlocks = [], ...options }, artifactAvailable, env, { appendFile = node_fs.appendFileSync, ...deps } = {}) {
 	let outcomes = computeReportOutcomes(report, options);
-	applyOutcomeAnnotations(annotation, outcomes.emissions), (await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)), ...extraBlocks], env, deps)).includes(wouldRefuseTruncationNote(artifactAvailable)) && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact."));
+	applyOutcomeAnnotations(annotation, outcomes.emissions);
+	let summary = fitSummaryBlocks([...withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)), ...extraBlocks], env, deps.fileSize);
+	summary.includes(wouldRefuseTruncationNote(artifactAvailable)) && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")), await (deps.writeSummary ?? writeStepSummary)(summary, env.GITHUB_STEP_SUMMARY);
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts
