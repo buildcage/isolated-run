@@ -73146,7 +73146,7 @@ function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 		...blocks.slice(at + 1)
 	];
 }
-function withWouldRefuseGrouped(blocks, report, extraInputs) {
+function withWouldRefuseGrouped(blocks, report) {
 	let at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse);
 	if (at === -1) return blocks;
 	let issuers = new Map();
@@ -73182,9 +73182,7 @@ function withWouldRefuseGrouped(blocks, report, extraInputs) {
 	let counts = [...groups.values()], lines = renderWouldRefuseBody(counts.map((events) => events[0]), report.startedAt).split("\n").slice(1, -2).map((line, i) => {
 		let rest = counts[i].length - 1;
 		return line.replace(/^(\S+) \S+: /, "$1 ") + (rest > 0 ? ` (+${rest} more)` : "");
-	}), note = "Requests audit let through that restrict would refuse, the first for each host and reason, or for each key under `aws-key-not-allowed`.";
-	extraInputs?.some((l) => l.endsWith(" # assumed in this run, check it is yours")) && report.timeline.some((e) => e.wouldRefuse === keyNotAllowed) && (note += " The Switch to restrict mode example marks an account `# assumed in this run`: requests signed with the keys of its roles show here as `aws-key-not-allowed` until it is listed, so check it first.");
-	let { text } = blocks[at], before = `${text.slice(0, text.indexOf("###"))}### 🚨 Restrict Would Refuse\n\n<sub>*${note}*</sub>\n\n`;
+	}), { text } = blocks[at], before = `${text.slice(0, text.indexOf("###"))}### 🚨 Restrict Would Refuse\n\n<sub>*Requests audit let through that restrict would refuse, the first for each host and reason, or for each key under \`aws-key-not-allowed\`.*</sub>\n\n`;
 	return blocks.with(at, {
 		...blocks[at],
 		text: `${before}\`\`\`\n${lines.join("\n")}\n\`\`\`\n`,
@@ -73201,7 +73199,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 		runCommand,
 		extraInputs,
 		actionVersion
-	}), report, extraInputs), report, actionRepo, actionRef);
+	}), report), report, actionRepo, actionRef);
 	return {
 		markdown: joinSummaryBlocks(blocks),
 		blocks,

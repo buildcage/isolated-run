@@ -34,7 +34,6 @@ import {
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
 import { AWS_REASON_PREFIX } from "../proxy/haproxy-aws-keys.ts";
-import { ASSUMED_ACCOUNT_MARK } from "./inputs.ts";
 import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
 import { TRAFFIC_PRIORITIES } from "./summary-priorities.ts";
 
@@ -168,11 +167,7 @@ function withAwsTroubleshootingLink(
  * whose AssumeRole answer issued the key. The time is left out, since a line
  * stands for requests made at different times.
  */
-function withWouldRefuseGrouped(
-  blocks: SummaryBlock[],
-  report: Report,
-  extraInputs: string[] | undefined,
-): SummaryBlock[] {
+function withWouldRefuseGrouped(blocks: SummaryBlock[], report: Report): SummaryBlock[] {
   const at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse);
   if (at === -1) return blocks;
   const issuers = new Map<string, string>();
@@ -216,18 +211,9 @@ function withWouldRefuseGrouped(
       const rest = counts[i].length - 1;
       return line.replace(/^(\S+) \S+: /, "$1 ") + (rest > 0 ? ` (+${rest} more)` : "");
     });
-  let note =
+  const note =
     "Requests audit let through that restrict would refuse, the first for each host and reason, " +
     "or for each key under `aws-key-not-allowed`.";
-  if (
-    extraInputs?.some((l) => l.endsWith(ASSUMED_ACCOUNT_MARK)) &&
-    report.timeline.some((e) => e.wouldRefuse === keyNotAllowed)
-  ) {
-    note +=
-      " The Switch to restrict mode example marks an account `# assumed in this run`: requests " +
-      "signed with the keys of its roles show here as `aws-key-not-allowed` until it is listed, " +
-      "so check it first.";
-  }
   const { text } = blocks[at];
   const before = `${text.slice(0, text.indexOf("###"))}### 🚨 Restrict Would Refuse\n\n<sub>*${note}*</sub>\n\n`;
   return blocks.with(at, {
@@ -267,7 +253,7 @@ export function computeReportOutcomes(
     actionVersion,
   });
   const blocks = withAwsTroubleshootingLink(
-    withWouldRefuseGrouped(rendered, report, extraInputs),
+    withWouldRefuseGrouped(rendered, report),
     report,
     actionRepo,
     actionRef,
