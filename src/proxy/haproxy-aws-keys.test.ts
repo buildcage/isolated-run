@@ -5,11 +5,14 @@ import {
   AWS_PUBLIC_HOST,
   AWS_RESOURCE_HOST,
   CODECOMMIT_HOST,
+  ECR_REGISTRY_HOST,
+  LOCATION_CREDENTIAL,
   SIGV2_PARAM,
   SIGV4_PARAM,
   awsKeyRequestRules,
   awsKeyResponseRules,
   awsKeyExtension,
+  S3_HOST,
   SIGV4_HEADER,
   STS_HOST,
 } from "./haproxy-aws-keys.ts";
@@ -250,8 +253,10 @@ describe("the check with no role account", () => {
   const KEY_ONLY = { keyMapFile: "/rules/keys.map" };
   const rules = awsKeyRequestRules(KEY_ONLY, "restrict").join("\n");
 
-  it("learns nothing, so it neither reads STS answers nor rewrites their Accept-Encoding", () => {
-    expect(awsKeyResponseRules(KEY_ONLY)).toStrictEqual([]);
+  it("learns no STS key, so it neither reads STS answers nor rewrites their Accept-Encoding", () => {
+    const response = awsKeyResponseRules(KEY_ONLY).join("\n");
+    expect(response.includes("res.body")).toBe(false);
+    expect(response.includes("aws_learn ")).toBe(false);
     expect(rules.includes("Accept-Encoding")).toBe(false);
     expect(rules.includes("aws_sts")).toBe(false);
     expect(rules.includes("aws_fed")).toBe(false);
@@ -368,6 +373,13 @@ describe("the traffic record", () => {
     });
   });
 
+  it("says which kind of known key signed a request", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict");
+    for (const kind of ["env", "assumed", "issued"]) {
+      expect(rules.some((l) => l.includes(`set-var(txn.aws_log_key) str(${kind}) if`))).toBe(true);
+    }
+  });
+
   it("is filled in only for a request the check let through", () => {
     for (const rules of [
       awsKeyRequestRules(CHECK, "audit"),
@@ -409,7 +421,10 @@ describe("learning a key", () => {
     // S3 takes a bucket named sts, whose host STS_HOST alone would match.
     expect(stsHost.test("sts.s3.amazonaws.com")).toBe(true);
     expect(resourceHost.test("sts.s3.amazonaws.com")).toBe(true);
-    for (const line of awsKeyResponseRules(CHECK).filter((l) => l.includes(" if "))) {
+    const sts = awsKeyResponseRules(CHECK).filter(
+      (l) => l.includes(" if ") && !l.includes("aws_issued_key"),
+    );
+    for (const line of sts) {
       // aws_new_account is set only under aws_learn.
       expect(
         line.includes(" if aws_learn ") ||
@@ -430,6 +445,81 @@ describe("learning a key", () => {
         l.includes("aws_assume_role !aws_many_keys !aws_many_arns"),
       ).length,
     ).toBe(2);
+  });
+});
+
+describe("a key ECR issues", () => {
+  const request = awsKeyRequestRules(CHECK, "restrict");
+  const response = awsKeyResponseRules(CHECK);
+
+  it("is learned only from a registry the check let a request through to", () => {
+    const registry = new RegExp(ECR_REGISTRY_HOST);
+    for (const host of [
+      "111111111111.dkr.ecr.us-east-1.amazonaws.com",
+      "111111111111.dkr.ecr-fips.us-east-1.amazonaws.com",
+      "111111111111.dkr.ecr.cn-north-1.amazonaws.com.cn",
+    ]) {
+      expect(registry.test(host)).toBe(true);
+    }
+    for (const host of [
+      "api.ecr.us-east-1.amazonaws.com",
+      "bucket.s3.us-east-1.amazonaws.com",
+      "b123abcde4.execute-api.us-east-1.amazonaws.com",
+    ]) {
+      expect(registry.test(host)).toBe(false);
+    }
+    expect(
+      request.includes(
+        `    http-request set-var(txn.aws_ecr_learn) bool(true) if aws_allowed { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
+      ),
+    ).toBe(true);
+    for (const line of response.filter((l) => l.includes("set-var(txn.aws_issued_key)"))) {
+      expect(
+        line.includes(
+          " if aws_ecr_learn { status 300:399 } { res.fhdr_cnt(location) eq 1 } !aws_location_many",
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("reads the key ID from a Location's query credential", () => {
+    const credential = new RegExp(LOCATION_CREDENTIAL);
+    const key = (location: string) => location.replace(credential, "$2");
+    const AS = "AS";
+    const issued = `${AS}IATESTISSUEDKEY01`;
+    expect(
+      key(
+        `https://prod-us-east-1-starport-layer-bucket.s3.us-east-1.amazonaws.com/a/b?X-Amz-Security-Token=T&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=${issued}%2F20261010%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=ab`,
+      ),
+    ).toBe(issued);
+    expect(
+      key(
+        `https://b.s3.amazonaws.com/x?X-Amz-Credential=${issued}/20261010/us-east-1/s3/aws4_request`,
+      ),
+    ).toBe(issued);
+    // Not a parameter of its own: left whole, which no key ID matches.
+    const hidden = `https://b.s3.amazonaws.com/x?a=1%26X-Amz-Credential=${issued}%2F`;
+    expect(key(hidden)).toBe(hidden);
+    const inPath = `https://b.s3.amazonaws.com/X-Amz-Credential=${issued}/`;
+    expect(key(inPath)).toBe(inPath);
+  });
+
+  it("never replaces what a known key was learned as", () => {
+    expect(
+      response.some((l) =>
+        l.endsWith(
+          "%[var(txn.aws_issued_key)] issued if aws_issued_key !{ var(txn.aws_issued_key),map(/rules/keys.map) -m found }",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("signs only a presigned URL to S3", () => {
+    expect(
+      request.includes(
+        `    http-request set-var(txn.aws) str(key-not-allowed) if aws_issued !aws_query or aws_issued !{ var(txn.host) -m reg ${S3_HOST} }`,
+      ),
+    ).toBe(true);
   });
 });
 
