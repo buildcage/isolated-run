@@ -10,6 +10,7 @@ import {
   filesystemAuditPaths,
   hostCannotAudit,
   startFilesystemAudit,
+  withoutCompatSyscalls,
   type AuditChild,
 } from "./filesystem-audit.ts";
 
@@ -29,6 +30,31 @@ describe("filesystemAuditPaths", () => {
 const REQUIREMENTS =
   "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and " +
   "tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting";
+
+describe("withoutCompatSyscalls", () => {
+  it("keeps only the native ABI and the rest of the profile", () => {
+    const profile = {
+      defaultAction: "SCMP_ACT_ERRNO",
+      architectures: ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"],
+      syscalls: [{ names: ["read"], action: "SCMP_ACT_ALLOW" }],
+    };
+    expect(withoutCompatSyscalls(profile, "x64")).toStrictEqual({
+      ...profile,
+      architectures: ["SCMP_ARCH_X86_64"],
+    });
+    expect(
+      withoutCompatSyscalls({ architectures: ["SCMP_ARCH_AARCH64", "SCMP_ARCH_ARM"] }, "arm64"),
+    ).toStrictEqual({ architectures: ["SCMP_ARCH_AARCH64"] });
+  });
+
+  it("leaves a profile naming no architectures, or one for a runner it cannot audit, as it is", () => {
+    const profile = { defaultAction: "SCMP_ACT_ERRNO" };
+    expect(withoutCompatSyscalls(profile, "x64")).toBe(profile);
+    expect(withoutCompatSyscalls(null, "x64")).toBeNull();
+    const s390 = { architectures: ["SCMP_ARCH_S390X", "SCMP_ARCH_S390"] };
+    expect(withoutCompatSyscalls(s390, "s390x")).toBe(s390);
+  });
+});
 
 describe("auditUnavailable", () => {
   it("says why and that the command did not run", () => {

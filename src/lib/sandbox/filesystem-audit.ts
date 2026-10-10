@@ -88,6 +88,24 @@ export function hostCannotAudit(reason: string): SandboxError {
 
 export const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2";
 
+/** The native seccomp architecture of each runner the tracer supports. */
+const NATIVE_ARCH: Partial<Record<NodeJS.Architecture, string>> = {
+  x64: "SCMP_ARCH_X86_64",
+  arm64: "SCMP_ARCH_AARCH64",
+};
+
+/** The seccomp profile with only the native ABI left, of those Docker's
+ *  default profile allows. A syscall through a 32-bit one skips the
+ *  per-syscall tracepoints the tracer catches attribute changes and failed
+ *  path changes at, so under the audit the kernel kills the thread that makes
+ *  one, with SIGSYS. */
+export function withoutCompatSyscalls(profile: unknown, arch = process.arch): unknown {
+  const p = profile as { architectures?: unknown } | null;
+  const native = NATIVE_ARCH[arch];
+  if (!p || !Array.isArray(p.architectures) || !native) return profile;
+  return { ...p, architectures: p.architectures.filter((a) => a === native) };
+}
+
 /** Fails the step before the proxy starts on a host the tracer cannot watch.
  *  The kernel version and tracefs are left to the tracer, which checks the
  *  kernel by feature and, as root, can see where tracefs is mounted. */

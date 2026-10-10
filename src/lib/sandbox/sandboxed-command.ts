@@ -27,6 +27,7 @@ import {
   NO_CGROUP_V2_REASON,
   type AuditHandle,
   type FilesystemAuditPaths,
+  withoutCompatSyscalls,
 } from "./filesystem-audit.ts";
 import {
   jvmTools,
@@ -401,7 +402,9 @@ export function assembleBundle(
         cgroupName: containerName,
         rootfsBindDir,
         resolvConfPath,
-        seccompProfile,
+        seccompProfile: options.filesystemAudit
+          ? withoutCompatSyscalls(seccompProfile)
+          : seccompProfile,
         execDir,
         envLoaderPath,
         scriptPath,

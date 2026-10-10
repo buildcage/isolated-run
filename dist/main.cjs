@@ -70299,7 +70299,17 @@ function hostCannotAudit(reason) {
 	let e = auditUnavailable(reason);
 	return new SandboxError(`${e.message} It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting`, e.code);
 }
-const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2";
+const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2", NATIVE_ARCH = {
+	x64: "SCMP_ARCH_X86_64",
+	arm64: "SCMP_ARCH_AARCH64"
+};
+function withoutCompatSyscalls(profile, arch = process.arch) {
+	let p = profile, native = NATIVE_ARCH[arch];
+	return !p || !Array.isArray(p.architectures) || !native ? profile : {
+		...p,
+		architectures: p.architectures.filter((a) => a === native)
+	};
+}
 function checkFilesystemAuditHost(probes = realHostProbes) {
 	if (probes.cgroupPath() === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
 	if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
@@ -72290,7 +72300,7 @@ function assembleBundle(dir, options, deps) {
 				cgroupName: containerName,
 				rootfsBindDir,
 				resolvConfPath,
-				seccompProfile,
+				seccompProfile: options.filesystemAudit ? withoutCompatSyscalls(seccompProfile) : seccompProfile,
 				execDir,
 				envLoaderPath,
 				scriptPath,

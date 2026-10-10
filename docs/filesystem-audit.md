@@ -318,6 +318,9 @@ The summary can also open with a warning:
 - **The recording could not be read.** The summary has none of the step's accesses, a warning is
   logged, and no artifact is uploaded.
 
+A program in the step that dies with `Bad system call` made a 32-bit system call, which the audit
+refuses; see [Requirements and limits](#requirements-and-limits).
+
 ## What it does not record
 
 - A `stat`, or an open that only obtains a handle (`O_PATH`), which reads no content. What a command
@@ -338,6 +341,10 @@ itself can do to the record, and what the record can be trusted for.
 - **Kernel.** A cgroup v2 host on Linux 6.1 or newer, 6.4 or newer on arm64, with kernel BTF and
   tracefs mounted. cgroup v2 and BTF are checked before the proxy starts, the kernel version and
   tracefs when the tracer starts.
+- **No 32-bit programs.** A system call through a 32-bit ABI, from an i386 or ARM32 program or
+  `int 0x80`, skips the hooks that record attribute changes and failed changes, so with the audit on
+  the sandbox refuses it: the kernel kills the thread that made it with `SIGSYS`, which a shell
+  reports as `Bad system call`.
 - **Cost to the whole host.** While the step runs, the tracer's hooks run on every system call and
   every file read or write on the runner host, not only the step's, since a hook has to run to tell
   whose call it is. That adds roughly 100 nanoseconds to each system call of every process on the
