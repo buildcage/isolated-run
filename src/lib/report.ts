@@ -127,7 +127,8 @@ export interface ReportOutcomes {
 
 /**
  * A pointer to what to do about the AWS access key check's refusals, under the
- * last table that lists one. The reasons alone do not say.
+ * last table that lists one. The reasons alone do not say. A refusal
+ * known_blocked_rules expects needs nothing done, so it alone adds no pointer.
  */
 function withAwsTroubleshootingLink(
   blocks: SummaryBlock[],
@@ -135,13 +136,12 @@ function withAwsTroubleshootingLink(
   actionRepo: string,
   actionRef: string,
 ): SummaryBlock[] {
-  const refusedByAwsCheck = report.timeline.some((e) =>
-    (e.wouldRefuse ?? e.reason ?? "").startsWith(AWS_REASON_PREFIX),
-  );
-  if (!refusedByAwsCheck) return blocks;
+  const refusedByAwsCheck =
+    report.blocked.some((r) => !r.expected && r.reason.startsWith(AWS_REASON_PREFIX)) ||
+    report.timeline.some((e) => e.wouldRefuse?.startsWith(AWS_REASON_PREFIX));
   const tables = new Set<string>([TRAFFIC_BLOCK.blocked, TRAFFIC_BLOCK.wouldRefuse]);
   const at = blocks.findLastIndex((b) => b.id !== undefined && tables.has(b.id));
-  if (at === -1) return blocks;
+  if (!refusedByAwsCheck || at === -1) return blocks;
   const url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`;
   const link: SummaryBlock = {
     priority: 0,

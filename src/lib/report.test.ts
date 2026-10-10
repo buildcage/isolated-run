@@ -154,12 +154,20 @@ describe("computeReportOutcomes", () => {
       );
     });
 
-    it("is left out when no table lists the refusal", () => {
+    it("is left out when known_blocked_rules expects every such refusal", () => {
+      const knownBlockedRules = ["sts.amazonaws.com"];
+      const timeline = [refused("aws-key-not-allowed")];
       const r: InspectReportData = {
-        ...report({ timeline: [refused("aws-unreadable")] }),
+        ...report({
+          parameters: reportParams({ knownBlockedRules }),
+          blockedCount: 1,
+          blocked: annotateKnownBlocked(timeline, knownBlockedRules),
+          timeline,
+        }),
         engine: "inspect",
       };
       const { markdown } = computeReportOutcomes(r, options());
+      expect(markdown).toContain("aws-key-not-allowed");
       expect(markdown).not.toContain("aws.md");
     });
 

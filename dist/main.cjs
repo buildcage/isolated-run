@@ -73060,9 +73060,8 @@ function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
 }
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
-	if (!report.timeline.some((e) => (e.wouldRefuse ?? e.reason ?? "").startsWith("aws-"))) return blocks;
-	let tables = new Set([TRAFFIC_BLOCK.blocked, TRAFFIC_BLOCK.wouldRefuse]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
-	if (at === -1) return blocks;
+	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => e.wouldRefuse?.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, TRAFFIC_BLOCK.wouldRefuse]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
+	if (!refusedByAwsCheck || at === -1) return blocks;
 	let link = {
 		priority: 0,
 		level: 1,
