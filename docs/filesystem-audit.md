@@ -51,7 +51,7 @@ self-hosted runner, check the host before turning it on:
 uname -rm                         # Linux 6.1 or newer; 6.4 or newer on aarch64
 stat -fc %T /sys/fs/cgroup        # cgroup2fs
 ls /sys/kernel/btf/vmlinux        # the kernel's type information (BTF)
-grep -w tracefs /proc/mounts      # tracefs mounted, anywhere
+sudo ls /sys/kernel/tracing/events >/dev/null   # tracefs, or /sys/kernel/debug/tracing
 ```
 
 A host that falls short fails the step before the command runs, with the reason; see
@@ -71,10 +71,14 @@ The step's Job Summary gets a **Filesystem audit** section after the traffic rep
 `filesystem_audit_artifact_name` output names the uploaded record:
 
 ```yaml
-- uses: actions/download-artifact@v5
+- if: steps.build.outputs.filesystem_audit_artifact_name != ''
+  uses: actions/download-artifact@v5
   with:
     name: ${{ steps.build.outputs.filesystem_audit_artifact_name }}
 ```
+
+The output is empty when nothing was recorded or the upload failed, and `download-artifact` with an
+empty name downloads every artifact of the run, hence the `if:`.
 
 `filesystem_audit_retention_days` sets how long the artifact is kept; empty uses the repository's
 default. The artifact names each program the step ran but not its arguments, which can carry
@@ -144,12 +148,12 @@ artifact has every access in order.
 | `path (deleted)`       | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row |
 | `\n`, `\u{202e}`, `\\` | A control or invisible character, or a backslash, in a path or command name                                      |
 
-`/`, `/home`, `/tmp`, the workspace, `$HOME` and the directories above them are never folded into a
-`dir/**` row.
+`/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME` and the directories above them are never
+folded into a `dir/**` row, nor is `/proc/<pid>`, which stands for any process's own directory.
 
 A program is shown under the file it ran, with symlinks followed, and a script under its own path
 rather than its interpreter's. A failed access is shown under the name the command passed, joined to
-its working directory without resolving `..`. A command reading or writing through a file it
+its working directory, or the directory it passed by descriptor, without resolving `..`. A command reading or writing through a file it
 inherited or was passed is shown under its own name, except for a pipe, a socket or a device such as
 `/dev/null`, which counts once.
 
@@ -170,11 +174,12 @@ The artifact named `buildcage-filesystem-audit-<id>` holds one file of JSON line
 line in the order they happened, with absolute paths. A few examples:
 
 ```sh
-# Every file the step wrote to
-jq -r 'select(.kind == "write") | .path' filesystem-audit-*.jsonl | sort -u
+# Every file the step wrote, created or truncated, and every directory it made
+jq -r 'select((.failed | not) and (.kind == "write" or .kind == "mkdir"
+  or (.kind == "open" and (.access // "" | test("[ct]"))))) | .path' filesystem-audit-*.jsonl | sort -u
 
 # Who opened a credential file, and when
-jq -c 'select(.path | endswith("/.npmrc")) | {t, comm, pid, kind}' filesystem-audit-*.jsonl
+jq -c 'select(.path // "" | endswith("/.npmrc")) | {t, comm, pid, kind}' filesystem-audit-*.jsonl
 
 # Every refused open
 jq -c 'select(.kind == "open-failed" and (.err == 1 or .err == 13 or .err == 30))' filesystem-audit-*.jsonl
@@ -245,12 +250,11 @@ itself can do to the record, and what the record can be trusted for.
   time outside the step took nearly twice as long in a test, while a typical build, which spends
   little of its time in system calls, barely changes. Inside the step, each program's first read or
   write of a file is also recorded, which costs more.
-- **Job Summary size.** GitHub caps a step's Job Summary at 1 MiB. When the traffic report and this
-  section would pass it, the filesystem details give way first, then the traffic report's
-  communication log, then the accessed-paths table, then the executed table. A part that does not
-  fit is cut at a line boundary, or left out whole when it would pass the limit on its own, under a
-  note naming the artifact, which still holds every access. Once a table is cut, the details go with
-  it. [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the full order.
+- **Job Summary size.** When the traffic report and this section would pass GitHub's 1 MiB cap,
+  the filesystem details give way first and this section's tables after the traffic report's
+  communication log; [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the full
+  order. What is cut is replaced by a note naming the artifact, which still holds every access, or
+  saying the record was not kept when the upload failed.
 
 ### Skipped hooks
 
