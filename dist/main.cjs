@@ -68407,7 +68407,11 @@ const LETTER = {
 ]), LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
 function classify(r) {
 	let letter, path = r.path, failed = !1;
-	return r.kind === "open-failed" ? (letter = "R", failed = !0) : r.failed ? (letter = FAILED_LETTER[r.kind], r.kind === "link" && (path = r.to), failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : r.kind === "link" ? (letter = "W", path = r.to) : letter = LETTER[r.kind], letter && path ? {
+	if (r.kind === "open-failed") {
+		let access = r.access ?? "r";
+		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
+	} else r.failed ? (letter = FAILED_LETTER[r.kind], r.kind === "link" && (path = r.to), failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : r.kind === "link" ? (letter = "W", path = r.to) : letter = LETTER[r.kind];
+	return letter && path ? {
 		letter,
 		path,
 		failed
@@ -68697,7 +68701,7 @@ function createAuditSummary(prefixes) {
 			let loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path)), t = loadRead ? NaN : Date.parse(r.t ?? ""), x = {
 				comm: r.comm ?? "",
 				path: normalize$2(path),
-				bit: loadRead ? 0 : BIT[c.letter],
+				bit: loadRead ? 0 : c.letter.split("").reduce((bits, l) => bits | BIT[l], 0),
 				failed: c.failed,
 				perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
 				t,

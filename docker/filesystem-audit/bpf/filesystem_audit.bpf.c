@@ -71,6 +71,10 @@ struct file {
 	unsigned int f_mode;
 } __attribute__((preserve_access_index));
 
+struct open_how {
+	__u64 flags;
+} __attribute__((preserve_access_index));
+
 // Since 6.7 a backing file's f_path is on the layer and user_path is the path
 // the step opened; before, f_path was that path.
 struct backing_file {
@@ -936,6 +940,7 @@ struct name_buf {
 	char name[PATH_LEN];
 	u64 ts;
 	s32 dfd;
+	u32 flags; // the open's flags, so a failure says whether it was to write
 };
 
 // One entry per thread inside open(2), each the size of a path, so allocated
@@ -967,7 +972,7 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 	return 0;
 }
 
-static __always_inline void open_enter(int dfd)
+static __always_inline void open_enter(int dfd, u32 flags)
 {
 	if (!in_target())
 		return;
@@ -993,6 +998,7 @@ static __always_inline void open_enter(int dfd)
 	nb->name[0] = 0;
 	nb->ts = bpf_ktime_get_boot_ns();
 	nb->dfd = dfd;
+	nb->flags = flags;
 }
 
 static __always_inline void open_exit(long ret)
@@ -1006,6 +1012,7 @@ static __always_inline void open_exit(long ret)
 		if (e) {
 			e->ts = nb->ts;
 			e->path_len = -ret;
+			e->flags = nb->flags;
 			long r = bpf_probe_read_kernel_str(e->data, PATH_LEN, nb->name);
 			u32 off = r > 0 ? r : 0;
 			u8 n = 0;
@@ -1024,16 +1031,16 @@ static __always_inline void open_exit(long ret)
 // it; hooking both covers either build. When both fire, the inner exit
 // emits and the outer one finds nothing left.
 SEC("fentry/do_sys_openat2")
-int BPF_PROG(on_openat2_enter, int dfd)
+int BPF_PROG(on_openat2_enter, int dfd, const char *filename, struct open_how *how)
 {
-	open_enter(dfd);
+	open_enter(dfd, BPF_CORE_READ(how, flags));
 	return 0;
 }
 
 SEC("fentry/do_sys_open")
-int BPF_PROG(on_open_enter, int dfd)
+int BPF_PROG(on_open_enter, int dfd, const char *filename, int flags)
 {
-	open_enter(dfd);
+	open_enter(dfd, flags);
 	return 0;
 }
 

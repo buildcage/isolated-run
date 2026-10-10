@@ -157,7 +157,14 @@ func TestDecode(t *testing.T) {
 		{
 			name: "failed open",
 			ev:   event{kind: 12, comm: "node", pathRet: int32(unix.ENOENT), data: []byte("/missing\x00")},
-			want: record{Kind: "open-failed", Comm: "node", Path: "/missing", Err: int32(unix.ENOENT)},
+			want: record{Kind: "open-failed", Comm: "node", Path: "/missing", Access: "r", Err: int32(unix.ENOENT)},
+		},
+		{
+			name: "failed open to write",
+			ev: event{kind: 12, comm: "cp", pathRet: int32(unix.EACCES), flags: unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC,
+				data: []byte("/usr/local/bin/tool\x00")},
+			want: record{Kind: "open-failed", Comm: "cp", Path: "/usr/local/bin/tool",
+				Flags: unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC, Access: "wct", Err: int32(unix.EACCES)},
 		},
 		{
 			name: "open, path too long for d_path",
@@ -225,7 +232,7 @@ func TestDecode(t *testing.T) {
 			name: "failed open, relative to the cwd",
 			ev: event{kind: 12, comm: "asm", pathRet: int32(unix.ENOENT), bases: 1, mode: 2,
 				data: append([]byte("./textflag.h\x00"), comps("runtime", "src")...)},
-			want: record{Kind: "open-failed", Comm: "asm", Path: "/src/runtime/textflag.h", Name: "./textflag.h", Err: int32(unix.ENOENT)},
+			want: record{Kind: "open-failed", Comm: "asm", Path: "/src/runtime/textflag.h", Name: "./textflag.h", Access: "r", Err: int32(unix.ENOENT)},
 		},
 		{
 			// Joined as passed: cleaning would drop "link/..", and with it the

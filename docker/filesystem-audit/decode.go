@@ -254,6 +254,8 @@ func decode(raw []byte) (record, error) {
 	case 12: // failed open
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet // the positive errno the BPF side stored as -ret
+		r.Flags = flags
+		r.Access = openAccess(flags, 0)
 	case 13, 14: // read, write
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 		applyMarks(&r, marks, pathRet >= 0)

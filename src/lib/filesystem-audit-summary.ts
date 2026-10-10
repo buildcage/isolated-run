@@ -70,6 +70,7 @@ const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
 const DEFAULT_FANOUT = 3;
 
 interface Classified {
+  /** One action letter, or R and W for a failed open that asked for both. */
   letter: string;
   path: string;
   failed: boolean;
@@ -83,7 +84,9 @@ function classify(r: AuditRecord): Classified | undefined {
   let path = r.path;
   let failed = false;
   if (r.kind === "open-failed") {
-    letter = "R";
+    // What it asked for: a read, and a write if it asked to write, create or truncate.
+    const access = r.access ?? "r";
+    letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : "");
     failed = true;
   } else if (r.failed) {
     letter = FAILED_LETTER[r.kind];
@@ -781,7 +784,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const x: Access = {
         comm: r.comm ?? "",
         path: normalize(path),
-        bit: loadRead ? 0 : BIT[c.letter],
+        bit: loadRead ? 0 : c.letter.split("").reduce((bits, l) => bits | BIT[l], 0),
         failed: c.failed,
         perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
         t,
