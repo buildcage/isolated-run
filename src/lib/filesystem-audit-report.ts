@@ -34,6 +34,7 @@ import {
   type SummaryOptions,
 } from "./filesystem-audit-summary.ts";
 import type { FilesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
+import { failOrWarn } from "./step-report.ts";
 import { FILESYSTEM_PRIORITIES } from "./summary-priorities.ts";
 
 export interface FilesystemAuditReportOptions {
@@ -46,6 +47,8 @@ export interface FilesystemAuditReportOptions {
   /** Where the guide the summary links to is read from. */
   actionRepo: string;
   actionRef: string;
+  /** Under restrict with fail_on_blocked: an output that cannot be set fails the step. */
+  failClosed: boolean;
 }
 
 export interface FilesystemAuditReportDeps {
@@ -180,6 +183,7 @@ export async function prepareStepFilesystemAudit(
     env,
     actionRepo,
     actionRef,
+    failClosed,
   }: FilesystemAuditReportOptions,
   overrides: Partial<FilesystemAuditReportDeps> = {},
 ): Promise<StepFilesystemAudit> {
@@ -243,9 +247,11 @@ export async function prepareStepFilesystemAudit(
     try {
       deps.setOutput(artifactName);
     } catch (e) {
-      annotation.warning(
-        `Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`,
-      );
+      // The command may have written a name of its own there and locked the file.
+      failOrWarn(
+        annotation,
+        failClosed,
+      )(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
     }
   }
 }

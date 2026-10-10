@@ -471,6 +471,7 @@ export async function runSandboxStep(
       env,
       actionRepo,
       actionRef: reportActionRef,
+      failClosed: proxyMode !== "audit" && failOnBlocked,
     });
     await reportStepTraffic({
       containerName,

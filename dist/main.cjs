@@ -68871,6 +68871,907 @@ function createStripper(scratchBase) {
 		}
 	};
 }
+//#endregion
+//#region src/proxy/aws-keys.ts
+const ACCOUNT_ID = /^\d{12}$/, ACCESS_KEY_ID = /^[A-Z0-9]{16,128}$/;
+function parseAwsAccounts(input) {
+	let tokens = splitRuleTokens(input).flatMap((token) => token.split(",").filter(Boolean)), invalid = tokens.filter((token) => !ACCOUNT_ID.test(token));
+	if (invalid.length > 0) throw Error(`invalid AWS account ID: ${invalid.map((t) => JSON.stringify(t)).join(", ")}`);
+	return [...new Set(tokens)];
+}
+function isAwsAccessKeyId(value) {
+	return ACCESS_KEY_ID.test(value);
+}
+//#endregion
+//#region src/lib/filesystem-audit-mode.ts
+const FILESYSTEM_AUDIT = ["off", "record"];
+function resolveFilesystemAudit(input) {
+	let trimmed = input?.trim() || "off";
+	if (!FILESYSTEM_AUDIT.includes(trimmed)) throw new SandboxError(`Invalid filesystem_audit: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_AUDIT.join(", ")}.`, "INVALID_FILESYSTEM_AUDIT");
+	return trimmed;
+}
+//#endregion
+//#region src/lib/filesystem-mode.ts
+const FILESYSTEM_MODES = ["persistent", "ephemeral"];
+function resolveFilesystemMode(input) {
+	let trimmed = input?.trim() || "persistent";
+	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem_mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
+	return trimmed;
+}
+//#endregion
+//#region src/lib/inputs.ts
+init_core();
+const LIST_INPUTS = [
+	"allowed_https_rules",
+	"allowed_http_rules",
+	"allowed_ip_rules",
+	"allowed_url_rules",
+	"allowed_tls_rules",
+	"known_blocked_rules",
+	"write_through"
+], CONFIG_FILE_INPUTS = {
+	known: [
+		"proxy_mode",
+		"proxy_engine",
+		...LIST_INPUTS,
+		"aws_key_check",
+		"allowed_aws_role_accounts",
+		"upload_traffic_artifact",
+		"traffic_artifact_retention_days",
+		"fail_on_blocked",
+		"fail_on_ca_residue",
+		"filesystem_mode",
+		"filesystem_audit",
+		"filesystem_audit_retention_days",
+		"label"
+	],
+	lists: LIST_INPUTS
+};
+function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, notice) {
+	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
+	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
+}
+function readRunCommand(getInput$9 = getInput) {
+	let runInput = getInput$9("run", { trimWhitespace: !1 });
+	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
+	return runInput;
+}
+function readProxyInputs(getInput$8 = getInput) {
+	return {
+		proxyEngine: resolveProxyEngine(getInput$8("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$8("proxy_mode"))
+	};
+}
+function readFilesystemInputs(notice, getInput$5 = getInput) {
+	return {
+		filesystemMode: resolveFilesystemMode(getInput$5("filesystem_mode")),
+		writeThroughInput: resolveWriteThroughInput$1({
+			writeThrough: getInput$5("write_through"),
+			writable: getInput$5("writable"),
+			allowWrite: getInput$5("allow_write")
+		}, notice)
+	};
+}
+function readFilesystemAuditInput(getInput$4 = getInput) {
+	return resolveFilesystemAudit(getInput$4("filesystem_audit"));
+}
+function readFilesystemAuditRetentionDays(getInput$6 = getInput) {
+	let days = getInput$6("filesystem_audit_retention_days");
+	if (days !== "") {
+		if (!/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
+		return Number(days);
+	}
+}
+function readStepLabel(getInput$2 = getInput) {
+	return getInput$2("label") || void 0;
+}
+function readFailOnCaResidue(getInput$7 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$7);
+}
+function readFailOnBlocked(getInput$1 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$1);
+}
+const AWS_KEY_CHECK_OFF = {
+	key: "",
+	roleAccounts: []
+};
+function readAwsKeyInputs({ proxyEngine }, env, getInput$3 = getInput) {
+	let roleAccounts;
+	try {
+		roleAccounts = parseAwsAccounts(getInput$3("allowed_aws_role_accounts"));
+	} catch (e) {
+		let { message } = e;
+		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
+	}
+	let check = readBooleanInput("aws_key_check", !1, getInput$3);
+	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config_file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
+	if (!check) return AWS_KEY_CHECK_OFF;
+	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy_engine: inspect, or remove aws_key_check and allowed_aws_role_accounts.`, "INVALID_PROXY_ENGINE");
+	let key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
+	if (!isAwsAccessKeyId(key)) throw new SandboxError("The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. The check starts from that variable alone, never from a profile, a credentials file or any other credential source. Put the key to check there in an earlier step, for example with aws-actions/configure-aws-credentials, or run the AWS commands in a step without the check.", "AWS_ACCESS_KEY_MISSING");
+	return {
+		key,
+		roleAccounts
+	};
+}
+function awsExampleInputs({ key, roleAccounts }, timeline = []) {
+	if (!key) return [];
+	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => e.extensions?.aws?.assumedAccount ?? []).filter((a) => /^\d{12}$/.test(a)), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), mark = (a) => added.has(a) ? " # assumed in this run, check it is yours" : "";
+	return accounts.length === 1 ? lines.push(`allowed_aws_role_accounts: "${accounts[0]}"${mark(accounts[0])}`) : accounts.length > 1 && lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${a}${mark(a)}`)), lines;
+}
+//#endregion
+//#region src/core/lib/actions/write-step-summary.ts
+init_core();
+async function writeStepSummary(markdown, summaryFile) {
+	summaryFile ? await summary.addRaw(markdown).write() : console.log(markdown);
+}
+//#endregion
+//#region src/core/lib/docker/args.ts
+function buildDockerCpArgs({ containerName, containerPath, hostPath }) {
+	return [
+		"cp",
+		`${containerName}:${containerPath}`,
+		hostPath
+	];
+}
+function buildComposeUpArgs({ composeFile, projectName, pullPolicy }) {
+	return [
+		"compose",
+		"-f",
+		composeFile,
+		"-p",
+		projectName,
+		"up",
+		"-d",
+		"--pull",
+		pullPolicy,
+		"--no-build",
+		"--wait",
+		"--wait-timeout",
+		"180",
+		"--quiet-pull"
+	];
+}
+function buildComposeLogsArgs({ composeFile, projectName, tail }) {
+	return [
+		"compose",
+		"-f",
+		composeFile,
+		"-p",
+		projectName,
+		"logs",
+		"--no-color",
+		"--tail",
+		String(tail)
+	];
+}
+function buildComposeDownArgs({ composeFile, projectName }) {
+	return [
+		"compose",
+		"-f",
+		composeFile,
+		"-p",
+		projectName,
+		"down",
+		"-v"
+	];
+}
+//#endregion
+//#region src/core/lib/docker/container-env.ts
+function parseDockerInspectEnv(inspectOutput) {
+	let entries = JSON.parse(inspectOutput), env = {};
+	for (let entry of entries) {
+		let i = entry.indexOf("=");
+		i !== -1 && (env[entry.slice(0, i)] = entry.slice(i + 1));
+	}
+	return env;
+}
+function parseDockerInspectLabels(inspectOutput) {
+	return JSON.parse(inspectOutput) ?? {};
+}
+//#endregion
+//#region src/core/lib/docker/client.ts
+function parseContainerIds(psOutput) {
+	return psOutput.split("\n").map((s) => s.trim()).filter(Boolean);
+}
+function defaultRunCommand(args) {
+	return (0, node_child_process.execFileSync)("docker", args, {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		maxBuffer: 67108864
+	});
+}
+function defaultSpawnCommand(args) {
+	return (0, node_child_process.spawn)("docker", args, { stdio: [
+		"ignore",
+		"pipe",
+		"pipe"
+	] });
+}
+async function* streamDockerLines(spawnDocker, args, operation) {
+	let child = spawnDocker(args), spawnError;
+	child.on("error", (err) => {
+		spawnError = err;
+	});
+	let closed = (0, node_events.once)(child, "close").then(([code, signal]) => ({
+		code,
+		signal
+	}), () => ({
+		code: null,
+		signal: null
+	})), stderr = "";
+	child.stderr?.setEncoding("utf8"), child.stderr?.on("data", (chunk) => {
+		stderr += chunk;
+	});
+	let rl = (0, node_readline.createInterface)({
+		input: child.stdout,
+		crlfDelay: Infinity
+	}), exhausted = !1;
+	try {
+		for await (let line of rl) yield line;
+		exhausted = !0;
+	} finally {
+		rl.close(), !exhausted && child.exitCode === null && child.signalCode === null && child.kill();
+	}
+	let { code, signal } = await closed;
+	if (spawnError) throw spawnError;
+	if (code !== 0) throw Object.assign(Error(`${operation} exited with code ${code}${signal ? ` (signal ${signal})` : ""}: ${stderr.trim()}`), {
+		status: code ?? void 0,
+		stderr
+	});
+}
+function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand) {
+	return {
+		findContainers(filters) {
+			let args = ["ps"];
+			for (let filter of filters) args.push("--filter", filter);
+			return args.push("--format", "{{.ID}}"), parseContainerIds(run(args));
+		},
+		copyFromContainer(containerId, containerPath, hostPath) {
+			run(buildDockerCpArgs({
+				containerName: containerId,
+				containerPath,
+				hostPath
+			}));
+		},
+		readFileLines(containerId, path) {
+			return streamDockerLines(spawnDocker, [
+				"exec",
+				containerId,
+				"cat",
+				path
+			], `docker exec cat ${path}`);
+		},
+		readEnv(containerId) {
+			return parseDockerInspectEnv(run([
+				"inspect",
+				containerId,
+				"--format",
+				"{{json .Config.Env}}"
+			]));
+		},
+		readLabels(containerId) {
+			return parseDockerInspectLabels(run([
+				"inspect",
+				containerId,
+				"--format",
+				"{{json .Config.Labels}}"
+			]));
+		},
+		exec(containerId, args) {
+			return run([
+				"exec",
+				containerId,
+				...args
+			]);
+		}
+	};
+}
+//#endregion
+//#region src/core/lib/docker/proxy-dropped-logs.ts
+const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m;
+function parseDroppedLogs(metrics) {
+	let match = COUNTER.exec(metrics);
+	return match ? Number(match[1]) : void 0;
+}
+function readProxyDroppedLogs(docker, containerId) {
+	try {
+		return parseDroppedLogs(docker.exec(containerId, [
+			"curl",
+			"-sf",
+			"--max-time",
+			"10",
+			"--unix-socket",
+			"/var/run/haproxy-health.sock",
+			"http://localhost/metrics?scope=global"
+		]));
+	} catch {
+		return;
+	}
+}
+//#endregion
+//#region src/core/lib/docker/rotated-log.ts
+const SEGMENT = /^@[0-9a-f]{24}\.[a-z]$/;
+function parseLogSegments(lsOutput) {
+	let entries = lsOutput.split("\n").map((line) => line.trim()).filter(Boolean), segments = entries.filter((name) => SEGMENT.test(name)).sort();
+	return entries.includes("current") && segments.push("current"), segments;
+}
+async function* readRotatedLog(docker, containerId, dir) {
+	let listing = docker.exec(containerId, [
+		"ls",
+		"-1",
+		dir
+	]);
+	for (let name of parseLogSegments(listing)) yield* docker.readFileLines(containerId, `${dir}/${name}`);
+}
+//#endregion
+//#region src/core/lib/report/action-version.ts
+function readActionVersion$1(docker, containerId, proxyEngine) {
+	try {
+		let label = docker.readLabels(containerId)["org.opencontainers.image.version"];
+		if (!label) return;
+		let suffix = `-${proxyEngine}`;
+		return `v${label.endsWith(suffix) ? label.slice(0, -suffix.length) : label}`;
+	} catch {
+		return;
+	}
+}
+//#endregion
+//#region src/core/lib/log/authority.ts
+const DEFAULT_PORT = {
+	https: "443",
+	http: "80"
+};
+function splitHostPort(authority) {
+	let colon = authority.lastIndexOf(":");
+	return colon <= 0 || authority.slice(colon + 1).includes("]") ? {
+		host: authority,
+		port: void 0
+	} : {
+		host: authority.slice(0, colon),
+		port: authority.slice(colon + 1)
+	};
+}
+function ruleHost(host) {
+	return sniHost(host).replace(/\.$/, "");
+}
+function sniHost(sni) {
+	return sni.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+//#endregion
+//#region src/core/lib/log/start-marker.ts
+const PROXY_START_MARKER = "buildcage haproxy starting", BAD_REQUEST_METHOD = "<BADREQ>";
+function incompleteReason(terminationState, method) {
+	let cause = terminationState[0];
+	if (cause !== "P") return terminationState[1] === "R" ? cause === "C" ? "client-aborted" : cause === "c" ? "client-timeout" : "no-request" : method === "<BADREQ>" ? "no-request" : void 0;
+}
+//#endregion
+//#region src/core/lib/log/traffic-event.ts
+const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
+function clientEndedNoise(timeline) {
+	let completed = new Set();
+	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
+	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason) && completed.has(ruleHost(event.host));
+}
+function connectedHosts(timeline) {
+	let connected = {
+		any: new Set(),
+		blocked: new Set()
+	};
+	for (let event of timeline) {
+		if (event.protocol === "dns" || event.action === "incomplete") continue;
+		let host = ruleHost(event.host);
+		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
+	}
+	return connected;
+}
+function isRedundantDns(event, connected) {
+	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
+}
+//#endregion
+//#region src/core/lib/log/inspect.ts
+const REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:wr=(\S+) )?((?:[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*=\S+ )*)(?:fcerr=(\S+) )?(?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
+function timeOf(stamp) {
+	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
+	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
+}
+function isRefusal(terminationState) {
+	let cause = terminationState[0];
+	if (cause === "P" || cause === "S") return !0;
+	let phase = terminationState[1];
+	return cause === "s" && (phase === "C" || phase === "H");
+}
+function reasonFor(logged, terminationState, tlsError, method) {
+	if (logged !== "-") return logged;
+	let cause = terminationState[0];
+	if (cause !== "S" && cause !== "s") return method === "<BADREQ>" ? "bad-request" : "not-allowed";
+	switch (terminationState[1]) {
+		case "H": return "origin-no-response";
+		case "D":
+		case "L": return "origin-aborted";
+		default: return tlsError === void 0 ? "origin-unreachable" : cause === "S" && tlsError !== "-" && tlsError !== "0" ? "origin-untrusted" : "origin-connect-failed";
+	}
+}
+const REQUESTLESS_REASONS = new Set(["bad-request", "missing-host-header"]), FAILURE_REASONS$1 = new Set([
+	"origin-unreachable",
+	"origin-no-response",
+	"origin-aborted",
+	"dns-failed"
+]);
+function actionFor(reason, isAudit) {
+	return reason === void 0 ? isAudit ? "audit" : "allow" : FAILURE_REASONS$1.has(reason) ? "failed" : "block";
+}
+function urlOf(scheme, authority, target) {
+	return target.startsWith("/") ? `${scheme}://${authority}${target}` : void 0;
+}
+function authorityOf(host, port, scheme) {
+	return port === DEFAULT_PORT$1[scheme] ? host : `${host}:${port}`;
+}
+function hostBeforeRequest(sni, address) {
+	return sni !== void 0 && sni !== "-" ? {
+		host: sniHost(sni),
+		byAddress: !1
+	} : address === "198.19.255.1" ? {
+		host: UNKNOWN_HOST,
+		byAddress: !1
+	} : {
+		host: address,
+		byAddress: !0
+	};
+}
+function extensionFields(tokens) {
+	let objects = new Map();
+	for (let token of tokens.split(" ")) {
+		let match = /^([^.]+)\.([^=]+)=(.*)$/.exec(token);
+		if (!match || match[3] === "-") continue;
+		let fields = objects.get(match[1]) ?? new Map();
+		objects.set(match[1], fields.set(match[2], match[3]));
+	}
+	if (objects.size !== 0) return Object.fromEntries([...objects].map(([name, fields]) => [name, Object.fromEntries(fields)]));
+}
+function parseProxyLine(line, isAudit) {
+	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
+	if (request) {
+		let fcerr = request[13] ?? "", incomplete = request[3] === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[15]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[14], request[9]) : void 0, event = {
+			time: Number(request[1]) / 1e3,
+			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
+			protocol: unnamed?.byAddress ? "tcp" : scheme,
+			host: unnamed?.host ?? host,
+			port: Number(request[10]),
+			destination: `${request[9]}:${request[10]}`
+		};
+		if (parsedRequest) {
+			event.method = request[3];
+			let url = urlOf(scheme, unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority, request[16]);
+			url !== void 0 && (event.url = url);
+		}
+		let wouldRefuse = request[11];
+		wouldRefuse !== void 0 && wouldRefuse !== "-" && (event.wouldRefuse = wouldRefuse);
+		let extensions = extensionFields(request[12]);
+		return extensions && (event.extensions = extensions), reason === void 0 ? (event.status = Number(request[4]), event.bytes = Number(request[5])) : event.reason = reason, event;
+	}
+	let pass = PASSTHROUGH.exec(trimmed);
+	if (pass) {
+		let reason = isRefusal(pass[4]) ? reasonFor(pass[5], pass[4], void 0, "-") : void 0, sni = pass[8], event = {
+			time: Number(pass[1]) / 1e3,
+			action: actionFor(reason, isAudit),
+			protocol: pass[2],
+			host: sni === "-" ? pass[6] : sniHost(sni),
+			port: Number(pass[7]),
+			destination: `${pass[6]}:${pass[7]}`
+		};
+		return reason === void 0 ? event.bytes = Number(pass[3]) : event.reason = reason, event;
+	}
+	return null;
+}
+async function scanInspectLog(lines, isAudit = !1, allowsName) {
+	let events = [], startedAt, headIntact, unparsed = 0;
+	for await (let line of lines) {
+		let event = parseProxyLine(line, isAudit);
+		if (event) {
+			headIntact ??= !1, events.push(event);
+			continue;
+		}
+		let trimmed = line.trim();
+		if (trimmed === "") continue;
+		let match = START$1.exec(trimmed);
+		headIntact ??= match !== null, match && startedAt === void 0 && (startedAt = Number(match[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
+	}
+	return refuseUnpassedAddresses(events), allowsName && refuseUnallowedNames(events, allowsName), {
+		events,
+		startedAt,
+		headIntact: headIntact ?? !1,
+		unparsed
+	};
+}
+function refuseUnpassedAddresses(events) {
+	let served = new Set();
+	for (let event of events) (event.protocol === "http" || event.protocol === "https") && event.action !== "incomplete" && served.add(event.destination);
+	for (let event of events) event.action === "incomplete" && event.protocol === "tcp" && (CLIENT_ENDED_REASONS.has(event.reason) && served.has(event.destination) || (event.action = "block", event.reason = "ip-not-allowed"));
+}
+function refuseUnallowedNames(events, allowsName) {
+	for (let event of events) event.action === "incomplete" && event.protocol === "https" && (event.host === "(unknown)" || allowsName(event.host) || event.destination?.startsWith("198.19.255.1:") || (event.action = "block", event.reason = "sni-not-allowed"));
+}
+async function scanInspectDnsLog(lines, isAudit = !1) {
+	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
+	for await (let line of lines) {
+		let trimmed = line.trim();
+		trimmed !== "" && (headIntact ??= trimmed.endsWith("buildcage coredns starting"));
+		let match = DNS.exec(trimmed);
+		if (match) {
+			let time = timeOf(match[1]), allowed = match[2] === "allowed", existing = seen.get(match[3]);
+			existing ? existing.allowed ||= allowed : seen.set(match[3], {
+				time,
+				allowed
+			});
+			continue;
+		}
+		let lookup = DNS_DISCOVERY.exec(trimmed);
+		if (lookup) {
+			let key = `${lookup[2]}\t${lookup[3]}`;
+			discovery.has(key) || discovery.set(key, {
+				time: timeOf(lookup[1]),
+				host: lookup[2],
+				queryType: lookup[3]
+			});
+			continue;
+		}
+		let refused = DNS_SERVICE_DENIED.exec(trimmed);
+		if (!refused) {
+			DNS_LINE.test(trimmed) && unparsed++;
+			continue;
+		}
+		service.has(refused[2]) || service.set(refused[2], {
+			time: timeOf(refused[1]),
+			host: refused[2],
+			queryType: refused[3]
+		});
+	}
+	let events = [...seen.entries()].map(([host, { time, allowed }]) => {
+		let reason = allowed ? void 0 : "dns-not-allowed", event = {
+			time,
+			action: actionFor(reason, isAudit),
+			protocol: "dns",
+			host
+		};
+		return reason !== void 0 && (event.reason = reason), event;
+	});
+	for (let { time, host, queryType } of discovery.values()) events.push({
+		time,
+		action: "discovery",
+		protocol: "dns",
+		host,
+		queryType
+	});
+	for (let { time, host, queryType } of service.values()) events.push({
+		time,
+		action: actionFor("dns-service-not-allowed", isAudit),
+		protocol: "dns",
+		host,
+		queryType,
+		reason: "dns-service-not-allowed"
+	});
+	return {
+		events,
+		headIntact: headIntact ?? !1,
+		unparsed
+	};
+}
+//#endregion
+//#region src/core/lib/log/aggregate.ts
+function entryKey(e) {
+	return `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
+}
+function compareAggregated(a, b) {
+	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
+}
+function aggregate(filtered) {
+	let map = {};
+	for (let e of filtered) {
+		let key = entryKey(e);
+		map[key] = (map[key] || 0) + 1;
+	}
+	return Object.keys(map).map((key) => {
+		let [host, portStr, ruleType, reason] = key.split("	");
+		return {
+			host,
+			port: portStr,
+			ruleType,
+			reason,
+			count: map[key]
+		};
+	}).sort(compareAggregated);
+}
+//#endregion
+//#region src/core/lib/report/build/aggregate.ts
+function targetOf(event) {
+	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
+}
+function requestPath(url) {
+	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
+	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
+}
+function matchesUrlRule({ rule, hostRe, pathRe }, event) {
+	if (event.method === void 0 || event.url === void 0) return !1;
+	let scheme = rule.schemes.find((s) => s === event.protocol);
+	if (scheme === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
+	let hostPort = `${event.host}:${event.port}`;
+	if (rule.isRegex) {
+		let defaultPort = Number(DEFAULT_PORT$1[scheme]);
+		return event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
+	}
+	return hostRe.test(hostPort);
+}
+function buildMatchers(knownBlockedRules) {
+	return knownBlockedRules.map((line) => {
+		if (isKnownBlockedUrlRule(line)) {
+			let urlRule = convertUrlRule(line), compiled = {
+				rule: urlRule,
+				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex, "i"),
+				pathRe: new RegExp(urlRule.pathRegex)
+			};
+			return {
+				rule: urlRule.raw,
+				matches: (event) => matchesUrlRule(compiled, event)
+			};
+		}
+		let completed = completeRulePort(line), re = new RegExp(convertRule(completed), "i");
+		return {
+			rule: completed,
+			matches: (event) => re.test(targetOf(event))
+		};
+	});
+}
+function annotateKnownBlocked(blockedEvents, knownBlockedRules) {
+	let matchers = buildMatchers(knownBlockedRules), accumulators = new Map();
+	for (let event of blockedEvents) {
+		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = entryKey(entry), accumulator = accumulators.get(key);
+		accumulator ? (accumulator.count++, index === -1 ? accumulator.expectedAll = !1 : index < accumulator.bestIndex && (accumulator.bestIndex = index, accumulator.bestRule = matchers[index].rule)) : accumulators.set(key, {
+			entry,
+			count: 1,
+			expectedAll: index !== -1,
+			bestIndex: index === -1 ? Infinity : index,
+			bestRule: index === -1 ? void 0 : matchers[index].rule
+		});
+	}
+	return [...accumulators.values()].map(({ entry, count, expectedAll, bestRule }) => expectedAll ? {
+		...entry,
+		count,
+		expected: !0,
+		expectedBy: bestRule
+	} : {
+		...entry,
+		count,
+		expected: !1
+	}).sort(compareAggregated);
+}
+const RULE_TYPE = {
+	https: "HTTPS",
+	http: "HTTP",
+	tls: "TLS",
+	tcp: "IP",
+	dns: "DNS"
+};
+function toHostRow(event) {
+	return {
+		host: event.host,
+		port: event.port === void 0 ? "-" : String(event.port),
+		ruleType: RULE_TYPE[event.protocol],
+		reason: event.reason ?? "-"
+	};
+}
+function reduceTimeline(timeline, knownBlockedRules) {
+	let passedRows = [], blockedEvents = [], failedRows = [], connected = connectedHosts(timeline);
+	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : event.action === "block" ? blockedEvents.push(event) : passedRows.push(toHostRow(event))));
+	return {
+		passed: aggregate(passedRows),
+		blocked: annotateKnownBlocked(blockedEvents, knownBlockedRules),
+		failed: aggregate(failedRows),
+		blockedCount: blockedEvents.length
+	};
+}
+//#endregion
+//#region src/core/lib/report/build/inspect.ts
+function resolverAllows(parameters) {
+	let { resolverHosts } = compileRuleSet({
+		httpsRules: parameters.allowedHttpsRules,
+		httpRules: parameters.allowedHttpRules,
+		tlsRules: parameters.allowedTlsRules,
+		urlRules: buildUrlRules(parameters.allowedUrlRules.join("\n"))
+	}), allowed = resolverHosts.map((regex) => RegExp(`^(?:${regex})$`, "i"));
+	return (name) => allowed.some((regex) => regex.test(name));
+}
+async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedLogs) {
+	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	return {
+		engine: "inspect",
+		parameters,
+		...reduceTimeline(timeline, parameters.knownBlockedRules),
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
+		startedAt,
+		timeline
+	};
+}
+//#endregion
+//#region src/core/lib/log/haproxy.ts
+const DECISION = /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za-z0-9._:-]+)" ([A-Za-z0-9-]+) (\d+|-)(?: ts=[A-Za-z-]{2} dst=[0-9.]+:\d+)?$/, NO_REQUEST = /^buildcage (\d+) \[-\] \(HTTP\) "-" - (?:\d+|-) ts=([A-Za-z-]{2}) dst=([0-9.]+):(\d+)$/, START = RegExp(`^${PROXY_START_MARKER} (\\d+)$`), PROTOCOL = {
+	HTTPS: "https",
+	HTTP: "http",
+	IP: "tcp"
+}, FAILURE_REASONS = new Set(["dns-failed"]);
+function hostOf(address, ruleType) {
+	return address === "198.19.255.1" ? UNKNOWN_HOST : ruleType === "HTTPS" ? sniHost(address) : ruleHost(address);
+}
+async function scanHaproxyLog(lines, isAudit) {
+	let events = [], passedDecision = isAudit ? "AUDIT" : "ALLOWED", startedAt, headIntact, unparsed = 0;
+	for await (let line of lines) {
+		let m = DECISION.exec(line);
+		if (m) {
+			headIntact ??= !1;
+			let [, ms, decision, ruleType, target, reason, bytes] = m;
+			if (decision !== passedDecision && decision !== "BLOCKED") continue;
+			let { host: address, port } = splitHostPort(target), host = hostOf(address, ruleType), failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), refused = decision === "BLOCKED" && !failed, event = {
+				time: Number(ms) / 1e3,
+				action: failed ? "failed" : refused ? "block" : isAudit ? "audit" : "allow",
+				protocol: PROTOCOL[ruleType] ?? "tcp",
+				host
+			};
+			port !== void 0 && (event.port = Number(port)), refused || failed ? event.reason = reason : bytes !== "-" && (event.bytes = Number(bytes)), events.push(event);
+			continue;
+		}
+		let none = NO_REQUEST.exec(line);
+		if (none) {
+			headIntact ??= !1;
+			let [, ms, terminationState, address, port] = none, ended = incompleteReason(terminationState, BAD_REQUEST_METHOD);
+			events.push({
+				time: Number(ms) / 1e3,
+				action: ended === void 0 ? "block" : "incomplete",
+				protocol: "http",
+				host: hostOf(address),
+				port: Number(port),
+				reason: ended ?? "bad-request"
+			});
+			continue;
+		}
+		let trimmed = line.trim();
+		if (trimmed === "") continue;
+		let start = START.exec(trimmed);
+		headIntact ??= start !== null, start && startedAt === void 0 && (startedAt = Number(start[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
+	}
+	return {
+		events,
+		startedAt,
+		headIntact: headIntact ?? !1,
+		unparsed
+	};
+}
+//#endregion
+//#region src/core/lib/report/build/universal.ts
+async function buildUniversalReportData(proxyLines, dnsLines, parameters, droppedLogs) {
+	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	return {
+		engine: "universal",
+		parameters,
+		...reduceTimeline(timeline, parameters.knownBlockedRules),
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
+		startedAt,
+		timeline
+	};
+}
+//#endregion
+//#region src/core/lib/report/outcome/annotate.ts
+function applyOutcomeAnnotations(annotation, emissions) {
+	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
+}
+//#endregion
+//#region src/core/lib/report/outcome/blocked-outcome.ts
+function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible }) {
+	if (!logLooksPlausible) return isAudit ? {
+		level: "notice",
+		shouldFail: !1
+	} : failOnBlocked ? {
+		level: "error",
+		shouldFail: !0
+	} : {
+		level: "notice",
+		shouldFail: !1
+	};
+	if (!blockedCount) return {
+		level: "none",
+		shouldFail: !1
+	};
+	if (isAudit) return {
+		level: "notice",
+		shouldFail: !1
+	};
+	let hasUnexpected = blockedRows.length === 0 || blockedRows.some((row) => !row.expected);
+	return failOnBlocked && hasUnexpected ? {
+		level: "error",
+		shouldFail: !0
+	} : {
+		level: "notice",
+		shouldFail: !1
+	};
+}
+const COUNT_NOUN = "connection(s) and lookup(s)";
+function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }) {
+	let base = `${blockedCount} blocked ${COUNT_NOUN} detected by buildcage ${engineLabel}`;
+	if (isAudit) return base;
+	let unexpected = blockedRows.filter((row) => !row.expected).length;
+	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known_blocked_rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known_blocked_rules)`;
+}
+function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, engineLabel }) {
+	let outcome = determineBlockedOutcome({
+		isAudit,
+		failOnBlocked,
+		blockedCount,
+		blockedRows,
+		logLooksPlausible
+	}), base = buildBlockedMessage({
+		blockedCount,
+		blockedRows,
+		engineLabel,
+		isAudit
+	});
+	if (logLooksPlausible) return {
+		...outcome,
+		message: base
+	};
+	if (isAudit) return {
+		...outcome,
+		message: `${base}, but the logs are incomplete and this is not a full record`
+	};
+	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. Either the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
+	return {
+		...outcome,
+		message
+	};
+}
+//#endregion
+//#region src/core/lib/report/outcome/report-outcomes.ts
+function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
+	let emissions = [describeBlockedOutcome({
+		isAudit: report.parameters.mode === "audit",
+		failOnBlocked,
+		blockedCount: report.blockedCount,
+		blockedRows: report.blocked,
+		logLooksPlausible: report.logLooksPlausible,
+		engineLabel
+	})], undecided = describeUndecidedRequests(report, engineLabel);
+	undecided && emissions.push(undecided);
+	let failed = describeFailedConnections(report, engineLabel);
+	failed && emissions.push(failed);
+	let wouldRefuse = describeWouldRefuse(report);
+	return wouldRefuse && emissions.push(wouldRefuse), emissions;
+}
+function describeWouldRefuse(report) {
+	let count = report.timeline.filter((event) => event.wouldRefuse !== void 0).length;
+	if (count !== 0) return {
+		level: "warning",
+		shouldFail: !1,
+		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section lists them with the reason.`
+	};
+}
+function describeUndecidedRequests(report, engineLabel) {
+	let isNoise = clientEndedNoise(report.timeline), count = report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
+	if (count !== 0) return {
+		level: "warning",
+		shouldFail: !1,
+		message: `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in Communication details. Each ended before a whole request had arrived, so no rule decided it and none reached an origin: the client closed or failed the TLS handshake, its own timeout expired, or this proxy ran into an error while still reading. None of them fails the step. Bytes this proxy would not read as a request are not among them: that is a refusal, and it is in Blocked Hosts.`
+	};
+}
+function describeFailedConnections(report, engineLabel) {
+	let count = report.failed.reduce((total, row) => total + row.count, 0);
+	if (count !== 0) return {
+		level: "notice",
+		shouldFail: !1,
+		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed under Failed Connections. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
+	};
+}
 function usesLine(actionRepo, actionRef, actionVersion) {
 	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
 }
@@ -69003,51 +69904,6 @@ function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
 }
 function hostTableTruncationNote(artifactAvailable) {
 	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload_traffic_artifact: true to get every request as a downloadable artifact"}._\n\n`;
-}
-//#endregion
-//#region src/core/lib/log/authority.ts
-const DEFAULT_PORT = {
-	https: "443",
-	http: "80"
-};
-function splitHostPort(authority) {
-	let colon = authority.lastIndexOf(":");
-	return colon <= 0 || authority.slice(colon + 1).includes("]") ? {
-		host: authority,
-		port: void 0
-	} : {
-		host: authority.slice(0, colon),
-		port: authority.slice(colon + 1)
-	};
-}
-function ruleHost(host) {
-	return sniHost(host).replace(/\.$/, "");
-}
-function sniHost(sni) {
-	return sni.replace(/[A-Z]/g, (c) => c.toLowerCase());
-}
-//#endregion
-//#region src/core/lib/log/traffic-event.ts
-const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
-function clientEndedNoise(timeline) {
-	let completed = new Set();
-	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
-	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason) && completed.has(ruleHost(event.host));
-}
-function connectedHosts(timeline) {
-	let connected = {
-		any: new Set(),
-		blocked: new Set()
-	};
-	for (let event of timeline) {
-		if (event.protocol === "dns" || event.action === "incomplete") continue;
-		let host = ruleHost(event.host);
-		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
-	}
-	return connected;
-}
-function isRedundantDns(event, connected) {
-	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
 }
 //#endregion
 //#region src/core/lib/report/render/inspect-details.ts
@@ -69342,6 +70198,10 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 		close: "</details>\n"
 	}), report.engine === "universal" && (bottom += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), bottom += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, bottom += "\n<hr>\n", blocks.push(frame(bottom)), blocks;
 }
+const vpceHost = (service) => `^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.${service}\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$`;
+`${vpceHost("sts")}`, "" + vpceHost("git-codecommit(-fips)?");
+const formName = (name) => name.split("").map((c) => `(${[c, ...new Set([c, c.toUpperCase()].map((l) => `%${l.charCodeAt(0).toString(16)}`))].join("|")})`).join("");
+formName("awsaccesskeyid"), formName("x-amz-credential"), formName("rolearn"), formName("action");
 //#endregion
 //#region src/lib/summary-priorities.ts
 const TRAFFIC_PRIORITIES = {
@@ -69355,287 +70215,114 @@ const TRAFFIC_PRIORITIES = {
 	[FILESYSTEM_BLOCK.executed]: 6,
 	[FILESYSTEM_BLOCK.paths]: 7,
 	[FILESYSTEM_BLOCK.log]: 9
-}, CHUNK_BYTES = 1 << 20;
-function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
-	let fd = (0, node_fs.openSync)(path, "r");
-	try {
-		let buf = Buffer.alloc(chunkBytes), carry = [];
-		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
-			let chunk = buf.subarray(0, n), start = 0;
-			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) carry.length === 0 ? onLine(chunk.toString("utf8", start, nl)) : onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
-			start < n && carry.push(Buffer.from(chunk.subarray(start)));
-		}
-		onLine(Buffer.concat(carry).toString("utf8"));
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
+}, HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
+function createHostDocker() {
+	return createDocker((args) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		maxBuffer: 67108864,
+		env: hostCommandEnv("docker")
+	}), (args) => (0, node_child_process.spawn)(hostCommand("docker"), args, {
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		env: hostCommandEnv("docker")
+	}));
 }
-function openWriter(path, chunkBytes = CHUNK_BYTES) {
-	let fd = (0, node_fs.openSync)(path, "w"), pending = [], size = 0, first = !0, flush = () => {
-		let data = Buffer.from(pending.join(""));
-		for (let off = 0; off < data.length;) off += (0, node_fs.writeSync)(fd, data, off);
-		pending = [], size = 0;
+function fetchReport(containerName, parameters, proxyEngine) {
+	let docker = createHostDocker();
+	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName)) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName));
+}
+function readActionVersion(containerName, proxyEngine, docker) {
+	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
+}
+function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
+	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => e.wouldRefuse?.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, TRAFFIC_BLOCK.wouldRefuse]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
+	if (!refusedByAwsCheck || at === -1) return blocks;
+	let link = {
+		priority: 0,
+		level: 1,
+		section: "traffic",
+		cut: "keep",
+		text: `\n<sub>*For an \`aws-\` reason, see [what to do](${`https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`}).*</sub>\n`
 	};
+	return [
+		...blocks.slice(0, at + 1),
+		link,
+		...blocks.slice(at + 1)
+	];
+}
+function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
+	let emissions = describeReportOutcomes(report, {
+		failOnBlocked: failOnBlocked ?? !1,
+		engineLabel: "sandbox"
+	}), blocks = withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
+		title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
+		stepName: "Start isolated-run",
+		runCommand,
+		extraInputs,
+		actionVersion
+	}), report, actionRepo, actionRef);
 	return {
-		write: (line) => {
-			pending.push(first ? line : `\n${line}`), first = !1, size += line.length + 1, size >= chunkBytes && flush();
-		},
-		close: () => {
-			try {
-				flush();
-			} finally {
-				(0, node_fs.closeSync)(fd);
-			}
-		}
+		markdown: joinSummaryBlocks(blocks),
+		blocks,
+		emissions
 	};
 }
-const realDeps$3 = {
-	readLines,
-	createSummary: createAuditSummary,
-	openWriter,
-	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
-	realpath: (path) => (0, node_fs.realpathSync)(path),
-	renderBlocks: renderAuditSummaryBlocks,
-	uploadArtifact: uploadFilesystemAuditArtifact,
-	setOutput: setFilesystemAuditOutput,
-	appendFile: (path, content) => (0, node_fs.appendFileSync)(path, content)
-};
-function prefixes(value, realpath) {
-	if (!value) return [];
-	let out = [value];
+function summarySize(path, fileSize) {
+	if (!path) return 0;
 	try {
-		let real = realpath(value);
-		real !== value && out.push(real);
-	} catch {}
-	return out;
-}
-const NONE = { blocks: () => [] };
-async function prepareStepFilesystemAudit({ audit, retentionDays, containerName, annotation, env, actionRepo, actionRef }, overrides = {}) {
-	let deps = {
-		...realDeps$3,
-		...overrides
-	}, artifactName = "";
-	try {
-		if (!audit) return NONE;
-		let options = {
-			workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-			home: prefixes(env.HOME, deps.realpath)
-		}, cleanPath = audit.stepPath, reduced;
-		try {
-			reduced = reduce(audit.outPath, cleanPath, options, annotation, deps);
-		} catch (e) {
-			return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), { blocks: () => unreadableSummaryBlocks() };
-		}
-		if (!reduced) return NONE;
-		let { summary, summaryError } = reduced;
-		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
-		let uploaded = artifactName || void 0, cutNote = (cause) => filesystemTruncationNote(uploaded, cause), notice = cutNote(), legendNote = filesystemLegendNote(uploaded, `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`);
-		return { blocks: (startedAt) => {
-			let rendered;
-			try {
-				if (!summary) throw summaryError;
-				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, cutNote, legendNote);
-			} catch (e) {
-				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
-			}
-			return audit.outPath, joinSummaryBlocks(rendered), withNotices(rendered, () => notice);
-		} };
-	} catch (e) {
-		return annotation.warning(`Failed to report the filesystem audit: ${errorMessage(e)}`), NONE;
-	} finally {
-		try {
-			deps.setOutput(artifactName);
-		} catch (e) {
-			annotation.warning(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
-		}
+		return fileSize(path);
+	} catch {
+		return 0;
 	}
 }
-function reduce(outPath, cleanPath, options, annotation, deps) {
-	let stripper = createStripper((0, node_path.dirname)(outPath)), summary = deps.createSummary(options), summaryError, failedSummary = !1, summarize = (step) => {
-		if (!failedSummary) try {
-			step();
-		} catch (e) {
-			[failedSummary, summaryError] = [!0, e];
-		}
-	}, lines = 0, length = 0;
-	try {
-		deps.readLines(outPath, (line) => {
-			lines++, length += line.length;
-			let r = parseLine(line);
-			stripper.observe(r), summarize(() => summary.observe(r));
-		});
-	} catch (e) {
-		if (e.code === "ENOENT") return;
-		throw e;
-	}
-	let writer, written = !1, dropCopy = (e) => {
-		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
-		let open = writer;
-		writer = void 0, written = !1;
-		try {
-			open?.close();
-		} catch {}
-	};
-	try {
-		writer = deps.openWriter(cleanPath);
-	} catch (e) {
-		dropCopy(e);
-	}
-	let again = 0, lengthAgain = 0;
-	try {
-		deps.readLines(outPath, (line) => {
-			again++, lengthAgain += line.length;
-			let r = parseLine(line), kept = stripper.filter(line, r);
-			if (summarize(() => summary.add(kept ? kept.record : r, kept !== void 0)), kept && writer) try {
-				writer.write(kept.line), written = !0;
-			} catch (e) {
-				dropCopy(e);
-			}
-		});
-	} finally {
-		let open = writer;
-		writer = void 0;
-		try {
-			open?.close();
-		} catch (e) {
-			dropCopy(e);
-		}
-	}
-	if (again !== lines || lengthAgain !== length) throw Error("the recording changed while it was being read");
-	let result;
-	return summarize(() => result = summary.finish()), {
-		summary: result,
-		summaryError,
-		written
-	};
+async function writeSummaryBlocks(blocks, env, { fileSize = (p) => (0, node_fs.statSync)(p).size, writeSummary = writeStepSummary } = {}) {
+	await writeSummary(fitStepSummary(blocks, { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) }), env.GITHUB_STEP_SUMMARY);
+}
+async function writeReportSummary(report, annotation, { extraBlocks = [], ...options }, artifactAvailable, env, { appendFile = node_fs.appendFileSync, ...deps } = {}) {
+	let outcomes = computeReportOutcomes(report, options);
+	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)), ...extraBlocks], env, deps);
 }
 //#endregion
-//#region src/proxy/aws-keys.ts
-const ACCOUNT_ID = /^\d{12}$/, ACCESS_KEY_ID = /^[A-Z0-9]{16,128}$/;
-function parseAwsAccounts(input) {
-	let tokens = splitRuleTokens(input).flatMap((token) => token.split(",").filter(Boolean)), invalid = tokens.filter((token) => !ACCOUNT_ID.test(token));
-	if (invalid.length > 0) throw Error(`invalid AWS account ID: ${invalid.map((t) => JSON.stringify(t)).join(", ")}`);
-	return [...new Set(tokens)];
+//#region src/core/lib/report/outcome/traffic-output.ts
+const RECORD_FIELDS = new Set([
+	"time",
+	"elapsed",
+	"action",
+	"protocol",
+	"host",
+	"port",
+	"queryType",
+	"method",
+	"url",
+	"status",
+	"bytes",
+	"reason",
+	"destination",
+	"wouldRefuse"
+]);
+function buildTrafficRecords(events, startedAt) {
+	return [...events].sort((a, b) => a.time - b.time).map((e) => {
+		let record = {
+			time: new Date(e.time * 1e3).toISOString(),
+			action: e.action,
+			protocol: e.protocol,
+			host: e.host
+		};
+		startedAt !== void 0 && (record.elapsed = formatElapsedFixed(e.time - startedAt)), e.port !== void 0 && (record.port = e.port), e.queryType !== void 0 && (record.queryType = e.queryType), e.method !== void 0 && (record.method = e.method), e.url !== void 0 && (record.url = e.url), e.status !== void 0 && (record.status = e.status), e.bytes !== void 0 && (record.bytes = e.bytes), e.reason !== void 0 && (record.reason = e.reason), e.destination !== void 0 && (record.destination = e.destination), e.wouldRefuse !== void 0 && (record.wouldRefuse = e.wouldRefuse);
+		for (let [name, fields] of Object.entries(e.extensions ?? {})) RECORD_FIELDS.has(name) || Object.assign(record, { [name]: fields });
+		return record;
+	});
 }
-function isAwsAccessKeyId(value) {
-	return ACCESS_KEY_ID.test(value);
-}
-//#endregion
-//#region src/lib/filesystem-audit-mode.ts
-const FILESYSTEM_AUDIT = ["off", "record"];
-function resolveFilesystemAudit(input) {
-	let trimmed = input?.trim() || "off";
-	if (!FILESYSTEM_AUDIT.includes(trimmed)) throw new SandboxError(`Invalid filesystem_audit: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_AUDIT.join(", ")}.`, "INVALID_FILESYSTEM_AUDIT");
-	return trimmed;
-}
-//#endregion
-//#region src/lib/filesystem-mode.ts
-const FILESYSTEM_MODES = ["persistent", "ephemeral"];
-function resolveFilesystemMode(input) {
-	let trimmed = input?.trim() || "persistent";
-	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem_mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
-	return trimmed;
-}
-//#endregion
-//#region src/lib/inputs.ts
-init_core();
-const LIST_INPUTS = [
-	"allowed_https_rules",
-	"allowed_http_rules",
-	"allowed_ip_rules",
-	"allowed_url_rules",
-	"allowed_tls_rules",
-	"known_blocked_rules",
-	"write_through"
-], CONFIG_FILE_INPUTS = {
-	known: [
-		"proxy_mode",
-		"proxy_engine",
-		...LIST_INPUTS,
-		"aws_key_check",
-		"allowed_aws_role_accounts",
-		"upload_traffic_artifact",
-		"traffic_artifact_retention_days",
-		"fail_on_blocked",
-		"fail_on_ca_residue",
-		"filesystem_mode",
-		"filesystem_audit",
-		"filesystem_audit_retention_days",
-		"label"
-	],
-	lists: LIST_INPUTS
-};
-function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, notice) {
-	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
-	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
-}
-function readRunCommand(getInput$9 = getInput) {
-	let runInput = getInput$9("run", { trimWhitespace: !1 });
-	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
-	return runInput;
-}
-function readProxyInputs(getInput$8 = getInput) {
-	return {
-		proxyEngine: resolveProxyEngine(getInput$8("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$8("proxy_mode"))
-	};
-}
-function readFilesystemInputs(notice, getInput$5 = getInput) {
-	return {
-		filesystemMode: resolveFilesystemMode(getInput$5("filesystem_mode")),
-		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$5("write_through"),
-			writable: getInput$5("writable"),
-			allowWrite: getInput$5("allow_write")
-		}, notice)
-	};
-}
-function readFilesystemAuditInput(getInput$4 = getInput) {
-	return resolveFilesystemAudit(getInput$4("filesystem_audit"));
-}
-function readFilesystemAuditRetentionDays(getInput$6 = getInput) {
-	let days = getInput$6("filesystem_audit_retention_days");
-	if (days !== "") {
-		if (!/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
-		return Number(days);
-	}
-}
-function readStepLabel(getInput$2 = getInput) {
-	return getInput$2("label") || void 0;
-}
-function readFailOnCaResidue(getInput$7 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$7);
-}
-function readFailOnBlocked(getInput$1 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$1);
-}
-const AWS_KEY_CHECK_OFF = {
-	key: "",
-	roleAccounts: []
-};
-function readAwsKeyInputs({ proxyEngine }, env, getInput$3 = getInput) {
-	let roleAccounts;
-	try {
-		roleAccounts = parseAwsAccounts(getInput$3("allowed_aws_role_accounts"));
-	} catch (e) {
-		let { message } = e;
-		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
-	}
-	let check = readBooleanInput("aws_key_check", !1, getInput$3);
-	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config_file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
-	if (!check) return AWS_KEY_CHECK_OFF;
-	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy_engine: inspect, or remove aws_key_check and allowed_aws_role_accounts.`, "INVALID_PROXY_ENGINE");
-	let key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
-	if (!isAwsAccessKeyId(key)) throw new SandboxError("The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. The check starts from that variable alone, never from a profile, a credentials file or any other credential source. Put the key to check there in an earlier step, for example with aws-actions/configure-aws-credentials, or run the AWS commands in a step without the check.", "AWS_ACCESS_KEY_MISSING");
-	return {
-		key,
-		roleAccounts
-	};
-}
-function awsExampleInputs({ key, roleAccounts }, timeline = []) {
-	if (!key) return [];
-	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => e.extensions?.aws?.assumedAccount ?? []).filter((a) => /^\d{12}$/.test(a)), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), mark = (a) => added.has(a) ? " # assumed in this run, check it is yours" : "";
-	return accounts.length === 1 ? lines.push(`allowed_aws_role_accounts: "${accounts[0]}"${mark(accounts[0])}`) : accounts.length > 1 && lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${a}${mark(a)}`)), lines;
+function writeTrafficFile(path, records) {
+	(0, node_fs.writeFileSync)(path, JSON.stringify(records, null, 2) + "\n");
 }
 //#endregion
 //#region src/lib/retry-briefly.ts
@@ -69782,6 +70469,254 @@ async function withScratchDir(fn, { containerName, ephemeralRoots, warn } = {}) 
 	}
 }
 //#endregion
+//#region src/lib/traffic-artifact.ts
+init_core();
+function trafficArtifactName(containerName) {
+	return `buildcage-traffic-${containerName.split("-").at(-1)}`;
+}
+const uploadViaActionsArtifact = async (name, files, rootDirectory, options) => {
+	let { DefaultArtifactClient } = await Promise.resolve().then(() => (init_artifact(), artifact_exports));
+	return new DefaultArtifactClient().uploadArtifact(name, files, rootDirectory, options);
+};
+async function uploadTrafficArtifact(report, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact, scratchBase = SANDBOX_SCRATCH_BASE } = {}) {
+	ensureOwnScratchBase(scratchBase);
+	let scratchDir = (0, node_fs.mkdtempSync)((0, node_path.join)(scratchBase, "traffic-"));
+	try {
+		let file = (0, node_path.join)(scratchDir, "traffic.json");
+		writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));
+		let name = trafficArtifactName(containerName);
+		return await upload(name, [file], scratchDir, { retentionDays }), console.log(`Uploaded the traffic JSON as ${name}`), name;
+	} catch (e) {
+		annotation.warning(`Could not upload the traffic artifact: ${errorMessage(e)}`);
+		return;
+	} finally {
+		(0, node_fs.rmSync)(scratchDir, {
+			recursive: !0,
+			force: !0
+		});
+	}
+}
+function setTrafficArtifactOutput(name) {
+	setOutput("traffic_artifact_name", name);
+}
+//#endregion
+//#region src/lib/step-report.ts
+const realDeps$3 = {
+	fetchReport,
+	readActionVersion,
+	writeReportSummary,
+	writeSummaryBlocks,
+	uploadTrafficArtifact,
+	setTrafficArtifactOutput,
+	readStepLabel
+};
+function failOrWarn(annotation, failClosed) {
+	return (message) => {
+		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail_on_blocked`), process.exitCode = 1) : annotation.warning(message);
+	};
+}
+async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [] }, overrides = {}) {
+	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
+		...realDeps$3,
+		...overrides
+	}, fail = failOrWarn(annotation, parameters.mode !== "audit" && failOnBlocked), report;
+	try {
+		report = await fetchReport(containerName, parameters, proxyEngine);
+	} catch (e) {
+		fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
+	}
+	let extraBlocks = moreBlocks(report?.startedAt), writeRest = async () => {
+		if (extraBlocks.length !== 0) try {
+			await writeSummaryBlocks(extraBlocks, env);
+		} catch (e) {
+			annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
+		}
+	}, artifactName = "";
+	if (!report) await writeRest();
+	else {
+		try {
+			await writeReportSummary(report, annotation, {
+				actionRepo,
+				actionRef,
+				runCommand,
+				extraInputs: extraInputs?.(report),
+				actionVersion: readActionVersion(containerName, proxyEngine),
+				stepLabel: readStepLabel(),
+				failOnBlocked,
+				extraBlocks
+			}, trafficArtifact.upload, env);
+		} catch (e) {
+			fail(`Failed to write the report summary: ${errorMessage(e)}`), await writeRest();
+		}
+		if (trafficArtifact.upload) try {
+			artifactName = await uploadTrafficArtifact(report, containerName, trafficArtifact.retentionDays, annotation) ?? "";
+		} catch (e) {
+			annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
+		}
+	}
+	try {
+		setTrafficArtifactOutput(artifactName);
+	} catch (e) {
+		fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
+	}
+}
+//#endregion
+//#region src/lib/filesystem-audit-report.ts
+const CHUNK_BYTES = 1 << 20;
+function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
+	let fd = (0, node_fs.openSync)(path, "r");
+	try {
+		let buf = Buffer.alloc(chunkBytes), carry = [];
+		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
+			let chunk = buf.subarray(0, n), start = 0;
+			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) carry.length === 0 ? onLine(chunk.toString("utf8", start, nl)) : onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
+			start < n && carry.push(Buffer.from(chunk.subarray(start)));
+		}
+		onLine(Buffer.concat(carry).toString("utf8"));
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function openWriter(path, chunkBytes = CHUNK_BYTES) {
+	let fd = (0, node_fs.openSync)(path, "w"), pending = [], size = 0, first = !0, flush = () => {
+		let data = Buffer.from(pending.join(""));
+		for (let off = 0; off < data.length;) off += (0, node_fs.writeSync)(fd, data, off);
+		pending = [], size = 0;
+	};
+	return {
+		write: (line) => {
+			pending.push(first ? line : `\n${line}`), first = !1, size += line.length + 1, size >= chunkBytes && flush();
+		},
+		close: () => {
+			try {
+				flush();
+			} finally {
+				(0, node_fs.closeSync)(fd);
+			}
+		}
+	};
+}
+const realDeps$2 = {
+	readLines,
+	createSummary: createAuditSummary,
+	openWriter,
+	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
+	realpath: (path) => (0, node_fs.realpathSync)(path),
+	renderBlocks: renderAuditSummaryBlocks,
+	uploadArtifact: uploadFilesystemAuditArtifact,
+	setOutput: setFilesystemAuditOutput,
+	appendFile: (path, content) => (0, node_fs.appendFileSync)(path, content)
+};
+function prefixes(value, realpath) {
+	if (!value) return [];
+	let out = [value];
+	try {
+		let real = realpath(value);
+		real !== value && out.push(real);
+	} catch {}
+	return out;
+}
+const NONE = { blocks: () => [] };
+async function prepareStepFilesystemAudit({ audit, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
+	let deps = {
+		...realDeps$2,
+		...overrides
+	}, artifactName = "";
+	try {
+		if (!audit) return NONE;
+		let options = {
+			workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
+			home: prefixes(env.HOME, deps.realpath)
+		}, cleanPath = audit.stepPath, reduced;
+		try {
+			reduced = reduce(audit.outPath, cleanPath, options, annotation, deps);
+		} catch (e) {
+			return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), { blocks: () => unreadableSummaryBlocks() };
+		}
+		if (!reduced) return NONE;
+		let { summary, summaryError } = reduced;
+		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
+		let uploaded = artifactName || void 0, cutNote = (cause) => filesystemTruncationNote(uploaded, cause), notice = cutNote(), legendNote = filesystemLegendNote(uploaded, `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`);
+		return { blocks: (startedAt) => {
+			let rendered;
+			try {
+				if (!summary) throw summaryError;
+				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, cutNote, legendNote);
+			} catch (e) {
+				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
+			}
+			return audit.outPath, joinSummaryBlocks(rendered), withNotices(rendered, () => notice);
+		} };
+	} catch (e) {
+		return annotation.warning(`Failed to report the filesystem audit: ${errorMessage(e)}`), NONE;
+	} finally {
+		try {
+			deps.setOutput(artifactName);
+		} catch (e) {
+			failOrWarn(annotation, failClosed)(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
+		}
+	}
+}
+function reduce(outPath, cleanPath, options, annotation, deps) {
+	let stripper = createStripper((0, node_path.dirname)(outPath)), summary = deps.createSummary(options), summaryError, failedSummary = !1, summarize = (step) => {
+		if (!failedSummary) try {
+			step();
+		} catch (e) {
+			[failedSummary, summaryError] = [!0, e];
+		}
+	}, lines = 0, length = 0;
+	try {
+		deps.readLines(outPath, (line) => {
+			lines++, length += line.length;
+			let r = parseLine(line);
+			stripper.observe(r), summarize(() => summary.observe(r));
+		});
+	} catch (e) {
+		if (e.code === "ENOENT") return;
+		throw e;
+	}
+	let writer, written = !1, dropCopy = (e) => {
+		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
+		let open = writer;
+		writer = void 0, written = !1;
+		try {
+			open?.close();
+		} catch {}
+	};
+	try {
+		writer = deps.openWriter(cleanPath);
+	} catch (e) {
+		dropCopy(e);
+	}
+	let again = 0, lengthAgain = 0;
+	try {
+		deps.readLines(outPath, (line) => {
+			again++, lengthAgain += line.length;
+			let r = parseLine(line), kept = stripper.filter(line, r);
+			if (summarize(() => summary.add(kept ? kept.record : r, kept !== void 0)), kept && writer) try {
+				writer.write(kept.line), written = !0;
+			} catch (e) {
+				dropCopy(e);
+			}
+		});
+	} finally {
+		let open = writer;
+		writer = void 0;
+		try {
+			open?.close();
+		} catch (e) {
+			dropCopy(e);
+		}
+	}
+	if (again !== lines || lengthAgain !== length) throw Error("the recording changed while it was being read");
+	let result;
+	return summarize(() => result = summary.finish()), {
+		summary: result,
+		summaryError,
+		written
+	};
+}
+//#endregion
 //#region src/lib/overlayfs-preflight.ts
 const REQUIREMENT$1 = `filesystem_mode: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE}: an overlay mount's upperdir/workdir are placed there, and the kernel doesn't allow those to themselves sit on an overlayfs filesystem. This commonly fails when the runner process is itself running inside a container whose own root filesystem is overlayfs (e.g. many container-based self-hosted runner setups), since that puts SANDBOX_SCRATCH_BASE on overlayfs too. Use filesystem_mode: persistent instead, or run this action from a runner whose filesystem isn't overlayfs-backed.`;
 function describeOverlayFailure(e) {
@@ -69861,57 +70796,6 @@ function postWriteThroughPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
 function saveWriteThroughForPost(env, writeThroughInput, scratchBase = SANDBOX_SCRATCH_BASE) {
 	let path = postWriteThroughPath(env, scratchBase);
 	env.GITHUB_STATE && path && (ensureOwnScratchBase(scratchBase), (0, node_fs.writeFileSync)(path, writeThroughInput, { mode: 384 }));
-}
-//#endregion
-//#region src/core/lib/docker/args.ts
-function buildDockerCpArgs({ containerName, containerPath, hostPath }) {
-	return [
-		"cp",
-		`${containerName}:${containerPath}`,
-		hostPath
-	];
-}
-function buildComposeUpArgs({ composeFile, projectName, pullPolicy }) {
-	return [
-		"compose",
-		"-f",
-		composeFile,
-		"-p",
-		projectName,
-		"up",
-		"-d",
-		"--pull",
-		pullPolicy,
-		"--no-build",
-		"--wait",
-		"--wait-timeout",
-		"180",
-		"--quiet-pull"
-	];
-}
-function buildComposeLogsArgs({ composeFile, projectName, tail }) {
-	return [
-		"compose",
-		"-f",
-		composeFile,
-		"-p",
-		projectName,
-		"logs",
-		"--no-color",
-		"--tail",
-		String(tail)
-	];
-}
-function buildComposeDownArgs({ composeFile, projectName }) {
-	return [
-		"compose",
-		"-f",
-		composeFile,
-		"-p",
-		projectName,
-		"down",
-		"-v"
-	];
 }
 //#endregion
 //#region src/core/lib/docker/health.ts
@@ -72147,7 +73031,7 @@ function extractRuncBootstrap({ containerName, destDir }, deps = {}) {
 //#endregion
 //#region src/lib/sandbox/sandboxed-command.ts
 init_core();
-const realDeps$2 = {
+const realDeps$1 = {
 	withScratchDir,
 	extractRuncBootstrap,
 	extractCaCert,
@@ -72334,7 +73218,7 @@ async function startAudit(dir, config, options, deps) {
 }
 async function runSandboxedCommand(options, overrides = {}) {
 	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {
-		...realDeps$2,
+		...realDeps$1,
 		...overrides
 	}, { withScratchDir, writeOciConfig, resolveSandboxEnv, buildEnvBlob, runIsolated } = deps;
 	return withScratchDir(async (dir) => {
@@ -72367,887 +73251,6 @@ async function runSandboxedCommand(options, overrides = {}) {
 		ephemeralRoots: filesystemMode === "ephemeral" ? overlayRoots : void 0,
 		warn
 	});
-}
-//#endregion
-//#region src/core/lib/actions/write-step-summary.ts
-init_core();
-async function writeStepSummary(markdown, summaryFile) {
-	summaryFile ? await summary.addRaw(markdown).write() : console.log(markdown);
-}
-//#endregion
-//#region src/core/lib/docker/container-env.ts
-function parseDockerInspectEnv(inspectOutput) {
-	let entries = JSON.parse(inspectOutput), env = {};
-	for (let entry of entries) {
-		let i = entry.indexOf("=");
-		i !== -1 && (env[entry.slice(0, i)] = entry.slice(i + 1));
-	}
-	return env;
-}
-function parseDockerInspectLabels(inspectOutput) {
-	return JSON.parse(inspectOutput) ?? {};
-}
-//#endregion
-//#region src/core/lib/docker/client.ts
-function parseContainerIds(psOutput) {
-	return psOutput.split("\n").map((s) => s.trim()).filter(Boolean);
-}
-function defaultRunCommand(args) {
-	return (0, node_child_process.execFileSync)("docker", args, {
-		encoding: "utf8",
-		stdio: [
-			"ignore",
-			"pipe",
-			"pipe"
-		],
-		maxBuffer: 67108864
-	});
-}
-function defaultSpawnCommand(args) {
-	return (0, node_child_process.spawn)("docker", args, { stdio: [
-		"ignore",
-		"pipe",
-		"pipe"
-	] });
-}
-async function* streamDockerLines(spawnDocker, args, operation) {
-	let child = spawnDocker(args), spawnError;
-	child.on("error", (err) => {
-		spawnError = err;
-	});
-	let closed = (0, node_events.once)(child, "close").then(([code, signal]) => ({
-		code,
-		signal
-	}), () => ({
-		code: null,
-		signal: null
-	})), stderr = "";
-	child.stderr?.setEncoding("utf8"), child.stderr?.on("data", (chunk) => {
-		stderr += chunk;
-	});
-	let rl = (0, node_readline.createInterface)({
-		input: child.stdout,
-		crlfDelay: Infinity
-	}), exhausted = !1;
-	try {
-		for await (let line of rl) yield line;
-		exhausted = !0;
-	} finally {
-		rl.close(), !exhausted && child.exitCode === null && child.signalCode === null && child.kill();
-	}
-	let { code, signal } = await closed;
-	if (spawnError) throw spawnError;
-	if (code !== 0) throw Object.assign(Error(`${operation} exited with code ${code}${signal ? ` (signal ${signal})` : ""}: ${stderr.trim()}`), {
-		status: code ?? void 0,
-		stderr
-	});
-}
-function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand) {
-	return {
-		findContainers(filters) {
-			let args = ["ps"];
-			for (let filter of filters) args.push("--filter", filter);
-			return args.push("--format", "{{.ID}}"), parseContainerIds(run(args));
-		},
-		copyFromContainer(containerId, containerPath, hostPath) {
-			run(buildDockerCpArgs({
-				containerName: containerId,
-				containerPath,
-				hostPath
-			}));
-		},
-		readFileLines(containerId, path) {
-			return streamDockerLines(spawnDocker, [
-				"exec",
-				containerId,
-				"cat",
-				path
-			], `docker exec cat ${path}`);
-		},
-		readEnv(containerId) {
-			return parseDockerInspectEnv(run([
-				"inspect",
-				containerId,
-				"--format",
-				"{{json .Config.Env}}"
-			]));
-		},
-		readLabels(containerId) {
-			return parseDockerInspectLabels(run([
-				"inspect",
-				containerId,
-				"--format",
-				"{{json .Config.Labels}}"
-			]));
-		},
-		exec(containerId, args) {
-			return run([
-				"exec",
-				containerId,
-				...args
-			]);
-		}
-	};
-}
-//#endregion
-//#region src/core/lib/docker/proxy-dropped-logs.ts
-const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m;
-function parseDroppedLogs(metrics) {
-	let match = COUNTER.exec(metrics);
-	return match ? Number(match[1]) : void 0;
-}
-function readProxyDroppedLogs(docker, containerId) {
-	try {
-		return parseDroppedLogs(docker.exec(containerId, [
-			"curl",
-			"-sf",
-			"--max-time",
-			"10",
-			"--unix-socket",
-			"/var/run/haproxy-health.sock",
-			"http://localhost/metrics?scope=global"
-		]));
-	} catch {
-		return;
-	}
-}
-//#endregion
-//#region src/core/lib/docker/rotated-log.ts
-const SEGMENT = /^@[0-9a-f]{24}\.[a-z]$/;
-function parseLogSegments(lsOutput) {
-	let entries = lsOutput.split("\n").map((line) => line.trim()).filter(Boolean), segments = entries.filter((name) => SEGMENT.test(name)).sort();
-	return entries.includes("current") && segments.push("current"), segments;
-}
-async function* readRotatedLog(docker, containerId, dir) {
-	let listing = docker.exec(containerId, [
-		"ls",
-		"-1",
-		dir
-	]);
-	for (let name of parseLogSegments(listing)) yield* docker.readFileLines(containerId, `${dir}/${name}`);
-}
-//#endregion
-//#region src/core/lib/report/action-version.ts
-function readActionVersion$1(docker, containerId, proxyEngine) {
-	try {
-		let label = docker.readLabels(containerId)["org.opencontainers.image.version"];
-		if (!label) return;
-		let suffix = `-${proxyEngine}`;
-		return `v${label.endsWith(suffix) ? label.slice(0, -suffix.length) : label}`;
-	} catch {
-		return;
-	}
-}
-//#endregion
-//#region src/core/lib/log/start-marker.ts
-const PROXY_START_MARKER = "buildcage haproxy starting", BAD_REQUEST_METHOD = "<BADREQ>";
-function incompleteReason(terminationState, method) {
-	let cause = terminationState[0];
-	if (cause !== "P") return terminationState[1] === "R" ? cause === "C" ? "client-aborted" : cause === "c" ? "client-timeout" : "no-request" : method === "<BADREQ>" ? "no-request" : void 0;
-}
-//#endregion
-//#region src/core/lib/log/inspect.ts
-const REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:wr=(\S+) )?((?:[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*=\S+ )*)(?:fcerr=(\S+) )?(?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
-function timeOf(stamp) {
-	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
-	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
-}
-function isRefusal(terminationState) {
-	let cause = terminationState[0];
-	if (cause === "P" || cause === "S") return !0;
-	let phase = terminationState[1];
-	return cause === "s" && (phase === "C" || phase === "H");
-}
-function reasonFor(logged, terminationState, tlsError, method) {
-	if (logged !== "-") return logged;
-	let cause = terminationState[0];
-	if (cause !== "S" && cause !== "s") return method === "<BADREQ>" ? "bad-request" : "not-allowed";
-	switch (terminationState[1]) {
-		case "H": return "origin-no-response";
-		case "D":
-		case "L": return "origin-aborted";
-		default: return tlsError === void 0 ? "origin-unreachable" : cause === "S" && tlsError !== "-" && tlsError !== "0" ? "origin-untrusted" : "origin-connect-failed";
-	}
-}
-const REQUESTLESS_REASONS = new Set(["bad-request", "missing-host-header"]), FAILURE_REASONS$1 = new Set([
-	"origin-unreachable",
-	"origin-no-response",
-	"origin-aborted",
-	"dns-failed"
-]);
-function actionFor(reason, isAudit) {
-	return reason === void 0 ? isAudit ? "audit" : "allow" : FAILURE_REASONS$1.has(reason) ? "failed" : "block";
-}
-function urlOf(scheme, authority, target) {
-	return target.startsWith("/") ? `${scheme}://${authority}${target}` : void 0;
-}
-function authorityOf(host, port, scheme) {
-	return port === DEFAULT_PORT$1[scheme] ? host : `${host}:${port}`;
-}
-function hostBeforeRequest(sni, address) {
-	return sni !== void 0 && sni !== "-" ? {
-		host: sniHost(sni),
-		byAddress: !1
-	} : address === "198.19.255.1" ? {
-		host: UNKNOWN_HOST,
-		byAddress: !1
-	} : {
-		host: address,
-		byAddress: !0
-	};
-}
-function extensionFields(tokens) {
-	let objects = new Map();
-	for (let token of tokens.split(" ")) {
-		let match = /^([^.]+)\.([^=]+)=(.*)$/.exec(token);
-		if (!match || match[3] === "-") continue;
-		let fields = objects.get(match[1]) ?? new Map();
-		objects.set(match[1], fields.set(match[2], match[3]));
-	}
-	if (objects.size !== 0) return Object.fromEntries([...objects].map(([name, fields]) => [name, Object.fromEntries(fields)]));
-}
-function parseProxyLine(line, isAudit) {
-	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
-	if (request) {
-		let fcerr = request[13] ?? "", incomplete = request[3] === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[15]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[14], request[9]) : void 0, event = {
-			time: Number(request[1]) / 1e3,
-			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
-			protocol: unnamed?.byAddress ? "tcp" : scheme,
-			host: unnamed?.host ?? host,
-			port: Number(request[10]),
-			destination: `${request[9]}:${request[10]}`
-		};
-		if (parsedRequest) {
-			event.method = request[3];
-			let url = urlOf(scheme, unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority, request[16]);
-			url !== void 0 && (event.url = url);
-		}
-		let wouldRefuse = request[11];
-		wouldRefuse !== void 0 && wouldRefuse !== "-" && (event.wouldRefuse = wouldRefuse);
-		let extensions = extensionFields(request[12]);
-		return extensions && (event.extensions = extensions), reason === void 0 ? (event.status = Number(request[4]), event.bytes = Number(request[5])) : event.reason = reason, event;
-	}
-	let pass = PASSTHROUGH.exec(trimmed);
-	if (pass) {
-		let reason = isRefusal(pass[4]) ? reasonFor(pass[5], pass[4], void 0, "-") : void 0, sni = pass[8], event = {
-			time: Number(pass[1]) / 1e3,
-			action: actionFor(reason, isAudit),
-			protocol: pass[2],
-			host: sni === "-" ? pass[6] : sniHost(sni),
-			port: Number(pass[7]),
-			destination: `${pass[6]}:${pass[7]}`
-		};
-		return reason === void 0 ? event.bytes = Number(pass[3]) : event.reason = reason, event;
-	}
-	return null;
-}
-async function scanInspectLog(lines, isAudit = !1, allowsName) {
-	let events = [], startedAt, headIntact, unparsed = 0;
-	for await (let line of lines) {
-		let event = parseProxyLine(line, isAudit);
-		if (event) {
-			headIntact ??= !1, events.push(event);
-			continue;
-		}
-		let trimmed = line.trim();
-		if (trimmed === "") continue;
-		let match = START$1.exec(trimmed);
-		headIntact ??= match !== null, match && startedAt === void 0 && (startedAt = Number(match[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
-	}
-	return refuseUnpassedAddresses(events), allowsName && refuseUnallowedNames(events, allowsName), {
-		events,
-		startedAt,
-		headIntact: headIntact ?? !1,
-		unparsed
-	};
-}
-function refuseUnpassedAddresses(events) {
-	let served = new Set();
-	for (let event of events) (event.protocol === "http" || event.protocol === "https") && event.action !== "incomplete" && served.add(event.destination);
-	for (let event of events) event.action === "incomplete" && event.protocol === "tcp" && (CLIENT_ENDED_REASONS.has(event.reason) && served.has(event.destination) || (event.action = "block", event.reason = "ip-not-allowed"));
-}
-function refuseUnallowedNames(events, allowsName) {
-	for (let event of events) event.action === "incomplete" && event.protocol === "https" && (event.host === "(unknown)" || allowsName(event.host) || event.destination?.startsWith("198.19.255.1:") || (event.action = "block", event.reason = "sni-not-allowed"));
-}
-async function scanInspectDnsLog(lines, isAudit = !1) {
-	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
-	for await (let line of lines) {
-		let trimmed = line.trim();
-		trimmed !== "" && (headIntact ??= trimmed.endsWith("buildcage coredns starting"));
-		let match = DNS.exec(trimmed);
-		if (match) {
-			let time = timeOf(match[1]), allowed = match[2] === "allowed", existing = seen.get(match[3]);
-			existing ? existing.allowed ||= allowed : seen.set(match[3], {
-				time,
-				allowed
-			});
-			continue;
-		}
-		let lookup = DNS_DISCOVERY.exec(trimmed);
-		if (lookup) {
-			let key = `${lookup[2]}\t${lookup[3]}`;
-			discovery.has(key) || discovery.set(key, {
-				time: timeOf(lookup[1]),
-				host: lookup[2],
-				queryType: lookup[3]
-			});
-			continue;
-		}
-		let refused = DNS_SERVICE_DENIED.exec(trimmed);
-		if (!refused) {
-			DNS_LINE.test(trimmed) && unparsed++;
-			continue;
-		}
-		service.has(refused[2]) || service.set(refused[2], {
-			time: timeOf(refused[1]),
-			host: refused[2],
-			queryType: refused[3]
-		});
-	}
-	let events = [...seen.entries()].map(([host, { time, allowed }]) => {
-		let reason = allowed ? void 0 : "dns-not-allowed", event = {
-			time,
-			action: actionFor(reason, isAudit),
-			protocol: "dns",
-			host
-		};
-		return reason !== void 0 && (event.reason = reason), event;
-	});
-	for (let { time, host, queryType } of discovery.values()) events.push({
-		time,
-		action: "discovery",
-		protocol: "dns",
-		host,
-		queryType
-	});
-	for (let { time, host, queryType } of service.values()) events.push({
-		time,
-		action: actionFor("dns-service-not-allowed", isAudit),
-		protocol: "dns",
-		host,
-		queryType,
-		reason: "dns-service-not-allowed"
-	});
-	return {
-		events,
-		headIntact: headIntact ?? !1,
-		unparsed
-	};
-}
-//#endregion
-//#region src/core/lib/log/aggregate.ts
-function entryKey(e) {
-	return `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
-}
-function compareAggregated(a, b) {
-	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
-}
-function aggregate(filtered) {
-	let map = {};
-	for (let e of filtered) {
-		let key = entryKey(e);
-		map[key] = (map[key] || 0) + 1;
-	}
-	return Object.keys(map).map((key) => {
-		let [host, portStr, ruleType, reason] = key.split("	");
-		return {
-			host,
-			port: portStr,
-			ruleType,
-			reason,
-			count: map[key]
-		};
-	}).sort(compareAggregated);
-}
-//#endregion
-//#region src/core/lib/report/build/aggregate.ts
-function targetOf(event) {
-	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
-}
-function requestPath(url) {
-	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
-	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
-}
-function matchesUrlRule({ rule, hostRe, pathRe }, event) {
-	if (event.method === void 0 || event.url === void 0) return !1;
-	let scheme = rule.schemes.find((s) => s === event.protocol);
-	if (scheme === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
-	let hostPort = `${event.host}:${event.port}`;
-	if (rule.isRegex) {
-		let defaultPort = Number(DEFAULT_PORT$1[scheme]);
-		return event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
-	}
-	return hostRe.test(hostPort);
-}
-function buildMatchers(knownBlockedRules) {
-	return knownBlockedRules.map((line) => {
-		if (isKnownBlockedUrlRule(line)) {
-			let urlRule = convertUrlRule(line), compiled = {
-				rule: urlRule,
-				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex, "i"),
-				pathRe: new RegExp(urlRule.pathRegex)
-			};
-			return {
-				rule: urlRule.raw,
-				matches: (event) => matchesUrlRule(compiled, event)
-			};
-		}
-		let completed = completeRulePort(line), re = new RegExp(convertRule(completed), "i");
-		return {
-			rule: completed,
-			matches: (event) => re.test(targetOf(event))
-		};
-	});
-}
-function annotateKnownBlocked(blockedEvents, knownBlockedRules) {
-	let matchers = buildMatchers(knownBlockedRules), accumulators = new Map();
-	for (let event of blockedEvents) {
-		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = entryKey(entry), accumulator = accumulators.get(key);
-		accumulator ? (accumulator.count++, index === -1 ? accumulator.expectedAll = !1 : index < accumulator.bestIndex && (accumulator.bestIndex = index, accumulator.bestRule = matchers[index].rule)) : accumulators.set(key, {
-			entry,
-			count: 1,
-			expectedAll: index !== -1,
-			bestIndex: index === -1 ? Infinity : index,
-			bestRule: index === -1 ? void 0 : matchers[index].rule
-		});
-	}
-	return [...accumulators.values()].map(({ entry, count, expectedAll, bestRule }) => expectedAll ? {
-		...entry,
-		count,
-		expected: !0,
-		expectedBy: bestRule
-	} : {
-		...entry,
-		count,
-		expected: !1
-	}).sort(compareAggregated);
-}
-const RULE_TYPE = {
-	https: "HTTPS",
-	http: "HTTP",
-	tls: "TLS",
-	tcp: "IP",
-	dns: "DNS"
-};
-function toHostRow(event) {
-	return {
-		host: event.host,
-		port: event.port === void 0 ? "-" : String(event.port),
-		ruleType: RULE_TYPE[event.protocol],
-		reason: event.reason ?? "-"
-	};
-}
-function reduceTimeline(timeline, knownBlockedRules) {
-	let passedRows = [], blockedEvents = [], failedRows = [], connected = connectedHosts(timeline);
-	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : event.action === "block" ? blockedEvents.push(event) : passedRows.push(toHostRow(event))));
-	return {
-		passed: aggregate(passedRows),
-		blocked: annotateKnownBlocked(blockedEvents, knownBlockedRules),
-		failed: aggregate(failedRows),
-		blockedCount: blockedEvents.length
-	};
-}
-//#endregion
-//#region src/core/lib/report/build/inspect.ts
-function resolverAllows(parameters) {
-	let { resolverHosts } = compileRuleSet({
-		httpsRules: parameters.allowedHttpsRules,
-		httpRules: parameters.allowedHttpRules,
-		tlsRules: parameters.allowedTlsRules,
-		urlRules: buildUrlRules(parameters.allowedUrlRules.join("\n"))
-	}), allowed = resolverHosts.map((regex) => RegExp(`^(?:${regex})$`, "i"));
-	return (name) => allowed.some((regex) => regex.test(name));
-}
-async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedLogs) {
-	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
-	return {
-		engine: "inspect",
-		parameters,
-		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
-		startedAt,
-		timeline
-	};
-}
-//#endregion
-//#region src/core/lib/log/haproxy.ts
-const DECISION = /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za-z0-9._:-]+)" ([A-Za-z0-9-]+) (\d+|-)(?: ts=[A-Za-z-]{2} dst=[0-9.]+:\d+)?$/, NO_REQUEST = /^buildcage (\d+) \[-\] \(HTTP\) "-" - (?:\d+|-) ts=([A-Za-z-]{2}) dst=([0-9.]+):(\d+)$/, START = RegExp(`^${PROXY_START_MARKER} (\\d+)$`), PROTOCOL = {
-	HTTPS: "https",
-	HTTP: "http",
-	IP: "tcp"
-}, FAILURE_REASONS = new Set(["dns-failed"]);
-function hostOf(address, ruleType) {
-	return address === "198.19.255.1" ? UNKNOWN_HOST : ruleType === "HTTPS" ? sniHost(address) : ruleHost(address);
-}
-async function scanHaproxyLog(lines, isAudit) {
-	let events = [], passedDecision = isAudit ? "AUDIT" : "ALLOWED", startedAt, headIntact, unparsed = 0;
-	for await (let line of lines) {
-		let m = DECISION.exec(line);
-		if (m) {
-			headIntact ??= !1;
-			let [, ms, decision, ruleType, target, reason, bytes] = m;
-			if (decision !== passedDecision && decision !== "BLOCKED") continue;
-			let { host: address, port } = splitHostPort(target), host = hostOf(address, ruleType), failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), refused = decision === "BLOCKED" && !failed, event = {
-				time: Number(ms) / 1e3,
-				action: failed ? "failed" : refused ? "block" : isAudit ? "audit" : "allow",
-				protocol: PROTOCOL[ruleType] ?? "tcp",
-				host
-			};
-			port !== void 0 && (event.port = Number(port)), refused || failed ? event.reason = reason : bytes !== "-" && (event.bytes = Number(bytes)), events.push(event);
-			continue;
-		}
-		let none = NO_REQUEST.exec(line);
-		if (none) {
-			headIntact ??= !1;
-			let [, ms, terminationState, address, port] = none, ended = incompleteReason(terminationState, BAD_REQUEST_METHOD);
-			events.push({
-				time: Number(ms) / 1e3,
-				action: ended === void 0 ? "block" : "incomplete",
-				protocol: "http",
-				host: hostOf(address),
-				port: Number(port),
-				reason: ended ?? "bad-request"
-			});
-			continue;
-		}
-		let trimmed = line.trim();
-		if (trimmed === "") continue;
-		let start = START.exec(trimmed);
-		headIntact ??= start !== null, start && startedAt === void 0 && (startedAt = Number(start[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
-	}
-	return {
-		events,
-		startedAt,
-		headIntact: headIntact ?? !1,
-		unparsed
-	};
-}
-//#endregion
-//#region src/core/lib/report/build/universal.ts
-async function buildUniversalReportData(proxyLines, dnsLines, parameters, droppedLogs) {
-	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
-	return {
-		engine: "universal",
-		parameters,
-		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
-		startedAt,
-		timeline
-	};
-}
-//#endregion
-//#region src/core/lib/report/outcome/annotate.ts
-function applyOutcomeAnnotations(annotation, emissions) {
-	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
-}
-//#endregion
-//#region src/core/lib/report/outcome/blocked-outcome.ts
-function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible }) {
-	if (!logLooksPlausible) return isAudit ? {
-		level: "notice",
-		shouldFail: !1
-	} : failOnBlocked ? {
-		level: "error",
-		shouldFail: !0
-	} : {
-		level: "notice",
-		shouldFail: !1
-	};
-	if (!blockedCount) return {
-		level: "none",
-		shouldFail: !1
-	};
-	if (isAudit) return {
-		level: "notice",
-		shouldFail: !1
-	};
-	let hasUnexpected = blockedRows.length === 0 || blockedRows.some((row) => !row.expected);
-	return failOnBlocked && hasUnexpected ? {
-		level: "error",
-		shouldFail: !0
-	} : {
-		level: "notice",
-		shouldFail: !1
-	};
-}
-const COUNT_NOUN = "connection(s) and lookup(s)";
-function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }) {
-	let base = `${blockedCount} blocked ${COUNT_NOUN} detected by buildcage ${engineLabel}`;
-	if (isAudit) return base;
-	let unexpected = blockedRows.filter((row) => !row.expected).length;
-	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known_blocked_rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known_blocked_rules)`;
-}
-function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, engineLabel }) {
-	let outcome = determineBlockedOutcome({
-		isAudit,
-		failOnBlocked,
-		blockedCount,
-		blockedRows,
-		logLooksPlausible
-	}), base = buildBlockedMessage({
-		blockedCount,
-		blockedRows,
-		engineLabel,
-		isAudit
-	});
-	if (logLooksPlausible) return {
-		...outcome,
-		message: base
-	};
-	if (isAudit) return {
-		...outcome,
-		message: `${base}, but the logs are incomplete and this is not a full record`
-	};
-	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. Either the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
-	return {
-		...outcome,
-		message
-	};
-}
-//#endregion
-//#region src/core/lib/report/outcome/report-outcomes.ts
-function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
-	let emissions = [describeBlockedOutcome({
-		isAudit: report.parameters.mode === "audit",
-		failOnBlocked,
-		blockedCount: report.blockedCount,
-		blockedRows: report.blocked,
-		logLooksPlausible: report.logLooksPlausible,
-		engineLabel
-	})], undecided = describeUndecidedRequests(report, engineLabel);
-	undecided && emissions.push(undecided);
-	let failed = describeFailedConnections(report, engineLabel);
-	failed && emissions.push(failed);
-	let wouldRefuse = describeWouldRefuse(report);
-	return wouldRefuse && emissions.push(wouldRefuse), emissions;
-}
-function describeWouldRefuse(report) {
-	let count = report.timeline.filter((event) => event.wouldRefuse !== void 0).length;
-	if (count !== 0) return {
-		level: "warning",
-		shouldFail: !1,
-		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section lists them with the reason.`
-	};
-}
-function describeUndecidedRequests(report, engineLabel) {
-	let isNoise = clientEndedNoise(report.timeline), count = report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
-	if (count !== 0) return {
-		level: "warning",
-		shouldFail: !1,
-		message: `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in Communication details. Each ended before a whole request had arrived, so no rule decided it and none reached an origin: the client closed or failed the TLS handshake, its own timeout expired, or this proxy ran into an error while still reading. None of them fails the step. Bytes this proxy would not read as a request are not among them: that is a refusal, and it is in Blocked Hosts.`
-	};
-}
-function describeFailedConnections(report, engineLabel) {
-	let count = report.failed.reduce((total, row) => total + row.count, 0);
-	if (count !== 0) return {
-		level: "notice",
-		shouldFail: !1,
-		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed under Failed Connections. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
-	};
-}
-const vpceHost = (service) => `^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.${service}\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$`;
-`${vpceHost("sts")}`, "" + vpceHost("git-codecommit(-fips)?");
-const formName = (name) => name.split("").map((c) => `(${[c, ...new Set([c, c.toUpperCase()].map((l) => `%${l.charCodeAt(0).toString(16)}`))].join("|")})`).join("");
-formName("awsaccesskeyid"), formName("x-amz-credential"), formName("rolearn"), formName("action");
-//#endregion
-//#region src/lib/report.ts
-const HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
-function createHostDocker() {
-	return createDocker((args) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
-		encoding: "utf8",
-		stdio: [
-			"ignore",
-			"pipe",
-			"pipe"
-		],
-		maxBuffer: 67108864,
-		env: hostCommandEnv("docker")
-	}), (args) => (0, node_child_process.spawn)(hostCommand("docker"), args, {
-		stdio: [
-			"ignore",
-			"pipe",
-			"pipe"
-		],
-		env: hostCommandEnv("docker")
-	}));
-}
-function fetchReport(containerName, parameters, proxyEngine) {
-	let docker = createHostDocker();
-	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName)) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName));
-}
-function readActionVersion(containerName, proxyEngine, docker) {
-	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
-}
-function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
-	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => e.wouldRefuse?.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, TRAFFIC_BLOCK.wouldRefuse]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
-	if (!refusedByAwsCheck || at === -1) return blocks;
-	let link = {
-		priority: 0,
-		level: 1,
-		section: "traffic",
-		cut: "keep",
-		text: `\n<sub>*For an \`aws-\` reason, see [what to do](${`https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`}).*</sub>\n`
-	};
-	return [
-		...blocks.slice(0, at + 1),
-		link,
-		...blocks.slice(at + 1)
-	];
-}
-function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
-	let emissions = describeReportOutcomes(report, {
-		failOnBlocked: failOnBlocked ?? !1,
-		engineLabel: "sandbox"
-	}), blocks = withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
-		title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
-		stepName: "Start isolated-run",
-		runCommand,
-		extraInputs,
-		actionVersion
-	}), report, actionRepo, actionRef);
-	return {
-		markdown: joinSummaryBlocks(blocks),
-		blocks,
-		emissions
-	};
-}
-function summarySize(path, fileSize) {
-	if (!path) return 0;
-	try {
-		return fileSize(path);
-	} catch {
-		return 0;
-	}
-}
-async function writeSummaryBlocks(blocks, env, { fileSize = (p) => (0, node_fs.statSync)(p).size, writeSummary = writeStepSummary } = {}) {
-	await writeSummary(fitStepSummary(blocks, { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) }), env.GITHUB_STEP_SUMMARY);
-}
-async function writeReportSummary(report, annotation, { extraBlocks = [], ...options }, artifactAvailable, env, { appendFile = node_fs.appendFileSync, ...deps } = {}) {
-	let outcomes = computeReportOutcomes(report, options);
-	applyOutcomeAnnotations(annotation, outcomes.emissions), await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)), ...extraBlocks], env, deps);
-}
-//#endregion
-//#region src/core/lib/report/outcome/traffic-output.ts
-const RECORD_FIELDS = new Set([
-	"time",
-	"elapsed",
-	"action",
-	"protocol",
-	"host",
-	"port",
-	"queryType",
-	"method",
-	"url",
-	"status",
-	"bytes",
-	"reason",
-	"destination",
-	"wouldRefuse"
-]);
-function buildTrafficRecords(events, startedAt) {
-	return [...events].sort((a, b) => a.time - b.time).map((e) => {
-		let record = {
-			time: new Date(e.time * 1e3).toISOString(),
-			action: e.action,
-			protocol: e.protocol,
-			host: e.host
-		};
-		startedAt !== void 0 && (record.elapsed = formatElapsedFixed(e.time - startedAt)), e.port !== void 0 && (record.port = e.port), e.queryType !== void 0 && (record.queryType = e.queryType), e.method !== void 0 && (record.method = e.method), e.url !== void 0 && (record.url = e.url), e.status !== void 0 && (record.status = e.status), e.bytes !== void 0 && (record.bytes = e.bytes), e.reason !== void 0 && (record.reason = e.reason), e.destination !== void 0 && (record.destination = e.destination), e.wouldRefuse !== void 0 && (record.wouldRefuse = e.wouldRefuse);
-		for (let [name, fields] of Object.entries(e.extensions ?? {})) RECORD_FIELDS.has(name) || Object.assign(record, { [name]: fields });
-		return record;
-	});
-}
-function writeTrafficFile(path, records) {
-	(0, node_fs.writeFileSync)(path, JSON.stringify(records, null, 2) + "\n");
-}
-//#endregion
-//#region src/lib/traffic-artifact.ts
-init_core();
-function trafficArtifactName(containerName) {
-	return `buildcage-traffic-${containerName.split("-").at(-1)}`;
-}
-const uploadViaActionsArtifact = async (name, files, rootDirectory, options) => {
-	let { DefaultArtifactClient } = await Promise.resolve().then(() => (init_artifact(), artifact_exports));
-	return new DefaultArtifactClient().uploadArtifact(name, files, rootDirectory, options);
-};
-async function uploadTrafficArtifact(report, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact, scratchBase = SANDBOX_SCRATCH_BASE } = {}) {
-	ensureOwnScratchBase(scratchBase);
-	let scratchDir = (0, node_fs.mkdtempSync)((0, node_path.join)(scratchBase, "traffic-"));
-	try {
-		let file = (0, node_path.join)(scratchDir, "traffic.json");
-		writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));
-		let name = trafficArtifactName(containerName);
-		return await upload(name, [file], scratchDir, { retentionDays }), console.log(`Uploaded the traffic JSON as ${name}`), name;
-	} catch (e) {
-		annotation.warning(`Could not upload the traffic artifact: ${errorMessage(e)}`);
-		return;
-	} finally {
-		(0, node_fs.rmSync)(scratchDir, {
-			recursive: !0,
-			force: !0
-		});
-	}
-}
-function setTrafficArtifactOutput(name) {
-	setOutput("traffic_artifact_name", name);
-}
-//#endregion
-//#region src/lib/step-report.ts
-const realDeps$1 = {
-	fetchReport,
-	readActionVersion,
-	writeReportSummary,
-	writeSummaryBlocks,
-	uploadTrafficArtifact,
-	setTrafficArtifactOutput,
-	readStepLabel
-};
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [] }, overrides = {}) {
-	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
-		...realDeps$1,
-		...overrides
-	}, failClosed = parameters.mode !== "audit" && failOnBlocked, fail = (message) => {
-		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail_on_blocked`), process.exitCode = 1) : annotation.warning(message);
-	}, report;
-	try {
-		report = await fetchReport(containerName, parameters, proxyEngine);
-	} catch (e) {
-		fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
-	}
-	let extraBlocks = moreBlocks(report?.startedAt), writeRest = async () => {
-		if (extraBlocks.length !== 0) try {
-			await writeSummaryBlocks(extraBlocks, env);
-		} catch (e) {
-			annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
-		}
-	}, artifactName = "";
-	if (!report) await writeRest();
-	else {
-		try {
-			await writeReportSummary(report, annotation, {
-				actionRepo,
-				actionRef,
-				runCommand,
-				extraInputs: extraInputs?.(report),
-				actionVersion: readActionVersion(containerName, proxyEngine),
-				stepLabel: readStepLabel(),
-				failOnBlocked,
-				extraBlocks
-			}, trafficArtifact.upload, env);
-		} catch (e) {
-			fail(`Failed to write the report summary: ${errorMessage(e)}`), await writeRest();
-		}
-		if (trafficArtifact.upload) try {
-			artifactName = await uploadTrafficArtifact(report, containerName, trafficArtifact.retentionDays, annotation) ?? "";
-		} catch (e) {
-			annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
-		}
-	}
-	try {
-		setTrafficArtifactOutput(artifactName);
-	} catch (e) {
-		fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
-	}
 }
 //#endregion
 //#region src/lib/sudo-preflight.ts
@@ -73434,7 +73437,8 @@ async function runSandboxStep(env, overrides = {}) {
 			annotation,
 			env,
 			actionRepo,
-			actionRef: reportActionRef
+			actionRef: reportActionRef,
+			failClosed: proxyMode !== "audit" && failOnBlocked
 		});
 		await reportStepTraffic({
 			containerName,
