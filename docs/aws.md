@@ -25,6 +25,74 @@ Nothing in your own account sees this: the call is authorized and logged entirel
 account, so no IAM policy or SCP of yours applies to it. The only place to stop it is the network
 path, before the request leaves the runner.
 
+## Does it fit your step?
+
+### What it works with
+
+A step passes the check when:
+
+- It calls AWS through the AWS CLI v2, a current AWS SDK, or a tool built on them, such as the CDK
+  and Terraform.
+- It switches roles only through STS `AssumeRole` or `AssumeRoleWithWebIdentity`, into the
+  `allowed_aws_role_accounts`: the CDK's deploy roles, Terraform's `assume_role`, or a CLI profile
+  whose `role_arn` starts from `credential_source = Environment` or a `web_identity_token_file`.
+- It reaches CodeCommit over Git through CodeCommit's credential helper, or with a static Git
+  credential of a listed account.
+- It pulls from ECR through the registry API, with a client such as `crane`, `skopeo` or Jib.
+
+### What it stops
+
+With `aws_key_check` on, these are refused:
+
+- Amazon SimpleDB (`sdb`), which accepts only the older Signature Version 2, and the retired AWS
+  Import/Export.
+- Very old SDKs and hand-written clients that still sign with Signature Version 2 or 3.
+- Form calls over about 4 MiB, such as SES v1 `SendRawEmail` with large attachments. Use SES v2
+  (`sesv2`).
+- Compressed form calls, such as CloudWatch `PutMetricData` from older SDKs, which compress a body
+  over 10 KB. Set `AWS_DISABLE_REQUEST_COMPRESSION=true` for the step, or update the SDK.
+- S3 POST-policy uploads. Upload with `PutObject` or a presigned `PutObject` URL.
+- Tokens that carry no AWS signature: Cognito user pool calls made without AWS credentials, Bedrock
+  API keys, CloudWatch Logs ingestion tokens and the IAM Identity Center portal.
+- Keys the step switches to through `GetSessionToken`, SAML or IAM Identity Center, which the proxy
+  does not learn.
+- Presigned URLs someone else signed that reach the step other than through an ECR registry's
+  redirect, such as the `Code.Location` of Lambda `GetFunction` or a vendor's download link.
+  Download the file in a step without the check. That is not possible when one command both signs
+  AWS requests and fetches such a URL, as `crane copy` does from a registry that keeps its layers in
+  S3 into ECR. Such a command has to run in a step without the check; if a tool you need does this,
+  [open an issue](https://github.com/buildcage/isolated-run/issues).
+- S3 Express One Zone directory buckets, signed with keys `CreateSession` issues, which the proxy
+  does not learn.
+
+Two of these come up often in CI.
+
+**Bedrock API keys.** The Bearer token in `AWS_BEARER_TOKEN_BEDROCK` names no account the proxy can
+see, so it is refused. Call Bedrock with the role keys `configure-aws-credentials` gets through OIDC
+instead: they are signed with SigV4 and pass with `aws_key_check: true` alone, given a role allowed
+`bedrock:InvokeModel`.
+
+**Cognito user pools without AWS credentials**, as an E2E test logging in does. The pool a call
+reaches is named by `ClientId` in its body, so the proxy cannot protect it, with the check or
+without. Keep the check on the deploy step, and run the test as a step of its own whose URL rules
+allow Cognito only. The check stays on where it works, and the traffic it cannot protect is kept to
+that one step:
+
+```yaml
+- uses: buildcage/isolated-run@<sha>
+  with:
+    aws_key_check: true
+    allowed_url_rules: |
+      * https://cloudformation.us-east-1.amazonaws.com/**
+    run: npx cdk deploy
+- uses: buildcage/isolated-run@<sha>
+  with:
+    allowed_url_rules: |
+      POST https://cognito-idp.us-east-1.amazonaws.com/
+      * https://app.example.com/**
+    run: npx playwright test
+```
+
 ## Getting started
 
 Turn the check on in `audit` mode first: nothing is refused, and the report shows what `restrict`
@@ -80,7 +148,141 @@ Then:
 3. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries the URL
    rules, `aws_key_check: true` and the accounts from step 1 over.
 
-## What the check does
+### In `audit` mode
+
+`audit` refuses nothing, and that includes this check. A warning annotation counts the requests it
+would have refused, so a step can be checked before it is switched to `restrict`. The report shows
+the first of them for each host and reason under **🚨 Restrict Would Refuse**, with the reason and
+how many more there were:
+
+```
+🚨 POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed) (+12 more)
+```
+
+The traffic artifact has every one. If the section still has to be cut to fit the Job Summary, a
+warning annotation says so.
+
+The traffic artifact carries the same reason in `wouldRefuse`.
+
+With the check on, the report's **Switch to restrict mode** example includes
+`aws_key_check: true`, and `allowed_aws_role_accounts` with the accounts given and each account the
+run assumed a role in, read from every STS answer, including one to a request restrict would refuse.
+A chain of roles, as the CDK assumes them, shows in full after one audit run. An answer the proxy
+cannot read, compressed or past its buffer, names no account. Anything in the step can assume a
+role, including in an account of its own, so each account the example adds that was not given is
+marked:
+
+```yaml
+aws_key_check: true
+allowed_aws_role_accounts: |
+  111111111111
+  222222222222 # assumed in this run, check it is yours
+```
+
+## Troubleshooting
+
+Each refusal has a reason that starts with `aws-`. In `restrict` the check judges only the requests
+the URL rules allowed, and its refusals show under **🚫 Blocked Hosts**. In `audit` it judges every
+request, and lists the ones it would refuse under **🚨 Restrict Would Refuse**. Under whichever of
+the two comes last, the report links here, unless `known_blocked_rules` expects every one.
+
+| Reason                       | Usual cause                                                                                                                                                                                              | What to do                                                                                                                                                                                                                           |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `aws-key-not-allowed`        | The step assumed a role in an account `allowed_aws_role_accounts` does not name, and signed with that role's key                                                                                         | Add the account if it is yours. The restrict example and the STS answer's `aws.assumedAccount` name it; see [Getting started](#getting-started)                                                                                      |
+|                              | The request was signed with a key from a profile, `~/.aws/credentials` or `credential_process` rather than `AWS_ACCESS_KEY_ID`                                                                           | Put the key to check in `AWS_ACCESS_KEY_ID`, or run those commands in a step without the check                                                                                                                                       |
+|                              | The key came from `GetSessionToken`, SAML or IAM Identity Center, which the proxy does not learn                                                                                                         | Get the credentials before the step and pass them in `AWS_ACCESS_KEY_ID`                                                                                                                                                             |
+|                              | A presigned URL someone else signed, such as Lambda `GetFunction`'s `Code.Location` or a vendor's download link                                                                                          | Download it in a step without the check, unless [one command also signs](#what-it-stops). `aws sts get-access-key-info --access-key-id <key-id>`, with the key ID from the URL's `X-Amz-Credential`, names the account it belongs to |
+|                              | An S3 Express One Zone directory bucket                                                                                                                                                                  | Use it from a step without the check                                                                                                                                                                                                 |
+|                              | The STS answer that issued the key could not be read, because the client signed its own `Accept-Encoding` and got it compressed, or it was unusually large                                               | Let the SDK send its default headers to STS; shorten a large session policy or tag set                                                                                                                                               |
+|                              | A CodeCommit static Git credential of an account not listed                                                                                                                                              | Add the account, or use CodeCommit's credential helper                                                                                                                                                                               |
+| `aws-no-credential`          | An unsigned request to a host that serves every account, such as a Cognito user pool call made without AWS credentials                                                                                   | Sign it, or run it in a step of its own without the check; see [Cognito user pools](#what-it-stops)                                                                                                                                  |
+|                              | `AssumeRoleWithWebIdentity` with no `allowed_aws_role_accounts`, or `AssumeRoleWithSAML`                                                                                                                 | Name the role's account, or get the credentials before the step                                                                                                                                                                      |
+|                              | A host that names a resource but is missing from the [list](#which-hosts)                                                                                                                                | Report it                                                                                                                                                                                                                            |
+| `aws-role-not-allowed`       | `AssumeRoleWithWebIdentity` for a role in an account not listed                                                                                                                                          | Add the account                                                                                                                                                                                                                      |
+| `aws-unsupported-credential` | An old SDK or a hand-written client signing with Signature Version 2 or 3, or a service that takes only those                                                                                            | Update the SDK, or run it in a step without the check                                                                                                                                                                                |
+|                              | A token in place of a signature, such as a Bedrock API key, on a host that serves every account                                                                                                          | Sign with AWS credentials; see [Bedrock API keys](#what-it-stops)                                                                                                                                                                    |
+|                              | An S3 POST-policy upload                                                                                                                                                                                 | Upload with `PutObject` or a presigned `PutObject` URL                                                                                                                                                                               |
+|                              | A token on a host that names a resource but is missing from the [list](#which-hosts)                                                                                                                     | Report it                                                                                                                                                                                                                            |
+| `aws-unreadable`             | A form call over about 4 MiB, such as SES v1 `SendRawEmail` with large attachments                                                                                                                       | Use SES v2 (`sesv2`)                                                                                                                                                                                                                 |
+|                              | A compressed form call, such as CloudWatch `PutMetricData` from an older SDK                                                                                                                             | Set `AWS_DISABLE_REQUEST_COMPRESSION=true`, or update the SDK                                                                                                                                                                        |
+|                              | A form body sent without a `Content-Length`                                                                                                                                                              | Send the body with a known length                                                                                                                                                                                                    |
+| `aws-ambiguous-credential`   | More than one credential on one request: two `Authorization` headers, a header and a presigned URL credential, or one repeated. Or an `AssumeRoleWithWebIdentity` naming its role twice, or in the query | Send one credential, and the role in the body only; a current SDK does                                                                                                                                                               |
+
+To tell the causes of `aws-key-not-allowed` apart, look first at which requests are refused:
+
+- **Requests of one kind**, while others signed in the step pass:
+  - to a host containing `--x-s3`: an S3 Express One Zone directory bucket.
+  - to a URL carrying `X-Amz-Credential`: a presigned URL someone else signed.
+  - to a `git-codecommit` host: a CodeCommit static Git credential of an account not listed.
+- **Every request signed after some point**, whatever its host: a key the proxy did not learn.
+  - After an STS call that was not refused itself: a role switch. STS answers it, but the proxy
+    learns the key only for a role in a listed account. If the restrict example marks an account
+    `# assumed in this run`, or the call's `aws.assumedAccount` in the traffic artifact is an
+    account not listed, add it once you have checked it is yours. Otherwise the STS answer could not
+    be read, or the call was `GetSessionToken`.
+  - With no such STS call before them: a key from a profile, `~/.aws/credentials`,
+    `credential_process`, SAML or IAM Identity Center.
+
+## What it does not stop
+
+The check looks at whose key signed a request, not at whose resource the request is for. A request
+signed with your own key that names a resource in another account passes. The target account is in
+the request body, not in the URL, so the proxy cannot see it. Requests like these remain possible:
+
+| Route                                 | Example                                                                                                                                                                                |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cross-account `AssumeRole`            | Assuming a role in another account, with data in the session name, source identity or session tags. A successful call is recorded in the role owner's CloudTrail. A denied one is not. |
+| Services with resource-based policies | Publishing to an SNS topic, sending to an SQS queue, invoking a Lambda function, putting events on an EventBridge bus or writing to an S3 bucket in another account                    |
+| KMS                                   | Encrypting with a key in another account, whose owner sees the encryption context in CloudTrail                                                                                        |
+| CloudFormation itself                 | A custom resource whose `ServiceToken` or a stack whose `NotificationARNs` names a topic or function in another account. AWS makes those calls, so they never pass the proxy.          |
+
+## Closing the rest in IAM
+
+Each route above needs your role to be allowed to act on a resource in another account, so IAM can
+close them. Set these on the role the step assumes, and on the CloudFormation service role if you
+use one:
+
+- **Deny access to resources outside your accounts** with the `aws:ResourceAccount` condition key,
+  or `aws:ResourceOrgID` if you use AWS Organizations. AWS's
+  [data perimeter guidance](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_data-perimeters.html)
+  covers the exceptions a real policy needs, such as resources AWS services own.
+- **Name the account in every `sts:AssumeRole` resource.** A resource such as
+  `arn:aws:iam::*:role/cdk-*`, common in CDK setups, lets the role assume a role of that name in any
+  account, including one someone else creates for the purpose. Write
+  `arn:aws:iam::111111111111:role/cdk-*` instead. A denied `AssumeRole` is not recorded in the target
+  account, so this closes the route entirely.
+
+## Requirements and limits
+
+- `proxy_engine: inspect` only, since `universal` never sees a request's headers. The check on
+  `universal` fails the step, in `audit` too.
+- The step has to start with a key in `AWS_ACCESS_KEY_ID`. A step with the check on and no access
+  key ID there fails before the proxy starts, in `audit` too.
+  Credentials read from `~/.aws/credentials`, a profile or a container credentials endpoint are not
+  used as a starting key, so a step that signs with a profile's key, or switches between two static
+  keys, cannot use the check: put the key to check in `AWS_ACCESS_KEY_ID`, or run the AWS commands
+  in a step without the check. A web identity token is not one either: a step that gets its
+  credentials only through `AWS_WEB_IDENTITY_TOKEN_FILE` cannot turn the check on, and a key set
+  beside it comes first in the SDKs' default credential chain, ahead of the token. Exchange the
+  token before the step instead, as `configure-aws-credentials` does with GitHub's OIDC token.
+- `AssumeRoleWithWebIdentity` takes no signature, so the proxy judges it by the account of the role
+  it names. A role in an account not listed in `allowed_aws_role_accounts` is refused as
+  `aws-role-not-allowed`, and with none listed the call stays `aws-no-credential`.
+  `AssumeRoleWithSAML` is refused as `aws-no-credential`, and keys from IAM Identity Center's
+  `GetRoleCredentials` or Cognito's `GetCredentialsForIdentity` are never learned. Get those
+  credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
+- Keys are learned only from STS answers and ECR registry redirects over HTTPS, to a request the key
+  check did not refuse, so in audit mode a request it would refuse teaches no key. A host that names
+  a resource is never taken for STS, even an S3 bucket named `sts`. A key in an STS answer the proxy
+  cannot read, because the client asked for it compressed or it is unusually large, is not learned,
+  and requests signed with it are refused.
+- A connection `allowed_tls_rules` or `allowed_ip_rules` passes through is never decrypted, so the
+  check never sees its requests. Do not pass AWS API hosts through.
+- The starting key ID is handed to the proxy container as an environment variable, so it is visible
+  to `docker inspect` on the runner while the step runs. A key ID is not a secret on its own:
+  signing needs the secret access key, which never reaches the proxy.
+
+## How the check decides
 
 ### Which keys pass
 
@@ -206,103 +408,6 @@ allowed_url_rules: |
   GET|PUT https://my-artifacts.s3.us-east-1.amazonaws.com/**
 ```
 
-### What it works with
-
-A step passes the check when:
-
-- It calls AWS through the AWS CLI v2, a current AWS SDK, or a tool built on them, such as the CDK
-  and Terraform.
-- It switches roles only through STS `AssumeRole` or `AssumeRoleWithWebIdentity`, into the
-  `allowed_aws_role_accounts`: the CDK's deploy roles, Terraform's `assume_role`, or a CLI profile
-  whose `role_arn` starts from `credential_source = Environment` or a `web_identity_token_file`.
-- It reaches CodeCommit over Git through CodeCommit's credential helper, or with a static Git
-  credential of a listed account.
-- It pulls from ECR through the registry API, with a client such as `crane`, `skopeo` or Jib.
-
-### What it stops
-
-With `aws_key_check` on, these are refused:
-
-- Amazon SimpleDB (`sdb`), which accepts only the older Signature Version 2, and the retired AWS
-  Import/Export.
-- Very old SDKs and hand-written clients that still sign with Signature Version 2 or 3.
-- Form calls over about 4 MiB, such as SES v1 `SendRawEmail` with large attachments. Use SES v2
-  (`sesv2`).
-- Compressed form calls, such as CloudWatch `PutMetricData` from older SDKs, which compress a body
-  over 10 KB. Set `AWS_DISABLE_REQUEST_COMPRESSION=true` for the step, or update the SDK.
-- S3 POST-policy uploads. Upload with `PutObject` or a presigned `PutObject` URL.
-- Tokens that carry no AWS signature: Cognito user pool calls made without AWS credentials, Bedrock
-  API keys, CloudWatch Logs ingestion tokens and the IAM Identity Center portal.
-- Keys the step switches to through `GetSessionToken`, SAML or IAM Identity Center, which the proxy
-  does not learn.
-- Presigned URLs someone else signed that reach the step other than through an ECR registry's
-  redirect, such as the `Code.Location` of Lambda `GetFunction` or a vendor's download link.
-  Download the file in a step without the check. That is not possible when one command both signs
-  AWS requests and fetches such a URL, as `crane copy` does from a registry that keeps its layers in
-  S3 into ECR. Such a command has to run in a step without the check; if a tool you need does this,
-  [open an issue](https://github.com/buildcage/isolated-run/issues).
-- S3 Express One Zone directory buckets, signed with keys `CreateSession` issues, which the proxy
-  does not learn.
-
-Two of these come up often in CI.
-
-**Bedrock API keys.** The Bearer token in `AWS_BEARER_TOKEN_BEDROCK` names no account the proxy can
-see, so it is refused. Call Bedrock with the role keys `configure-aws-credentials` gets through OIDC
-instead: they are signed with SigV4 and pass with `aws_key_check: true` alone, given a role allowed
-`bedrock:InvokeModel`.
-
-**Cognito user pools without AWS credentials**, as an E2E test logging in does. The pool a call
-reaches is named by `ClientId` in its body, so the proxy cannot protect it, with the check or
-without. Keep the check on the deploy step, and run the test as a step of its own whose URL rules
-allow Cognito only. The check stays on where it works, and the traffic it cannot protect is kept to
-that one step:
-
-```yaml
-- uses: buildcage/isolated-run@<sha>
-  with:
-    aws_key_check: true
-    allowed_url_rules: |
-      * https://cloudformation.us-east-1.amazonaws.com/**
-    run: npx cdk deploy
-- uses: buildcage/isolated-run@<sha>
-  with:
-    allowed_url_rules: |
-      POST https://cognito-idp.us-east-1.amazonaws.com/
-      * https://app.example.com/**
-    run: npx playwright test
-```
-
-### In `audit` mode
-
-`audit` refuses nothing, and that includes this check. A warning annotation counts the requests it
-would have refused, so a step can be checked before it is switched to `restrict`. The report shows
-the first of them for each host and reason under **🚨 Restrict Would Refuse**, with the reason and
-how many more there were:
-
-```
-🚨 POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed) (+12 more)
-```
-
-The traffic artifact has every one. If the section still has to be cut to fit the Job Summary, a
-warning annotation says so.
-
-The traffic artifact carries the same reason in `wouldRefuse`.
-
-With the check on, the report's **Switch to restrict mode** example includes
-`aws_key_check: true`, and `allowed_aws_role_accounts` with the accounts given and each account the
-run assumed a role in, read from every STS answer, including one to a request restrict would refuse.
-A chain of roles, as the CDK assumes them, shows in full after one audit run. An answer the proxy
-cannot read, compressed or past its buffer, names no account. Anything in the step can assume a
-role, including in an account of its own, so each account the example adds that was not given is
-marked:
-
-```yaml
-aws_key_check: true
-allowed_aws_role_accounts: |
-  111111111111
-  222222222222 # assumed in this run, check it is yours
-```
-
 ### In the traffic artifact
 
 Each request the check let through has an `aws` object in the
@@ -327,106 +432,3 @@ ID is written either.
   "aws": { "key": "assumed", "accountId": "111111111111" }
 }
 ```
-
-## Troubleshooting
-
-Each refusal has a reason that starts with `aws-`. In `restrict` the check judges only the requests
-the URL rules allowed, and its refusals show under **🚫 Blocked Hosts**. In `audit` it judges every
-request, and lists the ones it would refuse under **🚨 Restrict Would Refuse**. Under whichever of
-the two comes last, the report links here, unless `known_blocked_rules` expects every one.
-
-| Reason                       | Usual cause                                                                                                                                                                                              | What to do                                                                                                                                                                                                                           |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `aws-key-not-allowed`        | The step assumed a role in an account `allowed_aws_role_accounts` does not name, and signed with that role's key                                                                                         | Add the account if it is yours. The restrict example and the STS answer's `aws.assumedAccount` name it; see [Getting started](#getting-started)                                                                                      |
-|                              | The request was signed with a key from a profile, `~/.aws/credentials` or `credential_process` rather than `AWS_ACCESS_KEY_ID`                                                                           | Put the key to check in `AWS_ACCESS_KEY_ID`, or run those commands in a step without the check                                                                                                                                       |
-|                              | The key came from `GetSessionToken`, SAML or IAM Identity Center, which the proxy does not learn                                                                                                         | Get the credentials before the step and pass them in `AWS_ACCESS_KEY_ID`                                                                                                                                                             |
-|                              | A presigned URL someone else signed, such as Lambda `GetFunction`'s `Code.Location` or a vendor's download link                                                                                          | Download it in a step without the check, unless [one command also signs](#what-it-stops). `aws sts get-access-key-info --access-key-id <key-id>`, with the key ID from the URL's `X-Amz-Credential`, names the account it belongs to |
-|                              | An S3 Express One Zone directory bucket                                                                                                                                                                  | Use it from a step without the check                                                                                                                                                                                                 |
-|                              | The STS answer that issued the key could not be read, because the client signed its own `Accept-Encoding` and got it compressed, or it was unusually large                                               | Let the SDK send its default headers to STS; shorten a large session policy or tag set                                                                                                                                               |
-|                              | A CodeCommit static Git credential of an account not listed                                                                                                                                              | Add the account, or use CodeCommit's credential helper                                                                                                                                                                               |
-| `aws-no-credential`          | An unsigned request to a host that serves every account, such as a Cognito user pool call made without AWS credentials                                                                                   | Sign it, or run it in a step of its own without the check; see [Cognito user pools](#what-it-stops)                                                                                                                                  |
-|                              | `AssumeRoleWithWebIdentity` with no `allowed_aws_role_accounts`, or `AssumeRoleWithSAML`                                                                                                                 | Name the role's account, or get the credentials before the step                                                                                                                                                                      |
-|                              | A host that names a resource but is missing from the [list](#which-hosts)                                                                                                                                | Report it                                                                                                                                                                                                                            |
-| `aws-role-not-allowed`       | `AssumeRoleWithWebIdentity` for a role in an account not listed                                                                                                                                          | Add the account                                                                                                                                                                                                                      |
-| `aws-unsupported-credential` | An old SDK or a hand-written client signing with Signature Version 2 or 3, or a service that takes only those                                                                                            | Update the SDK, or run it in a step without the check                                                                                                                                                                                |
-|                              | A token in place of a signature, such as a Bedrock API key, on a host that serves every account                                                                                                          | Sign with AWS credentials; see [Bedrock API keys](#what-it-stops)                                                                                                                                                                    |
-|                              | An S3 POST-policy upload                                                                                                                                                                                 | Upload with `PutObject` or a presigned `PutObject` URL                                                                                                                                                                               |
-|                              | A token on a host that names a resource but is missing from the [list](#which-hosts)                                                                                                                     | Report it                                                                                                                                                                                                                            |
-| `aws-unreadable`             | A form call over about 4 MiB, such as SES v1 `SendRawEmail` with large attachments                                                                                                                       | Use SES v2 (`sesv2`)                                                                                                                                                                                                                 |
-|                              | A compressed form call, such as CloudWatch `PutMetricData` from an older SDK                                                                                                                             | Set `AWS_DISABLE_REQUEST_COMPRESSION=true`, or update the SDK                                                                                                                                                                        |
-|                              | A form body sent without a `Content-Length`                                                                                                                                                              | Send the body with a known length                                                                                                                                                                                                    |
-| `aws-ambiguous-credential`   | More than one credential on one request: two `Authorization` headers, a header and a presigned URL credential, or one repeated. Or an `AssumeRoleWithWebIdentity` naming its role twice, or in the query | Send one credential, and the role in the body only; a current SDK does                                                                                                                                                               |
-
-To tell the causes of `aws-key-not-allowed` apart, look first at which requests are refused:
-
-- **Requests of one kind**, while others signed in the step pass:
-  - to a host containing `--x-s3`: an S3 Express One Zone directory bucket.
-  - to a URL carrying `X-Amz-Credential`: a presigned URL someone else signed.
-  - to a `git-codecommit` host: a CodeCommit static Git credential of an account not listed.
-- **Every request signed after some point**, whatever its host: a key the proxy did not learn.
-  - After an STS call that was not refused itself: a role switch. STS answers it, but the proxy
-    learns the key only for a role in a listed account. If the restrict example marks an account
-    `# assumed in this run`, or the call's `aws.assumedAccount` in the traffic artifact is an
-    account not listed, add it once you have checked it is yours. Otherwise the STS answer could not
-    be read, or the call was `GetSessionToken`.
-  - With no such STS call before them: a key from a profile, `~/.aws/credentials`,
-    `credential_process`, SAML or IAM Identity Center.
-
-## What it does not stop
-
-The check looks at whose key signed a request, not at whose resource the request is for. A request
-signed with your own key that names a resource in another account passes. The target account is in
-the request body, not in the URL, so the proxy cannot see it. Requests like these remain possible:
-
-| Route                                 | Example                                                                                                                                                                                |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cross-account `AssumeRole`            | Assuming a role in another account, with data in the session name, source identity or session tags. A successful call is recorded in the role owner's CloudTrail. A denied one is not. |
-| Services with resource-based policies | Publishing to an SNS topic, sending to an SQS queue, invoking a Lambda function, putting events on an EventBridge bus or writing to an S3 bucket in another account                    |
-| KMS                                   | Encrypting with a key in another account, whose owner sees the encryption context in CloudTrail                                                                                        |
-| CloudFormation itself                 | A custom resource whose `ServiceToken` or a stack whose `NotificationARNs` names a topic or function in another account. AWS makes those calls, so they never pass the proxy.          |
-
-## Closing the rest in IAM
-
-Each route above needs your role to be allowed to act on a resource in another account, so IAM can
-close them. Set these on the role the step assumes, and on the CloudFormation service role if you
-use one:
-
-- **Deny access to resources outside your accounts** with the `aws:ResourceAccount` condition key,
-  or `aws:ResourceOrgID` if you use AWS Organizations. AWS's
-  [data perimeter guidance](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_data-perimeters.html)
-  covers the exceptions a real policy needs, such as resources AWS services own.
-- **Name the account in every `sts:AssumeRole` resource.** A resource such as
-  `arn:aws:iam::*:role/cdk-*`, common in CDK setups, lets the role assume a role of that name in any
-  account, including one someone else creates for the purpose. Write
-  `arn:aws:iam::111111111111:role/cdk-*` instead. A denied `AssumeRole` is not recorded in the target
-  account, so this closes the route entirely.
-
-## Requirements and limits
-
-- `proxy_engine: inspect` only, since `universal` never sees a request's headers. The check on
-  `universal` fails the step, in `audit` too.
-- The step has to start with a key in `AWS_ACCESS_KEY_ID`. A step with the check on and no access
-  key ID there fails before the proxy starts, in `audit` too.
-  Credentials read from `~/.aws/credentials`, a profile or a container credentials endpoint are not
-  used as a starting key, so a step that signs with a profile's key, or switches between two static
-  keys, cannot use the check: put the key to check in `AWS_ACCESS_KEY_ID`, or run the AWS commands
-  in a step without the check. A web identity token is not one either: a step that gets its
-  credentials only through `AWS_WEB_IDENTITY_TOKEN_FILE` cannot turn the check on, and a key set
-  beside it comes first in the SDKs' default credential chain, ahead of the token. Exchange the
-  token before the step instead, as `configure-aws-credentials` does with GitHub's OIDC token.
-- `AssumeRoleWithWebIdentity` takes no signature, so the proxy judges it by the account of the role
-  it names. A role in an account not listed in `allowed_aws_role_accounts` is refused as
-  `aws-role-not-allowed`, and with none listed the call stays `aws-no-credential`.
-  `AssumeRoleWithSAML` is refused as `aws-no-credential`, and keys from IAM Identity Center's
-  `GetRoleCredentials` or Cognito's `GetCredentialsForIdentity` are never learned. Get those
-  credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
-- Keys are learned only from STS answers and ECR registry redirects over HTTPS, to a request the key
-  check did not refuse, so in audit mode a request it would refuse teaches no key. A host that names
-  a resource is never taken for STS, even an S3 bucket named `sts`. A key in an STS answer the proxy
-  cannot read, because the client asked for it compressed or it is unusually large, is not learned,
-  and requests signed with it are refused.
-- A connection `allowed_tls_rules` or `allowed_ip_rules` passes through is never decrypted, so the
-  check never sees its requests. Do not pass AWS API hosts through.
-- The starting key ID is handed to the proxy container as an environment variable, so it is visible
-  to `docker inspect` on the runner while the step runs. A key ID is not a secret on its own:
-  signing needs the secret access key, which never reaches the proxy.
