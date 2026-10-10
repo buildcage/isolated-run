@@ -36,6 +36,7 @@ import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
   readProxyInputs,
+  awsExampleInputs,
   readAwsKeyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
@@ -484,6 +485,7 @@ export async function runSandboxStep(
       actionRepo,
       actionRef: reportActionRef,
       runCommand: runInput,
+      extraInputs: awsExampleInputs(aws),
       failOnBlocked,
       trafficArtifact,
       env,

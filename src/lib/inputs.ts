@@ -256,3 +256,17 @@ export function readAwsKeyInputs(
   }
   return { key, roleAccounts };
 }
+
+/**
+ * The check's inputs for the report's restrict example, only when it was on
+ * for this run. The accounts are a placeholder: the value given may have been
+ * an expression, and its result is not for the Job Summary.
+ */
+export function awsExampleInputs({ key, roleAccounts }: AwsKeyInputs): string[] {
+  if (!key) return [];
+  const lines = ["aws_key_check: true"];
+  if (roleAccounts.length > 0) {
+    lines.push("allowed_aws_role_accounts: <account-id> # copy the value from your audit step");
+  }
+  return lines;
+}

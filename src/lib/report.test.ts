@@ -145,6 +145,20 @@ describe("computeReportOutcomes", () => {
     expect(markdown).toMatch(/run: \|\n\s+npm install/);
   });
 
+  it("writes the extra inputs into the restrict example", () => {
+    const r = report({
+      parameters: reportParams({ mode: "audit" }),
+      passed: [
+        { host: "registry.npmjs.org", port: "443", ruleType: "HTTPS", reason: "-", count: 3 },
+      ],
+    });
+    const { markdown } = computeReportOutcomes(
+      r,
+      options({ extraInputs: ["aws_key_check: true"] }),
+    );
+    expect(markdown).toMatch(/^ {10}aws_key_check: true$/m);
+  });
+
   it("escapes structural Markdown in stepLabel so a label can't inject into the heading", () => {
     const r = report({ parameters: reportParams({ mode: "audit" }) });
     const { markdown } = computeReportOutcomes(

@@ -439,6 +439,10 @@ describe("runSandboxStep", () => {
       ALLOWED_AWS_KEY: `${ASIA}AAAAAAAAAAAAAAAA`,
       ALLOWED_AWS_ROLE_ACCOUNTS: "111111111111",
     });
+    expect(mocks.reportStepTraffic.mock.calls[0][0].extraInputs).toStrictEqual([
+      "aws_key_check: true",
+      "allowed_aws_role_accounts: <account-id> # copy the value from your audit step",
+    ]);
     expect(log).toHaveBeenCalledWith("AWS access key check: on");
     expect(log).toHaveBeenCalledWith("AWS role accounts: 111111111111");
     expect(log.mock.calls.flat().join("\n").includes(`${ASIA}AAAAAAAAAAAAAAAA`)).toBe(false);

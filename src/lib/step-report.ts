@@ -58,6 +58,8 @@ export interface ReportStepOptions {
   actionRepo: string;
   actionRef: string;
   runCommand: string;
+  /** See ExampleStepOptions.extraInputs. */
+  extraInputs?: string[];
   failOnBlocked: boolean;
   trafficArtifact: TrafficArtifactInputs;
   /** The step's own environment, which is where the summary's destinations
@@ -89,6 +91,7 @@ export async function reportStepTraffic(
     actionRepo,
     actionRef,
     runCommand,
+    extraInputs,
     failOnBlocked,
     trafficArtifact,
     env,
@@ -147,6 +150,7 @@ export async function reportStepTraffic(
           actionRepo,
           actionRef,
           runCommand,
+          extraInputs,
           actionVersion: readActionVersion(containerName, proxyEngine),
           stepLabel: readStepLabel(),
           failOnBlocked,
