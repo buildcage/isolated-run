@@ -772,6 +772,8 @@ int BPF_PROG(on_fork, struct task_struct *parent, struct task_struct *child)
 		return 0;
 	e->pid = tgid;
 	e->ppid = BPF_CORE_READ(parent, tgid);
+	// The child's own name, copied from the thread that forked it.
+	BPF_CORE_READ_STR_INTO(&e->comm, child, comm);
 	submit(e);
 	return 0;
 }
