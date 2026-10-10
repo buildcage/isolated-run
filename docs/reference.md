@@ -857,7 +857,7 @@ accesses was skipped; the section does not warn on a nonzero count, since a skip
 the step. Before Linux 6.7 the kernel does not count a skipped hook for failed operations.
 
 It observes accesses in the kernel, below any library the step links against, and only records; it
-never blocks an access. It needs a cgroup v2 host running Linux 5.17 or newer (6.4 on arm64, the
+never blocks an access. It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64, the
 first release there where a BPF program can attach to a kernel function with fentry), with kernel
 BTF and tracefs mounted. Where any of these is missing, the step fails with the reason before the
 command runs. See [Filesystem audit](./security.md#filesystem-audit) for what it does not record
