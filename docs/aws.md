@@ -318,7 +318,9 @@ use one:
 - The step has to start with a key in `AWS_ACCESS_KEY_ID`. In `restrict`, a step with the check on
   and no access key ID there fails before the proxy starts; `audit` warns and turns the check off.
   Credentials read from `~/.aws/credentials`, a profile or a container credentials endpoint are not
-  used as a starting key, and neither is a web identity token: a step that gets its credentials only
+  used as a starting key, so a step that signs with a profile's key, or switches between two static
+  keys, cannot use the check: put the key to check in `AWS_ACCESS_KEY_ID`, or run the AWS commands
+  in a separate step. A web identity token is not one either: a step that gets its credentials only
   through `AWS_WEB_IDENTITY_TOKEN_FILE` cannot turn the check on, and a key set beside it comes
   first in the SDKs' default credential chain, ahead of the token. Exchange the token before the
   step instead, as `configure-aws-credentials` does with GitHub's OIDC token.

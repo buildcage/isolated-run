@@ -389,7 +389,10 @@ describe("readAwsKeyInputs", () => {
     ["not a key ID", { AWS_ACCESS_KEY_ID: "asia-not-a-key" }],
   ])("refuses a step whose AWS_ACCESS_KEY_ID is %s", (_, env) => {
     expect(() => readAwsKeyInputs(inspect, env, silent, accounts("111111111111"))).toThrow(
-      expect.objectContaining({ code: "AWS_ACCESS_KEY_MISSING" }),
+      expect.objectContaining({
+        code: "AWS_ACCESS_KEY_MISSING",
+        message: expect.stringContaining("never from a profile"),
+      }),
     );
   });
 
@@ -404,6 +407,7 @@ describe("readAwsKeyInputs", () => {
       ),
     ).toStrictEqual(OFF);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("check is off for this run"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("never from a profile"));
   });
 
   it("does not echo the key it refuses", () => {
