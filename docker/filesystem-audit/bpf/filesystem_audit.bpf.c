@@ -97,6 +97,8 @@ struct files_struct {
 
 struct task_struct {
 	struct task_struct *real_parent;
+	struct task_struct *group_leader;
+	u64 start_time;
 	int tgid;
 	struct fs_struct *fs;
 	struct files_struct *files;
@@ -488,9 +490,9 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 }
 
 // Open files already reported as read (1), written (2) or mapped
-// executable (4), so each is reported once per direction rather than per
-// read(2). Keyed by the struct file and cleared when it is freed, before
-// the address can be reused.
+// executable (4), so each is reported once per direction and process rather
+// than per read(2). Keyed by the struct file and cleared when it is freed,
+// before the address can be reused.
 #define SEEN_READ 1
 #define SEEN_WRITE 2
 #define SEEN_EXEC 4
@@ -504,30 +506,86 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 #define OVERLAYFS_SUPER_MAGIC 0x794c7630
 #define FUSE_SUPER_MAGIC 0x65735546
 
+// A process, by its tgid and its leader's start time, which a reused pid
+// does not share.
+struct proc {
+	u64 start;
+	u32 tgid;
+	u32 pad;
+};
+
+struct seen {
+	u64 gen;	  // when the entry was made, so a reused address is a new file
+	struct proc owner; // the first process to use the file
+	u8 bits;	  // what the owner has been reported doing with it
+	u8 internal;	  // a pipe or socket, reported once whoever uses it
+};
+
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 65536);
 	__type(key, u64);
-	__type(value, u8);
+	__type(value, struct seen);
 } seen_files SEC(".maps");
 
-// Reports whether bit was newly recorded for file: false if it was already
-// set, or if the map is full (so a saturated map cannot cause re-emission).
-// A full map counts in untracked, since that access then goes unreported.
+// What each other process sharing an open file, such as a child that
+// inherited it, has been reported doing with it. An entry outlives its file,
+// but gen keeps it from matching the next file at that address; losing one to
+// eviction only reports that access again.
+struct shared_key {
+	u64 file;
+	u64 gen;
+	struct proc proc;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 65536);
+	__type(key, struct shared_key);
+	__type(value, u8);
+} shared_seen SEC(".maps");
+
+// Reports whether bit was newly recorded for file and the current process:
+// false if it was already set, or if seen_files is full (so a saturated map
+// cannot cause re-emission). A full map counts in untracked, since that
+// access then goes unreported.
 static __always_inline int first_time(struct file *file, u8 bit)
 {
+	struct task_struct *t = bpf_get_current_task_btf();
+	struct proc me = {
+		.start = BPF_CORE_READ(t, group_leader, start_time),
+		.tgid = bpf_get_current_pid_tgid() >> 32,
+	};
 	u64 key = (u64)file;
-	u8 *v = bpf_map_lookup_elem(&seen_files, &key);
-	if (v) {
-		if (*v & bit)
+	struct seen *v = bpf_map_lookup_elem(&seen_files, &key);
+	if (!v) {
+		struct seen s = {
+			.gen = bpf_ktime_get_ns(),
+			.owner = me,
+			.bits = bit,
+			.internal = (BPF_CORE_READ(file, f_path.mnt, mnt_flags) & MNT_INTERNAL) != 0,
+		};
+		if (bpf_map_update_elem(&seen_files, &key, &s, BPF_ANY) == 0)
+			return 1;
+		bump(&untracked);
+		return 0;
+	}
+	if (v->internal || (v->owner.tgid == me.tgid && v->owner.start == me.start)) {
+		if (v->bits & bit)
 			return 0;
-		*v |= bit;
+		v->bits |= bit;
 		return 1;
 	}
-	if (bpf_map_update_elem(&seen_files, &key, &bit, BPF_ANY) == 0)
+	struct shared_key k = { .file = key, .gen = v->gen, .proc = me };
+	u8 *b = bpf_map_lookup_elem(&shared_seen, &k);
+	if (b) {
+		if (*b & bit)
+			return 0;
+		*b |= bit;
 		return 1;
-	bump(&untracked);
-	return 0;
+	}
+	bpf_map_update_elem(&shared_seen, &k, &bit, BPF_ANY);
+	return 1;
 }
 
 static __always_inline u32 path_walk(struct event *e, struct dentry *d, struct vfsmount *mnt)
