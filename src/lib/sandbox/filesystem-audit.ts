@@ -201,9 +201,7 @@ function defaultSpawn(command: string, args: string[]): AuditChild {
 }
 
 function defaultSleep(ms: number, detached = false): Promise<void> {
-  // A wait the action is in the middle of holds the process open, or Node
-  // would exit with status 0 mid-await once the tracer has gone. Only a
-  // backstop raced against the tracer's exit lets it go.
+  // Unref only the backstop: an unref'd wait lets Node exit 0 once the tracer has gone.
   return new Promise((resolve) => {
     const t = setTimeout(resolve, ms);
     if (detached) t.unref();

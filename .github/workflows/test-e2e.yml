@@ -394,8 +394,9 @@ jobs:
           STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs
           if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
 
-      # Last, as it leaves the runner without tracefs: the tracer then cannot
-      # attach its syscall tracepoints, after it has made the sandbox's cgroup.
+      # After every other check, as it leaves the runner without tracefs for the
+      # rest of the job, post steps included: the tracer then cannot attach its
+      # syscall tracepoints, after it has made the sandbox's cgroup.
       - name: Take tracefs away
         run: |
           sudo umount -R /sys/kernel/debug || true

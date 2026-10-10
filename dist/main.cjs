@@ -73557,7 +73557,14 @@ async function runSandboxStep(env, overrides = {}) {
 }
 //#endregion
 //#region src/main.ts
-process.argv[1] && (0, node_fs.realpathSync)(process.argv[1]) === (0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href) && runSandboxStep(process.env).then((exitCode) => {
-	exitCode !== 0 && (process.exitCode = exitCode);
-}).catch(exitOnFatalError("sandbox"));
+if (process.argv[1] && (0, node_fs.realpathSync)(process.argv[1]) === (0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)) {
+	let settled = !1;
+	process.on("beforeExit", () => {
+		settled || (process.stdout.write("::error::The step stopped partway through; failing it.\n"), process.exitCode = 1);
+	}), runSandboxStep(process.env).then((exitCode) => {
+		exitCode !== 0 && (process.exitCode = exitCode);
+	}).catch(exitOnFatalError("sandbox")).finally(() => {
+		settled = !0;
+	});
+}
 //#endregion
