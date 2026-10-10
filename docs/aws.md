@@ -234,10 +234,9 @@ With `aws_key_check` on, these are refused:
 - Presigned URLs someone else signed that reach the step other than through an ECR registry's
   redirect, such as the `Code.Location` of Lambda `GetFunction` or a vendor's download link.
   Download the file in a step without the check. That is not possible when one command both signs
-  AWS requests and fetches such a URL, as `sam local invoke` does for a layer, downloading it from
-  the `Content.Location` of `GetLayerVersion`, or `crane copy` from a registry that keeps its layers
-  in S3 into ECR. Such a command has to run in a step without the check; if a tool you need does
-  this, [open an issue](https://github.com/buildcage/isolated-run/issues).
+  AWS requests and fetches such a URL, as `crane copy` does from a registry that keeps its layers in
+  S3 into ECR. Such a command has to run in a step without the check; if a tool you need does this,
+  [open an issue](https://github.com/buildcage/isolated-run/issues).
 - S3 Express One Zone directory buckets, signed with keys `CreateSession` issues, which the proxy
   does not learn.
 
