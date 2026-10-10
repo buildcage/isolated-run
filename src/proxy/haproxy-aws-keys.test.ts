@@ -113,6 +113,9 @@ describe("hosts that name the resource", () => {
       "ec2-52-54-55-66.ap-southeast-2.compute.amazonaws.com",
       "ec2-55-41-26-75.compute-1.amazonaws.com",
       "awscli.amazonaws.com",
+      "checkip.amazonaws.com",
+      "ip-ranges.amazonaws.com",
+      "pricing.us-east-1.amazonaws.com",
       "g-abcdef1234.grafana-workspace.us-east-1.amazonaws.com",
       "b-1234a5b6-78cd-901e-2fgh-3i45j6k178l9.mq.us-east-2.amazonaws.com",
       "search-my-domain-abcdefghijklmnop.us-east-1.es.amazonaws.com",
@@ -160,6 +163,9 @@ describe("hosts that name the resource", () => {
       "abcdef0123456789abcdef0123456789.us-east-1.eks.amazonaws.com",
       "eks.us-east-1.api.aws",
       "abcdef0123456789abcdef0123456789.gr7.us-east-1.api.aws",
+      "api.pricing.us-east-1.amazonaws.com",
+      "pricing.eu-central-1.amazonaws.com",
+      "checkip.amazonaws.com.cn",
     ]) {
       expect(resourceHost.test(host)).toBe(false);
     }

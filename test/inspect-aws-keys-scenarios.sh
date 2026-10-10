@@ -61,6 +61,7 @@ check_status "a Basic-auth call to an Amazon MQ broker console" \
   "$($C -u admin:secret https://b-0123abcd-4567-89ef-0123-456789abcdef.mq.us-east-1.amazonaws.com/api/overview)" "200"
 check_status "an unsigned read of an EKS OIDC discovery document" \
   "$($C https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF0123456789/.well-known/openid-configuration)" "200"
+check_status "an unsigned read of checkip" "$($C https://checkip.amazonaws.com/)" "200"
 check_status "a POST-policy upload to a bucket, its credential in the form" \
   "$($C -F "x-amz-credential=${AKIA}TESTATTACKER0001/20261008/us-east-1/s3/aws4_request" -F "file=@/dev/null" https://bucket.s3.amazonaws.com/)" "403"
 check_status "a POST-policy upload with the start key in the header too" \

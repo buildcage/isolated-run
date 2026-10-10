@@ -127,26 +127,29 @@ neither a known key nor an allowed account is `aws-key-not-allowed`, and a reque
 | `AssumeRoleWithWebIdentity` for a role in an account not in `allowed_aws_role_accounts`                          | `aws-role-not-allowed`       |
 
 These hosts name the resource a request reaches, in the host name or, for S3's path style and an EKS
-OIDC issuer, in the path. The URL rules can pin the resource there, so an unsigned request to them is
-left to the URL rules:
+OIDC issuer, in the path, so the URL rules can pin it; the last four reach no account at all. An
+unsigned request to any of them is left to the URL rules:
 
-| Service                | Host                                                                                                                                                         |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| S3                     | every S3 form: `<bucket>.s3.<region>.amazonaws.com`, `s3.<region>.amazonaws.com/<bucket>/…`, access points, `s3-control`, website and acceleration endpoints |
-| ECR                    | `<account>.dkr.ecr.<region>.amazonaws.com`, `<account>.dkr.ecr-fips.<region>.amazonaws.com`                                                                  |
-| CodeArtifact           | `<domain>-<owner>.d.codeartifact.<region>.amazonaws.com`                                                                                                     |
-| API Gateway            | `<api-id>.execute-api.<region>.amazonaws.com`                                                                                                                |
-| AppSync                | `<id>.appsync-api.<region>.amazonaws.com`, `<id>.appsync-realtime-api.<region>.amazonaws.com`                                                                |
-| Managed Grafana        | `g-<id>.grafana-workspace.<region>.amazonaws.com`                                                                                                            |
-| Amazon MQ              | `b-<id>.mq.<region>.amazonaws.com`                                                                                                                           |
-| OpenSearch Service     | `search-<domain>-<id>.<region>.es.amazonaws.com`, `vpc-<domain>-<id>.<region>.es.amazonaws.com`                                                              |
-| EKS cluster            | `<id>.<label>.<region>.eks.amazonaws.com` (such as `gr7` or `yl4`), `<id>.<region>.api.aws`                                                                  |
-| EKS OIDC issuer        | `oidc.eks.<region>.amazonaws.com/id/<id>`, `oidc-eks.<region>.api.aws/id/<id>`                                                                               |
-| Elastic Load Balancing | `<name>-<id>.elb.<region>.amazonaws.com`, `<name>-<id>.<region>.elb.amazonaws.com`                                                                           |
-| EC2                    | `ec2-<ip>.<region>.compute.amazonaws.com`, `ec2-<ip>.compute-1.amazonaws.com`                                                                                |
-| AWS CLI downloads      | `awscli.amazonaws.com`                                                                                                                                       |
+| Service                   | Host                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| S3                        | every S3 form: `<bucket>.s3.<region>.amazonaws.com`, `s3.<region>.amazonaws.com/<bucket>/…`, access points, `s3-control`, website and acceleration endpoints |
+| ECR                       | `<account>.dkr.ecr.<region>.amazonaws.com`, `<account>.dkr.ecr-fips.<region>.amazonaws.com`                                                                  |
+| CodeArtifact              | `<domain>-<owner>.d.codeartifact.<region>.amazonaws.com`                                                                                                     |
+| API Gateway               | `<api-id>.execute-api.<region>.amazonaws.com`                                                                                                                |
+| AppSync                   | `<id>.appsync-api.<region>.amazonaws.com`, `<id>.appsync-realtime-api.<region>.amazonaws.com`                                                                |
+| Managed Grafana           | `g-<id>.grafana-workspace.<region>.amazonaws.com`                                                                                                            |
+| Amazon MQ                 | `b-<id>.mq.<region>.amazonaws.com`                                                                                                                           |
+| OpenSearch Service        | `search-<domain>-<id>.<region>.es.amazonaws.com`, `vpc-<domain>-<id>.<region>.es.amazonaws.com`                                                              |
+| EKS cluster               | `<id>.<label>.<region>.eks.amazonaws.com` (such as `gr7` or `yl4`), `<id>.<region>.api.aws`                                                                  |
+| EKS OIDC issuer           | `oidc.eks.<region>.amazonaws.com/id/<id>`, `oidc-eks.<region>.api.aws/id/<id>`                                                                               |
+| Elastic Load Balancing    | `<name>-<id>.elb.<region>.amazonaws.com`, `<name>-<id>.<region>.elb.amazonaws.com`                                                                           |
+| EC2                       | `ec2-<ip>.<region>.compute.amazonaws.com`, `ec2-<ip>.compute-1.amazonaws.com`                                                                                |
+| AWS CLI downloads         | `awscli.amazonaws.com`                                                                                                                                       |
+| Public IP lookup          | `checkip.amazonaws.com`                                                                                                                                      |
+| AWS IP ranges             | `ip-ranges.amazonaws.com`                                                                                                                                    |
+| Price List Bulk API files | `pricing.us-east-1.amazonaws.com`                                                                                                                            |
 
-Each `amazonaws.com` name but `awscli.amazonaws.com` also matches under `amazonaws.com.cn` and
+Each `amazonaws.com` name but the last four also matches under `amazonaws.com.cn` and
 `amazonaws.eu`, and each `api.aws` one under `api.amazonwebservices.com.cn` and
 `api.amazonwebservices.eu`. Every other AWS API host names only a service and a region, such as `sts.us-east-1.amazonaws.com` or
 `sqs.us-east-1.amazonaws.com`. The account a request to one of those reaches is in its parameters or

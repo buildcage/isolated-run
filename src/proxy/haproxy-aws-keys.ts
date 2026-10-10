@@ -56,8 +56,10 @@ export const STS_HOST = `^sts(-fips)?(\\.[a-z0-9-]+)?\\.${AWS_DOMAINS}$|${vpceHo
 // unsigned request is left to them: S3 in every form, ECR registries,
 // CodeArtifact repositories, API Gateway, AppSync, Managed Grafana
 // workspaces, Amazon MQ brokers, OpenSearch domains, EKS clusters and OIDC
-// issuers, load balancers, EC2 public names, and the AWS CLI's download host.
-// Every other API host names only a service and a region.
+// issuers, load balancers and EC2 public names. With them, public hosts that
+// reach no account: the AWS CLI's downloads, checkip, the IP ranges and the
+// Price List Bulk API's files. Every other API host names only a service and a
+// region.
 export const S3_HOST = `(^|\\.)s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.${AMAZONAWS_DOMAINS}$`;
 export const AWS_RESOURCE_HOST =
   S3_HOST +
@@ -71,7 +73,7 @@ export const AWS_RESOURCE_HOST =
   `|^oidc-eks\\.[a-z0-9-]+\\.${DUALSTACK_DOMAINS}$` +
   `|\\.elb(\\.[a-z0-9-]+)?\\.${AMAZONAWS_DOMAINS}$` +
   `|\\.compute(-1)?\\.${AMAZONAWS_DOMAINS}$` +
-  "|^awscli\\.amazonaws\\.com$";
+  "|^(awscli|checkip|ip-ranges|pricing\\.us-east-1)\\.amazonaws\\.com$";
 export const CODECOMMIT_HOST =
   `^git-codecommit(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$|` +
   vpceHost("git-codecommit(-fips)?");
