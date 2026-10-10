@@ -2,7 +2,7 @@ package main
 
 import "golang.org/x/sys/unix"
 
-// syscallNumbers sets the BPF program's nr_ constants (see
+// syscallNumbers holds the values of the BPF program's nr_ constants (see
 // syscalls_amd64.go). arm64 has only the *at forms of the older calls, and
 // no futimesat, utime or utimes.
 var syscallNumbers = map[string]int64{

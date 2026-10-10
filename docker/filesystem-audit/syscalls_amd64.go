@@ -2,8 +2,8 @@ package main
 
 import "golang.org/x/sys/unix"
 
-// syscallNumbers sets the BPF program's nr_ constants, the path syscalls
-// whose failures and attribute changes it records at the syscall.
+// syscallNumbers holds the values of the BPF program's nr_ constants: the
+// path syscalls whose failures and attribute changes it records.
 var syscallNumbers = map[string]int64{
 	"nr_unlinkat":  unix.SYS_UNLINKAT,
 	"nr_unlink":    unix.SYS_UNLINK,

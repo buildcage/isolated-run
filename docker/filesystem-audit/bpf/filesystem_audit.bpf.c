@@ -1301,9 +1301,11 @@ static __always_inline void attr_op(int dfd, u64 p)
 }
 
 // The syscall numbers of the architecture the tracer runs on, set by the
-// loader; -1 for one it lacks (x86_64's older forms on arm64). A 32-bit
-// syscall numbers them differently, but under the audit the sandbox kills
-// the thread that makes one before it reaches sys_enter.
+// loader; -1 for one it lacks (x86_64's older forms on arm64). A negative
+// number is skipped, as the kernel passes -1 for a call that a ptrace or
+// seccomp tracer cancelled. A 32-bit syscall numbers them differently, but
+// under the audit the sandbox kills the thread that makes one before it
+// reaches sys_enter.
 const volatile long nr_unlinkat = -1, nr_unlink = -1, nr_rmdir = -1;
 const volatile long nr_renameat2 = -1, nr_renameat = -1, nr_rename = -1;
 const volatile long nr_fchmodat = -1, nr_fchmodat2 = -1, nr_chmod = -1;
@@ -1324,11 +1326,12 @@ static __always_inline u64 sys_arg(struct pt_regs *regs, int i)
 }
 
 #define ARG(i) sys_arg(regs, i)
+#define ENOSYS 38
 
 SEC("tp_btf/sys_enter")
 int BPF_PROG(on_sys_enter, struct pt_regs *regs, long nr)
 {
-	if (!in_target())
+	if (nr < 0 || !in_target())
 		return 0;
 	if (nr == nr_unlinkat)
 		failed_op(ARG(2) & AT_REMOVEDIR ? K_RMDIR_FAILED : K_UNLINK_FAILED, ARG(0), ARG(1), 0, 0);
@@ -1340,8 +1343,10 @@ int BPF_PROG(on_sys_enter, struct pt_regs *regs, long nr)
 		failed_op(K_RENAME_FAILED, ARG(0), ARG(1), ARG(2), ARG(3));
 	else if (nr == nr_rename)
 		failed_op(K_RENAME_FAILED, AT_FDCWD, ARG(0), AT_FDCWD, ARG(1));
-	else if (nr == nr_fchmodat || nr == nr_fchmodat2)
+	else if (nr == nr_fchmodat)
 		failed_op(K_CHMOD_FAILED, ARG(0), ARG(1), 0, 0);
+	else if (nr == nr_fchmodat2) // ENOSYS: a kernel before 6.6, so nothing was tried
+		stash(K_CHMOD_FAILED, 0, ENOSYS, ARG(0), ARG(1), 0, 0);
 	else if (nr == nr_chmod)
 		failed_op(K_CHMOD_FAILED, AT_FDCWD, ARG(0), 0, 0);
 	else if (nr == nr_fchownat)
@@ -1374,12 +1379,9 @@ int BPF_PROG(on_sys_enter, struct pt_regs *regs, long nr)
 }
 
 // Emits the call its entry stashed, as it ended.
-#define ENOSYS 38
 static __always_inline void op_exit(struct pending *pend, long ret)
 {
-	// ENOSYS: the kernel lacks the syscall, as fchmodat2 before 6.6, so
-	// nothing was tried.
-	if (ret == -ENOSYS || (ret < 0 && -ret == pend->quiet_err))
+	if (ret < 0 && -ret == pend->quiet_err)
 		return;
 	u32 kind = ret < 0 ? pend->kind : pend->kind_ok;
 	if (kind == 0)
