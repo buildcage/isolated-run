@@ -444,12 +444,9 @@ to the old `writable:` and `allow_write:` inputs are all in
 > `filesystem_audit` is **experimental**: its behavior, inputs, and output format may still change.
 
 `filesystem_audit: record` records what the isolated step reads, writes, moves, deletes, changes the
-attributes of, and executes, and adds a section to the Job Summary: a table of the programs it ran,
-a table of every path it touched with a flag for each action (`R` read, `W` write, `X` exec, `M`
-move, `D` delete, `A` attr; lowercase for an action that only failed, `!` for one refused for want
-of permission or on a read-only location), and, folded below them, one line per command and path with the first and last time it was
-touched. The full record is uploaded as a `buildcage-filesystem-audit-<id>` artifact; treat it as
-sensitive.
+attributes of, and executes, and adds a section to the Job Summary: the programs it ran, every path
+it touched with a flag for each action, and, folded below them, one line per command and path. The
+full record is uploaded as a `buildcage-filesystem-audit-<id>` artifact; treat it as sensitive.
 
 ```yaml
 - uses: buildcage/isolated-run@v2
@@ -458,12 +455,11 @@ sensitive.
     run: npm ci
 ```
 
-It observes accesses in the kernel, below the libraries a command links against, and only records;
-it never blocks an access. It needs a cgroup v2 host on Linux 6.1 or newer (6.4 on arm64) with
-kernel BTF and tracefs mounted; elsewhere the step fails before the command runs. While the step
-runs it adds a small cost to every system call on the host, other jobs' included. The flag format,
-the cost, the artifact, and what it does not record are in
-[Reference](./docs/reference.md#filesystem-audit).
+It only records; it never blocks an access. It works on GitHub-hosted Ubuntu runners, and on a
+self-hosted runner on Linux 6.1 or newer (6.4 on arm64) with cgroup v2, kernel BTF and tracefs;
+elsewhere the step fails before the command runs. While the step runs it adds a small cost to every
+system call on the host, other jobs' included. See [Filesystem audit](./docs/filesystem-audit.md)
+for how to use and read it.
 
 ## How it works
 
@@ -739,11 +735,12 @@ firewall-enabled runner image.
 
 ## Documentation
 
-| Doc                                        | What's in it                                                      |
-| ------------------------------------------ | ----------------------------------------------------------------- |
-| [Reference](./docs/reference.md)           | Every input, the rule syntax in full, the report's own output     |
-| [Security Details](./docs/security.md)     | Architecture and threat model for every engine, attack resistance |
-| [Development Guide](./docs/development.md) | Local usage, testing, logs, and the repository layout             |
+| Doc                                            | What's in it                                                      |
+| ---------------------------------------------- | ----------------------------------------------------------------- |
+| [Reference](./docs/reference.md)               | Every input, the rule syntax in full, the report's own output     |
+| [Filesystem Audit](./docs/filesystem-audit.md) | What `filesystem_audit` records, and how to read it               |
+| [Security Details](./docs/security.md)         | Architecture and threat model for every engine, attack resistance |
+| [Development Guide](./docs/development.md)     | Local usage, testing, logs, and the repository layout             |
 
 ## Contributing
 

@@ -352,8 +352,8 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │                              # helpers.sh carries what both halves share
 ├── dev/                       # Mac dev-loop image and scripts, and the filesystem audit fixture
 │                              # refresh; not used in production or CI
-├── docs/                      # development.md, security.md, aws.md, plus the reference.md/
-│                              # rules.md/inspect-engine.md link stubs
+├── docs/                      # development.md, security.md, aws.md, filesystem-audit.md, plus
+│                              # the reference.md/rules.md/inspect-engine.md link stubs
 ├── licenses/                  # gen-license-file.mjs, which regenerates THIRD_PARTY_LICENSES_NPM
 │                              # during `vp run build`, and what .glf.jsonc substitutes in
 ├── compose.yaml               # Local-dev compose config (builds docker/universal/Dockerfile;

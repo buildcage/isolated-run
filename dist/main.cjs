@@ -70285,7 +70285,7 @@ function auditUnavailable(reason) {
 }
 function hostCannotAudit(reason) {
 	let e = auditUnavailable(reason);
-	return new SandboxError(`${e.message} It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/reference.md#filesystem-audit`, e.code);
+	return new SandboxError(`${e.message} It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting`, e.code);
 }
 const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2";
 function checkFilesystemAuditHost(probes = realHostProbes) {

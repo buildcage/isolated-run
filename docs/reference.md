@@ -765,114 +765,19 @@ repository can fetch it through the API, until it expires.
 
 ## Filesystem audit
 
-**Experimental.** `filesystem_audit: record` records every file the isolated step opens, reads,
-writes, moves, deletes, changes the attributes of, and executes, and adds a section to the Job
-Summary: a table of what the step executed, a table of every path it touched with the actions on it,
-and, folded under **📂 Filesystem details**, one row per command and path in the order the rows were
-first touched:
+`filesystem_audit` is **experimental**: its behavior and output format may still change without
+following semver. The guide is [Filesystem audit](./filesystem-audit.md); what follows is the
+short form.
 
-```
-### Filesystem audit
-R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied
-
-#### Executed
-| Path                  |
-| --------------------- |
-| `/usr/local/bin/node` |
-
-#### Accessed paths
-| Access | Path                  |
-| ------ | --------------------- |
-| RWD    | `./node_modules/**`   |
-| R      | `./package.json`      |
-| Rr!    | `/etc/**`             |
-
-📂 Filesystem details
-first-last access
-00:00.412:           R   node ./package.json
-00:00.415-00:00.418: Rr! node /etc/**
-00:00.530-00:41.207: RWD node ./node_modules/**
-```
-
-The executed table lists each program once, in the order it first ran. The accessed-paths table
-combines every command's actions on a path in one row, in path order. Each row of the details names
-the command (its process name) and combines its flags for that path (`RW` read and written). The
-time is when the command first and last touched it, counted from the proxy's start like the
-communication details (from the first access if that start is unknown); a row touched once shows one
-time. It does not say which action came when, and a file kept open counts only the first read and
-first write through it by each program a process runs, so the last time can be earlier than its last
-write; a command reading or writing through a descriptor it inherited, or was passed, is shown under
-its own name, except on a pipe, socket or device such as `/dev/null`, which counts once. The artifact has every
-access in order. An action that only ever failed is lowercase. One refused for want of permission,
-by the sandbox or the file's own mode, or because the location is read-only, is lowercase and marked
-`!`, after the uppercase letters if it also succeeded: `RWr!` on `/etc/**` means reads and writes
-under `/etc` succeeded and at least one read was refused. A directory with many touched children is
-shown once as `dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and `$HOME`
-(`~/…`), else absolute. A failed access is recorded under the name the command used, joined to the
-directory a relative name resolved against (its working directory, or the directory it passed by
-descriptor) without resolving `..`; a name whose directory was closed before it could be read is
-shown as `…/name`, as is a path too deep to record in full. Where its `path` differs from the name
-as passed, the artifact keeps that name in `name` (`to_name` for a move's target). An invisible or
-control character in a path or command name is shown escaped, as `\n` or `\u{202e}`, and a backslash
-as `\\`. A program the step ran is recorded under the file it resolved to, with symlinks followed
-and a script under its own path rather than its interpreter's; the artifact keeps the name it was
-run by as `name`. A memfd, a file with no path, is shown as `memfd:"name"` with the name its creator
-gave it, and a file deleted while in use, or created with `O_TMPFILE` and never linked, has
-`(deleted)` after its path unless it is folded into a `dir/**` row; the artifact marks them
-`"memfd":true` and `"deleted":true`. The libraries a program loads are left out, as are its reads of
-them and of `/etc/ld.so.cache`, and its process's reads of the program itself, including those made
-just before running it. Other programs' reads of those files are shown. A file mapped executable
-counts as a library only when the kernel maps it to start a program, which the artifact marks
-`"image":true`, or when its name ends in `.so` (optionally followed by version numbers, as in
-`.so.6`) or `.node` and it is neither a memfd nor deleted; any other is shown as read. A file mapped
-shared and writable is shown as written, including one made so with `mprotect` after it was mapped.
-A rename with `RENAME_EXCHANGE` swaps two paths, so both show `M`; the artifact marks it
-`"exchange":true`.
-
-When the step's Job Summary would pass GitHub's size limit, its parts give way in this order: the
-filesystem details, the traffic report's communication log, the accessed-paths table, the executed
-table, then the traffic report's own tables and example. Each is cut at a line boundary with a note
-after what is kept, except the example, which is replaced whole by its note. Once a filesystem audit
-table is cut, the details are left out with it, under that one note. The filesystem audit's note
-names its artifact, or says the record was not kept when the artifact could not be uploaded. A
-filesystem audit table, or the details, that would pass the limit on its own is left out whole under
-that note; when it is the accessed-paths table, the details go with it.
-
-The full record is uploaded as JSON lines in an artifact named `buildcage-filesystem-audit-<id>`,
-with absolute paths; `filesystem_audit_artifact_name` carries its name. It names each program the
-step ran but not its arguments, which can carry secrets. Treat it as sensitive, like the traffic
-artifact. `filesystem_audit_retention_days` sets how long it is kept.
-
-The artifact ends with a line such as `{"kind":"end","dropped":0,"untracked":0,"host_missed":0}`,
-which the tracer writes only after every access it caught. `dropped` counts accesses that found its
-event buffer full, and `untracked` the calls it could not follow because too many files were open,
-or too many calls were in progress, at once. If either is nonzero, or the line is missing because the
-tracer did not stop cleanly, the section opens with a warning that the record is incomplete. If
-the recording cannot be read, the section says so, a warning is logged, and no artifact is uploaded.
-
-The kernel can also skip one of the tracer's hooks: the hooks for failed operations while another
-BPF tool's program, such as a security or monitoring agent's, is running on the same CPU, and, on a
-kernel built for full preemption, a hook entered again while it is preempted mid-run. A stock
-Ubuntu kernel, as on GitHub-hosted runners, does not preempt the hooks. The end line's
-`host_missed` counts the skips anywhere on the host while the step ran, so 0 means none of its
-accesses was skipped; the section does not warn on a nonzero count, since a skip cannot be tied to
-the step. Before Linux 6.7 the kernel does not count a skipped hook for failed operations.
-
-It observes accesses in the kernel, below any library the step links against, and only records; it
-never blocks an access. It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64, the
-first release there where a BPF program can attach to a kernel function with fentry), with kernel
-BTF and tracefs mounted. Where any of these is missing, the step fails with the reason before the
-command runs: cgroup v2 and BTF are checked before the proxy starts, the kernel version and tracefs
-only when the tracer starts. See [Filesystem audit](./security.md#filesystem-audit) for what it
-does not record and what its record can be trusted for.
-
-While the step runs, the tracer's hooks run on every system call and every file read or write on
-the runner host, not only the step's, since a hook has to run to tell whose call it is. That adds
-roughly 100 nanoseconds to each system call of every process on the machine, the proxy, Docker and
-other jobs on a shared runner included. Copying a file a byte at a time outside the step took nearly
-twice as long in a test, while a typical build, which spends little of its time in system calls,
-barely changes. Inside the step, each program's first read or write of a file is also recorded,
-which costs more.
+- `filesystem_audit: record` records the step's file accesses from the kernel and never blocks one.
+  It needs a cgroup v2 host on Linux 6.1 or newer (6.4 on arm64) with kernel BTF and tracefs
+  mounted; elsewhere the step fails before the command runs.
+- The step's Job Summary gets a section listing the programs it ran and every path it touched, with
+  a flag for each action, and folded below them one row per command and path.
+- The full record is uploaded as JSON lines in an artifact named `buildcage-filesystem-audit-<id>`,
+  whose name the `filesystem_audit_artifact_name` output carries; `filesystem_audit_retention_days`
+  sets how long it is kept. It leaves out each program's arguments but holds every path the step
+  touched; treat it as sensitive.
 
 ## CA trust variables
 
