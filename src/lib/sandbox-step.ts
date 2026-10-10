@@ -328,6 +328,7 @@ export async function runSandboxStep(
     },
     annotation.warning,
   );
+  // Unlike the checks above, fails in audit too.
   const aws = readAwsKeyInputs({ proxyEngine }, env);
 
   // Before any privileged setup; see assertNonRootUid.

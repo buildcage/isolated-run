@@ -28,7 +28,9 @@ path, before the request leaves the runner.
 ## Getting started
 
 Turn the check on in `audit` mode first: nothing is refused, and the report shows what `restrict`
-would refuse. A step that uses only the credentials it is given needs `aws_key_check` alone:
+would refuse. The step still needs `proxy_engine: inspect` and its key in `AWS_ACCESS_KEY_ID`, or
+it fails before it starts. A step that uses only the credentials it is given needs `aws_key_check`
+alone:
 
 ```yaml
 - uses: aws-actions/configure-aws-credentials@<sha>
