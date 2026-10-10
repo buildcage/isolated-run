@@ -128,9 +128,10 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	// Only a backstop for the action's own stop, so not worth failing over.
 	if watchPid > 0 {
 		if err := stopOnExit(watchPid, sig); err != nil {
-			return fmt.Errorf("watch pid %d: %w", watchPid, err)
+			fmt.Fprintf(os.Stderr, "filesystem-audit: cannot watch pid %d: %v\n", watchPid, err)
 		}
 	}
 	if pidPath != "" {
@@ -181,9 +182,10 @@ func missedRuns(coll *ebpf.Collection) (uint64, error) {
 	return sum, nil
 }
 
-// create makes a new file, never one already there or reached through a
-// symlink, as the tracer runs as root in a directory the runner owns. It is
-// 0644 whatever root's umask, so the action can read it back.
+// create makes a new file, never one already there and never through a
+// symlink at the path itself, as the tracer runs as root in a directory the
+// runner owns; the action has checked that directory is its own. It is 0644
+// whatever root's umask, so the action can read it back.
 func create(path string) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
 	if err != nil {
@@ -217,11 +219,19 @@ func stopOnExit(pid int, sig chan<- os.Signal) error {
 		defer unix.Close(fd)
 		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 		for {
-			if _, err := unix.Poll(fds, -1); err != unix.EINTR {
+			_, err := unix.Poll(fds, -1)
+			if err == nil {
 				break
 			}
+			if err != unix.EINTR {
+				fmt.Fprintln(os.Stderr, "filesystem-audit: stopped watching the action:", err)
+				return
+			}
 		}
-		sig <- syscall.SIGTERM
+		select {
+		case sig <- syscall.SIGTERM:
+		default: // a stop is already pending
+		}
 	}()
 	return nil
 }

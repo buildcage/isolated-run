@@ -78,9 +78,9 @@ func cstr(b []byte) string {
 // path, and returns the bytes left after them. A truncated walk is marked
 // with a leading ellipsis.
 func components(b []byte, n int, truncated bool) (string, []byte) {
-	// Leaf first; fewer than n if the buffer ran out. Each takes at least its
-	// NUL, so b bounds the count however large n is.
-	names := make([]string, 0, min(n, len(b)+1))
+	// Leaf first; fewer than n if the buffer ran out. Each takes at least a
+	// byte of b, so b bounds the count however large n is.
+	names := make([]string, 0, min(n, len(b)))
 	for i := 0; i < n && len(b) > 0; i++ {
 		j := bytes.IndexByte(b, 0)
 		if j < 0 {
