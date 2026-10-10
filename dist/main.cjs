@@ -69625,10 +69625,14 @@ function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$5 = ge
 		roleAccounts
 	};
 }
-function awsExampleInputs({ key, roleAccounts }) {
+function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 	if (!key) return [];
-	let lines = ["aws_key_check: true"];
-	return roleAccounts.length > 0 && lines.push("allowed_aws_role_accounts: <account-id> # copy the value from your audit step"), lines;
+	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => e.extensions?.aws?.assumedAccount ?? []).filter((a) => /^\d{12}$/.test(a) && !roleAccounts.includes(a)), accounts = [...new Set([...roleAccounts, ...assumed])].sort();
+	if (accounts.length > 0) {
+		let note = assumed.length > 0 ? " # check each account is yours" : "";
+		lines.push(`allowed_aws_role_accounts: "${accounts.join(" ")}"${note}`);
+	}
+	return lines;
 }
 //#endregion
 //#region src/lib/retry-briefly.ts
@@ -73189,7 +73193,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 				actionRepo,
 				actionRef,
 				runCommand,
-				extraInputs,
+				extraInputs: extraInputs?.(report),
 				actionVersion: readActionVersion(containerName, proxyEngine),
 				stepLabel: readStepLabel(),
 				failOnBlocked,
@@ -73414,7 +73418,7 @@ async function runSandboxStep(env, overrides = {}) {
 			actionRepo,
 			actionRef: reportActionRef,
 			runCommand: runInput,
-			extraInputs: awsExampleInputs(aws),
+			extraInputs: (report) => awsExampleInputs(aws, report.timeline),
 			failOnBlocked,
 			trafficArtifact,
 			env,

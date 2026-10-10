@@ -7,6 +7,7 @@ import { parse } from "yaml";
 
 import { applyConfigFile } from "#core/lib/actions/config-file.ts";
 import { InvalidInputError } from "#core/lib/actions/inputs.ts";
+import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
 import { SandboxError } from "./errors.ts";
 import {
@@ -455,13 +456,39 @@ describe("awsExampleInputs", () => {
     expect(awsExampleInputs({ key: "", roleAccounts: [] })).toStrictEqual([]);
   });
 
-  it("turns the check on, and holds the accounts' place without their value", () => {
+  it("turns the check on, and names the accounts given", () => {
     expect(awsExampleInputs({ key: KEY, roleAccounts: [] })).toStrictEqual(["aws_key_check: true"]);
     const lines = awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] });
     expect(lines).toStrictEqual([
       "aws_key_check: true",
-      "allowed_aws_role_accounts: <account-id> # copy the value from your audit step",
+      'allowed_aws_role_accounts: "111111111111"',
     ]);
     expect(lines.join("\n").includes(KEY)).toBe(false);
+  });
+
+  it("adds each account the run assumed a role in, and asks for a look at them", () => {
+    const event = (assumedAccount: string) => ({
+      time: 0,
+      action: "allow",
+      protocol: "https",
+      host: "sts.amazonaws.com",
+      extensions: { aws: { key: "env", assumedAccount } },
+    });
+    const timeline = [
+      event("222222222222"),
+      event("012345678901"),
+      event("222222222222"),
+      event("111111111111"),
+      event('1" injected'),
+      { time: 0, action: "allow", protocol: "https", host: "example.com" },
+    ] as TrafficEvent[];
+    expect(awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline)).toStrictEqual([
+      "aws_key_check: true",
+      'allowed_aws_role_accounts: "012345678901 111111111111 222222222222" # check each account is yours',
+    ]);
+    expect(awsExampleInputs({ key: KEY, roleAccounts: [] }, timeline.slice(0, 1))).toStrictEqual([
+      "aws_key_check: true",
+      'allowed_aws_role_accounts: "222222222222" # check each account is yours',
+    ]);
   });
 });

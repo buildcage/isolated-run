@@ -23,6 +23,7 @@ import {
   type ProxyEngine,
   type ProxyMode,
 } from "#core/lib/actions/inputs.ts";
+import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
 import { isAwsAccessKeyId, parseAwsAccounts } from "../proxy/aws-keys.ts";
 import { SandboxError } from "./errors.ts";
@@ -262,14 +263,24 @@ export function readAwsKeyInputs(
 
 /**
  * The check's inputs for the report's restrict example, only when it was on
- * for this run. The accounts are a placeholder: the value given may have been
- * an expression, and its result is not for the Job Summary.
+ * for this run: the accounts given, and every account the run assumed a role
+ * in. A build's own AssumeRole names an account too, so one not given asks
+ * for a look. Quoted, since YAML reads an ID that begins with 0 as a number.
  */
-export function awsExampleInputs({ key, roleAccounts }: AwsKeyInputs): string[] {
+export function awsExampleInputs(
+  { key, roleAccounts }: AwsKeyInputs,
+  timeline: TrafficEvent[] = [],
+): string[] {
   if (!key) return [];
   const lines = ["aws_key_check: true"];
-  if (roleAccounts.length > 0) {
-    lines.push("allowed_aws_role_accounts: <account-id> # copy the value from your audit step");
+  // The log is the proxy's, but only an ID goes into the YAML.
+  const assumed = timeline
+    .flatMap((e) => e.extensions?.aws?.assumedAccount ?? [])
+    .filter((a) => /^\d{12}$/.test(a) && !roleAccounts.includes(a));
+  const accounts = [...new Set([...roleAccounts, ...assumed])].sort();
+  if (accounts.length > 0) {
+    const note = assumed.length > 0 ? " # check each account is yours" : "";
+    lines.push(`allowed_aws_role_accounts: "${accounts.join(" ")}"${note}`);
   }
   return lines;
 }

@@ -485,7 +485,7 @@ export async function runSandboxStep(
       actionRepo,
       actionRef: reportActionRef,
       runCommand: runInput,
-      extraInputs: awsExampleInputs(aws),
+      extraInputs: (report) => awsExampleInputs(aws, report.timeline),
       failOnBlocked,
       trafficArtifact,
       env,

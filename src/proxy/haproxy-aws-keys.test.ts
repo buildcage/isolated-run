@@ -253,12 +253,17 @@ describe("the check with no role account", () => {
   const KEY_ONLY = { keyMapFile: "/rules/keys.map" };
   const rules = awsKeyRequestRules(KEY_ONLY, "restrict").join("\n");
 
-  it("learns no STS key, so it neither reads STS answers nor rewrites their Accept-Encoding", () => {
-    const response = awsKeyResponseRules(KEY_ONLY).join("\n");
-    expect(response.includes("res.body")).toBe(false);
-    expect(response.includes("aws_learn ")).toBe(false);
-    expect(rules.includes("Accept-Encoding")).toBe(false);
-    expect(rules.includes("aws_sts")).toBe(false);
+  it("learns no STS key, but still records the account an STS answer names", () => {
+    const response = awsKeyResponseRules(KEY_ONLY);
+    expect(response.some((l) => l.includes("set-map") && l.includes("aws_new_key"))).toBe(false);
+    expect(
+      response.includes(
+        "    http-response set-var(txn.aws_log_assumed) var(txn.aws_new_account) if aws_new_account",
+      ),
+    ).toBe(true);
+    expect(rules.includes("http-request set-header Accept-Encoding identity if aws_sts_host")).toBe(
+      true,
+    );
     expect(rules.includes("aws_fed")).toBe(false);
     expect(rules.includes("aws_role_account")).toBe(false);
   });

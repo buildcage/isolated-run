@@ -86,7 +86,8 @@ echo "--- audit: let through, and noted ---"
 run_step audit \
   AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
   INPUT_PROXY_MODE="audit" \
-  INPUT_RUN="curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTATTACKER0001/x' https://sts.us-east-1.amazonaws.com/sts/same-account &&
+  INPUT_RUN="curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTSTARTKEY0001/x' https://sts.us-east-1.amazonaws.com/sts/other-account &&
+    curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTATTACKER0001/x' https://sts.us-east-1.amazonaws.com/sts/same-account &&
     curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTLEARNEDKEY01/x' https://cloudformation.us-east-1.amazonaws.com/"
 RUN_EXIT=$?
 if [ "$RUN_EXIT" = "0" ]; then
@@ -103,6 +104,8 @@ if grep -qE "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(rest
 else
   fail "an AssumeRole answer to a key restrict would refuse taught its key"
 fi
+assert_summary_contains 'allowed_aws_role_accounts: "111111111111 999999999999" # check each account is yours' \
+  "the restrict example names the account given and the one a role was assumed in"
 if grep -qF "restrict mode would refuse" "$TMPDIR/audit.log"; then
   pass "a warning counts the requests restrict would refuse"
 else

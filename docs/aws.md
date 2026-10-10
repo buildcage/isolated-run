@@ -93,7 +93,8 @@ The proxy knows three kinds of key:
   keep working, such as the CDK assuming its `cdk-hnb659fds-deploy-role-*` roles, Terraform's
   `assume_role`, or the AWS CLI run with a `--profile` that sets `role_arn` and
   `web_identity_token_file`. A role in any other account issues a key the proxy never learns, so
-  requests signed with it are refused. With no account named, no STS key is learned.
+  requests signed with it are refused. With no account named, no STS key is learned, but the proxy
+  still reads each answer for the account of its role, so a run shows which accounts to name.
 - **Keys ECR signs a layer's presigned URL with.** An ECR registry,
   `<account>.dkr.ecr.<region>.amazonaws.com` or its dual-stack `<account>.dkr-ecr.<region>.on.aws`,
   answers a layer download with a redirect to a presigned S3 URL, signed with a key of ECR's own.
@@ -278,8 +279,15 @@ step can be checked before it is switched to `restrict`:
 The traffic artifact carries the same reason in `wouldRefuse`.
 
 When the check was on for the run, the report's **Switch to restrict mode** example includes
-`aws_key_check: true`. Its `allowed_aws_role_accounts` holds an `<account-id>` placeholder in place
-of the accounts: copy the value over from the audit step.
+`aws_key_check: true`, and `allowed_aws_role_accounts` with the accounts given and each account the
+run assumed a role in. This is where to find the accounts a tool such as the CDK switches into.
+Anything in the step can assume a role, including in an account of its own, so when the example adds
+an account it was not given it says `# check each account is yours`:
+
+```yaml
+aws_key_check: true
+allowed_aws_role_accounts: "111111111111 222222222222" # check each account is yours
+```
 
 ### In the traffic artifact
 

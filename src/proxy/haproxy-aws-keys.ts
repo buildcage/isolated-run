@@ -20,7 +20,8 @@ import type { InspectStageExtension } from "#core/lib/acl/haproxy-inspect-stage.
 /** Where the files the check reads are. */
 export interface AwsKeyCheck {
   keyMapFile: string;
-  /** The accounts whose roles may issue keys; absent, no STS key is learned. */
+  /** The accounts whose roles may issue keys; absent, no STS key is learned,
+   *  though the account an STS answer names is still recorded. */
   accountFile?: string;
 }
 
@@ -133,7 +134,7 @@ export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
  */
 export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit"): string[] {
   const map = `map(${check.keyMapFile}) -m found`;
-  const l = [
+  return [
     "    # AWS access key check. req.fhdr, not req.hdr: Authorization holds commas.",
     "    # Each fact is matched once and kept in a variable: an acl is evaluated",
     "    # again on every line that names it.",
@@ -189,6 +190,10 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    # And on a public host, which reaches no account.",
     `    http-request set-var(txn.aws_unsigned_ok) bool(true) if aws_host !{ req.fhdr(authorization) -m found } { var(txn.host) -m reg ${AWS_PUBLIC_HOST} }`,
     "    acl aws_unsigned_ok var(txn.aws_unsigned_ok) -m bool",
+    "    # A host that names a resource is never STS, whatever its name: S3",
+    "    # takes a bucket named sts.",
+    `    http-request set-var(txn.aws_sts_host) bool(true) if aws_host !aws_resource_host { var(txn.host) -m reg ${STS_HOST} }`,
+    "    acl aws_sts_host var(txn.aws_sts_host) -m bool",
     ...(check.accountFile ? accountRules(check.accountFile) : []),
     "    # Where a credential could be out of sight: a form body that is",
     "    # compressed, has no Content-Length (which HAProxy drops from a chunked",
@@ -240,22 +245,17 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    # can teach a key, and only over TLS, where the registry's certificate",
     "    # was verified.",
     `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
+    "    # The body has to be readable to learn from it; no Accept-Encoding at",
+    "    # all would mean any coding is acceptable (RFC 9110). Left alone where it",
+    "    # is signed, which rewriting would break: a compressed answer then",
+    "    # teaches nothing, and the key it issues is refused.",
+    "    acl aws_coding_signed req.fhdr(authorization) -m reg -i signedheaders=[^,]*accept-encoding",
+    "    acl aws_coding_signed query,url_dec -m reg -i (^|&)x-amz-signedheaders=[^&]*accept-encoding",
+    "    http-request set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed",
+    "    # Only an answer to a request the check let through can teach a key.",
+    "    http-request set-var(txn.aws_learn) bool(true) if aws_sts_host { var(txn.aws) -m str allowed }",
+    "",
   ];
-  if (check.accountFile) {
-    l.push(
-      "    # The body has to be readable to learn a key from it; no Accept-Encoding",
-      "    # at all would mean any coding is acceptable (RFC 9110). Left alone where",
-      "    # it is signed, which rewriting would break: a compressed answer then",
-      "    # teaches nothing, and the key it issues is refused.",
-      "    acl aws_coding_signed req.fhdr(authorization) -m reg -i signedheaders=[^,]*accept-encoding",
-      "    acl aws_coding_signed query,url_dec -m reg -i (^|&)x-amz-signedheaders=[^&]*accept-encoding",
-      "    http-request set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed",
-      "    # Only an answer to a request the check let through can teach a key.",
-      "    http-request set-var(txn.aws_learn) bool(true) if aws_sts_host { var(txn.aws) -m str allowed }",
-    );
-  }
-  l.push("");
-  return l;
 }
 
 /**
@@ -266,10 +266,6 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
  */
 function accountRules(accountFile: string): string[] {
   return [
-    "    # A host that names a resource is never STS, whatever its name: S3",
-    "    # takes a bucket named sts.",
-    `    http-request set-var(txn.aws_sts_host) bool(true) if aws_host !aws_resource_host { var(txn.host) -m reg ${STS_HOST} }`,
-    "    acl aws_sts_host var(txn.aws_sts_host) -m bool",
     `    acl aws_fed_action req.body -m reg -i (^|&)${FORM_ACTION}=AssumeRoleWithWebIdentity(&|$)`,
     `    acl aws_fed_action_many req.body -m reg -i (?s)(^|&)${FORM_ACTION}=.*&${FORM_ACTION}=`,
     `    acl aws_role_body_many req.body -m reg -i (?s)(^|&)${FORM_ROLE_ARN}=.*&${FORM_ROLE_ARN}=`,
@@ -288,38 +284,38 @@ function accountRules(accountFile: string): string[] {
  * redirects a layer download to, and, when role accounts are named, the key
  * an AssumeRole or AssumeRoleWithWebIdentity answer issues for a role in one
  * of them. Only an answer to a request the check did not refuse teaches one.
+ * The account of the role is recorded whether or not any is named, so a run
+ * shows which accounts to name.
  *
  * Only ECR writes that Location, over a connection whose certificate the
  * proxy verified, so a build cannot put its own key there. The role ARN is
- * AWS's own, not the caller's. A body larger than the
- * buffer is read only in part, so a key past it is not learned and its
- * requests are refused.
+ * AWS's own, not the caller's. A body larger than the buffer is read only in
+ * part, so a key past it is not learned and its requests are refused.
  */
 export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
-  const l = [
+  return [
     "    acl aws_ecr_learn var(txn.aws_ecr_learn) -m bool",
     "    acl aws_location_many res.fhdr(location) -m reg -i x-amz-credential=.*x-amz-credential=",
     `    http-response set-var(txn.aws_issued_key) 'res.fhdr(location),regsub("${LOCATION_CREDENTIAL}","\\2",i)' if aws_ecr_learn { status 300:399 } { res.fhdr_cnt(location) eq 1 } !aws_location_many`,
     "    acl aws_issued_key var(txn.aws_issued_key) -m reg ^ASIA[A-Z0-9]+$",
     "    # A key the proxy already knows keeps what it was learned as.",
     `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_issued_key)] issued if aws_issued_key !{ var(txn.aws_issued_key),map(${check.keyMapFile}) -m found }`,
+    "    acl aws_learn var(txn.aws_learn) -m bool",
+    "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity)?Response[\\s>]",
+    "    acl aws_many_keys res.body -m reg (?s)<AccessKeyId>.*<AccessKeyId>",
+    "    acl aws_many_arns res.body -m reg (?s)<Arn>.*<Arn>",
+    "    http-response wait-for-body time 10s if aws_learn { status 200 }",
+    `    http-response set-var(txn.aws_new_account) 'res.body,regsub("(?s)^.*<Arn>arn:aws[a-z-]*:sts::([0-9]{12}):assumed-role/[^<]*</Arn>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
+    "    acl aws_new_account var(txn.aws_new_account) -m reg ^[0-9]{12}$",
+    ...(check.accountFile
+      ? [
+          `    http-response set-var(txn.aws_new_key) 'res.body,regsub("(?s)^.*<AccessKeyId>(ASIA[A-Z0-9]+)</AccessKeyId>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
+          "    acl aws_new_key var(txn.aws_new_key) -m reg ^ASIA[A-Z0-9]+$",
+          `    acl aws_new_account_allowed var(txn.aws_new_account) -m str -f ${check.accountFile}`,
+          `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_new_key aws_new_account aws_new_account_allowed`,
+        ]
+      : []),
+    "    http-response set-var(txn.aws_log_assumed) var(txn.aws_new_account) if aws_new_account",
+    "",
   ];
-  if (check.accountFile) {
-    l.push(
-      "    acl aws_learn var(txn.aws_learn) -m bool",
-      "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity)?Response[\\s>]",
-      "    acl aws_many_keys res.body -m reg (?s)<AccessKeyId>.*<AccessKeyId>",
-      "    acl aws_many_arns res.body -m reg (?s)<Arn>.*<Arn>",
-      "    http-response wait-for-body time 10s if aws_learn { status 200 }",
-      `    http-response set-var(txn.aws_new_key) 'res.body,regsub("(?s)^.*<AccessKeyId>(ASIA[A-Z0-9]+)</AccessKeyId>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
-      `    http-response set-var(txn.aws_new_account) 'res.body,regsub("(?s)^.*<Arn>arn:aws[a-z-]*:sts::([0-9]{12}):assumed-role/[^<]*</Arn>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
-      "    acl aws_new_key var(txn.aws_new_key) -m reg ^ASIA[A-Z0-9]+$",
-      "    acl aws_new_account var(txn.aws_new_account) -m reg ^[0-9]{12}$",
-      `    acl aws_new_account_allowed var(txn.aws_new_account) -m str -f ${check.accountFile}`,
-      `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_new_key aws_new_account aws_new_account_allowed`,
-      "    http-response set-var(txn.aws_log_assumed) var(txn.aws_new_account) if aws_new_account",
-    );
-  }
-  l.push("");
-  return l;
 }
