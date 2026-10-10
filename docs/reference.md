@@ -46,8 +46,9 @@ details.
 | `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                                                                                                                                                                          |
 
 `fail_on_blocked`, `fail_on_ca_residue`, `upload_traffic_artifact` and `aws_key_check` take `true`
-or `false`, and `traffic_artifact_retention_days` a whole number above zero. Any other value fails
-the step before the sandbox is set up.
+or `false`, `filesystem_mode` `persistent` or `ephemeral`, `filesystem_audit` `off` or `record`, and
+`traffic_artifact_retention_days` and `filesystem_audit_retention_days` a whole number above zero.
+Any other value fails the step before the sandbox is set up.
 
 ### Rule inputs
 
@@ -111,7 +112,7 @@ known_blocked_rules: |
 | Output                           | Description                                                                                                                                                                    |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `traffic_artifact_name`          | Name of the uploaded traffic artifact, when `upload_traffic_artifact` produced one. Empty otherwise, so a later step can tell an upload apart from none having been requested. |
-| `filesystem_audit_artifact_name` | Name of the uploaded filesystem audit artifact, when `filesystem_audit: record` recorded something. Empty otherwise.                                                           |
+| `filesystem_audit_artifact_name` | Name of the uploaded filesystem audit artifact, when `filesystem_audit: record` uploaded one. Empty otherwise, including when the upload failed.                               |
 
 ## Operation modes
 
