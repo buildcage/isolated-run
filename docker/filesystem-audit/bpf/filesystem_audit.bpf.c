@@ -677,20 +677,6 @@ static __always_inline int on_layer(struct file *file)
 	return 1;
 }
 
-SEC("fentry/security_file_open")
-int BPF_PROG(on_open, struct file *file)
-{
-	if (!in_target() || on_layer(file))
-		return 0;
-	struct event *e = start(K_OPEN);
-	if (!e)
-		return 0;
-	e->flags = file->f_flags;
-	e->mode = file->f_mode;
-	file_path(e, file);
-	submit(e);
-	return 0;
-}
 
 // The file being executed, resolved, while bprm->file is still the one named:
 // by sched_process_exec a script has been swapped for its interpreter, and
@@ -961,6 +947,37 @@ struct {
 	__type(value, struct name_buf);
 } open_names SEC(".maps");
 
+// An open(2) seen at security_file_open, held per thread until the syscall
+// returns: the file's own open method, an LSM or the FIFO checks can still
+// refuse it after that hook, and a refused one is recorded as failed instead.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 65536);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
+	__type(key, u64);
+	__type(value, struct event);
+} held_opens SEC(".maps");
+
+// An open from outside open(2), such as exec opening the program, has no exit
+// to wait for here, and is recorded at once.
+SEC("fentry/security_file_open")
+int BPF_PROG(on_open, struct file *file)
+{
+	if (!in_target() || on_layer(file))
+		return 0;
+	struct event *e = start(K_OPEN);
+	if (!e)
+		return 0;
+	e->flags = file->f_flags;
+	e->mode = file->f_mode;
+	file_path(e, file);
+	u64 id = bpf_get_current_pid_tgid();
+	if (!bpf_map_lookup_elem(&open_names, &id) ||
+	    bpf_map_update_elem(&held_opens, &id, e, BPF_ANY) != 0)
+		submit(e);
+	return 0;
+}
+
 // mknod(2) and bind(2) to a path. A creating open also passes here, from
 // may_o_create, and is skipped: the open records it.
 SEC("fentry/security_path_mknod")
@@ -1015,6 +1032,12 @@ static __always_inline void open_exit(long ret)
 	struct name_buf *nb = bpf_map_lookup_elem(&open_names, &id);
 	if (!nb)
 		return;
+	struct event *held = bpf_map_lookup_elem(&held_opens, &id);
+	if (held) {
+		if (ret >= 0)
+			submit(held);
+		bpf_map_delete_elem(&held_opens, &id);
+	}
 	if (ret < 0) {
 		struct event *e = start(K_OPEN_FAILED);
 		if (e) {
@@ -1159,10 +1182,15 @@ static __always_inline void map_events(struct file *file, struct dentry *d, stru
 		map_event(file, d, mnt, prot, flags, SEEN_READ, 1);
 }
 
-SEC("fentry/security_mmap_file")
-int BPF_PROG(on_mmap, struct file *file, unsigned long prot, unsigned long flags)
+// fexit, so only a mapping that was made is recorded: after the LSMs,
+// do_mmap still refuses a shared writable mapping of a file not open for
+// writing, and an executable one on a noexec mount. mmap(2) and exec's own
+// mappings both come through here.
+SEC("fexit/vm_mmap_pgoff")
+int BPF_PROG(on_mmap, struct file *file, unsigned long addr, unsigned long len,
+	     unsigned long prot, unsigned long flags, unsigned long pgoff, unsigned long ret)
 {
-	if (!file || !in_target() || on_layer(file))
+	if (!file || ret >= (unsigned long)-4095 || !in_target() || on_layer(file))
 		return 0;
 	map_events(file, 0, 0, prot, flags, 1);
 	return 0;
