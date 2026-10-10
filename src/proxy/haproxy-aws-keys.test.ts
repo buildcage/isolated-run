@@ -2,6 +2,7 @@ import { describe, it, expect, reportResults } from "#core/lib/test/test-shim.ts
 
 import {
   AWS_API_HOST,
+  AWS_PUBLIC_HOST,
   AWS_RESOURCE_HOST,
   CODECOMMIT_HOST,
   SIGV2_PARAM,
@@ -20,6 +21,7 @@ const CHECK = { accountFile: "/rules/accounts.lst", keyMapFile: "/rules/keys.map
 const apiHost = new RegExp(AWS_API_HOST);
 const stsHost = new RegExp(STS_HOST);
 const resourceHost = new RegExp(AWS_RESOURCE_HOST);
+const publicHost = new RegExp(AWS_PUBLIC_HOST);
 
 describe("AWS API hosts", () => {
   it("covers the classic, China and dual-stack domains", () => {
@@ -112,10 +114,6 @@ describe("hosts that name the resource", () => {
       "my-loadbalancer-1234567890.us-west-2.elb.amazonaws.com",
       "ec2-52-54-55-66.ap-southeast-2.compute.amazonaws.com",
       "ec2-55-41-26-75.compute-1.amazonaws.com",
-      "awscli.amazonaws.com",
-      "checkip.amazonaws.com",
-      "ip-ranges.amazonaws.com",
-      "pricing.us-east-1.amazonaws.com",
       "g-abcdef1234.grafana-workspace.us-east-1.amazonaws.com",
       "b-1234a5b6-78cd-901e-2fgh-3i45j6k178l9.mq.us-east-2.amazonaws.com",
       "search-my-domain-abcdefghijklmnop.us-east-1.es.amazonaws.com",
@@ -163,11 +161,34 @@ describe("hosts that name the resource", () => {
       "abcdef0123456789abcdef0123456789.us-east-1.eks.amazonaws.com",
       "eks.us-east-1.api.aws",
       "abcdef0123456789abcdef0123456789.gr7.us-east-1.api.aws",
+      "checkip.amazonaws.com",
+    ]) {
+      expect(resourceHost.test(host)).toBe(false);
+    }
+  });
+});
+
+describe("public hosts", () => {
+  it("covers the hosts AWS serves unsigned that reach no account", () => {
+    for (const host of [
+      "awscli.amazonaws.com",
+      "checkip.amazonaws.com",
+      "ip-ranges.amazonaws.com",
+      "pricing.us-east-1.amazonaws.com",
+      "pricing.cn-northwest-1.amazonaws.com.cn",
+    ]) {
+      expect(publicHost.test(host)).toBe(true);
+    }
+  });
+
+  it("leaves out the signed Price List API and other names", () => {
+    for (const host of [
       "api.pricing.us-east-1.amazonaws.com",
       "pricing.eu-central-1.amazonaws.com",
       "checkip.amazonaws.com.cn",
+      "x.checkip.amazonaws.com",
     ]) {
-      expect(resourceHost.test(host)).toBe(false);
+      expect(publicHost.test(host)).toBe(false);
     }
   });
 });
@@ -278,7 +299,13 @@ describe("awsKeyRequestRules", () => {
 
   it("matches each host pattern once", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    for (const pattern of [AWS_API_HOST, AWS_RESOURCE_HOST, CODECOMMIT_HOST, STS_HOST]) {
+    for (const pattern of [
+      AWS_API_HOST,
+      AWS_RESOURCE_HOST,
+      AWS_PUBLIC_HOST,
+      CODECOMMIT_HOST,
+      STS_HOST,
+    ]) {
       expect(rules.split(`-m reg ${pattern} }`).length).toBe(2);
     }
   });

@@ -38,6 +38,7 @@ echo "=== [a key of the build's own] ==="
 check_status "a request signed with it" "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTATTACKER0001)" $CF)" "403"
 check_status "a presigned URL carrying it" \
   "$($C "https://bucket.s3.amazonaws.com/x?X-Amz-Credential=${AKIA}TESTATTACKER0001%2F20261008%2Fus-east-1%2Fs3%2Faws4_request")" "403"
+check_status "a request to checkip signed with it" "$($C -H "Authorization: $(sigv4 ${AKIA}TESTATTACKER0001)" https://checkip.amazonaws.com/)" "403"
 check_status "a presigned URL carrying it under a percent-encoded name" \
   "$($C "https://bucket.s3.amazonaws.com/x?X-Amz-Cr%65dential=${AKIA}TESTATTACKER0001%2F20261008%2Fus-east-1%2Fs3%2Faws4_request")" "403"
 # The proxy issues no certificate for such a name, but a client that skips
@@ -62,6 +63,9 @@ check_status "a Basic-auth call to an Amazon MQ broker console" \
 check_status "an unsigned read of an EKS OIDC discovery document" \
   "$($C https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF0123456789/.well-known/openid-configuration)" "200"
 check_status "an unsigned read of checkip" "$($C https://checkip.amazonaws.com/)" "200"
+check_status "an unsigned read of the IP ranges" "$($C https://ip-ranges.amazonaws.com/ip-ranges.json)" "200"
+check_status "an unsigned read of a Price List Bulk file" "$($C https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/index.json)" "200"
+check_status "a Bearer token to checkip" "$($C -H "Authorization: Bearer token" https://checkip.amazonaws.com/)" "403"
 check_status "a POST-policy upload to a bucket, its credential in the form" \
   "$($C -F "x-amz-credential=${AKIA}TESTATTACKER0001/20261008/us-east-1/s3/aws4_request" -F "file=@/dev/null" https://bucket.s3.amazonaws.com/)" "403"
 check_status "a POST-policy upload with the start key in the header too" \
