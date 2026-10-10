@@ -397,6 +397,8 @@ func FuzzDecode(f *testing.F) {
 		make([]byte, hdrLen),
 		event{kind: 8, pathRet: 1 << 20, n1: 2, data: []byte("x\x00y\x00")}.bytes(),
 		event{kind: 17, n1: 1, data: []byte("no-terminator")}.bytes(),
+		// A base component count of 2^32-1 must not size an allocation.
+		event{kind: 17, bases: 1, mode: 0xffffffff, data: []byte("a\x00b\x00")}.bytes(),
 	} {
 		f.Add(raw)
 	}

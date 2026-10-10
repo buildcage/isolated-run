@@ -139,6 +139,7 @@ describe("runSandboxedCommand", () => {
     const AUDIT = {
       outPath: "/var/tmp/buildcage-1001/filesystem-audit-deadbeef.jsonl",
       pidFilePath: "/var/tmp/buildcage-1001/filesystem-audit-deadbeef.pid",
+      stepPath: "/var/tmp/buildcage-1001/filesystem-audit-deadbeef.step.jsonl",
     };
 
     function auditing() {
@@ -159,6 +160,7 @@ describe("runSandboxedCommand", () => {
         outPath: AUDIT.outPath,
         pidFilePath: AUDIT.pidFilePath,
         readyPath: `${SCRATCH}/filesystem-audit.ready`,
+        watchPid: process.pid,
       });
       expect(mocks.startFilesystemAudit.mock.invocationCallOrder[0]).toBeLessThan(
         mocks.runIsolated.mock.invocationCallOrder[0],

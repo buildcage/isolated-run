@@ -181,8 +181,8 @@ export async function prepareStepFilesystemAudit(
     // The stripped copy goes beside the recording under the scratch base,
     // which the sandbox cannot reach (unlike $RUNNER_TEMP or /tmp). Writing a
     // new file leaves the root-owned recording in place, so a failed write
-    // never uploads the raw.
-    const cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl");
+    // never uploads the raw. The post step removes both.
+    const cleanPath = audit.stepPath;
     let reduced: Reduced | undefined;
     try {
       reduced = reduce(audit.outPath, cleanPath, options, annotation, deps);

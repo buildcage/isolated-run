@@ -69406,7 +69406,7 @@ async function prepareStepFilesystemAudit({ audit, retentionDays, containerName,
 		let options = {
 			workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
 			home: prefixes(env.HOME, deps.realpath)
-		}, cleanPath = audit.outPath.replace(/\.jsonl$/, ".step.jsonl"), reduced;
+		}, cleanPath = audit.stepPath, reduced;
 		try {
 			reduced = reduce(audit.outPath, cleanPath, options, annotation, deps);
 		} catch (e) {
@@ -70268,7 +70268,8 @@ function filesystemAuditPaths(containerName, scratchBase) {
 	let suffix = containerName.split("-").at(-1);
 	return {
 		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
-		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`)
+		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
+		stepPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.step.jsonl`)
 	};
 }
 function cgroupFsPath(cgroupsPath) {
@@ -70334,7 +70335,7 @@ function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = n
 		hostPath: tracerPath
 	})), chmod(tracerPath, 493), tracerPath;
 }
-async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath }, deps = {}) {
+async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath, watchPid }, deps = {}) {
 	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2 } = deps, child = spawn("sudo", [
 		"-n",
 		"--",
@@ -70346,7 +70347,9 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		"--pidfile",
 		pidFilePath,
 		"--ready",
-		readyPath
+		readyPath,
+		"--watch-pid",
+		String(watchPid)
 	]), exited = !1;
 	child.exited.then(() => {
 		exited = !0;
@@ -72306,7 +72309,8 @@ async function startAudit(dir, config, options, deps) {
 		cgroupsPath,
 		outPath: filesystemAudit.outPath,
 		pidFilePath: filesystemAudit.pidFilePath,
-		readyPath: (0, node_path.join)(dir, "filesystem-audit.ready")
+		readyPath: (0, node_path.join)(dir, "filesystem-audit.ready"),
+		watchPid: process.pid
 	});
 }
 async function runSandboxedCommand(options, overrides = {}) {

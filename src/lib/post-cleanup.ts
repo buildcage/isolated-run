@@ -55,7 +55,10 @@ function cleanupLeftoverAudit(
     removeFile = defaultRemoveFile,
   }: PostCleanupDeps,
 ): void {
-  const { outPath, pidFilePath } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
+  const { outPath, pidFilePath, stepPath } = filesystemAuditPaths(
+    containerName,
+    SANDBOX_SCRATCH_BASE,
+  );
   if (fileExists(pidFilePath)) {
     try {
       const pid = Number(readFile(pidFilePath).trim());
@@ -70,6 +73,7 @@ function cleanupLeftoverAudit(
     removeFile(pidFilePath);
   }
   removeFile(outPath);
+  removeFile(stepPath);
 }
 
 function isTracer(pid: number, readFile: (path: string) => string): boolean {

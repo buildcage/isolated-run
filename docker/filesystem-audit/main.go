@@ -57,6 +57,7 @@ func main() {
 	out := flag.String("out", "", "JSON lines output file")
 	ready := flag.String("ready", "", "file to create once the programs are attached")
 	pidfile := flag.String("pidfile", "", "file to write this process's pid to, for the caller to stop it")
+	watchPid := flag.Int("watch-pid", 0, "process whose exit stops the tracer, as a signal would")
 	flag.Parse()
 	if *cgPath == "" || *out == "" {
 		flag.Usage()
@@ -65,14 +66,14 @@ func main() {
 	// stderr is a pipe the action reads; once the action is gone, a write to
 	// it must fail rather than kill the tracer before it flushes the record.
 	signal.Ignore(syscall.SIGPIPE)
-	if err := run(*cgPath, *out, *ready, *pidfile); err != nil {
+	if err := run(*cgPath, *out, *ready, *pidfile, *watchPid); err != nil {
 		// The action reports the "fatal:" line as the reason the step failed.
 		fmt.Fprintln(os.Stderr, "filesystem-audit: fatal:", err)
 		os.Exit(1)
 	}
 }
 
-func run(cgPath, outPath, readyPath, pidPath string) error {
+func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
 	cg, err := prepareCgroup(cgPath)
 	if err != nil {
 		return err
@@ -117,35 +118,36 @@ func run(cgPath, outPath, readyPath, pidPath string) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.Create(outPath)
+	f, err := create(outPath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	// The tracer runs as root; 0644 regardless of root's umask so the action,
-	// running as the runner, can read the recording back.
-	if err := f.Chmod(0o644); err != nil {
-		return err
-	}
 	bw := bufio.NewWriterSize(f, 1<<20)
 	defer bw.Flush()
 
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	// Only a backstop for the action's own stop, so not worth failing over.
+	if watchPid > 0 {
+		if err := stopOnExit(watchPid, sig); err != nil {
+			fmt.Fprintf(os.Stderr, "filesystem-audit: cannot watch pid %d: %v\n", watchPid, err)
+		}
+	}
 	if pidPath != "" {
-		if err := os.WriteFile(pidPath, []byte(fmt.Sprintln(os.Getpid())), 0o644); err != nil {
+		if err := writeNew(pidPath, []byte(fmt.Sprintln(os.Getpid()))); err != nil {
 			return err
 		}
 	}
 	// Before the ready file, which lets the step start.
 	base, errBase := missedRuns(coll)
 	if readyPath != "" {
-		if err := os.WriteFile(readyPath, nil, 0o644); err != nil {
+		if err := writeNew(readyPath, nil); err != nil {
 			return err
 		}
 	}
 	fmt.Fprintln(os.Stderr, "filesystem-audit: attached")
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	// Read before the flush that ends readLoop, so it has the count by then.
 	missed := make(chan count, 1)
 	go func() {
@@ -178,6 +180,60 @@ func missedRuns(coll *ebpf.Collection) (uint64, error) {
 		sum += s.RecursionMisses
 	}
 	return sum, nil
+}
+
+// create makes a new file, never one already there and never through a
+// symlink at the path itself, as the tracer runs as root in a directory the
+// runner owns; the action has checked that directory is its own. It is 0644
+// whatever root's umask, so the action can read it back.
+func create(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Chmod(0o644); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+func writeNew(path string, data []byte) error {
+	f, err := create(path)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	return errors.Join(err, f.Close())
+}
+
+// stopOnExit stops the tracer when pid exits, so it does not outlive an
+// action killed before it could stop it. A pidfd, opened while pid is known
+// to be alive, cannot follow a later process that reuses the number.
+func stopOnExit(pid int, sig chan<- os.Signal) error {
+	fd, err := unix.PidfdOpen(pid, 0)
+	if err != nil {
+		return err
+	}
+	go func() {
+		defer unix.Close(fd)
+		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		for {
+			_, err := unix.Poll(fds, -1)
+			if err == nil {
+				break
+			}
+			if err != unix.EINTR {
+				fmt.Fprintln(os.Stderr, "filesystem-audit: stopped watching the action:", err)
+				return
+			}
+		}
+		select {
+		case sig <- syscall.SIGTERM:
+		default: // a stop is already pending
+		}
+	}()
+	return nil
 }
 
 // prepareCgroup verifies the host is cgroup v2, creates the watched cgroup
