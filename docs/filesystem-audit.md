@@ -221,8 +221,8 @@ jq -c 'select(.kind == "open" and .failed and (.err == 1 or .err == 13 or .err =
 | `to_name`  |                             | as `name`, for `to`                                                                                                                                    |
 | `access`   | `open`, `mmap`              | what was asked for; see [Access letters](#access-letters)                                                                                              |
 | `flags`    | `open`                      | the `open(2)` flags as a number; absent when 0, as for a plain read-only open                                                                          |
-| `mode`     | `chmod`                     | the new mode in octal, such as `"0755"`; absent on most failed ones                                                                                    |
-| `owner`    | `chown`                     | the new `uid:gid`; absent on most failed ones                                                                                                          |
+| `mode`     | `chmod`                     | the new mode in octal, such as `"0755"`                                                                                                                |
+| `owner`    | `chown`                     | the new `uid:gid`                                                                                                                                      |
 | `failed`   |                             | `true` when the operation failed                                                                                                                       |
 | `err`      |                             | on a failed one, the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read |
 | `image`    |                             | on `mmap`, a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                              |

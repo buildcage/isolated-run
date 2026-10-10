@@ -19,6 +19,7 @@ type event struct {
 	pathRet                   int32
 	err                       uint32
 	marks                     uint32
+	gid                       uint32
 	bases                     uint32
 	n1, n2, truncated, trunc2 uint8
 	pid, ppid                 uint32
@@ -41,6 +42,7 @@ func (e event) bytes() []byte {
 	copy(b[36:52], e.comm)
 	le.PutUint32(b[52:], e.err)
 	le.PutUint32(b[56:], e.marks)
+	le.PutUint32(b[60:], e.gid)
 	le.PutUint64(b[64:], e.boot)
 	return append(b, e.data...)
 }
@@ -133,6 +135,9 @@ func TestHeaderMatchesEvent(t *testing.T) {
 	var e filesystemAuditEvent
 	if got := unsafe.Offsetof(e.Marks); got != 56 {
 		t.Fatalf("marks at %d, decode reads 56", got)
+	}
+	if got := unsafe.Offsetof(e.Gid); got != 60 {
+		t.Fatalf("gid at %d, decode reads 60", got)
 	}
 	if got := unsafe.Offsetof(e.Ts); got != 64 {
 		t.Fatalf("ts at %d, decode reads 64", got)
@@ -284,9 +289,14 @@ func TestDecode(t *testing.T) {
 			// Joined as passed: cleaning would drop "link/..", and with it the
 			// symlink the kernel followed.
 			name: "failed chmod, relative through a symlink",
-			ev: event{kind: 18, comm: "chmod", pathRet: int32(unix.EPERM), bases: 1, mode: 1,
+			ev: event{kind: 18, comm: "chmod", pathRet: int32(unix.EPERM), bases: 1, mode: 1, flags: 0o104755,
 				data: append([]byte("l/../hosts\x00"), comps("work")...)},
-			want: record{Kind: "chmod", Comm: "chmod", Path: "/work/l/../hosts", Name: "l/../hosts", Err: int32(unix.EPERM), Failed: true},
+			want: record{Kind: "chmod", Comm: "chmod", Path: "/work/l/../hosts", Name: "l/../hosts", Mode: "4755", Err: int32(unix.EPERM), Failed: true},
+		},
+		{
+			name: "failed chown",
+			ev:   event{kind: 19, comm: "chown", pathRet: int32(unix.ENOENT), flags: 0, gid: 121, data: []byte("/etc/x\x00")},
+			want: record{Kind: "chown", Comm: "chown", Path: "/etc/x", Owner: "0:121", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
 			name: "relative to the root",

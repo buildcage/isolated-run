@@ -145,7 +145,8 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	K_OPEN_FAILED = 12, K_READ = 13, K_WRITE = 14, K_MMAP = 15,
 	// Failed path syscalls: data holds the user path(s), NUL-separated (old
 	// then new for rename), then the base directories of the relative ones
-	// (see add_base); path_len holds the errno.
+	// (see add_base); path_len holds the errno. A failed chmod's new mode is in
+	// flags, a failed chown's new uid in flags and gid in gid.
 	K_UNLINK_FAILED = 16, K_RENAME_FAILED = 17, K_CHMOD_FAILED = 18,
 	K_CHOWN_FAILED = 19, K_ATTR = 20, K_ATTR_FAILED = 21,
 	// A new process: pid is the child, ppid the process that made it, where
@@ -192,6 +193,7 @@ struct event {
 	char comm[16];
 	u32 err; // a held path change's errno when its syscall refused it
 	u32 marks; // MARK_* for the file a path was taken from
+	u32 gid; // a failed chown's new group
 	u64 ts; // CLOCK_BOOTTIME at the access; a failed syscall at its entry
 	char data[DATA_SZ + NAME_LEN]; // slack: masked offset + one component
 };
@@ -245,6 +247,8 @@ struct pending {
 	s32 dfd1;      // what p1 and p2 resolve against when relative
 	s32 dfd2;
 	u32 nr;        // the syscall, so only its own exit takes the entry
+	u32 val1;      // a chmod's new mode, or a chown's new uid
+	u32 val2;      // a chown's new gid
 };
 
 // One entry per thread inside a path syscall.
@@ -280,6 +284,7 @@ static __always_inline struct event *start(u32 kind)
 	e->truncated = 0;
 	e->trunc2 = 0;
 	e->marks = 0;
+	e->gid = 0;
 	// The process's name, as ps shows it, not the thread's: a JVM or tokio
 	// worker thread names itself after its pool.
 	BPF_CORE_READ_STR_INTO(&e->comm, t, group_leader, comm);
@@ -1307,7 +1312,9 @@ static __always_inline long sys_nr(struct pt_regs *regs)
 #define ARG(i) sys_arg(regs, i)
 #define OP(k, ok, quiet, d1, a1, d2, a2)						\
 	({ p->kind = k; p->kind_ok = ok; p->quiet_err = quiet;				\
-	   p->dfd1 = d1; p->p1 = a1; p->dfd2 = d2; p->p2 = a2; 1; })
+	   p->dfd1 = d1; p->p1 = a1; p->dfd2 = d2; p->p2 = a2;			\
+	   p->val1 = 0; p->val2 = 0; 1; })
+#define VALS(v1, v2) ({ p->val1 = v1; p->val2 = v2; 1; })
 
 // Making a name. The kernel refuses one on a read-only mount before the
 // security_path_* hook, so the failure is caught here. A name that is already
@@ -1346,15 +1353,15 @@ static __always_inline int classify(long nr, struct pt_regs *regs, struct pendin
 	if (nr == nr_rename)
 		return OP(K_RENAME_FAILED, 0, 0, AT_FDCWD, ARG(0), AT_FDCWD, ARG(1));
 	if (nr == nr_fchmodat)
-		return OP(K_CHMOD_FAILED, 0, 0, ARG(0), ARG(1), 0, 0);
+		return OP(K_CHMOD_FAILED, 0, 0, ARG(0), ARG(1), 0, 0) && VALS(ARG(2), 0);
 	if (nr == nr_fchmodat2) // ENOSYS: a kernel before 6.6, so nothing was tried
-		return OP(K_CHMOD_FAILED, 0, ENOSYS, ARG(0), ARG(1), 0, 0);
+		return OP(K_CHMOD_FAILED, 0, ENOSYS, ARG(0), ARG(1), 0, 0) && VALS(ARG(2), 0);
 	if (nr == nr_chmod)
-		return OP(K_CHMOD_FAILED, 0, 0, AT_FDCWD, ARG(0), 0, 0);
+		return OP(K_CHMOD_FAILED, 0, 0, AT_FDCWD, ARG(0), 0, 0) && VALS(ARG(1), 0);
 	if (nr == nr_fchownat)
-		return OP(K_CHOWN_FAILED, 0, 0, ARG(0), ARG(1), 0, 0);
+		return OP(K_CHOWN_FAILED, 0, 0, ARG(0), ARG(1), 0, 0) && VALS(ARG(2), ARG(3));
 	if (nr == nr_chown || nr == nr_lchown)
-		return OP(K_CHOWN_FAILED, 0, 0, AT_FDCWD, ARG(0), 0, 0);
+		return OP(K_CHOWN_FAILED, 0, 0, AT_FDCWD, ARG(0), 0, 0) && VALS(ARG(1), ARG(2));
 	if (nr == nr_utimensat || nr == nr_futimesat)
 		return attr_op(p, regs, ARG(0), ARG(1));
 	if (nr == nr_utime || nr == nr_utimes || nr == nr_setxattr || nr == nr_lsetxattr)
@@ -1412,6 +1419,8 @@ static __always_inline void op_exit(struct pending *pend, long ret)
 	e->ts = pend->ts;
 	if (ret < 0)
 		e->path_len = -ret;
+	e->flags = pend->val1;
+	e->gid = pend->val2;
 	long r = pend->p1 ? bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1) : 0;
 	u32 off = r > 0 ? r : 0;
 	u32 second = off;

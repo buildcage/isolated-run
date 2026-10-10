@@ -130,8 +130,8 @@ var kindNames = map[uint32]string{
 }
 
 // Mirrors the fixed header of struct event in bpf/filesystem_audit.bpf.c:
-// eight u32 fields, four u8 fields, comm[16], u32 err and marks, padding to
-// align the u64 timestamp, then the data bytes.
+// eight u32 fields, four u8 fields, comm[16], u32 err, marks and gid, the u64
+// timestamp, then the data bytes.
 const hdrLen = 8*4 + 4 + 16 + 4 + 4 + 4 + 8
 
 const (
@@ -373,6 +373,12 @@ func decode(raw []byte) (record, error) {
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
+		switch kind {
+		case 18:
+			r.Mode = fmt.Sprintf("%04o", flags&0o7777)
+		case 19:
+			r.Owner = fmt.Sprintf("%d:%d", flags, le.Uint32(raw[60:]))
+		}
 	case 17, 29: // a failed rename or link: from one name to another
 		// n1 == 1 marks a second name after the first; both come before the
 		// base directories.
