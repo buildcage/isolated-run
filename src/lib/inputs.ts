@@ -264,8 +264,9 @@ export function readAwsKeyInputs(
 /**
  * The check's inputs for the report's restrict example, only when it was on
  * for this run: the accounts given, and every account the run assumed a role
- * in. A build's own AssumeRole names an account too, so one not given asks
- * for a look. Quoted, since YAML reads an ID that begins with 0 as a number.
+ * in. A build's own AssumeRole names an account too, so the ones not given are
+ * named again in a comment asking for a look. Quoted, since YAML reads an ID
+ * that begins with 0 as a number.
  */
 export function awsExampleInputs(
   { key, roleAccounts }: AwsKeyInputs,
@@ -276,10 +277,12 @@ export function awsExampleInputs(
   // The log is the proxy's, but only an ID goes into the YAML.
   const assumed = timeline
     .flatMap((e) => e.extensions?.aws?.assumedAccount ?? [])
-    .filter((a) => /^\d{12}$/.test(a) && !roleAccounts.includes(a));
-  const accounts = [...new Set([...roleAccounts, ...assumed])].sort();
+    .filter((a) => /^\d{12}$/.test(a));
+  const added = [...new Set(assumed)].filter((a) => !roleAccounts.includes(a)).sort();
+  const accounts = [...roleAccounts, ...added].sort();
   if (accounts.length > 0) {
-    const note = assumed.length > 0 ? " # check each account is yours" : "";
+    const note =
+      added.length > 0 ? ` # assumed in this run, check they are yours: ${added.join(" ")}` : "";
     lines.push(`allowed_aws_role_accounts: "${accounts.join(" ")}"${note}`);
   }
   return lines;

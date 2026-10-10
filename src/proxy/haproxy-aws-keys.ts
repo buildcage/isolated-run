@@ -252,7 +252,9 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    acl aws_coding_signed req.fhdr(authorization) -m reg -i signedheaders=[^,]*accept-encoding",
     "    acl aws_coding_signed query,url_dec -m reg -i (^|&)x-amz-signedheaders=[^&]*accept-encoding",
     "    http-request set-header Accept-Encoding identity if aws_sts_host !aws_coding_signed",
-    "    # Only an answer to a request the check let through can teach a key.",
+    "    # Any answer names the account of its role, but only one to a request",
+    "    # the check let through can teach a key.",
+    "    http-request set-var(txn.aws_sts_read) bool(true) if aws_sts_host",
     "    http-request set-var(txn.aws_learn) bool(true) if aws_sts_host { var(txn.aws) -m str allowed }",
     "",
   ];
@@ -284,8 +286,9 @@ function accountRules(accountFile: string): string[] {
  * redirects a layer download to, and, when role accounts are named, the key
  * an AssumeRole or AssumeRoleWithWebIdentity answer issues for a role in one
  * of them. Only an answer to a request the check did not refuse teaches one.
- * The account of the role is recorded whether or not any is named, so a run
- * shows which accounts to name.
+ * The account of the role is recorded from any answer, named or not and
+ * allowed or not, so one run shows every account to name, a chain of roles
+ * included.
  *
  * Only ECR writes that Location, over a connection whose certificate the
  * proxy verified, so a build cannot put its own key there. The role ARN is
@@ -300,19 +303,20 @@ export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
     "    acl aws_issued_key var(txn.aws_issued_key) -m reg ^ASIA[A-Z0-9]+$",
     "    # A key the proxy already knows keeps what it was learned as.",
     `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_issued_key)] issued if aws_issued_key !{ var(txn.aws_issued_key),map(${check.keyMapFile}) -m found }`,
+    "    acl aws_sts_read var(txn.aws_sts_read) -m bool",
     "    acl aws_learn var(txn.aws_learn) -m bool",
     "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity)?Response[\\s>]",
     "    acl aws_many_keys res.body -m reg (?s)<AccessKeyId>.*<AccessKeyId>",
     "    acl aws_many_arns res.body -m reg (?s)<Arn>.*<Arn>",
-    "    http-response wait-for-body time 10s if aws_learn { status 200 }",
-    `    http-response set-var(txn.aws_new_account) 'res.body,regsub("(?s)^.*<Arn>arn:aws[a-z-]*:sts::([0-9]{12}):assumed-role/[^<]*</Arn>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
+    "    http-response wait-for-body time 10s if aws_sts_read { status 200 }",
+    `    http-response set-var(txn.aws_new_account) 'res.body,regsub("(?s)^.*<Arn>arn:aws[a-z-]*:sts::([0-9]{12}):assumed-role/[^<]*</Arn>.*$","\\1")' if aws_sts_read { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
     "    acl aws_new_account var(txn.aws_new_account) -m reg ^[0-9]{12}$",
     ...(check.accountFile
       ? [
           `    http-response set-var(txn.aws_new_key) 'res.body,regsub("(?s)^.*<AccessKeyId>(ASIA[A-Z0-9]+)</AccessKeyId>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
           "    acl aws_new_key var(txn.aws_new_key) -m reg ^ASIA[A-Z0-9]+$",
           `    acl aws_new_account_allowed var(txn.aws_new_account) -m str -f ${check.accountFile}`,
-          `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_new_key aws_new_account aws_new_account_allowed`,
+          `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_learn aws_new_key aws_new_account aws_new_account_allowed`,
         ]
       : []),
     "    http-response set-var(txn.aws_log_assumed) var(txn.aws_new_account) if aws_new_account",

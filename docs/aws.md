@@ -280,27 +280,28 @@ The traffic artifact carries the same reason in `wouldRefuse`.
 
 When the check was on for the run, the report's **Switch to restrict mode** example includes
 `aws_key_check: true`, and `allowed_aws_role_accounts` with the accounts given and each account the
-run assumed a role in. This is where to find the accounts a tool such as the CDK switches into.
-Anything in the step can assume a role, including in an account of its own, so when the example adds
-an account it was not given it says `# check each account is yours`:
+run assumed a role in, read from every STS answer, including one to a request restrict would refuse.
+A chain of roles, as the CDK assumes them, shows in full after one audit run. An answer the proxy
+cannot read, compressed or past its buffer, names no account. Anything in the step can assume a role, including in an
+account of its own, so the comment names each account the example adds:
 
 ```yaml
 aws_key_check: true
-allowed_aws_role_accounts: "111111111111 222222222222" # check each account is yours
+allowed_aws_role_accounts: "111111111111 222222222222" # assumed in this run, check they are yours: 222222222222
 ```
 
 ### In the traffic artifact
 
 Each request the check let through has an `aws` object in the
 [traffic artifact](./reference.md#traffic-artifact), so a run shows that the check was on even
-where it refused nothing. A request the check refused has none; its `reason` or `wouldRefuse`
-says why.
+where it refused nothing. A request the check refused has none, save an STS call in audit mode,
+whose answer still gives `assumedAccount`. Its `reason` or `wouldRefuse` says why.
 
 | Field            | Always | Notes                                                                                                                                                                        |
 | ---------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `key`            | yes    | `env` for the key the step started with, `assumed` for one STS issued, `issued` for one ECR signed a layer's presigned URL with, `none` for a request carrying no access key |
 | `accountId`      |        | an account the check confirmed: the one an `assumed` key came from, or the one a static CodeCommit Git credential or a role ARN names                                        |
-| `assumedAccount` |        | the account of the role an STS answer issued a key for, whether or not that account is allowed                                                                               |
+| `assumedAccount` |        | the account of the role an STS answer issued a key for, whether or not that account is allowed or named                                                                      |
 
 The starting key's account is never shown, since the proxy does not ask AWS whose key it is. No key
 ID is written either.

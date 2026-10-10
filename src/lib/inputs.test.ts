@@ -484,11 +484,11 @@ describe("awsExampleInputs", () => {
     ] as TrafficEvent[];
     expect(awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline)).toStrictEqual([
       "aws_key_check: true",
-      'allowed_aws_role_accounts: "012345678901 111111111111 222222222222" # check each account is yours',
+      'allowed_aws_role_accounts: "012345678901 111111111111 222222222222" # assumed in this run, check they are yours: 012345678901 222222222222',
     ]);
     expect(awsExampleInputs({ key: KEY, roleAccounts: [] }, timeline.slice(0, 1))).toStrictEqual([
       "aws_key_check: true",
-      'allowed_aws_role_accounts: "222222222222" # check each account is yours',
+      'allowed_aws_role_accounts: "222222222222" # assumed in this run, check they are yours: 222222222222',
     ]);
   });
 });

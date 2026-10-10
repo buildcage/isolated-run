@@ -413,7 +413,7 @@ describe("the traffic record", () => {
 });
 
 describe("learning a key", () => {
-  it("learns only from an STS host that names no resource, after a request it let through", () => {
+  it("learns only from an STS host that names no resource, after a request it let through, but reads the account from any answer", () => {
     const rules = awsKeyRequestRules(CHECK, "audit").join("\n");
     expect(
       rules.includes("set-var(txn.aws_sts_host) bool(true) if aws_host !aws_resource_host"),
@@ -426,23 +426,18 @@ describe("learning a key", () => {
     // S3 takes a bucket named sts, whose host STS_HOST alone would match.
     expect(stsHost.test("sts.s3.amazonaws.com")).toBe(true);
     expect(resourceHost.test("sts.s3.amazonaws.com")).toBe(true);
-    const sts = awsKeyResponseRules(CHECK).filter(
-      (l) => l.includes(" if ") && !l.includes("aws_issued_key"),
-    );
-    for (const line of sts) {
-      // aws_new_account is set only under aws_learn.
-      expect(
-        line.includes(" if aws_learn ") ||
-          line.includes("aws_new_account_allowed") ||
-          line.endsWith(" if aws_new_account"),
-      ).toBe(true);
-    }
+    expect(rules.includes("set-var(txn.aws_sts_read) bool(true) if aws_sts_host\n")).toBe(true);
+    const response = awsKeyResponseRules(CHECK);
+    const line = (variable: string) => response.find((l) => l.includes(variable))!;
+    expect(line("set-var(txn.aws_new_key)").includes(" if aws_learn ")).toBe(true);
+    expect(line("%[var(txn.aws_new_key)]").includes(" if aws_learn ")).toBe(true);
+    expect(line("set-var(txn.aws_new_account)").includes(" if aws_sts_read ")).toBe(true);
   });
 
   it("adds a key only for a role in an allowed account, from an answer naming one key and role", () => {
     expect(
       awsKeyResponseRules(CHECK).includes(
-        "    http-response set-map(/rules/keys.map) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_new_key aws_new_account aws_new_account_allowed",
+        "    http-response set-map(/rules/keys.map) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_learn aws_new_key aws_new_account aws_new_account_allowed",
       ),
     ).toBe(true);
     expect(

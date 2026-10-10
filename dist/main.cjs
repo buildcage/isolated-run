@@ -69627,9 +69627,9 @@ function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$5 = ge
 }
 function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 	if (!key) return [];
-	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => e.extensions?.aws?.assumedAccount ?? []).filter((a) => /^\d{12}$/.test(a) && !roleAccounts.includes(a)), accounts = [...new Set([...roleAccounts, ...assumed])].sort();
+	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => e.extensions?.aws?.assumedAccount ?? []).filter((a) => /^\d{12}$/.test(a)), added = [...new Set(assumed)].filter((a) => !roleAccounts.includes(a)).sort(), accounts = [...roleAccounts, ...added].sort();
 	if (accounts.length > 0) {
-		let note = assumed.length > 0 ? " # check each account is yours" : "";
+		let note = added.length > 0 ? ` # assumed in this run, check they are yours: ${added.join(" ")}` : "";
 		lines.push(`allowed_aws_role_accounts: "${accounts.join(" ")}"${note}`);
 	}
 	return lines;
