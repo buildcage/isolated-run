@@ -28,7 +28,6 @@ interface AuditRecord {
   deleted?: boolean;
   dropped?: number;
   untracked?: number;
-  missed?: number;
   exchange?: boolean;
 }
 
@@ -575,9 +574,8 @@ const LEGEND =
 const TIME_LEGEND = "first-last access";
 const HEADING = "### Filesystem audit";
 const INCOMPLETE_NOTE =
-  "> ⚠️ **This record is incomplete.** The tracer's buffers filled up, the kernel skipped some of its\n" +
-  "> runs, or it did not stop cleanly, so some accesses are missing from this summary and from the\n" +
-  "> artifact.";
+  "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
+  "> some accesses are missing from this summary and from the artifact.";
 const UNREADABLE_NOTE =
   "> ⚠️ **The recording could not be read**, so this summary has none of its accesses and no\n" +
   "> artifact was uploaded.";
@@ -745,7 +743,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (!counted) return;
     if (r.kind === "end") {
       ended = true;
-      lost = Boolean(r.dropped || r.untracked || r.missed);
+      lost = Boolean(r.dropped || r.untracked);
       return;
     }
     if (r.kind === "exec" && r.path && executed) {

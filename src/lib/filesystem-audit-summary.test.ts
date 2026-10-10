@@ -46,7 +46,6 @@ describe("renderFilesystemAuditSummary", () => {
     expect(render({ kind: "end", dropped: 0, untracked: 2 })).toMatch(
       /incomplete\.\*\*[\s\S]*No file access was recorded\./,
     );
-    expect(render(read, { kind: "end", dropped: 0, untracked: 0, missed: 1 })).toContain(warning);
   });
 
   it("includes a heading and the flag legend", () => {

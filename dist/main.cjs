@@ -68675,7 +68675,7 @@ function createAuditSummary(prefixes) {
 		let proc = procOf(added, r);
 		if (!counted) return;
 		if (r.kind === "end") {
-			ended = !0, lost = !!(r.dropped || r.untracked || r.missed);
+			ended = !0, lost = !!(r.dropped || r.untracked);
 			return;
 		}
 		if (r.kind === "exec" && r.path && executed) {
@@ -68741,9 +68741,8 @@ function inRecordingOrder(rows) {
 	});
 }
 function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote) {
-	let { ended, lost, executed, paths, details } = summary, heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up, the kernel skipped some of its
-> runs, or it did not stop cleanly, so some accesses are missing from this summary and from the
-> artifact.`, frame = (text) => ({
+	let { ended, lost, executed, paths, details } = summary, heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
+> some accesses are missing from this summary and from the artifact.`, frame = (text) => ({
 		priority: 0,
 		level: 1,
 		section: SECTION$1,

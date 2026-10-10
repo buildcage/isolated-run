@@ -141,15 +141,39 @@ func run(cgPath, outPath, readyPath, pidPath string) error {
 		}
 	}
 	fmt.Fprintln(os.Stderr, "filesystem-audit: attached")
+	base, errBase := missedRuns(coll)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	// Read before the flush that ends readLoop, so it has the count by then.
+	missed := make(chan count, 1)
 	go func() {
 		<-sig
+		n, err := missedRuns(coll)
+		missed <- count{n - base, errors.Join(errBase, err)}
 		rd.Flush() // Read drains what is queued, then returns ErrFlushed.
 	}()
 
-	return readLoop(rd, bw, coll)
+	return readLoop(rd, bw, coll, missed)
+}
+
+type count struct {
+	n   uint64
+	err error
+}
+
+// missedRuns sums the runs of the programs the kernel skipped, anywhere on
+// the host, as it cannot say whose access a skip was.
+func missedRuns(coll *ebpf.Collection) (uint64, error) {
+	var sum uint64
+	for _, p := range coll.Programs {
+		s, err := p.Stats()
+		if err != nil {
+			return 0, err
+		}
+		sum += s.RecursionMisses
+	}
+	return sum, nil
 }
 
 // prepareCgroup verifies the host is cgroup v2, creates the watched cgroup
@@ -270,7 +294,7 @@ func wallTime(boot uint64, offset int64) string {
 // flushed, then reports a one-line tally to stderr. Events before the
 // sandboxed command's first exec belong to runc's own setup and are
 // dropped; the cgroup holds nothing else before then.
-func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error {
+func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missedRun <-chan count) error {
 	enc := json.NewEncoder(w)
 	counts := map[string]int{}
 	files := execFiles{}
@@ -331,16 +355,16 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 	for _, k := range kinds {
 		fmt.Fprintf(os.Stderr, "filesystem-audit: %-11s %d\n", k, counts[k])
 	}
-	missed, errMissed := missedRuns(coll)
+	missed := <-missedRun
 	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d missed=%d internal-skipped=%d pre-exec-skipped=%d\n",
-		total, dropped, untracked, missed, internal, preExec)
+		total, dropped, untracked, missed.n, internal, preExec)
 	// Without every count the recording cannot claim to be complete, so it is
 	// left without its end line.
-	if err := errors.Join(errDropped, errUntracked, errMissed); err != nil {
+	if err := errors.Join(errDropped, errUntracked, missed.err); err != nil {
 		fmt.Fprintln(os.Stderr, "filesystem-audit: read loss counters:", err)
 		return w.Flush()
 	}
-	if err := enc.Encode(end{Kind: "end", Dropped: dropped, Untracked: untracked, Missed: missed}); err != nil {
+	if err := enc.Encode(end{Kind: "end", Dropped: dropped, Untracked: untracked, Missed: missed.n}); err != nil {
 		return err
 	}
 	return w.Flush()
@@ -348,28 +372,14 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection) error 
 
 // end is the recording's last line, written only once every queued event is
 // out, so a recording without it was cut short. Dropped events found the ring
-// buffer full, Untracked calls found a tracking map full, and Missed runs of a
-// program the kernel skipped.
+// buffer full, and Untracked calls found a tracking map full. Missed runs the
+// kernel skipped between attaching and the stop signal; the summary does not
+// count them as lost, since any of them may have been another process's.
 type end struct {
 	Kind      string `json:"kind"`
 	Dropped   uint64 `json:"dropped"`
 	Untracked uint64 `json:"untracked"`
 	Missed    uint64 `json:"missed"`
-}
-
-// missedRuns sums the runs the kernel skipped because the program was already
-// running on that CPU, as one preempted mid-run can be. A skip anywhere on the
-// host counts, since it cannot say whose access it was.
-func missedRuns(coll *ebpf.Collection) (uint64, error) {
-	var sum uint64
-	for _, p := range coll.Programs {
-		s, err := p.Stats()
-		if err != nil {
-			return 0, err
-		}
-		sum += s.RecursionMisses
-	}
-	return sum, nil
 }
 
 func sumPerCPU(m *ebpf.Map) (uint64, error) {
