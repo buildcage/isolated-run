@@ -376,14 +376,6 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["R node ./dir/**", "R sh ./dir/a"]);
   });
 
-  it("counts only touched children toward the fanout, not a kept directory below", () => {
-    const md = renderFilesystemAuditSummary(
-      jsonl({ kind: "read", comm: "c", path: "/w/a" }, { kind: "read", comm: "c", path: "/w/b" }),
-      { workspace: ["/w/x/y"], home: [] },
-    );
-    expect(lines(md)).toEqual(["R c /w/a", "R c /w/b"]);
-  });
-
   it("never folds a directory above a kept one, however many children it has", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(

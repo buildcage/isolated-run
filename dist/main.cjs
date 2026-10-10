@@ -68567,7 +68567,7 @@ var Lines = class {
 		}
 	}
 	isKept(parts, depth) {
-		return this.opts.keep.some((k) => k.length >= depth && k.every((part, i) => i >= depth || part === parts[i]));
+		return this.opts.keep.some((k) => k.length >= depth && k.slice(0, depth).every((part, i) => part === parts[i]));
 	}
 	fold(node) {
 		let agg = newAgg(), stack = [node];
