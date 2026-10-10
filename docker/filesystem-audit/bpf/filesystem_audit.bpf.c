@@ -934,6 +934,7 @@ struct name_buf {
 	u64 ts;
 	s32 dfd;
 	u32 flags; // the open's flags, so a failure says whether it was to write
+	u32 creating; // the open reached its create step (see on_mknod)
 };
 
 // One entry per thread inside open(2), each the size of a path, so allocated
@@ -988,8 +989,11 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 	if (!in_target())
 		return 0;
 	u64 id = bpf_get_current_pid_tgid();
-	if (bpf_map_lookup_elem(&open_names, &id))
+	struct name_buf *nb = bpf_map_lookup_elem(&open_names, &id);
+	if (nb) {
+		nb->creating = 1;
 		return 0;
+	}
 	struct event *e = start(K_MKNOD);
 	if (!e)
 		return 0;
@@ -1026,6 +1030,7 @@ static __always_inline void open_enter(int dfd, u32 flags)
 	nb->ts = bpf_ktime_get_boot_ns();
 	nb->dfd = dfd;
 	nb->flags = flags;
+	nb->creating = 0;
 }
 
 static __always_inline void open_exit(long ret)
@@ -1034,9 +1039,18 @@ static __always_inline void open_exit(long ret)
 	struct name_buf *nb = bpf_map_lookup_elem(&open_names, &id);
 	if (!nb)
 		return;
+	// ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal interrupted the open,
+	// which the kernel runs again, and that run records it.
+	if (ret <= -512 && ret >= -516) {
+		bpf_map_delete_elem(&held_opens, &id);
+		bpf_map_delete_elem(&open_names, &id);
+		return;
+	}
 	struct event *held = bpf_map_lookup_elem(&held_opens, &id);
 	if (held) {
-		if (ret >= 0)
+		// Reaching the file after its create step means it was created,
+		// whatever then refused the open.
+		if (ret >= 0 || nb->creating)
 			submit(held);
 		bpf_map_delete_elem(&held_opens, &id);
 	}
