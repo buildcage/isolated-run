@@ -430,11 +430,7 @@ describe("runSandboxStep", () => {
 
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.readAwsKeyInputs).toHaveBeenCalledWith(
-      { proxyEngine: "universal", proxyMode: "restrict" },
-      ENV,
-      annotation.warning,
-    );
+    expect(mocks.readAwsKeyInputs).toHaveBeenCalledWith({ proxyEngine: "universal" }, ENV);
     expect(mocks.startSandboxProxy.mock.calls[0][0].composeEnv).toMatchObject({
       ALLOWED_AWS_KEY: `${ASIA}AAAAAAAAAAAAAAAA`,
       ALLOWED_AWS_ROLE_ACCOUNTS: "111111111111",

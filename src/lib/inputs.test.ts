@@ -270,55 +270,38 @@ describe.each([
 
 describe("readAwsKeyInputs", () => {
   const KEY = `${ASIA}AAAAAAAAAAAAAAAA`;
-  const inspect = { proxyEngine: "inspect", proxyMode: "restrict" } as const;
+  const inspect = { proxyEngine: "inspect" } as const;
   const accounts = (value: string) =>
     inputs({ aws_key_check: "true", allowed_aws_role_accounts: value });
   const OFF = { key: "", roleAccounts: [] };
 
   it("leaves the check off when unset, whatever the environment holds", () => {
-    expect(readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, inputs())).toStrictEqual(
-      OFF,
-    );
+    expect(readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, inputs())).toStrictEqual(OFF);
     expect(
-      readAwsKeyInputs(
-        inspect,
-        { AWS_ACCESS_KEY_ID: KEY },
-        silent,
-        inputs({ aws_key_check: "false" }),
-      ),
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, inputs({ aws_key_check: "false" })),
     ).toStrictEqual(OFF);
   });
 
   it("pins the step's key with aws_key_check alone, learning no role's key", () => {
     expect(
-      readAwsKeyInputs(
-        inspect,
-        { AWS_ACCESS_KEY_ID: KEY },
-        silent,
-        inputs({ aws_key_check: "true" }),
-      ),
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, inputs({ aws_key_check: "true" })),
     ).toStrictEqual({ key: KEY, roleAccounts: [] });
   });
 
-  // Ahead of the engine and key checks, which only warn in audit.
+  // Ahead of the engine and key checks.
   it.each([
-    ["unset", "inspect", "restrict", {}],
-    ["false", "inspect", "restrict", { aws_key_check: "false" }],
-    ["unset", "inspect", "audit", {}],
-    ["unset", "universal", "audit", {}],
-  ] as const)(
-    "refuses role accounts with aws_key_check %s on %s in %s",
-    (_, proxyEngine, proxyMode, check) => {
-      expect(() =>
-        readAwsKeyInputs(
-          { proxyEngine, proxyMode },
-          {},
-          silent,
-          inputs({ ...check, allowed_aws_role_accounts: "111111111111" }),
-        ),
-      ).toThrow(expect.objectContaining({ code: "AWS_KEY_CHECK_NOT_SET" }));
-    },
-  );
+    ["unset", "inspect", {}],
+    ["false", "inspect", { aws_key_check: "false" }],
+    ["unset", "universal", {}],
+  ] as const)("refuses role accounts with aws_key_check %s on %s", (_, proxyEngine, check) => {
+    expect(() =>
+      readAwsKeyInputs(
+        { proxyEngine },
+        {},
+        inputs({ ...check, allowed_aws_role_accounts: "111111111111" }),
+      ),
+    ).toThrow(expect.objectContaining({ code: "AWS_KEY_CHECK_NOT_SET" }));
+  });
 
   it("refuses a config_file's accounts when the workflow sets aws_key_check: false", () => {
     const workspace = mkdtempSync(join(tmpdir(), "config-file-"));
@@ -331,7 +314,7 @@ describe("readAwsKeyInputs", () => {
     };
     applyConfigFile(env, CONFIG_FILE_INPUTS);
     expect(() =>
-      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, (name) =>
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, (name) =>
         (env[`INPUT_${name.toUpperCase()}`] ?? "").trim(),
       ),
     ).toThrow(/use a file without them/);
@@ -342,7 +325,6 @@ describe("readAwsKeyInputs", () => {
       readAwsKeyInputs(
         inspect,
         { AWS_ACCESS_KEY_ID: ` ${KEY}\n` },
-        silent,
         accounts("111111111111 222222222222\n111111111111 # prod"),
       ),
     ).toStrictEqual({ key: KEY, roleAccounts: ["111111111111", "222222222222"] });
@@ -350,12 +332,7 @@ describe("readAwsKeyInputs", () => {
 
   it("names every entry that is not an account ID", () => {
     const read = () =>
-      readAwsKeyInputs(
-        inspect,
-        { AWS_ACCESS_KEY_ID: KEY },
-        silent,
-        accounts("12345 111111111111 abc"),
-      );
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, accounts("12345 111111111111 abc"));
     expect(read).toThrow(SandboxError);
     expect(read).toThrow('invalid AWS account ID: "12345", "abc"');
   });
@@ -373,13 +350,12 @@ describe("readAwsKeyInputs", () => {
     };
     applyConfigFile(env, CONFIG_FILE_INPUTS);
     expect(() =>
-      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, (name) =>
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, (name) =>
         (env[`INPUT_${name.toUpperCase()}`] ?? "").trim(),
       ),
     ).toThrow(/"12345678901".*Quote an ID that begins with 0/);
     for (const typo of ["abc", "12345"]) {
-      const read = () =>
-        readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, silent, accounts(typo));
+      const read = () => readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, accounts(typo));
       expect(read).toThrow(SandboxError);
       expect(read).not.toThrow(/Quote/);
     }
@@ -390,7 +366,7 @@ describe("readAwsKeyInputs", () => {
     ["empty", { AWS_ACCESS_KEY_ID: "" }],
     ["not a key ID", { AWS_ACCESS_KEY_ID: "asia-not-a-key" }],
   ])("refuses a step whose AWS_ACCESS_KEY_ID is %s", (_, env) => {
-    expect(() => readAwsKeyInputs(inspect, env, silent, accounts("111111111111"))).toThrow(
+    expect(() => readAwsKeyInputs(inspect, env, accounts("111111111111"))).toThrow(
       expect.objectContaining({
         code: "AWS_ACCESS_KEY_MISSING",
         message: expect.stringContaining("run the AWS commands in a step without the check"),
@@ -398,55 +374,20 @@ describe("readAwsKeyInputs", () => {
     );
   });
 
-  it("warns and turns the check off in audit when there is no key to start from", () => {
-    const warn = vi.fn();
-    expect(
-      readAwsKeyInputs(
-        { proxyEngine: "inspect", proxyMode: "audit" },
-        {},
-        warn,
-        accounts("111111111111"),
-      ),
-    ).toStrictEqual(OFF);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("check is off for this run"));
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("run the AWS commands in a step without the check"),
-    );
-  });
-
   it("does not echo the key it refuses", () => {
     expect(() =>
-      readAwsKeyInputs(
-        inspect,
-        { AWS_ACCESS_KEY_ID: "SECRET-LOOKING" },
-        silent,
-        accounts("111111111111"),
-      ),
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: "SECRET-LOOKING" }, accounts("111111111111")),
     ).toThrow(expect.objectContaining({ message: expect.not.stringContaining("SECRET-LOOKING") }));
   });
 
-  it("refuses universal in restrict, where the check would silently not run", () => {
+  it("refuses universal, where the check would silently not run", () => {
     expect(() =>
       readAwsKeyInputs(
-        { proxyEngine: "universal", proxyMode: "restrict" },
+        { proxyEngine: "universal" },
         { AWS_ACCESS_KEY_ID: KEY },
-        silent,
         accounts("111111111111"),
       ),
     ).toThrow(InvalidInputError);
-  });
-
-  it("warns and turns the check off for universal in audit", () => {
-    const warn = vi.fn();
-    expect(
-      readAwsKeyInputs(
-        { proxyEngine: "universal", proxyMode: "audit" },
-        {},
-        warn,
-        accounts("111111111111"),
-      ),
-    ).toStrictEqual(OFF);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("ignored for this run"));
   });
 });
 

@@ -155,13 +155,13 @@ assert_summary_contains "999999999999 # assumed in this run, check it is yours" 
 echo ""
 echo "--- no key to start from ---"
 run_step nokey \
-  INPUT_PROXY_MODE="restrict" \
+  INPUT_PROXY_MODE="audit" \
   INPUT_RUN="true"
 RUN_EXIT=$?
 if [ "$RUN_EXIT" != "0" ] && grep -qF "AWS_ACCESS_KEY_ID is unset" "$TMPDIR/nokey.log"; then
-  pass "a step with no AWS_ACCESS_KEY_ID fails, naming it"
+  pass "a step with no AWS_ACCESS_KEY_ID fails in audit too, naming it"
 else
-  fail "a step with no AWS_ACCESS_KEY_ID did not fail as expected (exit $RUN_EXIT)"
+  fail "a step with no AWS_ACCESS_KEY_ID did not fail in audit (exit $RUN_EXIT)"
   cat "$TMPDIR/nokey.log"
 fi
 if grep -qF "proxy image:" "$TMPDIR/nokey.log"; then

@@ -655,8 +655,7 @@ check exists, how to set it up, what it does not stop, and the IAM settings that
 
 - With `aws_key_check: true`, a request to an AWS API host must be signed with the step's own
   `AWS_ACCESS_KEY_ID`, taken as given without checking its account. If that variable is unset or is
-  not an access key ID, `restrict` fails the step before the sandbox is set up and `audit` warns and
-  turns the check off.
+  not an access key ID, the step fails before the sandbox is set up, in `audit` too.
 - `allowed_aws_role_accounts` takes 12-digit AWS account IDs, separated by commas, whitespace or
   newlines, with `#` comments as in the rule inputs. A key STS issues through `AssumeRole` or
   `AssumeRoleWithWebIdentity` for a role in one of these accounts passes too, and with no account

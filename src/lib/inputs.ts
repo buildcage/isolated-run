@@ -193,13 +193,12 @@ const STARTING_KEY_HELP =
 /**
  * The AWS access key check pins the step to its own AWS_ACCESS_KEY_ID; role
  * accounts also let through the keys STS issues for their roles, and need the
- * check set on explicitly. universal never sees a request's headers, so it
- * fails in restrict and is warned about in audit.
+ * check set on explicitly. A check that cannot run fails audit too, where
+ * turning it off would let the run read as checked.
  */
 export function readAwsKeyInputs(
-  { proxyEngine, proxyMode }: ProxyInputs,
+  { proxyEngine }: Pick<ProxyInputs, "proxyEngine">,
   env: NodeJS.ProcessEnv,
-  warn: Notice,
   getInput: GetInput = core.getInput,
 ): AwsKeyInputs {
   let roleAccounts: string[];
@@ -229,16 +228,10 @@ export function readAwsKeyInputs(
   if (!check) return AWS_KEY_CHECK_OFF;
 
   if (proxyEngine !== "inspect") {
-    const reason =
-      `The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never ` +
-      "sees a request's headers.";
-    if (proxyMode === "audit") {
-      warn(`${reason} It is ignored for this run.`);
-      return AWS_KEY_CHECK_OFF;
-    }
     throw new InvalidInputError(
-      `${reason} Switch to proxy_engine: inspect, or remove aws_key_check and ` +
-        "allowed_aws_role_accounts.",
+      `The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never ` +
+        "sees a request's headers. Switch to proxy_engine: inspect, or remove aws_key_check " +
+        "and allowed_aws_role_accounts.",
       "INVALID_PROXY_ENGINE",
     );
   }
@@ -246,13 +239,6 @@ export function readAwsKeyInputs(
   // Not echoed back: configure-aws-credentials masks it.
   const key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
   if (!isAwsAccessKeyId(key)) {
-    if (proxyMode === "audit") {
-      warn(
-        "The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access " +
-          `key ID, so the check is off for this run. ${STARTING_KEY_HELP}`,
-      );
-      return AWS_KEY_CHECK_OFF;
-    }
     throw new SandboxError(
       `The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. ${STARTING_KEY_HELP}`,
       "AWS_ACCESS_KEY_MISSING",
