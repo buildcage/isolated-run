@@ -1547,7 +1547,7 @@ static __always_inline void create_exit(long ret)
 		op_exit(ret, 1);
 		return;
 	}
-	// Drops a change held for it too, as on_sys_exit does in either order.
+	// The change its path hook held goes too, so either exit may run first.
 	u64 id = bpf_get_current_pid_tgid();
 	bpf_map_delete_elem(&held_ops, &id);
 	op_exit(0, 1);
