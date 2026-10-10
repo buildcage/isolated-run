@@ -8,6 +8,7 @@ import {
   exitReason,
   extractTracer,
   filesystemAuditPaths,
+  hostCannotAudit,
   startFilesystemAudit,
   type AuditChild,
 } from "./filesystem-audit.ts";
@@ -30,8 +31,19 @@ const REQUIREMENTS =
   "tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/reference.md#filesystem-audit";
 
 describe("auditUnavailable", () => {
-  it("says why, that the command did not run, and what the tracer needs", () => {
-    expect(auditUnavailable("the tracer exited")).toStrictEqual(
+  it("says why and that the command did not run", () => {
+    expect(auditUnavailable("docker cp failed")).toStrictEqual(
+      new SandboxError(
+        "filesystem_audit could not start (docker cp failed); the command was not run.",
+        "FILESYSTEM_AUDIT_UNAVAILABLE",
+      ),
+    );
+  });
+});
+
+describe("hostCannotAudit", () => {
+  it("adds what the tracer needs of the host", () => {
+    expect(hostCannotAudit("the tracer exited")).toStrictEqual(
       new SandboxError(
         `filesystem_audit could not start (the tracer exited); the command was not run. ${REQUIREMENTS}`,
         "FILESYSTEM_AUDIT_UNAVAILABLE",
@@ -41,23 +53,26 @@ describe("auditUnavailable", () => {
 });
 
 describe("checkFilesystemAuditHost", () => {
-  const v2 = { cgroupPath: () => "/system.slice/runner.service" };
+  const host = (cgroup: string | undefined, btf: boolean) => ({
+    cgroupPath: () => cgroup,
+    kernelBtf: () => btf,
+  });
 
   it("passes on a cgroup v2 host with kernel BTF", () => {
-    const exists = vi.fn(() => true);
-    expect(() => checkFilesystemAuditHost(v2, exists)).not.toThrow();
-    expect(exists).toHaveBeenCalledWith("/sys/kernel/btf/vmlinux");
+    expect(() =>
+      checkFilesystemAuditHost(host("/system.slice/runner.service", true)),
+    ).not.toThrow();
   });
 
   it("fails the step on a host without cgroup v2", () => {
-    expect(() => checkFilesystemAuditHost({ cgroupPath: () => undefined }, () => true)).toThrow(
-      auditUnavailable("the runner is not on cgroup v2"),
+    expect(() => checkFilesystemAuditHost(host(undefined, true))).toThrow(
+      hostCannotAudit("the runner is not on cgroup v2"),
     );
   });
 
   it("fails the step on a kernel without BTF", () => {
-    expect(() => checkFilesystemAuditHost(v2, () => false)).toThrow(
-      auditUnavailable("the kernel has no BTF at /sys/kernel/btf/vmlinux"),
+    expect(() => checkFilesystemAuditHost(host("/system.slice/runner.service", false))).toThrow(
+      hostCannotAudit("the kernel exposes no BTF"),
     );
   });
 });
@@ -244,7 +259,7 @@ describe("startFilesystemAudit", () => {
     });
 
     await expect(start).rejects.toThrow(
-      "filesystem_audit could not start (attach on_unlinkat_enter: neither debugfs nor tracefs are mounted); the command was not run.",
+      hostCannotAudit("attach on_unlinkat_enter: neither debugfs nor tracefs are mounted"),
     );
     // One yield in the ready loop before the exit is seen, then one in stop's
     // grace race.

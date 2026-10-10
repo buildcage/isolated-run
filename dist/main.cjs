@@ -70265,7 +70265,8 @@ const realHostProbes = {
 	cgroupPath: () => {
 		let procCgroup = readOptionalFile("/proc/self/cgroup");
 		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
-	}
+	},
+	kernelBtf: () => (0, node_fs.existsSync)("/sys/kernel/btf/vmlinux")
 };
 function filesystemAuditPaths(containerName, scratchBase) {
 	let suffix = containerName.split("-").at(-1);
@@ -70279,12 +70280,16 @@ function cgroupFsPath(cgroupsPath) {
 	return (0, node_path.join)("/sys/fs/cgroup", cgroupsPath);
 }
 function auditUnavailable(reason) {
-	return new SandboxError(`filesystem_audit could not start (${reason}); the command was not run. It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/reference.md#filesystem-audit`, "FILESYSTEM_AUDIT_UNAVAILABLE");
+	return new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
 }
-const NO_CGROUP_V2 = "the runner is not on cgroup v2", KERNEL_BTF = "/sys/kernel/btf/vmlinux";
-function checkFilesystemAuditHost(probes = realHostProbes, exists = node_fs.existsSync) {
-	if (probes.cgroupPath() === void 0) throw auditUnavailable(NO_CGROUP_V2);
-	if (!exists(KERNEL_BTF)) throw auditUnavailable(`the kernel has no BTF at ${KERNEL_BTF}`);
+function hostCannotAudit(reason) {
+	let e = auditUnavailable(reason);
+	return new SandboxError(`${e.message} It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/reference.md#filesystem-audit`, e.code);
+}
+const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2";
+function checkFilesystemAuditHost(probes = realHostProbes) {
+	if (probes.cgroupPath() === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
+	if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
 }
 function exitReason() {
 	let partial = "", fatal = "", last = "";
@@ -70378,8 +70383,8 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		if (exited) break;
 		await sleep(100);
 	}
-	let cancelled = !exited && cancel?.aborted, reason = exited ? child.reason() || "the tracer exited" : "the tracer did not attach in time";
-	throw await stop(), remove(outPath), cancelled ? cancelledBeforeRun() : auditUnavailable(reason);
+	let cancelled = !exited && cancel?.aborted, failure = exited ? hostCannotAudit(child.reason() || "the tracer exited") : auditUnavailable("the tracer did not attach in time");
+	throw await stop(), remove(outPath), cancelled ? cancelledBeforeRun() : failure;
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
@@ -72306,12 +72311,12 @@ async function startAudit(dir, config, options, deps) {
 	let { filesystemAudit, containerName } = options;
 	if (filesystemAudit === void 0) return noAudit;
 	let cgroupsPath = config.linux.cgroupsPath;
-	if (cgroupsPath === void 0) throw auditUnavailable(NO_CGROUP_V2);
+	if (cgroupsPath === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
 	let tracerPath;
 	try {
 		tracerPath = deps.extractTracer(containerName, dir);
 	} catch (e) {
-		throw new SandboxError(`filesystem_audit could not start (${errorMessage(e)}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
+		throw auditUnavailable(errorMessage(e));
 	}
 	return deps.startFilesystemAudit({
 		tracerPath,

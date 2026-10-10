@@ -21,9 +21,10 @@ import { createOverlayScratchDirs, overlayUpperFor } from "./ephemeral-fs.ts";
 import {
   auditUnavailable,
   extractTracer,
+  hostCannotAudit,
   startFilesystemAudit,
   noAudit,
-  NO_CGROUP_V2,
+  NO_CGROUP_V2_REASON,
   type AuditHandle,
   type FilesystemAuditPaths,
 } from "./filesystem-audit.ts";
@@ -526,15 +527,12 @@ async function startAudit(
   const { filesystemAudit, containerName } = options;
   if (filesystemAudit === undefined) return noAudit;
   const cgroupsPath = config.linux.cgroupsPath;
-  if (cgroupsPath === undefined) throw auditUnavailable(NO_CGROUP_V2);
+  if (cgroupsPath === undefined) throw hostCannotAudit(NO_CGROUP_V2_REASON);
   let tracerPath: string;
   try {
     tracerPath = deps.extractTracer(containerName, dir);
   } catch (e) {
-    throw new SandboxError(
-      `filesystem_audit could not start (${errorMessage(e)}); the command was not run.`,
-      "FILESYSTEM_AUDIT_UNAVAILABLE",
-    );
+    throw auditUnavailable(errorMessage(e));
   }
   return deps.startFilesystemAudit({
     tracerPath,

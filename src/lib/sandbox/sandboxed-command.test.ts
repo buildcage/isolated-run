@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { SandboxError } from "../errors.ts";
-import { auditUnavailable, NO_CGROUP_V2 } from "./filesystem-audit.ts";
+import { hostCannotAudit, NO_CGROUP_V2_REASON } from "./filesystem-audit.ts";
 import { WritablePathConflictError } from "./paths.ts";
 import {
   assembleBundle,
@@ -192,7 +192,7 @@ describe("runSandboxedCommand", () => {
       mocks.buildOciConfig.mockReturnValue({ process: {}, linux: {} });
 
       await expect(runSandboxedCommand(options({ filesystemAudit: AUDIT }), deps)).rejects.toThrow(
-        auditUnavailable(NO_CGROUP_V2),
+        hostCannotAudit(NO_CGROUP_V2_REASON),
       );
       expect(mocks.startFilesystemAudit).not.toHaveBeenCalled();
       expect(mocks.runIsolated).not.toHaveBeenCalled();
