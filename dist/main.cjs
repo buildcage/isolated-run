@@ -68813,7 +68813,7 @@ function unreadableSummaryBlocks() {
 	}];
 }
 function filesystemLegendNote(artifactName, guideUrl) {
-	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` paths under dir in one row · ${artifactName ? `every access is in the \`${artifactName}\` artifact` : "the full record could not be uploaded"} · [how to read this](${guideUrl})`;
+	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifactName ? `the full record is in the \`${artifactName}\` artifact` : "the full record could not be uploaded"} · [how to read this](${guideUrl})`;
 }
 function filesystemTruncationNote(artifactName) {
 	return `_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; ${artifactName ? `the ${artifactName} artifact uploaded for this run has every access` : "the recording could not be uploaded as an artifact, so the rest is not kept"}._\n\n`;

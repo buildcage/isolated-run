@@ -112,8 +112,8 @@ describe("prepareStepFilesystemAudit", () => {
     expect(summaries[0]).toContain("Filesystem audit");
     expect(summaries[0]).toContain("W node ./a.txt");
     expect(summaries[0]).toContain(
-      "<br>`./` workspace · `~/` $HOME · `dir/**` paths under dir in one row · " +
-        "every access is in the `buildcage-filesystem-audit-deadbeef` artifact · " +
+      "<br>`./` workspace · `~/` $HOME · `dir/**` a folded directory · " +
+        "the full record is in the `buildcage-filesystem-audit-deadbeef` artifact · " +
         "[how to read this](https://github.com/buildcage/isolated-run/blob/v2/docs/filesystem-audit.md#reading-the-summary)</sub>",
     );
     // The stripped copy is written beside the recording and uploaded; the

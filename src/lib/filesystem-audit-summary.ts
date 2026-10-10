@@ -1000,14 +1000,14 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
 }
 
 /**
- * The legend's second line: what the path notations mean, where every access
- * is, and the guide that explains the rest.
+ * The legend's second line: what the path notations mean, where the full
+ * record is, and the guide that explains the rest.
  */
 export function filesystemLegendNote(artifactName: string | undefined, guideUrl: string): string {
   const record = artifactName
-    ? `every access is in the \`${artifactName}\` artifact`
+    ? `the full record is in the \`${artifactName}\` artifact`
     : "the full record could not be uploaded";
-  return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` paths under dir in one row · ${record} · [how to read this](${guideUrl})`;
+  return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${record} · [how to read this](${guideUrl})`;
 }
 
 /**

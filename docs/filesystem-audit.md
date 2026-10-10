@@ -90,7 +90,7 @@ open, so treat it as sensitive, like the traffic artifact.
 ```
 ### Filesystem audit
 R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied
-./ workspace · ~/ $HOME · dir/** paths under dir in one row · every access is in the
+./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
 buildcage-filesystem-audit-<id> artifact · how to read this
 
 #### Executed
