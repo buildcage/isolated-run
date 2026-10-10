@@ -720,6 +720,17 @@ describe("renderFilesystemAuditSummary", () => {
     expect(dropWalkedDirs(many, () => ["R"])).toEqual(many);
   });
 
+  it("drops a walked directory's line from printed flags, but not a refused one", () => {
+    const flags = new Map([
+      [keyOf("c", "/w/a"), ["r"]],
+      [keyOf("c", "/w/a/f"), ["R", "r!"]],
+      [keyOf("c", "/w/b"), ["r!"]],
+      [keyOf("c", "/w/b/f"), ["R", "r!"]],
+    ]);
+    const got = dropWalkedDirs(new Set(flags.keys()), (k) => flags.get(k)!);
+    expect(got).toEqual(new Set([keyOf("c", "/w/a/f"), keyOf("c", "/w/b"), keyOf("c", "/w/b/f")]));
+  });
+
   it("neither drops a climbing line nor credits it to the directories it names", () => {
     const got = dropWalkedDirs(new Set([keyOf("c", "/work/d"), keyOf("c", "/work/d/../x")]), () => [
       "R",
