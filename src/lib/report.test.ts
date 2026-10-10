@@ -287,6 +287,7 @@ describe("computeReportOutcomes", () => {
       expect(section(markdown)).toContain(
         "<sub>*Requests audit let through that restrict would refuse, the first for each host and reason, or for each key under `aws-key-not-allowed`.*</sub>",
       );
+      expect(section(markdown)).not.toContain("assumed in this run");
     });
 
     it("keeps a request that came to nothing on a line of its own", () => {

@@ -261,7 +261,7 @@ export function readAwsKeyInputs(
 }
 
 /** Ends the restrict example's line for an account the run assumed a role in but was not given. */
-export const ASSUMED_ACCOUNT_MARK = " # assumed in this run, check it is yours";
+const ASSUMED_ACCOUNT_MARK = " # assumed in this run, check it is yours";
 
 /**
  * The check's inputs for the report's restrict example, only when it was on
