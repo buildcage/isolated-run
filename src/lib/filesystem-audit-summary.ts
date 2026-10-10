@@ -569,7 +569,6 @@ function fmtFlags(a: Agg): string {
 
 const LEGEND =
   "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied";
-const TIME_LEGEND = "first-last access";
 const HEADING = "### Filesystem audit";
 const INCOMPLETE_NOTE =
   "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
@@ -837,6 +836,7 @@ export function renderAuditSummaryBlocks(
   startedAt: number | undefined,
   priorities: FilesystemPriorities,
   cutNote: string,
+  legendNote?: string,
 ): SummaryBlock[] {
   const { ended, lost, executed, paths, details } = summary;
   const heading = ended && !lost ? HEADING : `${HEADING}\n\n${INCOMPLETE_NOTE}`;
@@ -849,7 +849,8 @@ export function renderAuditSummaryBlocks(
   });
   if (details?.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
 
-  const blocks: SummaryBlock[] = [frame(`${heading}\n\n<sub>${LEGEND}</sub>\n\n`)];
+  const legend = legendNote ? `${LEGEND}<br>${legendNote}` : LEGEND;
+  const blocks: SummaryBlock[] = [frame(`${heading}\n\n<sub>${legend}</sub>\n\n`)];
   const table = (id: FilesystemBlockId, title: string, md: string | undefined): SummaryBlock =>
     md === undefined
       ? {
@@ -932,6 +933,13 @@ export function renderAuditSummaryBlocks(
   const timeW = times.reduce((m, t) => Math.max(m, t.length), 0);
   const flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0);
   const commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0);
+  const columns = [
+    timeW &&
+      (startedAt === undefined ? "first-last access" : "first-last access since the proxy started"),
+    "flags",
+    "command",
+    "path",
+  ];
   const body = rows
     .map(
       (r, i) =>
@@ -944,7 +952,7 @@ export function renderAuditSummaryBlocks(
     section: SECTION,
     cut: "lines",
     open: DETAILS_OPEN,
-    text: `${timeW ? `<sub>${TIME_LEGEND}</sub>\n\n` : ""}\`\`\`\n${body}\n\`\`\`\n\n`,
+    text: `<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`,
     close: DETAILS_CLOSE,
   });
   return blocks;
@@ -989,6 +997,17 @@ export function unreadableSummaryBlocks(): SummaryBlock[] {
 /** The summary as one string, with nothing cut. */
 export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOptions): string {
   return joinSummaryBlocks(renderFilesystemAuditBlocks(jsonl, prefixes, JOINED));
+}
+
+/**
+ * The legend's second line: what the path notations mean, where every access
+ * is, and the guide that explains the rest.
+ */
+export function filesystemLegendNote(artifactName: string | undefined, guideUrl: string): string {
+  const record = artifactName
+    ? `every access is in the \`${artifactName}\` artifact`
+    : "the full record could not be uploaded";
+  return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` paths under dir in one row · ${record} · [how to read this](${guideUrl})`;
 }
 
 /**

@@ -68609,7 +68609,7 @@ function fmtFlags(a) {
 	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
 	return out;
 }
-const HEADING = "### Filesystem audit", SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
+const LEGEND = "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit", SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
 	executed: "filesystem-executed",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
@@ -68735,7 +68735,7 @@ function inRecordingOrder(rows) {
 		return a.agg.seq - b.agg.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
 	});
 }
-function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote) {
+function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote) {
 	let { ended, lost, executed, paths, details } = summary, heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
 > some accesses are missing from this summary and from the artifact.`, frame = (text) => ({
 		priority: 0,
@@ -68745,7 +68745,7 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote) {
 		cut: "keep"
 	});
 	if (details?.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
-	let blocks = [frame(`${heading}\n\n<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>\n\n`)], table = (id, title, md) => md === void 0 ? {
+	let blocks = [frame(`${heading}\n\n<sub>${legendNote ? `${LEGEND}<br>${legendNote}` : LEGEND}</sub>\n\n`)], table = (id, title, md) => md === void 0 ? {
 		id,
 		priority: priorities[id],
 		level: 2,
@@ -68780,13 +68780,18 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote) {
 		text: cutNote,
 		close: DETAILS_CLOSE
 	}), blocks;
-	let rows = inRecordingOrder(details), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`).join("\n");
+	let rows = inRecordingOrder(details), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), columns = [
+		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
+		"flags",
+		"command",
+		"path"
+	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`).join("\n");
 	return blocks.push({
 		...log,
 		section: SECTION$1,
 		cut: "lines",
 		open: DETAILS_OPEN,
-		text: `${timeW ? "<sub>first-last access</sub>\n\n" : ""}\`\`\`\n${body}\n\`\`\`\n\n`,
+		text: `<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`,
 		close: DETAILS_CLOSE
 	}), blocks;
 }
@@ -68806,6 +68811,9 @@ function unreadableSummaryBlocks() {
 > artifact was uploaded.\n`,
 		cut: "keep"
 	}];
+}
+function filesystemLegendNote(artifactName, guideUrl) {
+	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` paths under dir in one row · ${artifactName ? `every access is in the \`${artifactName}\` artifact` : "the full record could not be uploaded"} · [how to read this](${guideUrl})`;
 }
 function filesystemTruncationNote(artifactName) {
 	return `_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; ${artifactName ? `the ${artifactName} artifact uploaded for this run has every access` : "the recording could not be uploaded as an artifact, so the rest is not kept"}._\n\n`;
@@ -69391,7 +69399,7 @@ function prefixes(value, realpath) {
 	return out;
 }
 const NONE = { blocks: () => [] };
-async function prepareStepFilesystemAudit({ audit, retentionDays, containerName, annotation, env }, overrides = {}) {
+async function prepareStepFilesystemAudit({ audit, retentionDays, containerName, annotation, env, actionRepo, actionRef }, overrides = {}) {
 	let deps = {
 		...realDeps$3,
 		...overrides
@@ -69410,12 +69418,12 @@ async function prepareStepFilesystemAudit({ audit, retentionDays, containerName,
 		if (!reduced) return NONE;
 		let { summary, summaryError } = reduced;
 		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
-		let notice = filesystemTruncationNote(artifactName || void 0);
+		let notice = filesystemTruncationNote(artifactName || void 0), guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`, legendNote = filesystemLegendNote(artifactName || void 0, guide);
 		return { blocks: (startedAt) => {
 			let rendered;
 			try {
 				if (!summary) throw summaryError;
-				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, notice);
+				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, notice, legendNote);
 			} catch (e) {
 				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
 			}
@@ -73423,7 +73431,9 @@ async function runSandboxStep(env, overrides = {}) {
 			retentionDays: filesystemAuditRetentionDays,
 			containerName,
 			annotation,
-			env
+			env,
+			actionRepo,
+			actionRef: reportActionRef
 		});
 		await reportStepTraffic({
 			containerName,

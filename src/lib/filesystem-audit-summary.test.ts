@@ -598,6 +598,14 @@ describe("renderFilesystemAuditSummary", () => {
     const at = (ms: number): string => new Date(START * 1000 + ms).toISOString();
     const timed = { ...PREFIXES, startedAt: START };
 
+    it("names the columns without the proxy's start when it is unknown", () => {
+      const md = renderFilesystemAuditSummary(
+        jsonl({ t: at(250), kind: "read", comm: "node", path: "/work/a" }),
+        PREFIXES,
+      );
+      expect(md).toContain("<sub>first-last access · flags · command · path</sub>");
+    });
+
     it("orders rows by first access and shows each row's first-last span", () => {
       const md = renderFilesystemAuditSummary(
         jsonl(
@@ -607,7 +615,9 @@ describe("renderFilesystemAuditSummary", () => {
         ),
         timed,
       );
-      expect(md).toContain("<sub>first-last access</sub>");
+      expect(md).toContain(
+        "<sub>first-last access since the proxy started · flags · command · path</sub>",
+      );
       expect(lines(md)).toEqual([
         "00:00.250-00:04.000: RW node ./a",
         "00:01.500: R node /etc/hosts",
@@ -919,7 +929,7 @@ describe("renderFilesystemAuditSummary", () => {
       const md = render({ kind: "read", comm: "a", path: "/work/x" });
       expect(md.indexOf("#### Accessed paths")).toBeLessThan(md.indexOf("<details>"));
       expect(md).toMatch(
-        /<details>\n<summary>📂 Filesystem details<\/summary>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
+        /<details>\n<summary>📂 Filesystem details<\/summary>\n\n<sub>flags · command · path<\/sub>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
       );
     });
   });
