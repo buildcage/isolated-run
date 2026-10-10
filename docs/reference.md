@@ -841,7 +841,7 @@ with absolute paths; `filesystem_audit_artifact_name` carries its name. It names
 step ran but not its arguments, which can carry secrets. Treat it as sensitive, like the traffic
 artifact. `filesystem_audit_retention_days` sets how long it is kept.
 
-The artifact ends with a line such as `{"kind":"end","dropped":0,"untracked":0,"missed":0}`,
+The artifact ends with a line such as `{"kind":"end","dropped":0,"untracked":0,"host_missed":0}`,
 which the tracer writes only after every access it caught. `dropped` counts accesses that found its
 event buffer full, and `untracked` the calls it could not follow because too many files were open,
 or too many calls were in progress, at once. If either is nonzero, or the line is missing because the
@@ -851,10 +851,10 @@ the recording cannot be read, the section says so, a warning is logged, and no a
 The kernel can also skip one of the tracer's hooks: the hooks for failed operations while another
 BPF tool's program, such as a security or monitoring agent's, is running on the same CPU, and, on a
 kernel built for full preemption, a hook entered again while it is preempted mid-run. A stock
-Ubuntu kernel, as on GitHub-hosted runners, does not preempt the hooks. The end line's `missed`
-counts the skips anywhere on the host while the step ran, so 0 means none of its accesses was
-skipped; the section does not warn on a nonzero count, since a skip cannot be tied to the step.
-Before Linux 6.7 the kernel does not count a skipped hook for failed operations.
+Ubuntu kernel, as on GitHub-hosted runners, does not preempt the hooks. The end line's
+`host_missed` counts the skips anywhere on the host while the step ran, so 0 means none of its
+accesses was skipped; the section does not warn on a nonzero count, since a skip cannot be tied to
+the step. Before Linux 6.7 the kernel does not count a skipped hook for failed operations.
 
 It observes accesses in the kernel, below any library the step links against, and only records; it
 never blocks an access. It needs a cgroup v2 host running Linux 5.17 or newer (6.4 on arm64, the

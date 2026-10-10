@@ -356,7 +356,7 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missed
 		fmt.Fprintf(os.Stderr, "filesystem-audit: %-11s %d\n", k, counts[k])
 	}
 	missed := <-missedRun
-	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d missed=%d internal-skipped=%d pre-exec-skipped=%d\n",
+	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d host-missed=%d internal-skipped=%d pre-exec-skipped=%d\n",
 		total, dropped, untracked, missed.n, internal, preExec)
 	// Without every count the recording cannot claim to be complete, so it is
 	// left without its end line.
@@ -364,7 +364,7 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missed
 		fmt.Fprintln(os.Stderr, "filesystem-audit: read loss counters:", err)
 		return w.Flush()
 	}
-	if err := enc.Encode(end{Kind: "end", Dropped: dropped, Untracked: untracked, Missed: missed.n}); err != nil {
+	if err := enc.Encode(end{Kind: "end", Dropped: dropped, Untracked: untracked, HostMissed: missed.n}); err != nil {
 		return err
 	}
 	return w.Flush()
@@ -372,14 +372,14 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missed
 
 // end is the recording's last line, written only once every queued event is
 // out, so a recording without it was cut short. Dropped events found the ring
-// buffer full, and Untracked calls found a tracking map full. Missed runs the
+// buffer full, and Untracked calls found a tracking map full. HostMissed runs the
 // kernel skipped between attaching and the stop signal; the summary does not
 // count them as lost, since any of them may have been another process's.
 type end struct {
-	Kind      string `json:"kind"`
-	Dropped   uint64 `json:"dropped"`
-	Untracked uint64 `json:"untracked"`
-	Missed    uint64 `json:"missed"`
+	Kind       string `json:"kind"`
+	Dropped    uint64 `json:"dropped"`
+	Untracked  uint64 `json:"untracked"`
+	HostMissed uint64 `json:"host_missed"`
 }
 
 func sumPerCPU(m *ebpf.Map) (uint64, error) {
