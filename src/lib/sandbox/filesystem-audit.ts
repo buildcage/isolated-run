@@ -88,6 +88,20 @@ export function hostCannotAudit(reason: string): SandboxError {
 
 export const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2";
 
+/** The 32-bit ABIs Docker's default seccomp profile lets through beside the
+ *  native one. A syscall through one of them skips the per-syscall
+ *  tracepoints the tracer catches attribute changes and failed path changes
+ *  at, so under the audit the sandbox refuses them. */
+const COMPAT_ARCHES = new Set(["SCMP_ARCH_X86", "SCMP_ARCH_X32", "SCMP_ARCH_ARM"]);
+
+/** The seccomp profile with the 32-bit ABIs dropped, so the kernel kills a
+ *  process that makes a syscall through one. */
+export function withoutCompatSyscalls(profile: unknown): unknown {
+  const p = profile as { architectures?: string[] };
+  if (!Array.isArray(p.architectures)) return profile;
+  return { ...p, architectures: p.architectures.filter((a) => !COMPAT_ARCHES.has(a)) };
+}
+
 /** Fails the step before the proxy starts on a host the tracer cannot watch.
  *  The kernel version and tracefs are left to the tracer, which checks the
  *  kernel by feature and, as root, can see where tracefs is mounted. */

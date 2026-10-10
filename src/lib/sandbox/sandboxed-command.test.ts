@@ -151,6 +151,21 @@ describe("runSandboxedCommand", () => {
       return options({ filesystemAudit: AUDIT });
     }
 
+    it("refuses 32-bit syscalls in the sandbox only under the audit", async () => {
+      const seccompProfile = {
+        architectures: ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"],
+      };
+      mocks.extractRuncBootstrap.mockReturnValue({ ...BOOTSTRAP, seccompProfile });
+
+      await runSandboxedCommand(auditing(), deps);
+      await runSandboxedCommand(options(), deps);
+
+      expect(mocks.buildOciConfig.mock.calls[0][1].runtime.seccompProfile).toStrictEqual({
+        architectures: ["SCMP_ARCH_X86_64"],
+      });
+      expect(mocks.buildOciConfig.mock.calls[1][1].runtime.seccompProfile).toBe(seccompProfile);
+    });
+
     it("starts the tracer over the sandbox cgroup and stops it after the command", async () => {
       const cancel = new AbortController().signal;
       await runSandboxedCommand({ ...auditing(), cancel }, deps);

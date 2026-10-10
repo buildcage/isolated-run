@@ -10,6 +10,7 @@ import {
   filesystemAuditPaths,
   hostCannotAudit,
   startFilesystemAudit,
+  withoutCompatSyscalls,
   type AuditChild,
 } from "./filesystem-audit.ts";
 
@@ -29,6 +30,28 @@ describe("filesystemAuditPaths", () => {
 const REQUIREMENTS =
   "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and " +
   "tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting";
+
+describe("withoutCompatSyscalls", () => {
+  it("drops the 32-bit ABIs and keeps the rest of the profile", () => {
+    const profile = {
+      defaultAction: "SCMP_ACT_ERRNO",
+      architectures: ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"],
+      syscalls: [{ names: ["read"], action: "SCMP_ACT_ALLOW" }],
+    };
+    expect(withoutCompatSyscalls(profile)).toStrictEqual({
+      ...profile,
+      architectures: ["SCMP_ARCH_X86_64"],
+    });
+    expect(
+      withoutCompatSyscalls({ architectures: ["SCMP_ARCH_AARCH64", "SCMP_ARCH_ARM"] }),
+    ).toStrictEqual({ architectures: ["SCMP_ARCH_AARCH64"] });
+  });
+
+  it("leaves a profile naming no architectures as it is", () => {
+    const profile = { defaultAction: "SCMP_ACT_ERRNO" };
+    expect(withoutCompatSyscalls(profile)).toBe(profile);
+  });
+});
 
 describe("auditUnavailable", () => {
   it("says why and that the command did not run", () => {
