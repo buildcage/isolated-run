@@ -325,8 +325,9 @@ The summary can also open with a warning:
 - Work handed to a process outside the sandbox, such as an `ssh-agent` or `gpg-agent` reached over a
   socket.
 - A change through a file the command inherited from the program that ran it, an extended attribute
-  change other than through `setxattr` or `lsetxattr`, a failed `exec`, and a `mkdir`, `mknod`,
-  `symlink`, `link` or `truncate` that fails before reaching its file.
+  change other than through `setxattr` or `lsetxattr`, a failed `exec`, a `mkdir`, `mknod`,
+  `symlink` or `link` on a name already there, and one made by `bind(2)` or through io_uring that
+  the kernel refuses before reaching its file.
 - The sandbox's own setup, and the step's shell reading its script.
 
 [Filesystem audit](./security.md#filesystem-audit) in the security details covers what the step

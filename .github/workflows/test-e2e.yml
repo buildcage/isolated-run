@@ -318,7 +318,6 @@ jobs:
           grep -qE ' W +bash +\./execd\.txt$' "$f"
           grep -qE ' W +cat +\./execd\.txt$' "$f"
           grep -qE ' w!? +mkdir +\./root-owned/x$' "$f"
-          grep -qE ' w! +mkdir +/usr/local/buildcage-ro-probe$' "$f"
           # A file mapped executable shows as read unless it is a library or
           # an exec mapped it, as it does run.sh's interpreter.
           grep -qE ' R +python3 +\./mapped\.bin$' "$f"
@@ -358,7 +357,10 @@ jobs:
           # the name it was run by beside it.
           grep -qE '"kind":"exec",[^}]*"path":"/[^"]*/A/run\.sh","name":"\./run\.sh"' "$f"
           jq -se 'any(.[]; .kind == "mmap" and .path == "/usr/bin/dash" and .image == true)' "$f" > /dev/null
-          # A mkdir on a name already there is not recorded.
+          # A mkdir the read-only root refused before the tracer's path hook is
+          # recorded (the summary folds it into /usr/**), one on a name
+          # already there is not.
+          jq -se 'any(.[]; .kind == "mkdir" and .path == "/usr/local/buildcage-ro-probe" and .err == 30)' "$f" > /dev/null
           if jq -se 'any(.[]; .kind == "mkdir" and .err == 17)' "$f" > /dev/null; then exit 1; fi
           # Refused after the tracer's hook: no mapping, and only the failed open.
           if jq -se 'any(.[]; .kind == "mmap" and (.path // "" | endswith("/ro-mapped.bin")))' "$f" > /dev/null; then exit 1; fi

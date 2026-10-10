@@ -1541,6 +1541,18 @@ ATTR_OP(futimesat, ctx->args[0], ctx->args[1])
 // is already there changed nothing, and mkdir -p meets one at every level it
 // keeps, so EEXIST is not recorded.
 #define EEXIST 17
+static __always_inline void create_exit(long ret)
+{
+	if (ret != -EEXIST) {
+		op_exit(ret, 1);
+		return;
+	}
+	// Drops a change held for it too, as on_sys_exit does in either order.
+	u64 id = bpf_get_current_pid_tgid();
+	bpf_map_delete_elem(&held_ops, &id);
+	op_exit(0, 1);
+}
+
 #define FAILED_CREATE(sys, kind, dfd1, p1, dfd2, p2)				\
 SEC("tracepoint/syscalls/sys_enter_" #sys)					\
 int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
@@ -1551,7 +1563,7 @@ int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
 SEC("tracepoint/syscalls/sys_exit_" #sys)					\
 int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
 {										\
-	op_exit(ctx->ret == -EEXIST ? 0 : ctx->ret, 1);				\
+	create_exit(ctx->ret);							\
 	return 0;								\
 }
 

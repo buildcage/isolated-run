@@ -232,6 +232,18 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "mkdir", Comm: "mkdir", Path: "/opt/x", Err: int32(unix.EROFS), Failed: true},
 		},
 		{
+			name: "failed mkdir, relative to the cwd",
+			ev: event{kind: 26, comm: "mkdir", pathRet: int32(unix.EROFS), bases: 1, mode: 1,
+				data: append([]byte("x\x00"), comps("opt")...)},
+			want: record{Kind: "mkdir", Comm: "mkdir", Path: "/opt/x", Name: "x", Err: int32(unix.EROFS), Failed: true},
+		},
+		{
+			name: "failed link, the new name relative to its base",
+			ev: event{kind: 29, comm: "ln", pathRet: int32(unix.EROFS), n1: 1, bases: 2, flags: 1,
+				data: append([]byte("/a\x00b\x00"), comps("bin")...)},
+			want: record{Kind: "link", Comm: "ln", Path: "/a", To: "/bin/b", ToName: "b", Err: int32(unix.EROFS), Failed: true},
+		},
+		{
 			name: "failed mknod",
 			ev:   event{kind: 27, comm: "mkfifo", pathRet: int32(unix.EROFS), data: []byte("/opt/p\x00")},
 			want: record{Kind: "mknod", Comm: "mkfifo", Path: "/opt/p", Err: int32(unix.EROFS), Failed: true},
