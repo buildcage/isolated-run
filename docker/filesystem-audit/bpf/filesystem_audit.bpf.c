@@ -158,7 +158,11 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	// components, as for unlink.
 	K_MKNOD = 24,
 	// A failed rmdir, or unlinkat with AT_REMOVEDIR; as K_UNLINK_FAILED.
-	K_RMDIR_FAILED = 25 };
+	K_RMDIR_FAILED = 25,
+	// A failed mkdir, mknod, symlink (the link's name) or truncate, as
+	// K_UNLINK_FAILED; a failed link as K_RENAME_FAILED.
+	K_MKDIR_FAILED = 26, K_MKNOD_FAILED = 27, K_SYMLINK_FAILED = 28,
+	K_LINK_FAILED = 29, K_TRUNCATE_FAILED = 30 };
 
 // Fixed header (mirrored by hdrLen in decode.go), then data_len bytes of data:
 //   open:    d_path result (path_len is its return value)
@@ -1531,5 +1535,49 @@ int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
 ATTR_OP(utime, AT_FDCWD, ctx->args[0])
 ATTR_OP(utimes, AT_FDCWD, ctx->args[0])
 ATTR_OP(futimesat, ctx->args[0], ctx->args[1])
+
+// Making a name: the kernel refuses one on a read-only mount before the
+// security_path_* hook, so the failure is caught at the syscall. A name that
+// is already there changed nothing, and mkdir -p meets one at every level it
+// keeps, so EEXIST is not recorded.
+#define EEXIST 17
+static __always_inline void create_exit(long ret)
+{
+	if (ret != -EEXIST) {
+		op_exit(ret, 1);
+		return;
+	}
+	// The change its path hook held goes too, so either exit may run first.
+	u64 id = bpf_get_current_pid_tgid();
+	bpf_map_delete_elem(&held_ops, &id);
+	op_exit(0, 1);
+}
+
+#define FAILED_CREATE(sys, kind, dfd1, p1, dfd2, p2)				\
+SEC("tracepoint/syscalls/sys_enter_" #sys)					\
+int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
+{										\
+	op_enter(kind, dfd1, p1, dfd2, p2);					\
+	return 0;								\
+}										\
+SEC("tracepoint/syscalls/sys_exit_" #sys)					\
+int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
+{										\
+	create_exit(ctx->ret);							\
+	return 0;								\
+}
+
+// mkdirat(dfd, name), mknodat(dfd, name), symlinkat(target, newdfd, name),
+// linkat(olddfd, oldname, newdfd, newname), truncate(name); mkdir, mknod,
+// symlink and link are x86_64's older forms (see main.go).
+FAILED_CREATE(mkdirat, K_MKDIR_FAILED, ctx->args[0], ctx->args[1], 0, 0)
+FAILED_CREATE(mkdir, K_MKDIR_FAILED, AT_FDCWD, ctx->args[0], 0, 0)
+FAILED_CREATE(mknodat, K_MKNOD_FAILED, ctx->args[0], ctx->args[1], 0, 0)
+FAILED_CREATE(mknod, K_MKNOD_FAILED, AT_FDCWD, ctx->args[0], 0, 0)
+FAILED_CREATE(symlinkat, K_SYMLINK_FAILED, ctx->args[1], ctx->args[2], 0, 0)
+FAILED_CREATE(symlink, K_SYMLINK_FAILED, AT_FDCWD, ctx->args[1], 0, 0)
+FAILED_CREATE(linkat, K_LINK_FAILED, ctx->args[0], ctx->args[1], ctx->args[2], ctx->args[3])
+FAILED_CREATE(link, K_LINK_FAILED, AT_FDCWD, ctx->args[0], AT_FDCWD, ctx->args[1])
+FAILED_CREATE(truncate, K_TRUNCATE_FAILED, AT_FDCWD, ctx->args[0], 0, 0)
 
 char LICENSE[] SEC("license") = "GPL";

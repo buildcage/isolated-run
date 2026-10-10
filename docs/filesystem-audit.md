@@ -241,9 +241,10 @@ Python's `surrogateescape` does, so `os.fsencode` gives back the name's exact by
 ### Kinds
 
 A failed operation keeps the kind it would have had, with `"failed":true` and `err`, and shows its
-letter lowercase in the summary. A failed `open`, `unlink`, `rmdir`, `rename`, `chmod`, `chown` or
-`attr` is recorded however it failed; a `mkdir`, `mknod`, `symlink`, `link` or `truncate` only when
-the kernel refused it after reaching its file, and a failed `exec` or `mmap` not at all.
+letter lowercase in the summary. A failed `open`, `unlink`, `rmdir`, `rename`, `chmod`, `chown`,
+`attr` or `truncate` is recorded however it failed, and a failed `mkdir`, `mknod`, `symlink` or
+`link` too unless its name was already there (`EEXIST`), which changed nothing and which `mkdir -p`
+meets at every level it keeps. A failed `exec` or `mmap` is not recorded.
 
 | `kind`                                          | Records                                                                                          | Summary                                   |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------- |
@@ -324,8 +325,9 @@ The summary can also open with a warning:
 - Work handed to a process outside the sandbox, such as an `ssh-agent` or `gpg-agent` reached over a
   socket.
 - A change through a file the command inherited from the program that ran it, an extended attribute
-  change other than through `setxattr` or `lsetxattr`, a failed `exec`, and a `mkdir`, `mknod`,
-  `symlink`, `link` or `truncate` that fails before reaching its file.
+  change other than through `setxattr` or `lsetxattr`, a failed `exec`, a `mkdir`, `mknod`,
+  `symlink` or `link` on a name already there, and one made by `bind(2)` or through io_uring that
+  the kernel refuses before reaching its file.
 - The sandbox's own setup, and the step's shell reading its script.
 
 [Filesystem audit](./security.md#filesystem-audit) in the security details covers what the step

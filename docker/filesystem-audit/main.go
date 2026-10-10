@@ -350,7 +350,7 @@ func dropAbsentPrograms(spec *ebpf.CollectionSpec, kspec *btf.Spec) {
 var optionalSyscalls = map[string]bool{
 	"unlink": true, "rmdir": true, "rename": true, "renameat": true, "chmod": true,
 	"chown": true, "lchown": true, "utime": true, "utimes": true, "futimesat": true,
-	"fchmodat2": true,
+	"mkdir": true, "mknod": true, "symlink": true, "link": true, "fchmodat2": true,
 }
 
 // attachAll attaches every loaded program, and any that fails is fatal; those
