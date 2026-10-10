@@ -130,8 +130,8 @@ var kindNames = map[uint32]string{
 }
 
 // Mirrors the fixed header of struct event in bpf/filesystem_audit.bpf.c:
-// eight u32 fields, four u8 fields, comm[16], u32 err and marks, padding to
-// align the u64 timestamp, then the data bytes.
+// eight u32 fields, four u8 fields, comm[16], u32 err, marks and gid, the u64
+// timestamp, then the data bytes.
 const hdrLen = 8*4 + 4 + 16 + 4 + 4 + 4 + 8
 
 const (
@@ -306,6 +306,7 @@ func decode(raw []byte) (record, error) {
 	truncated, truncated2 := raw[34] != 0, raw[35] != 0
 	data := raw[hdrLen:]
 	marks := le.Uint32(raw[56:])
+	gid := le.Uint32(raw[60:]) // a failed chown's; a held one's is in mode
 	r := record{
 		Kind: kindNames[kind],
 		PID:  le.Uint32(raw[4:]),
@@ -353,7 +354,7 @@ func decode(raw []byte) (record, error) {
 	case 11: // chown
 		r.Path, _ = components(data, n1, truncated)
 		applyMarks(&r, marks, false)
-		r.Owner = fmt.Sprintf("%d:%d", flags, mode)
+		r.Owner = owner(flags, mode)
 	case 8: // symlink
 		r.To = cstr(data)
 		// pathRet is the link body's length, i.e. the offset of the path
@@ -373,6 +374,12 @@ func decode(raw []byte) (record, error) {
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
+		switch kind {
+		case 18:
+			r.Mode = fmt.Sprintf("%04o", flags&0o7777)
+		case 19:
+			r.Owner = owner(flags, gid)
+		}
 	case 17, 29: // a failed rename or link: from one name to another
 		// n1 == 1 marks a second name after the first; both come before the
 		// base directories.
@@ -405,6 +412,17 @@ func decode(raw []byte) (record, error) {
 		applyMarks(&r, marks, false)
 	}
 	return r, nil
+}
+
+// owner renders a chown's new uid:gid, with -1 for a side it leaves as is.
+func owner(uid, gid uint32) string {
+	id := func(v uint32) string {
+		if v == ^uint32(0) {
+			return "-1"
+		}
+		return fmt.Sprint(v)
+	}
+	return id(uid) + ":" + id(gid)
 }
 
 // openAccess renders an open's flags as letters: r/w/rw, plus c (create),

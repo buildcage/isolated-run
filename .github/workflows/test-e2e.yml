@@ -221,6 +221,7 @@ jobs:
             except FileNotFoundError: pass' "$GITHUB_WORKSPACE/sub"
             # Changes the kernel refuses after the tracer's hook has seen them.
             chmod 777 "$GITHUB_WORKSPACE/root-owned.txt" 2>/dev/null || true
+            chown 1:2 "$GITHUB_WORKSPACE/root-owned.txt" 2>/dev/null || true
             mkdir "$GITHUB_WORKSPACE/root-owned/x" 2>/dev/null || true
             # Refused by the read-only root before the tracer's path hook, and
             # a name already there, which is no change.
@@ -371,6 +372,8 @@ jobs:
           # recorded (the summary folds it into /usr/**), one on a name
           # already there is not.
           jq -se 'any(.[]; .kind == "mkdir" and .path == "/usr/local/buildcage-ro-probe" and .err == 30)' "$f" > /dev/null
+          jq -se 'any(.[]; .kind == "chmod" and .failed and .mode == "0777" and (.path | endswith("/root-owned.txt")))' "$f" > /dev/null
+          jq -se 'any(.[]; .kind == "chown" and .failed and .owner == "1:2" and (.path | endswith("/root-owned.txt")))' "$f" > /dev/null
           if jq -se 'any(.[]; .kind == "mkdir" and .err == 17)' "$f" > /dev/null; then exit 1; fi
           # Refused after the tracer's hook: no mapping, and only the failed open.
           if jq -se 'any(.[]; .kind == "mmap" and (.path // "" | endswith("/ro-mapped.bin")))' "$f" > /dev/null; then exit 1; fi
