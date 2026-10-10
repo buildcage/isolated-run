@@ -295,8 +295,10 @@ use one:
   cannot use the check. Put the key to check in `AWS_ACCESS_KEY_ID`, or run those commands in a step
   without the check.
 - An EC2 instance profile or a container credentials endpoint does not give a starting key either,
-  as on a self-hosted runner on EC2 or ECS. Run `configure-aws-credentials` in an earlier step, so
-  the keys reach the step in `AWS_ACCESS_KEY_ID`.
+  as on a self-hosted runner on EC2 or ECS. Run `configure-aws-credentials` in an earlier step with
+  `role-to-assume`: it assumes that role from the instance's credentials and exports the role's keys
+  in `AWS_ACCESS_KEY_ID`. If it reports that the credentials loaded by the SDK do not match, add
+  `role-chaining: true`.
 - Nor does a web identity token: a step that gets its credentials only through
   `AWS_WEB_IDENTITY_TOKEN_FILE` cannot turn the check on, and a key set beside the token is what the
   SDKs use, so the token goes unused. Exchange the token before the step instead, as
