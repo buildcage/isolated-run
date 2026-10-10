@@ -242,6 +242,10 @@ const newAgg = (): Agg => ({
 
 const flagBits = (a: Agg): number => a.ok | a.failed;
 
+// The flags fmtFlags prints, one bit each: "R" succeeded, "r" only ever
+// failed, "r!" refused.
+const shownBits = (a: Agg): number => a.ok | ((a.failed & ~a.ok & ~a.perm) << 8) | (a.perm << 16);
+
 function mergeAgg(dst: Agg, src: Agg): void {
   dst.ok |= src.ok;
   dst.failed |= src.failed;
@@ -334,11 +338,11 @@ function walkedNodes(top: Map<string, Node>): Set<Node> {
     let bits = 0;
     for (const kid of node.kids?.values() ?? []) {
       bits |= below.get(kid)!;
-      if (kid.own) bits |= flagBits(kid.own);
-      if (kid.folded) bits |= flagBits(kid.folded);
+      if (kid.own) bits |= shownBits(kid.own);
+      if (kid.folded) bits |= shownBits(kid.folded);
     }
     below.set(node, bits);
-    if (node.own && node.kids?.size && (flagBits(node.own) & ~bits) === 0) walked.add(node);
+    if (node.own && node.kids?.size && (shownBits(node.own) & ~bits) === 0) walked.add(node);
   }
   return walked;
 }
@@ -371,7 +375,8 @@ function* treeLines(top: Map<string, Node>): Generator<[string, Agg]> {
 
 /**
  * Drops each bare directory line whose flags the same command's lines below it
- * already carry: its read is only the walk that reached them.
+ * already carry: its read is only the walk that reached them. flagsOf yields
+ * each flag as a row prints it: "R", "r" or "r!".
  */
 export function dropWalkedDirs(
   lines: Set<string>,
@@ -397,7 +402,12 @@ export function dropWalkedDirs(
       kids = node.kids ??= new Map();
     }
     const agg = newAgg();
-    for (const c of flagsOf(l)) agg.ok |= BIT[c];
+    for (const flag of flagsOf(l)) {
+      const bit = BIT[flag[0].toUpperCase()];
+      if (flag[0] !== flag[0].toLowerCase()) agg.ok |= bit;
+      else agg.failed |= bit;
+      if (flag.endsWith("!")) agg.perm |= bit;
+    }
     if (folded) node!.folded = agg;
     else node!.own = agg;
     if (!folded) nodeOf.set(l, node!);
@@ -560,12 +570,14 @@ class Lines {
   }
 }
 
+// A refusal shows even beside a success, as one in a folded directory would
+// otherwise vanish into the reads of its siblings.
 function fmtFlags(a: Agg): string {
-  const failed = a.failed & ~a.ok;
   let out = "";
+  for (const c of ORDER) if (a.ok & BIT[c]) out += c;
   for (const c of ORDER) {
-    if (a.ok & BIT[c]) out += c;
-    else if (failed & BIT[c]) out += c.toLowerCase() + (a.perm & BIT[c] ? "!" : "");
+    if (a.perm & BIT[c]) out += `${c.toLowerCase()}!`;
+    else if (a.failed & ~a.ok & BIT[c]) out += c.toLowerCase();
   }
   return out;
 }

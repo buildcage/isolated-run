@@ -785,12 +785,12 @@ R read · W write · X exec · M move · D delete · A attr · lowercase = faile
 | ------ | --------------------- |
 | RWD    | `./node_modules/**`   |
 | R      | `./package.json`      |
-| r!     | `/etc/shadow`         |
+| Rr!    | `/etc/**`             |
 
 📂 Filesystem details
 first-last access
 00:00.412:           R   node ./package.json
-00:00.415:           r!  node /etc/shadow
+00:00.415-00:00.418: Rr! node /etc/**
 00:00.530-00:41.207: RWD node ./node_modules/**
 ```
 
@@ -803,9 +803,11 @@ time. It does not say which action came when, and a file kept open counts only t
 first write through it by each program a process runs, so the last time can be earlier than its last
 write; a command reading or writing through a descriptor it inherited, or was passed, is shown under
 its own name, except on a pipe, socket or device such as `/dev/null`, which counts once. The artifact has every
-access in order. An action that only ever failed is lowercase, and one the sandbox refused, for want
-of permission or because the location is read-only, is marked `!`. A directory with many touched
-children is shown once as `dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and
+access in order. An action that only ever failed is lowercase. One the sandbox refused, for want
+of permission or because the location is read-only, is lowercase and marked `!`, after the uppercase
+letter if it also succeeded: `Rr!` on `/etc/**` means reads under `/etc` succeeded and at least
+one was refused. A directory with many touched children is shown once as `dir/**`. Paths are
+shown relative to `$GITHUB_WORKSPACE` (`./…`) and
 `$HOME` (`~/…`), else absolute. A failed access is recorded under the name the command used, joined
 to the directory a relative name resolved against (its working directory, or the directory it passed
 by descriptor) without resolving `..`; a name whose directory was closed before it could be read is

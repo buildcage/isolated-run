@@ -151,7 +151,16 @@ describe("renderFilesystemAuditSummary: properties", () => {
         "…/t",
         "…/t/u",
       ),
-      flags: fc.subarray(["R", "W", "X", "M", "D", "A"]),
+      // Each action as a row can print it: absent, succeeded, only failed,
+      // refused, or succeeded and refused.
+      flags: fc
+        .tuple(
+          ...["R", "W", "X", "M", "D", "A"].map((c) => {
+            const l = c.toLowerCase();
+            return fc.constantFrom([], [c], [l], [`${l}!`], [c, `${l}!`]);
+          }),
+        )
+        .map((fs) => fs.flat()),
     });
     fc.assert(
       fc.property(fc.array(lineArb, { maxLength: 15 }), (ls) => {
