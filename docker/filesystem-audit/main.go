@@ -121,10 +121,13 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
 	if err != nil {
 		return fmt.Errorf("read kernel BTF: %w", err)
 	}
-	if err := requireRuntimeAlloc(kspec); err != nil {
+	if err := requireLinux61(kspec); err != nil {
 		return err
 	}
 	dropAbsentPrograms(spec, kspec)
+	if err := setSyscallNumbers(spec); err != nil {
+		return err
+	}
 	if stopRequested(sig) {
 		return errStoppedEarly
 	}
@@ -146,7 +149,7 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
 	if stopRequested(sig) {
 		return errStoppedEarly
 	}
-	links, err := attachAll(coll, spec)
+	links, err := attachAll(coll)
 	for _, l := range links {
 		defer l.Close()
 	}
@@ -316,11 +319,9 @@ func prepareCgroup(cgPath string) (f *os.File, created bool, err error) {
 	return f, created, nil
 }
 
-// requireRuntimeAlloc refuses a kernel without the BPF memory allocator added
-// in 6.1. Without it, the verifier loads a tracepoint program that uses a map
-// allocated on use (op_exit's held_ops) but warns, which taints the kernel and
-// panics a panic_on_warn host.
-func requireRuntimeAlloc(kspec *btf.Spec) error {
+// requireLinux61 refuses a kernel older than 6.1, the oldest the tracer
+// supports, told by the BPF memory allocator that release added.
+func requireLinux61(kspec *btf.Spec) error {
 	var s *btf.Struct
 	err := kspec.TypeByName("bpf_mem_alloc", &s)
 	if errors.Is(err, btf.ErrNotFound) {
@@ -344,39 +345,31 @@ func dropAbsentPrograms(spec *ebpf.CollectionSpec, kspec *btf.Spec) {
 	}
 }
 
-// optionalSyscalls are syscalls only some architectures have (x86_64's older
-// forms, and renameat, which a few newer ports lack), and fchmodat2, added in
-// Linux 6.6; their missing tracepoints are not reported.
-var optionalSyscalls = map[string]bool{
-	"unlink": true, "rmdir": true, "rename": true, "renameat": true, "chmod": true,
-	"chown": true, "lchown": true, "utime": true, "utimes": true, "futimesat": true,
-	"mkdir": true, "mknod": true, "symlink": true, "link": true, "fchmodat2": true,
+// setSyscallNumbers gives the BPF program the architecture's syscall numbers;
+// those it leaves unset are syscalls the architecture lacks.
+func setSyscallNumbers(spec *ebpf.CollectionSpec) error {
+	for name, nr := range syscallNumbers {
+		v, ok := spec.Variables[name]
+		if !ok {
+			return fmt.Errorf("no variable %s in the BPF program", name)
+		}
+		if err := v.Set(nr); err != nil {
+			return fmt.Errorf("set %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // attachAll attaches every loaded program, and any that fails is fatal; those
-// the kernel does not offer were dropped before load. The exceptions: a
-// syscall tracepoint the architecture or kernel lacks, and one of the two getname
-// spellings, of which at least one must attach or a failed open would have no
-// name. A classic syscall tracepoint needs tracefs.
-func attachAll(coll *ebpf.Collection, spec *ebpf.CollectionSpec) ([]link.Link, error) {
+// the kernel does not offer were dropped before load. The exception is one of
+// the two getname spellings, of which at least one must attach or a failed
+// open would have no name.
+func attachAll(coll *ebpf.Collection) ([]link.Link, error) {
 	var links []link.Link
 	getnames := 0
 	for name, p := range coll.Programs {
-		var l link.Link
-		var err error
-		var tp string
-		if p.Type() == ebpf.TracePoint {
-			var group string
-			group, tp, _ = strings.Cut(strings.TrimPrefix(spec.Programs[name].SectionName, "tracepoint/"), "/")
-			l, err = link.Tracepoint(group, tp, p, nil)
-		} else {
-			l, err = link.AttachTracing(link.TracingOptions{Program: p})
-		}
+		l, err := link.AttachTracing(link.TracingOptions{Program: p})
 		if err != nil {
-			sys := strings.TrimPrefix(strings.TrimPrefix(tp, "sys_enter_"), "sys_exit_")
-			if p.Type() == ebpf.TracePoint && errors.Is(err, os.ErrNotExist) && optionalSyscalls[sys] {
-				continue
-			}
 			if getnameProgs[name] {
 				fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
 				continue

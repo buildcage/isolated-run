@@ -459,7 +459,7 @@ it touched with a flag for each action, and, folded below them, one line per com
 ```
 
 It only records; it never blocks an access. It works on GitHub-hosted Ubuntu runners, and on a
-self-hosted runner on Linux 6.1 or newer (6.4 on arm64) with cgroup v2, kernel BTF and tracefs;
+self-hosted runner on Linux 6.1 or newer (6.4 on arm64) with cgroup v2 and kernel BTF;
 elsewhere the step fails before the command runs. While the step runs it adds a small cost to every
 system call on the host, other jobs' included. See [Filesystem audit](./docs/filesystem-audit.md)
 for how to use and read it.

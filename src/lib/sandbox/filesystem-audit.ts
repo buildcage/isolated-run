@@ -69,8 +69,8 @@ export function cgroupFsPath(cgroupsPath: string): string {
 }
 
 const REQUIREMENTS =
-  "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and " +
-  "tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting";
+  "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF: " +
+  "https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting";
 
 /** The step's failure when the tracer could not start. */
 export function auditUnavailable(reason: string): SandboxError {
@@ -95,9 +95,9 @@ const NATIVE_ARCH: Partial<Record<NodeJS.Architecture, string>> = {
 };
 
 /** The seccomp profile with only the native ABI left, of those Docker's
- *  default profile allows. A syscall through a 32-bit one skips the
- *  per-syscall tracepoints the tracer catches attribute changes and failed
- *  path changes at, so under the audit the kernel kills the thread that makes
+ *  default profile allows. A syscall through a 32-bit one is numbered apart
+ *  from the native ones the tracer reads attribute changes and failed path
+ *  changes from, so under the audit the kernel kills the thread that makes
  *  one, with SIGSYS. */
 export function withoutCompatSyscalls(profile: unknown, arch = process.arch): unknown {
   const p = profile as { architectures?: unknown } | null;
@@ -107,8 +107,8 @@ export function withoutCompatSyscalls(profile: unknown, arch = process.arch): un
 }
 
 /** Fails the step before the proxy starts on a host the tracer cannot watch.
- *  The kernel version and tracefs are left to the tracer, which checks the
- *  kernel by feature and, as root, can see where tracefs is mounted. */
+ *  The kernel version is left to the tracer, which checks the kernel by
+ *  feature. */
 export function checkFilesystemAuditHost(
   probes: Pick<HostProbes, "cgroupPath" | "kernelBtf"> = realHostProbes,
 ): void {

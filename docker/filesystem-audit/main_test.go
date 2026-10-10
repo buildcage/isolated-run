@@ -85,3 +85,13 @@ func TestRunRefusesAnActionAlreadyGone(t *testing.T) {
 		t.Fatal("wrote a pidfile for a tracer that never started")
 	}
 }
+
+func TestSetSyscallNumbersNamesOnlyTheProgramsConstants(t *testing.T) {
+	spec, err := loadFilesystemAudit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setSyscallNumbers(spec); err != nil {
+		t.Fatal(err)
+	}
+}

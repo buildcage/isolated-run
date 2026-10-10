@@ -631,11 +631,11 @@ a backslash or a byte that is not UTF-8 in a name is shown escaped, so no name c
 Summary or pass for another.
 
 **Going unrecorded.** The step cannot leave the cgroup: it sees the cgroup filesystem read-only and
-holds no capability. Nor can it make a system call through a 32-bit ABI, which skips the per-call
-tracepoints: under the audit the sandbox's seccomp filter refuses those. Nor can it change which
-records count as its own: after its shell starts, everything is the step's except the sandbox
-init's records and the shell reading its script, however the step arranges its processes or spells
-a path. What it can do:
+holds no capability. Nor can it make a system call through a 32-bit ABI, numbered apart from the
+calls the tracer reads: under the audit the sandbox's seccomp filter refuses those. Nor can it
+change which records count as its own: after its shell starts, everything is the step's except the
+sandbox init's records and the shell reading its script, however the step arranges its processes or
+spells a path. What it can do:
 
 - Hand the work to a process outside the sandbox, such as an `ssh-agent` or `gpg-agent` it reaches
   over a Unix socket.
@@ -657,7 +657,7 @@ a path. What it can do:
   every access stays in the artifact when one was uploaded.
 
 Where the tracer cannot start or cannot attach a probe the kernel offers, for want of cgroup v2,
-BTF, tracefs or Linux 6.1 (6.4 on arm64), the step fails before the command runs rather than keep
+BTF or Linux 6.1 (6.4 on arm64), the step fails before the command runs rather than keep
 a partial record.
 
 ## Hardening

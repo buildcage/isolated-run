@@ -45,14 +45,13 @@ records: it never blocks an access. What the step may write is decided by
 ### Which runners
 
 GitHub-hosted `ubuntu-latest`, `ubuntu-22.04`, `ubuntu-24.04` and their `-arm` variants meet every
-requirement: their kernels are Linux 6.8 or newer, on cgroup v2, with BTF and tracefs. On a
-self-hosted runner, check the host before turning it on:
+requirement: their kernels are Linux 6.8 or newer, on cgroup v2, with BTF. On a self-hosted
+runner, check the host before turning it on:
 
 ```sh
 uname -rm                         # Linux 6.1 or newer; 6.4 or newer on aarch64
 stat -fc %T /sys/fs/cgroup        # cgroup2fs
 ls /sys/kernel/btf/vmlinux        # the kernel's type information (BTF)
-sudo ls /sys/kernel/tracing/events >/dev/null   # tracefs, or /sys/kernel/debug/tracing
 ```
 
 A host that falls short fails the step before the command runs, with the reason; see
@@ -300,15 +299,14 @@ tracer caught:
 The step fails before the command runs with
 `filesystem_audit could not start (<reason>); the command was not run.`
 
-| Reason                                                   | What to do                                                                                               |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `the runner is not on cgroup v2`                         | Boot the host with cgroup v2 (the default on Ubuntu 22.04 and later)                                     |
-| `the kernel exposes no BTF`                              | Use a kernel built with BTF (`/sys/kernel/btf/vmlinux`), as Ubuntu's and most distributions' are         |
-| `the kernel is older than Linux 6.1`                     | Move to Linux 6.1 or newer                                                                               |
-| `attach <name>: …` on arm64                              | Move to Linux 6.4 or newer, the first arm64 kernel that lets the tracer hook kernel functions            |
-| `attach <name>: neither debugfs nor tracefs are mounted` | Mount tracefs: `sudo mount -t tracefs tracefs /sys/kernel/tracing`                                       |
-| `the tracer did not attach in time`                      | The host was too busy to start the tracer; run the job again                                             |
-| Anything else                                            | The tracer's own error; please [open an issue](https://github.com/buildcage/isolated-run/issues) with it |
+| Reason                               | What to do                                                                                               |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `the runner is not on cgroup v2`     | Boot the host with cgroup v2 (the default on Ubuntu 22.04 and later)                                     |
+| `the kernel exposes no BTF`          | Use a kernel built with BTF (`/sys/kernel/btf/vmlinux`), as Ubuntu's and most distributions' are         |
+| `the kernel is older than Linux 6.1` | Move to Linux 6.1 or newer                                                                               |
+| `attach <name>: …` on arm64          | Move to Linux 6.4 or newer, the first arm64 kernel that lets the tracer hook kernel functions            |
+| `the tracer did not attach in time`  | The host was too busy to start the tracer; run the job again                                             |
+| Anything else                        | The tracer's own error; please [open an issue](https://github.com/buildcage/isolated-run/issues) with it |
 
 The summary can also open with a warning:
 
@@ -338,13 +336,12 @@ itself can do to the record, and what the record can be trusted for.
 
 ## Requirements and limits
 
-- **Kernel.** A cgroup v2 host on Linux 6.1 or newer, 6.4 or newer on arm64, with kernel BTF and
-  tracefs mounted. cgroup v2 and BTF are checked before the proxy starts, the kernel version and
-  tracefs when the tracer starts.
+- **Kernel.** A cgroup v2 host on Linux 6.1 or newer, 6.4 or newer on arm64, with kernel BTF.
+  cgroup v2 and BTF are checked before the proxy starts, the kernel version when the tracer starts.
 - **No 32-bit programs.** A system call through a 32-bit ABI, from an i386 or ARM32 program or
-  `int 0x80`, skips the hooks that record attribute changes and failed changes, so with the audit on
-  the sandbox refuses it: the kernel kills the thread that made it with `SIGSYS`, which a shell
-  reports as `Bad system call`.
+  `int 0x80`, is numbered apart from the native calls the tracer reads attribute changes and failed
+  changes from, so with the audit on the sandbox refuses it: the kernel kills the thread that made
+  it with `SIGSYS`, which a shell reports as `Bad system call`.
 - **Cost to the whole host.** While the step runs, the tracer's hooks run on every system call and
   every file read or write on the runner host, not only the step's, since a hook has to run to tell
   whose call it is. That adds roughly 100 nanoseconds to each system call of every process on the
@@ -363,10 +360,8 @@ itself can do to the record, and what the record can be trusted for.
 
 ### Skipped hooks
 
-The kernel can skip one of the tracer's hooks: those for failed operations while another BPF
-program, such as a security or monitoring agent's, is running on the same CPU, and, on a kernel
-built for full preemption, a hook entered again while it is paused mid-run. A stock Ubuntu kernel,
-as on GitHub-hosted runners, does not pause the hooks. `host_missed` counts skips anywhere on the
-host while the step ran, so 0 means none of the step's accesses was skipped. The summary does not
-warn on a nonzero count, since a skip cannot be tied to the step. Before Linux 6.7 the kernel does
-not count a skipped hook for failed operations.
+On a kernel built for full preemption, one of the tracer's hooks is skipped when it is entered again
+while paused mid-run. A stock Ubuntu kernel, as on GitHub-hosted runners, does not pause the
+hooks. `host_missed` counts skips anywhere on the host while the step ran, so 0 means none of the
+step's accesses was skipped. The summary does not warn on a nonzero count, since a skip cannot be
+tied to the step.

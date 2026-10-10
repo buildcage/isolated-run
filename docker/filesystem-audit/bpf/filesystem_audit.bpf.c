@@ -121,14 +121,13 @@ struct linux_binprm {
 	struct file *file;
 } __attribute__((preserve_access_index));
 
-struct trace_event_raw_sys_enter {
-	long id;
-	unsigned long args[6];
+// The registers each architecture passes a syscall's first arguments in.
+struct pt_regs___x86 {
+	unsigned long di, si, dx, r10;
 } __attribute__((preserve_access_index));
 
-struct trace_event_raw_sys_exit {
-	long id;
-	long ret;
+struct pt_regs___arm64 {
+	unsigned long regs[31];
 } __attribute__((preserve_access_index));
 
 #define DATA_SZ 8192
@@ -238,9 +237,10 @@ struct pending {
 	u64 p1;
 	u64 p2;
 	u64 ts;
-	u32 kind;    // emitted on failure
-	u32 kind_ok; // emitted on success, 0 to skip
-	s32 dfd1;    // what p1 and p2 resolve against when relative
+	u32 kind;      // emitted on failure
+	u32 kind_ok;   // emitted on success, 0 to skip
+	u32 quiet_err; // an errno that changed nothing, so is not recorded
+	s32 dfd1;      // what p1 and p2 resolve against when relative
 	s32 dfd2;
 };
 
@@ -905,30 +905,6 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 	return 0;
 }
 
-// Reports a held path change when its syscall returns: as done if it
-// succeeded (a truncating open returns a descriptor), else as failed with the
-// errno, unless a failed-path tracepoint below records the failure itself.
-// That tracepoint and this program run in either order on the same exit, so
-// each clears the other's entry.
-SEC("tp_btf/sys_exit")
-int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
-{
-	if (!in_target())
-		return 0;
-	u64 id = bpf_get_current_pid_tgid();
-	struct event *e = bpf_map_lookup_elem(&held_ops, &id);
-	if (!e)
-		return 0;
-	if (ret >= 0) {
-		submit(e);
-	} else if (!bpf_map_lookup_elem(&pending_ops, &id)) {
-		e->err = -ret;
-		submit(e);
-	}
-	bpf_map_delete_elem(&held_ops, &id);
-	return 0;
-}
-
 // A refused or missing file never reaches security_file_open, so a failed
 // open is caught at the syscall. The name is read from the kernel's own copy
 // (getname_flags), not the user pointer, which the caller could rewrite
@@ -1282,302 +1258,199 @@ int BPF_PROG(on_file_free, struct file *file)
 
 // Failed path syscalls. security_path_* fires only once the path has
 // resolved, so a missing target (the common failure) never reaches it; the
-// syscall tracepoints catch it. The entry stashes the user path pointer(s);
+// syscall's entry and exit catch it. The entry stashes the user path pointer(s);
 // the exit emits only when ret < 0, reading them back. Best-effort: this reads
 // the user buffer, which a concurrent thread could rewrite between entry and
 // exit, so a failed op's recorded path is not tamper-proof the way the open
 // path's getname copy is.
-static __always_inline void op_enter2(u32 kind, u32 kind_ok, int dfd1, u64 p1, int dfd2, u64 p2)
+static __always_inline void stash(u32 kind, u32 kind_ok, u32 quiet_err, int dfd1, u64 p1, int dfd2, u64 p2)
 {
-	if (!in_target())
-		return;
 	u64 id = bpf_get_current_pid_tgid();
 	struct pending pend = {
 		.p1 = p1, .p2 = p2, .ts = bpf_ktime_get_boot_ns(), .kind = kind, .kind_ok = kind_ok,
-		.dfd1 = dfd1, .dfd2 = dfd2,
+		.quiet_err = quiet_err, .dfd1 = dfd1, .dfd2 = dfd2,
 	};
-	// An op recorded on success too is lost either way; one recorded only on
-	// failure is counted at the exit, once the result is known.
-	if (bpf_map_update_elem(&pending_ops, &id, &pend, BPF_ANY) != 0 && kind_ok)
+	// Counted before the outcome is known: the call goes unfollowed either way.
+	if (bpf_map_update_elem(&pending_ops, &id, &pend, BPF_ANY) != 0)
 		bump(&untracked);
 }
 
-static __always_inline void op_enter(u32 kind, int dfd1, u64 p1, int dfd2, u64 p2)
+static __always_inline void failed_op(u32 kind, int dfd1, u64 p1, int dfd2, u64 p2)
 {
-	op_enter2(kind, 0, dfd1, p1, dfd2, p2);
+	stash(kind, 0, 0, dfd1, p1, dfd2, p2);
 }
 
-// failure_only: the op is recorded only on failure and its entry stashes on
-// every call, so a failure that finds no entry is one the full map lost.
-static __always_inline void op_exit(long ret, int failure_only)
+// Making a name. The kernel refuses one on a read-only mount before the
+// security_path_* hook, so the failure is caught here. A name that is already
+// there changed nothing, and mkdir -p meets one at every level it keeps, so
+// EEXIST is not recorded.
+#define EEXIST 17
+static __always_inline void create_op(u32 kind, int dfd1, u64 p1, int dfd2, u64 p2)
 {
+	stash(kind, 0, EEXIST, dfd1, p1, dfd2, p2);
+}
+
+// utimensat, utime, utimes, futimesat and {,l}setxattr are the attribute
+// changes with no security_path_* hook of their own; recorded here, success
+// and failure alike. A NULL path (futimens) changes the file dfd refers to;
+// with AT_FDCWD it names nothing and fails.
+static __always_inline void attr_op(int dfd, u64 p)
+{
+	if (p || dfd != AT_FDCWD)
+		stash(K_ATTR_FAILED, K_ATTR, 0, dfd, p, 0, 0);
+}
+
+// The syscall numbers of the architecture the tracer runs on, set by the
+// loader; -1 for one it lacks (x86_64's older forms on arm64). A 32-bit
+// syscall numbers them differently, but under the audit the sandbox kills
+// the thread that makes one before it reaches sys_enter.
+const volatile long nr_unlinkat = -1, nr_unlink = -1, nr_rmdir = -1;
+const volatile long nr_renameat2 = -1, nr_renameat = -1, nr_rename = -1;
+const volatile long nr_fchmodat = -1, nr_fchmodat2 = -1, nr_chmod = -1;
+const volatile long nr_fchownat = -1, nr_chown = -1, nr_lchown = -1;
+const volatile long nr_utimensat = -1, nr_futimesat = -1, nr_utime = -1, nr_utimes = -1;
+const volatile long nr_setxattr = -1, nr_lsetxattr = -1;
+const volatile long nr_mkdirat = -1, nr_mkdir = -1, nr_mknodat = -1, nr_mknod = -1;
+const volatile long nr_symlinkat = -1, nr_symlink = -1, nr_linkat = -1, nr_link = -1;
+const volatile long nr_truncate = -1;
+
+// A syscall's argument i (0 to 3), from the register it is passed in.
+static __always_inline u64 sys_arg(struct pt_regs *regs, int i)
+{
+	struct pt_regs___x86 *x = (void *)regs;
+	if (bpf_core_field_exists(x->di))
+		return i == 0 ? x->di : i == 1 ? x->si : i == 2 ? x->dx : x->r10;
+	return ((struct pt_regs___arm64 *)regs)->regs[i];
+}
+
+#define ARG(i) sys_arg(regs, i)
+
+SEC("tp_btf/sys_enter")
+int BPF_PROG(on_sys_enter, struct pt_regs *regs, long nr)
+{
+	if (!in_target())
+		return 0;
+	if (nr == nr_unlinkat)
+		failed_op(ARG(2) & AT_REMOVEDIR ? K_RMDIR_FAILED : K_UNLINK_FAILED, ARG(0), ARG(1), 0, 0);
+	else if (nr == nr_unlink)
+		failed_op(K_UNLINK_FAILED, AT_FDCWD, ARG(0), 0, 0);
+	else if (nr == nr_rmdir)
+		failed_op(K_RMDIR_FAILED, AT_FDCWD, ARG(0), 0, 0);
+	else if (nr == nr_renameat2 || nr == nr_renameat)
+		failed_op(K_RENAME_FAILED, ARG(0), ARG(1), ARG(2), ARG(3));
+	else if (nr == nr_rename)
+		failed_op(K_RENAME_FAILED, AT_FDCWD, ARG(0), AT_FDCWD, ARG(1));
+	else if (nr == nr_fchmodat || nr == nr_fchmodat2)
+		failed_op(K_CHMOD_FAILED, ARG(0), ARG(1), 0, 0);
+	else if (nr == nr_chmod)
+		failed_op(K_CHMOD_FAILED, AT_FDCWD, ARG(0), 0, 0);
+	else if (nr == nr_fchownat)
+		failed_op(K_CHOWN_FAILED, ARG(0), ARG(1), 0, 0);
+	else if (nr == nr_chown || nr == nr_lchown)
+		failed_op(K_CHOWN_FAILED, AT_FDCWD, ARG(0), 0, 0);
+	else if (nr == nr_utimensat || nr == nr_futimesat)
+		attr_op(ARG(0), ARG(1));
+	else if (nr == nr_utime || nr == nr_utimes || nr == nr_setxattr || nr == nr_lsetxattr)
+		attr_op(AT_FDCWD, ARG(0));
+	else if (nr == nr_mkdirat)
+		create_op(K_MKDIR_FAILED, ARG(0), ARG(1), 0, 0);
+	else if (nr == nr_mkdir)
+		create_op(K_MKDIR_FAILED, AT_FDCWD, ARG(0), 0, 0);
+	else if (nr == nr_mknodat)
+		create_op(K_MKNOD_FAILED, ARG(0), ARG(1), 0, 0);
+	else if (nr == nr_mknod)
+		create_op(K_MKNOD_FAILED, AT_FDCWD, ARG(0), 0, 0);
+	else if (nr == nr_symlinkat) // (target, newdfd, name): the link's name
+		create_op(K_SYMLINK_FAILED, ARG(1), ARG(2), 0, 0);
+	else if (nr == nr_symlink)
+		create_op(K_SYMLINK_FAILED, AT_FDCWD, ARG(1), 0, 0);
+	else if (nr == nr_linkat)
+		create_op(K_LINK_FAILED, ARG(0), ARG(1), ARG(2), ARG(3));
+	else if (nr == nr_link)
+		create_op(K_LINK_FAILED, AT_FDCWD, ARG(0), AT_FDCWD, ARG(1));
+	else if (nr == nr_truncate)
+		create_op(K_TRUNCATE_FAILED, AT_FDCWD, ARG(0), 0, 0);
+	return 0;
+}
+
+// Emits the call its entry stashed, as it ended.
+#define ENOSYS 38
+static __always_inline void op_exit(struct pending *pend, long ret)
+{
+	// ENOSYS: the kernel lacks the syscall, as fchmodat2 before 6.6, so
+	// nothing was tried.
+	if (ret == -ENOSYS || (ret < 0 && -ret == pend->quiet_err))
+		return;
+	u32 kind = ret < 0 ? pend->kind : pend->kind_ok;
+	if (kind == 0)
+		return;
+	struct event *e = start(kind);
+	if (!e)
+		return;
+	e->ts = pend->ts;
+	if (ret < 0)
+		e->path_len = -ret;
+	long r = pend->p1 ? bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1) : 0;
+	u32 off = r > 0 ? r : 0;
+	u32 second = off;
+	// Mark a second path only when both were read, so a failed read never
+	// leaves n1 claiming a name that is not in the buffer.
+	if (pend->p2 && off > 0) {
+		long r2 = bpf_probe_read_user_str(&e->data[off & (DATA_SZ - 1)], PATH_LEN, (void *)pend->p2);
+		if (r2 > 0) {
+			e->n1 = 1;
+			off += r2;
+		}
+	}
+	// mode and flags count the base components of the first and second name.
+	u8 nb = 0;
+	if (!pend->p1) {
+		// No name (futimens): the descriptor's path, or no record if it
+		// was not open.
+		e->data[0] = 0;
+		off = add_base(e, 1, pend->dfd1, &nb, &e->truncated, 1, 0);
+		e->mode = nb;
+		if (!(e->bases & 1))
+			return;
+	} else if (r > 1 && e->data[0] != '/') {
+		off = add_base(e, off, pend->dfd1, &nb, &e->truncated, 1, e->n1);
+		e->mode = nb;
+	}
+	if (e->n1 && e->data[second & (DATA_SZ - 1)] != '/' && e->data[second & (DATA_SZ - 1)]) {
+		nb = 0;
+		off = add_base(e, off, pend->dfd2, &nb, &e->trunc2, 2, 0);
+		e->flags = nb;
+	}
+	e->data_len = off;
+	submit(e);
+}
+
+// Reports a held path change when its syscall returns: as done if it
+// succeeded (a truncating open returns a descriptor), else as failed with the
+// errno, unless the syscall's entry stashed it, whose record then stands for
+// the failure.
+SEC("tp_btf/sys_exit")
+int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
+{
+	if (!in_target())
+		return 0;
 	u64 id = bpf_get_current_pid_tgid();
 	struct pending *pend = bpf_map_lookup_elem(&pending_ops, &id);
-	if (!pend) {
-		if (failure_only && ret < 0 && in_target())
-			bump(&untracked);
-		return;
-	}
-	// This records the failure, so a change held for it is not reported too.
-	if (ret < 0)
-		bpf_map_delete_elem(&held_ops, &id);
-	u32 kind = ret < 0 ? pend->kind : pend->kind_ok;
-	if (kind == 0) {
-		bpf_map_delete_elem(&pending_ops, &id);
-		return;
-	}
-	struct event *e = start(kind);
+	struct event *e = bpf_map_lookup_elem(&held_ops, &id);
 	if (e) {
-		e->ts = pend->ts;
-		if (ret < 0)
-			e->path_len = -ret;
-		long r = pend->p1 ? bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1) : 0;
-		u32 off = r > 0 ? r : 0;
-		u32 second = off;
-		// Mark a second path only when both were read, so a failed read never
-		// leaves n1 claiming a name that is not in the buffer.
-		if (pend->p2 && off > 0) {
-			long r2 = bpf_probe_read_user_str(&e->data[off & (DATA_SZ - 1)], PATH_LEN, (void *)pend->p2);
-			if (r2 > 0) {
-				e->n1 = 1;
-				off += r2;
-			}
+		if (ret >= 0) {
+			submit(e);
+		} else if (!pend) {
+			e->err = -ret;
+			submit(e);
 		}
-		// mode and flags count the base components of the first and second name.
-		u8 nb = 0;
-		if (!pend->p1) {
-			// No name (futimens): the descriptor's path, or no record if it
-			// was not open.
-			e->data[0] = 0;
-			off = add_base(e, 1, pend->dfd1, &nb, &e->truncated, 1, 0);
-			e->mode = nb;
-			if (!(e->bases & 1)) {
-				bpf_map_delete_elem(&pending_ops, &id);
-				return;
-			}
-		} else if (r > 1 && e->data[0] != '/') {
-			off = add_base(e, off, pend->dfd1, &nb, &e->truncated, 1, e->n1);
-			e->mode = nb;
-		}
-		if (e->n1 && e->data[second & (DATA_SZ - 1)] != '/' && e->data[second & (DATA_SZ - 1)]) {
-			nb = 0;
-			off = add_base(e, off, pend->dfd2, &nb, &e->trunc2, 2, 0);
-			e->flags = nb;
-		}
-		e->data_len = off;
-		submit(e);
+		bpf_map_delete_elem(&held_ops, &id);
 	}
-	bpf_map_delete_elem(&pending_ops, &id);
-}
-
-// unlinkat (pathname=arg1) is unlink and rmdir on architectures without
-// those older syscalls; where they exist they are traced on their own below.
-SEC("tracepoint/syscalls/sys_enter_unlinkat")
-int on_unlinkat_enter(struct trace_event_raw_sys_enter *ctx)
-{
-	u32 kind = ctx->args[2] & AT_REMOVEDIR ? K_RMDIR_FAILED : K_UNLINK_FAILED;
-	op_enter(kind, ctx->args[0], ctx->args[1], 0, 0);
-	return 0;
-}
-SEC("tracepoint/syscalls/sys_exit_unlinkat")
-int on_unlinkat_exit(struct trace_event_raw_sys_exit *ctx)
-{
-	op_exit(ctx->ret, 1);
-	return 0;
-}
-
-// A failed move: (old dfd, old name, new dfd, new name) from the syscall's
-// arguments, AT_FDCWD standing in for a dfd the syscall does not take.
-#define FAILED_RENAME(sys, dfd1, p1, dfd2, p2)					\
-SEC("tracepoint/syscalls/sys_enter_" #sys)					\
-int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
-{										\
-	op_enter(K_RENAME_FAILED, dfd1, p1, dfd2, p2);				\
-	return 0;								\
-}										\
-SEC("tracepoint/syscalls/sys_exit_" #sys)					\
-int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
-{										\
-	op_exit(ctx->ret, 1);							\
-	return 0;								\
-}
-
-// renameat2(olddfd, oldname, newdfd, newname, flags), and renameat without
-// the flags; rename(oldname, newname) is x86_64's older form.
-FAILED_RENAME(renameat2, ctx->args[0], ctx->args[1], ctx->args[2], ctx->args[3])
-FAILED_RENAME(renameat, ctx->args[0], ctx->args[1], ctx->args[2], ctx->args[3])
-FAILED_RENAME(rename, AT_FDCWD, ctx->args[0], AT_FDCWD, ctx->args[1])
-
-SEC("tracepoint/syscalls/sys_enter_fchmodat")
-int on_fchmodat_enter(struct trace_event_raw_sys_enter *ctx)
-{
-	op_enter(K_CHMOD_FAILED, ctx->args[0], ctx->args[1], 0, 0);
-	return 0;
-}
-SEC("tracepoint/syscalls/sys_exit_fchmodat")
-int on_fchmodat_exit(struct trace_event_raw_sys_exit *ctx)
-{
-	op_exit(ctx->ret, 1);
-	return 0;
-}
-
-// From 6.6; absent before (see main.go).
-SEC("tracepoint/syscalls/sys_enter_fchmodat2")
-int on_fchmodat2_enter(struct trace_event_raw_sys_enter *ctx)
-{
-	op_enter(K_CHMOD_FAILED, ctx->args[0], ctx->args[1], 0, 0);
-	return 0;
-}
-SEC("tracepoint/syscalls/sys_exit_fchmodat2")
-int on_fchmodat2_exit(struct trace_event_raw_sys_exit *ctx)
-{
-	op_exit(ctx->ret, 1);
-	return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_fchownat")
-int on_fchownat_enter(struct trace_event_raw_sys_enter *ctx)
-{
-	op_enter(K_CHOWN_FAILED, ctx->args[0], ctx->args[1], 0, 0);
-	return 0;
-}
-SEC("tracepoint/syscalls/sys_exit_fchownat")
-int on_fchownat_exit(struct trace_event_raw_sys_exit *ctx)
-{
-	op_exit(ctx->ret, 1);
-	return 0;
-}
-
-// utimensat(dfd, path=arg1, ...) and {,l}setxattr(path=arg0, ...) are the
-// attribute changes with no security_path_* hook of their own; captured at
-// the syscall, success and failure alike.
-SEC("tracepoint/syscalls/sys_enter_utimensat")
-int on_utimensat_enter(struct trace_event_raw_sys_enter *ctx)
-{
-	// A NULL path (futimens) changes the file dfd refers to; with AT_FDCWD it
-	// names nothing and fails.
-	if (ctx->args[1] || (int)ctx->args[0] != AT_FDCWD)
-		op_enter2(K_ATTR_FAILED, K_ATTR, ctx->args[0], ctx->args[1], 0, 0);
-	return 0;
-}
-SEC("tracepoint/syscalls/sys_exit_utimensat")
-int on_utimensat_exit(struct trace_event_raw_sys_exit *ctx)
-{
-	op_exit(ctx->ret, 0);
-	return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_setxattr")
-int on_setxattr_enter(struct trace_event_raw_sys_enter *ctx)
-{
-	op_enter2(K_ATTR_FAILED, K_ATTR, AT_FDCWD, ctx->args[0], 0, 0);
-	return 0;
-}
-SEC("tracepoint/syscalls/sys_exit_setxattr")
-int on_setxattr_exit(struct trace_event_raw_sys_exit *ctx)
-{
-	op_exit(ctx->ret, 0);
-	return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_lsetxattr")
-int on_lsetxattr_enter(struct trace_event_raw_sys_enter *ctx)
-{
-	op_enter2(K_ATTR_FAILED, K_ATTR, AT_FDCWD, ctx->args[0], 0, 0);
-	return 0;
-}
-SEC("tracepoint/syscalls/sys_exit_lsetxattr")
-int on_lsetxattr_exit(struct trace_event_raw_sys_exit *ctx)
-{
-	op_exit(ctx->ret, 0);
-	return 0;
-}
-
-// The older forms x86_64 keeps beside the *at ones; elsewhere their
-// tracepoints do not exist (see main.go).
-#define FAILED_OP_1(sys, kind)							\
-SEC("tracepoint/syscalls/sys_enter_" #sys)					\
-int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
-{										\
-	op_enter(kind, AT_FDCWD, ctx->args[0], 0, 0);				\
-	return 0;								\
-}										\
-SEC("tracepoint/syscalls/sys_exit_" #sys)					\
-int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
-{										\
-	op_exit(ctx->ret, 1);							\
-	return 0;								\
-}
-
-FAILED_OP_1(unlink, K_UNLINK_FAILED)
-FAILED_OP_1(rmdir, K_RMDIR_FAILED)
-FAILED_OP_1(chmod, K_CHMOD_FAILED)
-FAILED_OP_1(chown, K_CHOWN_FAILED)
-FAILED_OP_1(lchown, K_CHOWN_FAILED)
-
-// utime and utimes take a name, futimesat a name relative to dfd; recorded
-// like utimensat.
-#define ATTR_OP(sys, dfd, p)							\
-SEC("tracepoint/syscalls/sys_enter_" #sys)					\
-int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
-{										\
-	if (p || (int)(dfd) != AT_FDCWD) /* as for utimensat */			\
-		op_enter2(K_ATTR_FAILED, K_ATTR, dfd, p, 0, 0);			\
-	return 0;								\
-}										\
-SEC("tracepoint/syscalls/sys_exit_" #sys)					\
-int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
-{										\
-	op_exit(ctx->ret, 0);							\
-	return 0;								\
-}
-
-ATTR_OP(utime, AT_FDCWD, ctx->args[0])
-ATTR_OP(utimes, AT_FDCWD, ctx->args[0])
-ATTR_OP(futimesat, ctx->args[0], ctx->args[1])
-
-// Making a name: the kernel refuses one on a read-only mount before the
-// security_path_* hook, so the failure is caught at the syscall. A name that
-// is already there changed nothing, and mkdir -p meets one at every level it
-// keeps, so EEXIST is not recorded.
-#define EEXIST 17
-static __always_inline void create_exit(long ret)
-{
-	if (ret != -EEXIST) {
-		op_exit(ret, 1);
-		return;
+	if (pend) {
+		op_exit(pend, ret);
+		bpf_map_delete_elem(&pending_ops, &id);
 	}
-	// The change its path hook held goes too, so either exit may run first.
-	u64 id = bpf_get_current_pid_tgid();
-	bpf_map_delete_elem(&held_ops, &id);
-	op_exit(0, 1);
+	return 0;
 }
-
-#define FAILED_CREATE(sys, kind, dfd1, p1, dfd2, p2)				\
-SEC("tracepoint/syscalls/sys_enter_" #sys)					\
-int on_##sys##_enter(struct trace_event_raw_sys_enter *ctx)			\
-{										\
-	op_enter(kind, dfd1, p1, dfd2, p2);					\
-	return 0;								\
-}										\
-SEC("tracepoint/syscalls/sys_exit_" #sys)					\
-int on_##sys##_exit(struct trace_event_raw_sys_exit *ctx)			\
-{										\
-	create_exit(ctx->ret);							\
-	return 0;								\
-}
-
-// mkdirat(dfd, name), mknodat(dfd, name), symlinkat(target, newdfd, name),
-// linkat(olddfd, oldname, newdfd, newname), truncate(name); mkdir, mknod,
-// symlink and link are x86_64's older forms (see main.go).
-FAILED_CREATE(mkdirat, K_MKDIR_FAILED, ctx->args[0], ctx->args[1], 0, 0)
-FAILED_CREATE(mkdir, K_MKDIR_FAILED, AT_FDCWD, ctx->args[0], 0, 0)
-FAILED_CREATE(mknodat, K_MKNOD_FAILED, ctx->args[0], ctx->args[1], 0, 0)
-FAILED_CREATE(mknod, K_MKNOD_FAILED, AT_FDCWD, ctx->args[0], 0, 0)
-FAILED_CREATE(symlinkat, K_SYMLINK_FAILED, ctx->args[1], ctx->args[2], 0, 0)
-FAILED_CREATE(symlink, K_SYMLINK_FAILED, AT_FDCWD, ctx->args[1], 0, 0)
-FAILED_CREATE(linkat, K_LINK_FAILED, ctx->args[0], ctx->args[1], ctx->args[2], ctx->args[3])
-FAILED_CREATE(link, K_LINK_FAILED, AT_FDCWD, ctx->args[0], AT_FDCWD, ctx->args[1])
-FAILED_CREATE(truncate, K_TRUNCATE_FAILED, AT_FDCWD, ctx->args[0], 0, 0)
 
 char LICENSE[] SEC("license") = "GPL";
