@@ -459,7 +459,7 @@ sensitive.
 ```
 
 It observes accesses in the kernel, below the libraries a command links against, and only records;
-it never blocks an access. It needs a cgroup v2 host on Linux 5.17 or newer (6.4 on arm64) with
+it never blocks an access. It needs a cgroup v2 host on Linux 6.1 or newer (6.4 on arm64) with
 kernel BTF and tracefs mounted; elsewhere the step fails before the command runs. While the step
 runs it adds a small cost to every system call on the host, other jobs' included. The flag format,
 the cost, the artifact, and what it does not record are in

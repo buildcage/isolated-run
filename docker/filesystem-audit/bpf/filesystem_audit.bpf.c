@@ -3,7 +3,7 @@
 // each program's first read and write of each open file, mmaps, execs, and the path
 // operations (create, move, delete, attribute change), successes and
 // failures alike. Kernel types are declared locally with preserve_access_index
-// so one CO-RE object runs on any BTF-enabled kernel from 5.17 on, 6.4 on
+// so one CO-RE object runs on any BTF-enabled kernel from 6.1 on, 6.4 on
 // arm64, the first to let fentry attach to a kernel function there.
 
 #include <linux/types.h>
@@ -1339,6 +1339,7 @@ int on_fchmodat_exit(struct trace_event_raw_sys_exit *ctx)
 	return 0;
 }
 
+// From 6.6; absent before (see main.go).
 SEC("tracepoint/syscalls/sys_enter_fchmodat2")
 int on_fchmodat2_enter(struct trace_event_raw_sys_enter *ctx)
 {
