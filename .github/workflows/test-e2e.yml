@@ -230,6 +230,17 @@ jobs:
             echo data > "$GITHUB_WORKSPACE/mapped.bin"
             python3 -c 'import mmap, sys; f = open(sys.argv[1], "rb")
             mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ | mmap.PROT_EXEC)' "$GITHUB_WORKSPACE/mapped.bin"
+            # A mapping and an open the kernel refuses after the tracer's hook: a
+            # shared writable map of a file opened read-only, and a FIFO opened
+            # for writing with no reader.
+            echo data > "$GITHUB_WORKSPACE/ro-mapped.bin"
+            python3 -c 'import mmap, sys; f = open(sys.argv[1], "rb")
+            try: mmap.mmap(f.fileno(), 0)
+            except PermissionError: pass' "$GITHUB_WORKSPACE/ro-mapped.bin"
+            mkfifo "$GITHUB_WORKSPACE/fifo"
+            python3 -c 'import os, sys
+            try: os.open(sys.argv[1], os.O_WRONLY | os.O_NONBLOCK)
+            except OSError: pass' "$GITHUB_WORKSPACE/fifo"
             # mprotect adding PROT_WRITE (and PROT_EXEC) to shared mappings.
             echo data > "$GITHUB_WORKSPACE/mprotected.bin"
             echo data > "$GITHUB_WORKSPACE/mprotected-rwx.bin"
@@ -305,6 +316,8 @@ jobs:
           # A file mapped executable shows as read unless it is a library or
           # an exec mapped it, as it does run.sh's interpreter.
           grep -qE ' R +python3 +\./mapped\.bin$' "$f"
+          # A mapping the kernel refused after the tracer's hook is not a write.
+          if grep -qE ' [A-Za-z!]*[Ww][A-Za-z!]* +python3 +\./ro-mapped\.bin$' "$f"; then exit 1; fi
           # Shared anonymous memory names no file.
           grep -qE ' RW +python3 +\./mprotected\.bin$' "$f"
           grep -qE ' RW +python3 +\./mprotected-rwx\.bin$' "$f"
@@ -339,6 +352,9 @@ jobs:
           # the name it was run by beside it.
           grep -qE '"kind":"exec",[^}]*"path":"/[^"]*/A/run\.sh","name":"\./run\.sh"' "$f"
           jq -se 'any(.[]; .kind == "mmap" and .path == "/usr/bin/dash" and .image == true)' "$f" > /dev/null
+          # Refused after the tracer's hook: no mapping, and only the failed open.
+          if jq -se 'any(.[]; .kind == "mmap" and (.path // "" | endswith("/ro-mapped.bin")))' "$f" > /dev/null; then exit 1; fi
+          jq -se '[.[] | select(.kind == "open" and (.path // "" | endswith("/fifo")))] | length == 1 and .[0].failed' "$f" > /dev/null
           if grep -q '/var/tmp/buildcage-' "$f"; then exit 1; fi
           if grep -q 'buildcage-audit-sentinel-arg' "$f"; then exit 1; fi
 

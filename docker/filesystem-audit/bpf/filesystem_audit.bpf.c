@@ -677,7 +677,6 @@ static __always_inline int on_layer(struct file *file)
 	return 1;
 }
 
-
 // The file being executed, resolved, while bprm->file is still the one named:
 // by sched_process_exec a script has been swapped for its interpreter, and
 // filename is only the name the caller passed, relative to its cwd or not.
@@ -950,16 +949,19 @@ struct {
 // An open(2) seen at security_file_open, held per thread until the syscall
 // returns: the file's own open method, an LSM or the FIFO checks can still
 // refuse it after that hook, and a refused one is recorded as failed instead.
+// Each entry is an event, so as many as held_ops; an open that finds the map
+// full is recorded at once, as before.
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 65536);
+	__uint(max_entries, 4096);
 	__uint(map_flags, BPF_F_NO_PREALLOC);
 	__type(key, u64);
 	__type(value, struct event);
 } held_opens SEC(".maps");
 
 // An open from outside open(2), such as exec opening the program, has no exit
-// to wait for here, and is recorded at once.
+// to wait for here, and is recorded at once, as is one nested in an open
+// already held, such as a FUSE passthrough's backing file.
 SEC("fentry/security_file_open")
 int BPF_PROG(on_open, struct file *file)
 {
@@ -973,7 +975,7 @@ int BPF_PROG(on_open, struct file *file)
 	file_path(e, file);
 	u64 id = bpf_get_current_pid_tgid();
 	if (!bpf_map_lookup_elem(&open_names, &id) ||
-	    bpf_map_update_elem(&held_opens, &id, e, BPF_ANY) != 0)
+	    bpf_map_update_elem(&held_opens, &id, e, BPF_NOEXIST) != 0)
 		submit(e);
 	return 0;
 }
@@ -1184,15 +1186,33 @@ static __always_inline void map_events(struct file *file, struct dentry *d, stru
 
 // fexit, so only a mapping that was made is recorded: after the LSMs,
 // do_mmap still refuses a shared writable mapping of a file not open for
-// writing, and an executable one on a noexec mount. mmap(2) and exec's own
-// mappings both come through here.
+// writing, and an executable one on a noexec mount. mmap(2) comes through
+// vm_mmap_pgoff, and exec's own mappings through vm_mmap, which calls it but
+// may have it inlined; one mapping seen at both is recorded once (first_time).
+// The return value is read with bpf_get_func_ret, as for the open exits.
+static __always_inline void mapped(u64 *ctx, struct file *file, unsigned long prot,
+				   unsigned long flags)
+{
+	u64 ret = 0;
+	bpf_get_func_ret(ctx, &ret);
+	if (!file || ret >= (u64)-4095 || !in_target() || on_layer(file))
+		return;
+	map_events(file, 0, 0, prot, flags, 1);
+}
+
 SEC("fexit/vm_mmap_pgoff")
 int BPF_PROG(on_mmap, struct file *file, unsigned long addr, unsigned long len,
-	     unsigned long prot, unsigned long flags, unsigned long pgoff, unsigned long ret)
+	     unsigned long prot, unsigned long flags)
 {
-	if (!file || ret >= (unsigned long)-4095 || !in_target() || on_layer(file))
-		return 0;
-	map_events(file, 0, 0, prot, flags, 1);
+	mapped(ctx, file, prot, flags);
+	return 0;
+}
+
+SEC("fexit/vm_mmap")
+int BPF_PROG(on_vm_mmap, struct file *file, unsigned long addr, unsigned long len,
+	     unsigned long prot, unsigned long flags)
+{
+	mapped(ctx, file, prot, flags);
 	return 0;
 }
 
