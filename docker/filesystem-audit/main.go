@@ -75,8 +75,8 @@ func main() {
 }
 
 func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
-	// Before loading, which takes a while: an action killed meanwhile, or one
-	// that stops the tracer meanwhile, must not leave it recording.
+	// Set up before loading, which takes a while, so an action that dies or
+	// stops the tracer meanwhile does not leave it recording.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	if watchPid > 0 {
@@ -89,7 +89,7 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
 			fmt.Fprintf(os.Stderr, "filesystem-audit: cannot watch pid %d: %v\n", watchPid, err)
 		}
 	}
-	// This early so the post step can stop a tracer still loading.
+	// Written before loading so the post step can stop a tracer still loading.
 	if pidPath != "" {
 		if err := writeNew(pidPath, []byte(fmt.Sprintln(os.Getpid()))); err != nil {
 			return err
@@ -125,6 +125,9 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
 		return err
 	}
 	dropAbsentPrograms(spec, kspec)
+	if stopRequested(sig) {
+		return errStoppedEarly
+	}
 
 	coll, err := ebpf.NewCollection(spec)
 	if err != nil {
@@ -140,6 +143,9 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
 		return fmt.Errorf("set watched cgroup: %w", err)
 	}
 
+	if stopRequested(sig) {
+		return errStoppedEarly
+	}
 	links, err := attachAll(coll, spec)
 	for _, l := range links {
 		defer l.Close()
@@ -147,10 +153,8 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
 	if err != nil {
 		return err
 	}
-	select {
-	case <-sig:
-		return errors.New("stopped before it attached")
-	default:
+	if stopRequested(sig) {
+		return errStoppedEarly
 	}
 
 	rd, err := ringbuf.NewReader(coll.Maps["events"])
@@ -187,6 +191,20 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
 	}()
 
 	return readLoop(rd, bw, coll, missed)
+}
+
+var errStoppedEarly = errors.New("stopped before it attached")
+
+// stopRequested reports a stop that came while starting up. Checked between
+// the slow steps, so a stopped tracer exits, and removes its cgroup, before
+// the action's stop grace runs out and it is killed.
+func stopRequested(sig <-chan os.Signal) bool {
+	select {
+	case <-sig:
+		return true
+	default:
+		return false
+	}
 }
 
 type count struct {
@@ -278,9 +296,7 @@ func prepareCgroup(cgPath string) (f *os.File, created bool, err error) {
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
 		return nil, false, fmt.Errorf("cgroup path must be below %s: %s", cgroupRoot, cgPath)
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return nil, false, err
-	}
+	// Under the runner's own cgroup, which is there already.
 	err = os.Mkdir(abs, 0o755)
 	if err != nil && !errors.Is(err, fs.ErrExist) {
 		return nil, false, err

@@ -208,7 +208,7 @@ function buildComposeDownArgs({ composeFile, projectName }) {
 }
 //#endregion
 //#region src/lib/compose-file.ts
-const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$2, "../docker/compose.action.yaml");
+const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml");
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
 }
@@ -424,7 +424,6 @@ function realPathOf(path, deps = realSymlinkDeps) {
 	let resolved = resolveHostPath(path, deps);
 	return "real" in resolved ? resolved.real : path;
 }
-(0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
 //#endregion
 //#region src/lib/sandbox/filesystem-audit.ts
 function filesystemAuditPaths(containerName, scratchBase) {

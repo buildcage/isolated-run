@@ -91,3 +91,7 @@ export type SandboxErrorCode =
   | "AWS_ACCESS_KEY_MISSING";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}
+
+export function cancelledBeforeRun(): SandboxError {
+  return new SandboxError("The step was cancelled before the command ran.", "CANCELLED_BEFORE_RUN");
+}

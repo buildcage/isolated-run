@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { errorMessage } from "#core/lib/errors.ts";
 
-import { SandboxError } from "../errors.ts";
+import { SandboxError, cancelledBeforeRun } from "../errors.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 // rollup's cjs output doesn't convert import.meta.dirname (it silently
@@ -47,10 +47,6 @@ export interface RunIsolatedDeps {
  * cancelling, and the report and the proxy's teardown need the rest.
  */
 export const CANCEL_GRACE_MS = 5_000;
-
-export function cancelledBeforeRun(): SandboxError {
-  return new SandboxError("The step was cancelled before the command ran.", "CANCELLED_BEFORE_RUN");
-}
 
 // Untested by design: the default behind runIsolated's seam, which only hands
 // node:child_process what the tested caller assembled.

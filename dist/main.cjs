@@ -23156,6 +23156,9 @@ function isLikelySlimRunner(_env = process.env, _exists = node_fs.existsSync) {
 //#endregion
 //#region src/lib/errors.ts
 var SandboxError = class extends ActionError {};
+function cancelledBeforeRun() {
+	return new SandboxError("The step was cancelled before the command ran.", "CANCELLED_BEFORE_RUN");
+}
 //#endregion
 //#region src/lib/sandbox/pinned-commands.ts
 const pinned = new Map();
@@ -70263,69 +70266,7 @@ const realHostProbes = {
 		let procCgroup = readOptionalFile("/proc/self/cgroup");
 		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
 	}
-}, __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
-function cancelledBeforeRun() {
-	return new SandboxError("The step was cancelled before the command ran.", "CANCELLED_BEFORE_RUN");
-}
-function defaultSpawn$1(command, args, input) {
-	let child = (0, node_child_process.spawn)(hostCommand(command), args, {
-		stdio: [
-			"pipe",
-			"inherit",
-			"inherit"
-		],
-		env: hostCommandEnv(command)
-	});
-	return child.stdin.on("error", () => {}), child.stdin.end(input), {
-		exited: new Promise((resolve) => {
-			child.on("error", (error) => {
-				child.pid === void 0 && resolve({ error });
-			}), child.on("close", (code, signal) => resolve(code === null ? { signal } : { status: code }));
-		}),
-		kill: (signal) => child.kill(signal)
-	};
-}
-function defaultCopyScript(from, to) {
-	(0, node_fs.copyFileSync)(from, to), (0, node_fs.chmodSync)(to, 320);
-}
-async function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, targetIp, envBlob, cancel }, { spawn = defaultSpawn$1, copyScript = defaultCopyScript } = {}) {
-	let runIsolatedShPath = (0, node_path.join)(bundleDir, "run-isolated.sh");
-	copyScript((0, node_path.join)(__dirname$1, "..", "scripts", "run-isolated.sh"), runIsolatedShPath);
-	let args = [
-		"-n",
-		"--",
-		runIsolatedShPath,
-		"--proxy-netns",
-		proxyNetns,
-		"--runc",
-		runcPath,
-		"--bundle",
-		bundleDir,
-		"--container-id",
-		containerId,
-		"--netns-name",
-		netnsName,
-		"--rootfs-bind-dir",
-		rootfsBindDir,
-		"--gateway",
-		gateway,
-		"--target-ip",
-		targetIp
-	];
-	if (cancel?.aborted) throw cancelledBeforeRun();
-	let child = spawn("sudo", args, envBlob), escalation, stop = () => {
-		child.kill("SIGTERM"), escalation = setTimeout(() => child.kill("SIGTERM"), 5e3);
-	};
-	cancel?.addEventListener("abort", stop, { once: !0 });
-	let exit;
-	try {
-		exit = await child.exited;
-	} finally {
-		clearTimeout(escalation), cancel?.removeEventListener("abort", stop);
-	}
-	if ("status" in exit) return exit.status;
-	throw "signal" in exit ? new SandboxError(`The sandbox was ended by ${exit.signal}, so the command's exit status is unknown.`, "SANDBOX_TERMINATED") : new SandboxError(`Failed to start the sandbox: ${errorMessage(exit.error)}`, "SANDBOX_LAUNCH_FAILED");
-}
+};
 function filesystemAuditPaths(containerName, scratchBase) {
 	let suffix = containerName.split("-").at(-1);
 	return {
@@ -70358,7 +70299,7 @@ function defaultExec$3(command, args) {
 		env: hostCommandEnv(command)
 	});
 }
-function defaultSpawn(command, args) {
+function defaultSpawn$1(command, args) {
 	let child = (0, node_child_process.spawn)(hostCommand(command), args, {
 		stdio: [
 			"ignore",
@@ -70398,7 +70339,7 @@ function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = n
 	})), chmod(tracerPath, 493), tracerPath;
 }
 async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath, watchPid, cancel }, deps = {}) {
-	let { spawn = defaultSpawn, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2 } = deps, child = spawn("sudo", [
+	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2 } = deps, child = spawn("sudo", [
 		"-n",
 		"--",
 		tracerPath,
@@ -70433,8 +70374,8 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		if (exited) break;
 		await sleep(100);
 	}
-	let reason = exited ? child.reason() || "the tracer exited" : "the tracer did not attach in time";
-	throw await stop(), remove(outPath), cancel?.aborted ? cancelledBeforeRun() : new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
+	let cancelled = !exited && cancel?.aborted, reason = exited ? child.reason() || "the tracer exited" : "the tracer did not attach in time";
+	throw await stop(), remove(outPath), cancelled ? cancelledBeforeRun() : new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
@@ -72089,6 +72030,68 @@ function writeOciConfig(config, bundleDir) {
 function writeResolvConf(dns, dir) {
 	let resolvConfPath = (0, node_path.join)(dir, "resolv.conf");
 	return (0, node_fs.writeFileSync)(resolvConfPath, `nameserver ${dns}\n`, { mode: 420 }), resolvConfPath;
+}
+//#endregion
+//#region src/lib/sandbox/run.ts
+const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
+function defaultSpawn(command, args, input) {
+	let child = (0, node_child_process.spawn)(hostCommand(command), args, {
+		stdio: [
+			"pipe",
+			"inherit",
+			"inherit"
+		],
+		env: hostCommandEnv(command)
+	});
+	return child.stdin.on("error", () => {}), child.stdin.end(input), {
+		exited: new Promise((resolve) => {
+			child.on("error", (error) => {
+				child.pid === void 0 && resolve({ error });
+			}), child.on("close", (code, signal) => resolve(code === null ? { signal } : { status: code }));
+		}),
+		kill: (signal) => child.kill(signal)
+	};
+}
+function defaultCopyScript(from, to) {
+	(0, node_fs.copyFileSync)(from, to), (0, node_fs.chmodSync)(to, 320);
+}
+async function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netnsName, rootfsBindDir, gateway, targetIp, envBlob, cancel }, { spawn = defaultSpawn, copyScript = defaultCopyScript } = {}) {
+	let runIsolatedShPath = (0, node_path.join)(bundleDir, "run-isolated.sh");
+	copyScript((0, node_path.join)(__dirname$1, "..", "scripts", "run-isolated.sh"), runIsolatedShPath);
+	let args = [
+		"-n",
+		"--",
+		runIsolatedShPath,
+		"--proxy-netns",
+		proxyNetns,
+		"--runc",
+		runcPath,
+		"--bundle",
+		bundleDir,
+		"--container-id",
+		containerId,
+		"--netns-name",
+		netnsName,
+		"--rootfs-bind-dir",
+		rootfsBindDir,
+		"--gateway",
+		gateway,
+		"--target-ip",
+		targetIp
+	];
+	if (cancel?.aborted) throw cancelledBeforeRun();
+	let child = spawn("sudo", args, envBlob), escalation, stop = () => {
+		child.kill("SIGTERM"), escalation = setTimeout(() => child.kill("SIGTERM"), 5e3);
+	};
+	cancel?.addEventListener("abort", stop, { once: !0 });
+	let exit;
+	try {
+		exit = await child.exited;
+	} finally {
+		clearTimeout(escalation), cancel?.removeEventListener("abort", stop);
+	}
+	if ("status" in exit) return exit.status;
+	throw "signal" in exit ? new SandboxError(`The sandbox was ended by ${exit.signal}, so the command's exit status is unknown.`, "SANDBOX_TERMINATED") : new SandboxError(`Failed to start the sandbox: ${errorMessage(exit.error)}`, "SANDBOX_LAUNCH_FAILED");
 }
 //#endregion
 //#region src/lib/sandbox/runc-bootstrap.ts
