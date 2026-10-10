@@ -12,6 +12,7 @@
 #   AWS_ACCESS_KEY_ID:    ${AKIA}TESTSTARTKEY0001
 #   allowed_url_rules:
 #     * https://**.amazonaws.com/**
+#     POST http://sts.us-east-1.amazonaws.com/sts/**
 #     GET https://allowed.example.com/public/**
 # ---------------------------------------------------------------------------
 set -uo pipefail
@@ -178,6 +179,12 @@ check_status "the key it issued" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA
 check_status "AssumeRole for a role in another account" \
   "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" $STS/sts/other-account)" "200"
 check_status "the key that one issued" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTFOREIGNKEY01)" $CF)" "403"
+OUT=$(curl -sS --max-time 10 -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" http://sts.us-east-1.amazonaws.com/sts/plain-same-account)
+case "$OUT" in
+  *"${ASIA}TESTPLAINKEY0001"*) pass "AssumeRole over plaintext for a role in the allowed account" ;;
+  *) fail "AssumeRole over plaintext for a role in the allowed account -- got: $OUT" ;;
+esac
+check_status "the key that one issued" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTPLAINKEY0001)" $CF)" "403"
 
 echo "=== [a key ECR issued for a layer's presigned URL] ==="
 LAYER=https://prod-us-east-1-starport-layer-bucket.s3.amazonaws.com/layer
