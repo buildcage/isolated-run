@@ -1004,7 +1004,7 @@ export function renderFilesystemAuditBlocks(
   jsonl: string,
   prefixes: SummaryOptions,
   priorities: FilesystemPriorities,
-  cutNote = (cause?: CutCause) => filesystemTruncationNote(undefined, cause),
+  cutNote = (cause?: CutCause) => filesystemTruncationNote("upload-failed", cause),
 ): SummaryBlock[] {
   const summary = createAuditSummary(prefixes);
   const records = jsonl.split("\n").map(parseLine);
@@ -1031,14 +1031,20 @@ export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOpt
   return joinSummaryBlocks(renderFilesystemAuditBlocks(jsonl, prefixes, JOINED));
 }
 
+/** The artifact the summary points the reader to, or why there is none. */
+export type RecordArtifact = { name: string } | "not-requested" | "upload-failed";
+
 /**
  * The legend's second line: what the path notations mean, where the full
  * record is, and the guide that explains the rest.
  */
-export function filesystemLegendNote(artifactName: string | undefined, guideUrl: string): string {
-  const record = artifactName
-    ? `the full record is in the \`${artifactName}\` artifact`
-    : "the full record could not be uploaded";
+export function filesystemLegendNote(artifact: RecordArtifact, guideUrl: string): string {
+  const record =
+    artifact === "not-requested"
+      ? "set `upload_filesystem_audit_artifact: true` for the full record"
+      : artifact === "upload-failed"
+        ? "the full record could not be uploaded"
+        : `the full record is in the \`${artifact.name}\` artifact`;
   return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${record} · [how to read this](${guideUrl})`;
 }
 
@@ -1048,12 +1054,15 @@ export function filesystemLegendNote(artifactName: string | undefined, guideUrl:
  * when the artifact could not be uploaded.
  */
 export function filesystemTruncationNote(
-  artifactName: string | undefined,
+  artifact: RecordArtifact,
   cause: CutCause = "size",
 ): string {
-  const rest = artifactName
-    ? `the ${artifactName} artifact uploaded for this run has every access`
-    : "the recording could not be uploaded as an artifact, so the rest is not kept";
+  const rest =
+    artifact === "not-requested"
+      ? "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact"
+      : artifact === "upload-failed"
+        ? "the recording could not be uploaded as an artifact, so the rest is not kept"
+        : `the ${artifact.name} artifact uploaded for this run has every access`;
   const why =
     cause === "paths"
       ? "the filesystem audit touched too many distinct paths to summarize"

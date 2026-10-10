@@ -41,7 +41,7 @@ import {
   readFailOnBlocked,
   readFailOnCaResidue,
   readFilesystemAuditInput,
-  readFilesystemAuditRetentionDays,
+  readFilesystemAuditArtifactInputs,
   readFilesystemInputs,
   readRunCommand,
 } from "./inputs.ts";
@@ -92,7 +92,7 @@ export interface SandboxStepDeps {
   readProxyInputs: typeof readProxyInputs;
   readFilesystemInputs: typeof readFilesystemInputs;
   readFilesystemAuditInput: typeof readFilesystemAuditInput;
-  readFilesystemAuditRetentionDays: typeof readFilesystemAuditRetentionDays;
+  readFilesystemAuditArtifactInputs: typeof readFilesystemAuditArtifactInputs;
   readRuleInputs: typeof readRuleInputs;
   readFailOnCaResidue: typeof readFailOnCaResidue;
   readFailOnBlocked: typeof readFailOnBlocked;
@@ -155,7 +155,7 @@ const realDeps: SandboxStepDeps = {
   readProxyInputs,
   readFilesystemInputs,
   readFilesystemAuditInput,
-  readFilesystemAuditRetentionDays,
+  readFilesystemAuditArtifactInputs,
   readRuleInputs,
   readFailOnCaResidue,
   readFailOnBlocked,
@@ -243,7 +243,7 @@ export async function runSandboxStep(
     readProxyInputs,
     readFilesystemInputs,
     readFilesystemAuditInput,
-    readFilesystemAuditRetentionDays,
+    readFilesystemAuditArtifactInputs,
     readRuleInputs,
     readFailOnCaResidue,
     readFailOnBlocked,
@@ -301,7 +301,7 @@ export async function runSandboxStep(
   // SandboxStepDeps).
   const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
   const filesystemAudit = readFilesystemAuditInput();
-  const filesystemAuditRetentionDays = readFilesystemAuditRetentionDays();
+  const filesystemAuditArtifact = readFilesystemAuditArtifactInputs();
   // Before the first write under the scratch base, the one just below.
   checkScratchBaseParent();
   // Before the command runs, for the post step's pinning; see post-write-through.ts.
@@ -469,7 +469,8 @@ export async function runSandboxStep(
     const prepareAudit = () =>
       prepareStepFilesystemAudit({
         audit,
-        retentionDays: filesystemAuditRetentionDays,
+        upload: filesystemAuditArtifact.upload,
+        retentionDays: filesystemAuditArtifact.retentionDays,
         containerName,
         annotation,
         env,

@@ -32,6 +32,7 @@ import {
   unreadableSummaryBlocks,
   type AuditSummary,
   type CutCause,
+  type RecordArtifact,
   type SummaryOptions,
 } from "./filesystem-audit-summary.ts";
 import type { FilesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
@@ -40,6 +41,8 @@ import { FILESYSTEM_PRIORITIES } from "./summary-priorities.ts";
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */
   audit: FilesystemAuditPaths | undefined;
+  /** upload_filesystem_audit_artifact: whether to upload the record at all. */
+  upload: boolean;
   retentionDays: number | undefined;
   containerName: string;
   annotation: Annotation;
@@ -177,6 +180,7 @@ const NONE: StepFilesystemAudit = { blocks: () => [] };
 export async function prepareStepFilesystemAudit(
   {
     audit,
+    upload,
     retentionDays,
     containerName,
     annotation,
@@ -202,7 +206,7 @@ export async function prepareStepFilesystemAudit(
     const cleanPath = audit.stepPath;
     let reduced: Reduced | undefined;
     try {
-      reduced = reduce(audit.outPath, cleanPath, options, annotation, deps);
+      reduced = reduce(audit.outPath, upload ? cleanPath : undefined, options, annotation, deps);
     } catch (e) {
       annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
       return { blocks: () => unreadableSummaryBlocks() };
@@ -212,7 +216,11 @@ export async function prepareStepFilesystemAudit(
     if (reduced.written)
       artifactName =
         (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
-    const uploaded = artifactName || undefined;
+    const uploaded: RecordArtifact = !upload
+      ? "not-requested"
+      : artifactName
+        ? { name: artifactName }
+        : "upload-failed";
     const cutNote = (cause?: CutCause): string => filesystemTruncationNote(uploaded, cause);
     const notice = cutNote();
     const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`;
@@ -272,7 +280,8 @@ interface Reduced {
 // on its own, so it never costs the artifact.
 function reduce(
   outPath: string,
-  cleanPath: string,
+  /** Where to write the stripped copy to upload; undefined writes none. */
+  cleanPath: string | undefined,
   options: SummaryOptions,
   annotation: Annotation,
   deps: FilesystemAuditReportDeps,
@@ -323,7 +332,7 @@ function reduce(
     }
   };
   try {
-    writer = deps.openWriter(cleanPath);
+    if (cleanPath !== undefined) writer = deps.openWriter(cleanPath);
   } catch (e) {
     dropCopy(e);
   }

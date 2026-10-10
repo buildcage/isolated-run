@@ -76,8 +76,11 @@ inputs:
   filesystem_audit:
     description: "Experimental. record logs the file accesses of the isolated step; off (default) does not. Fails the step on a host that cannot run it. See docs/reference.md#filesystem-audit."
     required: false
+  upload_filesystem_audit_artifact:
+    description: "Upload the filesystem audit's full record as an artifact. It holds every path the step touched, so treat it as sensitive. Default false. See docs/filesystem-audit.md#the-artifact."
+    required: false
   filesystem_audit_retention_days:
-    description: "How long to keep the filesystem audit artifact, in days. Empty uses the repository's own default, and a value above the repository maximum is lowered to it, with a warning."
+    description: "How long to keep that artifact, in days. Empty uses the repository's own default, and a value above the repository maximum is lowered to it, with a warning."
     required: false
     default: ""
   label:
@@ -89,7 +92,7 @@ outputs:
   traffic_artifact_name:
     description: "Name of the uploaded traffic artifact, when upload_traffic_artifact produced one. Empty otherwise, so a later step can tell an upload apart from none having been requested."
   filesystem_audit_artifact_name:
-    description: "Name of the uploaded filesystem audit artifact, when filesystem_audit: record uploaded one. Empty otherwise, including when the upload failed."
+    description: "Name of the uploaded filesystem audit artifact, when upload_filesystem_audit_artifact produced one. Empty otherwise, including when the upload failed."
 
 runs:
   using: node24

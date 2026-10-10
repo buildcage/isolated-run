@@ -14,7 +14,7 @@ import {
   type FilesystemAuditReportDeps,
   type FilesystemAuditReportOptions,
 } from "./filesystem-audit-report.ts";
-import { createAuditSummary } from "./filesystem-audit-summary.ts";
+import { createAuditSummary, renderAuditSummaryBlocks } from "./filesystem-audit-summary.ts";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -95,6 +95,7 @@ async function reportStepFilesystemAudit(
 
 describe("prepareStepFilesystemAudit", () => {
   const base = {
+    upload: true,
     retentionDays: 3,
     containerName: "buildcage-proxy-deadbeef",
     actionRepo: "buildcage/isolated-run",
@@ -297,6 +298,44 @@ describe("prepareStepFilesystemAudit", () => {
     expect(summaries[0]).toContain("No file access was recorded.");
     expect(uploads).toEqual([]);
     expect(outputs).toEqual([""]);
+  });
+
+  it("uploads nothing unless asked to, and points the reader at the input", async () => {
+    const notes: string[] = [];
+    const {
+      deps: d,
+      summaries,
+      uploads,
+      outputs,
+      writes,
+    } = deps({
+      renderBlocks: (summary, startedAt, priorities, cutNote, legendNote) => {
+        notes.push(cutNote());
+        return renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote);
+      },
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        upload: false,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: { GITHUB_WORKSPACE: "/work" },
+      },
+      d,
+    );
+
+    expect(writes).toEqual([]);
+    expect(uploads).toEqual([]);
+    expect(outputs).toEqual([""]);
+    expect(summaries[0]).toContain(
+      " · set `upload_filesystem_audit_artifact: true` for the full record · [how to read this](",
+    );
+    expect(notes).toEqual([
+      "_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; " +
+        "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact._\n\n",
+    ]);
   });
 
   it("names the artifact in the note for a part given up, with why", async () => {
@@ -572,6 +611,7 @@ describe("prepareStepFilesystemAudit", () => {
 
 describe("prepareStepFilesystemAudit: failures while reading", () => {
   const base = {
+    upload: true,
     retentionDays: 3,
     containerName: "buildcage-proxy-deadbeef",
     actionRepo: "buildcage/isolated-run",
@@ -676,6 +716,7 @@ describe("prepareStepFilesystemAudit: an upload that throws", () => {
 
     await reportStepFilesystemAudit(
       {
+        upload: true,
         retentionDays: 3,
         containerName: "buildcage-proxy-deadbeef",
         actionRepo: "buildcage/isolated-run",
