@@ -11,6 +11,7 @@ import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 import { SandboxError } from "./errors.ts";
 import {
   CONFIG_FILE_INPUTS,
+  awsExampleInputs,
   readAwsKeyInputs,
   readProxyInputs,
   readFailOnBlocked,
@@ -438,5 +439,23 @@ describe("readAwsKeyInputs", () => {
       ),
     ).toStrictEqual(OFF);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("ignored for this run"));
+  });
+});
+
+describe("awsExampleInputs", () => {
+  const KEY = `${ASIA}AAAAAAAAAAAAAAAA`;
+
+  it("writes nothing when the check was off for the run", () => {
+    expect(awsExampleInputs({ key: "", roleAccounts: [] })).toStrictEqual([]);
+  });
+
+  it("turns the check on, and holds the accounts' place without their value", () => {
+    expect(awsExampleInputs({ key: KEY, roleAccounts: [] })).toStrictEqual(["aws_key_check: true"]);
+    const lines = awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] });
+    expect(lines).toStrictEqual([
+      "aws_key_check: true",
+      "allowed_aws_role_accounts: <account-id> # copy the value from your audit step",
+    ]);
+    expect(lines.join("\n").includes(KEY)).toBe(false);
   });
 });

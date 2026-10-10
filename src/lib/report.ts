@@ -109,6 +109,8 @@ export interface ComputeReportOutcomesOptions {
   actionRepo: string;
   actionRef: string;
   runCommand?: string;
+  /** See ExampleStepOptions.extraInputs. */
+  extraInputs?: string[];
   actionVersion?: string;
   failOnBlocked?: boolean;
 }
@@ -133,6 +135,7 @@ export function computeReportOutcomes(
     actionRepo,
     actionRef,
     runCommand,
+    extraInputs,
     actionVersion,
   }: ComputeReportOutcomesOptions,
 ): ReportOutcomes {
@@ -146,6 +149,7 @@ export function computeReportOutcomes(
     title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : undefined,
     stepName: "Start isolated-run",
     runCommand,
+    extraInputs,
     actionVersion,
   });
 

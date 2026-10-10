@@ -117,12 +117,13 @@ describe("reportStepTraffic", () => {
   });
 
   it("hands the summary the step's own labelling and the inputs that shape it", async () => {
-    await reportStepTraffic(options(), deps);
+    await reportStepTraffic(options({ extraInputs: ["aws_key_check: true"] }), deps);
 
     expect(mocks.writeReportSummary.mock.calls[0][2]).toStrictEqual({
       actionRepo: "buildcage/isolated-run",
       actionRef: "v1",
       runCommand: "npm ci",
+      extraInputs: ["aws_key_check: true"],
       actionVersion: "1.2.3",
       stepLabel: "build",
       failOnBlocked: true,

@@ -68868,6 +68868,9 @@ function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", 
 	}
 	return yaml;
 }
+function extraInputLines({ extraInputs = [] }) {
+	return extraInputs.map((line) => `    ${line}\n`).join("");
+}
 function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
 	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "\n<details>\n";
 	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
@@ -68896,7 +68899,7 @@ function buildRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
 		yaml += `    ${param}: >-\n`;
 		for (let rule of rules) yaml += `      ${rule}\n`;
 	}
-	return restrictExampleBlock(yaml);
+	return yaml += extraInputLines(step), restrictExampleBlock(yaml);
 }
 function communicationTruncationNote(artifactAvailable) {
 	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
@@ -69226,7 +69229,7 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 		yaml += "    allowed_ip_rules: |\n";
 		for (let rule of allowedIpRules) yaml += `      ${rule}\n`;
 	}
-	return restrictExampleBlock(yaml, {
+	return yaml += extraInputLines(step), restrictExampleBlock(yaml, {
 		appendix: leftOut.length > 0 ? leftOutSection(leftOut) : void 0,
 		footnote: "Permits exactly what this build did; a versioned or dated URL may drift."
 	});
@@ -69621,6 +69624,11 @@ function readAwsKeyInputs({ proxyEngine, proxyMode }, env, warn, getInput$4 = ge
 		key,
 		roleAccounts
 	};
+}
+function awsExampleInputs({ key, roleAccounts }) {
+	if (!key) return [];
+	let lines = ["aws_key_check: true"];
+	return roleAccounts.length > 0 && lines.push("allowed_aws_role_accounts: <account-id> # copy the value from your audit step"), lines;
 }
 //#endregion
 //#region src/lib/retry-briefly.ts
@@ -73043,7 +73051,7 @@ function fetchReport(containerName, parameters, proxyEngine) {
 function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
 }
-function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, actionVersion }) {
+function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
@@ -73051,6 +73059,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 		title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
 		stepName: "Start isolated-run",
 		runCommand,
+		extraInputs,
 		actionVersion
 	});
 	return {
@@ -73150,7 +73159,7 @@ const realDeps$1 = {
 	setTrafficArtifactOutput,
 	readStepLabel
 };
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, failOnBlocked, trafficArtifact, env, moreBlocks = () => [] }, overrides = {}) {
+async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [] }, overrides = {}) {
 	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
 		...realDeps$1,
 		...overrides
@@ -73176,6 +73185,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 				actionRepo,
 				actionRef,
 				runCommand,
+				extraInputs,
 				actionVersion: readActionVersion(containerName, proxyEngine),
 				stepLabel: readStepLabel(),
 				failOnBlocked,
@@ -73400,6 +73410,7 @@ async function runSandboxStep(env, overrides = {}) {
 			actionRepo,
 			actionRef: reportActionRef,
 			runCommand: runInput,
+			extraInputs: awsExampleInputs(aws),
 			failOnBlocked,
 			trafficArtifact,
 			env,

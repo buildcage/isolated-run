@@ -234,6 +234,10 @@ step can be checked before it is switched to `restrict`:
 
 The traffic artifact carries the same reason in `wouldRefuse`.
 
+When the check was on for the run, the report's **Switch to restrict mode** example keeps
+`aws_key_check: true`. It writes `allowed_aws_role_accounts` as an `<account-id>` placeholder rather
+than the accounts themselves, so copy the value from the audit step.
+
 ### In the traffic artifact
 
 Each request the check let through has an `aws` object in the
