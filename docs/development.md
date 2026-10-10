@@ -380,8 +380,8 @@ are left out of [AWS access key check](./aws.md):
   `aws-unreadable` as well.
 - The proxy rewrites a request to STS to ask for an uncompressed answer
   (`Accept-Encoding: identity`), unless the client signed its own `Accept-Encoding`, which it then
-  leaves alone. It reads an answer up to its buffer size (16 KB), so a key in a compressed answer or
-  past the buffer is not learned.
+  leaves alone. It reads an answer up to its buffer size (16 KB), so a compressed answer or one past
+  the buffer teaches no key and names no account.
 
 Each Dockerfile copies `docker/common/files/` first and the engine's own `files/` on top. An engine
 keeps only what differs: `THIRD_PARTY_LICENSES` and the `init-cfg` script that generates its
