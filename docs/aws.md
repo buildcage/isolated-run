@@ -66,8 +66,9 @@ With `aws_key_check` on, these are refused, the most common first:
 - Keys from a profile or `~/.aws/credentials` rather than `AWS_ACCESS_KEY_ID`, and keys the step
   gets from `GetSessionToken`, SAML or IAM Identity Center, which the proxy does not learn; see
   [Limits](#limits).
-- Presigned URLs someone else signed, such as Lambda `GetFunction`'s `Code.Location` or a vendor's
-  download link, unless they come from an ECR registry's redirect.
+- Presigned URLs and keys an AWS API hands back for the step to download or upload with, such as
+  Lambda `GetFunction`'s `Code.Location`, and other presigned URLs someone else signed, such as a
+  vendor's download link, unless they come from an ECR registry's redirect.
 - Calls over about 4 MiB to APIs that take their parameters as a form (STS, IAM, CloudFormation,
   SNS, EC2, SES v1 and others), such as SES v1 `SendRawEmail` with large attachments. Use SES v2
   (`sesv2`).
@@ -357,7 +358,7 @@ than one credential is `aws-ambiguous-credential`. Where more than one reason ap
 
 ### Which keys pass
 
-The proxy knows three kinds of key:
+The proxy knows only these three kinds of key, and refuses any other:
 
 - **The key the step starts with**, read from `AWS_ACCESS_KEY_ID` in the step's environment, which
   is where `aws-actions/configure-aws-credentials` puts it. It is taken as given: the proxy does not
