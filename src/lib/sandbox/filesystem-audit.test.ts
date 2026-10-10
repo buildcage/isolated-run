@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 
 import { SandboxError } from "../errors.ts";
 import {
+  auditUnavailable,
   cgroupFsPath,
   checkFilesystemAuditHost,
   exitReason,
@@ -24,16 +25,39 @@ describe("filesystemAuditPaths", () => {
   });
 });
 
-describe("checkFilesystemAuditHost", () => {
-  it("passes on a cgroup v2 host and fails the step elsewhere", () => {
-    expect(() =>
-      checkFilesystemAuditHost({ cgroupPath: () => "/system.slice/runner.service" }),
-    ).not.toThrow();
-    expect(() => checkFilesystemAuditHost({ cgroupPath: () => undefined })).toThrow(
+const REQUIREMENTS =
+  "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and " +
+  "tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/reference.md#filesystem-audit";
+
+describe("auditUnavailable", () => {
+  it("says why, that the command did not run, and what the tracer needs", () => {
+    expect(auditUnavailable("the tracer exited")).toStrictEqual(
       new SandboxError(
-        "filesystem_audit needs a cgroup v2 host; the command was not run.",
+        `filesystem_audit could not start (the tracer exited); the command was not run. ${REQUIREMENTS}`,
         "FILESYSTEM_AUDIT_UNAVAILABLE",
       ),
+    );
+  });
+});
+
+describe("checkFilesystemAuditHost", () => {
+  const v2 = { cgroupPath: () => "/system.slice/runner.service" };
+
+  it("passes on a cgroup v2 host with kernel BTF", () => {
+    const exists = vi.fn(() => true);
+    expect(() => checkFilesystemAuditHost(v2, exists)).not.toThrow();
+    expect(exists).toHaveBeenCalledWith("/sys/kernel/btf/vmlinux");
+  });
+
+  it("fails the step on a host without cgroup v2", () => {
+    expect(() => checkFilesystemAuditHost({ cgroupPath: () => undefined }, () => true)).toThrow(
+      auditUnavailable("the runner is not on cgroup v2"),
+    );
+  });
+
+  it("fails the step on a kernel without BTF", () => {
+    expect(() => checkFilesystemAuditHost(v2, () => false)).toThrow(
+      auditUnavailable("the kernel has no BTF at /sys/kernel/btf/vmlinux"),
     );
   });
 });
@@ -159,12 +183,7 @@ describe("startFilesystemAudit", () => {
       remove,
     });
 
-    await expect(start).rejects.toThrow(
-      new SandboxError(
-        "filesystem_audit could not start (the tracer did not attach in time); the command was not run.",
-        "FILESYSTEM_AUDIT_UNAVAILABLE",
-      ),
-    );
+    await expect(start).rejects.toThrow(auditUnavailable("the tracer did not attach in time"));
     expect(kill).toHaveBeenCalledWith("SIGTERM");
     expect(remove).toHaveBeenCalledWith(START_OPTIONS.pidFilePath);
     expect(remove).toHaveBeenCalledWith(START_OPTIONS.outPath);

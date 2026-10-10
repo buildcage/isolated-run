@@ -19,6 +19,7 @@ import {
 import { buildEnvBlob, resolveSandboxEnv, writeEnvLoader } from "./env-loader.ts";
 import { createOverlayScratchDirs, overlayUpperFor } from "./ephemeral-fs.ts";
 import {
+  auditUnavailable,
   extractTracer,
   startFilesystemAudit,
   noAudit,
@@ -525,9 +526,7 @@ async function startAudit(
   const { filesystemAudit, containerName } = options;
   if (filesystemAudit === undefined) return noAudit;
   const cgroupsPath = config.linux.cgroupsPath;
-  if (cgroupsPath === undefined) {
-    throw new SandboxError(NO_CGROUP_V2, "FILESYSTEM_AUDIT_UNAVAILABLE");
-  }
+  if (cgroupsPath === undefined) throw auditUnavailable(NO_CGROUP_V2);
   let tracerPath: string;
   try {
     tracerPath = deps.extractTracer(containerName, dir);

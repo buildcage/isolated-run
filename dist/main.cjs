@@ -70278,9 +70278,13 @@ function filesystemAuditPaths(containerName, scratchBase) {
 function cgroupFsPath(cgroupsPath) {
 	return (0, node_path.join)("/sys/fs/cgroup", cgroupsPath);
 }
-const NO_CGROUP_V2 = "filesystem_audit needs a cgroup v2 host; the command was not run.";
-function checkFilesystemAuditHost(probes = realHostProbes) {
-	if (probes.cgroupPath() === void 0) throw new SandboxError(NO_CGROUP_V2, "FILESYSTEM_AUDIT_UNAVAILABLE");
+function auditUnavailable(reason) {
+	return new SandboxError(`filesystem_audit could not start (${reason}); the command was not run. It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/reference.md#filesystem-audit`, "FILESYSTEM_AUDIT_UNAVAILABLE");
+}
+const NO_CGROUP_V2 = "the runner is not on cgroup v2", KERNEL_BTF = "/sys/kernel/btf/vmlinux";
+function checkFilesystemAuditHost(probes = realHostProbes, exists = node_fs.existsSync) {
+	if (probes.cgroupPath() === void 0) throw auditUnavailable(NO_CGROUP_V2);
+	if (!exists(KERNEL_BTF)) throw auditUnavailable(`the kernel has no BTF at ${KERNEL_BTF}`);
 }
 function exitReason() {
 	let partial = "", fatal = "", last = "";
@@ -70375,7 +70379,7 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		await sleep(100);
 	}
 	let cancelled = !exited && cancel?.aborted, reason = exited ? child.reason() || "the tracer exited" : "the tracer did not attach in time";
-	throw await stop(), remove(outPath), cancelled ? cancelledBeforeRun() : new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
+	throw await stop(), remove(outPath), cancelled ? cancelledBeforeRun() : auditUnavailable(reason);
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
@@ -72302,7 +72306,7 @@ async function startAudit(dir, config, options, deps) {
 	let { filesystemAudit, containerName } = options;
 	if (filesystemAudit === void 0) return noAudit;
 	let cgroupsPath = config.linux.cgroupsPath;
-	if (cgroupsPath === void 0) throw new SandboxError(NO_CGROUP_V2, "FILESYSTEM_AUDIT_UNAVAILABLE");
+	if (cgroupsPath === void 0) throw auditUnavailable(NO_CGROUP_V2);
 	let tracerPath;
 	try {
 		tracerPath = deps.extractTracer(containerName, dir);

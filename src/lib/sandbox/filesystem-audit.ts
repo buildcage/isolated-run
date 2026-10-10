@@ -51,15 +51,30 @@ export function cgroupFsPath(cgroupsPath: string): string {
   return join(CGROUP_ROOT, cgroupsPath);
 }
 
-export const NO_CGROUP_V2 = "filesystem_audit needs a cgroup v2 host; the command was not run.";
+const REQUIREMENTS =
+  "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and " +
+  "tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/reference.md#filesystem-audit";
 
-/** Fails the step before the proxy starts on a host the tracer cannot watch. */
+/** The step's failure when the tracer cannot run here, with what it needs. */
+export function auditUnavailable(reason: string): SandboxError {
+  return new SandboxError(
+    `filesystem_audit could not start (${reason}); the command was not run. ${REQUIREMENTS}`,
+    "FILESYSTEM_AUDIT_UNAVAILABLE",
+  );
+}
+
+export const NO_CGROUP_V2 = "the runner is not on cgroup v2";
+const KERNEL_BTF = "/sys/kernel/btf/vmlinux";
+
+/** Fails the step before the proxy starts on a host the tracer cannot watch.
+ *  The kernel version and tracefs are left to the tracer: it tells the
+ *  version by feature, and tracefs may be mounted where the runner cannot look. */
 export function checkFilesystemAuditHost(
   probes: Pick<HostProbes, "cgroupPath"> = realHostProbes,
+  exists: (path: string) => boolean = existsSync,
 ): void {
-  if (probes.cgroupPath() === undefined) {
-    throw new SandboxError(NO_CGROUP_V2, "FILESYSTEM_AUDIT_UNAVAILABLE");
-  }
+  if (probes.cgroupPath() === undefined) throw auditUnavailable(NO_CGROUP_V2);
+  if (!exists(KERNEL_BTF)) throw auditUnavailable(`the kernel has no BTF at ${KERNEL_BTF}`);
 }
 
 export type SpawnAudit = (command: string, args: string[]) => AuditChild;
@@ -274,8 +289,5 @@ export async function startFilesystemAudit(
   // report would otherwise read it as one cut short.
   remove(outPath);
   if (cancelled) throw cancelledBeforeRun();
-  throw new SandboxError(
-    `filesystem_audit could not start (${reason}); the command was not run.`,
-    "FILESYSTEM_AUDIT_UNAVAILABLE",
-  );
+  throw auditUnavailable(reason);
 }
