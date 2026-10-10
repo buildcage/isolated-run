@@ -312,11 +312,11 @@ use one:
   learned. Get those credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
 - Keys are learned only from STS answers and ECR registry redirects received over HTTPS, to a
   request the key check did not refuse, so in `audit` mode a request it would refuse teaches no key.
-  An STS answer over plain HTTP teaches no key and names no account in the restrict example. A host
-  that names a resource is never taken for STS, even an S3 bucket named `sts`. A key in an STS answer
-  the proxy cannot read, because the client asked for it compressed or it is unusually large, is not
-  learned, and requests signed with it are refused. Such an answer names no account in the restrict
-  example either.
+  An STS answer over plain HTTP names no account in the restrict example either. A host that names a
+  resource is never taken for STS, even an S3 bucket named `sts`. A key in an STS answer the proxy
+  cannot read, because the client asked for it compressed or it is unusually large, is not learned,
+  and requests signed with it are refused. Such an answer names no account in the restrict example
+  either.
 - A connection `allowed_tls_rules` or `allowed_ip_rules` passes through is never decrypted, so the
   check never sees its requests. Do not pass AWS API hosts through.
 - The starting key ID is handed to the proxy container as an environment variable, so it is visible

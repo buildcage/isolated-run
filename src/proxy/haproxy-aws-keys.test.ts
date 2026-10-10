@@ -261,9 +261,9 @@ describe("the check with no role account", () => {
         "    http-response set-var(txn.aws_log_assumed) var(txn.aws_new_account) if aws_new_account",
       ),
     ).toBe(true);
-    expect(rules.includes("http-request set-header Accept-Encoding identity if aws_sts_host")).toBe(
-      true,
-    );
+    expect(
+      rules.includes("http-request set-header Accept-Encoding identity if { ssl_fc } aws_sts_host"),
+    ).toBe(true);
     expect(rules.includes("aws_fed")).toBe(false);
     expect(rules.includes("aws_role_account")).toBe(false);
   });

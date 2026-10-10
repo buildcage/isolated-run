@@ -142,7 +142,7 @@ run_step keyonlyaudit \
   INPUT_ALLOWED_AWS_ROLE_ACCOUNTS="" \
   INPUT_RUN="curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTSTARTKEY0001/x' https://sts.us-east-1.amazonaws.com/sts/same-account &&
     curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTLEARNEDKEY01/x' https://sts.us-east-1.amazonaws.com/sts/other-account &&
-    curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTSTARTKEY0001/x' http://sts.us-east-1.amazonaws.com/sts/plain-other-account"
+    curl -sS --max-time 10 -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTSTARTKEY0001/x' http://sts.us-east-1.amazonaws.com/sts/plain-other-account | grep -qF 333333333333"
 RUN_EXIT=$?
 if [ "$RUN_EXIT" != "0" ]; then
   fail "the key-only audit step failed (exit $RUN_EXIT)"
