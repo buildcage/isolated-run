@@ -16,11 +16,11 @@
 # socket mounted in just to reach a sibling container: it stays scoped to
 # testing run-isolated.sh itself.
 # renovate: datasource=github-release-attachments depName=opencontainers/runc
-ARG RUNC_VERSION=v1.5.1
-# renovate: datasource=github-release-attachments depName=opencontainers/runc digestVersion=v1.5.1
-ARG RUNC_SHA256_AMD64=177df879d50c913eb205e898d5c1c05a18f574053c0ce5524c471208eaf06f6f
-# renovate: datasource=github-release-attachments depName=opencontainers/runc digestVersion=v1.5.1
-ARG RUNC_SHA256_ARM64=ca70e7dbd6616ca782a59b5d3ac86909123fdaa9fa3f89dcf29051c70eee7ce9
+ARG RUNC_VERSION=v1.5.2
+# renovate: datasource=github-release-attachments depName=opencontainers/runc digestVersion=v1.5.2
+ARG RUNC_SHA256_AMD64=599f6f94ff8c5057241eff0d54c3c74f95c34935b6457b33fe545defc61e9488
+# renovate: datasource=github-release-attachments depName=opencontainers/runc digestVersion=v1.5.2
+ARG RUNC_SHA256_ARM64=d10ecae898361832a059be2089bab92d158aec54661b18ed7346ed79628b46b0
 
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS deps
 ARG RUNC_VERSION
