@@ -281,8 +281,9 @@ jobs:
             (exec 3> "$GITHUB_WORKSPACE/execd.txt"; echo head >&3; exec cat /etc/hostname >&3)
             # A program, not the builtin, with an argument the record must not keep.
             /usr/bin/true buildcage-audit-sentinel-arg
-            # A 32-bit syscall (getpid through int 0x80) would skip the per-call
-            # tracepoints, so seccomp kills the thread making it: SIGSYS, 128+31.
+            # A 32-bit syscall (getpid through int 0x80) is numbered apart from
+            # the calls the tracer reads, so seccomp kills the thread making it:
+            # SIGSYS, 128+31.
             if [ "$(uname -m)" = x86_64 ]; then
               printf 'int main(void){long r;__asm__ volatile("int $0x80":"=a"(r):"a"(20L));return r < 0;}' |
                 gcc -x c -o "$GITHUB_WORKSPACE/int80" -
@@ -394,16 +395,14 @@ jobs:
           STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs
           if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
 
-      # After every other check, as it leaves the runner without tracefs for the
-      # rest of the job, post steps included: the tracer then cannot attach its
-      # syscall tracepoints, after it has made the sandbox's cgroup.
-      - name: Take tracefs away
+      # After every other check, as it leaves the kernel's BTF empty for the
+      # rest of the job, post steps included: the tracer then cannot load, after
+      # it has made the sandbox's cgroup. The file is still there, so the
+      # action's own BTF check passes.
+      - name: Empty the kernel's BTF
         run: |
-          sudo umount -R /sys/kernel/debug || true
-          sudo umount /sys/kernel/tracing || true
-          if sudo test -e /sys/kernel/tracing/events || sudo test -e /sys/kernel/debug/tracing/events; then
-            echo "::error::tracefs is still reachable"; exit 1
-          fi
+          sudo mount --bind "$(mktemp)" /sys/kernel/btf/vmlinux
+          if [ -s /sys/kernel/btf/vmlinux ]; then echo "::error::the kernel's BTF is still readable"; exit 1; fi
 
       - name: Run a step whose tracer cannot start
         id: unstarted

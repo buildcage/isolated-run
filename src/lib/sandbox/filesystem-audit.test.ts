@@ -28,8 +28,8 @@ describe("filesystemAuditPaths", () => {
 });
 
 const REQUIREMENTS =
-  "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and " +
-  "tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting";
+  "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF: " +
+  "https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting";
 
 describe("withoutCompatSyscalls", () => {
   it("keeps only the native ABI and the rest of the profile", () => {
@@ -115,9 +115,9 @@ describe("exitReason", () => {
   it("prefers the tracer's own fatal line, joined across chunks", () => {
     const reason = exitReason();
     reason.push("filesystem-audit: cgroup /sys/fs/cgroup/x id=1\nfilesystem-audit: fat");
-    reason.push("al: attach on_unlinkat_enter: no tracefs\nfilesystem-audit: total=0\n");
+    reason.push("al: attach on_sys_enter: permission denied\nfilesystem-audit: total=0\n");
 
-    expect(reason.value()).toBe("attach on_unlinkat_enter: no tracefs");
+    expect(reason.value()).toBe("attach on_sys_enter: permission denied");
   });
 
   it("falls back to the last line written, then to an unterminated one", () => {
@@ -273,7 +273,7 @@ describe("startFilesystemAudit", () => {
     const child: AuditChild = {
       exited: Promise.resolve(),
       kill: vi.fn(),
-      reason: () => "attach on_unlinkat_enter: neither debugfs nor tracefs are mounted",
+      reason: () => "the kernel is older than Linux 6.1",
     };
     const sleep = vi.fn(async () => {});
 
@@ -284,9 +284,7 @@ describe("startFilesystemAudit", () => {
       remove: vi.fn(),
     });
 
-    await expect(start).rejects.toThrow(
-      hostCannotAudit("attach on_unlinkat_enter: neither debugfs nor tracefs are mounted"),
-    );
+    await expect(start).rejects.toThrow(hostCannotAudit("the kernel is older than Linux 6.1"));
     // One yield in the ready loop before the exit is seen; stopping a tracer
     // already gone waits for nothing.
     expect(sleep).toHaveBeenCalledTimes(1);
