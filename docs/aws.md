@@ -349,9 +349,19 @@ the two comes last, the report links here, unless `known_blocked_rules` expects 
 |                              | A form body sent without a `Content-Length`                                                                                                                                                              | Send the body with a known length                                                                                                                                                                                                    |
 | `aws-ambiguous-credential`   | More than one credential on one request: two `Authorization` headers, a header and a presigned URL credential, or one repeated. Or an `AssumeRoleWithWebIdentity` naming its role twice, or in the query | Send one credential, and the role in the body only; a current SDK does                                                                                                                                                               |
 
-A role switch into an account not listed is not refused itself: STS answers it, but the proxy does
-not learn the key it issues. What shows is a run of `aws-key-not-allowed` on the requests signed
-with that key, after an STS call that went through.
+To tell the causes of `aws-key-not-allowed` apart, take the first of these that fits the refused
+request:
+
+1. Its host contains `--x-s3`: an S3 Express One Zone directory bucket.
+2. Its host contains `git-codecommit`: a CodeCommit static Git credential of an account not listed.
+3. Its URL carries `X-Amz-Credential`: a presigned URL someone else signed.
+4. The refusals start after an STS call that went through. A role switch is not refused itself:
+   STS answers it, but the proxy does not learn the key it issues. If the restrict example marks an
+   account `# assumed in this run`, or the STS request's `aws.assumedAccount` in the traffic
+   artifact is an account not listed, the role is in that account. Otherwise the STS answer could
+   not be read, or the key came from `GetSessionToken`, SAML or IAM Identity Center.
+5. The refusals start at the step's first AWS request: a key from a profile, `~/.aws/credentials` or
+   `credential_process`.
 
 ## What it does not stop
 
