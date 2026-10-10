@@ -19,6 +19,7 @@ describe("filesystemAuditPaths", () => {
     expect(filesystemAuditPaths(CONTAINER, "/var/tmp/buildcage-0")).toStrictEqual({
       outPath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.jsonl",
       pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.pid",
+      stepPath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.step.jsonl",
     });
   });
 });
@@ -86,6 +87,7 @@ const START_OPTIONS = {
   outPath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.jsonl",
   pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.pid",
   readyPath: `${DEST}/filesystem-audit.ready`,
+  watchPid: 4242,
 };
 
 /** A tracer that never exits on its own; resolves only once killed. */
@@ -123,6 +125,8 @@ describe("startFilesystemAudit", () => {
       START_OPTIONS.pidFilePath,
       "--ready",
       START_OPTIONS.readyPath,
+      "--watch-pid",
+      "4242",
     ]);
 
     await handle.stop();

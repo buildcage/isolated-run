@@ -430,7 +430,8 @@ function filesystemAuditPaths(containerName, scratchBase) {
 	let suffix = containerName.split("-").at(-1);
 	return {
 		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
-		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`)
+		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
+		stepPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.step.jsonl`)
 	};
 }
 //#endregion
@@ -722,7 +723,7 @@ function defaultRemoveFile(path) {
 	(0, node_fs.rmSync)(path, { force: !0 });
 }
 function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.existsSync, readFile = defaultReadFile, killTracer = defaultKillTracer, removeFile = defaultRemoveFile }) {
-	let { outPath, pidFilePath } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
+	let { outPath, pidFilePath, stepPath } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
 	if (fileExists(pidFilePath)) {
 		try {
 			let pid = Number(readFile(pidFilePath).trim());
@@ -732,7 +733,7 @@ function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.
 		}
 		removeFile(pidFilePath);
 	}
-	removeFile(outPath);
+	removeFile(outPath), removeFile(stepPath);
 }
 function isTracer(pid, readFile) {
 	try {

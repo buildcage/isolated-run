@@ -28,6 +28,8 @@ const FATAL = "filesystem-audit: fatal: ";
 export interface FilesystemAuditPaths {
   outPath: string;
   pidFilePath: string;
+  /** The recording with buildcage's own records stripped, as uploaded. */
+  stepPath: string;
 }
 
 export function filesystemAuditPaths(
@@ -38,6 +40,7 @@ export function filesystemAuditPaths(
   return {
     outPath: join(scratchBase, `filesystem-audit-${suffix}.jsonl`),
     pidFilePath: join(scratchBase, `filesystem-audit-${suffix}.pid`),
+    stepPath: join(scratchBase, `filesystem-audit-${suffix}.step.jsonl`),
   };
 }
 
@@ -183,6 +186,8 @@ export interface StartFilesystemAuditOptions {
   outPath: string;
   pidFilePath: string;
   readyPath: string;
+  /** The action's own process, whose exit stops the tracer if nothing else did. */
+  watchPid: number;
 }
 
 /**
@@ -195,7 +200,14 @@ export interface StartFilesystemAuditOptions {
  * step is done.
  */
 export async function startFilesystemAudit(
-  { tracerPath, cgroupsPath, outPath, pidFilePath, readyPath }: StartFilesystemAuditOptions,
+  {
+    tracerPath,
+    cgroupsPath,
+    outPath,
+    pidFilePath,
+    readyPath,
+    watchPid,
+  }: StartFilesystemAuditOptions,
   deps: FilesystemAuditDeps = {},
 ): Promise<AuditHandle> {
   const {
@@ -218,6 +230,8 @@ export async function startFilesystemAudit(
     pidFilePath,
     "--ready",
     readyPath,
+    "--watch-pid",
+    String(watchPid),
   ]);
   let exited = false;
   void child.exited.then(() => {

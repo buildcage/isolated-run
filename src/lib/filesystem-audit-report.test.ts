@@ -18,13 +18,14 @@ import { createAuditSummary } from "./filesystem-audit-summary.ts";
 
 afterEach(() => vi.unstubAllEnvs());
 
+// The stripped copy, written beside the recording and uploaded in its place.
+const CLEAN = "/var/tmp/buildcage-0/filesystem-audit-deadbeef.step.jsonl";
+
 const AUDIT = {
   outPath: "/var/tmp/buildcage-0/filesystem-audit-deadbeef.jsonl",
   pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-deadbeef.pid",
+  stepPath: CLEAN,
 };
-
-// The stripped copy, written beside the recording and uploaded in its place.
-const CLEAN = "/var/tmp/buildcage-0/filesystem-audit-deadbeef.step.jsonl";
 
 function annotation(): Annotation & { warning: Mock; error: Mock } {
   return { notice: vi.fn(), warning: vi.fn(), error: vi.fn() };
