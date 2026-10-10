@@ -664,7 +664,9 @@ check exists, how to set it up, what it does not stop, and the IAM settings that
   number.
 - Any account named needs `aws_key_check: true`, from the workflow or a config file; unset or
   `false`, the step fails, in `audit` too. Set in the workflow, `allowed_aws_role_accounts` replaces
-  a config file's value.
+  a config file's value; left empty, it counts as unset and the file's accounts apply, so
+  `aws_key_check: false` in the workflow fails the step. To run without the check, point
+  `config_file` at a file that names no accounts.
 - An unsigned request is left to the URL rules where the host names the resource it is for, such as
   an S3 bucket or an ECR registry, and refused everywhere else but an `AssumeRoleWithWebIdentity`
   call for a role in one of these accounts.
