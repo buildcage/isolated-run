@@ -67,16 +67,14 @@ Then:
 1. Read **🚨 Restrict Would Refuse** in the report. Each request the check would refuse ends in its
    reason, such as `(restrict would refuse: aws-key-not-allowed)`, and
    [Troubleshooting](#troubleshooting) gives the usual causes of each.
-2. Add the accounts of the other roles the step assumed. In the
-   [traffic artifact](#in-the-traffic-artifact), each STS answer that issued a role's key carries
-   `aws.assumedAccount`, listed or not, so the accounts to add are the ones there that
-   `allowed_aws_role_accounts` does not name yet. A CDK app deploying to several accounts assumes a
-   `cdk-hnb659fds-deploy-role-*` role in each. The proxy reads STS answers only when at least one
-   account is named. Add only accounts that are yours: one you do not recognise there is what the
-   check is meant to catch.
+2. Check the accounts of the other roles the step assumed. The report's **Switch to restrict mode**
+   example lists them under `allowed_aws_role_accounts` and marks each one not named yet
+   `# assumed in this run, check it is yours`; the [traffic artifact](#in-the-traffic-artifact)
+   gives each as `aws.assumedAccount`. A CDK app deploying to several accounts assumes a
+   `cdk-hnb659fds-deploy-role-*` role in each. Keep only accounts that are yours: one you do not
+   recognise there is what the check is meant to catch.
 3. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries the URL
-   rules and `aws_key_check: true` over. Replace its `<account-id>` placeholder with the accounts
-   from step 2.
+   rules, `aws_key_check: true` and the accounts from step 2 over.
 
 ## What the check does
 
@@ -93,7 +91,8 @@ The proxy knows three kinds of key:
   keep working, such as the CDK assuming its `cdk-hnb659fds-deploy-role-*` roles, Terraform's
   `assume_role`, or the AWS CLI run with a `--profile` that sets `role_arn` and
   `web_identity_token_file`. A role in any other account issues a key the proxy never learns, so
-  requests signed with it are refused. With no account named, no STS key is learned.
+  requests signed with it are refused. With no account named, no STS key is learned, but the proxy
+  still reads each answer for the account of its role, so a run shows which accounts to name.
 - **Keys ECR signs a layer's presigned URL with.** An ECR registry,
   `<account>.dkr.ecr.<region>.amazonaws.com` or its dual-stack `<account>.dkr-ecr.<region>.on.aws`,
   answers a layer download with a redirect to a presigned S3 URL, signed with a key of ECR's own.
@@ -278,21 +277,31 @@ step can be checked before it is switched to `restrict`:
 The traffic artifact carries the same reason in `wouldRefuse`.
 
 When the check was on for the run, the report's **Switch to restrict mode** example includes
-`aws_key_check: true`. Its `allowed_aws_role_accounts` holds an `<account-id>` placeholder in place
-of the accounts: copy the value over from the audit step.
+`aws_key_check: true`, and `allowed_aws_role_accounts` with the accounts given and each account the
+run assumed a role in, read from every STS answer, including one to a request restrict would refuse.
+A chain of roles, as the CDK assumes them, shows in full after one audit run. An answer the proxy
+cannot read, compressed or past its buffer, names no account. Anything in the step can assume a role, including in an
+account of its own, so each account the example adds that was not given is marked:
+
+```yaml
+aws_key_check: true
+allowed_aws_role_accounts: |
+  111111111111
+  222222222222 # assumed in this run, check it is yours
+```
 
 ### In the traffic artifact
 
 Each request the check let through has an `aws` object in the
 [traffic artifact](./reference.md#traffic-artifact), so a run shows that the check was on even
-where it refused nothing. A request the check refused has none; its `reason` or `wouldRefuse`
-says why.
+where it refused nothing. A request the check refused has none, save an STS call in audit mode,
+whose answer still gives `assumedAccount`. Its `reason` or `wouldRefuse` says why.
 
 | Field            | Always | Notes                                                                                                                                                                        |
 | ---------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `key`            | yes    | `env` for the key the step started with, `assumed` for one STS issued, `issued` for one ECR signed a layer's presigned URL with, `none` for a request carrying no access key |
 | `accountId`      |        | an account the check confirmed: the one an `assumed` key came from, or the one a static CodeCommit Git credential or a role ARN names                                        |
-| `assumedAccount` |        | the account of the role an STS answer issued a key for, whether or not that account is allowed                                                                               |
+| `assumedAccount` |        | the account of the role an STS answer issued a key for, whether or not that account is allowed or named                                                                      |
 
 The starting key's account is never shown, since the proxy does not ask AWS whose key it is. No key
 ID is written either.
@@ -314,7 +323,7 @@ request, and lists the ones it would refuse under **🚨 Restrict Would Refuse**
 
 | Reason                       | Usual cause                                                                                                                                                                                              | What to do                                                                                                                                                                          |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `aws-key-not-allowed`        | The step assumed a role in an account `allowed_aws_role_accounts` does not name, and signed with that role's key                                                                                         | Add the account if it is yours. With an account named and the traffic artifact on, the STS answer's `aws.assumedAccount` names it; see [Getting started](#getting-started)          |
+| `aws-key-not-allowed`        | The step assumed a role in an account `allowed_aws_role_accounts` does not name, and signed with that role's key                                                                                         | Add the account if it is yours. The restrict example and the STS answer's `aws.assumedAccount` name it; see [Getting started](#getting-started)                                     |
 |                              | The request was signed with a key from a profile, `~/.aws/credentials` or `credential_process` rather than `AWS_ACCESS_KEY_ID`                                                                           | Put the key to check in `AWS_ACCESS_KEY_ID`, or run those commands in a step without the check                                                                                      |
 |                              | The key came from `GetSessionToken`, SAML or IAM Identity Center, which the proxy does not learn                                                                                                         | Get the credentials before the step and pass them in `AWS_ACCESS_KEY_ID`                                                                                                            |
 |                              | A presigned URL someone else signed, such as Lambda `GetFunction`'s `Code.Location` or a vendor's download link                                                                                          | Download it in a step without the check. `aws sts get-access-key-info --access-key-id <key-id>`, with the key ID from the URL's `X-Amz-Credential`, names the account it belongs to |

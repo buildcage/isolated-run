@@ -253,12 +253,17 @@ describe("the check with no role account", () => {
   const KEY_ONLY = { keyMapFile: "/rules/keys.map" };
   const rules = awsKeyRequestRules(KEY_ONLY, "restrict").join("\n");
 
-  it("learns no STS key, so it neither reads STS answers nor rewrites their Accept-Encoding", () => {
-    const response = awsKeyResponseRules(KEY_ONLY).join("\n");
-    expect(response.includes("res.body")).toBe(false);
-    expect(response.includes("aws_learn ")).toBe(false);
-    expect(rules.includes("Accept-Encoding")).toBe(false);
-    expect(rules.includes("aws_sts")).toBe(false);
+  it("learns no STS key, but still records the account an STS answer names", () => {
+    const response = awsKeyResponseRules(KEY_ONLY);
+    expect(response.some((l) => l.includes("set-map") && l.includes("aws_new_key"))).toBe(false);
+    expect(
+      response.includes(
+        "    http-response set-var(txn.aws_log_assumed) var(txn.aws_new_account) if aws_new_account",
+      ),
+    ).toBe(true);
+    expect(rules.includes("http-request set-header Accept-Encoding identity if aws_sts_host")).toBe(
+      true,
+    );
     expect(rules.includes("aws_fed")).toBe(false);
     expect(rules.includes("aws_role_account")).toBe(false);
   });
@@ -408,7 +413,7 @@ describe("the traffic record", () => {
 });
 
 describe("learning a key", () => {
-  it("learns only from an STS host that names no resource, after a request it let through", () => {
+  it("learns only from an STS host that names no resource, after a request it let through, but reads the account from any answer", () => {
     const rules = awsKeyRequestRules(CHECK, "audit").join("\n");
     expect(
       rules.includes("set-var(txn.aws_sts_host) bool(true) if aws_host !aws_resource_host"),
@@ -421,23 +426,18 @@ describe("learning a key", () => {
     // S3 takes a bucket named sts, whose host STS_HOST alone would match.
     expect(stsHost.test("sts.s3.amazonaws.com")).toBe(true);
     expect(resourceHost.test("sts.s3.amazonaws.com")).toBe(true);
-    const sts = awsKeyResponseRules(CHECK).filter(
-      (l) => l.includes(" if ") && !l.includes("aws_issued_key"),
-    );
-    for (const line of sts) {
-      // aws_new_account is set only under aws_learn.
-      expect(
-        line.includes(" if aws_learn ") ||
-          line.includes("aws_new_account_allowed") ||
-          line.endsWith(" if aws_new_account"),
-      ).toBe(true);
-    }
+    expect(rules.includes("set-var(txn.aws_sts_read) bool(true) if aws_sts_host\n")).toBe(true);
+    const response = awsKeyResponseRules(CHECK);
+    const line = (variable: string) => response.find((l) => l.includes(variable))!;
+    expect(line("set-var(txn.aws_new_key)").includes(" if aws_learn ")).toBe(true);
+    expect(line("%[var(txn.aws_new_key)]").includes(" if aws_learn ")).toBe(true);
+    expect(line("set-var(txn.aws_new_account)").includes(" if aws_sts_read ")).toBe(true);
   });
 
   it("adds a key only for a role in an allowed account, from an answer naming one key and role", () => {
     expect(
       awsKeyResponseRules(CHECK).includes(
-        "    http-response set-map(/rules/keys.map) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_new_key aws_new_account aws_new_account_allowed",
+        "    http-response set-map(/rules/keys.map) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_learn aws_new_key aws_new_account aws_new_account_allowed",
       ),
     ).toBe(true);
     expect(

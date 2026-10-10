@@ -86,7 +86,8 @@ echo "--- audit: let through, and noted ---"
 run_step audit \
   AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
   INPUT_PROXY_MODE="audit" \
-  INPUT_RUN="curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTATTACKER0001/x' https://sts.us-east-1.amazonaws.com/sts/same-account &&
+  INPUT_RUN="curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTSTARTKEY0001/x' https://sts.us-east-1.amazonaws.com/sts/other-account &&
+    curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTATTACKER0001/x' https://sts.us-east-1.amazonaws.com/sts/same-account &&
     curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTLEARNEDKEY01/x' https://cloudformation.us-east-1.amazonaws.com/"
 RUN_EXIT=$?
 if [ "$RUN_EXIT" = "0" ]; then
@@ -103,6 +104,14 @@ if grep -qE "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(rest
 else
   fail "an AssumeRole answer to a key restrict would refuse taught its key"
 fi
+assert_summary_contains "allowed_aws_role_accounts: |" "the restrict example lists the accounts one to a line"
+if grep -qE "^ +111111111111$" <<< "$SUMMARY"; then
+  pass "the restrict example names the account given, unmarked"
+else
+  fail "the restrict example does not name the account given on a line of its own"
+fi
+assert_summary_contains "999999999999 # assumed in this run, check it is yours" \
+  "the restrict example marks the account a role was assumed in"
 if grep -qF "restrict mode would refuse" "$TMPDIR/audit.log"; then
   pass "a warning counts the requests restrict would refuse"
 else
@@ -123,6 +132,25 @@ if [ "$RUN_EXIT" = "0" ]; then
 else
   fail "one or more key-only scenarios failed (exit $RUN_EXIT)"
 fi
+
+echo ""
+echo "--- aws_key_check alone, audited: every account a role was assumed in ---"
+run_step keyonlyaudit \
+  AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
+  INPUT_PROXY_MODE="audit" \
+  INPUT_ALLOWED_AWS_ROLE_ACCOUNTS="" \
+  INPUT_RUN="curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTSTARTKEY0001/x' https://sts.us-east-1.amazonaws.com/sts/same-account &&
+    curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTLEARNEDKEY01/x' https://sts.us-east-1.amazonaws.com/sts/other-account"
+RUN_EXIT=$?
+if [ "$RUN_EXIT" != "0" ]; then
+  fail "the key-only audit step failed (exit $RUN_EXIT)"
+  cat "$TMPDIR/keyonlyaudit.log"
+fi
+SUMMARY=$(cat "$TMPDIR/keyonlyaudit.md")
+assert_summary_contains "111111111111 # assumed in this run, check it is yours" \
+  "with no account named, the restrict example names the first role of a chain"
+assert_summary_contains "999999999999 # assumed in this run, check it is yours" \
+  "with no account named, the restrict example names the second role of a chain"
 
 echo ""
 echo "--- no key to start from ---"
