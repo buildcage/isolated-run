@@ -68528,7 +68528,7 @@ var Lines = class {
 	climbing = new Map();
 	bytes = 0;
 	nodes = 0;
-	stopped = !1;
+	stopped;
 	opts;
 	constructor(opts) {
 		this.opts = opts;
@@ -68552,8 +68552,8 @@ var Lines = class {
 				if (node = {
 					bytes: 0,
 					kept: this.isKept(parts, i + 1) || void 0
-				}, kids.set(parts[i], node), ++this.nodes > this.opts.nodes) return this.stop();
-				if (parent && (this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout)) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
+				}, kids.set(parts[i], node), this.nodes++, parent && (this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout)) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
+				if (this.nodes > this.opts.nodes) return this.stop("paths");
 			}
 			if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x, settled);
 			if (i === parts.length - 1) {
@@ -68584,15 +68584,18 @@ var Lines = class {
 		this.count(bytes - node.bytes), node.bytes = bytes;
 	}
 	count(bytes) {
-		this.bytes += bytes, this.bytes > this.opts.limit && this.stop();
+		this.bytes += bytes, this.bytes > this.opts.limit && this.stop("size");
 	}
-	stop() {
-		this.stopped = !0, this.trees = new Map(), this.climbing = new Map();
+	stop(cause) {
+		this.stopped = cause, this.trees = new Map(), this.climbing = new Map();
 	}
 	finish() {
 		if (this.stopped) return;
 		let out = [], bytes = 0;
-		for (let line of this.lines()) if (out.push(line), bytes += this.opts.rowBytes(line.path, line.comm), bytes > this.opts.limit) return;
+		for (let line of this.lines()) if (out.push(line), bytes += this.opts.rowBytes(line.path, line.comm), bytes > this.opts.limit) {
+			this.stopped = "size";
+			return;
+		}
 		return out;
 	}
 	*lines() {
@@ -68723,13 +68726,15 @@ function createAuditSummary(prefixes) {
 		observe,
 		add,
 		finish: () => {
-			let byPath = rows(paths.finish());
+			let byPath = rows(paths.finish()), log = byPath && rows(details.finish());
 			return {
 				ended,
 				lost,
 				executed: executed && [...executed].map(shown),
 				paths: byPath,
-				details: byPath && rows(details.finish())
+				details: log,
+				pathsCut: paths.stopped,
+				detailsCut: details.stopped
 			};
 		}
 	};
@@ -68741,7 +68746,7 @@ function inRecordingOrder(rows) {
 	});
 }
 function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote) {
-	let { ended, lost, executed, paths, details } = summary, heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
+	let { ended, lost, executed, paths, details, pathsCut, detailsCut } = summary, heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
 > some accesses are missing from this summary and from the artifact.`, frame = (text) => ({
 		priority: 0,
 		level: 1,
@@ -68750,12 +68755,12 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		cut: "keep"
 	});
 	if (details?.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
-	let blocks = [frame(`${heading}\n\n<sub>${legendNote ? `${LEGEND}<br>${legendNote}` : LEGEND}</sub>\n\n`)], table = (id, title, md) => md === void 0 ? {
+	let blocks = [frame(`${heading}\n\n<sub>${legendNote ? `${LEGEND}<br>${legendNote}` : LEGEND}</sub>\n\n`)], table = (id, title, md, cause) => md === void 0 ? {
 		id,
 		priority: priorities[id],
 		level: 2,
 		section: SECTION$1,
-		text: `#### ${title}\n\n${cutNote}`,
+		text: `#### ${title}\n\n${cutNote(cause)}`,
 		cut: "atomic"
 	} : {
 		id,
@@ -68771,7 +68776,7 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return ca - cb || (pa < pb ? -1 : +(pa > pb));
 	});
-	if (blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map((r) => [r.flags, pathCell(r)])))), !byPath) return blocks;
+	if (blocks.push(table(FILESYSTEM_BLOCK.paths, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map((r) => [r.flags, pathCell(r)])), pathsCut)), !byPath) return blocks;
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
@@ -68782,7 +68787,7 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		section: SECTION$1,
 		cut: "atomic",
 		open: DETAILS_OPEN,
-		text: cutNote,
+		text: cutNote(detailsCut),
 		close: DETAILS_CLOSE
 	}), blocks;
 	let rows = inRecordingOrder(details), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), columns = [
@@ -68820,8 +68825,9 @@ function unreadableSummaryBlocks() {
 function filesystemLegendNote(artifactName, guideUrl) {
 	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifactName ? `the full record is in the \`${artifactName}\` artifact` : "the full record could not be uploaded"} · [how to read this](${guideUrl})`;
 }
-function filesystemTruncationNote(artifactName) {
-	return `_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; ${artifactName ? `the ${artifactName} artifact uploaded for this run has every access` : "the recording could not be uploaded as an artifact, so the rest is not kept"}._\n\n`;
+function filesystemTruncationNote(artifactName, cause = "size") {
+	let rest = artifactName ? `the ${artifactName} artifact uploaded for this run has every access` : "the recording could not be uploaded as an artifact, so the rest is not kept";
+	return `_…truncated: ${cause === "paths" ? "the filesystem audit touched too many distinct paths to summarize" : "the filesystem audit exceeded GitHub's Job Summary size limit"}; ${rest}._\n\n`;
 }
 //#endregion
 //#region src/lib/filesystem-audit-strip.ts
@@ -69423,12 +69429,12 @@ async function prepareStepFilesystemAudit({ audit, retentionDays, containerName,
 		if (!reduced) return NONE;
 		let { summary, summaryError } = reduced;
 		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
-		let notice = filesystemTruncationNote(artifactName || void 0), guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`, legendNote = filesystemLegendNote(artifactName || void 0, guide);
+		let uploaded = artifactName || void 0, cutNote = (cause) => filesystemTruncationNote(uploaded, cause), notice = cutNote(), legendNote = filesystemLegendNote(uploaded, `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`);
 		return { blocks: (startedAt) => {
 			let rendered;
 			try {
 				if (!summary) throw summaryError;
-				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, notice, legendNote);
+				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, cutNote, legendNote);
 			} catch (e) {
 				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
 			}

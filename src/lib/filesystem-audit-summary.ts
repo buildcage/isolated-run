@@ -435,7 +435,8 @@ class Lines {
   private climbing = new Map<string, Agg>();
   private bytes = 0;
   private nodes = 0;
-  stopped = false;
+  /** Why it gave up, once it has. */
+  stopped: CutCause | undefined;
 
   private readonly opts: LinesOptions;
 
@@ -467,7 +468,7 @@ class Lines {
       if (!node) {
         node = { bytes: 0, kept: this.isKept(parts, i + 1) || undefined };
         kids.set(parts[i], node);
-        if (++this.nodes > this.opts.nodes) return this.stop();
+        this.nodes++;
         if (parent) {
           // No longer a leaf, its own line may be only the walk to this one.
           this.setBytes(parent, 0);
@@ -476,6 +477,8 @@ class Lines {
             return this.addFolded(parent, parts.slice(0, i), x, parentSettled);
           }
         }
+        // Only once a fold had its chance to bring the count back down.
+        if (this.nodes > this.opts.nodes) return this.stop("paths");
       }
       if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x, settled);
       if (i === parts.length - 1) {
@@ -533,11 +536,11 @@ class Lines {
 
   private count(bytes: number): void {
     this.bytes += bytes;
-    if (this.bytes > this.opts.limit) this.stop();
+    if (this.bytes > this.opts.limit) this.stop("size");
   }
 
-  private stop(): void {
-    this.stopped = true;
+  private stop(cause: CutCause): void {
+    this.stopped = cause;
     this.trees = new Map();
     this.climbing = new Map();
   }
@@ -550,7 +553,10 @@ class Lines {
     for (const line of this.lines()) {
       out.push(line);
       bytes += this.opts.rowBytes(line.path, line.comm);
-      if (bytes > this.opts.limit) return undefined;
+      if (bytes > this.opts.limit) {
+        this.stopped = "size";
+        return undefined;
+      }
     }
     return out;
   }
@@ -639,7 +645,16 @@ export interface AuditSummary {
   executed: Shown[] | undefined;
   paths: Row[] | undefined;
   details: Row[] | undefined;
+  /** Why the paths and the details were given up, where they were. */
+  pathsCut?: CutCause;
+  detailsCut?: CutCause;
 }
+
+/**
+ * Why a part was not printed: it would pass the Job Summary's size limit, or
+ * it held too many paths to fold.
+ */
+export type CutCause = "size" | "paths";
 
 // A process: its pid and how many forks and execs have handed that pid a new
 // one. Call once per record, in order.
@@ -808,13 +823,16 @@ export function createAuditSummary(prefixes: SummaryOptions): {
 
   const finish = (): AuditSummary => {
     const byPath = rows(paths.finish());
+    // A table too large to print leaves no room for the details either.
+    const log = byPath && rows(details.finish());
     return {
       ended,
       lost,
       executed: executed && [...executed].map(shown),
       paths: byPath,
-      // A table too large to print leaves no room for the details either.
-      details: byPath && rows(details.finish()),
+      details: log,
+      pathsCut: paths.stopped,
+      detailsCut: details.stopped,
     };
   };
   return { observe, add, finish };
@@ -843,10 +861,10 @@ export function renderAuditSummaryBlocks(
   summary: AuditSummary,
   startedAt: number | undefined,
   priorities: FilesystemPriorities,
-  cutNote: string,
+  cutNote: (cause?: CutCause) => string,
   legendNote?: string,
 ): SummaryBlock[] {
-  const { ended, lost, executed, paths, details } = summary;
+  const { ended, lost, executed, paths, details, pathsCut, detailsCut } = summary;
   const heading = ended && !lost ? HEADING : `${HEADING}\n\n${INCOMPLETE_NOTE}`;
   const frame = (text: string): SummaryBlock => ({
     priority: 0,
@@ -859,14 +877,19 @@ export function renderAuditSummaryBlocks(
 
   const legend = legendNote ? `${LEGEND}<br>${legendNote}` : LEGEND;
   const blocks: SummaryBlock[] = [frame(`${heading}\n\n<sub>${legend}</sub>\n\n`)];
-  const table = (id: FilesystemBlockId, title: string, md: string | undefined): SummaryBlock =>
+  const table = (
+    id: FilesystemBlockId,
+    title: string,
+    md: string | undefined,
+    cause?: CutCause,
+  ): SummaryBlock =>
     md === undefined
       ? {
           id,
           priority: priorities[id],
           level: 2,
           section: SECTION,
-          text: `#### ${title}\n\n${cutNote}`,
+          text: `#### ${title}\n\n${cutNote(cause)}`,
           cut: "atomic",
         }
       : {
@@ -910,6 +933,7 @@ export function renderAuditSummaryBlocks(
           ["Access", "Path"],
           byPath.map((r) => [r.flags, pathCell(r)]),
         ),
+      pathsCut,
     ),
   );
 
@@ -922,7 +946,7 @@ export function renderAuditSummaryBlocks(
       section: SECTION,
       cut: "atomic",
       open: DETAILS_OPEN,
-      text: cutNote,
+      text: cutNote(detailsCut),
       close: DETAILS_CLOSE,
     });
     return blocks;
@@ -980,7 +1004,7 @@ export function renderFilesystemAuditBlocks(
   jsonl: string,
   prefixes: SummaryOptions,
   priorities: FilesystemPriorities,
-  cutNote = filesystemTruncationNote(undefined),
+  cutNote = (cause?: CutCause) => filesystemTruncationNote(undefined, cause),
 ): SummaryBlock[] {
   const summary = createAuditSummary(prefixes);
   const records = jsonl.split("\n").map(parseLine);
@@ -1019,12 +1043,20 @@ export function filesystemLegendNote(artifactName: string | undefined, guideUrl:
 }
 
 /**
- * What the summary says where the Job Summary's size limit cut it: where the
- * rest is, or that it is nowhere when the artifact could not be uploaded.
+ * What the summary says where a part was left out, for its size or for
+ * holding too many paths: why, and where the rest is, or that it is nowhere
+ * when the artifact could not be uploaded.
  */
-export function filesystemTruncationNote(artifactName: string | undefined): string {
+export function filesystemTruncationNote(
+  artifactName: string | undefined,
+  cause: CutCause = "size",
+): string {
   const rest = artifactName
     ? `the ${artifactName} artifact uploaded for this run has every access`
     : "the recording could not be uploaded as an artifact, so the rest is not kept";
-  return `_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; ${rest}._\n\n`;
+  const why =
+    cause === "paths"
+      ? "the filesystem audit touched too many distinct paths to summarize"
+      : "the filesystem audit exceeded GitHub's Job Summary size limit";
+  return `_…truncated: ${why}; ${rest}._\n\n`;
 }

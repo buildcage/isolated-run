@@ -338,6 +338,9 @@ itself can do to the record, and what the record can be trusted for.
   communication log; [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the full
   order. What is cut is replaced by a note naming the artifact, which still holds every access, or
   saying the record was not kept when the upload failed.
+- **Distinct paths.** The accessed-paths table or the details is left out the same way, under a
+  note that says why, once its folded tree holds more than 200,000 files and directories, every
+  directory on the way counted, and each command's counted apart in the details.
 
 ### Skipped hooks
 

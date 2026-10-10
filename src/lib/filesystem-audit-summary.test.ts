@@ -1001,9 +1001,34 @@ describe("renderFilesystemAuditSummary: limits", () => {
     expect(section(md, "#### Accessed paths", "<details>")).toContain("| X | `/usr/bin/**` |");
   });
 
-  it("cuts a part whose unfolded paths outgrow the bound", () => {
+  it("cuts a part whose unfolded paths outgrow the bound, saying so", () => {
     const md = limited({ nodes: 5 }, ...tmpFiles(5));
-    expect(section(md, "#### Accessed paths", "<details>")).toContain(CUT);
+    expect(section(md, "#### Accessed paths")).toContain(
+      "_…truncated: the filesystem audit touched too many distinct paths to summarize; " +
+        "the recording could not be uploaded as an artifact, so the rest is not kept._",
+    );
+    expect(md).not.toContain(CUT);
+  });
+
+  it("folds before counting a new path against the bound", () => {
+    // "/", "x" and three files pass four, but the third file folds them.
+    const files = ["a", "b", "c"].map((f) => ({ kind: "write", comm: "c", path: `/x/${f}` }));
+    const md = limited({ nodes: 4 }, ...files);
+    expect(md).not.toContain("too many distinct paths");
+    expect(md).toContain("| W | `/x/**` |");
+  });
+
+  it("gives the details their own cause when only they outgrow the bound", () => {
+    // Each command has a tree of its own in the details, so they hold more paths.
+    const md = limited(
+      { nodes: 6 },
+      { kind: "read", comm: "a", path: "/x/f" },
+      { kind: "read", comm: "a", path: "/y/g" },
+      { kind: "read", comm: "b", path: "/x/f" },
+      { kind: "read", comm: "b", path: "/y/g" },
+    );
+    expect(section(md, "#### Accessed paths", "<details>")).toContain("`/x/f`");
+    expect(section(md, "<details>")).toContain("too many distinct paths to summarize");
   });
 
   it("counts the directories a walk does not explain once the lines are spelled out", () => {

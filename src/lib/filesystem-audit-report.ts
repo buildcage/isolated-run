@@ -30,6 +30,7 @@ import {
   renderAuditSummaryBlocks,
   unreadableSummaryBlocks,
   type AuditSummary,
+  type CutCause,
   type SummaryOptions,
 } from "./filesystem-audit-summary.ts";
 import type { FilesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
@@ -207,9 +208,11 @@ export async function prepareStepFilesystemAudit(
     if (reduced.written)
       artifactName =
         (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
-    const notice = filesystemTruncationNote(artifactName || undefined);
+    const uploaded = artifactName || undefined;
+    const cutNote = (cause?: CutCause): string => filesystemTruncationNote(uploaded, cause);
+    const notice = cutNote();
     const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`;
-    const legendNote = filesystemLegendNote(artifactName || undefined, guide);
+    const legendNote = filesystemLegendNote(uploaded, guide);
 
     // The summary and the upload are independent: a render failure must not
     // also drop the artifact, which is most wanted when the recording is
@@ -218,7 +221,13 @@ export async function prepareStepFilesystemAudit(
       let rendered: SummaryBlock[];
       try {
         if (!summary) throw summaryError;
-        rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, notice, legendNote);
+        rendered = deps.renderBlocks(
+          summary,
+          startedAt,
+          FILESYSTEM_PRIORITIES,
+          cutNote,
+          legendNote,
+        );
       } catch (e) {
         annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
         return [];
