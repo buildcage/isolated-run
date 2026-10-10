@@ -72,8 +72,8 @@ export function hostCannotAudit(reason: string): SandboxError {
 export const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2";
 
 /** Fails the step before the proxy starts on a host the tracer cannot watch.
- *  The kernel version and tracefs are left to the tracer: it tells the
- *  version by feature, and tracefs may be mounted where the runner cannot look. */
+ *  The kernel version and tracefs are left to the tracer, which checks the
+ *  kernel by feature and, as root, can see where tracefs is mounted. */
 export function checkFilesystemAuditHost(
   probes: Pick<HostProbes, "cgroupPath" | "kernelBtf"> = realHostProbes,
 ): void {
@@ -285,7 +285,7 @@ export async function startFilesystemAudit(
   }
   // A tracer that failed on its own names a problem a cancel would hide.
   const cancelled = !exited && cancel?.aborted;
-  // The tracer exits on what the host lacks; a timeout is more likely load.
+  // Only a tracer that exited points at the host; a timeout is more likely load.
   const failure = exited
     ? hostCannotAudit(child.reason() || "the tracer exited")
     : auditUnavailable("the tracer did not attach in time");

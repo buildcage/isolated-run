@@ -108,7 +108,7 @@ export interface HostProbes {
   realpath(path: string): string;
   /** This process's cgroup on a cgroup v2 host, undefined on any other. */
   cgroupPath(): string | undefined;
-  /** Whether the kernel exposes its own BTF, which fentry programs attach by. */
+  /** Whether the kernel exposes its BTF, which fentry programs need to attach. */
   kernelBtf(): boolean;
 }
 
@@ -178,8 +178,7 @@ export const realHostProbes: HostProbes = {
     const procCgroup = readOptionalFile("/proc/self/cgroup");
     return procCgroup === undefined ? undefined : parseCgroupV2Path(procCgroup);
   },
-  // Not a vmlinux file under /boot: that serves CO-RE, but attaching needs
-  // the BTF loaded in the kernel.
+  // A vmlinux file under /boot would do for CO-RE, not for attaching.
   kernelBtf: () => existsSync("/sys/kernel/btf/vmlinux"),
 };
 /* v8 ignore stop */
