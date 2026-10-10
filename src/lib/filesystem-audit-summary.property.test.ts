@@ -126,9 +126,14 @@ describe("renderFilesystemAuditSummary: properties", () => {
         const below = [...lines.values()].filter(
           (d) => d.comm === l.comm && base(d.path) !== lb && base(d.path).startsWith(prefix),
         );
-        const carried = new Set(below.flatMap((d) => d.flags));
+        // "R", "r" and "r!" all count as the action, and a refused line stays.
+        const actions = (flags: string[]): string[] => flags.map((f) => f[0].toUpperCase());
+        const carried = new Set(below.flatMap((d) => actions(d.flags)));
         const walked =
-          !l.path.endsWith("/**") && below.length > 0 && l.flags.every((c) => carried.has(c));
+          !l.path.endsWith("/**") &&
+          below.length > 0 &&
+          !l.flags.some((f) => f.endsWith("!")) &&
+          actions(l.flags).every((c) => carried.has(c));
         if (!walked) kept.add(k);
       }
       return kept;
@@ -151,7 +156,16 @@ describe("renderFilesystemAuditSummary: properties", () => {
         "…/t",
         "…/t/u",
       ),
-      flags: fc.subarray(["R", "W", "X", "M", "D", "A"]),
+      // Each action as a row can print it: absent, succeeded, only failed,
+      // refused, or succeeded and refused.
+      flags: fc
+        .tuple(
+          ...["R", "W", "X", "M", "D", "A"].map((c) => {
+            const l = c.toLowerCase();
+            return fc.constantFrom([], [c], [l], [`${l}!`], [c, `${l}!`]);
+          }),
+        )
+        .map((fs) => fs.flat()),
     });
     fc.assert(
       fc.property(fc.array(lineArb, { maxLength: 15 }), (ls) => {

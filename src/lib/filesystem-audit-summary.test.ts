@@ -337,6 +337,42 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["r node ./missing", "d! node /etc/x"]);
   });
 
+  it("keeps a refusal beside a success, and a plain failure only where nothing succeeded", () => {
+    const md = render(
+      { kind: "read", comm: "c", path: "/etc/passwd" },
+      { kind: "read", comm: "c", path: "/etc/hosts" },
+      { kind: "open-failed", comm: "c", path: "/etc/shadow", err: 13 },
+      { kind: "open-failed", comm: "c", path: "/etc/missing", err: 2 },
+      { kind: "write", comm: "c", path: "/etc/cron.d/evil" },
+    );
+    expect(lines(md)).toEqual(["RWr! c /etc/**"]);
+  });
+
+  it("keeps a refused directory open beside the reads below it", () => {
+    const md = render(
+      { kind: "open-failed", comm: "c", path: "/work/d", err: 13 },
+      { kind: "read", comm: "c", path: "/work/d/f" },
+    );
+    expect(lines(md)).toEqual(["r! c ./d", "R c ./d/f"]);
+  });
+
+  it("keeps a refused directory open even beside a refusal below it", () => {
+    const md = render(
+      { kind: "open-failed", comm: "c", path: "/work/d", err: 13 },
+      { kind: "open-failed", comm: "c", path: "/work/d/x", err: 13 },
+      { kind: "read", comm: "c", path: "/work/d/y" },
+    );
+    expect(lines(md)).toEqual(["r! c ./d", "r! c ./d/x", "R c ./d/y"]);
+  });
+
+  it("still drops a directory read whose only lines below are misses", () => {
+    const md = render(
+      { kind: "read", comm: "c", path: "/work/d" },
+      { kind: "open-failed", comm: "c", path: "/work/d/a.json", err: 2 },
+    );
+    expect(lines(md)).toEqual(["r c ./d/a.json"]);
+  });
+
   it("drops libraries, exec'd binaries and non-file targets from reads", () => {
     const md = render(
       { kind: "mmap", comm: "sh", path: "/usr/lib/libc.so", access: "x" },
@@ -684,6 +720,17 @@ describe("renderFilesystemAuditSummary", () => {
     expect(dropWalkedDirs(many, () => ["R"])).toEqual(many);
   });
 
+  it("drops a walked directory's line from printed flags, but not a refused one", () => {
+    const flags = new Map([
+      [keyOf("c", "/w/a"), ["r"]],
+      [keyOf("c", "/w/a/f"), ["R", "r!"]],
+      [keyOf("c", "/w/b"), ["r!"]],
+      [keyOf("c", "/w/b/f"), ["R", "r!"]],
+    ]);
+    const got = dropWalkedDirs(new Set(flags.keys()), (k) => flags.get(k)!);
+    expect(got).toEqual(new Set([keyOf("c", "/w/a/f"), keyOf("c", "/w/b"), keyOf("c", "/w/b/f")]));
+  });
+
   it("neither drops a climbing line nor credits it to the directories it names", () => {
     const got = dropWalkedDirs(new Set([keyOf("c", "/work/d"), keyOf("c", "/work/d/../x")]), () => [
       "R",
@@ -832,7 +879,7 @@ describe("renderFilesystemAuditSummary", () => {
         ),
         { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
       );
-      expect(md).toContain("| Access | Path |\n| --- | --- |\n| A | `.` |\n\n");
+      expect(md).toContain("| Access | Path |\n| --- | --- |\n| Aa! | `.` |\n\n");
     });
 
     it("keys a path once whether it was reached through the workspace's symlink or not", () => {

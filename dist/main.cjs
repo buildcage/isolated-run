@@ -68504,7 +68504,7 @@ function walkedNodes(top) {
 		}
 		let bits = 0;
 		for (let kid of node.kids?.values() ?? []) bits |= below.get(kid), kid.own && (bits |= flagBits(kid.own)), kid.folded && (bits |= flagBits(kid.folded));
-		below.set(node, bits), node.own && node.kids?.size && (flagBits(node.own) & ~bits) === 0 && walked.add(node);
+		below.set(node, bits), node.own && !node.own.perm && node.kids?.size && (flagBits(node.own) & ~bits) === 0 && walked.add(node);
 	}
 	return walked;
 }
@@ -68613,8 +68613,9 @@ var Lines = class {
 	}
 };
 function fmtFlags(a) {
-	let failed = a.failed & ~a.ok, out = "";
-	for (let c of ORDER) a.ok & BIT[c] ? out += c : failed & BIT[c] && (out += c.toLowerCase() + (a.perm & BIT[c] ? "!" : ""));
+	let out = "";
+	for (let c of ORDER) a.ok & BIT[c] && (out += c);
+	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
 	return out;
 }
 const HEADING = "### Filesystem audit", SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {

@@ -338,7 +338,9 @@ function walkedNodes(top: Map<string, Node>): Set<Node> {
       if (kid.folded) bits |= flagBits(kid.folded);
     }
     below.set(node, bits);
-    if (node.own && node.kids?.size && (flagBits(node.own) & ~bits) === 0) walked.add(node);
+    // A refused open of the directory is not how anything below it was reached.
+    if (node.own && !node.own.perm && node.kids?.size && (flagBits(node.own) & ~bits) === 0)
+      walked.add(node);
   }
   return walked;
 }
@@ -371,7 +373,8 @@ function* treeLines(top: Map<string, Node>): Generator<[string, Agg]> {
 
 /**
  * Drops each bare directory line whose flags the same command's lines below it
- * already carry: its read is only the walk that reached them.
+ * already carry: its read is only the walk that reached them. flagsOf yields
+ * each flag as a row prints it: "R", "r" or "r!".
  */
 export function dropWalkedDirs(
   lines: Set<string>,
@@ -397,7 +400,12 @@ export function dropWalkedDirs(
       kids = node.kids ??= new Map();
     }
     const agg = newAgg();
-    for (const c of flagsOf(l)) agg.ok |= BIT[c];
+    for (const flag of flagsOf(l)) {
+      const bit = BIT[flag[0].toUpperCase()];
+      if (flag[0] !== flag[0].toLowerCase()) agg.ok |= bit;
+      else agg.failed |= bit;
+      if (flag.endsWith("!")) agg.perm |= bit;
+    }
     if (folded) node!.folded = agg;
     else node!.own = agg;
     if (!folded) nodeOf.set(l, node!);
@@ -560,12 +568,14 @@ class Lines {
   }
 }
 
+// A refusal shows even beside a success, as one in a folded directory would
+// otherwise vanish into the reads of its siblings.
 function fmtFlags(a: Agg): string {
-  const failed = a.failed & ~a.ok;
   let out = "";
+  for (const c of ORDER) if (a.ok & BIT[c]) out += c;
   for (const c of ORDER) {
-    if (a.ok & BIT[c]) out += c;
-    else if (failed & BIT[c]) out += c.toLowerCase() + (a.perm & BIT[c] ? "!" : "");
+    if (a.perm & BIT[c]) out += `${c.toLowerCase()}!`;
+    else if (a.failed & ~a.ok & BIT[c]) out += c.toLowerCase();
   }
   return out;
 }
