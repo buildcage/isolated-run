@@ -44,14 +44,16 @@ A step passes the check when:
 
 With `aws_key_check` on, these are refused:
 
-- Amazon SimpleDB (`sdb`), which accepts only the older Signature Version 2, and the retired AWS
-  Import/Export.
-- Very old SDKs and hand-written clients that still sign with Signature Version 2 or 3.
-- Form calls over about 4 MiB, such as SES v1 `SendRawEmail` with large attachments. Use SES v2
-  (`sesv2`).
-- Compressed form calls, such as CloudWatch `PutMetricData` from older SDKs, which compress a body
-  over 10 KB. Set `AWS_DISABLE_REQUEST_COMPRESSION=true` for the step, or update the SDK.
-- S3 POST-policy uploads. Upload with `PutObject` or a presigned `PutObject` URL.
+- Amazon SimpleDB (`sdb`) and the retired AWS Import/Export, which take only an older way of
+  signing.
+- Very old SDKs and hand-written clients that still sign that older way.
+- Calls over about 4 MiB to APIs that take their parameters as a form, such as STS, IAM,
+  CloudFormation, SNS, EC2 and SES v1: SES v1 `SendRawEmail` with large attachments, for one. Use
+  SES v2 (`sesv2`).
+- The same calls compressed, such as CloudWatch `PutMetricData` from older SDKs, which compress a
+  body over 10 KB. Set `AWS_DISABLE_REQUEST_COMPRESSION=true` for the step, or update the SDK.
+- Uploads to S3 from an HTML form (a POST policy). Upload with `PutObject` or a presigned
+  `PutObject` URL.
 - Tokens that carry no AWS signature: Cognito user pool calls made without AWS credentials, Bedrock
   API keys, CloudWatch Logs ingestion tokens and the IAM Identity Center portal.
 - Keys the step switches to through `GetSessionToken`, SAML or IAM Identity Center, which the proxy
@@ -159,10 +161,8 @@ how many more there were:
 🚨 POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed) (+12 more)
 ```
 
-The traffic artifact has every one. If the section still has to be cut to fit the Job Summary, a
-warning annotation says so.
-
-The traffic artifact carries the same reason in `wouldRefuse`.
+The traffic artifact has every one, with the reason in `wouldRefuse`. If the section still has to
+be cut to fit the Job Summary, a warning annotation says so.
 
 With the check on, the report's **Switch to restrict mode** example includes
 `aws_key_check: true`, and `allowed_aws_role_accounts` with the accounts given and each account the
@@ -342,27 +342,6 @@ under `on.aws`, are left to the URL rules alone.
 The URL rules still decide first. A request they refuse stays `not-allowed`, and the key check only
 applies to requests they allow.
 
-What happens to a request that carries no AWS signature depends on whether the host names the
-resource it is for. On such a host, a `Bearer` or `Basic` token, such as ECR's or CodeArtifact's,
-counts as no signature, though a scheme starting with `AWS` does not. CodeCommit is the exception
-both ways: a `Basic` login to it that carries neither a known key nor an allowed account is
-`aws-key-not-allowed`, and a request to it with no `Authorization` at all, which Git sends first to
-be told to log in, is let through.
-
-| Request                                                                                                          | Result                       |
-| ---------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| Signed with a known key                                                                                          | allowed                      |
-| Signed with any other key                                                                                        | `aws-key-not-allowed`        |
-| Unsigned, to a host that names its resource or a public host (below)                                             | allowed                      |
-| Unsigned, to any other AWS API host, whatever the method                                                         | `aws-no-credential`          |
-| A CodeCommit `Basic` login with a known key, or a static Git credential of an allowed account                    | allowed                      |
-| A CodeCommit `Basic` login with any other key or account                                                         | `aws-key-not-allowed`        |
-| A CodeCommit request with no `Authorization`, as Git sends first                                                 | allowed                      |
-| More than one credential: two `Authorization` headers, a header and a query credential, or a credential repeated | `aws-ambiguous-credential`   |
-| A credential other than SigV4's or SigV4a's, or an S3 POST-policy upload (above)                                 | `aws-unsupported-credential` |
-| A form body the proxy cannot read through (above)                                                                | `aws-unreadable`             |
-| `AssumeRoleWithWebIdentity` for a role in an account not in `allowed_aws_role_accounts`                          | `aws-role-not-allowed`       |
-
 These hosts name the resource a request reaches, in the host name or, for S3's path style and an EKS
 OIDC issuer, in the path. The URL rules can pin the resource there, so an unsigned request to them is
 left to the URL rules:
@@ -393,9 +372,9 @@ the Price List Bulk API's files on `pricing.us-east-1.amazonaws.com` and
 Every other AWS API host names only a service and a region, such as `sts.us-east-1.amazonaws.com` or
 `sqs.us-east-1.amazonaws.com`. The account a request to one of those reaches is in its parameters or
 its body, where the proxy does not look, so an unsigned request there is refused, `GET` included,
-`AssumeRoleWithWebIdentity` excepted (below). A host missing from the lists above is treated the
-same way; if a legitimate request is refused for that reason, as `aws-no-credential` or, carrying a
-token, `aws-unsupported-credential`, report it.
+`AssumeRoleWithWebIdentity` excepted. A host missing from the lists above is treated the same way;
+if a legitimate request is refused for that reason, as `aws-no-credential` or, carrying a token,
+`aws-unsupported-credential`, report it.
 
 These hosts are only as narrow as the URL rules that allow them. A rule such as
 `* https://**.amazonaws.com/**` lets an unsigned request reach anyone's bucket, registry, cluster or
@@ -407,6 +386,31 @@ allowed_url_rules: |
   * https://111111111111.dkr.ecr.us-east-1.amazonaws.com/**
   GET|PUT https://my-artifacts.s3.us-east-1.amazonaws.com/**
 ```
+
+### Host and credential
+
+What the check does with a request the URL rules allowed, by the kind of host and the credential it
+carries:
+
+| Host                                                           | No credential              | `Bearer` or `Basic` token    | Signed with a [known key](#which-keys-pass) | Signed with another key | Other AWS credential         |
+| -------------------------------------------------------------- | -------------------------- | ---------------------------- | ------------------------------------------- | ----------------------- | ---------------------------- |
+| Serves every account, such as STS or CloudFormation            | `aws-no-credential`¹       | `aws-unsupported-credential` | allowed²                                    | `aws-key-not-allowed`   | `aws-unsupported-credential` |
+| A [public host](#which-hosts), such as `checkip.amazonaws.com` | allowed                    | `aws-unsupported-credential` | allowed²                                    | `aws-key-not-allowed`   | `aws-unsupported-credential` |
+| Names its resource, such as an S3 bucket or ECR                | allowed                    | allowed                      | allowed²                                    | `aws-key-not-allowed`   | `aws-unsupported-credential` |
+| CodeCommit                                                     | allowed, as Git asks first | see note 3                   | allowed²                                    | `aws-key-not-allowed`   | `aws-unsupported-credential` |
+
+"Signed" covers both the `Authorization` header and a presigned URL; "other AWS credential" is any
+of those [the proxy does not read](#which-credentials-it-reads). Whatever the host, a request
+carrying more than one credential is `aws-ambiguous-credential`. On a host that is not CodeCommit
+and does not name its resource, a form body the proxy cannot read through is `aws-unreadable`.
+
+1. `AssumeRoleWithWebIdentity` for a role in a listed account is allowed, and for one in any other
+   account is `aws-role-not-allowed`.
+2. A key ECR issued passes only as the credential of a presigned URL to S3, and is
+   `aws-key-not-allowed` anywhere else.
+3. A `Basic` login passes with a known key as its user name, as CodeCommit's credential helper sends
+   it, or with a static Git credential of a listed account, and is `aws-key-not-allowed` otherwise.
+   A `Bearer` token is `aws-unsupported-credential`.
 
 ### In the traffic artifact
 
