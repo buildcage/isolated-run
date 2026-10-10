@@ -192,6 +192,13 @@ jobs:
       - name: Leave a file and a directory in the workspace the step does not own
         run: sudo touch "$GITHUB_WORKSPACE/root-owned.txt" && sudo mkdir "$GITHUB_WORKSPACE/root-owned"
 
+      # Built outside the audited step, so the compile stays out of its record.
+      - name: Build a program that makes a 32-bit syscall
+        if: runner.arch == 'X64'
+        run: |
+          printf 'int main(void){long r;__asm__ volatile("int $0x80":"=a"(r):"a"(20L));return r < 0;}' |
+            gcc -x c -o "$GITHUB_WORKSPACE/int80" -
+
       - name: Run a step with filesystem_audit enabled
         id: audit
         uses: ./
@@ -286,8 +293,6 @@ jobs:
             # the calls the tracer reads, so seccomp kills the thread making it:
             # SIGSYS, 128+31.
             if [ "$(uname -m)" = x86_64 ]; then
-              printf 'int main(void){long r;__asm__ volatile("int $0x80":"=a"(r):"a"(20L));return r < 0;}' |
-                gcc -x c -o "$GITHUB_WORKSPACE/int80" -
               status=0
               "$GITHUB_WORKSPACE/int80" || status=$?
               if [ "$status" -ne 159 ]; then echo "::error::a 32-bit syscall ended with $status, not SIGSYS"; exit 1; fi
