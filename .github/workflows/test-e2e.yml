@@ -157,6 +157,10 @@ jobs:
       matrix:
         runner: [ubuntu-latest, ubuntu-24.04-arm]
         filesystem_mode: [persistent, ephemeral]
+        # 22.04 carries the oldest kernel GitHub-hosted runners ship (6.8), once per architecture.
+        include:
+          - { runner: ubuntu-22.04, filesystem_mode: persistent }
+          - { runner: ubuntu-22.04-arm, filesystem_mode: persistent }
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
