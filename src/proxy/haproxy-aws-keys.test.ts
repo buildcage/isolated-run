@@ -458,6 +458,7 @@ describe("a key ECR issues", () => {
       "111111111111.dkr.ecr.us-east-1.amazonaws.com",
       "111111111111.dkr.ecr-fips.us-east-1.amazonaws.com",
       "111111111111.dkr.ecr.cn-north-1.amazonaws.com.cn",
+      "111111111111.dkr-ecr.us-east-1.on.aws",
     ]) {
       expect(registry.test(host)).toBe(true);
     }
@@ -465,15 +466,18 @@ describe("a key ECR issues", () => {
       "api.ecr.us-east-1.amazonaws.com",
       "bucket.s3.us-east-1.amazonaws.com",
       "b123abcde4.execute-api.us-east-1.amazonaws.com",
+      "abcdefghij.lambda-url.us-east-1.on.aws",
     ]) {
       expect(registry.test(host)).toBe(false);
     }
     expect(
       request.includes(
-        `    http-request set-var(txn.aws_ecr_learn) bool(true) if aws_allowed { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
+        `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
       ),
     ).toBe(true);
-    for (const line of response.filter((l) => l.includes("set-var(txn.aws_issued_key)"))) {
+    const learning = response.filter((l) => l.includes("set-var(txn.aws_issued_key)"));
+    expect(learning.length).toBe(1);
+    for (const line of learning) {
       expect(
         line.includes(
           " if aws_ecr_learn { status 300:399 } { res.fhdr_cnt(location) eq 1 } !aws_location_many",
@@ -483,7 +487,7 @@ describe("a key ECR issues", () => {
   });
 
   it("reads the key ID from a Location's query credential", () => {
-    const credential = new RegExp(LOCATION_CREDENTIAL);
+    const credential = new RegExp(LOCATION_CREDENTIAL, "i");
     const key = (location: string) => location.replace(credential, "$2");
     const AS = "AS";
     const issued = `${AS}IATESTISSUEDKEY01`;
@@ -497,6 +501,7 @@ describe("a key ECR issues", () => {
         `https://b.s3.amazonaws.com/x?X-Amz-Credential=${issued}/20261010/us-east-1/s3/aws4_request`,
       ),
     ).toBe(issued);
+    expect(key(`https://b.s3.amazonaws.com/x?x-amz-credential=${issued}%2F20261010`)).toBe(issued);
     // Not a parameter of its own: left whole, which no key ID matches.
     const hidden = `https://b.s3.amazonaws.com/x?a=1%26X-Amz-Credential=${issued}%2F`;
     expect(key(hidden)).toBe(hidden);

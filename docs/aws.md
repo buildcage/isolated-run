@@ -98,12 +98,13 @@ The proxy knows three kinds of key:
   `web_identity_token_file`. A role in any other account issues a key the proxy never learns, so
   requests signed with it are refused. With no account named, no STS key is learned, and the proxy
   leaves STS answers alone.
-- **Keys ECR signs a layer's presigned URL with.** An ECR registry answers a layer download with a
-  redirect to a presigned S3 URL, signed with a key of ECR's own. The proxy reads that key from the
-  redirect's `Location`, which only ECR writes, and adds it whether or not any account is named, so
-  a registry client in the step, such as `crane`, `skopeo` or Jib, can follow the redirect. The key
-  passes only in a presigned URL to S3, as it was issued for. Whoever holds it cannot sign with it:
-  the secret stays with ECR.
+- **Keys ECR signs a layer's presigned URL with.** An ECR registry,
+  `<account>.dkr.ecr.<region>.amazonaws.com` or its dual-stack `<account>.dkr-ecr.<region>.on.aws`,
+  answers a layer download with a redirect to a presigned S3 URL, signed with a key of ECR's own.
+  The proxy reads that key from the redirect's `Location`, which only ECR writes, over HTTPS, and
+  adds it whether or not any account is named, so a registry client in the step, such as `crane`,
+  `skopeo` or Jib, can follow the redirect. The key passes only as the credential of a presigned URL
+  to S3. Whoever holds its ID cannot sign with it: the secret stays with ECR.
 
 AWS API hosts are names under `amazonaws.com`, `amazonaws.com.cn` and `amazonaws.eu` (the European
 Sovereign Cloud), and under their dual-stack counterparts `api.aws`, `api.amazonwebservices.com.cn`
@@ -207,10 +208,10 @@ With `aws_key_check` on, these are refused:
 - Keys the step switches to through `GetSessionToken`, SAML or IAM Identity Center, which the proxy
   does not learn.
 - Presigned URLs someone else signed that reach the step other than through an ECR registry's
-  redirect: the `Code.Location` of Lambda `GetFunction`, a URL from ECR's `GetDownloadUrlForLayer`,
-  or a vendor's download link. They are refused as `aws-key-not-allowed`. The report shows the URL,
-  and its `X-Amz-Credential` the key ID; `aws sts get-access-key-info --access-key-id <key-id>`
-  names the account it belongs to. Download them in a step of their own without the check.
+  redirect, such as the `Code.Location` of Lambda `GetFunction` or a vendor's download link. They
+  are refused as `aws-key-not-allowed`. The report shows the URL, and its `X-Amz-Credential` the key
+  ID; `aws sts get-access-key-info --access-key-id <key-id>` names the account it belongs to.
+  Download them in a step of their own without the check.
 
 Two of these come up often in CI.
 
@@ -328,11 +329,11 @@ use one:
   IAM Identity Center's `GetRoleCredentials` or Cognito's `GetCredentialsForIdentity` are never
   learned. Get those credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
 - Keys are learned only from STS answers and ECR registry redirects over HTTPS, to a request the key
-  check allowed, so in audit mode a request it would refuse teaches no key. A host that names a resource is never taken
-  for STS, even an S3 bucket named `sts`. The proxy asks STS for an uncompressed answer, unless the
-  client signed its own `Accept-Encoding`, which the proxy then leaves alone. It reads an answer up
-  to its buffer size (16 KB). A key in a compressed answer or past the buffer is not learned, and
-  requests signed with it are refused.
+  check did not refuse, so in audit mode a request it would refuse teaches no key. A host that names
+  a resource is never taken for STS, even an S3 bucket named `sts`. The proxy asks STS for an
+  uncompressed answer, unless the client signed its own `Accept-Encoding`, which the proxy then
+  leaves alone. It reads an answer up to its buffer size (16 KB). A key in a compressed answer or
+  past the buffer is not learned, and requests signed with it are refused.
 - A connection `allowed_tls_rules` or `allowed_ip_rules` passes through is never decrypted, so the
   check never sees its requests. Do not pass AWS API hosts through.
 - S3 Express One Zone directory buckets are signed with keys `CreateSession` issues, which the proxy

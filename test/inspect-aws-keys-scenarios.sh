@@ -180,11 +180,10 @@ check_status "AssumeRole for a role in another account" \
 check_status "the key that one issued" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTFOREIGNKEY01)" $CF)" "403"
 
 echo "=== [a key ECR issued for a layer's presigned URL] ==="
-LAYER=https://prod-us-east-1-starport-layer-bucket.s3.us-east-1.amazonaws.com/layer
+LAYER=https://prod-us-east-1-starport-layer-bucket.s3.amazonaws.com/layer
 presigned() { echo "$1?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=${ASIA}TESTISSUEDKEY01%2F20261010%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=ab"; }
 check_status "unknown until a registry redirects to it" "$($C "$(presigned $LAYER)")" "403"
-check_status "the same redirect from an API Gateway host" \
-  "$($C https://b123abcde4.execute-api.us-east-1.amazonaws.com/v2/app/blobs/sha256:abc)" "307"
+check_status "the same redirect from a bucket" "$($C https://bucket.s3.amazonaws.com/v2/app/blobs/sha256:abc)" "307"
 check_status "the key in it, still unknown" "$($C "$(presigned $LAYER)")" "403"
 check_status "a layer download from a registry" \
   "$($C -H "Authorization: Bearer registry-token" https://111111111111.dkr.ecr.us-east-1.amazonaws.com/v2/app/blobs/sha256:abc)" "307"

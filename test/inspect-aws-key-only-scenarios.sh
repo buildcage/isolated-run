@@ -30,7 +30,7 @@ check_status "AssumeRole for a role in the start key's account" \
   "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" $STS/sts/same-account)" "200"
 check_status "the key it issued, learned by no role account" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTLEARNEDKEY01)" $CF)" "403"
 
-LAYER="https://prod-us-east-1-starport-layer-bucket.s3.us-east-1.amazonaws.com/layer?X-Amz-Credential=${ASIA}TESTISSUEDKEY01%2F20261010%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=ab"
+LAYER="https://prod-us-east-1-starport-layer-bucket.s3.amazonaws.com/layer?X-Amz-Credential=${ASIA}TESTISSUEDKEY01%2F20261010%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=ab"
 check_status "a layer download from a registry" \
   "$($C https://111111111111.dkr.ecr.us-east-1.amazonaws.com/v2/app/blobs/sha256:abc)" "307"
 check_status "the presigned URL it redirected to, learned with no role account" "$($C "$LAYER")" "200"
