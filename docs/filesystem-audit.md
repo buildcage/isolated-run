@@ -89,10 +89,10 @@ was uploaded, and without the `if:`, `download-artifact` would then download eve
 run.
 
 `filesystem_audit_retention_days` sets how long the artifact is kept; empty uses the repository's
-default, and a value above the repository's maximum is lowered to it, with a warning. It is checked
-even when nothing is uploaded. The artifact names each program the step ran but not its arguments,
-which can carry secrets. It still holds every path the step touched, including the names of files
-it only tried to open, so treat it as sensitive, like the traffic artifact.
+default, and a value above the repository's maximum is lowered to it, with a warning. The value is
+checked even when nothing is uploaded. The artifact names each program the step ran but not its
+arguments, which can carry secrets. It still holds every path the step touched, including the names
+of files it only tried to open, so treat it as sensitive, like the traffic artifact.
 
 ## Reading the summary
 

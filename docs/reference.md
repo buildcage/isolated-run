@@ -46,8 +46,9 @@ details.
 | `upload_traffic_artifact`          | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                                                                                                                                                                  |
 | `traffic_artifact_retention_days`  | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default, and a value above the repository's maximum is lowered to it, with a warning                                                                                             |
 
-`fail_on_blocked`, `fail_on_ca_residue`, `upload_traffic_artifact`, `upload_filesystem_audit_artifact`
-and `aws_key_check` take `true` or `false`, `filesystem_mode` `persistent` or `ephemeral`, `filesystem_audit` `off` or `record`, and
+`fail_on_blocked`, `fail_on_ca_residue`, `upload_traffic_artifact`,
+`upload_filesystem_audit_artifact` and `aws_key_check` take `true` or `false`, `filesystem_mode`
+`persistent` or `ephemeral`, `filesystem_audit` `off` or `record`, and
 `traffic_artifact_retention_days` and `filesystem_audit_retention_days` a whole number above zero.
 Left empty, each takes its default; any other value fails the step before the sandbox is set up.
 

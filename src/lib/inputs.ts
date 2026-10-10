@@ -148,10 +148,16 @@ export function readFilesystemAuditInput(getInput: GetInput = core.getInput): Fi
   return resolveFilesystemAudit(getInput("filesystem_audit"));
 }
 
+export interface FilesystemAuditArtifactInputs {
+  upload: boolean;
+  /** Undefined leaves the retention to the repository's own default. */
+  retentionDays?: number;
+}
+
 /**
  * Whether to upload the record, off unless asked for as the traffic artifact
- * is, and how long to keep it, undefined leaving the repository default. The
- * retention is checked even when nothing is uploaded, as the traffic one is.
+ * is, and how long to keep it. The retention is checked even when nothing is
+ * uploaded, as the traffic one is.
  */
 export function readFilesystemAuditArtifactInputs(
   getInput: GetInput = core.getInput,
@@ -168,11 +174,6 @@ export function readFilesystemAuditArtifactInputs(
     upload: readBooleanInput("upload_filesystem_audit_artifact", false, getInput),
     retentionDays: days === "" ? undefined : Number(days),
   };
-}
-
-export interface FilesystemAuditArtifactInputs {
-  upload: boolean;
-  retentionDays?: number;
 }
 
 /** The optional `label:`, which only titles the report heading. */

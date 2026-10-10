@@ -307,6 +307,7 @@ describe("prepareStepFilesystemAudit", () => {
       summaries,
       uploads,
       outputs,
+      writes,
     } = deps({
       renderBlocks: (summary, startedAt, priorities, cutNote, legendNote) => {
         notes.push(cutNote());
@@ -325,6 +326,7 @@ describe("prepareStepFilesystemAudit", () => {
       d,
     );
 
+    expect(writes).toEqual([]);
     expect(uploads).toEqual([]);
     expect(outputs).toEqual([""]);
     expect(summaries[0]).toContain(

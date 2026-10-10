@@ -683,7 +683,7 @@ when nothing of it fits; the example is always replaced whole rather than printe
 table or the 🚨 list is cut, the timeline is left out with it, under that one note. The report is
 written to the Job Summary only, so what was cut is recovered from the [traffic
 artifact](./docs/reference.md#traffic-artifact), or the filesystem audit's own artifact for its
-section, and nowhere else when neither was uploaded.
+section; when neither was uploaded, it is not kept anywhere.
 
 ## FAQ
 

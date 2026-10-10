@@ -206,14 +206,14 @@ export async function prepareStepFilesystemAudit(
     const cleanPath = audit.stepPath;
     let reduced: Reduced | undefined;
     try {
-      reduced = reduce(audit.outPath, cleanPath, options, annotation, deps);
+      reduced = reduce(audit.outPath, upload ? cleanPath : undefined, options, annotation, deps);
     } catch (e) {
       annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
       return { blocks: () => unreadableSummaryBlocks() };
     }
     if (!reduced) return NONE;
     const { summary, summaryError } = reduced;
-    if (reduced.written && upload)
+    if (reduced.written)
       artifactName =
         (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
     const uploaded: RecordArtifact = !upload
@@ -280,7 +280,8 @@ interface Reduced {
 // on its own, so it never costs the artifact.
 function reduce(
   outPath: string,
-  cleanPath: string,
+  /** Where to write the stripped copy to upload; undefined writes none. */
+  cleanPath: string | undefined,
   options: SummaryOptions,
   annotation: Annotation,
   deps: FilesystemAuditReportDeps,
@@ -331,7 +332,7 @@ function reduce(
     }
   };
   try {
-    writer = deps.openWriter(cleanPath);
+    if (cleanPath !== undefined) writer = deps.openWriter(cleanPath);
   } catch (e) {
     dropCopy(e);
   }

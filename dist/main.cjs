@@ -69429,13 +69429,13 @@ async function prepareStepFilesystemAudit({ audit, upload, retentionDays, contai
 			home: prefixes(env.HOME, deps.realpath)
 		}, cleanPath = audit.stepPath, reduced;
 		try {
-			reduced = reduce(audit.outPath, cleanPath, options, annotation, deps);
+			reduced = reduce(audit.outPath, upload ? cleanPath : void 0, options, annotation, deps);
 		} catch (e) {
 			return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), { blocks: () => unreadableSummaryBlocks() };
 		}
 		if (!reduced) return NONE;
 		let { summary, summaryError } = reduced;
-		reduced.written && upload && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
+		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
 		let uploaded = upload ? artifactName ? { name: artifactName } : "upload-failed" : "not-requested", cutNote = (cause) => filesystemTruncationNote(uploaded, cause), notice = cutNote(), legendNote = filesystemLegendNote(uploaded, `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`);
 		return { blocks: (startedAt) => {
 			let rendered;
@@ -69484,7 +69484,7 @@ function reduce(outPath, cleanPath, options, annotation, deps) {
 		} catch {}
 	};
 	try {
-		writer = deps.openWriter(cleanPath);
+		cleanPath !== void 0 && (writer = deps.openWriter(cleanPath));
 	} catch (e) {
 		dropCopy(e);
 	}
