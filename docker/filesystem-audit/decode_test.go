@@ -227,6 +227,31 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "rename", Comm: "mv", Path: "/a", To: "/b", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
+			name: "failed mkdir on a read-only mount",
+			ev:   event{kind: 26, comm: "mkdir", pathRet: int32(unix.EROFS), data: []byte("/opt/x\x00")},
+			want: record{Kind: "mkdir", Comm: "mkdir", Path: "/opt/x", Err: int32(unix.EROFS), Failed: true},
+		},
+		{
+			name: "failed mknod",
+			ev:   event{kind: 27, comm: "mkfifo", pathRet: int32(unix.EROFS), data: []byte("/opt/p\x00")},
+			want: record{Kind: "mknod", Comm: "mkfifo", Path: "/opt/p", Err: int32(unix.EROFS), Failed: true},
+		},
+		{
+			name: "failed symlink, by the link's name",
+			ev:   event{kind: 28, comm: "ln", pathRet: int32(unix.EROFS), data: []byte("/usr/local/bin/foo\x00")},
+			want: record{Kind: "symlink", Comm: "ln", Path: "/usr/local/bin/foo", Err: int32(unix.EROFS), Failed: true},
+		},
+		{
+			name: "failed truncate",
+			ev:   event{kind: 30, comm: "sh", pathRet: int32(unix.EROFS), data: []byte("/etc/hosts\x00")},
+			want: record{Kind: "truncate", Comm: "sh", Path: "/etc/hosts", Err: int32(unix.EROFS), Failed: true},
+		},
+		{
+			name: "failed link, old name to new",
+			ev:   event{kind: 29, comm: "ln", pathRet: int32(unix.EROFS), n1: 1, data: []byte("/a\x00/b\x00")},
+			want: record{Kind: "link", Comm: "ln", Path: "/a", To: "/b", Err: int32(unix.EROFS), Failed: true},
+		},
+		{
 			name: "fork",
 			ev:   event{kind: 22, pid: 9, ppid: 7, comm: "bash"},
 			want: record{Kind: "fork", PID: 9, PPID: 7, Comm: "bash"},

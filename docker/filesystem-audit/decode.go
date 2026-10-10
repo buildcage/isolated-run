@@ -118,7 +118,7 @@ func (n rawName) MarshalJSON() ([]byte, error) {
 
 // kindNames maps the kind field of struct event to a name. A failed operation
 // decodes to the name of the one that succeeded, with Failed set: the kinds
-// only a failure has (12, 16-19, 21, 25), and any path change the kernel
+// only a failure has (12, 16-19, 21, 25-30), and any path change the kernel
 // refused after its hook saw it.
 var kindNames = map[uint32]string{
 	1: "open", 2: "exec", 3: "unlink", 4: "rmdir", 5: "rename", 6: "mkdir",
@@ -126,6 +126,7 @@ var kindNames = map[uint32]string{
 	12: "open", 13: "read", 14: "write", 15: "mmap",
 	16: "unlink", 17: "rename", 18: "chmod", 19: "chown", 20: "attr", 21: "attr",
 	22: "fork", 23: "exec-file", 24: "mknod", 25: "rmdir",
+	26: "mkdir", 27: "mknod", 28: "symlink", 29: "link", 30: "truncate",
 }
 
 // Mirrors the fixed header of struct event in bpf/filesystem_audit.bpf.c:
@@ -368,11 +369,11 @@ func decode(raw []byte) (record, error) {
 		r.To, _ = components(rest, n2, truncated2)
 		applyMarks(&r, marks, false) // only a link's source is marked
 		r.Exchange = kind == 5 && flags&unix.RENAME_EXCHANGE != 0
-	case 16, 18, 19, 25: // failed unlink / chmod / chown / rmdir
+	case 16, 18, 19, 25, 26, 27, 28, 30: // a failed change to one name
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
-	case 17: // failed rename
+	case 17, 29: // a failed rename or link: from one name to another
 		// n1 == 1 marks a second name after the first; both come before the
 		// base directories.
 		name := cstr(data)
