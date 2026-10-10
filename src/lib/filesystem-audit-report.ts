@@ -17,6 +17,7 @@ import {
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 
+import { failOrWarn } from "./fail-or-warn.ts";
 import {
   setFilesystemAuditOutput,
   uploadFilesystemAuditArtifact,
@@ -34,7 +35,6 @@ import {
   type SummaryOptions,
 } from "./filesystem-audit-summary.ts";
 import type { FilesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
-import { failOrWarn } from "./step-report.ts";
 import { FILESYSTEM_PRIORITIES } from "./summary-priorities.ts";
 
 export interface FilesystemAuditReportOptions {
@@ -247,10 +247,11 @@ export async function prepareStepFilesystemAudit(
     try {
       deps.setOutput(artifactName);
     } catch (e) {
-      // The command may have written a name of its own there and locked the file.
+      // The command may have written a name of its own there and locked the
+      // file, which matters only where the audit was on.
       failOrWarn(
         annotation,
-        failClosed,
+        failClosed && audit !== undefined,
       )(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
     }
   }
