@@ -314,8 +314,11 @@ describe("startFilesystemAudit", () => {
     const exec = vi.fn();
     const remove = vi.fn();
     let tail = '{"kind":"open"}\n';
-    const sleep = vi.fn(async () => {
+    // The detach grace never runs out here.
+    const sleep = vi.fn((ms: number) => {
+      if (ms > 1_000) return new Promise<void>(() => {});
       tail += '{"kind":"end","dropped":0,"untracked":0,"host_missed":0}\n';
+      return Promise.resolve();
     });
 
     const handle = await startFilesystemAudit(START_OPTIONS, {
@@ -328,13 +331,68 @@ describe("startFilesystemAudit", () => {
     });
     await handle.stop();
 
-    expect(sleep).toHaveBeenCalledTimes(1);
-    expect(exec).not.toHaveBeenCalled();
+    expect(sleep.mock.calls).toStrictEqual([[100], [10_000]]);
     expect(remove).not.toHaveBeenCalled();
     resolveExit!();
-    await exited;
-    await Promise.resolve();
-    expect(remove).toHaveBeenCalledWith(START_OPTIONS.pidFilePath);
+    await vi.waitFor(() => expect(remove).toHaveBeenCalledWith(START_OPTIONS.pidFilePath));
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("kills a tracer that does not exit within 10 seconds of finishing its record", async () => {
+    let resolveExit: () => void;
+    const exited = new Promise<void>((r) => {
+      resolveExit = r;
+    });
+    const exec = vi.fn(() => {
+      resolveExit();
+      return "";
+    });
+    const remove = vi.fn(() => {
+      throw new Error("EBUSY"); // left to the post step
+    });
+
+    const handle = await startFilesystemAudit(START_OPTIONS, {
+      spawn: () => ({ exited, kill: vi.fn(), reason: () => "" }),
+      exists: () => true,
+      sleep: async () => {},
+      remove,
+      exec,
+      readFile: () => "999\n",
+      readTail: () => '{"kind":"end","dropped":0,"untracked":0,"host_missed":0}\n',
+    });
+    await handle.stop();
+
+    await vi.waitFor(() => expect(remove).toHaveBeenCalled());
+    expect(exec).toHaveBeenCalledWith("sudo", ["-n", "kill", "-KILL", "999"]);
+  });
+
+  it("cuts a long wait short when the step is cancelled during it", async () => {
+    let resolveExit: () => void;
+    const exited = new Promise<void>((r) => {
+      resolveExit = r;
+    });
+    const cancel = new AbortController();
+    let waits = 0;
+    const handle = await startFilesystemAudit(
+      { ...START_OPTIONS, cancel: cancel.signal },
+      {
+        spawn: () => ({ exited, kill: vi.fn(), reason: () => "" }),
+        exists: () => true,
+        sleep: async () => {
+          if (++waits === 50) cancel.abort(); // 5 seconds in
+        },
+        remove: vi.fn(),
+        exec: () => {
+          resolveExit();
+          return "";
+        },
+        readFile: () => "999\n",
+        readTail: () => "",
+      },
+    );
+    await handle.stop();
+
+    expect(waits).toBe(50);
   });
 
   it("gives a tracer 30 seconds to finish its record, and 2 once the step is cancelled", async () => {

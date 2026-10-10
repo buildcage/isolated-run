@@ -31,6 +31,9 @@ const READY_TRIES = 300;
  *  is cancelled, or for a tracer that never attached. */
 const STOP_GRACE_MS = 30_000;
 const SHORT_STOP_GRACE_MS = 2_000;
+/** How long a tracer whose record is whole has to detach its probes, which
+ *  takes the kernel a few seconds, before it is killed after all. */
+const DETACH_GRACE_MS = 10_000;
 /** The tracer's last line, written once every access it caught is. */
 const END_LINE = /"kind":"end"[^\n]*\n$/;
 /** How the tracer starts the line naming why it exited (see its main.go). */
@@ -298,34 +301,43 @@ export async function startFilesystemAudit(
   });
   // sudo relays SIGTERM to the tracer for a clean flush. Once its end line is
   // written the record is whole, and the seconds the kernel takes to detach
-  // its probes are left to it, so it can remove its cgroup. One that writes
-  // neither in time is SIGKILLed itself: SIGKILL to the sudo wrapper would not
+  // its probes are left to it, so it can remove its cgroup. One that neither
+  // writes it nor exits in time is SIGKILLed itself: SIGKILL to the sudo wrapper would not
   // reach it. Removing the pidfile once it is gone tells the post step the
   // tracer is stopped, so it only acts on one a cancel orphaned.
-  const halt = async (graceMs: number) => {
+  const kill = () => {
+    try {
+      const pid = Number(readFile(pidFilePath).trim()); // NaN for a junk pidfile
+      if (pid > 0) exec("sudo", ["-n", "kill", "-KILL", String(pid)]);
+    } catch {
+      // The tracer is already gone, or its pidfile cannot be read.
+    }
+  };
+  // untilRecorded: return once the record is whole rather than once the
+  // tracer has gone, which a tracer that never attached has no record for.
+  const halt = async (untilRecorded: boolean) => {
     child.kill("SIGTERM");
-    let complete = false;
-    for (let waited = 0; !exited && waited < graceMs; waited += READY_POLL_MS) {
-      complete = recordComplete(readTail, outPath);
-      if (complete) break;
+    // Read each round, so a cancel that comes while waiting cuts the wait.
+    const grace = () => (untilRecorded && !cancel?.aborted ? STOP_GRACE_MS : SHORT_STOP_GRACE_MS);
+    for (let waited = 0; !exited; waited += READY_POLL_MS) {
+      if (untilRecorded && recordComplete(readTail, outPath)) {
+        void Promise.race([child.exited, sleep(DETACH_GRACE_MS)])
+          .then(() => {
+            if (!exited) kill();
+            return child.exited;
+          })
+          .then(() => remove(pidFilePath))
+          .catch(() => {}); // the post step removes a pidfile left behind
+        return;
+      }
+      if (waited >= grace()) break;
       await sleep(READY_POLL_MS);
     }
-    if (complete && !exited) {
-      void child.exited.then(() => remove(pidFilePath));
-      return;
-    }
-    if (!exited) {
-      try {
-        const pid = Number(readFile(pidFilePath).trim()); // NaN for a junk pidfile
-        if (pid > 0) exec("sudo", ["-n", "kill", "-KILL", String(pid)]);
-      } catch {
-        // The tracer is already gone, or its pidfile cannot be read.
-      }
-    }
+    if (!exited) kill();
     await child.exited;
     remove(pidFilePath);
   };
-  const stop = () => halt(cancel?.aborted ? SHORT_STOP_GRACE_MS : STOP_GRACE_MS);
+  const stop = () => halt(true);
   for (let i = 0; i < READY_TRIES; i++) {
     if (cancel?.aborted) break;
     if (exists(readyPath)) return { stop };
@@ -338,7 +350,7 @@ export async function startFilesystemAudit(
   const failure = exited
     ? hostCannotAudit(child.reason() || "the tracer exited")
     : auditUnavailable("the tracer did not attach in time");
-  await halt(SHORT_STOP_GRACE_MS);
+  await halt(false);
   // A tracer that attached just too late may have created the recording; the
   // report would otherwise read it as one cut short.
   remove(outPath);

@@ -71036,7 +71036,7 @@ const realHostProbes = {
 		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
 	},
 	kernelBtf: () => (0, node_fs.existsSync)("/sys/kernel/btf/vmlinux")
-}, SHORT_STOP_GRACE_MS = 2e3, END_LINE = /"kind":"end"[^\n]*\n$/;
+}, END_LINE = /"kind":"end"[^\n]*\n$/;
 function filesystemAuditPaths(containerName, scratchBase) {
 	let suffix = containerName.split("-").at(-1);
 	return {
@@ -71151,15 +71151,8 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 	child.exited.then(() => {
 		exited = !0;
 	});
-	let halt = async (graceMs) => {
-		child.kill("SIGTERM");
-		let complete = !1;
-		for (let waited = 0; !exited && waited < graceMs && (complete = recordComplete(readTail, outPath), !complete); waited += 100) await sleep(100);
-		if (complete && !exited) {
-			child.exited.then(() => remove(pidFilePath));
-			return;
-		}
-		if (!exited) try {
+	let kill = () => {
+		try {
 			let pid = Number(readFile(pidFilePath).trim());
 			pid > 0 && exec("sudo", [
 				"-n",
@@ -71168,15 +71161,26 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 				String(pid)
 			]);
 		} catch {}
-		await child.exited, remove(pidFilePath);
-	}, stop = () => halt(cancel?.aborted ? SHORT_STOP_GRACE_MS : 3e4);
+	}, halt = async (untilRecorded) => {
+		child.kill("SIGTERM");
+		let grace = () => untilRecorded && !cancel?.aborted ? 3e4 : 2e3;
+		for (let waited = 0; !exited; waited += 100) {
+			if (untilRecorded && recordComplete(readTail, outPath)) {
+				Promise.race([child.exited, sleep(1e4)]).then(() => (exited || kill(), child.exited)).then(() => remove(pidFilePath)).catch(() => {});
+				return;
+			}
+			if (waited >= grace()) break;
+			await sleep(100);
+		}
+		exited || kill(), await child.exited, remove(pidFilePath);
+	}, stop = () => halt(!0);
 	for (let i = 0; i < 300 && !cancel?.aborted; i++) {
 		if (exists(readyPath)) return { stop };
 		if (exited) break;
 		await sleep(100);
 	}
 	let cancelled = !exited && cancel?.aborted, failure = exited ? hostCannotAudit(child.reason() || "the tracer exited") : auditUnavailable("the tracer did not attach in time");
-	throw await halt(SHORT_STOP_GRACE_MS), remove(outPath), cancelled ? cancelledBeforeRun() : failure;
+	throw await halt(!1), remove(outPath), cancelled ? cancelledBeforeRun() : failure;
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
