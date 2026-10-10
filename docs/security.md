@@ -461,10 +461,12 @@ origin; only the log line reflects the host-only nature of that decision. See
 more than intended.
 
 An allowed AWS API host serves every AWS account, so a step can sign requests to it with a key of its
-own and have AWS record what it sends in that account's CloudTrail. `aws_key_check` refuses a request
-signed with any key but the step's own and those STS issues for roles in `allowed_aws_role_accounts`.
-It cannot see which account a request's resource belongs to, so IAM has to close the rest; see
-[AWS access key check](./aws.md).
+own and have AWS record what it sends in that account's CloudTrail. `aws_key_check` lets through only
+the step's own key, keys STS issues for roles in `allowed_aws_role_accounts`, keys ECR signs a
+presigned S3 URL with, and CodeCommit Git credentials of those accounts. An unsigned request is
+refused unless its host names the resource it is for, such as an S3 bucket, where the URL rules
+decide. The check cannot see which account a request's resource belongs to, so IAM has to close the
+rest; see [AWS access key check](./aws.md).
 
 #### The CA and its private key
 

@@ -280,8 +280,9 @@ When the check was on for the run, the report's **Switch to restrict mode** exam
 `aws_key_check: true`, and `allowed_aws_role_accounts` with the accounts given and each account the
 run assumed a role in, read from every STS answer, including one to a request restrict would refuse.
 A chain of roles, as the CDK assumes them, shows in full after one audit run. An answer the proxy
-cannot read, compressed or past its buffer, names no account. Anything in the step can assume a role, including in an
-account of its own, so each account the example adds that was not given is marked:
+cannot read, compressed or past its buffer, names no account. Anything in the step can assume a
+role, including in an account of its own, so each account the example adds that was not given is
+marked:
 
 ```yaml
 aws_key_check: true

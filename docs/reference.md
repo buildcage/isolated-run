@@ -96,7 +96,8 @@ known_blocked_rules: |
 - Each key is an input name and each value is written as it would be under `with:`. A key that is
   not an input, `writable` (use `write_through`), a list or a nested mapping fails the step.
 - An input the workflow sets wins over the file. The rule inputs and `write_through` are the
-  exception: the file's lines are added to the workflow's.
+  exception: the file's lines are added to the workflow's. An empty value counts as unset, so the
+  workflow cannot clear a value the file sets.
 - The path is relative to `$GITHUB_WORKSPACE` and must stay inside it, through symlinks too. The
   repository has to be checked out by an earlier step.
 - `config_file` fails the step on `pull_request_target`, and on `workflow_run` triggered by a pull
@@ -664,7 +665,9 @@ check exists, how to set it up, what it does not stop, and the IAM settings that
   number.
 - Any account named needs `aws_key_check: true`, from the workflow or a config file; unset or
   `false`, the step fails, in `audit` too. Set in the workflow, `allowed_aws_role_accounts` replaces
-  a config file's value.
+  a config file's value. A workflow cannot turn the check off for a config file that names accounts:
+  `aws_key_check: false` fails the step, and an empty `allowed_aws_role_accounts` leaves the file's.
+  Point `config_file` at a file without them.
 - An unsigned request is left to the URL rules where the host names the resource it is for, such as
   an S3 bucket or an ECR registry, and refused everywhere else but an `AssumeRoleWithWebIdentity`
   call for a role in one of these accounts.
