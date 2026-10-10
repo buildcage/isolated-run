@@ -273,14 +273,18 @@ func prepareCgroup(cgPath string) (*os.File, error) {
 	return f, nil
 }
 
-// requireRuntimeAlloc refuses a kernel older than 6.1, told by the BPF memory
-// allocator that release added. Before it, the verifier lets a tracepoint
-// program use a map allocated on use, as op_exit does held_ops, but taints
-// the kernel with a warning, which panics a panic_on_warn host.
+// requireRuntimeAlloc refuses a kernel without the BPF memory allocator added
+// in 6.1. Without it, the verifier loads a tracepoint program that uses a map
+// allocated on use (op_exit's held_ops) but warns, which taints the kernel and
+// panics a panic_on_warn host.
 func requireRuntimeAlloc(kspec *btf.Spec) error {
 	var s *btf.Struct
-	if err := kspec.TypeByName("bpf_mem_alloc", &s); err != nil {
+	err := kspec.TypeByName("bpf_mem_alloc", &s)
+	if errors.Is(err, btf.ErrNotFound) {
 		return errors.New("the kernel is older than Linux 6.1")
+	}
+	if err != nil {
+		return fmt.Errorf("read kernel BTF: %w", err)
 	}
 	return nil
 }
