@@ -23,6 +23,7 @@ import {
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
   renderReportBlocks,
+  TRAFFIC_BLOCK,
   trafficNotice,
 } from "#core/lib/report/render/render-report-markdown.ts";
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
@@ -124,6 +125,33 @@ export interface ReportOutcomes {
 }
 
 /**
+ * A pointer to what to do about the AWS access key check's refusals, under the
+ * last table that lists one. The reasons alone do not say.
+ */
+function withAwsTroubleshootingLink(
+  blocks: SummaryBlock[],
+  report: Report,
+  actionRepo: string,
+  actionRef: string,
+): SummaryBlock[] {
+  const refusedByAwsCheck = report.timeline.some((e) =>
+    (e.wouldRefuse ?? e.reason ?? "").startsWith("aws-"),
+  );
+  const tables = new Set<string>([TRAFFIC_BLOCK.blocked, TRAFFIC_BLOCK.wouldRefuse]);
+  const at = blocks.findLastIndex((b) => b.id !== undefined && tables.has(b.id));
+  if (!refusedByAwsCheck || at === -1) return blocks;
+  const url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`;
+  const link: SummaryBlock = {
+    priority: 0,
+    level: 1,
+    section: "traffic",
+    cut: "keep",
+    text: `\n<sub>*For an \`aws-\` reason, see [what to do](${url}).*</sub>\n`,
+  };
+  return [...blocks.slice(0, at + 1), link, ...blocks.slice(at + 1)];
+}
+
+/**
  * Pure decision + rendering step, kept free of process.env/file I/O so it's
  * testable without touching the filesystem.
  */
@@ -143,7 +171,7 @@ export function computeReportOutcomes(
     failOnBlocked: failOnBlocked ?? false,
     engineLabel: "sandbox",
   });
-  const blocks = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
+  const rendered = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
     // stepLabel is the untrusted `label` input; the renderer escapes the whole
     // title, so it is folded in raw here rather than pre-sanitized twice.
     title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : undefined,
@@ -152,6 +180,7 @@ export function computeReportOutcomes(
     extraInputs,
     actionVersion,
   });
+  const blocks = withAwsTroubleshootingLink(rendered, report, actionRepo, actionRef);
 
   return { markdown: joinSummaryBlocks(blocks), blocks, emissions };
 }

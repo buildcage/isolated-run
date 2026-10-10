@@ -73055,17 +73055,33 @@ function fetchReport(containerName, parameters, proxyEngine) {
 function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
 }
+function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
+	let refusedByAwsCheck = report.timeline.some((e) => (e.wouldRefuse ?? e.reason ?? "").startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, TRAFFIC_BLOCK.wouldRefuse]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
+	if (!refusedByAwsCheck || at === -1) return blocks;
+	let link = {
+		priority: 0,
+		level: 1,
+		section: "traffic",
+		cut: "keep",
+		text: `\n<sub>*For an \`aws-\` reason, see [what to do](${`https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`}).*</sub>\n`
+	};
+	return [
+		...blocks.slice(0, at + 1),
+		link,
+		...blocks.slice(at + 1)
+	];
+}
 function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
-	}), blocks = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
+	}), blocks = withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
 		title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
 		stepName: "Start isolated-run",
 		runCommand,
 		extraInputs,
 		actionVersion
-	});
+	}), report, actionRepo, actionRef);
 	return {
 		markdown: joinSummaryBlocks(blocks),
 		blocks,
