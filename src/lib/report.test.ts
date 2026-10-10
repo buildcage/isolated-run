@@ -150,7 +150,7 @@ describe("computeReportOutcomes", () => {
       };
       const { markdown } = computeReportOutcomes(r, options());
       expect(markdown).toMatch(
-        /### 🚨 Restrict Would Refuse\n\n```\n.*\n```\n\n<sub>\*For an `aws-`/,
+        /### 🚨 Restrict Would Refuse\n\n<sub>.*<\/sub>\n\n```\n.*\n```\n\n<sub>\*For an `aws-`/,
       );
     });
 
@@ -174,6 +174,72 @@ describe("computeReportOutcomes", () => {
     it("is left out when no refusal is the check's", () => {
       const { markdown } = computeReportOutcomes(restrict("not-allowed"), options());
       expect(markdown).not.toContain("aws.md");
+    });
+  });
+
+  describe("Restrict Would Refuse", () => {
+    const wouldRefuse = (time: number, host: string, reason: string): TrafficEvent => ({
+      time,
+      action: "audit",
+      protocol: "https",
+      host,
+      port: 443,
+      method: "GET",
+      url: `https://${host}/${time}`,
+      status: 200,
+      wouldRefuse: reason,
+    });
+    const audit = (timeline: TrafficEvent[]): InspectReportData => ({
+      ...report({ parameters: reportParams({ mode: "audit" }), timeline, startedAt: 0 }),
+      engine: "inspect",
+    });
+    const section = (markdown: string) =>
+      markdown.slice(
+        markdown.indexOf("### 🚨"),
+        markdown.indexOf("```\n\n", markdown.indexOf("### 🚨")),
+      );
+
+    it("shows the first request of each host and reason without its time, and counts the rest", () => {
+      const { markdown } = computeReportOutcomes(
+        audit([
+          wouldRefuse(1, "s3.amazonaws.com", "aws-key-not-allowed"),
+          wouldRefuse(2, "ssm.amazonaws.com", "aws-key-not-allowed"),
+          { time: 2, action: "allow", protocol: "https", host: "s3.amazonaws.com", port: 443 },
+          wouldRefuse(3, "s3.amazonaws.com", "aws-key-not-allowed"),
+          wouldRefuse(4, "s3.amazonaws.com", "aws-no-credential"),
+          wouldRefuse(5, "s3.amazonaws.com", "aws-key-not-allowed"),
+        ]),
+        options(),
+      );
+      expect(section(markdown).split("```\n")[1]).toBe(
+        [
+          "🚨 GET https://s3.amazonaws.com/1 -> 200 (restrict would refuse: aws-key-not-allowed) (+2 more)",
+          "🚨 GET https://ssm.amazonaws.com/2 -> 200 (restrict would refuse: aws-key-not-allowed)",
+          "🚨 GET https://s3.amazonaws.com/4 -> 200 (restrict would refuse: aws-no-credential)",
+          "",
+        ].join("\n"),
+      );
+    });
+
+    it("says what it lists, and points at an assumed account only when the example marks one", () => {
+      const r = audit([wouldRefuse(1, "s3.amazonaws.com", "aws-key-not-allowed")]);
+      const plain = section(computeReportOutcomes(r, options()).markdown);
+      const marked = section(
+        computeReportOutcomes(
+          r,
+          options({
+            extraInputs: [
+              "aws_key_check: true",
+              'allowed_aws_role_accounts: "222222222222" # assumed in this run, check it is yours',
+            ],
+          }),
+        ).markdown,
+      );
+      expect(plain).toContain(
+        "one for each host and reason; Communication details lists every one.*",
+      );
+      expect(plain).not.toContain("assumed in this run");
+      expect(marked).toContain("marks an account `# assumed in this run`");
     });
   });
 
@@ -342,6 +408,71 @@ describe("writeReportSummary", () => {
 
     expect(written[0]).toContain(restrictExampleTruncationNote(true));
     expect(written[0]).toContain(hostTableTruncationNote(true));
+  });
+
+  it.each([
+    {
+      artifact: true,
+      says: "The buildcage-traffic artifact uploaded for this run has every request.",
+    },
+    {
+      artifact: false,
+      says: "Set upload_traffic_artifact: true to get every request as an artifact.",
+    },
+  ])(
+    "warns when Restrict Would Refuse is cut (artifact: $artifact)",
+    async ({ artifact, says }) => {
+      const warning = vi.fn();
+      const timeline: TrafficEvent[] = Array.from({ length: 2000 }, (_, i) => ({
+        time: i,
+        action: "audit",
+        protocol: "https",
+        host: `h${i}.example.com`,
+        port: 443,
+        method: "GET",
+        url: `https://h${i}.example.com/${"x".repeat(500)}`,
+        status: 200,
+        wouldRefuse: "aws-key-not-allowed",
+      }));
+
+      await writeReportSummary(
+        { ...report({ parameters: reportParams({ mode: "audit" }), timeline }), engine: "inspect" },
+        { notice: vi.fn(), warning, error: vi.fn() },
+        options(),
+        artifact,
+        { GITHUB_STEP_SUMMARY: "/summary.md" },
+        { fileSize: () => 0, writeSummary: async () => {} },
+      );
+
+      expect(warning).toHaveBeenCalledWith(
+        `The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. ${says}`,
+      );
+    },
+  );
+
+  it("does not warn about Restrict Would Refuse when it fits", async () => {
+    const warning = vi.fn();
+    const timeline: TrafficEvent[] = [
+      {
+        time: 1,
+        action: "audit",
+        protocol: "https",
+        host: "s3.amazonaws.com",
+        port: 443,
+        wouldRefuse: "aws-key-not-allowed",
+      },
+    ];
+
+    await writeReportSummary(
+      { ...report({ parameters: reportParams({ mode: "audit" }), timeline }), engine: "inspect" },
+      { notice: vi.fn(), warning, error: vi.fn() },
+      options(),
+      true,
+      { GITHUB_STEP_SUMMARY: "/summary.md" },
+      { fileSize: () => 0, writeSummary: async () => {} },
+    );
+
+    expect(warning).not.toHaveBeenCalledWith(expect.stringContaining("was cut"));
   });
 
   it("writes the summary to GITHUB_STEP_SUMMARY", async () => {

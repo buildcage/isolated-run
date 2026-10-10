@@ -64,17 +64,19 @@ Start with the account of the role the step is given:
 
 Then:
 
-1. Read **🚨 Restrict Would Refuse** in the report. Each request the check would refuse ends in its
-   reason, such as `(restrict would refuse: aws-key-not-allowed)`, and
-   [Troubleshooting](#troubleshooting) gives the usual causes of each.
-2. Check the accounts of the other roles the step assumed. The report's **Switch to restrict mode**
+1. Check the accounts of the other roles the step assumed. The report's **Switch to restrict mode**
    example lists them under `allowed_aws_role_accounts` and marks each one not named yet
    `# assumed in this run, check it is yours`; the [traffic artifact](#in-the-traffic-artifact)
    gives each as `aws.assumedAccount`. A CDK app deploying to several accounts assumes a
    `cdk-hnb659fds-deploy-role-*` role in each. Keep only accounts that are yours: one you do not
-   recognise there is what the check is meant to catch.
+   recognise there is what the check is meant to catch. Until an account is named, every request
+   signed with its roles' keys would be refused, so name the accounts and run `audit` again before
+   reading on.
+2. Read **🚨 Restrict Would Refuse** in the report. Each line ends in the reason the check would
+   refuse for, such as `(restrict would refuse: aws-key-not-allowed)`, and
+   [Troubleshooting](#troubleshooting) gives the usual causes of each.
 3. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries the URL
-   rules, `aws_key_check: true` and the accounts from step 2 over.
+   rules, `aws_key_check: true` and the accounts from step 1 over.
 
 ## What the check does
 
@@ -271,12 +273,16 @@ that one step:
 ### In `audit` mode
 
 `audit` refuses nothing, and that includes this check. A warning annotation counts the requests it
-would have refused, and the report lists each under **🚨 Restrict Would Refuse** with the reason, so a
-step can be checked before it is switched to `restrict`:
+would have refused, so a step can be checked before it is switched to `restrict`. The report shows
+the first of them for each host and reason under **🚨 Restrict Would Refuse**, with the reason and
+how many more there were:
 
 ```
-🚨 00:03.120: POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed)
+🚨 POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed) (+12 more)
 ```
+
+**Communication details** lists every one. If the section still has to be cut to fit the Job
+Summary, a warning annotation says so and points to the traffic artifact.
 
 The traffic artifact carries the same reason in `wouldRefuse`.
 

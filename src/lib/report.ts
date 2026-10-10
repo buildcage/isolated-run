@@ -7,6 +7,7 @@ import { writeStepSummary } from "#core/lib/actions/write-step-summary.ts";
 import { createDocker, type Docker } from "#core/lib/docker/client.ts";
 import { readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
 import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
+import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { readActionVersion as readImageActionVersion } from "#core/lib/report/action-version.ts";
 import { buildInspectReportData } from "#core/lib/report/build/inspect.ts";
 import { buildUniversalReportData } from "#core/lib/report/build/universal.ts";
@@ -22,6 +23,10 @@ import {
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
+  renderWouldRefuseBody,
+  wouldRefuseTruncationNote,
+} from "#core/lib/report/render/inspect-details.ts";
+import {
   renderReportBlocks,
   TRAFFIC_BLOCK,
   trafficNotice,
@@ -29,6 +34,7 @@ import {
 import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
 import { AWS_REASON_PREFIX } from "../proxy/haproxy-aws-keys.ts";
+import { ASSUMED_ACCOUNT_MARK } from "./inputs.ts";
 import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
 import { TRAFFIC_PRIORITIES } from "./summary-priorities.ts";
 
@@ -154,6 +160,52 @@ function withAwsTroubleshootingLink(
 }
 
 /**
+ * Restrict Would Refuse with the first request of each host and reason, in the
+ * order each first appeared, the count of the rest after it, and a note on what
+ * it lists. A role assumed in an account not given refuses every later request
+ * signed with its key, which would otherwise bury the rest. The time is left
+ * out: the line stands for requests made at different times.
+ */
+function withWouldRefuseGrouped(
+  blocks: SummaryBlock[],
+  report: Report,
+  extraInputs: string[] | undefined,
+): SummaryBlock[] {
+  const at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse);
+  if (at === -1) return blocks;
+  const groups = new Map<string, TrafficEvent[]>();
+  for (const e of report.timeline) {
+    if (e.wouldRefuse === undefined) continue;
+    const key = `${e.host} ${e.wouldRefuse}`;
+    const group = groups.get(key);
+    if (group) group.push(e);
+    else groups.set(key, [e]);
+  }
+  const lines = [...groups.values()].map((events) => {
+    const line = renderWouldRefuseBody(events.slice(0, 1), report.startedAt)
+      .split("\n")[1]
+      .replace(/^(\S+) \S+: /, "$1 ");
+    return events.length > 1 ? `${line} (+${events.length - 1} more)` : line;
+  });
+  let note =
+    "Requests audit let through that restrict would refuse, one for each host and reason; " +
+    "Communication details lists every one.";
+  if (extraInputs?.some((l) => l.endsWith(ASSUMED_ACCOUNT_MARK))) {
+    note +=
+      " The Switch to restrict mode example marks an account `# assumed in this run`: requests " +
+      "signed with the keys of its roles show here as `aws-key-not-allowed` until it is listed, " +
+      "so check it first.";
+  }
+  const { text } = blocks[at];
+  const before = `${text.slice(0, text.indexOf("###"))}### 🚨 Restrict Would Refuse\n\n<sub>*${note}*</sub>\n\n`;
+  return blocks.with(at, {
+    ...blocks[at],
+    text: `${before}\`\`\`\n${lines.join("\n")}\n\`\`\`\n`,
+    head: before.split("\n").length,
+  });
+}
+
+/**
  * Pure decision + rendering step, kept free of process.env/file I/O so it's
  * testable without touching the filesystem.
  */
@@ -182,7 +234,12 @@ export function computeReportOutcomes(
     extraInputs,
     actionVersion,
   });
-  const blocks = withAwsTroubleshootingLink(rendered, report, actionRepo, actionRef);
+  const blocks = withAwsTroubleshootingLink(
+    withWouldRefuseGrouped(rendered, report, extraInputs),
+    report,
+    actionRepo,
+    actionRef,
+  );
 
   return { markdown: joinSummaryBlocks(blocks), blocks, emissions };
 }
@@ -206,7 +263,7 @@ function summarySize(path: string | undefined, fileSize: (p: string) => number):
   }
 }
 
-/** Fits `blocks` into what is left of the step's Job Summary and writes them. */
+/** Fits `blocks` into what is left of the step's Job Summary and writes them, returning what was written. */
 export async function writeSummaryBlocks(
   blocks: SummaryBlock[],
   env: NodeJS.ProcessEnv,
@@ -214,11 +271,12 @@ export async function writeSummaryBlocks(
     fileSize = (p) => statSync(p).size,
     writeSummary = writeStepSummary,
   }: Pick<WriteReportSummaryDeps, "fileSize" | "writeSummary"> = {},
-): Promise<void> {
-  await writeSummary(
-    fitStepSummary(blocks, { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) }),
-    env.GITHUB_STEP_SUMMARY,
-  );
+): Promise<string> {
+  const summary = fitStepSummary(blocks, {
+    usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize),
+  });
+  await writeSummary(summary, env.GITHUB_STEP_SUMMARY);
+  return summary;
 }
 
 export interface WriteReportSummaryOptions extends ComputeReportOutcomesOptions {
@@ -251,11 +309,20 @@ export async function writeReportSummary(
   // cannot take the step's outcome down with it.
   applyOutcomeAnnotations(annotation, outcomes.emissions);
 
-  await writeSummaryBlocks(
+  const summary = await writeSummaryBlocks(
     [...withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)), ...extraBlocks],
     env,
     deps,
   );
+  // The section's own notice is easy to miss below the fold.
+  if (summary.includes(wouldRefuseTruncationNote(artifactAvailable))) {
+    annotation.warning(
+      "The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " +
+        (artifactAvailable
+          ? "The buildcage-traffic artifact uploaded for this run has every request."
+          : "Set upload_traffic_artifact: true to get every request as an artifact."),
+    );
+  }
 
   // Debug-only mirror: GITHUB_STEP_SUMMARY is unique per step and can't be
   // reassigned, so a later step has no way to read this step's copy back.
