@@ -67,16 +67,14 @@ Then:
 1. Read **🚨 Restrict Would Refuse** in the report. Each request the check would refuse ends in its
    reason, such as `(restrict would refuse: aws-key-not-allowed)`, and
    [Troubleshooting](#troubleshooting) gives the usual causes of each.
-2. Add the accounts of the other roles the step assumed. In the
-   [traffic artifact](#in-the-traffic-artifact), each STS answer that issued a role's key carries
-   `aws.assumedAccount`, listed or not, so the accounts to add are the ones there that
-   `allowed_aws_role_accounts` does not name yet. A CDK app deploying to several accounts assumes a
-   `cdk-hnb659fds-deploy-role-*` role in each. The proxy reads STS answers only when at least one
-   account is named. Add only accounts that are yours: one you do not recognise there is what the
-   check is meant to catch.
+2. Check the accounts of the other roles the step assumed. The report's **Switch to restrict mode**
+   example lists them under `allowed_aws_role_accounts` and marks each one not named yet
+   `# assumed in this run, check it is yours`; the [traffic artifact](#in-the-traffic-artifact)
+   gives each as `aws.assumedAccount`. A CDK app deploying to several accounts assumes a
+   `cdk-hnb659fds-deploy-role-*` role in each. Keep only accounts that are yours: one you do not
+   recognise there is what the check is meant to catch.
 3. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries the URL
-   rules and `aws_key_check: true` over. Replace its `<account-id>` placeholder with the accounts
-   from step 2.
+   rules, `aws_key_check: true` and the accounts from step 2 over.
 
 ## What the check does
 
@@ -325,7 +323,7 @@ request, and lists the ones it would refuse under **🚨 Restrict Would Refuse**
 
 | Reason                       | Usual cause                                                                                                                                                                                              | What to do                                                                                                                                                                          |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `aws-key-not-allowed`        | The step assumed a role in an account `allowed_aws_role_accounts` does not name, and signed with that role's key                                                                                         | Add the account if it is yours. With an account named and the traffic artifact on, the STS answer's `aws.assumedAccount` names it; see [Getting started](#getting-started)          |
+| `aws-key-not-allowed`        | The step assumed a role in an account `allowed_aws_role_accounts` does not name, and signed with that role's key                                                                                         | Add the account if it is yours. The restrict example and the STS answer's `aws.assumedAccount` name it; see [Getting started](#getting-started)                                     |
 |                              | The request was signed with a key from a profile, `~/.aws/credentials` or `credential_process` rather than `AWS_ACCESS_KEY_ID`                                                                           | Put the key to check in `AWS_ACCESS_KEY_ID`, or run those commands in a step without the check                                                                                      |
 |                              | The key came from `GetSessionToken`, SAML or IAM Identity Center, which the proxy does not learn                                                                                                         | Get the credentials before the step and pass them in `AWS_ACCESS_KEY_ID`                                                                                                            |
 |                              | A presigned URL someone else signed, such as Lambda `GetFunction`'s `Code.Location` or a vendor's download link                                                                                          | Download it in a step without the check. `aws sts get-access-key-info --access-key-id <key-id>`, with the key ID from the URL's `X-Amz-Credential`, names the account it belongs to |
