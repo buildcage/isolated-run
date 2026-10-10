@@ -102,11 +102,13 @@ R read · W write · X exec · M move · D delete · A attr · lowercase = faile
 | RWD    | `./node_modules/**`   |
 | R      | `./package.json`      |
 | Rr!    | `/etc/**`             |
+| w!     | `/usr/local/bin/node` |
 
 📂 Filesystem details
 first-last access
 00:00.412:           R   node ./package.json
 00:00.415-00:00.418: Rr! node /etc/**
+00:00.420:           w!  node /usr/local/bin/node
 00:00.530-00:41.207: RWD node ./node_modules/**
 ```
 
@@ -133,7 +135,8 @@ first-last access
 
 A refusal shows even where the same action also succeeded, after the uppercase letters: `RWr!` on
 `/etc/**` means reads and writes under `/etc` succeeded and at least one read was refused. A failed
-open shows as `r` whatever it was opened for. A row's flags do not say which action came first; the
+open shows what it asked for: `w` to write, create or truncate, `r` to read, and both for one opened
+to read and write, as bash does `/dev/tty`. A row's flags do not say which action came first; the
 artifact has every access in order.
 
 ### Paths
@@ -186,7 +189,9 @@ jq -c 'select(.kind == "open-failed" and (.err == 1 or .err == 13 or .err == 30)
 ```
 
 Where a recorded `path` differs from the name the command passed, the name is kept as `name`, or
-`to_name` for a move's target. A program's line keeps the name it was run by as `name`. A memfd is
+`to_name` for a move's target. A program's line keeps the name it was run by as `name`. An open,
+failed or not, has what it asked for in `access`: `r`, `w` or `rw`, then `c` to create, `t` to
+truncate and, on one that succeeded, `x` to run the file. A memfd is
 marked `"memfd":true`, a deleted file `"deleted":true`, a program the kernel loaded to start a
 process `"image":true`, and a rename that swapped two paths `"exchange":true`, which shows `M` on
 both.

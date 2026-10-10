@@ -373,6 +373,23 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["r c ./d/a.json"]);
   });
 
+  it("shows a failed open as the read and write it asked for", () => {
+    const md = render(
+      { kind: "open-failed", comm: "sh", path: "/a/tool", access: "wct", err: 30 },
+      { kind: "open-failed", comm: "sh", path: "/b/tool", access: "rw", err: 13 },
+      { kind: "open-failed", comm: "sh", path: "/c/tool", access: "rc", err: 2 },
+      { kind: "open-failed", comm: "sh", path: "/d/tool", access: "rt", err: 13 },
+      { kind: "open-failed", comm: "sh", path: "/e/tool", access: "r", err: 13 },
+    );
+    expect(lines(md)).toEqual([
+      "w! sh /a/tool",
+      "r!w! sh /b/tool",
+      "rw sh /c/tool",
+      "r!w! sh /d/tool",
+      "r! sh /e/tool",
+    ]);
+  });
+
   it("drops libraries, exec'd binaries and non-file targets from reads", () => {
     const md = render(
       { kind: "mmap", comm: "sh", path: "/usr/lib/libc.so", access: "x" },
