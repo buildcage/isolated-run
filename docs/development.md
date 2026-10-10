@@ -369,6 +369,20 @@ through the generators in `src/core/lib/acl/` (`haproxy-config.ts` for `inspect`
 `haproxy-universal-config.ts` for `universal`). rolldown bundles it into
 `/opt/buildcage/scripts/gen-configs.js` at image build time, and `tsconfig.qjs.json` type-checks it.
 
+The AWS access key check's HAProxy rules are built in `src/proxy/haproxy-aws-keys.ts`. These details
+are left out of [AWS access key check](./aws.md):
+
+- SigV2 (`Authorization: AWS <key>:<signature>`, or `AWSAccessKeyId` in the query or a form body),
+  SigV3's `X-Amzn-Authorization`, and `X-Amz-Credential` in a form body or spelled other than
+  exactly in the query are refused as `aws-unsupported-credential` without their key being read.
+- A form body is read into HAProxy's large buffer, 4 MiB, which holds the request's headers too, so
+  the body can be 4 MiB less the headers. Matching stops at a NUL byte, so a body holding one is
+  `aws-unreadable` as well.
+- With an account named, the proxy rewrites a request to STS to ask for an uncompressed answer
+  (`Accept-Encoding: identity`), unless the client signed its own `Accept-Encoding`, which it then
+  leaves alone. It reads an answer up to its buffer size (16 KB), so a key in a compressed answer or
+  past the buffer is not learned.
+
 Each Dockerfile copies `docker/common/files/` first and the engine's own `files/` on top. An engine
 keeps only what differs: `THIRD_PARTY_LICENSES` and the `init-cfg` script that generates its
 configs. A path in both would be settled silently by copy order, so
