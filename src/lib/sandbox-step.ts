@@ -60,7 +60,7 @@ import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
-import { reportStepTraffic } from "./step-report.ts";
+import { reportStepTraffic, writeMoreSummary } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 
 /**
@@ -119,6 +119,7 @@ export interface SandboxStepDeps {
   stopSandboxProxy: typeof stopSandboxProxy;
   runSandboxedCommand: typeof runSandboxedCommand;
   reportStepTraffic: typeof reportStepTraffic;
+  writeMoreSummary: typeof writeMoreSummary;
   prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
   /** Calls listener on each signal a cancelled run sends this process, and
    *  returns what stops listening. */
@@ -181,6 +182,7 @@ const realDeps: SandboxStepDeps = {
   stopSandboxProxy,
   runSandboxedCommand,
   reportStepTraffic,
+  writeMoreSummary,
   prepareStepFilesystemAudit,
   onCancel,
   saveState: core.saveState,
@@ -268,6 +270,7 @@ export async function runSandboxStep(
     stopSandboxProxy,
     runSandboxedCommand,
     reportStepTraffic,
+    writeMoreSummary,
     prepareStepFilesystemAudit,
     onCancel,
     saveState,
@@ -463,17 +466,23 @@ export async function runSandboxStep(
     });
   } finally {
     // None throws, so the teardown and stopListening are always reached.
-    const filesystemReport = await prepareStepFilesystemAudit({
-      audit,
-      retentionDays: filesystemAuditRetentionDays,
-      containerName,
-      annotation,
-      env,
-      actionRepo,
-      actionRef: reportActionRef,
-      failClosed: proxyMode !== "audit" && failOnBlocked,
-    });
-    await reportStepTraffic({
+    const prepareAudit = () =>
+      prepareStepFilesystemAudit({
+        audit,
+        retentionDays: filesystemAuditRetentionDays,
+        containerName,
+        annotation,
+        env,
+        actionRepo,
+        actionRef: reportActionRef,
+        failClosed: proxyMode !== "audit" && failOnBlocked,
+      });
+    // The runner kills a cancelled step seconds after cancelling it, and a
+    // large recording takes a while to read and upload, so the traffic report
+    // goes first and the audit takes what the summary has left.
+    const cancelled = cancel.signal.aborted;
+    const filesystemReport = cancelled ? undefined : await prepareAudit();
+    const startedAt = await reportStepTraffic({
       containerName,
       proxyEngine,
       parameters: {
@@ -493,8 +502,12 @@ export async function runSandboxStep(
       failOnBlocked,
       trafficArtifact,
       env,
-      moreBlocks: filesystemReport.blocks,
+      moreBlocks: filesystemReport?.blocks,
     });
+    if (cancelled) {
+      const late = await prepareAudit();
+      await writeMoreSummary(late.blocks(startedAt), env, annotation);
+    }
     await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
     stopListening();
   }

@@ -77,6 +77,7 @@ export interface ReportStepOptions {
  * Fetch the proxy's report, write the Job Summary, and upload the traffic
  * artifact if one was asked for. The rest of the summary, `moreBlocks`, is
  * written with the report, or alone when there is no report to write.
+ * Resolves to the proxy's start, for a part of the summary written later.
  *
  * Never throws. A failure here is a warning naming the step that failed, and
  * under `restrict` with fail_on_blocked it also fails the step: a report that
@@ -99,7 +100,7 @@ export async function reportStepTraffic(
     moreBlocks = () => [],
   }: ReportStepOptions,
   overrides: Partial<ReportStepDeps> = {},
-): Promise<void> {
+): Promise<number | undefined> {
   const {
     fetchReport,
     readActionVersion,
@@ -122,14 +123,7 @@ export async function reportStepTraffic(
   // Written alone when there is no report or its write failed, so the report
   // cannot take the rest of the summary down with it.
   const extraBlocks = moreBlocks(report?.startedAt);
-  const writeRest = async (): Promise<void> => {
-    if (extraBlocks.length === 0) return;
-    try {
-      await writeSummaryBlocks(extraBlocks, env);
-    } catch (e) {
-      annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
-    }
-  };
+  const writeRest = () => writeMoreSummary(extraBlocks, env, annotation, { writeSummaryBlocks });
 
   let artifactName = "";
   if (!report) {
@@ -178,5 +172,23 @@ export async function reportStepTraffic(
     setTrafficArtifactOutput(artifactName);
   } catch (e) {
     fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
+  }
+  return report?.startedAt;
+}
+
+/** Fits `blocks` into what the Job Summary has left and writes them; never
+ *  throws, as a failure here only costs that part of the summary. */
+export async function writeMoreSummary(
+  blocks: SummaryBlock[],
+  env: NodeJS.ProcessEnv,
+  annotation: Annotation,
+  overrides: Partial<ReportStepDeps> = {},
+): Promise<void> {
+  const { writeSummaryBlocks } = { ...realDeps, ...overrides };
+  if (blocks.length === 0) return;
+  try {
+    await writeSummaryBlocks(blocks, env);
+  } catch (e) {
+    annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
   }
 }

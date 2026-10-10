@@ -53,6 +53,7 @@ const mocks = {
   stopSandboxProxy: vi.fn(),
   runSandboxedCommand: vi.fn(),
   reportStepTraffic: vi.fn(),
+  writeMoreSummary: vi.fn(),
   prepareStepFilesystemAudit: vi.fn(),
   onCancel: vi.fn(),
   saveState: vi.fn(),
@@ -686,6 +687,32 @@ describe("runSandboxStep", () => {
       ).toStrictEqual([["buildcage: the step was cancelled; stopping the sandbox"]]);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
       expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
+    });
+
+    it("writes the traffic report before the audit once cancelled, and the audit after it", async () => {
+      const block = { kind: "text", text: "audit" };
+      const blocks = vi.fn(() => [block]);
+      mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks });
+      mocks.reportStepTraffic.mockResolvedValue(1_700_000_000);
+      mocks.runSandboxedCommand.mockImplementation(async () => {
+        cancelListener()();
+        return 143;
+      });
+
+      await runSandboxStep(ENV, deps);
+
+      expect(mocks.reportStepTraffic.mock.calls[0][0].moreBlocks).toBeUndefined();
+      expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(
+        orderOf(mocks.prepareStepFilesystemAudit),
+      );
+      expect(blocks).toHaveBeenCalledWith(1_700_000_000);
+      expect(mocks.writeMoreSummary.mock.calls[0].slice(0, 2)).toStrictEqual([[block], ENV]);
+      expect(orderOf(mocks.writeMoreSummary)).toBeLessThan(orderOf(mocks.stopSandboxProxy));
+    });
+
+    it("writes no separate audit summary when not cancelled", async () => {
+      await runSandboxStep(ENV, deps);
+      expect(mocks.writeMoreSummary).not.toHaveBeenCalled();
     });
   });
 });

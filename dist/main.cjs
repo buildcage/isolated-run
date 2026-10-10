@@ -70278,7 +70278,7 @@ const realHostProbes = {
 		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
 	},
 	kernelBtf: () => (0, node_fs.existsSync)("/sys/kernel/btf/vmlinux")
-};
+}, END_LINE = /"kind":"end"[^\n]*\n$/;
 function filesystemAuditPaths(containerName, scratchBase) {
 	let suffix = containerName.split("-").at(-1);
 	return {
@@ -70312,6 +70312,13 @@ function exitReason() {
 		},
 		value: () => fatal || last || partial.trim()
 	};
+}
+function recordComplete(readTail, path) {
+	try {
+		return END_LINE.test(readTail(path));
+	} catch {
+		return !1;
+	}
 }
 function defaultExec$3(command, args) {
 	return (0, node_child_process.execFileSync)(hostCommand(command), args, {
@@ -70349,6 +70356,15 @@ function defaultRemove(path) {
 function defaultReadFile$2(path) {
 	return (0, node_fs.readFileSync)(path, "utf8");
 }
+function defaultReadTail(path) {
+	let fd = (0, node_fs.openSync)(path, "r");
+	try {
+		let buf = Buffer.alloc(512), start = Math.max(0, (0, node_fs.fstatSync)(fd).size - buf.length);
+		return buf.toString("utf8", 0, (0, node_fs.readSync)(fd, buf, 0, buf.length, start));
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
 const noAudit = { stop: async () => {} };
 function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = node_fs.chmodSync } = {}) {
 	let tracerPath = (0, node_path.join)(destDir, "filesystem-audit");
@@ -70359,7 +70375,7 @@ function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = n
 	})), chmod(tracerPath, 493), tracerPath;
 }
 async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath, watchPid, cancel }, deps = {}) {
-	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2 } = deps, child = spawn("sudo", [
+	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2, readTail = defaultReadTail } = deps, child = spawn("sudo", [
 		"-n",
 		"--",
 		tracerPath,
@@ -70377,8 +70393,8 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 	child.exited.then(() => {
 		exited = !0;
 	});
-	let stop = async () => {
-		if (child.kill("SIGTERM"), await Promise.race([child.exited, sleep(2e3)]), !exited) try {
+	let kill = () => {
+		try {
 			let pid = Number(readFile(pidFilePath).trim());
 			pid > 0 && exec("sudo", [
 				"-n",
@@ -70387,15 +70403,26 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 				String(pid)
 			]);
 		} catch {}
-		await child.exited, remove(pidFilePath);
-	};
+	}, halt = async (untilRecorded) => {
+		child.kill("SIGTERM");
+		let grace = () => untilRecorded && !cancel?.aborted ? 3e4 : 2e3;
+		for (let waited = 0; !exited; waited += 100) {
+			if (untilRecorded && recordComplete(readTail, outPath)) {
+				Promise.race([child.exited, sleep(1e4)]).then(() => (exited || kill(), child.exited)).then(() => remove(pidFilePath)).catch(() => {});
+				return;
+			}
+			if (waited >= grace()) break;
+			await sleep(100);
+		}
+		exited || kill(), await child.exited, remove(pidFilePath);
+	}, stop = () => halt(!0);
 	for (let i = 0; i < 300 && !cancel?.aborted; i++) {
 		if (exists(readyPath)) return { stop };
 		if (exited) break;
 		await sleep(100);
 	}
 	let cancelled = !exited && cancel?.aborted, failure = exited ? hostCannotAudit(child.reason() || "the tracer exited") : auditUnavailable("the tracer did not attach in time");
-	throw await stop(), remove(outPath), cancelled ? cancelledBeforeRun() : failure;
+	throw await halt(!1), remove(outPath), cancelled ? cancelledBeforeRun() : failure;
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
@@ -73219,13 +73246,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	} catch (e) {
 		fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
 	}
-	let extraBlocks = moreBlocks(report?.startedAt), writeRest = async () => {
-		if (extraBlocks.length !== 0) try {
-			await writeSummaryBlocks(extraBlocks, env);
-		} catch (e) {
-			annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
-		}
-	}, artifactName = "";
+	let extraBlocks = moreBlocks(report?.startedAt), writeRest = () => writeMoreSummary(extraBlocks, env, annotation, { writeSummaryBlocks }), artifactName = "";
 	if (!report) await writeRest();
 	else {
 		try {
@@ -73252,6 +73273,18 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 		setTrafficArtifactOutput(artifactName);
 	} catch (e) {
 		fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
+	}
+	return report?.startedAt;
+}
+async function writeMoreSummary(blocks, env, annotation, overrides = {}) {
+	let { writeSummaryBlocks } = {
+		...realDeps$1,
+		...overrides
+	};
+	if (blocks.length !== 0) try {
+		await writeSummaryBlocks(blocks, env);
+	} catch (e) {
+		annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
 	}
 }
 //#endregion
@@ -73311,6 +73344,7 @@ const realDeps = {
 	stopSandboxProxy,
 	runSandboxedCommand,
 	reportStepTraffic,
+	writeMoreSummary,
 	prepareStepFilesystemAudit,
 	onCancel,
 	saveState,
@@ -73337,7 +73371,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditRetentionDays, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, prepareStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditRetentionDays, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -73432,7 +73466,7 @@ async function runSandboxStep(env, overrides = {}) {
 			cancel: cancel.signal
 		});
 	} finally {
-		let filesystemReport = await prepareStepFilesystemAudit({
+		let prepareAudit = () => prepareStepFilesystemAudit({
 			audit,
 			retentionDays: filesystemAuditRetentionDays,
 			containerName,
@@ -73441,8 +73475,7 @@ async function runSandboxStep(env, overrides = {}) {
 			actionRepo,
 			actionRef: reportActionRef,
 			failClosed: proxyMode !== "audit" && failOnBlocked
-		});
-		await reportStepTraffic({
+		}), cancelled = cancel.signal.aborted, filesystemReport = cancelled ? void 0 : await prepareAudit(), startedAt = await reportStepTraffic({
 			containerName,
 			proxyEngine,
 			parameters: {
@@ -73462,8 +73495,9 @@ async function runSandboxStep(env, overrides = {}) {
 			failOnBlocked,
 			trafficArtifact,
 			env,
-			moreBlocks: filesystemReport.blocks
-		}), await stopSandboxProxy({
+			moreBlocks: filesystemReport?.blocks
+		});
+		cancelled && await writeMoreSummary((await prepareAudit()).blocks(startedAt), env, annotation), await stopSandboxProxy({
 			composeFile,
 			projectName,
 			composeEnv,
