@@ -176,12 +176,14 @@ last time in the details can be earlier than its last write.
 The artifact named `buildcage-filesystem-audit-<id>` holds one file,
 `filesystem-audit-<id>.step.jsonl`: one JSON object per line, in the order the accesses happened,
 with absolute paths. It holds only the step's own accesses, as the summary does: the sandbox's setup
-is left out, and the step's shell is named `bash`. A few examples:
+is left out, and the step's shell is named `bash`. A record marked incomplete can hold the setup too.
+A few examples:
 
 ```sh
-# Every file the step wrote, created or truncated, and every directory it made
-jq -r 'select((.failed | not) and (.kind == "write" or .kind == "mkdir"
-  or (.kind == "open" and (.access // "" | test("[ct]"))))) | .path' filesystem-audit-*.jsonl | sort -u
+# Every path the summary shows as written
+jq -r 'select((.failed | not) and ((.kind | IN("write", "mkdir", "mknod", "symlink", "link", "truncate"))
+  or (.kind == "open" and (.access // "" | test("[ct]")))))
+  | if .kind == "link" then .to else .path end' filesystem-audit-*.jsonl | sort -u
 
 # Who opened a credential file, and when
 jq -c 'select(.path // "" | endswith("/.npmrc")) | {t, comm, pid, kind}' filesystem-audit-*.jsonl
@@ -192,40 +194,42 @@ jq -c 'select(.kind == "open" and .failed and (.err == 1 or .err == 13 or .err =
 
 ### Fields
 
-| Field      | On                          | Notes                                                                                                                               |
-| ---------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `t`        | every line but `end`        | ISO 8601 UTC, to the millisecond                                                                                                    |
-| `kind`     | every line                  | what happened; see [Kinds](#kinds)                                                                                                  |
-| `pid`      | every line but `end`        | the process, as the runner host numbers it                                                                                          |
-| `ppid`     | every line but `end`        | its parent at the time; on `fork`, the process that made it                                                                         |
-| `comm`     | every line but `end`        | the name the process gave itself, up to 15 bytes                                                                                    |
-| `path`     | all but `fork`, `end`       | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read                               |
-| `to`       | `rename`, `link`, `symlink` | the new name; on `symlink`, the link's contents as written                                                                          |
-| `name`     |                             | the name the command passed, where `path` differs from it; on `exec`, the name it was run by                                        |
-| `to_name`  |                             | as `name`, for `to`                                                                                                                 |
-| `access`   | `open`, `mmap`              | what was asked for; see [Access letters](#access-letters)                                                                           |
-| `flags`    | `open`                      | the `open(2)` flags as a number                                                                                                     |
-| `mode`     | `chmod`                     | the new mode in octal, such as `"0755"`; absent on most failed ones                                                                 |
-| `owner`    | `chown`                     | the new `uid:gid`                                                                                                                   |
-| `failed`   |                             | `true` when the operation failed                                                                                                    |
-| `err`      |                             | on a failed one, the error number; see [Error numbers](#error-numbers). Without `failed`, why an open file's path could not be read |
-| `image`    |                             | on `mmap`, a file the kernel mapped to start a program: the program, its loader or a script's interpreter                           |
-| `memfd`    |                             | a file that exists only in memory; `path` is `memfd:` and the name its creator chose                                                |
-| `deleted`  |                             | a file deleted while it was open, or created without a name and never given one                                                     |
-| `exchange` |                             | on `rename`, a swap of two paths, which shows `M` on both in the summary                                                            |
+| Field      | On                          | Notes                                                                                                                                                  |
+| ---------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `t`        | every line but `end`        | ISO 8601 UTC, to the millisecond                                                                                                                       |
+| `kind`     | every line                  | what happened; see [Kinds](#kinds)                                                                                                                     |
+| `pid`      | every line but `end`        | the process, as the runner host numbers it                                                                                                             |
+| `ppid`     | every line but `end`        | its parent at the time; on `fork`, the process that made it                                                                                            |
+| `comm`     | every line but `end`        | the name the process gave itself, up to 15 bytes                                                                                                       |
+| `path`     | all but `fork`, `end`       | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read                                                  |
+| `to`       | `rename`, `link`, `symlink` | the new name; on `symlink`, the link's contents as written                                                                                             |
+| `name`     |                             | the name the command passed, where `path` differs from it; on `exec`, the name it was run by                                                           |
+| `to_name`  |                             | as `name`, for `to`                                                                                                                                    |
+| `access`   | `open`, `mmap`              | what was asked for; see [Access letters](#access-letters)                                                                                              |
+| `flags`    | `open`                      | the `open(2)` flags as a number; absent when 0, as for a plain read-only open                                                                          |
+| `mode`     | `chmod`                     | the new mode in octal, such as `"0755"`; absent on most failed ones                                                                                    |
+| `owner`    | `chown`                     | the new `uid:gid`; absent on most failed ones                                                                                                          |
+| `failed`   |                             | `true` when the operation failed                                                                                                                       |
+| `err`      |                             | on a failed one, the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read |
+| `image`    |                             | on `mmap`, a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                              |
+| `memfd`    |                             | a file that exists only in memory; `path` is `memfd:` and the name its creator chose                                                                   |
+| `deleted`  |                             | a file deleted while it was open, or created without a name and never given one                                                                        |
+| `exchange` |                             | on `rename`, a swap of two paths, which shows `M` on both in the summary                                                                               |
 
 A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted` and `exchange`
 are absent rather than `false`.
 
 ### Kinds
 
-A failed operation keeps the kind it would have had, with `"failed":true` and `err`. That includes
-a change the kernel refused after the tracer saw it start.
+A failed operation keeps the kind it would have had, with `"failed":true` and `err`, and shows its
+letter lowercase in the summary. A failed `open`, `unlink`, `rmdir`, `rename`, `chmod`, `chown` or
+`attr` is recorded however it failed; a `mkdir`, `mknod`, `symlink`, `link` or `truncate` only when
+the kernel refused it after reaching its file, and a failed `exec` not at all.
 
 | `kind`                                          | Records                                                                                          | Summary                                   |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------- |
 | `open`                                          | a file opened; the summary counts one that creates or truncates, or that failed                  | `W`, `r`, `w`                             |
-| `read`, `write`                                 | the first read, or the first write, of a file by each program a process runs                     | `R`, `W`                                  |
+| `read`, `write`                                 | the first read, or the first write, through each opened file by each program a process runs      | `R`, `W`                                  |
 | `mmap`                                          | a file mapped into memory                                                                        | `R`, or `W` for a shared writable mapping |
 | `exec`                                          | a program run                                                                                    | `X`                                       |
 | `fork`                                          | a new process; `pid` is the child                                                                | none                                      |
