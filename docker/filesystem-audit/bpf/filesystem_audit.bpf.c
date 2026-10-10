@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Records the file accesses of every task in one cgroup v2 subtree: opens,
-// the first read and write of each open file, mmaps, execs, and the path
+// each program's first read and write of each open file, mmaps, execs, and the path
 // operations (create, move, delete, attribute change), successes and
 // failures alike. Kernel types are declared locally with preserve_access_index
 // so one CO-RE object runs on any BTF-enabled kernel from 5.17 on, 6.4 on
@@ -156,7 +156,7 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 //   open:    d_path result (path_len is its return value)
 //   open-failed: the name as passed to open(2), then its base directory if
 //            it is relative (see add_base); path_len holds the errno
-//   read/write: d_path result, once per open file and direction
+//   read/write: d_path result, once per open file, direction and program
 //   mmap:    path components; mode holds prot, flags the map flags, and
 //            path_len is 1 when an exec mapped it (see in_exec)
 //   exec:    filename; its arguments are not read, as they can hold secrets
@@ -492,7 +492,7 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 }
 
 // Open files already reported as read (1), written (2) or mapped
-// executable (4), so each is reported once per direction and process rather
+// executable (4), so each is reported once per direction and program rather
 // than per read(2). Keyed by the struct file and cleared when it is freed,
 // before the address can be reused.
 #define SEEN_READ 1
