@@ -242,10 +242,6 @@ const newAgg = (): Agg => ({
 
 const flagBits = (a: Agg): number => a.ok | a.failed;
 
-// What the lines below a directory must show for its own line to be dropped
-// as walked: its actions, and its refusals apart from them.
-const walkBits = (a: Agg): number => flagBits(a) | (a.perm << 8);
-
 function mergeAgg(dst: Agg, src: Agg): void {
   dst.ok |= src.ok;
   dst.failed |= src.failed;
@@ -338,11 +334,13 @@ function walkedNodes(top: Map<string, Node>): Set<Node> {
     let bits = 0;
     for (const kid of node.kids?.values() ?? []) {
       bits |= below.get(kid)!;
-      if (kid.own) bits |= walkBits(kid.own);
-      if (kid.folded) bits |= walkBits(kid.folded);
+      if (kid.own) bits |= flagBits(kid.own);
+      if (kid.folded) bits |= flagBits(kid.folded);
     }
     below.set(node, bits);
-    if (node.own && node.kids?.size && (walkBits(node.own) & ~bits) === 0) walked.add(node);
+    // A refused open of the directory is not how anything below it was reached.
+    if (node.own && !node.own.perm && node.kids?.size && (flagBits(node.own) & ~bits) === 0)
+      walked.add(node);
   }
   return walked;
 }

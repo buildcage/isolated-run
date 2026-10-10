@@ -356,6 +356,15 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["r! c ./d", "R c ./d/f"]);
   });
 
+  it("keeps a refused directory open even beside a refusal below it", () => {
+    const md = render(
+      { kind: "open-failed", comm: "c", path: "/work/d", err: 13 },
+      { kind: "open-failed", comm: "c", path: "/work/d/x", err: 13 },
+      { kind: "read", comm: "c", path: "/work/d/y" },
+    );
+    expect(lines(md)).toEqual(["r! c ./d", "r! c ./d/x", "R c ./d/y"]);
+  });
+
   it("still drops a directory read whose only lines below are misses", () => {
     const md = render(
       { kind: "read", comm: "c", path: "/work/d" },

@@ -126,14 +126,14 @@ describe("renderFilesystemAuditSummary: properties", () => {
         const below = [...lines.values()].filter(
           (d) => d.comm === l.comm && base(d.path) !== lb && base(d.path).startsWith(prefix),
         );
-        // "R" and "r" both count as the action; "r!" is the action and a refusal.
-        const marks = (flags: string[]): string[] =>
-          flags.flatMap((f) => (f.endsWith("!") ? [f[0].toUpperCase(), f] : [f.toUpperCase()]));
-        const carried = new Set(below.flatMap((d) => marks(d.flags)));
+        // "R", "r" and "r!" all count as the action, and a refused line stays.
+        const actions = (flags: string[]): string[] => flags.map((f) => f[0].toUpperCase());
+        const carried = new Set(below.flatMap((d) => actions(d.flags)));
         const walked =
           !l.path.endsWith("/**") &&
           below.length > 0 &&
-          marks(l.flags).every((c) => carried.has(c));
+          !l.flags.some((f) => f.endsWith("!")) &&
+          actions(l.flags).every((c) => carried.has(c));
         if (!walked) kept.add(k);
       }
       return kept;

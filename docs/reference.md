@@ -803,14 +803,14 @@ time. It does not say which action came when, and a file kept open counts only t
 first write through it by each program a process runs, so the last time can be earlier than its last
 write; a command reading or writing through a descriptor it inherited, or was passed, is shown under
 its own name, except on a pipe, socket or device such as `/dev/null`, which counts once. The artifact has every
-access in order. An action that only ever failed is lowercase. One the sandbox refused, for want
-of permission or because the location is read-only, is lowercase and marked `!`, after the uppercase
-letters if it also succeeded: `RWr!` on `/etc/**` means reads and writes under `/etc` succeeded and
-at least one read was refused. A directory with many touched children is shown once as `dir/**`.
-Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and `$HOME` (`~/…`), else absolute. A
-failed access is recorded under the name the command used, joined
-to the directory a relative name resolved against (its working directory, or the directory it passed
-by descriptor) without resolving `..`; a name whose directory was closed before it could be read is
+access in order. An action that only ever failed is lowercase. One refused for want of permission,
+by the sandbox or the file's own mode, or because the location is read-only, is lowercase and marked
+`!`, after the uppercase letters if it also succeeded: `RWr!` on `/etc/**` means reads and writes
+under `/etc` succeeded and at least one read was refused. A directory with many touched children is
+shown once as `dir/**`. Paths are shown relative to `$GITHUB_WORKSPACE` (`./…`) and `$HOME`
+(`~/…`), else absolute. A failed access is recorded under the name the command used, joined to the
+directory a relative name resolved against (its working directory, or the directory it passed by
+descriptor) without resolving `..`; a name whose directory was closed before it could be read is
 shown as `…/name`, as is a path too deep to record in full. Where its `path` differs from the name
 as passed, the artifact keeps that name in `name` (`to_name` for a move's target). An invisible or
 control character in a path or command name is shown escaped, as `\n` or `\u{202e}`, and a backslash
