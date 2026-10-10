@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
-import { reportStepTraffic, type ReportStepDeps, type ReportStepOptions } from "./step-report.ts";
+import {
+  reportStepTraffic,
+  writeMoreSummary,
+  type ReportStepDeps,
+  type ReportStepOptions,
+} from "./step-report.ts";
 
 // What is left to check here is the order they run in, what each one is
 // handed, and that a failure anywhere in the sequence still leaves the caller
@@ -273,5 +278,39 @@ describe("reportStepTraffic", () => {
       "Failed to set the traffic_artifact_name output: Missing file at path: /github/output; failing the step under restrict with fail_on_blocked",
     );
     expect(process.exitCode).toBe(1);
+  });
+
+  it("resolves to the proxy's start, or undefined without a report", async () => {
+    mocks.fetchReport.mockResolvedValue({ engine: "inspect", startedAt: 1_791_244_800 });
+    await expect(reportStepTraffic(options(), deps)).resolves.toBe(1_791_244_800);
+    mocks.fetchReport.mockRejectedValue(new Error("proxy is gone"));
+    await expect(reportStepTraffic(options({ failOnBlocked: false }), deps)).resolves.toBe(
+      undefined,
+    );
+  });
+});
+
+describe("writeMoreSummary", () => {
+  const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
+  const ann = annotation as unknown as ReportStepOptions["annotation"];
+
+  it("writes the blocks into what the summary has left", async () => {
+    await writeMoreSummary([block], { GITHUB_STEP_SUMMARY: "/s" }, ann, mocks.writeSummaryBlocks);
+    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith([block], { GITHUB_STEP_SUMMARY: "/s" });
+  });
+
+  it("writes nothing for no blocks", async () => {
+    await writeMoreSummary([], {}, ann, mocks.writeSummaryBlocks);
+    expect(mocks.writeSummaryBlocks).not.toHaveBeenCalled();
+  });
+
+  it("warns rather than throws when the write fails", async () => {
+    mocks.writeSummaryBlocks.mockRejectedValue(new Error("summary file is gone"));
+    await expect(
+      writeMoreSummary([block], {}, ann, mocks.writeSummaryBlocks),
+    ).resolves.toBeUndefined();
+    expect(annotation.warning).toHaveBeenCalledWith(
+      "Failed to write the Job Summary: summary file is gone",
+    );
   });
 });

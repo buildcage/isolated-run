@@ -261,9 +261,9 @@ describe("startFilesystemAudit", () => {
     await expect(start).rejects.toThrow(
       hostCannotAudit("attach on_unlinkat_enter: neither debugfs nor tracefs are mounted"),
     );
-    // One yield in the ready loop before the exit is seen, then one in stop's
-    // grace race.
-    expect(sleep).toHaveBeenCalledTimes(2);
+    // One yield in the ready loop before the exit is seen; stopping a tracer
+    // already gone waits for nothing.
+    expect(sleep).toHaveBeenCalledTimes(1);
   });
 
   it("says only that the tracer exited when it wrote nothing", async () => {
@@ -304,6 +304,83 @@ describe("startFilesystemAudit", () => {
     expect(kill).toHaveBeenCalledWith("SIGTERM");
     expect(exec).toHaveBeenCalledWith("sudo", ["-n", "kill", "-KILL", "999"]);
     expect(remove).toHaveBeenCalledWith(START_OPTIONS.pidFilePath);
+  });
+
+  it("leaves a tracer whose record is complete to exit, and drops its pidfile once it has", async () => {
+    let resolveExit: () => void;
+    const exited = new Promise<void>((r) => {
+      resolveExit = r;
+    });
+    const exec = vi.fn();
+    const remove = vi.fn();
+    let tail = '{"kind":"open"}\n';
+    const sleep = vi.fn(async () => {
+      tail += '{"kind":"end","dropped":0,"untracked":0,"host_missed":0}\n';
+    });
+
+    const handle = await startFilesystemAudit(START_OPTIONS, {
+      spawn: () => ({ exited, kill: vi.fn(), reason: () => "" }),
+      exists: () => true,
+      sleep,
+      remove,
+      exec,
+      readTail: () => tail,
+    });
+    await handle.stop();
+
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(exec).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    resolveExit!();
+    await exited;
+    await Promise.resolve();
+    expect(remove).toHaveBeenCalledWith(START_OPTIONS.pidFilePath);
+  });
+
+  it("gives a tracer 30 seconds to finish its record, and 2 once the step is cancelled", async () => {
+    const stopAfter = async (cancelled: boolean): Promise<number> => {
+      const cancel = new AbortController();
+      let resolveExit: () => void;
+      const exited = new Promise<void>((r) => {
+        resolveExit = r;
+      });
+      const sleep = vi.fn(async () => {});
+      const handle = await startFilesystemAudit(
+        { ...START_OPTIONS, cancel: cancel.signal },
+        {
+          spawn: () => ({ exited, kill: vi.fn(), reason: () => "" }),
+          exists: () => true,
+          sleep,
+          remove: vi.fn(),
+          exec: () => {
+            resolveExit();
+            return "";
+          },
+          readFile: () => "999\n",
+          readTail: () => '{"kind":"open"}\n',
+        },
+      );
+      if (cancelled) cancel.abort();
+      await handle.stop();
+      return sleep.mock.calls.length;
+    };
+
+    expect(await stopAfter(false)).toBe(300);
+    expect(await stopAfter(true)).toBe(20);
+  });
+
+  it("reads a recording that is not there yet as unfinished", async () => {
+    const { child } = liveChild();
+    const handle = await startFilesystemAudit(START_OPTIONS, {
+      spawn: () => child,
+      exists: () => true,
+      sleep: async () => {},
+      remove: vi.fn(),
+      readTail: () => {
+        throw new Error("ENOENT");
+      },
+    });
+    await expect(handle.stop()).resolves.toBeUndefined();
   });
 
   it("does not signal anything when the pidfile holds no usable pid", async () => {

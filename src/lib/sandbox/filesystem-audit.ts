@@ -1,5 +1,14 @@
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, readFileSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  rmSync,
+} from "node:fs";
 import { join } from "node:path";
 
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
@@ -16,9 +25,14 @@ const READY_POLL_MS = 100;
 // startFilesystemAudit); this cap only matters if it spawns but neither
 // attaches nor exits.
 const READY_TRIES = 300;
-/** How long the tracer has to exit on SIGTERM before it is killed, so a wedged
- *  tracer cannot hang the step's own teardown. */
-const STOP_GRACE_MS = 2_000;
+/** How long the tracer has to finish its record on SIGTERM before it is
+ *  killed, so a wedged tracer cannot hang the step's own teardown: long enough
+ *  to drain a full event buffer at the end of a step, and short once the step
+ *  is cancelled, or for a tracer that never attached. */
+const STOP_GRACE_MS = 30_000;
+const SHORT_STOP_GRACE_MS = 2_000;
+/** The tracer's last line, written once every access it caught is. */
+const END_LINE = /"kind":"end"[^\n]*\n$/;
 /** How the tracer starts the line naming why it exited (see its main.go). */
 const FATAL = "filesystem-audit: fatal: ";
 
@@ -120,6 +134,17 @@ export interface FilesystemAuditDeps {
   sleep?: (ms: number) => Promise<void>;
   remove?: (path: string) => void;
   readFile?: (path: string) => string;
+  /** The last few hundred bytes of a file. */
+  readTail?: (path: string) => string;
+}
+
+/** Whether the recording at `path` ends with the tracer's end line. */
+function recordComplete(readTail: (path: string) => string, path: string): boolean {
+  try {
+    return END_LINE.test(readTail(path));
+  } catch {
+    return false; // not created yet
+  }
 }
 
 // Untested by design: the defaults behind this module's seams, which only hand
@@ -165,6 +190,17 @@ function defaultRemove(path: string): void {
 
 function defaultReadFile(path: string): string {
   return readFileSync(path, "utf8");
+}
+
+function defaultReadTail(path: string): string {
+  const fd = openSync(path, "r");
+  try {
+    const buf = Buffer.alloc(512);
+    const start = Math.max(0, fstatSync(fd).size - buf.length);
+    return buf.toString("utf8", 0, readSync(fd, buf, 0, buf.length, start));
+  } finally {
+    closeSync(fd);
+  }
 }
 /* v8 ignore stop */
 
@@ -239,6 +275,7 @@ export async function startFilesystemAudit(
     remove = defaultRemove,
     exec = defaultExec,
     readFile = defaultReadFile,
+    readTail = defaultReadTail,
   } = deps;
   const child = spawn("sudo", [
     "-n",
@@ -259,13 +296,24 @@ export async function startFilesystemAudit(
   void child.exited.then(() => {
     exited = true;
   });
-  // sudo relays SIGTERM to the tracer for a clean flush. If that does not end
-  // it in time, SIGKILL the tracer itself: SIGKILL to the sudo wrapper would
-  // not reach it. Removing the pidfile afterwards tells the post step the
+  // sudo relays SIGTERM to the tracer for a clean flush. Once its end line is
+  // written the record is whole, and the seconds the kernel takes to detach
+  // its probes are left to it, so it can remove its cgroup. One that writes
+  // neither in time is SIGKILLed itself: SIGKILL to the sudo wrapper would not
+  // reach it. Removing the pidfile once it is gone tells the post step the
   // tracer is stopped, so it only acts on one a cancel orphaned.
-  const stop = async () => {
+  const halt = async (graceMs: number) => {
     child.kill("SIGTERM");
-    await Promise.race([child.exited, sleep(STOP_GRACE_MS)]);
+    let complete = false;
+    for (let waited = 0; !exited && waited < graceMs; waited += READY_POLL_MS) {
+      complete = recordComplete(readTail, outPath);
+      if (complete) break;
+      await sleep(READY_POLL_MS);
+    }
+    if (complete && !exited) {
+      void child.exited.then(() => remove(pidFilePath));
+      return;
+    }
     if (!exited) {
       try {
         const pid = Number(readFile(pidFilePath).trim()); // NaN for a junk pidfile
@@ -277,6 +325,7 @@ export async function startFilesystemAudit(
     await child.exited;
     remove(pidFilePath);
   };
+  const stop = () => halt(cancel?.aborted ? SHORT_STOP_GRACE_MS : STOP_GRACE_MS);
   for (let i = 0; i < READY_TRIES; i++) {
     if (cancel?.aborted) break;
     if (exists(readyPath)) return { stop };
@@ -289,7 +338,7 @@ export async function startFilesystemAudit(
   const failure = exited
     ? hostCannotAudit(child.reason() || "the tracer exited")
     : auditUnavailable("the tracer did not attach in time");
-  await stop();
+  await halt(SHORT_STOP_GRACE_MS);
   // A tracer that attached just too late may have created the recording; the
   // report would otherwise read it as one cut short.
   remove(outPath);
