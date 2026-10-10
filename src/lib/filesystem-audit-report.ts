@@ -209,7 +209,8 @@ export async function prepareStepFilesystemAudit(
       artifactName =
         (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
     const uploaded = artifactName || undefined;
-    const notice = filesystemTruncationNote(uploaded);
+    const cutNote = (cause?: CutCause): string => filesystemTruncationNote(uploaded, cause);
+    const notice = cutNote();
     const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`;
     const legendNote = filesystemLegendNote(uploaded, guide);
 
@@ -220,7 +221,6 @@ export async function prepareStepFilesystemAudit(
       let rendered: SummaryBlock[];
       try {
         if (!summary) throw summaryError;
-        const cutNote = (cause?: CutCause): string => filesystemTruncationNote(uploaded, cause);
         rendered = deps.renderBlocks(
           summary,
           startedAt,

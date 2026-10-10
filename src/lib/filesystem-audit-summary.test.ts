@@ -1001,6 +1001,14 @@ describe("renderFilesystemAuditSummary: limits", () => {
     expect(md).not.toContain(CUT);
   });
 
+  it("folds before counting a new path against the bound", () => {
+    // "/", "x" and three files pass four, but the third file folds them.
+    const files = ["a", "b", "c"].map((f) => ({ kind: "write", comm: "c", path: `/x/${f}` }));
+    const md = limited({ nodes: 4 }, ...files);
+    expect(md).not.toContain("too many distinct paths");
+    expect(md).toContain("| W | `/x/**` |");
+  });
+
   it("gives the details their own cause when only they outgrow the bound", () => {
     // Each command has a tree of its own in the details, so they hold more paths.
     const md = limited(

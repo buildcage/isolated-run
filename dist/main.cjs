@@ -68547,8 +68547,8 @@ var Lines = class {
 				if (node = {
 					bytes: 0,
 					kept: this.isKept(parts, i + 1) || void 0
-				}, kids.set(parts[i], node), ++this.nodes > this.opts.nodes) return this.stop("paths");
-				if (parent && (this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout)) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
+				}, kids.set(parts[i], node), this.nodes++, parent && (this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout)) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
+				if (this.nodes > this.opts.nodes) return this.stop("paths");
 			}
 			if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x, settled);
 			if (i === parts.length - 1) {
@@ -68729,7 +68729,7 @@ function createAuditSummary(prefixes) {
 				paths: byPath,
 				details: log,
 				pathsCut: paths.stopped,
-				detailsCut: byPath && details.stopped
+				detailsCut: details.stopped
 			};
 		}
 	};
@@ -69424,12 +69424,12 @@ async function prepareStepFilesystemAudit({ audit, retentionDays, containerName,
 		if (!reduced) return NONE;
 		let { summary, summaryError } = reduced;
 		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
-		let uploaded = artifactName || void 0, notice = filesystemTruncationNote(uploaded), legendNote = filesystemLegendNote(uploaded, `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`);
+		let uploaded = artifactName || void 0, cutNote = (cause) => filesystemTruncationNote(uploaded, cause), notice = cutNote(), legendNote = filesystemLegendNote(uploaded, `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`);
 		return { blocks: (startedAt) => {
 			let rendered;
 			try {
 				if (!summary) throw summaryError;
-				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, (cause) => filesystemTruncationNote(uploaded, cause), legendNote);
+				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, cutNote, legendNote);
 			} catch (e) {
 				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
 			}

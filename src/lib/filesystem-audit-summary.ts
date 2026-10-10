@@ -460,7 +460,7 @@ class Lines {
       if (!node) {
         node = { bytes: 0, kept: this.isKept(parts, i + 1) || undefined };
         kids.set(parts[i], node);
-        if (++this.nodes > this.opts.nodes) return this.stop("paths");
+        this.nodes++;
         if (parent) {
           // No longer a leaf, its own line may be only the walk to this one.
           this.setBytes(parent, 0);
@@ -469,6 +469,8 @@ class Lines {
             return this.addFolded(parent, parts.slice(0, i), x, parentSettled);
           }
         }
+        // Only once a fold had its chance to bring the count back down.
+        if (this.nodes > this.opts.nodes) return this.stop("paths");
       }
       if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x, settled);
       if (i === parts.length - 1) {
@@ -822,7 +824,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       paths: byPath,
       details: log,
       pathsCut: paths.stopped,
-      detailsCut: byPath && details.stopped,
+      detailsCut: details.stopped,
     };
   };
   return { observe, add, finish };
@@ -1033,8 +1035,9 @@ export function filesystemLegendNote(artifactName: string | undefined, guideUrl:
 }
 
 /**
- * What the summary says where the Job Summary's size limit cut it: where the
- * rest is, or that it is nowhere when the artifact could not be uploaded.
+ * What the summary says where a part was left out, for its size or for
+ * holding too many paths: why, and where the rest is, or that it is nowhere
+ * when the artifact could not be uploaded.
  */
 export function filesystemTruncationNote(
   artifactName: string | undefined,

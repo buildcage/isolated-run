@@ -649,7 +649,7 @@ the step arranges its processes or spells a path. What it can do:
   record is incomplete, as it does when the tracer did not stop cleanly. Flooding can hide which
   accesses happened, not that some are missing.
 - Touch so many paths that a table or the details would pass GitHub's Job Summary size limit, or
-  hold more than 200,000 paths after folding. That part is replaced by a note naming the artifact,
+  hold more than 200,000 files and directories after folding. That part is replaced by a note naming the artifact,
   which still holds every access.
 
 Where the tracer cannot start or cannot attach a probe the kernel offers, for want of cgroup v2,
