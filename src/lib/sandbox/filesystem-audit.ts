@@ -53,7 +53,7 @@ export function cgroupFsPath(cgroupsPath: string): string {
 
 const REQUIREMENTS =
   "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF and " +
-  "tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/reference.md#filesystem-audit";
+  "tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting";
 
 /** The step's failure when the tracer could not start. */
 export function auditUnavailable(reason: string): SandboxError {

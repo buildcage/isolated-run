@@ -592,7 +592,8 @@ the path, and a recorded query is as likely to hold a one-off token as anything 
 ## Filesystem audit
 
 `filesystem_audit: record` records what the step touches; it never blocks an access, so it is a
-visibility aid, not a control. What follows is what the watched step itself can do to the record.
+visibility aid, not a control. What follows is what the watched step itself can do to the record;
+[Filesystem audit](./filesystem-audit.md) covers how to use and read it.
 
 **Altering the record.** The tracer runs as root on the runner host, outside the sandbox, and is
 watching the sandbox's cgroup before the step starts. It writes under `/var/tmp/buildcage-<uid>`,
