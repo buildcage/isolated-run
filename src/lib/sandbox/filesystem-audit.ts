@@ -88,18 +88,22 @@ export function hostCannotAudit(reason: string): SandboxError {
 
 export const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2";
 
-/** The 32-bit ABIs Docker's default seccomp profile lets through beside the
- *  native one. A syscall through one of them skips the per-syscall
- *  tracepoints the tracer catches attribute changes and failed path changes
- *  at, so under the audit the sandbox refuses them. */
-const COMPAT_ARCHES = new Set(["SCMP_ARCH_X86", "SCMP_ARCH_X32", "SCMP_ARCH_ARM"]);
+/** The native seccomp architecture of each runner the tracer supports. */
+const NATIVE_ARCH: Partial<Record<NodeJS.Architecture, string>> = {
+  x64: "SCMP_ARCH_X86_64",
+  arm64: "SCMP_ARCH_AARCH64",
+};
 
-/** The seccomp profile with the 32-bit ABIs dropped, so the kernel kills a
- *  process that makes a syscall through one. */
-export function withoutCompatSyscalls(profile: unknown): unknown {
-  const p = profile as { architectures?: string[] };
-  if (!Array.isArray(p.architectures)) return profile;
-  return { ...p, architectures: p.architectures.filter((a) => !COMPAT_ARCHES.has(a)) };
+/** The seccomp profile with only the native ABI left, of those Docker's
+ *  default profile allows. A syscall through a 32-bit one skips the
+ *  per-syscall tracepoints the tracer catches attribute changes and failed
+ *  path changes at, so under the audit the kernel kills the thread that makes
+ *  one, with SIGSYS. */
+export function withoutCompatSyscalls(profile: unknown, arch = process.arch): unknown {
+  const p = profile as { architectures?: unknown } | null;
+  const native = NATIVE_ARCH[arch];
+  if (!p || !Array.isArray(p.architectures) || !native) return profile;
+  return { ...p, architectures: p.architectures.filter((a) => a === native) };
 }
 
 /** Fails the step before the proxy starts on a host the tracer cannot watch.

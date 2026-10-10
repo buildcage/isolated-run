@@ -32,24 +32,27 @@ const REQUIREMENTS =
   "tracefs mounted: https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting";
 
 describe("withoutCompatSyscalls", () => {
-  it("drops the 32-bit ABIs and keeps the rest of the profile", () => {
+  it("keeps only the native ABI and the rest of the profile", () => {
     const profile = {
       defaultAction: "SCMP_ACT_ERRNO",
       architectures: ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"],
       syscalls: [{ names: ["read"], action: "SCMP_ACT_ALLOW" }],
     };
-    expect(withoutCompatSyscalls(profile)).toStrictEqual({
+    expect(withoutCompatSyscalls(profile, "x64")).toStrictEqual({
       ...profile,
       architectures: ["SCMP_ARCH_X86_64"],
     });
     expect(
-      withoutCompatSyscalls({ architectures: ["SCMP_ARCH_AARCH64", "SCMP_ARCH_ARM"] }),
+      withoutCompatSyscalls({ architectures: ["SCMP_ARCH_AARCH64", "SCMP_ARCH_ARM"] }, "arm64"),
     ).toStrictEqual({ architectures: ["SCMP_ARCH_AARCH64"] });
   });
 
-  it("leaves a profile naming no architectures as it is", () => {
+  it("leaves a profile naming no architectures, or one for a runner it cannot audit, as it is", () => {
     const profile = { defaultAction: "SCMP_ACT_ERRNO" };
-    expect(withoutCompatSyscalls(profile)).toBe(profile);
+    expect(withoutCompatSyscalls(profile, "x64")).toBe(profile);
+    expect(withoutCompatSyscalls(null, "x64")).toBeNull();
+    const s390 = { architectures: ["SCMP_ARCH_S390X", "SCMP_ARCH_S390"] };
+    expect(withoutCompatSyscalls(s390, "s390x")).toBe(s390);
   });
 });
 

@@ -281,15 +281,14 @@ jobs:
             (exec 3> "$GITHUB_WORKSPACE/execd.txt"; echo head >&3; exec cat /etc/hostname >&3)
             # A program, not the builtin, with an argument the record must not keep.
             /usr/bin/true buildcage-audit-sentinel-arg
-            # A 32-bit syscall (getpid through int 0x80) is refused, since it
-            # would skip the per-call tracepoints.
+            # A 32-bit syscall (getpid through int 0x80) would skip the per-call
+            # tracepoints, so seccomp kills the thread making it: SIGSYS, 128+31.
             if [ "$(uname -m)" = x86_64 ]; then
               printf 'int main(void){long r;__asm__ volatile("int $0x80":"=a"(r):"a"(20L));return r < 0;}' |
                 gcc -x c -o "$GITHUB_WORKSPACE/int80" -
               status=0
               "$GITHUB_WORKSPACE/int80" || status=$?
-              echo "32-bit syscall: exit status $status"
-              if [ "$status" -eq 0 ]; then echo "::error::a 32-bit syscall ran"; exit 1; fi
+              if [ "$status" -ne 159 ]; then echo "::error::a 32-bit syscall ended with $status, not SIGSYS"; exit 1; fi
             fi
 
       - name: Verify the Job Summary has the filesystem audit

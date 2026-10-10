@@ -632,9 +632,10 @@ Summary or pass for another.
 
 **Going unrecorded.** The step cannot leave the cgroup: it sees the cgroup filesystem read-only and
 holds no capability. Nor can it make a system call through a 32-bit ABI, which skips the per-call
-tracepoints: under the audit the sandbox's seccomp filter refuses those. Nor can it change which records count as its own: after its shell starts,
-everything is the step's except the sandbox init's records and the shell reading its script, however
-the step arranges its processes or spells a path. What it can do:
+tracepoints: under the audit the sandbox's seccomp filter refuses those. Nor can it change which
+records count as its own: after its shell starts, everything is the step's except the sandbox
+init's records and the shell reading its script, however the step arranges its processes or spells
+a path. What it can do:
 
 - Hand the work to a process outside the sandbox, such as an `ssh-agent` or `gpg-agent` it reaches
   over a Unix socket.
