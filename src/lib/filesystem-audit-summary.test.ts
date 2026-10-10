@@ -771,6 +771,17 @@ describe("renderFilesystemAuditSummary", () => {
       expect(tableRows(md)).toEqual(["| X | `/tmp/p` (deleted) |"]);
     });
 
+    it("shows an exchange as a move of both paths", () => {
+      const md = render({
+        kind: "rename",
+        comm: "mv",
+        path: "/srv/a",
+        to: "/srv/b",
+        exchange: true,
+      });
+      expect(tableRows(md)).toEqual(["| M | `/srv/a` |", "| M | `/srv/b` |"]);
+    });
+
     it("leaves the executed table out when nothing was run", () => {
       const md = render({ kind: "read", comm: "a", path: "/work/x" });
       expect(md).not.toContain("#### Executed");

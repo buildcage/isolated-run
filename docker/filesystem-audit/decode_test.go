@@ -344,6 +344,12 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "unlink", Comm: "rm", Path: "…/deep"},
 		},
 		{
+			name: "rename exchange",
+			ev: event{kind: 5, comm: "mv", flags: unix.RENAME_EXCHANGE, n1: 2, n2: 2,
+				data: append(comps("a", "tmp"), comps("b", "tmp")...)},
+			want: record{Kind: "rename", Comm: "mv", Path: "/tmp/a", To: "/tmp/b", Exchange: true},
+		},
+		{
 			// Only the rename target was truncated; the source must not
 			// inherit the mark.
 			name: "rename, only target truncated",

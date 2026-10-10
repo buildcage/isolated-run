@@ -639,6 +639,9 @@ the step arranges its processes or spells a path. What it can do:
   `exec`, an extended attribute change other than through `setxattr` or `lsetxattr`, a failed
   `exec`, or a `mkdir`, `mknod`, `symlink`, `link` or `truncate` that fails before reaching its
   file, such as on a name that does not exist.
+- Look without reading. A `stat`, or an open with `O_PATH`, reads no content and is too frequent
+  to record; what a command then does through an `O_PATH` descriptor, such as running or reopening
+  the file, is recorded.
 - Flood the tracer until its buffers fill. What did not fit is lost, but the summary then says the
   record is incomplete, as it does when the tracer did not stop cleanly. Flooding can hide which
   accesses happened, not that some are missing.

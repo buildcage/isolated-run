@@ -38,6 +38,8 @@ type record struct {
 	// chose; Deleted a file unlinked while in use, or an O_TMPFILE.
 	Memfd   bool `json:"memfd,omitempty"`
 	Deleted bool `json:"deleted,omitempty"`
+	// Exchange marks a rename that swapped Path and To (RENAME_EXCHANGE).
+	Exchange bool `json:"exchange,omitempty"`
 	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the reader
 	// turns it into Time.
 	boot uint64
@@ -287,6 +289,7 @@ func decode(raw []byte) (record, error) {
 		r.Path, rest = components(data, n1, truncated)
 		r.To, _ = components(rest, n2, truncated2)
 		applyMarks(&r, marks, false) // only a link's source is marked
+		r.Exchange = kind == 5 && flags&unix.RENAME_EXCHANGE != 0
 	case 16, 18, 19: // failed delete / chmod / chown
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet
