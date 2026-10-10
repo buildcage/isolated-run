@@ -39,16 +39,16 @@ details.
 | `write_through`                   | empty        | Paths whose writes reach the real host filesystem. See [`write_through` paths](#write_through-paths).                                                                                                                                                                       |
 | `filesystem_mode`                 | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                                                                                                                                                                    |
 | `filesystem_audit`                | `off`        | `record` logs the step's file accesses (**experimental**). See [Filesystem audit](#filesystem-audit).                                                                                                                                                                       |
-| `filesystem_audit_retention_days` | empty        | How long to keep the filesystem audit artifact, as a whole number of days; empty uses the repository's own default                                                                                                                                                          |
+| `filesystem_audit_retention_days` | empty        | How long to keep the filesystem audit artifact, as a whole number of days; empty uses the repository's own default, and a value above the repository's maximum is lowered to it, with a warning                                                                             |
 | `writable`                        | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                                                                                                                                                                   |
 | `label`                           | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                                                                                                                                                              |
 | `upload_traffic_artifact`         | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                                                                                                                                                                  |
-| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default                                                                                                                                                                          |
+| `traffic_artifact_retention_days` | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default, and a value above the repository's maximum is lowered to it, with a warning                                                                                             |
 
 `fail_on_blocked`, `fail_on_ca_residue`, `upload_traffic_artifact` and `aws_key_check` take `true`
 or `false`, `filesystem_mode` `persistent` or `ephemeral`, `filesystem_audit` `off` or `record`, and
 `traffic_artifact_retention_days` and `filesystem_audit_retention_days` a whole number above zero.
-Any other value fails the step before the sandbox is set up.
+Left empty, each takes its default; any other value fails the step before the sandbox is set up.
 
 ### Rule inputs
 
@@ -767,8 +767,8 @@ repository can fetch it through the API, until it expires.
 
 ## Filesystem audit
 
-`filesystem_audit` is **experimental**: its behavior and output format may still change without
-following semver. The guide is [Filesystem audit](./filesystem-audit.md); what follows is the
+`filesystem_audit` is **experimental**: its behavior, inputs and output format may still change
+without following semver. The guide is [Filesystem audit](./filesystem-audit.md); what follows is the
 short form.
 
 - `filesystem_audit: record` records the step's file accesses from the kernel and never blocks one.
