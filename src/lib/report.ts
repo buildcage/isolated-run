@@ -161,10 +161,10 @@ function withAwsTroubleshootingLink(
 
 /**
  * Restrict Would Refuse with the first request of each host and reason, in the
- * order each first appeared, the count of the rest after it, and a note on what
- * it lists. A role assumed in an account not given refuses every later request
- * signed with its key, which would otherwise bury the rest. The time is left
- * out: the line stands for requests made at different times.
+ * order each first appeared, and how many more there were. A role assumed in an
+ * account not given has every later request signed with its key refused, and a
+ * line for each would bury the other refusals. The time is left out, since a
+ * line stands for requests made at different times.
  */
 function withWouldRefuseGrouped(
   blocks: SummaryBlock[],

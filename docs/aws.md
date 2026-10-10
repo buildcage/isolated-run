@@ -71,9 +71,9 @@ Then:
    `cdk-hnb659fds-deploy-role-*` role in each. Keep only accounts that are yours: one you do not
    recognise there is what the check is meant to catch. Until an account is named, every request
    signed with its roles' keys would be refused, so name the accounts and run `audit` again before
-   reading on.
-2. Read **🚨 Restrict Would Refuse** in the report. Each line ends in the reason the check would
-   refuse for, such as `(restrict would refuse: aws-key-not-allowed)`, and
+   step 2.
+2. Read **🚨 Restrict Would Refuse** in the report. Each line ends in its reason, such as
+   `(restrict would refuse: aws-key-not-allowed)`, and
    [Troubleshooting](#troubleshooting) gives the usual causes of each.
 3. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries the URL
    rules, `aws_key_check: true` and the accounts from step 1 over.
