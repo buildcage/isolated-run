@@ -456,10 +456,10 @@ full record is uploaded as a `buildcage-filesystem-audit-<id>` artifact; treat i
 ```
 
 It only records; it never blocks an access. It works on GitHub-hosted Ubuntu runners, and on a
-self-hosted host on Linux 6.1 or newer (6.4 on arm64) with cgroup v2, kernel BTF and tracefs;
-elsewhere the step fails before the command runs. While the step runs it adds a small cost to every system call on the
-host, other jobs' included. [Filesystem audit](./docs/filesystem-audit.md) covers what to use it
-for, how to read the summary and the artifact, and what it does not record.
+self-hosted runner on Linux 6.1 or newer (6.4 on arm64) with cgroup v2, kernel BTF and tracefs;
+elsewhere the step fails before the command runs. While the step runs it adds a small cost to every
+system call on the host, other jobs' included. See [Filesystem audit](./docs/filesystem-audit.md)
+for how to use and read it.
 
 ## How it works
 

@@ -5,7 +5,7 @@
 > in a future release without following semver. Try it in a non-critical workflow first, and pin
 > this action to a commit SHA rather than a version tag if you adopt it.
 
-`filesystem_audit: record` records every file the isolated step opens, reads, writes, moves,
+`filesystem_audit: record` records every file the isolated step reads, writes, moves,
 deletes, changes the attributes of, and executes. It adds a section to the Job Summary and uploads
 the full record as an artifact. It watches from the kernel, so a static binary or a tool that
 bypasses libc is seen like any other, and it only records: it never blocks an access. What the step
@@ -77,8 +77,8 @@ The step's Job Summary gets a **Filesystem audit** section after the traffic rep
     name: ${{ steps.build.outputs.filesystem_audit_artifact_name }}
 ```
 
-The output is empty when nothing was recorded or the upload failed, and `download-artifact` with an
-empty name downloads every artifact of the run, hence the `if:`.
+The output is empty when nothing was recorded or the upload failed, and without the `if:`,
+`download-artifact` would then download every artifact of the run.
 
 `filesystem_audit_retention_days` sets how long the artifact is kept; empty uses the repository's
 default. The artifact names each program the step ran but not its arguments, which can carry
@@ -153,11 +153,11 @@ folded into a `dir/**` row, nor is `/proc/<pid>`, which stands for any process's
 
 A program is shown under the file it ran, with symlinks followed, and a script under its own path
 rather than its interpreter's. A failed access is shown under the name the command passed, joined to
-its working directory, or the directory it passed by descriptor, without resolving `..`. A command reading or writing through a file it
-inherited or was passed is shown under its own name, except for a pipe, a socket or a device such as
-`/dev/null`, which counts once.
+its working directory, or the directory it passed by descriptor, without resolving `..`. A command
+reading or writing through a file it inherited or was passed is shown under its own name, except for
+a pipe, a socket or a device such as `/dev/null`, which counts once.
 
-### What is left out
+### What the summary leaves out
 
 The summary leaves out what any program does just to start: the shared libraries it loads, its
 reads of them and of `/etc/ld.so.cache`, and its own reads of the program file. Another program

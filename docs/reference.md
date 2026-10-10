@@ -766,8 +766,8 @@ repository can fetch it through the API, until it expires.
 ## Filesystem audit
 
 `filesystem_audit` is **experimental**: its behavior and output format may still change without
-following semver. [Filesystem audit](./filesystem-audit.md) covers what it is for, which runners it
-works on, how to read its summary and artifact, and what it does not record.
+following semver. The guide is [Filesystem audit](./filesystem-audit.md); what follows is the
+short form.
 
 - `filesystem_audit: record` records the step's file accesses from the kernel and never blocks one.
   It needs a cgroup v2 host on Linux 6.1 or newer (6.4 on arm64) with kernel BTF and tracefs
@@ -775,8 +775,9 @@ works on, how to read its summary and artifact, and what it does not record.
 - The step's Job Summary gets a section listing the programs it ran and every path it touched, with
   a flag for each action, and folded below them one row per command and path.
 - The full record is uploaded as JSON lines in an artifact named `buildcage-filesystem-audit-<id>`,
-  which `filesystem_audit_artifact_name` names and `filesystem_audit_retention_days` keeps. It
-  leaves out each program's arguments but holds every path the step touched; treat it as sensitive.
+  whose name the `filesystem_audit_artifact_name` output carries; `filesystem_audit_retention_days`
+  sets how long it is kept. It leaves out each program's arguments but holds every path the step
+  touched; treat it as sensitive.
 
 ## CA trust variables
 
