@@ -222,6 +222,58 @@ describe("computeReportOutcomes", () => {
       );
     });
 
+    it("groups aws-key-not-allowed by key, whatever the host, naming the account a role was assumed in", () => {
+      const signed = (time: number, host: string, keyRef: string): TrafficEvent => ({
+        ...wouldRefuse(time, host, "aws-key-not-allowed"),
+        extensions: { aws: { keyRef } },
+      });
+      const { markdown } = computeReportOutcomes(
+        audit([
+          {
+            time: 0,
+            action: "allow",
+            protocol: "https",
+            host: "sts.amazonaws.com",
+            port: 443,
+            extensions: {
+              aws: { key: "env", assumedAccount: "222222222222", issuedKeyRef: "aaaa1111" },
+            },
+          },
+          // An ECR redirect names no account.
+          {
+            time: 0,
+            action: "allow",
+            protocol: "https",
+            host: "1.dkr.ecr.us-east-1.amazonaws.com",
+            port: 443,
+            extensions: { aws: { key: "none", issuedKeyRef: "cccc3333" } },
+          },
+          signed(1, "s3.amazonaws.com", "aaaa1111"),
+          signed(2, "ssm.amazonaws.com", "bbbb2222"),
+          signed(3, "ssm.amazonaws.com", "aaaa1111"),
+          wouldRefuse(4, "s3.amazonaws.com", "aws-no-credential"),
+          signed(5, "s3.amazonaws.com", "aaaa1111"),
+          signed(6, "cloudformation.amazonaws.com", "cccc3333"),
+          // Another reason keeps to its host, key or not.
+          {
+            ...wouldRefuse(7, "s3.amazonaws.com", "aws-ambiguous-credential"),
+            extensions: { aws: { keyRef: "aaaa1111" } },
+          },
+        ]),
+        options(),
+      );
+      expect(section(markdown).split("```\n")[1]).toBe(
+        [
+          "🚨 GET https://s3.amazonaws.com/1 -> 200 (restrict would refuse: aws-key-not-allowed, key 1 from a role in 222222222222) (+2 more)",
+          "🚨 GET https://ssm.amazonaws.com/2 -> 200 (restrict would refuse: aws-key-not-allowed, key 2)",
+          "🚨 GET https://s3.amazonaws.com/4 -> 200 (restrict would refuse: aws-no-credential)",
+          "🚨 GET https://cloudformation.amazonaws.com/6 -> 200 (restrict would refuse: aws-key-not-allowed, key 3)",
+          "🚨 GET https://s3.amazonaws.com/7 -> 200 (restrict would refuse: aws-ambiguous-credential)",
+          "",
+        ].join("\n"),
+      );
+    });
+
     it("says what it lists, and points at an assumed account only when the example marks one", () => {
       const r = audit([wouldRefuse(1, "s3.amazonaws.com", "aws-key-not-allowed")]);
       const plain = section(computeReportOutcomes(r, options()).markdown);
@@ -236,7 +288,9 @@ describe("computeReportOutcomes", () => {
           }),
         ).markdown,
       );
-      expect(plain).toContain("the first for each host and reason.*");
+      expect(plain).toContain(
+        "the first for each host and reason, or for each key under `aws-key-not-allowed`.*",
+      );
       expect(plain).not.toContain("assumed in this run");
       expect(marked).toContain("marks an account `# assumed in this run`");
     });

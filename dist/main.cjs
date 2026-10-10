@@ -73095,6 +73095,8 @@ function describeFailedConnections(report, engineLabel) {
 		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed under Failed Connections. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
 	};
 }
+//#endregion
+//#region src/proxy/haproxy-aws-keys.ts
 const vpceHost = (service) => `^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.${service}\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$`;
 `${vpceHost("sts")}`, "" + vpceHost("git-codecommit(-fips)?");
 const formName = (name) => name.split("").map((c) => `(${[c, ...new Set([c, c.toUpperCase()].map((l) => `%${l.charCodeAt(0).toString(16)}`))].join("|")})`).join("");
@@ -73147,23 +73149,41 @@ function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 function withWouldRefuseGrouped(blocks, report, extraInputs) {
 	let at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse);
 	if (at === -1) return blocks;
-	let groups = new Map();
+	let issuers = new Map();
+	for (let e of report.timeline) {
+		let { issuedKeyRef, assumedAccount } = e.extensions?.aws ?? {};
+		issuedKeyRef && assumedAccount && /^\d{12}$/.test(assumedAccount) && issuers.set(issuedKeyRef, assumedAccount);
+	}
+	let keyNotAllowed = "aws-key-not-allowed", keys = new Map(), groups = new Map();
 	for (let e of report.timeline) {
 		if (e.wouldRefuse === void 0) continue;
-		let key = [
+		let keyRef = e.wouldRefuse === keyNotAllowed ? e.extensions?.aws?.keyRef : void 0, key = keyRef ? [
+			e.action,
+			"key",
+			keyRef
+		].join(" ") : [
 			e.action,
 			e.protocol,
 			e.host,
 			e.port,
 			e.wouldRefuse
 		].join(" "), group = groups.get(key);
-		group ? group.push(e) : groups.set(key, [e]);
+		if (group) {
+			group.push(e);
+			continue;
+		}
+		keyRef && !keys.has(keyRef) && keys.set(keyRef, keys.size + 1);
+		let account = keyRef && issuers.get(keyRef), label = keyRef ? `${keyNotAllowed}, key ${keys.get(keyRef)}${account ? ` from a role in ${account}` : ""}` : e.wouldRefuse;
+		groups.set(key, [{
+			...e,
+			wouldRefuse: label
+		}]);
 	}
 	let counts = [...groups.values()], lines = renderWouldRefuseBody(counts.map((events) => events[0]), report.startedAt).split("\n").slice(1, -2).map((line, i) => {
 		let rest = counts[i].length - 1;
 		return line.replace(/^(\S+) \S+: /, "$1 ") + (rest > 0 ? ` (+${rest} more)` : "");
-	}), note = "Requests audit let through that restrict would refuse, the first for each host and reason.";
-	extraInputs?.some((l) => l.endsWith(" # assumed in this run, check it is yours")) && counts.some((events) => events[0].wouldRefuse === "aws-key-not-allowed") && (note += " The Switch to restrict mode example marks an account `# assumed in this run`: requests signed with the keys of its roles show here as `aws-key-not-allowed` until it is listed, so check it first.");
+	}), note = "Requests audit let through that restrict would refuse, the first for each host and reason, or for each key under `aws-key-not-allowed`.";
+	extraInputs?.some((l) => l.endsWith(" # assumed in this run, check it is yours")) && report.timeline.some((e) => e.wouldRefuse === keyNotAllowed) && (note += " The Switch to restrict mode example marks an account `# assumed in this run`: requests signed with the keys of its roles show here as `aws-key-not-allowed` until it is listed, so check it first.");
 	let { text } = blocks[at], before = `${text.slice(0, text.indexOf("###"))}### 🚨 Restrict Would Refuse\n\n<sub>*${note}*</sub>\n\n`;
 	return blocks.with(at, {
 		...blocks[at],

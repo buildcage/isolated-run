@@ -7,9 +7,14 @@ import { expectMatchesGolden } from "#core/lib/test/golden.node.ts";
 import { AWS_ACCOUNT_FILE, AWS_KEY_MAP_FILE } from "./aws-keys.ts";
 import { awsKeyExtension } from "./haproxy-aws-keys.ts";
 
-const extension = awsKeyExtension({ accountFile: AWS_ACCOUNT_FILE, keyMapFile: AWS_KEY_MAP_FILE });
+const refSecret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwd";
+const extension = awsKeyExtension({
+  accountFile: AWS_ACCOUNT_FILE,
+  keyMapFile: AWS_KEY_MAP_FILE,
+  refSecret,
+});
 // aws_key_check with no role account: nothing to learn, so no STS rules.
-const keyOnly = awsKeyExtension({ keyMapFile: AWS_KEY_MAP_FILE });
+const keyOnly = awsKeyExtension({ keyMapFile: AWS_KEY_MAP_FILE, refSecret });
 
 // The whole config with the check on, in the mode that refuses and the one that
 // does not.
