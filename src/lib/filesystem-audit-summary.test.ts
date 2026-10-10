@@ -115,8 +115,8 @@ describe("renderFilesystemAuditSummary", () => {
     ];
     for (const [kind, letter] of doneOrFailed)
       expect(lines(render({ kind, comm: "c", path: "/x" }))).toEqual([`${letter} c /x`]);
-    // delete is a kind only failures have.
-    for (const [kind, letter] of [...doneOrFailed, ["delete", "D"]])
+    // A failed open is a read whatever it was opened for.
+    for (const [kind, letter] of [...doneOrFailed, ["open", "R"]])
       expect(lines(render({ kind, comm: "c", path: "/x", err: 2, failed: true }))).toEqual([
         `${letter.toLowerCase()} c /x`,
       ]);
@@ -151,8 +151,8 @@ describe("renderFilesystemAuditSummary", () => {
           { kind: "read", comm: "sh", path: "pipe:[12]" },
           { kind: "write", comm: "sh", path: "socket:[34]" },
           { kind: "read", comm: "sh", path: "/work/pipe:x" },
-          { kind: "open-failed", comm: "sh", path: "pipe:y", err: 2 },
-          { kind: "delete", comm: "sh", path: "pipe:z", err: 13, failed: true },
+          { kind: "open", failed: true, comm: "sh", path: "pipe:y", err: 2 },
+          { kind: "unlink", comm: "sh", path: "pipe:z", err: 13, failed: true },
         ),
       ),
     ).toEqual(["R sh ./pipe:x", "r sh …/pipe:y", "d! sh …/pipe:z"]);
@@ -263,8 +263,8 @@ describe("renderFilesystemAuditSummary", () => {
     expect(
       lines(
         render(
-          { kind: "open-failed", comm: "c", path: "x", err: 2 },
-          { kind: "delete", comm: "c", path: "./x", err: 2, failed: true },
+          { kind: "open", failed: true, comm: "c", path: "x", err: 2 },
+          { kind: "unlink", comm: "c", path: "./x", err: 2, failed: true },
         ),
       ),
     ).toEqual(["rd c …/x"]);
@@ -331,8 +331,8 @@ describe("renderFilesystemAuditSummary", () => {
 
   it("marks a failed-only action lowercase and a permission failure with !", () => {
     const md = render(
-      { kind: "open-failed", comm: "node", path: "/work/missing", err: 2 },
-      { kind: "delete", comm: "node", path: "/etc/x", err: 30, failed: true },
+      { kind: "open", failed: true, comm: "node", path: "/work/missing", err: 2 },
+      { kind: "unlink", comm: "node", path: "/etc/x", err: 30, failed: true },
     );
     expect(lines(md)).toEqual(["r node ./missing", "d! node /etc/x"]);
   });
@@ -341,8 +341,8 @@ describe("renderFilesystemAuditSummary", () => {
     const md = render(
       { kind: "read", comm: "c", path: "/etc/passwd" },
       { kind: "read", comm: "c", path: "/etc/hosts" },
-      { kind: "open-failed", comm: "c", path: "/etc/shadow", err: 13 },
-      { kind: "open-failed", comm: "c", path: "/etc/missing", err: 2 },
+      { kind: "open", failed: true, comm: "c", path: "/etc/shadow", err: 13 },
+      { kind: "open", failed: true, comm: "c", path: "/etc/missing", err: 2 },
       { kind: "write", comm: "c", path: "/etc/cron.d/evil" },
     );
     expect(lines(md)).toEqual(["RWr! c /etc/**"]);
@@ -350,7 +350,7 @@ describe("renderFilesystemAuditSummary", () => {
 
   it("keeps a refused directory open beside the reads below it", () => {
     const md = render(
-      { kind: "open-failed", comm: "c", path: "/work/d", err: 13 },
+      { kind: "open", failed: true, comm: "c", path: "/work/d", err: 13 },
       { kind: "read", comm: "c", path: "/work/d/f" },
     );
     expect(lines(md)).toEqual(["r! c ./d", "R c ./d/f"]);
@@ -358,8 +358,8 @@ describe("renderFilesystemAuditSummary", () => {
 
   it("keeps a refused directory open even beside a refusal below it", () => {
     const md = render(
-      { kind: "open-failed", comm: "c", path: "/work/d", err: 13 },
-      { kind: "open-failed", comm: "c", path: "/work/d/x", err: 13 },
+      { kind: "open", failed: true, comm: "c", path: "/work/d", err: 13 },
+      { kind: "open", failed: true, comm: "c", path: "/work/d/x", err: 13 },
       { kind: "read", comm: "c", path: "/work/d/y" },
     );
     expect(lines(md)).toEqual(["r! c ./d", "r! c ./d/x", "R c ./d/y"]);
@@ -368,18 +368,18 @@ describe("renderFilesystemAuditSummary", () => {
   it("still drops a directory read whose only lines below are misses", () => {
     const md = render(
       { kind: "read", comm: "c", path: "/work/d" },
-      { kind: "open-failed", comm: "c", path: "/work/d/a.json", err: 2 },
+      { kind: "open", failed: true, comm: "c", path: "/work/d/a.json", err: 2 },
     );
     expect(lines(md)).toEqual(["r c ./d/a.json"]);
   });
 
   it("shows a failed open as the read and write it asked for", () => {
     const md = render(
-      { kind: "open-failed", comm: "sh", path: "/a/tool", access: "wct", err: 30 },
-      { kind: "open-failed", comm: "sh", path: "/b/tool", access: "rw", err: 13 },
-      { kind: "open-failed", comm: "sh", path: "/c/tool", access: "rc", err: 2 },
-      { kind: "open-failed", comm: "sh", path: "/d/tool", access: "rt", err: 13 },
-      { kind: "open-failed", comm: "sh", path: "/e/tool", access: "r", err: 13 },
+      { kind: "open", failed: true, comm: "sh", path: "/a/tool", access: "wct", err: 30 },
+      { kind: "open", failed: true, comm: "sh", path: "/b/tool", access: "rw", err: 13 },
+      { kind: "open", failed: true, comm: "sh", path: "/c/tool", access: "rc", err: 2 },
+      { kind: "open", failed: true, comm: "sh", path: "/d/tool", access: "rt", err: 13 },
+      { kind: "open", failed: true, comm: "sh", path: "/e/tool", access: "r", err: 13 },
     );
     expect(lines(md)).toEqual([
       "w! sh /a/tool",
@@ -449,11 +449,11 @@ describe("renderFilesystemAuditSummary", () => {
 
   it("folds relative names apart from absolute ones", () => {
     const md = render(
-      { kind: "open-failed", comm: "c", path: "./", err: 2 },
+      { kind: "open", failed: true, comm: "c", path: "./", err: 2 },
       { kind: "read", comm: "c", path: "/etc/hosts" },
-      { kind: "open-failed", comm: "c", path: "d/1", err: 2 },
-      { kind: "open-failed", comm: "c", path: "d/2", err: 2 },
-      { kind: "open-failed", comm: "c", path: "d/3", err: 2 },
+      { kind: "open", failed: true, comm: "c", path: "d/1", err: 2 },
+      { kind: "open", failed: true, comm: "c", path: "d/2", err: 2 },
+      { kind: "open", failed: true, comm: "c", path: "d/3", err: 2 },
     );
     expect(lines(md)).toEqual(["R c /etc/hosts", "r c …/", "r c …/d/**"]);
   });
@@ -461,7 +461,8 @@ describe("renderFilesystemAuditSummary", () => {
   it("renders paths thousands of components deep without stalling", () => {
     const deep = `/work/${"a/".repeat(2000)}`;
     const records = Array.from({ length: 500 }, (_, i) => ({
-      kind: "open-failed",
+      kind: "open",
+      failed: true,
       comm: "c",
       path: `${deep}${i}`,
       err: 2,
@@ -476,8 +477,8 @@ describe("renderFilesystemAuditSummary", () => {
 
   it("shows a failed access's unresolved relative name under …/, bare or dotted alike", () => {
     const md = render(
-      { kind: "open-failed", comm: "node", path: "config.json", err: 2 },
-      { kind: "open-failed", comm: "node", path: "./secret", err: 13 },
+      { kind: "open", failed: true, comm: "node", path: "config.json", err: 2 },
+      { kind: "open", failed: true, comm: "node", path: "./secret", err: 13 },
     );
     expect(lines(md)).toEqual(["r node …/config.json", "r! node …/secret"]);
   });
@@ -559,8 +560,8 @@ describe("renderFilesystemAuditSummary", () => {
   it("tolerates records missing their path or errno", () => {
     const md = render(
       { kind: "mmap", comm: "node", access: "x" }, // a library with no path
-      { kind: "open-failed", comm: "node" }, // a failed open with no name
-      { kind: "delete", comm: "node", path: "/work/w", failed: true }, // failed, no errno
+      { kind: "open", failed: true, comm: "node" }, // a failed open with no name
+      { kind: "unlink", comm: "node", path: "/work/w", failed: true }, // failed, no errno
       { kind: "write", comm: "node", path: "/work/w" },
     );
     expect(lines(md)).toEqual(["Wd node ./w"]);
@@ -586,7 +587,7 @@ describe("renderFilesystemAuditSummary", () => {
       { kind: "read", comm: "node", path: "/work/d/x/1" },
       { kind: "read", comm: "node", path: "/work/d/x/2" },
       { kind: "read", comm: "node", path: "/work/d/x/3" },
-      { kind: "delete", comm: "node", path: "/work/d/gone", failed: true, err: 2 },
+      { kind: "unlink", comm: "node", path: "/work/d/gone", failed: true, err: 2 },
     );
     expect(lines(md)).toEqual(["d node ./d/gone", "R node ./d/x/**"]);
   });
@@ -639,7 +640,7 @@ describe("renderFilesystemAuditSummary", () => {
     it("leaves a success under a relative name out of the failed row's span", () => {
       const md = renderFilesystemAuditSummary(
         jsonl(
-          { t: at(1000), kind: "open-failed", comm: "a", path: "foo", err: 2 },
+          { t: at(1000), kind: "open", failed: true, comm: "a", path: "foo", err: 2 },
           { t: at(30_000), kind: "read", comm: "a", path: "foo" },
         ),
         timed,
@@ -793,7 +794,7 @@ describe("renderFilesystemAuditSummary", () => {
     it("keeps two rows that read alike in a stable order", () => {
       const md = render(
         { kind: "read", comm: "a", path: "…/x" },
-        { kind: "open-failed", comm: "a", path: "x", err: 2 },
+        { kind: "open", failed: true, comm: "a", path: "x", err: 2 },
       );
       expect(md).toContain("| R | `…/x` |\n| r | `…/x` |\n");
     });
@@ -902,7 +903,7 @@ describe("renderFilesystemAuditSummary", () => {
     it("keys a path once whether it was reached through the workspace's symlink or not", () => {
       const md = renderFilesystemAuditSummary(
         jsonl(
-          { kind: "open-failed", comm: "a", path: "/sym/work/x", err: 2 },
+          { kind: "open", failed: true, comm: "a", path: "/sym/work/x", err: 2 },
           { kind: "read", comm: "a", path: "/real/work/x" },
           { kind: "exec", comm: "a", path: "/sym/work/bin" },
           { kind: "exec", comm: "a", path: "/real/work/bin" },

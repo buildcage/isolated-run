@@ -461,7 +461,11 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missed
 			return err
 		}
 		r.Time = wallTime(r.boot, offset)
-		counts[r.Kind]++
+		if r.Failed {
+			counts[r.Kind+" failed"]++
+		} else {
+			counts[r.Kind]++
+		}
 		total++
 		if err := enc.Encode(r); err != nil {
 			return err
@@ -476,7 +480,7 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missed
 	}
 	sort.Strings(kinds)
 	for _, k := range kinds {
-		fmt.Fprintf(os.Stderr, "filesystem-audit: %-11s %d\n", k, counts[k])
+		fmt.Fprintf(os.Stderr, "filesystem-audit: %-13s %d\n", k, counts[k])
 	}
 	missed := <-missedRun
 	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d host-missed=%d internal-skipped=%d pre-exec-skipped=%d\n",

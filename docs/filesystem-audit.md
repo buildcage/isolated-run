@@ -185,7 +185,7 @@ jq -r 'select((.failed | not) and (.kind == "write" or .kind == "mkdir"
 jq -c 'select(.path // "" | endswith("/.npmrc")) | {t, comm, pid, kind}' filesystem-audit-*.jsonl
 
 # Every refused open
-jq -c 'select(.kind == "open-failed" and (.err == 1 or .err == 13 or .err == 30))' filesystem-audit-*.jsonl
+jq -c 'select(.kind == "open" and .failed and (.err == 1 or .err == 13 or .err == 30))' filesystem-audit-*.jsonl
 ```
 
 Where a recorded `path` differs from the name the command passed, the name is kept as `name`, or

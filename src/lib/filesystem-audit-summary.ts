@@ -48,22 +48,6 @@ const LETTER: Record<string, string> = {
   attr: "A",
 };
 const ORDER = "RWXMDA";
-// Failed kinds from the syscall tracepoints, and the path changes the kernel
-// refused after the tracer's hook saw them, which keep their own kind.
-const FAILED_LETTER: Record<string, string> = {
-  delete: "D",
-  rename: "M",
-  chmod: "A",
-  chown: "A",
-  attr: "A",
-  unlink: "D",
-  rmdir: "D",
-  mkdir: "W",
-  mknod: "W",
-  truncate: "W",
-  symlink: "W",
-  link: "W",
-};
 const PERM_ERRNO = new Set([1, 13, 30]); // EPERM, EACCES, EROFS
 // A shared object or a Node.js addon, by file name.
 const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
@@ -83,13 +67,13 @@ function classify(r: AuditRecord): Classified | undefined {
   let letter: string | undefined;
   let path = r.path;
   let failed = false;
-  if (r.kind === "open-failed") {
+  if (r.failed && r.kind === "open") {
     // What it asked for: a read, and a write if it asked to write, create or truncate.
     const access = r.access ?? "r";
     letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : "");
     failed = true;
   } else if (r.failed) {
-    letter = FAILED_LETTER[r.kind];
+    letter = LETTER[r.kind];
     if (r.kind === "link") path = r.to;
     failed = true;
   } else if (r.kind === "mmap") {

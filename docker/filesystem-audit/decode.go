@@ -28,6 +28,8 @@ type record struct {
 	ToName string `json:"to_name,omitempty"`
 	Access string `json:"access,omitempty"`
 	Flags  uint32 `json:"flags,omitempty"`
+	// Mode is a chmod's new mode in octal, and Owner a chown's new uid:gid.
+	Mode   string `json:"mode,omitempty"`
 	Owner  string `json:"owner,omitempty"`
 	Err    int32  `json:"err,omitempty"`
 	Failed bool   `json:"failed,omitempty"`
@@ -45,14 +47,16 @@ type record struct {
 	boot uint64
 }
 
-// kindNames maps the kind field of struct event to a name. The failed path
-// operations (16-21) decode to the base action name with Failed set.
+// kindNames maps the kind field of struct event to a name. A failed operation
+// decodes to the name of the one that succeeded, with Failed set: the kinds
+// only a failure has (12, 16-19, 21, 25), and any path change the kernel
+// refused after its hook saw it.
 var kindNames = map[uint32]string{
 	1: "open", 2: "exec", 3: "unlink", 4: "rmdir", 5: "rename", 6: "mkdir",
 	7: "chmod", 8: "symlink", 9: "link", 10: "truncate", 11: "chown",
-	12: "open-failed", 13: "read", 14: "write", 15: "mmap",
-	16: "delete", 17: "rename", 18: "chmod", 19: "chown", 20: "attr", 21: "attr",
-	22: "fork", 23: "exec-file", 24: "mknod",
+	12: "open", 13: "read", 14: "write", 15: "mmap",
+	16: "unlink", 17: "rename", 18: "chmod", 19: "chown", 20: "attr", 21: "attr",
+	22: "fork", 23: "exec-file", 24: "mknod", 25: "rmdir",
 }
 
 // Mirrors the fixed header of struct event in bpf/filesystem_audit.bpf.c:
@@ -256,6 +260,7 @@ func decode(raw []byte) (record, error) {
 		r.Err = pathRet // the positive errno the BPF side stored as -ret
 		r.Flags = flags
 		r.Access = openAccess(flags, 0)
+		r.Failed = true
 	case 13, 14: // read, write
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 		applyMarks(&r, marks, pathRet >= 0)
@@ -274,7 +279,7 @@ func decode(raw []byte) (record, error) {
 	case 7: // chmod
 		r.Path, _ = components(data, n1, truncated)
 		applyMarks(&r, marks, false)
-		r.Flags = mode
+		r.Mode = fmt.Sprintf("%04o", mode&0o7777)
 	case 11: // chown
 		r.Path, _ = components(data, n1, truncated)
 		applyMarks(&r, marks, false)
@@ -294,7 +299,7 @@ func decode(raw []byte) (record, error) {
 		r.To, _ = components(rest, n2, truncated2)
 		applyMarks(&r, marks, false) // only a link's source is marked
 		r.Exchange = kind == 5 && flags&unix.RENAME_EXCHANGE != 0
-	case 16, 18, 19: // failed delete / chmod / chown
+	case 16, 18, 19, 25: // failed unlink / chmod / chown / rmdir
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
