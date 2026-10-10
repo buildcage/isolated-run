@@ -49,9 +49,9 @@ type record struct {
 	boot uint64
 }
 
-// MarshalJSON is encoding/json's own rendering of record, field for field,
-// except that the names the step chose are rawName, so a byte in them that
-// is not UTF-8 is kept rather than turned into U+FFFD.
+// MarshalJSON writes record as encoding/json would, except that a name the
+// step chose keeps a byte that is not UTF-8 (see rawName) rather than having
+// it turned into U+FFFD.
 func (r record) MarshalJSON() ([]byte, error) {
 	type plain record // without this method
 	if utf8.ValidString(r.Comm) && utf8.ValidString(r.Path) && utf8.ValidString(r.Name) &&
