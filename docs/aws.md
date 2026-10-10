@@ -33,10 +33,10 @@ path, before the request leaves the runner.
 
 - The default `proxy_engine: inspect`. `universal` never sees a request's headers, so the check
   fails the step there, in `audit` too.
-- A key in `AWS_ACCESS_KEY_ID` when the step starts, as `aws-actions/configure-aws-credentials`
-  sets it. Without one the step fails before the proxy starts, in `audit` too. A key from a
-  profile, `~/.aws/credentials`, a container credentials endpoint or a web identity token file does
-  not count; see [Limits](#limits).
+- An access key ID in `AWS_ACCESS_KEY_ID` when the step starts, as
+  `aws-actions/configure-aws-credentials` sets it. Without one, or with something else there, the
+  step fails before the proxy starts, in `audit` too. Other sources of credentials do not count;
+  see [Limits](#limits).
 
 ### What it works with
 
@@ -66,13 +66,15 @@ With `aws_key_check` on, these are refused:
   body over 10 KB. Set `AWS_DISABLE_REQUEST_COMPRESSION=true` for the step, or update the SDK.
 - Uploads to S3 from an HTML form (a POST policy). Upload with `PutObject` or a presigned
   `PutObject` URL.
-- Tokens that carry no AWS signature: Cognito user pool calls made without AWS credentials, Bedrock
-  API keys, CloudWatch Logs ingestion tokens and the IAM Identity Center portal.
-- Keys the step gets in the middle of its run other than by switching roles, such as through
-  `GetSessionToken`, SAML or IAM Identity Center; see [Limits](#limits).
+- Unsigned calls to a host that serves every account, such as Cognito user pool calls made without
+  AWS credentials and the IAM Identity Center portal.
+- Tokens in place of an AWS signature: Bedrock API keys and CloudWatch Logs ingestion tokens.
+- Keys the step gets from `GetSessionToken`, SAML or IAM Identity Center, which the proxy does not
+  learn; see [Limits](#limits).
 - Presigned URLs someone else signed, such as Lambda `GetFunction`'s `Code.Location` or a vendor's
   download link, unless they come from an ECR registry's redirect.
-- S3 Express One Zone directory buckets.
+- S3 Express One Zone directory buckets, whose keys come from `CreateSession`, which the proxy does
+  not learn.
 
 Two of these come up often in CI.
 
@@ -164,8 +166,9 @@ were:
 🚨 POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed) (+12 more)
 ```
 
-The traffic artifact has every one, with the reason in `wouldRefuse`. If the section still has to
-be cut to fit the Job Summary, a warning annotation says so.
+With `upload_traffic_artifact: true`, the traffic artifact has every one, with the reason in
+`wouldRefuse`. If the section still has to be cut to fit the Job Summary, a warning annotation says
+so.
 
 The report's **Switch to restrict mode** example includes `aws_key_check: true`, and
 `allowed_aws_role_accounts` with the accounts given and each account the run switched to a role
@@ -303,7 +306,6 @@ use one:
   proxy cannot read, because the client asked for it compressed or it is unusually large, is not
   learned, and requests signed with it are refused. Such an answer names no account in the restrict
   example either.
-- S3 Express One Zone signs with keys `CreateSession` issues, which the proxy does not learn.
 - A connection `allowed_tls_rules` or `allowed_ip_rules` passes through is never decrypted, so the
   check never sees its requests. Do not pass AWS API hosts through.
 - The starting key ID is handed to the proxy container as an environment variable, so it is visible
@@ -367,8 +369,9 @@ Sovereign Cloud), and under their dual-stack counterparts `api.aws`, `api.amazon
 and `api.amazonwebservices.eu`. Other AWS names, such as `public.ecr.aws` or Lambda function URLs
 under `on.aws`, are left to the URL rules alone.
 
-The URL rules still decide first. A request they refuse stays `not-allowed`, and the key check only
-applies to requests they allow.
+In `restrict` the URL rules decide first: a request they refuse stays `not-allowed`, and the key
+check judges only the requests they allow. In `audit` the check judges every request, so one no URL
+rule allows can show an `aws-` reason too.
 
 These hosts name the resource a request reaches, in the host name or, for S3's path style and an EKS
 OIDC issuer, in the path. The URL rules can pin the resource there, so an unsigned request to them is
@@ -436,8 +439,8 @@ host:
    `aws-no-credential`.
 2. Any other token to CodeCommit is `aws-unsupported-credential`.
 
-The proxy reads a form body for a credential only on the first two kinds of host, and refuses one it
-cannot read through there as `aws-unreadable`. On a host that names its resource, or CodeCommit, a
-form body is not looked at. Whatever the host, a request carrying more than one credential is
-`aws-ambiguous-credential`. Where more than one reason applies, `aws-unreadable` comes first, then
-`aws-unsupported-credential`, then `aws-ambiguous-credential`.
+The proxy reads a form body for a credential only on hosts that serve every account and public
+hosts, and refuses one it cannot read through there as `aws-unreadable`. On a host that names its
+resource, or CodeCommit, a form body is not looked at. Whatever the host, a request carrying more
+than one credential is `aws-ambiguous-credential`. Where more than one reason applies,
+`aws-unreadable` comes first, then `aws-unsupported-credential`, then `aws-ambiguous-credential`.
