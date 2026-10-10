@@ -678,8 +678,9 @@ each one's usual causes and what to do.
 
 These are refusals like `not-allowed`: they are in **🚫 Blocked Hosts** and fail the step under
 `fail_on_blocked: true`. In `audit` mode nothing is refused: a warning annotation counts the requests
-`restrict` would have refused, and the report lists each under **🚨 Restrict Would Refuse**, ending in
-`(restrict would refuse: <reason>)`. They also stay in **Communication details** among the other requests.
+`restrict` would have refused, and the report shows the first of them for each host and reason under
+**🚨 Restrict Would Refuse**, ending in `(restrict would refuse: <reason>)` and the count of the
+rest. **Communication details** and the traffic artifact list them among the other requests.
 
 ## Traffic artifact
 

@@ -247,6 +247,9 @@ export function readAwsKeyInputs(
   return { key, roleAccounts };
 }
 
+/** Ends the restrict example's line for an account the run assumed a role in but was not given. */
+export const ASSUMED_ACCOUNT_MARK = " # assumed in this run, check it is yours";
+
 /**
  * The check's inputs for the report's restrict example, only when it was on
  * for this run: the accounts given, and every account the run assumed a role
@@ -267,7 +270,7 @@ export function awsExampleInputs(
     .filter((a) => /^\d{12}$/.test(a));
   const added = new Set(assumed.filter((a) => !roleAccounts.includes(a)));
   const accounts = [...roleAccounts, ...added].sort();
-  const mark = (a: string) => (added.has(a) ? " # assumed in this run, check it is yours" : "");
+  const mark = (a: string) => (added.has(a) ? ASSUMED_ACCOUNT_MARK : "");
   if (accounts.length === 1) {
     lines.push(`allowed_aws_role_accounts: "${accounts[0]}"${mark(accounts[0])}`);
   } else if (accounts.length > 1) {
