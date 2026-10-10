@@ -801,12 +801,12 @@ combines every command's actions on a path in one row, in path order. Each row o
 the command (its process name) and combines its flags for that path (`RW` read and written). The
 time is when the command first and last touched it, counted from the proxy's start like the
 communication details (from the first access if that start is unknown); a row touched once shows one
-time. It does not say which action came when, and a file kept open counts only each process's first
-read and first write through it, so the last time can be earlier than its last write; a process
-reading or writing through a descriptor it inherited, or was passed, is shown under its own command.
-The artifact has every access in order. An action that only ever failed is lowercase, and one the
-sandbox refused, for want of permission or because the location is read-only, is marked `!`. A
-directory with many touched children is shown once as `dir/**`. Paths are shown relative to
+time. It does not say which action came when, and a file kept open counts only the first read and
+first write through it by each program a process runs, so the last time can be earlier than its last
+write; a command reading or writing through a descriptor it inherited, or was passed, is shown under
+its own name. The artifact has every access in order. An action that only ever failed is lowercase,
+and one the sandbox refused, for want of permission or because the location is read-only, is marked
+`!`. A directory with many touched children is shown once as `dir/**`. Paths are shown relative to
 `$GITHUB_WORKSPACE` (`./…`) and `$HOME` (`~/…`), else absolute. A failed access is recorded under
 the name the command used, joined to the directory a relative name resolved against (its working
 directory, or the directory it passed by descriptor) without resolving `..`; a name whose directory

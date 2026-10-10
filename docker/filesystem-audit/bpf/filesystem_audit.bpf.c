@@ -99,6 +99,7 @@ struct task_struct {
 	struct task_struct *real_parent;
 	struct task_struct *group_leader;
 	u64 start_time;
+	u64 self_exec_id;
 	int tgid;
 	struct fs_struct *fs;
 	struct files_struct *files;
@@ -505,11 +506,16 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 #define S_PRIVATE (1 << 9)
 #define OVERLAYFS_SUPER_MAGIC 0x794c7630
 #define FUSE_SUPER_MAGIC 0x65735546
+#define PIPEFS_MAGIC 0x50495045
+#define SOCKFS_MAGIC 0x534F434B
+#define ANON_INODE_FS_MAGIC 0x09041934
 
-// A process, by its tgid and its leader's start time, which a reused pid
-// does not share.
+// A program run by a process: its tgid, its leader's start time, which a
+// reused pid does not share, and how many execs it has been through, so a
+// program exec'd in place counts as its own.
 struct proc {
 	u64 start;
+	u64 exec;
 	u32 tgid;
 	u32 pad;
 };
@@ -518,7 +524,7 @@ struct seen {
 	u64 gen;	  // when the entry was made, so a reused address is a new file
 	struct proc owner; // the first process to use the file
 	u8 bits;	  // what the owner has been reported doing with it
-	u8 internal;	  // a pipe or socket, reported once whoever uses it
+	u8 internal;	  // a pipe, socket or anon inode, reported once whoever uses it
 };
 
 struct {
@@ -554,23 +560,31 @@ static __always_inline int first_time(struct file *file, u8 bit)
 	struct task_struct *t = bpf_get_current_task_btf();
 	struct proc me = {
 		.start = BPF_CORE_READ(t, group_leader, start_time),
+		.exec = BPF_CORE_READ(t, group_leader, self_exec_id),
 		.tgid = bpf_get_current_pid_tgid() >> 32,
 	};
 	u64 key = (u64)file;
 	struct seen *v = bpf_map_lookup_elem(&seen_files, &key);
 	if (!v) {
+		unsigned long magic = BPF_CORE_READ(file, f_path.dentry, d_sb, s_magic);
 		struct seen s = {
 			.gen = bpf_ktime_get_ns(),
 			.owner = me,
 			.bits = bit,
-			.internal = (BPF_CORE_READ(file, f_path.mnt, mnt_flags) & MNT_INTERNAL) != 0,
+			.internal = magic == PIPEFS_MAGIC || magic == SOCKFS_MAGIC ||
+				    magic == ANON_INODE_FS_MAGIC,
 		};
-		if (bpf_map_update_elem(&seen_files, &key, &s, BPF_ANY) == 0)
+		if (bpf_map_update_elem(&seen_files, &key, &s, BPF_NOEXIST) == 0)
 			return 1;
-		bump(&untracked);
-		return 0;
+		// Another process made the entry first; share it.
+		v = bpf_map_lookup_elem(&seen_files, &key);
+		if (!v) {
+			bump(&untracked);
+			return 0;
+		}
 	}
-	if (v->internal || (v->owner.tgid == me.tgid && v->owner.start == me.start)) {
+	if (v->internal || (v->owner.tgid == me.tgid && v->owner.start == me.start &&
+			    v->owner.exec == me.exec)) {
 		if (v->bits & bit)
 			return 0;
 		v->bits |= bit;
