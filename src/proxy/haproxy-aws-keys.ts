@@ -23,6 +23,8 @@ export interface AwsKeyCheck {
   /** The accounts whose roles may issue keys; absent, no STS key is learned,
    *  though the account an STS answer names is still recorded. */
   accountFile?: string;
+  /** The base64 HMAC key a run's key references are made with. */
+  refSecret: string;
 }
 
 /** Starts every reason the check refuses with. */
@@ -111,8 +113,23 @@ const ROLE_ARN = "^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$";
 /** What the traffic record says of a request the check let through; see
  *  docs/aws.md#in-the-traffic-artifact. */
 export type AwsTrafficFields = {
-  aws: { key: "env" | "assumed" | "issued" | "none"; accountId?: string; assumedAccount?: string };
+  aws: {
+    key?: "env" | "assumed" | "issued" | "none";
+    accountId?: string;
+    assumedAccount?: string;
+    keyRef?: string;
+    issuedKeyRef?: string;
+  };
 };
+
+const REF_SECRET = /^[A-Za-z0-9+/]{40}$/;
+
+/** An expression for an opaque reference to the key ID in a variable: the
+ *  same for a key throughout a run, and unrelated across runs. */
+function keyRef(variable: string, secret: string): string {
+  if (!REF_SECRET.test(secret)) throw new Error("invalid AWS key reference secret");
+  return `'var(${variable}),hmac(sha256,${secret}),bytes(0,4),hex,lower'`;
+}
 
 /** The check as the inspect stage takes it. */
 export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
@@ -126,6 +143,8 @@ export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
         key: "txn.aws_log_key",
         accountId: "txn.aws_log_account",
         assumedAccount: "txn.aws_log_assumed",
+        keyRef: "txn.aws_log_key_ref",
+        issuedKeyRef: "txn.aws_log_issued_ref",
       },
     },
   };
@@ -185,6 +204,8 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     `    http-request set-var(txn.aws_key) 'url_param(X-Amz-Credential),url_dec,regsub("^([A-Za-z0-9]+)/.*$","\\1")' if aws_query !aws_sigv4`,
     `    http-request set-var(txn.aws_git_user) 'req.fhdr(authorization),regsub("^basic\\s+","",i),b64dec,regsub(":.*$","")' if aws_git`,
     '    http-request set-var(txn.aws_key) \'var(txn.aws_git_user),regsub("%.*$","")\' if aws_git',
+    "    # A static Git credential's user name is no key ID.",
+    `    http-request set-var(txn.aws_log_key_ref) ${keyRef("txn.aws_key", check.refSecret)} if { var(txn.aws_key) -m reg ^[A-Z0-9]{16,128}$ }`,
     "    # Unsigned, whatever the method, only where the host names a resource:",
     "    # elsewhere the account a request reaches is in the parameters or the",
     "    # body, out of sight. Git asks CodeCommit with no credential first, and",
@@ -292,9 +313,9 @@ function accountRules(accountFile: string): string[] {
  * redirects a layer download to, and, when role accounts are named, the key
  * an AssumeRole or AssumeRoleWithWebIdentity answer issues for a role in one
  * of them. Only an answer over TLS to a request the check did not refuse
- * teaches one. The account of the role is recorded from any answer over TLS,
- * named or not and allowed or not, so one run shows every account to name, a
- * chain of roles included.
+ * teaches one. The account of the role, and a reference to the key, are
+ * recorded from any answer over TLS, named or not and allowed or not, so one
+ * run shows every account to name, a chain of roles included.
  *
  * Only ECR writes that Location, over a connection whose certificate the
  * proxy verified, so a build cannot put its own key there. The role ARN is
@@ -309,6 +330,7 @@ export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
     "    acl aws_issued_key var(txn.aws_issued_key) -m reg ^ASIA[A-Z0-9]+$",
     "    # A key the proxy already knows keeps what it was learned as.",
     `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_issued_key)] issued if aws_issued_key !{ var(txn.aws_issued_key),map(${check.keyMapFile}) -m found }`,
+    `    http-response set-var(txn.aws_log_issued_ref) ${keyRef("txn.aws_issued_key", check.refSecret)} if aws_issued_key`,
     "    acl aws_sts_read var(txn.aws_sts_read) -m bool",
     "    acl aws_learn var(txn.aws_learn) -m bool",
     "    acl aws_assume_role res.body -m reg ^(<\\?xml[^>]*\\?>)?\\s*<AssumeRole(WithWebIdentity)?Response[\\s>]",
@@ -317,10 +339,11 @@ export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
     "    http-response wait-for-body time 10s if aws_sts_read { status 200 }",
     `    http-response set-var(txn.aws_new_account) 'res.body,regsub("(?s)^.*<Arn>arn:aws[a-z-]*:sts::([0-9]{12}):assumed-role/[^<]*</Arn>.*$","\\1")' if aws_sts_read { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
     "    acl aws_new_account var(txn.aws_new_account) -m reg ^[0-9]{12}$",
+    `    http-response set-var(txn.aws_new_key) 'res.body,regsub("(?s)^.*<AccessKeyId>(ASIA[A-Z0-9]+)</AccessKeyId>.*$","\\1")' if aws_sts_read { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
+    "    acl aws_new_key var(txn.aws_new_key) -m reg ^ASIA[A-Z0-9]+$",
+    `    http-response set-var(txn.aws_log_issued_ref) ${keyRef("txn.aws_new_key", check.refSecret)} if aws_new_key`,
     ...(check.accountFile
       ? [
-          `    http-response set-var(txn.aws_new_key) 'res.body,regsub("(?s)^.*<AccessKeyId>(ASIA[A-Z0-9]+)</AccessKeyId>.*$","\\1")' if aws_learn { status 200 } aws_assume_role !aws_many_keys !aws_many_arns`,
-          "    acl aws_new_key var(txn.aws_new_key) -m reg ^ASIA[A-Z0-9]+$",
           `    acl aws_new_account_allowed var(txn.aws_new_account) -m str -f ${check.accountFile}`,
           `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_new_key)] %[var(txn.aws_new_account)] if aws_learn aws_new_key aws_new_account aws_new_account_allowed`,
         ]

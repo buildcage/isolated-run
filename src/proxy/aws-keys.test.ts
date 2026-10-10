@@ -1,6 +1,12 @@
 import { describe, it, expect, reportResults } from "#core/lib/test/test-shim.ts";
 
-import { awsAccountList, awsKeyMap, isAwsAccessKeyId, parseAwsAccounts } from "./aws-keys.ts";
+import {
+  awsAccountList,
+  awsKeyMap,
+  awsKeyRefSecret,
+  isAwsAccessKeyId,
+  parseAwsAccounts,
+} from "./aws-keys.ts";
 
 // Assembled at runtime: a literal shaped like an AWS access key ID trips
 // secret scanning on push.
@@ -59,6 +65,22 @@ describe("file contents", () => {
 
   it("lists each account on its own line", () => {
     expect(awsAccountList(["111111111111", "222222222222"])).toBe("111111111111\n222222222222\n");
+  });
+});
+
+describe("awsKeyRefSecret", () => {
+  it("spells 30 bytes in base64, with no padding", () => {
+    const bytes = new Uint8Array(30);
+    for (let i = 0; i < 30; i++) bytes[i] = i;
+    expect(awsKeyRefSecret(bytes)).toBe("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwd");
+    expect(awsKeyRefSecret(new Uint8Array(30).fill(0xff))).toBe("/".repeat(40));
+    const high = new Uint8Array(30);
+    for (let i = 0; i < 30; i += 3) high.set([0xfb, 0xef, 0xff], i);
+    expect(awsKeyRefSecret(high)).toBe("++//".repeat(10));
+  });
+
+  it("takes only 30 bytes", () => {
+    expect(() => awsKeyRefSecret(new Uint8Array(29))).toThrow(/takes 30 bytes/);
   });
 });
 

@@ -17,7 +17,12 @@ import {
   STS_HOST,
 } from "./haproxy-aws-keys.ts";
 
-const CHECK = { accountFile: "/rules/accounts.lst", keyMapFile: "/rules/keys.map" };
+const REF_SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwd";
+const CHECK = {
+  accountFile: "/rules/accounts.lst",
+  keyMapFile: "/rules/keys.map",
+  refSecret: REF_SECRET,
+};
 
 // What the config writes is also what reaches the regex engine: HAProxy's
 // word parser leaves `\.` alone. See escapeForHaproxy.
@@ -250,7 +255,7 @@ describe("AssumeRoleWithWebIdentity", () => {
 });
 
 describe("the check with no role account", () => {
-  const KEY_ONLY = { keyMapFile: "/rules/keys.map" };
+  const KEY_ONLY = { keyMapFile: "/rules/keys.map", refSecret: REF_SECRET };
   const rules = awsKeyRequestRules(KEY_ONLY, "restrict").join("\n");
 
   it("learns no STS key, but still records the account an STS answer names", () => {
@@ -374,6 +379,8 @@ describe("the traffic record", () => {
         key: "txn.aws_log_key",
         accountId: "txn.aws_log_account",
         assumedAccount: "txn.aws_log_assumed",
+        keyRef: "txn.aws_log_key_ref",
+        issuedKeyRef: "txn.aws_log_issued_ref",
       },
     });
   });
@@ -388,9 +395,12 @@ describe("the traffic record", () => {
   it("is filled in only for a request the check let through", () => {
     for (const rules of [
       awsKeyRequestRules(CHECK, "audit"),
-      awsKeyRequestRules({ keyMapFile: "/rules/keys.map" }, "restrict"),
+      awsKeyRequestRules({ keyMapFile: "/rules/keys.map", refSecret: REF_SECRET }, "restrict"),
     ]) {
-      for (const line of rules.filter((l) => l.includes("set-var(txn.aws_log_"))) {
+      const filled = rules.filter(
+        (l) => l.includes("set-var(txn.aws_log_") && !l.includes("txn.aws_log_key_ref"),
+      );
+      for (const line of filled) {
         expect(/ if aws_allowed( |$)/.test(line) || line.includes("{ var(txn.aws_key_owner)")).toBe(
           true,
         );
@@ -400,6 +410,39 @@ describe("the traffic record", () => {
           .filter((l) => l.includes("set-var(txn.aws_key_owner)"))
           .every((l) => / if aws_allowed( |$)/.test(l)),
       ).toBe(true);
+    }
+  });
+
+  it("references the key of every request signed with one, whatever the verdict", () => {
+    const ref = `'var(txn.aws_key),hmac(sha256,${REF_SECRET}),bytes(0,4),hex,lower'`;
+    for (const mode of ["restrict", "audit"] as const) {
+      expect(
+        awsKeyRequestRules(CHECK, mode).includes(
+          `    http-request set-var(txn.aws_log_key_ref) ${ref} if { var(txn.aws_key) -m reg ^[A-Z0-9]{16,128}$ }`,
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("references the key an STS answer or an ECR redirect issues, allowed or not", () => {
+    const response = awsKeyResponseRules({ keyMapFile: "/rules/keys.map", refSecret: REF_SECRET });
+    for (const [variable, acl] of [
+      ["txn.aws_new_key", "aws_new_key"],
+      ["txn.aws_issued_key", "aws_issued_key"],
+    ]) {
+      expect(
+        response.includes(
+          `    http-response set-var(txn.aws_log_issued_ref) 'var(${variable}),hmac(sha256,${REF_SECRET}),bytes(0,4),hex,lower' if ${acl}`,
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("takes only a secret HAProxy reads as one base64 argument", () => {
+    for (const refSecret of ["", `${REF_SECRET}=`, `${REF_SECRET.slice(1)},`]) {
+      expect(() => awsKeyRequestRules({ ...CHECK, refSecret }, "restrict")).toThrow(
+        "invalid AWS key reference secret",
+      );
     }
   });
 
@@ -413,7 +456,7 @@ describe("the traffic record", () => {
 });
 
 describe("learning a key", () => {
-  it("learns only over TLS from an STS host that names no resource, after a request it let through, but reads the account from any answer over TLS", () => {
+  it("learns only over TLS from an STS host that names no resource, after a request it let through, but reads the account and the key from any answer over TLS", () => {
     const rules = awsKeyRequestRules(CHECK, "audit").join("\n");
     expect(
       rules.includes("set-var(txn.aws_sts_host) bool(true) if aws_host !aws_resource_host"),
@@ -431,7 +474,7 @@ describe("learning a key", () => {
     ).toBe(true);
     const response = awsKeyResponseRules(CHECK);
     const line = (variable: string) => response.find((l) => l.includes(variable))!;
-    expect(line("set-var(txn.aws_new_key)").includes(" if aws_learn ")).toBe(true);
+    expect(line("set-var(txn.aws_new_key)").includes(" if aws_sts_read ")).toBe(true);
     expect(line("%[var(txn.aws_new_key)]").includes(" if aws_learn ")).toBe(true);
     expect(line("set-var(txn.aws_new_account)").includes(" if aws_sts_read ")).toBe(true);
   });

@@ -15,9 +15,23 @@ import {
   AWS_KEY_MAP_FILE,
   awsAccountList,
   awsKeyMap,
+  awsKeyRefSecret,
   parseAwsAccounts,
 } from "../aws-keys.js";
 import { awsKeyExtension } from "../haproxy-aws-keys.js";
+
+// std's FILE has read; the shared declarations leave it out.
+type Readable = { read(buffer: ArrayBuffer, position: number, length: number): number };
+
+function randomBytes(length: number): Uint8Array {
+  const file = std.open("/dev/urandom", "rb");
+  if (!file) throw new Error("cannot open /dev/urandom");
+  const buffer = new ArrayBuffer(length);
+  const read = (file as unknown as Readable).read(buffer, 0, length);
+  file.close();
+  if (read !== length) throw new Error("short read from /dev/urandom");
+  return new Uint8Array(buffer);
+}
 
 runInspectConfigGenerator((write) => {
   const key = std.getenv("ALLOWED_AWS_KEY")?.trim() ?? "";
@@ -32,5 +46,6 @@ runInspectConfigGenerator((write) => {
   return awsKeyExtension({
     keyMapFile: AWS_KEY_MAP_FILE,
     accountFile: accounts.length > 0 ? AWS_ACCOUNT_FILE : undefined,
+    refSecret: awsKeyRefSecret(randomBytes(30)),
   });
 });

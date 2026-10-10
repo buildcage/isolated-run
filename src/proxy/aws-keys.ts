@@ -41,6 +41,21 @@ export function awsKeyMap(key: string): string {
   return `${key} env\n`;
 }
 
+const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/** The secret key references are made with, from 30 random bytes: base64 with
+ *  no padding, as HAProxy's hmac converter takes it.
+ *  @throws {Error} if it is not 30 bytes */
+export function awsKeyRefSecret(bytes: Uint8Array): string {
+  if (bytes.length !== 30) throw new Error("an AWS key reference secret takes 30 bytes");
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+    out += [18, 12, 6, 0].map((shift) => BASE64[(n >> shift) & 63]).join("");
+  }
+  return out;
+}
+
 export function awsAccountList(accounts: string[]): string {
   return accounts.map((account) => `${account}\n`).join("");
 }

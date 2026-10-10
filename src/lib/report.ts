@@ -163,8 +163,10 @@ function withAwsTroubleshootingLink(
  * Restrict Would Refuse with the first request of each host and reason, in the
  * order each first appeared, and how many more there were. A role assumed in an
  * account not given has every later request signed with its key refused, and a
- * line for each would bury the other refusals. The time is left out, since a
- * line stands for requests made at different times.
+ * line for each would bury the other refusals, so aws-key-not-allowed is
+ * grouped by key instead, whatever the host, and names the account of the role
+ * whose AssumeRole answer issued the key. The time is left out, since a line
+ * stands for requests made at different times.
  */
 function withWouldRefuseGrouped(
   blocks: SummaryBlock[],
@@ -173,14 +175,34 @@ function withWouldRefuseGrouped(
 ): SummaryBlock[] {
   const at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse);
   if (at === -1) return blocks;
+  const issuers = new Map<string, string>();
+  for (const e of report.timeline) {
+    const { issuedKeyRef, assumedAccount } = e.extensions?.aws ?? {};
+    if (issuedKeyRef && assumedAccount && /^\d{12}$/.test(assumedAccount)) {
+      issuers.set(issuedKeyRef, assumedAccount);
+    }
+  }
+  const keyNotAllowed = `${AWS_REASON_PREFIX}key-not-allowed`;
+  const keys = new Map<string, number>();
   const groups = new Map<string, TrafficEvent[]>();
   for (const e of report.timeline) {
     if (e.wouldRefuse === undefined) continue;
+    const keyRef = e.wouldRefuse === keyNotAllowed ? e.extensions?.aws?.keyRef : undefined;
     // The action too, so a line's mark and outcome hold for the requests it stands for.
-    const key = [e.action, e.protocol, e.host, e.port, e.wouldRefuse].join(" ");
+    const key = keyRef
+      ? [e.action, "key", keyRef].join(" ")
+      : [e.action, e.protocol, e.host, e.port, e.wouldRefuse].join(" ");
     const group = groups.get(key);
-    if (group) group.push(e);
-    else groups.set(key, [e]);
+    if (group) {
+      group.push(e);
+      continue;
+    }
+    if (keyRef && !keys.has(keyRef)) keys.set(keyRef, keys.size + 1);
+    const account = keyRef && issuers.get(keyRef);
+    const label = keyRef
+      ? `${keyNotAllowed}, key ${keys.get(keyRef)}${account ? ` from a role in ${account}` : ""}`
+      : e.wouldRefuse;
+    groups.set(key, [{ ...e, wouldRefuse: label }]);
   }
   const counts = [...groups.values()];
   // One line per request inside the fence, each starting with its mark and time.
@@ -195,10 +217,11 @@ function withWouldRefuseGrouped(
       return line.replace(/^(\S+) \S+: /, "$1 ") + (rest > 0 ? ` (+${rest} more)` : "");
     });
   let note =
-    "Requests audit let through that restrict would refuse, the first for each host and reason.";
+    "Requests audit let through that restrict would refuse, the first for each host and reason, " +
+    "or for each key under `aws-key-not-allowed`.";
   if (
     extraInputs?.some((l) => l.endsWith(ASSUMED_ACCOUNT_MARK)) &&
-    counts.some((events) => events[0].wouldRefuse === `${AWS_REASON_PREFIX}key-not-allowed`)
+    counts.some((events) => events[0].wouldRefuse?.startsWith(keyNotAllowed))
   ) {
     note +=
       " The Switch to restrict mode example marks an account `# assumed in this run`: requests " +

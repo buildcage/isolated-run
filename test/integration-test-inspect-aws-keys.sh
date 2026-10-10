@@ -89,7 +89,9 @@ run_step audit \
   INPUT_PROXY_MODE="audit" \
   INPUT_RUN="curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTSTARTKEY0001/x' https://sts.us-east-1.amazonaws.com/sts/other-account &&
     curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTATTACKER0001/x' https://sts.us-east-1.amazonaws.com/sts/same-account &&
-    curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTLEARNEDKEY01/x' https://cloudformation.us-east-1.amazonaws.com/"
+    curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTLEARNEDKEY01/x' https://cloudformation.us-east-1.amazonaws.com/ &&
+    curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTFOREIGNKEY01/x' https://ssm.us-east-1.amazonaws.com/ &&
+    curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTFOREIGNKEY01/x' https://sqs.us-east-1.amazonaws.com/"
 RUN_EXIT=$?
 if [ "$RUN_EXIT" = "0" ]; then
   pass "audit refused nothing"
@@ -98,12 +100,17 @@ else
   cat "$TMPDIR/audit.log"
 fi
 SUMMARY=$(cat "$TMPDIR/audit.md")
-assert_summary_contains "(restrict would refuse: aws-key-not-allowed)" \
+assert_summary_contains "(restrict would refuse: aws-key-not-allowed, key 1)" \
   "the timeline says restrict would have refused the request"
-if grep -qE "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(restrict would refuse: aws-key-not-allowed\)" <<< "$SUMMARY"; then
+if grep -qE "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(restrict would refuse: aws-key-not-allowed, key 2 from a role in 111111111111\)" <<< "$SUMMARY"; then
   pass "an AssumeRole answer to a key restrict would refuse taught no key"
 else
   fail "an AssumeRole answer to a key restrict would refuse taught its key"
+fi
+if grep -qE "POST https://ssm\.us-east-1\.amazonaws\.com/ -> .*\(restrict would refuse: aws-key-not-allowed, key 3 from a role in 999999999999\) \(\+1 more\)$" <<< "$SUMMARY"; then
+  pass "the requests signed with a key an AssumeRole answer issued are one line, naming the role's account"
+else
+  fail "the requests signed with a key an AssumeRole answer issued are not one line naming the role's account"
 fi
 assert_summary_contains "allowed_aws_role_accounts: |" "the restrict example lists the accounts one to a line"
 if grep -qE "^ +111111111111$" <<< "$SUMMARY"; then
