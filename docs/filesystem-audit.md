@@ -362,7 +362,8 @@ tracer caught:
 
 - `dropped` counts accesses lost because the tracer's buffer was full.
 - `untracked` counts calls it could not follow because too many files were open, or too many calls
-  in progress, at once.
+  in progress, at once, or because the kernel was short of memory. Such a call is missing from the
+  record even when it succeeded.
 - `host_missed` counts hooks the kernel skipped anywhere on the host while the step ran; see
   [Skipped hooks](#skipped-hooks).
 
