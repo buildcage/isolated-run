@@ -650,7 +650,7 @@ export interface AuditSummary {
   // From the tracer's end line, which a recording cut short lacks.
   ended: boolean;
   lost: boolean;
-  /** Up to the size limit; past it, fitStepSummary cuts the table with its note. */
+  /** Up to the size limit, past which fitStepSummary cuts it. */
   executed: Executed[];
   /** Each part, or undefined where it outgrew the Job Summary. */
   paths: Row[] | undefined;
@@ -760,8 +760,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     nodes: limits.nodes,
     rowBytes: (p, comm) => relLength(p) + comm.length + 3,
   });
-  // Each program run, by path, and how many times, until the table passes
-  // the limit, which already fills the Job Summary.
+  // Each program run, with how many times it ran.
   const executed = new Map<string, number>();
   let executedBytes = 0;
   let ended = false;

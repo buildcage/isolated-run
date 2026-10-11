@@ -129,8 +129,8 @@ Where there is no artifact, the legend says how to ask for one, or that the uplo
 - **Executed** lists each program once, in the order it first ran, with how many times it ran.
 - **Accessed paths** combines every command's actions on a path in one row, in path order: the
   workspace first, then `$HOME`, then the rest. Running a program is left to the executed table.
-  A path the step was refused under a `dir/**` row is in the details when that command touched
-  little else there, and otherwise only in the artifact.
+  Which path was refused inside a `dir/**` row shows in the details unless that command's row is
+  folded too; the artifact always has it.
 - **📂 Filesystem details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
   that command first and last touched the path, counted from the proxy's start like the
@@ -142,7 +142,7 @@ Where there is no artifact, the legend says how to ask for one, or that the uplo
 | ---- | ---------------------------------------------------------------------------------------------- |
 | `R`  | Read, or mapped for reading                                                                    |
 | `W`  | Written, mapped shared and writable, created or truncated: a file, a directory, a link         |
-| `X`  | Run as a program; in the details only, as the executed table lists every program run           |
+| `X`  | Run as a program; shown in the details only, as the executed table lists every program         |
 | `M`  | Moved (renamed), from or to this path                                                          |
 | `D`  | Deleted                                                                                        |
 | `A`  | Attributes changed: mode, owner, times, extended attributes                                    |
@@ -171,7 +171,7 @@ artifact has every access in order.
 `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME` and the directories above them are never
 folded into a `dir/**` row, nor is `/proc/<pid>`, which stands for any process's own directory. A
 program run is never folded either, and neither it nor a file a program loaded counts toward the
-three.
+three entries.
 
 A program is shown under the file it ran, with symlinks followed, and a script under its own path
 rather than its interpreter's. A failed access is shown under the name the command passed, joined to
