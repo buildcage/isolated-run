@@ -67,7 +67,7 @@ check the host before turning it on:
 ```sh
 uname -rm                         # Linux 6.1 or newer; 6.4 or newer on aarch64
 stat -fc %T /sys/fs/cgroup        # cgroup2fs
-ls /sys/kernel/btf/vmlinux        # the kernel's type information (BTF)
+ls -l /sys/kernel/btf/vmlinux     # the kernel's type information (BTF), not empty
 ```
 
 A host that falls short fails the step before the command runs, with the reason; see
@@ -374,20 +374,17 @@ The step fails before the command runs with
 | Reason                               | What to do                                                                                                                                                                   |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `the runner is not on cgroup v2`     | Boot the host with cgroup v2 (the default on Ubuntu 22.04 and later). On a cgroup v2 host, it means the runner's own cgroup lies outside its cgroup namespace or was removed |
-| `the kernel exposes no BTF`          | Use a kernel built with BTF (`/sys/kernel/btf/vmlinux`), as Ubuntu's and most distributions' are                                                                             |
+| `the kernel exposes no BTF`          | Use a kernel built with BTF (`/sys/kernel/btf/vmlinux`), as Ubuntu's and most distributions' are. An empty file, such as `/dev/null` mounted there, counts as none           |
 | `read kernel BTF: …`                 | See below the table                                                                                                                                                          |
 | `the kernel is older than Linux 6.1` | Move to Linux 6.1 or newer                                                                                                                                                   |
 | `attach <name>: …` on arm64          | Move to Linux 6.4 or newer, the first arm64 kernel that lets the tracer hook kernel functions                                                                                |
 | `the tracer did not attach in time`  | The host was too busy to start the tracer; run the job again                                                                                                                 |
 | Anything else                        | The tracer's own error; please [open an issue](https://github.com/buildcage/isolated-run/issues) with it                                                                     |
 
-`read kernel BTF: …` has two causes, told apart by how the message ends:
-
-- `unknown kind …`, `header contains non-zero trailer` or `unsupported flags …`: the kernel's BTF is
-  newer than the tracer can read. Please
-  [open an issue](https://github.com/buildcage/isolated-run/issues) with the output of `uname -r`.
-- `buffer too small` or `no BTF found …`: `/sys/kernel/btf/vmlinux` is empty, covered or
-  unreadable. Make sure it is the kernel's own.
+`read kernel BTF: …` means the kernel's BTF is newer than the tracer can read. Please
+[open an issue](https://github.com/buildcage/isolated-run/issues) with the output of `uname -r`. If it
+ends in `no BTF found …`, root cannot read `/sys/kernel/btf/vmlinux`, as when a security module
+denies it.
 
 The summary can also open with a warning, or be missing:
 

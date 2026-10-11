@@ -406,14 +406,37 @@ jobs:
           STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs
           if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
 
-      # After every other check, as it leaves the kernel's BTF empty for the
-      # rest of the job, post steps included: the tracer then cannot load, after
-      # it has made the sandbox's cgroup. The file is still there, so the
-      # action's own BTF check passes.
+      # After every other check, as these leave the kernel's BTF unusable for
+      # the rest of the job, post steps included. An empty file is caught by
+      # the action's own check, before the proxy starts.
       - name: Empty the kernel's BTF
         run: |
           sudo mount --bind "$(mktemp)" /sys/kernel/btf/vmlinux
-          if [ -s /sys/kernel/btf/vmlinux ]; then echo "::error::the kernel's BTF is still readable"; exit 1; fi
+          if [ -s /sys/kernel/btf/vmlinux ]; then echo "::error::the kernel's BTF is not empty"; exit 1; fi
+
+      # Run directly, as the action would, to see which check refused it.
+      - name: A step on a kernel that exposes no BTF fails before its command
+        env:
+          INPUT_PROXY_ENGINE: universal
+          INPUT_PROXY_MODE: audit
+          INPUT_FILESYSTEM_MODE: ${{ matrix.filesystem_mode }}
+          INPUT_FILESYSTEM_AUDIT: record
+          INPUT_RUN: touch "$GITHUB_WORKSPACE/should-not-run"
+        run: |
+          if node dist/main.cjs > "$RUNNER_TEMP/no-btf.log" 2>&1; then cat "$RUNNER_TEMP/no-btf.log"; echo "::error::the step did not fail"; exit 1; fi
+          if ! grep -q 'filesystem_audit could not start (the kernel exposes no BTF)' "$RUNNER_TEMP/no-btf.log"; then
+            cat "$RUNNER_TEMP/no-btf.log"; echo "::error::the step failed for another reason"; exit 1
+          fi
+          if [ -e "$GITHUB_WORKSPACE/should-not-run" ]; then echo "::error::the command ran"; exit 1; fi
+
+      # A file of the right size but not BTF passes that check, so the tracer
+      # fails to load after it has made the sandbox's cgroup.
+      - name: Replace the kernel's BTF with a file that is not BTF
+        run: |
+          f=$(mktemp)
+          head -c 4096 /dev/zero > "$f"
+          sudo mount --bind "$f" /sys/kernel/btf/vmlinux
+          if [ ! -s /sys/kernel/btf/vmlinux ]; then echo "::error::the kernel's BTF is empty"; exit 1; fi
 
       - name: Run a step whose tracer cannot start
         id: unstarted
