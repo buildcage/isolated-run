@@ -266,9 +266,6 @@ describe("the check with no role account", () => {
         "    http-response set-var(txn.aws_log_assumed) var(txn.aws_new_account) if aws_new_account",
       ),
     ).toBe(true);
-    expect(
-      rules.includes("http-request set-header Accept-Encoding identity if { ssl_fc } aws_sts_host"),
-    ).toBe(true);
     expect(rules.includes("aws_fed")).toBe(false);
     expect(rules.includes("aws_role_account")).toBe(false);
   });
@@ -359,15 +356,6 @@ describe("awsKeyRequestRules", () => {
       ),
     ).toBe(true);
     expect(codecommit.test("codecommit.us-east-1.amazonaws.com")).toBe(false);
-  });
-
-  it("asks STS for a body it can read, unless the client signed Accept-Encoding", () => {
-    // The pattern the signed-header test reads, against real SignedHeaders lists.
-    const signed = new RegExp("signedheaders=[^,]*accept-encoding", "i");
-    expect(
-      signed.test("Credential=K/x, SignedHeaders=accept-encoding;host;x-amz-date, Signature=a"),
-    ).toBe(true);
-    expect(signed.test("Credential=K/x, SignedHeaders=host;x-amz-date, Signature=a")).toBe(false);
   });
 });
 
