@@ -642,19 +642,18 @@ spells a path. What it can do:
 - Have the sandbox init act for it, on a self-hosted runner with `kernel.yama.ptrace_scope=0`: the
   init runs as the step's user, so the step can trace it, and the init's own records are left out.
   GitHub-hosted runners only let a process trace its descendants.
-- Use an operation the tracer does not record: a change through a descriptor inherited across
-  `exec`, an extended attribute change other than through `setxattr` or `lsetxattr`, a failed
-  `exec`, a `mkdir`, `mknod`, `symlink` or `link` on a name that is already there, or one made by
-  `bind(2)` or through io_uring that the kernel refuses before reaching its file.
-- Look without reading. A `stat`, or an open with `O_PATH`, reads no content and is too frequent
-  to record; what a command then does through an `O_PATH` descriptor, such as running or reopening
-  the file, is recorded.
+- Use an operation the tracer does not record: an extended attribute change other than through
+  `setxattr` or `lsetxattr`, a failed `exec`, a `mkdir`, `mknod`, `symlink` or `link` on a name
+  that is already there, or one made by `bind(2)` that the kernel refuses before reaching its file.
+- Look a file up, or read a link's target or an extended attribute. `stat`, `access`,
+  `readlink`, `getxattr`, `listxattr` and an open with `O_PATH` are not recorded; what a command
+  then does through an `O_PATH` descriptor, such as running or reopening the file, is recorded.
 - Flood the tracer until its buffers fill. What did not fit is lost, but the summary then says the
   record is incomplete, as it does when the tracer did not stop cleanly. Flooding can hide which
   accesses happened, not that some are missing.
 - Touch so many paths that a table or the details would pass GitHub's Job Summary size limit, or
-  hold more than 200,000 files and directories after folding. That part is replaced by a note, and
-  every access stays in the artifact when one was uploaded.
+  hold more than 200,000 files and directories after folding. That part is cut or left out under a
+  note, and every access stays in the artifact when one was uploaded.
 
 Where the tracer cannot start or cannot attach a probe the kernel offers, for want of cgroup v2,
 BTF or Linux 6.1 (6.4 on arm64), the step fails before the command runs rather than keep

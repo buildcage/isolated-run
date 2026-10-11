@@ -779,7 +779,8 @@ short form.
 
 - `filesystem_audit: record` records the step's file accesses from the kernel and never blocks one.
   It needs a cgroup v2 host on Linux 6.1 or newer (6.4 on arm64) with kernel BTF; elsewhere the step
-  fails before the command runs.
+  fails before the command runs. A program in the step that makes a 32-bit system call is killed
+  with `SIGSYS`.
 - The step's Job Summary gets a section listing the programs it ran and how often, and every path it
   touched, with a flag for each action, and folded below them one row per command and path.
 - `upload_filesystem_audit_artifact: true` uploads the full record as JSON lines in an artifact
