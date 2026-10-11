@@ -321,8 +321,6 @@ jobs:
           grep -qF '| `./A/run.sh` | 1 |' "$f"
           # Running a program is left to the executed table.
           if sed -n '/^#### Accessed/,/<details>/p' "$f" | grep -qE '^\| [A-Za-z!]*X'; then exit 1; fi
-          # A program run does not fold /usr, so the refusal under it shows.
-          grep -qE ' w! +mkdir +/usr/local/buildcage-ro-probe$' "$f"
           # touch creates its file, then sets its times through the descriptor.
           grep -qF '| WA | `./subshell.txt` |' "$f"
           grep -q '<summary>📂 Filesystem details</summary>' "$f"

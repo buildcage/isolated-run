@@ -68604,14 +68604,17 @@ var Lines = class {
 		return out;
 	}
 	*lines() {
+		for (let [comm, top] of this.trees) for (let [path, agg] of treeLines(top)) {
+			let ran = this.climbing.get(keyOf(comm, path));
+			ran ? mergeAgg(ran, agg) : yield {
+				comm,
+				path,
+				agg
+			};
+		}
 		for (let [key, agg] of this.climbing) yield {
 			comm: commOf(key),
 			path: pathOf(key),
-			agg
-		};
-		for (let [comm, top] of this.trees) for (let [path, agg] of treeLines(top)) yield {
-			comm,
-			path,
 			agg
 		};
 	}
@@ -68686,9 +68689,9 @@ function createAuditSummary(prefixes) {
 			ended = !0, lost = !!(r.dropped || r.untracked);
 			return;
 		}
-		if (r.kind === "exec" && r.path && executed) {
+		if (r.kind === "exec" && r.path) {
 			let p = normalize$2(canonical(marked(r, r.path), prefixes)), runs = executed.get(p);
-			executed.set(p, (runs ?? 0) + 1), runs === void 0 && (executedBytes += relLength(p) + 11, executedBytes > limit && (executed = void 0));
+			runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
 		}
 		if (isLibraryMap(r)) return;
 		let first = classify(r);
@@ -68736,7 +68739,7 @@ function createAuditSummary(prefixes) {
 			return {
 				ended,
 				lost,
-				executed: executed && [...executed].map(([path, runs]) => ({
+				executed: [...executed].map(([path, runs]) => ({
 					...shown(path),
 					runs
 				})),
@@ -68780,14 +68783,6 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		cut: "lines",
 		head: 4
 	};
-	if (!executed) return blocks.push({
-		id: FILESYSTEM_BLOCK.executed,
-		priority: priorities[FILESYSTEM_BLOCK.executed],
-		level: 2,
-		section: SECTION$1,
-		text: cutNote(),
-		cut: "atomic"
-	}), blocks;
 	executed.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, 2, "Executed", markdownRows(["Path", "Runs"], executed.map((e) => [pathCell(e), String(e.runs)]))));
 	let byPath = paths && inRecordingOrder(paths).sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);

@@ -226,6 +226,15 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["R x /opt/lib/x.conf"]);
   });
 
+  it("keeps one row for a command that writes a file and then runs it", () => {
+    const md = render(
+      { kind: "write", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
+      { kind: "exec", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
+    );
+    expect(lines(md)).toEqual(["WX rustup ~/.cargo/bin/rustup"]);
+    expect(tableRows(md)).toEqual(["| W | `~/.cargo/bin/rustup` |"]);
+  });
+
   it("never folds a program run, nor lets one fold its directory", () => {
     const md = render(
       ...["a", "b", "c"].map((p) => ({ kind: "exec", comm: "sh", path: `/usr/bin/${p}` })),
@@ -1038,16 +1047,15 @@ describe("renderFilesystemAuditSummary: limits", () => {
     expect(section(md, "<details>")).toContain(CUT);
   });
 
-  it("puts one note in place of every part when the executed table is too large", () => {
+  it("stops listing new programs once the executed table outgrows the limit, still counting runs", () => {
     const execs = Array.from({ length: 20 }, (_, i) => ({
       kind: "exec",
       comm: "c",
       path: `/usr/bin/tool-${i}`,
     }));
-    const md = limited({ bytes: 200 }, ...execs, { kind: "read", comm: "c", path: "/work/x" });
-    expect(md.split(CUT)).toHaveLength(2);
-    expect(md).not.toContain("####");
-    expect(md).not.toContain("<details>");
+    const md = limited({ bytes: 200 }, ...execs, execs[0]);
+    expect(md).toContain("| `/usr/bin/tool-0` | 2 |");
+    expect(md).not.toContain("tool-19");
   });
 
   it("prints nothing after the part a size cut reaches, its note standing for the rest", () => {

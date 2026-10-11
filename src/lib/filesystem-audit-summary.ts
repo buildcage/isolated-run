@@ -563,9 +563,14 @@ class Lines {
   }
 
   private *lines(): Generator<{ comm: string; path: string; agg: Agg }> {
-    for (const [key, agg] of this.climbing) yield { comm: commOf(key), path: pathOf(key), agg };
     for (const [comm, top] of this.trees)
-      for (const [path, agg] of treeLines(top)) yield { comm, path, agg };
+      for (const [path, agg] of treeLines(top)) {
+        // A command that also ran the file keeps one row for it.
+        const ran = this.climbing.get(keyOf(comm, path));
+        if (ran) mergeAgg(ran, agg);
+        else yield { comm, path, agg };
+      }
+    for (const [key, agg] of this.climbing) yield { comm: commOf(key), path: pathOf(key), agg };
   }
 }
 
@@ -645,8 +650,9 @@ export interface AuditSummary {
   // From the tracer's end line, which a recording cut short lacks.
   ended: boolean;
   lost: boolean;
+  /** Up to the size limit; past it, fitStepSummary cuts the table with its note. */
+  executed: Executed[];
   /** Each part, or undefined where it outgrew the Job Summary. */
-  executed: Executed[] | undefined;
   paths: Row[] | undefined;
   details: Row[] | undefined;
   /** Why the paths and the details were given up, where they were. */
@@ -754,8 +760,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     nodes: limits.nodes,
     rowBytes: (p, comm) => relLength(p) + comm.length + 3,
   });
-  // Each program run, by path, and how many times.
-  let executed: Map<string, number> | undefined = new Map<string, number>();
+  // Each program run, by path, and how many times, until the table passes
+  // the limit, which already fills the Job Summary.
+  const executed = new Map<string, number>();
   let executedBytes = 0;
   let ended = false;
   let lost = false;
@@ -771,13 +778,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       lost = Boolean(r.dropped || r.untracked);
       return;
     }
-    if (r.kind === "exec" && r.path && executed) {
+    if (r.kind === "exec" && r.path) {
       const p = normalize(canonical(marked(r, r.path), prefixes));
       const runs = executed.get(p);
-      executed.set(p, (runs ?? 0) + 1);
-      if (runs === undefined) {
+      if (runs !== undefined) executed.set(p, runs + 1);
+      else if (executedBytes <= limit) {
+        executed.set(p, 1);
         executedBytes += relLength(p) + 11;
-        if (executedBytes > limit) executed = undefined;
       }
     }
     if (isLibraryMap(r)) return;
@@ -835,7 +842,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return {
       ended,
       lost,
-      executed: executed && [...executed].map(([path, runs]) => ({ ...shown(path), runs })),
+      executed: [...executed].map(([path, runs]) => ({ ...shown(path), runs })),
       paths: byPath,
       details: log,
       pathsCut: paths.stopped,
@@ -912,17 +919,6 @@ export function renderAuditSummaryBlocks(
           head: 4,
         };
 
-  if (!executed) {
-    blocks.push({
-      id: FILESYSTEM_BLOCK.executed,
-      priority: priorities[FILESYSTEM_BLOCK.executed],
-      level: 2,
-      section: SECTION,
-      text: cutNote(),
-      cut: "atomic",
-    });
-    return blocks;
-  }
   if (executed.length !== 0) {
     blocks.push(
       table(
