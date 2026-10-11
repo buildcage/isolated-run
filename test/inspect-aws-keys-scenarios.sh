@@ -221,6 +221,24 @@ check_status "a web identity call naming its role only under an encoded name" \
 check_status "a web identity call naming a second role in the query" \
   "$(form "Action=AssumeRoleWithWebIdentity&RoleArn=$ROLE&RoleSessionName=gh&WebIdentityToken=eyJ" "$STS/?R%6FleArn=$EVIL")" "403"
 
+echo "=== [EC2 reads the body as a form whatever the Content-Type] ==="
+EC2=https://ec2.us-east-1.amazonaws.com/
+check_status "a form POST signed with the start key" \
+  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data "Action=DescribeRegions&Version=2016-11-15" $EC2)" "200"
+# A non-form Content-Type is refused: EC2 reads the body as a form, so a SigV2
+# there would slip past the form-body check behind the start-key header.
+check_status "a JSON Content-Type POST hiding the attacker's SigV2, start key in the header" \
+  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/json" --data "Action=DescribeRegions&Version=2016-11-15&AWSAccessKeyId=${AKIA}TESTATTACKER0001&SignatureVersion=2&Signature=ab" $EC2)" "403"
+check_status "a POST with no Content-Type" \
+  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type:" --data "Action=DescribeRegions" $EC2)" "403"
+# A form body's SigV2 is still caught by the form-body check.
+check_status "a form POST hiding the attacker's SigV2" \
+  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data "Action=X&AWSAccessKeyId=${AKIA}TESTATTACKER0001&SignatureVersion=2" $EC2)" "403"
+# Scoped to EC2: a strict service ignores a non-form body, so a JSON POST there
+# stays allowed on its header key.
+check_status "a JSON Content-Type POST to CloudFormation, which does not read a form body" \
+  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/json" --data '{"StackName":"x"}' $CF)" "200"
+
 echo "=== [hosts that are not AWS] ==="
 check_status "an unsigned read the URL rules allow" "$($C https://allowed.example.com/public/x)" "200"
 

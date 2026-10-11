@@ -5,6 +5,7 @@ import {
   AWS_PUBLIC_HOST,
   AWS_RESOURCE_HOST,
   CODECOMMIT_HOST,
+  EC2_HOST,
   ECR_REGISTRY_HOST,
   LOCATION_CREDENTIAL,
   SIGV2_PARAM,
@@ -87,6 +88,47 @@ describe("AWS API hosts", () => {
     }
     expect(stsHost.test("cloudformation.us-east-1.amazonaws.com")).toBe(false);
     expect(stsHost.test("sts.amazonaws.com.evil")).toBe(false);
+  });
+});
+
+describe("EC2's API host", () => {
+  const ec2Host = new RegExp(EC2_HOST);
+
+  it("names EC2 by its regional, region-less, FIPS, dual-stack and VPC-endpoint names", () => {
+    for (const host of [
+      "ec2.us-east-1.amazonaws.com",
+      "ec2.amazonaws.com",
+      "ec2-fips.us-east-1.amazonaws.com",
+      "ec2.cn-north-1.amazonaws.com.cn",
+      "ec2.us-east-1.api.aws",
+      "ec2-fips.us-east-1.api.aws",
+      "vpce-0123456789abcdef0-abcdefgh.ec2.us-east-1.vpce.amazonaws.com",
+    ]) {
+      expect(ec2Host.test(host)).toBe(true);
+    }
+  });
+
+  it("leaves out an EC2 instance's public name and other ec2-prefixed services", () => {
+    for (const host of [
+      "ec2-54-12-3-4.compute-1.amazonaws.com",
+      "ec2messages.us-east-1.amazonaws.com",
+      "ec2instanceconnect.us-east-1.amazonaws.com",
+      "ec2.amazonaws.com.evil",
+    ]) {
+      expect(ec2Host.test(host)).toBe(false);
+    }
+  });
+
+  it("refuses a non-form Content-Type POST to EC2", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
+    const rule =
+      rules
+        .split("\n")
+        .find((l) => l.includes(EC2_HOST) && l.includes("set-var(txn.aws_unsupported)")) ?? "";
+    expect(rule.includes("METH_POST")).toBe(true);
+    expect(
+      rule.includes("!{ req.hdr(content-type) -m beg -i application/x-www-form-urlencoded }"),
+    ).toBe(true);
   });
 });
 
