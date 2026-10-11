@@ -1,0 +1,45 @@
+name: Example (filesystem audit)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      # The Job Summary's "Filesystem audit" section lists the programs the
+      # install ran and every path it touched. The rules are the inspect
+      # restrict example's, since this example is about the filesystem.
+      - name: Record what an install touches
+        id: sandboxed
+        uses: buildcage/isolated-run@4533b0b5f31b7084de488a0d7a46b8917afcbb4d # v2.2.0-rc4
+        with:
+          proxy_mode: restrict
+          allowed_url_rules: |
+            GET https://registry.npmjs.org/**
+            POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk
+          filesystem_audit: record
+          upload_filesystem_audit_artifact: true
+          run: |
+            npm init -y
+            npm install --ignore-scripts @hono/node-server
+
+            # Recorded as a refused write (w!): the sandbox makes /usr/local/bin read-only.
+            touch /usr/local/bin/buildcage-example-planted || true
+
+      # Empty when nothing was uploaded, and download-artifact would then fetch
+      # every artifact of the run.
+      - name: Download the full record
+        if: steps.sandboxed.outputs.filesystem_audit_artifact_name != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ steps.sandboxed.outputs.filesystem_audit_artifact_name }}
+          path: filesystem-audit
+
+      - name: Show the first entries of the record
+        run: find filesystem-audit -type f -exec head -n 5 {} +
