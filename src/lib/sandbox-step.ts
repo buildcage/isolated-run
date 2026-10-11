@@ -441,6 +441,7 @@ export async function runSandboxStep(
   // 1 unless the isolated command itself reports otherwise: every way out of
   // the block below that isn't the command's own exit code is a failure.
   let exitCode = 1;
+  let auditAttached = false;
   try {
     const proxyNetns = getContainerNetns(containerName);
     if (proxyNetns === null) {
@@ -461,6 +462,7 @@ export async function runSandboxStep(
       overlayRoots,
       failOnCaResidue,
       filesystemAudit: audit,
+      onAuditAttached: () => (auditAttached = true),
       warn,
       cancel: cancel.signal,
     });
@@ -469,6 +471,7 @@ export async function runSandboxStep(
     const prepareAudit = () =>
       prepareStepFilesystemAudit({
         audit,
+        attached: auditAttached,
         upload: filesystemAuditArtifact.upload,
         retentionDays: filesystemAuditArtifact.retentionDays,
         containerName,

@@ -101,6 +101,7 @@ describe("prepareStepFilesystemAudit", () => {
     actionRepo: "buildcage/isolated-run",
     actionRef: "v2",
     failClosed: false,
+    attached: true,
   };
 
   it("renders, uploads and sets the output when a recording exists", async () => {
@@ -162,7 +163,8 @@ describe("prepareStepFilesystemAudit", () => {
     expect(outputs).toEqual([""]);
   });
 
-  it("reports nothing and sets an empty output when the recording is missing", async () => {
+  it("reports nothing and sets an empty output when the tracer never attached", async () => {
+    const exitCode = process.exitCode;
     const note = annotation();
     const {
       deps: d,
@@ -174,11 +176,45 @@ describe("prepareStepFilesystemAudit", () => {
       },
     });
 
-    await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+    await reportStepFilesystemAudit(
+      { ...base, attached: false, audit: AUDIT, annotation: note, env: {} },
+      d,
+    );
 
     expect(note.warning).not.toHaveBeenCalled();
+    expect(note.error).not.toHaveBeenCalled();
     expect(summaries).toEqual([]);
     expect(outputs).toEqual([""]);
+    expect(process.exitCode).toBe(exitCode);
+  });
+
+  it("fails the step, whatever the mode, when the recording is gone after the tracer attached", async () => {
+    const exitCode = process.exitCode;
+    const note = annotation();
+    const {
+      deps: d,
+      summaries,
+      outputs,
+      uploads,
+    } = deps({
+      readLines: () => {
+        throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+      },
+    });
+
+    try {
+      await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+
+      expect(note.error).toHaveBeenCalledWith(
+        "The filesystem audit recording is gone: something removed it after the tracer started",
+      );
+      expect(process.exitCode).toBe(1);
+      expect(summaries[0]).toContain("The recording could not be read");
+      expect(uploads).toEqual([]);
+      expect(outputs).toEqual([""]);
+    } finally {
+      process.exitCode = exitCode;
+    }
   });
 
   it("still uploads the recording when the summary fails to render", async () => {
@@ -617,6 +653,7 @@ describe("prepareStepFilesystemAudit: failures while reading", () => {
     actionRepo: "buildcage/isolated-run",
     actionRef: "v2",
     failClosed: false,
+    attached: true,
     audit: AUDIT,
     env: { GITHUB_WORKSPACE: "/work" },
   };
@@ -722,6 +759,7 @@ describe("prepareStepFilesystemAudit: an upload that throws", () => {
         actionRepo: "buildcage/isolated-run",
         actionRef: "v2",
         failClosed: false,
+        attached: true,
         audit: AUDIT,
         annotation: note,
         env: {},

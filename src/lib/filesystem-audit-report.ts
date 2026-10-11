@@ -41,6 +41,9 @@ import { FILESYSTEM_PRIORITIES } from "./summary-priorities.ts";
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */
   audit: FilesystemAuditPaths | undefined;
+  /** Whether the tracer attached. Once it has, its recording is there until
+   *  the post step, so one that is gone was removed by something else. */
+  attached: boolean;
   /** upload_filesystem_audit_artifact: whether to upload the record at all. */
   upload: boolean;
   retentionDays: number | undefined;
@@ -180,6 +183,7 @@ const NONE: StepFilesystemAudit = { blocks: () => [] };
 export async function prepareStepFilesystemAudit(
   {
     audit,
+    attached,
     upload,
     retentionDays,
     containerName,
@@ -211,7 +215,14 @@ export async function prepareStepFilesystemAudit(
       annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
       return { blocks: () => unreadableSummaryBlocks() };
     }
-    if (!reduced) return NONE;
+    if (!reduced) {
+      if (!attached) return NONE;
+      annotation.error(
+        "The filesystem audit recording is gone: something removed it after the tracer started",
+      );
+      process.exitCode = 1;
+      return { blocks: () => unreadableSummaryBlocks() };
+    }
     const { summary, summaryError } = reduced;
     if (reduced.written)
       artifactName =
@@ -313,7 +324,7 @@ function reduce(
       summarize(() => summary.observe(r));
     });
   } catch (e) {
-    // The tracer never started, or the file is already gone.
+    // The tracer never started, or something removed the file.
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw e;
   }

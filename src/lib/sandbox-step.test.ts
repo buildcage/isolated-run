@@ -216,6 +216,19 @@ describe("runSandboxStep", () => {
     );
   });
 
+  it("tells the report whether the tracer attached", async () => {
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+    await runSandboxStep(ENV, deps);
+    expect(mocks.prepareStepFilesystemAudit.mock.calls[0][0].attached).toBe(false);
+
+    mocks.runSandboxedCommand.mockImplementation(async ({ onAuditAttached }) => {
+      onAuditAttached?.();
+      throw new Error("the command failed to run");
+    });
+    await expect(runSandboxStep(ENV, deps)).rejects.toThrow("the command failed to run");
+    expect(mocks.prepareStepFilesystemAudit.mock.calls[1][0].attached).toBe(true);
+  });
+
   it("leaves the audit off by default", async () => {
     await runSandboxStep(ENV, deps);
 

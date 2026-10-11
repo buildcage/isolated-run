@@ -154,6 +154,8 @@ export interface RunSandboxedCommandOptions {
   /** Present only under filesystem_audit: record: where the tracer writes.
    *  The step fails before its command runs if it cannot be started. */
   filesystemAudit?: FilesystemAuditPaths;
+  /** Called once the tracer has attached. */
+  onAuditAttached?: () => void;
   /** Where this module's own warnings go: a scratch dir that would not
    *  unmount, the environment variables a shell cannot export, and NSS not
    *  answering the primary group check. Passed in
@@ -537,7 +539,7 @@ async function startAudit(
   } catch (e) {
     throw auditUnavailable(errorMessage(e));
   }
-  return deps.startFilesystemAudit({
+  const handle = await deps.startFilesystemAudit({
     tracerPath,
     cgroupsPath,
     outPath: filesystemAudit.outPath,
@@ -546,6 +548,8 @@ async function startAudit(
     watchPid: process.pid,
     cancel: options.cancel,
   });
+  options.onAuditAttached?.();
+  return handle;
 }
 
 /**

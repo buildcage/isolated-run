@@ -395,7 +395,8 @@ The summary can also open with a warning, or be missing:
   cleanly. Some accesses are missing from both the summary and the artifact. A step that touches a
   very large number of files at once can cause it.
 - **The recording could not be read.** The summary has none of the step's accesses, a warning is
-  logged, and no artifact is uploaded.
+  logged, and no artifact is uploaded. If the recording is gone after the tracer started, which
+  takes a process on the runner host removing it, the step fails instead, in any mode.
 - **No section, and a `Failed to render the filesystem audit summary` warning.** The recording was
   read but its summary could not be written; the artifact is still uploaded if asked for. Please
   [open an issue](https://github.com/buildcage/isolated-run/issues) with the warning.
