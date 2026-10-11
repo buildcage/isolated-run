@@ -94,9 +94,10 @@ function classify(r: AuditRecord): Classified[] {
   // An exchange moves each path to the other.
   if (r.kind === "rename" && r.exchange && r.to) out.push({ letter, path: r.to, failed, perm });
   // A hard link writes its new name, and the file it names can be read under
-  // that name from then on. Any other failed one exposes nothing, nor does
-  // one of a file with no name of its own, as O_TMPFILE makes.
-  if (r.kind === "link" && (!failed || fileRefused) && !r.deleted && r.path)
+  // that name from then on; a failed one still shows which file it was after,
+  // as a link across mounts fails EXDEV. One of a file with no name of its
+  // own, as O_TMPFILE makes, names none.
+  if (r.kind === "link" && !r.deleted && r.path)
     out.push({ letter: "L", path: r.path, failed, perm: fileRefused });
   return out;
 }

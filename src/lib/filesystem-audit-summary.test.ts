@@ -89,7 +89,7 @@ describe("renderFilesystemAuditSummary", () => {
       { kind: "mkdir", comm: "mkdir", path: "/work/d", err: 13, failed: true },
       { kind: "link", comm: "ln", path: "/work/a", to: "/work/b", err: 2, failed: true },
     );
-    expect(lines(md)).toEqual(["w ln ./b", "w! mkdir ./d", "d! rm /tmp/f"]);
+    expect(lines(md)).toEqual(["l ln ./a", "w ln ./b", "w! mkdir ./d", "d! rm /tmp/f"]);
   });
 
   it("never folds a climbing path into the directories it names", () => {
@@ -132,14 +132,14 @@ describe("renderFilesystemAuditSummary", () => {
       expect(lines(render({ kind, comm: "c", path: "/x", err: 2, failed: true }))).toEqual([
         `${letter.toLowerCase()} c /x`,
       ]);
-    // A link's new name, done or failed.
+    // A link's new name and the file it names, done or failed.
     expect(lines(render({ kind: "link", comm: "ln", path: "/a", to: "/b" }))).toEqual([
       "L ln /a",
       "W ln /b",
     ]);
     expect(
       lines(render({ kind: "link", comm: "ln", path: "/a", to: "/b", err: 2, failed: true })),
-    ).toEqual(["w ln /b"]);
+    ).toEqual(["l ln /a", "w ln /b"]);
   });
 
   it("counts an open as a write when it truncates, without creating", () => {
@@ -588,17 +588,24 @@ describe("renderFilesystemAuditSummary", () => {
     expect(
       lines(render({ kind: "link", comm: "ln", path: "/tmp/#12", to: "/work/f", deleted: true })),
     ).toEqual(["W ln ./f"]);
-    // Nor does a failed link, which exposes nothing, as when O_TMPFILE's file
-    // is linked through /proc and the tracer cannot mark it.
+    // A failed link still names the file it was after, as one across mounts
+    // fails EXDEV; a refusal other than EPERM is the new name's.
     expect(
       lines(
         render(
-          { kind: "link", comm: "sh", path: "/proc/self/fd/3", to: "/ro/f", err: 30, failed: true },
-          { kind: "link", comm: "ln", path: "/a", to: "/work/y", err: 13, failed: true },
+          {
+            kind: "link",
+            comm: "ln",
+            path: "/home/u/.ssh/id_rsa",
+            to: "/work/x",
+            err: 18,
+            failed: true,
+          },
+          { kind: "link", comm: "sh", path: "/a", to: "/ro/f", err: 30, failed: true },
         ),
       ),
-    ).toEqual(["w! ln ./y", "w! sh /ro/f"]);
-    // But EPERM refuses the file itself, as protected_hardlinks does, so the
+    ).toEqual(["w ln ./x", "l ln ~/.ssh/id_rsa", "l sh /a", "w! sh /ro/f"]);
+    // EPERM refuses the file itself, as protected_hardlinks does, so the
     // refusal shows on it rather than on the new name.
     expect(
       lines(

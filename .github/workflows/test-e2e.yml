@@ -242,6 +242,8 @@ jobs:
             # A hard link, which names the file it links as well as its new name.
             echo data > "$GITHUB_WORKSPACE/link-src.txt"
             ln "$GITHUB_WORKSPACE/link-src.txt" "$GITHUB_WORKSPACE/link-dst.txt"
+            # One across mounts, which fails.
+            ln /etc/hostname "$GITHUB_WORKSPACE/hostname-link" 2>/dev/null || true
             # A file mapped executable that is no library.
             echo data > "$GITHUB_WORKSPACE/mapped.bin"
             python3 -c 'import mmap, sys; f = open(sys.argv[1], "rb")
@@ -342,6 +344,7 @@ jobs:
           grep -qE ' w!? +mkdir +\./root-owned/x$' "$f"
           grep -qE ' W +ln +\./link-dst\.txt$' "$f"
           grep -qE ' L +ln +\./link-src\.txt$' "$f"
+          grep -qE ' l!? +ln +/etc/hostname$' "$f"
           # A file mapped executable shows as read unless it is a library or
           # an exec mapped it, as it does run.sh's interpreter.
           grep -qE ' R +python3 +\./mapped\.bin$' "$f"

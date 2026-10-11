@@ -68417,7 +68417,7 @@ function classify(r) {
 		path: r.to,
 		failed,
 		perm
-	}), r.kind === "link" && (!failed || fileRefused) && !r.deleted && r.path && out.push({
+	}), r.kind === "link" && !r.deleted && r.path && out.push({
 		letter: "L",
 		path: r.path,
 		failed,
