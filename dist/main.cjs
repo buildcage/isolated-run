@@ -70284,7 +70284,13 @@ const realHostProbes = {
 		let procCgroup = readOptionalFile("/proc/self/cgroup");
 		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
 	},
-	kernelBtf: () => (0, node_fs.existsSync)("/sys/kernel/btf/vmlinux")
+	kernelBtf: () => {
+		try {
+			return (0, node_fs.statSync)("/sys/kernel/btf/vmlinux").size > 0;
+		} catch {
+			return !1;
+		}
+	}
 }, END_LINE = /"kind":"end"[^\n]*\n$/;
 function filesystemAuditPaths(containerName, scratchBase) {
 	let suffix = containerName.split("-").at(-1);

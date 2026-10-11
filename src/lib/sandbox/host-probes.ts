@@ -6,7 +6,7 @@
  * Every judgement they make is a pure function here; only the syscalls sit
  * behind the `v8 ignore` below.
  */
-import { existsSync, readFileSync, realpathSync, statfsSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statfsSync, statSync } from "node:fs";
 import os from "node:os";
 
 import { realPathOf } from "./symlinks.ts";
@@ -108,7 +108,8 @@ export interface HostProbes {
   realpath(path: string): string;
   /** This process's cgroup on a cgroup v2 host, undefined on any other. */
   cgroupPath(): string | undefined;
-  /** Whether the kernel exposes its BTF, which fentry programs need to attach. */
+  /** Whether the kernel exposes its BTF, which fentry programs need to attach:
+   *  an empty file there, such as /dev/null mounted over it, does not count. */
   kernelBtf(): boolean;
 }
 
@@ -179,6 +180,12 @@ export const realHostProbes: HostProbes = {
     return procCgroup === undefined ? undefined : parseCgroupV2Path(procCgroup);
   },
   // A vmlinux file under /boot would do for CO-RE, not for attaching.
-  kernelBtf: () => existsSync("/sys/kernel/btf/vmlinux"),
+  kernelBtf: () => {
+    try {
+      return statSync("/sys/kernel/btf/vmlinux").size > 0;
+    } catch {
+      return false;
+    }
+  },
 };
 /* v8 ignore stop */
