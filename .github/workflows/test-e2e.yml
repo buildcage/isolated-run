@@ -617,10 +617,16 @@ jobs:
   test_sandbox_concurrency:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.04 carries the oldest kernel GitHub-hosted runners ship (6.8). Its arm
+        # image runs here, as the inspect job below needs Chrome, which it lacks.
+        runner: [ubuntu-latest, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-    name: "e2e: test (sandbox, concurrency)"
+    name: "e2e: test (sandbox, concurrency, ${{ matrix.runner }})"
 
     env:
       PROXY_ENGINE: universal
@@ -754,10 +760,14 @@ jobs:
   test_sandbox_concurrency_inspect:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-    name: "e2e: test (sandbox, inspect engine, concurrency)"
+    name: "e2e: test (sandbox, inspect engine, concurrency, ${{ matrix.runner }})"
 
     steps:
       - name: Checkout
