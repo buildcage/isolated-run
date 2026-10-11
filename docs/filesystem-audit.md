@@ -8,17 +8,32 @@
 `filesystem_audit: record` records every file the isolated step reads, writes, moves,
 deletes, changes the attributes of, and executes. It adds a section to the Job Summary and, with
 `upload_filesystem_audit_artifact: true`, uploads the full record as an artifact. It watches from
-the kernel, so a static binary or a tool that bypasses libc is seen like any other, and it only
-records: it never blocks an access. What the step may write is decided by
-[`filesystem_mode` and `write_through`](../README.md#filesystem-access).
+the kernel, so a static binary or a tool that bypasses libc is seen like any other. It works the
+same whatever `proxy_mode` and `proxy_engine` are set to.
+
+It records and never blocks an access: what the step may write is decided by
+[`filesystem_mode` and `write_through`](../README.md#filesystem-access). Turning it on still
+changes two things, covered in [Does it fit your step?](#does-it-fit-your-step): a 32-bit system
+call kills the thread that made it, and every system call on the runner host gets slightly slower
+while the step runs.
 
 ## What it is for
 
 - **Finding what `write_through` needs.** Under `filesystem_mode: ephemeral` every write is thrown
-  away when the step ends, except under the paths `write_through` names. Run the step once with
-  both, and the `W`, `M` and `D` rows show where it wrote: the build output and the files a later
-  step reads, such as `$GITHUB_OUTPUT`, belong in `write_through`, and the rest is what ephemeral
-  discards on purpose.
+  away when the step ends, except under the paths `write_through` names. The audit shows where the
+  step wrote, so you can name only what a later step needs:
+
+  1. Run the step with `filesystem_mode: ephemeral` and `filesystem_audit: record`, and in
+     `write_through` only what you already know a later step reads, such as `$GITHUB_OUTPUT` if the
+     step sets outputs.
+  2. Look at the `W`, `D` and `A` rows under **Accessed paths**, and at the `M` rows. `M` marks
+     only the path a file was moved away from, so a file a tool writes under a temporary name and
+     then renames into place shows under the temporary name; the artifact has where it went, as
+     `to` on its `rename` line.
+  3. Add what a later step reads, usually the build output, to `write_through`, and run again. The
+     rest is what ephemeral discards on purpose.
+
+  A build that sets outputs and writes `./dist` ends up with:
 
   ```yaml
   - uses: buildcage/isolated-run@<sha>
@@ -36,17 +51,18 @@ records: it never blocks an access. What the step may write is decided by
   which command, and the artifact, if uploaded, says when and from which process.
 - **Seeing what an install ran.** The executed table lists every program the step started, so a
   `postinstall` script that runs `curl` or a binary it just downloaded shows up there.
-- **Seeing what was refused.** A lowercase flag with `!` is an access the sandbox, a file's
-  permissions or a read-only location refused, such as a write to `/usr/local/bin`, which the
-  sandbox makes read-only, or a read of `/etc/shadow`.
+- **Seeing what was refused.** A flag followed by `!`, such as `w!`, is an access the sandbox, a
+  file's permissions or a read-only location refused, such as a write to `/usr/local/bin`, which
+  the sandbox makes read-only, or a read of `/etc/shadow`.
 
-## Getting started
+## Does it fit your step?
 
-### Which runners
+### What it needs
 
-GitHub-hosted `ubuntu-latest`, `ubuntu-22.04`, `ubuntu-24.04` and their `-arm` variants meet every
-requirement: their kernels are Linux 6.8 or newer, on cgroup v2, with BTF. On a self-hosted
-runner, check the host before turning it on:
+A cgroup v2 host on Linux 6.1 or newer, 6.4 or newer on arm64, with the kernel's type information
+(BTF). GitHub-hosted `ubuntu-latest`, `ubuntu-22.04`, `ubuntu-24.04`, `ubuntu-22.04-arm` and
+`ubuntu-24.04-arm` meet all of it: their kernels are Linux 6.8 or newer. On a self-hosted runner,
+check the host before turning it on:
 
 ```sh
 uname -rm                         # Linux 6.1 or newer; 6.4 or newer on aarch64
@@ -57,7 +73,21 @@ ls /sys/kernel/btf/vmlinux        # the kernel's type information (BTF)
 A host that falls short fails the step before the command runs, with the reason; see
 [Troubleshooting](#troubleshooting).
 
-### Turning it on
+### What changes in the step
+
+- **No 32-bit programs.** The tracer reads only the native 64-bit system calls, so with the audit on
+  the sandbox refuses one through a 32-bit ABI, from an i386 or ARM32 program or `int 0x80`: the
+  kernel kills the thread that made it with `SIGSYS`. A single-threaded program dies, and a shell
+  reports it as `Bad system call`. Run such a program in a step without the audit.
+- **Cost to the whole host.** While the step runs, the tracer's hooks run on every system call and
+  every file read or write on the runner host, not only the step's, since a hook has to run to tell
+  whose call it is. That adds roughly 100 nanoseconds to each system call of every process on the
+  machine, the proxy, Docker and other jobs on a shared runner included. Copying a file a byte at a
+  time outside the step took nearly twice as long in a test, while a typical build, which spends
+  little of its time in system calls, barely changes. Inside the step, each program's first read or
+  write of a file is also recorded, which costs more.
+
+## Getting started
 
 ```yaml
 - uses: buildcage/isolated-run@<sha>
@@ -78,7 +108,7 @@ record, with every access in order, is uploaded only when asked for, as the traf
     run: npm ci
 
 - if: steps.build.outputs.filesystem_audit_artifact_name != ''
-  uses: actions/download-artifact@v5
+  uses: actions/download-artifact@<sha>
   with:
     name: ${{ steps.build.outputs.filesystem_audit_artifact_name }}
 ```
@@ -87,11 +117,17 @@ The `filesystem_audit_artifact_name` output names the uploaded artifact. It is e
 was uploaded, and without the `if:`, `download-artifact` would then download every artifact of the
 run.
 
+Each step with the audit on gets its own section and its own artifact,
+`buildcage-filesystem-audit-<id>`, where `<id>` is the same random suffix as that step's traffic
+artifact, so several steps in one job never collide. Each section follows its step's traffic
+report, whose heading carries the step's `label`, so set `label` to tell the steps apart.
+
 `filesystem_audit_retention_days` sets how long the artifact is kept; empty uses the repository's
-default, and a value above the repository's maximum is lowered to it, with a warning. The value is
-checked even when nothing is uploaded. The artifact names each program the step ran but not its
-arguments, which can carry secrets. It still holds every path the step touched, including the names
-of files it only tried to open, so treat it as sensitive, like the traffic artifact.
+default, and a value above the repository's maximum is lowered to it, with a warning. A value that
+is not a whole number above zero fails the step even when nothing is uploaded. The artifact names
+each program the step ran but not its arguments, which can carry secrets. It still holds every path
+the step touched, including the names of files it only tried to open, so treat it as sensitive,
+like the traffic artifact.
 
 ## Reading the summary
 
@@ -124,13 +160,14 @@ first-last access since the proxy started · flags · command · path
 00:00.531-00:40.982: X   sh   /usr/bin/dash
 ```
 
-Where there is no artifact, the legend says how to ask for one, or that the upload failed.
+Where there is no artifact, the legend says how to ask for one, or that the upload failed. A step
+that touched no file shows `No file access was recorded.` instead of the tables.
 
 - **Executed** lists each program once, in the order it first ran, with how many times it ran.
 - **Accessed paths** combines every command's actions on a path in one row, in path order: the
   workspace first, then `$HOME`, then the rest. Running a program is left to the executed table.
-  Which path was refused inside a `dir/**` row shows in the details unless that command's row is
-  folded too; the artifact always has it.
+  A `dir/**` row does not say which path under it was refused. The details fold each command's
+  paths on their own, so they often name it; the artifact always does.
 - **📂 Filesystem details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
   that command first and last touched the path, counted from the proxy's start like the
@@ -140,10 +177,10 @@ Where there is no artifact, the legend says how to ask for one, or that the uplo
 
 | Flag | Means                                                                                          |
 | ---- | ---------------------------------------------------------------------------------------------- |
-| `R`  | Read, or mapped for reading                                                                    |
+| `R`  | Read, or mapped for reading or to run                                                          |
 | `W`  | Written, mapped shared and writable, created or truncated: a file, a directory, a link         |
 | `X`  | Run as a program; shown in the details only, as the executed table lists every program         |
-| `M`  | Moved (renamed), from or to this path                                                          |
+| `M`  | Moved (renamed) away from this path; where it went is in the artifact                          |
 | `D`  | Deleted                                                                                        |
 | `A`  | Attributes changed: mode, owner, times, extended attributes                                    |
 | `r`  | Lowercase: the action failed every time it was tried here, such as opening a missing file      |
@@ -152,58 +189,77 @@ Where there is no artifact, the legend says how to ask for one, or that the uplo
 A refusal shows even where the same action also succeeded, after the uppercase letters: `RWr!` on
 `/etc/**` means reads and writes under `/etc` succeeded and at least one read was refused. A failed
 open shows what it asked for: `w` to write, create or truncate, `r` to read, and both for one opened
-to read and write, as bash does `/dev/tty`. A row's flags do not say which action came first; the
+to read and write, as bash does `/dev/tty`. A swap of two paths (`renameat2` with
+`RENAME_EXCHANGE`) shows `M` on both. A row's flags do not say which action came first; the
 artifact has every access in order.
 
 ### Paths
 
-| Shown as               | Means                                                                                                            |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `./…`                  | Under `$GITHUB_WORKSPACE`                                                                                        |
-| `~/…`                  | Under `$HOME`                                                                                                    |
-| `dir/**`               | Three or more entries directly under `dir` were touched, so it is shown as one row with every flag below it      |
-| `…/name`               | A relative name whose directory was closed before it could be read, or a path too deep to record in full         |
-| `memfd:"name"`         | A file that exists only in memory and has no path; the name is whatever its creator chose                        |
-| `path (deleted)`       | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row |
-| `\n`, `\u{202e}`, `\\` | A control or invisible character, or a backslash, in a path or command name                                      |
-| `\xff`                 | A byte that is not UTF-8 in a path or command name                                                               |
+| Shown as               | Means                                                                                                                             |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `./…`                  | Under `$GITHUB_WORKSPACE`                                                                                                         |
+| `~/…`                  | Under `$HOME`                                                                                                                     |
+| `dir/**`               | Three or more entries directly under `dir` were touched, so it is shown as one row with the flags of everything under it combined |
+| `/proc/<pid>/…`        | Under a process's own directory in `/proc`, every process's shown as one                                                          |
+| `…/name`               | A relative name whose directory was closed before it could be read, or a path too deep to record in full                          |
+| `memfd:"name"`         | A file that exists only in memory and has no path; the name is whatever its creator chose                                         |
+| `path (deleted)`       | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row                  |
+| `\n`, `\u{202e}`, `\\` | A control or invisible character, or a backslash, in a path or command name                                                       |
+| `\xff`                 | A byte that is not UTF-8 in a path or command name                                                                                |
 
-`/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME` and the directories above them are never
-folded into a `dir/**` row, nor is `/proc/<pid>`, which stands for any process's own directory. A
-program run is never folded either, and neither it nor a file a program loaded counts toward the
-three entries.
+Never folded into a `dir/**` row, nor counted toward its three entries:
 
-A program is shown under the file it ran, with symlinks followed, and a script under its own path
-rather than its interpreter's. A failed access is shown under the name the command passed, joined to
-its working directory, or the directory it passed by descriptor, without resolving `..`. A command
-reading or writing through a file it inherited or was passed is shown under its own name, except for
-a pipe, a socket or a device such as `/dev/null`, which counts once.
+- `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME`, the directories above them, and
+  `/proc/<pid>`.
+- A program run, a path containing `..`, which may lead elsewhere through a symlink, and a memfd. A
+  file a program loaded is not counted either.
+
+Which path a row is shown under:
+
+- A program is shown under the file it ran, with symlinks followed, and a script under its own path
+  rather than its interpreter's.
+- A failed access is shown under the name the command passed, joined to its working directory, or
+  the directory it passed by descriptor, without resolving `..`.
+- A command reading or writing a file it inherited or was passed, such as a shell's redirection, is
+  shown on its own row under that file's path.
+- Reads and writes through a device such as `/dev/null` are recorded once for each time it is
+  opened, under the first program to make them. A pipe or a socket is left out of the summary.
 
 ### What the summary leaves out
 
 The summary leaves out what any program does just to start: the shared libraries it loads, its
 reads of them and of `/etc/ld.so.cache`, and its own reads of the program file. Another program
 reading those files is shown. A file counts as a library when the kernel loads it to start a
-program, or when its name ends in `.so`, `.so.<version>` or `.node` and it is neither in memory only
-nor deleted.
+program, or when it is mapped to run and its name ends in `.so`, `.so` with a version such as
+`.so.1.2.3`, or `.node`, and it is neither in memory only nor deleted. A `.so` file only read, as a
+packaging tool reads it, is shown.
 
-A file kept open counts only the first read and the first write through it by each program, so the
-last time in the details can be earlier than its last write.
+A directory's own row is left out when every flag on it shows on a row below it too and none of it
+was refused: after `mkdir dist` and a write to `dist/app.js`, only `./dist/app.js` shows.
+
+A regular file or directory kept open counts only the first read and the first write through it by
+each program, so the last time in the details can be earlier than its last write. Through a device,
+only the first read and the first write after each open count, whichever program makes them.
 
 ## The artifact
 
 With `upload_filesystem_audit_artifact: true`, the artifact named `buildcage-filesystem-audit-<id>`
-holds one file,
-`filesystem-audit-<id>.step.jsonl`: one JSON object per line, in the order the accesses happened,
-with absolute paths. It holds only the step's own accesses, as the summary does: the sandbox's setup
-is left out, and the step's shell is named `bash`. A record marked incomplete can hold the setup too.
-A few examples:
+holds one file, `filesystem-audit-<id>.step.jsonl`: one JSON object per line, in the order the
+tracer caught the accesses. Opens and path changes are written when their call returns, so lines
+from different threads can be slightly out of `t` order. It holds only the step's own accesses, as
+the summary does: the sandbox's setup is left out, and the step's shell is named `bash`. A record
+marked incomplete can hold the setup too. A few examples:
 
 ```sh
-# Every path the summary shows as written
-jq -r 'select((.failed | not) and ((.kind | IN("write", "mkdir", "mknod", "symlink", "link", "truncate"))
-  or (.kind == "open" and (.access // "" | test("[ct]")))))
-  | if .kind == "link" then .to else .path end' filesystem-audit-*.jsonl | sort -u
+# Every path written, made or moved to
+jq -r 'select(.failed | not)
+  | if (.kind | IN("write", "mkdir", "mknod", "symlink", "truncate"))
+      or (.kind == "open" and (.access // "" | test("[ct]")))
+      or (.kind == "mmap" and .access == "w") then .path
+    elif .kind == "link" or .kind == "rename" then .to
+    else empty end
+  | select(. != null and (startswith("/") or startswith("…/") or startswith("memfd:")))' \
+  filesystem-audit-*.jsonl | sort -u
 
 # Who opened a credential file, and when
 jq -c 'select(.path // "" | endswith("/.npmrc")) | {t, comm, pid, kind}' filesystem-audit-*.jsonl
@@ -212,32 +268,39 @@ jq -c 'select(.path // "" | endswith("/.npmrc")) | {t, comm, pid, kind}' filesys
 jq -c 'select(.kind == "open" and .failed and (.err == 1 or .err == 13 or .err == 30))' filesystem-audit-*.jsonl
 ```
 
+The last `select` of the first example drops pipes and sockets, which the summary leaves out too.
+Unlike the summary, it also lists a directory that was made and then written under.
+
 ### Fields
 
-| Field      | On                          | Notes                                                                                                                                                  |
-| ---------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `t`        | every line but `end`        | ISO 8601 UTC, to the millisecond                                                                                                                       |
-| `kind`     | every line                  | what happened; see [Kinds](#kinds)                                                                                                                     |
-| `pid`      | every line but `end`        | the process, as the runner host numbers it                                                                                                             |
-| `ppid`     | every line but `end`        | its parent at the time; on `fork`, the process that made it                                                                                            |
-| `comm`     | every line but `end`        | the name the process gave itself, up to 15 bytes                                                                                                       |
-| `path`     | all but `fork`, `end`       | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read                                                  |
-| `to`       | `rename`, `link`, `symlink` | the new name; on `symlink`, the link's contents as written                                                                                             |
-| `name`     |                             | the name the command passed, where `path` differs from it; on `exec`, the name it was run by                                                           |
-| `to_name`  |                             | as `name`, for `to`                                                                                                                                    |
-| `access`   | `open`, `mmap`              | what was asked for; see [Access letters](#access-letters)                                                                                              |
-| `flags`    | `open`                      | the `open(2)` flags as a number; absent when 0, as for a plain read-only open                                                                          |
-| `mode`     | `chmod`                     | the new mode in octal, such as `"0755"`                                                                                                                |
-| `owner`    | `chown`                     | the new `uid:gid`, with `-1` for a side left as it was                                                                                                 |
-| `failed`   |                             | `true` when the operation failed                                                                                                                       |
-| `err`      |                             | on a failed one, the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read |
-| `image`    |                             | on `mmap`, a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                              |
-| `memfd`    |                             | a file that exists only in memory; `path` is `memfd:` and the name its creator chose                                                                   |
-| `deleted`  |                             | a file deleted while it was open, or created without a name and never given one                                                                        |
-| `exchange` |                             | on `rename`, a swap of two paths, which shows `M` on both in the summary                                                                               |
+| Field      | On                                             | Notes                                                                                                                                                |
+| ---------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `t`        | every line but `end`                           | ISO 8601 UTC, to the millisecond                                                                                                                     |
+| `kind`     | every line                                     | what happened; see [Kinds](#kinds)                                                                                                                   |
+| `pid`      | every line but `end`                           | the process, as the runner host numbers it                                                                                                           |
+| `ppid`     | every line but `end`                           | its parent at the time; on `fork`, the process that made it                                                                                          |
+| `comm`     | every line but `end`                           | the name the process gave itself, up to 15 bytes                                                                                                     |
+| `path`     | all but `fork`, `end`                          | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path |
+| `to`       | `rename`, `link`, `symlink`                    | the new name; on `symlink`, the link's contents as written, absent on a failed one                                                                   |
+| `name`     | where it differs from `path`, and every `exec` | the name the command passed; on `exec`, the name it was run by                                                                                       |
+| `to_name`  | where it differs from `to`                     | as `name`, for `to`                                                                                                                                  |
+| `access`   | `open`, `mmap`                                 | what was asked for; see [Access letters](#access-letters)                                                                                            |
+| `flags`    | `open`                                         | the `open(2)` flags as a number, which the kernel gives `O_LARGEFILE` even on a plain read-only open                                                 |
+| `mode`     | `chmod`                                        | the new mode in octal, such as `"0755"`                                                                                                              |
+| `owner`    | `chown`                                        | the new `uid:gid`, with `-1` for a side left as it was                                                                                               |
+| `failed`   | a failed operation                             | `true`                                                                                                                                               |
+| `err`      | a failed operation                             | the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read                |
+| `image`    | `mmap`                                         | a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                                       |
+| `memfd`    | a file in memory only                          | `path` is `memfd:` and the name its creator chose                                                                                                    |
+| `deleted`  | a deleted or never-named file                  | a file deleted while it was open, or created without a name and never given one                                                                      |
+| `exchange` | `rename`                                       | a swap of two paths, which shows `M` on both in the summary                                                                                          |
 
 A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted` and `exchange`
 are absent rather than `false`.
+
+`path` is absolute except for a file in memory only (`memfd:…`), a pipe, socket or other file the
+kernel names without a path (such as `pipe:[1234]`), a path too deep to record in full (`…/…`), and
+the relative name of a failed call or an attribute change whose directory could not be read.
 
 A byte of a name that is not UTF-8 is written as a lone surrogate, `\udcff` for the byte `0xff`, as
 Python's `surrogateescape` does, so `os.fsencode` gives back the name's exact bytes. jq prints it as
@@ -246,23 +309,26 @@ Python's `surrogateescape` does, so `os.fsencode` gives back the name's exact by
 ### Kinds
 
 A failed operation keeps the kind it would have had, with `"failed":true` and `err`, and shows its
-letter lowercase in the summary. A failed `open`, `unlink`, `rmdir`, `rename`, `chmod`, `chown`,
-`attr` or `truncate` is recorded however it failed, and a failed `mkdir`, `mknod`, `symlink` or
-`link` too unless its name was already there (`EEXIST`), which changed nothing and which `mkdir -p`
-meets at every level it keeps. A failed `exec` or `mmap` is not recorded.
+letter lowercase in the summary. A failed `open`, `unlink`, `rmdir` or `rename`, and a failed
+`chmod`, `chown`, `attr` or `truncate` on a path, is recorded however it failed; through a file
+descriptor, as `fchmod` or `ftruncate` do, only if the kernel refused it after checking the file. A
+failed `mkdir`, `mknod`, `symlink` or `link` is recorded too unless its name was already there
+(`EEXIST`), which changed nothing and which `mkdir -p` meets at every level it keeps. A failed
+`mmap` is not recorded, nor is a failed `exec`, though the file it opened before failing can show
+as an `open` with `x`.
 
-| `kind`                                          | Records                                                                                          | Summary                                   |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| `open`                                          | a file opened; the summary counts one that creates or truncates, or that failed                  | `W`, `r`, `w`                             |
-| `read`, `write`                                 | the first read, or the first write, through each opened file by each program a process runs      | `R`, `W`                                  |
-| `mmap`                                          | a file mapped into memory                                                                        | `R`, or `W` for a shared writable mapping |
-| `exec`                                          | a program run                                                                                    | `X`                                       |
-| `fork`                                          | a new process; `pid` is the child                                                                | none                                      |
-| `unlink`, `rmdir`                               | a file or a directory deleted                                                                    | `D`                                       |
-| `rename`                                        | a move from `path` to `to`                                                                       | `M`                                       |
-| `mkdir`, `mknod`, `symlink`, `link`, `truncate` | a directory, a special file or Unix socket, a symlink or a hard link made, or a file cut to size | `W`                                       |
-| `chmod`, `chown`, `attr`                        | a mode, an owner, or times or extended attributes changed                                        | `A`                                       |
-| `end`                                           | the last line; see below                                                                         | none                                      |
+| `kind`                                          | Records                                                                                                                                           | Summary                                   |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `open`                                          | a file opened; the summary counts one that creates or truncates, or that failed                                                                   | `W`, `r`, `w`                             |
+| `read`, `write`                                 | the first read, or the first write, through each opened file by each program a process runs; through a device, a pipe or a socket, by any program | `R`, `W`                                  |
+| `mmap`                                          | a file mapped into memory                                                                                                                         | `R`, or `W` for a shared writable mapping |
+| `exec`                                          | a program run                                                                                                                                     | `X`                                       |
+| `fork`                                          | a new process; `pid` is the child                                                                                                                 | none                                      |
+| `unlink`, `rmdir`                               | a file or a directory deleted                                                                                                                     | `D`                                       |
+| `rename`                                        | a move from `path` to `to`                                                                                                                        | `M` on `path`                             |
+| `mkdir`, `mknod`, `symlink`, `link`, `truncate` | a directory, a special file or Unix socket, a symlink or a hard link made, or a file cut to size                                                  | `W`                                       |
+| `chmod`, `chown`, `attr`                        | a mode, an owner, or times or extended attributes changed                                                                                         | `A`                                       |
+| `end`                                           | the last line; see below                                                                                                                          | none                                      |
 
 ### Access letters
 
@@ -305,69 +371,82 @@ tracer caught:
 The step fails before the command runs with
 `filesystem_audit could not start (<reason>); the command was not run.`
 
-| Reason                               | What to do                                                                                               |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `the runner is not on cgroup v2`     | Boot the host with cgroup v2 (the default on Ubuntu 22.04 and later)                                     |
-| `the kernel exposes no BTF`          | Use a kernel built with BTF (`/sys/kernel/btf/vmlinux`), as Ubuntu's and most distributions' are         |
-| `the kernel is older than Linux 6.1` | Move to Linux 6.1 or newer                                                                               |
-| `attach <name>: …` on arm64          | Move to Linux 6.4 or newer, the first arm64 kernel that lets the tracer hook kernel functions            |
-| `the tracer did not attach in time`  | The host was too busy to start the tracer; run the job again                                             |
-| Anything else                        | The tracer's own error; please [open an issue](https://github.com/buildcage/isolated-run/issues) with it |
+| Reason                               | What to do                                                                                                                                                                   |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `the runner is not on cgroup v2`     | Boot the host with cgroup v2 (the default on Ubuntu 22.04 and later). On a cgroup v2 host, it means the runner's own cgroup lies outside its cgroup namespace or was removed |
+| `the kernel exposes no BTF`          | Use a kernel built with BTF (`/sys/kernel/btf/vmlinux`), as Ubuntu's and most distributions' are                                                                             |
+| `read kernel BTF: …`                 | See below the table                                                                                                                                                          |
+| `the kernel is older than Linux 6.1` | Move to Linux 6.1 or newer                                                                                                                                                   |
+| `attach <name>: …` on arm64          | Move to Linux 6.4 or newer, the first arm64 kernel that lets the tracer hook kernel functions                                                                                |
+| `the tracer did not attach in time`  | The host was too busy to start the tracer; run the job again                                                                                                                 |
+| Anything else                        | The tracer's own error; please [open an issue](https://github.com/buildcage/isolated-run/issues) with it                                                                     |
 
-The summary can also open with a warning:
+`read kernel BTF: …` has two causes, told apart by how the message ends:
+
+- `unknown kind …`, `header contains non-zero trailer` or `unsupported flags …`: the kernel's BTF is
+  newer than the tracer can read. Please
+  [open an issue](https://github.com/buildcage/isolated-run/issues) with the output of `uname -r`.
+- `buffer too small` or `no BTF found …`: `/sys/kernel/btf/vmlinux` is empty, covered or
+  unreadable. Make sure it is the kernel's own.
+
+The summary can also open with a warning, or be missing:
 
 - **This record is incomplete.** `dropped` or `untracked` is nonzero, or the tracer did not stop
   cleanly. Some accesses are missing from both the summary and the artifact. A step that touches a
   very large number of files at once can cause it.
 - **The recording could not be read.** The summary has none of the step's accesses, a warning is
   logged, and no artifact is uploaded.
+- **No section, and a `Failed to render the filesystem audit summary` warning.** The recording was
+  read but its summary could not be written; the artifact is still uploaded if asked for. Please
+  [open an issue](https://github.com/buildcage/isolated-run/issues) with the warning.
 
 A program in the step that dies with `Bad system call` made a 32-bit system call, which the audit
-refuses; see [Requirements and limits](#requirements-and-limits).
+refuses; see [What changes in the step](#what-changes-in-the-step).
+
+### Skipped hooks
+
+On some kernels one of the tracer's hooks can be paused mid-run, and is then skipped when it is
+entered again. The kernels on GitHub-hosted runners do not pause the hooks, nor do Ubuntu 22.04's
+and 24.04's `generic` kernels as they boot by default; Ubuntu 26.04's, and the 7.0 hardware
+enablement kernel of 24.04, do. On a self-hosted runner, `sudo cat /sys/kernel/debug/sched/preempt`
+prints the modes with the one in use in parentheses, such as `full (lazy)`, and hooks can be skipped
+when it is `(full)` or `(lazy)`. That file needs debugfs mounted at `/sys/kernel/debug`. Where it is
+missing even so, the kernel cannot switch modes, and hooks can be skipped when
+`/boot/config-$(uname -r)` sets `CONFIG_PREEMPT_RCU=y`.
+
+`host_missed` counts skips anywhere on the host while the step ran, so 0 means none of the step's
+accesses was skipped. The summary does not warn on a nonzero count, since a skip cannot be tied to
+the step. Treat such a record as possibly missing accesses; for a complete one, use a kernel that
+does not pause the hooks, such as one booted with `preempt=voluntary` where the kernel offers that
+mode.
 
 ## What it does not record
 
-- A `stat`, or an open that only obtains a handle (`O_PATH`), which reads no content. What a command
-  then does through such a handle, such as running or reopening the file, is recorded.
+- A call that only looks a file up or reads its metadata: `stat`, `access`, `readlink`,
+  `getxattr`, `listxattr`, and a successful open that only obtains a handle (`O_PATH`). What a
+  command then does through such a handle, such as running or reopening the file, is recorded, and
+  a failed `O_PATH` open is recorded as a failed read.
 - Work handed to a process outside the sandbox, such as an `ssh-agent` or `gpg-agent` reached over a
   socket.
-- A change through a file the command inherited from the program that ran it, an extended attribute
-  change other than through `setxattr` or `lsetxattr`, a failed `exec`, a `mkdir`, `mknod`,
-  `symlink` or `link` on a name already there, and one made by `bind(2)` or through io_uring that
-  the kernel refuses before reaching its file.
+- An inode flag change through `ioctl`, as `chattr` makes, an extended attribute change other than
+  through `setxattr` or `lsetxattr`, a failed `exec`, a `mkdir`, `mknod`, `symlink` or `link` on a
+  name already there, and one made by `bind(2)` that the kernel refuses before reaching its file.
 - The sandbox's own setup, and the step's shell reading its script.
+
+io_uring is not among them: the sandbox refuses `io_uring_setup`, so no access goes through it.
 
 [Filesystem audit](./security.md#filesystem-audit) in the security details covers what the step
 itself can do to the record, and what the record can be trusted for.
 
-## Requirements and limits
+## Limits
 
-- **Kernel.** A cgroup v2 host on Linux 6.1 or newer, 6.4 or newer on arm64, with kernel BTF.
-  cgroup v2 and BTF are checked before the proxy starts, the kernel version when the tracer starts.
-- **No 32-bit programs.** A system call through a 32-bit ABI, from an i386 or ARM32 program or
-  `int 0x80`, is numbered apart from the native calls the tracer reads attribute changes and failed
-  changes from, so with the audit on the sandbox refuses it: the kernel kills the thread that made
-  it with `SIGSYS`, which a shell reports as `Bad system call`.
-- **Cost to the whole host.** While the step runs, the tracer's hooks run on every system call and
-  every file read or write on the runner host, not only the step's, since a hook has to run to tell
-  whose call it is. That adds roughly 100 nanoseconds to each system call of every process on the
-  machine, the proxy, Docker and other jobs on a shared runner included. Copying a file a byte at a
-  time outside the step took nearly twice as long in a test, while a typical build, which spends
-  little of its time in system calls, barely changes. Inside the step, each program's first read or
-  write of a file is also recorded, which costs more.
 - **Job Summary size.** When the traffic report and this section would pass GitHub's 1 MiB cap,
   the filesystem details give way first and this section's tables after the traffic report's
   communication log; [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the full
-  order. What is cut is replaced by a note naming the artifact, which still holds every access, or
-  saying how to ask for one, or that the record was not kept when the upload failed.
-- **Distinct paths.** The accessed-paths table or the details is left out the same way, under a
-  note that says why, once its folded tree holds more than 200,000 files and directories, every
-  directory on the way counted, and each command's counted apart in the details.
-
-### Skipped hooks
-
-On a kernel built for full preemption, one of the tracer's hooks is skipped when it is entered again
-while paused mid-run. A stock Ubuntu kernel, as on GitHub-hosted runners, does not pause the
-hooks. `host_missed` counts skips anywhere on the host while the step ran, so 0 means none of the
-step's accesses was skipped. The summary does not warn on a nonzero count, since a skip cannot be
-tied to the step.
+  order. A part that does not fit is cut at a line, with a note after what is kept, or replaced by
+  the note when none of it fits. The note names the artifact, which still holds every access, or
+  says how to ask for one, or that the record was not kept when the upload failed.
+- **One part too large.** The accessed-paths table or the details is left out whole, under a note
+  that says why, when it alone would pass 1 MiB, or once its folded tree holds more than 200,000
+  files and directories, every directory on the way counted, and each command's counted apart in
+  the details. When the table is left out, the details go with it.
