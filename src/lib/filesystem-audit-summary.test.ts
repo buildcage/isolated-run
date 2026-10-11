@@ -593,18 +593,25 @@ describe("renderFilesystemAuditSummary", () => {
     expect(
       lines(
         render(
-          {
-            kind: "link",
-            comm: "ln",
-            path: "/home/u/.ssh/id_rsa",
-            to: "/work/x",
-            err: 1,
-            failed: true,
-          },
           { kind: "link", comm: "sh", path: "/proc/self/fd/3", to: "/ro/f", err: 30, failed: true },
+          { kind: "link", comm: "ln", path: "/a", to: "/work/y", err: 13, failed: true },
         ),
       ),
-    ).toEqual(["w! ln ./x", "w! sh /ro/f"]);
+    ).toEqual(["w! ln ./y", "w! sh /ro/f"]);
+    // But EPERM refuses the file itself, as protected_hardlinks does, so the
+    // refusal shows on it rather than on the new name.
+    expect(
+      lines(
+        render({
+          kind: "link",
+          comm: "ln",
+          path: "/etc/shadow",
+          to: "/work/x",
+          err: 1,
+          failed: true,
+        }),
+      ),
+    ).toEqual(["w ln ./x", "l! ln /etc/shadow"]);
   });
 
   it("folds a walked-through directory into the leaf it reached", () => {
