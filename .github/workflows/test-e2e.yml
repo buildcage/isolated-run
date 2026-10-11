@@ -155,12 +155,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
         filesystem_mode: [persistent, ephemeral]
-        # 22.04 carries the oldest kernel GitHub-hosted runners ship (6.8), once per architecture.
+        # The oldest (6.8 on 22.04) and newest (7.0 on 26.04) kernels
+        # GitHub-hosted runners ship, once per architecture.
         include:
           - { runner: ubuntu-22.04, filesystem_mode: persistent }
           - { runner: ubuntu-22.04-arm, filesystem_mode: persistent }
+          - { runner: ubuntu-26.04, filesystem_mode: persistent }
+          - { runner: ubuntu-26.04-arm, filesystem_mode: persistent }
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
