@@ -243,10 +243,14 @@ describe("SigV4's credential in a form body", () => {
 
 describe("AssumeRoleWithWebIdentity", () => {
   const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
+  const acl = (name: string) => {
+    const line = rules.split("\n").find((l) => l.startsWith(`    acl ${name} `))!;
+    const source = line.replace(/^.* -m reg -i /, "");
+    return new RegExp(source.replace("(?s)", ""), source.startsWith("(?s)") ? "is" : "i");
+  };
 
   it("matches Action undecoded, so a name hidden in another value does not count", () => {
-    const action = /\(\^\|&\)(.*)=AssumeRoleWithWebIdentity\(&\|\$\)/.exec(rules)![1];
-    const named = new RegExp(`(^|&)${action}=AssumeRoleWithWebIdentity(&|$)`, "i");
+    const named = acl("aws_fed_action");
     expect(named.test("Action=AssumeRoleWithWebIdentity&RoleArn=x")).toBe(true);
     expect(named.test("Action=GetFederationToken&Name=%26Action%3DAssumeRoleWithWebIdentity")).toBe(
       false,
@@ -254,12 +258,6 @@ describe("AssumeRoleWithWebIdentity", () => {
   });
 
   // STS decodes a parameter's name, so R%6FleArn is RoleArn to it.
-  const acl = (name: string) => {
-    const line = rules.split("\n").find((l) => l.startsWith(`    acl ${name} `))!;
-    const source = line.replace(/^.* -m reg -i /, "");
-    return new RegExp(source.replace("(?s)", ""), source.startsWith("(?s)") ? "is" : "i");
-  };
-
   it("counts Action and RoleArn under a percent-encoded name", () => {
     expect(acl("aws_fed_action").test("%41ction=AssumeRoleWithWebIdentity&RoleArn=x")).toBe(true);
     expect(acl("aws_fed_action_many").test("Action=AssumeRoleWithWebIdentity&%41ction=X")).toBe(

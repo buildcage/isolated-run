@@ -203,17 +203,17 @@ check_status "the key in a header" \
 echo "=== [AssumeRoleWithWebIdentity, judged by the role's account] ==="
 form() { $C -X POST -H "Content-Type: application/x-www-form-urlencoded" --data "$1" "$2"; }
 ROLE="arn%3Aaws%3Aiam%3A%3A111111111111%3Arole%2Fdeploy"
+EVIL="arn%3Aaws%3Aiam%3A%3A999999999999%3Arole%2Fevil"
 check_status "unknown until a web identity call hands it out" \
   "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTWEBIDKEY0001)" $CF)" "403"
 check_status "a web identity call for a role in the allowed account" \
   "$(form "Action=AssumeRoleWithWebIdentity&RoleArn=$ROLE&RoleSessionName=gh&WebIdentityToken=eyJ" $STS/sts/web-identity)" "200"
 check_status "the key it issued" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTWEBIDKEY0001)" $CF)" "200"
 check_status "a web identity call for a role in another account" \
-  "$(form "Action=AssumeRoleWithWebIdentity&RoleArn=arn%3Aaws%3Aiam%3A%3A999999999999%3Arole%2Fevil&RoleSessionName=gh&WebIdentityToken=eyJ" $STS/)" "403"
+  "$(form "Action=AssumeRoleWithWebIdentity&RoleArn=$EVIL&RoleSessionName=gh&WebIdentityToken=eyJ" $STS/)" "403"
 check_status "a web identity call naming two roles" \
-  "$(form "Action=AssumeRoleWithWebIdentity&RoleArn=$ROLE&RoleArn=arn%3Aaws%3Aiam%3A%3A999999999999%3Arole%2Fevil" $STS/)" "403"
+  "$(form "Action=AssumeRoleWithWebIdentity&RoleArn=$ROLE&RoleArn=$EVIL" $STS/)" "403"
 # STS decodes a parameter's name, and takes the query's value over the body's.
-EVIL="arn%3Aaws%3Aiam%3A%3A999999999999%3Arole%2Fevil"
 check_status "a web identity call naming a second role under an encoded name" \
   "$(form "Action=AssumeRoleWithWebIdentity&R%6FleArn=$EVIL&RoleArn=$ROLE&RoleSessionName=gh&WebIdentityToken=eyJ" $STS/)" "403"
 check_status "a web identity call naming its role only under an encoded name" \
