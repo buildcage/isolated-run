@@ -681,10 +681,10 @@ audit's details, the timeline, the filesystem audit's tables, then the allowed, 
 tables, then the 🚨 list of requests `restrict` would refuse, and last the `restrict` example. A part
 that does not fit is cut at a line boundary with a note after what is kept, or replaced by the note
 when nothing of it fits; the example is always replaced whole rather than printed in part. Once a
-table or the 🚨 list is cut, the timeline is left out with it, under that one note. In the same way,
-once one of the filesystem audit's parts is cut, the parts after it (the executed table, then the
-accessed paths, then the details) are left out under that one note. The report is written to the Job
-Summary only, so what was cut is recovered from the [traffic
+table or the 🚨 list is cut, the timeline is left out with it, under that one note. The filesystem
+audit's parts follow the same rule in their order, the executed table, the accessed paths, then the
+details: once one is cut, those after it are left out under its note. The report is written to the
+Job Summary only, so what was cut is recovered from the [traffic
 artifact](./docs/reference.md#traffic-artifact), or the filesystem audit's own artifact for its
 section; when neither was uploaded, it is not kept anywhere.
 

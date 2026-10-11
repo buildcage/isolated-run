@@ -117,10 +117,9 @@ buildcage-filesystem-audit-<id> artifact · how to read this
 
 📂 Filesystem details
 first-last access since the proxy started · flags · command · path
-00:00.401:           X   node /usr/local/bin/node
+00:00.401-00:00.420: Xw! node /usr/local/bin/node
 00:00.412:           R   node ./package.json
 00:00.415-00:00.418: Rr! node /etc/**
-00:00.420:           w!  node /usr/local/bin/node
 00:00.530-00:41.207: RWD node ./node_modules/**
 00:00.531-00:40.982: X   sh   /usr/bin/dash
 ```
