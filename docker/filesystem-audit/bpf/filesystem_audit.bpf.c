@@ -383,21 +383,17 @@ static __always_inline int is_held(u32 use)
 	return bpf_map_lookup_elem(&held_short, &k) || bpf_map_lookup_elem(&held_long, &k);
 }
 
-// A thread holds one path change per syscall, so one still held is a change
-// whose syscall never returned to report it, such as an io_uring worker's.
 static __always_inline void hold(struct event *e)
 {
-	if (is_held(HELD_OP))
-		bump(&untracked);
 	if (hold_as(e, HELD_OP) != 0)
 		bump(&untracked);
 }
 
-// Reports whether the thread held anything under use.
-static __always_inline int release(u32 use)
+static __always_inline void release(u32 use)
 {
 	struct held_key k = held_key(use);
-	return (bpf_map_delete_elem(&held_short, &k) == 0) | (bpf_map_delete_elem(&held_long, &k) == 0);
+	bpf_map_delete_elem(&held_short, &k);
+	bpf_map_delete_elem(&held_long, &k);
 }
 
 // Field offsets are resolved by CO-RE in the caller and handed over, since
@@ -808,14 +804,6 @@ int BPF_PROG(on_task_exit, struct task_struct *p)
 		return 0;
 	u64 id = bpf_get_current_pid_tgid();
 	bpf_map_delete_elem(&in_exec, &id);
-	// Nor does an io_uring worker reach sys_exit for the path changes it
-	// makes: one still held is lost, and would otherwise pass for the next
-	// thread's.
-	bpf_map_delete_elem(&in_syscall, &id);
-	if (release(HELD_OP))
-		bump(&untracked);
-	release(HELD_OPEN);
-	release(HELD_NAME);
 	return 0;
 }
 
