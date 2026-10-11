@@ -89,7 +89,7 @@ describe("renderFilesystemAuditSummary", () => {
       { kind: "mkdir", comm: "mkdir", path: "/work/d", err: 13, failed: true },
       { kind: "link", comm: "ln", path: "/work/a", to: "/work/b", err: 2, failed: true },
     );
-    expect(lines(md)).toEqual(["l ln ./a", "w ln ./b", "w! mkdir ./d", "d! rm /tmp/f"]);
+    expect(lines(md)).toEqual(["w ln ./b", "w! mkdir ./d", "d! rm /tmp/f"]);
   });
 
   it("never folds a climbing path into the directories it names", () => {
@@ -132,14 +132,14 @@ describe("renderFilesystemAuditSummary", () => {
       expect(lines(render({ kind, comm: "c", path: "/x", err: 2, failed: true }))).toEqual([
         `${letter.toLowerCase()} c /x`,
       ]);
-    // A link writes its new name and links the file it names, done or failed.
+    // A link's new name, done or failed.
     expect(lines(render({ kind: "link", comm: "ln", path: "/a", to: "/b" }))).toEqual([
       "L ln /a",
       "W ln /b",
     ]);
     expect(
-      lines(render({ kind: "link", comm: "ln", path: "/a", to: "/b", err: 1, failed: true })),
-    ).toEqual(["l! ln /a", "w! ln /b"]);
+      lines(render({ kind: "link", comm: "ln", path: "/a", to: "/b", err: 2, failed: true })),
+    ).toEqual(["w ln /b"]);
   });
 
   it("counts an open as a write when it truncates, without creating", () => {
@@ -588,14 +588,23 @@ describe("renderFilesystemAuditSummary", () => {
     expect(
       lines(render({ kind: "link", comm: "ln", path: "/tmp/#12", to: "/work/f", deleted: true })),
     ).toEqual(["W ln ./f"]);
-    // Only EPERM refuses the file itself; a read-only new name refuses that name alone.
+    // Nor does a failed link, which exposes nothing, as when O_TMPFILE's file
+    // is linked through /proc and the tracer cannot mark it.
     expect(
-      lines(render({ kind: "link", comm: "ln", path: "/a", to: "/b", err: 30, failed: true })),
-    ).toEqual(["l ln /a", "w! ln /b"]);
-    // A link whose new name could not be read still names its file.
-    expect(lines(render({ kind: "link", comm: "ln", path: "/a", err: 2, failed: true }))).toEqual([
-      "l ln /a",
-    ]);
+      lines(
+        render(
+          {
+            kind: "link",
+            comm: "ln",
+            path: "/home/u/.ssh/id_rsa",
+            to: "/work/x",
+            err: 1,
+            failed: true,
+          },
+          { kind: "link", comm: "sh", path: "/proc/self/fd/3", to: "/ro/f", err: 30, failed: true },
+        ),
+      ),
+    ).toEqual(["w! ln ./x", "w! sh /ro/f"]);
   });
 
   it("folds a walked-through directory into the leaf it reached", () => {

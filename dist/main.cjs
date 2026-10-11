@@ -68406,17 +68406,16 @@ function classify(r) {
 		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
 	} else r.failed ? (letter = LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : letter = LETTER[r.kind];
 	if (!letter) return [];
-	let perm = failed && PERM_ERRNO.has(r.err ?? 0), on = (l, path, refused = perm) => path ? [{
-		letter: l,
+	let out = (r.kind === "link" ? [r.to] : r.exchange ? [r.path, r.to] : [r.path]).flatMap((path) => path ? [{
+		letter,
 		path,
-		failed,
-		perm: refused
-	}] : [];
-	if (r.kind === "link") {
-		let linked = r.deleted ? [] : on("L", r.path, failed && r.err === 1);
-		return [...on(letter, r.to), ...linked];
-	}
-	return [...on(letter, r.path), ...r.exchange ? on(letter, r.to) : []];
+		failed
+	}] : []);
+	return r.kind === "link" && !failed && !r.deleted && r.path && out.push({
+		letter: "L",
+		path: r.path,
+		failed
+	}), out;
 }
 const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\\`, UNSAFE_CHARS = RegExp(`[${UNSAFE}]`, "gu"), UNSAFE_QUOTED = RegExp(`[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
 	"\n": "\\n",
@@ -68708,7 +68707,7 @@ function createAuditSummary(prefixes) {
 					path: normalize$2(path),
 					bit: loadRead ? 0 : c.letter.split("").reduce((bits, l) => bits | BIT[l], 0),
 					failed: c.failed,
-					perm: c.perm,
+					perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
 					t,
 					seq: Number.isNaN(t) ? Infinity : seq++
 				};
