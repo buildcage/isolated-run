@@ -218,7 +218,7 @@ export async function prepareStepFilesystemAudit(
     if (!reduced) {
       if (!attached) return NONE;
       annotation.error(
-        "The filesystem audit recording is gone: something removed it after the tracer started",
+        "The filesystem audit recording is gone: something removed it after the tracer started; failing the step",
       );
       process.exitCode = 1;
       return { blocks: () => unreadableSummaryBlocks() };

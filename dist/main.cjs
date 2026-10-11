@@ -69458,7 +69458,7 @@ async function prepareStepFilesystemAudit({ audit, attached, upload, retentionDa
 		} catch (e) {
 			return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), { blocks: () => unreadableSummaryBlocks() };
 		}
-		if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started"), process.exitCode = 1, { blocks: () => unreadableSummaryBlocks() }) : NONE;
+		if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, { blocks: () => unreadableSummaryBlocks() }) : NONE;
 		let { summary, summaryError } = reduced;
 		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
 		let uploaded = upload ? artifactName ? { name: artifactName } : "upload-failed" : "not-requested", cutNote = (cause) => filesystemTruncationNote(uploaded, cause), notice = cutNote(), legendNote = filesystemLegendNote(uploaded, `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`);

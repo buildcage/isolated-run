@@ -206,7 +206,7 @@ describe("prepareStepFilesystemAudit", () => {
       await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
 
       expect(note.error).toHaveBeenCalledWith(
-        "The filesystem audit recording is gone: something removed it after the tracer started",
+        "The filesystem audit recording is gone: something removed it after the tracer started; failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(summaries[0]).toContain("The recording could not be read");
