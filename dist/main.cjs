@@ -68406,13 +68406,18 @@ function classify(r) {
 		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
 	} else r.failed ? (letter = LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : letter = LETTER[r.kind];
 	if (!letter) return [];
-	let fileRefused = r.kind === "link" && failed && r.err === 1, perm = failed && PERM_ERRNO.has(r.err ?? 0) && !fileRefused, out = (r.kind === "link" ? [r.to] : r.exchange ? [r.path, r.to] : [r.path]).flatMap((path) => path ? [{
+	let fileRefused = r.kind === "link" && failed && r.err === 1, perm = failed && PERM_ERRNO.has(r.err ?? 0) && !fileRefused, out = [], first = r.kind === "link" ? r.to : r.path;
+	return first && out.push({
 		letter,
-		path,
+		path: first,
 		failed,
 		perm
-	}] : []);
-	return r.kind === "link" && (!failed || fileRefused) && !r.deleted && r.path && out.push({
+	}), r.kind === "rename" && r.exchange && r.to && out.push({
+		letter,
+		path: r.to,
+		failed,
+		perm
+	}), r.kind === "link" && (!failed || fileRefused) && !r.deleted && r.path && out.push({
 		letter: "L",
 		path: r.path,
 		failed,

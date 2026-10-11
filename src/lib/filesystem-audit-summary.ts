@@ -88,9 +88,11 @@ function classify(r: AuditRecord): Classified[] {
   // (protected_hardlinks), not for its new name.
   const fileRefused = r.kind === "link" && failed && r.err === 1;
   const perm = failed && PERM_ERRNO.has(r.err ?? 0) && !fileRefused;
+  const out: Classified[] = [];
+  const first = r.kind === "link" ? r.to : r.path;
+  if (first) out.push({ letter, path: first, failed, perm });
   // An exchange moves each path to the other.
-  const paths = r.kind === "link" ? [r.to] : r.exchange ? [r.path, r.to] : [r.path];
-  const out = paths.flatMap((path) => (path ? [{ letter, path, failed, perm }] : []));
+  if (r.kind === "rename" && r.exchange && r.to) out.push({ letter, path: r.to, failed, perm });
   // A hard link writes its new name, and the file it names can be read under
   // that name from then on. Any other failed one exposes nothing, nor does
   // one of a file with no name of its own, as O_TMPFILE makes.
