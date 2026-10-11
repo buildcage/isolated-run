@@ -174,7 +174,7 @@ check_status "the same answer read with the start key" \
   "$($C -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" https://sts.s3.amazonaws.com/sts/same-account)" "200"
 check_status "the key in it, still unknown" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTLEARNEDKEY01)" $CF)" "403"
 check_status "AssumeRole for a role in the allowed account" \
-  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" $STS/sts/same-account)" "200"
+  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Accept-Encoding: gzip" $STS/sts/same-account)" "200"
 check_status "the key it issued" "$($C -X POST -H "Authorization: $(sigv4 ${ASIA}TESTLEARNEDKEY01)" $CF)" "200"
 check_status "AssumeRole for a role in another account" \
   "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" $STS/sts/other-account)" "200"
