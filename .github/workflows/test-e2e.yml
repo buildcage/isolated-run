@@ -239,6 +239,12 @@ jobs:
             printf '#!/bin/sh\n' > "$GITHUB_WORKSPACE/A/run.sh"
             chmod +x "$GITHUB_WORKSPACE/A/run.sh"
             (cd "$GITHUB_WORKSPACE/A" && ./run.sh)
+            # A hard link, which names the file it links as well as its new name.
+            echo data > "$GITHUB_WORKSPACE/link-src.txt"
+            ln "$GITHUB_WORKSPACE/link-src.txt" "$GITHUB_WORKSPACE/link-dst.txt"
+            # One across mounts, which fails EXDEV before protected_hardlinks
+            # is consulted.
+            ln /etc/hostname "$GITHUB_WORKSPACE/hostname-link" 2>/dev/null || true
             # A file mapped executable that is no library.
             echo data > "$GITHUB_WORKSPACE/mapped.bin"
             python3 -c 'import mmap, sys; f = open(sys.argv[1], "rb")
@@ -308,7 +314,7 @@ jobs:
           # The probe writes show as a flagged, command-tagged line under the
           # workspace, led by its elapsed time (MM:SS.mmm) and a colon.
           t='[0-9]{2}:[0-9]{2}\.[0-9]{3}'
-          grep -qE "^$t(-$t)?: +[RWXMDArwxmda!]+ +\S+ +\./probe" "$f" || exit 1
+          grep -qE "^$t(-$t)?: +[RWXMLDArwxmlda!]+ +\S+ +\./probe" "$f" || exit 1
           # Rows run in the order they were first touched: write, move, delete.
           w=$(grep -nE ' W +bash +\./probe\.txt$' "$f" | head -1 | cut -d: -f1)
           m=$(grep -nE ' M +mv +\./probe\.txt$' "$f" | head -1 | cut -d: -f1)
@@ -337,6 +343,9 @@ jobs:
           grep -qE ' W +bash +\./execd\.txt$' "$f"
           grep -qE ' W +cat +\./execd\.txt$' "$f"
           grep -qE ' w!? +mkdir +\./root-owned/x$' "$f"
+          grep -qE ' W +ln +\./link-dst\.txt$' "$f"
+          grep -qE ' L +ln +\./link-src\.txt$' "$f"
+          grep -qE ' l +ln +/etc/hostname$' "$f"
           # A file mapped executable shows as read unless it is a library or
           # an exec mapped it, as it does run.sh's interpreter.
           grep -qE ' R +python3 +\./mapped\.bin$' "$f"

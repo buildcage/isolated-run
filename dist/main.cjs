@@ -68394,22 +68394,46 @@ const LETTER = {
 	chmod: "A",
 	chown: "A",
 	attr: "A"
-}, ORDER = "RWXMDA", PERM_ERRNO = new Set([
+}, ORDER = "RWXMLDA", PERM_ERRNO = new Set([
 	1,
 	13,
 	30
 ]), LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
 function classify(r) {
-	let letter, path = r.path, failed = !1;
+	let letter, failed = !1;
 	if (r.failed && r.kind === "open") {
 		let access = r.access ?? "r";
 		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
-	} else r.failed ? (letter = LETTER[r.kind], r.kind === "link" && (path = r.to), failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : r.kind === "link" ? (letter = "W", path = r.to) : letter = LETTER[r.kind];
-	return letter && path ? {
+	} else r.failed ? (letter = LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : letter = LETTER[r.kind];
+	if (!letter) return [];
+	let perm = failed && PERM_ERRNO.has(r.err ?? 0);
+	if (r.kind === "link") return classifyLink(r, letter, failed, perm);
+	let out = r.path ? [{
 		letter,
-		path,
-		failed
-	} : void 0;
+		path: r.path,
+		failed,
+		perm
+	}] : [];
+	return r.kind === "rename" && r.exchange && r.to && out.push({
+		letter,
+		path: r.to,
+		failed,
+		perm
+	}), out;
+}
+function classifyLink(r, letter, failed, perm) {
+	let file = !r.deleted && !r.memfd ? r.path : void 0, fileRefused = !!file && failed && r.err === 1, out = [];
+	return r.to && out.push({
+		letter,
+		path: r.to,
+		failed,
+		perm: perm && !fileRefused
+	}), file && out.push({
+		letter: "L",
+		path: file,
+		failed,
+		perm: fileRefused
+	}), out;
 }
 const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\\`, UNSAFE_CHARS = RegExp(`[${UNSAFE}]`, "gu"), UNSAFE_QUOTED = RegExp(`[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
 	"\n": "\\n",
@@ -68625,7 +68649,7 @@ function fmtFlags(a) {
 	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
 	return out;
 }
-const LEGEND = "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit", SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
+const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit", SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
 	executed: "filesystem-executed",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
@@ -68684,37 +68708,33 @@ function createAuditSummary(prefixes) {
 	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, seq = 0, added = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
-		if (!counted) return;
-		if (r.kind === "end") {
-			ended = !0, lost = !!(r.dropped || r.untracked);
-			return;
-		}
-		if (r.kind === "exec" && r.path) {
-			let p = normalize$2(canonical(marked(r, r.path), prefixes)), runs = executed.get(p);
-			runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
-		}
-		if (isLibraryMap(r)) return;
-		let first = classify(r);
-		if (first) for (let c of r.exchange && r.to ? [first, {
-			...first,
-			path: r.to
-		}] : [first]) {
-			let path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
-			if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) continue;
-			let loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path)), t = loadRead ? NaN : Date.parse(r.t ?? ""), x = {
-				comm: r.comm ?? "",
-				path: normalize$2(path),
-				bit: loadRead ? 0 : c.letter.split("").reduce((bits, l) => bits | BIT[l], 0),
-				failed: c.failed,
-				perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
-				t,
-				seq: Number.isNaN(t) ? Infinity : seq++
-			};
-			details.add(x), paths.add({
-				...x,
-				comm: "",
-				bit: x.bit & ~BIT.X
-			});
+		if (counted) {
+			if (r.kind === "end") {
+				ended = !0, lost = !!(r.dropped || r.untracked);
+				return;
+			}
+			if (r.kind === "exec" && r.path) {
+				let p = normalize$2(canonical(marked(r, r.path), prefixes)), runs = executed.get(p);
+				runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
+			}
+			if (!isLibraryMap(r)) for (let c of classify(r)) {
+				let path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
+				if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) continue;
+				let loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path)), t = loadRead ? NaN : Date.parse(r.t ?? ""), x = {
+					comm: r.comm ?? "",
+					path: normalize$2(path),
+					bit: loadRead ? 0 : c.letter.split("").reduce((bits, l) => bits | BIT[l], 0),
+					failed: c.failed,
+					perm: c.perm,
+					t,
+					seq: Number.isNaN(t) ? Infinity : seq++
+				};
+				details.add(x), paths.add({
+					...x,
+					comm: "",
+					bit: x.bit & ~BIT.X
+				});
+			}
 		}
 	}, shown = (path) => {
 		if (path.startsWith(MEMFD)) {

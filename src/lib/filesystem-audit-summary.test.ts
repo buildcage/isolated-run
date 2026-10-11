@@ -89,7 +89,7 @@ describe("renderFilesystemAuditSummary", () => {
       { kind: "mkdir", comm: "mkdir", path: "/work/d", err: 13, failed: true },
       { kind: "link", comm: "ln", path: "/work/a", to: "/work/b", err: 2, failed: true },
     );
-    expect(lines(md)).toEqual(["w ln ./b", "w! mkdir ./d", "d! rm /tmp/f"]);
+    expect(lines(md)).toEqual(["l ln ./a", "w ln ./b", "w! mkdir ./d", "d! rm /tmp/f"]);
   });
 
   it("never folds a climbing path into the directories it names", () => {
@@ -132,11 +132,14 @@ describe("renderFilesystemAuditSummary", () => {
       expect(lines(render({ kind, comm: "c", path: "/x", err: 2, failed: true }))).toEqual([
         `${letter.toLowerCase()} c /x`,
       ]);
-    // A link's row is its new name, done or failed.
-    expect(lines(render({ kind: "link", comm: "ln", path: "/a", to: "/b" }))).toEqual(["W ln /b"]);
+    // A link's new name and the file it names, done or failed.
+    expect(lines(render({ kind: "link", comm: "ln", path: "/a", to: "/b" }))).toEqual([
+      "L ln /a",
+      "W ln /b",
+    ]);
     expect(
       lines(render({ kind: "link", comm: "ln", path: "/a", to: "/b", err: 2, failed: true })),
-    ).toEqual(["w ln /b"]);
+    ).toEqual(["l ln /a", "w ln /b"]);
   });
 
   it("counts an open as a write when it truncates, without creating", () => {
@@ -575,9 +578,64 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["M node ./a", "W node ./c"]);
   });
 
-  it("counts a hard link as a write of its new name", () => {
-    const md = render({ kind: "link", comm: "ln", path: "/work/src", to: "/work/dst" });
-    expect(lines(md)).toEqual(["W ln ./dst"]);
+  it("shows the file a hard link names, so a read through the link leads back to it", () => {
+    const md = render(
+      { kind: "link", comm: "ln", path: "/home/u/.ssh/id_rsa", to: "/work/x" },
+      { kind: "read", comm: "cat", path: "/work/x" },
+    );
+    expect(lines(md)).toEqual(["R cat ./x", "W ln ./x", "L ln ~/.ssh/id_rsa"]);
+    // A file with no name of its own, as O_TMPFILE makes, names nothing.
+    expect(
+      lines(render({ kind: "link", comm: "ln", path: "/tmp/#12", to: "/work/f", deleted: true })),
+    ).toEqual(["W ln ./f"]);
+    // A failed link still names the file it was after, as one across mounts
+    // fails EXDEV; a refusal other than EPERM is the new name's.
+    expect(
+      lines(
+        render(
+          {
+            kind: "link",
+            comm: "ln",
+            path: "/home/u/.ssh/id_rsa",
+            to: "/work/x",
+            err: 18,
+            failed: true,
+          },
+          { kind: "link", comm: "sh", path: "/a", to: "/ro/f", err: 30, failed: true },
+        ),
+      ),
+    ).toEqual(["w ln ./x", "l ln ~/.ssh/id_rsa", "l sh /a", "w! sh /ro/f"]);
+    // EPERM refuses the file itself, as protected_hardlinks does, so the
+    // refusal shows on it rather than on the new name.
+    expect(
+      lines(
+        render({
+          kind: "link",
+          comm: "ln",
+          path: "/etc/shadow",
+          to: "/work/x",
+          err: 1,
+          failed: true,
+        }),
+      ),
+    ).toEqual(["w ln ./x", "l! ln /etc/shadow"]);
+    // With no file row to carry it, the refusal stays on the new name.
+    expect(
+      lines(
+        render(
+          { kind: "link", comm: "ln", to: "/work/y", err: 1, failed: true },
+          {
+            kind: "link",
+            comm: "sh",
+            path: "memfd:m",
+            to: "/work/z",
+            memfd: true,
+            err: 1,
+            failed: true,
+          },
+        ),
+      ),
+    ).toEqual(["w! ln ./y", "w! sh ./z"]);
   });
 
   it("folds a walked-through directory into the leaf it reached", () => {

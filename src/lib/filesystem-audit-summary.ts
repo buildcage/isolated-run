@@ -47,7 +47,7 @@ const LETTER: Record<string, string> = {
   chown: "A",
   attr: "A",
 };
-const ORDER = "RWXMDA";
+const ORDER = "RWXMLDA";
 const PERM_ERRNO = new Set([1, 13, 30]); // EPERM, EACCES, EROFS
 // A shared object or a Node.js addon, by file name.
 const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
@@ -58,14 +58,15 @@ interface Classified {
   letter: string;
   path: string;
   failed: boolean;
+  /** Failed for want of permission. */
+  perm: boolean;
 }
 
-// The action a record counts as, and the path it acts on, or undefined to
-// drop it. open counts only when it creates or truncates; a plain read/write
-// of an open file comes through the read/write kinds instead.
-function classify(r: AuditRecord): Classified | undefined {
+// The actions a record counts as, each with the path it acts on. open counts
+// only when it creates or truncates; a plain read/write of an open file comes
+// through the read/write kinds instead.
+function classify(r: AuditRecord): Classified[] {
   let letter: string | undefined;
-  let path = r.path;
   let failed = false;
   if (r.failed && r.kind === "open") {
     // What it asked for: a read, and a write if it asked to write, create or truncate.
@@ -74,19 +75,40 @@ function classify(r: AuditRecord): Classified | undefined {
     failed = true;
   } else if (r.failed) {
     letter = LETTER[r.kind];
-    if (r.kind === "link") path = r.to;
     failed = true;
   } else if (r.kind === "mmap") {
     letter = r.access === "w" ? "W" : "R";
   } else if (r.kind === "open") {
     if (r.access?.includes("c") || r.access?.includes("t")) letter = "W";
-  } else if (r.kind === "link") {
-    letter = "W";
-    path = r.to;
   } else {
     letter = LETTER[r.kind];
   }
-  return letter && path ? { letter, path, failed } : undefined;
+  if (!letter) return [];
+  const perm = failed && PERM_ERRNO.has(r.err ?? 0);
+  if (r.kind === "link") return classifyLink(r, letter, failed, perm);
+  const out: Classified[] = r.path ? [{ letter, path: r.path, failed, perm }] : [];
+  // An exchange moves each path to the other.
+  if (r.kind === "rename" && r.exchange && r.to) out.push({ letter, path: r.to, failed, perm });
+  return out;
+}
+
+// A hard link writes its new name, and the file it names can be read under
+// that name from then on; a failed one still shows which file it was after,
+// as a link across mounts fails EXDEV. A file with no name of its own, as
+// O_TMPFILE or memfd_create makes, names none. EPERM is mostly
+// protected_hardlinks refusing the file, so the refusal shows on it.
+function classifyLink(
+  r: AuditRecord,
+  letter: string,
+  failed: boolean,
+  perm: boolean,
+): Classified[] {
+  const file = !r.deleted && !r.memfd ? r.path : undefined;
+  const fileRefused = Boolean(file) && failed && r.err === 1;
+  const out: Classified[] = [];
+  if (r.to) out.push({ letter, path: r.to, failed, perm: perm && !fileRefused });
+  if (file) out.push({ letter: "L", path: file, failed, perm: fileRefused });
+  return out;
 }
 
 // A file or process name is chosen by the step, and a newline in one could
@@ -587,7 +609,7 @@ function fmtFlags(a: Agg): string {
 }
 
 const LEGEND =
-  "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied";
+  "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied";
 const HEADING = "### Filesystem audit";
 const INCOMPLETE_NOTE =
   "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
@@ -787,10 +809,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       }
     }
     if (isLibraryMap(r)) return;
-    const first = classify(r);
-    if (!first) return;
-    // An exchange moves each path to the other.
-    for (const c of r.exchange && r.to ? [first, { ...first, path: r.to }] : [first]) {
+    for (const c of classify(r)) {
       const path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
       // A succeeding record resolves to an absolute path or a "…/" walk, so a
       // relative one there is d_path's pipe:, socket: or anon_inode: target, or
@@ -804,7 +823,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
         path: normalize(path),
         bit: loadRead ? 0 : c.letter.split("").reduce((bits, l) => bits | BIT[l], 0),
         failed: c.failed,
-        perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
+        perm: c.perm,
         t,
         seq: Number.isNaN(t) ? Infinity : seq++,
       };

@@ -17,7 +17,17 @@ const recordArb = fc.record(
   {
     t: timeArb,
     comm: fc.constantFrom("node", "cat", "bash", "sh"),
-    kind: fc.constantFrom("read", "write", "exec", "mmap", "open", "unlink", "rename", "chmod"),
+    kind: fc.constantFrom(
+      "read",
+      "write",
+      "exec",
+      "mmap",
+      "open",
+      "unlink",
+      "rename",
+      "link",
+      "chmod",
+    ),
     path: fc.constantFrom(
       "/work/a",
       "/work/b/c.txt",
@@ -28,9 +38,12 @@ const recordArb = fc.record(
       "pipe:[3]",
       "…/x",
     ),
+    to: fc.constantFrom("/work/n", "/home/u/.l"),
     access: fc.constantFrom("r", "w", "x", "wct"),
-    err: fc.constantFrom(0, 2, 13, 30),
+    err: fc.constantFrom(0, 1, 2, 13, 18, 30),
     failed: fc.boolean(),
+    exchange: fc.boolean(),
+    deleted: fc.boolean(),
   },
   { requiredKeys: ["comm", "kind", "path"] },
 );
@@ -57,7 +70,7 @@ describe("renderFilesystemAuditSummary: properties", () => {
         if (block)
           for (const row of block[1].split("\n"))
             // An optional time column, then flags, command and a path.
-            expect(row).toMatch(/^(?:(?:[\d:.-]+:)? +)?[RWXMDArwxmda!]+ +\S+ +\S/);
+            expect(row).toMatch(/^(?:(?:[\d:.-]+:)? +)?[RWXMLDArwxmlda!]+ +\S+ +\S/);
       }),
     );
   });
@@ -160,7 +173,7 @@ describe("renderFilesystemAuditSummary: properties", () => {
       // refused, or succeeded and refused.
       flags: fc
         .tuple(
-          ...["R", "W", "X", "M", "D", "A"].map((c) => {
+          ...["R", "W", "X", "M", "L", "D", "A"].map((c) => {
             const l = c.toLowerCase();
             return fc.constantFrom([], [c], [l], [`${l}!`], [c, `${l}!`]);
           }),
