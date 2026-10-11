@@ -1,6 +1,6 @@
 ### Filesystem audit
 
-<sub>R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied</sub>
+<sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied</sub>
 
 #### Executed
 

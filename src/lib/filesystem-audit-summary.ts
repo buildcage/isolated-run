@@ -58,6 +58,8 @@ interface Classified {
   letter: string;
   path: string;
   failed: boolean;
+  /** Failed for want of permission. */
+  perm: boolean;
 }
 
 // The actions a record counts as, each with the path it acts on. open counts
@@ -82,11 +84,16 @@ function classify(r: AuditRecord): Classified[] {
     letter = LETTER[r.kind];
   }
   if (!letter) return [];
-  const on = (l: string, path?: string): Classified[] =>
-    path ? [{ letter: l, path, failed }] : [];
-  // A hard link writes its new name, and the file it names can be read under
-  // that name from then on.
-  if (r.kind === "link") return [...on(letter, r.to), ...on("L", r.path)];
+  const perm = failed && PERM_ERRNO.has(r.err ?? 0);
+  const on = (l: string, path?: string, refused = perm): Classified[] =>
+    path ? [{ letter: l, path, failed, perm: refused }] : [];
+  if (r.kind === "link") {
+    // A hard link writes its new name, and the file it names can be read under
+    // that name from then on. Only EPERM (protected_hardlinks) is about that
+    // file, and one with no name of its own, as O_TMPFILE makes, names none.
+    const linked = r.deleted ? [] : on("L", r.path, failed && r.err === 1);
+    return [...on(letter, r.to), ...linked];
+  }
   // An exchange moves each path to the other.
   return [...on(letter, r.path), ...(r.exchange ? on(letter, r.to) : [])];
 }
@@ -589,7 +596,7 @@ function fmtFlags(a: Agg): string {
 }
 
 const LEGEND =
-  "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied";
+  "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied";
 const HEADING = "### Filesystem audit";
 const INCOMPLETE_NOTE =
   "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
@@ -803,7 +810,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
         path: normalize(path),
         bit: loadRead ? 0 : c.letter.split("").reduce((bits, l) => bits | BIT[l], 0),
         failed: c.failed,
-        perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
+        perm: c.perm,
         t,
         seq: Number.isNaN(t) ? Infinity : seq++,
       };

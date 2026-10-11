@@ -584,10 +584,14 @@ describe("renderFilesystemAuditSummary", () => {
       { kind: "read", comm: "cat", path: "/work/x" },
     );
     expect(lines(md)).toEqual(["R cat ./x", "W ln ./x", "L ln ~/.ssh/id_rsa"]);
-    // Named under the path it had, though deleted while open.
+    // A file with no name of its own, as O_TMPFILE makes, names nothing.
     expect(
-      lines(render({ kind: "link", comm: "ln", path: "/tmp/f", to: "/work/f", deleted: true })),
-    ).toEqual(["W ln ./f", "L ln /tmp/f (deleted)"]);
+      lines(render({ kind: "link", comm: "ln", path: "/tmp/#12", to: "/work/f", deleted: true })),
+    ).toEqual(["W ln ./f"]);
+    // Only EPERM refuses the file itself; a read-only new name refuses that name alone.
+    expect(
+      lines(render({ kind: "link", comm: "ln", path: "/a", to: "/b", err: 30, failed: true })),
+    ).toEqual(["l ln /a", "w! ln /b"]);
     // A link whose new name could not be read still names its file.
     expect(lines(render({ kind: "link", comm: "ln", path: "/a", err: 2, failed: true }))).toEqual([
       "l ln /a",

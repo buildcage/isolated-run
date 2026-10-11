@@ -68406,12 +68406,17 @@ function classify(r) {
 		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
 	} else r.failed ? (letter = LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : letter = LETTER[r.kind];
 	if (!letter) return [];
-	let on = (l, path) => path ? [{
+	let perm = failed && PERM_ERRNO.has(r.err ?? 0), on = (l, path, refused = perm) => path ? [{
 		letter: l,
 		path,
-		failed
+		failed,
+		perm: refused
 	}] : [];
-	return r.kind === "link" ? [...on(letter, r.to), ...on("L", r.path)] : [...on(letter, r.path), ...r.exchange ? on(letter, r.to) : []];
+	if (r.kind === "link") {
+		let linked = r.deleted ? [] : on("L", r.path, failed && r.err === 1);
+		return [...on(letter, r.to), ...linked];
+	}
+	return [...on(letter, r.path), ...r.exchange ? on(letter, r.to) : []];
 }
 const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\\`, UNSAFE_CHARS = RegExp(`[${UNSAFE}]`, "gu"), UNSAFE_QUOTED = RegExp(`[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
 	"\n": "\\n",
@@ -68627,7 +68632,7 @@ function fmtFlags(a) {
 	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
 	return out;
 }
-const LEGEND = "R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit", SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
+const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit", SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
 	executed: "filesystem-executed",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
@@ -68703,7 +68708,7 @@ function createAuditSummary(prefixes) {
 					path: normalize$2(path),
 					bit: loadRead ? 0 : c.letter.split("").reduce((bits, l) => bits | BIT[l], 0),
 					failed: c.failed,
-					perm: c.failed && PERM_ERRNO.has(r.err ?? 0),
+					perm: c.perm,
 					t,
 					seq: Number.isNaN(t) ? Infinity : seq++
 				};

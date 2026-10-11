@@ -42,6 +42,7 @@ const recordArb = fc.record(
     access: fc.constantFrom("r", "w", "x", "wct"),
     err: fc.constantFrom(0, 2, 13, 30),
     failed: fc.boolean(),
+    exchange: fc.boolean(),
   },
   { requiredKeys: ["comm", "kind", "path"] },
 );

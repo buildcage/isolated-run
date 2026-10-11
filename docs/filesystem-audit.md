@@ -133,7 +133,7 @@ like the traffic artifact.
 
 ```
 ### Filesystem audit
-R read · W write · X exec · M move · D delete · A attr · lowercase = failed · ! = denied
+R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied
 ./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
 buildcage-filesystem-audit-<id> artifact · how to read this
 
@@ -181,7 +181,7 @@ that touched no file shows `No file access was recorded.` instead of the tables.
 | `W`  | Written, mapped shared and writable, created or truncated: a file, a directory, a link         |
 | `X`  | Run as a program; shown in the details only, as the executed table lists every program         |
 | `M`  | Moved (renamed) away from this path; where it went is in the artifact                          |
-| `L`  | Given another name by a hard link, shown as `W` on that name; a read through it shows there    |
+| `L`  | Hard-linked: given a second name, shown as `W`; a read through that name shows under it        |
 | `D`  | Deleted                                                                                        |
 | `A`  | Attributes changed: mode, owner, times, extended attributes                                    |
 | `r`  | Lowercase: the action failed every time it was tried here, such as opening a missing file      |
@@ -328,7 +328,7 @@ as an `open` with `x`.
 | `unlink`, `rmdir`                       | a file or a directory deleted                                                                                                                     | `D`                                       |
 | `rename`                                | a move from `path` to `to`                                                                                                                        | `M` on `path`                             |
 | `mkdir`, `mknod`, `symlink`, `truncate` | a directory, a special file or Unix socket, or a symlink made; or a file cut to size                                                              | `W`                                       |
-| `link`                                  | a hard link made from `path` to `to`                                                                                                              | `W` on `to`, `L` on `path`                |
+| `link`                                  | a hard link made from `path` to `to`; `L` is left out for a file with no name of its own, as `O_TMPFILE` makes                                    | `W` on `to`, `L` on `path`                |
 | `chmod`, `chown`, `attr`                | a mode, an owner, or times or extended attributes changed                                                                                         | `A`                                       |
 | `end`                                   | the last line; see below                                                                                                                          | none                                      |
 
