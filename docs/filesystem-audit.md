@@ -181,7 +181,7 @@ that touched no file shows `No file access was recorded.` instead of the tables.
 | `W`  | Written, mapped shared and writable, created or truncated: a file, a directory, a link         |
 | `X`  | Run as a program; shown in the details only, as the executed table lists every program         |
 | `M`  | Moved (renamed) away from this path; where it went is in the artifact                          |
-| `L`  | Given a second name by a hard link. The new name shows as `W`, and a read through it under it  |
+| `L`  | Given a second name by a hard link, which shows as `W`; reads through it show under that name  |
 | `D`  | Deleted                                                                                        |
 | `A`  | Attributes changed: mode, owner, times, extended attributes                                    |
 | `r`  | Lowercase: the action failed every time it was tried here, such as opening a missing file      |
