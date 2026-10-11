@@ -26,6 +26,7 @@ jobs:
     if: github.event_name == 'pull_request'
     outputs:
       test_sandbox: ${{ steps.filter.outputs.test_sandbox }}
+      filesystem_audit: ${{ steps.filter.outputs.filesystem_audit }}
     steps:
       - name: Filter changed paths
         id: filter
@@ -49,6 +50,17 @@ jobs:
               - 'src/**'
               - 'scripts/**'
               - 'test/**'
+            # The tracer, what starts and reads it, and the sandbox whose cgroup it watches.
+            filesystem_audit:
+              - 'docker/filesystem-audit/**'
+              - 'docker/universal/Dockerfile'
+              - 'compose.yaml'
+              - 'action.yml'
+              - 'src/main.ts'
+              - 'src/post.ts'
+              - 'src/lib/**'
+              - 'scripts/**'
+              - '.github/workflows/test-e2e.yml'
 
   # Exercises the real action end-to-end (uses: ./) on the actual runner
   # host; none of this can be validated inside a nested container (see dev/
@@ -151,7 +163,7 @@ jobs:
   # surfaces the recording for the assertion.
   test_sandbox_filesystem_audit:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.filesystem_audit == 'true') }}
     strategy:
       fail-fast: false
       matrix:
