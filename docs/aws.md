@@ -44,10 +44,10 @@ A step passes the check when:
 
 - It calls AWS through the AWS CLI v2, a current AWS SDK, or a tool built on them, such as the CDK
   and Terraform.
-- It switches roles only through STS `AssumeRole` or `AssumeRoleWithWebIdentity`, into an account
-  in `allowed_aws_role_accounts`: the CDK's deploy roles, Terraform's `assume_role`, or a CLI
-  profile whose `role_arn` starts from `credential_source = Environment` or a
-  `web_identity_token_file`.
+- It switches roles only through STS `AssumeRole`, or `AssumeRoleWithWebIdentity` with its
+  parameters in the form body as an AWS SDK sends it, into an account in
+  `allowed_aws_role_accounts`: the CDK's deploy roles, Terraform's `assume_role`, or a CLI profile
+  whose `role_arn` starts from `credential_source = Environment` or a `web_identity_token_file`.
 - It reaches CodeCommit over Git through CodeCommit's credential helper, or with a static Git
   credential of an account in `allowed_aws_role_accounts`.
 - It pulls from or pushes to ECR through the registry API, with a client such as `crane`, `skopeo`
