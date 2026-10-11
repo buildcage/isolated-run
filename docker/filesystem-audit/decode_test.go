@@ -74,6 +74,16 @@ func TestDecodeHeldRefusal(t *testing.T) {
 	}
 }
 
+func TestDecodeHeldOpenRefusal(t *testing.T) {
+	r, err := decode(event{kind: 1, flags: unix.O_WRONLY | unix.O_NONBLOCK, err: uint32(unix.ENXIO), data: []byte("/tmp/fifo\x00")}.bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Kind != "open" || r.Path != "/tmp/fifo" || r.Access != "w" || !r.Failed || r.Err != int32(unix.ENXIO) {
+		t.Errorf("held open refusal decode: %+v", r)
+	}
+}
+
 func TestTidy(t *testing.T) {
 	for in, want := range map[string]string{
 		"/a/./b//c":       "/a/b/c",

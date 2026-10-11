@@ -247,23 +247,17 @@ struct pending {
 	s32 dfd1;      // what p1 and p2 resolve against when relative
 	s32 dfd2;
 	u32 nr;        // the syscall, so only its own exit takes the entry
-	u32 val1;      // a chmod's new mode, or a chown's new uid, or an open's flags
+	u32 val1;      // a chmod's new mode, or a chown's new uid
 	u32 val2;      // a chown's new gid
-	u32 creating;  // an open reached its create step (see on_mknod)
-	u32 name_lost; // an open's name found no room to be held
 };
 
-// nr of an open(2), whose entry open_enter makes and open_exit takes: ts,
-// dfd1 and val1 hold when, from where and with which flags it was called.
-#define NR_OPEN 0xffffffff
-
-// One entry per thread inside a path syscall or open(2).
+// One entry per thread inside a path syscall.
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 8192);
 	__type(key, u64);
 	__type(value, struct pending);
-} in_syscall SEC(".maps");
+} pending_ops SEC(".maps");
 
 static __always_inline int in_target(void)
 {
@@ -324,10 +318,9 @@ static __always_inline void submit(struct event *e)
 // Events held per thread until their syscall returns. A path change's
 // security_path_* hook runs before the kernel's own permission checks
 // (may_delete, may_create, notify_change), so whether it happened is known
-// only then; for an open, see on_open.
+// only then; for an open, see open_enter.
 #define HELD_OP 1
 #define HELD_OPEN 2
-#define HELD_NAME 3 // the name an open(2) was given, in data alone
 
 struct held_key {
 	u64 id;
@@ -335,8 +328,9 @@ struct held_key {
 	u32 pad;
 };
 
-// Nearly every path fits a short slot; a longer one takes a long slot. Both
-// pools are preallocated, so a hold fails only when they are full.
+// Nearly every path fits a short slot; a longer one, or one that finds the
+// short pool full, takes a long slot. Both pools are preallocated, so a hold
+// fails only when they are full.
 #define SHORT_DATA 1024
 
 struct short_slot {
@@ -357,30 +351,65 @@ struct {
 	__type(value, struct event);
 } held_long SEC(".maps");
 
+// How many long slots are in use, so a thread with none skips that pool. A
+// thread counts its own slot before it can look for it, so the count is never
+// 0 while it holds one, whatever other threads do.
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, u64);
+} long_used SEC(".maps");
+
+static __always_inline void count_long(u64 d)
+{
+	u32 zero = 0;
+	u64 *n = bpf_map_lookup_elem(&long_used, &zero);
+	if (n)
+		__sync_fetch_and_add(n, d);
+}
+
+static __always_inline int any_long(void)
+{
+	u32 zero = 0;
+	u64 *n = bpf_map_lookup_elem(&long_used, &zero);
+	return n && *n;
+}
+
+static __always_inline int put_long(struct held_key *k, struct event *e)
+{
+	if (bpf_map_update_elem(&held_long, k, e, BPF_NOEXIST) == 0) {
+		count_long(1);
+		return 0;
+	}
+	return bpf_map_update_elem(&held_long, k, e, BPF_EXIST);
+}
+
+static __always_inline void del_long(struct held_key *k)
+{
+	if (bpf_map_delete_elem(&held_long, k) == 0)
+		count_long((u64)-1);
+}
+
 static __always_inline struct held_key held_key(u32 use)
 {
 	struct held_key k = { .id = bpf_get_current_pid_tgid(), .use = use, .pad = 0 };
 	return k;
 }
 
+// Holds e as the thread's one slot under use, replacing what it held there.
 static __always_inline int hold_as(struct event *e, u32 use)
 {
 	struct held_key k = held_key(use);
-	// One slot per key: one left in the other pool would outlive this hold.
 	if (e->data_len <= SHORT_DATA && bpf_map_update_elem(&held_short, &k, e, BPF_ANY) == 0) {
-		if (bpf_map_lookup_elem(&held_long, &k))
-			bpf_map_delete_elem(&held_long, &k);
+		if (any_long())
+			del_long(&k);
 		return 0;
 	}
-	if (bpf_map_lookup_elem(&held_short, &k))
-		bpf_map_delete_elem(&held_short, &k);
-	return bpf_map_update_elem(&held_long, &k, e, BPF_ANY);
-}
-
-static __always_inline int is_held(u32 use)
-{
-	struct held_key k = held_key(use);
-	return bpf_map_lookup_elem(&held_short, &k) || bpf_map_lookup_elem(&held_long, &k);
+	if (put_long(&k, e) != 0)
+		return -1;
+	bpf_map_delete_elem(&held_short, &k);
+	return 0;
 }
 
 static __always_inline void hold(struct event *e)
@@ -389,11 +418,32 @@ static __always_inline void hold(struct event *e)
 		bump(&untracked);
 }
 
-static __always_inline void release(u32 use)
+// The thread's slot under use, or 0; *in_long says which pool it is in, so
+// the caller can bound what it reads by that pool's slot size.
+static __always_inline struct event *find_held(struct held_key *k, int *in_long)
 {
-	struct held_key k = held_key(use);
-	bpf_map_delete_elem(&held_short, &k);
-	bpf_map_delete_elem(&held_long, &k);
+	*in_long = 0;
+	struct event *e = bpf_map_lookup_elem(&held_short, k);
+	if (e || !any_long())
+		return e;
+	*in_long = 1;
+	return bpf_map_lookup_elem(&held_long, k);
+}
+
+static __always_inline void drop_held(struct held_key *k, int in_long)
+{
+	if (in_long)
+		del_long(k);
+	else
+		bpf_map_delete_elem(&held_short, k);
+}
+
+static __always_inline void submit_held(struct event *e, int in_long)
+{
+	if (in_long)
+		submit_cap(e, sizeof(struct event));
+	else
+		submit_cap(e, sizeof(struct short_slot));
 }
 
 // Field offsets are resolved by CO-RE in the caller and handed over, since
@@ -980,24 +1030,16 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 	return 0;
 }
 
-// A refused or missing file never reaches security_file_open, so a failed
-// open is caught at the syscall. The name is held from the kernel's own copy
-// (getname_flags), not the user pointer, which the caller could rewrite
-// before the syscall returns.
-static __always_inline struct pending *in_open(void)
-{
-	u64 id = bpf_get_current_pid_tgid();
-	struct pending *p = bpf_map_lookup_elem(&in_syscall, &id);
-	return p && p->nr == NR_OPEN ? p : 0;
-}
-
-// An open(2) seen at security_file_open, held as HELD_OPEN until the syscall
-// returns: the file's own open method, an LSM or the FIFO checks can still
-// refuse it after that hook, and a refused one is recorded as failed instead.
-// An open from outside open(2), such as exec opening the program, has no exit
-// to wait for here, and is recorded at once, as is one nested in an open
-// already held, such as a FUSE passthrough's backing file, or one with no
-// room to be held.
+// An open(2) holds one slot from its entry until it returns. A refused or
+// missing file never reaches security_file_open, so until then the slot is
+// the failed open it would be (K_OPEN_FAILED): when the open was called, its
+// flags, and the name from the kernel's own copy (getname_flags), not the
+// user pointer, which the caller could rewrite before the syscall returns.
+// The file's own open method, an LSM or the FIFO checks can still refuse it
+// after that hook, so from there the slot is the open (K_OPEN), reported as
+// done or refused once the syscall returns. Throughout, err says whether the
+// open reached its create step (see on_mknod), and gid holds the descriptor
+// a relative name resolves against; open_exit sets err before reporting.
 SEC("fentry/security_file_open")
 int BPF_PROG(on_open, struct file *file)
 {
@@ -1009,8 +1051,20 @@ int BPF_PROG(on_open, struct file *file)
 	e->flags = file->f_flags;
 	e->mode = file->f_mode;
 	file_path(e, file);
-	if (!in_open() || is_held(HELD_OPEN) || hold_as(e, HELD_OPEN) != 0)
-		submit(e);
+	// An open from outside open(2), such as exec opening the program, has no
+	// exit to wait for here, and is recorded at once, as is one nested in an
+	// open already held, such as a FUSE passthrough's backing file, or one
+	// with no room to be held.
+	struct held_key k = held_key(HELD_OPEN);
+	int in_long;
+	struct event *held = find_held(&k, &in_long);
+	if (held && held->kind == K_OPEN_FAILED) {
+		e->err = held->err;
+		if (hold_as(e, HELD_OPEN) == 0)
+			return 0;
+		e->err = 0;
+	}
+	submit(e);
 	return 0;
 }
 
@@ -1021,9 +1075,11 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 {
 	if (!in_target())
 		return 0;
-	struct pending *op = in_open();
-	if (op) {
-		op->creating = 1;
+	struct held_key k = held_key(HELD_OPEN);
+	int in_long;
+	struct event *held = find_held(&k, &in_long);
+	if (held) {
+		held->err = 1;
 		return 0;
 	}
 	struct event *e = start(K_MKNOD);
@@ -1035,108 +1091,83 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 	return 0;
 }
 
-// When both hooks fire, do_sys_openat2's entry replaces do_sys_open's.
+// When both hooks fire, do_sys_openat2's slot replaces do_sys_open's. A full
+// pool counts in untracked even if this open then succeeds and is recorded.
 static __always_inline void open_enter(int dfd, u32 flags)
 {
 	if (!in_target())
 		return;
-	struct pending p;
-	__builtin_memset(&p, 0, sizeof(p));
-	p.nr = NR_OPEN;
-	p.ts = bpf_ktime_get_boot_ns();
-	p.dfd1 = dfd;
-	p.val1 = flags;
-	u64 id = bpf_get_current_pid_tgid();
-	// A full map counts in untracked even if this open then succeeds and is
-	// recorded.
-	if (bpf_map_update_elem(&in_syscall, &id, &p, BPF_ANY) != 0)
+	u32 zero = 0;
+	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
+	if (!e)
+		return;
+	e->kind = K_OPEN_FAILED;
+	e->ts = bpf_ktime_get_boot_ns();
+	e->flags = flags;
+	e->gid = dfd;
+	e->err = 0;
+	e->truncated = 0;
+	e->data_len = 0;
+	e->data[0] = 0;
+	if (hold_as(e, HELD_OPEN) != 0)
 		bump(&untracked);
 }
 
-static __always_inline void open_failed(struct pending *op, long ret, struct event *name, u32 name_cap)
+// The failed open a slot held until the open returned; name_cap is the
+// slot's room for the name.
+static __always_inline void open_failed(struct event *held, long ret, u32 name_cap)
 {
 	struct event *e = start(K_OPEN_FAILED);
 	if (!e)
 		return;
-	e->ts = op->ts;
+	e->ts = held->ts;
 	e->path_len = -ret;
-	e->flags = op->val1;
-	long r = name ? bpf_probe_read_kernel_str(e->data, name_cap, name->data) : 0;
+	e->flags = held->flags;
+	e->truncated = held->truncated;
+	long r = bpf_probe_read_kernel_str(e->data, name_cap, held->data);
 	u32 off = r > 0 ? r : 0;
 	if (off == 0)
 		e->data[off++] = 0; // the name could not be read: an empty one
 	u8 n = 0;
 	if (off > 1 && e->data[0] != '/') {
-		off = add_base(e, off, op->dfd1, &n, &e->truncated, 1, 0);
+		off = add_base(e, off, (s32)held->gid, &n, &e->truncated, 1, 0);
 		e->mode = n;
 	}
 	e->data_len = off;
 	submit(e);
 }
 
-// A held event as its syscall returned. use and the caps are constants once
-// inlined, so each pool's slot size bounds what is read from it.
-static __always_inline void held_done(u32 use, struct event *e, u32 cap, u32 data_cap, long ret,
-				      struct pending *p)
-{
-	if (use == HELD_OP) {
-		// A failure the syscall's entry recorded stands for this one.
-		if (ret >= 0) {
-			submit_cap(e, cap);
-		} else if (!p) {
-			e->err = -ret;
-			submit_cap(e, cap);
-		}
-	} else if (use == HELD_OPEN) {
-		// Reaching the file after its create step means it was created,
-		// whatever then refused the open.
-		if (ret >= 0 || (p && p->creating))
-			submit_cap(e, cap);
-	} else if (ret < 0 && p) {
-		open_failed(p, ret, e, data_cap);
-	}
-}
-
-// Ends the thread's hold under use, and reports whether it had one.
-static __always_inline int take(u32 use, long ret, struct pending *p)
-{
-	struct held_key k = held_key(use);
-	struct event *e = bpf_map_lookup_elem(&held_short, &k);
-	if (e) {
-		held_done(use, e, sizeof(struct short_slot), SHORT_DATA, ret, p);
-		bpf_map_delete_elem(&held_short, &k);
-		return 1;
-	}
-	e = bpf_map_lookup_elem(&held_long, &k);
-	if (!e)
-		return 0;
-	held_done(use, e, sizeof(struct event), PATH_LEN, ret, p);
-	bpf_map_delete_elem(&held_long, &k);
-	return 1;
-}
-
 static __always_inline void open_exit(long ret)
 {
-	u64 id = bpf_get_current_pid_tgid();
-	struct pending *op = in_open();
-	if (!op)
+	struct held_key k = held_key(HELD_OPEN);
+	int in_long;
+	struct event *held = find_held(&k, &in_long);
+	if (!held)
 		return;
 	// ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal interrupted the open,
 	// which the kernel runs again, and that run records it.
 	if (ret <= -512 && ret >= -516) {
-		release(HELD_OPEN);
-		release(HELD_NAME);
-		bpf_map_delete_elem(&in_syscall, &id);
+		drop_held(&k, in_long);
 		return;
 	}
-	take(HELD_OPEN, ret, op);
-	if (!take(HELD_NAME, ret, op) && ret < 0) {
-		if (op->name_lost)
-			bump(&untracked);
+	if (held->kind == K_OPEN) {
+		// Reaching the file after its create step means it was created,
+		// whatever then refused the open.
+		if (ret >= 0 || held->err) {
+			held->err = 0;
+			submit_held(held, in_long);
+		}
+		if (ret < 0) {
+			held->err = -ret;
+			submit_held(held, in_long);
+		}
+	} else if (ret < 0) {
+		if (in_long)
+			open_failed(held, ret, PATH_LEN);
 		else
-			open_failed(op, ret, 0, 0);
+			open_failed(held, ret, SHORT_DATA);
 	}
-	bpf_map_delete_elem(&in_syscall, &id);
+	drop_held(&k, in_long);
 }
 
 // open/openat reach do_sys_openat2 through do_sys_open, which may inline
@@ -1156,21 +1187,41 @@ int BPF_PROG(on_open_enter, int dfd, const char *filename, int flags)
 	return 0;
 }
 
+// Reads the name into the open's slot; one that fills a short slot moves to
+// a long one, or stays there marked cut when none is free.
 static __always_inline void stash_name(u64 *ctx)
 {
 	struct filename *ret = 0;
 	bpf_get_func_ret(ctx, (u64 *)&ret);
-	struct pending *op = in_open();
-	if (!op || ((long)ret < 0 && (long)ret >= -4095))
+	if ((long)ret < 0 && (long)ret >= -4095)
+		return;
+	struct held_key k = held_key(HELD_OPEN);
+	int in_long;
+	struct event *held = find_held(&k, &in_long);
+	if (!held || held->kind != K_OPEN_FAILED)
+		return;
+	const char *name = BPF_CORE_READ(ret, name);
+	long r;
+	if (in_long) {
+		r = bpf_probe_read_kernel_str(held->data, PATH_LEN, name);
+		held->data_len = r > 0 ? r : 0;
+		return;
+	}
+	r = bpf_probe_read_kernel_str(held->data, SHORT_DATA, name);
+	held->data_len = r > 0 ? r : 0;
+	if (r < SHORT_DATA)
 		return;
 	u32 zero = 0;
 	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
 	if (!e)
 		return;
-	long r = bpf_probe_read_kernel_str(e->data, PATH_LEN, BPF_CORE_READ(ret, name));
+	bpf_probe_read_kernel(e, __builtin_offsetof(struct event, data), held);
+	r = bpf_probe_read_kernel_str(e->data, PATH_LEN, name);
 	e->data_len = r > 0 ? r : 0;
-	if (hold_as(e, HELD_NAME) != 0)
-		op->name_lost = 1;
+	if (put_long(&k, e) == 0)
+		bpf_map_delete_elem(&held_short, &k);
+	else
+		held->truncated = 1;
 }
 
 // Some builds inline getname_flags into getname (6.8), others call
@@ -1396,7 +1447,7 @@ static __always_inline long sys_nr(struct pt_regs *regs)
 #define OP(k, ok, quiet, d1, a1, d2, a2)						\
 	({ p->kind = k; p->kind_ok = ok; p->quiet_err = quiet;				\
 	   p->dfd1 = d1; p->p1 = a1; p->dfd2 = d2; p->p2 = a2;			\
-	   p->val1 = 0; p->val2 = 0; p->creating = 0; p->name_lost = 0; 1; })
+	   p->val1 = 0; p->val2 = 0; 1; })
 #define VALS(v1, v2) ({ p->val1 = v1; p->val2 = v2; 1; })
 
 // Making a name. The kernel refuses one on a read-only mount before the
@@ -1483,7 +1534,7 @@ int BPF_PROG(on_sys_enter, struct pt_regs *regs, long nr)
 	u64 id = bpf_get_current_pid_tgid();
 	// An op recorded on success too is lost either way; one recorded only on
 	// failure is counted at the exit, once the result is known.
-	if (bpf_map_update_elem(&in_syscall, &id, &p, BPF_ANY) != 0 && p.kind_ok)
+	if (bpf_map_update_elem(&pending_ops, &id, &p, BPF_ANY) != 0 && p.kind_ok)
 		bump(&untracked);
 	return 0;
 }
@@ -1554,20 +1605,32 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	struct pending want;
 	struct pending *pend = 0;
 	if (classify(nr, 0, &want)) {
-		pend = bpf_map_lookup_elem(&in_syscall, &id);
+		pend = bpf_map_lookup_elem(&pending_ops, &id);
 		// Only this syscall's own entry: one another left is dropped.
 		if (pend && pend->nr != nr) {
-			bpf_map_delete_elem(&in_syscall, &id);
+			bpf_map_delete_elem(&pending_ops, &id);
 			pend = 0;
 		}
 		// A failure-only op whose entry the full map did not take.
 		if (!pend && !want.kind_ok && ret < 0 && -ret != want.quiet_err)
 			bump(&untracked);
 	}
-	take(HELD_OP, ret, pend);
+	struct held_key k = held_key(HELD_OP);
+	int in_long;
+	struct event *e = find_held(&k, &in_long);
+	if (e) {
+		// A failure the syscall's entry recorded stands for this one.
+		if (ret >= 0) {
+			submit_held(e, in_long);
+		} else if (!pend) {
+			e->err = -ret;
+			submit_held(e, in_long);
+		}
+		drop_held(&k, in_long);
+	}
 	if (pend) {
 		op_exit(pend, ret);
-		bpf_map_delete_elem(&in_syscall, &id);
+		bpf_map_delete_elem(&pending_ops, &id);
 	}
 	return 0;
 }

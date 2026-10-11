@@ -314,15 +314,19 @@ func decode(raw []byte) (record, error) {
 		Comm: cstr(raw[36:52]),
 		boot: le.Uint64(raw[64:]),
 	}
-	// A held path change its syscall refused carries the errno; its path and
-	// kind are as for one that succeeded.
+	// A held path change or open its syscall refused carries the errno; its
+	// path and kind are as for one that succeeded.
 	if heldErr := le.Uint32(raw[52:]); heldErr != 0 {
 		r.Err = int32(heldErr)
 		r.Failed = true
 	}
 	switch kind {
 	case 1: // open
-		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
+		var pathErr int32
+		r.Path, pathErr = filePath(data, pathRet, n1, truncated)
+		if !r.Failed {
+			r.Err = pathErr
+		}
 		applyMarks(&r, marks, pathRet >= 0)
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
