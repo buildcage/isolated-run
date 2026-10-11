@@ -377,23 +377,27 @@ static __always_inline int hold_as(struct event *e, u32 use)
 	return bpf_map_update_elem(&held_long, &k, e, BPF_ANY);
 }
 
-static __always_inline void hold(struct event *e)
-{
-	if (hold_as(e, HELD_OP) != 0)
-		bump(&untracked);
-}
-
 static __always_inline int is_held(u32 use)
 {
 	struct held_key k = held_key(use);
 	return bpf_map_lookup_elem(&held_short, &k) || bpf_map_lookup_elem(&held_long, &k);
 }
 
-static __always_inline void release(u32 use)
+// A thread holds one path change per syscall, so one still held is a change
+// whose syscall never returned to report it, such as an io_uring worker's.
+static __always_inline void hold(struct event *e)
+{
+	if (is_held(HELD_OP))
+		bump(&untracked);
+	if (hold_as(e, HELD_OP) != 0)
+		bump(&untracked);
+}
+
+// Reports whether the thread held anything under use.
+static __always_inline int release(u32 use)
 {
 	struct held_key k = held_key(use);
-	bpf_map_delete_elem(&held_short, &k);
-	bpf_map_delete_elem(&held_long, &k);
+	return (bpf_map_delete_elem(&held_short, &k) == 0) | (bpf_map_delete_elem(&held_long, &k) == 0);
 }
 
 // Field offsets are resolved by CO-RE in the caller and handed over, since
@@ -805,9 +809,11 @@ int BPF_PROG(on_task_exit, struct task_struct *p)
 	u64 id = bpf_get_current_pid_tgid();
 	bpf_map_delete_elem(&in_exec, &id);
 	// Nor does an io_uring worker reach sys_exit for the path changes it
-	// makes; what it held would otherwise pass for the next thread's.
+	// makes: one still held is lost, and would otherwise pass for the next
+	// thread's.
 	bpf_map_delete_elem(&in_syscall, &id);
-	release(HELD_OP);
+	if (release(HELD_OP))
+		bump(&untracked);
 	release(HELD_OPEN);
 	release(HELD_NAME);
 	return 0;
@@ -1096,9 +1102,9 @@ static __always_inline void held_done(u32 use, struct event *e, u32 cap, u32 dat
 	} else if (use == HELD_OPEN) {
 		// Reaching the file after its create step means it was created,
 		// whatever then refused the open.
-		if (ret >= 0 || p->creating)
+		if (ret >= 0 || (p && p->creating))
 			submit_cap(e, cap);
-	} else if (ret < 0) {
+	} else if (ret < 0 && p) {
 		open_failed(p, ret, e, data_cap);
 	}
 }
