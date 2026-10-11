@@ -47,7 +47,7 @@ const LETTER: Record<string, string> = {
   chown: "A",
   attr: "A",
 };
-const ORDER = "RWXMDA";
+const ORDER = "RWXMLDA";
 const PERM_ERRNO = new Set([1, 13, 30]); // EPERM, EACCES, EROFS
 // A shared object or a Node.js addon, by file name.
 const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
@@ -60,12 +60,11 @@ interface Classified {
   failed: boolean;
 }
 
-// The action a record counts as, and the path it acts on, or undefined to
-// drop it. open counts only when it creates or truncates; a plain read/write
-// of an open file comes through the read/write kinds instead.
-function classify(r: AuditRecord): Classified | undefined {
+// The actions a record counts as, each with the path it acts on. open counts
+// only when it creates or truncates; a plain read/write of an open file comes
+// through the read/write kinds instead.
+function classify(r: AuditRecord): Classified[] {
   let letter: string | undefined;
-  let path = r.path;
   let failed = false;
   if (r.failed && r.kind === "open") {
     // What it asked for: a read, and a write if it asked to write, create or truncate.
@@ -74,19 +73,22 @@ function classify(r: AuditRecord): Classified | undefined {
     failed = true;
   } else if (r.failed) {
     letter = LETTER[r.kind];
-    if (r.kind === "link") path = r.to;
     failed = true;
   } else if (r.kind === "mmap") {
     letter = r.access === "w" ? "W" : "R";
   } else if (r.kind === "open") {
     if (r.access?.includes("c") || r.access?.includes("t")) letter = "W";
-  } else if (r.kind === "link") {
-    letter = "W";
-    path = r.to;
   } else {
     letter = LETTER[r.kind];
   }
-  return letter && path ? { letter, path, failed } : undefined;
+  if (!letter) return [];
+  const on = (l: string, path?: string): Classified[] =>
+    path ? [{ letter: l, path, failed }] : [];
+  // A hard link writes its new name, and the file it names can be read under
+  // that name from then on.
+  if (r.kind === "link") return [...on(letter, r.to), ...on("L", r.path)];
+  // An exchange moves each path to the other.
+  return [...on(letter, r.path), ...(r.exchange ? on(letter, r.to) : [])];
 }
 
 // A file or process name is chosen by the step, and a newline in one could
@@ -787,10 +789,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       }
     }
     if (isLibraryMap(r)) return;
-    const first = classify(r);
-    if (!first) return;
-    // An exchange moves each path to the other.
-    for (const c of r.exchange && r.to ? [first, { ...first, path: r.to }] : [first]) {
+    for (const c of classify(r)) {
       const path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
       // A succeeding record resolves to an absolute path or a "…/" walk, so a
       // relative one there is d_path's pipe:, socket: or anon_inode: target, or

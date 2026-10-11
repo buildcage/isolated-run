@@ -181,6 +181,7 @@ that touched no file shows `No file access was recorded.` instead of the tables.
 | `W`  | Written, mapped shared and writable, created or truncated: a file, a directory, a link         |
 | `X`  | Run as a program; shown in the details only, as the executed table lists every program         |
 | `M`  | Moved (renamed) away from this path; where it went is in the artifact                          |
+| `L`  | Given another name by a hard link, shown as `W` on that name; a read through it shows there    |
 | `D`  | Deleted                                                                                        |
 | `A`  | Attributes changed: mode, owner, times, extended attributes                                    |
 | `r`  | Lowercase: the action failed every time it was tried here, such as opening a missing file      |
@@ -317,18 +318,19 @@ failed `mkdir`, `mknod`, `symlink` or `link` is recorded too unless its name was
 `mmap` is not recorded, nor is a failed `exec`, though the file it opened before failing can show
 as an `open` with `x`.
 
-| `kind`                                          | Records                                                                                                                                           | Summary                                   |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `open`                                          | a file opened; the summary counts one that creates or truncates, or that failed                                                                   | `W`, `r`, `w`                             |
-| `read`, `write`                                 | the first read, or the first write, through each opened file by each program a process runs; through a device, a pipe or a socket, by any program | `R`, `W`                                  |
-| `mmap`                                          | a file mapped into memory                                                                                                                         | `R`, or `W` for a shared writable mapping |
-| `exec`                                          | a program run                                                                                                                                     | `X`                                       |
-| `fork`                                          | a new process; `pid` is the child                                                                                                                 | none                                      |
-| `unlink`, `rmdir`                               | a file or a directory deleted                                                                                                                     | `D`                                       |
-| `rename`                                        | a move from `path` to `to`                                                                                                                        | `M` on `path`                             |
-| `mkdir`, `mknod`, `symlink`, `link`, `truncate` | a directory, a special file or Unix socket, a symlink or a hard link made, or a file cut to size                                                  | `W`                                       |
-| `chmod`, `chown`, `attr`                        | a mode, an owner, or times or extended attributes changed                                                                                         | `A`                                       |
-| `end`                                           | the last line; see below                                                                                                                          | none                                      |
+| `kind`                                  | Records                                                                                                                                           | Summary                                   |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `open`                                  | a file opened; the summary counts one that creates or truncates, or that failed                                                                   | `W`, `r`, `w`                             |
+| `read`, `write`                         | the first read, or the first write, through each opened file by each program a process runs; through a device, a pipe or a socket, by any program | `R`, `W`                                  |
+| `mmap`                                  | a file mapped into memory                                                                                                                         | `R`, or `W` for a shared writable mapping |
+| `exec`                                  | a program run                                                                                                                                     | `X`                                       |
+| `fork`                                  | a new process; `pid` is the child                                                                                                                 | none                                      |
+| `unlink`, `rmdir`                       | a file or a directory deleted                                                                                                                     | `D`                                       |
+| `rename`                                | a move from `path` to `to`                                                                                                                        | `M` on `path`                             |
+| `mkdir`, `mknod`, `symlink`, `truncate` | a directory, a special file or Unix socket, or a symlink made; or a file cut to size                                                              | `W`                                       |
+| `link`                                  | a hard link made from `path` to `to`                                                                                                              | `W` on `to`, `L` on `path`                |
+| `chmod`, `chown`, `attr`                | a mode, an owner, or times or extended attributes changed                                                                                         | `A`                                       |
+| `end`                                   | the last line; see below                                                                                                                          | none                                      |
 
 ### Access letters
 
