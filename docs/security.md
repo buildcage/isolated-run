@@ -616,8 +616,9 @@ or uses as a symlink's target, is kept.
 
 **Falsifying what it says.** A successful access and a program the step ran are recorded with the
 path the kernel resolved. A delete, move, mkdir, mknod, symlink, link, chmod, chown or truncate
-counts as done only if its syscall succeeds; one the kernel refuses is recorded as failed. A failed
-call, and an attribute change through `utimensat`, `utime`,
+counts as done only if its syscall succeeds; one the kernel refuses is recorded as failed. An open
+refused after the kernel reached its file is recorded as failed with the path it resolved. Any
+other failed call, and an attribute change through `utimensat`, `utime`,
 `utimes`, `futimesat`, `setxattr` or `lsetxattr`, are recorded under the name the command passed,
 joined to its working directory or directory descriptor without resolving `..`; the artifact keeps
 that name as `name` where it differs from `path`. These names are best-effort: apart from a failed
