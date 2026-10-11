@@ -379,10 +379,9 @@ are left out of [AWS access key check](./aws.md):
 - A form body is read into HAProxy's large buffer, 4 MiB, which holds the request's headers too, so
   the body can be 4 MiB less the headers. Matching stops at a NUL byte, so a body holding one is
   `aws-unreadable` as well.
-- The proxy rewrites a request to STS to ask for an uncompressed answer
-  (`Accept-Encoding: identity`), unless the client signed its own `Accept-Encoding`, which it then
-  leaves alone. It reads an answer up to its buffer size (16 KB), so a compressed answer or one past
-  the buffer teaches no key and names no account.
+- The proxy reads an STS answer as XML, up to its buffer size (16 KB). STS does not compress its
+  answers, so the request's `Accept-Encoding` is left alone. A compressed or JSON answer, or one
+  past the buffer, teaches no key and names no account.
 
 Each Dockerfile copies `docker/common/files/` first and the engine's own `files/` on top. An engine
 keeps only what differs: `THIRD_PARTY_LICENSES` and the `init-cfg` script that generates its
