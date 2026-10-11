@@ -125,7 +125,12 @@ Each pair runs the same command with and without rules:
 
 A separate
 [ephemeral filesystem example](.github/workflows/example-ephemeral-filesystem.yml) shows which
-writes survive a `filesystem_mode: ephemeral` step and which the overlay discards.
+writes survive a `filesystem_mode: ephemeral` step and which the overlay discards, and the
+[filesystem audit example](.github/workflows/example-filesystem-audit.yml) records what an npm
+install touches. The AWS access key check runs against a real AWS account
+([audit](.github/workflows/example-aws-key-check-audit.yml) ·
+[restrict](.github/workflows/example-aws-key-check-restrict.yml)), switching to a role and refusing a
+key the step was not given.
 
 ## Engines
 
