@@ -646,9 +646,9 @@ spells a path. What it can do:
   makes, an extended attribute change other than through
   `setxattr` or `lsetxattr`, a failed `exec`, a `mkdir`, `mknod`, `symlink` or `link` on a name
   that is already there, or one made by `bind(2)` that the kernel refuses before reaching its file.
-- Look a file up, or read a link's target or an extended attribute. `stat`, `access`,
-  `readlink`, `getxattr`, `listxattr` and a successful open with `O_PATH` are not recorded; what a command
-  then does through an `O_PATH` descriptor, such as running or reopening the file, is recorded.
+- Look a file up, or read a link's target or an extended attribute. `stat`, `access`, `readlink`,
+  `getxattr`, `listxattr` and a successful open with `O_PATH` are not recorded; what a command then
+  does through an `O_PATH` descriptor, such as running or reopening the file, is recorded.
 - Flood the tracer until its buffers fill. What did not fit is lost, but the summary then says the
   record is incomplete, as it does when the tracer did not stop cleanly. Flooding can hide which
   accesses happened, not that some are missing.

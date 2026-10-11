@@ -245,10 +245,10 @@ only the first read and the first write after each open count, whichever program
 
 With `upload_filesystem_audit_artifact: true`, the artifact named `buildcage-filesystem-audit-<id>`
 holds one file, `filesystem-audit-<id>.step.jsonl`: one JSON object per line, in the order the
-tracer caught the accesses. A failed call is caught when it returns, so lines from different threads
-can be slightly out of `t` order. It holds only the step's own accesses, as the summary does: the
-sandbox's setup is left out, and the step's shell is named `bash`. A record marked incomplete can
-hold the setup too. A few examples:
+tracer caught the accesses. Opens and path changes are written when their call returns, so lines
+from different threads can be slightly out of `t` order. It holds only the step's own accesses, as
+the summary does: the sandbox's setup is left out, and the step's shell is named `bash`. A record
+marked incomplete can hold the setup too. A few examples:
 
 ```sh
 # Every path written, made or moved to
@@ -384,8 +384,8 @@ The step fails before the command runs with
 `read kernel BTF: …` has two causes, told apart by how the message ends:
 
 - `unknown kind …`, `header contains non-zero trailer` or `unsupported flags …`: the kernel's BTF is
-  newer than the tracer can read. Please [open an issue](https://github.com/buildcage/isolated-run/issues)
-  with the output of `uname -r`.
+  newer than the tracer can read. Please
+  [open an issue](https://github.com/buildcage/isolated-run/issues) with the output of `uname -r`.
 - `buffer too small` or `no BTF found …`: `/sys/kernel/btf/vmlinux` is empty, covered or
   unreadable. Make sure it is the kernel's own.
 
@@ -409,10 +409,10 @@ On some kernels one of the tracer's hooks can be paused mid-run, and is then ski
 entered again. The kernels on GitHub-hosted runners do not pause the hooks, nor do Ubuntu 22.04's
 and 24.04's `generic` kernels as they boot by default; Ubuntu 26.04's, and the 7.0 hardware
 enablement kernel of 24.04, do. On a self-hosted runner, `sudo cat /sys/kernel/debug/sched/preempt`
-prints the modes with the one in use in parentheses, such as `full (lazy)`; `(full)` and `(lazy)`
-are the case here. That file needs debugfs mounted at `/sys/kernel/debug`. Where it is missing even
-so, the kernel cannot switch modes, and it is the case when `/boot/config-$(uname -r)` sets
-`CONFIG_PREEMPT_RCU=y`.
+prints the modes with the one in use in parentheses, such as `full (lazy)`, and hooks can be skipped
+when it is `(full)` or `(lazy)`. That file needs debugfs mounted at `/sys/kernel/debug`. Where it is
+missing even so, the kernel cannot switch modes, and hooks can be skipped when
+`/boot/config-$(uname -r)` sets `CONFIG_PREEMPT_RCU=y`.
 
 `host_missed` counts skips anywhere on the host while the step ran, so 0 means none of the step's
 accesses was skipped. The summary does not warn on a nonzero count, since a skip cannot be tied to
@@ -429,9 +429,8 @@ mode.
 - Work handed to a process outside the sandbox, such as an `ssh-agent` or `gpg-agent` reached over a
   socket.
 - An inode flag change through `ioctl`, as `chattr` makes, an extended attribute change other than
-  through `setxattr` or `lsetxattr`, a failed `exec`, a
-  `mkdir`, `mknod`, `symlink` or `link` on a name already there, and one made by `bind(2)` that the
-  kernel refuses before reaching its file.
+  through `setxattr` or `lsetxattr`, a failed `exec`, a `mkdir`, `mknod`, `symlink` or `link` on a
+  name already there, and one made by `bind(2)` that the kernel refuses before reaching its file.
 - The sandbox's own setup, and the step's shell reading its script.
 
 io_uring is not among them: the sandbox refuses `io_uring_setup`, so no access goes through it.
