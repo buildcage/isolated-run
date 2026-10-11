@@ -40,9 +40,10 @@ const recordArb = fc.record(
     ),
     to: fc.constantFrom("/work/n", "/home/u/.l"),
     access: fc.constantFrom("r", "w", "x", "wct"),
-    err: fc.constantFrom(0, 2, 13, 30),
+    err: fc.constantFrom(0, 1, 2, 13, 18, 30),
     failed: fc.boolean(),
     exchange: fc.boolean(),
+    deleted: fc.boolean(),
   },
   { requiredKeys: ["comm", "kind", "path"] },
 );

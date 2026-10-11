@@ -619,6 +619,23 @@ describe("renderFilesystemAuditSummary", () => {
         }),
       ),
     ).toEqual(["w ln ./x", "l! ln /etc/shadow"]);
+    // With no file row to carry it, the refusal stays on the new name.
+    expect(
+      lines(
+        render(
+          { kind: "link", comm: "ln", to: "/work/y", err: 1, failed: true },
+          {
+            kind: "link",
+            comm: "sh",
+            path: "memfd:m",
+            to: "/work/z",
+            memfd: true,
+            err: 1,
+            failed: true,
+          },
+        ),
+      ),
+    ).toEqual(["w! ln ./y", "w! sh ./z"]);
   });
 
   it("folds a walked-through directory into the leaf it reached", () => {

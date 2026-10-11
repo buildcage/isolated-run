@@ -68406,20 +68406,31 @@ function classify(r) {
 		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
 	} else r.failed ? (letter = LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : letter = LETTER[r.kind];
 	if (!letter) return [];
-	let fileRefused = r.kind === "link" && failed && r.err === 1, perm = failed && PERM_ERRNO.has(r.err ?? 0) && !fileRefused, out = [], first = r.kind === "link" ? r.to : r.path;
-	return first && out.push({
+	let perm = failed && PERM_ERRNO.has(r.err ?? 0);
+	if (r.kind === "link") return classifyLink(r, letter, failed, perm);
+	let out = r.path ? [{
 		letter,
-		path: first,
+		path: r.path,
 		failed,
 		perm
-	}), r.kind === "rename" && r.exchange && r.to && out.push({
+	}] : [];
+	return r.kind === "rename" && r.exchange && r.to && out.push({
 		letter,
 		path: r.to,
 		failed,
 		perm
-	}), r.kind === "link" && !r.deleted && r.path && out.push({
+	}), out;
+}
+function classifyLink(r, letter, failed, perm) {
+	let file = !r.deleted && !r.memfd ? r.path : void 0, fileRefused = !!file && failed && r.err === 1, out = [];
+	return r.to && out.push({
+		letter,
+		path: r.to,
+		failed,
+		perm: perm && !fileRefused
+	}), file && out.push({
 		letter: "L",
-		path: r.path,
+		path: file,
 		failed,
 		perm: fileRefused
 	}), out;

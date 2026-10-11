@@ -84,21 +84,30 @@ function classify(r: AuditRecord): Classified[] {
     letter = LETTER[r.kind];
   }
   if (!letter) return [];
-  // A hard link refused EPERM is refused for the file it names
-  // (protected_hardlinks), not for its new name.
-  const fileRefused = r.kind === "link" && failed && r.err === 1;
-  const perm = failed && PERM_ERRNO.has(r.err ?? 0) && !fileRefused;
-  const out: Classified[] = [];
-  const first = r.kind === "link" ? r.to : r.path;
-  if (first) out.push({ letter, path: first, failed, perm });
+  const perm = failed && PERM_ERRNO.has(r.err ?? 0);
+  if (r.kind === "link") return classifyLink(r, letter, failed, perm);
+  const out: Classified[] = r.path ? [{ letter, path: r.path, failed, perm }] : [];
   // An exchange moves each path to the other.
   if (r.kind === "rename" && r.exchange && r.to) out.push({ letter, path: r.to, failed, perm });
-  // A hard link writes its new name, and the file it names can be read under
-  // that name from then on; a failed one still shows which file it was after,
-  // as a link across mounts fails EXDEV. One of a file with no name of its
-  // own, as O_TMPFILE makes, names none.
-  if (r.kind === "link" && !r.deleted && r.path)
-    out.push({ letter: "L", path: r.path, failed, perm: fileRefused });
+  return out;
+}
+
+// A hard link writes its new name, and the file it names can be read under
+// that name from then on; a failed one still shows which file it was after,
+// as a link across mounts fails EXDEV. A file with no name of its own, as
+// O_TMPFILE or memfd_create makes, names none. EPERM is mostly
+// protected_hardlinks refusing the file, so the refusal shows on it.
+function classifyLink(
+  r: AuditRecord,
+  letter: string,
+  failed: boolean,
+  perm: boolean,
+): Classified[] {
+  const file = !r.deleted && !r.memfd ? r.path : undefined;
+  const fileRefused = Boolean(file) && failed && r.err === 1;
+  const out: Classified[] = [];
+  if (r.to) out.push({ letter, path: r.to, failed, perm: perm && !fileRefused });
+  if (file) out.push({ letter: "L", path: file, failed, perm: fileRefused });
   return out;
 }
 
