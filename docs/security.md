@@ -642,7 +642,8 @@ spells a path. What it can do:
 - Have the sandbox init act for it, on a self-hosted runner with `kernel.yama.ptrace_scope=0`: the
   init runs as the step's user, so the step can trace it, and the init's own records are left out.
   GitHub-hosted runners only let a process trace its descendants.
-- Use an operation the tracer does not record: an extended attribute change other than through
+- Use an operation the tracer does not record: an inode flag change through `ioctl`, as `chattr`
+  makes, an extended attribute change other than through
   `setxattr` or `lsetxattr`, a failed `exec`, a `mkdir`, `mknod`, `symlink` or `link` on a name
   that is already there, or one made by `bind(2)` that the kernel refuses before reaching its file.
 - Look a file up, or read a link's target or an extended attribute. `stat`, `access`,

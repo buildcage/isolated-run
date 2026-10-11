@@ -361,15 +361,15 @@ tracer caught:
 The step fails before the command runs with
 `filesystem_audit could not start (<reason>); the command was not run.`
 
-| Reason                               | What to do                                                                                                                                                                   |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `the runner is not on cgroup v2`     | Boot the host with cgroup v2 (the default on Ubuntu 22.04 and later). On a cgroup v2 host, it means the runner's own cgroup lies outside its cgroup namespace or was removed |
-| `the kernel exposes no BTF`          | Use a kernel built with BTF (`/sys/kernel/btf/vmlinux`), as Ubuntu's and most distributions' are                                                                             |
-| `read kernel BTF: …`                 | `/sys/kernel/btf/vmlinux` is there but empty or unreadable, as when something is mounted over it; make sure it is the kernel's own                                           |
-| `the kernel is older than Linux 6.1` | Move to Linux 6.1 or newer                                                                                                                                                   |
-| `attach <name>: …` on arm64          | Move to Linux 6.4 or newer, the first arm64 kernel that lets the tracer hook kernel functions                                                                                |
-| `the tracer did not attach in time`  | The host was too busy to start the tracer; run the job again                                                                                                                 |
-| Anything else                        | The tracer's own error; please [open an issue](https://github.com/buildcage/isolated-run/issues) with it                                                                     |
+| Reason                               | What to do                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `the runner is not on cgroup v2`     | Boot the host with cgroup v2 (the default on Ubuntu 22.04 and later). On a cgroup v2 host, it means the runner's own cgroup lies outside its cgroup namespace or was removed                                                                                                                                                                                                                               |
+| `the kernel exposes no BTF`          | Use a kernel built with BTF (`/sys/kernel/btf/vmlinux`), as Ubuntu's and most distributions' are                                                                                                                                                                                                                                                                                                           |
+| `read kernel BTF: …`                 | If it ends in `unknown kind …`, `header contains non-zero trailer` or `unsupported flags …`, the kernel's BTF is newer than the tracer can read; please [open an issue](https://github.com/buildcage/isolated-run/issues) with the output of `uname -r`. If it ends in `buffer too small` or `no BTF found …`, `/sys/kernel/btf/vmlinux` is empty, covered or unreadable; make sure it is the kernel's own |
+| `the kernel is older than Linux 6.1` | Move to Linux 6.1 or newer                                                                                                                                                                                                                                                                                                                                                                                 |
+| `attach <name>: …` on arm64          | Move to Linux 6.4 or newer, the first arm64 kernel that lets the tracer hook kernel functions                                                                                                                                                                                                                                                                                                              |
+| `the tracer did not attach in time`  | The host was too busy to start the tracer; run the job again                                                                                                                                                                                                                                                                                                                                               |
+| Anything else                        | The tracer's own error; please [open an issue](https://github.com/buildcage/isolated-run/issues) with it                                                                                                                                                                                                                                                                                                   |
 
 The summary can also open with a warning, or be missing:
 
@@ -392,7 +392,8 @@ refuses; see [What changes in the step](#what-changes-in-the-step).
   does through such a handle, such as running or reopening the file, is recorded.
 - Work handed to a process outside the sandbox, such as an `ssh-agent` or `gpg-agent` reached over a
   socket.
-- An extended attribute change other than through `setxattr` or `lsetxattr`, a failed `exec`, a
+- An inode flag change through `ioctl`, as `chattr` makes, an extended attribute change other than
+  through `setxattr` or `lsetxattr`, a failed `exec`, a
   `mkdir`, `mknod`, `symlink` or `link` on a name already there, and one made by `bind(2)` that the
   kernel refuses before reaching its file.
 - The sandbox's own setup, and the step's shell reading its script.
@@ -415,10 +416,12 @@ itself can do to the record, and what the record can be trusted for.
 
 ### Skipped hooks
 
-On a kernel running with full preemption, one of the tracer's hooks is skipped when it is entered
-again while paused mid-run. A stock Ubuntu kernel, as on GitHub-hosted runners, does not pause the
-hooks. On a self-hosted runner, `sudo cat /sys/kernel/debug/sched/preempt` prints the mode in use in
-parentheses, such as `none (voluntary) full`; `(full)` is the case here, as is a `uname -v` naming
-`PREEMPT` or `PREEMPT_RT` on a kernel without that file. `host_missed` counts skips anywhere on the
-host while the step ran, so 0 means none of the step's accesses was skipped. The summary does not
-warn on a nonzero count, since a skip cannot be tied to the step.
+On some kernels one of the tracer's hooks can be paused mid-run, and is then skipped when it is
+entered again. The kernels on GitHub-hosted runners do not pause the hooks, nor do Ubuntu 22.04's
+and 24.04's `generic` kernels as they boot by default; Ubuntu 26.04's, and the 7.0 hardware
+enablement kernel of 24.04, do. On a self-hosted runner, `sudo cat /sys/kernel/debug/sched/preempt`
+prints the modes with the one in use in parentheses, such as `full (lazy)`; `(full)` and `(lazy)`
+are the case here. On a kernel without that file, it is the case when `/boot/config-$(uname -r)`
+sets `CONFIG_PREEMPT_RCU=y`. `host_missed` counts skips anywhere on the host while the step ran, so
+0 means none of the step's accesses was skipped. The summary does not warn on a nonzero count, since
+a skip cannot be tied to the step.
