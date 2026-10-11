@@ -414,7 +414,7 @@ jobs:
           sudo mount --bind "$(mktemp)" /sys/kernel/btf/vmlinux
           if [ -s /sys/kernel/btf/vmlinux ]; then echo "::error::the kernel's BTF is not empty"; exit 1; fi
 
-      # Run directly, as the action would, to see which check refused it.
+      # Run directly rather than through `uses:`, so the log shows which check refused it.
       - name: A step on a kernel that exposes no BTF fails before its command
         env:
           INPUT_PROXY_ENGINE: universal
@@ -429,7 +429,7 @@ jobs:
           fi
           if [ -e "$GITHUB_WORKSPACE/should-not-run" ]; then echo "::error::the command ran"; exit 1; fi
 
-      # A file of the right size but not BTF passes that check, so the tracer
+      # A non-empty file that is not BTF passes that check, so the tracer
       # fails to load after it has made the sandbox's cgroup.
       - name: Replace the kernel's BTF with a file that is not BTF
         run: |

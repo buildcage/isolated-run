@@ -381,10 +381,11 @@ The step fails before the command runs with
 | `the tracer did not attach in time`  | The host was too busy to start the tracer; run the job again                                                                                                                 |
 | Anything else                        | The tracer's own error; please [open an issue](https://github.com/buildcage/isolated-run/issues) with it                                                                     |
 
-`read kernel BTF: …` means the kernel's BTF is newer than the tracer can read. Please
-[open an issue](https://github.com/buildcage/isolated-run/issues) with the output of `uname -r`. If it
-ends in `no BTF found …`, root cannot read `/sys/kernel/btf/vmlinux`, as when a security module
-denies it.
+`read kernel BTF: …` ending in `unknown kind …`, `header contains non-zero trailer` or
+`unsupported flags …` means the kernel's BTF is newer than the tracer can read. Please
+[open an issue](https://github.com/buildcage/isolated-run/issues) with the output of `uname -r`.
+Other endings, such as `no valid BTF header` or `no BTF found …`, mean
+`/sys/kernel/btf/vmlinux` is not the kernel's own or root cannot read it.
 
 The summary can also open with a warning, or be missing:
 
