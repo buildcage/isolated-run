@@ -247,7 +247,7 @@ function mergeAgg(dst: Agg, src: Agg): void {
 }
 
 // One access, as a line records it. bit is 0 for a read of what the process
-// loaded, which still counts toward a directory's fold but prints nothing.
+// loaded, which prints nothing and so does not count toward a directory's fold.
 interface Access {
   comm: string;
   path: string;
@@ -259,7 +259,6 @@ interface Access {
 }
 
 function apply(a: Agg, x: Access): void {
-  if (!x.bit) return;
   if (!x.failed) a.ok |= x.bit;
   else {
     a.failed |= x.bit;
@@ -445,15 +444,17 @@ class Lines {
   }
 
   add(x: Access): void {
-    if (this.stopped) return;
+    if (this.stopped || !x.bit) return;
     const parts = components(x.path);
-    if (unfoldable(parts, x.path)) {
+    // A program run is never folded away, nor makes its directory fold.
+    if (unfoldable(parts, x.path) || x.bit === BIT.X) {
       const key = keyOf(x.comm, x.path);
       let a = this.climbing.get(key);
-      if (!a) this.climbing.set(key, (a = newAgg()));
-      const shown = flagBits(a) !== 0;
+      if (!a) {
+        this.climbing.set(key, (a = newAgg()));
+        this.count(this.opts.rowBytes(x.path, x.comm));
+      }
       apply(a, x);
-      if (!shown && flagBits(a)) this.count(this.opts.rowBytes(x.path, x.comm));
       return;
     }
     let kids: Map<string, Node> | undefined = this.trees.get(x.comm);
@@ -562,10 +563,14 @@ class Lines {
   }
 
   private *lines(): Generator<{ comm: string; path: string; agg: Agg }> {
-    for (const [key, agg] of this.climbing)
-      if (flagBits(agg)) yield { comm: commOf(key), path: pathOf(key), agg };
     for (const [comm, top] of this.trees)
-      for (const [path, agg] of treeLines(top)) yield { comm, path, agg };
+      for (const [path, agg] of treeLines(top)) {
+        // A command that also ran the file keeps one row for it.
+        const ran = this.climbing.get(keyOf(comm, path));
+        if (ran) mergeAgg(ran, agg);
+        else yield { comm, path, agg };
+      }
+    for (const [key, agg] of this.climbing) yield { comm: commOf(key), path: pathOf(key), agg };
   }
 }
 
@@ -630,6 +635,10 @@ interface Shown {
   deleted?: boolean;
 }
 
+interface Executed extends Shown {
+  runs: number;
+}
+
 interface Row extends Shown {
   agg: Agg;
   flags: string;
@@ -641,8 +650,9 @@ export interface AuditSummary {
   // From the tracer's end line, which a recording cut short lacks.
   ended: boolean;
   lost: boolean;
+  /** Up to the size limit, past which fitStepSummary cuts it. */
+  executed: Executed[];
   /** Each part, or undefined where it outgrew the Job Summary. */
-  executed: Shown[] | undefined;
   paths: Row[] | undefined;
   details: Row[] | undefined;
   /** Why the paths and the details were given up, where they were. */
@@ -750,7 +760,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     nodes: limits.nodes,
     rowBytes: (p, comm) => relLength(p) + comm.length + 3,
   });
-  let executed: Set<string> | undefined = new Set<string>();
+  // Each program run, with how many times it ran.
+  const executed = new Map<string, number>();
   let executedBytes = 0;
   let ended = false;
   let lost = false;
@@ -766,12 +777,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       lost = Boolean(r.dropped || r.untracked);
       return;
     }
-    if (r.kind === "exec" && r.path && executed) {
+    if (r.kind === "exec" && r.path) {
       const p = normalize(canonical(marked(r, r.path), prefixes));
-      if (!executed.has(p)) {
-        executed.add(p);
-        executedBytes += relLength(p) + 7;
-        if (executedBytes > limit) executed = undefined;
+      const runs = executed.get(p);
+      if (runs !== undefined) executed.set(p, runs + 1);
+      else if (executedBytes <= limit) {
+        executed.set(p, 1);
+        executedBytes += relLength(p) + 11;
       }
     }
     if (isLibraryMap(r)) return;
@@ -797,7 +809,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
         seq: Number.isNaN(t) ? Infinity : seq++,
       };
       details.add(x);
-      paths.add({ ...x, comm: "" });
+      // The executed table lists what ran, so this one leaves it out.
+      paths.add({ ...x, comm: "", bit: x.bit & ~BIT.X });
     }
   };
 
@@ -828,7 +841,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return {
       ended,
       lost,
-      executed: executed && [...executed].map(shown),
+      executed: [...executed].map(([path, runs]) => ({ ...shown(path), runs })),
       paths: byPath,
       details: log,
       pathsCut: paths.stopped,
@@ -877,8 +890,11 @@ export function renderAuditSummaryBlocks(
 
   const legend = legendNote ? `${LEGEND}<br>${legendNote}` : LEGEND;
   const blocks: SummaryBlock[] = [frame(`${heading}\n\n<sub>${legend}</sub>\n\n`)];
+  // Each part sits a level below the one before it, so once one is cut the
+  // parts after it print nothing and its note stands for them all.
   const table = (
     id: FilesystemBlockId,
+    level: number,
     title: string,
     md: string | undefined,
     cause?: CutCause,
@@ -887,7 +903,7 @@ export function renderAuditSummaryBlocks(
       ? {
           id,
           priority: priorities[id],
-          level: 2,
+          level,
           section: SECTION,
           text: `#### ${title}\n\n${cutNote(cause)}`,
           cut: "atomic",
@@ -895,23 +911,23 @@ export function renderAuditSummaryBlocks(
       : {
           id,
           priority: priorities[id],
-          level: 2,
+          level,
           section: SECTION,
           text: `#### ${title}\n\n${md}\n\n`,
           cut: "lines",
           head: 4,
         };
 
-  if (executed?.length !== 0) {
+  if (executed.length !== 0) {
     blocks.push(
       table(
         FILESYSTEM_BLOCK.executed,
+        2,
         "Executed",
-        executed &&
-          markdownRows(
-            ["Path"],
-            executed.map((e) => [pathCell(e)]),
-          ),
+        markdownRows(
+          ["Path", "Runs"],
+          executed.map((e) => [pathCell(e), String(e.runs)]),
+        ),
       ),
     );
   }
@@ -924,22 +940,26 @@ export function renderAuditSummaryBlocks(
       const [cb, pb] = sortKey(b.path);
       return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : 0);
     });
-  blocks.push(
-    table(
-      FILESYSTEM_BLOCK.paths,
-      "Accessed paths",
-      byPath &&
-        markdownRows(
-          ["Access", "Path"],
-          byPath.map((r) => [r.flags, pathCell(r)]),
-        ),
-      pathsCut,
-    ),
-  );
+  // Empty when the step only ran programs, which the executed table lists.
+  if (byPath?.length !== 0) {
+    blocks.push(
+      table(
+        FILESYSTEM_BLOCK.paths,
+        3,
+        "Accessed paths",
+        byPath &&
+          markdownRows(
+            ["Access", "Path"],
+            byPath.map((r) => [r.flags, pathCell(r)]),
+          ),
+        pathsCut,
+      ),
+    );
+  }
 
   // The table's note stands for the details too.
   if (!byPath) return blocks;
-  const log = { id: FILESYSTEM_BLOCK.log, priority: priorities[FILESYSTEM_BLOCK.log], level: 3 };
+  const log = { id: FILESYSTEM_BLOCK.log, priority: priorities[FILESYSTEM_BLOCK.log], level: 4 };
   if (!details) {
     blocks.push({
       ...log,

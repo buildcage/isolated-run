@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
 
+import { fitStepSummary, withNotices } from "#core/lib/report/render/fit-step-summary.ts";
+
 import {
   dropWalkedDirs,
   keyOf,
+  renderFilesystemAuditBlocks,
   renderFilesystemAuditSummary,
   type SummaryOptions,
 } from "./filesystem-audit-summary.ts";
@@ -199,8 +202,53 @@ describe("renderFilesystemAuditSummary", () => {
     expect(tableRows(md)).toEqual([
       "| R | `./libx.so` |",
       "| R | `/etc/ld.so.cache` |",
-      "| RX | `/usr/bin/tool` |",
+      "| R | `/usr/bin/tool` |",
     ]);
+  });
+
+  it("does not let what a process loaded fold the directory it sits in", () => {
+    const md = render(
+      ...["a", "b", "c"].map((f) => ({
+        kind: "mmap",
+        pid: 2,
+        comm: "x",
+        path: `/opt/lib/lib${f}.so`,
+        access: "x",
+      })),
+      ...["a", "b", "c"].map((f) => ({
+        kind: "read",
+        pid: 2,
+        comm: "x",
+        path: `/opt/lib/lib${f}.so`,
+      })),
+      { kind: "read", pid: 2, comm: "x", path: "/opt/lib/x.conf" },
+    );
+    expect(lines(md)).toEqual(["R x /opt/lib/x.conf"]);
+  });
+
+  it("keeps one row for a command that writes a file and then runs it", () => {
+    const md = render(
+      { kind: "write", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
+      { kind: "exec", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
+    );
+    expect(lines(md)).toEqual(["WX rustup ~/.cargo/bin/rustup"]);
+    expect(tableRows(md)).toEqual(["| W | `~/.cargo/bin/rustup` |"]);
+  });
+
+  it("never folds a program run, nor lets one fold its directory", () => {
+    const md = render(
+      ...["a", "b", "c"].map((p) => ({ kind: "exec", comm: "sh", path: `/usr/bin/${p}` })),
+      { kind: "mkdir", failed: true, err: 30, comm: "sh", path: "/usr/local/x" },
+      { kind: "read", comm: "sh", path: "/usr/share/y" },
+    );
+    expect(lines(md)).toEqual([
+      "X sh /usr/bin/a",
+      "X sh /usr/bin/b",
+      "X sh /usr/bin/c",
+      "w! sh /usr/local/x",
+      "R sh /usr/share/y",
+    ]);
+    expect(tableRows(md)).toEqual(["| w! | `/usr/local/x` |", "| R | `/usr/share/y` |"]);
   });
 
   it("tells a process from a later one given the same pid", () => {
@@ -789,14 +837,14 @@ describe("renderFilesystemAuditSummary", () => {
   });
 
   describe("tables", () => {
-    it("lists each executed path once, in the order first run", () => {
+    it("lists each executed path once with how many times it ran, in the order first run", () => {
       const md = render(
         { kind: "exec", comm: "sh", path: "/usr/bin/sh" },
         { kind: "exec", comm: "node", path: "/work/bin/node" },
         { kind: "exec", comm: "sh", path: "/usr/bin/sh" },
       );
       expect(md).toContain(
-        "#### Executed\n\n| Path |\n| --- |\n| `/usr/bin/sh` |\n| `./bin/node` |\n\n",
+        "#### Executed\n\n| Path | Runs |\n| --- | --- |\n| `/usr/bin/sh` | 2 |\n| `./bin/node` | 1 |\n\n",
       );
     });
 
@@ -807,7 +855,9 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "exec", comm: "a", path: "/proc/12/fd/3" },
         { kind: "exec", comm: "a", path: "/proc/34/fd/3" },
       );
-      expect(md).toContain("| Path |\n| --- |\n| `…/run.sh` |\n| `/proc/<pid>/fd/3` |\n\n");
+      expect(md).toContain(
+        "| Path | Runs |\n| --- | --- |\n| `…/run.sh` | 2 |\n| `/proc/<pid>/fd/3` | 2 |\n\n",
+      );
     });
 
     it("keeps two rows that read alike in a stable order", () => {
@@ -827,10 +877,10 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "write", comm: "py", path: "/tmp/q (deleted)" },
       );
       expect(md).toContain(
-        '| Path |\n| --- |\n| `memfd:"/usr/bin/a\\"b"` |\n| `/tmp/p` (deleted) |\n\n',
+        '| Path | Runs |\n| --- | --- |\n| `memfd:"/usr/bin/a\\"b"` | 1 |\n| `/tmp/p` (deleted) | 1 |\n\n',
       );
       expect(md).toContain(
-        '| WX | `/tmp/p` (deleted) |\n| W | `/tmp/q (deleted)` |\n| WX | `memfd:"/usr/bin/a\\"b"` |\n',
+        '| W | `/tmp/p` (deleted) |\n| W | `/tmp/q (deleted)` |\n| W | `memfd:"/usr/bin/a\\"b"` |\n',
       );
       expect(lines(md)).toContain('W py memfd:"/usr/bin/a\\"b"');
       expect(lines(md)).toContain("W py /tmp/p (deleted)");
@@ -862,7 +912,14 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "read", pid: 1, comm: "p", path: "/tmp/p", deleted: true },
         { kind: "exec", pid: 1, comm: "p", path: "/tmp/p", deleted: true },
       );
-      expect(tableRows(md)).toEqual(["| X | `/tmp/p` (deleted) |"]);
+      expect(md).toContain("| `/tmp/p` (deleted) | 1 |");
+      expect(lines(md)).toEqual(["X p /tmp/p (deleted)"]);
+    });
+
+    it("leaves the accessed-paths table out when the step only ran programs", () => {
+      const md = render({ kind: "exec", comm: "sh", path: "/usr/bin/sh" });
+      expect(md).not.toContain("#### Accessed paths");
+      expect(lines(md)).toEqual(["X sh /usr/bin/sh"]);
     });
 
     it("shows an exchange as a move of both paths", () => {
@@ -931,7 +988,7 @@ describe("renderFilesystemAuditSummary", () => {
       );
       expect(md).toContain("| R | `./x` |");
       expect(md).not.toContain("| r | `./x` |");
-      expect(md).toContain("| Path |\n| --- |\n| `./bin` |\n\n");
+      expect(md).toContain("| Path | Runs |\n| --- | --- |\n| `./bin` | 2 |\n\n");
     });
 
     it("folds the per-command record into a details element after the tables", () => {
@@ -990,15 +1047,37 @@ describe("renderFilesystemAuditSummary: limits", () => {
     expect(section(md, "<details>")).toContain(CUT);
   });
 
-  it("cuts the executed table on its own", () => {
+  it("stops listing new programs once the executed table outgrows the limit, still counting runs", () => {
     const execs = Array.from({ length: 20 }, (_, i) => ({
       kind: "exec",
       comm: "c",
       path: `/usr/bin/tool-${i}`,
     }));
-    const md = limited({ bytes: 200 }, ...execs);
-    expect(section(md, "#### Executed", "#### Accessed paths")).toContain(CUT);
-    expect(section(md, "#### Accessed paths", "<details>")).toContain("| X | `/usr/bin/**` |");
+    const md = limited({ bytes: 200 }, ...execs, execs[0]);
+    expect(md).toContain("| `/usr/bin/tool-0` | 2 |");
+    expect(md).not.toContain("tool-19");
+  });
+
+  it("prints nothing after the part a size cut reaches, its note standing for the rest", () => {
+    const execs = Array.from({ length: 40 }, (_, i) => ({
+      kind: "exec",
+      comm: "c",
+      path: `/usr/bin/tool-${i}`,
+    }));
+    const blocks = renderFilesystemAuditBlocks(
+      jsonl(...execs, ...tmpFiles(40)),
+      PREFIXES,
+      { "filesystem-executed": 1, "filesystem-paths": 2, "filesystem-log": 3 },
+      () => "unused",
+    );
+    const md = fitStepSummary(
+      withNotices(blocks, () => "NOTE\n"),
+      { limitBytes: 8 * 1024 + 600 },
+    );
+    expect(md).toContain("`/usr/bin/tool-0`");
+    expect(md.split("NOTE")).toHaveLength(2);
+    expect(md).not.toContain("#### Accessed paths");
+    expect(md).not.toContain("<details>");
   });
 
   it("cuts a part whose unfolded paths outgrow the bound, saying so", () => {

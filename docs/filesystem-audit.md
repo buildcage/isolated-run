@@ -102,9 +102,10 @@ R read · W write · X exec · M move · D delete · A attr · lowercase = faile
 buildcage-filesystem-audit-<id> artifact · how to read this
 
 #### Executed
-| Path                  |
-| --------------------- |
-| `/usr/local/bin/node` |
+| Path                  | Runs |
+| --------------------- | ---- |
+| `/usr/local/bin/node` | 1    |
+| `/usr/bin/dash`       | 12   |
 
 #### Accessed paths
 | Access | Path                  |
@@ -116,17 +117,20 @@ buildcage-filesystem-audit-<id> artifact · how to read this
 
 📂 Filesystem details
 first-last access since the proxy started · flags · command · path
+00:00.401-00:00.420: Xw! node /usr/local/bin/node
 00:00.412:           R   node ./package.json
 00:00.415-00:00.418: Rr! node /etc/**
-00:00.420:           w!  node /usr/local/bin/node
 00:00.530-00:41.207: RWD node ./node_modules/**
+00:00.531-00:40.982: X   sh   /usr/bin/dash
 ```
 
 Where there is no artifact, the legend says how to ask for one, or that the upload failed.
 
-- **Executed** lists each program once, in the order it first ran.
+- **Executed** lists each program once, in the order it first ran, with how many times it ran.
 - **Accessed paths** combines every command's actions on a path in one row, in path order: the
-  workspace first, then `$HOME`, then the rest.
+  workspace first, then `$HOME`, then the rest. Running a program is left to the executed table.
+  Which path was refused inside a `dir/**` row shows in the details unless that command's row is
+  folded too; the artifact always has it.
 - **📂 Filesystem details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
   that command first and last touched the path, counted from the proxy's start like the
@@ -138,7 +142,7 @@ Where there is no artifact, the legend says how to ask for one, or that the uplo
 | ---- | ---------------------------------------------------------------------------------------------- |
 | `R`  | Read, or mapped for reading                                                                    |
 | `W`  | Written, mapped shared and writable, created or truncated: a file, a directory, a link         |
-| `X`  | Run as a program                                                                               |
+| `X`  | Run as a program; shown in the details only, as the executed table lists every program         |
 | `M`  | Moved (renamed), from or to this path                                                          |
 | `D`  | Deleted                                                                                        |
 | `A`  | Attributes changed: mode, owner, times, extended attributes                                    |
@@ -165,7 +169,9 @@ artifact has every access in order.
 | `\xff`                 | A byte that is not UTF-8 in a path or command name                                                               |
 
 `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME` and the directories above them are never
-folded into a `dir/**` row, nor is `/proc/<pid>`, which stands for any process's own directory.
+folded into a `dir/**` row, nor is `/proc/<pid>`, which stands for any process's own directory. A
+program run is never folded either, and neither it nor a file a program loaded counts toward the
+three entries.
 
 A program is shown under the file it ran, with symlinks followed, and a script under its own path
 rather than its interpreter's. A failed access is shown under the name the command passed, joined to
