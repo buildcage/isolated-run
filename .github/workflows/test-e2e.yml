@@ -157,8 +157,8 @@ jobs:
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
         filesystem_mode: [persistent, ephemeral]
-        # The oldest (6.8 on 22.04) and newest (7.0 on 26.04) kernels
-        # GitHub-hosted runners ship, once per architecture.
+        # The oldest (22.04) and newest (26.04) kernels GitHub-hosted runners
+        # ship, once per architecture.
         include:
           - { runner: ubuntu-22.04, filesystem_mode: persistent }
           - { runner: ubuntu-22.04-arm, filesystem_mode: persistent }
@@ -336,8 +336,10 @@ jobs:
           grep -q '<summary>📂 Filesystem details</summary>' "$f"
           grep -qE ' WA +python3 +\./futimens\.txt$' "$f"
           # A subshell's command still counts as the step's. GNU touch then
-          # sets the new file's times; uutils' does not.
-          grep -qE ' WA? +touch +\./subshell\.txt$' "$f"
+          # sets the new file's times through the descriptor; uutils' does not.
+          a=; if touch --version | grep -q 'GNU coreutils'; then a=A; fi
+          grep -qF "| W$a | \`./subshell.txt\` |" "$f"
+          grep -qE " W$a +touch +\./subshell\.txt$" "$f"
           # Relative names show under the directory they resolved against.
           grep -qE ' r +bash +\./sub/missing\.txt$' "$f"
           grep -qE ' d +python3 +\./sub/gone$' "$f"
