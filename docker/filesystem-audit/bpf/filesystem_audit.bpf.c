@@ -366,8 +366,14 @@ static __always_inline struct held_key held_key(u32 use)
 static __always_inline int hold_as(struct event *e, u32 use)
 {
 	struct held_key k = held_key(use);
-	if (e->data_len <= SHORT_DATA && bpf_map_update_elem(&held_short, &k, e, BPF_ANY) == 0)
+	// One slot per key: one left in the other pool would outlive this hold.
+	if (e->data_len <= SHORT_DATA && bpf_map_update_elem(&held_short, &k, e, BPF_ANY) == 0) {
+		if (bpf_map_lookup_elem(&held_long, &k))
+			bpf_map_delete_elem(&held_long, &k);
 		return 0;
+	}
+	if (bpf_map_lookup_elem(&held_short, &k))
+		bpf_map_delete_elem(&held_short, &k);
 	return bpf_map_update_elem(&held_long, &k, e, BPF_ANY);
 }
 
@@ -798,6 +804,12 @@ int BPF_PROG(on_task_exit, struct task_struct *p)
 		return 0;
 	u64 id = bpf_get_current_pid_tgid();
 	bpf_map_delete_elem(&in_exec, &id);
+	// Nor does an io_uring worker reach sys_exit for the path changes it
+	// makes; what it held would otherwise pass for the next thread's.
+	bpf_map_delete_elem(&in_syscall, &id);
+	release(HELD_OP);
+	release(HELD_OPEN);
+	release(HELD_NAME);
 	return 0;
 }
 
@@ -1068,13 +1080,53 @@ static __always_inline void open_failed(struct pending *op, long ret, struct eve
 	submit(e);
 }
 
+// A held event as its syscall returned. use and the caps are constants once
+// inlined, so each pool's slot size bounds what is read from it.
+static __always_inline void held_done(u32 use, struct event *e, u32 cap, u32 data_cap, long ret,
+				      struct pending *p)
+{
+	if (use == HELD_OP) {
+		// A failure the syscall's entry recorded stands for this one.
+		if (ret >= 0) {
+			submit_cap(e, cap);
+		} else if (!p) {
+			e->err = -ret;
+			submit_cap(e, cap);
+		}
+	} else if (use == HELD_OPEN) {
+		// Reaching the file after its create step means it was created,
+		// whatever then refused the open.
+		if (ret >= 0 || p->creating)
+			submit_cap(e, cap);
+	} else if (ret < 0) {
+		open_failed(p, ret, e, data_cap);
+	}
+}
+
+// Ends the thread's hold under use, and reports whether it had one.
+static __always_inline int take(u32 use, long ret, struct pending *p)
+{
+	struct held_key k = held_key(use);
+	struct event *e = bpf_map_lookup_elem(&held_short, &k);
+	if (e) {
+		held_done(use, e, sizeof(struct short_slot), SHORT_DATA, ret, p);
+		bpf_map_delete_elem(&held_short, &k);
+		return 1;
+	}
+	e = bpf_map_lookup_elem(&held_long, &k);
+	if (!e)
+		return 0;
+	held_done(use, e, sizeof(struct event), PATH_LEN, ret, p);
+	bpf_map_delete_elem(&held_long, &k);
+	return 1;
+}
+
 static __always_inline void open_exit(long ret)
 {
 	u64 id = bpf_get_current_pid_tgid();
 	struct pending *op = in_open();
 	if (!op)
 		return;
-	struct held_key k = held_key(HELD_OPEN);
 	// ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal interrupted the open,
 	// which the kernel runs again, and that run records it.
 	if (ret <= -512 && ret >= -516) {
@@ -1083,30 +1135,8 @@ static __always_inline void open_exit(long ret)
 		bpf_map_delete_elem(&in_syscall, &id);
 		return;
 	}
-	// Reaching the file after its create step means it was created, whatever
-	// then refused the open.
-	int done = ret >= 0 || op->creating;
-	struct event *held = bpf_map_lookup_elem(&held_short, &k);
-	if (held) {
-		if (done)
-			submit_cap(held, sizeof(struct short_slot));
-		bpf_map_delete_elem(&held_short, &k);
-	} else if ((held = bpf_map_lookup_elem(&held_long, &k))) {
-		if (done)
-			submit_cap(held, sizeof(struct event));
-		bpf_map_delete_elem(&held_long, &k);
-	}
-	k.use = HELD_NAME;
-	struct event *name = bpf_map_lookup_elem(&held_short, &k);
-	if (name) {
-		if (ret < 0)
-			open_failed(op, ret, name, SHORT_DATA);
-		bpf_map_delete_elem(&held_short, &k);
-	} else if ((name = bpf_map_lookup_elem(&held_long, &k))) {
-		if (ret < 0)
-			open_failed(op, ret, name, PATH_LEN);
-		bpf_map_delete_elem(&held_long, &k);
-	} else if (ret < 0) {
+	take(HELD_OPEN, ret, op);
+	if (!take(HELD_NAME, ret, op) && ret < 0) {
 		if (op->name_lost)
 			bump(&untracked);
 		else
@@ -1516,17 +1546,6 @@ static __always_inline void op_exit(struct pending *pend, long ret)
 	submit(e);
 }
 
-// A held path change, as its syscall returned.
-static __always_inline void op_done(struct event *e, u32 cap, long ret, struct pending *pend)
-{
-	if (ret >= 0) {
-		submit_cap(e, cap);
-	} else if (!pend) {
-		e->err = -ret;
-		submit_cap(e, cap);
-	}
-}
-
 // Reports a held path change when its syscall returns: as done if it
 // succeeded (a truncating open returns a descriptor), else as failed with the
 // errno, unless the syscall's entry stashed it, whose record then stands for
@@ -1551,15 +1570,7 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 		if (!pend && !want.kind_ok && ret < 0 && -ret != want.quiet_err)
 			bump(&untracked);
 	}
-	struct held_key k = held_key(HELD_OP);
-	struct event *e = bpf_map_lookup_elem(&held_short, &k);
-	if (e) {
-		op_done(e, sizeof(struct short_slot), ret, pend);
-		bpf_map_delete_elem(&held_short, &k);
-	} else if ((e = bpf_map_lookup_elem(&held_long, &k))) {
-		op_done(e, sizeof(struct event), ret, pend);
-		bpf_map_delete_elem(&held_long, &k);
-	}
+	take(HELD_OP, ret, pend);
 	if (pend) {
 		op_exit(pend, ret);
 		bpf_map_delete_elem(&in_syscall, &id);
