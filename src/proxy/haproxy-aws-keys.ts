@@ -57,7 +57,16 @@ export const AWS_API_HOST = `\\.${AWS_DOMAINS}$`;
 // The names an interface VPC endpoint gives a service.
 const vpceHost = (service: string) =>
   `^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.${service}\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$`;
-export const STS_HOST = `^sts(-fips)?(\\.[a-z0-9-]+)?\\.${AWS_DOMAINS}$|${vpceHost("sts")}`;
+// A service's API host: its regional, region-less and dual-stack names and its
+// interface VPC endpoint. vpceService lets the VPC-endpoint name differ, as
+// EC2's does in carrying `-fips`.
+const apiHost = (service: string, vpceService = service) =>
+  `^${service}(-fips)?(\\.[a-z0-9-]+)?\\.${AWS_DOMAINS}$|${vpceHost(vpceService)}`;
+export const STS_HOST = apiHost("sts");
+// EC2's API. It reads the request body as a Query form whatever the
+// Content-Type says; as of 2026-10-12 it was the only Query service that does.
+// The `ec2-<ip>.compute` public names are a resource host, not this.
+export const EC2_HOST = apiHost("ec2", "ec2(-fips)?");
 // Hosts that name the resource a request is for, in the host or (S3's path
 // style, an EKS OIDC issuer) the path, so the URL rules can pin it and an
 // unsigned request is left to them: S3 in every form, ECR registries,
@@ -197,6 +206,10 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    # Matched undecoded, since a value carries & and = encoded, but each",
     "    # letter of the name may be.",
     `    http-request set-var(txn.aws_unsupported) bool(true) if aws_form { req.body -m reg -i (^|&)(${SIGV2_PARAM}|${SIGV4_PARAM})= }`,
+    "    # A non-form body would carry a SigV2 past the form-body check above, and",
+    "    # EC2 takes it over the Authorization header. EC2 has no JSON API, so a",
+    "    # non-form POST is never legitimate.",
+    `    http-request set-var(txn.aws_unsupported) bool(true) if aws_host METH_POST { var(txn.host) -m reg ${EC2_HOST} } !{ req.hdr(content-type) -m beg -i application/x-www-form-urlencoded }`,
     "    # A query credential spelled other than the one name the key is read from.",
     "    http-request set-var(txn.aws_unsupported) bool(true) if aws_query !{ url_param(X-Amz-Credential) -m found }",
     "    acl aws_unsupported var(txn.aws_unsupported) -m bool",
