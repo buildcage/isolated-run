@@ -13,23 +13,17 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
-	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"golang.org/x/sys/unix"
@@ -40,23 +34,6 @@ import (
 // -mcpu=v3 for the fetch-and-add that takes tails; every kernel the tracer
 // runs on has it.
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cflags -mcpu=v3 -type event filesystemAudit bpf/filesystem_audit.bpf.c
-
-const cgroupRoot = "/sys/fs/cgroup"
-
-// optionalProgs are programs whose attach target some supported kernels do
-// not expose; each is dropped before load when its function is absent from
-// kernel BTF. do_filp_open, renamed in 7.0, starts an open's hold with the
-// name getname copied.
-var optionalProgs = map[string]string{
-	"on_filp_open":     "do_filp_open",
-	"on_do_file_open":  "do_file_open",
-	"on_exec_file":     "security_bprm_creds_for_exec",
-	"on_file_truncate": "security_file_truncate",
-}
-
-// openNameProgs is the subset of optionalProgs that starts an open's hold; at
-// least one must attach.
-var openNameProgs = map[string]bool{"on_filp_open": true, "on_do_file_open": true}
 
 func main() {
 	cgPath := flag.String("cgroup", "", "cgroup v2 directory to watch, created if missing")
@@ -219,237 +196,13 @@ func stopRequested(sig <-chan os.Signal) bool {
 	}
 }
 
-type count struct {
-	n   uint64
-	err error
-}
-
-// missedRuns sums the runs of the programs the kernel skipped, anywhere on
-// the host, as it cannot say whose access a skip was.
-func missedRuns(coll *ebpf.Collection) (uint64, error) {
-	var sum uint64
-	for _, p := range coll.Programs {
-		s, err := p.Stats()
-		if err != nil {
-			return 0, err
-		}
-		sum += s.RecursionMisses
-	}
-	return sum, nil
-}
-
-// create makes a new file, never one already there and never through a
-// symlink at the path itself, as the tracer runs as root in a directory the
-// runner owns; the action has checked that directory is its own. It is 0644
-// whatever root's umask, so the action can read it back.
-func create(path string) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
-	if err != nil {
-		return nil, err
-	}
-	if err := f.Chmod(0o644); err != nil {
-		f.Close()
-		return nil, err
-	}
-	return f, nil
-}
-
-func writeNew(path string, data []byte) error {
-	f, err := create(path)
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(data)
-	return errors.Join(err, f.Close())
-}
-
-// stopOnExit stops the tracer when pid exits, so it does not outlive an
-// action killed before it could stop it. A pidfd, opened while pid is known
-// to be alive, cannot follow a later process that reuses the number.
-func stopOnExit(pid int, sig chan<- os.Signal) error {
-	fd, err := unix.PidfdOpen(pid, 0)
-	if err != nil {
-		return err
-	}
-	go func() {
-		defer unix.Close(fd)
-		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-		for {
-			_, err := unix.Poll(fds, -1)
-			if err == nil {
-				break
-			}
-			if err != unix.EINTR {
-				fmt.Fprintln(os.Stderr, "filesystem-audit: stopped watching the action:", err)
-				return
-			}
-		}
-		select {
-		case sig <- syscall.SIGTERM:
-		default: // a stop is already pending
-		}
-	}()
-	return nil
-}
-
-// prepareCgroup verifies the host is cgroup v2, creates the watched cgroup
-// if missing, and opens it for the programs' cgroup array. created says
-// whether it made the cgroup itself.
-func prepareCgroup(cgPath string) (f *os.File, created bool, err error) {
-	var sfs unix.Statfs_t
-	if err := unix.Statfs(cgroupRoot, &sfs); err != nil {
-		return nil, false, err
-	}
-	if sfs.Type != unix.CGROUP2_SUPER_MAGIC {
-		return nil, false, fmt.Errorf("%s is not cgroup v2 (magic %#x)", cgroupRoot, sfs.Type)
-	}
-	abs := filepath.Clean(cgPath)
-	rel, err := filepath.Rel(cgroupRoot, abs)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return nil, false, fmt.Errorf("cgroup path must be below %s: %s", cgroupRoot, cgPath)
-	}
-	// Under the runner's own cgroup, which is there already.
-	err = os.Mkdir(abs, 0o755)
-	if err != nil && !errors.Is(err, fs.ErrExist) {
-		return nil, false, err
-	}
-	created = err == nil
-	var st unix.Stat_t
-	if err = unix.Stat(abs, &st); err == nil {
-		f, err = os.Open(abs)
-	}
-	if err != nil {
-		if created {
-			os.Remove(abs)
-		}
-		return nil, false, err
-	}
-	fmt.Fprintf(os.Stderr, "filesystem-audit: cgroup %s id=%d\n", abs, st.Ino)
-	return f, created, nil
-}
-
-// requireLinux61 refuses a kernel older than 6.1, the oldest the tracer
-// supports, told by the BPF memory allocator that release added.
-func requireLinux61(kspec *btf.Spec) error {
-	var s *btf.Struct
-	err := kspec.TypeByName("bpf_mem_alloc", &s)
-	if errors.Is(err, btf.ErrNotFound) {
-		return errors.New("the kernel is older than Linux 6.1")
-	}
-	if err != nil {
-		return fmt.Errorf("read kernel BTF: %w", err)
-	}
-	return nil
-}
-
-// dropAbsentPrograms removes optional programs whose attach target the
-// running kernel does not expose, so loading does not fail on a missing one.
-func dropAbsentPrograms(spec *ebpf.CollectionSpec, kspec *btf.Spec) {
-	for prog, fn := range optionalProgs {
-		var f *btf.Func
-		if err := kspec.TypeByName(fn, &f); err != nil {
-			fmt.Fprintf(os.Stderr, "filesystem-audit: %s absent from kernel BTF, skipped\n", fn)
-			delete(spec.Programs, prog)
-		}
-	}
-}
-
-// setSyscallNumbers gives the BPF program the architecture's syscall numbers;
-// those it leaves unset are syscalls the architecture lacks.
-func setSyscallNumbers(spec *ebpf.CollectionSpec) error {
-	for name, nr := range syscallNumbers {
-		v, ok := spec.Variables[name]
-		if !ok {
-			return fmt.Errorf("no variable %s in the BPF program", name)
-		}
-		if err := v.Set(nr); err != nil {
-			return fmt.Errorf("set %s: %w", name, err)
-		}
-	}
-	return nil
-}
-
-// markRefusable marks each native syscall the sandbox's seccomp profile does
-// not allow outright, given the comma-separated names it does; with none
-// given, no refusal is recorded.
-func markRefusable(m *ebpf.Map, allowed string) error {
-	if allowed == "" {
-		return nil
-	}
-	ok := map[string]bool{}
-	for _, name := range strings.Split(allowed, ",") {
-		ok[name] = true
-	}
-	for nr, name := range syscallNames {
-		if ok[name] || nr < 0 || nr >= int64(m.MaxEntries()) {
-			continue
-		}
-		if err := m.Put(uint32(nr), uint8(1)); err != nil {
-			return fmt.Errorf("mark %s refusable: %w", name, err)
-		}
-	}
-	return nil
-}
-
-// attachAll attaches every loaded program, and any that fails is fatal; those
-// the kernel does not offer were dropped before load. The exception is one of
-// the two spellings of do_filp_open, of which at least one must attach or no
-// open would be held.
-func attachAll(coll *ebpf.Collection) ([]link.Link, error) {
-	var links []link.Link
-	openNames := 0
-	for name, p := range coll.Programs {
-		l, err := link.AttachTracing(link.TracingOptions{Program: p})
-		if err != nil {
-			if openNameProgs[name] {
-				fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
-				continue
-			}
-			return links, fmt.Errorf("attach %s: %w", name, err)
-		}
-		links = append(links, l)
-		if openNameProgs[name] {
-			openNames++
-		}
-	}
-	if openNames == 0 {
-		return links, errors.New("neither do_filp_open nor do_file_open can be traced")
-	}
-	return links, nil
-}
-
-// bootOffset is CLOCK_REALTIME minus CLOCK_BOOTTIME, read back to back, so
-// adding it to an event's boot timestamp gives the wall-clock time of the
-// access.
-func bootOffset() (int64, error) {
-	var boot, real unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &boot); err != nil {
-		return 0, fmt.Errorf("read CLOCK_BOOTTIME: %w", err)
-	}
-	if err := unix.ClockGettime(unix.CLOCK_REALTIME, &real); err != nil {
-		return 0, fmt.Errorf("read CLOCK_REALTIME: %w", err)
-	}
-	return real.Nano() - boot.Nano(), nil
-}
-
-// wallTime formats an event's boot timestamp as UTC to the millisecond.
-func wallTime(boot uint64, offset int64) string {
-	return time.Unix(0, int64(boot)+offset).UTC().Format("2006-01-02T15:04:05.000Z07:00")
-}
-
-// readLoop drains the ring buffer into the writer until the reader is
-// flushed, then reports a one-line tally to stderr. Events before the
-// sandboxed command's first exec belong to runc's own setup and are
-// dropped; the cgroup holds nothing else before then.
+// readLoop drains the ring buffer into the recording until the reader is
+// flushed.
 func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missedRun <-chan count) error {
-	enc := json.NewEncoder(w)
-	counts := map[string]int{}
-	files := execFiles{}
-	preExec, total := 0, 0
-	started := false
+	rec := newRecorder(w, os.Stderr, bootOffset)
 	for {
 		rd.SetDeadline(time.Now().Add(100 * time.Millisecond))
-		rec, err := rd.Read()
+		sample, err := rd.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrFlushed) {
 				break
@@ -464,99 +217,9 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missed
 			}
 			return err
 		}
-		r, err := decode(rec.RawSample)
-		if err != nil {
-			return err
-		}
-		if files.attach(&r) {
-			continue
-		}
-		if !started {
-			if r.Kind != "exec" {
-				preExec++
-				continue
-			}
-			started = true
-		}
-		// Read per event, so a wall-clock step mid-run shifts later times as it
-		// shifts the proxy's.
-		offset, err := bootOffset()
-		if err != nil {
-			return err
-		}
-		r.Time = wallTime(r.boot, offset)
-		if r.Failed {
-			counts[r.Kind+" failed"]++
-		} else {
-			counts[r.Kind]++
-		}
-		total++
-		if err := enc.Encode(r); err != nil {
+		if err := rec.add(sample.RawSample); err != nil {
 			return err
 		}
 	}
-	dropped, errDropped := sumPerCPU(coll.Maps["drops"])
-	untracked, errUntracked := sumPerCPU(coll.Maps["untracked"])
-	internal, _ := sumPerCPU(coll.Maps["skipped_internal"])
-	named, errNamed := sumPerCPU(coll.Maps["open_named"])
-	unheld, errUnheld := sumPerCPU(coll.Maps["open_unheld"])
-	if errNamed == nil && errUnheld == nil && named == 0 && unheld > 0 {
-		fmt.Fprintln(os.Stderr, "filesystem-audit: no open passed do_filp_open; failed opens went unrecorded")
-		untracked += unheld
-	}
-	kinds := make([]string, 0, len(counts))
-	for k := range counts {
-		kinds = append(kinds, k)
-	}
-	sort.Strings(kinds)
-	for _, k := range kinds {
-		fmt.Fprintf(os.Stderr, "filesystem-audit: %-13s %d\n", k, counts[k])
-	}
-	missed := <-missedRun
-	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d host-missed=%d internal-skipped=%d pre-exec-skipped=%d tails-peak=%s/%d\n",
-		total, dropped, untracked, missed.n, internal, preExec, tailsPeak(coll), coll.Maps["tails"].MaxEntries())
-	// Without every count the recording cannot claim to be complete, so it is
-	// left without its end line.
-	if err := errors.Join(errDropped, errUntracked, errNamed, errUnheld, missed.err); err != nil {
-		fmt.Fprintln(os.Stderr, "filesystem-audit: read loss counters:", err)
-		return w.Flush()
-	}
-	if err := enc.Encode(end{Kind: "end", Dropped: dropped, Untracked: untracked, HostMissed: missed.n}); err != nil {
-		return err
-	}
-	return w.Flush()
-}
-
-// end is the recording's last line, written only once every queued event is
-// out, so a recording without it was cut short. Dropped events found the ring
-// buffer full, and Untracked calls found a tracking map full. HostMissed runs the
-// kernel skipped between attaching and the stop signal; the summary does not
-// count them as lost, since any of them may have been another process's.
-type end struct {
-	Kind       string `json:"kind"`
-	Dropped    uint64 `json:"dropped"`
-	Untracked  uint64 `json:"untracked"`
-	HostMissed uint64 `json:"host_missed"`
-}
-
-// tailsPeak is the most tails held at once, for the step log; "?" when it
-// cannot be read.
-func tailsPeak(coll *ebpf.Collection) string {
-	var use struct{ Taken, Peak uint64 }
-	if err := coll.Maps["tail_use"].Lookup(uint32(0), &use); err != nil {
-		return "?"
-	}
-	return strconv.FormatUint(use.Peak, 10)
-}
-
-func sumPerCPU(m *ebpf.Map) (uint64, error) {
-	var per []uint64
-	if err := m.Lookup(uint32(0), &per); err != nil {
-		return 0, err
-	}
-	var sum uint64
-	for _, v := range per {
-		sum += v
-	}
-	return sum, nil
+	return rec.finish(readLoss(coll, <-missedRun))
 }

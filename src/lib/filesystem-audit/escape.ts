@@ -17,7 +17,7 @@ const NAMED_ESCAPES: Record<string, string> = {
 };
 
 // The tracer writes a byte 0xNN that is not UTF-8 as a lone surrogate U+DCNN
-// (see its decode.go).
+// (see its json.go).
 const RAW_BYTE_FIRST = 0xdc80;
 const RAW_BYTE_LAST = 0xdcff;
 
