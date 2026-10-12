@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { dropWalkedDirs } from "../test/filesystem-audit.ts";
 import { fmtFlags, type Access } from "./agg.ts";
 import { keyOf, Lines } from "./fold-tree.ts";
-import { components } from "./paths.ts";
+import { components, MEMFD, MEMFDS } from "./paths.ts";
 import { BIT } from "./record.ts";
 
 describe("dropWalkedDirs", () => {
@@ -44,8 +44,18 @@ describe("Lines", () => {
     t: 0,
     seq: seq++,
   });
-  const lines = (opts: Partial<ConstructorParameters<typeof Lines>[0]> = {}) =>
-    new Lines({ fanout: 3, keep: [], limit: 1 << 20, nodes: 1000, rowBytes: () => 1, ...opts });
+  const lines = (opts: Partial<ConstructorParameters<typeof Lines>[0]> = {}) => {
+    const limit = opts.limit ?? 1 << 20;
+    return new Lines({
+      fanout: 3,
+      keep: [],
+      nodes: 1000,
+      rowBytes: () => 1,
+      ...opts,
+      limit,
+      loose: opts.loose ?? limit,
+    });
+  };
   const printed = (l: Lines) => l.finish()?.map((r) => `${fmtFlags(r.agg)} ${r.comm} ${r.path}`);
 
   it("folds a directory once it has fanout children", () => {
@@ -74,7 +84,8 @@ describe("Lines", () => {
     for (const p of ["/a/1", "/a/2", "/a/3"]) l.add(access(p));
     l.add(access("/a/run", BIT.X));
     l.add(access("/a/../b"));
-    expect(printed(l)).toStrictEqual(["R c /a/**", "X c /a/run", "R c /a/../b"]);
+    // Program runs come first, so a part cut short keeps them.
+    expect(printed(l)).toStrictEqual(["X c /a/run", "R c /a/**", "R c /a/../b"]);
   });
 
   it("keeps each command's tree apart", () => {
@@ -97,12 +108,172 @@ describe("Lines", () => {
     expect(l.finish()).toBeUndefined();
   });
 
-  it("stops once the lines it cannot fold away outgrow the limit", () => {
+  it("keeps the lines that fit once those it cannot fold away outgrow the limit", () => {
     const l = lines({ limit: 2, keep: [["/"]], rowBytes: () => 2 });
     l.add(access("/a"));
-    expect(l.stopped).toBeUndefined();
     l.add(access("/b"));
-    expect(l.stopped).toBe("size");
-    expect(l.finish()).toBeUndefined();
+    expect(printed(l)).toStrictEqual(["R c /a"]);
+    expect(l.stopped).toBeUndefined();
+    expect(l.cut).toBe("size");
+  });
+
+  describe("once it outgrows the limit", () => {
+    // Each line counts 1 byte, so `tight(n)` loosens at the (n + 1)th line.
+    const home = components("/home/u");
+    const tight = (limit: number) => lines({ limit, keep: [home] });
+    const five = ["/a", "/b", "/c", "/d", "/e"];
+
+    it("folds a kept directory's other children, keeping the kept ones below it", () => {
+      const l = tight(6);
+      l.add(access("/home/u/x"));
+      // Another command's tree, ending at a kept directory with nothing below.
+      l.add(access("/home/u", BIT.R, "d"));
+      // A child already folded at the usual fanout folds in with the rest.
+      for (const p of ["/a/1", "/a/2", "/a/3", "/b", "/c", "/d", "/e"]) l.add(access(p));
+      expect(l.stopped).toBeUndefined();
+      expect(printed(l)).toStrictEqual(["R c /**", "R c /home/u/x", "R d /home/u"]);
+    });
+
+    it("then sends a new child to the fold, the kept directory itself and kept ones past it", () => {
+      const l = tight(4);
+      for (const p of five) l.add(access(p));
+      l.add(access("/f", BIT.W));
+      l.add(access("/", BIT.A));
+      l.add(access("/home/u/y"));
+      l.add(access("/home/u/z"));
+      expect(printed(l)).toStrictEqual(["RW c /**", "A c /", "R c /home/u/y", "R c /home/u/z"]);
+    });
+
+    it("folds a kept directory as its children reach the loose fanout", () => {
+      const l = tight(5);
+      for (const p of [...five, "/f"]) l.add(access(p));
+      for (const p of ["/home/u/1", "/home/u/2", "/home/u/3", "/home/u/4"]) l.add(access(p));
+      expect(l.stopped).toBeUndefined();
+      l.add(access("/home/u/5"));
+      expect(printed(l)).toStrictEqual(["R c /**", "R c /home/u/**"]);
+    });
+
+    it("folds the paths behind one '..' and a command's memfds", () => {
+      const l = tight(5);
+      for (let i = 0; i < 6; i++) l.add(access(`/w/a/../f${i}`));
+      for (let i = 0; i < 4; i++) l.add(access(`${MEMFD}m${i}`, BIT.W));
+      expect(printed(l)).toStrictEqual([
+        "R c /w/a/../**",
+        `W c ${MEMFD}m0`,
+        `W c ${MEMFD}m1`,
+        `W c ${MEMFD}m2`,
+        `W c ${MEMFD}m3`,
+      ]);
+      l.add(access(`${MEMFD}m4`, BIT.W));
+      l.add(access("/w/a/../g", BIT.W));
+      expect(printed(l)).toStrictEqual(["RW c /w/a/../**", `W c ${MEMFDS}`]);
+    });
+
+    it("never folds a program run into its group", () => {
+      const l = tight(9);
+      l.add(access("/w/a/../run", BIT.X));
+      for (let i = 0; i < 9; i++) l.add(access(`/w/a/../f${i}`));
+      // Loose now: a memfd run, and a group line that runs once it is listed.
+      l.add(access(`${MEMFD}stage2`, BIT.X));
+      for (let i = 0; i < 4; i++) l.add(access(`${MEMFD}m${i}`, BIT.W));
+      l.add(access(`${MEMFD}m0`, BIT.X));
+      l.add(access(`${MEMFD}m4`, BIT.W));
+      // m0 ran, so it no longer counts: the group folds at its fifth other line.
+      expect(printed(l)).toContain(`W c ${MEMFD}m4`);
+      l.add(access(`${MEMFD}m5`, BIT.W));
+      expect(printed(l)).toStrictEqual([
+        "X c /w/a/../run",
+        `X c ${MEMFD}stage2`,
+        `WX c ${MEMFD}m0`,
+        "R c /w/a/../**",
+        `W c ${MEMFDS}`,
+      ]);
+    });
+
+    it("joins a path spelled like the line its group folds into", () => {
+      const l = tight(5);
+      l.add(access("/w/a/../**", BIT.W));
+      for (let i = 0; i < 5; i++) l.add(access(`/w/a/../f${i}`));
+      expect(printed(l)).toStrictEqual(["RW c /w/a/../**"]);
+    });
+
+    it("joins a path spelled like a group's line arriving once loose", () => {
+      const l = tight(4);
+      for (const p of five) l.add(access(p));
+      l.add(access("/w/a/../**", BIT.W));
+      for (let i = 0; i < 5; i++) l.add(access(`/w/a/../f${i}`));
+      expect(printed(l)).toStrictEqual(["R c /**", "RW c /w/a/../**"]);
+    });
+
+    it("folds past `loose` but keeps what is still under the limit", () => {
+      const l = lines({ loose: 4, limit: 100, keep: [home] });
+      for (const p of ["/a/../x", "/b/../x", "/c/../x", "/d/../x", "/e/../x"]) l.add(access(p));
+      expect(l.stopped).toBeUndefined();
+      expect(printed(l)).toHaveLength(5);
+    });
+
+    it("folds at the end when the lines spelled out pass `loose` but not the limit", () => {
+      const l = lines({ loose: 2, limit: 100, keep: [home] });
+      for (const p of ["/k/1", "/k/2", "/l/1", "/m/1", "/n/1", "/o/1"]) l.add(access(p));
+      expect(printed(l)).toStrictEqual(["R c /**"]);
+    });
+
+    it("keeps the lines that fit if folding does not bring it back under the limit", () => {
+      const l = tight(2);
+      for (const p of ["/a/../x", "/b/../x", "/c/../x"]) l.add(access(p));
+      expect(printed(l)).toStrictEqual(["R c /a/../x", "R c /b/../x"]);
+      expect(l.cut).toBe("size");
+    });
+
+    it("takes no new line once it outgrows the limit loose, but adds to those it has", () => {
+      const l = tight(4);
+      for (const p of five) l.add(access(p));
+      for (const p of ["/x/../1", "/y/../1", "/z/../1", "/v/../1"]) l.add(access(p));
+      expect(l.cut).toBeUndefined();
+      l.add(access("/w/../1"));
+      l.add(access("/home/u/q"));
+      l.add(access("/x/../1", BIT.W));
+      expect(printed(l)).toStrictEqual(["R c /**", "RW c /x/../1", "R c /y/../1", "R c /z/../1"]);
+      expect(l.stopped).toBeUndefined();
+      expect(l.cut).toBe("size");
+    });
+
+    it("folds at the end when only the lines spelled out pass the limit", () => {
+      // Lines below a directory that can still fold are not counted as they arrive.
+      const l = tight(2);
+      for (const p of ["/k/1", "/k/2", "/l/1", "/l/2", "/m/1", "/n/1", "/o/1"]) l.add(access(p));
+      expect(printed(l)).toStrictEqual(["R c /**"]);
+    });
+
+    it("still takes a line that folds a group once full, and new lines once that frees room", () => {
+      const l = tight(6);
+      for (const p of five) l.add(access(p));
+      for (const p of ["/g/../1", "/g/../2", "/g/../3", "/g/../4", "/h/../1", "/i/../1"])
+        l.add(access(p));
+      l.add(access("/g/../5"));
+      l.add(access("/j/../1"));
+      expect(printed(l)).toStrictEqual([
+        "R c /**",
+        "R c /h/../1",
+        "R c /i/../1",
+        "R c /g/../**",
+        "R c /j/../1",
+      ]);
+      expect(l.cut).toBeUndefined();
+    });
+
+    it("cuts at the end when the lines spelled out pass the limit even loose", () => {
+      const l = tight(4);
+      for (const p of five) l.add(access(p));
+      for (const p of ["/home/u/k/1", "/home/u/k/2", "/home/u/l/1", "/home/u/l/2"])
+        l.add(access(p));
+      expect(printed(l)).toStrictEqual([
+        "R c /**",
+        "R c /home/u/k/1",
+        "R c /home/u/k/2",
+        "R c /home/u/l/1",
+      ]);
+      expect(l.cut).toBe("size");
+    });
   });
 });

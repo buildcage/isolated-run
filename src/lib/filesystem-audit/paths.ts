@@ -4,6 +4,8 @@ import type { AuditRecord } from "./record.ts";
 // as a name never holds a NUL, so neither passes for a file still there.
 export const MEMFD_PREFIX = "memfd:";
 export const MEMFD = `\0${MEMFD_PREFIX}`;
+/** Every memfd a command used, folded into one line ("memfd:**"). */
+export const MEMFDS = `${MEMFD}\0`;
 export const DELETED_MARK = " (deleted)";
 export const DELETED = `\0${DELETED_MARK}`;
 

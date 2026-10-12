@@ -105,7 +105,7 @@ export interface RenderOptions {
   /** The proxy's start, in epoch seconds; undefined counts from the first access shown. */
   startedAt: number | undefined;
   priorities: FilesystemPriorities;
-  /** What a part too large to print at all says in its place. */
+  /** What a part says where it left rows out: in place of them all, or after those it kept. */
   cutNote: (cause?: CutCause) => string;
   /** The line under the heading. */
   legendNote?: string;
@@ -138,7 +138,8 @@ function table(
         priority: priorities[id],
         level,
         section: SECTION,
-        text: `#### ${title}\n\n${legend ? `<sub>${legend}</sub>\n\n` : ""}${md}\n\n`,
+        // A table cut short says so after the rows it kept.
+        text: `#### ${title}\n\n${legend ? `<sub>${legend}</sub>\n\n` : ""}${md}\n\n${cause ? cutNote(cause) : ""}`,
         cut: "lines",
         head: legend ? 6 : 4,
       };
@@ -234,7 +235,9 @@ function detailsBlock(
   return {
     ...log,
     cut: "lines",
-    text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`,
+    text:
+      `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` +
+      (detailsCut ? cutNote(detailsCut) : ""),
   };
 }
 

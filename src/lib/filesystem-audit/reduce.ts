@@ -18,6 +18,7 @@ import {
   marked,
   MEMFD,
   MEMFD_PREFIX,
+  MEMFDS,
   normalize,
   relativize,
   unmarked,
@@ -48,6 +49,12 @@ const REFUSED_KEPT = 200;
 interface Limits {
   /** The Job Summary's size limit, past which a part is not printed. */
   bytes: number;
+  /**
+   * The size past which a part folds the directories, ".." paths and memfds
+   * it otherwise keeps whole, well under `bytes`: so many rows say no more to
+   * a reader than fewer, coarser ones.
+   */
+  loose: number;
   /** How many paths a part holds unfolded before it gives up. */
   nodes: number;
   /**
@@ -57,7 +64,12 @@ interface Limits {
   loads: number;
 }
 
-const LIMITS: Limits = { bytes: STEP_SUMMARY_LIMIT_BYTES, nodes: 200_000, loads: 200_000 };
+const LIMITS: Limits = {
+  bytes: STEP_SUMMARY_LIMIT_BYTES,
+  loose: 300 * 1024,
+  nodes: 200_000,
+  loads: 200_000,
+};
 
 export interface Executed extends Shown {
   runs: number;
@@ -83,12 +95,12 @@ export interface AuditSummary {
   hostMissed: number;
   /** Up to the size limit, past which fitStepSummary cuts it. */
   executed: Executed[];
-  /** Each part, or undefined where it outgrew the Job Summary. */
+  /** Each part, or undefined where it was given up (see pathsCut). */
   paths: Row[] | undefined;
   details: Row[] | undefined;
   /** Each refused syscall per command, as a details row. */
   refused: RefusedRow[];
-  /** Why the paths and the details were given up, where they were. */
+  /** Why the paths and the details were given up, or cut short, where they were. */
   pathsCut?: CutCause;
   detailsCut?: CutCause;
 }
@@ -115,6 +127,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
 } {
   const limits = { ...LIMITS, ...prefixes.limits };
   const limit = limits.bytes;
+  const loose = Math.min(limits.loose, limit);
   const loaded = new Set<string>();
   const images = new Map<string, string[]>();
   const observed = new Map<number | undefined, number>();
@@ -167,6 +180,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     fanout,
     keep,
     limit,
+    loose,
     nodes: limits.nodes,
     rowBytes: (p) => relLength(p) + 11,
   });
@@ -174,6 +188,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     fanout,
     keep,
     limit,
+    loose,
     nodes: limits.nodes,
     rowBytes: (p, comm) => relLength(p) + comm.length + 3,
   });
@@ -256,6 +271,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // A memfd shows its name quoted, as one its creator chose; a deleted file
   // shows the mark outside its path.
   const shown = (path: string): Shown => {
+    if (path === MEMFDS) return { path: `${MEMFD_PREFIX}**` };
     if (path.startsWith(MEMFD)) {
       const name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
       return { path: `${MEMFD_PREFIX}"${name}"` };
@@ -273,10 +289,16 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       ...shown(path),
     }));
 
+  // A part cut short with no line left is given up, its note standing alone.
+  const kept = (part: Lines): Row[] | undefined => {
+    const lines = part.finish();
+    return lines?.length || !part.cut ? rows(lines) : undefined;
+  };
+
   const finish = (): AuditSummary => {
-    const byPath = rows(paths.finish());
-    // A table too large to print leaves no room for the details either.
-    const log = byPath && rows(details.finish());
+    const byPath = kept(paths);
+    // A table given up leaves no room for the details either.
+    const log = byPath && kept(details);
     return {
       ended,
       lost,
@@ -285,8 +307,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       paths: byPath,
       details: log,
       refused: [...refused.values()],
-      pathsCut: paths.stopped,
-      detailsCut: details.stopped,
+      pathsCut: paths.cut,
+      detailsCut: details.cut,
     };
   };
   return { observe, add, finish };

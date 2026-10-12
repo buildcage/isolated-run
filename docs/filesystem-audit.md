@@ -232,6 +232,13 @@ Never folded into a `dir/**` row, nor counted toward its three rows:
 - A program run, a path containing `..`, which may lead elsewhere through a symlink, and a memfd. A
   file a program loaded is not counted either.
 
+That changes once a table or the details would pass 300 KB, more rows than anyone reads. Each
+of those directories then folds once five entries directly under it are not themselves among them,
+keeping those that are on rows of their own: `/` folds into `/**` but `/home/runner` still shows its
+own rows. Paths with `..` fold the same way once five share what comes before their first `..`,
+into a row such as `./a/../**`, and memfds once there are five, into `memfd:**` (in the details,
+five of one command's). A program run still never folds.
+
 Which path a row is shown under:
 
 - A program is shown under the file it ran, with symlinks followed, and a script under its own path
@@ -484,7 +491,10 @@ itself can do to the record, and what the record can be trusted for.
   order. A part that does not fit is cut at a line, with a note after what is kept, or replaced by
   the note when none of it fits. The note names the artifact, which still holds every access, or
   says how to ask for one, or that the record was not kept when the upload failed.
-- **One part too large.** The accessed-paths table or the details is left out whole, under a note
-  that says why, when it alone would pass 1 MiB, or once its folded tree holds more than 200,000
-  files and directories, every directory on the way counted, and each command's counted apart in
-  the details. When the table is left out, the details go with it.
+- **One part too large.** The accessed-paths table or the details that alone would pass 300 KB
+  folds the directories, `..` paths and memfds it otherwise keeps on rows of their own (see
+  [Paths](#paths)). One that would pass 1 MiB even so keeps the rows that fit in it, takes no new
+  ones, and ends with a note; the Job Summary's cap then decides how much of it prints. It
+  is left out whole, under a note that says why, when not one row fits, or once its folded tree holds
+  more than 200,000 files and directories, every directory on the way counted, and each command's
+  counted apart in the details. When the table is left out, the details go with it.

@@ -1016,9 +1016,53 @@ describe("createAuditSummary: limits", () => {
   const tmpFiles = (n: number): object[] =>
     Array.from({ length: n }, (_, i) => ({ kind: "write", comm: "c", path: `/tmp/f${i}` }));
 
-  it("puts the note in place of a table and the details too large to print", () => {
+  it("folds a kept directory's children once the table outgrows the limit", () => {
+    const md = limited({ bytes: 200 }, ...tmpFiles(20));
+    expect(tableRows(md)).toEqual(["| `/tmp/**` | W |"]);
+    expect(md).not.toContain(CUT);
+  });
+
+  it("folds a flood of '..' paths rather than drop the table with what else it holds", () => {
+    const climbing = Array.from({ length: 300 }, (_, i) => ({
+      kind: "read",
+      comm: "c",
+      path: `/work/${"a".repeat(3500)}/../f${i}`,
+    }));
+    const md = limited({}, ...climbing, { kind: "write", comm: "sh", path: "/home/u/.bashrc" });
+    expect(md).not.toContain(CUT);
+    expect(tableRows(md)).toEqual([
+      `| \`./${"a".repeat(3500)}/../**\` | R |`,
+      "| `~/.bashrc` | W |",
+    ]);
+  });
+
+  it("folds a command's memfds into one line", () => {
+    const memfds = Array.from({ length: 5 }, (_, i) => ({
+      kind: "write",
+      comm: "c",
+      path: `memfd:m${i}`,
+      memfd: true,
+    }));
+    // Each line counts 20 bytes, so the fifth passes 90 and folds them.
+    expect(tableRows(limited({ bytes: 90 }, ...memfds))).toEqual(["| `memfd:**` | W |"]);
+  });
+
+  it("keeps the rows that fit and notes the cut, rather than drop the table and the details", () => {
+    // Paths with ".." under different directories, which no fold joins. A
+    // table row counts 19 bytes and a details row 12.
     const md = limited(
-      { bytes: 200 },
+      { bytes: 40 },
+      ...["a", "b", "c", "d"].map((d) => ({ kind: "read", comm: "c", path: `/${d}/../f` })),
+    );
+    expect(tableRows(md)).toEqual(["| `/a/../f` | R |", "| `/b/../f` | R |"]);
+    expect(section(md, "#### Accessed Paths", "<details>")).toContain(CUT);
+    expect(lines(md)).toEqual(["R c /a/../f", "R c /b/../f", "R c /c/../f"]);
+    expect(section(md, "<details>")).toContain(CUT);
+  });
+
+  it("puts the note in place of a table and the details too large to print even folded", () => {
+    const md = limited(
+      { bytes: 10 },
       { kind: "exec", comm: "c", path: "/usr/bin/c" },
       ...tmpFiles(20),
     );
@@ -1125,8 +1169,10 @@ describe("createAuditSummary: limits", () => {
       { kind: "chmod", comm: "c", path: `/tmp/d${i}` },
       { kind: "read", comm: "c", path: `/tmp/d${i}/f` },
     ]).flat();
-    expect(section(limited({ bytes: 1000 }, ...records), "#### Accessed Paths")).not.toContain(CUT);
-    expect(section(limited({ bytes: 150 }, ...records), "#### Accessed Paths")).toContain(CUT);
+    expect(tableRows(limited({ bytes: 1000 }, ...records))).toHaveLength(10);
+    // Only spelled out at the end do they pass the limit, and fold there.
+    expect(tableRows(limited({ bytes: 150 }, ...records))).toEqual(["| `/tmp/**` | RA |"]);
+    expect(section(limited({ bytes: 10 }, ...records), "#### Accessed Paths")).toContain(CUT);
   });
 
   it("shows a library's read once it remembers no more loads", () => {

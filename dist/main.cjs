@@ -69059,7 +69059,7 @@ function fmtFlags(a) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/paths.ts
-const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, DELETED_MARK = " (deleted)", DELETED = `\0${DELETED_MARK}`;
+const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0`, DELETED_MARK = " (deleted)", DELETED = `\0${DELETED_MARK}`;
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
@@ -69179,7 +69179,7 @@ function table({ priorities, cutNote }, id, level, title, md, cause, legend) {
 		priority: priorities[id],
 		level,
 		section: SECTION,
-		text: `#### ${title}\n\n${legend ? `<sub>${legend}</sub>\n\n` : ""}${md}\n\n`,
+		text: `#### ${title}\n\n${legend ? `<sub>${legend}</sub>\n\n` : ""}${md}\n\n${cause ? cutNote(cause) : ""}`,
 		cut: "lines",
 		head: legend ? 6 : 4
 	};
@@ -69216,7 +69216,7 @@ function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, 
 	return {
 		...log,
 		cut: "lines",
-		text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`
+		text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` + (detailsCut ? cutNote(detailsCut) : "")
 	};
 }
 function renderAuditSummaryBlocks(summary, opts) {
@@ -69266,7 +69266,15 @@ const TRAFFIC_PRIORITIES = {
 	[FILESYSTEM_BLOCK.executed]: 5,
 	[FILESYSTEM_BLOCK.paths]: 6,
 	[FILESYSTEM_BLOCK.log]: 8
-}, keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1);
+}, starred = (path) => path === "/" ? "/**" : `${path}/**`, looseKids = (node) => {
+	let n = 0;
+	for (let kid of node.kids?.values() ?? []) kid.kept || n++;
+	return n;
+};
+function climbGroup(path, parts = components(path)) {
+	return path.startsWith(MEMFD) ? MEMFDS : starred(spell(parts.slice(0, parts.indexOf("..") + 1)));
+}
+const ran = (a) => ((a.ok | a.failed) & BIT.X) !== 0, keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1);
 function walkedNodes(top) {
 	let walked = new Set(), below = new Map(), stack = [...top.values()].map((n) => [n, !1]);
 	for (; stack.length > 0;) {
@@ -69276,9 +69284,9 @@ function walkedNodes(top) {
 			for (let kid of node.kids?.values() ?? []) stack.push([kid, !1]);
 			continue;
 		}
-		let bits = 0;
+		let bits = node.folded ? flagBits(node.folded) : 0;
 		for (let kid of node.kids?.values() ?? []) bits |= below.get(kid), kid.own && (bits |= flagBits(kid.own)), kid.folded && (bits |= flagBits(kid.folded));
-		below.set(node, bits), node.own && !node.own.perm && node.kids?.size && (flagBits(node.own) & ~bits) === 0 && walked.add(node);
+		below.set(node, bits), node.own && !node.own.perm && (node.kids?.size || node.folded) && (flagBits(node.own) & ~bits) === 0 && walked.add(node);
 	}
 	return walked;
 }
@@ -69293,10 +69301,10 @@ function* treeLines(top, fanout) {
 	}));
 	for (; stack.length > 0;) {
 		let e = stack.pop(), { folded, own, kids, kept } = e.node;
-		folded && flagBits(folded) && (yield [`${pathTo(e)}/**`, folded]);
+		folded && flagBits(folded) && (yield [starred(pathTo(e)), folded]);
 		let ownLine = own && flagBits(own) && !walked.has(e.node) ? own : void 0;
 		if (kids?.size && !kept && kids.size + +!!ownLine >= fanout) {
-			yield [`${pathTo(e)}/**`, treeAgg(e.node)];
+			yield [starred(pathTo(e)), treeAgg(e.node)];
 			continue;
 		}
 		ownLine && (yield [pathTo(e), ownLine]);
@@ -69326,7 +69334,18 @@ var Lines = class {
 	climbing = new Map();
 	bytes = 0;
 	nodes = 0;
+	loose = !1;
+	loosening = !1;
+	members = new Map();
+	dropped = !1;
+	truncated = !1;
 	stopped;
+	get full() {
+		return this.bytes > this.opts.limit;
+	}
+	get cut() {
+		return this.stopped ?? (this.truncated ? "size" : void 0);
+	}
 	opts;
 	constructor(opts) {
 		this.opts = opts;
@@ -69335,7 +69354,17 @@ var Lines = class {
 		if (this.stopped || !x.bit) return;
 		if (unfoldable(parts, x.path) || x.bit === BIT.X) {
 			let key = keyOf(x.comm, x.path), a = this.climbing.get(key);
-			a || (this.climbing.set(key, a = newAgg()), this.count(this.opts.rowBytes(x.path, x.comm))), apply(a, x);
+			if (!a && this.loose && x.bit !== BIT.X) {
+				let folded = keyOf(x.comm, climbGroup(x.path, parts));
+				if (a = this.climbing.get(folded), a) key = folded;
+				else if (folded !== key) {
+					let keys = (this.members.get(folded) ?? []).filter((k) => !ran(this.climbing.get(k)));
+					keys.length + 1 >= 5 ? (this.gather(folded, keys), a = this.climbing.get(key = folded)) : this.full || this.members.set(folded, [...keys, key]);
+				}
+			}
+			if (a) return apply(a, x);
+			if (this.full) return void (this.dropped = !0);
+			this.climbing.set(key, a = newAgg()), apply(a, x), this.count(this.opts.rowBytes(pathOf(key), x.comm));
 			return;
 		}
 		let kids = this.trees.get(x.comm);
@@ -69344,21 +69373,28 @@ var Lines = class {
 		for (let i = 0; i < parts.length; i++) {
 			let node = kids.get(parts[i]);
 			if (!node) {
+				if (this.full && !this.foldsInto(parent, kids, parts, i)) return void (this.dropped = !0);
 				if (node = {
 					bytes: 0,
 					kept: this.isKept(parts, i + 1) || void 0
-				}, kids.set(parts[i], node), this.nodes++, parent && (this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout)) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
+				}, kids.set(parts[i], node), this.nodes++, parent) {
+					if (parent.folded || this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
+					if (parent.kept && !node.kept && this.loose && looseKids(parent) >= 5) return this.foldLoose(parent, parts.slice(0, i), x.comm), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
+				}
 				if (this.nodes > this.opts.nodes) return this.stop("paths");
 			}
-			if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x, settled);
+			if (node.folded && !(node.kept && (i === parts.length - 1 || node.kids?.has(parts[i + 1]) || this.isKept(parts, i + 2)))) return this.addFolded(node, parts.slice(0, i + 1), x, settled);
 			if (i === parts.length - 1) {
 				node.own ??= newAgg();
 				let shown = flagBits(node.own) !== 0;
-				apply(node.own, x), settled && !shown && flagBits(node.own) && !node.kids?.size && this.setBytes(node, this.opts.rowBytes(x.path, x.comm));
+				apply(node.own, x), settled && !shown && flagBits(node.own) && !node.kids?.size && this.setBytes(node, node.bytes + this.opts.rowBytes(x.path, x.comm));
 				return;
 			}
 			node.kids ??= new Map(), kids = node.kids, parent = node, parentSettled = settled, settled &&= !!node.kept;
 		}
+	}
+	foldsInto(parent, kids, parts, i) {
+		return parent ? parent.kept ? !this.isKept(parts, i + 1) && looseKids(parent) + 1 >= 5 : kids.size + 1 >= this.opts.fanout : !1;
 	}
 	isKept(parts, depth) {
 		return this.opts.keep.some((k) => k.length >= depth && k.slice(0, depth).every((part, i) => part === parts[i]));
@@ -69369,41 +69405,94 @@ var Lines = class {
 			n.own && mergeAgg(agg, n.own), n.folded && mergeAgg(agg, n.folded), this.setBytes(n, 0), n !== node && this.nodes--;
 		}), node.folded = agg, node.own = void 0, node.kids = void 0;
 	}
+	foldLoose(node, parts, comm) {
+		let agg = newAgg();
+		for (let [part, kid] of node.kids) kid.kept || (forEachInSubtree(kid, (n) => {
+			n.own && mergeAgg(agg, n.own), n.folded && mergeAgg(agg, n.folded), this.setBytes(n, 0), this.nodes--;
+		}), node.kids.delete(part));
+		node.folded = agg, this.setBytes(node, this.opts.rowBytes(starred(spell(parts)), comm));
+	}
 	addFolded(node, parts, x, settled) {
-		apply(node.folded, x), settled && flagBits(node.folded) && !node.bytes && this.setBytes(node, this.opts.rowBytes(`${spell(parts)}/**`, x.comm));
+		apply(node.folded, x), settled && flagBits(node.folded) && !node.bytes && this.setBytes(node, this.opts.rowBytes(starred(spell(parts)), x.comm));
+	}
+	gather(group, keys) {
+		let comm = commOf(group), had = this.climbing.get(group), agg = had ?? newAgg();
+		for (let key of keys) mergeAgg(agg, this.climbing.get(key)), this.climbing.delete(key), this.count(-this.opts.rowBytes(pathOf(key), comm));
+		this.members.delete(group), !had && (this.climbing.set(group, agg), this.count(this.opts.rowBytes(pathOf(group), comm)));
+	}
+	loosen() {
+		this.loose = !0, this.loosening = !0;
+		for (let [comm, top] of this.trees) {
+			let stack = [...top].map(([part, node]) => [node, [part]]);
+			for (; stack.length > 0;) {
+				let [node, parts] = stack.pop();
+				if (node.kept) {
+					looseKids(node) >= 5 && this.foldLoose(node, parts, comm);
+					for (let [part, kid] of node.kids ?? []) stack.push([kid, [...parts, part]]);
+				}
+			}
+		}
+		let groups = new Map();
+		for (let [key, a] of this.climbing) {
+			let group = ran(a) ? void 0 : climbGroup(pathOf(key)), folded = group && keyOf(commOf(key), group);
+			if (!folded || folded === key) continue;
+			let keys = groups.get(folded);
+			keys ? keys.push(key) : groups.set(folded, [key]);
+		}
+		for (let [group, keys] of groups) keys.length >= 5 ? this.gather(group, keys) : this.members.set(group, keys);
+		this.loosening = !1;
 	}
 	setBytes(node, bytes) {
-		this.count(bytes - node.bytes), node.bytes = bytes;
+		let delta = bytes - node.bytes;
+		node.bytes = bytes, this.count(delta);
 	}
 	count(bytes) {
-		this.bytes += bytes, this.bytes > this.opts.limit && this.stop("size");
+		this.bytes += bytes, !this.loosening && !this.loose && this.bytes > this.opts.loose && this.loosen();
 	}
 	stop(cause) {
 		this.stopped = cause, this.trees = new Map(), this.climbing = new Map();
 	}
 	finish() {
 		if (this.stopped) return;
-		let out = [], bytes = 0;
-		for (let line of this.lines()) if (out.push(line), bytes += this.opts.rowBytes(line.path, line.comm), bytes > this.opts.limit) {
-			this.stopped = "size";
-			return;
+		let out = this.within();
+		return !this.loose && (out.cut || out.bytes > this.opts.loose) && (this.loosen(), out = this.within()), this.truncated = this.dropped || out.cut, out.lines;
+	}
+	within() {
+		let lines = [], bytes = 0;
+		for (let line of this.lines()) {
+			let size = this.opts.rowBytes(line.path, line.comm);
+			if (bytes + size > this.opts.limit) return {
+				lines,
+				bytes,
+				cut: !0
+			};
+			lines.push(line), bytes += size;
 		}
-		return out;
+		return {
+			lines,
+			bytes,
+			cut: !1
+		};
 	}
 	*lines() {
+		for (let [key, agg] of this.climbing) ran(agg) && (yield {
+			comm: commOf(key),
+			path: pathOf(key),
+			agg
+		});
 		for (let [comm, top] of this.trees) for (let [path, agg] of treeLines(top, this.opts.fanout)) {
-			let ran = this.climbing.get(keyOf(comm, path));
-			ran ? mergeAgg(ran, agg) : yield {
+			let run = this.climbing.get(keyOf(comm, path));
+			run ? mergeAgg(run, agg) : yield {
 				comm,
 				path,
 				agg
 			};
 		}
-		for (let [key, agg] of this.climbing) yield {
+		for (let [key, agg] of this.climbing) ran(agg) || (yield {
 			comm: commOf(key),
 			path: pathOf(key),
 			agg
-		};
+		});
 	}
 };
 //#endregion
@@ -69452,6 +69541,7 @@ function createStripper(scratchBase) {
 //#region src/lib/filesystem-audit/reduce.ts
 const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/, LIMITS = {
 	bytes: STEP_SUMMARY_LIMIT_BYTES,
+	loose: 307200,
 	nodes: 2e5,
 	loads: 2e5
 };
@@ -69459,7 +69549,7 @@ function createAuditSummary(prefixes) {
 	let limits = {
 		...LIMITS,
 		...prefixes.limits
-	}, limit = limits.bytes, loaded = new Set(), images = new Map(), observed = new Map(), load = (proc, path, library) => {
+	}, limit = limits.bytes, loose = Math.min(limits.loose, limit), loaded = new Set(), images = new Map(), observed = new Map(), load = (proc, path, library) => {
 		loaded.size >= limits.loads || (loaded.add(keyOf(proc, canonical(path, prefixes))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache")));
 	}, isLibraryMap = (r) => r.kind === "mmap" && r.access === "x" && !!r.path && !!(r.image || !r.memfd && !r.deleted && LIBRARY_NAME.test(r.path)), observe = (r) => {
 		if (!isRecord(r)) return;
@@ -69486,12 +69576,14 @@ function createAuditSummary(prefixes) {
 		fanout,
 		keep,
 		limit,
+		loose,
 		nodes: limits.nodes,
 		rowBytes: (p) => relLength(p) + 11
 	}), details = new Lines({
 		fanout,
 		keep,
 		limit,
+		loose,
 		nodes: limits.nodes,
 		rowBytes: (p, comm) => relLength(p) + comm.length + 3
 	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), add = (r, counted = !0) => {
@@ -69544,6 +69636,7 @@ function createAuditSummary(prefixes) {
 			}
 		}
 	}, shown = (path) => {
+		if (path === MEMFDS) return { path: `${MEMFD_PREFIX}**` };
 		if (path.startsWith(MEMFD)) {
 			let name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
 			return { path: `${MEMFD_PREFIX}"${name}"` };
@@ -69557,12 +69650,15 @@ function createAuditSummary(prefixes) {
 		flags: fmtFlags(agg),
 		comm: escapeForDisplay(comm),
 		...shown(path)
-	}));
+	})), kept = (part) => {
+		let lines = part.finish();
+		return lines?.length || !part.cut ? rows(lines) : void 0;
+	};
 	return {
 		observe,
 		add,
 		finish: () => {
-			let byPath = rows(paths.finish()), log = byPath && rows(details.finish());
+			let byPath = kept(paths), log = byPath && kept(details);
 			return {
 				ended,
 				lost,
@@ -69574,8 +69670,8 @@ function createAuditSummary(prefixes) {
 				paths: byPath,
 				details: log,
 				refused: [...refused.values()],
-				pathsCut: paths.stopped,
-				detailsCut: details.stopped
+				pathsCut: paths.cut,
+				detailsCut: details.cut
 			};
 		}
 	};
