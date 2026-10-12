@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: MIT OR GPL-2.0-only
 /**
  * @file event.h
  * The event the tracer records, shared by the BPF program and the userspace

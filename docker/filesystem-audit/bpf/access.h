@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: MIT OR GPL-2.0-only
 /**
  * @file access.h
  * Reporting each open file's reads, writes and mappings once per

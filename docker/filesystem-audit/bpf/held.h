@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: MIT OR GPL-2.0-only
 /**
  * @file held.h
  * Events held per thread until their syscall returns, in heads and tails.

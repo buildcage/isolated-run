@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: MIT OR GPL-2.0-only
 /**
  * @file filesystem_audit.bpf.c
  * Records the file accesses of every task in one cgroup v2 subtree: opens,
@@ -569,6 +569,6 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	return 0;
 }
 
-char LICENSE[] SEC("license") = "GPL";
+char LICENSE[] SEC("license") = "Dual MIT/GPL";
 
 _Static_assert(__COUNTER__ <= N_SLOTS, "a program has no scratch event of its own");

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: MIT OR GPL-2.0-only
 /**
  * @file record.h
  * What every program records through: the watched cgroup, the ring
