@@ -33,6 +33,8 @@ done
 wait $pids
 sleep 12
 kill -TERM "$tracer"
-wait "$tracer"
+status=0
+wait "$tracer" || status=$?
 tail -3 /tmp/tracer.err
+[ "$status" -eq 0 ]
 python3 "$dir/check.py" /tmp/rec.jsonl

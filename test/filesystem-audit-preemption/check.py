@@ -29,7 +29,8 @@ for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
     kinds, letter = EXPECT[comm]
     counts[comm] += 1
     m = NAME.match(path)
-    if not (m and m.group(1) == letter and m.group(2) == letter and r.get("kind") in kinds):
+    whose = m and int(m.group(3)) == r.get("pid")
+    if not (whose and m.group(1) == letter and m.group(2) == letter and r.get("kind") in kinds):
         counts["mixed"] += 1
         if len(bad) < 10:
             bad.append(r)

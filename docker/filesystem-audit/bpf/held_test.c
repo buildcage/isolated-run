@@ -304,10 +304,6 @@ static void test_long_hold_round_trip(void)
 }
 
 /**
- * N_TAILS is small here: one hold of over half of them leaves too few for a
- * second, but a hold that needs none still fits.
- */
-/**
  * Another program writing its own scratch event mid-assembly, as one on the
  * same CPU can while this one is preempted, leaves this one's event whole.
  */
@@ -325,6 +321,10 @@ static void test_scratch_per_program(void)
 	CHECK_ACCOUNTS();
 }
 
+/**
+ * N_TAILS is small here: one hold of over half of them leaves too few for a
+ * second, but a hold that needs none still fits.
+ */
 static void test_pool_limit(void)
 {
 	reset();
