@@ -233,7 +233,7 @@ static __always_inline void bump(void *counter)
 
 #define CHUNK 256
 
-// An event, with room past its end for the whole of its last chunk (see
+// An event, with room past its end for the whole of its last tail (see
 // heads).
 struct scratch_buf {
 	struct event e;
@@ -338,15 +338,21 @@ struct held_key {
 	u32 n; // which chunk: 0 for the head, from 1 a tail
 };
 
-// A held event is cut into chunks: its head holds the event's first CHUNK
+// A held event is cut in pieces: its head holds the event's first HEAD
 // bytes, its header and the start of its path, and tail n the CHUNK bytes
-// from n * CHUNK on. Nearly every path fits the head alone, and a long one
-// takes as many tails as it needs, so the pools hold as many bytes of path
-// as they have room for, whatever the paths' lengths. Both are preallocated,
-// so a hold fails only when they are full.
-#define HEAD_DATA (CHUNK - __builtin_offsetof(struct event, data))
+// after the head and the n - 1 tails before it. Nearly every path, a deep
+// node_modules one included, fits the head alone, and a longer one takes as
+// many tails as it needs, so the tails hold as many bytes of path as they
+// have room for, whatever the paths' lengths. Both are preallocated, so a
+// hold fails only when they are full.
+#define HEAD 512
+#define HEAD_DATA (HEAD - __builtin_offsetof(struct event, data))
 #define N_TAILS 24576
-#define MAX_TAILS 33 // for DATA_SZ + NAME_LEN of data
+#define MAX_TAILS 32 // for DATA_SZ + NAME_LEN of data
+
+struct head {
+	char b[HEAD];
+};
 
 struct chunk {
 	char b[CHUNK];
@@ -356,7 +362,7 @@ struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 8192);
 	__type(key, struct held_key);
-	__type(value, struct chunk);
+	__type(value, struct head);
 } heads SEC(".maps");
 
 struct {
@@ -388,7 +394,7 @@ static __always_inline u32 tails_for(u32 data_len)
 }
 
 // Takes n tails, or none when fewer are free, so a hold never runs out
-// halfway. A few tries lost to other CPUs count as none free.
+// halfway. Tries lost to other CPUs all along count as none free.
 static __always_inline int take_tails(u32 n)
 {
 	if (!n)
@@ -397,7 +403,7 @@ static __always_inline int take_tails(u32 n)
 	struct tail_use *u = bpf_map_lookup_elem(&tail_use, &zero);
 	if (!u)
 		return -1;
-	for (int i = 0; i < 8; i++) {
+	for (int i = 0; i < 32; i++) {
 		u64 v = *(volatile u64 *)&u->taken;
 		if (v + n > N_TAILS)
 			return -1;
@@ -435,11 +441,11 @@ static __always_inline long tail_at(u64 i, struct tails_ctx *c, struct held_key 
 	u32 n = c->from + i;
 	if (n >= c->to)
 		return -1;
-	u64 off = (u64)n * CHUNK;
+	u64 off = HEAD + (u64)(n - 1) * CHUNK;
 	// Checked after the barrier, so the verifier sees the bound on the very
 	// value used.
 	asm volatile("" : "+r"(off));
-	if (off > MAX_TAILS * CHUNK)
+	if (off > HEAD + (MAX_TAILS - 1) * CHUNK)
 		return -1;
 	*k = c->k;
 	k->n = n;
@@ -466,8 +472,13 @@ static long get_tail(u64 i, struct tails_ctx *c)
 	if (off < 0)
 		return 1;
 	void *t = bpf_map_lookup_elem(&tails, &k);
-	if (t)
+	if (t) {
 		bpf_probe_read_kernel(c->buf + off, CHUNK, t);
+	} else {
+		// Not left as whatever an earlier event put there.
+		__builtin_memset(c->buf + off, 0, CHUNK);
+		c->err = 1;
+	}
 	return 0;
 }
 
@@ -502,16 +513,21 @@ static __always_inline void release(struct held_key *k, u32 ntails)
 	give_tails(ntails);
 }
 
-// Holds e, in scratch, under use, in place of a hold that took old tails.
-static __always_inline int hold_as(struct event *e, u32 use, u32 old)
+// Holds e, in scratch, under use, in place of a hold that took old tails,
+// with have tails the caller already took.
+static __always_inline int hold_as(struct event *e, u32 use, u32 old, u32 have)
 {
 	struct held_key k = held_key(use);
 	u32 t = tails_for(e->data_len);
-	if (t > old && take_tails(t - old) != 0)
+	u32 need = t > old ? t - old : 0;
+	if (have > need) {
+		give_tails(have - need);
+	} else if (need > have && take_tails(need - have) != 0) {
+		give_tails(have);
 		return -1;
+	}
 	if (bpf_map_update_elem(&heads, &k, e, BPF_ANY) != 0) {
-		if (t > old)
-			give_tails(t - old);
+		give_tails(need);
 		return -1;
 	}
 	if (tails_loop(put_tail, &k, e, 1, t + 1) != 0) {
@@ -542,11 +558,12 @@ static __always_inline int hold_new(struct event *e, u32 use)
 		release(&k, t);
 		return -1;
 	}
-	give_tails(t);
-	if (r != -EEXIST)
+	if (r != -EEXIST) {
+		give_tails(t);
 		return -1;
+	}
 	struct event *old = bpf_map_lookup_elem(&heads, &k);
-	return hold_as(e, use, old ? tails_for(old->data_len) : 0);
+	return hold_as(e, use, old ? tails_for(old->data_len) : 0, t);
 }
 
 static __always_inline void hold(struct event *e)
@@ -562,9 +579,28 @@ static __always_inline struct event *assemble(struct held_key *k, struct event *
 	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
 	if (!e)
 		return 0;
-	__builtin_memcpy(e, head, CHUNK);
-	tails_loop(get_tail, k, e, 1, tails_for(e->data_len) + 1);
+	__builtin_memcpy(e, head, HEAD);
+	if (tails_loop(get_tail, k, e, 1, tails_for(e->data_len) + 1) != 0) {
+		e->truncated = 1;
+		bump(&untracked);
+	}
 	return e;
+}
+
+// Records the held event whose head is head, with err, straight from the
+// head when it has no tails.
+static __always_inline void report_held(struct held_key *k, struct event *head, u32 err)
+{
+	if (!tails_for(head->data_len)) {
+		head->err = err;
+		submit_cap(head, HEAD);
+		return;
+	}
+	struct event *e = assemble(k, head);
+	if (e) {
+		e->err = err;
+		submit(e);
+	}
 }
 
 // Field offsets are resolved by CO-RE in the caller and handed over, since
@@ -1182,10 +1218,10 @@ int BPF_PROG(on_open, struct file *file)
 		e->bases = head->bases;
 		u32 old = tails_for(head->data_len);
 		if (!old && !tails_for(e->data_len)) {
-			__builtin_memcpy(head, e, CHUNK);
+			__builtin_memcpy(head, e, HEAD);
 			return 0;
 		}
-		if (hold_as(e, HELD_OPEN, old) == 0)
+		if (hold_as(e, HELD_OPEN, old, 0) == 0)
 			return 0;
 		// Recorded as done, though something may still refuse it.
 		bump(&untracked);
@@ -1239,7 +1275,16 @@ static __always_inline void open_enter(int dfd, u32 flags)
 	e->data[0] = 0;
 	struct held_key k = held_key(HELD_OPEN);
 	long r = bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
-	if (r != 0 && r != -EEXIST)
+	if (r == -EEXIST) {
+		// Kept only when it is this open's own, its name still unread; one an
+		// earlier open left is replaced.
+		struct event *head = bpf_map_lookup_elem(&heads, &k);
+		if (!head || (head->kind == K_OPEN_FAILED && !head->data_len))
+			return;
+		release(&k, tails_for(head->data_len));
+		r = bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
+	}
+	if (r != 0)
 		bump(&untracked);
 }
 
@@ -1282,22 +1327,19 @@ static __always_inline void open_exit(long ret)
 	// ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal interrupted the open,
 	// which the kernel runs again, and that run records it.
 	int restart = ret <= -512 && ret >= -516;
-	if (!restart && (head->kind == K_OPEN || ret < 0)) {
+	if (!restart && head->kind == K_OPEN) {
+		// Reaching the file after its create step means it was created,
+		// whatever then refused the open.
+		u32 created = head->bases;
+		head->bases = 0;
+		if (ret >= 0 || created)
+			report_held(&k, head, 0);
+		if (ret < 0)
+			report_held(&k, head, -ret);
+	} else if (!restart && ret < 0) {
 		struct event *e = assemble(&k, head);
-		if (e && e->kind == K_OPEN) {
-			// Reaching the file after its create step means it was
-			// created, whatever then refused the open.
-			u32 created = e->bases;
-			e->bases = 0;
-			if (ret >= 0 || created)
-				submit(e);
-			if (ret < 0) {
-				e->err = -ret;
-				submit(e);
-			}
-		} else if (e) {
+		if (e)
 			open_failed(e, ret);
-		}
 	}
 	release(&k, t);
 }
@@ -1344,14 +1386,16 @@ static __always_inline void stash_name(u64 *ctx)
 	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
 	if (!e)
 		return;
-	__builtin_memcpy(e, head, CHUNK);
+	__builtin_memcpy(e, head, HEAD);
 	r = bpf_probe_read_kernel_str(e->data, PATH_LEN, name);
 	e->data_len = r > 0 ? r : 0;
-	if (hold_as(e, HELD_OPEN, 0) == 0)
+	if (hold_as(e, HELD_OPEN, 0, 0) == 0)
 		return;
 	head = bpf_map_lookup_elem(&heads, &k);
 	if (head)
 		head->truncated = 1;
+	else
+		bump(&untracked); // lost with its head, so a failure goes unrecorded
 }
 
 // Some builds inline getname_flags into getname (6.8), others call
@@ -1749,14 +1793,8 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	if (head) {
 		u32 t = tails_for(head->data_len);
 		// A failure the syscall's entry recorded stands for this one.
-		if (ret >= 0 || !pend) {
-			struct event *e = assemble(&k, head);
-			if (e) {
-				if (ret < 0)
-					e->err = -ret;
-				submit(e);
-			}
-		}
+		if (ret >= 0 || !pend)
+			report_held(&k, head, ret < 0 ? -ret : 0);
 		release(&k, t);
 	}
 	if (pend) {

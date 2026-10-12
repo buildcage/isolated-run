@@ -22,6 +22,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -476,7 +477,7 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missed
 		fmt.Fprintf(os.Stderr, "filesystem-audit: %-13s %d\n", k, counts[k])
 	}
 	missed := <-missedRun
-	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d host-missed=%d internal-skipped=%d pre-exec-skipped=%d tails-peak=%d/%d\n",
+	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d host-missed=%d internal-skipped=%d pre-exec-skipped=%d tails-peak=%s/%d\n",
 		total, dropped, untracked, missed.n, internal, preExec, tailsPeak(coll), coll.Maps["tails"].MaxEntries())
 	// Without every count the recording cannot claim to be complete, so it is
 	// left without its end line.
@@ -503,13 +504,14 @@ type end struct {
 }
 
 // tailsPeak is the most tails, the chunks a long path takes past its head,
-// held at once, so a step's log shows how close it came to running out.
-func tailsPeak(coll *ebpf.Collection) uint64 {
+// held at once, so a step's log shows how close it came to running out; "?"
+// when it cannot be read.
+func tailsPeak(coll *ebpf.Collection) string {
 	var use struct{ Taken, Peak uint64 }
 	if err := coll.Maps["tail_use"].Lookup(uint32(0), &use); err != nil {
-		return 0
+		return "?"
 	}
-	return use.Peak
+	return strconv.FormatUint(use.Peak, 10)
 }
 
 func sumPerCPU(m *ebpf.Map) (uint64, error) {
