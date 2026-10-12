@@ -113,9 +113,13 @@ export function resolveDefaultWritableDirs(
   };
 }
 
+function insideOf(persisting: string[]): (path: string) => boolean {
+  return (path) => persisting.some((w) => isAtOrUnder(path, w));
+}
+
 /** Whether a path resolves inside `persisting`, passes through a symlink there, or loops. */
 function reachableFrom(persisting: string[], deps: SymlinkDeps): (path: string) => boolean {
-  const inside = (path: string) => persisting.some((w) => isAtOrUnder(path, w));
+  const inside = insideOf(persisting);
   return (path) => {
     const resolved = resolveHostPath(path, deps);
     return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
@@ -123,9 +127,9 @@ function reachableFrom(persisting: string[], deps: SymlinkDeps): (path: string) 
 }
 
 /**
- * `pathEnv` without the entries inside `persisting` or through a symlink there,
- * judged like findPinnableCommand. Relative and empty entries resolve against the
- * workspace, so they go too.
+ * `pathEnv` without the entries inside `persisting`, through a symlink there, or
+ * in a symlink loop. Relative and empty entries resolve against the workspace,
+ * so they go too.
  */
 export function pathOutside(
   pathEnv: string = "",
@@ -141,13 +145,16 @@ export function pathOutside(
 }
 
 /**
- * The first `command` on `pathEnv` that neither resolves inside `persisting`
- * nor passes through a symlink there, which the command could repoint (a
- * self-hosted `/opt/tools` may point into `$HOME`). Returns the `$PATH` entry,
- * not the resolved target: snap's `/snap/bin/docker` -> `/usr/bin/snap` picks
- * its role from the name it was invoked by. Relative entries resolve against
- * the workspace, so they are skipped. `write_through: /` is the documented
- * full opt-out.
+ * The first `command` on `pathEnv` that does not resolve inside `persisting`.
+ * Returns the `$PATH` entry, not the resolved target: snap's
+ * `/snap/bin/docker` -> `/usr/bin/snap` picks its role from the name it was
+ * invoked by. One that passes through a symlink there, which the command could
+ * repoint (a self-hosted `/opt/tools` may point into `$HOME`), is taken by the
+ * file it leads to now, provided that file bears the command's own name and
+ * the `$PATH` entry is not itself in reach, as `/usr/bin/sudo` ->
+ * `/etc/alternatives/sudo` -> `/usr/lib/cargo/bin/sudo` is under
+ * `write_through: /etc`. Relative entries resolve against the workspace, so
+ * they are skipped. `write_through: /` is the documented full opt-out.
  */
 export function findPinnableCommand(
   command: string,
@@ -156,12 +163,19 @@ export function findPinnableCommand(
   deps: FindCommandDeps = realFindCommandDeps,
 ): string | undefined {
   const optedOut = persisting.includes("/");
+  const inside = insideOf(persisting);
   const reachable = reachableFrom(persisting, deps);
   for (const dir of (pathEnv ?? "").split(delimiter)) {
     if (!isAbsolute(dir)) continue;
     const candidate = join(dir, command);
     if (!deps.isExecutable(candidate)) continue;
     if (optedOut || !reachable(candidate)) return candidate;
+    // A directory the command can write to may hold a symlink it planted.
+    if (reachable(dir)) continue;
+    const resolved = resolveHostPath(candidate, deps);
+    if ("real" in resolved && !inside(resolved.real) && basename(resolved.real) === command) {
+      return resolved.real;
+    }
   }
   return undefined;
 }

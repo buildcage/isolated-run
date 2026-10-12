@@ -200,7 +200,10 @@ sandbox down, so what it runs is kept out of those paths:
 - `docker` and `sudo` are pinned, before either first runs, to a binary outside
   `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, `$RUNNER_TEMP` and `write_through:`. This applies in
   `ephemeral` mode too, since an earlier step's writes there survive. The step fails if either is on
-  `$PATH` only inside those paths. The post step pins them again. Both also run with `PATH`
+  `$PATH` only inside those paths. One reached through a symlink in them, such as Ubuntu 26.04's
+  `/usr/bin/sudo` through `/etc/alternatives` under `write_through: /etc`, is pinned to the file
+  that symlink leads to at the time, if that file bears the command's name. The post step
+  pins them again. Both also run with `PATH`
   stripped of those paths and of any entry through a symlink in them: `sudo` resolves what it runs
   there when sudoers sets no `secure_path`, and `docker` finds its `docker-credential-*` helpers
   there. `sudo` gets the system directories and `docker` the step's own `$PATH`, so a helper
