@@ -24,7 +24,7 @@ case "$MODE" in
   audit)
     assert_summary_contains "(restrict would refuse: aws-key-not-allowed" \
       "the call signed with the switched role's key is one restrict would refuse"
-    assert_summary_contains "$ACCOUNT_ID # assumed in this run, check it is yours" \
+    assert_summary_contains "allowed_aws_role_accounts: \"$ACCOUNT_ID\" # assumed in this run, check it is yours" \
       "the restrict example names the switched role's account, read from the real STS answer"
     assert_summary_contains "aws_key_check: true" "the restrict example carries aws_key_check over"
     ;;
