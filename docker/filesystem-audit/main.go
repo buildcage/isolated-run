@@ -22,6 +22,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -34,7 +35,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -type event filesystemAudit bpf/filesystem_audit.bpf.c
+// -mcpu=v3 for the fetch-and-add that takes tails; every kernel the tracer
+// runs on has it.
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cflags -mcpu=v3 -type event filesystemAudit bpf/filesystem_audit.bpf.c
 
 const cgroupRoot = "/sys/fs/cgroup"
 
@@ -476,8 +479,8 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missed
 		fmt.Fprintf(os.Stderr, "filesystem-audit: %-13s %d\n", k, counts[k])
 	}
 	missed := <-missedRun
-	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d host-missed=%d internal-skipped=%d pre-exec-skipped=%d\n",
-		total, dropped, untracked, missed.n, internal, preExec)
+	fmt.Fprintf(os.Stderr, "filesystem-audit: total=%d dropped=%d untracked=%d host-missed=%d internal-skipped=%d pre-exec-skipped=%d tails-peak=%s/%d\n",
+		total, dropped, untracked, missed.n, internal, preExec, tailsPeak(coll), coll.Maps["tails"].MaxEntries())
 	// Without every count the recording cannot claim to be complete, so it is
 	// left without its end line.
 	if err := errors.Join(errDropped, errUntracked, missed.err); err != nil {
@@ -500,6 +503,16 @@ type end struct {
 	Dropped    uint64 `json:"dropped"`
 	Untracked  uint64 `json:"untracked"`
 	HostMissed uint64 `json:"host_missed"`
+}
+
+// tailsPeak is the most tails held at once, for the step log; "?" when it
+// cannot be read.
+func tailsPeak(coll *ebpf.Collection) string {
+	var use struct{ Taken, Peak uint64 }
+	if err := coll.Maps["tail_use"].Lookup(uint32(0), &use); err != nil {
+		return "?"
+	}
+	return strconv.FormatUint(use.Peak, 10)
 }
 
 func sumPerCPU(m *ebpf.Map) (uint64, error) {

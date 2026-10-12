@@ -64,13 +64,16 @@ FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:4cb7ac979db5fcc41cae44b
 # each package, so a pinned version would stop the build at its next fix. The
 # digest above picks the branch, so a digest bump can bring a newer clang; the
 # filesystem audit e2e loads what it compiles on the CI runners' kernels.
-RUN apk add --no-cache clang llvm libbpf-dev linux-headers
+RUN apk add --no-cache clang llvm libbpf-dev linux-headers gcc musl-dev
 ARG TARGETARCH
 WORKDIR /src
 COPY docker/filesystem-audit/go.mod docker/filesystem-audit/go.sum ./
 RUN go mod download
 COPY docker/filesystem-audit/ ./
+# held_test.c runs the BPF program's holding logic on the build host, with
+# pools small enough to fill.
 RUN go generate ./... && \
+    cc -Wall -Wextra -O2 -DN_HEADS=4 -DN_TAILS=40 -o /tmp/held_test bpf/held_test.c && /tmp/held_test && \
     CGO_ENABLED=0 go test ./... && \
     CGO_ENABLED=0 GOARCH="${TARGETARCH}" go build -trimpath -ldflags="-s -w" -o /out/filesystem-audit .
 
