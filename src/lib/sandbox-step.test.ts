@@ -625,6 +625,8 @@ describe("runSandboxStep", () => {
       });
 
       await expect(runSandboxStep(ENV, deps)).rejects.toThrow("runc: exec failed");
+      expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
+      expect(mocks.setFilesystemAuditOutput).toHaveBeenCalledWith("");
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
       expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
       expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(orderOf(mocks.stopSandboxProxy));
