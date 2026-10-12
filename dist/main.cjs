@@ -68323,13 +68323,13 @@ function withNotices(blocks, noticeFor) {
 		notice: noticeFor(b)
 	});
 }
-function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES } = {}) {
+function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES, onCut } = {}) {
 	let full = blocks.map(whole), sizes = full.map(bytes), budget = limitBytes - 8192 - usedBytes;
 	if (sizes.reduce((sum, n) => sum + n, 0) <= budget) return full.join("");
 	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
 	for (let i of order) {
 		let b = blocks[i];
-		(cutAt.get(b.section) ?? Infinity) < b.level || (b.cut === "keep" || sizes[i] <= budget ? (out[i] = full[i], budget -= sizes[i]) : (out[i] = cutBlock(b, Math.max(0, budget)), budget -= bytes(out[i]), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level))));
+		(cutAt.get(b.section) ?? Infinity) < b.level || (b.cut === "keep" || sizes[i] <= budget ? (out[i] = full[i], budget -= sizes[i]) : (out[i] = cutBlock(b, Math.max(0, budget)), budget -= bytes(out[i]), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level)), onCut?.(b)));
 	}
 	return out.join("");
 }
@@ -73510,24 +73510,27 @@ function summarySize(path, fileSize) {
 		return 0;
 	}
 }
-function fitSummaryBlocks(blocks, env, fileSize) {
-	return fitStepSummary(blocks, { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) });
-}
 async function writeSummaryBlocks(blocks, env, overrides = {}) {
 	let { fileSize, writeSummary } = {
 		...realDeps$2,
 		...overrides
-	};
-	await writeSummary(fitSummaryBlocks(blocks, env, fileSize), env.GITHUB_STEP_SUMMARY);
+	}, cutIds = new Set();
+	return await writeSummary(fitStepSummary(blocks, {
+		usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize),
+		onCut: (b) => {
+			b.id !== void 0 && cutIds.add(b.id);
+		}
+	}), env.GITHUB_STEP_SUMMARY), cutIds;
 }
 async function writeReportSummary(report, annotation, { extraBlocks = [], ...options }, artifactAvailable, env, overrides = {}) {
 	let { appendFile, fileSize, writeSummary } = {
 		...realDeps$2,
 		...overrides
 	}, outcomes = computeReportOutcomes(report, options);
-	applyOutcomeAnnotations(annotation, outcomes.emissions);
-	let summary = fitSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-refuse" ? wouldRefuseTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, fileSize);
-	summary.includes(wouldRefuseTruncationNote(artifactAvailable)) && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")), await writeSummary(summary, env.GITHUB_STEP_SUMMARY);
+	applyOutcomeAnnotations(annotation, outcomes.emissions), (await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-refuse" ? wouldRefuseTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, {
+		fileSize,
+		writeSummary
+	})).has("traffic-would-refuse") && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact."));
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts
