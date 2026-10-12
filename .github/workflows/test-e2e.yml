@@ -304,6 +304,8 @@ jobs:
             (exec 3> "$GITHUB_WORKSPACE/execd.txt"; echo head >&3; exec cat /etc/hostname >&3)
             # A program, not the builtin, with an argument the record must not keep.
             /usr/bin/true buildcage-audit-sentinel-arg
+            # A user namespace, which the sandbox's seccomp profile refuses.
+            python3 -c 'import ctypes; assert ctypes.CDLL(None).unshare(0x10000000) == -1'
             # A 32-bit syscall (getpid through int 0x80) is numbered apart from
             # the calls the tracer reads, so seccomp kills the thread making it:
             # SIGSYS, 128+31.
@@ -348,6 +350,13 @@ jobs:
           grep -qE ' r +bash +\./sub/missing\.txt$' "$f"
           grep -qE ' d +python3 +\./sub/gone$' "$f"
           grep -qE ' r +python3 +\./sub/absent$' "$f"
+          # A refused syscall: noted under the heading, and a details row.
+          grep -qE '^> Refused system calls: .*`unshare` \(`python3`\)' "$f"
+          grep -qE ' ! +python3 +syscall:unshare$' "$f"
+          if [ "$(uname -m)" = x86_64 ]; then
+            grep -qE '^> .*illed for a 32-bit system call: .*`int80`' "$f"
+            grep -qE ' ! +int80 +syscall:32-bit getpid \(killed\)$' "$f"
+          fi
           # A refused change shows only as failed.
           grep -qE ' a!? +chmod +\./root-owned\.txt$' "$f"
           # Each program sharing a descriptor gets its own row.
@@ -411,6 +420,10 @@ jobs:
           jq -se '[.[] | select(.kind == "open" and (.path // "" | endswith("/fifo")))] | length == 1 and .[0].failed' "$f" > /dev/null
           if grep -q '/var/tmp/buildcage-' "$f"; then exit 1; fi
           if grep -q 'buildcage-audit-sentinel-arg' "$f"; then exit 1; fi
+          jq -se 'any(.[]; .kind == "syscall" and .syscall == "unshare" and .err == 1 and .failed)' "$f" > /dev/null
+          if [ "$(uname -m)" = x86_64 ]; then
+            jq -se 'any(.[]; .kind == "syscall" and .syscall == "getpid" and .compat and .killed)' "$f" > /dev/null
+          fi
 
       - name: The tracer and the sandbox's cgroup are gone after the step
         run: |

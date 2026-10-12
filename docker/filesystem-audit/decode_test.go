@@ -192,6 +192,21 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "open", Comm: "sh", Path: "…/d/f", Flags: unix.O_WRONLY, Access: "w"},
 		},
 		{
+			name: "refused syscall",
+			ev:   event{kind: 31, comm: "node", flags: unix.SYS_IO_URING_SETUP, pathRet: int32(unix.EPERM)},
+			want: record{Kind: "syscall", Comm: "node", Syscall: "io_uring_setup", Err: int32(unix.EPERM), Failed: true},
+		},
+		{
+			name: "32-bit syscall killed",
+			ev:   event{kind: 31, comm: "a.out", flags: 1, mode: 1},
+			want: record{Kind: "syscall", Comm: "a.out", Syscall: compatSyscallNames[1], Compat: true, Killed: true, Failed: true},
+		},
+		{
+			name: "refused syscall with no name",
+			ev:   event{kind: 31, comm: "x", flags: 9999, pathRet: int32(unix.EPERM)},
+			want: record{Kind: "syscall", Comm: "x", Syscall: "9999", Err: int32(unix.EPERM), Failed: true},
+		},
+		{
 			name: "mknod",
 			ev:   event{kind: 24, comm: "mkfifo", n1: 2, data: comps("p", "tmp")},
 			want: record{Kind: "mknod", Comm: "mkfifo", Path: "/tmp/p"},

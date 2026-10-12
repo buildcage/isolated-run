@@ -30,6 +30,8 @@ interface AuditRecord {
   untracked?: number;
   host_missed?: number;
   exchange?: boolean;
+  syscall?: string;
+  killed?: boolean;
 }
 
 const LETTER: Record<string, string> = {
@@ -146,6 +148,8 @@ function escapeForDisplay(name: string, unsafe = UNSAFE_CHARS): string {
 // A memfd and a file deleted while in use key under marks no path can spell,
 // as a name never holds a NUL, so neither passes for a file still there.
 const MEMFD_PREFIX = "memfd:";
+// A refused syscall's details row names it where a path would be.
+const SYSCALL_PREFIX = "syscall:";
 const MEMFD = `\0${MEMFD_PREFIX}`;
 const DELETED_MARK = " (deleted)";
 const DELETED = `\0${DELETED_MARK}`;
@@ -210,11 +214,15 @@ function canonical(path: string, prefixes: SummaryOptions): string {
 // A cell holding a path as a code span, so Markdown in a name the step chose
 // (an entity, ~~, a link) prints as itself. GFM still splits a table row on a
 // `|` inside a code span, so that alone is escaped.
-function codeCell(text: string): string {
+function codeSpan(text: string): string {
   const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
   const fence = "`".repeat(longest + 1);
   const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
-  return `${fence}${pad}${text.replace(/\|/g, "\\|")}${pad}${fence}`;
+  return `${fence}${pad}${text}${pad}${fence}`;
+}
+
+function codeCell(text: string): string {
+  return codeSpan(text.replace(/\|/g, "\\|"));
 }
 
 function pathCell({ path, deleted }: Shown): string {
@@ -637,6 +645,36 @@ const HEADING = "\n### 🗂️ Filesystem audit";
 const INCOMPLETE_NOTE =
   "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
   "> some accesses are missing from this summary and from the artifact.";
+const REFUSED_SHOWN = 10;
+
+// Each refused syscall with the commands it was refused to, in the order
+// first refused, then each command killed for a 32-bit one.
+function refusedNote(rows: Row[]): string {
+  const byName = new Map<string, Set<string>>();
+  const killed = new Set<string>();
+  for (const r of inRecordingOrder(rows)) {
+    if (r.path.endsWith(" (killed)")) killed.add(r.comm);
+    else {
+      const name = r.path.slice(SYSCALL_PREFIX.length);
+      byName.set(name, (byName.get(name) ?? new Set()).add(r.comm));
+    }
+  }
+  const list = (comms: Set<string>): string => [...comms].map(codeSpan).join(", ");
+  const names = [...byName].map(([name, comms]) => `${codeSpan(name)} (${list(comms)})`);
+  const more = names.length - REFUSED_SHOWN;
+  const parts = [];
+  if (names.length) {
+    parts.push(
+      `Refused system calls: ${names.slice(0, REFUSED_SHOWN).join(", ")}` +
+        (more > 0 ? ` and ${more} more in the details` : ""),
+    );
+  }
+  if (killed.size) {
+    parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call: ${list(killed)}`);
+  }
+  return `> ${parts.join("; ")}.`;
+}
+
 // A skip may have been any process's on the host, so unlike INCOMPLETE_NOTE
 // this says accesses may be missing rather than that they are.
 function skippedNote(count: number, url: string | undefined): string {
@@ -713,6 +751,8 @@ export interface AuditSummary {
   /** Each part, or undefined where it outgrew the Job Summary. */
   paths: Row[] | undefined;
   details: Row[] | undefined;
+  /** Each refused syscall per command, as a details row. */
+  refused: Row[];
   /** Why the paths and the details were given up, where they were. */
   pathsCut?: CutCause;
   detailsCut?: CutCause;
@@ -826,6 +866,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   let hostMissed = 0;
   let seq = 0;
   const added = new Map<number | undefined, number>();
+  const refused = new Map<string, Row>();
 
   const add = (r: unknown, counted = true): void => {
     if (!isRecord(r)) return;
@@ -835,6 +876,25 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       ended = true;
       lost = Boolean(r.dropped || r.untracked);
       hostMissed = typeof r.host_missed === "number" ? r.host_missed : 0;
+      return;
+    }
+    if (r.kind === "syscall") {
+      const name = escapeForDisplay(r.syscall ?? "");
+      const path =
+        SYSCALL_PREFIX + (r.killed ? ["32-bit", name, "(killed)"].filter(Boolean).join(" ") : name);
+      const comm = escapeForDisplay(r.comm ?? "");
+      const key = keyOf(comm, path);
+      const t = Date.parse(r.t ?? "");
+      let row = refused.get(key);
+      if (!row) {
+        row = { agg: newAgg(), flags: "!", comm, path };
+        row.agg.seq = Number.isNaN(t) ? Infinity : seq++;
+        refused.set(key, row);
+      }
+      if (!Number.isNaN(t)) {
+        row.agg.first = Math.min(row.agg.first, t);
+        row.agg.last = Math.max(row.agg.last, t);
+      }
       return;
     }
     if (r.kind === "exec" && r.path) {
@@ -902,6 +962,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       executed: [...executed].map(([path, runs]) => ({ ...shown(path), runs })),
       paths: byPath,
       details: log,
+      refused: [...refused.values()],
       pathsCut: paths.stopped,
       detailsCut: details.stopped,
     };
@@ -937,11 +998,13 @@ export function renderAuditSummaryBlocks(
   /** Where the skipped-hooks note links to. */
   skippedHooksUrl?: string,
 ): SummaryBlock[] {
-  const { ended, lost, hostMissed, executed, paths, details, pathsCut, detailsCut } = summary;
+  const { ended, lost, hostMissed, executed, paths, details, refused, pathsCut, detailsCut } =
+    summary;
   const heading = [
     HEADING,
     ...(ended && !lost ? [] : [INCOMPLETE_NOTE]),
     ...(hostMissed ? [skippedNote(hostMissed, skippedHooksUrl)] : []),
+    ...(refused.length ? [refusedNote(refused)] : []),
   ].join("\n\n");
   const frame = (text: string): SummaryBlock => ({
     priority: 0,
@@ -950,7 +1013,8 @@ export function renderAuditSummaryBlocks(
     text,
     cut: "keep",
   });
-  if (details?.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
+  if (details?.length === 0 && !refused.length)
+    return [frame(`${heading}\n\nNo file access was recorded.\n`)];
 
   const blocks: SummaryBlock[] = [
     frame(legendNote ? `${heading}\n\n<sub>${legendNote}</sub>\n\n` : `${heading}\n\n`),
@@ -1039,7 +1103,7 @@ export function renderAuditSummaryBlocks(
     });
     return blocks;
   }
-  const rows = inRecordingOrder(details);
+  const rows = inRecordingOrder([...details, ...refused]);
   // Times count from the proxy's start, as the communication details do, or
   // from the first access shown when that start is unknown.
   const originMs =

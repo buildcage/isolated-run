@@ -76,6 +76,72 @@ describe("renderFilesystemAuditSummary", () => {
     );
   });
 
+  it("notes refused syscalls under the heading and lists each command's in the details", () => {
+    const refused = (comm: string, syscall: string, t: string): object => ({
+      t,
+      kind: "syscall",
+      comm,
+      syscall,
+      err: 1,
+      failed: true,
+    });
+    const md = render(
+      refused("node", "io_uring_setup", "2026-01-01T00:00:01.000Z"),
+      { t: "2026-01-01T00:00:02.000Z", kind: "read", comm: "cat", path: "/etc/hostname" },
+      refused("bwrap", "unshare", "2026-01-01T00:00:03.000Z"),
+      refused("npm", "io_uring_setup", "2026-01-01T00:00:04.000Z"),
+      refused("node", "io_uring_setup", "2026-01-01T00:00:05.000Z"),
+      {
+        t: "2026-01-01T00:00:06.000Z",
+        kind: "syscall",
+        comm: "a.out",
+        syscall: "socketcall",
+        compat: true,
+        killed: true,
+        failed: true,
+      },
+      { kind: "end", dropped: 0, untracked: 0 },
+    );
+    expect(md).toContain(
+      "> Refused system calls: `io_uring_setup` (`node`, `npm`), `unshare` (`bwrap`); " +
+        "killed for a 32-bit system call: `a.out`.",
+    );
+    expect(tableRows(md)).toEqual(["| R | `/etc/hostname` |"]); // a syscall is no path
+    expect(lines(md)).toEqual([
+      "00:00.000-00:04.000: ! node syscall:io_uring_setup",
+      "00:01.000: R cat /etc/hostname",
+      "00:02.000: ! bwrap syscall:unshare",
+      "00:03.000: ! npm syscall:io_uring_setup",
+      "00:05.000: ! a.out syscall:32-bit socketcall (killed)",
+    ]);
+  });
+
+  it("notes a command killed for a 32-bit syscall on its own, from a record missing its fields", () => {
+    const md = render(
+      { kind: "syscall", comm: "a.out", killed: true, failed: true },
+      { kind: "syscall", killed: true, failed: true },
+      { kind: "end", dropped: 0, untracked: 0 },
+    );
+    expect(md).toContain("> Killed for a 32-bit system call: ``, `a.out`.");
+    expect(lines(md)).toEqual(["! syscall:32-bit (killed)", "! a.out syscall:32-bit (killed)"]);
+  });
+
+  it("lists the first refused syscalls in the note and leaves the rest to the details", () => {
+    const records = Array.from({ length: 12 }, (_, i) => ({
+      t: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+      kind: "syscall",
+      comm: "x",
+      syscall: `s${i}`,
+      err: 1,
+      failed: true,
+    }));
+    const md = render(...records, { kind: "end", dropped: 0, untracked: 0 });
+    expect(md).toContain("`s9` (`x`) and 2 more in the details.");
+    expect(md).not.toContain("`s10` (");
+    expect(md).toContain("! x syscall:s11\n");
+    expect(md).not.toContain("No file access was recorded.");
+  });
+
   it("opens on a blank line and explains the flags under the accessed paths", () => {
     const md = render(
       { kind: "exec", comm: "cat", path: "/usr/bin/cat" },

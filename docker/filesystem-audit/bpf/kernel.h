@@ -101,10 +101,25 @@ struct task_struct {
 	u64 start_time;
 	u64 self_exec_id;
 	int tgid;
+	int exit_code;
 	char comm[16];
 	struct fs_struct *fs;
 	struct files_struct *files;
 	struct nsproxy *nsproxy;
+} __attribute__((preserve_access_index));
+
+/** The fields of the SIGSYS seccomp sends, with si_code SYS_SECCOMP. */
+struct kernel_siginfo {
+	int si_signo;
+	int si_errno;
+	int si_code;
+	union {
+		struct {
+			void *_call_addr;
+			int _syscall;
+			unsigned int _arch;
+		} _sigsys;
+	} _sifields;
 } __attribute__((preserve_access_index));
 
 struct filename {

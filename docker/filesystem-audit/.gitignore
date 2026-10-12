@@ -3,3 +3,5 @@
 *_bpfel.o
 # local build output
 out/
+# gensyscallnames output, regenerated at image build time
+syscallnames_*.go

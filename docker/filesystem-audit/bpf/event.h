@@ -57,8 +57,15 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	 * @{
 	 */
 	K_MKDIR_FAILED = 26, K_MKNOD_FAILED = 27, K_SYMLINK_FAILED = 28,
-	K_LINK_FAILED = 29, K_TRUNCATE_FAILED = 30
+	K_LINK_FAILED = 29, K_TRUNCATE_FAILED = 30,
 	/** @} */
+	/**
+	 * A syscall refused with EPERM, or one whose thread the kernel killed
+	 * with SIGSYS, as for a 32-bit one under the audit's seccomp profile:
+	 * flags holds its number, mode is 1 when killed, path_len the errno; no
+	 * data.
+	 */
+	K_SYSCALL = 31
 };
 
 /**

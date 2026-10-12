@@ -245,4 +245,48 @@ static __always_inline int in_open_call(void)
 	return is_open_nr(sys_nr((struct pt_regs *)bpf_task_pt_regs(bpf_get_current_task_btf())));
 }
 
+#ifndef EPERM
+#define EPERM 1
+#endif
+#define SIGSYS 31
+
+/** A program and a syscall it was refused, recorded once. */
+struct refused_key {
+	struct proc proc;
+	u32 nr;
+	u32 killed;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 4096);
+	__type(key, struct refused_key);
+	__type(value, u8);
+} refused_seen SEC(".maps");
+
+/**
+ * Records the step's syscall @p nr as refused, once per program: with
+ * @p killed, one whose thread the kernel killed with SIGSYS, else one that
+ * failed with EPERM.
+ */
+static __always_inline void syscall_refused(u32 slot, long nr, u32 killed)
+{
+	struct refused_key k;
+	__builtin_memset(&k, 0, sizeof(k));
+	k.proc = current_proc();
+	k.nr = nr;
+	k.killed = killed;
+	u8 one = 1;
+	if (bpf_map_update_elem(&refused_seen, &k, &one, BPF_NOEXIST))
+		return; // recorded already
+	struct event *e = start(slot, K_SYSCALL);
+	if (!e)
+		return;
+	e->flags = nr;
+	e->mode = killed;
+	e->path_len = killed ? 0 : EPERM;
+	e->data_len = 0;
+	submit(e);
+}
+
 #endif
