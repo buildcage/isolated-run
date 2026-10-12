@@ -172,7 +172,7 @@ interface RefusedKey {
    *  run issued the key. */
   label: string;
   /** The hosts its requests went to, in the order each first appeared. */
-  hosts: string[];
+  hosts: Set<string>;
   count: number;
   /** Whether audit let one of its requests through, so it has a row in
    *  Restrict Would Refuse. */
@@ -195,10 +195,10 @@ function refusedKeys(timeline: TrafficEvent[]): Map<string, RefusedKey> {
     }
     const keyRef = refusedKeyRef(e);
     if (!keyRef) continue;
-    const key = seen.get(keyRef) ?? { hosts: [], count: 0, audited: false };
-    if (!key.hosts.includes(e.host)) key.hosts.push(e.host);
+    const key = seen.get(keyRef) ?? { hosts: new Set(), count: 0, audited: false };
+    key.hosts.add(e.host);
     key.count++;
-    key.audited ||= e.wouldRefuse !== undefined;
+    key.audited ||= auditedKey(e);
     seen.set(keyRef, key);
   }
   const numbered = seen.size > 1;
@@ -212,14 +212,18 @@ function refusedKeys(timeline: TrafficEvent[]): Map<string, RefusedKey> {
 }
 
 function refusedKeyRef(e: TrafficEvent): string | undefined {
-  const reason = e.action === "block" ? e.reason : e.wouldRefuse;
-  return reason === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : undefined;
+  const refused = e.action === "block" && e.reason === KEY_NOT_ALLOWED;
+  return refused || auditedKey(e) ? e.extensions?.aws?.keyRef : undefined;
+}
+
+function auditedKey(e: TrafficEvent): boolean {
+  return e.wouldRefuse === KEY_NOT_ALLOWED && e.extensions?.aws?.keyRef !== undefined;
 }
 
 /** aws-key-not-allowed with the key it names, unless that says nothing more. */
 function keyRefusalLabel(keys: Map<string, RefusedKey>): RefusalLabel {
-  return (e) => {
-    const keyRef = refusedKeyRef(e);
+  return (e, reason) => {
+    const keyRef = reason === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : undefined;
     const label = keyRef && keys.get(keyRef)?.label;
     return label && label !== "key" ? `${KEY_NOT_ALLOWED}, ${label}` : undefined;
   };
@@ -241,13 +245,14 @@ function withKeyTable(
   if (at === -1 || audited.length === 0) return blocks;
   const table = markdownTable(
     [
-      { key: "key", title: "Key" },
+      // Every row's reason, which the troubleshooting link below is looked up by.
+      { key: "key", title: `Key (${KEY_NOT_ALLOWED})` },
       { key: "hosts", title: "Hosts" },
       { key: "count", title: "Count", align: "right" },
     ],
     audited.map(({ label, hosts, count }) => {
-      const rest = hosts.length - KEY_HOSTS_SHOWN;
-      const shown = hosts.slice(0, KEY_HOSTS_SHOWN).join(", ");
+      const rest = hosts.size - KEY_HOSTS_SHOWN;
+      const shown = [...hosts].slice(0, KEY_HOSTS_SHOWN).join(", ");
       return { key: label, hosts: rest > 0 ? `${shown} and ${rest} more` : shown, count };
     }),
   );
@@ -258,7 +263,7 @@ function withKeyTable(
     text: `${heading}${table}\n`,
     head: heading.split("\n").length + 1,
   };
-  const rows = wouldRefuseRows(timeline.filter((e) => !refusedKeyRef(e)));
+  const rows = wouldRefuseRows(timeline.filter((e) => !auditedKey(e)));
   if (rows.length === 0) return blocks.with(at, keyBlock);
   // Deeper, so a cut key table takes it along under the key table's notice.
   const restBlock = {

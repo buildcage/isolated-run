@@ -261,13 +261,26 @@ describe("computeReportOutcomes", () => {
             ...wouldRefuse(7, "s3.amazonaws.com", "aws-ambiguous-credential"),
             extensions: { aws: { keyRef: "aaaa1111" } },
           },
+          // Refused for another reason, and would be for its key too.
+          {
+            ...signed(8, "sqs.amazonaws.com", "aaaa1111"),
+            action: "block",
+            reason: "ip-not-allowed",
+          },
         ]),
-        options(),
+        options({
+          extraInputs: [
+            "aws_key_check: true",
+            'allowed_aws_role_accounts: "222222222222" # assumed in this run, check it is yours',
+          ],
+        }),
       );
-      expect(markdown).toContain("### 🚨 Restrict Would Refuse\n\n| Key | Hosts | Count |\n");
+      expect(markdown).toContain(
+        "### 🚨 Restrict Would Refuse\n\n| Key (aws-key-not-allowed) | Hosts | Count |\n",
+      );
       expect(tables(markdown)).toStrictEqual([
         [
-          "| key 1 from a role in 222222222222 | s3.amazonaws.com, ssm.amazonaws.com | 3 |",
+          "| key 1 from a role in 222222222222 | s3.amazonaws.com, ssm.amazonaws.com, sqs.amazonaws.com | 4 |",
           "| key 2 | ssm.amazonaws.com | 1 |",
           "| key 3 | cloudformation.amazonaws.com | 1 |",
         ],
@@ -282,6 +295,11 @@ describe("computeReportOutcomes", () => {
       expect(details(markdown)).toContain(
         "🚨 00:02.000: GET https://ssm.amazonaws.com/2 -> 200 (restrict would refuse: aws-key-not-allowed, key 2)",
       );
+      expect(details(markdown)).toContain(
+        "🚫 00:08.000: GET https://sqs.amazonaws.com/8 -> ip-not-allowed (restrict would refuse: aws-key-not-allowed, key 1 from a role in 222222222222)",
+      );
+      const section = markdown.slice(markdown.indexOf("### 🚨"), markdown.indexOf("🛡️"));
+      expect(section).not.toContain("assumed in this run");
     });
 
     it("names three hosts of a key and counts the rest", () => {

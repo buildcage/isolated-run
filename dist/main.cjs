@@ -69226,7 +69226,7 @@ const MARK = {
 	failed: "⚠️"
 };
 function renderEvent(event, startedAt, refusalLabel) {
-	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "🚨" : MARK[event.action] ?? "✅", label = refusalLabel(event), note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${label ?? event.wouldRefuse})`, result = event.action === "block" && label !== void 0 ? label : outcome(event);
+	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "🚨" : MARK[event.action] ?? "✅", label = (reason) => refusalLabel(event, reason) ?? reason, note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${label(event.wouldRefuse)})`, result = event.action === "block" && event.reason !== void 0 ? label(event.reason) : outcome(event);
 	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${result}${note}`;
 }
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
@@ -73191,11 +73191,11 @@ function refusedKeys(timeline) {
 		let keyRef = refusedKeyRef(e);
 		if (!keyRef) continue;
 		let key = seen.get(keyRef) ?? {
-			hosts: [],
+			hosts: new Set(),
 			count: 0,
 			audited: !1
 		};
-		key.hosts.includes(e.host) || key.hosts.push(e.host), key.count++, key.audited ||= e.wouldRefuse !== void 0, seen.set(keyRef, key);
+		key.hosts.add(e.host), key.count++, key.audited ||= auditedKey(e), seen.set(keyRef, key);
 	}
 	let numbered = seen.size > 1;
 	return new Map([...seen].map(([keyRef, key], i) => {
@@ -73207,11 +73207,14 @@ function refusedKeys(timeline) {
 	}));
 }
 function refusedKeyRef(e) {
-	return (e.action === "block" ? e.reason : e.wouldRefuse) === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : void 0;
+	return e.action === "block" && e.reason === KEY_NOT_ALLOWED || auditedKey(e) ? e.extensions?.aws?.keyRef : void 0;
+}
+function auditedKey(e) {
+	return e.wouldRefuse === KEY_NOT_ALLOWED && e.extensions?.aws?.keyRef !== void 0;
 }
 function keyRefusalLabel(keys) {
-	return (e) => {
-		let keyRef = refusedKeyRef(e), label = keyRef && keys.get(keyRef)?.label;
+	return (e, reason) => {
+		let keyRef = reason === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : void 0, label = keyRef && keys.get(keyRef)?.label;
 		return label && label !== "key" ? `${KEY_NOT_ALLOWED}, ${label}` : void 0;
 	};
 }
@@ -73221,7 +73224,7 @@ function withKeyTable(blocks, timeline, keys) {
 	let table = markdownTable([
 		{
 			key: "key",
-			title: "Key"
+			title: `Key (${KEY_NOT_ALLOWED})`
 		},
 		{
 			key: "hosts",
@@ -73233,7 +73236,7 @@ function withKeyTable(blocks, timeline, keys) {
 			align: "right"
 		}
 	], audited.map(({ label, hosts, count }) => {
-		let rest = hosts.length - 3, shown = hosts.slice(0, 3).join(", ");
+		let rest = hosts.size - 3, shown = [...hosts].slice(0, 3).join(", ");
 		return {
 			key: label,
 			hosts: rest > 0 ? `${shown} and ${rest} more` : shown,
@@ -73243,7 +73246,7 @@ function withKeyTable(blocks, timeline, keys) {
 		...blocks[at],
 		text: `${heading}${table}\n`,
 		head: heading.split("\n").length + 1
-	}, rows = wouldRefuseRows(timeline.filter((e) => !refusedKeyRef(e)));
+	}, rows = wouldRefuseRows(timeline.filter((e) => !auditedKey(e)));
 	if (rows.length === 0) return blocks.with(at, keyBlock);
 	let restBlock = {
 		...blocks[at],

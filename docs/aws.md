@@ -168,7 +168,7 @@ up to three of the hosts its requests went to. Keys are numbered in the order th
 unless the run refused only one, and a key an STS answer in the run issued names the account of its
 role. Every other reason gets a row for each host, as in **🚫 Blocked Hosts**:
 
-| Key                               | Hosts                                                              | Count |
+| Key (aws-key-not-allowed)         | Hosts                                                              | Count |
 | --------------------------------- | ------------------------------------------------------------------ | ----: |
 | key 1 from a role in 222222222222 | cloudformation.us-east-1.amazonaws.com, s3.us-east-1.amazonaws.com |    66 |
 | key 2                             | ssm.us-east-1.amazonaws.com                                        |     3 |
