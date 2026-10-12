@@ -16,7 +16,7 @@ import {
 } from "./oci-mounts.ts";
 import { resolveProtectedPaths } from "./oci-protected-paths.ts";
 import { isAtOrUnder } from "./paths.ts";
-import type { OciSpec, BuiltOciSpec, HostMount, OverlayDirs } from "./types.ts";
+import type { OciSpec, BuiltOciSpec, HostMount, MountEntry, OverlayDirs } from "./types.ts";
 export interface SandboxIdentity {
   uid: number;
   gid: number;
@@ -83,6 +83,13 @@ export interface BuildOciConfigOptions {
   readonlyHostPaths?: string[];
   /** See host-commands.ts's renameGuardDirs. */
   renameGuardDirs?: string[];
+  /** Action-owned binds carried in with the DNS and CA mounts, so a
+   *  write_through entry containing them cannot shadow them: the mediated
+   *  runner-file directory; see runner-output-files.ts. */
+  extraInternalMounts?: MountEntry[];
+  /** Paths masked on top of the computed set: the real runner files the
+   *  mediation keeps the command away from; see runner-output-files.ts. */
+  extraMaskedPaths?: string[];
 }
 
 /**
@@ -148,6 +155,8 @@ export function buildOciConfig(
     caTrust,
     readonlyHostPaths = [],
     renameGuardDirs = [],
+    extraInternalMounts = [],
+    extraMaskedPaths = [],
   }: BuildOciConfigOptions,
   probes: HostProbes = realHostProbes,
 ): BuiltOciSpec {
@@ -186,6 +195,7 @@ export function buildOciConfig(
       options: ["rbind", "ro"],
     },
     ...(caAdditions?.mounts ?? []),
+    ...extraInternalMounts,
   ];
   const nofile: NofileLimit | undefined = probes.nofileRlimit();
   const freshMountDestinations = freshMountDestinationsFrom(baseSpec);
@@ -285,7 +295,9 @@ export function buildOciConfig(
       ...(cgroupsPath !== undefined && { cgroupsPath }),
       namespaces,
       seccomp: seccompProfile,
-      maskedPaths,
+      // runc applies masks after every mount, so they win over a writable layer:
+      // the mediation's real runner files stay covered even under write_through.
+      maskedPaths: [...new Set([...maskedPaths, ...extraMaskedPaths])],
       // runc applies these after every mount, so they win over any writable layer.
       readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostPaths])],
     },

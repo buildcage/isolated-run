@@ -75,12 +75,16 @@ function isRunnerOnly(key: string): boolean {
 }
 
 /** The step's own environment, minus what the runner added for this action
- *  alone, plus (inspect engine only) the CA-trust variables it left unset.
- *  See ca-trust.ts. */
+ *  alone, plus (inspect engine only) the CA-trust variables it left unset (see
+ *  ca-trust.ts) and `overrides`, which repoint the command at its mediated
+ *  runner files (see runner-output-files.ts). `overrides` win over the step's
+ *  own values and are identifier-shaped by construction, so they skip the
+ *  name check. */
 export function resolveSandboxEnv(
   env: NodeJS.ProcessEnv,
   caTrust?: CaTrustFiles,
   warn?: Warn,
+  overrides: Record<string, string> = {},
 ): Record<string, string> {
   const merged = { ...env, ...(caTrust ? caTrustAdditions(caTrust, env).env : undefined) };
   const resolved: Record<string, string> = {};
@@ -98,7 +102,7 @@ export function resolveSandboxEnv(
       `Not passing environment variables whose names a shell cannot export: ${skipped.join(", ")}`,
     );
   }
-  return resolved;
+  return { ...resolved, ...overrides };
 }
 
 export function buildEnvBlob(resolved: Record<string, string>): Buffer {

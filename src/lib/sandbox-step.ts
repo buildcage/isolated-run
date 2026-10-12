@@ -9,6 +9,11 @@
  * and sandbox/sandboxed-command.ts.
  */
 
+import { randomBytes } from "node:crypto";
+import { rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import * as core from "@actions/core";
 
 import { isKnownBlockedUrlRule } from "#core/lib/acl/wildcard-rules.ts";
@@ -60,10 +65,16 @@ import {
 } from "./sandbox/filesystem-plan.ts";
 import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { assertNonRootUid } from "./sandbox/identity.ts";
+import {
+  mediateRunnerOutputFiles,
+  readBackingFile,
+  type MediatedRunnerFile,
+  type RunnerOutputMediation,
+} from "./sandbox/runner-output-files.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
-import { replaceIfNotRegularFile, rewriteOutputFile } from "./step-output-file.ts";
+import { validatedOutputText } from "./step-output-file.ts";
 import { reportStepTraffic, writeLateSummary } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
@@ -126,8 +137,11 @@ export interface SandboxStepDeps {
   reportStepTraffic: typeof reportStepTraffic;
   writeLateSummary: typeof writeLateSummary;
   prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
-  rewriteOutputFile: typeof rewriteOutputFile;
-  replaceIfNotRegularFile: typeof replaceIfNotRegularFile;
+  mediateRunnerOutputFiles: typeof mediateRunnerOutputFiles;
+  readBackingFile: typeof readBackingFile;
+  /** Writes a mediated runner file's real path from its validated backing
+   *  content; the command never touched the real path. */
+  writeRunnerFile: (path: string, content: Buffer) => void;
   setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
   setFilesystemAuditOutput: typeof setFilesystemAuditOutput;
   /** Calls listener on each signal a cancelled run sends this process, and
@@ -193,8 +207,11 @@ const realDeps: SandboxStepDeps = {
   reportStepTraffic,
   writeLateSummary,
   prepareStepFilesystemAudit,
-  rewriteOutputFile,
-  replaceIfNotRegularFile,
+  mediateRunnerOutputFiles,
+  readBackingFile,
+  // A one-line fs wrapper; its behaviour is writeFileSync's.
+  /* v8 ignore next */
+  writeRunnerFile: (path, content) => writeFileSync(path, content),
   setTrafficArtifactOutput,
   setFilesystemAuditOutput,
   onCancel,
@@ -241,32 +258,47 @@ function saveCleanupState(
 }
 
 /**
- * Puts right what the command left at one of the runner's files this action
- * writes after it. `putRight` returns what it had to put right, if anything,
- * which fails the step. A file it could not put right may still be the
- * command's symlink or FIFO, so nothing more is written through it: without
- * the variable, @actions/core sets outputs as ::set-output commands and the
- * reports go to the step's log.
+ * Writes a mediated runner file's real path from what the command left in its
+ * backing copy. The command never reached the real path (masked), so the host
+ * writes it directly, with no symlink, FIFO or permission to work around.
+ * $GITHUB_OUTPUT is trimmed to the entries the runner can read; a dropped entry
+ * fails the step, since the runner would stop at it. A backing copy the command
+ * made unreadable (a symlink, FIFO, or one over 64 MiB) leaves the real file
+ * empty and fails the step too.
  */
-function putRunnerFileRight(
-  env: NodeJS.ProcessEnv,
-  name: "GITHUB_OUTPUT" | "GITHUB_STEP_SUMMARY",
+function writeBackMediatedFile(
+  file: MediatedRunnerFile,
   annotation: Annotation,
-  putRight: (path: string) => string | undefined,
+  deps: Pick<SandboxStepDeps, "readBackingFile" | "writeRunnerFile">,
 ): void {
-  const path = env[name];
-  if (!path) return;
-  try {
-    const done = putRight(path);
-    if (done === undefined) return;
-    annotation.error(`$${name} ${done}; failing the step`);
-  } catch (e) {
-    annotation.error(
-      `$${name} could not be put right: ${errorMessage(e)}; leaving it unwritten and failing the step`,
-    );
-    delete env[name];
+  const fail = (reason: string) => {
+    annotation.error(`$${file.variable} ${reason}; failing the step`);
+    process.exitCode = 1;
+  };
+  const read = deps.readBackingFile(file.backingPath);
+  let content: Buffer = Buffer.alloc(0);
+  let failure: string | undefined;
+  if ("reason" in read) failure = read.reason;
+  else if ("bytes" in read) {
+    if (file.variable === "GITHUB_OUTPUT") {
+      const { text, error } = validatedOutputText(read.bytes);
+      content = Buffer.from(text, "utf8");
+      if (error) failure = `was written without what the runner could not read: ${error}`;
+    } else {
+      // The step's own summary, written verbatim; the report is fitted around
+      // it afterward (see report.ts).
+      content = read.bytes;
+    }
   }
-  process.exitCode = 1;
+  // An empty read is the command removing its backing file: the real file is
+  // left empty, no failure.
+  try {
+    deps.writeRunnerFile(file.realPath, content);
+  } catch (e) {
+    fail(`could not be written: ${errorMessage(e)}`);
+    return;
+  }
+  if (failure) fail(failure);
 }
 
 /**
@@ -315,8 +347,9 @@ export async function runSandboxStep(
     reportStepTraffic,
     writeLateSummary,
     prepareStepFilesystemAudit,
-    rewriteOutputFile,
-    replaceIfNotRegularFile,
+    mediateRunnerOutputFiles,
+    readBackingFile,
+    writeRunnerFile,
     setTrafficArtifactOutput,
     setFilesystemAuditOutput,
     onCancel,
@@ -485,6 +518,19 @@ export async function runSandboxStep(
     cancel.abort();
   });
 
+  // The command writes action-owned backing copies of $GITHUB_OUTPUT and
+  // $GITHUB_STEP_SUMMARY, bound into the sandbox, with the real files masked
+  // from it; the host reads the copies back and writes the real files itself
+  // after the step. The backing directory sits outside the sandbox's scratch
+  // so it outlives the command, and is removed below. The path is settled here
+  // (no I/O), but the directory is only created inside the try, so a failure
+  // there still tears the proxy down in the finally.
+  const runnerFilesBackingDir = join(
+    tmpdir(),
+    `buildcage-runner-files-${randomBytes(8).toString("hex")}`,
+  );
+  let mediation: RunnerOutputMediation | undefined;
+
   // 1 unless the isolated command itself reports otherwise: every way out of
   // the block below that isn't the command's own exit code is a failure.
   let exitCode = 1;
@@ -497,6 +543,8 @@ export async function runSandboxStep(
         "PROXY_NOT_RUNNING",
       );
     }
+
+    mediation = mediateRunnerOutputFiles(env, runnerFilesBackingDir);
 
     exitCode = await runSandboxedCommand({
       containerName,
@@ -512,22 +560,22 @@ export async function runSandboxStep(
       onAuditAttached: () => (auditAttached = true),
       warn,
       cancel: cancel.signal,
+      internalMounts: mediation?.mounts,
+      maskedPaths: mediation?.maskedPaths,
+      envOverrides: mediation?.envOverrides,
     });
   } finally {
-    // The command can set either artifact name, in $GITHUB_OUTPUT or with
-    // ::set-output, or leave the file so the runner stops before the names
-    // appended to it. The file is rewritten to what the runner reads, then both
-    // names set empty, which the runner applies last. The reports append to
-    // $GITHUB_STEP_SUMMARY, which the command can have replaced too.
-    putRunnerFileRight(env, "GITHUB_OUTPUT", annotation, (path) => {
-      const unreadable = rewriteOutputFile(path);
-      return unreadable && `was rewritten without what the runner could not read: ${unreadable}`;
-    });
-    putRunnerFileRight(env, "GITHUB_STEP_SUMMARY", annotation, (path) =>
-      replaceIfNotRegularFile(path)
-        ? "held something other than a regular file, now replaced with an empty one"
-        : undefined,
-    );
+    // Write $GITHUB_OUTPUT and then $GITHUB_STEP_SUMMARY back from their backing
+    // copies before this action appends its own: the artifact-name outputs via
+    // @actions/core (last-write-wins over anything the command set), and the
+    // reports onto the summary. The command never reached the real files, so
+    // there is no symlink, FIFO or permission to put right here.
+    if (mediation) {
+      for (const file of mediation.files) {
+        writeBackMediatedFile(file, annotation, { readBackingFile, writeRunnerFile });
+      }
+      rmSync(runnerFilesBackingDir, { recursive: true, force: true });
+    }
     for (const set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) {
       try {
         set("");

@@ -56,7 +56,7 @@ import { runIsolated } from "./run.ts";
 import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
 import { SANDBOX_SCRATCH_BASE, withScratchDir, type Warn } from "./scratch-dir.ts";
 import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
-import type { BuiltOciSpec, OverlayDirs } from "./types.ts";
+import type { BuiltOciSpec, MountEntry, OverlayDirs } from "./types.ts";
 
 /**
  * The sandbox's own end of the direct veth link to the proxy's buildcage0
@@ -167,6 +167,13 @@ export interface RunSandboxedCommandOptions {
   warn: Warn;
   /** Aborted when the step is cancelled; see runIsolated. */
   cancel?: AbortSignal;
+  /** The mediation of $GITHUB_OUTPUT/$GITHUB_STEP_SUMMARY, set up by the step:
+   *  a directory bind carried in with the internal mounts, the real paths to
+   *  mask, and the environment overrides repointing the command at the backing
+   *  files. See runner-output-files.ts. */
+  internalMounts?: MountEntry[];
+  maskedPaths?: string[];
+  envOverrides?: Record<string, string>;
 }
 
 export type AssembleBundleOptions = Omit<RunSandboxedCommandOptions, "proxyNetns">;
@@ -420,6 +427,8 @@ export function assembleBundle(
       caTrust,
       readonlyHostPaths: [...readonlyHostDirs, ...readonlyFiles],
       renameGuardDirs,
+      extraInternalMounts: options.internalMounts,
+      extraMaskedPaths: options.maskedPaths,
     });
   } catch (e) {
     if (caTrust?.nssDb) deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps));
@@ -582,7 +591,7 @@ export async function runSandboxedCommand(
         const audit = await startAudit(dir, config, options, deps);
         try {
           exitCode = await runIsolated({
-            envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
+            envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn, options.envOverrides)),
             runcPath,
             proxyNetns,
             bundleDir: dir,

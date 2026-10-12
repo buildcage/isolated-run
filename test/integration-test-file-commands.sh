@@ -6,6 +6,12 @@
 # third run also tries to move $RUNNER_TEMP aside. The fourth reaches the files
 # through a bind mount that write_through names. See
 # sandboxReadonlyFileCommands and renameGuardDirs in sandbox/host-commands.ts.
+#
+# The last run checks the other half: GITHUB_OUTPUT and GITHUB_STEP_SUMMARY are
+# mediated, so the command writes backing copies it can rewrite in place (sed
+# -i, which would EBUSY against a bind-mounted file), and the host writes the
+# real files from them -- even under ephemeral, where other writes are
+# discarded. See runner-output-files.ts.
 set -uo pipefail
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
@@ -128,6 +134,31 @@ exit \$rc" \
   node dist/main.cjs
 ALIAS_CODE=$?
 
+# Mediation: the command writes GITHUB_OUTPUT and GITHUB_STEP_SUMMARY, rewriting
+# the output in place with sed -i, under ephemeral (where a plain write would be
+# discarded). The host must end up with what the command left.
+MED_OUTPUT="$COMMANDS/set_output_med"
+MED_SUMMARY="$WORKDIR/summary_med.md"
+touch "$COMMANDS/set_env_med" "$COMMANDS/add_path_med" "$COMMANDS/save_state_med"
+touch "$MED_OUTPUT" "$MED_SUMMARY"
+echo "=== mediation: GITHUB_OUTPUT and GITHUB_STEP_SUMMARY (ephemeral) ==="
+RUNNER_TEMP="$WORKDIR/_temp" \
+GITHUB_WORKSPACE="$WORKDIR" \
+GITHUB_ENV="$COMMANDS/set_env_med" \
+GITHUB_PATH="$COMMANDS/add_path_med" \
+GITHUB_STATE="$COMMANDS/save_state_med" \
+GITHUB_OUTPUT="$MED_OUTPUT" \
+GITHUB_STEP_SUMMARY="$MED_SUMMARY" \
+BUILDCAGE_BUILD_TEST_HOOKS=1 \
+BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
+INPUT_FILESYSTEM_MODE=ephemeral \
+INPUT_RUN='set -e
+echo "mediated_key=initial" >> "$GITHUB_OUTPUT"
+sed -i "s/initial/final/" "$GITHUB_OUTPUT"
+echo "## from the command" >> "$GITHUB_STEP_SUMMARY"' \
+  node dist/main.cjs
+MED_CODE=$?
+
 echo ""
 echo "=== Sandbox File Command Assertions ==="
 echo ""
@@ -154,4 +185,16 @@ check_host_file "ephemeral: GITHUB_ENV took the write" "$COMMANDS/set_env_epheme
 check_host_file "ephemeral: GITHUB_PATH is untouched" "$COMMANDS/add_path_ephemeral" ""
 check_host_file "write_through: /: GITHUB_ENV is untouched" "$COMMANDS/set_env_whole" ""
 check_host_file "an alias in write_through: GITHUB_ENV is untouched" "$COMMANDS/env_alias" ""
+
+check_status "mediation: the step held" "$MED_CODE" 0
+if grep -qx "mediated_key=final" "$MED_OUTPUT" 2>/dev/null; then
+  pass "mediation: GITHUB_OUTPUT written back after an in-place edit"
+else
+  fail "mediation: GITHUB_OUTPUT -- got: $(cat "$MED_OUTPUT" 2>/dev/null)"
+fi
+if grep -q "## from the command" "$MED_SUMMARY" 2>/dev/null; then
+  pass "mediation: GITHUB_STEP_SUMMARY carries the command's own summary"
+else
+  fail "mediation: GITHUB_STEP_SUMMARY -- got: $(cat "$MED_SUMMARY" 2>/dev/null)"
+fi
 assert_results

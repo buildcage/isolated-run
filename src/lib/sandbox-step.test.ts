@@ -55,8 +55,9 @@ const mocks = {
   reportStepTraffic: vi.fn(),
   writeLateSummary: vi.fn(),
   prepareStepFilesystemAudit: vi.fn(),
-  rewriteOutputFile: vi.fn(),
-  replaceIfNotRegularFile: vi.fn(),
+  mediateRunnerOutputFiles: vi.fn(),
+  readBackingFile: vi.fn(),
+  writeRunnerFile: vi.fn(),
   setTrafficArtifactOutput: vi.fn(),
   setFilesystemAuditOutput: vi.fn(),
   onCancel: vi.fn(),
@@ -129,6 +130,23 @@ beforeEach(() => {
   mocks.reportStepTraffic.mockResolvedValue({ startedAt: undefined, reported: true });
   mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks: () => [] });
   mocks.onCancel.mockReturnValue(stopListening);
+  // Mirrors the real mediation: a backing file per variable the step has.
+  mocks.mediateRunnerOutputFiles.mockImplementation(
+    (env: NodeJS.ProcessEnv, backingDir: string) => {
+      const files = (["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"] as const)
+        .filter((v) => env[v])
+        .map((variable) => ({
+          variable,
+          realPath: env[variable]!,
+          backingPath: `${backingDir}/${variable}`,
+        }));
+      return files.length === 0
+        ? undefined
+        : { envOverrides: {}, mounts: [], maskedPaths: [], files };
+    },
+  );
+  // The command wrote nothing by default; a test that cares overrides this.
+  mocks.readBackingFile.mockReturnValue({ empty: true });
 });
 
 /** Call order of a step that ran, for comparing two steps against each other. */
@@ -639,7 +657,7 @@ describe("runSandboxStep", () => {
       });
 
       await expect(runSandboxStep(ENV, deps)).rejects.toThrow("runc: exec failed");
-      expect(mocks.rewriteOutputFile).toHaveBeenCalledTimes(1);
+      expect(mocks.writeRunnerFile).toHaveBeenCalled();
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
       expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
       expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(orderOf(mocks.stopSandboxProxy));
@@ -675,17 +693,17 @@ describe("runSandboxStep", () => {
       expect(mocks.onCancel).not.toHaveBeenCalled();
     });
 
-    // The command can leave the file so the runner never reads the names
-    // appended after it.
-    it("rewrites $GITHUB_OUTPUT once the command has stopped, before the report", async () => {
+    // The command wrote a backing copy; the real file is written from it after
+    // the command stops, before the report appends its own outputs.
+    it("writes $GITHUB_OUTPUT back once the command has stopped, before the report", async () => {
       await runSandboxStep(ENV, deps);
 
-      expect(mocks.rewriteOutputFile.mock.calls).toStrictEqual([[ENV.GITHUB_OUTPUT]]);
-      expect(orderOf(mocks.runSandboxedCommand)).toBeLessThan(orderOf(mocks.rewriteOutputFile));
-      expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(
+      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_OUTPUT, Buffer.alloc(0));
+      expect(orderOf(mocks.runSandboxedCommand)).toBeLessThan(orderOf(mocks.writeRunnerFile));
+      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(
         orderOf(mocks.prepareStepFilesystemAudit),
       );
-      expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
+      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
       expect(annotation.error).not.toHaveBeenCalled();
     });
 
@@ -696,9 +714,7 @@ describe("runSandboxStep", () => {
 
       expect(mocks.setTrafficArtifactOutput.mock.calls).toStrictEqual([[""]]);
       expect(mocks.setFilesystemAuditOutput.mock.calls).toStrictEqual([[""]]);
-      expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(
-        orderOf(mocks.setTrafficArtifactOutput),
-      );
+      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.setTrafficArtifactOutput));
       expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
         orderOf(mocks.prepareStepFilesystemAudit),
       );
@@ -714,76 +730,105 @@ describe("runSandboxStep", () => {
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
     });
 
-    it("fails the step but still reports when $GITHUB_OUTPUT held what the runner cannot read", async () => {
-      mocks.rewriteOutputFile.mockReturnValue("it is not a regular file");
+    it("writes $GITHUB_OUTPUT back trimmed to what the runner reads, without failing", async () => {
+      mocks.readBackingFile.mockImplementation((path: string) =>
+        path.endsWith("GITHUB_OUTPUT") ? { bytes: Buffer.from("key=value\n") } : { empty: true },
+      );
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(
+        ENV.GITHUB_OUTPUT,
+        Buffer.from("key=value\n"),
+      );
+      expect(annotation.error).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing back and still reports where the runner gave neither file", async () => {
+      await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "", GITHUB_STEP_SUMMARY: "" }, deps);
+      expect(mocks.writeRunnerFile).not.toHaveBeenCalled();
+      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails the step but still reports when $GITHUB_OUTPUT held what the runner cannot read", async () => {
+      mocks.readBackingFile.mockImplementation((path: string) =>
+        path.endsWith("GITHUB_OUTPUT")
+          ? { bytes: Buffer.from("a=1\nx<<NEVER\nb=2\n") }
+          : { empty: true },
+      );
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_OUTPUT, Buffer.from("a=1\n"));
       expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_OUTPUT was rewritten without what the runner could not read: it is not a regular file; failing the step",
+        "$GITHUB_OUTPUT was written without what the runner could not read: a NAME<<DELIMITER entry never reaches its delimiter; failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
       expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
     });
 
-    it("fails the step but still reports, writing nothing more to $GITHUB_OUTPUT, when it cannot be rewritten", async () => {
-      mocks.rewriteOutputFile.mockImplementation(() => {
-        throw new Error("EACCES");
+    it("fails the step but still reports when $GITHUB_OUTPUT's real file cannot be written", async () => {
+      mocks.writeRunnerFile.mockImplementation((path: string) => {
+        if (path === ENV.GITHUB_OUTPUT) throw new Error("EACCES");
       });
-      const env = { ...ENV };
-
-      await expect(runSandboxStep(env, deps)).resolves.toBe(0);
-      expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_OUTPUT could not be put right: EACCES; leaving it unwritten and failing the step",
-      );
-      expect(process.exitCode).toBe(1);
-      expect(env.GITHUB_OUTPUT).toBeUndefined();
-      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
-    });
-
-    it("replaces whatever but a regular file the command left at $GITHUB_STEP_SUMMARY, before the report", async () => {
-      await runSandboxStep(ENV, deps);
-
-      expect(mocks.replaceIfNotRegularFile.mock.calls).toStrictEqual([[ENV.GITHUB_STEP_SUMMARY]]);
-      expect(orderOf(mocks.replaceIfNotRegularFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
-      expect(annotation.error).not.toHaveBeenCalled();
-    });
-
-    it("fails the step but still reports when $GITHUB_STEP_SUMMARY was not a regular file", async () => {
-      mocks.replaceIfNotRegularFile.mockReturnValue(true);
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
       expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_STEP_SUMMARY held something other than a regular file, now replaced with an empty one; failing the step",
+        "$GITHUB_OUTPUT could not be written: EACCES; failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
     });
 
-    it("fails the step and reports to the log instead when $GITHUB_STEP_SUMMARY cannot be replaced", async () => {
-      mocks.replaceIfNotRegularFile.mockImplementation(() => {
-        throw new Error("EACCES");
-      });
-      const env = { ...ENV };
+    it("writes $GITHUB_STEP_SUMMARY back before the report", async () => {
+      await runSandboxStep(ENV, deps);
 
-      await expect(runSandboxStep(env, deps)).resolves.toBe(0);
+      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_STEP_SUMMARY, Buffer.alloc(0));
+      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
+      expect(annotation.error).not.toHaveBeenCalled();
+    });
+
+    it("writes the command's own summary back verbatim, to be fitted with the report", async () => {
+      mocks.readBackingFile.mockImplementation((path: string) =>
+        path.endsWith("GITHUB_STEP_SUMMARY")
+          ? { bytes: Buffer.from("## the command's own\n") }
+          : { empty: true },
+      );
+
+      await runSandboxStep(ENV, deps);
+
+      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(
+        ENV.GITHUB_STEP_SUMMARY,
+        Buffer.from("## the command's own\n"),
+      );
+      expect(annotation.error).not.toHaveBeenCalled();
+    });
+
+    it("fails the step but still reports when the $GITHUB_STEP_SUMMARY backing was not a regular file", async () => {
+      mocks.readBackingFile.mockImplementation((path: string) =>
+        path.endsWith("GITHUB_STEP_SUMMARY")
+          ? { reason: "it was not a regular file" }
+          : { empty: true },
+      );
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_STEP_SUMMARY, Buffer.alloc(0));
       expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_STEP_SUMMARY could not be put right: EACCES; leaving it unwritten and failing the step",
+        "$GITHUB_STEP_SUMMARY it was not a regular file; failing the step",
       );
       expect(process.exitCode).toBe(1);
-      expect(mocks.reportStepTraffic.mock.calls[0][0].env.GITHUB_STEP_SUMMARY).toBeUndefined();
+      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
     });
 
-    it("checks nothing where the runner gave no $GITHUB_STEP_SUMMARY", async () => {
+    it("writes nothing back where the runner gave no $GITHUB_STEP_SUMMARY", async () => {
       await runSandboxStep({ ...ENV, GITHUB_STEP_SUMMARY: "" }, deps);
-      expect(mocks.replaceIfNotRegularFile).not.toHaveBeenCalled();
-      expect(mocks.rewriteOutputFile).toHaveBeenCalledTimes(1);
+      const written = mocks.writeRunnerFile.mock.calls.map((c: unknown[]) => c[0]);
+      expect(written).toStrictEqual([ENV.GITHUB_OUTPUT]);
     });
 
-    it("rewrites nothing where the runner gave no $GITHUB_OUTPUT", async () => {
+    it("writes nothing back where the runner gave no $GITHUB_OUTPUT", async () => {
       await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "" }, deps);
-      expect(mocks.rewriteOutputFile).not.toHaveBeenCalled();
-      expect(mocks.replaceIfNotRegularFile).toHaveBeenCalledTimes(1);
+      const written = mocks.writeRunnerFile.mock.calls.map((c: unknown[]) => c[0]);
+      expect(written).toStrictEqual([ENV.GITHUB_STEP_SUMMARY]);
       expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
     });
 
@@ -855,7 +900,7 @@ describe("runSandboxStep", () => {
         moreBlocks: undefined,
         closeSummary: false,
       });
-      expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
+      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
       expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(
         orderOf(mocks.prepareStepFilesystemAudit),
       );

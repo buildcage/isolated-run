@@ -812,10 +812,8 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 	"HOME",
 	"GITHUB_WORKSPACE",
 	"RUNNER_TEMP",
-	"GITHUB_OUTPUT",
 	"GITHUB_ENV",
-	"GITHUB_PATH",
-	"GITHUB_STEP_SUMMARY"
+	"GITHUB_PATH"
 ], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
 function resolveWriteThroughEntry(rawLine, env) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {

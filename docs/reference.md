@@ -892,10 +892,11 @@ this:
   group of paths can carry a heading. Unlike the rule inputs, only a whole-line `#` counts: a `#`
   anywhere else stays part of the path, since a path may legitimately contain one (or a space before
   one) and an inline comment could not be told apart from it.
-- `$NAME` / `${NAME}` expand only for `HOME`, `GITHUB_WORKSPACE`, `RUNNER_TEMP`, `GITHUB_OUTPUT`,
-  `GITHUB_ENV`, `GITHUB_PATH`, and `GITHUB_STEP_SUMMARY`, not arbitrary env, so a value smuggled in
-  through the step's own `env:` block can't redirect where a listed path resolves. Any other `$NAME`
-  is rejected.
+- `$NAME` / `${NAME}` expand only for `HOME`, `GITHUB_WORKSPACE`, `RUNNER_TEMP`, `GITHUB_ENV`, and
+  `GITHUB_PATH`, not arbitrary env, so a value smuggled in through the step's own `env:` block can't
+  redirect where a listed path resolves. Any other `$NAME` is rejected, `GITHUB_OUTPUT` and
+  `GITHUB_STEP_SUMMARY` included: this action mediates those two itself (see
+  [below](#github_output-and-github_step_summary)), so `write_through` has nothing to add for them.
 - A leading `~/` expands to `$HOME`.
 - A relative path (`./dist`) resolves against `$GITHUB_WORKSPACE`, matching the sandbox's own
   working directory.
@@ -908,9 +909,9 @@ this:
   to `/var/home`.
 - A path that doesn't already exist is created before the step runs, **always as a directory**, the
   same convention Docker itself uses for a bind mount whose host source doesn't exist yet
-  (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and
-  `$GITHUB_STEP_SUMMARY` are the runner's own generated files and must already exist: a missing one
-  is an error, not something this action creates. Anything else missing (`./dist`, say) is created
+  (`docker run -v`/`--mount`), never as a file. `$GITHUB_ENV` and `$GITHUB_PATH` are the runner's own
+  generated files and must already exist: a missing one is an error, not something this action
+  creates. Anything else missing (`./dist`, say) is created
   as a directory by the runner user, parents included, which needs the nearest existing parent to
   be writable by it (a tree it owns, or `/tmp`). Under any other parent the step fails before your
   command runs, since the command couldn't write there either. Create such a path in an earlier,
@@ -921,10 +922,9 @@ this:
   when the step starts; a missing target is always created as a directory (see above), never a file.
   A file entry is bind-mounted file-to-file (the same technique the `inspect` engine already uses to
   distribute its CA), so an append or a truncating write goes through, but a tool that replaces the
-  file outright (`mv`, or unlink plus recreate) does not. `$GITHUB_OUTPUT` and
-  `$GITHUB_STEP_SUMMARY`'s own contract is append-only, so this doesn't affect them in practice. If
-  you need a file that doesn't exist yet to persist, either have an earlier step create it first, or
-  list its (already-existing) parent directory instead.
+  file outright (`mv`, or unlink plus recreate) does not. If you need a file that doesn't exist yet
+  to persist, either have an earlier step create it first, or list its (already-existing) parent
+  directory instead.
 - A directory entry is a mount point inside the sandbox. A tool that refreshes its output directory
   by removing it and recreating it, rather than clearing its contents, fails at the final `rmdir`
   with `EBUSY`, the same way removing a `docker run -v` target does: a mount point can't be removed
@@ -938,6 +938,18 @@ this:
 directory the runner user cannot write (`/usr`, most of `/etc`) gains nothing. It is meant for paths
 outside `$HOME` that the workflow has already arranged for the runner user to write, in an earlier,
 non-isolated step.
+
+### `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`
+
+These two the command writes freely, so this action mediates them rather than leaving them to
+`write_through`: the command writes action-owned backing copies bound into the sandbox, the real
+files are kept out of its reach, and after the step the action reads the copies back and writes the
+real files itself. So they reach the runner **in either filesystem mode** -- `ephemeral` included,
+where other writes are discarded -- without being named in `write_through`, and `write_through`
+rejects them. `$GITHUB_OUTPUT` is written back trimmed to the entries the runner can read (a dropped
+entry fails the step); `$GITHUB_STEP_SUMMARY` is written back verbatim, then the report is fitted
+around it (see [Traffic artifact](#traffic-artifact) and the step's Job Summary). `$GITHUB_ENV`,
+`$GITHUB_PATH` and `$GITHUB_STATE` are not mediated: they stay read-only in the sandbox as before.
 
 ### Paths under `/run`
 
@@ -1009,6 +1021,6 @@ the one thing that mode exists to prevent. The sentinel is the literal `/` only:
 was its `filesystem_mode: ephemeral`-only counterpart. `writable:` still works and means the same
 thing, with one change: its entries now go through the resolution above, so a relative entry
 resolves against `$GITHUB_WORKSPACE` rather than being passed through as-is, and a `$NAME` outside
-the seven supported variables is rejected instead of being treated as a literal path. Setting both
+the five supported variables is rejected instead of being treated as a literal path. Setting both
 joins their lines. `allow_write:` has been removed, and a step still passing it fails with a message
 saying so rather than silently discarding the writes it asked to keep.
