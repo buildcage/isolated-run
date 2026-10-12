@@ -59,6 +59,30 @@ struct {
 	__type(value, struct seen);
 } seen_files SEC(".maps");
 
+#define N_SEEN_COUNTS 65536
+
+/**
+ * How many seen_files entries each bucket of file addresses holds, so freeing
+ * any other file on the host skips the hash delete.
+ */
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, N_SEEN_COUNTS);
+	__type(key, u32);
+	__type(value, u32);
+} seen_counts SEC(".maps");
+
+/**
+ * The seen_counts bucket of the file at @p addr, which must be a number: the
+ * verifier allows no arithmetic on a pointer.
+ */
+static __always_inline u32 *seen_count(u64 addr)
+{
+	_Static_assert(N_SEEN_COUNTS == 1 << 16, "the index is the hash's top 16 bits");
+	u32 i = ((u32)addr * 0x9e3779b1u) >> 16;
+	return bpf_map_lookup_elem(&seen_counts, &i);
+}
+
 /**
  * What each other process sharing an open file, such as a child that
  * inherited it, has been reported doing with it. An entry outlives its file,
@@ -123,8 +147,14 @@ static __always_inline int first_time(struct file *file, u8 bit)
 		// nothing per command.
 		u32 type = BPF_CORE_READ(file, f_inode, i_mode) & S_IFMT;
 		s.once = type != S_IFREG && type != S_IFDIR;
-		if (bpf_map_update_elem(&seen_files, &key, &s, BPF_NOEXIST) == 0)
+		if (bpf_map_update_elem(&seen_files, &key, &s, BPF_NOEXIST) == 0) {
+			u64 addr = 0;
+			bpf_probe_read_kernel(&addr, sizeof(addr), &key);
+			u32 *n = seen_count(addr);
+			if (n)
+				__sync_fetch_and_add(n, 1);
 			return 1;
+		}
 		// Another process made the entry first; share it.
 		v = bpf_map_lookup_elem(&seen_files, &key);
 		if (!v) {

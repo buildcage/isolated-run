@@ -628,8 +628,7 @@ that name as `name` where it differs from `path`. These names are best-effort: t
 command's memory when the call returns, so another thread can rewrite one first, or change
 directory so that a relative one is joined to another, and a process tracing the command can change
 the call's arguments. A failed open's flags are read the same way, but its name is the kernel's
-copy, unless the kernel refused the name, as one too long, and then it is read as the kernel refuses
-it. A path too deep to record in full is shown cut, with `…/`. A row's command name is the one
+copy, unless the kernel refused the name as too long, when it is read like the others. A path too deep to record in full is shown cut, with `…/`. A row's command name is the one
 the process gave itself, not a thread's, so it says which process acted, not which binary, and a
 process named `run-script.sh` is shown as the step's shell, `bash`. A memfd's name is whatever its creator chose,
 so it is quoted after `memfd:` and never reads as a path. A control, format or separator character,

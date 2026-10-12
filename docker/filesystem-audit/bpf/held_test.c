@@ -517,7 +517,7 @@ static void test_open_short_name_refused_early(void)
 }
 
 /**
- * A name getname refused, as one too long, is held from the caller's own;
+ * A name getname refused as too long is held from the caller's own;
  * one that cannot be read names nothing, and is neither held nor counted. A
  * kernel copy that cannot be read is counted.
  */
@@ -538,7 +538,7 @@ static void test_open_caller_name(void)
 	CHECK_ACCOUNTS();
 }
 
-/** Both getname programs of one open: the second finds the name read. */
+/** A second name for one open, as open_returned() gives, finds the name read. */
 static void test_open_name_read_once(void)
 {
 	reset();

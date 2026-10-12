@@ -18,6 +18,9 @@
 #ifndef EEXIST
 #define EEXIST 17
 #endif
+#ifndef ENAMETOOLONG
+#define ENAMETOOLONG 36
+#endif
 
 /**
  * Whether @p ret is one of ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal
@@ -29,7 +32,7 @@ static __always_inline int is_restart(long ret)
 }
 
 #define HELD_OP 1   ///< A path change, held from its security_path_* hook.
-#define HELD_OPEN 2 ///< An open(2), held from its getname (see open_name()).
+#define HELD_OPEN 2 ///< An open(2), held from do_filp_open (see open_name()).
 
 /**
  * The kind of an open hold whose open was recorded at its hook, as it could
@@ -431,10 +434,10 @@ static __always_inline void report_held(u32 slot, struct held_key *k, struct eve
 
 /**
  * Starts holding the open(2) the thread is in, from the @p name it was given,
- * as the kernel copied it (getname_flags), not the user pointer, which the
- * caller could rewrite before the syscall returns. When getname refused the
- * name, as for one too long, @p user says @p name is the caller's own,
- * best-effort as a failed path syscall's is.
+ * as the kernel copied it (getname), not the user pointer, which the caller
+ * could rewrite before the syscall returns. When getname refused the name as
+ * too long, @p user says @p name is the caller's own, best-effort as a failed
+ * path syscall's is.
  *
  * An open holds one event from here until it returns. A refused or missing
  * file never reaches security_file_open, so until then the event is the failed
@@ -445,10 +448,9 @@ static __always_inline void report_held(u32 slot, struct held_key *k, struct eve
  * step (see open_creating()).
  *
  * No hold outlives its syscall (see on_sys_exit), so one already there is this
- * open's: some builds run both getname programs for one open, and the second
- * finds the name read. A name that needs tails when none are free is kept cut,
- * marked in n2. A full pool counts in untracked even if this open then
- * succeeds and is recorded.
+ * open's, and its name is read. A name that needs tails when none are free is
+ * kept cut, marked in n2. A full pool counts in untracked even if this open
+ * then succeeds and is recorded.
  */
 static __always_inline void open_name(u32 slot, const char *name, int user)
 {
