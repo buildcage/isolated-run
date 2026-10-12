@@ -4,7 +4,8 @@ run-name: Test / Filesystem audit under preemption (${{ github.ref_name }})
 # Run by hand after changing the tracer's BPF program. The kernels on
 # GitHub-hosted runners never preempt it mid-run; Ubuntu's generic kernels
 # can, so this boots them in a VM and fails on a record assembled from two
-# events.
+# events. Debian 12's 6.1, the oldest kernel the tracer supports, boots the
+# same way, for its verifier and its VFS.
 on:
   workflow_dispatch:
 
@@ -26,6 +27,9 @@ jobs:
           # 6.8: voluntary by default, and full.
           - { package: linux-image-generic, version: "6.8.", mode: default }
           - { package: linux-image-generic, version: "6.8.", mode: full }
+          # 6.1 as Debian 12 ships it.
+          - { package: debian-bookworm, version: "6.1.", mode: default }
+          - { package: debian-bookworm, version: "6.1.", mode: full }
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,10 +49,37 @@ jobs:
         run: |
           sudo chmod 666 /dev/kvm
           sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-system-x86 "$PACKAGE" >/dev/null
+          if [ "$PACKAGE" = debian-bookworm ]; then
+            sudo apt-get install -y -qq qemu-system-x86 debian-archive-keyring >/dev/null
+            # Ubuntu ships no 6.1, so bookworm's current kernel is unpacked in
+            # place, checked against the archive's signed index.
+            mirror=https://deb.debian.org/debian
+            cd "$RUNNER_TEMP"
+            curl -fsSLO "$mirror/dists/bookworm/InRelease"
+            # A newer key's signature may not verify here; one good one is enough.
+            gpgv --status-fd 1 --keyring /usr/share/keyrings/debian-archive-keyring.gpg InRelease \
+              >gpgv.status || true
+            grep -q '^\[GNUPG:\] VALIDSIG ' gpgv.status
+            curl -fsSLO "$mirror/dists/bookworm/main/binary-amd64/Packages.xz"
+            grep -qE " $(sha256sum Packages.xz | cut -d' ' -f1) +[0-9]+ main/binary-amd64/Packages.xz$" InRelease
+            set -- $(xz -dc Packages.xz | awk '
+              /^Package: linux-image-6\.1\.0-[0-9]+-amd64-unsigned$/ { p = 1 }
+              p && /^Filename:/ { f = $2 }
+              p && /^SHA256:/ { print f, $2; p = 0 }' | sort -V | tail -1)
+            echo "kernel: $1"
+            curl -fsSL -o kernel.deb "$mirror/$1"
+            echo "$2  kernel.deb" | sha256sum -c -
+            sudo dpkg -x kernel.deb /
+            cd "$GITHUB_WORKSPACE"
+            sudo depmod "$(basename "$(ls -d /lib/modules/"$VERSION"*-amd64)")"
+            flavour=amd64
+          else
+            sudo apt-get install -y -qq qemu-system-x86 "$PACKAGE" >/dev/null
+            flavour=generic
+          fi
           pipx install virtme-ng==1.41 >/dev/null
           sudo chmod 644 /boot/vmlinuz-*
-          kernel=$(ls /boot/vmlinuz-"$VERSION"*-generic | sort -V | tail -1)
+          kernel=$(ls /boot/vmlinuz-"$VERSION"*-"$flavour" | sort -V | tail -1)
           [ -n "$kernel" ]
           append=""; [ "$MODE" = default ] || append="preempt=$MODE"
           timeout 900 vng -r "$kernel" -p 4 -m 4G --user root --append "$append" -- \
