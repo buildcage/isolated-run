@@ -485,18 +485,86 @@ describe("computeReportOutcomes", () => {
 });
 
 describe("writeSummaryBlocks", () => {
-  it("writes the blocks fitted into what is left of the summary", async () => {
+  it("writes the blocks when they fit", async () => {
     const written: string[] = [];
-    await writeSummaryBlocks(
+    const { wrote } = await writeSummaryBlocks(
       [{ priority: 1, level: 1, section: "s", cut: "lines", text: "a\nb\n", notice: "cut\n" }],
+      { GITHUB_STEP_SUMMARY: "/summary.md" },
+      { fileSize: () => 0, writeSummary: async (m) => void written.push(m) },
+    );
+    expect(written).toStrictEqual(["a\nb\n"]);
+    expect(wrote).toBe("blocks");
+  });
+
+  it("writes nothing rather than overrun the limit the command already filled", async () => {
+    // fitStepSummary prints a keep frame whole even with no room; writing it
+    // would push the summary over GitHub's limit and lose the command's own
+    // output with it.
+    const written: string[] = [];
+    const { wrote } = await writeSummaryBlocks(
+      [{ id: "frame", priority: 1, level: 1, section: "k", cut: "keep", text: "frame\n" }],
       { GITHUB_STEP_SUMMARY: "/summary.md" },
       { fileSize: () => 1024 * 1024, writeSummary: async (m) => void written.push(m) },
     );
-    expect(written).toStrictEqual(["cut\n"]);
+    expect(written).toStrictEqual([]);
+    expect(wrote).toBe("nothing");
+  });
+
+  it("falls back to the given line when the frame does not fit but the line does", async () => {
+    const written: string[] = [];
+    const { wrote } = await writeSummaryBlocks(
+      // A keep frame larger than the line, so there is room for the line alone.
+      [
+        {
+          id: "frame",
+          priority: 1,
+          level: 1,
+          section: "k",
+          cut: "keep",
+          text: `${"x".repeat(2000)}\n`,
+        },
+      ],
+      { GITHUB_STEP_SUMMARY: "/summary.md" },
+      {
+        fileSize: () => 1024 * 1024 - 9000,
+        writeSummary: async (m) => void written.push(m),
+        fallbackLine: "see the artifact\n",
+      },
+    );
+    expect(written).toStrictEqual(["see the artifact\n"]);
+    expect(wrote).toBe("fallback");
+  });
+
+  it("rules off buildcage's part from the command's own output before it", async () => {
+    const written: string[] = [];
+    await writeSummaryBlocks(
+      [{ priority: 1, level: 1, section: "s", cut: "lines", text: "report\n", notice: "cut\n" }],
+      { GITHUB_STEP_SUMMARY: "/summary.md" },
+      {
+        fileSize: () => 10,
+        writeSummary: async (m) => void written.push(m),
+        separateFromExisting: true,
+      },
+    );
+    expect(written).toStrictEqual(["\n\n---\n\nreport\n"]);
+  });
+
+  it("adds no rule when the summary is still empty", async () => {
+    const written: string[] = [];
+    await writeSummaryBlocks(
+      [{ priority: 1, level: 1, section: "s", cut: "lines", text: "report\n", notice: "cut\n" }],
+      { GITHUB_STEP_SUMMARY: "/summary.md" },
+      {
+        fileSize: () => 0,
+        writeSummary: async (m) => void written.push(m),
+        separateFromExisting: true,
+      },
+    );
+    expect(written).toStrictEqual(["report\n"]);
   });
 
   it("returns the ids of the blocks it cut, by id rather than by notice text", async () => {
-    const cutIds = await writeSummaryBlocks(
+    const { cutIds } = await writeSummaryBlocks(
       [
         { id: "kept", priority: 1, level: 1, section: "k", cut: "keep", text: "frame\n" },
         {
@@ -517,7 +585,7 @@ describe("writeSummaryBlocks", () => {
   });
 
   it("returns an empty set when everything fits", async () => {
-    const cutIds = await writeSummaryBlocks(
+    const { cutIds } = await writeSummaryBlocks(
       [
         {
           id: "x",
@@ -531,6 +599,15 @@ describe("writeSummaryBlocks", () => {
       ],
       { GITHUB_STEP_SUMMARY: "/summary.md" },
       { fileSize: () => 0, writeSummary: async () => {} },
+    );
+    expect(cutIds.size).toBe(0);
+  });
+
+  it("keeps a cut block with no id out of the set", async () => {
+    const { cutIds } = await writeSummaryBlocks(
+      [{ priority: 1, level: 1, section: "s", cut: "lines", text: "a\nb\nc\n", notice: "cut\n" }],
+      { GITHUB_STEP_SUMMARY: "/summary.md" },
+      { fileSize: () => 1024 * 1024, writeSummary: async () => {} },
     );
     expect(cutIds.size).toBe(0);
   });
@@ -564,11 +641,11 @@ describe("writeReportSummary", () => {
   }
 
   it.each([
-    { held: 1024 * 1024, cut: true },
-    { held: undefined, cut: false }, // unreadable: counted as empty
+    { held: 1024 * 1024, omitted: true },
+    { held: undefined, omitted: false }, // unreadable: counted as empty
   ])(
     "counts what the summary already holds against the limit ($held bytes)",
-    async ({ held, cut }) => {
+    async ({ held, omitted }) => {
       const written: string[] = [];
       const timeline: TrafficEvent[] = [
         { time: 1, action: "allow", protocol: "https", host: "a.example.com", port: 443 },
@@ -589,15 +666,23 @@ describe("writeReportSummary", () => {
         },
       );
 
-      expect(written[0].includes("truncated")).toBe(cut);
+      // A summary already at the limit leaves no room, so buildcage writes
+      // nothing rather than push it over and lose the command's output too.
+      expect(written.length === 0).toBe(omitted);
     },
   );
 
   it("gives the example and each host table its own notice when they are cut", async () => {
     const written: string[] = [];
-    const passed = [
-      { host: "a.example.com", port: "443", ruleType: "HTTPS", reason: "-", count: 1 },
-    ];
+    // Enough suggested rules and hosts that both sections overrun the limit on
+    // their own, so each is cut rather than the report omitted whole.
+    const passed = Array.from({ length: 5000 }, (_, i) => ({
+      host: `${"x".repeat(200)}${i}.example.com`,
+      port: "443",
+      ruleType: "HTTPS",
+      reason: "-",
+      count: 1,
+    }));
 
     await writeReportSummary(
       report({ parameters: reportParams({ mode: "audit" }), passed }),
@@ -606,7 +691,7 @@ describe("writeReportSummary", () => {
       true,
       { GITHUB_STEP_SUMMARY: "/summary.md" },
       {
-        fileSize: () => 1024 * 1024,
+        fileSize: () => 0,
         writeSummary: async (markdown) => void written.push(markdown),
       },
     );

@@ -156,6 +156,8 @@ export async function reportStepTraffic(
       env,
       annotation,
       { writeSummaryBlocks },
+      // buildcage's first write, so a rule marks where it follows the command.
+      true,
     );
 
   let artifactName = "";
@@ -249,11 +251,12 @@ export async function writeMoreSummary(
   env: NodeJS.ProcessEnv,
   annotation: Annotation,
   overrides: Partial<ReportStepDeps> = {},
+  separateFromExisting = false,
 ): Promise<void> {
   const { writeSummaryBlocks } = { ...realDeps, ...overrides };
   if (blocks.length === 0) return;
   try {
-    await writeSummaryBlocks(blocks, env);
+    await writeSummaryBlocks(blocks, env, { separateFromExisting });
   } catch (e) {
     annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
   }

@@ -73531,27 +73531,43 @@ function summarySize(path, fileSize) {
 		return 0;
 	}
 }
-async function writeSummaryBlocks(blocks, env, overrides = {}) {
+function fullReportLocation(artifactAvailable) {
+	return artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the full report" : "set upload_traffic_artifact: true to get the full report as a downloadable artifact";
+}
+function reportDidNotFitMessage(artifactAvailable) {
+	return `The buildcage traffic report did not fit in GitHub's Job Summary size limit after this step's own output; ${fullReportLocation(artifactAvailable)}. The step's verdict was still enforced.`;
+}
+function reportDidNotFitLine(artifactAvailable) {
+	return `> ⚠️ ${reportDidNotFitMessage(artifactAvailable)}\n`;
+}
+async function writeSummaryBlocks(blocks, env, { separateFromExisting = !1, fallbackLine, ...overrides } = {}) {
 	let { fileSize, writeSummary } = {
 		...realDeps$2,
 		...overrides
-	}, cutIds = new Set();
-	return await writeSummary(fitStepSummary(blocks, {
-		usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize),
+	}, used = summarySize(env.GITHUB_STEP_SUMMARY, fileSize), separator = separateFromExisting && used > 0 ? "\n\n---\n\n" : "", cutIds = new Set(), fitted = fitStepSummary(blocks, {
+		usedBytes: used + bytes(separator),
 		onCut: (b) => {
 			b.id !== void 0 && cutIds.add(b.id);
 		}
-	}), env.GITHUB_STEP_SUMMARY), cutIds;
+	}), fits = (text) => used + bytes(separator) + bytes(text) <= 1040384, content = "", wrote = "nothing";
+	return fits(fitted) ? (content = separator + fitted, wrote = "blocks") : fallbackLine !== void 0 && fits(fallbackLine) && (content = separator + fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
+		cutIds,
+		wrote
+	};
 }
 async function writeReportSummary(report, annotation, { extraBlocks = [], ...options }, artifactAvailable, env, overrides = {}) {
 	let { appendFile, fileSize, writeSummary } = {
 		...realDeps$2,
 		...overrides
 	}, outcomes = computeReportOutcomes(report, options);
-	applyOutcomeAnnotations(annotation, outcomes.emissions), (await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-refuse" ? wouldRefuseTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, {
+	applyOutcomeAnnotations(annotation, outcomes.emissions);
+	let { cutIds, wrote } = await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-refuse" ? wouldRefuseTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, {
 		fileSize,
-		writeSummary
-	})).has("traffic-would-refuse") && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact."));
+		writeSummary,
+		separateFromExisting: !0,
+		fallbackLine: reportDidNotFitLine(artifactAvailable)
+	});
+	wrote === "blocks" ? cutIds.has("traffic-would-refuse") && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts
@@ -73636,7 +73652,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 		missingReportFrame(reportTitle(stepLabel, named), parameters.mode === "audit"),
 		...rest,
 		...footer
-	], env, annotation, { writeSummaryBlocks }), artifactName = "", reported = !1;
+	], env, annotation, { writeSummaryBlocks }, !0), artifactName = "", reported = !1;
 	if (!report) await writeRest();
 	else {
 		try {
@@ -73681,13 +73697,13 @@ async function writeLateSummary(blocks, { reported, actionRepo, isAudit, env, an
 		summaryFooter(actionRepo)
 	], env, annotation, overrides);
 }
-async function writeMoreSummary(blocks, env, annotation, overrides = {}) {
+async function writeMoreSummary(blocks, env, annotation, overrides = {}, separateFromExisting = !1) {
 	let { writeSummaryBlocks } = {
 		...realDeps$1,
 		...overrides
 	};
 	if (blocks.length !== 0) try {
-		await writeSummaryBlocks(blocks, env);
+		await writeSummaryBlocks(blocks, env, { separateFromExisting });
 	} catch (e) {
 		annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
 	}
