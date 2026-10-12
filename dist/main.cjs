@@ -23268,49 +23268,6 @@ function resolveComposeFile(override) {
 	return override?.composeFile ?? DEFAULT_COMPOSE_FILE;
 }
 //#endregion
-//#region src/core/lib/report/render/fit-step-summary.ts
-const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
-function withNotices(blocks, noticeFor) {
-	return blocks.map((b) => b.cut === "keep" ? b : {
-		...b,
-		notice: noticeFor(b)
-	});
-}
-function joinSummaryBlocks(blocks) {
-	return blocks.map(whole).join("");
-}
-function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES } = {}) {
-	let full = blocks.map(whole), all = full.join(""), budget = limitBytes - 8192 - usedBytes;
-	if (bytes(all) <= budget) return all;
-	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
-	for (let i of order) {
-		let b = blocks[i];
-		if ((cutAt.get(b.section) ?? Infinity) < b.level) continue;
-		let size = bytes(full[i]);
-		b.cut === "keep" || size <= budget ? out[i] = full[i] : (out[i] = cutBlock(b, Math.max(0, budget)), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level))), budget -= bytes(out[i]);
-	}
-	return out.join("");
-}
-function cutBlock(b, budget) {
-	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
-	if (b.cut === "atomic") return alone;
-	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
-	for (let line of b.text.split("\n")) {
-		let withNewline = `${line}\n`, lineBytes = bytes(withNewline);
-		if (usedBytes + lineBytes > room) break;
-		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen);
-	}
-	let head = b.head ?? 0;
-	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
-}
-//#endregion
-//#region src/lib/fail-or-warn.ts
-function failOrWarn(annotation, failClosed) {
-	return (message) => {
-		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail_on_blocked`), process.exitCode = 1) : annotation.warning(message);
-	};
-}
-//#endregion
 //#region node_modules/.pnpm/@actions+artifact@6.2.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/config.js
 function getUploadChunkSize() {
 	return 8388608;
@@ -68356,6 +68313,49 @@ function setFilesystemAuditOutput(name) {
 	setOutput("filesystem_audit_artifact_name", name);
 }
 //#endregion
+//#region src/core/lib/report/render/fit-step-summary.ts
+const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
+function withNotices(blocks, noticeFor) {
+	return blocks.map((b) => b.cut === "keep" ? b : {
+		...b,
+		notice: noticeFor(b)
+	});
+}
+function joinSummaryBlocks(blocks) {
+	return blocks.map(whole).join("");
+}
+function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES } = {}) {
+	let full = blocks.map(whole), all = full.join(""), budget = limitBytes - 8192 - usedBytes;
+	if (bytes(all) <= budget) return all;
+	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
+	for (let i of order) {
+		let b = blocks[i];
+		if ((cutAt.get(b.section) ?? Infinity) < b.level) continue;
+		let size = bytes(full[i]);
+		b.cut === "keep" || size <= budget ? out[i] = full[i] : (out[i] = cutBlock(b, Math.max(0, budget)), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level))), budget -= bytes(out[i]);
+	}
+	return out.join("");
+}
+function cutBlock(b, budget) {
+	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
+	if (b.cut === "atomic") return alone;
+	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
+	for (let line of b.text.split("\n")) {
+		let withNewline = `${line}\n`, lineBytes = bytes(withNewline);
+		if (usedBytes + lineBytes > room) break;
+		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen);
+	}
+	let head = b.head ?? 0;
+	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
+}
+//#endregion
+//#region src/lib/fail-or-warn.ts
+function failOrWarn(annotation, failClosed) {
+	return (message) => {
+		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail_on_blocked`), process.exitCode = 1) : annotation.warning(message);
+	};
+}
+//#endregion
 //#region src/core/lib/report/elapsed-time.ts
 function toParts(elapsedSeconds) {
 	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
@@ -73461,6 +73461,8 @@ const realDeps = {
 	reportStepTraffic,
 	writeMoreSummary,
 	prepareStepFilesystemAudit,
+	setTrafficArtifactOutput,
+	setFilesystemAuditOutput,
 	onCancel,
 	saveState,
 	info,
@@ -73486,7 +73488,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -73582,6 +73584,9 @@ async function runSandboxStep(env, overrides = {}) {
 			cancel: cancel.signal
 		});
 	} finally {
+		for (let set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) try {
+			set("");
+		} catch {}
 		let prepareAudit = () => prepareStepFilesystemAudit({
 			audit,
 			attached: auditAttached,

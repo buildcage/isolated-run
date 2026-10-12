@@ -31,6 +31,7 @@ import { buildComposeEnv } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
+import { setFilesystemAuditOutput } from "./filesystem-audit-artifact.ts";
 import { prepareStepFilesystemAudit } from "./filesystem-audit-report.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
@@ -62,6 +63,7 @@ import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { reportStepTraffic, writeMoreSummary } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
+import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
 
 /**
  * Display fallback for the report's `uses:` example when the runner names no
@@ -121,6 +123,8 @@ export interface SandboxStepDeps {
   reportStepTraffic: typeof reportStepTraffic;
   writeMoreSummary: typeof writeMoreSummary;
   prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
+  setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
+  setFilesystemAuditOutput: typeof setFilesystemAuditOutput;
   /** Calls listener on each signal a cancelled run sends this process, and
    *  returns what stops listening. */
   onCancel: (listener: () => void) => () => void;
@@ -184,6 +188,8 @@ const realDeps: SandboxStepDeps = {
   reportStepTraffic,
   writeMoreSummary,
   prepareStepFilesystemAudit,
+  setTrafficArtifactOutput,
+  setFilesystemAuditOutput,
   onCancel,
   saveState: core.saveState,
   info: core.info,
@@ -273,6 +279,8 @@ export async function runSandboxStep(
     reportStepTraffic,
     writeMoreSummary,
     prepareStepFilesystemAudit,
+    setTrafficArtifactOutput,
+    setFilesystemAuditOutput,
     onCancel,
     saveState,
     info,
@@ -468,6 +476,16 @@ export async function runSandboxStep(
       cancel: cancel.signal,
     });
   } finally {
+    // The command can write either artifact name to $GITHUB_OUTPUT. Cleared
+    // once it has stopped, so a step killed before the report sets them
+    // leaves none of its names.
+    for (const set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) {
+      try {
+        set("");
+      } catch {
+        // The report setting it again says so.
+      }
+    }
     // None throws, so the teardown and stopListening are always reached.
     const prepareAudit = () =>
       prepareStepFilesystemAudit({
