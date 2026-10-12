@@ -2,11 +2,91 @@ import { describe, it, expect } from "vitest";
 
 import { fitStepSummary, withNotices } from "#core/lib/report/render/fit-step-summary.ts";
 
-import { dropWalkedDirs, keyOf, type SummaryOptions } from "./filesystem-audit-summary.ts";
 import {
   renderFilesystemAuditBlocks,
   renderFilesystemAuditSummary,
-} from "./test/filesystem-audit.ts";
+} from "../test/filesystem-audit.ts";
+import { createAuditSummary, reduceRecording, type SummaryOptions } from "./reduce.ts";
+
+const BASE = "/var/tmp/buildcage-0";
+const OPTIONS = { workspace: ["/work"], home: ["/home/u"] };
+
+const machinery = JSON.stringify({
+  kind: "exec",
+  pid: 1,
+  comm: "setpriv",
+  path: "/usr/bin/setpriv",
+});
+const shell = JSON.stringify({
+  kind: "exec",
+  pid: 2,
+  ppid: 1,
+  comm: "run-script.sh",
+  path: `${BASE}/sandbox-x/exec/run-script.sh`,
+});
+const step = JSON.stringify({ kind: "read", pid: 3, comm: "cat", path: "/work/a" });
+
+const feed =
+  (...text: string[]) =>
+  (onLine: (line: string) => void): void =>
+    text.forEach((line) => onLine(line));
+
+describe("reduceRecording", () => {
+  it("opens the sink after the first pass and hands it only the step's lines", () => {
+    const events: string[] = [];
+    let pass = 0;
+    const { summary } = reduceRecording(
+      (onLine) => {
+        events.push(`pass ${++pass}`);
+        feed(machinery, shell, step)(onLine);
+      },
+      BASE,
+      OPTIONS,
+      () => {
+        events.push("open");
+        return (line) => events.push(line);
+      },
+    );
+    expect(events).toStrictEqual(["pass 1", "open", "pass 2", step]);
+    expect(summary?.paths?.map((p) => p.path)).toContain("./a");
+  });
+
+  it("returns a failed summary as its error and still hands the sink every kept line", () => {
+    const kept: string[] = [];
+    const boom = new Error("boom");
+    const { summary, summaryError } = reduceRecording(
+      feed(machinery, shell, step),
+      BASE,
+      OPTIONS,
+      () => (line) => kept.push(line),
+      (options) => ({
+        ...createAuditSummary(options),
+        observe: () => {
+          throw boom;
+        },
+      }),
+    );
+    expect(summary).toBeUndefined();
+    expect(summaryError).toBe(boom);
+    expect(kept).toStrictEqual([step]);
+  });
+
+  it("reduces with no sink", () => {
+    expect(reduceRecording(feed(step), BASE, OPTIONS).summary).toBeDefined();
+  });
+
+  it.each([
+    ["more lines", [step, step]],
+    ["a longer line", [`${step} `]],
+  ])("throws when the second pass reads %s", (_, second) => {
+    let pass = 0;
+    const changing = (onLine: (line: string) => void): void =>
+      feed(...(++pass === 1 ? [step] : second))(onLine);
+    expect(() => reduceRecording(changing, BASE, OPTIONS)).toThrow(
+      "the recording changed while it was being read",
+    );
+  });
+});
 
 const PREFIXES: SummaryOptions = { workspace: ["/work"], home: ["/home/u"] };
 
@@ -31,7 +111,7 @@ function tableRows(md: string): string[] {
 const render = (...records: object[]): string =>
   renderFilesystemAuditSummary(jsonl(...records), PREFIXES);
 
-describe("renderFilesystemAuditSummary", () => {
+describe("createAuditSummary", () => {
   it("reports no access on empty input", () => {
     const md = renderFilesystemAuditSummary("", PREFIXES);
     expect(md).toContain("No file access was recorded.");
@@ -899,141 +979,6 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["d node ./d/gone", "R node ./d/x/**"]);
   });
 
-  describe("times", () => {
-    // 2026-10-06T00:00:00Z in epoch seconds, the proxy's start in these cases.
-    const START = Date.parse("2026-10-06T00:00:00Z") / 1000;
-    const at = (ms: number): string => new Date(START * 1000 + ms).toISOString();
-    const timed = { ...PREFIXES, startedAt: START };
-
-    it("names the columns without the proxy's start when it is unknown", () => {
-      const md = renderFilesystemAuditSummary(
-        jsonl({ t: at(250), kind: "read", comm: "node", path: "/work/a" }),
-        PREFIXES,
-      );
-      expect(md).toContain("<sub>first-last access · flags · command · path</sub>");
-    });
-
-    it("orders rows by first access and shows each row's first-last span", () => {
-      const md = renderFilesystemAuditSummary(
-        jsonl(
-          { t: at(250), kind: "read", comm: "node", path: "/work/a" },
-          { t: at(1500), kind: "read", comm: "node", path: "/etc/hosts" },
-          { t: at(4000), kind: "write", comm: "node", path: "/work/a" },
-        ),
-        timed,
-      );
-      expect(md).toContain(
-        "<sub>first-last access since the proxy started · flags · command · path</sub>",
-      );
-      expect(lines(md)).toEqual([
-        "00:00.250-00:04.000: RW node ./a",
-        "00:01.500: R node /etc/hosts",
-      ]);
-    });
-
-    it("orders by the recording, not the clock, when the clock steps back", () => {
-      const md = renderFilesystemAuditSummary(
-        jsonl(
-          { t: at(5000), kind: "read", comm: "a", path: "/work/first" },
-          { t: at(3000), kind: "write", comm: "a", path: "/work/second" },
-        ),
-        timed,
-      );
-      expect(lines(md)).toEqual(["00:05.000: R a ./first", "00:03.000: W a ./second"]);
-    });
-
-    it("leaves a dropped library read out of the row's span", () => {
-      const md = renderFilesystemAuditSummary(
-        jsonl(
-          { t: at(0), kind: "read", comm: "sh", path: "/lib/libc.so.6" },
-          { t: at(0), kind: "mmap", comm: "sh", path: "/lib/libc.so.6", access: "x" },
-          { t: at(5000), kind: "read", comm: "sh", path: "/lib/data" },
-        ),
-        timed,
-      );
-      expect(lines(md)).toEqual(["00:05.000: R sh /lib/data"]);
-    });
-
-    it("leaves a success under a relative name out of the failed row's span", () => {
-      const md = renderFilesystemAuditSummary(
-        jsonl(
-          { t: at(1000), kind: "open", failed: true, comm: "a", path: "foo", err: 2 },
-          { t: at(30_000), kind: "read", comm: "a", path: "foo" },
-        ),
-        timed,
-      );
-      expect(lines(md)).toEqual(["00:01.000: r a …/foo"]);
-    });
-
-    it("pads a single time to the width of a span", () => {
-      const md = renderFilesystemAuditSummary(
-        jsonl(
-          { t: at(0), kind: "read", comm: "a", path: "/work/x" },
-          { t: at(1000), kind: "read", comm: "a", path: "/work/x" },
-          { t: at(2000), kind: "read", comm: "a", path: "/work/y" },
-        ),
-        timed,
-      );
-      const block = md.match(/```\n([\s\S]*?)\n```/)![1];
-      expect(block.split("\n")).toEqual([
-        "00:00.000-00:01.000: R a ./x",
-        "00:02.000:           R a ./y",
-      ]);
-    });
-
-    it("spans every path folded into a directory row", () => {
-      const md = renderFilesystemAuditSummary(
-        jsonl(
-          { t: at(100), kind: "read", comm: "go", path: "/work/d/1" },
-          { t: at(900), kind: "write", comm: "go", path: "/work/d/2" },
-          { t: at(500), kind: "read", comm: "go", path: "/work/d/3" },
-        ),
-        timed,
-      );
-      expect(lines(md)).toEqual(["00:00.100-00:00.900: RW go ./d/**"]);
-    });
-
-    it("keeps recording order among rows first touched in the same millisecond", () => {
-      const md = renderFilesystemAuditSummary(
-        jsonl(
-          { t: at(0), kind: "exec", comm: "mv", path: "/usr/bin/mv" },
-          { t: at(0), kind: "rename", comm: "mv", path: "/work/b" },
-        ),
-        timed,
-      );
-      expect(lines(md)).toEqual(["00:00.000: X mv /usr/bin/mv", "00:00.000: M mv ./b"]);
-    });
-
-    it("counts from the first access shown, not a dropped library read", () => {
-      const md = render(
-        { t: at(0), kind: "read", comm: "sh", path: "/etc/ld.so.cache" },
-        { t: at(0), kind: "mmap", comm: "sh", path: "/lib/libc.so.6", access: "x" },
-        { t: at(3), kind: "read", comm: "sh", path: "/work/x" },
-      );
-      expect(lines(md)).toEqual(["00:00.000: R sh ./x"]);
-    });
-
-    it("counts from the first record when the proxy's start is unknown", () => {
-      const md = render(
-        { t: at(61_234), kind: "read", comm: "a", path: "/work/x" },
-        { t: at(62_000), kind: "read", comm: "a", path: "/work/y" },
-      );
-      expect(lines(md)).toEqual(["00:00.000: R a ./x", "00:00.766: R a ./y"]);
-    });
-
-    it("puts a row with no timestamp last, with no time", () => {
-      const md = renderFilesystemAuditSummary(
-        jsonl(
-          { kind: "read", comm: "a", path: "/work/a" },
-          { t: "not a time", kind: "read", comm: "a", path: "/work/b" },
-          { t: at(0), kind: "read", comm: "a", path: "/work/c" },
-        ),
-        timed,
-      );
-      expect(lines(md)).toEqual(["00:00.000: R a ./c", "R a ./a", "R a ./b"]);
-    });
-  });
-
   it("drops the root like any directory its descendants' flags cover", () => {
     const md = render(
       { kind: "read", comm: "find", path: "/" },
@@ -1048,31 +993,6 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["W sh /"]);
   });
 
-  it("finds walked directories among a hundred thousand lines without comparing every pair", () => {
-    // Every line is its own command's, so none has a line below it; comparing
-    // every pair would take minutes at this size.
-    const many = new Set(Array.from({ length: 100_000 }, (_, i) => keyOf(`c${i}`, `/work/f${i}`)));
-    expect(dropWalkedDirs(many, () => ["R"])).toEqual(many);
-  });
-
-  it("drops a walked directory's line from printed flags, but not a refused one", () => {
-    const flags = new Map([
-      [keyOf("c", "/w/a"), ["r"]],
-      [keyOf("c", "/w/a/f"), ["R", "r!"]],
-      [keyOf("c", "/w/b"), ["r!"]],
-      [keyOf("c", "/w/b/f"), ["R", "r!"]],
-    ]);
-    const got = dropWalkedDirs(new Set(flags.keys()), (k) => flags.get(k)!);
-    expect(got).toEqual(new Set([keyOf("c", "/w/a/f"), keyOf("c", "/w/b"), keyOf("c", "/w/b/f")]));
-  });
-
-  it("neither drops a climbing line nor credits it to the directories it names", () => {
-    const got = dropWalkedDirs(new Set([keyOf("c", "/work/d"), keyOf("c", "/work/d/../x")]), () => [
-      "R",
-    ]);
-    expect(got).toEqual(new Set([keyOf("c", "/work/d"), keyOf("c", "/work/d/../x")]));
-  });
-
   it("joins a climbing path's accesses, and leaves out its library reads", () => {
     expect(
       lines(
@@ -1085,175 +1005,9 @@ describe("renderFilesystemAuditSummary", () => {
       ),
     ).toEqual(["RW c ./../x"]);
   });
-
-  describe("tables", () => {
-    it("lists each executed path once with how many times it ran, in the order first run", () => {
-      const md = render(
-        { kind: "exec", comm: "sh", path: "/usr/bin/sh" },
-        { kind: "exec", comm: "node", path: "/work/bin/node" },
-        { kind: "exec", comm: "sh", path: "/usr/bin/sh" },
-      );
-      expect(md).toContain(
-        "#### Executed Programs\n\n| Path | Count |\n| --- | ---: |\n| `/usr/bin/sh` | 2 |\n| `./bin/node` | 1 |\n\n",
-      );
-    });
-
-    it("spells an executed path the way the other views do", () => {
-      const md = render(
-        { kind: "exec", comm: "sh", path: "./run.sh" },
-        { kind: "exec", comm: "sh", path: "run.sh" },
-        { kind: "exec", comm: "a", path: "/proc/12/fd/3" },
-        { kind: "exec", comm: "a", path: "/proc/34/fd/3" },
-      );
-      expect(md).toContain(
-        "| Path | Count |\n| --- | ---: |\n| `…/run.sh` | 2 |\n| `/proc/<pid>/fd/3` | 2 |\n\n",
-      );
-    });
-
-    it("keeps two rows that read alike in a stable order", () => {
-      const md = render(
-        { kind: "read", comm: "a", path: "…/x" },
-        { kind: "open", failed: true, comm: "a", path: "x", err: 2 },
-      );
-      expect(md).toContain("| `…/x` | R |\n| `…/x` | r |\n");
-    });
-
-    it("shows a memfd by its quoted name and a deleted file with a mark outside its path", () => {
-      const md = render(
-        { kind: "write", comm: "py", path: 'memfd:/usr/bin/a"b', memfd: true },
-        { kind: "exec", comm: "x", path: 'memfd:/usr/bin/a"b', memfd: true },
-        { kind: "write", comm: "py", path: "/tmp/p", deleted: true },
-        { kind: "exec", comm: "p", path: "/tmp/p", deleted: true },
-        { kind: "write", comm: "py", path: "/tmp/q (deleted)" },
-      );
-      expect(md).toContain(
-        '| Path | Count |\n| --- | ---: |\n| `memfd:"/usr/bin/a\\"b"` | 1 |\n| `/tmp/p` (deleted) | 1 |\n\n',
-      );
-      expect(md).toContain(
-        '| `/tmp/p` (deleted) | W |\n| `/tmp/q (deleted)` | W |\n| `memfd:"/usr/bin/a\\"b"` | W |\n',
-      );
-      expect(lines(md)).toContain('W py memfd:"/usr/bin/a\\"b"');
-      expect(lines(md)).toContain("W py /tmp/p (deleted)");
-    });
-
-    it("folds a deleted file with its siblings but keeps a memfd on its own line", () => {
-      const md = render(
-        { kind: "write", comm: "a", path: "/srv/d/1" },
-        { kind: "write", comm: "a", path: "/srv/d/2" },
-        { kind: "write", comm: "a", path: "/srv/d/3", deleted: true },
-        { kind: "write", comm: "a", path: "memfd:/srv/d/4", memfd: true },
-      );
-      expect(tableRows(md)).toEqual(["| `/srv/d/**` | W |", '| `memfd:"/srv/d/4"` | W |']);
-    });
-
-    it("shows a memfd or deleted file mapped executable whatever its name", () => {
-      const md = render(
-        { kind: "mmap", comm: "a", path: "memfd:libx.so", access: "x", memfd: true },
-        { kind: "mmap", comm: "a", path: "/tmp/liby.so", access: "x", deleted: true },
-      );
-      expect(tableRows(md)).toEqual([
-        "| `/tmp/liby.so` (deleted) | R |",
-        '| `memfd:"libx.so"` | R |',
-      ]);
-    });
-
-    it("leaves out a process's reads of the deleted program it runs", () => {
-      const md = render(
-        { kind: "read", pid: 1, comm: "p", path: "/tmp/p", deleted: true },
-        { kind: "exec", pid: 1, comm: "p", path: "/tmp/p", deleted: true },
-      );
-      expect(md).toContain("| `/tmp/p` (deleted) | 1 |");
-      expect(lines(md)).toEqual(["X p /tmp/p (deleted)"]);
-    });
-
-    it("leaves the accessed-paths table out when the step only ran programs", () => {
-      const md = render({ kind: "exec", comm: "sh", path: "/usr/bin/sh" });
-      expect(md).not.toContain("#### Accessed Paths");
-      expect(lines(md)).toEqual(["X sh /usr/bin/sh"]);
-    });
-
-    it("shows an exchange as a move of both paths", () => {
-      const md = render({
-        kind: "rename",
-        comm: "mv",
-        path: "/srv/a",
-        to: "/srv/b",
-        exchange: true,
-      });
-      expect(tableRows(md)).toEqual(["| `/srv/a` | M |", "| `/srv/b` | M |"]);
-    });
-
-    it("leaves the executed table out when nothing was run", () => {
-      const md = render({ kind: "read", comm: "a", path: "/work/x" });
-      expect(md).not.toContain("#### Executed Programs");
-    });
-
-    it("gives each path one row for every command's access, in path order", () => {
-      const md = render(
-        { kind: "read", comm: "node", path: "/etc/hosts" },
-        { kind: "read", comm: "node", path: "/work/a" },
-        { kind: "write", comm: "sh", path: "/work/a" },
-      );
-      expect(md).toContain(
-        "#### Accessed Paths\n\n<sub>R read · W write · X exec · M move · L link · D delete · A attr · " +
-          "lowercase = failed · ! = denied</sub>\n\n" +
-          "| Path | Access |\n| --- | --- |\n| `./a` | RW |\n| `/etc/hosts` | R |\n",
-      );
-    });
-
-    it("prints a path's Markdown as itself and escapes only what would break the row", () => {
-      const md = render(
-        { kind: "read", comm: "a", path: "/work/x|y" },
-        { kind: "read", comm: "a", path: "/work/a&#47;~~b~~" },
-        { kind: "read", comm: "a", path: "/work/`c``d" },
-      );
-      expect(md).toContain("| `./x\\|y` | R |");
-      expect(md).toContain("| `./a&#47;~~b~~` | R |");
-      expect(md).toContain("| ```./`c``d``` | R |");
-    });
-
-    it("pads a code span whose path ends with a backtick", () => {
-      const md = render({ kind: "read", comm: "a", path: "/work/x`" });
-      expect(md).toContain("| `` ./x` `` | R |");
-    });
-
-    it("keys the workspace itself once under either spelling", () => {
-      const md = renderFilesystemAuditSummary(
-        jsonl(
-          { kind: "chmod", comm: "a", path: "/real/work" },
-          { kind: "chmod", comm: "a", path: "/sym/work", failed: true, err: 1 },
-        ),
-        { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
-      );
-      expect(md).toContain("| Path | Access |\n| --- | --- |\n| `.` | Aa! |\n\n");
-    });
-
-    it("keys a path once whether it was reached through the workspace's symlink or not", () => {
-      const md = renderFilesystemAuditSummary(
-        jsonl(
-          { kind: "open", failed: true, comm: "a", path: "/sym/work/x", err: 2 },
-          { kind: "read", comm: "a", path: "/real/work/x" },
-          { kind: "exec", comm: "a", path: "/sym/work/bin" },
-          { kind: "exec", comm: "a", path: "/real/work/bin" },
-        ),
-        { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
-      );
-      expect(md).toContain("| `./x` | R |");
-      expect(md).not.toContain("| `./x` | r |");
-      expect(md).toContain("| Path | Count |\n| --- | ---: |\n| `./bin` | 2 |\n\n");
-    });
-
-    it("folds the per-command record into a details element after the tables", () => {
-      const md = render({ kind: "read", comm: "a", path: "/work/x" });
-      expect(md.indexOf("#### Accessed Paths")).toBeLessThan(md.indexOf("<details>"));
-      expect(md).toMatch(
-        /<details>\n<summary>🔍 Process details<\/summary>\n\n<sub>flags · command · path<\/sub>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
-      );
-    });
-  });
 });
 
-describe("renderFilesystemAuditSummary: limits", () => {
+describe("createAuditSummary: limits", () => {
   const CUT = "_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit";
   const limited = (limits: SummaryOptions["limits"], ...records: object[]): string =>
     renderFilesystemAuditSummary(jsonl(...records), { ...PREFIXES, limits });

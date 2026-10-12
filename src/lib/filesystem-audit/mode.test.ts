@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
-import { SandboxError } from "./errors.ts";
-import { resolveFilesystemAudit } from "./filesystem-audit-mode.ts";
+import { SandboxError } from "../errors.ts";
+import { resolveFilesystemAudit } from "./mode.ts";
 
 describe("resolveFilesystemAudit", () => {
   it("defaults to off for undefined", () => {

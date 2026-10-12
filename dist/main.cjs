@@ -68300,7 +68300,7 @@ const uploadViaActionsArtifact = async (name, files, rootDirectory, options) => 
 	return new DefaultArtifactClient().uploadArtifact(name, files, rootDirectory, options);
 };
 //#endregion
-//#region src/lib/filesystem-audit-artifact.ts
+//#region src/lib/filesystem-audit/artifact.ts
 init_core();
 async function uploadFilesystemAuditArtifact(outPath, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact } = {}) {
 	try {
@@ -68350,640 +68350,6 @@ function cutBlock(b, budget) {
 function failOrWarn(annotation, failClosed) {
 	return (message) => {
 		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail_on_blocked`), process.exitCode = 1) : annotation.warning(message);
-	};
-}
-//#endregion
-//#region src/lib/filesystem-audit-strip.ts
-const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && r.access === "r";
-function createStripper(scratchBase) {
-	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), asRecord = (r) => typeof r == "object" && r ? r : void 0, ownShellPids = new Set(), shell, script, init, boundary = -1, observed = 0, filtered = 0;
-	return {
-		observe: (rec) => {
-			let i = observed++, r = asRecord(rec);
-			r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 ? [shell, script, boundary, init] = [
-				r.pid,
-				r.path,
-				i,
-				r.ppid
-			] : r.pid !== shell && ownShellPids.add(r.pid) : ownShellPids.add(r.pid));
-		},
-		filter: (line, rec) => {
-			let i = filtered++, r = asRecord(rec);
-			if (r === void 0) return line === "" ? void 0 : {
-				line,
-				record: rec
-			};
-			r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
-			let readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
-			if (!(shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript))) {
-				if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
-					let record = {
-						...r,
-						comm: "bash"
-					};
-					return {
-						line: JSON.stringify(record),
-						record
-					};
-				}
-				return {
-					line,
-					record: rec
-				};
-			}
-		}
-	};
-}
-//#endregion
-//#region src/core/lib/report/elapsed-time.ts
-function toParts(elapsedSeconds) {
-	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
-	return {
-		hours: Math.floor(totalMinutes / 60),
-		minutes,
-		seconds,
-		ms
-	};
-}
-function pad(n, width = 2) {
-	return String(n).padStart(width, "0");
-}
-function formatElapsedVariable(elapsedSeconds) {
-	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
-	return hours === 0 ? `${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
-}
-function formatElapsedFixed(elapsedSeconds) {
-	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
-	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
-}
-//#endregion
-//#region src/lib/filesystem-audit-summary.ts
-const LETTER = {
-	read: "R",
-	write: "W",
-	exec: "X",
-	mkdir: "W",
-	mknod: "W",
-	truncate: "W",
-	symlink: "W",
-	link: "W",
-	rename: "M",
-	unlink: "D",
-	rmdir: "D",
-	chmod: "A",
-	chown: "A",
-	attr: "A"
-}, ORDER = "RWXMLDA", PERM_ERRNO = new Set([
-	1,
-	13,
-	30
-]), LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
-function classify(r) {
-	let letter, failed = !1;
-	if (r.failed && r.kind === "open") {
-		let access = r.access ?? "r";
-		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
-	} else r.failed ? (letter = LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : letter = LETTER[r.kind];
-	if (!letter) return [];
-	let perm = failed && PERM_ERRNO.has(r.err ?? 0);
-	if (r.kind === "link") return classifyLink(r, letter, failed, perm);
-	let out = r.path ? [{
-		letter,
-		path: r.path,
-		failed,
-		perm
-	}] : [];
-	return r.kind === "rename" && r.exchange && r.to && out.push({
-		letter,
-		path: r.to,
-		failed,
-		perm
-	}), out;
-}
-function classifyLink(r, letter, failed, perm) {
-	let file = !r.deleted && !r.memfd ? r.path : void 0, fileRefused = !!file && failed && r.err === 1, out = [];
-	return r.to && out.push({
-		letter,
-		path: r.to,
-		failed,
-		perm: perm && !fileRefused
-	}), file && out.push({
-		letter: "L",
-		path: file,
-		failed,
-		perm: fileRefused
-	}), out;
-}
-const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\\`, UNSAFE_CHARS = RegExp(`[${UNSAFE}]`, "gu"), UNSAFE_QUOTED = RegExp(`[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
-	"\n": "\\n",
-	"\r": "\\r",
-	"	": "\\t",
-	"\\": "\\\\",
-	"\"": "\\\""
-};
-function escapeForDisplay(name, unsafe = UNSAFE_CHARS) {
-	return name.replace(unsafe, (c) => {
-		let named = NAMED_ESCAPES[c];
-		if (named !== void 0) return named;
-		let cp = Number(c.codePointAt(0));
-		return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
-	});
-}
-const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, DELETED_MARK = " (deleted)", DELETED = `\0${DELETED_MARK}`;
-function marked(r, path) {
-	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
-}
-const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD);
-function normalize$2(path) {
-	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
-}
-function relativize(path, prefixes) {
-	for (let ws of prefixes.workspace) {
-		if (path === ws) return ".";
-		if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
-	}
-	for (let home of prefixes.home) {
-		if (path === home) return "~";
-		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
-	}
-	return !path.startsWith("/") && !path.startsWith("…/") ? `…/${path}` : path;
-}
-function canonical(path, prefixes) {
-	for (let [first, ...rest] of [prefixes.workspace, prefixes.home]) for (let alt of rest) {
-		if (path === alt) return first;
-		if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
-	}
-	return path;
-}
-function codeSpan(text) {
-	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
-	return `${fence}${pad}${text}${pad}${fence}`;
-}
-function codeCell(text) {
-	return codeSpan(text.replace(/\|/g, "\\|"));
-}
-function pathCell({ path, deleted }) {
-	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
-}
-function markdownRows(header, rows) {
-	let line = (cells) => `| ${cells.join(" | ")} |`, rule = header.map((h) => h === "Count" ? "---:" : "---");
-	return [
-		line(header),
-		line(rule),
-		...rows.map(line)
-	].join("\n");
-}
-function sortKey(path) {
-	return path === "." || path.startsWith("./") ? [0, path] : path === "~" || path.startsWith("~/") ? [1, path] : [2, path];
-}
-const BIT = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i])), newAgg = () => ({
-	ok: 0,
-	failed: 0,
-	perm: 0,
-	first: Infinity,
-	last: -Infinity,
-	seq: Infinity
-}), flagBits = (a) => a.ok | a.failed;
-function mergeAgg(dst, src) {
-	dst.ok |= src.ok, dst.failed |= src.failed, dst.perm |= src.perm, dst.first = Math.min(dst.first, src.first), dst.last = Math.max(dst.last, src.last), dst.seq = Math.min(dst.seq, src.seq);
-}
-function apply(a, x) {
-	x.failed ? (a.failed |= x.bit, x.perm && (a.perm |= x.bit)) : a.ok |= x.bit, !Number.isNaN(x.t) && (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq));
-}
-function fmtSpan(a, originMs) {
-	if (a.first === Infinity) return "";
-	let first = formatElapsedVariable((a.first - originMs) / 1e3), last = formatElapsedVariable((a.last - originMs) / 1e3);
-	return first === last ? first : `${first}-${last}`;
-}
-const keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1);
-function components(p) {
-	return p === "/" ? ["/"] : p.startsWith("/") ? ["/", ...p.slice(1).split("/")] : p.split("/");
-}
-function spell(parts) {
-	return parts[0] === "/" ? `/${parts.slice(1).join("/")}` : parts.join("/");
-}
-function walkedNodes(top) {
-	let walked = new Set(), below = new Map(), stack = [...top.values()].map((n) => [n, !1]);
-	for (; stack.length > 0;) {
-		let [node, done] = stack.pop();
-		if (!done) {
-			stack.push([node, !0]);
-			for (let kid of node.kids?.values() ?? []) stack.push([kid, !1]);
-			continue;
-		}
-		let bits = 0;
-		for (let kid of node.kids?.values() ?? []) bits |= below.get(kid), kid.own && (bits |= flagBits(kid.own)), kid.folded && (bits |= flagBits(kid.folded));
-		below.set(node, bits), node.own && !node.own.perm && node.kids?.size && (flagBits(node.own) & ~bits) === 0 && walked.add(node);
-	}
-	return walked;
-}
-function* treeLines(top, fanout) {
-	let walked = walkedNodes(top), pathTo = (e) => {
-		let parts = [];
-		for (let at = e; at; at = at.up) parts.push(at.part);
-		return spell(parts.reverse());
-	}, stack = [...top].reverse().map(([part, node]) => ({
-		node,
-		part
-	}));
-	for (; stack.length > 0;) {
-		let e = stack.pop(), { folded, own, kids, kept } = e.node;
-		folded && flagBits(folded) && (yield [`${pathTo(e)}/**`, folded]);
-		let ownLine = own && flagBits(own) && !walked.has(e.node) ? own : void 0;
-		if (kids?.size && !kept && kids.size + +!!ownLine >= fanout) {
-			yield [`${pathTo(e)}/**`, treeAgg(e.node)];
-			continue;
-		}
-		ownLine && (yield [pathTo(e), ownLine]);
-		for (let [part, node] of [...kids ?? []].reverse()) stack.push({
-			node,
-			part,
-			up: e
-		});
-	}
-}
-function treeAgg(node) {
-	let agg = newAgg(), stack = [node];
-	for (; stack.length > 0;) {
-		let n = stack.pop();
-		n.own && mergeAgg(agg, n.own), n.folded && mergeAgg(agg, n.folded), stack.push(...n.kids?.values() ?? []);
-	}
-	return agg;
-}
-var Lines = class {
-	trees = new Map();
-	climbing = new Map();
-	bytes = 0;
-	nodes = 0;
-	stopped;
-	opts;
-	constructor(opts) {
-		this.opts = opts;
-	}
-	add(x) {
-		if (this.stopped || !x.bit) return;
-		let parts = components(x.path);
-		if (unfoldable(parts, x.path) || x.bit === BIT.X) {
-			let key = keyOf(x.comm, x.path), a = this.climbing.get(key);
-			a || (this.climbing.set(key, a = newAgg()), this.count(this.opts.rowBytes(x.path, x.comm))), apply(a, x);
-			return;
-		}
-		let kids = this.trees.get(x.comm);
-		kids || this.trees.set(x.comm, kids = new Map());
-		let parent, settled = !0, parentSettled = !0;
-		for (let i = 0; i < parts.length; i++) {
-			let node = kids.get(parts[i]);
-			if (!node) {
-				if (node = {
-					bytes: 0,
-					kept: this.isKept(parts, i + 1) || void 0
-				}, kids.set(parts[i], node), this.nodes++, parent && (this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout)) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
-				if (this.nodes > this.opts.nodes) return this.stop("paths");
-			}
-			if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x, settled);
-			if (i === parts.length - 1) {
-				node.own ??= newAgg();
-				let shown = flagBits(node.own) !== 0;
-				apply(node.own, x), settled && !shown && flagBits(node.own) && !node.kids?.size && this.setBytes(node, this.opts.rowBytes(x.path, x.comm));
-				return;
-			}
-			node.kids ??= new Map(), kids = node.kids, parent = node, parentSettled = settled, settled &&= !!node.kept;
-		}
-	}
-	isKept(parts, depth) {
-		return this.opts.keep.some((k) => k.length >= depth && k.slice(0, depth).every((part, i) => part === parts[i]));
-	}
-	fold(node) {
-		let agg = newAgg(), stack = [node];
-		for (; stack.length > 0;) {
-			let n = stack.pop();
-			n.own && mergeAgg(agg, n.own), n.folded && mergeAgg(agg, n.folded), this.setBytes(n, 0);
-			for (let kid of n.kids?.values() ?? []) this.nodes--, stack.push(kid);
-		}
-		node.folded = agg, node.own = void 0, node.kids = void 0;
-	}
-	addFolded(node, parts, x, settled) {
-		apply(node.folded, x), settled && flagBits(node.folded) && !node.bytes && this.setBytes(node, this.opts.rowBytes(`${spell(parts)}/**`, x.comm));
-	}
-	setBytes(node, bytes) {
-		this.count(bytes - node.bytes), node.bytes = bytes;
-	}
-	count(bytes) {
-		this.bytes += bytes, this.bytes > this.opts.limit && this.stop("size");
-	}
-	stop(cause) {
-		this.stopped = cause, this.trees = new Map(), this.climbing = new Map();
-	}
-	finish() {
-		if (this.stopped) return;
-		let out = [], bytes = 0;
-		for (let line of this.lines()) if (out.push(line), bytes += this.opts.rowBytes(line.path, line.comm), bytes > this.opts.limit) {
-			this.stopped = "size";
-			return;
-		}
-		return out;
-	}
-	*lines() {
-		for (let [comm, top] of this.trees) for (let [path, agg] of treeLines(top, this.opts.fanout)) {
-			let ran = this.climbing.get(keyOf(comm, path));
-			ran ? mergeAgg(ran, agg) : yield {
-				comm,
-				path,
-				agg
-			};
-		}
-		for (let [key, agg] of this.climbing) yield {
-			comm: commOf(key),
-			path: pathOf(key),
-			agg
-		};
-	}
-};
-function fmtFlags(a) {
-	let out = "";
-	for (let c of ORDER) a.ok & BIT[c] && (out += c);
-	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
-	return out;
-}
-const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "\n### ⚙️ Process Activity";
-function refusedNote(rows) {
-	let byName = new Map(), killed = new Set(), anyKilled = !1;
-	for (let { syscall, comm } of inRecordingOrder(rows)) {
-		anyKilled ||= syscall.killed;
-		let comms = syscall.killed ? killed : byName.get(syscall.name) ?? new Set();
-		syscall.killed || byName.set(syscall.name, comms), comm && comms.add(comm);
-	}
-	let list = (items, shown) => items.slice(0, shown).join(", ") + (items.length > shown ? ` and ${items.length - shown} more` : ""), comms = (c) => list([...c].map(codeSpan), 3), names = [...byName].map(([name, c]) => codeSpan(name) + (c.size ? ` (${comms(c)})` : "")), parts = [];
-	if (names.length && parts.push(`Refused system calls: ${list(names, 10)}`), anyKilled) {
-		let by = killed.size ? `: ${comms(killed)}` : "";
-		parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call${by}`);
-	}
-	return `> 🚫 ${parts.join("; ")}.`;
-}
-function skippedNote(count, url) {
-	let why = url ? ` [Why](${url})` : "";
-	return `> ❗ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
-> accesses may be missing from this summary and from the artifact.${why}`;
-}
-const SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>🔍 Process details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
-	executed: "filesystem-executed",
-	paths: "filesystem-paths",
-	log: "filesystem-log"
-}, LIMITS = {
-	bytes: STEP_SUMMARY_LIMIT_BYTES,
-	nodes: 2e5,
-	loads: 2e5
-};
-function procOf(gens, r) {
-	r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
-	let gen = gens.get(r.pid) ?? 0;
-	return r.kind === "exec" && gens.set(r.pid, gen + 1), `${r.pid}/${gen}`;
-}
-const isRecord = (r) => typeof r == "object" && !!r && typeof r.kind == "string";
-function createAuditSummary(prefixes) {
-	let limits = {
-		...LIMITS,
-		...prefixes.limits
-	}, limit = limits.bytes, loaded = new Set(), images = new Map(), observed = new Map(), load = (proc, path, library) => {
-		loaded.size >= limits.loads || (loaded.add(keyOf(proc, canonical(path, prefixes))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache")));
-	}, isLibraryMap = (r) => r.kind === "mmap" && r.access === "x" && !!r.path && !!(r.image || !r.memfd && !r.deleted && LIBRARY_NAME.test(r.path)), observe = (r) => {
-		if (!isRecord(r)) return;
-		let proc = procOf(observed, r);
-		if (isLibraryMap(r)) {
-			if (r.image) {
-				let paths = images.get(proc);
-				paths || images.set(proc, paths = []), paths.push(marked(r, r.path));
-			} else load(proc, r.path, !0);
-		} else if (r.kind === "exec") {
-			let next = `${r.pid}/${observed.get(r.pid)}`;
-			for (let path of [...images.get(proc) ?? [], ...r.path ? [marked(r, r.path)] : []]) load(proc, path, !1), load(next, path, !path.startsWith(MEMFD) && LIBRARY_NAME.test(unmarked(path)));
-			images.delete(proc);
-		}
-	}, fanout = prefixes.fanout ?? 3, keep = [
-		"/",
-		"/home",
-		"/tmp",
-		"/proc",
-		"/proc/<pid>",
-		...prefixes.workspace,
-		...prefixes.home
-	].map(components), relLength = (path) => relativize(path, prefixes).length, paths = new Lines({
-		fanout,
-		keep,
-		limit,
-		nodes: limits.nodes,
-		rowBytes: (p) => relLength(p) + 11
-	}), details = new Lines({
-		fanout,
-		keep,
-		limit,
-		nodes: limits.nodes,
-		rowBytes: (p, comm) => relLength(p) + comm.length + 3
-	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), add = (r, counted = !0) => {
-		if (!isRecord(r)) return;
-		let proc = procOf(added, r);
-		if (counted) {
-			if (r.kind === "end") {
-				ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = typeof r.host_missed == "number" ? r.host_missed : 0;
-				return;
-			}
-			if (r.kind === "syscall") {
-				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
-				if (!row) {
-					if (refused.size >= 200 && !r.killed) return;
-					row = {
-						agg: newAgg(),
-						flags: "!",
-						comm,
-						path,
-						syscall: {
-							name,
-							killed: !!r.killed
-						}
-					}, refused.set(key, row);
-				}
-				Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
-				return;
-			}
-			if (r.kind === "exec" && r.path) {
-				let p = normalize$2(canonical(marked(r, r.path), prefixes)), runs = executed.get(p);
-				runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
-			}
-			if (!isLibraryMap(r)) for (let c of classify(r)) {
-				let path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
-				if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) continue;
-				let loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path)), t = loadRead ? NaN : Date.parse(r.t ?? ""), x = {
-					comm: r.comm ?? "",
-					path: normalize$2(path),
-					bit: loadRead ? 0 : c.letter.split("").reduce((bits, l) => bits | BIT[l], 0),
-					failed: c.failed,
-					perm: c.perm,
-					t,
-					seq: Number.isNaN(t) ? Infinity : seq++
-				};
-				details.add(x), paths.add({
-					...x,
-					comm: "",
-					bit: x.bit & ~BIT.X
-				});
-			}
-		}
-	}, shown = (path) => {
-		if (path.startsWith(MEMFD)) {
-			let name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
-			return { path: `${MEMFD_PREFIX}"${name}"` };
-		}
-		return path.endsWith(DELETED) ? {
-			path: escapeForDisplay(relativize(path.slice(0, -DELETED.length), prefixes)),
-			deleted: !0
-		} : { path: escapeForDisplay(relativize(path, prefixes)) };
-	}, rows = (lines) => lines?.map(({ comm, path, agg }) => ({
-		agg,
-		flags: fmtFlags(agg),
-		comm: escapeForDisplay(comm),
-		...shown(path)
-	}));
-	return {
-		observe,
-		add,
-		finish: () => {
-			let byPath = rows(paths.finish()), log = byPath && rows(details.finish());
-			return {
-				ended,
-				lost,
-				hostMissed,
-				executed: [...executed].map(([path, runs]) => ({
-					...shown(path),
-					runs
-				})),
-				paths: byPath,
-				details: log,
-				refused: [...refused.values()],
-				pathsCut: paths.stopped,
-				detailsCut: details.stopped
-			};
-		}
-	};
-}
-function inRecordingOrder(rows) {
-	return rows.toSorted((a, b) => {
-		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
-		return a.agg.seq - b.agg.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
-	});
-}
-function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote, skippedHooksUrl) {
-	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut, detailsCut } = summary, heading = [
-		HEADING,
-		...ended && !lost ? [] : ["> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
-		...hostMissed ? [skippedNote(hostMissed, skippedHooksUrl)] : [],
-		...refused.length ? [refusedNote(refused)] : []
-	].join("\n\n"), frame = (text) => ({
-		priority: 0,
-		level: 1,
-		section: SECTION$1,
-		text,
-		cut: "keep"
-	});
-	if (details?.length === 0 && !refused.length) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
-	let blocks = [frame(legendNote ? `${heading}\n\n<sub>${legendNote}</sub>\n\n` : `${heading}\n\n`)], table = (id, level, title, md, cause, legend) => md === void 0 ? {
-		id,
-		priority: priorities[id],
-		level,
-		section: SECTION$1,
-		text: `#### ${title}\n\n${cutNote(cause)}`,
-		cut: "atomic"
-	} : {
-		id,
-		priority: priorities[id],
-		level,
-		section: SECTION$1,
-		text: `#### ${title}\n\n${legend ? `<sub>${legend}</sub>\n\n` : ""}${md}\n\n`,
-		cut: "lines",
-		head: legend ? 6 : 4
-	};
-	executed.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, 2, "Executed Programs", markdownRows(["Path", "Count"], executed.map((e) => [pathCell(e), String(e.runs)]))));
-	let byPath = paths && inRecordingOrder(paths).sort((a, b) => {
-		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
-		return ca - cb || (pa < pb ? -1 : +(pa > pb));
-	});
-	if (byPath?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.paths, 3, "Accessed Paths", byPath && markdownRows(["Path", "Access"], byPath.map((r) => [pathCell(r), r.flags])), pathsCut, LEGEND)), !byPath) return blocks;
-	let log = {
-		id: FILESYSTEM_BLOCK.log,
-		priority: priorities[FILESYSTEM_BLOCK.log],
-		level: 4
-	};
-	if (!details) return blocks.push({
-		...log,
-		section: SECTION$1,
-		cut: "atomic",
-		open: DETAILS_OPEN,
-		text: cutNote(detailsCut),
-		close: DETAILS_CLOSE
-	}), blocks;
-	let rows = inRecordingOrder([...details, ...refused]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), columns = [
-		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
-		"flags",
-		"command",
-		"path"
-	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`).join("\n"), legend = byPath.length === 0 ? `<sub>${LEGEND}</sub>\n\n` : "";
-	return blocks.push({
-		...log,
-		section: SECTION$1,
-		cut: "lines",
-		open: DETAILS_OPEN,
-		text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`,
-		close: DETAILS_CLOSE
-	}), blocks;
-}
-function parseLine(line) {
-	try {
-		return JSON.parse(line);
-	} catch {
-		return;
-	}
-}
-function unreadableSummaryBlocks() {
-	return [{
-		priority: 0,
-		level: 1,
-		section: SECTION$1,
-		text: `${HEADING}\n\n> ❗ **The recording could not be read**, so this summary has none of its accesses and no
-> artifact was uploaded.\n`,
-		cut: "keep"
-	}];
-}
-function filesystemLegendNote(artifact, guideUrl) {
-	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifact === "not-requested" ? "set `upload_filesystem_audit_artifact: true` for the full record" : artifact === "upload-failed" ? "the full record could not be uploaded" : `the full record is in the \`${artifact.name}\` artifact`} · [how to read this](${guideUrl})`;
-}
-function filesystemTruncationNote(artifact, cause = "size") {
-	let rest = artifact === "not-requested" ? "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact" : artifact === "upload-failed" ? "the recording could not be uploaded as an artifact, so the rest is not kept" : `the ${artifact.name} artifact uploaded for this run has every access`;
-	return `_…truncated: ${cause === "paths" ? "the filesystem audit touched too many distinct paths to summarize" : "the filesystem audit exceeded GitHub's Job Summary size limit"}; ${rest}._\n\n`;
-}
-//#endregion
-//#region src/lib/filesystem-audit-reduce.ts
-function reduceRecording(forEachLine, scratchBase, options, openSink, createSummary = createAuditSummary) {
-	let stripper = createStripper(scratchBase), summary = createSummary(options), summaryError, failedSummary = !1, summarize = (step) => {
-		if (!failedSummary) try {
-			step();
-		} catch (e) {
-			[failedSummary, summaryError] = [!0, e];
-		}
-	}, lines = 0, length = 0;
-	forEachLine((line) => {
-		lines++, length += line.length;
-		let r = parseLine(line);
-		stripper.observe(r), summarize(() => summary.observe(r));
-	});
-	let sink = openSink?.(), again = 0, lengthAgain = 0;
-	if (forEachLine((line) => {
-		again++, lengthAgain += line.length;
-		let r = parseLine(line), kept = stripper.filter(line, r);
-		summarize(() => summary.add(kept ? kept.record : r, kept !== void 0)), kept && sink?.(kept.line);
-	}), again !== lines || lengthAgain !== length) throw Error("the recording changed while it was being read");
-	let result;
-	return summarize(() => result = summary.finish()), {
-		summary: result,
-		summaryError
 	};
 }
 function usesLine(actionRepo, actionRef, actionVersion) {
@@ -69168,6 +68534,28 @@ function connectedHosts(timeline) {
 }
 function isRedundantDns(event, connected) {
 	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
+}
+//#endregion
+//#region src/core/lib/report/elapsed-time.ts
+function toParts(elapsedSeconds) {
+	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
+	return {
+		hours: Math.floor(totalMinutes / 60),
+		minutes,
+		seconds,
+		ms
+	};
+}
+function pad(n, width = 2) {
+	return String(n).padStart(width, "0");
+}
+function formatElapsedVariable(elapsedSeconds) {
+	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
+	return hours === 0 ? `${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
+}
+function formatElapsedFixed(elapsedSeconds) {
+	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
+	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
 }
 //#endregion
 //#region src/core/lib/report/render/inspect-details.ts
@@ -69475,7 +68863,7 @@ function renderVerdict(report, extraItems = []) {
 }
 //#endregion
 //#region src/core/lib/report/render/render-report-markdown.ts
-const SECTION = "traffic", TRAFFIC_BLOCK = {
+const SECTION$1 = "traffic", TRAFFIC_BLOCK = {
 	example: "traffic-example",
 	blocked: "traffic-blocked",
 	passed: "traffic-passed",
@@ -69496,7 +68884,7 @@ function trafficTableBlock(id, priority, before, table, after) {
 		id,
 		priority,
 		level: 2,
-		section: SECTION,
+		section: SECTION$1,
 		text: before + table + after,
 		cut: "lines",
 		head: before.split("\n").length + 1
@@ -69505,7 +68893,7 @@ function trafficTableBlock(id, priority, before, table, after) {
 const frame = (text) => ({
 	priority: 0,
 	level: 1,
-	section: SECTION,
+	section: SECTION$1,
 	text,
 	cut: "keep"
 });
@@ -69541,7 +68929,7 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 			id: TRAFFIC_BLOCK.example,
 			priority: priorities[TRAFFIC_BLOCK.example],
 			level: 2,
-			section: `${SECTION}-example`,
+			section: `${SECTION$1}-example`,
 			cut: "atomic",
 			text: example
 		}), wrote ||= example !== "";
@@ -69553,7 +68941,7 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 		id: TRAFFIC_BLOCK.log,
 		priority: priorities[TRAFFIC_BLOCK.log],
 		level: 3,
-		section: SECTION,
+		section: SECTION$1,
 		cut: "lines",
 		open: "\n<details>\n<summary>💬 Communication details</summary>\n\n",
 		text: details,
@@ -69567,6 +68955,291 @@ function reportFooter(actionRepo) {
 	return `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n\n<hr>\n`;
 }
 //#endregion
+//#region src/lib/filesystem-audit/record.ts
+const LETTER = {
+	read: "R",
+	write: "W",
+	exec: "X",
+	mkdir: "W",
+	mknod: "W",
+	truncate: "W",
+	symlink: "W",
+	link: "W",
+	rename: "M",
+	unlink: "D",
+	rmdir: "D",
+	chmod: "A",
+	chown: "A",
+	attr: "A"
+}, ORDER = "RWXMLDA", PERM_ERRNO = new Set([
+	1,
+	13,
+	30
+]);
+function classify(r) {
+	let letter, failed = !1;
+	if (r.failed && r.kind === "open") {
+		let access = r.access ?? "r";
+		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
+	} else r.failed ? (letter = LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : letter = LETTER[r.kind];
+	if (!letter) return [];
+	let perm = failed && PERM_ERRNO.has(r.err ?? 0);
+	if (r.kind === "link") return classifyLink(r, letter, failed, perm);
+	let out = r.path ? [{
+		letter,
+		path: r.path,
+		failed,
+		perm
+	}] : [];
+	return r.kind === "rename" && r.exchange && r.to && out.push({
+		letter,
+		path: r.to,
+		failed,
+		perm
+	}), out;
+}
+function classifyLink(r, letter, failed, perm) {
+	let file = !r.deleted && !r.memfd ? r.path : void 0, fileRefused = !!file && failed && r.err === 1, out = [];
+	return r.to && out.push({
+		letter,
+		path: r.to,
+		failed,
+		perm: perm && !fileRefused
+	}), file && out.push({
+		letter: "L",
+		path: file,
+		failed,
+		perm: fileRefused
+	}), out;
+}
+const BIT = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i]));
+function procOf(gens, r) {
+	r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
+	let gen = gens.get(r.pid) ?? 0;
+	return r.kind === "exec" && gens.set(r.pid, gen + 1), `${r.pid}/${gen}`;
+}
+const isRecord = (r) => typeof r == "object" && !!r && typeof r.kind == "string";
+function parseLine(line) {
+	try {
+		return JSON.parse(line);
+	} catch {
+		return;
+	}
+}
+//#endregion
+//#region src/lib/filesystem-audit/agg.ts
+const newAgg = () => ({
+	ok: 0,
+	failed: 0,
+	perm: 0,
+	first: Infinity,
+	last: -Infinity,
+	seq: Infinity
+}), flagBits = (a) => a.ok | a.failed;
+function mergeAgg(dst, src) {
+	dst.ok |= src.ok, dst.failed |= src.failed, dst.perm |= src.perm, dst.first = Math.min(dst.first, src.first), dst.last = Math.max(dst.last, src.last), dst.seq = Math.min(dst.seq, src.seq);
+}
+function apply(a, x) {
+	x.failed ? (a.failed |= x.bit, x.perm && (a.perm |= x.bit)) : a.ok |= x.bit, !Number.isNaN(x.t) && (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq));
+}
+function fmtSpan(a, originMs) {
+	if (a.first === Infinity) return "";
+	let first = formatElapsedVariable((a.first - originMs) / 1e3), last = formatElapsedVariable((a.last - originMs) / 1e3);
+	return first === last ? first : `${first}-${last}`;
+}
+function fmtFlags(a) {
+	let out = "";
+	for (let c of ORDER) a.ok & BIT[c] && (out += c);
+	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
+	return out;
+}
+//#endregion
+//#region src/lib/filesystem-audit/paths.ts
+const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, DELETED_MARK = " (deleted)", DELETED = `\0${DELETED_MARK}`;
+function marked(r, path) {
+	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
+}
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD);
+function normalize$2(path) {
+	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
+}
+function relativize(path, prefixes) {
+	for (let ws of prefixes.workspace) {
+		if (path === ws) return ".";
+		if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
+	}
+	for (let home of prefixes.home) {
+		if (path === home) return "~";
+		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
+	}
+	return !path.startsWith("/") && !path.startsWith("…/") ? `…/${path}` : path;
+}
+function canonical(path, prefixes) {
+	for (let [first, ...rest] of [prefixes.workspace, prefixes.home]) for (let alt of rest) {
+		if (path === alt) return first;
+		if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
+	}
+	return path;
+}
+function sortKey(path) {
+	return path === "." || path.startsWith("./") ? [0, path] : path === "~" || path.startsWith("~/") ? [1, path] : [2, path];
+}
+function components(p) {
+	return p === "/" ? ["/"] : p.startsWith("/") ? ["/", ...p.slice(1).split("/")] : p.split("/");
+}
+function spell(parts) {
+	return parts[0] === "/" ? `/${parts.slice(1).join("/")}` : parts.join("/");
+}
+//#endregion
+//#region src/lib/filesystem-audit/escape.ts
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\\`, UNSAFE_CHARS = RegExp(`[${UNSAFE}]`, "gu"), UNSAFE_QUOTED = RegExp(`[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
+	"\n": "\\n",
+	"\r": "\\r",
+	"	": "\\t",
+	"\\": "\\\\",
+	"\"": "\\\""
+};
+function escapeForDisplay(name, unsafe = UNSAFE_CHARS) {
+	return name.replace(unsafe, (c) => {
+		let named = NAMED_ESCAPES[c];
+		if (named !== void 0) return named;
+		let cp = Number(c.codePointAt(0));
+		return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
+	});
+}
+function codeSpan(text) {
+	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
+	return `${fence}${pad}${text}${pad}${fence}`;
+}
+function codeCell(text) {
+	return codeSpan(text.replace(/\|/g, "\\|"));
+}
+function pathCell({ path, deleted }) {
+	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
+}
+function markdownRows(header, rows) {
+	let line = (cells) => `| ${cells.join(" | ")} |`, rule = header.map((h) => h === "Count" ? "---:" : "---");
+	return [
+		line(header),
+		line(rule),
+		...rows.map(line)
+	].join("\n");
+}
+//#endregion
+//#region src/lib/filesystem-audit/render.ts
+const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "\n### ⚙️ Process Activity";
+function refusedNote(rows) {
+	let byName = new Map(), killed = new Set(), anyKilled = !1;
+	for (let { syscall, comm } of inRecordingOrder(rows)) {
+		anyKilled ||= syscall.killed;
+		let comms = syscall.killed ? killed : byName.get(syscall.name) ?? new Set();
+		syscall.killed || byName.set(syscall.name, comms), comm && comms.add(comm);
+	}
+	let list = (items, shown) => items.slice(0, shown).join(", ") + (items.length > shown ? ` and ${items.length - shown} more` : ""), comms = (c) => list([...c].map(codeSpan), 3), names = [...byName].map(([name, c]) => codeSpan(name) + (c.size ? ` (${comms(c)})` : "")), parts = [];
+	if (names.length && parts.push(`Refused system calls: ${list(names, 10)}`), anyKilled) {
+		let by = killed.size ? `: ${comms(killed)}` : "";
+		parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call${by}`);
+	}
+	return `> 🚫 ${parts.join("; ")}.`;
+}
+function skippedNote(count, url) {
+	let why = url ? ` [Why](${url})` : "";
+	return `> ❗ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
+> accesses may be missing from this summary and from the artifact.${why}`;
+}
+const SECTION = "filesystem", DETAILS_OPEN = "<details>\n<summary>🔍 Process details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
+	executed: "filesystem-executed",
+	paths: "filesystem-paths",
+	log: "filesystem-log"
+};
+function inRecordingOrder(rows) {
+	return rows.toSorted((a, b) => {
+		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
+		return a.agg.seq - b.agg.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
+	});
+}
+function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote, skippedHooksUrl) {
+	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut, detailsCut } = summary, heading = [
+		HEADING,
+		...ended && !lost ? [] : ["> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
+		...hostMissed ? [skippedNote(hostMissed, skippedHooksUrl)] : [],
+		...refused.length ? [refusedNote(refused)] : []
+	].join("\n\n"), frame = (text) => ({
+		priority: 0,
+		level: 1,
+		section: SECTION,
+		text,
+		cut: "keep"
+	});
+	if (details?.length === 0 && !refused.length) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
+	let blocks = [frame(legendNote ? `${heading}\n\n<sub>${legendNote}</sub>\n\n` : `${heading}\n\n`)], table = (id, level, title, md, cause, legend) => md === void 0 ? {
+		id,
+		priority: priorities[id],
+		level,
+		section: SECTION,
+		text: `#### ${title}\n\n${cutNote(cause)}`,
+		cut: "atomic"
+	} : {
+		id,
+		priority: priorities[id],
+		level,
+		section: SECTION,
+		text: `#### ${title}\n\n${legend ? `<sub>${legend}</sub>\n\n` : ""}${md}\n\n`,
+		cut: "lines",
+		head: legend ? 6 : 4
+	};
+	executed.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, 2, "Executed Programs", markdownRows(["Path", "Count"], executed.map((e) => [pathCell(e), String(e.runs)]))));
+	let byPath = paths && inRecordingOrder(paths).sort((a, b) => {
+		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
+		return ca - cb || (pa < pb ? -1 : +(pa > pb));
+	});
+	if (byPath?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.paths, 3, "Accessed Paths", byPath && markdownRows(["Path", "Access"], byPath.map((r) => [pathCell(r), r.flags])), pathsCut, LEGEND)), !byPath) return blocks;
+	let log = {
+		id: FILESYSTEM_BLOCK.log,
+		priority: priorities[FILESYSTEM_BLOCK.log],
+		level: 4
+	};
+	if (!details) return blocks.push({
+		...log,
+		section: SECTION,
+		cut: "atomic",
+		open: DETAILS_OPEN,
+		text: cutNote(detailsCut),
+		close: DETAILS_CLOSE
+	}), blocks;
+	let rows = inRecordingOrder([...details, ...refused]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), columns = [
+		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
+		"flags",
+		"command",
+		"path"
+	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`).join("\n"), legend = byPath.length === 0 ? `<sub>${LEGEND}</sub>\n\n` : "";
+	return blocks.push({
+		...log,
+		section: SECTION,
+		cut: "lines",
+		open: DETAILS_OPEN,
+		text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`,
+		close: DETAILS_CLOSE
+	}), blocks;
+}
+function unreadableSummaryBlocks() {
+	return [{
+		priority: 0,
+		level: 1,
+		section: SECTION,
+		text: `${HEADING}\n\n> ❗ **The recording could not be read**, so this summary has none of its accesses and no
+> artifact was uploaded.\n`,
+		cut: "keep"
+	}];
+}
+function filesystemLegendNote(artifact, guideUrl) {
+	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifact === "not-requested" ? "set `upload_filesystem_audit_artifact: true` for the full record" : artifact === "upload-failed" ? "the full record could not be uploaded" : `the full record is in the \`${artifact.name}\` artifact`} · [how to read this](${guideUrl})`;
+}
+function filesystemTruncationNote(artifact, cause = "size") {
+	let rest = artifact === "not-requested" ? "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact" : artifact === "upload-failed" ? "the recording could not be uploaded as an artifact, so the rest is not kept" : `the ${artifact.name} artifact uploaded for this run has every access`;
+	return `_…truncated: ${cause === "paths" ? "the filesystem audit touched too many distinct paths to summarize" : "the filesystem audit exceeded GitHub's Job Summary size limit"}; ${rest}._\n\n`;
+}
+//#endregion
 //#region src/lib/summary-priorities.ts
 const TRAFFIC_PRIORITIES = {
 	[TRAFFIC_BLOCK.example]: 1,
@@ -69577,7 +69250,349 @@ const TRAFFIC_PRIORITIES = {
 	[FILESYSTEM_BLOCK.executed]: 5,
 	[FILESYSTEM_BLOCK.paths]: 6,
 	[FILESYSTEM_BLOCK.log]: 8
-}, CHUNK_BYTES = 1 << 20;
+}, keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1);
+function walkedNodes(top) {
+	let walked = new Set(), below = new Map(), stack = [...top.values()].map((n) => [n, !1]);
+	for (; stack.length > 0;) {
+		let [node, done] = stack.pop();
+		if (!done) {
+			stack.push([node, !0]);
+			for (let kid of node.kids?.values() ?? []) stack.push([kid, !1]);
+			continue;
+		}
+		let bits = 0;
+		for (let kid of node.kids?.values() ?? []) bits |= below.get(kid), kid.own && (bits |= flagBits(kid.own)), kid.folded && (bits |= flagBits(kid.folded));
+		below.set(node, bits), node.own && !node.own.perm && node.kids?.size && (flagBits(node.own) & ~bits) === 0 && walked.add(node);
+	}
+	return walked;
+}
+function* treeLines(top, fanout) {
+	let walked = walkedNodes(top), pathTo = (e) => {
+		let parts = [];
+		for (let at = e; at; at = at.up) parts.push(at.part);
+		return spell(parts.reverse());
+	}, stack = [...top].reverse().map(([part, node]) => ({
+		node,
+		part
+	}));
+	for (; stack.length > 0;) {
+		let e = stack.pop(), { folded, own, kids, kept } = e.node;
+		folded && flagBits(folded) && (yield [`${pathTo(e)}/**`, folded]);
+		let ownLine = own && flagBits(own) && !walked.has(e.node) ? own : void 0;
+		if (kids?.size && !kept && kids.size + +!!ownLine >= fanout) {
+			yield [`${pathTo(e)}/**`, treeAgg(e.node)];
+			continue;
+		}
+		ownLine && (yield [pathTo(e), ownLine]);
+		for (let [part, node] of [...kids ?? []].reverse()) stack.push({
+			node,
+			part,
+			up: e
+		});
+	}
+}
+function forEachInSubtree(node, visit) {
+	let stack = [node];
+	for (; stack.length > 0;) {
+		let n = stack.pop();
+		visit(n);
+		for (let kid of n.kids?.values() ?? []) stack.push(kid);
+	}
+}
+function treeAgg(node) {
+	let agg = newAgg();
+	return forEachInSubtree(node, (n) => {
+		n.own && mergeAgg(agg, n.own), n.folded && mergeAgg(agg, n.folded);
+	}), agg;
+}
+var Lines = class {
+	trees = new Map();
+	climbing = new Map();
+	bytes = 0;
+	nodes = 0;
+	stopped;
+	opts;
+	constructor(opts) {
+		this.opts = opts;
+	}
+	add(x) {
+		if (this.stopped || !x.bit) return;
+		let parts = components(x.path);
+		if (unfoldable(parts, x.path) || x.bit === BIT.X) {
+			let key = keyOf(x.comm, x.path), a = this.climbing.get(key);
+			a || (this.climbing.set(key, a = newAgg()), this.count(this.opts.rowBytes(x.path, x.comm))), apply(a, x);
+			return;
+		}
+		let kids = this.trees.get(x.comm);
+		kids || this.trees.set(x.comm, kids = new Map());
+		let parent, settled = !0, parentSettled = !0;
+		for (let i = 0; i < parts.length; i++) {
+			let node = kids.get(parts[i]);
+			if (!node) {
+				if (node = {
+					bytes: 0,
+					kept: this.isKept(parts, i + 1) || void 0
+				}, kids.set(parts[i], node), this.nodes++, parent && (this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout)) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
+				if (this.nodes > this.opts.nodes) return this.stop("paths");
+			}
+			if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x, settled);
+			if (i === parts.length - 1) {
+				node.own ??= newAgg();
+				let shown = flagBits(node.own) !== 0;
+				apply(node.own, x), settled && !shown && flagBits(node.own) && !node.kids?.size && this.setBytes(node, this.opts.rowBytes(x.path, x.comm));
+				return;
+			}
+			node.kids ??= new Map(), kids = node.kids, parent = node, parentSettled = settled, settled &&= !!node.kept;
+		}
+	}
+	isKept(parts, depth) {
+		return this.opts.keep.some((k) => k.length >= depth && k.slice(0, depth).every((part, i) => part === parts[i]));
+	}
+	fold(node) {
+		let agg = newAgg();
+		forEachInSubtree(node, (n) => {
+			n.own && mergeAgg(agg, n.own), n.folded && mergeAgg(agg, n.folded), this.setBytes(n, 0), n !== node && this.nodes--;
+		}), node.folded = agg, node.own = void 0, node.kids = void 0;
+	}
+	addFolded(node, parts, x, settled) {
+		apply(node.folded, x), settled && flagBits(node.folded) && !node.bytes && this.setBytes(node, this.opts.rowBytes(`${spell(parts)}/**`, x.comm));
+	}
+	setBytes(node, bytes) {
+		this.count(bytes - node.bytes), node.bytes = bytes;
+	}
+	count(bytes) {
+		this.bytes += bytes, this.bytes > this.opts.limit && this.stop("size");
+	}
+	stop(cause) {
+		this.stopped = cause, this.trees = new Map(), this.climbing = new Map();
+	}
+	finish() {
+		if (this.stopped) return;
+		let out = [], bytes = 0;
+		for (let line of this.lines()) if (out.push(line), bytes += this.opts.rowBytes(line.path, line.comm), bytes > this.opts.limit) {
+			this.stopped = "size";
+			return;
+		}
+		return out;
+	}
+	*lines() {
+		for (let [comm, top] of this.trees) for (let [path, agg] of treeLines(top, this.opts.fanout)) {
+			let ran = this.climbing.get(keyOf(comm, path));
+			ran ? mergeAgg(ran, agg) : yield {
+				comm,
+				path,
+				agg
+			};
+		}
+		for (let [key, agg] of this.climbing) yield {
+			comm: commOf(key),
+			path: pathOf(key),
+			agg
+		};
+	}
+};
+//#endregion
+//#region src/lib/filesystem-audit/strip.ts
+const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && r.access === "r";
+function createStripper(scratchBase) {
+	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), asRecord = (r) => typeof r == "object" && r ? r : void 0, ownShellPids = new Set(), shell, script, init, boundary = -1, observed = 0, filtered = 0;
+	return {
+		observe: (rec) => {
+			let i = observed++, r = asRecord(rec);
+			r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 ? [shell, script, boundary, init] = [
+				r.pid,
+				r.path,
+				i,
+				r.ppid
+			] : r.pid !== shell && ownShellPids.add(r.pid) : ownShellPids.add(r.pid));
+		},
+		filter: (line, rec) => {
+			let i = filtered++, r = asRecord(rec);
+			if (r === void 0) return line === "" ? void 0 : {
+				line,
+				record: rec
+			};
+			r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
+			let readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
+			if (!(shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript))) {
+				if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
+					let record = {
+						...r,
+						comm: "bash"
+					};
+					return {
+						line: JSON.stringify(record),
+						record
+					};
+				}
+				return {
+					line,
+					record: rec
+				};
+			}
+		}
+	};
+}
+//#endregion
+//#region src/lib/filesystem-audit/reduce.ts
+const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/, LIMITS = {
+	bytes: STEP_SUMMARY_LIMIT_BYTES,
+	nodes: 2e5,
+	loads: 2e5
+};
+function createAuditSummary(prefixes) {
+	let limits = {
+		...LIMITS,
+		...prefixes.limits
+	}, limit = limits.bytes, loaded = new Set(), images = new Map(), observed = new Map(), load = (proc, path, library) => {
+		loaded.size >= limits.loads || (loaded.add(keyOf(proc, canonical(path, prefixes))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache")));
+	}, isLibraryMap = (r) => r.kind === "mmap" && r.access === "x" && !!r.path && !!(r.image || !r.memfd && !r.deleted && LIBRARY_NAME.test(r.path)), observe = (r) => {
+		if (!isRecord(r)) return;
+		let proc = procOf(observed, r);
+		if (isLibraryMap(r)) {
+			if (r.image) {
+				let paths = images.get(proc);
+				paths || images.set(proc, paths = []), paths.push(marked(r, r.path));
+			} else load(proc, r.path, !0);
+		} else if (r.kind === "exec") {
+			let next = `${r.pid}/${observed.get(r.pid)}`;
+			for (let path of [...images.get(proc) ?? [], ...r.path ? [marked(r, r.path)] : []]) load(proc, path, !1), load(next, path, !path.startsWith(MEMFD) && LIBRARY_NAME.test(unmarked(path)));
+			images.delete(proc);
+		}
+	}, fanout = prefixes.fanout ?? 3, keep = [
+		"/",
+		"/home",
+		"/tmp",
+		"/proc",
+		"/proc/<pid>",
+		...prefixes.workspace,
+		...prefixes.home
+	].map(components), relLength = (path) => relativize(path, prefixes).length, paths = new Lines({
+		fanout,
+		keep,
+		limit,
+		nodes: limits.nodes,
+		rowBytes: (p) => relLength(p) + 11
+	}), details = new Lines({
+		fanout,
+		keep,
+		limit,
+		nodes: limits.nodes,
+		rowBytes: (p, comm) => relLength(p) + comm.length + 3
+	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), add = (r, counted = !0) => {
+		if (!isRecord(r)) return;
+		let proc = procOf(added, r);
+		if (counted) {
+			if (r.kind === "end") {
+				ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = typeof r.host_missed == "number" ? r.host_missed : 0;
+				return;
+			}
+			if (r.kind === "syscall") {
+				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
+				if (!row) {
+					if (refused.size >= 200 && !r.killed) return;
+					row = {
+						agg: newAgg(),
+						flags: "!",
+						comm,
+						path,
+						syscall: {
+							name,
+							killed: !!r.killed
+						}
+					}, refused.set(key, row);
+				}
+				Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
+				return;
+			}
+			if (r.kind === "exec" && r.path) {
+				let p = normalize$2(canonical(marked(r, r.path), prefixes)), runs = executed.get(p);
+				runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
+			}
+			if (!isLibraryMap(r)) for (let c of classify(r)) {
+				let path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
+				if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) continue;
+				let loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path)), t = loadRead ? NaN : Date.parse(r.t ?? ""), x = {
+					comm: r.comm ?? "",
+					path: normalize$2(path),
+					bit: loadRead ? 0 : c.letter.split("").reduce((bits, l) => bits | BIT[l], 0),
+					failed: c.failed,
+					perm: c.perm,
+					t,
+					seq: Number.isNaN(t) ? Infinity : seq++
+				};
+				details.add(x), paths.add({
+					...x,
+					comm: "",
+					bit: x.bit & ~BIT.X
+				});
+			}
+		}
+	}, shown = (path) => {
+		if (path.startsWith(MEMFD)) {
+			let name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
+			return { path: `${MEMFD_PREFIX}"${name}"` };
+		}
+		return path.endsWith(DELETED) ? {
+			path: escapeForDisplay(relativize(path.slice(0, -DELETED.length), prefixes)),
+			deleted: !0
+		} : { path: escapeForDisplay(relativize(path, prefixes)) };
+	}, rows = (lines) => lines?.map(({ comm, path, agg }) => ({
+		agg,
+		flags: fmtFlags(agg),
+		comm: escapeForDisplay(comm),
+		...shown(path)
+	}));
+	return {
+		observe,
+		add,
+		finish: () => {
+			let byPath = rows(paths.finish()), log = byPath && rows(details.finish());
+			return {
+				ended,
+				lost,
+				hostMissed,
+				executed: [...executed].map(([path, runs]) => ({
+					...shown(path),
+					runs
+				})),
+				paths: byPath,
+				details: log,
+				refused: [...refused.values()],
+				pathsCut: paths.stopped,
+				detailsCut: details.stopped
+			};
+		}
+	};
+}
+function reduceRecording(forEachLine, scratchBase, options, openSink, createSummary = createAuditSummary) {
+	let stripper = createStripper(scratchBase), summary = createSummary(options), summaryError, failedSummary = !1, summarize = (step) => {
+		if (!failedSummary) try {
+			step();
+		} catch (e) {
+			[failedSummary, summaryError] = [!0, e];
+		}
+	}, lines = 0, length = 0;
+	forEachLine((line) => {
+		lines++, length += line.length;
+		let r = parseLine(line);
+		stripper.observe(r), summarize(() => summary.observe(r));
+	});
+	let sink = openSink?.(), again = 0, lengthAgain = 0;
+	if (forEachLine((line) => {
+		again++, lengthAgain += line.length;
+		let r = parseLine(line), kept = stripper.filter(line, r);
+		summarize(() => summary.add(kept ? kept.record : r, kept !== void 0)), kept && sink?.(kept.line);
+	}), again !== lines || lengthAgain !== length) throw Error("the recording changed while it was being read");
+	let result;
+	return summarize(() => result = summary.finish()), {
+		summary: result,
+		summaryError
+	};
+}
+//#endregion
+//#region src/lib/filesystem-audit/report.ts
+const CHUNK_BYTES = 1 << 20;
 function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
 	let fd = (0, node_fs.openSync)(path, "r");
 	try {
@@ -69727,7 +69742,7 @@ function isAwsAccessKeyId(value) {
 	return ACCESS_KEY_ID.test(value);
 }
 //#endregion
-//#region src/lib/filesystem-audit-mode.ts
+//#region src/lib/filesystem-audit/mode.ts
 const FILESYSTEM_AUDIT = ["off", "record"];
 function resolveFilesystemAudit(input) {
 	let trimmed = input?.trim() || "off";

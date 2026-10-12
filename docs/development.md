@@ -332,7 +332,8 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 ├── src/                       # Source (ESM)
 │   ├── main.ts / post.ts      # Start proxy, run isolated command, report, stop
 │   ├── lib/                   # Action-specific implementation: container, report, sudo-preflight,
-│   │                          # sandbox/ (OCI config, runc bootstrap, netns/mountinfo helpers)
+│   │                          # sandbox/ (OCI config, runc bootstrap, netns/mountinfo helpers),
+│   │                          # filesystem-audit/ (the recording's reduction, summary and artifact)
 │   ├── proxy/                 # The AWS access key check, an extension to core's inspect config,
 │   │                          # built for both runtimes; scripts/ holds this action's inspect
 │   │                          # config generator, core's plus the check

@@ -17,24 +17,24 @@ import {
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 
-import { failOrWarn } from "./fail-or-warn.ts";
-import {
-  setFilesystemAuditOutput,
-  uploadFilesystemAuditArtifact,
-} from "./filesystem-audit-artifact.ts";
-import { reduceRecording, type ReducedRecording } from "./filesystem-audit-reduce.ts";
+import { failOrWarn } from "../fail-or-warn.ts";
+import type { FilesystemAuditPaths } from "../sandbox/filesystem-audit.ts";
+import { FILESYSTEM_PRIORITIES } from "../summary-priorities.ts";
+import { setFilesystemAuditOutput, uploadFilesystemAuditArtifact } from "./artifact.ts";
+import type { CutCause } from "./fold-tree.ts";
 import {
   createAuditSummary,
+  reduceRecording,
+  type ReducedRecording,
+  type SummaryOptions,
+} from "./reduce.ts";
+import {
   filesystemLegendNote,
   filesystemTruncationNote,
   renderAuditSummaryBlocks,
   unreadableSummaryBlocks,
-  type CutCause,
   type RecordArtifact,
-  type SummaryOptions,
-} from "./filesystem-audit-summary.ts";
-import type { FilesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
-import { FILESYSTEM_PRIORITIES } from "./summary-priorities.ts";
+} from "./render.ts";
 
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */

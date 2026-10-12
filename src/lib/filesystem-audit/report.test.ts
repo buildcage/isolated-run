@@ -7,14 +7,15 @@ import { describe, it, expect, vi, afterEach, beforeEach, type Mock } from "vite
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
 
+import { createAuditSummary } from "./reduce.ts";
+import { renderAuditSummaryBlocks } from "./render.ts";
 import {
   openWriter,
   prepareStepFilesystemAudit,
   readLines,
   type FilesystemAuditReportDeps,
   type FilesystemAuditReportOptions,
-} from "./filesystem-audit-report.ts";
-import { createAuditSummary, renderAuditSummaryBlocks } from "./filesystem-audit-summary.ts";
+} from "./report.ts";
 
 afterEach(() => vi.unstubAllEnvs());
 

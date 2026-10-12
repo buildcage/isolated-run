@@ -27,7 +27,7 @@ import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
 import { isAwsAccessKeyId, parseAwsAccounts } from "../proxy/aws-keys.ts";
 import { SandboxError } from "./errors.ts";
-import { resolveFilesystemAudit, type FilesystemAudit } from "./filesystem-audit-mode.ts";
+import { resolveFilesystemAudit, type FilesystemAudit } from "./filesystem-audit/mode.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
 
 const LIST_INPUTS = [

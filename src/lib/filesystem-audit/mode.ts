@@ -1,4 +1,4 @@
-import { SandboxError } from "./errors.ts";
+import { SandboxError } from "../errors.ts";
 
 /**
  * Lives here rather than in inputs.ts for the same reason filesystem-mode.ts

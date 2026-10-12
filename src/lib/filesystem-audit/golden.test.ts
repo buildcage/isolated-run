@@ -4,14 +4,14 @@ import { describe, it } from "vitest";
 
 import { expectMatchesGolden } from "#core/lib/test/golden.node.ts";
 
-import { reduceText, renderFilesystemAuditSummary } from "./test/filesystem-audit.ts";
+import { reduceText, renderFilesystemAuditSummary } from "../test/filesystem-audit.ts";
 
 // A real recording from the test_sandbox_filesystem_audit e2e, with the runner
 // uid normalized (dev/update-filesystem-audit-fixture.sh refreshes it). It
 // carries the actual process tree, which a hand-built sample would not, so it
 // guards against the model drifting from what the tracer emits.
 const fixture = (name: string): URL =>
-  new URL(`./__fixtures__/filesystem-audit/${name}`, import.meta.url);
+  new URL(`../__fixtures__/filesystem-audit/${name}`, import.meta.url);
 const recording = (): string => readFileSync(fixture("recording.jsonl"), "utf8");
 
 describe("filesystem audit: real recording golden", () => {

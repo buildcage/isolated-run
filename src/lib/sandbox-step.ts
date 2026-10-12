@@ -32,8 +32,8 @@ import { buildComposeEnv } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
-import { setFilesystemAuditOutput } from "./filesystem-audit-artifact.ts";
-import { prepareStepFilesystemAudit } from "./filesystem-audit-report.ts";
+import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
+import { prepareStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
