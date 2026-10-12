@@ -252,8 +252,8 @@ jobs:
             # One across mounts, which fails EXDEV before protected_hardlinks
             # is consulted.
             ln /etc/hostname "$GITHUB_WORKSPACE/hostname-link" 2>/dev/null || true
-            # A symlink whose target is longer than one path component.
-            ln -s "/$(printf 'x%.0s' $(seq 4000))" "$GITHUB_WORKSPACE/long-link"
+            # A symlink with the longest target the kernel takes.
+            ln -s "/$(printf 'x%.0s' $(seq 4094))" "$GITHUB_WORKSPACE/long-link"
             # A file mapped executable that is no library.
             echo data > "$GITHUB_WORKSPACE/mapped.bin"
             python3 -c 'import mmap, sys; f = open(sys.argv[1], "rb")
@@ -405,7 +405,7 @@ jobs:
           jq -se 'any(.[]; .kind == "chmod" and .failed and .mode == "0777" and (.path | endswith("/root-owned.txt")))' "$f" > /dev/null
           jq -se 'any(.[]; .kind == "chown" and .failed and .owner == "1:2" and (.path | endswith("/root-owned.txt")))' "$f" > /dev/null
           if jq -se 'any(.[]; .kind == "mkdir" and .err == 17)' "$f" > /dev/null; then exit 1; fi
-          jq -se 'any(.[]; .kind == "symlink" and (.path | endswith("/long-link")) and (.to | length) == 4001)' "$f" > /dev/null
+          jq -se 'any(.[]; .kind == "symlink" and (.path | endswith("/long-link")) and (.to | length) == 4095)' "$f" > /dev/null
           # Refused after the tracer's hook: no mapping, and only the failed open.
           if jq -se 'any(.[]; .kind == "mmap" and (.path // "" | endswith("/ro-mapped.bin")))' "$f" > /dev/null; then exit 1; fi
           jq -se '[.[] | select(.kind == "open" and (.path // "" | endswith("/fifo")))] | length == 1 and .[0].failed' "$f" > /dev/null
