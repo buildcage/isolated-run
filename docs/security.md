@@ -780,6 +780,15 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   through it, and the report goes to the step's log. Where the report is meant to be an audit
   trail, take it from `upload_traffic_artifact: true` instead: the JSON is uploaded when the step
   ends, and is not a file a later step can append a line to.
+- **Masking the report, or silencing its annotations.** The command's stdout reaches the runner,
+  which reads workflow commands from it as from any step. `::add-mask::` registers a string as a
+  secret, so the runner replaces it with `***` wherever it appears for the rest of the job, this
+  step's Job Summary included: a command can mask the very host it was blocked from, leaving `***`
+  in the report and in any allowlist suggestion. `::stop-commands::` halts command processing, so
+  this action's `::error::` and `::warning::` annotations print as plain text. Neither changes what
+  was blocked: `restrict` refuses a disallowed connection as it is made, independent of anything the
+  command prints, and `upload_traffic_artifact: true` is uploaded as a file rather than passed
+  through the masker, so its JSON records each host unmasked and stays the trustworthy audit trail.
 - **Exhausting the host.** The OCI spec sets no `linux.resources`, so there is no memory, pids or
   CPU ceiling, and capability bounding and seccomp cannot close this either, since a legitimate
   build calls `fork(2)` and `mmap(2)` freely. A fork bomb consumes host memory or the process table
