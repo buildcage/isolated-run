@@ -114,6 +114,7 @@ describe("reportStepTraffic", () => {
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [missingReportFrame("Outbound Traffic Report — build", false), block, FOOTER],
       {},
+      { separateFromExisting: true },
     );
   });
 
@@ -134,6 +135,7 @@ describe("reportStepTraffic", () => {
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [missingReportFrame("Traffic & Process Activity Report — build", true), block],
       {},
+      { separateFromExisting: true },
     );
   });
 
@@ -146,6 +148,7 @@ describe("reportStepTraffic", () => {
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [missingReportFrame("Outbound Traffic Report — build", false), block, FOOTER],
       {},
+      { separateFromExisting: true },
     );
   });
 
@@ -356,7 +359,13 @@ describe("writeMoreSummary", () => {
 
   it("writes the blocks into what the summary has left", async () => {
     await writeMoreSummary([block], { GITHUB_STEP_SUMMARY: "/s" }, ann, deps);
-    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith([block], { GITHUB_STEP_SUMMARY: "/s" });
+    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
+      [block],
+      { GITHUB_STEP_SUMMARY: "/s" },
+      {
+        separateFromExisting: false,
+      },
+    );
   });
 
   it("writes nothing for no blocks", async () => {
@@ -384,9 +393,21 @@ describe("writeLateSummary", () => {
 
   it("closes a written report's summary after the blocks", async () => {
     await writeLateSummary([block], { ...late, reported: true }, deps);
-    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith([block, FOOTER], {});
+    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
+      [block, FOOTER],
+      {},
+      {
+        separateFromExisting: false,
+      },
+    );
     await writeLateSummary([], { ...late, reported: true }, deps);
-    expect(mocks.writeSummaryBlocks).toHaveBeenLastCalledWith([FOOTER], {});
+    expect(mocks.writeSummaryBlocks).toHaveBeenLastCalledWith(
+      [FOOTER],
+      {},
+      {
+        separateFromExisting: false,
+      },
+    );
   });
 
   it("opens under a title of its own when the report was not written", async () => {
@@ -394,6 +415,7 @@ describe("writeLateSummary", () => {
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [missingReportFrame("Traffic & Process Activity Report — build", false), block, FOOTER],
       {},
+      { separateFromExisting: false },
     );
   });
 

@@ -8,8 +8,11 @@ import {
 } from "#core/lib/report/outcome/annotate.ts";
 import { describeReportOutcomes } from "#core/lib/report/outcome/report-outcomes.ts";
 import {
+  bytes,
   fitStepSummary,
   joinSummaryBlocks,
+  SAFETY_MARGIN_BYTES,
+  STEP_SUMMARY_LIMIT_BYTES,
   withNotices,
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
@@ -142,26 +145,89 @@ function summarySize(path: string | undefined, fileSize: (p: string) => number):
   }
 }
 
+// A horizontal rule set between the command's own Job Summary and buildcage's
+// report so the two are not read as one, added only when the command wrote
+// something and buildcage has room to follow it.
+const COMMAND_SEPARATOR = "\n\n---\n\n";
+
+/** Where the full report is when it did not reach the summary. */
+function fullReportLocation(artifactAvailable: boolean): string {
+  return artifactAvailable
+    ? "the buildcage-traffic artifact uploaded for this run has the full report"
+    : "set upload_traffic_artifact: true to get the full report as a downloadable artifact";
+}
+
+/** Said when the report did not fit what the Job Summary had left. Omitting the
+ *  report never changes the step's verdict, which is annotated and applied
+ *  before any summary is written. */
+export function reportDidNotFitMessage(artifactAvailable: boolean): string {
+  return (
+    "The buildcage traffic report did not fit in GitHub's Job Summary size limit after this " +
+    `step's own output; ${fullReportLocation(artifactAvailable)}. The step's verdict was still enforced.`
+  );
+}
+
+/** The same, as one blockquote line standing in for the report in the summary. */
+export function reportDidNotFitLine(artifactAvailable: boolean): string {
+  return `> ⚠️ ${reportDidNotFitMessage(artifactAvailable)}\n`;
+}
+
+export interface WriteSummaryBlocksOptions extends Partial<
+  Pick<WriteReportSummaryDeps, "fileSize" | "writeSummary">
+> {
+  /** Put a horizontal rule before the blocks when the summary already holds
+   *  the command's own output. Set on buildcage's first write only. */
+  separateFromExisting?: boolean;
+  /** Written in place of the blocks when not even their frame fits: a single
+   *  line pointing to the full report. Without it, nothing is written then. */
+  fallbackLine?: string;
+}
+
+export interface SummaryWriteResult {
+  /** The ids of the blocks the fit cut. */
+  cutIds: Set<string>;
+  /** Whether the blocks, the fallback line, or nothing was written. */
+  wrote: "blocks" | "fallback" | "nothing";
+}
+
 /**
- * Fits `blocks` into what is left of the step's Job Summary, writes them, and
- * returns the ids of the blocks it cut, so a caller can warn about a section
- * lost below the fold.
+ * Fits `blocks` into what is left of the step's Job Summary and writes them.
+ * fitStepSummary prints a `keep` block (the report's own frame) whole even when
+ * it overruns the budget, and GitHub answers a summary over its 1 MiB limit by
+ * dropping the whole step's upload, the command's own output included. So
+ * buildcage writes its part only when it truly fits under the limit, and
+ * otherwise gives way to `fallbackLine` or to nothing.
  */
 export async function writeSummaryBlocks(
   blocks: SummaryBlock[],
   env: NodeJS.ProcessEnv,
-  overrides: Partial<Pick<WriteReportSummaryDeps, "fileSize" | "writeSummary">> = {},
-): Promise<Set<string>> {
+  { separateFromExisting = false, fallbackLine, ...overrides }: WriteSummaryBlocksOptions = {},
+): Promise<SummaryWriteResult> {
   const { fileSize, writeSummary } = { ...realDeps, ...overrides };
+  const used = summarySize(env.GITHUB_STEP_SUMMARY, fileSize);
+  const separator = separateFromExisting && used > 0 ? COMMAND_SEPARATOR : "";
   const cutIds = new Set<string>();
-  const summary = fitStepSummary(blocks, {
-    usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize),
+  const fitted = fitStepSummary(blocks, {
+    usedBytes: used + bytes(separator),
     onCut: (b) => {
       if (b.id !== undefined) cutIds.add(b.id);
     },
   });
-  await writeSummary(summary, env.GITHUB_STEP_SUMMARY);
-  return cutIds;
+  // The same headroom fitStepSummary keeps, so buildcage's part never lands the
+  // file at the edge GitHub drops it at.
+  const fits = (text: string): boolean =>
+    used + bytes(separator) + bytes(text) <= STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES;
+  let content = "";
+  let wrote: SummaryWriteResult["wrote"] = "nothing";
+  if (fits(fitted)) {
+    content = separator + fitted;
+    wrote = "blocks";
+  } else if (fallbackLine !== undefined && fits(fallbackLine)) {
+    content = separator + fallbackLine;
+    wrote = "fallback";
+  }
+  if (content !== "") await writeSummary(content, env.GITHUB_STEP_SUMMARY);
+  return { cutIds, wrote };
 }
 
 export interface WriteReportSummaryOptions extends ComputeReportOutcomesOptions {
@@ -195,7 +261,7 @@ export async function writeReportSummary(
   // cannot take the step's outcome down with it.
   applyOutcomeAnnotations(annotation, outcomes.emissions);
 
-  const cutIds = await writeSummaryBlocks(
+  const { cutIds, wrote } = await writeSummaryBlocks(
     [
       ...withNotices(outcomes.blocks, (b) =>
         b.id === WOULD_REFUSE_BLOCK
@@ -205,10 +271,19 @@ export async function writeReportSummary(
       ...extraBlocks,
     ],
     env,
-    { fileSize, writeSummary },
+    {
+      fileSize,
+      writeSummary,
+      separateFromExisting: true,
+      fallbackLine: reportDidNotFitLine(artifactAvailable),
+    },
   );
-  // The section's own notice is easy to miss below the fold.
-  if (cutIds.has(WOULD_REFUSE_BLOCK)) {
+  // The whole report gave way to a line, or to nothing: the command's own
+  // summary left no room under GitHub's limit.
+  if (wrote !== "blocks") {
+    annotation.warning(reportDidNotFitMessage(artifactAvailable));
+  } else if (cutIds.has(WOULD_REFUSE_BLOCK)) {
+    // The section's own notice is easy to miss below the fold.
     annotation.warning(
       "The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " +
         (artifactAvailable
