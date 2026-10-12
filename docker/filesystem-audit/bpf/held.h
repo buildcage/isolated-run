@@ -19,6 +19,15 @@
 #define EEXIST 17
 #endif
 
+/**
+ * Whether @p ret is one of ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal
+ * interrupted the call, which the kernel runs again, and that run records it.
+ */
+static __always_inline int is_restart(long ret)
+{
+	return ret <= -512 && ret >= -516;
+}
+
 #define HELD_OP 1   ///< A path change, held from its security_path_* hook.
 #define HELD_OPEN 2 ///< An open(2), held from its entry.
 
@@ -560,9 +569,7 @@ static __always_inline struct event *open_end(u32 slot, long ret)
 		return 0;
 	u32 t = tails_for(head->data_len);
 	struct event *failed = 0;
-	// ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal interrupted the open,
-	// which the kernel runs again, and that run records it.
-	int restart = ret <= -512 && ret >= -516;
+	int restart = is_restart(ret);
 	if (!restart && head->kind == K_OPEN) {
 		// Reaching the file after its create step means it was created,
 		// whatever then refused the open.

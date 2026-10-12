@@ -126,6 +126,7 @@ struct pt_regs___x86 {
 
 struct pt_regs___arm64 {
 	unsigned long regs[31];
+	unsigned long orig_x0;
 	int syscallno;
 } __attribute__((preserve_access_index));
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT OR GPL-2.0-only
 /**
  * @file syscalls.h
- * Path syscalls recorded from their entry and exit, chiefly the ones
- * that fail before the tracer's path hooks. It defines maps, so only
+ * Path syscalls recorded from their exit, chiefly the ones that fail
+ * before the tracer's path hooks. It defines maps, so only
  * filesystem_audit.bpf.c includes it.
  */
 #ifndef FILESYSTEM_AUDIT_SYSCALLS_H
@@ -16,36 +16,28 @@
 #define EEXIST 17
 #endif
 
-struct pending {
+/** A path syscall as it returned: what it records and what it was given. */
+struct path_call {
 	u64 p1;
 	u64 p2;
-	u64 ts;
 	u32 kind;      ///< emitted on failure
 	u32 kind_ok;   ///< emitted on success, 0 to skip
 	u32 quiet_err; ///< an errno that changed nothing, so is not recorded
 	s32 dfd1;      ///< what p1 and p2 resolve against when relative
 	s32 dfd2;
-	u32 nr;        ///< the syscall, so only its own exit takes the entry
 	u32 val1;      ///< a chmod's new mode, or a chown's new uid
 	u32 val2;      ///< a chown's new gid
 };
 
-/** One entry per thread inside a path syscall. */
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 8192);
-	__type(key, u64);
-	__type(value, struct pending);
-} pending_ops SEC(".maps");
-
 /**
  * @name Failed path syscalls
  * security_path_* fires only once the path has resolved, so a missing target
- * (the common failure) never reaches it; the syscall's entry and exit catch
- * it. The entry stashes the user path pointer(s); the exit emits only when
- * ret < 0, reading them back. Best-effort: this reads the user buffer, which a
- * concurrent thread could rewrite between entry and exit, so a failed op's
- * recorded path is not tamper-proof the way the open path's getname copy is.
+ * (the common failure) never reaches it; the syscall's exit catches it, with
+ * the arguments the call left in its registers, and emits only when ret < 0,
+ * reading the user path(s) they point to. Best-effort: this reads the user
+ * buffer, which a concurrent thread could rewrite while the call runs, so a
+ * failed op's recorded path is not tamper-proof the way the open path's
+ * getname copy is.
  * @{
  */
 
@@ -54,8 +46,8 @@ struct {
  * loader; -1 for one it lacks (x86_64's older forms on arm64). A negative
  * number is skipped, as the kernel passes -1 for a call that a ptrace or
  * seccomp tracer cancelled. A 32-bit syscall numbers them differently, but
- * under the audit the sandbox kills the thread that makes one before it
- * reaches sys_enter.
+ * under the audit the sandbox kills the thread that makes one before the
+ * call runs.
  */
 const volatile long nr_unlinkat = -1, nr_unlink = -1, nr_rmdir = -1;
 const volatile long nr_renameat2 = -1, nr_renameat = -1, nr_rename = -1;
@@ -68,17 +60,17 @@ const volatile long nr_symlinkat = -1, nr_symlink = -1, nr_linkat = -1, nr_link 
 const volatile long nr_truncate = -1;
 
 /**
- * A syscall's argument i (0 to 3), from the register it is passed in; 0
- * without the registers.
+ * A syscall's argument @p i (0 to 3), from the register it was passed in.
+ * They still hold it when the call returns, save arm64's first, which the
+ * return value overwrites and orig_x0 keeps.
  */
 static __always_inline u64 sys_arg(struct pt_regs *regs, int i)
 {
-	if (!regs)
-		return 0;
 	struct pt_regs___x86 *x = (void *)regs;
 	if (bpf_core_field_exists(x->di))
 		return i == 0 ? x->di : i == 1 ? x->si : i == 2 ? x->dx : x->r10;
-	return ((struct pt_regs___arm64 *)regs)->regs[i];
+	struct pt_regs___arm64 *a = (void *)regs;
+	return i == 0 ? a->orig_x0 : a->regs[i];
 }
 
 /** The number of the syscall returning, as tp_btf/sys_exit sees it. */
@@ -112,19 +104,18 @@ static __always_inline long sys_nr(struct pt_regs *regs)
  * and failure alike. A NULL path (futimens) changes the file dfd refers to;
  * with AT_FDCWD it names nothing and fails.
  */
-static __always_inline int attr_op(struct pending *p, struct pt_regs *regs, int dfd, u64 path)
+static __always_inline int attr_op(struct path_call *p, int dfd, u64 path)
 {
-	if (regs && !path && dfd == AT_FDCWD)
+	if (!path && dfd == AT_FDCWD)
 		return 0;
 	return OP(K_ATTR_FAILED, K_ATTR, 0, dfd, path, 0, 0);
 }
 
 /**
  * Fills p with what syscall nr records, and its arguments from regs, and
- * reports whether it is watched. Without regs, as at the exit, only what it
- * records.
+ * reports whether it is watched.
  */
-static __always_inline int classify(long nr, struct pt_regs *regs, struct pending *p)
+static __always_inline int classify(long nr, struct pt_regs *regs, struct path_call *p)
 {
 	if (nr < 0)
 		return 0;
@@ -149,9 +140,9 @@ static __always_inline int classify(long nr, struct pt_regs *regs, struct pendin
 	if (nr == nr_chown || nr == nr_lchown)
 		return OP(K_CHOWN_FAILED, 0, 0, AT_FDCWD, ARG(0), 0, 0) && VALS(ARG(1), ARG(2));
 	if (nr == nr_utimensat || nr == nr_futimesat)
-		return attr_op(p, regs, ARG(0), ARG(1));
+		return attr_op(p, ARG(0), ARG(1));
 	if (nr == nr_utime || nr == nr_utimes || nr == nr_setxattr || nr == nr_lsetxattr)
-		return attr_op(p, regs, AT_FDCWD, ARG(0));
+		return attr_op(p, AT_FDCWD, ARG(0));
 	if (nr == nr_mkdirat)
 		return CREATE(K_MKDIR_FAILED, ARG(0), ARG(1), 0, 0);
 	if (nr == nr_mkdir)
@@ -173,29 +164,30 @@ static __always_inline int classify(long nr, struct pt_regs *regs, struct pendin
 	return 0;
 }
 
-/** Emits the call its entry stashed, as it ended. */
-static __always_inline void op_exit(u32 slot, struct pending *pend, long ret)
+/** Emits the call as it ended with @p ret. */
+static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 {
-	if (ret < 0 && -ret == pend->quiet_err)
+	if (is_restart(ret) || (ret < 0 && -ret == call->quiet_err))
 		return;
-	u32 kind = ret < 0 ? pend->kind : pend->kind_ok;
-	if (kind == 0)
+	u32 kind = ret < 0 ? call->kind : call->kind_ok;
+	// Only an attribute change names its file by descriptor alone (futimens);
+	// any other call given no name names nothing.
+	if (kind == 0 || (!call->p1 && kind != K_ATTR && kind != K_ATTR_FAILED))
 		return;
 	struct event *e = start(slot, kind);
 	if (!e)
 		return;
-	e->ts = pend->ts;
 	if (ret < 0)
 		e->path_len = -ret;
-	e->flags = pend->val1;
-	e->gid = pend->val2;
-	long r = pend->p1 ? bpf_probe_read_user_str(e->data, PATH_LEN, (void *)pend->p1) : 0;
+	e->flags = call->val1;
+	e->gid = call->val2;
+	long r = call->p1 ? bpf_probe_read_user_str(e->data, PATH_LEN, (void *)call->p1) : 0;
 	u32 off = r > 0 ? r : 0;
 	u32 second = off;
 	// Mark a second path only when both were read, so a failed read never
 	// leaves n1 claiming a name that is not in the buffer.
-	if (pend->p2 && off > 0) {
-		long r2 = bpf_probe_read_user_str(&e->data[off & (DATA_SZ - 1)], PATH_LEN, (void *)pend->p2);
+	if (call->p2 && off > 0) {
+		long r2 = bpf_probe_read_user_str(&e->data[off & (DATA_SZ - 1)], PATH_LEN, (void *)call->p2);
 		if (r2 > 0) {
 			e->n1 = 1;
 			off += r2;
@@ -204,21 +196,21 @@ static __always_inline void op_exit(u32 slot, struct pending *pend, long ret)
 	// mode and flags count the base components of the first and second name;
 	// flags holds val1 instead for an op with one name.
 	u8 nb = 0;
-	if (!pend->p1) {
+	if (!call->p1) {
 		// No name (futimens): the descriptor's path, or no record if it
 		// was not open.
 		e->data[0] = 0;
-		off = add_base(e, 1, pend->dfd1, &nb, &e->truncated, 1, 0);
+		off = add_base(e, 1, call->dfd1, &nb, &e->truncated, 1, 0);
 		e->mode = nb;
 		if (!(e->bases & 1))
 			return;
 	} else if (r > 1 && e->data[0] != '/') {
-		off = add_base(e, off, pend->dfd1, &nb, &e->truncated, 1, e->n1);
+		off = add_base(e, off, call->dfd1, &nb, &e->truncated, 1, e->n1);
 		e->mode = nb;
 	}
 	if (e->n1 && e->data[second & (DATA_SZ - 1)] != '/' && e->data[second & (DATA_SZ - 1)]) {
 		nb = 0;
-		off = add_base(e, off, pend->dfd2, &nb, &e->trunc2, 2, 0);
+		off = add_base(e, off, call->dfd2, &nb, &e->trunc2, 2, 0);
 		e->flags = nb;
 	}
 	e->data_len = off;

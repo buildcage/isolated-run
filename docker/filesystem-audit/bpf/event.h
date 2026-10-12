@@ -92,7 +92,7 @@ struct event {
 	u32 err;   ///< A held path change's or open's errno when its syscall refused it.
 	u32 marks; ///< MARK_* for the file a path was taken from.
 	u32 gid;   ///< A failed chown's new group.
-	u64 ts;    ///< CLOCK_BOOTTIME at the access; a failed syscall at its entry.
+	u64 ts;    ///< CLOCK_BOOTTIME at the access; a failed syscall as it returned.
 	char data[DATA_SZ + NAME_LEN]; ///< Slack: masked offset + one component.
 };
 

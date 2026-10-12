@@ -115,9 +115,9 @@ describe("exitReason", () => {
   it("prefers the tracer's own fatal line, joined across chunks", () => {
     const reason = exitReason();
     reason.push("filesystem-audit: cgroup /sys/fs/cgroup/x id=1\nfilesystem-audit: fat");
-    reason.push("al: attach on_sys_enter: permission denied\nfilesystem-audit: total=0\n");
+    reason.push("al: attach on_sys_exit: permission denied\nfilesystem-audit: total=0\n");
 
-    expect(reason.value()).toBe("attach on_sys_enter: permission denied");
+    expect(reason.value()).toBe("attach on_sys_exit: permission denied");
   });
 
   it("falls back to the last line written, then to an unterminated one", () => {

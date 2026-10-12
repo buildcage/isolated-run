@@ -509,63 +509,29 @@ int BPF_PROG(on_file_free, struct file *file)
 	return 0;
 }
 
-SEC("tp_btf/sys_enter")
-int BPF_PROG(on_sys_enter, struct pt_regs *regs, long nr)
-{
-	struct pending p;
-	// The number first, which rules out nearly every syscall on the host
-	// more cheaply than the cgroup check.
-	if (!classify(nr, regs, &p) || !in_target())
-		return 0;
-	p.nr = nr;
-	p.ts = bpf_ktime_get_boot_ns();
-	u64 id = bpf_get_current_pid_tgid();
-	// An op recorded on success too is lost either way; one recorded only on
-	// failure is counted at the exit, once the result is known.
-	if (bpf_map_update_elem(&pending_ops, &id, &p, BPF_ANY) != 0 && p.kind_ok)
-		bump(&untracked);
-	return 0;
-}
-
 /**
  * Reports a held path change when its syscall returns: as done if it
  * succeeded (a truncating open returns a descriptor), else as failed with the
- * errno, unless the syscall's entry stashed it, whose record then stands for
- * the failure.
+ * errno, unless the call is one recorded from its exit (see classify()),
+ * whose record then stands for the failure.
  */
 SEC("tp_btf/sys_exit")
 int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 {
 	if (!in_target())
 		return 0;
-	u64 id = bpf_get_current_pid_tgid();
-	long nr = sys_nr(regs);
-	struct pending want;
-	struct pending *pend = 0;
-	if (classify(nr, 0, &want)) {
-		pend = bpf_map_lookup_elem(&pending_ops, &id);
-		// Only this syscall's own entry: one another left is dropped.
-		if (pend && pend->nr != nr) {
-			bpf_map_delete_elem(&pending_ops, &id);
-			pend = 0;
-		}
-		// A failure-only op whose entry the full map did not take.
-		if (!pend && !want.kind_ok && ret < 0 && -ret != want.quiet_err)
-			bump(&untracked);
-	}
+	struct path_call call = {}; // so no field reaches the stack unset
+	int watched = classify(sys_nr(regs), regs, &call);
 	struct held_key k = held_key(HELD_OP);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
 	if (head) {
 		u32 t = tails_for(head->data_len);
-		// A failure the syscall's entry recorded stands for this one.
-		if (ret >= 0 || !pend)
+		if (!is_restart(ret) && (ret >= 0 || !watched))
 			report_held(slot, &k, head, ret < 0 ? -ret : 0, 0);
 		release(&k, t);
 	}
-	if (pend) {
-		op_exit(slot, pend, ret);
-		bpf_map_delete_elem(&pending_ops, &id);
-	}
+	if (watched)
+		op_exit(slot, &call, ret);
 	return 0;
 }
 
