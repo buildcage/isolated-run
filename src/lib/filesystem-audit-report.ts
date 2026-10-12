@@ -256,7 +256,7 @@ export async function prepareStepFilesystemAudit(
         annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
         return [];
       }
-      mirrorForDebug(env, deps, audit.outPath, joinSummaryBlocks(rendered));
+      mirrorForDebug(env, deps, audit.outPath, rendered);
       return withNotices(rendered, () => notice);
     };
     return { blocks };
@@ -392,7 +392,7 @@ function mirrorForDebug(
   env: NodeJS.ProcessEnv,
   deps: FilesystemAuditReportDeps,
   outPath: string,
-  summary: string,
+  blocks: SummaryBlock[],
 ): void {
   if (process.env.BUILDCAGE_BUILD_TEST_HOOKS !== "1") return;
   // A debug copy that cannot be written must not cost the real summary.
@@ -400,7 +400,7 @@ function mirrorForDebug(
     if (env.BUILDCAGE_RUN_DEBUG_RAW_FILE)
       deps.appendFile(env.BUILDCAGE_RUN_DEBUG_RAW_FILE, deps.readFile(outPath));
     if (env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE)
-      deps.appendFile(env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE, summary);
+      deps.appendFile(env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE, joinSummaryBlocks(blocks));
   } catch {
     // ignored: test hooks only
   }

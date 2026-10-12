@@ -126,8 +126,7 @@ export interface ComputeReportOutcomesOptions {
 }
 
 export interface ReportOutcomes {
-  markdown: string;
-  /** The same report as blocks, for fitting it into the Job Summary. */
+  /** The report as blocks, for fitting it into the Job Summary. */
   blocks: SummaryBlock[];
   /** Every annotation this report calls for, in the order to emit them. */
   emissions: OutcomeEmission[];
@@ -197,7 +196,7 @@ export function computeReportOutcomes(
   });
   const blocks = withAwsTroubleshootingLink(rendered, report, actionRepo, actionRef);
 
-  return { markdown: joinSummaryBlocks(blocks), blocks, emissions };
+  return { blocks, emissions };
 }
 
 /** The file access this module makes for the Job Summary; injected for the
@@ -302,7 +301,7 @@ export async function writeReportSummary(
     const debugSummaryFile = env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE;
     // A debug copy that cannot be written must not read as a failed summary.
     try {
-      if (debugSummaryFile) appendFile(debugSummaryFile, outcomes.markdown);
+      if (debugSummaryFile) appendFile(debugSummaryFile, joinSummaryBlocks(outcomes.blocks));
     } catch {
       // ignored: test hooks only
     }

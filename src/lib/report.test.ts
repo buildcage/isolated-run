@@ -8,6 +8,7 @@ import { createAnnotation } from "#core/lib/actions/annotation.ts";
 import type { Docker } from "#core/lib/docker/client.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { annotateKnownBlocked } from "#core/lib/report/build/aggregate.ts";
+import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
 import { hostTableTruncationNote } from "#core/lib/report/render/host-table.ts";
 import { restrictExampleTruncationNote } from "#core/lib/report/render/restrict-example.ts";
 import type { InspectReportData, UniversalReportData } from "#core/lib/report/types.ts";
@@ -32,6 +33,9 @@ function options(
 ): ComputeReportOutcomesOptions {
   return { actionRepo: "buildcage/isolated-run", actionRef: "v1", ...overrides };
 }
+
+const markdownOf = (...args: Parameters<typeof computeReportOutcomes>): string =>
+  joinSummaryBlocks(computeReportOutcomes(...args).blocks);
 
 // blocked rows are already expected to be annotated by the time a Report
 // reaches computeReportOutcomes: this mirrors that, applying
@@ -127,7 +131,7 @@ describe("computeReportOutcomes", () => {
     };
 
     it("follows the Blocked Hosts table when the check refused a request", () => {
-      const { markdown } = computeReportOutcomes(restrict("aws-key-not-allowed"), options());
+      const markdown = markdownOf(restrict("aws-key-not-allowed"), options());
       expect(markdown).toMatch(/### 🚫 Blocked Hosts\n\n(\|.*\n)+\n<sub>\*For an `aws-` reason/);
       expect(markdown).toContain(LINK);
     });
@@ -149,7 +153,7 @@ describe("computeReportOutcomes", () => {
           },
         ],
       };
-      const { markdown } = computeReportOutcomes(r, options());
+      const markdown = markdownOf(r, options());
       expect(markdown).toMatch(/### 🚨 Restrict Would Refuse\n\n(\|.*\n)+\n<sub>\*For an `aws-`/);
     });
 
@@ -165,13 +169,13 @@ describe("computeReportOutcomes", () => {
         }),
         engine: "inspect",
       };
-      const { markdown } = computeReportOutcomes(r, options());
+      const markdown = markdownOf(r, options());
       expect(markdown).toContain("aws-key-not-allowed");
       expect(markdown).not.toContain("aws.md");
     });
 
     it("is left out when no refusal is the check's", () => {
-      const { markdown } = computeReportOutcomes(restrict("not-allowed"), options());
+      const markdown = markdownOf(restrict("not-allowed"), options());
       expect(markdown).not.toContain("aws.md");
     });
   });
@@ -248,7 +252,7 @@ describe("computeReportOutcomes", () => {
     };
 
     it("counts each host and reason in a table", () => {
-      const { markdown } = computeReportOutcomes(
+      const markdown = markdownOf(
         audit([
           wouldRefuse(1, "s3.amazonaws.com", "aws-key-not-allowed"),
           { time: 2, action: "allow", protocol: "https", host: "s3.amazonaws.com", port: 443 },
@@ -266,7 +270,7 @@ describe("computeReportOutcomes", () => {
     });
 
     it("puts aws-key-not-allowed in a table of keys, whatever the host, naming the account a role was assumed in", () => {
-      const { markdown } = computeReportOutcomes(
+      const markdown = markdownOf(
         audit([
           assumed("222222222222", "aaaa1111"),
           // An ECR redirect names no account.
@@ -332,7 +336,7 @@ describe("computeReportOutcomes", () => {
 
     it("names three hosts of a key and counts the rest", () => {
       const hosts = ["a", "b", "c", "d", "e"].map((h) => `${h}.amazonaws.com`);
-      const { markdown } = computeReportOutcomes(
+      const markdown = markdownOf(
         audit([
           ...hosts.map((host, i) => signed(i, host, "aaaa1111")),
           signed(5, hosts[0], "bbbb2222"),
@@ -345,20 +349,17 @@ describe("computeReportOutcomes", () => {
     });
 
     it("numbers no key when the run refused one alone, and leaves a bare key out of the log", () => {
-      const one = computeReportOutcomes(
+      const one = markdownOf(
         audit([assumed("222222222222", "aaaa1111"), signed(1, "s3.amazonaws.com", "aaaa1111")]),
         options(),
-      ).markdown;
+      );
       expect(tables(one)).toStrictEqual([
         ["| key from a role in 222222222222 | s3.amazonaws.com | 1 |"],
       ]);
       expect(details(one).at(-1)).toContain(
         "(restrict would refuse: aws-key-not-allowed, key from a role in 222222222222)",
       );
-      const bare = computeReportOutcomes(
-        audit([signed(1, "s3.amazonaws.com", "aaaa1111")]),
-        options(),
-      ).markdown;
+      const bare = markdownOf(audit([signed(1, "s3.amazonaws.com", "aaaa1111")]), options());
       expect(tables(bare)).toStrictEqual([["| key | s3.amazonaws.com | 1 |"]]);
       expect(details(bare).at(-1)).toMatch(/\(restrict would refuse: aws-key-not-allowed\)$/);
     });
@@ -385,7 +386,7 @@ describe("computeReportOutcomes", () => {
       }),
       engine: "inspect",
     };
-    const { markdown } = computeReportOutcomes(r, options());
+    const markdown = markdownOf(r, options());
     expect(details(markdown)).toContain(
       "🚫 00:01.000: GET https://s3.amazonaws.com/ -> aws-key-not-allowed, key from a role in 222222222222",
     );
@@ -422,7 +423,7 @@ describe("computeReportOutcomes", () => {
         { host: "registry.npmjs.org", port: "443", ruleType: "HTTPS", reason: "-", count: 3 },
       ],
     });
-    const { markdown } = computeReportOutcomes(
+    const markdown = markdownOf(
       r,
       options({ stepLabel: "npm install", runCommand: "npm install" }),
     );
@@ -439,16 +440,13 @@ describe("computeReportOutcomes", () => {
         { host: "registry.npmjs.org", port: "443", ruleType: "HTTPS", reason: "-", count: 3 },
       ],
     });
-    const { markdown } = computeReportOutcomes(
-      r,
-      options({ extraInputs: ["aws_key_check: true"] }),
-    );
+    const markdown = markdownOf(r, options({ extraInputs: ["aws_key_check: true"] }));
     expect(markdown).toMatch(/^ {10}aws_key_check: true$/m);
   });
 
   it("escapes structural Markdown in stepLabel so a label can't inject into the heading", () => {
     const r = report({ parameters: reportParams({ mode: "audit" }) });
-    const { markdown } = computeReportOutcomes(
+    const markdown = markdownOf(
       r,
       options({ stepLabel: "[x](javascript:alert(1))\n# owned <b>|*" }),
     );
