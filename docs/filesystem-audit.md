@@ -394,6 +394,8 @@ The summary can also open with a warning, or be missing:
 - **This record is incomplete.** `dropped` or `untracked` is nonzero, or the tracer did not stop
   cleanly. Some accesses are missing from both the summary and the artifact. A step that touches a
   very large number of files at once can cause it.
+- **The kernel skipped the tracer's hooks N times.** `host_missed` is nonzero, so some accesses may
+  be missing; see [Skipped hooks](#skipped-hooks).
 - **The recording could not be read.** The summary has none of the step's accesses, a warning is
   logged, and no artifact is uploaded.
 - **The same note, with an error and a failed step, in any mode.** The recording was removed after
@@ -417,10 +419,10 @@ missing even so, the kernel cannot switch modes, and hooks can be skipped when
 `/boot/config-$(uname -r)` sets `CONFIG_PREEMPT_RCU=y`.
 
 `host_missed` counts skips anywhere on the host while the step ran, so 0 means none of the step's
-accesses was skipped. The summary does not warn on a nonzero count, since a skip cannot be tied to
-the step. Treat such a record as possibly missing accesses; for a complete one, use a kernel that
-does not pause the hooks, such as one booted with `preempt=voluntary` where the kernel offers that
-mode.
+accesses was skipped. A nonzero count opens the summary with a note that some accesses may be
+missing; a skip cannot be tied to the step, so the note cannot say they are. For a complete record,
+use a kernel that does not pause the hooks, such as one booted with `preempt=voluntary` where the
+kernel offers that mode.
 
 ## What it does not record
 

@@ -51,6 +51,29 @@ describe("renderFilesystemAuditSummary", () => {
     );
   });
 
+  it("notes hooks skipped on the host apart from a record known to be incomplete", () => {
+    const read = { kind: "read", comm: "cat", path: "/etc/hostname" };
+    const note =
+      "> ⚠️ **The kernel skipped the tracer's hooks 15,779 times** on the\n" +
+      "> runner host while this step ran. Any of them may have been this step's, so some of its\n" +
+      "> accesses may be missing from this summary and from the artifact.\n";
+    const skipped = render(read, { kind: "end", dropped: 0, untracked: 0, host_missed: 15779 });
+    expect(skipped).toContain(`### Filesystem audit\n\n${note}`);
+    expect(skipped).not.toContain("incomplete");
+    expect(lines(skipped)).toEqual(["R cat /etc/hostname"]);
+    // Both, the incomplete warning first.
+    expect(render(read, { kind: "end", dropped: 3, untracked: 0, host_missed: 1 })).toMatch(
+      /incomplete\.\*\*[^\n]*\n[^\n]*\n\n> ⚠️ \*\*The kernel skipped the tracer's hooks 1 time\*\*/,
+    );
+    expect(render(read, { kind: "end", dropped: 0, untracked: 0, host_missed: 0 })).not.toContain(
+      "⚠️",
+    );
+    // Only a number counts.
+    expect(render(read, { kind: "end", dropped: 0, untracked: 0, host_missed: "7" })).not.toContain(
+      "⚠️",
+    );
+  });
+
   it("includes a heading and the flag legend", () => {
     const md = render({ kind: "read", comm: "cat", path: "/etc/hostname" });
     expect(md).toContain("### Filesystem audit");

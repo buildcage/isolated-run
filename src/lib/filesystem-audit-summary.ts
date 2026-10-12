@@ -28,6 +28,7 @@ interface AuditRecord {
   deleted?: boolean;
   dropped?: number;
   untracked?: number;
+  host_missed?: number;
   exchange?: boolean;
 }
 
@@ -614,6 +615,17 @@ const HEADING = "### Filesystem audit";
 const INCOMPLETE_NOTE =
   "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
   "> some accesses are missing from this summary and from the artifact.";
+// A skip may have been any process's on the host, so unlike INCOMPLETE_NOTE
+// this says accesses may be missing rather than that they are.
+function skippedNote(count: number, url: string | undefined): string {
+  const why = url ? ` [Why](${url})` : "";
+  return (
+    `> ⚠️ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ` +
+    `${count === 1 ? "time" : "times"}** on the\n` +
+    "> runner host while this step ran. Any of them may have been this step's, so some of its\n" +
+    `> accesses may be missing from this summary and from the artifact.${why}`
+  );
+}
 const UNREADABLE_NOTE =
   "> ⚠️ **The recording could not be read**, so this summary has none of its accesses and no\n" +
   "> artifact was uploaded.";
@@ -672,6 +684,8 @@ export interface AuditSummary {
   // From the tracer's end line, which a recording cut short lacks.
   ended: boolean;
   lost: boolean;
+  /** Hooks the kernel skipped anywhere on the host while the step ran. */
+  hostMissed: number;
   /** Up to the size limit, past which fitStepSummary cuts it. */
   executed: Executed[];
   /** Each part, or undefined where it outgrew the Job Summary. */
@@ -787,6 +801,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   let executedBytes = 0;
   let ended = false;
   let lost = false;
+  let hostMissed = 0;
   let seq = 0;
   const added = new Map<number | undefined, number>();
 
@@ -797,6 +812,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (r.kind === "end") {
       ended = true;
       lost = Boolean(r.dropped || r.untracked);
+      hostMissed = typeof r.host_missed === "number" ? r.host_missed : 0;
       return;
     }
     if (r.kind === "exec" && r.path) {
@@ -860,6 +876,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return {
       ended,
       lost,
+      hostMissed,
       executed: [...executed].map(([path, runs]) => ({ ...shown(path), runs })),
       paths: byPath,
       details: log,
@@ -895,9 +912,15 @@ export function renderAuditSummaryBlocks(
   priorities: FilesystemPriorities,
   cutNote: (cause?: CutCause) => string,
   legendNote?: string,
+  /** Where the skipped-hooks note links to. */
+  skippedHooksUrl?: string,
 ): SummaryBlock[] {
-  const { ended, lost, executed, paths, details, pathsCut, detailsCut } = summary;
-  const heading = ended && !lost ? HEADING : `${HEADING}\n\n${INCOMPLETE_NOTE}`;
+  const { ended, lost, hostMissed, executed, paths, details, pathsCut, detailsCut } = summary;
+  const heading = [
+    HEADING,
+    ...(ended && !lost ? [] : [INCOMPLETE_NOTE]),
+    ...(hostMissed ? [skippedNote(hostMissed, skippedHooksUrl)] : []),
+  ].join("\n\n");
   const frame = (text: string): SummaryBlock => ({
     priority: 0,
     level: 1,

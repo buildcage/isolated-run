@@ -68649,7 +68649,13 @@ function fmtFlags(a) {
 	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
 	return out;
 }
-const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit", SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
+const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit";
+function skippedNote(count, url) {
+	let why = url ? ` [Why](${url})` : "";
+	return `> ⚠️ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
+> accesses may be missing from this summary and from the artifact.${why}`;
+}
+const SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
 	executed: "filesystem-executed",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
@@ -68705,12 +68711,12 @@ function createAuditSummary(prefixes) {
 		limit,
 		nodes: limits.nodes,
 		rowBytes: (p, comm) => relLength(p) + comm.length + 3
-	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, seq = 0, added = new Map(), add = (r, counted = !0) => {
+	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (counted) {
 			if (r.kind === "end") {
-				ended = !0, lost = !!(r.dropped || r.untracked);
+				ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = typeof r.host_missed == "number" ? r.host_missed : 0;
 				return;
 			}
 			if (r.kind === "exec" && r.path) {
@@ -68759,6 +68765,7 @@ function createAuditSummary(prefixes) {
 			return {
 				ended,
 				lost,
+				hostMissed,
 				executed: [...executed].map(([path, runs]) => ({
 					...shown(path),
 					runs
@@ -68777,9 +68784,12 @@ function inRecordingOrder(rows) {
 		return a.agg.seq - b.agg.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
 	});
 }
-function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote) {
-	let { ended, lost, executed, paths, details, pathsCut, detailsCut } = summary, heading = ended && !lost ? HEADING : `${HEADING}\n\n> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so
-> some accesses are missing from this summary and from the artifact.`, frame = (text) => ({
+function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote, skippedHooksUrl) {
+	let { ended, lost, hostMissed, executed, paths, details, pathsCut, detailsCut } = summary, heading = [
+		HEADING,
+		...ended && !lost ? [] : ["> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
+		...hostMissed ? [skippedNote(hostMissed, skippedHooksUrl)] : []
+	].join("\n\n"), frame = (text) => ({
 		priority: 0,
 		level: 1,
 		section: SECTION$1,
@@ -69461,12 +69471,12 @@ async function prepareStepFilesystemAudit({ audit, attached, upload, retentionDa
 		if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, { blocks: () => unreadableSummaryBlocks() }) : NONE;
 		let { summary, summaryError } = reduced;
 		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
-		let uploaded = upload ? artifactName ? { name: artifactName } : "upload-failed" : "not-requested", cutNote = (cause) => filesystemTruncationNote(uploaded, cause), notice = cutNote(), legendNote = filesystemLegendNote(uploaded, `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`);
+		let uploaded = upload ? artifactName ? { name: artifactName } : "upload-failed" : "not-requested", cutNote = (cause) => filesystemTruncationNote(uploaded, cause), notice = cutNote(), guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`, legendNote = filesystemLegendNote(uploaded, `${guide}#reading-the-summary`);
 		return { blocks: (startedAt) => {
 			let rendered;
 			try {
 				if (!summary) throw summaryError;
-				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, cutNote, legendNote);
+				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, cutNote, legendNote, `${guide}#skipped-hooks`);
 			} catch (e) {
 				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
 			}

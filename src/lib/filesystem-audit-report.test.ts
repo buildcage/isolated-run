@@ -104,6 +104,24 @@ describe("prepareStepFilesystemAudit", () => {
     attached: true,
   };
 
+  it("links the skipped-hooks note to the guide", async () => {
+    const { deps: d, summaries } = deps({
+      raw: [
+        JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
+        JSON.stringify({ kind: "end", dropped: 0, untracked: 0, host_missed: 2 }),
+      ].join("\n"),
+    });
+
+    await reportStepFilesystemAudit(
+      { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
+      d,
+    );
+
+    expect(summaries[0]).toContain(
+      "from the artifact. [Why](https://github.com/buildcage/isolated-run/blob/v2/docs/filesystem-audit.md#skipped-hooks)\n",
+    );
+  });
+
   it("renders, uploads and sets the output when a recording exists", async () => {
     const { deps: d, summaries, uploads, outputs, writes } = deps();
 
@@ -345,9 +363,9 @@ describe("prepareStepFilesystemAudit", () => {
       outputs,
       writes,
     } = deps({
-      renderBlocks: (summary, startedAt, priorities, cutNote, legendNote) => {
+      renderBlocks: (summary, startedAt, priorities, cutNote, ...rest) => {
         notes.push(cutNote());
-        return renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote);
+        return renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, ...rest);
       },
     });
 
