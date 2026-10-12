@@ -1,29 +1,36 @@
 // SPDX-License-Identifier: GPL-2.0
-// The tests in held_test.c build this with the maps and helpers it uses
-// replaced (HELD_MOCK_MAPS), so its accounting runs without a kernel.
+/**
+ * @file held.h
+ * The tests in held_test.c build this with the maps and helpers it uses
+ * replaced (HELD_MOCK_MAPS), so its accounting runs without a kernel.
+ */
 #ifndef FILESYSTEM_AUDIT_HELD_H
 #define FILESYSTEM_AUDIT_HELD_H
 
-// Events held per thread until their syscall returns. A path change's
-// security_path_* hook runs before the kernel's own permission checks
-// (may_delete, may_create, notify_change), so whether it happened is known
-// only then; for an open, see on_open.
+/**
+ * Events held per thread until their syscall returns. A path change's
+ * security_path_* hook runs before the kernel's own permission checks
+ * (may_delete, may_create, notify_change), so whether it happened is known
+ * only then; for an open, see on_open.
+ */
 #define HELD_OP 1
 #define HELD_OPEN 2
 
 struct held_key {
 	u64 id;
 	u32 use;
-	u32 n; // which chunk: 0 for the head, from 1 a tail
+	u32 n; ///< which chunk: 0 for the head, from 1 a tail
 };
 
-// A held event is cut in pieces: its head holds the event's first HEAD
-// bytes, its header and the start of its path, and tail n the CHUNK bytes
-// after the head and the n - 1 tails before it. Nearly every path, a deep
-// node_modules one included, fits the head alone, and a longer one takes as
-// many tails as it needs, so the tails fill by bytes of path, whatever the
-// paths' lengths. Both are preallocated, so a hold fails only when they are
-// full.
+/**
+ * A held event is cut in pieces: its head holds the event's first HEAD
+ * bytes, its header and the start of its path, and tail n the CHUNK bytes
+ * after the head and the n - 1 tails before it. Nearly every path, a deep
+ * node_modules one included, fits the head alone, and a longer one takes as
+ * many tails as it needs, so the tails fill by bytes of path, whatever the
+ * paths' lengths. Both are preallocated, so a hold fails only when they are
+ * full.
+ */
 #define CHUNK 256
 #define HEAD 512
 #define HEAD_DATA (HEAD - __builtin_offsetof(struct event, data))
@@ -33,7 +40,7 @@ struct held_key {
 #ifndef N_TAILS
 #define N_TAILS 24576
 #endif
-#define MAX_TAILS 32 // for DATA_SZ + NAME_LEN of data
+#define MAX_TAILS 32 ///< for DATA_SZ + NAME_LEN of data
 
 _Static_assert((DATA_SZ + NAME_LEN - HEAD_DATA + CHUNK - 1) / CHUNK <= MAX_TAILS,
 	       "MAX_TAILS is short of the tails the longest event takes");
@@ -48,8 +55,10 @@ struct chunk {
 	char b[CHUNK];
 };
 
-// How many tails the heads hold, and the most they held at once, which the
-// loader reports.
+/**
+ * How many tails the heads hold, and the most they held at once, which the
+ * loader reports.
+ */
 struct tail_use {
 	u64 taken;
 	u64 peak;
@@ -85,9 +94,11 @@ static __always_inline u32 tails_for(u32 data_len)
 	return data_len <= HEAD_DATA ? 0 : (data_len - HEAD_DATA + CHUNK - 1) / CHUNK;
 }
 
-// Takes n tails, or none when fewer are free, so a hold never runs out
-// halfway. Taking them is one atomic add, which no other CPU can make fail;
-// one that would pass the limit is given back at once.
+/**
+ * Takes n tails, or none when fewer are free, so a hold never runs out
+ * halfway. Taking them is one atomic add, which no other CPU can make fail;
+ * one that would pass the limit is given back at once.
+ */
 static __always_inline int take_tails(u32 n)
 {
 	if (!n)
@@ -118,14 +129,16 @@ static __always_inline void give_tails(u32 n)
 
 struct tails_ctx {
 	struct held_key k;
-	char *buf; // the event, laid out as in scratch
-	u32 from;  // tails from..to-1
+	char *buf; ///< the event, laid out as in scratch
+	u32 from;  ///< tails from..to-1
 	u32 to;
 	int err;
 };
 
-// Tail i of c's range: its key in k, and its offset in the event, or -1
-// past the range.
+/**
+ * Tail i of c's range: its key in k, and its offset in the event, or -1
+ * past the range.
+ */
 static __always_inline long tail_at(u64 i, struct tails_ctx *c, struct held_key *k)
 {
 	u32 n = c->from + i;
@@ -180,8 +193,10 @@ static long del_tail(u64 i, struct tails_ctx *c)
 	return 0;
 }
 
-// Runs fn over tails from..to-1, and returns 0 unless fn failed: for
-// get_tail, the missing tail it stopped at.
+/**
+ * Runs fn over tails from..to-1, and returns 0 unless fn failed: for
+ * get_tail, the missing tail it stopped at.
+ */
 static __always_inline u32 tails_loop(void *fn, struct held_key *k, void *buf, u32 from, u32 to)
 {
 	struct tails_ctx c = { .k = *k, .buf = buf, .from = from, .to = to, .err = 0 };
@@ -196,7 +211,7 @@ static __always_inline struct held_key held_key(u32 use)
 	return k;
 }
 
-// Ends a hold: its head, and the ntails tails it took.
+/** Ends a hold: its head, and the ntails tails it took. */
 static __always_inline void release(struct held_key *k, u32 ntails)
 {
 	bpf_map_delete_elem(&heads, k);
@@ -204,8 +219,10 @@ static __always_inline void release(struct held_key *k, u32 ntails)
 	give_tails(ntails);
 }
 
-// Holds e, in scratch, under use, in place of a hold that took old tails,
-// with have tails the caller already took.
+/**
+ * Holds e, in scratch, under use, in place of a hold that took old tails,
+ * with have tails the caller already took.
+ */
 static __always_inline int hold_as(struct event *e, u32 use, u32 old, u32 have)
 {
 	struct held_key k = held_key(use);
@@ -234,8 +251,10 @@ static __always_inline int hold_as(struct event *e, u32 use, u32 old, u32 have)
 	return 0;
 }
 
-// Holds e in place of a hold left there, with have tails already taken. One
-// that cannot replace it drops it too: it is no event of this syscall's.
+/**
+ * Holds e in place of a hold left there, with have tails already taken. One
+ * that cannot replace it drops it too: it is no event of this syscall's.
+ */
 static __always_inline int hold_over(struct held_key *k, struct event *e, u32 use, u32 have)
 {
 	struct event *old = bpf_map_lookup_elem(&heads, k);
@@ -247,8 +266,10 @@ static __always_inline int hold_over(struct held_key *k, struct event *e, u32 us
 	return -1;
 }
 
-// Holds e, in scratch, under use, where the thread normally holds nothing
-// yet; finding a hold there after all, it replaces it.
+/**
+ * Holds e, in scratch, under use, where the thread normally holds nothing
+ * yet; finding a hold there after all, it replaces it.
+ */
 static __always_inline int hold_new(struct event *e, u32 use)
 {
 	struct held_key k = held_key(use);
@@ -279,7 +300,7 @@ static __always_inline void hold(struct event *e)
 		bump(&untracked);
 }
 
-// Assembles the held event whose head is head in scratch.
+/** Assembles the held event whose head is head in scratch. */
 static __always_inline struct event *assemble(struct held_key *k, struct event *head)
 {
 	u32 zero = 0;
@@ -304,8 +325,10 @@ static __always_inline struct event *assemble(struct held_key *k, struct event *
 	return e;
 }
 
-// Records a held event, at e of size cap, as done with err 0 or refused
-// with err; a created open refused after its create step is both.
+/**
+ * Records a held event, at e of size cap, as done with err 0 or refused
+ * with err; a created open refused after its create step is both.
+ */
 static __always_inline void report_at(struct event *e, u32 cap, u32 err, u32 created)
 {
 	if (!err || created) {
@@ -318,8 +341,10 @@ static __always_inline void report_at(struct event *e, u32 cap, u32 err, u32 cre
 	}
 }
 
-// Records the held event whose head is head: straight from the head when it
-// has no tails, else assembled once in scratch.
+/**
+ * Records the held event whose head is head: straight from the head when it
+ * has no tails, else assembled once in scratch.
+ */
 static __always_inline void report_held(struct held_key *k, struct event *head, u32 err, u32 created)
 {
 	if (!tails_for(head->data_len)) {

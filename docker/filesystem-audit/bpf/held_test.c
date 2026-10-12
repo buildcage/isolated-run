@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
-// Tests for held.h, built for the host with its maps and helpers replaced by
-// the ones below; the image build compiles and runs it with small pools
-// (N_HEADS, N_TAILS) so their limits are reached.
+/**
+ * @file held_test.c
+ * Tests for held.h, built for the host with its maps and helpers replaced by
+ * the ones below; the image build compiles and runs it with small pools
+ * (N_HEADS, N_TAILS) so their limits are reached.
+ */
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,12 +14,12 @@
 
 #include "event.h"
 
-// A map: fixed-size keys and values, up to max entries, linear search.
+/** A map: fixed-size keys and values, up to max entries, linear search. */
 struct map {
 	const char *name;
 	unsigned key_size, value_size, max;
-	int array;      // an array: entries exist from the start
-	int busy_after; // updates left before one fails with EBUSY; -1 for never
+	int array;      ///< an array: entries exist from the start
+	int busy_after; ///< updates left before one fails with EBUSY; -1 for never
 	unsigned count;
 	unsigned char *used;
 	unsigned char *keys;
@@ -119,7 +122,7 @@ static void bump(void *counter)
 	(*(__u64 *)bpf_map_lookup_elem(counter, &zero))++;
 }
 
-// What submit_cap sent, in order.
+/** What submit_cap sent, in order. */
 static struct submitted {
 	unsigned size;
 	struct event e;
@@ -186,8 +189,10 @@ static void reset(void)
 	nsent = 0;
 }
 
-// Every tail is accounted for: the count taken is what the heads' lengths
-// call for, and is exactly the tails held.
+/**
+ * Every tail is accounted for: the count taken is what the heads' lengths
+ * call for, and is exactly the tails held.
+ */
 static void check_accounts(int line)
 {
 	__u64 want = 0;
@@ -202,7 +207,7 @@ static void check_accounts(int line)
 }
 #define CHECK_ACCOUNTS() check_accounts(__LINE__)
 
-// An event in scratch whose data is len bytes of a pattern keyed by seed.
+/** An event in scratch whose data is len bytes of a pattern keyed by seed. */
 static struct event *make(u32 kind, u32 len, unsigned char seed)
 {
 	struct event *e = scratch_event();
@@ -271,8 +276,10 @@ static void test_long_hold_round_trip(void)
 	CHECK_ACCOUNTS();
 }
 
-// N_TAILS is small here: one hold of over half of them leaves too few for a
-// second, but a hold that needs none still fits.
+/**
+ * N_TAILS is small here: one hold of over half of them leaves too few for a
+ * second, but a hold that needs none still fits.
+ */
 static void test_pool_limit(void)
 {
 	reset();
@@ -305,8 +312,10 @@ static void test_replace_shorter_and_longer(void)
 	CHECK(e && e->kind == K_OPEN && data_matches(e, HEAD_DATA + 5 * CHUNK, 7));
 }
 
-// hold_new over a hold left in place replaces it, reusing the tails it took
-// for itself rather than giving them back first.
+/**
+ * hold_new over a hold left in place replaces it, reusing the tails it took
+ * for itself rather than giving them back first.
+ */
 static void test_new_over_existing(void)
 {
 	reset();
@@ -319,8 +328,10 @@ static void test_new_over_existing(void)
 	CHECK_ACCOUNTS();
 }
 
-// With the pool exactly full, replacing a hold with one of the same size
-// still fits, on the tails the old hold frees.
+/**
+ * With the pool exactly full, replacing a hold with one of the same size
+ * still fits, on the tails the old hold frees.
+ */
 static void test_new_over_existing_when_full(void)
 {
 	reset();
@@ -336,8 +347,10 @@ static void test_new_over_existing_when_full(void)
 	CHECK_ACCOUNTS();
 }
 
-// A hold left in place that the new one cannot replace for want of tails is
-// dropped, rather than reported later as this syscall's.
+/**
+ * A hold left in place that the new one cannot replace for want of tails is
+ * dropped, rather than reported later as this syscall's.
+ */
 static void test_new_over_existing_short_drops_it(void)
 {
 	reset();

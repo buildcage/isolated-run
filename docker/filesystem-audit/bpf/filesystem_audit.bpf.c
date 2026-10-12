@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0
-// Records the file accesses of every task in one cgroup v2 subtree: opens,
-// each program's first read and write of each open file, mmaps, execs, and the path
-// operations (create, move, delete, attribute change), successes and
-// failures alike. Kernel types are declared locally with preserve_access_index
-// so one CO-RE object runs on any BTF-enabled kernel from 6.1 on, 6.4 on
-// arm64, the first to let fentry attach to a kernel function there.
+/**
+ * @file filesystem_audit.bpf.c
+ * Records the file accesses of every task in one cgroup v2 subtree: opens,
+ * each program's first read and write of each open file, mmaps, execs, and the path
+ * operations (create, move, delete, attribute change), successes and
+ * failures alike. Kernel types are declared locally with preserve_access_index
+ * so one CO-RE object runs on any BTF-enabled kernel from 6.1 on, 6.4 on
+ * arm64, the first to let fentry attach to a kernel function there.
+ */
 
 #include <linux/types.h>
 #include <linux/bpf.h>
@@ -72,8 +75,10 @@ struct open_how {
 	__u64 flags;
 } __attribute__((preserve_access_index));
 
-// Since 6.7 a backing file's f_path is on the layer and user_path is the path
-// the step opened; before, f_path was that path.
+/**
+ * Since 6.7 a backing file's f_path is on the layer and user_path is the path
+ * the step opened; before, f_path was that path.
+ */
 struct backing_file {
 	struct file file;
 	struct path user_path;
@@ -118,8 +123,10 @@ struct linux_binprm {
 	struct file *file;
 } __attribute__((preserve_access_index));
 
-// The registers each architecture passes a syscall's number and first
-// arguments in.
+/**
+ * The registers each architecture passes a syscall's number and first
+ * arguments in.
+ */
 struct pt_regs___x86 {
 	unsigned long di, si, dx, r10, orig_ax;
 } __attribute__((preserve_access_index));
@@ -129,17 +136,19 @@ struct pt_regs___arm64 {
 	int syscallno;
 } __attribute__((preserve_access_index));
 
-#define MAX_COMPONENTS 254 // n1 and n2 are u8; a longer walk is marked cut
+#define MAX_COMPONENTS 254 ///< n1 and n2 are u8; a longer walk is marked cut
 #define WAKEUP_BYTES (1 << 20)
 #define AT_FDCWD -100
 #define AT_REMOVEDIR 0x200
 #define EEXIST 17
 
-// Keeps struct event in BTF for bpf2go's -type.
+/** Keeps struct event in BTF for bpf2go's -type. */
 const struct event *unused_event __attribute__((unused));
 
-// The watched cgroup, set by the loader. Descent is checked in the kernel's
-// own hierarchy, whatever cgroup namespace the loader runs in.
+/**
+ * The watched cgroup, set by the loader. Descent is checked in the kernel's
+ * own hierarchy, whatever cgroup namespace the loader runs in.
+ */
 struct {
 	__uint(type, BPF_MAP_TYPE_CGROUP_ARRAY);
 	__uint(max_entries, 1);
@@ -178,17 +187,17 @@ struct pending {
 	u64 p1;
 	u64 p2;
 	u64 ts;
-	u32 kind;      // emitted on failure
-	u32 kind_ok;   // emitted on success, 0 to skip
-	u32 quiet_err; // an errno that changed nothing, so is not recorded
-	s32 dfd1;      // what p1 and p2 resolve against when relative
+	u32 kind;      ///< emitted on failure
+	u32 kind_ok;   ///< emitted on success, 0 to skip
+	u32 quiet_err; ///< an errno that changed nothing, so is not recorded
+	s32 dfd1;      ///< what p1 and p2 resolve against when relative
 	s32 dfd2;
-	u32 nr;        // the syscall, so only its own exit takes the entry
-	u32 val1;      // a chmod's new mode, or a chown's new uid
-	u32 val2;      // a chown's new gid
+	u32 nr;        ///< the syscall, so only its own exit takes the entry
+	u32 val1;      ///< a chmod's new mode, or a chown's new uid
+	u32 val2;      ///< a chown's new gid
 };
 
-// One entry per thread inside a path syscall.
+/** One entry per thread inside a path syscall. */
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 8192);
@@ -230,7 +239,7 @@ static __always_inline struct event *start(u32 kind)
 	return e;
 }
 
-// cap is the size of what e points into, a constant in each caller.
+/** cap is the size of what e points into, a constant in each caller. */
 static __always_inline void submit_cap(struct event *e, u32 cap)
 {
 	u32 len = e->data_len;
@@ -254,8 +263,10 @@ static __always_inline void submit(struct event *e)
 
 #include "held.h"
 
-// Field offsets are resolved by CO-RE in the caller and handed over, since
-// relocations inside a bpf_loop callback come out poisoned with cilium/ebpf.
+/**
+ * Field offsets are resolved by CO-RE in the caller and handed over, since
+ * relocations inside a bpf_loop callback come out poisoned with cilium/ebpf.
+ */
 struct walk_ctx {
 	void *d;
 	void *vfs;
@@ -264,7 +275,7 @@ struct walk_ctx {
 	u32 off;
 	u32 n;
 	u8 *trunc;
-	u8 done; // reached the namespace root, or set *trunc itself
+	u8 done; ///< reached the namespace root, or set *trunc itself
 	u32 off_mnt_root, off_d_parent, off_d_name, off_mnt_parent, off_mountpoint, off_mnt;
 };
 
@@ -275,12 +286,16 @@ static __always_inline void *rd_ptr(void *base, u32 off)
 	return v;
 }
 
-// The first of two paths gets half the buffer, so a deep one leaves the
-// second room.
+/**
+ * The first of two paths gets half the buffer, so a deep one leaves the
+ * second room.
+ */
 #define FIRST_PATH_END (DATA_SZ / 2)
 
-// end is a constant in each caller below: compared with a value from the
-// context instead, the verifier tracks off exactly and runs out of states.
+/**
+ * end is a constant in each caller below: compared with a value from the
+ * context instead, the verifier tracks off exactly and runs out of states.
+ */
 static __always_inline long walk_step_to(struct walk_ctx *c, u32 end)
 {
 	void *root = rd_ptr(c->vfs, c->off_mnt_root);
@@ -323,9 +338,11 @@ static long walk_step_first(u64 i, struct walk_ctx *c)
 	return walk_step_to(c, FIRST_PATH_END);
 }
 
-// Appends the leaf-first path components of a dentry under a mount to
-// e->data at off, crossing mounts up to the namespace root like d_path; the
-// first of two paths stops at FIRST_PATH_END and is marked cut there.
+/**
+ * Appends the leaf-first path components of a dentry under a mount to
+ * e->data at off, crossing mounts up to the namespace root like d_path; the
+ * first of two paths stops at FIRST_PATH_END and is marked cut there.
+ */
 static __always_inline u32 walk_path(struct event *e, u32 off, int first, struct dentry *d,
 				     struct vfsmount *vfs, u8 *n, u8 *trunc)
 {
@@ -380,11 +397,13 @@ static __always_inline u32 leaf(struct event *e, u32 off, struct dentry *d, u8 *
 }
 
 #define MNT_INTERNAL 0x4000
-#define MARK_INTERNAL 1 // on a kernel-internal mount, as a memfd is
-#define MARK_UNLINKED 2 // deleted, or an O_TMPFILE never linked
+#define MARK_INTERNAL 1 ///< on a kernel-internal mount, as a memfd is
+#define MARK_UNLINKED 2 ///< deleted, or an O_TMPFILE never linked
 
-// Marks a file as d_path would show it (the unlinked test is d_unlinked's),
-// and reports whether it is kernel-internal.
+/**
+ * Marks a file as d_path would show it (the unlinked test is d_unlinked's),
+ * and reports whether it is kernel-internal.
+ */
 static __always_inline int mark_file(struct event *e, struct dentry *d, struct vfsmount *mnt)
 {
 	if (BPF_CORE_READ(mnt, mnt_flags) & MNT_INTERNAL) {
@@ -396,12 +415,14 @@ static __always_inline int mark_file(struct event *e, struct dentry *d, struct v
 	return 0;
 }
 
-// A relative name in a syscall resolves against dfd: the calling task's
-// working directory for AT_FDCWD, else that open directory. Appends the
-// directory's leaf-first components at off and sets bit in e->bases, or
-// leaves both alone when the fd is not open. Read at the syscall's exit, so a
-// thread that closes the fd or changes directory meanwhile can give another
-// directory.
+/**
+ * A relative name in a syscall resolves against dfd: the calling task's
+ * working directory for AT_FDCWD, else that open directory. Appends the
+ * directory's leaf-first components at off and sets bit in e->bases, or
+ * leaves both alone when the fd is not open. Read at the syscall's exit, so a
+ * thread that closes the fd or changes directory meanwhile can give another
+ * directory.
+ */
 static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8 *trunc, u32 bit,
 				    int first)
 {
@@ -438,13 +459,18 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 	return walk_path(e, off, first, d, m, n, trunc);
 }
 
-// Open files already reported as read (1), written (2) or mapped
-// executable (4), so each is reported once per direction and program rather
-// than per read(2). Keyed by the struct file and cleared when it is freed,
-// before the address can be reused.
+/**
+ * @name Seen
+ * Open files already reported as read (1), written (2) or mapped
+ * executable (4), so each is reported once per direction and program rather
+ * than per read(2). Keyed by the struct file and cleared when it is freed,
+ * before the address can be reused.
+ * @{
+ */
 #define SEEN_READ 1
 #define SEEN_WRITE 2
 #define SEEN_EXEC 4
+/** @} */
 #define MAY_WRITE 2
 #define MAY_READ 4
 #define PROT_WRITE 2
@@ -455,9 +481,11 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 #define OVERLAYFS_SUPER_MAGIC 0x794c7630
 #define FUSE_SUPER_MAGIC 0x65735546
 
-// A program run by a process: its tgid, its leader's start time, which a
-// reused pid does not share, and how many execs it has been through, so a
-// program exec'd in place counts as its own.
+/**
+ * A program run by a process: its tgid, its leader's start time, which a
+ * reused pid does not share, and how many execs it has been through, so a
+ * program exec'd in place counts as its own.
+ */
 struct proc {
 	u64 start;
 	u64 exec;
@@ -466,10 +494,10 @@ struct proc {
 };
 
 struct seen {
-	u64 gen;	  // when the entry was made, so a reused address is a new file
-	struct proc owner; // the first process to use the file
-	u32 bits;	  // what the owner has been reported doing with it
-	u32 once;	  // reported once whoever uses it: see first_time
+	u64 gen;	  ///< when the entry was made, so a reused address is a new file
+	struct proc owner; ///< the first process to use the file
+	u32 bits;	  ///< what the owner has been reported doing with it
+	u32 once;	  ///< reported once whoever uses it: see first_time
 };
 
 struct {
@@ -479,10 +507,12 @@ struct {
 	__type(value, struct seen);
 } seen_files SEC(".maps");
 
-// What each other process sharing an open file, such as a child that
-// inherited it, has been reported doing with it. An entry outlives its file,
-// but gen keeps it from matching the next file at that address; losing one to
-// eviction only reports that access again.
+/**
+ * What each other process sharing an open file, such as a child that
+ * inherited it, has been reported doing with it. An entry outlives its file,
+ * but gen keeps it from matching the next file at that address; losing one to
+ * eviction only reports that access again.
+ */
 struct shared_key {
 	u64 file;
 	u64 gen;
@@ -500,8 +530,10 @@ struct {
 #define S_IFREG 0100000
 #define S_IFDIR 0040000
 
-// Sets bit in *bits, reporting whether it was clear. Not atomic: two processes
-// racing on a shared entry can each report the same bit, never neither.
+/**
+ * Sets bit in *bits, reporting whether it was clear. Not atomic: two processes
+ * racing on a shared entry can each report the same bit, never neither.
+ */
 static __always_inline int set_first(u32 *bits, u32 bit)
 {
 	if (*bits & bit)
@@ -510,10 +542,12 @@ static __always_inline int set_first(u32 *bits, u32 bit)
 	return 1;
 }
 
-// Reports whether bit was newly recorded for file and the current program:
-// false if it was already set, or if a map could not take the entry (so a
-// saturated map cannot cause re-emission). That counts in untracked, since
-// the access then goes unreported.
+/**
+ * Reports whether bit was newly recorded for file and the current program:
+ * false if it was already set, or if a map could not take the entry (so a
+ * saturated map cannot cause re-emission). That counts in untracked, since
+ * the access then goes unreported.
+ */
 static __always_inline int first_time(struct file *file, u8 bit)
 {
 	u64 key = (u64)file;
@@ -578,8 +612,10 @@ static __always_inline u32 file_walk(struct event *e, struct file *file)
 	return path_walk(e, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt));
 }
 
-// bpf_d_path fails on a path over PATH_LEN; such a path is spelled from its
-// dentries instead, so the access keeps a name (n1 > 0 tells the reader).
+/**
+ * bpf_d_path fails on a path over PATH_LEN; such a path is spelled from its
+ * dentries instead, so the access keeps a name (n1 > 0 tells the reader).
+ */
 static __always_inline void file_path(struct event *e, struct file *file)
 {
 	// Marked first: a file unlinked in between keeps d_path's suffix in its
@@ -594,9 +630,11 @@ static __always_inline void file_path(struct event *e, struct file *file)
 	e->data_len = file_walk(e, file);
 }
 
-// overlayfs reaches its layers through private clones of their mounts, which
-// belong to no namespace the step can open a file in, so an access through one
-// is the overlay's, not the step's. Kernel-internal mounts (pipes, memfd) count.
+/**
+ * overlayfs reaches its layers through private clones of their mounts, which
+ * belong to no namespace the step can open a file in, so an access through one
+ * is the overlay's, not the step's. Kernel-internal mounts (pipes, memfd) count.
+ */
 static __always_inline int in_step_ns(struct vfsmount *vfs)
 {
 	if (BPF_CORE_READ(vfs, mnt_flags) & MNT_INTERNAL)
@@ -614,9 +652,11 @@ static __always_inline int on_layer(struct file *file)
 	return 1;
 }
 
-// The file being executed, resolved, while bprm->file is still the one named:
-// by sched_process_exec a script has been swapped for its interpreter, and
-// filename is only the name the caller passed, relative to its cwd or not.
+/**
+ * The file being executed, resolved, while bprm->file is still the one named:
+ * by sched_process_exec a script has been swapped for its interpreter, and
+ * filename is only the name the caller passed, relative to its cwd or not.
+ */
 SEC("fentry/security_bprm_creds_for_exec")
 int BPF_PROG(on_exec_file, struct linux_binprm *bprm)
 {
@@ -631,10 +671,12 @@ int BPF_PROG(on_exec_file, struct linux_binprm *bprm)
 	return 0;
 }
 
-// Threads past an exec's point of no return and not yet through it. Its other
-// threads are gone by then and this one runs no code of its own, so whatever
-// it maps meanwhile is the kernel loading the new program, its dynamic
-// loader and a script's interpreter.
+/**
+ * Threads past an exec's point of no return and not yet through it. Its other
+ * threads are gone by then and this one runs no code of its own, so whatever
+ * it maps meanwhile is the kernel loading the new program, its dynamic
+ * loader and a script's interpreter.
+ */
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 8192);
@@ -654,7 +696,7 @@ int BPF_PROG(on_exec_commit, const struct linux_binprm *bprm)
 	return 0;
 }
 
-// A thread killed inside an exec never reaches sched_process_exec.
+/** A thread killed inside an exec never reaches sched_process_exec. */
 SEC("tp_btf/sched_process_exit")
 int BPF_PROG(on_task_exit, struct task_struct *p)
 {
@@ -681,9 +723,11 @@ int BPF_PROG(on_exec, struct task_struct *p, int old_pid, struct linux_binprm *b
 	return 0;
 }
 
-// Every new process, so the recording shows who started each one, a subshell
-// that never execs or touches a file included. ppid is the process that made
-// it, not real_parent, which CLONE_PARENT sets to that process's own parent.
+/**
+ * Every new process, so the recording shows who started each one, a subshell
+ * that never execs or touches a file included. ppid is the process that made
+ * it, not real_parent, which CLONE_PARENT sets to that process's own parent.
+ */
 SEC("tp_btf/sched_process_fork")
 int BPF_PROG(on_fork, struct task_struct *parent, struct task_struct *child)
 {
@@ -703,8 +747,10 @@ int BPF_PROG(on_fork, struct task_struct *parent, struct task_struct *child)
 	return 0;
 }
 
-// The security_path_* hooks run once per syscall at the VFS entry, unlike
-// security_inode_*, which overlayfs calls again for each layer it touches.
+/**
+ * The security_path_* hooks run once per syscall at the VFS entry, unlike
+ * security_inode_*, which overlayfs calls again for each layer it touches.
+ */
 #define DIR_ENTRY_HOOK(hook, kind_)						\
 SEC("fentry/" #hook)								\
 int BPF_PROG(on_##hook, const struct path *dir, struct dentry *dentry)		\
@@ -774,8 +820,10 @@ int BPF_PROG(on_chmod, const struct path *path, unsigned short mode)
 	return 0;
 }
 
-// A hard link gives an existing inode a second name; opens through the new
-// name record only that name.
+/**
+ * A hard link gives an existing inode a second name; opens through the new
+ * name record only that name.
+ */
 SEC("fentry/security_path_link")
 int BPF_PROG(on_link, struct dentry *old_dentry, const struct path *new_dir,
 	     struct dentry *new_dentry)
@@ -794,7 +842,7 @@ int BPF_PROG(on_link, struct dentry *old_dentry, const struct path *new_dir,
 	return 0;
 }
 
-// truncate(2) changes a file's contents without opening it.
+/** truncate(2) changes a file's contents without opening it. */
 SEC("fentry/security_path_truncate")
 int BPF_PROG(on_truncate, const struct path *path)
 {
@@ -808,8 +856,10 @@ int BPF_PROG(on_truncate, const struct path *path)
 	return 0;
 }
 
-// From 6.2, ftruncate(2) and a truncating open reach this rather than
-// security_path_truncate; absent before (see main.go).
+/**
+ * From 6.2, ftruncate(2) and a truncating open reach this rather than
+ * security_path_truncate; absent before (see main.go).
+ */
 SEC("fentry/security_file_truncate")
 int BPF_PROG(on_file_truncate, struct file *file)
 {
@@ -838,16 +888,18 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 	return 0;
 }
 
-// An open(2) holds one event from its entry until it returns. A refused or
-// missing file never reaches security_file_open, so until then the event is
-// the failed open it would be (K_OPEN_FAILED): when the open was called, its
-// flags, and the name from the kernel's own copy (getname_flags), not the
-// user pointer, which the caller could rewrite before the syscall returns.
-// The file's own open method, an LSM or the FIFO checks can still refuse it
-// after that hook, so from there the event is the open (K_OPEN), reported as
-// done or refused once the syscall returns. bases, which neither record
-// uses, says whether the open reached its create step (see on_mknod); before
-// the hook, gid holds the descriptor a relative name resolves against.
+/**
+ * An open(2) holds one event from its entry until it returns. A refused or
+ * missing file never reaches security_file_open, so until then the event is
+ * the failed open it would be (K_OPEN_FAILED): when the open was called, its
+ * flags, and the name from the kernel's own copy (getname_flags), not the
+ * user pointer, which the caller could rewrite before the syscall returns.
+ * The file's own open method, an LSM or the FIFO checks can still refuse it
+ * after that hook, so from there the event is the open (K_OPEN), reported as
+ * done or refused once the syscall returns. bases, which neither record
+ * uses, says whether the open reached its create step (see on_mknod); before
+ * the hook, gid holds the descriptor a relative name resolves against.
+ */
 SEC("fentry/security_file_open")
 int BPF_PROG(on_open, struct file *file)
 {
@@ -886,8 +938,10 @@ int BPF_PROG(on_open, struct file *file)
 	return 0;
 }
 
-// mknod(2) and bind(2) to a path. A creating open also passes here, from
-// may_o_create, and is skipped: the open records it.
+/**
+ * mknod(2) and bind(2) to a path. A creating open also passes here, from
+ * may_o_create, and is skipped: the open records it.
+ */
 SEC("fentry/security_path_mknod")
 int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 {
@@ -908,8 +962,10 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 	return 0;
 }
 
-// A full pool counts in untracked even if this open then succeeds and is
-// recorded.
+/**
+ * A full pool counts in untracked even if this open then succeeds and is
+ * recorded.
+ */
 static __always_inline void open_enter(int dfd, u32 flags)
 {
 	if (!in_target())
@@ -946,7 +1002,7 @@ static __always_inline void open_enter(int dfd, u32 flags)
 		bump(&untracked);
 }
 
-// Records the failed open assembled in e, its name in place.
+/** Records the failed open assembled in e, its name in place. */
 static __always_inline void open_failed(struct event *e, long ret)
 {
 	u64 ts = e->ts;
@@ -1002,9 +1058,11 @@ static __always_inline void open_exit(long ret)
 	release(&k, t);
 }
 
-// open/openat reach do_sys_openat2 through do_sys_open, which may inline
-// it; hooking both covers either build. When both fire, the inner exit
-// emits and the outer one finds nothing left.
+/**
+ * open/openat reach do_sys_openat2 through do_sys_open, which may inline
+ * it; hooking both covers either build. When both fire, the inner exit
+ * emits and the outer one finds nothing left.
+ */
 SEC("fentry/do_sys_openat2")
 int BPF_PROG(on_openat2_enter, int dfd, const char *filename, struct open_how *how)
 {
@@ -1019,9 +1077,11 @@ int BPF_PROG(on_open_enter, int dfd, const char *filename, int flags)
 	return 0;
 }
 
-// Reads the name into the open's head; one that fills the head moves, whole,
-// to tails, or stays there cut when there are none to take. When both
-// getname programs fire, the second finds the name already read.
+/**
+ * Reads the name into the open's head; one that fills the head moves, whole,
+ * to tails, or stays there cut when there are none to take. When both
+ * getname programs fire, the second finds the name already read.
+ */
 static __always_inline void stash_name(u64 *ctx)
 {
 	struct filename *ret = 0;
@@ -1058,8 +1118,10 @@ static __always_inline void stash_name(u64 *ctx)
 	}
 }
 
-// Some builds inline getname_flags into getname (6.8), others call
-// getname_flags directly (7.0); either may be absent, so both are optional.
+/**
+ * Some builds inline getname_flags into getname (6.8), others call
+ * getname_flags directly (7.0); either may be absent, so both are optional.
+ */
 SEC("fexit/getname_flags")
 int on_getname(u64 *ctx)
 {
@@ -1074,9 +1136,11 @@ int on_getname_outer(u64 *ctx)
 	return 0;
 }
 
-// bpf_get_func_ret rather than a declared ret argument: the argument lists
-// of these internal functions change between kernel releases. The return
-// type does too (long, later int), so only the low 32 bits are used.
+/**
+ * bpf_get_func_ret rather than a declared ret argument: the argument lists
+ * of these internal functions change between kernel releases. The return
+ * type does too (long, later int), so only the low 32 bits are used.
+ */
 SEC("fexit/do_sys_openat2")
 int on_openat2_exit(u64 *ctx)
 {
@@ -1095,9 +1159,11 @@ int on_open_exit(u64 *ctx)
 	return 0;
 }
 
-// read(2), write(2) and their vector, positional, splice, sendfile and
-// copy_file_range forms all pass through rw_verify_area, which calls this;
-// so does iterate_dir for a directory listing (as a read).
+/**
+ * read(2), write(2) and their vector, positional, splice, sendfile and
+ * copy_file_range forms all pass through rw_verify_area, which calls this;
+ * so does iterate_dir for a directory listing (as a read).
+ */
 SEC("fentry/security_file_permission")
 int BPF_PROG(on_file_permission, struct file *file, int mask)
 {
@@ -1140,7 +1206,7 @@ static __always_inline void map_event(struct file *file, struct dentry *d, struc
 	submit(e);
 }
 
-// The write drops PROT_EXEC from its mode so it decodes as a write.
+/** The write drops PROT_EXEC from its mode so it decodes as a write. */
 static __always_inline void map_events(struct file *file, struct dentry *d, struct vfsmount *mnt,
 				      unsigned long prot, unsigned long flags, int at_mmap)
 {
@@ -1154,12 +1220,14 @@ static __always_inline void map_events(struct file *file, struct dentry *d, stru
 		map_event(file, d, mnt, prot, flags, SEEN_READ, 1);
 }
 
-// fexit, so only a mapping that was made is recorded: after the LSMs,
-// do_mmap still refuses a shared writable mapping of a file not open for
-// writing, and an executable one on a noexec mount. mmap(2) comes through
-// vm_mmap_pgoff, and exec's own mappings through vm_mmap, which calls it but
-// may have it inlined; one mapping seen at both is recorded once (first_time).
-// The return value is read with bpf_get_func_ret, as for the open exits.
+/**
+ * fexit, so only a mapping that was made is recorded: after the LSMs,
+ * do_mmap still refuses a shared writable mapping of a file not open for
+ * writing, and an executable one on a noexec mount. mmap(2) comes through
+ * vm_mmap_pgoff, and exec's own mappings through vm_mmap, which calls it but
+ * may have it inlined; one mapping seen at both is recorded once (first_time).
+ * The return value is read with bpf_get_func_ret, as for the open exits.
+ */
 static __always_inline void mapped(u64 *ctx, struct file *file, unsigned long prot,
 				   unsigned long flags)
 {
@@ -1186,8 +1254,10 @@ int BPF_PROG(on_vm_mmap, struct file *file, unsigned long addr, unsigned long le
 	return 0;
 }
 
-// fexit, so only a change the LSMs allowed is recorded. reqprot is what the
-// caller asked for, as mmap sees it; prot may add PROT_EXEC.
+/**
+ * fexit, so only a change the LSMs allowed is recorded. reqprot is what the
+ * caller asked for, as mmap sees it; prot may add PROT_EXEC.
+ */
 SEC("fexit/security_file_mprotect")
 int BPF_PROG(on_mprotect, struct vm_area_struct *vma, unsigned long reqprot, unsigned long prot,
 	     int ret)
@@ -1232,20 +1302,25 @@ int BPF_PROG(on_file_free, struct file *file)
 	return 0;
 }
 
-// Failed path syscalls. security_path_* fires only once the path has
-// resolved, so a missing target (the common failure) never reaches it; the
-// syscall's entry and exit catch it. The entry stashes the user path pointer(s);
-// the exit emits only when ret < 0, reading them back. Best-effort: this reads
-// the user buffer, which a concurrent thread could rewrite between entry and
-// exit, so a failed op's recorded path is not tamper-proof the way the open
-// path's getname copy is.
+/**
+ * @name Failed path syscalls
+ * security_path_* fires only once the path has resolved, so a missing target
+ * (the common failure) never reaches it; the syscall's entry and exit catch
+ * it. The entry stashes the user path pointer(s); the exit emits only when
+ * ret < 0, reading them back. Best-effort: this reads the user buffer, which a
+ * concurrent thread could rewrite between entry and exit, so a failed op's
+ * recorded path is not tamper-proof the way the open path's getname copy is.
+ * @{
+ */
 
-// The syscall numbers of the architecture the tracer runs on, set by the
-// loader; -1 for one it lacks (x86_64's older forms on arm64). A negative
-// number is skipped, as the kernel passes -1 for a call that a ptrace or
-// seccomp tracer cancelled. A 32-bit syscall numbers them differently, but
-// under the audit the sandbox kills the thread that makes one before it
-// reaches sys_enter.
+/**
+ * The syscall numbers of the architecture the tracer runs on, set by the
+ * loader; -1 for one it lacks (x86_64's older forms on arm64). A negative
+ * number is skipped, as the kernel passes -1 for a call that a ptrace or
+ * seccomp tracer cancelled. A 32-bit syscall numbers them differently, but
+ * under the audit the sandbox kills the thread that makes one before it
+ * reaches sys_enter.
+ */
 const volatile long nr_unlinkat = -1, nr_unlink = -1, nr_rmdir = -1;
 const volatile long nr_renameat2 = -1, nr_renameat = -1, nr_rename = -1;
 const volatile long nr_fchmodat = -1, nr_fchmodat2 = -1, nr_chmod = -1;
@@ -1256,8 +1331,10 @@ const volatile long nr_mkdirat = -1, nr_mkdir = -1, nr_mknodat = -1, nr_mknod = 
 const volatile long nr_symlinkat = -1, nr_symlink = -1, nr_linkat = -1, nr_link = -1;
 const volatile long nr_truncate = -1;
 
-// A syscall's argument i (0 to 3), from the register it is passed in; 0
-// without the registers.
+/**
+ * A syscall's argument i (0 to 3), from the register it is passed in; 0
+ * without the registers.
+ */
 static __always_inline u64 sys_arg(struct pt_regs *regs, int i)
 {
 	if (!regs)
@@ -1268,7 +1345,7 @@ static __always_inline u64 sys_arg(struct pt_regs *regs, int i)
 	return ((struct pt_regs___arm64 *)regs)->regs[i];
 }
 
-// The number of the syscall returning, as tp_btf/sys_exit sees it.
+/** The number of the syscall returning, as tp_btf/sys_exit sees it. */
 static __always_inline long sys_nr(struct pt_regs *regs)
 {
 	struct pt_regs___x86 *x = (void *)regs;
@@ -1284,17 +1361,21 @@ static __always_inline long sys_nr(struct pt_regs *regs)
 	   p->val1 = 0; p->val2 = 0; 1; })
 #define VALS(v1, v2) ({ p->val1 = v1; p->val2 = v2; 1; })
 
-// Making a name. The kernel refuses one on a read-only mount before the
-// security_path_* hook, so the failure is caught here. A name that is already
-// there changed nothing, and mkdir -p meets one at every level it keeps, so
-// EEXIST is not recorded.
+/**
+ * Making a name. The kernel refuses one on a read-only mount before the
+ * security_path_* hook, so the failure is caught here. A name that is already
+ * there changed nothing, and mkdir -p meets one at every level it keeps, so
+ * EEXIST is not recorded.
+ */
 #define CREATE(k, d1, a1, d2, a2) OP(k, 0, EEXIST, d1, a1, d2, a2)
 #define ENOSYS 38
 
-// utimensat, utime, utimes, futimesat and {,l}setxattr are the attribute
-// changes with no security_path_* hook of their own; recorded here, success
-// and failure alike. A NULL path (futimens) changes the file dfd refers to;
-// with AT_FDCWD it names nothing and fails.
+/**
+ * utimensat, utime, utimes, futimesat and {,l}setxattr are the attribute
+ * changes with no security_path_* hook of their own; recorded here, success
+ * and failure alike. A NULL path (futimens) changes the file dfd refers to;
+ * with AT_FDCWD it names nothing and fails.
+ */
 static __always_inline int attr_op(struct pending *p, struct pt_regs *regs, int dfd, u64 path)
 {
 	if (regs && !path && dfd == AT_FDCWD)
@@ -1302,9 +1383,11 @@ static __always_inline int attr_op(struct pending *p, struct pt_regs *regs, int 
 	return OP(K_ATTR_FAILED, K_ATTR, 0, dfd, path, 0, 0);
 }
 
-// Fills p with what syscall nr records, and its arguments from regs, and
-// reports whether it is watched. Without regs, as at the exit, only what it
-// records.
+/**
+ * Fills p with what syscall nr records, and its arguments from regs, and
+ * reports whether it is watched. Without regs, as at the exit, only what it
+ * records.
+ */
 static __always_inline int classify(long nr, struct pt_regs *regs, struct pending *p)
 {
 	if (nr < 0)
@@ -1372,7 +1455,7 @@ int BPF_PROG(on_sys_enter, struct pt_regs *regs, long nr)
 	return 0;
 }
 
-// Emits the call its entry stashed, as it ended.
+/** Emits the call its entry stashed, as it ended. */
 static __always_inline void op_exit(struct pending *pend, long ret)
 {
 	if (ret < 0 && -ret == pend->quiet_err)
@@ -1424,10 +1507,12 @@ static __always_inline void op_exit(struct pending *pend, long ret)
 	submit(e);
 }
 
-// Reports a held path change when its syscall returns: as done if it
-// succeeded (a truncating open returns a descriptor), else as failed with the
-// errno, unless the syscall's entry stashed it, whose record then stands for
-// the failure.
+/**
+ * Reports a held path change when its syscall returns: as done if it
+ * succeeded (a truncating open returns a descriptor), else as failed with the
+ * errno, unless the syscall's entry stashed it, whose record then stands for
+ * the failure.
+ */
 SEC("tp_btf/sys_exit")
 int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 {
@@ -1463,5 +1548,7 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	}
 	return 0;
 }
+
+/** @} */
 
 char LICENSE[] SEC("license") = "GPL";
