@@ -276,10 +276,12 @@ To tell the causes of `aws-key-not-allowed` apart, look first at which requests 
   - `key N from a role in <account>`: a role switch. STS issued the key, but the proxy learns it
     only for a role in an account in `allowed_aws_role_accounts`. Add the account once you have
     checked it is yours. If it is already there in `audit`, the STS call was itself one `restrict`
-    would refuse, so its answer taught no key. In the traffic artifact, the STS call whose
-    `aws.issuedKeyRef` is the request's `aws.keyRef` has the account in `aws.assumedAccount`.
-  - `key N` alone: a key from a profile, `~/.aws/credentials`, `credential_process`, SAML, IAM
-    Identity Center or `GetSessionToken`, or from an STS answer the proxy could not read.
+    would refuse, so its answer taught no key. In the traffic artifact
+    (`upload_traffic_artifact: true`), the STS call whose `aws.issuedKeyRef` is the request's
+    `aws.keyRef` has the account in `aws.assumedAccount`.
+  - `key N` alone, or nothing after the reason when it is the only key refused: a key from a
+    profile, `~/.aws/credentials`, `credential_process`, SAML, IAM Identity Center or
+    `GetSessionToken`, or from an STS answer the proxy could not read.
 
 A presigned URL someone else signed can be downloaded in a step without the check, except when one
 command both signs AWS requests and fetches it, as `crane copy` does from a registry that keeps its
