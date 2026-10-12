@@ -108,8 +108,8 @@ export function withoutCompatSyscalls(profile: unknown, arch = process.arch): un
 
 /** The syscalls a seccomp profile allows, for some arguments at least; the
  *  tracer records any other that fails EPERM as one the profile refused. One
- *  allowed only for some arguments is left out, since the kernel's own EPERM,
- *  as for a raw socket, would read as the profile's. */
+ *  allowed only for some arguments counts as allowed, since the kernel's own
+ *  EPERM for it, as for a raw socket, would read as the profile's. */
 export function allowedSyscalls(profile: unknown): string[] {
   const p = profile as { syscalls?: unknown } | null;
   if (!p || !Array.isArray(p.syscalls)) return [];

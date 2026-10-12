@@ -181,9 +181,10 @@ that only ran programs has no accessed paths table, and the flag legend opens th
   `io_uring_setup` or `unshare`, which fails with `EPERM`. The note under the heading names each one
   with the first commands that made it, and the details, where they fit, show it once per program,
   as `syscall:io_uring_setup` with `!`. One already recorded as a failed change to a path is not
-  repeated, and one the profile allows for some arguments, as `clone` without namespace flags, is
-  not recorded, since the kernel's own `EPERM` for it would read the same. A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a
-  thread killed while others run on is not recorded.
+  repeated, and one the profile allows only for some arguments, as `clone`, is not recorded even
+  when refused, since the kernel's own `EPERM` for it would read the same. A program killed for a
+  32-bit system call shows as `syscall:32-bit <name> (killed)`; a thread killed while others run on
+  is not recorded.
 
 ### Flags
 

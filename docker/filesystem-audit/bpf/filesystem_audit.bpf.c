@@ -93,9 +93,9 @@ int BPF_PROG(on_task_exit, struct task_struct *p)
  * the audit's profile allows none of, with a SIGSYS to that thread naming the
  * syscall it is making and its architecture. A native one comes from a filter
  * of the step's own, and one naming another call was queued by the process
- * itself, which can still queue one naming the call it queues with, a record
- * of its own making. A thread killed while others live on gets no signal, and
- * is not recorded.
+ * itself; one naming the queuing call itself still passes, adding a record
+ * only about that process. A thread killed while others live on gets no
+ * signal, and is not recorded.
  */
 SEC("tp_btf/signal_generate")
 int BPF_PROG(on_signal, int sig, struct kernel_siginfo *info, struct task_struct *task)
