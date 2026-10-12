@@ -12,13 +12,17 @@ jobs:
       contents: read
 
     steps:
-      # A project to install, written before the audited step so the audit sees
-      # npm ci read an existing package.json and lockfile rather than probe for
-      # and create them.
-      - name: Write the project to install
-        run: |
-          echo '{ "name": "buildcage-example", "private": true }' > package.json
-          npm install @hono/node-server --package-lock-only
+      # A committed sample, staged at the workspace root before the audited step
+      # so npm ci reads an existing package.json and lockfile rather than probes
+      # for and creates them. Staging at the root rather than running from its
+      # own directory keeps the recorded paths workspace-relative, since the
+      # audit shows them under $GITHUB_WORKSPACE whatever the working directory.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: test/filesystem-audit
+          sparse-checkout-cone-mode: false
+      - name: Stage the sample project
+        run: cp test/filesystem-audit/package.json test/filesystem-audit/package-lock.json .
 
       # The Job Summary's "Filesystem audit" section lists the programs the
       # install ran and every path it touched. The rules are the inspect

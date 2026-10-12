@@ -1,0 +1,7 @@
+{
+  "name": "buildcage-filesystem-audit-example",
+  "private": true,
+  "dependencies": {
+    "@hono/node-server": "2.1.4"
+  }
+}
