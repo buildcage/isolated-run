@@ -14,10 +14,10 @@ import {
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
-  frame,
   renderReportBlocks,
   reportFooter,
   reportHeading,
+  trafficFrame,
   trafficNotice,
 } from "#core/lib/report/render/render-report-markdown.ts";
 import type { ReportData } from "#core/lib/report/types.ts";
@@ -44,12 +44,12 @@ export function reportTitle(label: string | undefined, processActivity: boolean)
 
 /** The footer, after everything else the step writes to its Job Summary. */
 export function summaryFooter(actionRepo: string): SummaryBlock {
-  return frame(reportFooter(actionRepo));
+  return trafficFrame(reportFooter(actionRepo));
 }
 
 /** The title, for a summary written with no traffic report to open it. */
 export function missingReportFrame(title: string, isAudit: boolean): SummaryBlock {
-  return frame(
+  return trafficFrame(
     reportHeading(title, isAudit) +
       "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n",
   );

@@ -68890,7 +68890,7 @@ function trafficTableBlock(id, priority, before, table, after) {
 		head: before.split("\n").length + 1
 	};
 }
-const frame = (text) => ({
+const trafficFrame = (text) => ({
 	priority: 0,
 	level: 1,
 	section: SECTION$1,
@@ -68899,7 +68899,7 @@ const frame = (text) => ({
 });
 function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", refusalLabel, verdictItems, section, footer = !0, extraBlocks = () => [], ...step } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, h = section ? "####" : "###", heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = reportHeading(title, isAudit);
-	top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), section && (top += `### ${section}\n\n`), blocks.push(frame(top));
+	top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), section && (top += `### ${section}\n\n`), blocks.push(trafficFrame(top));
 	let wrote = !1, gap = () => wrote ? "\n" : "";
 	if (report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `${h} ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), report.blocked.length > 0 || report.failed.length > 0) {
 		let blocked = foldExpectedBlockedRows(report.blocked).map((r) => ({
@@ -68935,7 +68935,7 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 		}), wrote ||= example !== "";
 	}
 	let bottom = "";
-	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame(`${gap()}_(no communication)_\n\n`));
+	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(trafficFrame(`${gap()}_(no communication)_\n\n`));
 	let details = renderInspectDetailsBody(report.timeline, report.startedAt, refusalLabel);
 	return details && blocks.push({
 		id: TRAFFIC_BLOCK.log,
@@ -68946,7 +68946,7 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 		open: "\n<details>\n<summary>💬 Communication details</summary>\n\n",
 		text: details,
 		close: "</details>\n"
-	}), report.engine === "universal" && (bottom += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), footer && (bottom += reportFooter(actionRepo)), bottom && blocks.push(frame(bottom)), blocks;
+	}), report.engine === "universal" && (bottom += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), footer && (bottom += reportFooter(actionRepo)), bottom && blocks.push(trafficFrame(bottom)), blocks;
 }
 function reportHeading(title, isAudit) {
 	return `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
@@ -73470,13 +73470,7 @@ function wouldRefuseBlocks(timeline, keys, priority, gap, level) {
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => e.wouldRefuse?.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
 	if (!refusedByAwsCheck || at === -1) return blocks;
-	let link = {
-		priority: 0,
-		level: 1,
-		section: "traffic",
-		cut: "keep",
-		text: `\n<sub>*For an \`aws-\` reason, see [what to do](${`https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`}).*</sub>\n`
-	};
+	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, link = trafficFrame(`\n<sub>*For an \`aws-\` reason, see [what to do](${url}).*</sub>\n`);
 	return [
 		...blocks.slice(0, at + 1),
 		link,
@@ -73490,10 +73484,10 @@ function reportTitle(label, processActivity) {
 	return label ? `${title} — ${label}` : title;
 }
 function summaryFooter(actionRepo) {
-	return frame(reportFooter(actionRepo));
+	return trafficFrame(reportFooter(actionRepo));
 }
 function missingReportFrame(title, isAudit) {
-	return frame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
+	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
 }
 function computeReportOutcomes(report, { stepLabel, processActivity = !1, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
