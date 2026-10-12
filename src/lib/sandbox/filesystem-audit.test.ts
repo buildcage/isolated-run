@@ -11,7 +11,7 @@ import {
   hostCannotAudit,
   startFilesystemAudit,
   withoutCompatSyscalls,
-  alwaysAllowedSyscalls,
+  allowedSyscalls,
   type AuditChild,
 } from "./filesystem-audit.ts";
 
@@ -32,8 +32,8 @@ const REQUIREMENTS =
   "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF: " +
   "https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting";
 
-describe("alwaysAllowedSyscalls", () => {
-  it("lists the syscalls allowed whatever their arguments", () => {
+describe("allowedSyscalls", () => {
+  it("lists the syscalls allowed for any arguments or some", () => {
     const profile = {
       syscalls: [
         { names: ["read", "write"], action: "SCMP_ACT_ALLOW" },
@@ -44,9 +44,15 @@ describe("alwaysAllowedSyscalls", () => {
         { action: "SCMP_ACT_ALLOW" },
       ],
     };
-    expect(alwaysAllowedSyscalls(profile)).toStrictEqual(["read", "write", "personality", "uname"]);
-    expect(alwaysAllowedSyscalls(null)).toStrictEqual([]);
-    expect(alwaysAllowedSyscalls({})).toStrictEqual([]);
+    expect(allowedSyscalls(profile)).toStrictEqual([
+      "read",
+      "write",
+      "clone",
+      "personality",
+      "uname",
+    ]);
+    expect(allowedSyscalls(null)).toStrictEqual([]);
+    expect(allowedSyscalls({})).toStrictEqual([]);
   });
 });
 

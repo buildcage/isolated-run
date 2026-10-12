@@ -106,15 +106,15 @@ export function withoutCompatSyscalls(profile: unknown, arch = process.arch): un
   return { ...p, architectures: p.architectures.filter((a) => a === native) };
 }
 
-/** The syscalls a seccomp profile allows whatever their arguments; the tracer
- *  records any other that fails EPERM as one the profile refused. */
-export function alwaysAllowedSyscalls(profile: unknown): string[] {
+/** The syscalls a seccomp profile allows, for some arguments at least; the
+ *  tracer records any other that fails EPERM as one the profile refused. One
+ *  allowed only for some arguments is left out, since the kernel's own EPERM,
+ *  as for a raw socket, would read as the profile's. */
+export function allowedSyscalls(profile: unknown): string[] {
   const p = profile as { syscalls?: unknown } | null;
   if (!p || !Array.isArray(p.syscalls)) return [];
-  return p.syscalls.flatMap((s: { names?: unknown; action?: unknown; args?: unknown }) =>
-    s.action === "SCMP_ACT_ALLOW" &&
-    !(Array.isArray(s.args) && s.args.length) &&
-    Array.isArray(s.names)
+  return p.syscalls.flatMap((s: { names?: unknown; action?: unknown }) =>
+    s.action === "SCMP_ACT_ALLOW" && Array.isArray(s.names)
       ? s.names.filter((n): n is string => typeof n === "string")
       : [],
   );
@@ -281,7 +281,7 @@ export interface StartFilesystemAuditOptions {
   readyPath: string;
   /** The action's own process, whose exit stops the tracer if nothing else did. */
   watchPid: number;
-  /** See alwaysAllowedSyscalls. */
+  /** See allowedSyscalls. */
   allowedSyscalls: string[];
   /** Aborted when the step is cancelled, which ends the wait. */
   cancel?: AbortSignal;

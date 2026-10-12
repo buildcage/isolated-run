@@ -649,7 +649,8 @@ const INCOMPLETE_NOTE =
 // details, where they fit, show the rest.
 const REFUSED_SHOWN = 10;
 const REFUSED_COMMS_SHOWN = 3;
-// Past this many command and syscall pairs, the rest are left to the artifact.
+// Past this many command and syscall pairs, the rest but kills are left to the
+// artifact.
 const REFUSED_KEPT = 200;
 
 // Each refused syscall with the commands it was refused to, in the order
@@ -657,7 +658,9 @@ const REFUSED_KEPT = 200;
 function refusedNote(rows: RefusedRow[]): string {
   const byName = new Map<string, Set<string>>();
   const killed = new Set<string>();
+  let anyKilled = false;
   for (const { syscall, comm } of inRecordingOrder(rows)) {
+    anyKilled ||= syscall.killed;
     const comms = syscall.killed ? killed : (byName.get(syscall.name) ?? new Set<string>());
     if (!syscall.killed) byName.set(syscall.name, comms);
     if (comm) comms.add(comm);
@@ -669,7 +672,7 @@ function refusedNote(rows: RefusedRow[]): string {
   const names = [...byName].map(([name, c]) => codeSpan(name) + (c.size ? ` (${comms(c)})` : ""));
   const parts = [];
   if (names.length) parts.push(`Refused system calls: ${list(names, REFUSED_SHOWN)}`);
-  if (killed.size || rows.some((r) => r.syscall.killed)) {
+  if (anyKilled) {
     const by = killed.size ? `: ${comms(killed)}` : "";
     parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call${by}`);
   }
@@ -885,15 +888,15 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       return;
     }
     if (r.kind === "syscall") {
-      const name = escapeForDisplay(r.syscall ?? "");
-      const path =
-        SYSCALL_PREFIX + (r.killed ? ["32-bit", name, "(killed)"].filter(Boolean).join(" ") : name);
+      const name = escapeForDisplay(r.syscall || "?");
+      const path = SYSCALL_PREFIX + (r.killed ? `32-bit ${name} (killed)` : name);
       const comm = escapeForDisplay(r.comm ?? "");
       const key = keyOf(comm, path);
       const t = Date.parse(r.t ?? "");
       let row = refused.get(key);
       if (!row) {
-        if (refused.size >= REFUSED_KEPT) return;
+        // A kill explains a step's "Bad system call", so it is always kept.
+        if (refused.size >= REFUSED_KEPT && !r.killed) return;
         row = { agg: newAgg(), flags: "!", comm, path, syscall: { name, killed: !!r.killed } };
         refused.set(key, row);
       }

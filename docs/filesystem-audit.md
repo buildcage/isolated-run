@@ -181,7 +181,8 @@ that only ran programs has no accessed paths table, and the flag legend opens th
   `io_uring_setup` or `unshare`, which fails with `EPERM`. The note under the heading names each one
   with the first commands that made it, and the details, where they fit, show it once per program,
   as `syscall:io_uring_setup` with `!`. One already recorded as a failed change to a path is not
-  repeated. A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a
+  repeated, and one the profile allows for some arguments, as `clone` without namespace flags, is
+  not recorded, since the kernel's own `EPERM` for it would read the same. A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a
   thread killed while others run on is not recorded.
 
 ### Flags
@@ -308,7 +309,7 @@ Unlike the summary, it also lists a directory that was made and then written und
 | `deleted`  | a deleted or never-named file                  | a file deleted while it was open, or created without a name and never given one                                                                      |
 | `exchange` | `rename`                                       | a swap of two paths, which shows `M` on both in the summary                                                                                          |
 | `syscall`  | `syscall`                                      | the system call's name, or its number where the tracer has no name for it                                                                            |
-| `compat`   | `syscall`                                      | a 32-bit system call                                                                                                                                 |
+| `compat`   | `syscall`                                      | a 32-bit or x32 system call                                                                                                                          |
 | `killed`   | `syscall`                                      | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                    |
 
 A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted` and `exchange`

@@ -68668,13 +68668,14 @@ function fmtFlags(a) {
 }
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "\n### 🗂️ Filesystem audit";
 function refusedNote(rows) {
-	let byName = new Map(), killed = new Set();
+	let byName = new Map(), killed = new Set(), anyKilled = !1;
 	for (let { syscall, comm } of inRecordingOrder(rows)) {
+		anyKilled ||= syscall.killed;
 		let comms = syscall.killed ? killed : byName.get(syscall.name) ?? new Set();
 		syscall.killed || byName.set(syscall.name, comms), comm && comms.add(comm);
 	}
 	let list = (items, shown) => items.slice(0, shown).join(", ") + (items.length > shown ? ` and ${items.length - shown} more` : ""), comms = (c) => list([...c].map(codeSpan), 3), names = [...byName].map(([name, c]) => codeSpan(name) + (c.size ? ` (${comms(c)})` : "")), parts = [];
-	if (names.length && parts.push(`Refused system calls: ${list(names, 10)}`), killed.size || rows.some((r) => r.syscall.killed)) {
+	if (names.length && parts.push(`Refused system calls: ${list(names, 10)}`), anyKilled) {
 		let by = killed.size ? `: ${comms(killed)}` : "";
 		parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call${by}`);
 	}
@@ -68750,13 +68751,9 @@ function createAuditSummary(prefixes) {
 				return;
 			}
 			if (r.kind === "syscall") {
-				let name = escapeForDisplay(r.syscall ?? ""), path = "syscall:" + (r.killed ? [
-					"32-bit",
-					name,
-					"(killed)"
-				].filter(Boolean).join(" ") : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
+				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
 				if (!row) {
-					if (refused.size >= 200) return;
+					if (refused.size >= 200 && !r.killed) return;
 					row = {
 						agg: newAgg(),
 						flags: "!",
@@ -70381,9 +70378,9 @@ function withoutCompatSyscalls(profile, arch = process.arch) {
 		architectures: p.architectures.filter((a) => a === native)
 	};
 }
-function alwaysAllowedSyscalls(profile) {
+function allowedSyscalls(profile) {
 	let p = profile;
-	return !p || !Array.isArray(p.syscalls) ? [] : p.syscalls.flatMap((s) => s.action === "SCMP_ACT_ALLOW" && !(Array.isArray(s.args) && s.args.length) && Array.isArray(s.names) ? s.names.filter((n) => typeof n == "string") : []);
+	return !p || !Array.isArray(p.syscalls) ? [] : p.syscalls.flatMap((s) => s.action === "SCMP_ACT_ALLOW" && Array.isArray(s.names) ? s.names.filter((n) => typeof n == "string") : []);
 }
 function checkFilesystemAuditHost(probes = realHostProbes) {
 	if (probes.cgroupPath() === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
@@ -72463,7 +72460,7 @@ async function startAudit(dir, config, options, deps) {
 		pidFilePath: filesystemAudit.pidFilePath,
 		readyPath: (0, node_path.join)(dir, "filesystem-audit.ready"),
 		watchPid: process.pid,
-		allowedSyscalls: alwaysAllowedSyscalls(config.linux.seccomp),
+		allowedSyscalls: allowedSyscalls(config.linux.seccomp),
 		cancel: options.cancel
 	});
 	return options.onAuditAttached?.(), handle;

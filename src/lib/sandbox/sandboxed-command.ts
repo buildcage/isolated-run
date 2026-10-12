@@ -28,7 +28,7 @@ import {
   type AuditHandle,
   type FilesystemAuditPaths,
   withoutCompatSyscalls,
-  alwaysAllowedSyscalls,
+  allowedSyscalls,
 } from "./filesystem-audit.ts";
 import {
   jvmTools,
@@ -547,7 +547,7 @@ async function startAudit(
     pidFilePath: filesystemAudit.pidFilePath,
     readyPath: join(dir, "filesystem-audit.ready"),
     watchPid: process.pid,
-    allowedSyscalls: alwaysAllowedSyscalls(config.linux.seccomp),
+    allowedSyscalls: allowedSyscalls(config.linux.seccomp),
     cancel: options.cancel,
   });
   options.onAuditAttached?.();
