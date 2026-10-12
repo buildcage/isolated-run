@@ -364,9 +364,9 @@ describe("prepareStepFilesystemAudit", () => {
       outputs,
       writes,
     } = deps({
-      renderBlocks: (summary, startedAt, priorities, cutNote, ...rest) => {
-        notes.push(cutNote());
-        return renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, ...rest);
+      renderBlocks: (summary, opts) => {
+        notes.push(opts.cutNote());
+        return renderAuditSummaryBlocks(summary, opts);
       },
     });
 
@@ -396,7 +396,7 @@ describe("prepareStepFilesystemAudit", () => {
   it("names the artifact in the note for a part given up, with why", async () => {
     const notes: string[] = [];
     const { deps: d } = deps({
-      renderBlocks: (_summary, _startedAt, _priorities, cutNote) => {
+      renderBlocks: (_summary, { cutNote }) => {
         notes.push(cutNote("paths"), cutNote());
         return [];
       },

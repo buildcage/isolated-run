@@ -242,14 +242,13 @@ export async function prepareStepFilesystemAudit(
       let rendered: SummaryBlock[];
       try {
         if (!summary) throw summaryError;
-        rendered = deps.renderBlocks(
-          summary,
+        rendered = deps.renderBlocks(summary, {
           startedAt,
-          FILESYSTEM_PRIORITIES,
+          priorities: FILESYSTEM_PRIORITIES,
           cutNote,
           legendNote,
-          `${guide}#skipped-hooks`,
-        );
+          skippedHooksUrl: `${guide}#skipped-hooks`,
+        });
       } catch (e) {
         annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
         return [];

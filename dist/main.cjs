@@ -69015,7 +69015,7 @@ function classifyLink(r, letter, failed, perm) {
 const BIT = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i])), letterBits = new Map();
 function bitsOf(letter) {
 	let bits = letterBits.get(letter);
-	return bits === void 0 && (bits = [...letter].reduce((b, l) => b | BIT[l], 0), letterBits.set(letter, bits)), bits;
+	return bits === void 0 && (bits = letter.split("").reduce((b, l) => b | BIT[l], 0), letterBits.set(letter, bits)), bits;
 }
 function procOf(gens, r) {
 	r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
@@ -69151,32 +69151,23 @@ function skippedNote(count, url) {
 	return `> ❗ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
 > accesses may be missing from this summary and from the artifact.${why}`;
 }
-const SECTION = "filesystem", DETAILS_OPEN = "<details>\n<summary>🔍 Process details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
+const SECTION = "filesystem", FILESYSTEM_BLOCK = {
 	executed: "filesystem-executed",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
-};
+}, keyed = (rows) => rows.map((row) => {
+	let [cat, path] = sortKey(row.path);
+	return {
+		row,
+		cat,
+		path
+	};
+}), byRecording = (a, b) => a.row.agg.seq - b.row.agg.seq || a.cat - b.cat || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.row.comm < b.row.comm ? -1 : 1);
 function inRecordingOrder(rows) {
-	return rows.toSorted((a, b) => {
-		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
-		return a.agg.seq - b.agg.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
-	});
+	return keyed(rows).sort(byRecording).map((k) => k.row);
 }
-function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote, skippedHooksUrl) {
-	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut, detailsCut } = summary, heading = [
-		HEADING,
-		...ended && !lost ? [] : ["> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
-		...hostMissed ? [skippedNote(hostMissed, skippedHooksUrl)] : [],
-		...refused.length ? [refusedNote(refused)] : []
-	].join("\n\n"), frame = (text) => ({
-		priority: 0,
-		level: 1,
-		section: SECTION,
-		text,
-		cut: "keep"
-	});
-	if (details?.length === 0 && !refused.length) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
-	let blocks = [frame(legendNote ? `${heading}\n\n<sub>${legendNote}</sub>\n\n` : `${heading}\n\n`)], table = (id, level, title, md, cause, legend) => md === void 0 ? {
+function table({ priorities, cutNote }, id, level, title, md, cause, legend) {
+	return md === void 0 ? {
 		id,
 		priority: priorities[id],
 		level,
@@ -69192,39 +69183,60 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		cut: "lines",
 		head: legend ? 6 : 4
 	};
-	executed.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, 2, "Executed Programs", markdownRows(["Path", "Count"], executed.map((e) => [pathCell(e), String(e.runs)]))));
-	let byPath = paths && inRecordingOrder(paths).sort((a, b) => {
-		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
-		return ca - cb || (pa < pb ? -1 : +(pa > pb));
-	});
-	if (byPath?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.paths, 3, "Accessed Paths", byPath && markdownRows(["Path", "Access"], byPath.map((r) => [pathCell(r), r.flags])), pathsCut, LEGEND)), !byPath) return blocks;
+}
+function executedBlock(executed, opts) {
+	return table(opts, FILESYSTEM_BLOCK.executed, 2, "Executed Programs", markdownRows(["Path", "Count"], executed.map((e) => [pathCell(e), String(e.runs)])));
+}
+function byPath(paths) {
+	return keyed(paths).sort(byRecording).sort((a, b) => a.cat - b.cat || (a.path < b.path ? -1 : +(a.path > b.path))).map((k) => k.row);
+}
+function pathsBlock(rows, cause, opts) {
+	return table(opts, FILESYSTEM_BLOCK.paths, 3, "Accessed Paths", rows && markdownRows(["Path", "Access"], rows.map((r) => [pathCell(r), r.flags])), cause, LEGEND);
+}
+function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, priorities, cutNote }) {
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
-		level: 4
-	};
-	if (!details) return blocks.push({
-		...log,
+		level: 4,
 		section: SECTION,
+		open: "<details>\n<summary>🔍 Process details</summary>\n\n",
+		close: "</details>\n"
+	};
+	if (!details) return {
+		...log,
 		cut: "atomic",
-		open: DETAILS_OPEN,
-		text: cutNote(detailsCut),
-		close: DETAILS_CLOSE
-	}), blocks;
+		text: cutNote(detailsCut)
+	};
 	let rows = inRecordingOrder([...details, ...refused]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), columns = [
 		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
 		"flags",
 		"command",
 		"path"
-	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`).join("\n"), legend = byPath.length === 0 ? `<sub>${LEGEND}</sub>\n\n` : "";
-	return blocks.push({
+	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`).join("\n"), legend = legendDue ? `<sub>${LEGEND}</sub>\n\n` : "";
+	return {
 		...log,
-		section: SECTION,
 		cut: "lines",
-		open: DETAILS_OPEN,
-		text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`,
-		close: DETAILS_CLOSE
-	}), blocks;
+		text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`
+	};
+}
+function renderAuditSummaryBlocks(summary, opts) {
+	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut } = summary, heading = [
+		HEADING,
+		...ended && !lost ? [] : ["> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
+		...hostMissed ? [skippedNote(hostMissed, opts.skippedHooksUrl)] : [],
+		...refused.length ? [refusedNote(refused)] : []
+	].join("\n\n"), frame = (text) => ({
+		priority: 0,
+		level: 1,
+		section: SECTION,
+		text,
+		cut: "keep"
+	});
+	if (details?.length === 0 && !refused.length) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
+	let blocks = [frame(opts.legendNote ? `${heading}\n\n<sub>${opts.legendNote}</sub>\n\n` : `${heading}\n\n`)];
+	executed.length !== 0 && blocks.push(executedBlock(executed, opts));
+	let rows = paths && byPath(paths);
+	return rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, rows.length === 0, opts)), blocks;
 }
 function unreadableSummaryBlocks() {
 	return [{
@@ -69680,7 +69692,13 @@ async function prepareStepFilesystemAudit({ audit, attached, upload, retentionDa
 			let rendered;
 			try {
 				if (!summary) throw summaryError;
-				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, cutNote, legendNote, `${guide}#skipped-hooks`);
+				rendered = deps.renderBlocks(summary, {
+					startedAt,
+					priorities: FILESYSTEM_PRIORITIES,
+					cutNote,
+					legendNote,
+					skippedHooksUrl: `${guide}#skipped-hooks`
+				});
 			} catch (e) {
 				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
 			}

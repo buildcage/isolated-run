@@ -4,7 +4,7 @@ import { fmtSpan } from "./agg.ts";
 import { codeSpan, markdownRows, pathCell } from "./escape.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
-import type { AuditSummary, RefusedRow, Row } from "./reduce.ts";
+import type { AuditSummary, Executed, RefusedRow, Row } from "./reduce.ts";
 
 const LEGEND =
   "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied";
@@ -75,139 +75,133 @@ export type FilesystemBlockId = (typeof FILESYSTEM_BLOCK)[keyof typeof FILESYSTE
 /** The priority of each block that can be cut; see SummaryBlock.priority. */
 export type FilesystemPriorities = Record<FilesystemBlockId, number>;
 
-// In recording order, not by time, which a clock step could reorder. Rows
-// with no time go last, in path order.
-function inRecordingOrder<R extends Row>(rows: R[]): R[] {
-  return rows.toSorted((a, b) => {
-    const [ca, pa] = sortKey(a.path);
-    const [cb, pb] = sortKey(b.path);
-    return (
-      a.agg.seq - b.agg.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1)
-    );
-  });
+// A row with its sort key, worked out once rather than on every comparison.
+interface Keyed<R extends Row> {
+  row: R;
+  cat: number;
+  path: string;
 }
 
-/**
- * The summary as blocks for fitStepSummary, in print order: a frame (heading,
- * notes and `legendNote`) kept whole, the executed table, the accessed-paths
- * table under the flag legend, and the full per-command record folded into a
- * details element. The tables and the record take their priorities from
- * `priorities`; one too large to print at all says `cutNote` in its place.
- */
-export function renderAuditSummaryBlocks(
-  summary: AuditSummary,
-  startedAt: number | undefined,
-  priorities: FilesystemPriorities,
-  cutNote: (cause?: CutCause) => string,
-  legendNote?: string,
-  /** Where the skipped-hooks note links to. */
-  skippedHooksUrl?: string,
-): SummaryBlock[] {
-  const { ended, lost, hostMissed, executed, paths, details, refused, pathsCut, detailsCut } =
-    summary;
-  const heading = [
-    HEADING,
-    ...(ended && !lost ? [] : [INCOMPLETE_NOTE]),
-    ...(hostMissed ? [skippedNote(hostMissed, skippedHooksUrl)] : []),
-    ...(refused.length ? [refusedNote(refused)] : []),
-  ].join("\n\n");
-  const frame = (text: string): SummaryBlock => ({
-    priority: 0,
-    level: 1,
-    section: SECTION,
-    text,
-    cut: "keep",
+const keyed = <R extends Row>(rows: R[]): Keyed<R>[] =>
+  rows.map((row) => {
+    const [cat, path] = sortKey(row.path);
+    return { row, cat, path };
   });
-  if (details?.length === 0 && !refused.length)
-    return [frame(`${heading}\n\nNo file access was recorded.\n`)];
 
-  const blocks: SummaryBlock[] = [
-    frame(legendNote ? `${heading}\n\n<sub>${legendNote}</sub>\n\n` : `${heading}\n\n`),
-  ];
-  // Each part sits a level below the one before it, so once one is cut the
-  // parts after it print nothing and its note stands for them all.
-  const table = (
-    id: FilesystemBlockId,
-    level: number,
-    title: string,
-    md: string | undefined,
-    cause?: CutCause,
-    legend?: string,
-  ): SummaryBlock =>
-    md === undefined
-      ? {
-          id,
-          priority: priorities[id],
-          level,
-          section: SECTION,
-          text: `#### ${title}\n\n${cutNote(cause)}`,
-          cut: "atomic",
-        }
-      : {
-          id,
-          priority: priorities[id],
-          level,
-          section: SECTION,
-          text: `#### ${title}\n\n${legend ? `<sub>${legend}</sub>\n\n` : ""}${md}\n\n`,
-          cut: "lines",
-          head: legend ? 6 : 4,
-        };
+// In recording order, not by time, which a clock step could reorder. Rows
+// with no time go last, in path order.
+const byRecording = <R extends Row>(a: Keyed<R>, b: Keyed<R>): number =>
+  a.row.agg.seq - b.row.agg.seq ||
+  a.cat - b.cat ||
+  (a.path < b.path ? -1 : a.path > b.path ? 1 : a.row.comm < b.row.comm ? -1 : 1);
 
-  if (executed.length !== 0) {
-    blocks.push(
-      table(
-        FILESYSTEM_BLOCK.executed,
-        2,
-        "Executed Programs",
-        markdownRows(
-          ["Path", "Count"],
-          executed.map((e) => [pathCell(e), String(e.runs)]),
-        ),
+function inRecordingOrder<R extends Row>(rows: R[]): R[] {
+  return keyed(rows)
+    .sort(byRecording)
+    .map((k) => k.row);
+}
+
+export interface RenderOptions {
+  /** The proxy's start, in epoch seconds; undefined counts from the first access shown. */
+  startedAt: number | undefined;
+  priorities: FilesystemPriorities;
+  /** What a part too large to print at all says in its place. */
+  cutNote: (cause?: CutCause) => string;
+  /** The line under the heading. */
+  legendNote?: string;
+  /** Where the skipped-hooks note links to. */
+  skippedHooksUrl?: string;
+}
+
+// Each part sits a level below the one before it, so once one is cut the
+// parts after it print nothing and its note stands for them all.
+function table(
+  { priorities, cutNote }: RenderOptions,
+  id: FilesystemBlockId,
+  level: number,
+  title: string,
+  md: string | undefined,
+  cause?: CutCause,
+  legend?: string,
+): SummaryBlock {
+  return md === undefined
+    ? {
+        id,
+        priority: priorities[id],
+        level,
+        section: SECTION,
+        text: `#### ${title}\n\n${cutNote(cause)}`,
+        cut: "atomic",
+      }
+    : {
+        id,
+        priority: priorities[id],
+        level,
+        section: SECTION,
+        text: `#### ${title}\n\n${legend ? `<sub>${legend}</sub>\n\n` : ""}${md}\n\n`,
+        cut: "lines",
+        head: legend ? 6 : 4,
+      };
+}
+
+function executedBlock(executed: Executed[], opts: RenderOptions): SummaryBlock {
+  return table(
+    opts,
+    FILESYSTEM_BLOCK.executed,
+    2,
+    "Executed Programs",
+    markdownRows(
+      ["Path", "Count"],
+      executed.map((e) => [pathCell(e), String(e.runs)]),
+    ),
+  );
+}
+
+// Two paths can print alike ("x" and "…/x"), so they keep their recording
+// order between them.
+function byPath(paths: Row[]): Row[] {
+  return keyed(paths)
+    .sort(byRecording)
+    .sort((a, b) => a.cat - b.cat || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    .map((k) => k.row);
+}
+
+function pathsBlock(
+  rows: Row[] | undefined,
+  cause: CutCause | undefined,
+  opts: RenderOptions,
+): SummaryBlock {
+  return table(
+    opts,
+    FILESYSTEM_BLOCK.paths,
+    3,
+    "Accessed Paths",
+    rows &&
+      markdownRows(
+        ["Path", "Access"],
+        rows.map((r) => [pathCell(r), r.flags]),
       ),
-    );
-  }
-  // Two paths can print alike ("x" and "…/x"), so they keep their recording
-  // order between them.
-  const byPath =
-    paths &&
-    inRecordingOrder(paths).sort((a, b) => {
-      const [ca, pa] = sortKey(a.path);
-      const [cb, pb] = sortKey(b.path);
-      return ca - cb || (pa < pb ? -1 : pa > pb ? 1 : 0);
-    });
-  // Empty when the step only ran programs, which the executed table lists.
-  if (byPath?.length !== 0) {
-    blocks.push(
-      table(
-        FILESYSTEM_BLOCK.paths,
-        3,
-        "Accessed Paths",
-        byPath &&
-          markdownRows(
-            ["Path", "Access"],
-            byPath.map((r) => [pathCell(r), r.flags]),
-          ),
-        pathsCut,
-        // The flags are explained where they first appear.
-        LEGEND,
-      ),
-    );
-  }
+    cause,
+    // The flags are explained where they first appear.
+    LEGEND,
+  );
+}
 
-  // The table's note stands for the details too.
-  if (!byPath) return blocks;
-  const log = { id: FILESYSTEM_BLOCK.log, priority: priorities[FILESYSTEM_BLOCK.log], level: 4 };
-  if (!details) {
-    blocks.push({
-      ...log,
-      section: SECTION,
-      cut: "atomic",
-      open: DETAILS_OPEN,
-      text: cutNote(detailsCut),
-      close: DETAILS_CLOSE,
-    });
-    return blocks;
-  }
+function detailsBlock(
+  { details, refused, detailsCut }: AuditSummary,
+  /** Whether the flag legend is still to be shown. */
+  legendDue: boolean,
+  { startedAt, priorities, cutNote }: RenderOptions,
+): SummaryBlock {
+  const log = {
+    id: FILESYSTEM_BLOCK.log,
+    priority: priorities[FILESYSTEM_BLOCK.log],
+    level: 4,
+    section: SECTION,
+    open: DETAILS_OPEN,
+    close: DETAILS_CLOSE,
+  };
+  if (!details) return { ...log, cut: "atomic", text: cutNote(detailsCut) };
   const rows = inRecordingOrder([...details, ...refused]);
   // Times count from the proxy's start, as the communication details do, or
   // from the first access shown when that start is unknown.
@@ -236,17 +230,53 @@ export function renderAuditSummaryBlocks(
         `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`,
     )
     .join("\n");
+  const legend = legendDue ? `<sub>${LEGEND}</sub>\n\n` : "";
+  return {
+    ...log,
+    cut: "lines",
+    text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`,
+  };
+}
+
+/**
+ * The summary as blocks for fitStepSummary, in print order: a frame (heading,
+ * notes and the legend note) kept whole, the executed table, the accessed-paths
+ * table under the flag legend, and the full per-command record folded into a
+ * details element.
+ */
+export function renderAuditSummaryBlocks(
+  summary: AuditSummary,
+  opts: RenderOptions,
+): SummaryBlock[] {
+  const { ended, lost, hostMissed, executed, paths, details, refused, pathsCut } = summary;
+  const heading = [
+    HEADING,
+    ...(ended && !lost ? [] : [INCOMPLETE_NOTE]),
+    ...(hostMissed ? [skippedNote(hostMissed, opts.skippedHooksUrl)] : []),
+    ...(refused.length ? [refusedNote(refused)] : []),
+  ].join("\n\n");
+  const frame = (text: string): SummaryBlock => ({
+    priority: 0,
+    level: 1,
+    section: SECTION,
+    text,
+    cut: "keep",
+  });
+  if (details?.length === 0 && !refused.length)
+    return [frame(`${heading}\n\nNo file access was recorded.\n`)];
+
+  const blocks: SummaryBlock[] = [
+    frame(opts.legendNote ? `${heading}\n\n<sub>${opts.legendNote}</sub>\n\n` : `${heading}\n\n`),
+  ];
+  if (executed.length !== 0) blocks.push(executedBlock(executed, opts));
+  const rows = paths && byPath(paths);
+  // Empty when the step only ran programs, which the executed table lists.
+  if (rows?.length !== 0) blocks.push(pathsBlock(rows, pathsCut, opts));
+  // The table's note stands for the details too.
+  if (!rows) return blocks;
   // A step that only ran programs has no accessed paths table, so the
   // details are the first to show flags.
-  const legend = byPath.length === 0 ? `<sub>${LEGEND}</sub>\n\n` : "";
-  blocks.push({
-    ...log,
-    section: SECTION,
-    cut: "lines",
-    open: DETAILS_OPEN,
-    text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`,
-    close: DETAILS_CLOSE,
-  });
+  blocks.push(detailsBlock(summary, rows.length === 0, opts));
   return blocks;
 }
 

@@ -106,7 +106,7 @@ const letterBits = new Map<string, number>();
 export function bitsOf(letter: string): number {
   let bits = letterBits.get(letter);
   if (bits === undefined) {
-    bits = [...letter].reduce((b, l) => b | BIT[l], 0);
+    bits = letter.split("").reduce((b, l) => b | BIT[l], 0);
     letterBits.set(letter, bits);
   }
   return bits;
