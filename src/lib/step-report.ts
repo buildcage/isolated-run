@@ -74,11 +74,8 @@ export interface ReportStepOptions {
    * when unknown), fitted into GitHub's limit together with the report.
    */
   moreBlocks?: (startedAt: number | undefined) => SummaryBlock[];
-  /**
-   * Whether the step records its process activity. The title names it when it
-   * is written with the report and `moreBlocks` has it, or, with
-   * `closeSummary: false`, when it is to come later.
-   */
+  /** Whether the step records its process activity, which the title names
+   *  when its section is there or still to come. */
   processActivity: boolean;
   /** False leaves the footer to a part of the summary written later. */
   closeSummary?: boolean;
@@ -226,10 +223,9 @@ export interface LateSummaryOptions {
 }
 
 /**
- * Writes the part of the summary that follows a report written with
- * `closeSummary: false`, and closes the summary. It opens under a title of its
- * own when the report was not written, and writes nothing when neither has
- * anything to say. Never throws, as writeMoreSummary does not.
+ * Writes what follows a report written with `closeSummary: false`, then the
+ * footer. Opens under its own title when the report was not written; writes
+ * nothing when neither has anything to say.
  */
 export async function writeLateSummary(
   blocks: SummaryBlock[],

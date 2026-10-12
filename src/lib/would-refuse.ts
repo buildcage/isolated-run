@@ -128,7 +128,7 @@ export function describeWouldRefuse(timeline: TrafficEvent[]): OutcomeEmission |
  * is refused, and a row for each host would bury the other refusals. The rest
  * are counted by host and reason, as in Blocked Hosts. The first block opens
  * with `gap`, the blank line renderReportBlocks owes a block before it, and
- * the heading takes `level`'s, the host tables'.
+ * `level` is the host tables' heading level.
  */
 export function wouldRefuseBlocks(
   timeline: TrafficEvent[],

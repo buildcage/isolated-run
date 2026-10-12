@@ -118,9 +118,7 @@ export function readActionVersion(
   return readImageActionVersion(client, containerName, proxyEngine);
 }
 
-/** The step's Job Summary title, which names the process activity section
- *  only when the step has one. `label` is the untrusted input, which the
- *  renderer escapes along with the rest of the title. */
+/** `label` is untrusted input; the renderer escapes the whole title. */
 export function reportTitle(label: string | undefined, processActivity: boolean): string {
   const title = processActivity ? "Traffic & Process Activity Report" : "Outbound Traffic Report";
   return label ? `${title} — ${label}` : title;
