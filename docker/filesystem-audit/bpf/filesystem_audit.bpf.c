@@ -345,11 +345,11 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
  */
 static __always_inline void open_failed(u32 slot, struct event *e, long ret, int dfd, u32 flags)
 {
-	// A name kept cut for want of tails, marked in n2, has lost its end, the
-	// part that names the file; n2 tells the reader.
+	// A cut name, marked in n2 for the reader, has lost its end, the part that
+	// names the file; one cut for want of tails is also counted.
 	u8 cut = e->n2;
 	u32 off = e->data_len;
-	if (cut)
+	if (cut == NAME_CUT_HELD)
 		bump(&untracked);
 	// start resets the header of the scratch e is in.
 	if (start(slot, K_OPEN_FAILED) != e)

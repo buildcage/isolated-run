@@ -33,6 +33,15 @@ static __always_inline int is_restart(long ret)
 	return ret <= -512 && ret >= -516;
 }
 
+/**
+ * @name A failed open's cut name
+ * What n2 says of an open(2) hold's name, whose end is lost.
+ * @{
+ */
+#define NAME_CUT_HELD 1 ///< Cut to fit the head, as no tails were free.
+#define NAME_CUT_READ 2 ///< Read from the caller, and longer than PATH_LEN.
+/** @} */
+
 #define HELD_OP 1   ///< A path change, held from its security_path_* hook.
 #define HELD_OPEN 2 ///< An open(2), held from do_filp_open (see open_name()).
 
@@ -467,8 +476,8 @@ static __always_inline void report_held(u32 slot, struct held_key *k, struct eve
  *
  * No hold outlives its syscall (see on_sys_exit), so one already there is this
  * open's, and its name is read. A name that needs tails when none are free is
- * kept cut, marked in n2. A full pool counts in untracked even if this open
- * then succeeds and is recorded.
+ * kept cut, marked in n2, as is a caller's name longer than PATH_LEN. A full
+ * pool counts in untracked even if this open then succeeds and is recorded.
  */
 static __always_inline void open_name(u32 slot, const char *name, int user)
 {
@@ -492,12 +501,14 @@ static __always_inline void open_name(u32 slot, const char *name, int user)
 		return;
 	}
 	e->data_len = r;
+	if (user && r == PATH_LEN)
+		e->n2 = NAME_CUT_READ;
 	if (hold_new(e, HELD_OPEN) == 0)
 		return;
 	if (e->data_len > HEAD_DATA) {
 		e->data[HEAD_DATA - 1] = 0;
 		e->data_len = HEAD_DATA;
-		e->n2 = 1;
+		e->n2 = NAME_CUT_HELD;
 		if (hold_new(e, HELD_OPEN) == 0)
 			return;
 	}
