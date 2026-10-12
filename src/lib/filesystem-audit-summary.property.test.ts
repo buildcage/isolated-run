@@ -1,7 +1,8 @@
 import fc from "fast-check";
 import { describe, it, expect } from "vitest";
 
-import { dropWalkedDirs, keyOf, renderFilesystemAuditSummary } from "./filesystem-audit-summary.ts";
+import { dropWalkedDirs, keyOf } from "./filesystem-audit-summary.ts";
+import { renderFilesystemAuditSummary } from "./test/filesystem-audit.ts";
 
 const START = 1_791_244_800; // epoch seconds
 const PREFIXES = { workspace: ["/work"], home: ["/home/u"], startedAt: START };

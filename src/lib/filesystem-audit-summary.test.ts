@@ -2,13 +2,11 @@ import { describe, it, expect } from "vitest";
 
 import { fitStepSummary, withNotices } from "#core/lib/report/render/fit-step-summary.ts";
 
+import { dropWalkedDirs, keyOf, type SummaryOptions } from "./filesystem-audit-summary.ts";
 import {
-  dropWalkedDirs,
-  keyOf,
   renderFilesystemAuditBlocks,
   renderFilesystemAuditSummary,
-  type SummaryOptions,
-} from "./filesystem-audit-summary.ts";
+} from "./test/filesystem-audit.ts";
 
 const PREFIXES: SummaryOptions = { workspace: ["/work"], home: ["/home/u"] };
 

@@ -68353,6 +68353,48 @@ function failOrWarn(annotation, failClosed) {
 	};
 }
 //#endregion
+//#region src/lib/filesystem-audit-strip.ts
+const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && r.access === "r";
+function createStripper(scratchBase) {
+	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), asRecord = (r) => typeof r == "object" && r ? r : void 0, ownShellPids = new Set(), shell, script, init, boundary = -1, observed = 0, filtered = 0;
+	return {
+		observe: (rec) => {
+			let i = observed++, r = asRecord(rec);
+			r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 ? [shell, script, boundary, init] = [
+				r.pid,
+				r.path,
+				i,
+				r.ppid
+			] : r.pid !== shell && ownShellPids.add(r.pid) : ownShellPids.add(r.pid));
+		},
+		filter: (line, rec) => {
+			let i = filtered++, r = asRecord(rec);
+			if (r === void 0) return line === "" ? void 0 : {
+				line,
+				record: rec
+			};
+			r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
+			let readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
+			if (!(shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript))) {
+				if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
+					let record = {
+						...r,
+						comm: "bash"
+					};
+					return {
+						line: JSON.stringify(record),
+						record
+					};
+				}
+				return {
+					line,
+					record: rec
+				};
+			}
+		}
+	};
+}
+//#endregion
 //#region src/core/lib/report/elapsed-time.ts
 function toParts(elapsedSeconds) {
 	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
@@ -68687,9 +68729,7 @@ const SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>🔍 Process
 	executed: "filesystem-executed",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
-};
-Object.fromEntries(Object.values(FILESYSTEM_BLOCK).map((id) => [id, 0]));
-const LIMITS = {
+}, LIMITS = {
 	bytes: STEP_SUMMARY_LIMIT_BYTES,
 	nodes: 2e5,
 	loads: 2e5
@@ -68920,45 +68960,30 @@ function filesystemTruncationNote(artifact, cause = "size") {
 	return `_…truncated: ${cause === "paths" ? "the filesystem audit touched too many distinct paths to summarize" : "the filesystem audit exceeded GitHub's Job Summary size limit"}; ${rest}._\n\n`;
 }
 //#endregion
-//#region src/lib/filesystem-audit-strip.ts
-const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && r.access === "r";
-function createStripper(scratchBase) {
-	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), asRecord = (r) => typeof r == "object" && r ? r : void 0, ownShellPids = new Set(), shell, script, init, boundary = -1, observed = 0, filtered = 0;
-	return {
-		observe: (rec) => {
-			let i = observed++, r = asRecord(rec);
-			r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 ? [shell, script, boundary, init] = [
-				r.pid,
-				r.path,
-				i,
-				r.ppid
-			] : r.pid !== shell && ownShellPids.add(r.pid) : ownShellPids.add(r.pid));
-		},
-		filter: (line, rec) => {
-			let i = filtered++, r = asRecord(rec);
-			if (r === void 0) return line === "" ? void 0 : {
-				line,
-				record: rec
-			};
-			r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
-			let readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
-			if (!(shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript))) {
-				if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
-					let record = {
-						...r,
-						comm: "bash"
-					};
-					return {
-						line: JSON.stringify(record),
-						record
-					};
-				}
-				return {
-					line,
-					record: rec
-				};
-			}
+//#region src/lib/filesystem-audit-reduce.ts
+function reduceRecording(forEachLine, scratchBase, options, openSink, createSummary = createAuditSummary) {
+	let stripper = createStripper(scratchBase), summary = createSummary(options), summaryError, failedSummary = !1, summarize = (step) => {
+		if (!failedSummary) try {
+			step();
+		} catch (e) {
+			[failedSummary, summaryError] = [!0, e];
 		}
+	}, lines = 0, length = 0;
+	forEachLine((line) => {
+		lines++, length += line.length;
+		let r = parseLine(line);
+		stripper.observe(r), summarize(() => summary.observe(r));
+	});
+	let sink = openSink?.(), again = 0, lengthAgain = 0;
+	if (forEachLine((line) => {
+		again++, lengthAgain += line.length;
+		let r = parseLine(line), kept = stripper.filter(line, r);
+		summarize(() => summary.add(kept ? kept.record : r, kept !== void 0)), kept && sink?.(kept.line);
+	}), again !== lines || lengthAgain !== length) throw Error("the recording changed while it was being read");
+	let result;
+	return summarize(() => result = summary.finish()), {
+		summary: result,
+		summaryError
 	};
 }
 function usesLine(actionRepo, actionRef, actionVersion) {
@@ -69648,23 +69673,6 @@ async function prepareStepFilesystemAudit({ audit, attached, upload, retentionDa
 	}
 }
 function reduce(outPath, cleanPath, options, annotation, deps) {
-	let stripper = createStripper((0, node_path.dirname)(outPath)), summary = deps.createSummary(options), summaryError, failedSummary = !1, summarize = (step) => {
-		if (!failedSummary) try {
-			step();
-		} catch (e) {
-			[failedSummary, summaryError] = [!0, e];
-		}
-	}, lines = 0, length = 0;
-	try {
-		deps.readLines(outPath, (line) => {
-			lines++, length += line.length;
-			let r = parseLine(line);
-			stripper.observe(r), summarize(() => summary.observe(r));
-		});
-	} catch (e) {
-		if (e.code === "ENOENT") return;
-		throw e;
-	}
 	let writer, written = !1, dropCopy = (e) => {
 		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
 		let open = writer;
@@ -69672,23 +69680,27 @@ function reduce(outPath, cleanPath, options, annotation, deps) {
 		try {
 			open?.close();
 		} catch {}
-	};
-	try {
-		cleanPath !== void 0 && (writer = deps.openWriter(cleanPath));
-	} catch (e) {
-		dropCopy(e);
-	}
-	let again = 0, lengthAgain = 0;
-	try {
-		deps.readLines(outPath, (line) => {
-			again++, lengthAgain += line.length;
-			let r = parseLine(line), kept = stripper.filter(line, r);
-			if (summarize(() => summary.add(kept ? kept.record : r, kept !== void 0)), kept && writer) try {
-				writer.write(kept.line), written = !0;
+	}, openSink = () => {
+		try {
+			cleanPath !== void 0 && (writer = deps.openWriter(cleanPath));
+		} catch (e) {
+			dropCopy(e);
+		}
+		return (line) => {
+			if (writer) try {
+				writer.write(line), written = !0;
 			} catch (e) {
 				dropCopy(e);
 			}
-		});
+		};
+	}, readOnce = !1, reduced;
+	try {
+		reduced = reduceRecording((onLine) => {
+			deps.readLines(outPath, onLine), readOnce = !0;
+		}, (0, node_path.dirname)(outPath), options, openSink, deps.createSummary);
+	} catch (e) {
+		if (!readOnce && e.code === "ENOENT") return;
+		throw e;
 	} finally {
 		let open = writer;
 		writer = void 0;
@@ -69698,11 +69710,8 @@ function reduce(outPath, cleanPath, options, annotation, deps) {
 			dropCopy(e);
 		}
 	}
-	if (again !== lines || lengthAgain !== length) throw Error("the recording changed while it was being read");
-	let result;
-	return summarize(() => result = summary.finish()), {
-		summary: result,
-		summaryError,
+	return {
+		...reduced,
 		written
 	};
 }
