@@ -506,16 +506,15 @@ export async function runSandboxStep(
     // replaced too.
     if (env.GITHUB_STEP_SUMMARY) {
       try {
-        const replaced = replaceIfNotRegularFile(env.GITHUB_STEP_SUMMARY);
-        if (replaced) {
+        if (replaceIfNotRegularFile(env.GITHUB_STEP_SUMMARY)) {
           annotation.error(
-            `$GITHUB_STEP_SUMMARY was replaced with an empty file (${replaced}); failing the step`,
+            "The command left something other than a regular file at $GITHUB_STEP_SUMMARY, now replaced with an empty one; failing the step",
           );
           process.exitCode = 1;
         }
       } catch (e) {
         annotation.error(
-          `Failed to check $GITHUB_STEP_SUMMARY: ${errorMessage(e)}; failing the step`,
+          `Failed to put a regular file at $GITHUB_STEP_SUMMARY: ${errorMessage(e)}; failing the step`,
         );
         process.exitCode = 1;
       }

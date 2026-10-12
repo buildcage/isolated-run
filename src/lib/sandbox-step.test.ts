@@ -743,11 +743,11 @@ describe("runSandboxStep", () => {
     });
 
     it("fails the step but still reports when $GITHUB_STEP_SUMMARY was not a regular file", async () => {
-      mocks.replaceIfNotRegularFile.mockReturnValue("it is not a regular file");
+      mocks.replaceIfNotRegularFile.mockReturnValue(true);
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
       expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_STEP_SUMMARY was replaced with an empty file (it is not a regular file); failing the step",
+        "The command left something other than a regular file at $GITHUB_STEP_SUMMARY, now replaced with an empty one; failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
@@ -760,16 +760,22 @@ describe("runSandboxStep", () => {
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
       expect(annotation.error).toHaveBeenCalledWith(
-        "Failed to check $GITHUB_STEP_SUMMARY: EACCES; failing the step",
+        "Failed to put a regular file at $GITHUB_STEP_SUMMARY: EACCES; failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
     });
 
-    it("rewrites nothing where the runner gave no $GITHUB_OUTPUT", async () => {
-      await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "", GITHUB_STEP_SUMMARY: "" }, deps);
-      expect(mocks.rewriteOutputFile).not.toHaveBeenCalled();
+    it("checks nothing where the runner gave no $GITHUB_STEP_SUMMARY", async () => {
+      await runSandboxStep({ ...ENV, GITHUB_STEP_SUMMARY: "" }, deps);
       expect(mocks.replaceIfNotRegularFile).not.toHaveBeenCalled();
+      expect(mocks.rewriteOutputFile).toHaveBeenCalledTimes(1);
+    });
+
+    it("rewrites nothing where the runner gave no $GITHUB_OUTPUT", async () => {
+      await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "" }, deps);
+      expect(mocks.rewriteOutputFile).not.toHaveBeenCalled();
+      expect(mocks.replaceIfNotRegularFile).toHaveBeenCalledTimes(1);
       expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
     });
 

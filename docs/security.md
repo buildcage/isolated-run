@@ -774,9 +774,9 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   beforehand and leave markdown of its own beside the real report. Removing or locking the file
   instead leaves the report nowhere to go, which fails the step under `restrict` with
   `fail_on_blocked`. A symlink or a FIFO left in its place is replaced with an empty file before
-  the report is written, and fails the step. Where the report is meant to be an audit trail, take it from
-  `upload_traffic_artifact: true` instead: the JSON is uploaded when the step ends, and is not a
-  file a later step can append a line to.
+  the report is written, and fails the step. Where the report is meant to be an audit trail, take
+  it from `upload_traffic_artifact: true` instead: the JSON is uploaded when the step ends, and is
+  not a file a later step can append a line to.
 - **Exhausting the host.** The OCI spec sets no `linux.resources`, so there is no memory, pids or
   CPU ceiling, and capability bounding and seccomp cannot close this either, since a legitimate
   build calls `fork(2)` and `mmap(2)` freely. A fork bomb consumes host memory or the process table

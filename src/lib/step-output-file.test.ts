@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   lstatSync,
   mkdtempSync,
@@ -190,11 +191,21 @@ describe("replaceIfNotRegularFile", () => {
   it("leaves a regular file, and a missing one, as they are", () => {
     dir = mkdtempSync(join(tmpdir(), "step-summary-"));
     const path = join(dir, "summary");
-    expect(replaceIfNotRegularFile(path)).toBeUndefined();
+    expect(replaceIfNotRegularFile(path)).toBe(false);
     expect(() => lstatSync(path)).toThrow();
     writeFileSync(path, "the command's own\n");
-    expect(replaceIfNotRegularFile(path)).toBeUndefined();
+    expect(replaceIfNotRegularFile(path)).toBe(false);
     expect(readFileSync(path, "utf8")).toBe("the command's own\n");
+  });
+
+  // lstat, which does not open it: opening a FIFO would block.
+  it("replaces a FIFO with an empty file without opening it", () => {
+    dir = mkdtempSync(join(tmpdir(), "step-summary-"));
+    const path = join(dir, "summary");
+    execFileSync("mkfifo", [path]);
+
+    expect(replaceIfNotRegularFile(path)).toBe(true);
+    expect(lstatSync(path).isFile()).toBe(true);
   });
 
   it("replaces a symlink with an empty file, leaving what it pointed at alone", () => {
@@ -204,7 +215,7 @@ describe("replaceIfNotRegularFile", () => {
     writeFileSync(target, "untouched\n");
     symlinkSync(target, path);
 
-    expect(replaceIfNotRegularFile(path)).toBe("it is not a regular file");
+    expect(replaceIfNotRegularFile(path)).toBe(true);
     expect(lstatSync(path).isFile()).toBe(true);
     expect(readFileSync(path, "utf8")).toBe("");
     expect(readFileSync(target, "utf8")).toBe("untouched\n");

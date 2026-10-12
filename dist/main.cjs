@@ -72544,7 +72544,7 @@ function replaceIfNotRegularFile(path, overrides = {}) {
 		...realDeps$2,
 		...overrides
 	};
-	if (kind(path) === "other") return replaceFile(path, ""), "it is not a regular file";
+	return kind(path) === "other" && (replaceFile(path, ""), !0);
 }
 function rewriteOutputFile(path, overrides = {}) {
 	let { kind, readFile, replaceFile } = {
@@ -73735,10 +73735,9 @@ async function runSandboxStep(env, overrides = {}) {
 			annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
 		}
 		if (env.GITHUB_STEP_SUMMARY) try {
-			let replaced = replaceIfNotRegularFile(env.GITHUB_STEP_SUMMARY);
-			replaced && (annotation.error(`$GITHUB_STEP_SUMMARY was replaced with an empty file (${replaced}); failing the step`), process.exitCode = 1);
+			replaceIfNotRegularFile(env.GITHUB_STEP_SUMMARY) && (annotation.error("The command left something other than a regular file at $GITHUB_STEP_SUMMARY, now replaced with an empty one; failing the step"), process.exitCode = 1);
 		} catch (e) {
-			annotation.error(`Failed to check $GITHUB_STEP_SUMMARY: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
+			annotation.error(`Failed to put a regular file at $GITHUB_STEP_SUMMARY: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
 		}
 		for (let set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) try {
 			set("");
