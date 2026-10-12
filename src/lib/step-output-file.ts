@@ -73,12 +73,17 @@ export function readOutputEntries(text: string): OutputEntries {
   }
 }
 
-// Only names and delimiters are quoted, never a value, which may hold a
-// secret. The command wrote them, so they are cut short and escaped.
+// A value may hold a secret, so only a header line's name and delimiter are
+// quoted. That line can still be part of a value an early delimiter ended, as
+// in the runner's own errors, which quote the whole line. The command wrote
+// it, so it is cut short and escaped.
 const MAX_QUOTED = 64;
 
 function quoted(text: string): string {
-  return JSON.stringify(text.length > MAX_QUOTED ? `${text.slice(0, MAX_QUOTED)}…` : text);
+  const chars = Array.from(text);
+  return JSON.stringify(
+    chars.length > MAX_QUOTED ? `${chars.slice(0, MAX_QUOTED).join("")}…` : text,
+  );
 }
 
 // UTF-16 and UTF-32 byte order marks: the runner decodes by them, this reads

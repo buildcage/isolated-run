@@ -181,38 +181,43 @@ export function findPinnableCommand(
 }
 
 /**
- * Why `first`, the first `command` on PATH, could not be pinned, given that no
- * later one could either. One whose `$PATH` directory is out of reach can only
- * have been refused for a symlink on its way.
+ * Why no `command` on PATH could be pinned. The first one in a `$PATH`
+ * directory out of reach can only have been refused for a symlink on its way,
+ * which the message names.
  */
 function unpinnableReason(
   command: string,
-  first: string,
+  pathEnv: string,
   persisting: string[],
-  deps: SymlinkDeps,
+  deps: FindCommandDeps,
 ): string {
   const under = (path: string) => persisting.find((p) => isAtOrUnder(path, p));
-  const resolved = resolveHostPath(first, deps);
-  const runsOutside = "This action runs it outside the sandbox, so it";
-  if (!reachableFrom(persisting, deps)(dirname(first)) && "real" in resolved) {
-    if (under(resolved.real)) {
+  const reachable = reachableFrom(persisting, deps);
+  for (const dir of pathEnv.split(delimiter)) {
+    const candidate = join(dir, command);
+    if (!isAbsolute(dir) || !deps.isExecutable(candidate) || reachable(dir)) continue;
+    const resolved = resolveHostPath(candidate, deps);
+    // An executable path resolves; a symlink loop would not be one.
+    if (!("real" in resolved)) continue;
+    const realUnder = under(resolved.real);
+    if (realUnder) {
       return (
-        `'${command}' on PATH, ${first}, leads to ${resolved.real}, under ` +
-        `${under(resolved.real)}, which a sandboxed command can write to. ${runsOutside} has to ` +
-        "be a file no sandboxed command can replace."
+        `'${command}' on PATH, ${candidate}, leads to ${resolved.real}, under ${realUnder}, ` +
+        "which a sandboxed command can write to. This action runs it outside the sandbox, so " +
+        "it has to be a file no sandboxed command can replace."
       );
     }
     const link = resolved.links.find((l) => under(l.at))!;
     return (
-      `'${command}' on PATH, ${first}, leads through ${link.at}, under ${under(link.at)}, ` +
-      `which a sandboxed command can write to, to ${resolved.real}. ${runsOutside} is pinned ` +
-      `through such a symlink only when the file it leads to is named '${command}' too.`
+      `'${command}' on PATH, ${candidate}, leads to ${resolved.real} through ${link.at}, under ` +
+      `${under(link.at)}, which a sandboxed command can write to. This action runs it outside ` +
+      `the sandbox, so through such a symlink it pins only a file named '${command}'.`
     );
   }
   return (
     `'${command}' is on PATH only under paths a sandboxed command can write to ` +
-    `(${persisting.join(", ")}). ${runsOutside} has to live somewhere no sandboxed command ` +
-    "can replace it, such as /usr/bin."
+    `(${persisting.join(", ")}). This action runs it outside the sandbox, so it has to live ` +
+    "somewhere no sandboxed command can replace it, such as /usr/bin."
   );
 }
 
@@ -233,10 +238,10 @@ export function pinHostCommands(
       pinCommand(command, path);
       continue;
     }
-    const first = findPinnableCommand(command, env.PATH, [], deps);
-    if (!first) continue;
+    if (!findPinnableCommand(command, env.PATH, [], deps)) continue;
     throw new SandboxError(
-      unpinnableReason(command, first, paths, deps),
+      // The command was found on PATH above, so it is set.
+      unpinnableReason(command, env.PATH!, paths, deps),
       "HOST_COMMAND_UNPINNABLE",
     );
   }

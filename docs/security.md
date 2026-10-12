@@ -205,13 +205,11 @@ sandbox down, so what it runs is kept out of those paths:
   that symlink leads to at the time, if that file bears the command's name. One in a `$PATH`
   directory that is itself in those paths, or reached through a symlink in them, is passed over
   even when it is a symlink to a file outside them, and the next `$PATH` entry is tried. The post
-  step
-  pins them again. Both also run with `PATH`
-  stripped of those paths and of any entry through a symlink in them: `sudo` resolves what it runs
-  there when sudoers sets no `secure_path`, and `docker` finds its `docker-credential-*` helpers
-  there. `sudo` gets the system directories and `docker` the step's own `$PATH`, so a helper
-  installed only under those paths is not found. A helper that is a symlink into them is not
-  caught. `write_through: /` turns all of this off, since no path is left outside them.
+  step pins them again. Both also run with `PATH` stripped of those paths and of any entry through
+  a symlink in them: `sudo` resolves what it runs there when sudoers sets no `secure_path`, and
+  `docker` finds its `docker-credential-*` helpers there. `sudo` gets the system directories and
+  `docker` the step's own `$PATH`, so a helper installed only under those paths is not found.
+  A helper that is a symlink into them is not caught. `write_through: /` turns all of this off, since no path is left outside them.
 - Under `inspect`, the `keytool` that adds the CA to the JVM keystores is pinned the same way,
   `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so the command's
   `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` stays inside the sandbox. Without one, the step skips the
