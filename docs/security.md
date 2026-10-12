@@ -782,12 +782,14 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   sandbox, the real file is masked from it, and the host writes the real file after the step -- the
   command's own summary first, then the report after a horizontal rule. Because the real file is out
   of the command's reach, a symlink, FIFO, directory or permission it leaves on the backing copy
-  reaches nothing: a copy that is not a regular file is read back as empty, never followed or blocked
-  on. Filling the backing copy to GitHub's 1 MiB Job Summary limit leaves the report no room -- GitHub
-  drops a summary over the limit whole -- so the report is fitted into what is left and, when even
-  its frame will not fit, gives way to a single pointer line or to nothing rather than push the file
-  over. The step's verdict is decided and applied as annotations before any summary is written, so
-  whether the report reaches the summary never changes what the step enforces. Where the report is
+  reaches nothing: a copy that is not a regular file, or that it made unreadable, is read back as
+  empty and fails the step, never followed or blocked on. The backing directory sits under
+  `/var/tmp/buildcage-<uid>`, which the sandbox cannot see, so the command reaches it only through
+  the bind and cannot move it aside. Filling the backing copy to GitHub's 1 MiB Job Summary limit
+  leaves the report no room -- GitHub drops a summary over the limit whole -- so the report is
+  fitted into what is left and, when even its frame will not fit, gives way to a single pointer line
+  or to nothing rather than push the file over. The step's verdict is decided and applied as
+  annotations before any summary is written, so whether the report reaches the summary never changes what the step enforces. Where the report is
   meant to be an audit trail, take it from `upload_traffic_artifact: true` instead: the JSON is
   uploaded when the step ends, and is not a file a later step can append a line to.
 - **Masking the report, or silencing its annotations.** The command's stdout reaches the runner,

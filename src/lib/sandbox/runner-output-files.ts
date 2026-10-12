@@ -21,10 +21,13 @@
  * the sandbox, never mediated (see host-commands.ts).
  */
 
-import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+import { errorMessage } from "#core/lib/errors.ts";
 
 import { MAX_OUTPUT_BYTES } from "../step-output-file.ts";
+import { ensureOwnScratchBase } from "./scratch-dir.ts";
 import type { MountEntry } from "./types.ts";
 
 // Where the backing directory is bound inside the sandbox. Under /dev, which
@@ -64,16 +67,23 @@ export interface MediateDeps {
 }
 
 const realMediateDeps: MediateDeps = {
-  mkdir: (path) => void mkdirSync(path, { mode: 0o700, recursive: true }),
+  // Not recursive, under a parent checked to be ours, so a directory already
+  // at the path is never reused.
+  mkdir: (path) => {
+    ensureOwnScratchBase(dirname(path));
+    mkdirSync(path, { mode: 0o700 });
+  },
   // wx so a file already at the path is never reused or followed.
   writeFile: (path, data) => writeFileSync(path, data, { mode: 0o644, flag: "wx" }),
 };
 
 /**
  * Sets up the mediation for whichever of the two variables the step has. The
- * backing directory is created at `backingDir` (the caller owns its lifetime,
- * reading the files back before removing it). Returns undefined when neither
- * variable is set, so the caller leaves the sandbox untouched.
+ * backing directory is created at `backingDir`, which must be somewhere the
+ * sandbox cannot see (under SANDBOX_SCRATCH_BASE), so the command reaches it
+ * only through the bind and cannot rename or replace it. The caller owns its
+ * lifetime, reading the files back before removing it. Returns undefined when
+ * neither variable is set, so the caller leaves the sandbox untouched.
  */
 export function mediateRunnerOutputFiles(
   env: NodeJS.ProcessEnv,
@@ -122,21 +132,27 @@ const realReadBackingDeps: ReadBackingDeps = {
  * Reads a backing file the command wrote. A missing one (the command removed
  * it) is empty. Anything but a regular file, or one larger than a step's
  * outputs can be, is refused with a reason rather than followed, piped through
- * or read into memory. The command has exited, so the lstat and the read do not
- * race.
+ * or read into memory, and so is one the command made unreadable, by its mode
+ * or the directory's: this never throws, so the reports after it still go out.
+ * The command has exited, so the lstat and the read do not race.
  */
 export function readBackingFile(
   path: string,
   deps: ReadBackingDeps = realReadBackingDeps,
 ): BackingRead {
-  let stats: { isFile: () => boolean; size: number };
   try {
-    stats = deps.lstat(path);
+    const stats = deps.lstat(path);
+    if (!stats.isFile()) return { reason: "it was not a regular file" };
+    if (stats.size > MAX_OUTPUT_BYTES) return { reason: "it was over 64 MiB" };
+    return { bytes: deps.readFile(path) };
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return { empty: true };
-    throw e;
+    return { reason: `it could not be read: ${errorMessage(e)}` };
   }
-  if (!stats.isFile()) return { reason: "it was not a regular file" };
-  if (stats.size > MAX_OUTPUT_BYTES) return { reason: "it was over 64 MiB" };
-  return { bytes: deps.readFile(path) };
+}
+
+/** Removes the backing directory. Throws on what the command left in it that
+ *  cannot be removed, such as a subdirectory it made unreadable. */
+export function removeBackingDir(path: string): void {
+  rmSync(path, { recursive: true, force: true });
 }
