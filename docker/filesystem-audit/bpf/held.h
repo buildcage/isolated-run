@@ -465,8 +465,12 @@ static __always_inline void open_name(u32 slot, const char *name, int user)
 	e->n2 = 0;
 	long r = user ? bpf_probe_read_user_str(e->data, PATH_LEN, name) :
 			bpf_probe_read_kernel_str(e->data, PATH_LEN, name);
-	if (r <= 0)
-		return; // names nothing
+	if (r <= 0) {
+		// The caller's names nothing; the kernel's copy should always read.
+		if (!user)
+			bump(&untracked);
+		return;
+	}
 	e->data_len = r;
 	if (hold_new(e, HELD_OPEN) == 0)
 		return;

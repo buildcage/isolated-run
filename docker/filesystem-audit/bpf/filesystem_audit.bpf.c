@@ -322,10 +322,8 @@ static __always_inline void open_failed(u32 slot, struct event *e, long ret, int
 	e->path_len = -ret;
 	e->flags = flags;
 	e->truncated = cut;
-	if (off == 0 || off > PATH_LEN) {
-		e->data[0] = 0; // the name could not be read: an empty one
-		off = 1;
-	}
+	if (off > PATH_LEN) // never, but the verifier needs the bound
+		return;
 	u8 n = 0;
 	if (off > 1 && e->data[0] != '/') {
 		off = add_base(e, off, dfd, &n, &e->truncated, 1, 0);
@@ -342,8 +340,7 @@ static __always_inline void stash_name(u32 slot, u64 *ctx)
 		return;
 	struct filename *ret = 0;
 	bpf_get_func_ret(ctx, (u64 *)&ret);
-	// getname refused the name, as one too long: the caller's own, its first
-	// argument.
+	// getname refused the name, as one too long: read the caller's instead.
 	if ((long)ret < 0 && (long)ret >= -4095)
 		open_name(slot, (const char *)ctx[0], 1);
 	else

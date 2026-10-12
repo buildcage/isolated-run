@@ -518,17 +518,24 @@ static void test_open_short_name_refused_early(void)
 
 /**
  * A name getname refused, as one too long, is held from the caller's own;
- * one that cannot be read names nothing, and is neither held nor counted.
+ * one that cannot be read names nothing, and is neither held nor counted. A
+ * kernel copy that cannot be read is counted.
  */
 static void test_open_caller_name(void)
 {
 	reset();
 	open_name(0, NULL, 1);
 	CHECK(heads.count == 0 && untracked_count() == 0);
-	open_name(0, "/too/long", 1);
+	open_name(0, NULL, 0);
+	CHECK(heads.count == 0 && untracked_count() == 1);
+
+	reset();
+	name_of(long_name, sizeof(long_name) - 1, 'n');
+	open_name(0, long_name, 1);
 	struct event *e = open_return(0, -36);
-	CHECK(e && e->kind == K_OPEN_FAILED && !strcmp(e->data, "/too/long"));
-	CHECK(heads.count == 0);
+	CHECK(e && e->kind == K_OPEN_FAILED && !strcmp(e->data, long_name) && !e->n2);
+	CHECK(heads.count == 0 && use()->taken == 0);
+	CHECK_ACCOUNTS();
 }
 
 /** Both getname programs of one open: the second finds the name read. */

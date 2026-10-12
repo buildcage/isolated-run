@@ -36,8 +36,8 @@ struct path_call {
  * the arguments the call left in its registers, and emits only when ret < 0,
  * reading the user path(s) they point to. Best-effort: this reads the user
  * buffer, which a concurrent thread could rewrite while the call runs, so a
- * failed op's recorded path is not tamper-proof the way the open path's
- * getname copy is.
+ * failed op's recorded path is not tamper-proof the way an open's getname
+ * copy is.
  * @{
  */
 
