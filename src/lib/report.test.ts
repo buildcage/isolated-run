@@ -716,21 +716,24 @@ describe("writeReportSummary", () => {
 
   it("gives Restrict Would Refuse's key and host tables one cut notice between them", async () => {
     const written: string[] = [];
+    // Enough keys that the key table overruns the limit on its own and is cut.
+    // The host table, which the aws-no-credential request gives, is the deeper
+    // block, so the cut skips it and the one notice stands for both.
     const timeline: TrafficEvent[] = [
-      {
-        time: 1,
-        action: "audit",
-        protocol: "https",
-        host: "s3.amazonaws.com",
+      ...Array.from({ length: 5000 }, (_, i) => ({
+        time: i,
+        action: "audit" as const,
+        protocol: "https" as const,
+        host: `${"x".repeat(200)}${i}.example.com`,
         port: 443,
         method: "GET",
-        url: "https://s3.amazonaws.com/",
+        url: `https://h${i}.example.com/`,
         status: 200,
         wouldRefuse: "aws-key-not-allowed",
-        extensions: { aws: { keyRef: "aaaa1111" } },
-      },
+        extensions: { aws: { keyRef: `key${i}` } },
+      })),
       {
-        time: 2,
+        time: 5000,
         action: "audit",
         protocol: "https",
         host: "sts.amazonaws.com",
@@ -749,7 +752,7 @@ describe("writeReportSummary", () => {
       true,
       { GITHUB_STEP_SUMMARY: "/summary.md" },
       {
-        fileSize: () => 1024 * 1024,
+        fileSize: () => 0,
         writeSummary: async (markdown) => void written.push(markdown),
       },
     );
