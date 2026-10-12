@@ -199,7 +199,7 @@ assert_summary_contains "| aborted.example.com | DNS | 🚫 dns-not-allowed |" \
 # would be, and a request to a name lands on the proxy's own address, which
 # names nothing.
 if grep -qF '| 10.200.0.100:5432 | IP | 🚫 bad-request |' <<< "$SUMMARY" \
-  && grep -qE '^\| \(unknown\):[0-9]+ \| HTTP \| missing-host-header \|' <<< "$SUMMARY"; then
+  && grep -qE '^\| \(unknown\):[0-9]+ \| HTTP \| 🚫 missing-host-header \|' <<< "$SUMMARY"; then
   pass "both refusals that named no host are in the Blocked Hosts table"
 else
   fail "the Blocked Hosts table is missing the rows for requests that named no host"
