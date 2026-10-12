@@ -68,6 +68,7 @@ describe("rewriteOutputFile", () => {
   const rewrite = (content: string | Buffer, kind: "file" | "large" | "other" = "file") => {
     let written: string | undefined;
     const error = rewriteOutputFile("/out", {
+      ownDirectory: () => {},
       kind: () => kind,
       readFile: () => (typeof content === "string" ? Buffer.from(content) : content),
       replaceFile: (_, t) => (written = t),
@@ -107,23 +108,26 @@ describe("rewriteOutputFile", () => {
     });
   });
 
-  it("empties the file when reading it fails, then throws", () => {
+  it("empties the file when reading it fails, and says why", () => {
     const written: string[] = [];
-    const fail = new Error("EIO");
-    expect(() =>
+    expect(
       rewriteOutputFile("/out", {
+        ownDirectory: () => {},
         kind: () => "file",
         readFile: () => {
-          throw fail;
+          throw new Error("EIO");
         },
         replaceFile: (_, t) => written.push(t),
       }),
-    ).toThrow(fail);
+    ).toBe("it could not be read (EIO)");
     expect(written).toStrictEqual([""]);
-    // And throws what failed first when emptying it fails too.
+  });
+
+  it("throws what failed first when emptying the file fails too", () => {
+    const fail = new Error("EIO");
     expect(() =>
       rewriteOutputFile("/out", {
-        kind: () => {
+        ownDirectory: () => {
           throw fail;
         },
         replaceFile: () => {
@@ -210,13 +214,13 @@ describe("replaceIfNotRegularFile", () => {
     expect(lstatSync(path).isFile()).toBe(true);
   });
 
-  it("gives its directory back the write permission the command took away", () => {
+  it("gives its directory back the permissions the command took away", () => {
     dir = mkdtempSync(join(tmpdir(), "step-summary-"));
     const commands = join(dir, "commands");
     const path = join(commands, "summary");
     mkdirSync(commands);
     symlinkSync(join(dir, "elsewhere"), path);
-    chmodSync(commands, 0o555);
+    chmodSync(commands, 0o000);
 
     expect(replaceIfNotRegularFile(path)).toBe(true);
     expect(lstatSync(path).isFile()).toBe(true);

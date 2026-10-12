@@ -72518,29 +72518,22 @@ const realDeps$2 = {
 		}
 	},
 	readFile: (path) => (0, node_fs.readFileSync)(path),
+	ownDirectory: (path) => {
+		let dir = (0, node_path.dirname)(path), { mode } = (0, node_fs.lstatSync)(dir);
+		(mode & 448) != 448 && (0, node_fs.chmodSync)(dir, mode | 448);
+	},
 	replaceFile: (path, text) => {
+		let temporary = (0, node_path.join)((0, node_path.dirname)(path), `.${(0, node_path.basename)(path)}.${(0, node_crypto.randomBytes)(8).toString("hex")}`);
 		try {
-			writeBeside(path, text);
-		} catch (e) {
-			let { code } = e;
-			if (code !== "EACCES" && code !== "EPERM") throw e;
-			let dir = (0, node_path.dirname)(path);
-			(0, node_fs.chmodSync)(dir, (0, node_fs.lstatSync)(dir).mode | 448), writeBeside(path, text);
+			(0, node_fs.writeFileSync)(temporary, text, {
+				flag: "wx",
+				mode: 420
+			}), (0, node_fs.renameSync)(temporary, path);
+		} finally {
+			(0, node_fs.rmSync)(temporary, { force: !0 });
 		}
 	}
-};
-function writeBeside(path, text) {
-	let temporary = (0, node_path.join)((0, node_path.dirname)(path), `.${(0, node_path.basename)(path)}.${(0, node_crypto.randomBytes)(8).toString("hex")}`);
-	try {
-		(0, node_fs.writeFileSync)(temporary, text, {
-			flag: "wx",
-			mode: 420
-		}), (0, node_fs.renameSync)(temporary, path);
-	} finally {
-		(0, node_fs.rmSync)(temporary, { force: !0 });
-	}
-}
-const WIDE_BOMS = [
+}, WIDE_BOMS = [
 	[255, 254],
 	[254, 255],
 	[
@@ -72550,25 +72543,23 @@ const WIDE_BOMS = [
 		255
 	]
 ];
-function replaceIfNotRegularFile(path, overrides = {}) {
-	let { kind, replaceFile } = {
-		...realDeps$2,
-		...overrides
-	};
-	return kind(path) === "other" && (replaceFile(path, ""), !0);
+function replaceIfNotRegularFile(path) {
+	return realDeps$2.ownDirectory(path), realDeps$2.kind(path) === "other" && (realDeps$2.replaceFile(path, ""), !0);
 }
 function rewriteOutputFile(path, overrides = {}) {
-	let { kind, readFile, replaceFile } = {
+	let { kind, readFile, ownDirectory, replaceFile } = {
 		...realDeps$2,
 		...overrides
 	};
 	try {
-		return rewrite(path, kind, readFile, replaceFile);
+		return ownDirectory(path), rewrite(path, kind, readFile, replaceFile);
 	} catch (e) {
 		try {
 			replaceFile(path, "");
-		} catch {}
-		throw e;
+		} catch {
+			throw e;
+		}
+		return `it could not be read (${errorMessage(e)})`;
 	}
 }
 function rewrite(path, kind, readFile, replaceFile) {

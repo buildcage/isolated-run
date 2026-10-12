@@ -10,6 +10,8 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
+import { errorMessage } from "#core/lib/errors.ts";
+
 export interface OutputEntries {
   /** Each entry the runner reads, as the text it was written in. */
   entries: { name: string; text: string }[];
@@ -71,6 +73,8 @@ export interface RewriteOutputFileDeps {
    *  anything else. */
   kind: (path: string) => "missing" | "file" | "large" | "other";
   readFile: (path: string) => Buffer;
+  /** Gives the directory holding `path` back its owner's permissions. */
+  ownDirectory: (path: string) => void;
   /** Writes `text` beside `path` and moves it over `path`, so whatever the
    *  command left there is replaced rather than written through. */
   replaceFile: (path: string, text: string) => void;
@@ -92,31 +96,24 @@ const realDeps: RewriteOutputFileDeps = {
     }
   },
   readFile: (path) => readFileSync(path),
+  // The command runs as the user who owns the directory and can take its
+  // permissions away, so that what it put at the path cannot be replaced and
+  // is what the runner reads after the step.
+  ownDirectory: (path) => {
+    const dir = dirname(path);
+    const { mode } = lstatSync(dir);
+    if ((mode & 0o700) !== 0o700) chmodSync(dir, mode | 0o700);
+  },
   replaceFile: (path, text) => {
+    const temporary = join(dirname(path), `.${basename(path)}.${randomBytes(8).toString("hex")}`);
     try {
-      writeBeside(path, text);
-    } catch (e) {
-      const { code } = e as NodeJS.ErrnoException;
-      if (code !== "EACCES" && code !== "EPERM") throw e;
-      // The command runs as the user who owns the directory and can take its
-      // write permission away; left in place, what it put at the path is
-      // what the runner reads after the step.
-      const dir = dirname(path);
-      chmodSync(dir, lstatSync(dir).mode | 0o700);
-      writeBeside(path, text);
+      writeFileSync(temporary, text, { flag: "wx", mode: 0o644 });
+      renameSync(temporary, path);
+    } finally {
+      rmSync(temporary, { force: true });
     }
   },
 };
-
-function writeBeside(path: string, text: string): void {
-  const temporary = join(dirname(path), `.${basename(path)}.${randomBytes(8).toString("hex")}`);
-  try {
-    writeFileSync(temporary, text, { flag: "wx", mode: 0o644 });
-    renameSync(temporary, path);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
-}
 
 // UTF-16 and UTF-32 byte order marks: the runner decodes by them, this reads
 // UTF-8 only.
@@ -132,13 +129,10 @@ const WIDE_BOMS = [
  * and says whether it did. Appending through a symlink would reach a file the
  * command cannot, and to a FIFO would block.
  */
-export function replaceIfNotRegularFile(
-  path: string,
-  overrides: Partial<RewriteOutputFileDeps> = {},
-): boolean {
-  const { kind, replaceFile } = { ...realDeps, ...overrides };
-  if (kind(path) !== "other") return false;
-  replaceFile(path, "");
+export function replaceIfNotRegularFile(path: string): boolean {
+  realDeps.ownDirectory(path);
+  if (realDeps.kind(path) !== "other") return false;
+  realDeps.replaceFile(path, "");
   return true;
 }
 
@@ -153,8 +147,9 @@ export function rewriteOutputFile(
   path: string,
   overrides: Partial<RewriteOutputFileDeps> = {},
 ): string | undefined {
-  const { kind, readFile, replaceFile } = { ...realDeps, ...overrides };
+  const { kind, readFile, ownDirectory, replaceFile } = { ...realDeps, ...overrides };
   try {
+    ownDirectory(path);
     return rewrite(path, kind, readFile, replaceFile);
   } catch (e) {
     // Left as the command wrote it, the file could still stop the runner
@@ -162,9 +157,9 @@ export function rewriteOutputFile(
     try {
       replaceFile(path, "");
     } catch {
-      // The error thrown below fails the step either way.
+      throw e;
     }
-    throw e;
+    return `it could not be read (${errorMessage(e)})`;
   }
 }
 
