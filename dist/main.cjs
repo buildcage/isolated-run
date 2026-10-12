@@ -72518,6 +72518,10 @@ const realDeps$2 = {
 		}
 	},
 	readFile: (path) => (0, node_fs.readFileSync)(path),
+	ownDirectory: (path) => {
+		let dir = (0, node_path.dirname)(path), { mode } = (0, node_fs.lstatSync)(dir);
+		(mode & 448) != 448 && (0, node_fs.chmodSync)(dir, mode | 448);
+	},
 	replaceFile: (path, text) => {
 		let temporary = (0, node_path.join)((0, node_path.dirname)(path), `.${(0, node_path.basename)(path)}.${(0, node_crypto.randomBytes)(8).toString("hex")}`);
 		try {
@@ -72539,18 +72543,23 @@ const realDeps$2 = {
 		255
 	]
 ];
+function replaceIfNotRegularFile(path) {
+	return realDeps$2.ownDirectory(path), realDeps$2.kind(path) === "other" && (realDeps$2.replaceFile(path, ""), !0);
+}
 function rewriteOutputFile(path, overrides = {}) {
-	let { kind, readFile, replaceFile } = {
+	let { kind, readFile, ownDirectory, replaceFile } = {
 		...realDeps$2,
 		...overrides
 	};
 	try {
-		return rewrite(path, kind, readFile, replaceFile);
+		return ownDirectory(path), rewrite(path, kind, readFile, replaceFile);
 	} catch (e) {
 		try {
 			replaceFile(path, "");
-		} catch {}
-		throw e;
+		} catch {
+			throw e;
+		}
+		return `reading it failed with ${errorMessage(e)}, so it was emptied`;
 	}
 }
 function rewrite(path, kind, readFile, replaceFile) {
@@ -73597,6 +73606,7 @@ const realDeps = {
 	writeMoreSummary,
 	prepareStepFilesystemAudit,
 	rewriteOutputFile,
+	replaceIfNotRegularFile,
 	setTrafficArtifactOutput,
 	setFilesystemAuditOutput,
 	onCancel,
@@ -73623,8 +73633,21 @@ async function resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, { ve
 function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, saveState) {
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
+function putRunnerFileRight(env, name, annotation, putRight) {
+	let path = env[name];
+	if (path) {
+		try {
+			let done = putRight(path);
+			if (done === void 0) return;
+			annotation.error(`$${name} ${done}; failing the step`);
+		} catch (e) {
+			annotation.error(`$${name} could not be put right: ${errorMessage(e)}; leaving it unwritten and failing the step`), delete env[name];
+		}
+		process.exitCode = 1;
+	}
+}
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, rewriteOutputFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, rewriteOutputFile, replaceIfNotRegularFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -73720,12 +73743,10 @@ async function runSandboxStep(env, overrides = {}) {
 			cancel: cancel.signal
 		});
 	} finally {
-		if (env.GITHUB_OUTPUT) try {
-			let unreadable = rewriteOutputFile(env.GITHUB_OUTPUT);
-			unreadable && (annotation.error(`$GITHUB_OUTPUT was rewritten without what the runner could not read (${unreadable}); failing the step`), process.exitCode = 1);
-		} catch (e) {
-			annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
-		}
+		putRunnerFileRight(env, "GITHUB_OUTPUT", annotation, (path) => {
+			let unreadable = rewriteOutputFile(path);
+			return unreadable && `was rewritten without what the runner could not read: ${unreadable}`;
+		}), putRunnerFileRight(env, "GITHUB_STEP_SUMMARY", annotation, (path) => replaceIfNotRegularFile(path) ? "held something other than a regular file, now replaced with an empty one" : void 0);
 		for (let set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) try {
 			set("");
 		} catch {}

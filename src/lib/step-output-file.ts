@@ -7,8 +7,10 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+
+import { errorMessage } from "#core/lib/errors.ts";
 
 export interface OutputEntries {
   /** Each entry the runner reads, as the text it was written in. */
@@ -71,6 +73,8 @@ export interface RewriteOutputFileDeps {
    *  anything else. */
   kind: (path: string) => "missing" | "file" | "large" | "other";
   readFile: (path: string) => Buffer;
+  /** Gives the directory holding `path` back its owner's permissions. */
+  ownDirectory: (path: string) => void;
   /** Writes `text` beside `path` and moves it over `path`, so whatever the
    *  command left there is replaced rather than written through. */
   replaceFile: (path: string, text: string) => void;
@@ -92,6 +96,14 @@ const realDeps: RewriteOutputFileDeps = {
     }
   },
   readFile: (path) => readFileSync(path),
+  // The command runs as the user who owns the directory and can take its
+  // permissions away, so that what it put at the path cannot be replaced and
+  // is what the runner reads after the step.
+  ownDirectory: (path) => {
+    const dir = dirname(path);
+    const { mode } = lstatSync(dir);
+    if ((mode & 0o700) !== 0o700) chmodSync(dir, mode | 0o700);
+  },
   replaceFile: (path, text) => {
     const temporary = join(dirname(path), `.${basename(path)}.${randomBytes(8).toString("hex")}`);
     try {
@@ -112,6 +124,19 @@ const WIDE_BOMS = [
 ];
 
 /**
+ * Replaces anything but a regular file the command left at `path`, such as
+ * $GITHUB_STEP_SUMMARY, with an empty one before this action appends to it,
+ * and says whether it did. Appending through a symlink would reach a file the
+ * command cannot, and to a FIFO would block.
+ */
+export function replaceIfNotRegularFile(path: string): boolean {
+  realDeps.ownDirectory(path);
+  if (realDeps.kind(path) !== "other") return false;
+  realDeps.replaceFile(path, "");
+  return true;
+}
+
+/**
  * Rewrites the file with every entry the runner reads, as it was written,
  * ending in a newline, so the outputs this action appends after it are read.
  * What it could not read is dropped, and the reason returned. A symlink, a FIFO
@@ -122,8 +147,9 @@ export function rewriteOutputFile(
   path: string,
   overrides: Partial<RewriteOutputFileDeps> = {},
 ): string | undefined {
-  const { kind, readFile, replaceFile } = { ...realDeps, ...overrides };
+  const { kind, readFile, ownDirectory, replaceFile } = { ...realDeps, ...overrides };
   try {
+    ownDirectory(path);
     return rewrite(path, kind, readFile, replaceFile);
   } catch (e) {
     // Left as the command wrote it, the file could still stop the runner
@@ -131,9 +157,9 @@ export function rewriteOutputFile(
     try {
       replaceFile(path, "");
     } catch {
-      // The error thrown below fails the step either way.
+      throw e;
     }
-    throw e;
+    return `reading it failed with ${errorMessage(e)}, so it was emptied`;
   }
 }
 

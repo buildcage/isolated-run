@@ -12,7 +12,7 @@
 import * as core from "@actions/core";
 
 import { isKnownBlockedUrlRule } from "#core/lib/acl/wildcard-rules.ts";
-import { annotate, createAnnotation } from "#core/lib/actions/annotation.ts";
+import { annotate, createAnnotation, type Annotation } from "#core/lib/actions/annotation.ts";
 import { applyConfigFile } from "#core/lib/actions/config-file.ts";
 import {
   checkKnownBlockedUrlRuleSupport,
@@ -62,7 +62,7 @@ import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
-import { rewriteOutputFile } from "./step-output-file.ts";
+import { replaceIfNotRegularFile, rewriteOutputFile } from "./step-output-file.ts";
 import { reportStepTraffic, writeMoreSummary } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
@@ -126,6 +126,7 @@ export interface SandboxStepDeps {
   writeMoreSummary: typeof writeMoreSummary;
   prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
   rewriteOutputFile: typeof rewriteOutputFile;
+  replaceIfNotRegularFile: typeof replaceIfNotRegularFile;
   setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
   setFilesystemAuditOutput: typeof setFilesystemAuditOutput;
   /** Calls listener on each signal a cancelled run sends this process, and
@@ -192,6 +193,7 @@ const realDeps: SandboxStepDeps = {
   writeMoreSummary,
   prepareStepFilesystemAudit,
   rewriteOutputFile,
+  replaceIfNotRegularFile,
   setTrafficArtifactOutput,
   setFilesystemAuditOutput,
   onCancel,
@@ -235,6 +237,35 @@ function saveCleanupState(
   if (filesystemMode === "ephemeral") {
     saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots));
   }
+}
+
+/**
+ * Puts right what the command left at one of the runner's files this action
+ * writes after it. `putRight` returns what it had to put right, if anything,
+ * which fails the step. A file it could not put right may still be the
+ * command's symlink or FIFO, so nothing more is written through it: without
+ * the variable, @actions/core sets outputs as ::set-output commands and the
+ * reports go to the step's log.
+ */
+function putRunnerFileRight(
+  env: NodeJS.ProcessEnv,
+  name: "GITHUB_OUTPUT" | "GITHUB_STEP_SUMMARY",
+  annotation: Annotation,
+  putRight: (path: string) => string | undefined,
+): void {
+  const path = env[name];
+  if (!path) return;
+  try {
+    const done = putRight(path);
+    if (done === undefined) return;
+    annotation.error(`$${name} ${done}; failing the step`);
+  } catch (e) {
+    annotation.error(
+      `$${name} could not be put right: ${errorMessage(e)}; leaving it unwritten and failing the step`,
+    );
+    delete env[name];
+  }
+  process.exitCode = 1;
 }
 
 /**
@@ -284,6 +315,7 @@ export async function runSandboxStep(
     writeMoreSummary,
     prepareStepFilesystemAudit,
     rewriteOutputFile,
+    replaceIfNotRegularFile,
     setTrafficArtifactOutput,
     setFilesystemAuditOutput,
     onCancel,
@@ -484,21 +516,17 @@ export async function runSandboxStep(
     // The command can set either artifact name, in $GITHUB_OUTPUT or with
     // ::set-output, or leave the file so the runner stops before the names
     // appended to it. The file is rewritten to what the runner reads, then both
-    // names set empty, which the runner applies last.
-    if (env.GITHUB_OUTPUT) {
-      try {
-        const unreadable = rewriteOutputFile(env.GITHUB_OUTPUT);
-        if (unreadable) {
-          annotation.error(
-            `$GITHUB_OUTPUT was rewritten without what the runner could not read (${unreadable}); failing the step`,
-          );
-          process.exitCode = 1;
-        }
-      } catch (e) {
-        annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`);
-        process.exitCode = 1;
-      }
-    }
+    // names set empty, which the runner applies last. The reports append to
+    // $GITHUB_STEP_SUMMARY, which the command can have replaced too.
+    putRunnerFileRight(env, "GITHUB_OUTPUT", annotation, (path) => {
+      const unreadable = rewriteOutputFile(path);
+      return unreadable && `was rewritten without what the runner could not read: ${unreadable}`;
+    });
+    putRunnerFileRight(env, "GITHUB_STEP_SUMMARY", annotation, (path) =>
+      replaceIfNotRegularFile(path)
+        ? "held something other than a regular file, now replaced with an empty one"
+        : undefined,
+    );
     for (const set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) {
       try {
         set("");

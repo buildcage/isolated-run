@@ -1,5 +1,8 @@
+import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -12,7 +15,11 @@ import { join } from "node:path";
 
 import { describe, it, expect, afterEach } from "vitest";
 
-import { readOutputEntries, rewriteOutputFile } from "./step-output-file.ts";
+import {
+  readOutputEntries,
+  replaceIfNotRegularFile,
+  rewriteOutputFile,
+} from "./step-output-file.ts";
 
 // Each case is what actions/runner's EnvFileKeyValuePairs does with the text.
 describe("readOutputEntries", () => {
@@ -61,6 +68,7 @@ describe("rewriteOutputFile", () => {
   const rewrite = (content: string | Buffer, kind: "file" | "large" | "other" = "file") => {
     let written: string | undefined;
     const error = rewriteOutputFile("/out", {
+      ownDirectory: () => {},
       kind: () => kind,
       readFile: () => (typeof content === "string" ? Buffer.from(content) : content),
       replaceFile: (_, t) => (written = t),
@@ -100,23 +108,26 @@ describe("rewriteOutputFile", () => {
     });
   });
 
-  it("empties the file when reading it fails, then throws", () => {
+  it("empties the file when reading it fails, and says why", () => {
     const written: string[] = [];
-    const fail = new Error("EIO");
-    expect(() =>
+    expect(
       rewriteOutputFile("/out", {
+        ownDirectory: () => {},
         kind: () => "file",
         readFile: () => {
-          throw fail;
+          throw new Error("EIO");
         },
         replaceFile: (_, t) => written.push(t),
       }),
-    ).toThrow(fail);
+    ).toBe("reading it failed with EIO, so it was emptied");
     expect(written).toStrictEqual([""]);
-    // And throws what failed first when emptying it fails too.
+  });
+
+  it("throws what failed first when emptying the file fails too", () => {
+    const fail = new Error("EIO");
     expect(() =>
       rewriteOutputFile("/out", {
-        kind: () => {
+        ownDirectory: () => {
           throw fail;
         },
         replaceFile: () => {
@@ -176,5 +187,59 @@ describe("rewriteOutputFile", () => {
       expect(readFileSync(path, "utf8")).toBe("");
       expect(readFileSync(target, "utf8")).toBe("secret=1\n");
     });
+  });
+});
+
+describe("replaceIfNotRegularFile", () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("leaves a regular file, and a missing one, as they are", () => {
+    dir = mkdtempSync(join(tmpdir(), "step-summary-"));
+    const path = join(dir, "summary");
+    expect(replaceIfNotRegularFile(path)).toBe(false);
+    expect(() => lstatSync(path)).toThrow();
+    writeFileSync(path, "the command's own\n");
+    expect(replaceIfNotRegularFile(path)).toBe(false);
+    expect(readFileSync(path, "utf8")).toBe("the command's own\n");
+  });
+
+  // lstat, which does not open it: opening a FIFO would block.
+  it("replaces a FIFO with an empty file without opening it", () => {
+    dir = mkdtempSync(join(tmpdir(), "step-summary-"));
+    const path = join(dir, "summary");
+    execFileSync("mkfifo", [path]);
+
+    expect(replaceIfNotRegularFile(path)).toBe(true);
+    expect(lstatSync(path).isFile()).toBe(true);
+  });
+
+  it("gives its directory back the permissions the command took away", () => {
+    dir = mkdtempSync(join(tmpdir(), "step-summary-"));
+    const commands = join(dir, "commands");
+    const path = join(commands, "summary");
+    mkdirSync(commands);
+    symlinkSync(join(dir, "elsewhere"), path);
+    chmodSync(commands, 0o000);
+
+    expect(replaceIfNotRegularFile(path)).toBe(true);
+    expect(lstatSync(path).isFile()).toBe(true);
+    // And still fails on any other error, a directory at the path among them.
+    rmSync(path);
+    mkdirSync(path);
+    expect(() => replaceIfNotRegularFile(path)).toThrow();
+  });
+
+  it("replaces a symlink with an empty file, leaving what it pointed at alone", () => {
+    dir = mkdtempSync(join(tmpdir(), "step-summary-"));
+    const target = join(dir, "elsewhere");
+    const path = join(dir, "summary");
+    writeFileSync(target, "untouched\n");
+    symlinkSync(target, path);
+
+    expect(replaceIfNotRegularFile(path)).toBe(true);
+    expect(lstatSync(path).isFile()).toBe(true);
+    expect(readFileSync(path, "utf8")).toBe("");
+    expect(readFileSync(target, "utf8")).toBe("untouched\n");
   });
 });
