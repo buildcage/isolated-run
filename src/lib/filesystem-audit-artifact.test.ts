@@ -6,24 +6,15 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 
+import type { UploadArtifact } from "./artifact-upload.ts";
 import {
-  filesystemAuditArtifactName,
   uploadFilesystemAuditArtifact,
   setFilesystemAuditOutput,
-  type UploadArtifact,
 } from "./filesystem-audit-artifact.ts";
 
 function annotation(): Annotation & { warning: Mock; error: Mock } {
   return { notice: vi.fn(), warning: vi.fn(), error: vi.fn() };
 }
-
-describe("filesystemAuditArtifactName", () => {
-  it("derives the name from the container's random suffix", () => {
-    expect(filesystemAuditArtifactName("buildcage-proxy-deadbeef")).toBe(
-      "buildcage-filesystem-audit-deadbeef",
-    );
-  });
-});
 
 describe("uploadFilesystemAuditArtifact", () => {
   const OUT = "/var/tmp/buildcage-0/filesystem-audit-deadbeef.jsonl";

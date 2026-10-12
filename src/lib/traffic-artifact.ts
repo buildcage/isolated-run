@@ -8,36 +8,9 @@ import { errorMessage } from "#core/lib/errors.ts";
 import { buildTrafficRecords, writeTrafficFile } from "#core/lib/report/outcome/traffic-output.ts";
 
 import type { AwsTrafficFields } from "../proxy/haproxy-aws-keys.ts";
+import { artifactName, uploadViaActionsArtifact, type UploadArtifact } from "./artifact-upload.ts";
 import type { Report } from "./report.ts";
 import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase } from "./sandbox/scratch-dir.ts";
-
-/** Guaranteed collision-free across concurrent invocations of this action in
- *  the same job, since containerName's own random suffix already is (see
- *  generateContainerName). Unlike buildcage/docker, there is no stable
- *  builder_name-equivalent identity to name it from instead. */
-export function trafficArtifactName(containerName: string): string {
-  return `buildcage-traffic-${containerName.split("-").at(-1)}`;
-}
-
-export type UploadArtifact = (
-  name: string,
-  files: string[],
-  rootDirectory: string,
-  options: { retentionDays?: number },
-) => Promise<unknown>;
-
-/**
- * Imported lazily so a run that asks for no artifact does not load it.
- *
- * Untested by design: the default behind `upload`'s seam below, which only
- * hands @actions/artifact what the tested caller decided.
- */
-/* v8 ignore start */
-const uploadViaActionsArtifact: UploadArtifact = async (name, files, rootDirectory, options) => {
-  const { DefaultArtifactClient } = await import("@actions/artifact");
-  return new DefaultArtifactClient().uploadArtifact(name, files, rootDirectory, options);
-};
-/* v8 ignore stop */
 
 /** `upload` is injectable so tests can assert on the arguments instead of
  *  mocking @actions/artifact directly. */
@@ -71,7 +44,7 @@ export async function uploadTrafficArtifact(
       file,
       buildTrafficRecords<AwsTrafficFields>(report.timeline, report.startedAt),
     );
-    const name = trafficArtifactName(containerName);
+    const name = artifactName("buildcage-traffic", containerName);
     await upload(name, [file], scratchDir, { retentionDays });
     console.log(`Uploaded the traffic JSON as ${name}`);
     return name;

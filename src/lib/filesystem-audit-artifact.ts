@@ -5,26 +5,7 @@ import * as core from "@actions/core";
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
-/** Collision-free across concurrent invocations in one job: containerName's
- *  own random suffix already is (see generateContainerName). */
-export function filesystemAuditArtifactName(containerName: string): string {
-  return `buildcage-filesystem-audit-${containerName.split("-").at(-1)}`;
-}
-
-export type UploadArtifact = (
-  name: string,
-  files: string[],
-  rootDirectory: string,
-  options: { retentionDays?: number },
-) => Promise<unknown>;
-
-/* v8 ignore start -- the default behind the upload seam, loaded lazily so a
- *  run that records nothing never imports @actions/artifact. */
-const uploadViaActionsArtifact: UploadArtifact = async (name, files, rootDirectory, options) => {
-  const { DefaultArtifactClient } = await import("@actions/artifact");
-  return new DefaultArtifactClient().uploadArtifact(name, files, rootDirectory, options);
-};
-/* v8 ignore stop */
+import { artifactName, uploadViaActionsArtifact, type UploadArtifact } from "./artifact-upload.ts";
 
 /**
  * Upload the recording the tracer already wrote, and return the artifact's
@@ -39,7 +20,7 @@ export async function uploadFilesystemAuditArtifact(
   { upload = uploadViaActionsArtifact }: { upload?: UploadArtifact } = {},
 ): Promise<string | undefined> {
   try {
-    const name = filesystemAuditArtifactName(containerName);
+    const name = artifactName("buildcage-filesystem-audit", containerName);
     await upload(name, [outPath], dirname(outPath), { retentionDays });
     console.log(`Uploaded the filesystem audit as ${name}`);
     return name;
