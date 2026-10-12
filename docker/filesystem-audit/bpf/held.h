@@ -29,8 +29,7 @@ static __always_inline int is_restart(long ret)
 }
 
 #define HELD_OP 1   ///< A path change, held from its security_path_* hook.
-#define K_OPEN_ENDED 0 ///< An open hold its exit has ended, dropped with its syscall.
-#define HELD_OPEN 2 ///< An open(2), held from its entry.
+#define HELD_OPEN 2 ///< An open(2), held from its getname (see open_name()).
 
 /** Where a held event's head, or one of its tails, is kept. */
 struct held_key {
@@ -526,14 +525,12 @@ static __always_inline int hold_open(struct event *e)
  * on_sys_exit), so a second open exit, which some builds run for one open,
  * finds it ended.
  *
- * @param[out] held Whether there was a hold, ended or not.
  * @return The failed open to record, assembled in scratch, or 0.
  */
-static __always_inline struct event *open_end(u32 slot, long ret, int *held)
+static __always_inline struct event *open_end(u32 slot, long ret)
 {
 	struct held_key k = held_key(HELD_OPEN);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	*held = head != 0;
 	if (!head || head->kind == K_OPEN_ENDED)
 		return 0;
 	struct event *failed = 0;

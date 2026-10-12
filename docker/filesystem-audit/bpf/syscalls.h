@@ -222,14 +222,23 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 /** The open(2) family's syscall numbers, set by the loader as the others are. */
 const volatile long nr_open = -1, nr_openat = -1, nr_openat2 = -1, nr_creat = -1;
 
+/** Whether syscall @p nr is of the open(2) family. */
+static __always_inline int is_open_nr(long nr)
+{
+	return nr >= 0 && (nr == nr_open || nr == nr_openat || nr == nr_openat2 || nr == nr_creat);
+}
+
+#define O_WRONLY 01
+#define O_CREAT 0100
+#define O_TRUNC 01000
+
 /**
  * Whether the current task is in an open(2) family call, whose getname copies
  * the name being opened (see open_name()).
  */
 static __always_inline int in_open_call(void)
 {
-	long nr = sys_nr((struct pt_regs *)bpf_task_pt_regs(bpf_get_current_task_btf()));
-	return nr >= 0 && (nr == nr_open || nr == nr_openat || nr == nr_openat2 || nr == nr_creat);
+	return is_open_nr(sys_nr((struct pt_regs *)bpf_task_pt_regs(bpf_get_current_task_btf())));
 }
 
 #endif

@@ -333,9 +333,8 @@ static __always_inline void open_failed(u32 slot, struct event *e, long ret, int
 
 /**
  * The @p name a failed open with no hold was given, read into scratch from
- * the caller's memory, best-effort as a failed path syscall's is: getname
- * refused the name, as for one too long, or no getname program ran for the
- * open. 0 when it cannot be read, a call that names nothing.
+ * the caller's memory, best-effort as a failed path syscall's is. 0 when it
+ * cannot be read, a call that names nothing.
  */
 static __always_inline struct event *open_user_name(u32 slot, const char *name)
 {
@@ -351,28 +350,11 @@ static __always_inline struct event *open_user_name(u32 slot, const char *name)
 	return e;
 }
 
-static __always_inline void open_exit(u32 slot, long ret, int dfd, u32 flags, const char *name)
+static __always_inline void open_exit(u32 slot, long ret, int dfd, u32 flags)
 {
-	int held;
-	struct event *e = open_end(slot, ret, &held);
-	if (held || ret >= 0 || is_restart(ret) || !in_target()) {
-		if (e)
-			open_failed(slot, e, ret, dfd, flags);
-		return;
-	}
-	e = open_user_name(slot, name);
-	if (!e)
-		return;
-	open_failed(slot, e, ret, dfd, flags);
-	// Leave an ended hold, so a second open exit for this open does not record
-	// it again.
-	e = scratch_get(slot);
-	if (e) {
-		e->kind = K_OPEN_ENDED;
-		e->data_len = 0;
-		struct held_key k = held_key(HELD_OPEN);
-		bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
-	}
+	struct event *e = open_end(slot, ret);
+	if (e)
+		open_failed(slot, e, ret, dfd, flags);
 }
 
 /** Starts holding the open(2) the thread is in, if any, from its name. */
@@ -409,9 +391,9 @@ int on_getname_outer(u64 *ctx)
  * open/openat reach do_sys_openat2 through do_sys_open, which may inline it;
  * hooking both covers either build. When both fire, the inner exit records the
  * open and the outer one finds its hold ended. The descriptor is the first
- * argument of both, the name the second, and the flags, or the open_how holding
- * them, the third; the return value comes from bpf_get_func_ret, as its type
- * changed (long, later int), so only its low 32 bits are used.
+ * argument of both and the flags, or the open_how holding them, the third;
+ * the return value comes from bpf_get_func_ret, as its type changed (long,
+ * later int), so only its low 32 bits are used.
  */
 SEC("fexit/do_sys_openat2")
 int on_openat2_exit(u64 *ctx)
@@ -419,7 +401,7 @@ int on_openat2_exit(u64 *ctx)
 	u64 ret = 0;
 	bpf_get_func_ret(ctx, &ret);
 	struct open_how *how = (void *)ctx[2];
-	open_exit(__COUNTER__, (int)ret, (int)ctx[0], BPF_CORE_READ(how, flags), (void *)ctx[1]);
+	open_exit(__COUNTER__, (int)ret, (int)ctx[0], BPF_CORE_READ(how, flags));
 	return 0;
 }
 
@@ -428,7 +410,7 @@ int on_open_exit(u64 *ctx)
 {
 	u64 ret = 0;
 	bpf_get_func_ret(ctx, &ret);
-	open_exit(__COUNTER__, (int)ret, (int)ctx[0], (u32)ctx[2], (void *)ctx[1]);
+	open_exit(__COUNTER__, (int)ret, (int)ctx[0], (u32)ctx[2]);
 	return 0;
 }
 
@@ -528,6 +510,40 @@ int BPF_PROG(on_file_free, struct file *file)
 }
 
 /**
+ * Ends an open(2) family call's hold as the call returns, so none outlives it,
+ * recording the open first if its open's exit did not. With no hold, records
+ * a failed call from the name and flags the caller passed: getname refused
+ * the name, as for one too long, the pool was full, or no getname program
+ * ran for the open.
+ */
+static __always_inline void open_returned(u32 slot, struct pt_regs *regs, long nr, long ret)
+{
+	struct held_key k = held_key(HELD_OPEN);
+	struct event *head = bpf_map_lookup_elem(&heads, &k);
+	struct event *e = 0;
+	int at = nr == nr_openat || nr == nr_openat2;
+	if (head) {
+		e = open_end(slot, ret);
+		release(&k, tails_for(head->data_len));
+	} else if (ret < 0 && !is_restart(ret)) {
+		e = open_user_name(slot, (const char *)sys_arg(regs, at));
+	}
+	if (!e)
+		return;
+	u32 flags;
+	if (nr == nr_creat) {
+		flags = O_CREAT | O_WRONLY | O_TRUNC;
+	} else if (nr == nr_openat2) {
+		u64 f = 0; // open_how's first field
+		bpf_probe_read_user(&f, sizeof(f), (void *)sys_arg(regs, 2));
+		flags = f;
+	} else {
+		flags = sys_arg(regs, at + 1);
+	}
+	open_failed(slot, e, ret, at ? (int)sys_arg(regs, 0) : AT_FDCWD, flags);
+}
+
+/**
  * Reports a held path change when its syscall returns: as done if it
  * succeeded (a truncating open returns a descriptor), else as failed with the
  * errno, unless the call is one recorded from its exit (see classify()),
@@ -539,7 +555,8 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	if (!in_target())
 		return 0;
 	struct path_call call = {}; // so no field reaches the stack unset
-	int watched = classify(sys_nr(regs), regs, &call);
+	long nr = sys_nr(regs);
+	int watched = classify(nr, regs, &call);
 	struct held_key k = held_key(HELD_OP);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
 	if (head) {
@@ -550,10 +567,8 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	}
 	if (watched)
 		op_exit(slot, &call, ret);
-	// An open hold ends here, whether its open's exit ended it or, as when
-	// getname ran for another call, nothing did, so none outlives its syscall.
-	k = held_key(HELD_OPEN);
-	drop_held(&k);
+	if (is_open_nr(nr))
+		open_returned(slot, regs, nr, ret);
 	return 0;
 }
 
