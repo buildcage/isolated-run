@@ -69096,20 +69096,21 @@ function spell(parts) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/escape.ts
-const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, unsafe = (chars) => RegExp(`^ | $|(?! )[${chars}]`, "gu"), UNSAFE_CHARS = unsafe(UNSAFE), UNSAFE_QUOTED = unsafe(`${UNSAFE}"`), NAMED_ESCAPES = {
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
 	"\n": "\\n",
 	"\r": "\\r",
 	"	": "\\t",
 	"\\": "\\\\",
 	"\"": "\\\""
 };
-function escapeForDisplay(name, unsafe = UNSAFE_CHARS) {
-	return name.replace(unsafe, (c) => {
-		let named = NAMED_ESCAPES[c];
-		if (named !== void 0) return named;
-		let cp = Number(c.codePointAt(0));
-		return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
-	});
+function escapeForDisplay(name) {
+	return name.replace(UNSAFE_CHARS, (m) => m.startsWith(" ") ? escapeChar(" ").repeat(m.length) : escapeChar(m));
+}
+function escapeChar(c) {
+	let named = NAMED_ESCAPES[c];
+	if (named !== void 0) return named;
+	let cp = Number(c.codePointAt(0));
+	return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
 }
 function codeSpan(text) {
 	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
@@ -69507,7 +69508,7 @@ function createAuditSummary(prefixes) {
 				return;
 			}
 			if (r.kind === "syscall") {
-				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? "", UNSAFE_QUOTED), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
+				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
 				if (!row) {
 					if (refused.size >= 200 && !r.killed) return;
 					row = {
@@ -69549,20 +69550,20 @@ function createAuditSummary(prefixes) {
 		}
 	}, shown = (path) => {
 		if (path.startsWith(MEMFD)) {
-			let name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
+			let name = escapeForDisplay(path.slice(MEMFD.length));
 			return {
 				path: `${MEMFD_PREFIX}"${name}"`,
 				memfd: !0
 			};
 		}
 		return path.endsWith(DELETED) ? {
-			path: escapeForDisplay(relativize(path.slice(0, -DELETED.length), prefixes), UNSAFE_QUOTED),
+			path: escapeForDisplay(relativize(path.slice(0, -DELETED.length), prefixes)),
 			deleted: !0
-		} : { path: escapeForDisplay(relativize(path, prefixes), UNSAFE_QUOTED) };
+		} : { path: escapeForDisplay(relativize(path, prefixes)) };
 	}, rows = (lines) => lines?.map(({ comm, path, agg }) => ({
 		agg,
 		flags: fmtFlags(agg),
-		comm: escapeForDisplay(comm, UNSAFE_QUOTED),
+		comm: escapeForDisplay(comm),
 		...shown(path)
 	}));
 	return {

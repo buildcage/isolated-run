@@ -299,10 +299,10 @@ describe("createAuditSummary", () => {
       { kind: "read", comm: "sh", path: "/work/a\u{e0100}b\u034fc" },
       { kind: "read", comm: "sh", path: "/work/d\u3164e\u115ff\uffa0g\u2800h" },
       { kind: "read", comm: "sh", path: "/work/i\u00a0j\u3000k" },
-      { kind: "read", comm: " sh ", path: "/work/ l m " },
+      { kind: "read", comm: "  sh ", path: "/work/ l m " },
     );
     expect(lines(md)).toEqual([
-      'R \\u{20}sh\\u{20} "./ l m\\u{20}"',
+      'R \\u{20}\\u{20}sh\\u{20} "./ l m\\u{20}"',
       "R sh ./.bashrc\\u{fe0f}",
       "R sh ./a\\u{e0100}b\\u{34f}c",
       "R sh ./d\\u{3164}e\\u{115f}f\\u{ffa0}g\\u{2800}h",
