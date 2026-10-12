@@ -472,13 +472,12 @@ static long get_tail(u64 i, struct tails_ctx *c)
 	if (off < 0)
 		return 1;
 	void *t = bpf_map_lookup_elem(&tails, &k);
-	if (t) {
-		bpf_probe_read_kernel(c->buf + off, CHUNK, t);
-	} else {
-		// Not left as whatever an earlier event put there.
-		__builtin_memset(c->buf + off, 0, CHUNK);
+	if (!t) {
 		c->err = 1;
+		c->to = c->from + i; // where the event's whole data ends
+		return 1;
 	}
+	__builtin_memcpy(c->buf + off, t, CHUNK);
 	return 0;
 }
 
@@ -491,12 +490,14 @@ static long del_tail(u64 i, struct tails_ctx *c)
 	return 0;
 }
 
-static __always_inline int tails_loop(void *fn, struct held_key *k, void *buf, u32 from, u32 to)
+// Runs fn over tails from..to-1; reports where a run of get_tail stopped
+// short, or 0.
+static __always_inline u32 tails_loop(void *fn, struct held_key *k, void *buf, u32 from, u32 to)
 {
 	struct tails_ctx c = { .k = *k, .buf = buf, .from = from, .to = to, .err = 0 };
 	if (from < to)
 		bpf_loop(MAX_TAILS, fn, &c, 0);
-	return c.err;
+	return c.err ? (c.to ? c.to : 1) : 0;
 }
 
 static __always_inline struct held_key held_key(u32 use)
@@ -580,27 +581,42 @@ static __always_inline struct event *assemble(struct held_key *k, struct event *
 	if (!e)
 		return 0;
 	__builtin_memcpy(e, head, HEAD);
-	if (tails_loop(get_tail, k, e, 1, tails_for(e->data_len) + 1) != 0) {
+	u32 missing = tails_loop(get_tail, k, e, 1, tails_for(e->data_len) + 1);
+	if (missing) {
+		// Cut where the data stops being the event's, which the reader
+		// takes as it takes a path too deep to keep whole.
+		e->data_len = HEAD_DATA + (missing - 1) * CHUNK;
 		e->truncated = 1;
 		bump(&untracked);
 	}
 	return e;
 }
 
-// Records the held event whose head is head, with err, straight from the
-// head when it has no tails.
-static __always_inline void report_held(struct held_key *k, struct event *head, u32 err)
+// Records a held event, at e of size cap, as done with err 0 or refused
+// with err; a created open refused after its create step is both.
+static __always_inline void report_at(struct event *e, u32 cap, u32 err, u32 created)
+{
+	if (!err || created) {
+		e->err = 0;
+		submit_cap(e, cap);
+	}
+	if (err) {
+		e->err = err;
+		submit_cap(e, cap);
+	}
+}
+
+// Records the held event whose head is head: straight from the head when it
+// has no tails, else assembled once in scratch.
+static __always_inline void report_held(struct held_key *k, struct event *head, u32 err, u32 created)
 {
 	if (!tails_for(head->data_len)) {
-		head->err = err;
-		submit_cap(head, HEAD);
+		report_at(head, HEAD, err, created);
 		return;
 	}
 	struct event *e = assemble(k, head);
-	if (e) {
-		e->err = err;
-		submit(e);
-	}
+	if (e)
+		report_at(e, sizeof(struct event), err, created);
 }
 
 // Field offsets are resolved by CO-RE in the caller and handed over, since
@@ -1271,17 +1287,21 @@ static __always_inline void open_enter(int dfd, u32 flags)
 	e->bases = 0;
 	e->err = 0;
 	e->truncated = 0;
+	e->n2 = 0;
 	e->data_len = 0;
 	e->data[0] = 0;
 	struct held_key k = held_key(HELD_OPEN);
 	long r = bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
 	if (r == -EEXIST) {
-		// Kept only when it is this open's own, its name still unread; one an
-		// earlier open left is replaced.
+		// do_sys_open's, when both hooks fire, or one an earlier open left:
+		// this open's own call stands in it, as it would in a new one.
 		struct event *head = bpf_map_lookup_elem(&heads, &k);
-		if (!head || (head->kind == K_OPEN_FAILED && !head->data_len))
+		if (head && head->kind == K_OPEN_FAILED && !head->data_len) {
+			__builtin_memcpy(head, e, HEAD);
 			return;
-		release(&k, tails_for(head->data_len));
+		}
+		if (head)
+			release(&k, tails_for(head->data_len));
 		r = bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
 	}
 	if (r != 0)
@@ -1296,8 +1316,9 @@ static __always_inline void open_failed(struct event *e, long ret)
 	s32 dfd = e->gid;
 	u8 cut = e->truncated;
 	u32 off = e->data_len;
-	// A name kept cut has lost its end, the part that names the file.
-	if (cut)
+	// A name kept cut for want of tails, marked in n2, has lost its end, the
+	// part that names the file.
+	if (e->n2)
 		bump(&untracked);
 	start(K_OPEN_FAILED);
 	e->ts = ts;
@@ -1332,10 +1353,7 @@ static __always_inline void open_exit(long ret)
 		// whatever then refused the open.
 		u32 created = head->bases;
 		head->bases = 0;
-		if (ret >= 0 || created)
-			report_held(&k, head, 0);
-		if (ret < 0)
-			report_held(&k, head, -ret);
+		report_held(&k, head, ret < 0 ? -ret : 0, created);
 	} else if (!restart && ret < 0) {
 		struct event *e = assemble(&k, head);
 		if (e)
@@ -1392,10 +1410,12 @@ static __always_inline void stash_name(u64 *ctx)
 	if (hold_as(e, HELD_OPEN, 0, 0) == 0)
 		return;
 	head = bpf_map_lookup_elem(&heads, &k);
-	if (head)
+	if (head) {
 		head->truncated = 1;
-	else
+		head->n2 = 1; // see open_failed
+	} else {
 		bump(&untracked); // lost with its head, so a failure goes unrecorded
+	}
 }
 
 // Some builds inline getname_flags into getname (6.8), others call
@@ -1794,7 +1814,7 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 		u32 t = tails_for(head->data_len);
 		// A failure the syscall's entry recorded stands for this one.
 		if (ret >= 0 || !pend)
-			report_held(&k, head, ret < 0 ? -ret : 0);
+			report_held(&k, head, ret < 0 ? -ret : 0, 0);
 		release(&k, t);
 	}
 	if (pend) {
