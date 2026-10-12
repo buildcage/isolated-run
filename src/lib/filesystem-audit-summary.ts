@@ -316,8 +316,6 @@ interface Node {
   /** Once folded, everything at and below it, shown as "path/**". */
   folded?: Agg;
   kept?: boolean;
-  /** Every action taken anywhere below it, as bits. */
-  below: number;
   /** What its line adds to the size estimate, while it is counted. */
   bytes: number;
 }
@@ -367,7 +365,7 @@ function walkedNodes(top: Map<string, Node>): Set<Node> {
 // Every line of a tree that prints, with its path, but walked directories.
 // Each node links to its parent's entry, so only a printed line's path is
 // ever spelled out.
-function* treeLines(top: Map<string, Node>): Generator<[string, Agg]> {
+function* treeLines(top: Map<string, Node>, fanout: number): Generator<[string, Agg]> {
   interface Entry {
     node: Node;
     part: string;
@@ -383,11 +381,31 @@ function* treeLines(top: Map<string, Node>): Generator<[string, Agg]> {
   const stack: Entry[] = [...top].reverse().map(([part, node]) => ({ node, part }));
   while (stack.length > 0) {
     const e = stack.pop()!;
-    const { folded, own, kids } = e.node;
+    const { folded, own, kids, kept } = e.node;
     if (folded && flagBits(folded)) yield [`${pathTo(e)}/**`, folded];
-    if (own && flagBits(own) && !walked.has(e.node)) yield [pathTo(e), own];
+    const ownLine = own && flagBits(own) && !walked.has(e.node) ? own : undefined;
+    // Its own line counts toward a fold too. Whether that line prints can
+    // change until every access is in, so this fold waits for them.
+    if (kids?.size && !kept && kids.size + (ownLine ? 1 : 0) >= fanout) {
+      yield [`${pathTo(e)}/**`, treeAgg(e.node)];
+      continue;
+    }
+    if (ownLine) yield [pathTo(e), ownLine];
     for (const [part, node] of [...(kids ?? [])].reverse()) stack.push({ node, part, up: e });
   }
+}
+
+// The accesses of a node and everything below it, as one "node/**" line.
+function treeAgg(node: Node): Agg {
+  const agg = newAgg();
+  const stack = [node];
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    if (n.own) mergeAgg(agg, n.own);
+    if (n.folded) mergeAgg(agg, n.folded);
+    stack.push(...(n.kids?.values() ?? []));
+  }
+  return agg;
 }
 
 /**
@@ -415,7 +433,7 @@ export function dropWalkedDirs(
     let node: Node | undefined;
     for (const part of parts) {
       node = kids.get(part);
-      if (!node) kids.set(part, (node = { bytes: 0, below: 0 }));
+      if (!node) kids.set(part, (node = { bytes: 0 }));
       kids = node.kids ??= new Map();
     }
     const agg = newAgg();
@@ -448,7 +466,7 @@ interface LinesOptions {
 
 /**
  * The lines of one table as the accesses arrive, a directory folding into
- * "dir/**" as soon as it would print `fanout` lines, so a tree of any size costs
+ * "dir/**" as soon as it has `fanout` children, so a tree of any size costs
  * no more than its folded lines. Stops, dropping what it holds, once the
  * lines no fold can take away outgrow `limit` bytes, or it holds more than
  * `nodes` paths.
@@ -492,13 +510,13 @@ class Lines {
     for (let i = 0; i < parts.length; i++) {
       let node: Node | undefined = kids.get(parts[i]);
       if (!node) {
-        node = { bytes: 0, below: 0, kept: this.isKept(parts, i + 1) || undefined };
+        node = { bytes: 0, kept: this.isKept(parts, i + 1) || undefined };
         kids.set(parts[i], node);
         this.nodes++;
         if (parent) {
           // No longer a leaf, its own line may be only the walk to this one.
           this.setBytes(parent, 0);
-          if (this.full(parent)) {
+          if (!parent.kept && kids.size >= this.opts.fanout) {
             this.fold(parent);
             return this.addFolded(parent, parts.slice(0, i), x, parentSettled);
           }
@@ -511,32 +529,16 @@ class Lines {
         node.own ??= newAgg();
         const shown = flagBits(node.own) !== 0;
         apply(node.own, x);
-        // Its own line, once it prints, counts toward a fold like an entry.
-        if (this.full(node)) {
-          this.fold(node);
-          return this.addFolded(node, parts, x, settled);
-        }
         if (settled && !shown && flagBits(node.own) && !node.kids?.size)
           this.setBytes(node, this.opts.rowBytes(x.path, x.comm));
         return;
       }
-      node.below |= x.bit;
       node.kids ??= new Map();
       kids = node.kids;
       parent = node;
       parentSettled = settled;
       settled &&= Boolean(node.kept);
     }
-  }
-
-  // Whether a directory would print `fanout` lines or more: one per entry
-  // directly under it, and its own unless that is only the walk to them (see
-  // walkedNodes).
-  private full(node: Node): boolean {
-    if (node.kept || !node.kids?.size) return false;
-    const own = node.own;
-    const ownLine = own && (own.perm || (flagBits(own) & ~node.below) !== 0) ? 1 : 0;
-    return node.kids.size + ownLine >= this.opts.fanout;
   }
 
   // A kept directory's ancestors are kept too, or folding one would hide it.
@@ -605,7 +607,7 @@ class Lines {
 
   private *lines(): Generator<{ comm: string; path: string; agg: Agg }> {
     for (const [comm, top] of this.trees)
-      for (const [path, agg] of treeLines(top)) {
+      for (const [path, agg] of treeLines(top, this.opts.fanout)) {
         // A command that also ran the file keeps one row for it.
         const ran = this.climbing.get(keyOf(comm, path));
         if (ran) mergeAgg(ran, agg);
