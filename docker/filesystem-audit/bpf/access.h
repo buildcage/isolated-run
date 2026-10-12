@@ -30,8 +30,6 @@
 #define MAP_SHARED 1
 #define VM_SHARED 8
 #define S_PRIVATE (1 << 9)
-#define OVERLAYFS_SUPER_MAGIC 0x794c7630
-#define FUSE_SUPER_MAGIC 0x65735546
 
 /**
  * A program run by a process: its tgid, its leader's start time, which a

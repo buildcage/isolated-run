@@ -169,6 +169,13 @@ static struct event *scratch_get(u32 slot)
 #define HELD_MOCK_MAPS
 #include "held.h"
 
+/** open_return as the exit hook calls it, for the current thread. */
+static struct event *open_ret(long ret)
+{
+	int had_head;
+	return open_return(0, bpf_get_current_pid_tgid(), ret, &had_head);
+}
+
 _Static_assert(N_TAILS >= MAX_TAILS && N_TAILS / 2 + 1 <= MAX_TAILS,
 	       "build the tests with -DN_TAILS between MAX_TAILS and twice it");
 
@@ -541,7 +548,7 @@ static void test_open_short_name_refused_early(void)
 {
 	reset();
 	open_name(0, "/tmp/missing", 0);
-	struct event *e = open_return(0, -2);
+	struct event *e = open_ret(-2);
 	CHECK(e && e->kind == K_OPEN_FAILED && !strcmp(e->data, "/tmp/missing"));
 	CHECK(e && e->data_len == 13 && !e->n2);
 	CHECK(heads.count == 0);
@@ -564,7 +571,7 @@ static void test_open_caller_name(void)
 	reset();
 	name_of(long_name, sizeof(long_name) - 1, 'n');
 	open_name(0, long_name, 1);
-	struct event *e = open_return(0, -36);
+	struct event *e = open_ret(-36);
 	CHECK(e && e->kind == K_OPEN_FAILED && !strcmp(e->data, long_name) && !e->n2);
 	CHECK(heads.count == 0 && use()->taken == 0);
 	CHECK_ACCOUNTS();
@@ -577,7 +584,7 @@ static void test_open_caller_name_past_read(void)
 	reset();
 	name_of(name, sizeof(name) - 1, 'n');
 	open_name(0, name, 1);
-	struct event *e = open_return(0, -36);
+	struct event *e = open_ret(-36);
 	CHECK(e && e->data_len == PATH_LEN && e->n2 == NAME_CUT_READ);
 	CHECK(untracked_count() == 0);
 	CHECK(heads.count == 0 && use()->taken == 0);
@@ -591,7 +598,7 @@ static void test_open_name_read_once(void)
 	open_name(0, "/a", 0);
 	open_name(0, "/b", 0);
 	CHECK(heads.count == 1 && !strcmp(head_of(1, HELD_OPEN)->data, "/a"));
-	open_return(0, 0);
+	open_ret(0);
 	open_name(0, "/c", 0);
 	CHECK(heads.count == 1 && !strcmp(head_of(1, HELD_OPEN)->data, "/c"));
 }
@@ -602,7 +609,7 @@ static void test_open_long_name(void)
 	name_of(long_name, sizeof(long_name) - 1, 'n');
 	open_name(0, long_name, 0);
 	CHECK(use()->taken == tails_for(sizeof(long_name)));
-	struct event *e = open_return(0, -2);
+	struct event *e = open_ret(-2);
 	CHECK(e && !strcmp(e->data, long_name) && !e->truncated && !e->n2);
 	CHECK(heads.count == 0 && use()->taken == 0);
 	CHECK_ACCOUNTS();
@@ -635,7 +642,8 @@ static void test_open_no_head(void)
 	current_id = 1;
 	open_name(0, "/g", 0);
 	CHECK(untracked_count() == 1 && head_of(1, HELD_OPEN) == NULL);
-	CHECK(open_return(0, -2) == NULL);
+	int had_head = 1;
+	CHECK(open_return(0, bpf_get_current_pid_tgid(), -2, &had_head) == NULL && !had_head);
 }
 
 static void test_open_held_and_reported(void)
@@ -645,7 +653,9 @@ static void test_open_held_and_reported(void)
 	struct event *e = make(K_OPEN, 30, 5);
 	CHECK(hold_open(e) == 0); // in place, no tails
 	CHECK(head_of(1, HELD_OPEN)->kind == K_OPEN && tails.count == 0);
-	CHECK(open_return(0, 0) == NULL && nsent == 1 && sent[0].e.err == 0);
+	int had_head = 0;
+	CHECK(open_return(0, bpf_get_current_pid_tgid(), 0, &had_head) == NULL && had_head);
+	CHECK(nsent == 1 && sent[0].e.err == 0);
 	CHECK(sent[0].size == __builtin_offsetof(struct event, data) + 30);
 	CHECK(heads.count == 0);
 
@@ -654,7 +664,7 @@ static void test_open_held_and_reported(void)
 	CHECK(open_creating());
 	e = make(K_OPEN, HEAD_DATA + 2 * CHUNK, 6);
 	CHECK(hold_open(e) == 0 && use()->taken == 2);
-	CHECK(open_return(0, -13) == NULL && nsent == 2 && sent[0].e.err == 0 && sent[1].e.err == 13);
+	CHECK(open_ret(-13) == NULL && nsent == 2 && sent[0].e.err == 0 && sent[1].e.err == 13);
 	CHECK(data_matches(&sent[1].e, HEAD_DATA + 2 * CHUNK, 6));
 	CHECK(heads.count == 0 && use()->taken == 0);
 	CHECK_ACCOUNTS();
@@ -665,7 +675,7 @@ static void test_open_not_held(void)
 	reset();
 	CHECK(hold_open(make(K_OPEN, 30, 1)) < 0); // outside open(2)
 	CHECK(!open_creating());
-	CHECK(open_return(0, -2) == NULL);
+	CHECK(open_ret(-2) == NULL);
 	open_name(0, "/f", 0);
 	CHECK(hold_open(make(K_OPEN, 30, 1)) == 0);
 	CHECK(hold_open(make(K_OPEN, 30, 2)) < 0); // nested in the one held
@@ -686,7 +696,7 @@ static void test_open_no_tails(void)
 	CHECK(hold_open(e) > 0 && untracked_count() == 1);
 	open_recorded(e);
 	CHECK(head_of(1, HELD_OPEN)->kind == K_OPEN_RECORDED);
-	CHECK(open_return(0, -6) == NULL && nsent == 0 && heads.count == 0);
+	CHECK(open_ret(-6) == NULL && nsent == 0 && heads.count == 0);
 
 	reset();
 	open_name(0, "/tmp/f", 0);
@@ -696,7 +706,7 @@ static void test_open_no_tails(void)
 	tails.busy_after = -1;
 	open_recorded(e);
 	CHECK(head_of(1, HELD_OPEN)->kind == K_OPEN_RECORDED);
-	CHECK(open_return(0, -6) == NULL && nsent == 0);
+	CHECK(open_ret(-6) == NULL && nsent == 0);
 }
 
 static void test_open_restarted(void)
@@ -704,10 +714,10 @@ static void test_open_restarted(void)
 	reset();
 	open_name(0, "/f", 0);
 	hold_open(make(K_OPEN, HEAD_DATA + CHUNK, 1));
-	CHECK(open_return(0, -512) == NULL && nsent == 0);
+	CHECK(open_ret(-512) == NULL && nsent == 0);
 	CHECK(heads.count == 0 && use()->taken == 0);
 	open_name(0, "/x", 0);
-	CHECK(open_return(0, 0) == NULL && nsent == 0 && heads.count == 0);
+	CHECK(open_ret(0) == NULL && nsent == 0 && heads.count == 0);
 }
 
 static void test_report_outcomes(void)
