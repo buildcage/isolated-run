@@ -55,6 +55,8 @@ const mocks = {
   reportStepTraffic: vi.fn(),
   writeMoreSummary: vi.fn(),
   prepareStepFilesystemAudit: vi.fn(),
+  setTrafficArtifactOutput: vi.fn(),
+  setFilesystemAuditOutput: vi.fn(),
   onCancel: vi.fn(),
   saveState: vi.fn(),
   info: vi.fn(),
@@ -658,6 +660,35 @@ describe("runSandboxStep", () => {
       expect(mocks.onCancel).not.toHaveBeenCalled();
     });
 
+    // The command can write either name itself; a step killed during the
+    // report must not leave one of its names behind.
+    it("clears both artifact names once the command has stopped, before the report", async () => {
+      await runSandboxStep(ENV, deps);
+
+      expect(mocks.setTrafficArtifactOutput.mock.calls).toStrictEqual([[""]]);
+      expect(mocks.setFilesystemAuditOutput.mock.calls).toStrictEqual([[""]]);
+      expect(orderOf(mocks.runSandboxedCommand)).toBeLessThan(
+        orderOf(mocks.setTrafficArtifactOutput),
+      );
+      expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
+        orderOf(mocks.prepareStepFilesystemAudit),
+      );
+      expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
+        orderOf(mocks.reportStepTraffic),
+      );
+    });
+
+    it("still clears the other name and reports when one cannot be cleared", async () => {
+      mocks.setTrafficArtifactOutput.mockImplementation(() => {
+        throw new Error("EACCES");
+      });
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      expect(mocks.setFilesystemAuditOutput).toHaveBeenCalledWith("");
+      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+      expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
+    });
+
     it("creates nothing when docker or sudo cannot be pinned", async () => {
       mocks.pinHostCommands.mockImplementation(() => {
         throw new SandboxError("no docker", "HOST_COMMAND_UNPINNABLE");
@@ -722,6 +753,9 @@ describe("runSandboxStep", () => {
       await runSandboxStep(ENV, deps);
 
       expect(mocks.reportStepTraffic.mock.calls[0][0].moreBlocks).toBeUndefined();
+      expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
+        orderOf(mocks.reportStepTraffic),
+      );
       expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(
         orderOf(mocks.prepareStepFilesystemAudit),
       );
