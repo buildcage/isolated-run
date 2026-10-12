@@ -250,7 +250,7 @@ export async function prepareStepFilesystemAudit(
           FILESYSTEM_PRIORITIES,
           cutNote,
           legendNote,
-          guide,
+          `${guide}#skipped-hooks`,
         );
       } catch (e) {
         annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);

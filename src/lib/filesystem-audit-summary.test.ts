@@ -68,6 +68,10 @@ describe("renderFilesystemAuditSummary", () => {
     expect(render(read, { kind: "end", dropped: 0, untracked: 0, host_missed: 0 })).not.toContain(
       "⚠️",
     );
+    // Only a number counts.
+    expect(render(read, { kind: "end", dropped: 0, untracked: 0, host_missed: "7" })).not.toContain(
+      "⚠️",
+    );
   });
 
   it("includes a heading and the flag legend", () => {

@@ -68650,8 +68650,8 @@ function fmtFlags(a) {
 	return out;
 }
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit";
-function skippedNote(count, guideUrl) {
-	let why = guideUrl ? ` [Why](${guideUrl}#skipped-hooks)` : "";
+function skippedNote(count, url) {
+	let why = url ? ` [Why](${url})` : "";
 	return `> ⚠️ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
 > accesses may be missing from this summary and from the artifact.${why}`;
 }
@@ -68716,7 +68716,7 @@ function createAuditSummary(prefixes) {
 		let proc = procOf(added, r);
 		if (counted) {
 			if (r.kind === "end") {
-				ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = r.host_missed ?? 0;
+				ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = typeof r.host_missed == "number" ? r.host_missed : 0;
 				return;
 			}
 			if (r.kind === "exec" && r.path) {
@@ -68784,11 +68784,11 @@ function inRecordingOrder(rows) {
 		return a.agg.seq - b.agg.seq || ca - cb || (pa < pb ? -1 : pa > pb ? 1 : a.comm < b.comm ? -1 : 1);
 	});
 }
-function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote, guideUrl) {
+function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote, skippedHooksUrl) {
 	let { ended, lost, hostMissed, executed, paths, details, pathsCut, detailsCut } = summary, heading = [
 		HEADING,
 		...ended && !lost ? [] : ["> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
-		...hostMissed ? [skippedNote(hostMissed, guideUrl)] : []
+		...hostMissed ? [skippedNote(hostMissed, skippedHooksUrl)] : []
 	].join("\n\n"), frame = (text) => ({
 		priority: 0,
 		level: 1,
@@ -69476,7 +69476,7 @@ async function prepareStepFilesystemAudit({ audit, attached, upload, retentionDa
 			let rendered;
 			try {
 				if (!summary) throw summaryError;
-				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, cutNote, legendNote, guide);
+				rendered = deps.renderBlocks(summary, startedAt, FILESYSTEM_PRIORITIES, cutNote, legendNote, `${guide}#skipped-hooks`);
 			} catch (e) {
 				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
 			}

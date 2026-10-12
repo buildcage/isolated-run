@@ -363,9 +363,9 @@ describe("prepareStepFilesystemAudit", () => {
       outputs,
       writes,
     } = deps({
-      renderBlocks: (summary, startedAt, priorities, cutNote, legendNote) => {
+      renderBlocks: (summary, startedAt, priorities, cutNote, ...rest) => {
         notes.push(cutNote());
-        return renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote);
+        return renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, ...rest);
       },
     });
 

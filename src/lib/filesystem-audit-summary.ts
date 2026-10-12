@@ -617,8 +617,8 @@ const INCOMPLETE_NOTE =
   "> some accesses are missing from this summary and from the artifact.";
 // A skip may have been any process's on the host, so unlike INCOMPLETE_NOTE
 // this says accesses may be missing rather than that they are.
-function skippedNote(count: number, guideUrl: string | undefined): string {
-  const why = guideUrl ? ` [Why](${guideUrl}#skipped-hooks)` : "";
+function skippedNote(count: number, url: string | undefined): string {
+  const why = url ? ` [Why](${url})` : "";
   return (
     `> ⚠️ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ` +
     `${count === 1 ? "time" : "times"}** on the\n` +
@@ -812,7 +812,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (r.kind === "end") {
       ended = true;
       lost = Boolean(r.dropped || r.untracked);
-      hostMissed = r.host_missed ?? 0;
+      hostMissed = typeof r.host_missed === "number" ? r.host_missed : 0;
       return;
     }
     if (r.kind === "exec" && r.path) {
@@ -912,14 +912,14 @@ export function renderAuditSummaryBlocks(
   priorities: FilesystemPriorities,
   cutNote: (cause?: CutCause) => string,
   legendNote?: string,
-  /** The filesystem audit guide, which the skipped-hooks note links to. */
-  guideUrl?: string,
+  /** Where the skipped-hooks note links to. */
+  skippedHooksUrl?: string,
 ): SummaryBlock[] {
   const { ended, lost, hostMissed, executed, paths, details, pathsCut, detailsCut } = summary;
   const heading = [
     HEADING,
     ...(ended && !lost ? [] : [INCOMPLETE_NOTE]),
-    ...(hostMissed ? [skippedNote(hostMissed, guideUrl)] : []),
+    ...(hostMissed ? [skippedNote(hostMissed, skippedHooksUrl)] : []),
   ].join("\n\n");
   const frame = (text: string): SummaryBlock => ({
     priority: 0,
