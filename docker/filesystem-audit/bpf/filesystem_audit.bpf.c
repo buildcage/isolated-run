@@ -300,18 +300,12 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 	return 0;
 }
 
-static __always_inline void open_enter(u32 slot, int dfd, u32 flags)
+/**
+ * Records the failed open assembled in @p e, its name in place, called with
+ * @p dfd and @p flags.
+ */
+static __always_inline void open_failed(u32 slot, struct event *e, long ret, int dfd, u32 flags)
 {
-	if (in_target())
-		open_begin(slot, dfd, flags);
-}
-
-/** Records the failed open assembled in e, its name in place. */
-static __always_inline void open_failed(u32 slot, struct event *e, long ret)
-{
-	u64 ts = e->ts;
-	u32 flags = e->flags;
-	s32 dfd = e->gid;
 	u8 cut = e->truncated;
 	u32 off = e->data_len;
 	// A name kept cut for want of tails, marked in n2, has lost its end, the
@@ -321,7 +315,6 @@ static __always_inline void open_failed(u32 slot, struct event *e, long ret)
 	// start resets the header of the scratch e is in.
 	if (start(slot, K_OPEN_FAILED) != e)
 		return;
-	e->ts = ts;
 	e->path_len = -ret;
 	e->flags = flags;
 	e->truncated = cut;
@@ -338,39 +331,23 @@ static __always_inline void open_failed(u32 slot, struct event *e, long ret)
 	submit(e);
 }
 
-static __always_inline void open_exit(u32 slot, long ret)
+static __always_inline void open_exit(u32 slot, long ret, int dfd, u32 flags)
 {
 	struct event *e = open_end(slot, ret);
 	if (e)
-		open_failed(slot, e, ret);
+		open_failed(slot, e, ret, dfd, flags);
 }
 
-/**
- * open/openat reach do_sys_openat2 through do_sys_open, which may inline
- * it; hooking both covers either build. When both fire, the inner exit
- * emits and the outer one finds nothing left.
- */
-SEC("fentry/do_sys_openat2")
-int BPF_PROG(on_openat2_enter, int dfd, const char *filename, struct open_how *how)
-{
-	open_enter(slot, dfd, BPF_CORE_READ(how, flags));
-	return 0;
-}
-
-SEC("fentry/do_sys_open")
-int BPF_PROG(on_open_enter, int dfd, const char *filename, int flags)
-{
-	open_enter(slot, dfd, flags);
-	return 0;
-}
-
+/** Starts holding the open(2) the thread is in, if any, from its name. */
 static __always_inline void stash_name(u32 slot, u64 *ctx)
 {
+	if (!in_target() || !in_open_call())
+		return;
 	struct filename *ret = 0;
 	bpf_get_func_ret(ctx, (u64 *)&ret);
 	if ((long)ret < 0 && (long)ret >= -4095)
 		return;
-	hold_name(slot, BPF_CORE_READ(ret, name));
+	open_name(slot, (u64)ret, BPF_CORE_READ(ret, name));
 }
 
 /**
@@ -392,16 +369,20 @@ int on_getname_outer(u64 *ctx)
 }
 
 /**
- * bpf_get_func_ret rather than a declared ret argument: the argument lists
- * of these internal functions change between kernel releases. The return
- * type does too (long, later int), so only the low 32 bits are used.
+ * open/openat reach do_sys_openat2 through do_sys_open, which may inline it;
+ * hooking both covers either build. When both fire, the inner exit emits and
+ * the outer one finds nothing left. The descriptor is the first argument of
+ * both and the flags, or the open_how holding them, the third; the return
+ * value comes from bpf_get_func_ret, as its type changed (long, later int),
+ * so only its low 32 bits are used.
  */
 SEC("fexit/do_sys_openat2")
 int on_openat2_exit(u64 *ctx)
 {
 	u64 ret = 0;
 	bpf_get_func_ret(ctx, &ret);
-	open_exit(__COUNTER__, (int)ret);
+	struct open_how *how = (void *)ctx[2];
+	open_exit(__COUNTER__, (int)ret, (int)ctx[0], BPF_CORE_READ(how, flags));
 	return 0;
 }
 
@@ -410,7 +391,7 @@ int on_open_exit(u64 *ctx)
 {
 	u64 ret = 0;
 	bpf_get_func_ret(ctx, &ret);
-	open_exit(__COUNTER__, (int)ret);
+	open_exit(__COUNTER__, (int)ret, (int)ctx[0], (u32)ctx[2]);
 	return 0;
 }
 

@@ -20,4 +20,6 @@ var syscallNumbers = map[string]int64{
 	"nr_symlinkat": unix.SYS_SYMLINKAT,
 	"nr_linkat":    unix.SYS_LINKAT,
 	"nr_truncate":  unix.SYS_TRUNCATE,
+	"nr_openat":    unix.SYS_OPENAT,
+	"nr_openat2":   unix.SYS_OPENAT2,
 }
