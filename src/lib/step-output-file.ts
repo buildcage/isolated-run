@@ -73,10 +73,10 @@ export function readOutputEntries(text: string): OutputEntries {
   }
 }
 
-// A value may hold a secret, so only a header line's name and delimiter are
-// quoted. That line can still be part of a value an early delimiter ended, as
-// in the runner's own errors, which quote the whole line. The command wrote
-// it, so it is cut short and escaped.
+// A value may hold a secret, so only a NAME<<DELIMITER line's name and
+// delimiter are quoted, cut short and escaped. After a delimiter that came too
+// early that line can still be part of a value; the runner's own error would
+// quote all of it.
 const MAX_QUOTED = 64;
 
 function quoted(text: string): string {
