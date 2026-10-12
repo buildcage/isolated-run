@@ -271,13 +271,13 @@ To tell the causes of `aws-key-not-allowed` apart, look first at which requests 
   - to a URL carrying `X-Amz-Credential`: a presigned URL someone else signed.
   - to a `git-codecommit` host: a CodeCommit static Git credential of an account not in
     `allowed_aws_role_accounts`.
-- **Every request signed after some point**, whatever its host: a key the proxy did not learn. In
-  `restrict`, the traffic artifact names the account: the STS call whose `aws.issuedKeyRef` is the
-  request's `aws.keyRef` has it in `aws.assumedAccount`. In `audit`, the line ends in:
+- **Every request signed after some point**, whatever its host: a key the proxy did not learn. Its
+  line in Communication details ends in:
   - `key N from a role in <account>`: a role switch. STS issued the key, but the proxy learns it
     only for a role in an account in `allowed_aws_role_accounts`. Add the account once you have
-    checked it is yours. If it is already there, the STS call was itself one `restrict` would
-    refuse, so its answer taught no key.
+    checked it is yours. If it is already there in `audit`, the STS call was itself one `restrict`
+    would refuse, so its answer taught no key. In the traffic artifact, the STS call whose
+    `aws.issuedKeyRef` is the request's `aws.keyRef` has the account in `aws.assumedAccount`.
   - `key N` alone: a key from a profile, `~/.aws/credentials`, `credential_process`, SAML, IAM
     Identity Center or `GetSessionToken`, or from an STS answer the proxy could not read.
 
