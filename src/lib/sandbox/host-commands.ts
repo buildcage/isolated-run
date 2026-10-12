@@ -409,6 +409,27 @@ export function sandboxReadonlyFileCommands(
 }
 
 /**
+ * This step's GITHUB_OUTPUT and GITHUB_STEP_SUMMARY, where the command's writes
+ * to them persist. This action writes both after the command, through their
+ * paths; bound onto themselves they stay writable but are mount points, which
+ * the kernel refuses to unlink or rename, so no symlink or FIFO can take their
+ * place. A file the runner did not create is left out.
+ */
+export function sandboxInPlaceFileCommands(
+  persisting: string[],
+  env: NodeJS.ProcessEnv,
+  realpath: (path: string) => string,
+  lstat: SymlinkDeps["lstat"],
+): string[] {
+  return ["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"].flatMap((name) => {
+    const path = env[name];
+    const real = path && realpath(path);
+    if (!real || !lstat(real)) return [];
+    return persisting.some((root) => isAtOrUnder(real, root)) ? [real] : [];
+  });
+}
+
+/**
  * The writable directories between a read-only dir and the outermost persisting
  * root above it. Renaming one would move the read-only dir aside and free its
  * path for a replacement; binding each onto itself makes it a mount point,

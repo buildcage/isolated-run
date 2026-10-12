@@ -4,8 +4,10 @@
 # away, and that write_through naming GITHUB_ENV or GITHUB_PATH opens that one
 # file only. Under write_through: / nothing above them is a mount point, so the
 # third run also tries to move $RUNNER_TEMP aside. The fourth reaches the files
-# through a bind mount that write_through names. See
-# sandboxReadonlyFileCommands and renameGuardDirs in sandbox/host-commands.ts.
+# through a bind mount that write_through names. Where the command's writes
+# persist, GITHUB_OUTPUT and GITHUB_STEP_SUMMARY stay writable but cannot be
+# removed or replaced. See sandboxReadonlyFileCommands, renameGuardDirs and
+# sandboxInPlaceFileCommands in sandbox/host-commands.ts.
 set -uo pipefail
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
@@ -45,6 +47,24 @@ for name in GITHUB_ENV GITHUB_PATH GITHUB_STATE; do
     echo "OK: $name cannot be renamed"
   fi
 done
+# Writable, but not removable where the writes persist.
+if [ "$MODE" != ephemeral ]; then
+  for name in GITHUB_OUTPUT GITHUB_STEP_SUMMARY; do
+    file=$(printenv "$name")
+    if echo "probe=$MODE" >>"$file" 2>/dev/null; then
+      echo "OK: $name is writable"
+    else
+      echo "UNEXPECTED: $name was not writable"
+      rc=1
+    fi
+    if rm -f "$file" 2>/dev/null; then
+      echo "UNEXPECTED: $name could be removed"
+      rc=1
+    else
+      echo "OK: $name cannot be removed"
+    fi
+  done
+fi
 # Only a writable parent can be renamed, and only persistent mode keeps the
 # rename, so only there is the directory guarded.
 if [ "$MODE" = persistent ]; then
@@ -71,14 +91,15 @@ exit $rc'
 run_probe() {
   local tag="$1" mode="$2" write_through="$3" opened="$4"
   local env_file="$COMMANDS/set_env_$tag" path_file="$COMMANDS/add_path_$tag"
-  local state_file="$COMMANDS/save_state_$tag"
-  touch "$env_file" "$path_file" "$state_file"
+  local state_file="$COMMANDS/save_state_$tag" output_file="$COMMANDS/set_output_$tag"
+  touch "$env_file" "$path_file" "$state_file" "$output_file"
   echo "=== $mode, write_through: $write_through ==="
   RUNNER_TEMP="$WORKDIR/_temp" \
   GITHUB_WORKSPACE="$WORKDIR" \
   GITHUB_ENV="$env_file" \
   GITHUB_PATH="$path_file" \
   GITHUB_STATE="$state_file" \
+  GITHUB_OUTPUT="$output_file" \
   GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
   BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \

@@ -71651,6 +71651,12 @@ function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = 
 		return [resolved.real, ...aliases];
 	});
 }
+function sandboxInPlaceFileCommands(persisting, env, realpath, lstat) {
+	return ["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"].flatMap((name) => {
+		let path = env[name], real = path && realpath(path);
+		return !real || !lstat(real) ? [] : persisting.some((root) => isAtOrUnder(real, root)) ? [real] : [];
+	});
+}
 function renameGuardDirs(readonlyDirs, persisting) {
 	let writable = (dir) => persisting.includes(innermost(dir, [...persisting, ...readonlyDirs])), guards = new Set();
 	for (let dir of readonlyDirs) {
@@ -72037,7 +72043,7 @@ function sandboxNamespaces(base, netnsPath) {
 function cgroupsPathFor(runnerCgroup, name) {
 	if (runnerCgroup !== void 0) return `${runnerCgroup.replace(/\/$/, "")}/${name}`;
 }
-function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [] }, probes = realHostProbes) {
+function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [], inPlaceFiles = [] }, probes = realHostProbes) {
 	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, cgroupName, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [], scratchBaseAliases = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
 	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths, (path) => probes.realpath(path));
 	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
@@ -72045,7 +72051,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		type: "none",
 		source: resolvConfPath,
 		options: ["rbind", "ro"]
-	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), overlapsFresh = (p) => [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p)), renameGuards = renameGuardDirs.filter((p) => !overlapsFresh(p)).map((p) => ({
+	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), overlapsFresh = (p) => [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p)), renameGuards = [...renameGuardDirs, ...inPlaceFiles].filter((p) => !overlapsFresh(p)).map((p) => ({
 		destination: p,
 		type: "none",
 		source: p,
@@ -72350,7 +72356,8 @@ function assembleBundle(dir, options, deps) {
 			env,
 			caTrust,
 			readonlyHostPaths: [...readonlyHostDirs, ...readonlyFiles],
-			renameGuardDirs: renameGuardDirs$1
+			renameGuardDirs: renameGuardDirs$1,
+			inPlaceFiles: sandboxInPlaceFileCommands(persisting, env, deps.realpath, deps.lstat)
 		});
 	} catch (e) {
 		throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");

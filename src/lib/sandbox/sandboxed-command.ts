@@ -34,6 +34,7 @@ import {
   persistingWritablePaths,
   renameGuardDirs as renameGuards,
   resolveDefaultWritableDirs,
+  sandboxInPlaceFileCommands,
   sandboxReadonlyFileCommands,
   sandboxReadonlyHostDirs,
 } from "./host-commands.ts";
@@ -417,6 +418,7 @@ export function assembleBundle(
       caTrust,
       readonlyHostPaths: [...readonlyHostDirs, ...readonlyFiles],
       renameGuardDirs,
+      inPlaceFiles: sandboxInPlaceFileCommands(persisting, env, deps.realpath, deps.lstat),
     });
   } catch (e) {
     if (caTrust?.nssDb) deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps));

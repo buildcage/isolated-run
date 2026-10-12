@@ -751,6 +751,9 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   through a symlink in such a path fails the step, and one the host also shows at a second path
   through a bind mount is read-only there too. The runner's install directory and its
   `_actions` directory, which later steps and post steps run code from, are protected the same way.
+  `GITHUB_OUTPUT` and `GITHUB_STEP_SUMMARY`, which this action writes after the command, stay
+  writable but are mounted over themselves where the writes persist, so neither can be removed and
+  replaced with a symlink or a FIFO.
   What `GITHUB_ENV` and `GITHUB_PATH` set reaches every later step and post step at once, and
   `write_through:` can open either by naming it. Only this action's post step reads `GITHUB_STATE`.
   Workflow commands printed to stdout are not stopped: in a job that sets
