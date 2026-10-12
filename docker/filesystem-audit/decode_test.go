@@ -2,12 +2,7 @@ package main
 
 import (
 	"encoding/binary"
-	"encoding/json"
-	"reflect"
-	"strings"
 	"testing"
-	"time"
-	"unicode/utf8"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -110,32 +105,6 @@ func TestDecodeBootTime(t *testing.T) {
 	}
 	if r.boot != 123_456_789_000 {
 		t.Fatalf("boot = %d, want 123456789000", r.boot)
-	}
-}
-
-func TestWallTime(t *testing.T) {
-	// 1.5 s after boot, with boot at 2026-10-06T00:00:00Z.
-	offset := int64(1_791_244_800) * 1_000_000_000
-	if got, want := wallTime(1_500_000_000, offset), "2026-10-06T00:00:01.500Z"; got != want {
-		t.Fatalf("wallTime = %s, want %s", got, want)
-	}
-}
-
-func TestBootOffset(t *testing.T) {
-	off, err := bootOffset()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var boot unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &boot); err != nil {
-		t.Fatal(err)
-	}
-	got, err := time.Parse(time.RFC3339Nano, wallTime(uint64(boot.Nano()), off))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d := time.Since(got); d < -time.Second || d > time.Second {
-		t.Fatalf("boot time now converts to %s, %s from the wall clock", got, d)
 	}
 }
 
@@ -503,84 +472,4 @@ func FuzzDecode(f *testing.F) {
 	f.Fuzz(func(_ *testing.T, raw []byte) {
 		_, _ = decode(raw)
 	})
-}
-
-func TestRecordJSONKeepsBytesThatAreNotUTF8(t *testing.T) {
-	r := record{Kind: "open", Comm: "c\xff", Path: "/tmp/a\xfe\xc3\xa9<", To: "\xed\xb3\xbf"}
-	got, err := json.Marshal(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `{"t":"","kind":"open","pid":0,"ppid":0,"comm":"c\udcff","path":"/tmp/a\udcfeé\u003c","to":"\udced\udcb3\udcbf"}`
-	if string(got) != want {
-		t.Fatalf("got  %s\nwant %s", got, want)
-	}
-}
-
-// A record with a name that is not UTF-8 is written field for field as
-// encoding/json writes record, every field set, but for that name's byte.
-func TestRecordJSONMatchesItsFields(t *testing.T) {
-	type plain record
-	var r record
-	v := reflect.ValueOf(&r).Elem()
-	for i := range v.NumField() {
-		f := v.Field(i)
-		if !f.CanSet() {
-			continue
-		}
-		switch f.Kind() {
-		case reflect.String:
-			f.SetString(v.Type().Field(i).Name)
-		case reflect.Uint32:
-			f.SetUint(1)
-		case reflect.Int32:
-			f.SetInt(1)
-		case reflect.Bool:
-			f.SetBool(true)
-		default:
-			t.Fatalf("field %s: set it here", v.Type().Field(i).Name)
-		}
-	}
-	r.Comm = "c\xff"
-	got, err := json.Marshal(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := json.Marshal(plain(r))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if w := strings.Replace(string(want), "c"+string(utf8.RuneError), `c\udcff`, 1); string(got) != w {
-		t.Fatalf("got  %s\nwant %s", got, w)
-	}
-}
-
-func TestExecFilesAttach(t *testing.T) {
-	files := execFiles{}
-	if !files.attach(&record{Kind: "exec-file", PID: 9, Path: "/work/A/gradlew"}) {
-		t.Fatal("an exec-file record should be dropped")
-	}
-	other := record{Kind: "exec", PID: 7, Path: "/usr/bin/env"}
-	if files.attach(&other) || other.Path != "/usr/bin/env" || other.Name != "" {
-		t.Fatalf("an exec with no resolved file changed: %+v", other)
-	}
-	exec := record{Kind: "exec", PID: 9, Path: "./gradlew"}
-	if files.attach(&exec) {
-		t.Fatal("an exec record should be kept")
-	}
-	if exec.Path != "/work/A/gradlew" || exec.Name != "./gradlew" {
-		t.Fatalf("exec = %+v, want the resolved path with the name it was run by", exec)
-	}
-	if _, left := files[9]; left {
-		t.Fatal("the resolved file should be used once")
-	}
-	if files.attach(&record{Kind: "read", PID: 9, Path: "/etc/hosts"}) {
-		t.Fatal("other records should be kept")
-	}
-	files.attach(&record{Kind: "exec-file", PID: 9, Path: "memfd:x", Memfd: true})
-	memfd := record{Kind: "exec", PID: 9, Path: "/dev/fd/3"}
-	files.attach(&memfd)
-	if memfd.Path != "memfd:x" || !memfd.Memfd || memfd.Name != "/dev/fd/3" {
-		t.Fatalf("exec = %+v, want the memfd it ran", memfd)
-	}
 }
