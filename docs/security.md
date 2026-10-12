@@ -654,6 +654,9 @@ spells a path. What it can do:
 - Look a file up, or read a link's target or an extended attribute. `stat`, `access`, `readlink`,
   `getxattr`, `listxattr` and a successful open with `O_PATH` are not recorded; what a command then
   does through an `O_PATH` descriptor, such as running or reopening the file, is recorded.
+- Crash a process where the host's `core_pattern` names a path: the kernel writes the core file
+  itself, outside any system call, so its creation and contents go unrecorded. The step cannot
+  choose that path, which needs host privilege to set, and reading the file afterwards is recorded.
 - Flood the tracer until its buffers fill. What did not fit is lost, but the summary then says the
   record is incomplete, as it does when the tracer did not stop cleanly. Flooding can hide which
   accesses happened, not that some are missing.

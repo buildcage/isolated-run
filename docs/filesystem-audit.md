@@ -441,9 +441,12 @@ missing even so, the kernel cannot switch modes, and hooks can be skipped when
 
 `host_missed` counts skips anywhere on the host while the step ran, so 0 means none of the step's
 accesses was skipped. A nonzero count opens the summary with a note that some accesses may be
-missing; a skip cannot be tied to the step, so the note cannot say they are. For a complete record,
-use a kernel that does not pause the hooks, such as one booted with `preempt=voluntary` where the
-kernel offers that mode.
+missing; a skip cannot be tied to the step, so the note cannot say they are. A skipped hook drops
+the access it was following rather than reporting it against the wrong call, save where a recorded
+path may be an earlier one's: an open may carry an earlier open's path, and a delete, move or other
+path change whose own hook was skipped too an earlier such change's. For a complete record, use a
+kernel that does not pause the hooks, such as one booted with `preempt=voluntary` where the kernel
+offers that mode.
 
 ## What it does not record
 
@@ -457,6 +460,10 @@ kernel offers that mode.
   through `setxattr` or `lsetxattr`, a failed `exec`, a `mkdir`, `mknod`, `symlink` or `link` on a
   name already there, and one made by `bind(2)` that the kernel refuses before reaching its file.
 - The sandbox's own setup, and the step's shell reading its script.
+- The kernel writing a core dump when a process crashes, where `core_pattern` names a path: the file
+  is created and written by the kernel, not through a system call, so neither is recorded. Reading
+  that file afterwards is. GitHub-hosted runners pipe core dumps to a handler, which does not write a
+  file here.
 
 io_uring is not among them: the sandbox refuses `io_uring_setup`, so no access goes through it, and
 the refusal is recorded as a `syscall`.
