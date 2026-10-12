@@ -68291,18 +68291,20 @@ If the error persists, please check whether Actions and API requests are operati
 	init_client(), init_interfaces(), init_errors(), init_client(), client = new DefaultArtifactClient();
 }));
 //#endregion
-//#region src/lib/filesystem-audit-artifact.ts
-init_core();
-function filesystemAuditArtifactName(containerName) {
-	return `buildcage-filesystem-audit-${containerName.split("-").at(-1)}`;
+//#region src/lib/artifact-upload.ts
+function artifactName(prefix, containerName) {
+	return `${prefix}-${containerName.split("-").at(-1)}`;
 }
-const uploadViaActionsArtifact$1 = async (name, files, rootDirectory, options) => {
+const uploadViaActionsArtifact = async (name, files, rootDirectory, options) => {
 	let { DefaultArtifactClient } = await Promise.resolve().then(() => (init_artifact(), artifact_exports));
 	return new DefaultArtifactClient().uploadArtifact(name, files, rootDirectory, options);
 };
-async function uploadFilesystemAuditArtifact(outPath, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact$1 } = {}) {
+//#endregion
+//#region src/lib/filesystem-audit-artifact.ts
+init_core();
+async function uploadFilesystemAuditArtifact(outPath, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact } = {}) {
 	try {
-		let name = filesystemAuditArtifactName(containerName);
+		let name = artifactName("buildcage-filesystem-audit", containerName);
 		return await upload(name, [outPath], (0, node_path.dirname)(outPath), { retentionDays }), console.log(`Uploaded the filesystem audit as ${name}`), name;
 	} catch (e) {
 		annotation.warning(`Could not upload the filesystem audit artifact: ${errorMessage(e)}`);
@@ -73495,20 +73497,13 @@ function writeTrafficFile(path, records) {
 //#endregion
 //#region src/lib/traffic-artifact.ts
 init_core();
-function trafficArtifactName(containerName) {
-	return `buildcage-traffic-${containerName.split("-").at(-1)}`;
-}
-const uploadViaActionsArtifact = async (name, files, rootDirectory, options) => {
-	let { DefaultArtifactClient } = await Promise.resolve().then(() => (init_artifact(), artifact_exports));
-	return new DefaultArtifactClient().uploadArtifact(name, files, rootDirectory, options);
-};
 async function uploadTrafficArtifact(report, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact, scratchBase = SANDBOX_SCRATCH_BASE } = {}) {
 	ensureOwnScratchBase(scratchBase);
 	let scratchDir = (0, node_fs.mkdtempSync)((0, node_path.join)(scratchBase, "traffic-"));
 	try {
 		let file = (0, node_path.join)(scratchDir, "traffic.json");
 		writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));
-		let name = trafficArtifactName(containerName);
+		let name = artifactName("buildcage-traffic", containerName);
 		return await upload(name, [file], scratchDir, { retentionDays }), console.log(`Uploaded the traffic JSON as ${name}`), name;
 	} catch (e) {
 		annotation.warning(`Could not upload the traffic artifact: ${errorMessage(e)}`);

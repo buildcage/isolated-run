@@ -8,13 +8,9 @@ import { createAnnotation } from "#core/lib/actions/annotation.ts";
 import type { InspectReportData } from "#core/lib/report/types.ts";
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
+import type { UploadArtifact } from "./artifact-upload.ts";
 import type { Report } from "./report.ts";
-import {
-  setTrafficArtifactOutput,
-  trafficArtifactName,
-  uploadTrafficArtifact,
-  type UploadArtifact,
-} from "./traffic-artifact.ts";
+import { setTrafficArtifactOutput, uploadTrafficArtifact } from "./traffic-artifact.ts";
 
 const CONTAINER = "buildcage-proxy-deadbeef";
 
@@ -55,13 +51,6 @@ function fakeUpload(fail?: Error): {
 
 afterEach(() => {
   vi.unstubAllEnvs();
-});
-
-describe("trafficArtifactName", () => {
-  it("carries the container's own random suffix, so concurrent steps don't collide", () => {
-    expect(trafficArtifactName(CONTAINER)).toBe("buildcage-traffic-deadbeef");
-    expect(trafficArtifactName("buildcage-proxy-0badcafe")).toBe("buildcage-traffic-0badcafe");
-  });
 });
 
 describe("setTrafficArtifactOutput", () => {
