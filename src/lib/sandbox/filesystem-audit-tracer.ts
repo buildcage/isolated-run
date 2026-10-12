@@ -13,8 +13,9 @@ import { join } from "node:path";
 
 import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 
-import { SandboxError, cancelledBeforeRun } from "../errors.ts";
-import { realHostProbes, type HostProbes } from "./host-probes.ts";
+import { cancelledBeforeRun } from "../errors.ts";
+import { auditUnavailable, hostCannotAudit } from "./filesystem-audit-host.ts";
+import { readPid } from "./filesystem-audit-paths.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 const CGROUP_ROOT = "/sys/fs/cgroup";
@@ -39,95 +40,11 @@ const END_LINE = /"kind":"end"[^\n]*\n$/;
 /** How the tracer starts the line naming why it exited (see its main.go). */
 const FATAL = "filesystem-audit: fatal: ";
 
-/** Where the tracer writes, under the scratch base so the post step can read
- *  them after the per-step scratch dir is gone. The suffix matches the
- *  container's own, which is already collision-free (see generateContainerName). */
-export interface FilesystemAuditPaths {
-  outPath: string;
-  pidFilePath: string;
-  /** The recording with buildcage's own records stripped, as uploaded. */
-  stepPath: string;
-}
-
-export function filesystemAuditPaths(
-  containerName: string,
-  scratchBase: string,
-): FilesystemAuditPaths {
-  const suffix = containerName.split("-").at(-1);
-  return {
-    outPath: join(scratchBase, `filesystem-audit-${suffix}.jsonl`),
-    pidFilePath: join(scratchBase, `filesystem-audit-${suffix}.pid`),
-    stepPath: join(scratchBase, `filesystem-audit-${suffix}.step.jsonl`),
-  };
-}
-
 /** The sandbox cgroup's absolute path, from the cgroupsPath config.json gives
  *  runc (which is relative to the cgroup root). The tracer watches this
  *  subtree, which runc then puts the sandboxed process into. */
 export function cgroupFsPath(cgroupsPath: string): string {
   return join(CGROUP_ROOT, cgroupsPath);
-}
-
-const REQUIREMENTS =
-  "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF: " +
-  "https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting";
-
-/** The step's failure when the tracer could not start. */
-export function auditUnavailable(reason: string): SandboxError {
-  return new SandboxError(
-    `filesystem_audit could not start (${reason}); the command was not run.`,
-    "FILESYSTEM_AUDIT_UNAVAILABLE",
-  );
-}
-
-/** auditUnavailable for a host the tracer cannot run on, naming what it needs. */
-export function hostCannotAudit(reason: string): SandboxError {
-  const e = auditUnavailable(reason);
-  return new SandboxError(`${e.message} ${REQUIREMENTS}`, e.code);
-}
-
-export const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2";
-
-/** The native seccomp architecture of each runner the tracer supports. */
-const NATIVE_ARCH: Partial<Record<NodeJS.Architecture, string>> = {
-  x64: "SCMP_ARCH_X86_64",
-  arm64: "SCMP_ARCH_AARCH64",
-};
-
-/** The seccomp profile with only the native ABI left, of those Docker's
- *  default profile allows. A syscall through a 32-bit one is numbered apart
- *  from the native ones the tracer reads attribute changes and failed path
- *  changes from, so under the audit the kernel kills the thread that makes
- *  one, with SIGSYS. */
-export function withoutCompatSyscalls(profile: unknown, arch = process.arch): unknown {
-  const p = profile as { architectures?: unknown } | null;
-  const native = NATIVE_ARCH[arch];
-  if (!p || !Array.isArray(p.architectures) || !native) return profile;
-  return { ...p, architectures: p.architectures.filter((a) => a === native) };
-}
-
-/** The syscalls a seccomp profile allows, for some arguments at least; the
- *  tracer records any other that fails EPERM as one the profile refused. One
- *  allowed only for some arguments counts as allowed, since the kernel's own
- *  EPERM for it, as for a raw socket, would read as the profile's. */
-export function allowedSyscalls(profile: unknown): string[] {
-  const p = profile as { syscalls?: unknown } | null;
-  if (!p || !Array.isArray(p.syscalls)) return [];
-  return p.syscalls.flatMap((s: { names?: unknown; action?: unknown }) =>
-    s.action === "SCMP_ACT_ALLOW" && Array.isArray(s.names)
-      ? s.names.filter((n): n is string => typeof n === "string")
-      : [],
-  );
-}
-
-/** Fails the step before the proxy starts on a host the tracer cannot watch.
- *  The kernel version is left to the tracer, which checks the kernel by
- *  feature. */
-export function checkFilesystemAuditHost(
-  probes: Pick<HostProbes, "cgroupPath" | "kernelBtf"> = realHostProbes,
-): void {
-  if (probes.cgroupPath() === undefined) throw hostCannotAudit(NO_CGROUP_V2_REASON);
-  if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
 }
 
 export type SpawnAudit = (command: string, args: string[]) => AuditChild;
@@ -272,6 +189,77 @@ export function extractTracer(
   return tracerPath;
 }
 
+/** A spawned tracer, and whether it has exited yet. */
+export interface RunningTracer {
+  child: AuditChild;
+  exited: () => boolean;
+}
+
+export interface HaltTracerOptions {
+  outPath: string;
+  pidFilePath: string;
+  /** Aborted when the step is cancelled, which shortens the wait. */
+  cancel?: AbortSignal;
+}
+
+type HaltTracerDeps = Required<
+  Pick<FilesystemAuditDeps, "sleep" | "remove" | "exec" | "readFile" | "readTail">
+>;
+
+// SIGKILL to the sudo wrapper would not reach the tracer, so this kills the
+// tracer itself.
+function killTracer(
+  pidFilePath: string,
+  { readFile, exec }: Pick<HaltTracerDeps, "readFile" | "exec">,
+): void {
+  try {
+    const pid = readPid(readFile, pidFilePath);
+    if (pid > 0) exec("sudo", ["-n", "kill", "-KILL", String(pid)]);
+  } catch {
+    // The tracer is already gone, or its pidfile cannot be read.
+  }
+}
+
+/**
+ * Stops the tracer. sudo relays SIGTERM to it for a clean flush. Once its end
+ * line is written the record is whole, and the seconds the kernel takes to
+ * detach its probes are left to it, so it can remove its cgroup. One that
+ * neither writes it nor exits in time is killed. Removing the pidfile once it
+ * is gone tells the post step the tracer is stopped, so it only acts on one a
+ * cancel orphaned.
+ *
+ * untilRecorded: return once the record is whole rather than once the tracer
+ * has gone, which a tracer that never attached has no record for.
+ */
+export async function haltTracer(
+  { child, exited }: RunningTracer,
+  untilRecorded: boolean,
+  { outPath, pidFilePath, cancel }: HaltTracerOptions,
+  deps: HaltTracerDeps,
+): Promise<void> {
+  const { sleep, remove, readTail } = deps;
+  child.kill("SIGTERM");
+  // Read each round, so a cancel that comes while waiting cuts the wait.
+  const grace = () => (untilRecorded && !cancel?.aborted ? STOP_GRACE_MS : SHORT_STOP_GRACE_MS);
+  for (let waited = 0; !exited(); waited += READY_POLL_MS) {
+    if (untilRecorded && recordComplete(readTail, outPath)) {
+      void Promise.race([child.exited, sleep(DETACH_GRACE_MS, true)])
+        .then(() => {
+          if (!exited()) killTracer(pidFilePath, deps);
+          return child.exited;
+        })
+        .then(() => remove(pidFilePath))
+        .catch(() => {}); // the post step removes a pidfile left behind
+      return;
+    }
+    if (waited >= grace()) break;
+    await sleep(READY_POLL_MS);
+  }
+  if (!exited()) killTracer(pidFilePath, deps);
+  await child.exited;
+  remove(pidFilePath);
+}
+
 export interface StartFilesystemAuditOptions {
   tracerPath: string;
   /** config.json's cgroupsPath for the sandbox cgroup. */
@@ -339,45 +327,10 @@ export async function startFilesystemAudit(
   void child.exited.then(() => {
     exited = true;
   });
-  // sudo relays SIGTERM to the tracer for a clean flush. Once its end line is
-  // written the record is whole, and the seconds the kernel takes to detach
-  // its probes are left to it, so it can remove its cgroup. One that neither
-  // writes it nor exits in time is SIGKILLed itself: SIGKILL to the sudo wrapper would not
-  // reach it. Removing the pidfile once it is gone tells the post step the
-  // tracer is stopped, so it only acts on one a cancel orphaned.
-  const kill = () => {
-    try {
-      const pid = Number(readFile(pidFilePath).trim()); // NaN for a junk pidfile
-      if (pid > 0) exec("sudo", ["-n", "kill", "-KILL", String(pid)]);
-    } catch {
-      // The tracer is already gone, or its pidfile cannot be read.
-    }
-  };
-  // untilRecorded: return once the record is whole rather than once the
-  // tracer has gone, which a tracer that never attached has no record for.
-  const halt = async (untilRecorded: boolean) => {
-    child.kill("SIGTERM");
-    // Read each round, so a cancel that comes while waiting cuts the wait.
-    const grace = () => (untilRecorded && !cancel?.aborted ? STOP_GRACE_MS : SHORT_STOP_GRACE_MS);
-    for (let waited = 0; !exited; waited += READY_POLL_MS) {
-      if (untilRecorded && recordComplete(readTail, outPath)) {
-        void Promise.race([child.exited, sleep(DETACH_GRACE_MS, true)])
-          .then(() => {
-            if (!exited) kill();
-            return child.exited;
-          })
-          .then(() => remove(pidFilePath))
-          .catch(() => {}); // the post step removes a pidfile left behind
-        return;
-      }
-      if (waited >= grace()) break;
-      await sleep(READY_POLL_MS);
-    }
-    if (!exited) kill();
-    await child.exited;
-    remove(pidFilePath);
-  };
-  const stop = () => halt(true);
+  const tracer: RunningTracer = { child, exited: () => exited };
+  const haltOptions = { outPath, pidFilePath, cancel };
+  const haltDeps = { sleep, remove, exec, readFile, readTail };
+  const stop = () => haltTracer(tracer, true, haltOptions, haltDeps);
   for (let i = 0; i < READY_TRIES; i++) {
     if (cancel?.aborted) break;
     if (exists(readyPath)) return { stop };
@@ -390,7 +343,7 @@ export async function startFilesystemAudit(
   const failure = exited
     ? hostCannotAudit(child.reason() || "the tracer exited")
     : auditUnavailable("the tracer did not attach in time");
-  await halt(false);
+  await haltTracer(tracer, false, haltOptions, haltDeps);
   // A tracer that attached just too late may have created the recording; the
   // report would otherwise read it as one cut short.
   remove(outPath);

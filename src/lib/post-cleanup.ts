@@ -5,7 +5,7 @@ import { errorMessage } from "#core/lib/errors.ts";
 
 import { ownerToken, readContainerOwner, scratchDirNameFor } from "./container.ts";
 import { resolvePostState, type PostCleanupTargets } from "./post-state.ts";
-import { filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
+import { filesystemAuditPaths, readPid } from "./sandbox/filesystem-audit-paths.ts";
 import { releaseNssDb } from "./sandbox/nss-db-ledger.ts";
 import { runPinnedHostCommand } from "./sandbox/run-host-command.ts";
 import {
@@ -61,7 +61,7 @@ function cleanupLeftoverAudit(
   );
   if (fileExists(pidFilePath)) {
     try {
-      const pid = Number(readFile(pidFilePath).trim());
+      const pid = readPid(readFile, pidFilePath);
       // Only signal a live process that is still the tracer: by now its pid may
       // have been reused. comm is truncated to 15 bytes.
       if (Number.isInteger(pid) && pid > 0 && isTracer(pid, readFile)) killTracer(pid);

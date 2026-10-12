@@ -3,7 +3,7 @@ import { describe, it, expect, vi, type Mock } from "vitest";
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 
 import { planPostCleanup, type PostCleanupDeps } from "./post-cleanup.ts";
-import { filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
+import { filesystemAuditPaths } from "./sandbox/filesystem-audit-paths.ts";
 import { SANDBOX_SCRATCH_BASE, scratchDirFor } from "./sandbox/scratch-dir.ts";
 
 const CONTAINER = "buildcage-proxy-deadbeef";
