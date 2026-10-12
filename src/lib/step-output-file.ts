@@ -2,9 +2,8 @@
  * The step's $GITHUB_OUTPUT, put in order before this action sets its own
  * outputs there. The isolated command can write the file too, and the runner
  * reads it top to bottom, setting each output as it goes and stopping at the
- * first entry it cannot read: one the command leaves unreadable keeps every
- * line appended after it from being read, and one it names after this action's
- * outputs is set before them.
+ * first entry it cannot read, so one the command leaves unreadable keeps every
+ * line appended after it from being read.
  */
 
 import { randomBytes } from "node:crypto";
@@ -44,8 +43,8 @@ export function readOutputEntries(text: string): OutputEntries {
     const equals = line.indexOf("=");
     const heredoc = line.indexOf("<<");
     if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
-      // The runner takes an empty name here, but what it then does with one is
-      // not this to rely on.
+      // The runner takes an empty name here; whether it then reads on is not
+      // known, so this stops.
       if (equals === 0) return { entries, error: "an entry has an empty name" };
       entries.push({ name: line.slice(0, equals), text: text.slice(start, index) });
       continue;
@@ -107,34 +106,30 @@ const WIDE_BOMS = [
 ];
 
 /**
- * Rewrites the file with every entry the runner reads but those naming
- * `names`, whatever their case, ending in a newline, so this action's outputs
- * appended after it are read and nothing set before them can stand in for
- * them. What it could not read is dropped, and the reason returned. A symlink,
- * a FIFO or anything else but a regular file is not read at all: the runner
- * would read through it, to a file the command cannot reach, or block.
+ * Rewrites the file with every entry the runner reads, as it was written,
+ * ending in a newline, so the outputs this action appends after it are read.
+ * What it could not read is dropped, and the reason returned. A symlink, a FIFO
+ * or anything else but a regular file is not read at all: the runner would read
+ * through it, to a file the command cannot reach, or block.
  */
 export function rewriteOutputFile(
   path: string,
-  names: readonly string[],
   overrides: Partial<RewriteOutputFileDeps> = {},
 ): string | undefined {
   const { kind, readFile, replaceFile } = { ...realDeps, ...overrides };
   const found = kind(path);
   if (found === "other") {
     replaceFile(path, "");
-    return "it is not a regular file";
+    return "it is not a regular file, so none of it was read";
   }
   const bytes = found === "file" ? readFile(path) : Buffer.alloc(0);
   if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) {
     replaceFile(path, "");
-    return "it is not UTF-8";
+    return "it is not UTF-8, so none of it was read";
   }
-  // The runner drops a leading BOM, and looks an output up whatever its case.
+  // The runner drops a leading BOM.
   const { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, ""));
-  const dropped = new Set(names.map((n) => n.toLowerCase()));
-  const kept = entries.filter((e) => !dropped.has(e.name.toLowerCase())).map((e) => e.text);
-  const text = kept.join("");
+  const text = entries.map((e) => e.text).join("");
   replaceFile(path, text === "" || text.endsWith("\n") ? text : `${text}\n`);
   return error;
 }

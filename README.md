@@ -419,7 +419,8 @@ is gone.
 > Naming `$GITHUB_STEP_SUMMARY` puts the command's markdown in the same Job Summary this action
 > writes its own report to. That report and the `traffic_artifact_name` and
 > `filesystem_audit_artifact_name` outputs are unaffected either way: all are written from the runner
-> host after the sandboxed command has exited, outside the overlay.
+> host after the sandboxed command has exited, outside the overlay. Before they are, `$GITHUB_OUTPUT`
+> is rewritten to what the runner can read of it, and a file it cannot read to the end fails the step.
 
 Name only what a later step needs, usually the build output. Everything else the command writes is
 discarded, the rest of `$GITHUB_WORKSPACE` included: an edited `package.json` script, a new

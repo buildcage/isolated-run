@@ -68309,9 +68309,8 @@ async function uploadFilesystemAuditArtifact(outPath, containerName, retentionDa
 		return;
 	}
 }
-const FILESYSTEM_AUDIT_OUTPUT = "filesystem_audit_artifact_name";
 function setFilesystemAuditOutput(name) {
-	setOutput(FILESYSTEM_AUDIT_OUTPUT, name);
+	setOutput("filesystem_audit_artifact_name", name);
 }
 //#endregion
 //#region src/core/lib/report/render/fit-step-summary.ts
@@ -72539,15 +72538,15 @@ const realDeps$2 = {
 		255
 	]
 ];
-function rewriteOutputFile(path, names, overrides = {}) {
+function rewriteOutputFile(path, overrides = {}) {
 	let { kind, readFile, replaceFile } = {
 		...realDeps$2,
 		...overrides
 	}, found = kind(path);
-	if (found === "other") return replaceFile(path, ""), "it is not a regular file";
+	if (found === "other") return replaceFile(path, ""), "it is not a regular file, so none of it was read";
 	let bytes = found === "file" ? readFile(path) : Buffer.alloc(0);
-	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return replaceFile(path, ""), "it is not UTF-8";
-	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), dropped = new Set(names.map((n) => n.toLowerCase())), text = entries.filter((e) => !dropped.has(e.name.toLowerCase())).map((e) => e.text).join("");
+	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return replaceFile(path, ""), "it is not UTF-8, so none of it was read";
+	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");
 	return replaceFile(path, text === "" || text.endsWith("\n") ? text : `${text}\n`), error;
 }
 //#endregion
@@ -73461,9 +73460,8 @@ async function uploadTrafficArtifact(report, containerName, retentionDays, annot
 		});
 	}
 }
-const TRAFFIC_ARTIFACT_OUTPUT = "traffic_artifact_name";
 function setTrafficArtifactOutput(name) {
-	setOutput(TRAFFIC_ARTIFACT_OUTPUT, name);
+	setOutput("traffic_artifact_name", name);
 }
 //#endregion
 //#region src/lib/step-report.ts
@@ -73711,8 +73709,8 @@ async function runSandboxStep(env, overrides = {}) {
 		});
 	} finally {
 		if (env.GITHUB_OUTPUT) try {
-			let unreadable = rewriteOutputFile(env.GITHUB_OUTPUT, [TRAFFIC_ARTIFACT_OUTPUT, FILESYSTEM_AUDIT_OUTPUT]);
-			unreadable && (annotation.error(`The command left $GITHUB_OUTPUT unreadable (${unreadable}), so what it held from there on was dropped; failing the step`), process.exitCode = 1);
+			let unreadable = rewriteOutputFile(env.GITHUB_OUTPUT);
+			unreadable && (annotation.error(`The command left $GITHUB_OUTPUT unreadable: ${unreadable}. What the runner could not read was dropped; failing the step`), process.exitCode = 1);
 		} catch (e) {
 			annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
 		}

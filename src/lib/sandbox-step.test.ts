@@ -669,14 +669,12 @@ describe("runSandboxStep", () => {
       expect(mocks.onCancel).not.toHaveBeenCalled();
     });
 
-    // The command can write either name itself, or leave the file so the
-    // runner never reads the names the report appends.
-    it("rewrites $GITHUB_OUTPUT without either artifact name once the command has stopped, before the report", async () => {
+    // The command can leave the file so the runner never reads the names
+    // appended after it.
+    it("rewrites $GITHUB_OUTPUT once the command has stopped, before the report", async () => {
       await runSandboxStep(ENV, deps);
 
-      expect(mocks.rewriteOutputFile.mock.calls).toStrictEqual([
-        [ENV.GITHUB_OUTPUT, ["traffic_artifact_name", "filesystem_audit_artifact_name"]],
-      ]);
+      expect(mocks.rewriteOutputFile.mock.calls).toStrictEqual([[ENV.GITHUB_OUTPUT]]);
       expect(orderOf(mocks.runSandboxedCommand)).toBeLessThan(orderOf(mocks.rewriteOutputFile));
       expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(
         orderOf(mocks.prepareStepFilesystemAudit),
@@ -685,8 +683,8 @@ describe("runSandboxStep", () => {
       expect(annotation.error).not.toHaveBeenCalled();
     });
 
-    // The runner applies the file after ::set-output commands, so an empty
-    // value there overrides one the command set as a command.
+    // The runner applies the file after ::set-output commands, and its last
+    // entry for a name, so an empty value there overrides any the command set.
     it("then sets both names empty, before the report sets them", async () => {
       await runSandboxStep(ENV, deps);
 
@@ -711,11 +709,11 @@ describe("runSandboxStep", () => {
     });
 
     it("fails the step but still reports when $GITHUB_OUTPUT held what the runner cannot read", async () => {
-      mocks.rewriteOutputFile.mockReturnValue("it is not a regular file");
+      mocks.rewriteOutputFile.mockReturnValue("it is not a regular file, so none of it was read");
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
       expect(annotation.error).toHaveBeenCalledWith(
-        "The command left $GITHUB_OUTPUT unreadable (it is not a regular file), so what it held from there on was dropped; failing the step",
+        "The command left $GITHUB_OUTPUT unreadable: it is not a regular file, so none of it was read. What the runner could not read was dropped; failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);

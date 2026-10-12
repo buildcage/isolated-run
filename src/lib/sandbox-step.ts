@@ -32,7 +32,7 @@ import { buildComposeEnv } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
-import { FILESYSTEM_AUDIT_OUTPUT, setFilesystemAuditOutput } from "./filesystem-audit-artifact.ts";
+import { setFilesystemAuditOutput } from "./filesystem-audit-artifact.ts";
 import { prepareStepFilesystemAudit } from "./filesystem-audit-report.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
@@ -65,7 +65,7 @@ import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { rewriteOutputFile } from "./step-output-file.ts";
 import { reportStepTraffic, writeMoreSummary } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
-import { setTrafficArtifactOutput, TRAFFIC_ARTIFACT_OUTPUT } from "./traffic-artifact.ts";
+import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
 
 /**
  * Display fallback for the report's `uses:` example when the runner names no
@@ -483,18 +483,16 @@ export async function runSandboxStep(
   } finally {
     // The command can write either artifact name to $GITHUB_OUTPUT or as a
     // ::set-output command, or leave the file so the runner stops reading
-    // before the names the reports append. Once it has stopped, its names are
-    // taken out of the file and both set empty, which the runner applies after
-    // the commands, so a step killed before the report keeps none of them.
+    // before the names appended after it. Once it has stopped, the file is
+    // rewritten to what the runner reads and both names are set empty after
+    // it, which the runner applies last, so a step killed before the report
+    // keeps none of the command's names.
     if (env.GITHUB_OUTPUT) {
       try {
-        const unreadable = rewriteOutputFile(env.GITHUB_OUTPUT, [
-          TRAFFIC_ARTIFACT_OUTPUT,
-          FILESYSTEM_AUDIT_OUTPUT,
-        ]);
+        const unreadable = rewriteOutputFile(env.GITHUB_OUTPUT);
         if (unreadable) {
           annotation.error(
-            `The command left $GITHUB_OUTPUT unreadable (${unreadable}), so what it held from there on was dropped; failing the step`,
+            `The command left $GITHUB_OUTPUT unreadable: ${unreadable}. What the runner could not read was dropped; failing the step`,
           );
           process.exitCode = 1;
         }

@@ -83,13 +83,12 @@ export async function uploadTrafficArtifact(
   }
 }
 
-export const TRAFFIC_ARTIFACT_OUTPUT = "traffic_artifact_name";
-
 /**
  * Set the traffic_artifact_name output, empty when no artifact was uploaded.
  * Written on every path, after the isolated command has exited and
- * $GITHUB_OUTPUT has been rewritten without the name (see step-output-file.ts).
+ * $GITHUB_OUTPUT has been rewritten so the runner reads it (see
+ * step-output-file.ts), which this overrides as the last write.
  */
 export function setTrafficArtifactOutput(name: string): void {
-  core.setOutput(TRAFFIC_ARTIFACT_OUTPUT, name);
+  core.setOutput("traffic_artifact_name", name);
 }

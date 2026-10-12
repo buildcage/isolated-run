@@ -52,7 +52,7 @@ describe("readOutputEntries", () => {
 describe("rewriteOutputFile", () => {
   const rewrite = (content: string | Buffer, kind: "file" | "other" = "file") => {
     let written: string | undefined;
-    const error = rewriteOutputFile("/out", ["mine"], {
+    const error = rewriteOutputFile("/out", {
       kind: () => kind,
       readFile: () => (typeof content === "string" ? Buffer.from(content) : content),
       replaceFile: (_, t) => (written = t),
@@ -60,16 +60,11 @@ describe("rewriteOutputFile", () => {
     return { written, error };
   };
 
-  it("drops the given names in either form and keeps the rest as written", () => {
-    expect(rewrite("a=1\nmine=evil\nb<<EOF\nv\nEOF\nmine<<X\nevil\nX\n")).toStrictEqual({
+  it("keeps every entry the runner reads as it was written, without a leading BOM", () => {
+    expect(rewrite("\uFEFFa=1\nb<<EOF\nv\nEOF\n")).toStrictEqual({
       written: "a=1\nb<<EOF\nv\nEOF\n",
       error: undefined,
     });
-  });
-
-  it("drops a name whatever its case, and one behind a leading BOM, as the runner reads them", () => {
-    expect(rewrite("MINE=evil\na=1\n").written).toBe("a=1\n");
-    expect(rewrite("\uFEFFmine=evil\na=1\n").written).toBe("a=1\n");
   });
 
   it("ends the file in a newline, so a line appended after it is its own", () => {
@@ -78,7 +73,7 @@ describe("rewriteOutputFile", () => {
   });
 
   it("drops what the runner could not read, and says why", () => {
-    const { written, error } = rewrite("mine=evil\na=1\nx<<NEVER\nmine=ok\n");
+    const { written, error } = rewrite("a=1\nx<<NEVER\nb=2\n");
     expect(written).toBe("a=1\n");
     expect(error).toBe("a NAME<<DELIMITER entry never reaches its delimiter");
   });
@@ -86,7 +81,7 @@ describe("rewriteOutputFile", () => {
   it("empties, unread, anything at the path but a regular file", () => {
     expect(rewrite("keep=1\n", "other")).toStrictEqual({
       written: "",
-      error: "it is not a regular file",
+      error: "it is not a regular file, so none of it was read",
     });
   });
 
@@ -98,7 +93,7 @@ describe("rewriteOutputFile", () => {
     ]) {
       expect(rewrite(Buffer.from([...bom, 0x61, 0x3d, 0x31]))).toStrictEqual({
         written: "",
-        error: "it is not UTF-8",
+        error: "it is not UTF-8, so none of it was read",
       });
     }
   });
@@ -110,26 +105,26 @@ describe("rewriteOutputFile", () => {
     it("writes an empty file where the command removed it, and fails on any other read error", () => {
       dir = mkdtempSync(join(tmpdir(), "step-output-"));
       const path = join(dir, "output");
-      expect(rewriteOutputFile(path, ["mine"])).toBeUndefined();
+      expect(rewriteOutputFile(path)).toBeUndefined();
       expect(readFileSync(path, "utf8")).toBe("");
-      writeFileSync(path, "mine=evil\nkeep=1\n");
-      expect(rewriteOutputFile(path, ["mine"])).toBeUndefined();
+      writeFileSync(path, "keep=1");
+      expect(rewriteOutputFile(path)).toBeUndefined();
       expect(readFileSync(path, "utf8")).toBe("keep=1\n");
-      expect(() => rewriteOutputFile(dir, ["mine"])).toThrow();
-      expect(() => rewriteOutputFile(join(path, "below-a-file"), ["mine"])).toThrow(/ENOTDIR/);
+      expect(() => rewriteOutputFile(dir)).toThrow();
+      expect(() => rewriteOutputFile(join(path, "below-a-file"))).toThrow(/ENOTDIR/);
     });
 
     it("replaces a symlink left at the path, reading and writing nothing through it", () => {
       dir = mkdtempSync(join(tmpdir(), "step-output-"));
       const target = join(dir, "elsewhere");
       const path = join(dir, "output");
-      writeFileSync(target, "mine=evil\nkeep=1\n");
+      writeFileSync(target, "secret=1\n");
       symlinkSync(target, path);
 
-      expect(rewriteOutputFile(path, ["mine"])).toBe("it is not a regular file");
+      expect(rewriteOutputFile(path)).toBe("it is not a regular file, so none of it was read");
       expect(lstatSync(path).isSymbolicLink()).toBe(false);
       expect(readFileSync(path, "utf8")).toBe("");
-      expect(readFileSync(target, "utf8")).toBe("mine=evil\nkeep=1\n");
+      expect(readFileSync(target, "utf8")).toBe("secret=1\n");
     });
   });
 });
