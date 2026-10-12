@@ -23,6 +23,7 @@ import { readTrafficArtifactInputs } from "#core/lib/actions/inputs.ts";
 import { logRules, withLogGroup } from "#core/lib/actions/log.ts";
 import { readRuleInputs } from "#core/lib/actions/rule-inputs.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
+import { errorMessage } from "#core/lib/errors.ts";
 import { resolveBuildcageImageRef } from "#core/lib/provenance/image-ref.ts";
 import { verifyImageDigestOrThrow, type ResolvedImage } from "#core/lib/provenance/verify-image.ts";
 import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts";
@@ -31,7 +32,7 @@ import { buildComposeEnv } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
-import { setFilesystemAuditOutput } from "./filesystem-audit-artifact.ts";
+import { FILESYSTEM_AUDIT_OUTPUT } from "./filesystem-audit-artifact.ts";
 import { prepareStepFilesystemAudit } from "./filesystem-audit-report.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
@@ -61,9 +62,10 @@ import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
+import { rewriteOutputFile } from "./step-output-file.ts";
 import { reportStepTraffic, writeMoreSummary } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
-import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
+import { TRAFFIC_ARTIFACT_OUTPUT } from "./traffic-artifact.ts";
 
 /**
  * Display fallback for the report's `uses:` example when the runner names no
@@ -123,8 +125,7 @@ export interface SandboxStepDeps {
   reportStepTraffic: typeof reportStepTraffic;
   writeMoreSummary: typeof writeMoreSummary;
   prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
-  setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
-  setFilesystemAuditOutput: typeof setFilesystemAuditOutput;
+  rewriteOutputFile: typeof rewriteOutputFile;
   /** Calls listener on each signal a cancelled run sends this process, and
    *  returns what stops listening. */
   onCancel: (listener: () => void) => () => void;
@@ -188,8 +189,7 @@ const realDeps: SandboxStepDeps = {
   reportStepTraffic,
   writeMoreSummary,
   prepareStepFilesystemAudit,
-  setTrafficArtifactOutput,
-  setFilesystemAuditOutput,
+  rewriteOutputFile,
   onCancel,
   saveState: core.saveState,
   info: core.info,
@@ -279,8 +279,7 @@ export async function runSandboxStep(
     reportStepTraffic,
     writeMoreSummary,
     prepareStepFilesystemAudit,
-    setTrafficArtifactOutput,
-    setFilesystemAuditOutput,
+    rewriteOutputFile,
     onCancel,
     saveState,
     info,
@@ -476,14 +475,25 @@ export async function runSandboxStep(
       cancel: cancel.signal,
     });
   } finally {
-    // The command can write either artifact name to $GITHUB_OUTPUT. Cleared
-    // once it has stopped, so a step killed before the report sets them
-    // leaves none of its names.
-    for (const set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) {
+    // The command can write either artifact name to $GITHUB_OUTPUT, or leave
+    // the file so the runner stops reading before the names the reports
+    // append. Taken out once it has stopped, so a step killed before the
+    // report sets them leaves none of its names either.
+    if (env.GITHUB_OUTPUT) {
       try {
-        set("");
-      } catch {
-        // The report setting it again says so.
+        const unreadable = rewriteOutputFile(env.GITHUB_OUTPUT, [
+          TRAFFIC_ARTIFACT_OUTPUT,
+          FILESYSTEM_AUDIT_OUTPUT,
+        ]);
+        if (unreadable) {
+          annotation.error(
+            `$GITHUB_OUTPUT holds what the runner cannot read: ${unreadable}. The outputs from there on were dropped; failing the step`,
+          );
+          process.exitCode = 1;
+        }
+      } catch (e) {
+        annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`);
+        process.exitCode = 1;
       }
     }
     // None throws, so the teardown and stopListening are always reached.

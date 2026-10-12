@@ -68309,8 +68309,9 @@ async function uploadFilesystemAuditArtifact(outPath, containerName, retentionDa
 		return;
 	}
 }
+const FILESYSTEM_AUDIT_OUTPUT = "filesystem_audit_artifact_name";
 function setFilesystemAuditOutput(name) {
-	setOutput("filesystem_audit_artifact_name", name);
+	setOutput(FILESYSTEM_AUDIT_OUTPUT, name);
 }
 //#endregion
 //#region src/core/lib/report/render/fit-step-summary.ts
@@ -69420,7 +69421,7 @@ function openWriter(path, chunkBytes = CHUNK_BYTES) {
 		}
 	};
 }
-const realDeps$3 = {
+const realDeps$4 = {
 	readLines,
 	createSummary: createAuditSummary,
 	openWriter,
@@ -69443,7 +69444,7 @@ function prefixes(value, realpath) {
 const NONE = { blocks: () => [] };
 async function prepareStepFilesystemAudit({ audit, attached, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
 	let deps = {
-		...realDeps$3,
+		...realDeps$4,
 		...overrides
 	}, artifactName = "";
 	try {
@@ -72234,7 +72235,7 @@ function extractRuncBootstrap({ containerName, destDir }, deps = {}) {
 //#endregion
 //#region src/lib/sandbox/sandboxed-command.ts
 init_core();
-const realDeps$2 = {
+const realDeps$3 = {
 	withScratchDir,
 	extractRuncBootstrap,
 	extractCaCert,
@@ -72422,7 +72423,7 @@ async function startAudit(dir, config, options, deps) {
 }
 async function runSandboxedCommand(options, overrides = {}) {
 	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {
-		...realDeps$2,
+		...realDeps$3,
 		...overrides
 	}, { withScratchDir, writeOciConfig, resolveSandboxEnv, buildEnvBlob, runIsolated } = deps;
 	return withScratchDir(async (dir) => {
@@ -72455,6 +72456,85 @@ async function runSandboxedCommand(options, overrides = {}) {
 		ephemeralRoots: filesystemMode === "ephemeral" ? overlayRoots : void 0,
 		warn
 	});
+}
+//#endregion
+//#region src/lib/step-output-file.ts
+function readOutputEntries(text) {
+	let entries = [], index = 0, readLine = () => {
+		if (index >= text.length) return;
+		let lf = text.indexOf("\n", index), end = lf === -1 ? text.length : lf, line = text.slice(index, end);
+		return index = lf === -1 ? text.length : lf + 1, {
+			line,
+			newline: lf !== -1
+		};
+	};
+	for (;;) {
+		let start = index, read = readLine();
+		if (!read) return { entries };
+		let { line } = read;
+		if (line === "") continue;
+		let equals = line.indexOf("="), heredoc = line.indexOf("<<");
+		if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
+			entries.push({
+				name: line.slice(0, equals),
+				text: text.slice(start, index)
+			});
+			continue;
+		}
+		if (heredoc === -1) return {
+			entries,
+			error: "a line is neither NAME=VALUE nor NAME<<DELIMITER"
+		};
+		let name = line.slice(0, heredoc), delimiter = line.slice(heredoc + 2);
+		if (name === "" || delimiter === "") return {
+			entries,
+			error: "a NAME<<DELIMITER line has an empty name or delimiter"
+		};
+		for (;;) {
+			let value = readLine();
+			if (!value) return {
+				entries,
+				error: `the delimiter ${delimiter} never comes`
+			};
+			if (value.line === delimiter) break;
+			if (!value.newline) return {
+				entries,
+				error: `the delimiter ${delimiter} never comes`
+			};
+		}
+		entries.push({
+			name,
+			text: text.slice(start, index)
+		});
+	}
+}
+const realDeps$2 = {
+	readFile: (path) => {
+		try {
+			return (0, node_fs.readFileSync)(path, "utf8");
+		} catch (e) {
+			if (e.code === "ENOENT") return "";
+			throw e;
+		}
+	},
+	replaceFile: (path, text) => {
+		let temporary = (0, node_path.join)((0, node_path.dirname)(path), `.${(0, node_path.basename)(path)}.${(0, node_crypto.randomBytes)(8).toString("hex")}`);
+		try {
+			(0, node_fs.writeFileSync)(temporary, text, {
+				flag: "wx",
+				mode: 420
+			}), (0, node_fs.renameSync)(temporary, path);
+		} finally {
+			(0, node_fs.rmSync)(temporary, { force: !0 });
+		}
+	}
+};
+function rewriteOutputFile(path, names, overrides = {}) {
+	let { readFile, replaceFile } = {
+		...realDeps$2,
+		...overrides
+	}, { entries, error } = readOutputEntries(readFile(path)), text = entries.filter((e) => !names.includes(e.name)).map((e) => e.text).join("");
+	return replaceFile(path, text === "" || text.endsWith("\n") ? text : `${text}\n`), error;
 }
 //#endregion
 //#region src/core/lib/actions/write-step-summary.ts
@@ -73367,8 +73447,9 @@ async function uploadTrafficArtifact(report, containerName, retentionDays, annot
 		});
 	}
 }
+const TRAFFIC_ARTIFACT_OUTPUT = "traffic_artifact_name";
 function setTrafficArtifactOutput(name) {
-	setOutput("traffic_artifact_name", name);
+	setOutput(TRAFFIC_ARTIFACT_OUTPUT, name);
 }
 //#endregion
 //#region src/lib/step-report.ts
@@ -73491,8 +73572,7 @@ const realDeps = {
 	reportStepTraffic,
 	writeMoreSummary,
 	prepareStepFilesystemAudit,
-	setTrafficArtifactOutput,
-	setFilesystemAuditOutput,
+	rewriteOutputFile,
 	onCancel,
 	saveState,
 	info,
@@ -73518,7 +73598,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, rewriteOutputFile, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -73614,9 +73694,12 @@ async function runSandboxStep(env, overrides = {}) {
 			cancel: cancel.signal
 		});
 	} finally {
-		for (let set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) try {
-			set("");
-		} catch {}
+		if (env.GITHUB_OUTPUT) try {
+			let unreadable = rewriteOutputFile(env.GITHUB_OUTPUT, [TRAFFIC_ARTIFACT_OUTPUT, FILESYSTEM_AUDIT_OUTPUT]);
+			unreadable && (annotation.error(`$GITHUB_OUTPUT holds what the runner cannot read: ${unreadable}. The outputs from there on were dropped; failing the step`), process.exitCode = 1);
+		} catch (e) {
+			annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
+		}
 		let prepareAudit = () => prepareStepFilesystemAudit({
 			audit,
 			attached: auditAttached,

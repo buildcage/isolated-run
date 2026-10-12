@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 
@@ -55,8 +55,7 @@ const mocks = {
   reportStepTraffic: vi.fn(),
   writeMoreSummary: vi.fn(),
   prepareStepFilesystemAudit: vi.fn(),
-  setTrafficArtifactOutput: vi.fn(),
-  setFilesystemAuditOutput: vi.fn(),
+  rewriteOutputFile: vi.fn(),
   onCancel: vi.fn(),
   saveState: vi.fn(),
   info: vi.fn(),
@@ -78,9 +77,16 @@ const ENV = {
   HOME: "/home/runner",
   GITHUB_STEP_SUMMARY: "/home/runner/work/_temp/summary",
   GITHUB_STATE: "/home/runner/work/_temp/state",
+  GITHUB_OUTPUT: "/home/runner/work/_temp/output",
   GITHUB_ACTION_REF: "v1.2.3",
   GITHUB_ACTION_REPOSITORY: "buildcage/isolated-run",
 };
+
+// A failure the step reports by process.exitCode must not fail the test run.
+const exitCode = process.exitCode;
+afterEach(() => {
+  process.exitCode = exitCode;
+});
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -625,8 +631,7 @@ describe("runSandboxStep", () => {
       });
 
       await expect(runSandboxStep(ENV, deps)).rejects.toThrow("runc: exec failed");
-      expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
-      expect(mocks.setFilesystemAuditOutput).toHaveBeenCalledWith("");
+      expect(mocks.rewriteOutputFile).toHaveBeenCalledTimes(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
       expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
       expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(orderOf(mocks.stopSandboxProxy));
@@ -662,33 +667,50 @@ describe("runSandboxStep", () => {
       expect(mocks.onCancel).not.toHaveBeenCalled();
     });
 
-    // The command can write either name itself; a step killed during the
-    // report must not leave one of its names behind.
-    it("clears both artifact names once the command has stopped, before the report", async () => {
+    // The command can write either name itself, or leave the file so the
+    // runner never reads the names the report appends.
+    it("rewrites $GITHUB_OUTPUT without either artifact name once the command has stopped, before the report", async () => {
       await runSandboxStep(ENV, deps);
 
-      expect(mocks.setTrafficArtifactOutput.mock.calls).toStrictEqual([[""]]);
-      expect(mocks.setFilesystemAuditOutput.mock.calls).toStrictEqual([[""]]);
-      expect(orderOf(mocks.runSandboxedCommand)).toBeLessThan(
-        orderOf(mocks.setTrafficArtifactOutput),
-      );
-      expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
+      expect(mocks.rewriteOutputFile.mock.calls).toStrictEqual([
+        [ENV.GITHUB_OUTPUT, ["traffic_artifact_name", "filesystem_audit_artifact_name"]],
+      ]);
+      expect(orderOf(mocks.runSandboxedCommand)).toBeLessThan(orderOf(mocks.rewriteOutputFile));
+      expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(
         orderOf(mocks.prepareStepFilesystemAudit),
       );
-      expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
-        orderOf(mocks.reportStepTraffic),
-      );
+      expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
+      expect(annotation.error).not.toHaveBeenCalled();
     });
 
-    it("still clears the other name and reports when one cannot be cleared", async () => {
-      mocks.setTrafficArtifactOutput.mockImplementation(() => {
+    it("fails the step but still reports when $GITHUB_OUTPUT held what the runner cannot read", async () => {
+      mocks.rewriteOutputFile.mockReturnValue("the delimiter EOF never comes");
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      expect(annotation.error).toHaveBeenCalledWith(
+        "$GITHUB_OUTPUT holds what the runner cannot read: the delimiter EOF never comes. The outputs from there on were dropped; failing the step",
+      );
+      expect(process.exitCode).toBe(1);
+      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+      expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails the step but still reports when $GITHUB_OUTPUT cannot be rewritten", async () => {
+      mocks.rewriteOutputFile.mockImplementation(() => {
         throw new Error("EACCES");
       });
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
-      expect(mocks.setFilesystemAuditOutput).toHaveBeenCalledWith("");
+      expect(annotation.error).toHaveBeenCalledWith(
+        "Failed to rewrite $GITHUB_OUTPUT: EACCES; failing the step",
+      );
+      expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
-      expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
+    });
+
+    it("rewrites nothing where the runner gave no $GITHUB_OUTPUT", async () => {
+      await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "" }, deps);
+      expect(mocks.rewriteOutputFile).not.toHaveBeenCalled();
     });
 
     it("creates nothing when docker or sudo cannot be pinned", async () => {
@@ -755,9 +777,7 @@ describe("runSandboxStep", () => {
       await runSandboxStep(ENV, deps);
 
       expect(mocks.reportStepTraffic.mock.calls[0][0].moreBlocks).toBeUndefined();
-      expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
-        orderOf(mocks.reportStepTraffic),
-      );
+      expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
       expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(
         orderOf(mocks.prepareStepFilesystemAudit),
       );

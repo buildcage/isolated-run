@@ -49,9 +49,11 @@ export async function uploadFilesystemAuditArtifact(
   }
 }
 
+export const FILESYSTEM_AUDIT_OUTPUT = "filesystem_audit_artifact_name";
+
 /** Set the filesystem_audit_artifact_name output, empty when none was
- *  uploaded. Written after the command, which is last-write-wins over
- *  anything the command itself wrote to the same key. */
+ *  uploaded. Written after the command has exited and $GITHUB_OUTPUT has been
+ *  rewritten without the name (see step-output-file.ts). */
 export function setFilesystemAuditOutput(name: string): void {
-  core.setOutput("filesystem_audit_artifact_name", name);
+  core.setOutput(FILESYSTEM_AUDIT_OUTPUT, name);
 }
