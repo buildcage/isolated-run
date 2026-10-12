@@ -517,7 +517,7 @@ static void test_open_short_name_refused_early(void)
 }
 
 /**
- * A name getname refused, as one too long, is held from the caller's own;
+ * A name getname refused as too long is held from the caller's own;
  * one that cannot be read names nothing, and is neither held nor counted. A
  * kernel copy that cannot be read is counted.
  */
@@ -538,7 +538,7 @@ static void test_open_caller_name(void)
 	CHECK_ACCOUNTS();
 }
 
-/** Both getname programs of one open: the second finds the name read. */
+/** A second name for one open, as open_returned() gives, finds the name read. */
 static void test_open_name_read_once(void)
 {
 	reset();
@@ -617,12 +617,12 @@ static void test_open_held_and_reported(void)
 static void test_open_not_held(void)
 {
 	reset();
-	CHECK(hold_open(make(K_OPEN, 30, 1)) < 0); // outside open(2)
+	CHECK(hold_open(make(K_OPEN, 30, 1)) == -2); // outside open(2)
 	CHECK(!open_creating());
 	CHECK(open_return(0, -2) == NULL);
 	open_name(0, "/f", 0);
 	CHECK(hold_open(make(K_OPEN, 30, 1)) == 0);
-	CHECK(hold_open(make(K_OPEN, 30, 2)) < 0); // nested in the one held
+	CHECK(hold_open(make(K_OPEN, 30, 2)) == -1); // nested in the one held
 	CHECK(head_of(1, HELD_OPEN)->data[0] == (char)1);
 }
 

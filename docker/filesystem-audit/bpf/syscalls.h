@@ -237,8 +237,8 @@ static __always_inline int is_open_nr(long nr)
 #define O_TRUNC 01000
 
 /**
- * Whether the current task is in an open(2) family call, whose getname copies
- * the name being opened (see open_name()).
+ * Whether the current task is in an open(2) family call, whose name
+ * do_filp_open is given (see open_name()).
  */
 static __always_inline int in_open_call(void)
 {

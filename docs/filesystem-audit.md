@@ -82,8 +82,8 @@ A host that falls short fails the step before the command runs, with the reason;
 - **Cost to the whole host.** While the step runs, the tracer's hooks run on every system call and
   every file read or write on the runner host, not only the step's, since a hook has to run to tell
   whose call it is. That adds roughly 60 nanoseconds to each system call of every process on the
-  machine, the proxy, Docker and other jobs on a shared runner included, and about 100 to each read
-  or write. Copying a file a byte at a time outside the step took about one and a half times as long
+  machine, the proxy, Docker and other jobs on a shared runner included, about 100 to each read
+  or write, and about 250 to opening and closing a file. Copying a file a byte at a time outside the step took about one and a half times as long
   in a test, while a typical build, which spends little of its time in system calls, barely changes.
   Inside the step, each program's first read or write of a file is also recorded, which costs more.
 

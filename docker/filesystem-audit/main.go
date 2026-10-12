@@ -43,18 +43,18 @@ const cgroupRoot = "/sys/fs/cgroup"
 
 // optionalProgs are programs whose attach target some supported kernels do
 // not expose; each is dropped before load when its function is absent from
-// kernel BTF. getname has two spellings (one inlined into the other) and
-// starts an open's hold with the name it copies.
+// kernel BTF. do_filp_open, renamed in 7.0, starts an open's hold with the
+// name getname copied.
 var optionalProgs = map[string]string{
-	"on_getname":       "getname_flags",
-	"on_getname_outer": "getname",
+	"on_filp_open":     "do_filp_open",
+	"on_do_file_open":  "do_file_open",
 	"on_exec_file":     "security_bprm_creds_for_exec",
 	"on_file_truncate": "security_file_truncate",
 }
 
-// getnameProgs is the subset of optionalProgs that starts an open's hold; at
+// openNameProgs is the subset of optionalProgs that starts an open's hold; at
 // least one must attach.
-var getnameProgs = map[string]bool{"on_getname": true, "on_getname_outer": true}
+var openNameProgs = map[string]bool{"on_filp_open": true, "on_do_file_open": true}
 
 func main() {
 	cgPath := flag.String("cgroup", "", "cgroup v2 directory to watch, created if missing")
@@ -365,27 +365,27 @@ func setSyscallNumbers(spec *ebpf.CollectionSpec) error {
 
 // attachAll attaches every loaded program, and any that fails is fatal; those
 // the kernel does not offer were dropped before load. The exception is one of
-// the two getname spellings, of which at least one must attach or no open
-// would be held.
+// the two spellings of do_filp_open, of which at least one must attach or no
+// open would be held.
 func attachAll(coll *ebpf.Collection) ([]link.Link, error) {
 	var links []link.Link
-	getnames := 0
+	openNames := 0
 	for name, p := range coll.Programs {
 		l, err := link.AttachTracing(link.TracingOptions{Program: p})
 		if err != nil {
-			if getnameProgs[name] {
+			if openNameProgs[name] {
 				fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
 				continue
 			}
 			return links, fmt.Errorf("attach %s: %w", name, err)
 		}
 		links = append(links, l)
-		if getnameProgs[name] {
-			getnames++
+		if openNameProgs[name] {
+			openNames++
 		}
 	}
-	if getnames == 0 {
-		return links, errors.New("neither getname nor getname_flags can be traced")
+	if openNames == 0 {
+		return links, errors.New("neither do_filp_open nor do_file_open can be traced")
 	}
 	return links, nil
 }
@@ -470,6 +470,15 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missed
 	dropped, errDropped := sumPerCPU(coll.Maps["drops"])
 	untracked, errUntracked := sumPerCPU(coll.Maps["untracked"])
 	internal, _ := sumPerCPU(coll.Maps["skipped_internal"])
+	// do_filp_open's program attached but never ran for the step's opens, as
+	// where the kernel inlined it into its callers: every failed open went
+	// unrecorded.
+	named, _ := sumPerCPU(coll.Maps["open_named"])
+	unnamed, _ := sumPerCPU(coll.Maps["open_unnamed"])
+	if named == 0 && unnamed > 0 {
+		fmt.Fprintf(os.Stderr, "filesystem-audit: no open passed do_filp_open; failed opens went unrecorded\n")
+		untracked += unnamed
+	}
 	kinds := make([]string, 0, len(counts))
 	for k := range counts {
 		kinds = append(kinds, k)

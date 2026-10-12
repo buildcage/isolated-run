@@ -266,6 +266,18 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 	return 0;
 }
 
+/**
+ * Open(2) calls of the step's that reached do_filp_open, and ones that reached
+ * security_file_open with no hold, which do_filp_open's program, attached but
+ * never run, would leave as the only ones.
+ */
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, u64);
+} open_named SEC(".maps"), open_unnamed SEC(".maps");
+
 SEC("fentry/security_file_open")
 int BPF_PROG(on_open, struct file *file)
 {
@@ -282,6 +294,8 @@ int BPF_PROG(on_open, struct file *file)
 		submit(e);
 		if (r > 0)
 			open_recorded(e);
+		else if (r == -2 && in_open_call())
+			bump(&open_unnamed);
 	}
 	return 0;
 }
@@ -333,35 +347,38 @@ static __always_inline void open_failed(u32 slot, struct event *e, long ret, int
 	submit(e);
 }
 
-/** Starts holding the open(2) the thread is in, if any, from its name. */
-static __always_inline void stash_name(u32 slot, u64 *ctx)
+/**
+ * Starts holding the open(2) the thread is in, if any, from its name, the
+ * struct filename in @p ctx's second argument.
+ */
+static __always_inline void hold_name(u32 slot, u64 *ctx)
 {
 	if (!in_target() || !in_open_call())
 		return;
-	struct filename *ret = 0;
-	bpf_get_func_ret(ctx, (u64 *)&ret);
-	// getname refused the name, as one too long: read the caller's instead.
-	if ((long)ret < 0 && (long)ret >= -4095)
-		open_name(slot, (const char *)ctx[0], 1);
-	else
-		open_name(slot, BPF_CORE_READ(ret, name), 0);
+	bump(&open_named);
+	u64 name = 0;
+	bpf_get_func_arg(ctx, 1, &name);
+	// 7.0 passes on getname's error, which open_returned() handles.
+	if ((long)name < 0 && (long)name >= -4095)
+		return;
+	open_name(slot, BPF_CORE_READ((struct filename *)name, name), 0);
 }
 
 /**
- * Some builds inline getname_flags into getname (6.8), others call
- * getname_flags directly (7.0); either may be absent, so both are optional.
+ * Only an open, and exec's open of the program, reach do_filp_open, renamed
+ * do_file_open in 7.0, with the name getname copied; both are optional.
  */
-SEC("fexit/getname_flags")
-int on_getname(u64 *ctx)
+SEC("fentry/do_filp_open")
+int BPF_PROG(on_filp_open, int dfd, struct filename *name)
 {
-	stash_name(__COUNTER__, ctx);
+	hold_name(slot, ctx);
 	return 0;
 }
 
-SEC("fexit/getname")
-int on_getname_outer(u64 *ctx)
+SEC("fentry/do_file_open")
+int BPF_PROG(on_do_file_open, int dfd, struct filename *name)
 {
-	stash_name(__COUNTER__, ctx);
+	hold_name(slot, ctx);
 	return 0;
 }
 
@@ -455,20 +472,26 @@ int BPF_PROG(on_mprotect, struct vm_area_struct *vma, unsigned long reqprot, uns
 SEC("fentry/security_file_free")
 int BPF_PROG(on_file_free, struct file *file)
 {
-	u64 key = (u64)file;
-	bpf_map_delete_elem(&seen_files, &key);
+	u64 key = 0;
+	bpf_get_func_arg(ctx, 0, &key); // file, as a number
+	u32 *n = seen_count(key);
+	if (n && *n && bpf_map_delete_elem(&seen_files, &key) == 0)
+		__sync_fetch_and_add(n, -1);
 	return 0;
 }
 
 /**
  * Ends an open(2) family call's hold as the call returns, recording the open,
  * with the descriptor and flags from its arguments for a failed one. A call
- * with no hold names nothing the kernel looked up: a seccomp filter or a
- * tracer stopped it, or getname never copied its name.
+ * with no hold names nothing the kernel looked up, as one a seccomp filter or
+ * a tracer stopped, unless getname refused its name as too long, which is then
+ * read from the caller.
  */
 static __always_inline void open_returned(u32 slot, struct pt_regs *regs, long nr, long ret)
 {
 	int at = nr == nr_openat || nr == nr_openat2;
+	if (ret == -ENAMETOOLONG)
+		open_name(slot, (const char *)sys_arg(regs, at), 1);
 	struct event *e = open_return(slot, ret);
 	if (!e)
 		return;
