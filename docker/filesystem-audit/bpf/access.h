@@ -2,10 +2,14 @@
 /**
  * @file access.h
  * Reporting each open file's reads, writes and mappings once per
- * program, and the mappings an exec makes.
+ * program, and the mappings an exec makes. It defines maps, so only
+ * filesystem_audit.bpf.c includes it.
  */
 #ifndef FILESYSTEM_AUDIT_ACCESS_H
 #define FILESYSTEM_AUDIT_ACCESS_H
+
+#include "record.h"
+#include "path.h"
 
 /**
  * @name Seen

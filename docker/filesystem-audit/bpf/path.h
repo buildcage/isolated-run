@@ -7,6 +7,9 @@
 #ifndef FILESYSTEM_AUDIT_PATH_H
 #define FILESYSTEM_AUDIT_PATH_H
 
+#include "record.h"
+
+#define AT_FDCWD -100
 #define MAX_COMPONENTS 254 ///< n1 and n2 are u8; a longer walk is marked cut
 
 /**

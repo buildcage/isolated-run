@@ -2,10 +2,13 @@
 /**
  * @file kernel.h
  * The kernel types the tracer reads, declared locally with
- * preserve_access_index so one CO-RE object runs on every BTF-enabled kernel.
+ * preserve_access_index so one CO-RE object runs on every kernel the tracer
+ * supports (see filesystem_audit.bpf.c).
  */
 #ifndef FILESYSTEM_AUDIT_KERNEL_H
 #define FILESYSTEM_AUDIT_KERNEL_H
+
+#include "event.h"
 
 struct qstr {
 	const unsigned char *name;

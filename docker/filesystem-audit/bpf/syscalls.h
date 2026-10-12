@@ -2,10 +2,19 @@
 /**
  * @file syscalls.h
  * Path syscalls recorded from their entry and exit, chiefly the ones
- * that fail before the tracer's path hooks.
+ * that fail before the tracer's path hooks. It defines maps, so only
+ * filesystem_audit.bpf.c includes it.
  */
 #ifndef FILESYSTEM_AUDIT_SYSCALLS_H
 #define FILESYSTEM_AUDIT_SYSCALLS_H
+
+#include "record.h"
+#include "path.h"
+
+#define AT_REMOVEDIR 0x200
+#ifndef EEXIST
+#define EEXIST 17
+#endif
 
 struct pending {
 	u64 p1;

@@ -129,7 +129,7 @@ var kindNames = map[uint32]string{
 	26: "mkdir", 27: "mknod", 28: "symlink", 29: "link", 30: "truncate",
 }
 
-// Mirrors the fixed header of struct event in bpf/filesystem_audit.bpf.c:
+// Mirrors the fixed header of struct event in bpf/event.h:
 // eight u32 fields, four u8 fields, comm[16], u32 err, marks and gid, the u64
 // timestamp, then the data bytes.
 const hdrLen = 8*4 + 4 + 16 + 4 + 4 + 4 + 8

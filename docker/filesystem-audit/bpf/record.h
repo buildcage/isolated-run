@@ -2,15 +2,20 @@
 /**
  * @file record.h
  * What every program records through: the watched cgroup, the ring
- * buffer and loss counters, and each program's scratch event.
+ * buffer and loss counters, and each program's scratch event. It defines
+ * maps, so only filesystem_audit.bpf.c includes it.
  */
 #ifndef FILESYSTEM_AUDIT_RECORD_H
 #define FILESYSTEM_AUDIT_RECORD_H
 
+#include <linux/bpf.h>
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_core_read.h>
+
+#include "event.h"
+#include "kernel.h"
+
 #define WAKEUP_BYTES (1 << 20)
-#define AT_FDCWD -100
-#define AT_REMOVEDIR 0x200
-#define EEXIST 17
 
 /** Keeps struct event in BTF for bpf2go's -type. */
 const struct event *unused_event __attribute__((unused));
@@ -46,7 +51,7 @@ static __always_inline void bump(void *counter)
 		__sync_fetch_and_add(v, 1); // another program on this CPU may be mid-update
 }
 
-#define N_SLOTS 32 ///< Programs that can take a scratch event; checked at the end.
+#define N_SLOTS 32 ///< Programs that can take a scratch event; checked at the end of filesystem_audit.bpf.c.
 
 /**
  * The event being assembled, one per program and CPU. Where the kernel has

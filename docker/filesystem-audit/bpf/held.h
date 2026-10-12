@@ -15,6 +15,9 @@
 #ifndef ENOENT
 #define ENOENT 2
 #endif
+#ifndef EEXIST
+#define EEXIST 17
+#endif
 
 #define HELD_OP 1   ///< A path change, held from its security_path_* hook.
 #define HELD_OPEN 2 ///< An open(2), held from its entry.
