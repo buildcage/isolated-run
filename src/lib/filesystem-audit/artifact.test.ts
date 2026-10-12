@@ -6,11 +6,8 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 
-import type { UploadArtifact } from "./artifact-upload.ts";
-import {
-  uploadFilesystemAuditArtifact,
-  setFilesystemAuditOutput,
-} from "./filesystem-audit-artifact.ts";
+import type { UploadArtifact } from "../artifact-upload.ts";
+import { uploadFilesystemAuditArtifact, setFilesystemAuditOutput } from "./artifact.ts";
 
 function annotation(): Annotation & { warning: Mock; error: Mock } {
   return { notice: vi.fn(), warning: vi.fn(), error: vi.fn() };

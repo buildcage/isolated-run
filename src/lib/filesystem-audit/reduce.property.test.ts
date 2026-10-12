@@ -1,8 +1,8 @@
 import fc from "fast-check";
 import { describe, it, expect } from "vitest";
 
-import { dropWalkedDirs, keyOf } from "./filesystem-audit-summary.ts";
-import { renderFilesystemAuditSummary } from "./test/filesystem-audit.ts";
+import { dropWalkedDirs, renderFilesystemAuditSummary } from "../test/filesystem-audit.ts";
+import { keyOf } from "./fold-tree.ts";
 
 const START = 1_791_244_800; // epoch seconds
 const PREFIXES = { workspace: ["/work"], home: ["/home/u"], startedAt: START };
@@ -61,7 +61,7 @@ const TIME = /^(\d\d):(\d\d)\.(\d{3})(?:-(\d\d):(\d\d)\.(\d{3}))?:/;
 const ms = (m: string, sec: string, milli: string): number =>
   (Number(m) * 60 + Number(sec)) * 1000 + Number(milli);
 
-describe("renderFilesystemAuditSummary: properties", () => {
+describe("createAuditSummary: properties", () => {
   it("always leads with the heading and emits only well-formed rows", () => {
     fc.assert(
       fc.property(jsonlArb, (jsonl) => {

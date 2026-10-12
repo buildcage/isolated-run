@@ -12,7 +12,7 @@ import {
   type TrafficPriorities,
 } from "#core/lib/report/render/render-report-markdown.ts";
 
-import { FILESYSTEM_BLOCK, type FilesystemPriorities } from "./filesystem-audit-summary.ts";
+import { FILESYSTEM_BLOCK, type FilesystemPriorities } from "./filesystem-audit/render.ts";
 
 export const TRAFFIC_PRIORITIES: TrafficPriorities = {
   [TRAFFIC_BLOCK.example]: 1,

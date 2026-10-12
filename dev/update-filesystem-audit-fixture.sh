@@ -48,7 +48,7 @@ cp "$dir/recording.jsonl" "$tmp/previous.jsonl"
 mv "$tmp/recording.jsonl" "$dir/recording.jsonl"
 # A failed run rewrites no golden, so restore the recording to keep the three
 # files in step.
-if ! UPDATE_GOLDEN=1 vp test run src/lib/filesystem-audit-golden.test.ts; then
+if ! UPDATE_GOLDEN=1 vp test run src/lib/filesystem-audit/golden.test.ts; then
   cp "$tmp/previous.jsonl" "$dir/recording.jsonl"
   echo "regenerating the goldens failed; recording.jsonl is restored" >&2
   exit 1

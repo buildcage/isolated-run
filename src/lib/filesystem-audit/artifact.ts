@@ -5,7 +5,7 @@ import * as core from "@actions/core";
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
-import { artifactName, uploadViaActionsArtifact, type UploadArtifact } from "./artifact-upload.ts";
+import { artifactName, uploadViaActionsArtifact, type UploadArtifact } from "../artifact-upload.ts";
 
 /**
  * Upload the recording the tracer already wrote, and return the artifact's
