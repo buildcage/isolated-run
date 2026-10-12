@@ -73184,28 +73184,27 @@ function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 }
 const KEY_NOT_ALLOWED = "aws-key-not-allowed";
 function refusedKeys(timeline) {
-	let issuers = new Map();
+	let issuers = new Map(), seen = new Map();
 	for (let e of timeline) {
 		let { issuedKeyRef, assumedAccount } = e.extensions?.aws ?? {};
 		issuedKeyRef && assumedAccount && /^\d{12}$/.test(assumedAccount) && issuers.set(issuedKeyRef, assumedAccount);
-	}
-	let keys = new Map();
-	for (let e of timeline) {
 		let keyRef = refusedKeyRef(e);
 		if (!keyRef) continue;
-		let key = keys.get(keyRef) ?? {
-			label: "",
+		let key = seen.get(keyRef) ?? {
 			hosts: [],
-			count: 0
+			count: 0,
+			audited: !1
 		};
-		key.hosts.includes(e.host) || key.hosts.push(e.host), key.count++, keys.set(keyRef, key);
+		key.hosts.includes(e.host) || key.hosts.push(e.host), key.count++, key.audited ||= e.wouldRefuse !== void 0, seen.set(keyRef, key);
 	}
-	let n = 0;
-	for (let [keyRef, key] of keys) {
-		let account = issuers.get(keyRef);
-		key.label = `key${keys.size > 1 ? ` ${++n}` : ""}${account ? ` from a role in ${account}` : ""}`;
-	}
-	return keys;
+	let numbered = seen.size > 1;
+	return new Map([...seen].map(([keyRef, key], i) => {
+		let account = issuers.get(keyRef), label = `key${numbered ? ` ${i + 1}` : ""}${account ? ` from a role in ${account}` : ""}`;
+		return [keyRef, {
+			...key,
+			label
+		}];
+	}));
 }
 function refusedKeyRef(e) {
 	return (e.action === "block" ? e.reason : e.wouldRefuse) === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : void 0;
@@ -73217,7 +73216,7 @@ function keyRefusalLabel(keys) {
 	};
 }
 function withKeyTable(blocks, timeline, keys) {
-	let at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse), audited = [...keys].filter(([keyRef]) => timeline.some((e) => e.wouldRefuse !== void 0 && refusedKeyRef(e) === keyRef));
+	let at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse), audited = [...keys.values()].filter((key) => key.audited);
 	if (at === -1 || audited.length === 0) return blocks;
 	let table = markdownTable([
 		{
@@ -73233,14 +73232,14 @@ function withKeyTable(blocks, timeline, keys) {
 			title: "Count",
 			align: "right"
 		}
-	], audited.map(([, { label, hosts, count }]) => {
+	], audited.map(({ label, hosts, count }) => {
 		let rest = hosts.length - 3, shown = hosts.slice(0, 3).join(", ");
 		return {
 			key: label,
 			hosts: rest > 0 ? `${shown} and ${rest} more` : shown,
 			count
 		};
-	})), { text } = blocks[at], heading = text.slice(0, text.indexOf("| Host |")), keyBlock = {
+	})), { text } = blocks[at], heading = text.slice(0, text.indexOf("\n|") + 1), keyBlock = {
 		...blocks[at],
 		text: `${heading}${table}\n`,
 		head: heading.split("\n").length + 1

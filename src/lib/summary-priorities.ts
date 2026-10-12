@@ -1,7 +1,7 @@
 /**
  * The order the Job Summary's parts are given room in when the step's summary
  * would pass GitHub's size limit, lowest first: the traffic report's example,
- * its list of requests restrict would refuse and its host tables, the
+ * its table of requests restrict would refuse and its host tables, the
  * filesystem audit's tables, then the communication log
  * and the filesystem audit's full record. The frames (headings, notes,
  * footers) are always kept.

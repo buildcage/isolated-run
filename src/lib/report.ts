@@ -174,6 +174,9 @@ interface RefusedKey {
   /** The hosts its requests went to, in the order each first appeared. */
   hosts: string[];
   count: number;
+  /** Whether audit let one of its requests through, so it has a row in
+   *  Restrict Would Refuse. */
+  audited: boolean;
 }
 
 /**
@@ -184,27 +187,28 @@ interface RefusedKey {
  */
 function refusedKeys(timeline: TrafficEvent[]): Map<string, RefusedKey> {
   const issuers = new Map<string, string>();
+  const seen = new Map<string, Omit<RefusedKey, "label">>();
   for (const e of timeline) {
     const { issuedKeyRef, assumedAccount } = e.extensions?.aws ?? {};
     if (issuedKeyRef && assumedAccount && /^\d{12}$/.test(assumedAccount)) {
       issuers.set(issuedKeyRef, assumedAccount);
     }
-  }
-  const keys = new Map<string, RefusedKey>();
-  for (const e of timeline) {
     const keyRef = refusedKeyRef(e);
     if (!keyRef) continue;
-    const key = keys.get(keyRef) ?? { label: "", hosts: [], count: 0 };
+    const key = seen.get(keyRef) ?? { hosts: [], count: 0, audited: false };
     if (!key.hosts.includes(e.host)) key.hosts.push(e.host);
     key.count++;
-    keys.set(keyRef, key);
+    key.audited ||= e.wouldRefuse !== undefined;
+    seen.set(keyRef, key);
   }
-  let n = 0;
-  for (const [keyRef, key] of keys) {
-    const account = issuers.get(keyRef);
-    key.label = `key${keys.size > 1 ? ` ${++n}` : ""}${account ? ` from a role in ${account}` : ""}`;
-  }
-  return keys;
+  const numbered = seen.size > 1;
+  return new Map(
+    [...seen].map(([keyRef, key], i) => {
+      const account = issuers.get(keyRef);
+      const label = `key${numbered ? ` ${i + 1}` : ""}${account ? ` from a role in ${account}` : ""}`;
+      return [keyRef, { ...key, label }];
+    }),
+  );
 }
 
 function refusedKeyRef(e: TrafficEvent): string | undefined {
@@ -233,9 +237,7 @@ function withKeyTable(
   keys: Map<string, RefusedKey>,
 ): SummaryBlock[] {
   const at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse);
-  const audited = [...keys].filter(([keyRef]) =>
-    timeline.some((e) => e.wouldRefuse !== undefined && refusedKeyRef(e) === keyRef),
-  );
+  const audited = [...keys.values()].filter((key) => key.audited);
   if (at === -1 || audited.length === 0) return blocks;
   const table = markdownTable(
     [
@@ -243,14 +245,14 @@ function withKeyTable(
       { key: "hosts", title: "Hosts" },
       { key: "count", title: "Count", align: "right" },
     ],
-    audited.map(([, { label, hosts, count }]) => {
+    audited.map(({ label, hosts, count }) => {
       const rest = hosts.length - KEY_HOSTS_SHOWN;
       const shown = hosts.slice(0, KEY_HOSTS_SHOWN).join(", ");
       return { key: label, hosts: rest > 0 ? `${shown} and ${rest} more` : shown, count };
     }),
   );
   const { text } = blocks[at];
-  const heading = text.slice(0, text.indexOf("| Host |"));
+  const heading = text.slice(0, text.indexOf("\n|") + 1);
   const keyBlock = {
     ...blocks[at],
     text: `${heading}${table}\n`,

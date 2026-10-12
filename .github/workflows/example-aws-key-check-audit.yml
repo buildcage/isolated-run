@@ -21,8 +21,8 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
-      # No account is named yet, so the report's "Restrict Would Refuse" lists
-      # the call signed with the switched role's key, and its "Switch to
+      # No account is named yet, so the report's "Restrict Would Refuse" counts
+      # the calls signed with the switched role's key, and its "Switch to
       # restrict mode" example returns the URL rules, aws_key_check and the
       # role's account, marked for you to check it is yours.
       - name: Discover required URLs and accounts with isolated-run
