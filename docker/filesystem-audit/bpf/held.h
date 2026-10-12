@@ -293,6 +293,22 @@ static __always_inline void drop_held(struct held_key *k)
 }
 
 /**
+ * Drops the hold at @p k left by a syscall whose exit never reached
+ * on_sys_exit, so no hold outlives its thread. Its access goes unreported and
+ * counts in untracked, bar a K_OPEN_RECORDED marker, which stands for an open
+ * already recorded.
+ */
+static __always_inline void reclaim_held(struct held_key *k)
+{
+	struct event *head = bpf_map_lookup_elem(&heads, k);
+	if (!head)
+		return;
+	if (head->kind != K_OPEN_RECORDED)
+		bump(&untracked);
+	release(k, tails_for(head->data_len));
+}
+
+/**
  * Holds @p e, in scratch, under @p use, in place of a hold that took @p old
  * tails.
  *

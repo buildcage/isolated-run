@@ -75,7 +75,7 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
  *   is relative (see add_base); path_len holds the errno
  * - read/write: d_path result, once per open file, direction and program
  * - mmap: path components; mode holds prot, flags the map flags, and path_len
- *   is 1 when an exec mapped it (see in_exec)
+ *   is 1 when an exec mapped it (see in_execve)
  * - exec: filename; its arguments are not read, as they can hold secrets
  * - symlink: link body at 0, then the link's own path components
  * - others: leaf-first NUL-terminated path components, n1 of them, then n2

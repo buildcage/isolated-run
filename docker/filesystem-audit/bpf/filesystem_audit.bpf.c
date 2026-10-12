@@ -44,6 +44,19 @@ ____##name(u32 slot, unsigned long long *ctx, ##args)
 #include "syscalls.h"
 
 /**
+ * Holds the path change @p e, tagged in err with the syscall it was made from,
+ * so on_sys_exit reports it only against that call's own return. If that exit is
+ * skipped, the hold is left for the next syscall's exit, which the tag tells
+ * apart and drops rather than reports (see on_sys_exit). err is overwritten
+ * before the event is recorded.
+ */
+static __always_inline void hold_op(struct event *e)
+{
+	e->err = current_sys_nr();
+	hold(e);
+}
+
+/**
  * The file being executed, resolved, while bprm->file is still the one named:
  * by sched_process_exec a script has been swapped for its interpreter, and
  * filename is only the name the caller passed, relative to its cwd or not.
@@ -62,26 +75,21 @@ int BPF_PROG(on_exec_file, struct linux_binprm *bprm)
 	return 0;
 }
 
-SEC("fentry/security_bprm_committing_creds")
-int BPF_PROG(on_exec_commit, const struct linux_binprm *bprm)
-{
-	if (!in_target())
-		return 0;
-	u64 id = bpf_get_current_pid_tgid();
-	u8 one = 1;
-	if (bpf_map_update_elem(&in_exec, &id, &one, BPF_ANY) != 0)
-		bump(&untracked);
-	return 0;
-}
-
-/** A thread killed inside an exec never reaches sched_process_exec. */
+/**
+ * Drops any hold a thread still has as it exits, so one whose syscall exit
+ * never ran (a skipped hook, or the kernel writing a core dump through the path
+ * hooks with no syscall to return from) neither leaks nor is taken up by a
+ * reused thread id.
+ */
 SEC("tp_btf/sched_process_exit")
 int BPF_PROG(on_task_exit, struct task_struct *p)
 {
 	if (!in_target())
 		return 0;
-	u64 id = bpf_get_current_pid_tgid();
-	bpf_map_delete_elem(&in_exec, &id);
+	struct held_key op = held_key(HELD_OP);
+	reclaim_held(&op);
+	struct held_key open = held_key(HELD_OPEN);
+	reclaim_held(&open);
 	return 0;
 }
 
@@ -118,8 +126,6 @@ int BPF_PROG(on_exec, struct task_struct *p, int old_pid, struct linux_binprm *b
 {
 	if (!in_target())
 		return 0;
-	u64 id = bpf_get_current_pid_tgid();
-	bpf_map_delete_elem(&in_exec, &id);
 	struct event *e = start(slot, K_EXEC);
 	if (!e)
 		return 0;
@@ -168,7 +174,7 @@ int BPF_PROG(on_##hook, const struct path *dir, struct dentry *dentry)		\
 		return 0;							\
 	u32 off = leaf(e, 0, dentry, &e->n1);					\
 	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated); \
-	hold(e);								\
+	hold_op(e);								\
 	return 0;								\
 }
 
@@ -190,7 +196,7 @@ int BPF_PROG(on_symlink, const struct path *dir, struct dentry *dentry, const ch
 	e->path_len = off;
 	off = leaf(e, off, dentry, &e->n1);
 	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated);
-	hold(e);
+	hold_op(e);
 	return 0;
 }
 
@@ -209,7 +215,7 @@ int BPF_PROG(on_rename, const struct path *old_dir, struct dentry *old_dentry,
 			&e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
 	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), BPF_CORE_READ(new_dir, mnt), &e->n2, &e->trunc2);
-	hold(e);
+	hold_op(e);
 	return 0;
 }
 
@@ -223,7 +229,7 @@ int BPF_PROG(on_chmod, const struct path *path, unsigned short mode)
 		return 0;
 	e->mode = mode;
 	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
-	hold(e);
+	hold_op(e);
 	return 0;
 }
 
@@ -245,7 +251,7 @@ int BPF_PROG(on_link, struct dentry *old_dentry, const struct path *new_dir,
 	u32 off = walk_path(e, 0, 1, old_dentry, mnt, &e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
 	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), mnt, &e->n2, &e->trunc2);
-	hold(e);
+	hold_op(e);
 	return 0;
 }
 
@@ -259,7 +265,7 @@ int BPF_PROG(on_truncate, const struct path *path)
 	if (!e)
 		return 0;
 	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
-	hold(e);
+	hold_op(e);
 	return 0;
 }
 
@@ -276,7 +282,7 @@ int BPF_PROG(on_file_truncate, struct file *file)
 	if (!e)
 		return 0;
 	e->data_len = file_walk(e, file);
-	hold(e);
+	hold_op(e);
 	return 0;
 }
 
@@ -291,7 +297,7 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 	e->flags = uid;
 	e->mode = gid;
 	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
-	hold(e);
+	hold_op(e);
 	return 0;
 }
 
@@ -329,7 +335,7 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 		return 0;
 	u32 off = leaf(e, 0, dentry, &e->n1);
 	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated);
-	hold(e);
+	hold_op(e);
 	return 0;
 }
 
@@ -555,8 +561,14 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	int watched = classify(nr, regs, &call);
 	struct held_key k = held_key(HELD_OP);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	int held = head != 0;
-	if (head) {
+	// A hold tagged with another syscall is one whose own exit was skipped,
+	// left for this call to find; it belongs to no call now returning, so it
+	// is dropped as untracked rather than reported against the wrong one.
+	int held = head && head->err == (u32)nr;
+	if (head && !held) {
+		bump(&untracked);
+		release(&k, tails_for(head->data_len));
+	} else if (head) {
 		u32 t = tails_for(head->data_len);
 		if (!is_restart(ret) && (ret >= 0 || !watched))
 			report_held(slot, &k, head, ret < 0 ? -ret : 0, 0);
