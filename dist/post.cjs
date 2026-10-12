@@ -874,11 +874,17 @@ function pathOutside(pathEnv = "", persisting, deps = realSymlinkDeps) {
 	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !reachable(dir)).join(node_path.delimiter);
 }
 function findPinnableCommand(command, pathEnv, persisting, deps = realFindCommandDeps) {
-	let optedOut = persisting.includes("/"), reachable = reachableFrom(persisting, deps);
+	let optedOut = persisting.includes("/"), inside = (path) => persisting.some((w) => isAtOrUnder(path, w));
 	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
 		if (!(0, node_path.isAbsolute)(dir)) continue;
 		let candidate = (0, node_path.join)(dir, command);
-		if (deps.isExecutable(candidate) && (optedOut || !reachable(candidate))) return candidate;
+		if (!deps.isExecutable(candidate)) continue;
+		if (optedOut) return candidate;
+		let resolved = resolveHostPath(candidate, deps);
+		if (!("loop" in resolved || inside(resolved.real))) {
+			if (!resolved.links.some((l) => inside(l.at))) return candidate;
+			if ((0, node_path.basename)(resolved.real) === command) return resolved.real;
+		}
 	}
 }
 function pinHostCommands(paths, env, deps = realFindCommandDeps) {

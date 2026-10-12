@@ -141,13 +141,15 @@ export function pathOutside(
 }
 
 /**
- * The first `command` on `pathEnv` that neither resolves inside `persisting`
- * nor passes through a symlink there, which the command could repoint (a
- * self-hosted `/opt/tools` may point into `$HOME`). Returns the `$PATH` entry,
- * not the resolved target: snap's `/snap/bin/docker` -> `/usr/bin/snap` picks
- * its role from the name it was invoked by. Relative entries resolve against
- * the workspace, so they are skipped. `write_through: /` is the documented
- * full opt-out.
+ * The first `command` on `pathEnv` that does not resolve inside `persisting`.
+ * Returns the `$PATH` entry, not the resolved target: snap's
+ * `/snap/bin/docker` -> `/usr/bin/snap` picks its role from the name it was
+ * invoked by. One that passes through a symlink there, which the command could
+ * repoint (a self-hosted `/opt/tools` may point into `$HOME`), is taken by the
+ * file it leads to now, provided that file bears the command's own name, as
+ * `/usr/bin/sudo` -> `/etc/alternatives/sudo` -> `/usr/lib/cargo/bin/sudo` does
+ * under `write_through: /etc`. Relative entries resolve against the workspace,
+ * so they are skipped. `write_through: /` is the documented full opt-out.
  */
 export function findPinnableCommand(
   command: string,
@@ -156,12 +158,16 @@ export function findPinnableCommand(
   deps: FindCommandDeps = realFindCommandDeps,
 ): string | undefined {
   const optedOut = persisting.includes("/");
-  const reachable = reachableFrom(persisting, deps);
+  const inside = (path: string) => persisting.some((w) => isAtOrUnder(path, w));
   for (const dir of (pathEnv ?? "").split(delimiter)) {
     if (!isAbsolute(dir)) continue;
     const candidate = join(dir, command);
     if (!deps.isExecutable(candidate)) continue;
-    if (optedOut || !reachable(candidate)) return candidate;
+    if (optedOut) return candidate;
+    const resolved = resolveHostPath(candidate, deps);
+    if ("loop" in resolved || inside(resolved.real)) continue;
+    if (!resolved.links.some((l) => inside(l.at))) return candidate;
+    if (basename(resolved.real) === command) return resolved.real;
   }
   return undefined;
 }

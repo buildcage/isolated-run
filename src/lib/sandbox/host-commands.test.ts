@@ -86,15 +86,27 @@ describe("findPinnableCommand", () => {
     expect(findPinnableCommand("docker", path, PERSISTENT, deps)).toBe("/usr/bin/docker");
   });
 
-  it("skips a candidate whose symlink chain passes through a persisting path", () => {
-    // /usr/local/bin/docker -> ~/bin/docker (writable hop) -> /usr/bin/docker
-    const deps = host(["/usr/bin/docker"], {
+  it("skips a candidate whose symlink chain passes through a persisting path to another name", () => {
+    // /usr/local/bin/docker -> ~/bin/docker (writable hop) -> /usr/bin/podman
+    const deps = host(["/usr/bin/podman", "/usr/bin/docker"], {
       "/usr/local/bin/docker": `${HOME}/bin/docker`,
-      [`${HOME}/bin/docker`]: "/usr/bin/docker",
+      [`${HOME}/bin/docker`]: "/usr/bin/podman",
     });
 
     expect(findPinnableCommand("docker", "/usr/local/bin:/usr/bin", PERSISTENT, deps)).toBe(
       "/usr/bin/docker",
+    );
+  });
+
+  it("takes the file such a chain leads to when it bears the command's name", () => {
+    // Ubuntu 26.04's sudo-rs, under write_through: /etc.
+    const deps = host(["/usr/lib/cargo/bin/sudo"], {
+      "/usr/bin/sudo": "/etc/alternatives/sudo",
+      "/etc/alternatives/sudo": "/usr/lib/cargo/bin/sudo",
+    });
+
+    expect(findPinnableCommand("sudo", "/usr/bin", [...PERSISTENT, "/etc"], deps)).toBe(
+      "/usr/lib/cargo/bin/sudo",
     );
   });
 
@@ -130,7 +142,7 @@ describe("findPinnableCommand", () => {
     );
   });
 
-  it("skips a candidate that passes through a symlink in a persisting path, wherever it resolves", () => {
+  it("takes the file a directory symlink in a persisting path leads to", () => {
     // /usr/local/bin/docker -> /opt/tools/docker, where /opt/tools -> ~/tools -> /usr/lib/tools.
     const deps = host(["/usr/lib/tools/docker", "/usr/bin/docker"], {
       "/usr/local/bin/docker": "/opt/tools/docker",
@@ -139,7 +151,7 @@ describe("findPinnableCommand", () => {
     });
 
     expect(findPinnableCommand("docker", "/usr/local/bin:/usr/bin", PERSISTENT, deps)).toBe(
-      "/usr/bin/docker",
+      "/usr/lib/tools/docker",
     );
   });
 
