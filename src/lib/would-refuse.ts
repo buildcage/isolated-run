@@ -167,7 +167,9 @@ export function wouldRefuseBlocks(
     const host = trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n");
     // Nest the host table under the key table when both print: once a block is
     // cut, fitStepSummary skips the deeper ones of its section, so the section's
-    // truncation notice appears once rather than on each table in turn.
+    // truncation notice appears once rather than on each table in turn. They
+    // share one priority, so the key table, pushed first, is given room first,
+    // and its cut is the one that skips the other.
     blocks.push(blocks.length > 0 ? { ...host, level: host.level + 1 } : host);
   }
   return blocks;
