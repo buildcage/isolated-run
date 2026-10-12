@@ -543,25 +543,32 @@ describe("prepareStepFilesystemAudit", () => {
     }
   });
 
-  it("only warns when the output cannot be cleared and the audit was off", async () => {
+  it("fails the step when the output cannot be cleared with the audit off", async () => {
     const exitCode = process.exitCode;
     const note = annotation();
-    const { deps: d } = deps({
-      setOutput: () => {
+    const { deps: d, outputs } = deps({
+      setOutput: (name) => {
+        outputs.push(name);
         throw new Error("EACCES");
       },
     });
 
-    await reportStepFilesystemAudit(
-      { ...base, failClosed: true, audit: undefined, annotation: note, env: {} },
-      d,
-    );
+    try {
+      await reportStepFilesystemAudit(
+        { ...base, failClosed: true, audit: undefined, annotation: note, env: {} },
+        d,
+      );
 
-    expect(note.error).not.toHaveBeenCalled();
-    expect(note.warning).toHaveBeenCalledWith(
-      "Failed to set the filesystem_audit_artifact_name output: EACCES",
-    );
-    expect(process.exitCode).toBe(exitCode);
+      expect(outputs).toEqual([""]);
+      expect(note.error).toHaveBeenCalledWith(
+        "Failed to set the filesystem_audit_artifact_name output: EACCES; " +
+          "failing the step under restrict with fail_on_blocked",
+      );
+      expect(note.warning).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = exitCode;
+    }
   });
 
   it("only warns when the output cannot be set outside restrict with fail_on_blocked", async () => {

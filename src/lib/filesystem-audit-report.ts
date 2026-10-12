@@ -266,11 +266,10 @@ export async function prepareStepFilesystemAudit(
     try {
       deps.setOutput(artifactName);
     } catch (e) {
-      // The command may have written a name of its own there and locked the
-      // file, which matters only where the audit was on.
+      // The command may have written a name of its own there and locked the file.
       failOrWarn(
         annotation,
-        failClosed && audit !== undefined,
+        failClosed,
       )(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
     }
   }

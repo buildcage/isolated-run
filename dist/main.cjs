@@ -69478,7 +69478,7 @@ async function prepareStepFilesystemAudit({ audit, attached, upload, retentionDa
 		try {
 			deps.setOutput(artifactName);
 		} catch (e) {
-			failOrWarn(annotation, failClosed && audit !== void 0)(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
+			failOrWarn(annotation, failClosed)(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
 		}
 	}
 }
