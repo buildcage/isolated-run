@@ -60,9 +60,9 @@ while the step runs.
 ### What it needs
 
 A cgroup v2 host on Linux 6.1 or newer, 6.4 or newer on arm64, with the kernel's type information
-(BTF). GitHub-hosted `ubuntu-latest`, `ubuntu-22.04`, `ubuntu-24.04`, `ubuntu-22.04-arm` and
-`ubuntu-24.04-arm` meet all of it: their kernels are Linux 6.8 or newer. On a self-hosted runner,
-check the host before turning it on:
+(BTF). GitHub-hosted `ubuntu-latest`, `ubuntu-22.04`, `ubuntu-24.04`, `ubuntu-26.04`,
+`ubuntu-22.04-arm`, `ubuntu-24.04-arm` and `ubuntu-26.04-arm` meet all of it: their kernels are
+Linux 6.8 or newer. On a self-hosted runner, check the host before turning it on:
 
 ```sh
 uname -rm                         # Linux 6.1 or newer; 6.4 or newer on aarch64
