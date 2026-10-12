@@ -68580,19 +68580,26 @@ var Lines = class {
 			if (!node) {
 				if (node = {
 					bytes: 0,
+					below: 0,
 					kept: this.isKept(parts, i + 1) || void 0
-				}, kids.set(parts[i], node), this.nodes++, parent && (this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout)) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
+				}, kids.set(parts[i], node), this.nodes++, parent && (this.setBytes(parent, 0), this.full(parent))) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
 				if (this.nodes > this.opts.nodes) return this.stop("paths");
 			}
 			if (node.folded) return this.addFolded(node, parts.slice(0, i + 1), x, settled);
 			if (i === parts.length - 1) {
 				node.own ??= newAgg();
 				let shown = flagBits(node.own) !== 0;
-				apply(node.own, x), settled && !shown && flagBits(node.own) && !node.kids?.size && this.setBytes(node, this.opts.rowBytes(x.path, x.comm));
+				if (apply(node.own, x), this.full(node)) return this.fold(node), this.addFolded(node, parts, x, settled);
+				settled && !shown && flagBits(node.own) && !node.kids?.size && this.setBytes(node, this.opts.rowBytes(x.path, x.comm));
 				return;
 			}
-			node.kids ??= new Map(), kids = node.kids, parent = node, parentSettled = settled, settled &&= !!node.kept;
+			node.below |= x.bit, node.kids ??= new Map(), kids = node.kids, parent = node, parentSettled = settled, settled &&= !!node.kept;
 		}
+	}
+	full(node) {
+		if (node.kept || !node.kids?.size) return !1;
+		let own = node.own, ownLine = own && (own.perm || (flagBits(own) & ~node.below) !== 0) ? 1 : 0;
+		return node.kids.size + ownLine >= this.opts.fanout;
 	}
 	isKept(parts, depth) {
 		return this.opts.keep.some((k) => k.length >= depth && k.slice(0, depth).every((part, i) => part === parts[i]));

@@ -443,9 +443,33 @@ describe("renderFilesystemAuditSummary", () => {
     const md = render(
       { kind: "open", failed: true, comm: "c", path: "/work/d", err: 13 },
       { kind: "open", failed: true, comm: "c", path: "/work/d/x", err: 13 },
-      { kind: "read", comm: "c", path: "/work/d/y" },
     );
-    expect(lines(md)).toEqual(["r! c ./d", "r! c ./d/x", "R c ./d/y"]);
+    expect(lines(md)).toEqual(["r! c ./d", "r! c ./d/x"]);
+  });
+
+  it("counts a directory's own line toward a fold where it prints", () => {
+    // Made, written into, then listed: its own line prints for the read.
+    const listed = render(
+      { kind: "mkdir", comm: "npm", path: "/home/u/.npm/_logs" },
+      { kind: "write", comm: "npm", path: "/home/u/.npm/_logs/1.log" },
+      { kind: "read", comm: "npm", path: "/home/u/.npm/_logs" },
+      { kind: "write", comm: "npm", path: "/home/u/.npm/_logs/2.log" },
+    );
+    expect(lines(listed)).toEqual(["RW npm ~/.npm/_logs/**"]);
+    // Its own line arriving last folds it too.
+    const late = render(
+      { kind: "write", comm: "npm", path: "/home/u/.npm/_logs/1.log" },
+      { kind: "write", comm: "npm", path: "/home/u/.npm/_logs/2.log" },
+      { kind: "read", comm: "npm", path: "/home/u/.npm/_logs" },
+    );
+    expect(lines(late)).toEqual(["RW npm ~/.npm/_logs/**"]);
+    // Made and written into only: its line is the walk to them, so it does not count.
+    const walked = render(
+      { kind: "mkdir", comm: "c", path: "/work/dist" },
+      { kind: "write", comm: "c", path: "/work/dist/a" },
+      { kind: "write", comm: "c", path: "/work/dist/b" },
+    );
+    expect(lines(walked)).toEqual(["W c ./dist/a", "W c ./dist/b"]);
   });
 
   it("still drops a directory read whose only lines below are misses", () => {
