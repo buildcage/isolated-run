@@ -645,7 +645,12 @@ const HEADING = "\n### 🗂️ Filesystem audit";
 const INCOMPLETE_NOTE =
   "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
   "> some accesses are missing from this summary and from the artifact.";
+// The note names this many syscalls, and this many commands for each; the
+// details have them all.
 const REFUSED_SHOWN = 10;
+const REFUSED_COMMS_SHOWN = 3;
+// Past this many command and syscall pairs, the rest are left to the artifact.
+const REFUSED_KEPT = 1000;
 
 // Each refused syscall with the commands it was refused to, in the order
 // first refused, then each command killed for a 32-bit one.
@@ -659,18 +664,15 @@ function refusedNote(rows: Row[]): string {
       byName.set(name, (byName.get(name) ?? new Set()).add(r.comm));
     }
   }
-  const list = (comms: Set<string>): string => [...comms].map(codeSpan).join(", ");
-  const names = [...byName].map(([name, comms]) => `${codeSpan(name)} (${list(comms)})`);
-  const more = names.length - REFUSED_SHOWN;
+  const list = (items: string[], shown: number): string =>
+    items.slice(0, shown).join(", ") +
+    (items.length > shown ? ` and ${items.length - shown} more` : "");
+  const comms = (c: Set<string>): string => list([...c].map(codeSpan), REFUSED_COMMS_SHOWN);
+  const names = [...byName].map(([name, c]) => `${codeSpan(name)} (${comms(c)})`);
   const parts = [];
-  if (names.length) {
-    parts.push(
-      `Refused system calls: ${names.slice(0, REFUSED_SHOWN).join(", ")}` +
-        (more > 0 ? ` and ${more} more in the details` : ""),
-    );
-  }
+  if (names.length) parts.push(`Refused system calls: ${list(names, REFUSED_SHOWN)}`);
   if (killed.size) {
-    parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call: ${list(killed)}`);
+    parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call: ${comms(killed)}`);
   }
   return `> ${parts.join("; ")}.`;
 }
@@ -887,11 +889,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const t = Date.parse(r.t ?? "");
       let row = refused.get(key);
       if (!row) {
+        if (refused.size >= REFUSED_KEPT) return;
         row = { agg: newAgg(), flags: "!", comm, path };
-        row.agg.seq = Number.isNaN(t) ? Infinity : seq++;
         refused.set(key, row);
       }
       if (!Number.isNaN(t)) {
+        if (row.agg.seq === Infinity) row.agg.seq = seq++;
         row.agg.first = Math.min(row.agg.first, t);
         row.agg.last = Math.max(row.agg.last, t);
       }

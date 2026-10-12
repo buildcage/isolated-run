@@ -101,7 +101,6 @@ struct task_struct {
 	u64 start_time;
 	u64 self_exec_id;
 	int tgid;
-	int exit_code;
 	char comm[16];
 	struct fs_struct *fs;
 	struct files_struct *files;

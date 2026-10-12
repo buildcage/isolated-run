@@ -78,8 +78,8 @@ A host that falls short fails the step before the command runs, with the reason;
 - **No 32-bit programs.** The tracer reads only the native 64-bit system calls, so with the audit on
   the sandbox refuses one through a 32-bit ABI, from an i386 or ARM32 program or `int 0x80`: the
   kernel kills the thread that made it with `SIGSYS`. A single-threaded program dies, and a shell
-  reports it as `Bad system call`; the record names the call. Run such a program in a step without
-  the audit.
+  reports it as `Bad system call`, and the record names the call. Run such a program in a step
+  without the audit.
 - **Cost to the whole host.** While the step runs, the tracer's hooks run on every system call and
   every file read or write on the runner host, not only the step's, since a hook has to run to tell
   whose call it is. That adds roughly 60 nanoseconds to each system call of every process on the
@@ -180,8 +180,10 @@ that only ran programs has no accessed paths table, and the flag legend opens th
 - A **refused system call** is one the sandbox or the kernel refused for want of permission
   (`EPERM`), as the sandbox refuses `io_uring_setup` and `unshare`. The note under the heading names
   each one with the commands that made it, and the details show it once per program, as
-  `syscall:io_uring_setup` with `!`. A command killed for a 32-bit system call shows as
-  `syscall:32-bit <name> (killed)`. A refused call on a path shows as that path instead.
+  `syscall:io_uring_setup` with `!`. A refused call on a path shows as that path instead, and
+  `epoll_ctl`, `setsid` and `setpgid`, whose `EPERM` answers an ordinary request, are left out. A
+  program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a thread
+  killed while others run on is not recorded.
 
 ### Flags
 
@@ -346,7 +348,7 @@ failing can show as an `open` with `x`.
 | `mkdir`, `mknod`, `symlink`, `truncate` | a directory, a special file or Unix socket, or a symlink made; or a file cut to size                                                                                                                                                                                                                                | `W`                                                          |
 | `link`                                  | a hard link made from `path` to `to`. One across mounts, such as from `$HOME` into the workspace, fails (`EXDEV`). A refused one marks `to` refused, except on `EPERM`, which marks `path`, as `EPERM` mostly comes from `protected_hardlinks` refusing a file the step does not own and cannot both read and write | `W` on `to`, `L` on `path` unless it is `deleted` or `memfd` |
 | `chmod`, `chown`, `attr`                | a mode, an owner, or times or extended attributes changed                                                                                                                                                                                                                                                           | `A`                                                          |
-| `syscall`                               | a system call refused with `EPERM`, other than one on a path, once per program; or one the kernel killed the thread for                                                                                                                                                                                             | `A`                                                          |
+| `syscall`                               | a system call refused with `EPERM`, other than one on a path, once per program; or a 32-bit one the kernel killed the program for                                                                                                                                                                                   | `!` in the details                                           |
 | `end`                                   | the last line; see below                                                                                                                                                                                                                                                                                            | none                                                         |
 
 ### Access letters

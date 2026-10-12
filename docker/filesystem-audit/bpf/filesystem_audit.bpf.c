@@ -74,11 +74,7 @@ int BPF_PROG(on_exec_commit, const struct linux_binprm *bprm)
 	return 0;
 }
 
-/**
- * A thread killed inside an exec never reaches sched_process_exec. One that
- * seccomp killed while others live on exits with SIGSYS and no signal, its
- * syscall's number still in its registers (see on_signal).
- */
+/** A thread killed inside an exec never reaches sched_process_exec. */
 SEC("tp_btf/sched_process_exit")
 int BPF_PROG(on_task_exit, struct task_struct *p)
 {
@@ -86,26 +82,25 @@ int BPF_PROG(on_task_exit, struct task_struct *p)
 		return 0;
 	u64 id = bpf_get_current_pid_tgid();
 	bpf_map_delete_elem(&in_exec, &id);
-	if (p->exit_code == SIGSYS) {
-		long nr = sys_nr((struct pt_regs *)bpf_task_pt_regs(p));
-		if (nr >= 0)
-			syscall_refused(slot, nr, 1);
-	}
 	return 0;
 }
 
 #define SYS_SECCOMP 1
 
 /**
- * seccomp kills a process's last thread with a SIGSYS naming the syscall.
- * Under the audit it kills only for a 32-bit one.
+ * seccomp kills a process's last thread for a 32-bit syscall, which the
+ * audit's profile allows none of, with a SIGSYS naming the syscall and its
+ * architecture. One of the native architecture comes from a filter of the
+ * step's own. A thread killed while others live on gets no signal, and is
+ * not recorded.
  */
 SEC("tp_btf/signal_generate")
 int BPF_PROG(on_signal, int sig, struct kernel_siginfo *info)
 {
 	if (sig != SIGSYS || (unsigned long)info <= 2 || !in_target())
 		return 0;
-	if (BPF_CORE_READ(info, si_code) == SYS_SECCOMP)
+	if (BPF_CORE_READ(info, si_code) == SYS_SECCOMP &&
+	    BPF_CORE_READ(info, _sifields._sigsys._arch) != (u32)native_arch)
 		syscall_refused(slot, BPF_CORE_READ(info, _sifields._sigsys._syscall), 1);
 	return 0;
 }
@@ -552,6 +547,7 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	int watched = classify(nr, regs, &call);
 	struct held_key k = held_key(HELD_OP);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
+	int held = head != 0;
 	if (head) {
 		u32 t = tails_for(head->data_len);
 		if (!is_restart(ret) && (ret >= 0 || !watched))
@@ -562,7 +558,7 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 		op_exit(slot, &call, ret);
 	if (is_open_nr(nr))
 		open_returned(slot, regs, nr, ret);
-	else if (ret == -EPERM && !watched && nr >= 0)
+	else if (ret == -EPERM && !watched && !held && nr >= 0 && !eperm_ordinary(nr))
 		syscall_refused(slot, nr, 0);
 	return 0;
 }

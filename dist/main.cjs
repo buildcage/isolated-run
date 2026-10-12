@@ -68674,8 +68674,8 @@ function refusedNote(rows) {
 		let name = r.path.slice(8);
 		byName.set(name, (byName.get(name) ?? new Set()).add(r.comm));
 	}
-	let list = (comms) => [...comms].map(codeSpan).join(", "), names = [...byName].map(([name, comms]) => `${codeSpan(name)} (${list(comms)})`), more = names.length - 10, parts = [];
-	return names.length && parts.push(`Refused system calls: ${names.slice(0, 10).join(", ")}` + (more > 0 ? ` and ${more} more in the details` : "")), killed.size && parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call: ${list(killed)}`), `> ${parts.join("; ")}.`;
+	let list = (items, shown) => items.slice(0, shown).join(", ") + (items.length > shown ? ` and ${items.length - shown} more` : ""), comms = (c) => list([...c].map(codeSpan), 3), names = [...byName].map(([name, c]) => `${codeSpan(name)} (${comms(c)})`), parts = [];
+	return names.length && parts.push(`Refused system calls: ${list(names, 10)}`), killed.size && parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call: ${comms(killed)}`), `> ${parts.join("; ")}.`;
 }
 function skippedNote(count, url) {
 	let why = url ? ` [Why](${url})` : "";
@@ -68752,12 +68752,16 @@ function createAuditSummary(prefixes) {
 					name,
 					"(killed)"
 				].filter(Boolean).join(" ") : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
-				row || (row = {
-					agg: newAgg(),
-					flags: "!",
-					comm,
-					path
-				}, row.agg.seq = Number.isNaN(t) ? Infinity : seq++, refused.set(key, row)), Number.isNaN(t) || (row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
+				if (!row) {
+					if (refused.size >= 1e3) return;
+					row = {
+						agg: newAgg(),
+						flags: "!",
+						comm,
+						path
+					}, refused.set(key, row);
+				}
+				Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
 				return;
 			}
 			if (r.kind === "exec" && r.path) {

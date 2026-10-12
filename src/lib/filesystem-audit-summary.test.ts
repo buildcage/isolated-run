@@ -126,6 +126,32 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(md)).toEqual(["! syscall:32-bit (killed)", "! a.out syscall:32-bit (killed)"]);
   });
 
+  it("names the first commands of a refused syscall, and keeps the first thousand pairs", () => {
+    const refused = (comm: string, t?: string): object => ({
+      ...(t && { t }),
+      kind: "syscall",
+      comm,
+      syscall: "unshare",
+      err: 1,
+      failed: true,
+    });
+    const md = render(
+      refused("a"),
+      refused("a", "2026-01-01T00:00:01.000Z"),
+      refused("b", "2026-01-01T00:00:02.000Z"),
+      refused("c", "2026-01-01T00:00:03.000Z"),
+      refused("d", "2026-01-01T00:00:04.000Z"),
+      { kind: "end", dropped: 0, untracked: 0 },
+    );
+    expect(md).toContain("> Refused system calls: `unshare` (`a`, `b`, `c` and 1 more).");
+    // Placed by its first time, though its first record had none.
+    expect(lines(md)[0]).toBe("00:00.000: ! a syscall:unshare");
+
+    const many = render(...Array.from({ length: 1001 }, (_, i) => refused(`p${i}`)));
+    expect(many).toContain("! p999 syscall:unshare");
+    expect(many).not.toContain("p1000");
+  });
+
   it("lists the first refused syscalls in the note and leaves the rest to the details", () => {
     const records = Array.from({ length: 12 }, (_, i) => ({
       t: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
@@ -136,7 +162,7 @@ describe("renderFilesystemAuditSummary", () => {
       failed: true,
     }));
     const md = render(...records, { kind: "end", dropped: 0, untracked: 0 });
-    expect(md).toContain("`s9` (`x`) and 2 more in the details.");
+    expect(md).toContain("`s9` (`x`) and 2 more.");
     expect(md).not.toContain("`s10` (");
     expect(md).toContain("! x syscall:s11\n");
     expect(md).not.toContain("No file access was recorded.");

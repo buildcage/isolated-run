@@ -250,6 +250,20 @@ static __always_inline int in_open_call(void)
 #endif
 #define SIGSYS 31
 
+/**
+ * Calls whose EPERM is how they answer an ordinary request, not a refusal:
+ * epoll on a regular file, setsid or setpgid on a process group leader.
+ */
+const volatile long nr_epoll_ctl = -1, nr_setsid = -1, nr_setpgid = -1;
+
+/** The native architecture as seccomp names it (AUDIT_ARCH_*), set by the loader. */
+const volatile long native_arch = -1;
+
+static __always_inline int eperm_ordinary(long nr)
+{
+	return nr == nr_epoll_ctl || nr == nr_setsid || nr == nr_setpgid;
+}
+
 /** A program and a syscall it was refused, recorded once. */
 struct refused_key {
 	struct proc proc;

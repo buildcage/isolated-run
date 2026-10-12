@@ -3,8 +3,9 @@ package main
 import "golang.org/x/sys/unix"
 
 // syscallNumbers holds the values of the BPF program's nr_ constants: the
-// path syscalls whose failures and attribute changes it records, and the open(2)
-// family, whose name it holds.
+// path syscalls whose failures and attribute changes it records, the open(2)
+// family, whose name it holds, and the calls whose EPERM is no refusal, with
+// the architecture's seccomp number.
 var syscallNumbers = map[string]int64{
 	"nr_unlinkat":  unix.SYS_UNLINKAT,
 	"nr_unlink":    unix.SYS_UNLINK,
@@ -36,5 +37,9 @@ var syscallNumbers = map[string]int64{
 	"nr_open":      unix.SYS_OPEN,
 	"nr_openat":    unix.SYS_OPENAT,
 	"nr_openat2":   unix.SYS_OPENAT2,
+	"nr_epoll_ctl": unix.SYS_EPOLL_CTL,
+	"nr_setsid":    unix.SYS_SETSID,
+	"nr_setpgid":   unix.SYS_SETPGID,
+	"native_arch":  unix.AUDIT_ARCH_X86_64,
 	"nr_creat":     unix.SYS_CREAT,
 }
