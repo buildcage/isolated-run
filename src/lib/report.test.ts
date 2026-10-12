@@ -189,6 +189,28 @@ describe("computeReportOutcomes", () => {
   const details = (markdown: string): string[] =>
     markdown.slice(markdown.indexOf("💬")).split("```\n")[1].trimEnd().split("\n");
 
+  it("warns about requests audit let through that restrict would refuse, counting each one", () => {
+    const audited: TrafficEvent = {
+      time: 1,
+      action: "audit",
+      protocol: "https",
+      host: "s3.amazonaws.com",
+      port: 443,
+      wouldRefuse: "aws-no-credential",
+    };
+    const r: InspectReportData = {
+      ...report({
+        parameters: reportParams({ mode: "audit" }),
+        timeline: [audited, audited, { ...audited, wouldRefuse: undefined }],
+      }),
+      engine: "inspect",
+    };
+    const warning = computeReportOutcomes(r, options()).emissions.at(-1);
+    expect(warning?.level).toBe("warning");
+    expect(warning?.shouldFail).toBe(false);
+    expect(warning?.message.startsWith("2 request(s) restrict mode would refuse")).toBe(true);
+  });
+
   describe("Restrict Would Refuse", () => {
     const wouldRefuse = (time: number, host: string, reason: string): TrafficEvent => ({
       time,
