@@ -72510,7 +72510,8 @@ function readOutputEntries(text) {
 const realDeps$2 = {
 	kind: (path) => {
 		try {
-			return (0, node_fs.lstatSync)(path).isFile() ? "file" : "other";
+			let stats = (0, node_fs.lstatSync)(path);
+			return stats.isFile() ? stats.size > 67108864 ? "large" : "file" : "other";
 		} catch (e) {
 			if (e.code === "ENOENT") return "missing";
 			throw e;
@@ -72542,8 +72543,19 @@ function rewriteOutputFile(path, overrides = {}) {
 	let { kind, readFile, replaceFile } = {
 		...realDeps$2,
 		...overrides
-	}, found = kind(path);
-	if (found === "other") return replaceFile(path, ""), "it is not a regular file, so none of it was read";
+	};
+	try {
+		return rewrite(path, kind, readFile, replaceFile);
+	} catch (e) {
+		try {
+			replaceFile(path, "");
+		} catch {}
+		throw e;
+	}
+}
+function rewrite(path, kind, readFile, replaceFile) {
+	let found = kind(path);
+	if (found === "other" || found === "large") return replaceFile(path, ""), found === "other" ? "it is not a regular file, so none of it was read" : "it is over 64 MiB, so none of it was read";
 	let bytes = found === "file" ? readFile(path) : Buffer.alloc(0);
 	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return replaceFile(path, ""), "it is not UTF-8, so none of it was read";
 	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");

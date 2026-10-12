@@ -1,4 +1,12 @@
-import { lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -50,7 +58,7 @@ describe("readOutputEntries", () => {
 });
 
 describe("rewriteOutputFile", () => {
-  const rewrite = (content: string | Buffer, kind: "file" | "other" = "file") => {
+  const rewrite = (content: string | Buffer, kind: "file" | "large" | "other" = "file") => {
     let written: string | undefined;
     const error = rewriteOutputFile("/out", {
       kind: () => kind,
@@ -85,6 +93,39 @@ describe("rewriteOutputFile", () => {
     });
   });
 
+  it("empties, unread, a file over 64 MiB", () => {
+    expect(rewrite("keep=1\n", "large")).toStrictEqual({
+      written: "",
+      error: "it is over 64 MiB, so none of it was read",
+    });
+  });
+
+  it("empties the file when reading it fails, then throws", () => {
+    const written: string[] = [];
+    const fail = new Error("EIO");
+    expect(() =>
+      rewriteOutputFile("/out", {
+        kind: () => "file",
+        readFile: () => {
+          throw fail;
+        },
+        replaceFile: (_, t) => written.push(t),
+      }),
+    ).toThrow(fail);
+    expect(written).toStrictEqual([""]);
+    // And throws what failed first when emptying it fails too.
+    expect(() =>
+      rewriteOutputFile("/out", {
+        kind: () => {
+          throw fail;
+        },
+        replaceFile: () => {
+          throw new Error("EACCES");
+        },
+      }),
+    ).toThrow(fail);
+  });
+
   it("empties a file in UTF-16 or UTF-32, which the runner would decode otherwise", () => {
     for (const bom of [
       [0xff, 0xfe],
@@ -112,6 +153,15 @@ describe("rewriteOutputFile", () => {
       expect(readFileSync(path, "utf8")).toBe("keep=1\n");
       expect(() => rewriteOutputFile(dir)).toThrow();
       expect(() => rewriteOutputFile(join(path, "below-a-file"))).toThrow(/ENOTDIR/);
+    });
+
+    it("reads nothing of a file over 64 MiB", () => {
+      dir = mkdtempSync(join(tmpdir(), "step-output-"));
+      const path = join(dir, "output");
+      writeFileSync(path, "");
+      truncateSync(path, 64 * 1024 * 1024 + 1);
+      expect(rewriteOutputFile(path)).toBe("it is over 64 MiB, so none of it was read");
+      expect(readFileSync(path, "utf8")).toBe("");
     });
 
     it("replaces a symlink left at the path, reading and writing nothing through it", () => {

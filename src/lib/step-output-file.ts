@@ -43,8 +43,7 @@ export function readOutputEntries(text: string): OutputEntries {
     const equals = line.indexOf("=");
     const heredoc = line.indexOf("<<");
     if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
-      // The runner takes an empty name here; whether it then reads on is not
-      // known, so this stops.
+      // Taken here, but the runner's SetOutput throws on it and stops.
       if (equals === 0) return { entries, error: "an entry has an empty name" };
       entries.push({ name: line.slice(0, equals), text: text.slice(start, index) });
       continue;
@@ -68,18 +67,25 @@ export function readOutputEntries(text: string): OutputEntries {
 }
 
 export interface RewriteOutputFileDeps {
-  /** What is at `path`: nothing, a regular file, or anything else. */
-  kind: (path: string) => "missing" | "file" | "other";
+  /** What is at `path`: nothing, a regular file, one too large to read, or
+   *  anything else. */
+  kind: (path: string) => "missing" | "file" | "large" | "other";
   readFile: (path: string) => Buffer;
   /** Writes `text` beside `path` and moves it over `path`, so whatever the
    *  command left there is replaced rather than written through. */
   replaceFile: (path: string, text: string) => void;
 }
 
+// Far beyond what GitHub keeps of a step's outputs, and short of what reading
+// would cost in memory, or in the seconds a cancelled step has left.
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+
 const realDeps: RewriteOutputFileDeps = {
   kind: (path) => {
     try {
-      return lstatSync(path).isFile() ? "file" : "other";
+      const stats = lstatSync(path);
+      if (!stats.isFile()) return "other";
+      return stats.size > MAX_OUTPUT_BYTES ? "large" : "file";
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") return "missing";
       throw e;
@@ -117,10 +123,32 @@ export function rewriteOutputFile(
   overrides: Partial<RewriteOutputFileDeps> = {},
 ): string | undefined {
   const { kind, readFile, replaceFile } = { ...realDeps, ...overrides };
+  try {
+    return rewrite(path, kind, readFile, replaceFile);
+  } catch (e) {
+    // Left as the command wrote it, the file could still stop the runner
+    // before the names set after it.
+    try {
+      replaceFile(path, "");
+    } catch {
+      // The error thrown below fails the step either way.
+    }
+    throw e;
+  }
+}
+
+function rewrite(
+  path: string,
+  kind: RewriteOutputFileDeps["kind"],
+  readFile: RewriteOutputFileDeps["readFile"],
+  replaceFile: RewriteOutputFileDeps["replaceFile"],
+): string | undefined {
   const found = kind(path);
-  if (found === "other") {
+  if (found === "other" || found === "large") {
     replaceFile(path, "");
-    return "it is not a regular file, so none of it was read";
+    return found === "other"
+      ? "it is not a regular file, so none of it was read"
+      : "it is over 64 MiB, so none of it was read";
   }
   const bytes = found === "file" ? readFile(path) : Buffer.alloc(0);
   if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) {

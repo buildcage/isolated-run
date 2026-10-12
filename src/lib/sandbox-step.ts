@@ -241,8 +241,8 @@ function saveCleanupState(
  * Runs one `run:` step start to finish and returns the exit code the workflow
  * step should take, which is the isolated command's own. Anything that stops
  * the command from running rejects instead. Sets process.exitCode only for a
- * failure a report finds; the command's own exit code is left to whoever
- * invoked the action.
+ * failure a report finds, or a $GITHUB_OUTPUT the command left unreadable; the
+ * command's own exit code is left to whoever invoked the action.
  */
 export async function runSandboxStep(
   env: NodeJS.ProcessEnv,
