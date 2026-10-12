@@ -72533,7 +72533,7 @@ function rewriteOutputFile(path, names, overrides = {}) {
 	let { readFile, replaceFile } = {
 		...realDeps$2,
 		...overrides
-	}, { entries, error } = readOutputEntries(readFile(path)), text = entries.filter((e) => !names.includes(e.name)).map((e) => e.text).join("");
+	}, { entries, error } = readOutputEntries(readFile(path).replace(/^\uFEFF/, "")), dropped = new Set(names.map((n) => n.toLowerCase())), text = entries.filter((e) => !dropped.has(e.name.toLowerCase())).map((e) => e.text).join("");
 	return replaceFile(path, text === "" || text.endsWith("\n") ? text : `${text}\n`), error;
 }
 //#endregion
@@ -73573,6 +73573,8 @@ const realDeps = {
 	writeMoreSummary,
 	prepareStepFilesystemAudit,
 	rewriteOutputFile,
+	setTrafficArtifactOutput,
+	setFilesystemAuditOutput,
 	onCancel,
 	saveState,
 	info,
@@ -73598,7 +73600,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, rewriteOutputFile, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, rewriteOutputFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -73700,6 +73702,9 @@ async function runSandboxStep(env, overrides = {}) {
 		} catch (e) {
 			annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
 		}
+		for (let set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) try {
+			set("");
+		} catch {}
 		let prepareAudit = () => prepareStepFilesystemAudit({
 			audit,
 			attached: auditAttached,

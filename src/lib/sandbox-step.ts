@@ -32,7 +32,7 @@ import { buildComposeEnv } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
-import { FILESYSTEM_AUDIT_OUTPUT } from "./filesystem-audit-artifact.ts";
+import { FILESYSTEM_AUDIT_OUTPUT, setFilesystemAuditOutput } from "./filesystem-audit-artifact.ts";
 import { prepareStepFilesystemAudit } from "./filesystem-audit-report.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
@@ -65,7 +65,7 @@ import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { rewriteOutputFile } from "./step-output-file.ts";
 import { reportStepTraffic, writeMoreSummary } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
-import { TRAFFIC_ARTIFACT_OUTPUT } from "./traffic-artifact.ts";
+import { setTrafficArtifactOutput, TRAFFIC_ARTIFACT_OUTPUT } from "./traffic-artifact.ts";
 
 /**
  * Display fallback for the report's `uses:` example when the runner names no
@@ -126,6 +126,8 @@ export interface SandboxStepDeps {
   writeMoreSummary: typeof writeMoreSummary;
   prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
   rewriteOutputFile: typeof rewriteOutputFile;
+  setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
+  setFilesystemAuditOutput: typeof setFilesystemAuditOutput;
   /** Calls listener on each signal a cancelled run sends this process, and
    *  returns what stops listening. */
   onCancel: (listener: () => void) => () => void;
@@ -190,6 +192,8 @@ const realDeps: SandboxStepDeps = {
   writeMoreSummary,
   prepareStepFilesystemAudit,
   rewriteOutputFile,
+  setTrafficArtifactOutput,
+  setFilesystemAuditOutput,
   onCancel,
   saveState: core.saveState,
   info: core.info,
@@ -280,6 +284,8 @@ export async function runSandboxStep(
     writeMoreSummary,
     prepareStepFilesystemAudit,
     rewriteOutputFile,
+    setTrafficArtifactOutput,
+    setFilesystemAuditOutput,
     onCancel,
     saveState,
     info,
@@ -475,10 +481,11 @@ export async function runSandboxStep(
       cancel: cancel.signal,
     });
   } finally {
-    // The command can write either artifact name to $GITHUB_OUTPUT, or leave
-    // the file so the runner stops reading before the names the reports
-    // append. Taken out once it has stopped, so a step killed before the
-    // report sets them leaves none of its names either.
+    // The command can write either artifact name to $GITHUB_OUTPUT or as a
+    // ::set-output command, or leave the file so the runner stops reading
+    // before the names the reports append. Once it has stopped, its names are
+    // taken out of the file and both set empty, which the runner applies after
+    // the commands, so a step killed before the report keeps none of them.
     if (env.GITHUB_OUTPUT) {
       try {
         const unreadable = rewriteOutputFile(env.GITHUB_OUTPUT, [
@@ -494,6 +501,13 @@ export async function runSandboxStep(
       } catch (e) {
         annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`);
         process.exitCode = 1;
+      }
+    }
+    for (const set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) {
+      try {
+        set("");
+      } catch {
+        // The report setting it again says so.
       }
     }
     // None throws, so the teardown and stopListening are always reached.

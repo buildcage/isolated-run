@@ -69,6 +69,11 @@ describe("rewriteOutputFile", () => {
     });
   });
 
+  it("drops a name whatever its case, and one behind a leading BOM, as the runner reads them", () => {
+    expect(rewrite("MINE=evil\na=1\n").written).toBe("a=1\n");
+    expect(rewrite("\uFEFFmine=evil\na=1\n").written).toBe("a=1\n");
+  });
+
   it("ends the file in a newline, so a line appended after it is its own", () => {
     expect(rewrite("a=1").written).toBe("a=1\n");
     expect(rewrite("").written).toBe("");

@@ -82,8 +82,6 @@ const realDeps: RewriteOutputFileDeps = {
       throw e;
     }
   },
-  // Untested by design: the file system calls behind the seam.
-  /* v8 ignore start */
   replaceFile: (path, text) => {
     const temporary = join(dirname(path), `.${basename(path)}.${randomBytes(8).toString("hex")}`);
     try {
@@ -93,7 +91,6 @@ const realDeps: RewriteOutputFileDeps = {
       rmSync(temporary, { force: true });
     }
   },
-  /* v8 ignore stop */
 };
 
 /**
@@ -108,8 +105,10 @@ export function rewriteOutputFile(
   overrides: Partial<RewriteOutputFileDeps> = {},
 ): string | undefined {
   const { readFile, replaceFile } = { ...realDeps, ...overrides };
-  const { entries, error } = readOutputEntries(readFile(path));
-  const kept = entries.filter((e) => !names.includes(e.name)).map((e) => e.text);
+  // The runner drops a leading BOM, and looks an output up whatever its case.
+  const { entries, error } = readOutputEntries(readFile(path).replace(/^\uFEFF/, ""));
+  const dropped = new Set(names.map((n) => n.toLowerCase()));
+  const kept = entries.filter((e) => !dropped.has(e.name.toLowerCase())).map((e) => e.text);
   const text = kept.join("");
   replaceFile(path, text === "" || text.endsWith("\n") ? text : `${text}\n`);
   return error;

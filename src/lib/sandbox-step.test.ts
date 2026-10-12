@@ -56,6 +56,8 @@ const mocks = {
   writeMoreSummary: vi.fn(),
   prepareStepFilesystemAudit: vi.fn(),
   rewriteOutputFile: vi.fn(),
+  setTrafficArtifactOutput: vi.fn(),
+  setFilesystemAuditOutput: vi.fn(),
   onCancel: vi.fn(),
   saveState: vi.fn(),
   info: vi.fn(),
@@ -683,6 +685,31 @@ describe("runSandboxStep", () => {
       expect(annotation.error).not.toHaveBeenCalled();
     });
 
+    // The runner applies the file after ::set-output commands, so an empty
+    // value there overrides one the command set as a command.
+    it("then sets both names empty, before the report sets them", async () => {
+      await runSandboxStep(ENV, deps);
+
+      expect(mocks.setTrafficArtifactOutput.mock.calls).toStrictEqual([[""]]);
+      expect(mocks.setFilesystemAuditOutput.mock.calls).toStrictEqual([[""]]);
+      expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(
+        orderOf(mocks.setTrafficArtifactOutput),
+      );
+      expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
+        orderOf(mocks.prepareStepFilesystemAudit),
+      );
+    });
+
+    it("still sets the other name empty and reports when one cannot be set", async () => {
+      mocks.setTrafficArtifactOutput.mockImplementation(() => {
+        throw new Error("EACCES");
+      });
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      expect(mocks.setFilesystemAuditOutput).toHaveBeenCalledWith("");
+      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+    });
+
     it("fails the step but still reports when $GITHUB_OUTPUT held what the runner cannot read", async () => {
       mocks.rewriteOutputFile.mockReturnValue("the delimiter EOF never comes");
 
@@ -711,6 +738,7 @@ describe("runSandboxStep", () => {
     it("rewrites nothing where the runner gave no $GITHUB_OUTPUT", async () => {
       await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "" }, deps);
       expect(mocks.rewriteOutputFile).not.toHaveBeenCalled();
+      expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
     });
 
     it("creates nothing when docker or sudo cannot be pinned", async () => {
