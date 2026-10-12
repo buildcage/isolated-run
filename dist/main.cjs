@@ -68362,8 +68362,9 @@ function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", 
 function exampleStepTail({ extraInputs = [], runCommand }) {
 	let yaml = extraInputs.map((line) => `    ${line}\n`).join("");
 	if (runCommand) {
-		yaml += "    run: |\n";
-		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
+		let lines = runCommand.replace(/\r?\n$/, "").split(/\r?\n/), indicator = lines.find((line) => line !== "")?.startsWith(" ") ? "|2" : "|";
+		yaml += `    run: ${indicator}\n`;
+		for (let line of lines) yaml += `      ${line}\n`;
 	}
 	return yaml;
 }
