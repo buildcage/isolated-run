@@ -69586,7 +69586,7 @@ function openWriter(path, chunkBytes = CHUNK_BYTES) {
 		}
 	};
 }
-const realDeps$4 = {
+const realDeps$5 = {
 	readLines,
 	createSummary: createAuditSummary,
 	openWriter,
@@ -69609,7 +69609,7 @@ function prefixes(value, realpath) {
 const NONE = { blocks: () => [] };
 async function prepareStepFilesystemAudit({ audit, attached, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
 	let deps = {
-		...realDeps$4,
+		...realDeps$5,
 		...overrides
 	}, artifactName = "";
 	try {
@@ -72406,7 +72406,7 @@ function extractRuncBootstrap({ containerName, destDir }, deps = {}) {
 //#endregion
 //#region src/lib/sandbox/sandboxed-command.ts
 init_core();
-const realDeps$3 = {
+const realDeps$4 = {
 	withScratchDir,
 	extractRuncBootstrap,
 	extractCaCert,
@@ -72595,7 +72595,7 @@ async function startAudit(dir, config, options, deps) {
 }
 async function runSandboxedCommand(options, overrides = {}) {
 	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {
-		...realDeps$3,
+		...realDeps$4,
 		...overrides
 	}, { withScratchDir, writeOciConfig, resolveSandboxEnv, buildEnvBlob, runIsolated } = deps;
 	return withScratchDir(async (dir) => {
@@ -72680,7 +72680,7 @@ function readOutputEntries(text) {
 		});
 	}
 }
-const realDeps$2 = {
+const realDeps$3 = {
 	kind: (path) => {
 		try {
 			let stats = (0, node_fs.lstatSync)(path);
@@ -72717,11 +72717,11 @@ const realDeps$2 = {
 	]
 ];
 function replaceIfNotRegularFile(path) {
-	return realDeps$2.ownDirectory(path), realDeps$2.kind(path) === "other" && (realDeps$2.replaceFile(path, ""), !0);
+	return realDeps$3.ownDirectory(path), realDeps$3.kind(path) === "other" && (realDeps$3.replaceFile(path, ""), !0);
 }
 function rewriteOutputFile(path, overrides = {}) {
 	let { kind, readFile, ownDirectory, replaceFile } = {
-		...realDeps$2,
+		...realDeps$3,
 		...overrides
 	};
 	try {
@@ -72742,12 +72742,6 @@ function rewrite(path, kind, readFile, replaceFile) {
 	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return replaceFile(path, ""), "it is not UTF-8";
 	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");
 	return replaceFile(path, text === "" || text.endsWith("\n") ? text : `${text}\n`), error;
-}
-//#endregion
-//#region src/core/lib/actions/write-step-summary.ts
-init_core();
-async function writeStepSummary(markdown, summaryFile) {
-	summaryFile ? await summary.addRaw(markdown).write() : console.log(markdown);
 }
 //#endregion
 //#region src/core/lib/docker/container-env.ts
@@ -73311,6 +73305,41 @@ async function buildUniversalReportData(proxyLines, dnsLines, parameters, droppe
 	};
 }
 //#endregion
+//#region src/lib/report-fetch.ts
+const HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
+function createHostDocker() {
+	return createDocker((args) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		maxBuffer: 67108864,
+		env: hostCommandEnv("docker")
+	}), (args) => (0, node_child_process.spawn)(hostCommand("docker"), args, {
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		env: hostCommandEnv("docker")
+	}));
+}
+function fetchReport(containerName, parameters, proxyEngine) {
+	let docker = createHostDocker();
+	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName)) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName));
+}
+function readActionVersion(containerName, proxyEngine, docker) {
+	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
+}
+//#endregion
+//#region src/core/lib/actions/write-step-summary.ts
+init_core();
+async function writeStepSummary(markdown, summaryFile) {
+	summaryFile ? await summary.addRaw(markdown).write() : console.log(markdown);
+}
+//#endregion
 //#region src/core/lib/report/outcome/annotate.ts
 function applyOutcomeAnnotations(annotation, emissions) {
 	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
@@ -73416,44 +73445,7 @@ function wouldRefuseBlocks(timeline, keys, priority, gap, level) {
 	return blocks;
 }
 //#endregion
-//#region src/lib/report.ts
-const HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
-function createHostDocker() {
-	return createDocker((args) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
-		encoding: "utf8",
-		stdio: [
-			"ignore",
-			"pipe",
-			"pipe"
-		],
-		maxBuffer: 67108864,
-		env: hostCommandEnv("docker")
-	}), (args) => (0, node_child_process.spawn)(hostCommand("docker"), args, {
-		stdio: [
-			"ignore",
-			"pipe",
-			"pipe"
-		],
-		env: hostCommandEnv("docker")
-	}));
-}
-function fetchReport(containerName, parameters, proxyEngine) {
-	let docker = createHostDocker();
-	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName)) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName));
-}
-function readActionVersion(containerName, proxyEngine, docker) {
-	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
-}
-function reportTitle(label, processActivity) {
-	let title = processActivity ? "Traffic & Process Activity Report" : "Outbound Traffic Report";
-	return label ? `${title} — ${label}` : title;
-}
-function summaryFooter(actionRepo) {
-	return frame(reportFooter(actionRepo));
-}
-function missingReportFrame(title, isAudit) {
-	return frame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
-}
+//#region src/lib/aws-report.ts
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => e.wouldRefuse?.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
 	if (!refusedByAwsCheck || at === -1) return blocks;
@@ -73469,6 +73461,18 @@ function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 		link,
 		...blocks.slice(at + 1)
 	];
+}
+//#endregion
+//#region src/lib/report.ts
+function reportTitle(label, processActivity) {
+	let title = processActivity ? "Traffic & Process Activity Report" : "Outbound Traffic Report";
+	return label ? `${title} — ${label}` : title;
+}
+function summaryFooter(actionRepo) {
+	return frame(reportFooter(actionRepo));
+}
+function missingReportFrame(title, isAudit) {
+	return frame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
 }
 function computeReportOutcomes(report, { stepLabel, processActivity = !1, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
@@ -73493,6 +73497,11 @@ function computeReportOutcomes(report, { stepLabel, processActivity = !1, failOn
 		emissions
 	};
 }
+const realDeps$2 = {
+	appendFile: node_fs.appendFileSync,
+	fileSize: (path) => (0, node_fs.statSync)(path).size,
+	writeSummary: writeStepSummary
+};
 function summarySize(path, fileSize) {
 	if (!path) return 0;
 	try {
@@ -73501,17 +73510,24 @@ function summarySize(path, fileSize) {
 		return 0;
 	}
 }
-function fitSummaryBlocks(blocks, env, fileSize = (p) => (0, node_fs.statSync)(p).size) {
+function fitSummaryBlocks(blocks, env, fileSize) {
 	return fitStepSummary(blocks, { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) });
 }
-async function writeSummaryBlocks(blocks, env, { fileSize, writeSummary = writeStepSummary } = {}) {
+async function writeSummaryBlocks(blocks, env, overrides = {}) {
+	let { fileSize, writeSummary } = {
+		...realDeps$2,
+		...overrides
+	};
 	await writeSummary(fitSummaryBlocks(blocks, env, fileSize), env.GITHUB_STEP_SUMMARY);
 }
-async function writeReportSummary(report, annotation, { extraBlocks = [], ...options }, artifactAvailable, env, { appendFile = node_fs.appendFileSync, ...deps } = {}) {
-	let outcomes = computeReportOutcomes(report, options);
+async function writeReportSummary(report, annotation, { extraBlocks = [], ...options }, artifactAvailable, env, overrides = {}) {
+	let { appendFile, fileSize, writeSummary } = {
+		...realDeps$2,
+		...overrides
+	}, outcomes = computeReportOutcomes(report, options);
 	applyOutcomeAnnotations(annotation, outcomes.emissions);
-	let summary = fitSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-refuse" ? wouldRefuseTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, deps.fileSize);
-	summary.includes(wouldRefuseTruncationNote(artifactAvailable)) && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")), await (deps.writeSummary ?? writeStepSummary)(summary, env.GITHUB_STEP_SUMMARY);
+	let summary = fitSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-refuse" ? wouldRefuseTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, fileSize);
+	summary.includes(wouldRefuseTruncationNote(artifactAvailable)) && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")), await writeSummary(summary, env.GITHUB_STEP_SUMMARY);
 }
 //#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts

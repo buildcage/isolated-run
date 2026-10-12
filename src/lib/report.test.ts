@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { createAnnotation } from "#core/lib/actions/annotation.ts";
-import type { Docker } from "#core/lib/docker/client.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { annotateKnownBlocked } from "#core/lib/report/build/aggregate.ts";
 import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
@@ -18,17 +17,10 @@ import {
   computeReportOutcomes,
   missingReportFrame,
   reportTitle,
-  readActionVersion,
   writeReportSummary,
   writeSummaryBlocks,
   type ComputeReportOutcomesOptions,
 } from "./report.ts";
-
-// readActionVersion's only external call is `docker inspect` via the shared
-// client, so the client is what gets handed in here. Label parsing is tested
-// in action-version.test.ts.
-const readLabels = vi.fn();
-const docker = { readLabels } as unknown as Docker;
 
 function options(
   overrides: Partial<ComputeReportOutcomesOptions> = {},
@@ -501,28 +493,6 @@ describe("writeSummaryBlocks", () => {
       { fileSize: () => 1024 * 1024, writeSummary: async (m) => void written.push(m) },
     );
     expect(written).toStrictEqual(["cut\n"]);
-  });
-});
-
-describe("readActionVersion", () => {
-  const containerName = "buildcage-proxy-abcd1234";
-
-  beforeEach(() => {
-    readLabels.mockReset();
-  });
-
-  it("turns the image's bare version label back into its git tag", () => {
-    readLabels.mockReturnValueOnce({
-      "org.opencontainers.image.version": "3.1.4",
-    });
-    expect(readActionVersion(containerName, "universal", docker)).toBe("v3.1.4");
-  });
-
-  it("strips the engine suffix a non-universal image carries", () => {
-    readLabels.mockReturnValueOnce({
-      "org.opencontainers.image.version": "3.1.4-inspect",
-    });
-    expect(readActionVersion(containerName, "inspect", docker)).toBe("v3.1.4");
   });
 });
 

@@ -16,10 +16,9 @@ import type { GenReportParameters } from "#core/lib/report/types.ts";
 
 import { failOrWarn } from "./fail-or-warn.ts";
 import { readStepLabel } from "./inputs.ts";
+import { fetchReport, readActionVersion } from "./report-fetch.ts";
 import {
-  fetchReport,
   missingReportFrame,
-  readActionVersion,
   reportTitle,
   summaryFooter,
   writeReportSummary,
