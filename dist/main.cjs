@@ -68325,14 +68325,12 @@ function joinSummaryBlocks(blocks) {
 	return blocks.map(whole).join("");
 }
 function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES } = {}) {
-	let full = blocks.map(whole), all = full.join(""), budget = limitBytes - 8192 - usedBytes;
-	if (bytes(all) <= budget) return all;
+	let full = blocks.map(whole), sizes = full.map(bytes), budget = limitBytes - 8192 - usedBytes;
+	if (sizes.reduce((sum, n) => sum + n, 0) <= budget) return full.join("");
 	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
 	for (let i of order) {
 		let b = blocks[i];
-		if ((cutAt.get(b.section) ?? Infinity) < b.level) continue;
-		let size = bytes(full[i]);
-		b.cut === "keep" || size <= budget ? out[i] = full[i] : (out[i] = cutBlock(b, Math.max(0, budget)), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level))), budget -= bytes(out[i]);
+		(cutAt.get(b.section) ?? Infinity) < b.level || (b.cut === "keep" || sizes[i] <= budget ? (out[i] = full[i], budget -= sizes[i]) : (out[i] = cutBlock(b, Math.max(0, budget)), budget -= bytes(out[i]), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level))));
 	}
 	return out.join("");
 }
@@ -68340,10 +68338,10 @@ function cutBlock(b, budget) {
 	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
 	if (b.cut === "atomic") return alone;
 	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
-	for (let line of b.text.split("\n")) {
-		let withNewline = `${line}\n`, lineBytes = bytes(withNewline);
+	for (let pos = 0;;) {
+		let nl = b.text.indexOf("\n", pos), line = nl === -1 ? b.text.slice(pos) : b.text.slice(pos, nl), withNewline = `${line}\n`, lineBytes = bytes(withNewline);
 		if (usedBytes + lineBytes > room) break;
-		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen);
+		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen), pos = nl + 1;
 	}
 	let head = b.head ?? 0;
 	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
