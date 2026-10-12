@@ -68321,9 +68321,6 @@ function withNotices(blocks, noticeFor) {
 		notice: noticeFor(b)
 	});
 }
-function joinSummaryBlocks(blocks) {
-	return blocks.map(whole).join("");
-}
 function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES } = {}) {
 	let full = blocks.map(whole), all = full.join(""), budget = limitBytes - 8192 - usedBytes;
 	if (bytes(all) <= budget) return all;
@@ -69507,7 +69504,7 @@ async function prepareStepFilesystemAudit({ audit, attached, upload, retentionDa
 			} catch (e) {
 				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
 			}
-			return audit.outPath, joinSummaryBlocks(rendered), withNotices(rendered, () => notice);
+			return audit.outPath, withNotices(rendered, () => notice);
 		} };
 	} catch (e) {
 		return annotation.warning(`Failed to report the filesystem audit: ${errorMessage(e)}`), NONE;
@@ -73429,18 +73426,17 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 		engineLabel: "sandbox"
 	}), wouldRefuse = describeWouldRefuse(report.timeline);
 	wouldRefuse && emissions.push(wouldRefuse);
-	let keys = refusedKeys(report.timeline), blocks = withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
-		title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
-		stepName: "Start isolated-run",
-		runCommand,
-		extraInputs,
-		actionVersion,
-		refusalLabel: keyRefusalLabel(keys),
-		extraBlocks: (gap) => wouldRefuseBlocks(report.timeline, keys, 2, gap)
-	}), report, actionRepo, actionRef);
+	let keys = refusedKeys(report.timeline);
 	return {
-		markdown: joinSummaryBlocks(blocks),
-		blocks,
+		blocks: withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
+			title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
+			stepName: "Start isolated-run",
+			runCommand,
+			extraInputs,
+			actionVersion,
+			refusalLabel: keyRefusalLabel(keys),
+			extraBlocks: (gap) => wouldRefuseBlocks(report.timeline, keys, 2, gap)
+		}), report, actionRepo, actionRef),
 		emissions
 	};
 }
