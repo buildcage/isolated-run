@@ -277,8 +277,12 @@ int BPF_PROG(on_open, struct file *file)
 	e->flags = file->f_flags;
 	e->mode = file->f_mode;
 	file_path(e, file);
-	if (hold_open(e) != 0)
+	int r = hold_open(e);
+	if (r) {
 		submit(e);
+		if (r > 0)
+			open_recorded(e);
+	}
 	return 0;
 }
 
@@ -350,13 +354,6 @@ static __always_inline struct event *open_user_name(u32 slot, const char *name)
 	return e;
 }
 
-static __always_inline void open_exit(u32 slot, long ret, int dfd, u32 flags)
-{
-	struct event *e = open_end(slot, ret);
-	if (e)
-		open_failed(slot, e, ret, dfd, flags);
-}
-
 /** Starts holding the open(2) the thread is in, if any, from its name. */
 static __always_inline void stash_name(u32 slot, u64 *ctx)
 {
@@ -384,33 +381,6 @@ SEC("fexit/getname")
 int on_getname_outer(u64 *ctx)
 {
 	stash_name(__COUNTER__, ctx);
-	return 0;
-}
-
-/**
- * open/openat reach do_sys_openat2 through do_sys_open, which may inline it;
- * hooking both covers either build. When both fire, the inner exit records the
- * open and the outer one finds its hold ended. The descriptor is the first
- * argument of both and the flags, or the open_how holding them, the third;
- * the return value comes from bpf_get_func_ret, as its type changed (long,
- * later int), so only its low 32 bits are used.
- */
-SEC("fexit/do_sys_openat2")
-int on_openat2_exit(u64 *ctx)
-{
-	u64 ret = 0;
-	bpf_get_func_ret(ctx, &ret);
-	struct open_how *how = (void *)ctx[2];
-	open_exit(__COUNTER__, (int)ret, (int)ctx[0], BPF_CORE_READ(how, flags));
-	return 0;
-}
-
-SEC("fexit/do_sys_open")
-int on_open_exit(u64 *ctx)
-{
-	u64 ret = 0;
-	bpf_get_func_ret(ctx, &ret);
-	open_exit(__COUNTER__, (int)ret, (int)ctx[0], (u32)ctx[2]);
 	return 0;
 }
 
@@ -510,24 +480,19 @@ int BPF_PROG(on_file_free, struct file *file)
 }
 
 /**
- * Ends an open(2) family call's hold as the call returns, so none outlives it,
- * recording the open first if its open's exit did not. With no hold, records
- * a failed call from the name and flags the caller passed: getname refused
- * the name, as for one too long, the pool was full, or no getname program
- * ran for the open.
+ * Ends an open(2) family call's hold as the call returns, recording the open,
+ * with the descriptor and flags from its arguments for a failed one. With no
+ * hold, records a failed call from the name the caller passed: getname refused
+ * the name, as for one too long, the pool was full, or no getname program ran
+ * for the open.
  */
 static __always_inline void open_returned(u32 slot, struct pt_regs *regs, long nr, long ret)
 {
-	struct held_key k = held_key(HELD_OPEN);
-	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	struct event *e = 0;
+	int none;
 	int at = nr == nr_openat || nr == nr_openat2;
-	if (head) {
-		e = open_end(slot, ret);
-		release(&k, tails_for(head->data_len));
-	} else if (ret < 0 && !is_restart(ret)) {
+	struct event *e = open_return(slot, ret, &none);
+	if (none && ret < 0 && !is_restart(ret))
 		e = open_user_name(slot, (const char *)sys_arg(regs, at));
-	}
 	if (!e)
 		return;
 	u32 flags;

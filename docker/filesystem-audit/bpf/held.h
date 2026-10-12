@@ -493,7 +493,8 @@ static __always_inline int open_creating(void)
  * to wait for here, nor has one nested in an open already held, such as a FUSE
  * passthrough's backing file, or one with no room to be held.
  *
- * @return 0 when held, nonzero when it is to be recorded at once.
+ * @return 0 when held; else @p e is to be recorded at once, and after that,
+ *         when 1, open_recorded() called so its open(2) records nothing more.
  */
 static __always_inline int hold_open(struct event *e)
 {
@@ -509,42 +510,57 @@ static __always_inline int hold_open(struct event *e)
 	}
 	if (hold_as(e, HELD_OPEN, old, 0) == 0)
 		return 0;
-	// Recorded as done, though something may still refuse it, and not also
-	// as the failed open it was held as: the hold is ended.
+	// Recorded as done, though something may still refuse it.
 	bump(&untracked);
 	e->bases = 0;
-	head = bpf_map_lookup_elem(&heads, &k);
-	if (head)
-		head->kind = K_OPEN_ENDED;
-	return -1;
+	return 1;
 }
 
 /**
- * Ends the open(2) hold as the call returned @p ret, recording a held open.
- * The hold stays, marked K_OPEN_ENDED, until its syscall returns (see
- * on_sys_exit), so a second open exit, which some builds run for one open,
- * finds it ended.
- *
- * @return The failed open to record, assembled in scratch, or 0.
+ * Marks the open(2) the thread is in as recorded at its hook, from @p e, the
+ * open just submitted, so it is not also recorded as failed when it returns.
+ * A failed hold may have taken the head with it, so one is left in its place.
  */
-static __always_inline struct event *open_end(u32 slot, long ret)
+static __always_inline void open_recorded(struct event *e)
 {
 	struct held_key k = held_key(HELD_OPEN);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	if (!head || head->kind == K_OPEN_ENDED)
+	if (head) {
+		head->kind = K_OPEN_RECORDED;
+		return;
+	}
+	e->kind = K_OPEN_RECORDED;
+	e->data_len = 0;
+	bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
+}
+
+/**
+ * Ends the open(2) hold as its call returned @p ret, recording a held open,
+ * so no hold outlives its call.
+ *
+ * @param[out] none Whether there was no hold to end.
+ * @return The failed open to record, assembled in scratch, or 0.
+ */
+static __always_inline struct event *open_return(u32 slot, long ret, int *none)
+{
+	struct held_key k = held_key(HELD_OPEN);
+	struct event *head = bpf_map_lookup_elem(&heads, &k);
+	*none = !head;
+	if (!head)
 		return 0;
 	struct event *failed = 0;
-	int restart = is_restart(ret);
-	if (!restart && head->kind == K_OPEN) {
+	if (is_restart(ret)) {
+		// The kernel runs the open again, and that run records it.
+	} else if (head->kind == K_OPEN) {
 		// Reaching the file after its create step means it was created,
 		// whatever then refused the open.
 		u32 created = head->bases;
 		head->bases = 0;
 		report_held(slot, &k, head, ret < 0 ? -ret : 0, created);
-	} else if (!restart && ret < 0) {
+	} else if (head->kind == K_OPEN_FAILED && ret < 0) {
 		failed = assemble(slot, &k, head);
 	}
-	head->kind = K_OPEN_ENDED;
+	release(&k, tails_for(head->data_len));
 	return failed;
 }
 

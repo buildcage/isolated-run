@@ -222,7 +222,11 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 /** The open(2) family's syscall numbers, set by the loader as the others are. */
 const volatile long nr_open = -1, nr_openat = -1, nr_openat2 = -1, nr_creat = -1;
 
-/** Whether syscall @p nr is of the open(2) family. */
+/**
+ * Whether syscall @p nr is of the open(2) family. Only the native numbers are
+ * known, as the sandbox kills a thread that makes a 32-bit call before it
+ * runs (see nr_unlinkat).
+ */
 static __always_inline int is_open_nr(long nr)
 {
 	return nr >= 0 && (nr == nr_open || nr == nr_openat || nr == nr_openat2 || nr == nr_creat);
