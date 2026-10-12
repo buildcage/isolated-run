@@ -22,10 +22,10 @@ function lines(md: string): string[] {
   return m ? m[1].split("\n").map((l) => l.replace(/\s+/g, " ").trim()) : [];
 }
 
-// The rows of the "Accessed paths" table.
+// The rows of the "Accessed Paths" table.
 function tableRows(md: string): string[] {
   const m = md.match(
-    /#### Accessed paths\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
+    /#### Accessed Paths\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
   );
   return m ? m[1].split("\n") : [];
 }
@@ -42,8 +42,8 @@ describe("renderFilesystemAuditSummary", () => {
 
   it("warns unless the tracer's end line is there and counts nothing lost", () => {
     const read = { kind: "read", comm: "cat", path: "/etc/hostname" };
-    const warning = "### 🗂️ Filesystem audit\n\n> ⚠️ **This record is incomplete.**";
-    expect(render(read, { kind: "end", dropped: 0, untracked: 0 })).not.toContain("⚠️");
+    const warning = "### ⚙️ Process Activity\n\n> ❗ **This record is incomplete.**";
+    expect(render(read, { kind: "end", dropped: 0, untracked: 0 })).not.toContain("❗");
     expect(render(read)).toContain(warning); // cut short before the end line
     const dropped = render(read, { kind: "end", dropped: 3, untracked: 0 });
     expect(dropped).toContain(warning);
@@ -56,23 +56,23 @@ describe("renderFilesystemAuditSummary", () => {
   it("notes hooks skipped on the host apart from a record known to be incomplete", () => {
     const read = { kind: "read", comm: "cat", path: "/etc/hostname" };
     const note =
-      "> ⚠️ **The kernel skipped the tracer's hooks 15,779 times** on the\n" +
+      "> ❗ **The kernel skipped the tracer's hooks 15,779 times** on the\n" +
       "> runner host while this step ran. Any of them may have been this step's, so some of its\n" +
       "> accesses may be missing from this summary and from the artifact.\n";
     const skipped = render(read, { kind: "end", dropped: 0, untracked: 0, host_missed: 15779 });
-    expect(skipped).toContain(`### 🗂️ Filesystem audit\n\n${note}`);
+    expect(skipped).toContain(`### ⚙️ Process Activity\n\n${note}`);
     expect(skipped).not.toContain("incomplete");
     expect(lines(skipped)).toEqual(["R cat /etc/hostname"]);
     // Both, the incomplete warning first.
     expect(render(read, { kind: "end", dropped: 3, untracked: 0, host_missed: 1 })).toMatch(
-      /incomplete\.\*\*[^\n]*\n[^\n]*\n\n> ⚠️ \*\*The kernel skipped the tracer's hooks 1 time\*\*/,
+      /incomplete\.\*\*[^\n]*\n[^\n]*\n\n> ❗ \*\*The kernel skipped the tracer's hooks 1 time\*\*/,
     );
     expect(render(read, { kind: "end", dropped: 0, untracked: 0, host_missed: 0 })).not.toContain(
-      "⚠️",
+      "❗",
     );
     // Only a number counts.
     expect(render(read, { kind: "end", dropped: 0, untracked: 0, host_missed: "7" })).not.toContain(
-      "⚠️",
+      "❗",
     );
   });
 
@@ -103,10 +103,10 @@ describe("renderFilesystemAuditSummary", () => {
       { kind: "end", dropped: 0, untracked: 0 },
     );
     expect(md).toContain(
-      "> Refused system calls: `io_uring_setup` (`node`, `npm`), `unshare` (`bwrap`); " +
+      "> 🚫 Refused system calls: `io_uring_setup` (`node`, `npm`), `unshare` (`bwrap`); " +
         "killed for a 32-bit system call: `a.out`.",
     );
-    expect(tableRows(md)).toEqual(["| R | `/etc/hostname` |"]); // a syscall is no path
+    expect(tableRows(md)).toEqual(["| `/etc/hostname` | R |"]); // a syscall is no path
     expect(lines(md)).toEqual([
       "00:00.000-00:04.000: ! node syscall:io_uring_setup",
       "00:01.000: R cat /etc/hostname",
@@ -122,10 +122,10 @@ describe("renderFilesystemAuditSummary", () => {
       { kind: "syscall", killed: true, failed: true },
       { kind: "end", dropped: 0, untracked: 0 },
     );
-    expect(md).toContain("> Killed for a 32-bit system call: `a.out`.");
+    expect(md).toContain("> 🚫 Killed for a 32-bit system call: `a.out`.");
     expect(
       render({ kind: "syscall", killed: true }, { kind: "syscall", syscall: "mount" }),
-    ).toContain("> Refused system calls: `mount`; killed for a 32-bit system call.");
+    ).toContain("> 🚫 Refused system calls: `mount`; killed for a 32-bit system call.");
     expect(lines(md)).toEqual(["! syscall:32-bit ? (killed)", "! a.out syscall:32-bit ? (killed)"]);
   });
 
@@ -146,7 +146,7 @@ describe("renderFilesystemAuditSummary", () => {
       refused("d", "2026-01-01T00:00:04.000Z"),
       { kind: "end", dropped: 0, untracked: 0 },
     );
-    expect(md).toContain("> Refused system calls: `unshare` (`a`, `b`, `c` and 1 more).");
+    expect(md).toContain("> 🚫 Refused system calls: `unshare` (`a`, `b`, `c` and 1 more).");
     // Placed by its first time, though its first record had none.
     expect(lines(md)[0]).toBe("00:00.000: ! a syscall:unshare");
 
@@ -159,7 +159,9 @@ describe("renderFilesystemAuditSummary", () => {
     expect(lines(many)).toContain("! p199 syscall:unshare");
     expect(many).not.toContain("p200");
     expect(lines(many)).toContain("! old syscall:32-bit socketcall (killed)");
-    expect(render({ kind: "syscall", comm: "x" })).toContain("> Refused system calls: `?` (`x`).");
+    expect(render({ kind: "syscall", comm: "x" })).toContain(
+      "> 🚫 Refused system calls: `?` (`x`).",
+    );
   });
 
   it("lists the first refused syscalls in the note and leaves the rest to the details", () => {
@@ -185,15 +187,15 @@ describe("renderFilesystemAuditSummary", () => {
     );
     // Appended after the traffic report's </details>, which a heading right
     // after it would be read as part of.
-    expect(`</details>\n${md}`).toContain("</details>\n\n### 🗂️ Filesystem audit\n");
+    expect(`</details>\n${md}`).toContain("</details>\n\n### ⚙️ Process Activity\n");
     // Below the executed table, which shows no flags.
-    expect(md.indexOf("#### Accessed paths\n\n<sub>R read")).toBeGreaterThan(
-      md.indexOf("#### Executed"),
+    expect(md.indexOf("#### Accessed Paths\n\n<sub>R read")).toBeGreaterThan(
+      md.indexOf("#### Executed Programs"),
     );
     expect(md.split("<sub>R read")).toHaveLength(2);
     // With no accessed paths table, the details are the first to show flags.
     const ran = render({ kind: "exec", comm: "sh", path: "/usr/bin/cat" });
-    expect(ran).not.toContain("#### Accessed paths");
+    expect(ran).not.toContain("#### Accessed Paths");
     expect(ran.slice(ran.indexOf("<details>"))).toContain("<sub>R read");
   });
 
@@ -342,9 +344,9 @@ describe("renderFilesystemAuditSummary", () => {
       "X tool /usr/bin/tool",
     ]);
     expect(tableRows(md)).toEqual([
-      "| R | `./libx.so` |",
-      "| R | `/etc/ld.so.cache` |",
-      "| R | `/usr/bin/tool` |",
+      "| `./libx.so` | R |",
+      "| `/etc/ld.so.cache` | R |",
+      "| `/usr/bin/tool` | R |",
     ]);
   });
 
@@ -374,7 +376,7 @@ describe("renderFilesystemAuditSummary", () => {
       { kind: "exec", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
     );
     expect(lines(md)).toEqual(["WX rustup ~/.cargo/bin/rustup"]);
-    expect(tableRows(md)).toEqual(["| W | `~/.cargo/bin/rustup` |"]);
+    expect(tableRows(md)).toEqual(["| `~/.cargo/bin/rustup` | W |"]);
   });
 
   it("never folds a program run, nor lets one fold its directory", () => {
@@ -390,7 +392,7 @@ describe("renderFilesystemAuditSummary", () => {
       "w! sh /usr/local/x",
       "R sh /usr/share/y",
     ]);
-    expect(tableRows(md)).toEqual(["| w! | `/usr/local/x` |", "| R | `/usr/share/y` |"]);
+    expect(tableRows(md)).toEqual(["| `/usr/local/x` | w! |", "| `/usr/share/y` | R |"]);
   });
 
   it("tells a process from a later one given the same pid", () => {
@@ -492,10 +494,10 @@ describe("renderFilesystemAuditSummary", () => {
     );
     expect(lines(md)).toEqual(["R c ./a", "R c ./b", "R c ~/y", "R a /etc/x", "R b /etc/x"]);
     expect(tableRows(md)).toEqual([
-      "| R | `./a` |",
-      "| R | `./b` |",
-      "| R | `~/y` |",
-      "| R | `/etc/x` |",
+      "| `./a` | R |",
+      "| `./b` | R |",
+      "| `~/y` | R |",
+      "| `/etc/x` | R |",
     ]);
   });
 
@@ -1094,7 +1096,7 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "exec", comm: "sh", path: "/usr/bin/sh" },
       );
       expect(md).toContain(
-        "#### Executed\n\n| Path | Runs |\n| --- | --- |\n| `/usr/bin/sh` | 2 |\n| `./bin/node` | 1 |\n\n",
+        "#### Executed Programs\n\n| Path | Count |\n| --- | ---: |\n| `/usr/bin/sh` | 2 |\n| `./bin/node` | 1 |\n\n",
       );
     });
 
@@ -1106,7 +1108,7 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "exec", comm: "a", path: "/proc/34/fd/3" },
       );
       expect(md).toContain(
-        "| Path | Runs |\n| --- | --- |\n| `…/run.sh` | 2 |\n| `/proc/<pid>/fd/3` | 2 |\n\n",
+        "| Path | Count |\n| --- | ---: |\n| `…/run.sh` | 2 |\n| `/proc/<pid>/fd/3` | 2 |\n\n",
       );
     });
 
@@ -1115,7 +1117,7 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "read", comm: "a", path: "…/x" },
         { kind: "open", failed: true, comm: "a", path: "x", err: 2 },
       );
-      expect(md).toContain("| R | `…/x` |\n| r | `…/x` |\n");
+      expect(md).toContain("| `…/x` | R |\n| `…/x` | r |\n");
     });
 
     it("shows a memfd by its quoted name and a deleted file with a mark outside its path", () => {
@@ -1127,10 +1129,10 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "write", comm: "py", path: "/tmp/q (deleted)" },
       );
       expect(md).toContain(
-        '| Path | Runs |\n| --- | --- |\n| `memfd:"/usr/bin/a\\"b"` | 1 |\n| `/tmp/p` (deleted) | 1 |\n\n',
+        '| Path | Count |\n| --- | ---: |\n| `memfd:"/usr/bin/a\\"b"` | 1 |\n| `/tmp/p` (deleted) | 1 |\n\n',
       );
       expect(md).toContain(
-        '| W | `/tmp/p` (deleted) |\n| W | `/tmp/q (deleted)` |\n| W | `memfd:"/usr/bin/a\\"b"` |\n',
+        '| `/tmp/p` (deleted) | W |\n| `/tmp/q (deleted)` | W |\n| `memfd:"/usr/bin/a\\"b"` | W |\n',
       );
       expect(lines(md)).toContain('W py memfd:"/usr/bin/a\\"b"');
       expect(lines(md)).toContain("W py /tmp/p (deleted)");
@@ -1143,7 +1145,7 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "write", comm: "a", path: "/srv/d/3", deleted: true },
         { kind: "write", comm: "a", path: "memfd:/srv/d/4", memfd: true },
       );
-      expect(tableRows(md)).toEqual(["| W | `/srv/d/**` |", '| W | `memfd:"/srv/d/4"` |']);
+      expect(tableRows(md)).toEqual(["| `/srv/d/**` | W |", '| `memfd:"/srv/d/4"` | W |']);
     });
 
     it("shows a memfd or deleted file mapped executable whatever its name", () => {
@@ -1152,8 +1154,8 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "mmap", comm: "a", path: "/tmp/liby.so", access: "x", deleted: true },
       );
       expect(tableRows(md)).toEqual([
-        "| R | `/tmp/liby.so` (deleted) |",
-        '| R | `memfd:"libx.so"` |',
+        "| `/tmp/liby.so` (deleted) | R |",
+        '| `memfd:"libx.so"` | R |',
       ]);
     });
 
@@ -1168,7 +1170,7 @@ describe("renderFilesystemAuditSummary", () => {
 
     it("leaves the accessed-paths table out when the step only ran programs", () => {
       const md = render({ kind: "exec", comm: "sh", path: "/usr/bin/sh" });
-      expect(md).not.toContain("#### Accessed paths");
+      expect(md).not.toContain("#### Accessed Paths");
       expect(lines(md)).toEqual(["X sh /usr/bin/sh"]);
     });
 
@@ -1180,12 +1182,12 @@ describe("renderFilesystemAuditSummary", () => {
         to: "/srv/b",
         exchange: true,
       });
-      expect(tableRows(md)).toEqual(["| M | `/srv/a` |", "| M | `/srv/b` |"]);
+      expect(tableRows(md)).toEqual(["| `/srv/a` | M |", "| `/srv/b` | M |"]);
     });
 
     it("leaves the executed table out when nothing was run", () => {
       const md = render({ kind: "read", comm: "a", path: "/work/x" });
-      expect(md).not.toContain("#### Executed");
+      expect(md).not.toContain("#### Executed Programs");
     });
 
     it("gives each path one row for every command's access, in path order", () => {
@@ -1195,9 +1197,9 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "write", comm: "sh", path: "/work/a" },
       );
       expect(md).toContain(
-        "#### Accessed paths\n\n<sub>R read · W write · X exec · M move · L link · D delete · A attr · " +
+        "#### Accessed Paths\n\n<sub>R read · W write · X exec · M move · L link · D delete · A attr · " +
           "lowercase = failed · ! = denied</sub>\n\n" +
-          "| Access | Path |\n| --- | --- |\n| RW | `./a` |\n| R | `/etc/hosts` |\n",
+          "| Path | Access |\n| --- | --- |\n| `./a` | RW |\n| `/etc/hosts` | R |\n",
       );
     });
 
@@ -1207,14 +1209,14 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "read", comm: "a", path: "/work/a&#47;~~b~~" },
         { kind: "read", comm: "a", path: "/work/`c``d" },
       );
-      expect(md).toContain("| R | `./x\\|y` |");
-      expect(md).toContain("| R | `./a&#47;~~b~~` |");
-      expect(md).toContain("| R | ```./`c``d``` |");
+      expect(md).toContain("| `./x\\|y` | R |");
+      expect(md).toContain("| `./a&#47;~~b~~` | R |");
+      expect(md).toContain("| ```./`c``d``` | R |");
     });
 
     it("pads a code span whose path ends with a backtick", () => {
       const md = render({ kind: "read", comm: "a", path: "/work/x`" });
-      expect(md).toContain("| R | `` ./x` `` |");
+      expect(md).toContain("| `` ./x` `` | R |");
     });
 
     it("keys the workspace itself once under either spelling", () => {
@@ -1225,7 +1227,7 @@ describe("renderFilesystemAuditSummary", () => {
         ),
         { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
       );
-      expect(md).toContain("| Access | Path |\n| --- | --- |\n| Aa! | `.` |\n\n");
+      expect(md).toContain("| Path | Access |\n| --- | --- |\n| `.` | Aa! |\n\n");
     });
 
     it("keys a path once whether it was reached through the workspace's symlink or not", () => {
@@ -1238,16 +1240,16 @@ describe("renderFilesystemAuditSummary", () => {
         ),
         { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
       );
-      expect(md).toContain("| R | `./x` |");
-      expect(md).not.toContain("| r | `./x` |");
-      expect(md).toContain("| Path | Runs |\n| --- | --- |\n| `./bin` | 2 |\n\n");
+      expect(md).toContain("| `./x` | R |");
+      expect(md).not.toContain("| `./x` | r |");
+      expect(md).toContain("| Path | Count |\n| --- | ---: |\n| `./bin` | 2 |\n\n");
     });
 
     it("folds the per-command record into a details element after the tables", () => {
       const md = render({ kind: "read", comm: "a", path: "/work/x" });
-      expect(md.indexOf("#### Accessed paths")).toBeLessThan(md.indexOf("<details>"));
+      expect(md.indexOf("#### Accessed Paths")).toBeLessThan(md.indexOf("<details>"));
       expect(md).toMatch(
-        /<details>\n<summary>📂 Filesystem details<\/summary>\n\n<sub>flags · command · path<\/sub>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
+        /<details>\n<summary>🔍 Process details<\/summary>\n\n<sub>flags · command · path<\/sub>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
       );
     });
   });
@@ -1268,9 +1270,9 @@ describe("renderFilesystemAuditSummary: limits", () => {
       { kind: "exec", comm: "c", path: "/usr/bin/c" },
       ...tmpFiles(20),
     );
-    expect(section(md, "#### Executed", "#### Accessed paths")).toContain("`/usr/bin/c`");
+    expect(section(md, "#### Executed Programs", "#### Accessed Paths")).toContain("`/usr/bin/c`");
     // The table's note stands for the details too.
-    expect(section(md, "#### Accessed paths")).toContain(CUT);
+    expect(section(md, "#### Accessed Paths")).toContain(CUT);
     // A table cut whole takes its legend with it.
     expect(md).not.toContain("<sub>R read");
     expect(md.split(CUT)).toHaveLength(2);
@@ -1297,7 +1299,7 @@ describe("renderFilesystemAuditSummary: limits", () => {
       path: "/tmp/x",
     }));
     const md = limited({ bytes: 200 }, ...records);
-    expect(section(md, "#### Accessed paths", "<details>")).toContain("| R | `/tmp/x` |");
+    expect(section(md, "#### Accessed Paths", "<details>")).toContain("| `/tmp/x` | R |");
     expect(section(md, "<details>")).toContain(CUT);
   });
 
@@ -1330,13 +1332,13 @@ describe("renderFilesystemAuditSummary: limits", () => {
     );
     expect(md).toContain("`/usr/bin/tool-0`");
     expect(md.split("NOTE")).toHaveLength(2);
-    expect(md).not.toContain("#### Accessed paths");
+    expect(md).not.toContain("#### Accessed Paths");
     expect(md).not.toContain("<details>");
   });
 
   it("cuts a part whose unfolded paths outgrow the bound, saying so", () => {
     const md = limited({ nodes: 5 }, ...tmpFiles(5));
-    expect(section(md, "#### Accessed paths")).toContain(
+    expect(section(md, "#### Accessed Paths")).toContain(
       "_…truncated: the filesystem audit touched too many distinct paths to summarize; " +
         "the recording could not be uploaded as an artifact, so the rest is not kept._",
     );
@@ -1348,7 +1350,7 @@ describe("renderFilesystemAuditSummary: limits", () => {
     const files = ["a", "b", "c"].map((f) => ({ kind: "write", comm: "c", path: `/x/${f}` }));
     const md = limited({ nodes: 4 }, ...files);
     expect(md).not.toContain("too many distinct paths");
-    expect(md).toContain("| W | `/x/**` |");
+    expect(md).toContain("| `/x/**` | W |");
   });
 
   it("gives the details their own cause when only they outgrow the bound", () => {
@@ -1360,7 +1362,7 @@ describe("renderFilesystemAuditSummary: limits", () => {
       { kind: "read", comm: "b", path: "/x/f" },
       { kind: "read", comm: "b", path: "/y/g" },
     );
-    expect(section(md, "#### Accessed paths", "<details>")).toContain("`/x/f`");
+    expect(section(md, "#### Accessed Paths", "<details>")).toContain("`/x/f`");
     expect(section(md, "<details>")).toContain("too many distinct paths to summarize");
   });
 
@@ -1371,8 +1373,8 @@ describe("renderFilesystemAuditSummary: limits", () => {
       { kind: "chmod", comm: "c", path: `/tmp/d${i}` },
       { kind: "read", comm: "c", path: `/tmp/d${i}/f` },
     ]).flat();
-    expect(section(limited({ bytes: 1000 }, ...records), "#### Accessed paths")).not.toContain(CUT);
-    expect(section(limited({ bytes: 150 }, ...records), "#### Accessed paths")).toContain(CUT);
+    expect(section(limited({ bytes: 1000 }, ...records), "#### Accessed Paths")).not.toContain(CUT);
+    expect(section(limited({ bytes: 150 }, ...records), "#### Accessed Paths")).toContain(CUT);
   });
 
   it("shows a library's read once it remembers no more loads", () => {

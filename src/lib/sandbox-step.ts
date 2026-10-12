@@ -63,7 +63,7 @@ import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { replaceIfNotRegularFile, rewriteOutputFile } from "./step-output-file.ts";
-import { reportStepTraffic, writeMoreSummary } from "./step-report.ts";
+import { reportStepTraffic, writeLateSummary } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
 
@@ -123,7 +123,7 @@ export interface SandboxStepDeps {
   stopSandboxProxy: typeof stopSandboxProxy;
   runSandboxedCommand: typeof runSandboxedCommand;
   reportStepTraffic: typeof reportStepTraffic;
-  writeMoreSummary: typeof writeMoreSummary;
+  writeLateSummary: typeof writeLateSummary;
   prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
   rewriteOutputFile: typeof rewriteOutputFile;
   replaceIfNotRegularFile: typeof replaceIfNotRegularFile;
@@ -190,7 +190,7 @@ const realDeps: SandboxStepDeps = {
   stopSandboxProxy,
   runSandboxedCommand,
   reportStepTraffic,
-  writeMoreSummary,
+  writeLateSummary,
   prepareStepFilesystemAudit,
   rewriteOutputFile,
   replaceIfNotRegularFile,
@@ -312,7 +312,7 @@ export async function runSandboxStep(
     stopSandboxProxy,
     runSandboxedCommand,
     reportStepTraffic,
-    writeMoreSummary,
+    writeLateSummary,
     prepareStepFilesystemAudit,
     rewriteOutputFile,
     replaceIfNotRegularFile,
@@ -553,7 +553,8 @@ export async function runSandboxStep(
     // goes first and the audit takes what the summary has left.
     const cancelled = cancel.signal.aborted;
     const filesystemReport = cancelled ? undefined : await prepareAudit();
-    const startedAt = await reportStepTraffic({
+    const processActivity = audit !== undefined;
+    const { startedAt, reported } = await reportStepTraffic({
       containerName,
       proxyEngine,
       parameters: {
@@ -574,10 +575,20 @@ export async function runSandboxStep(
       trafficArtifact,
       env,
       moreBlocks: filesystemReport?.blocks,
+      processActivity,
+      // The audit written below closes the summary instead.
+      closeSummary: !(cancelled && processActivity),
     });
-    if (cancelled) {
+    if (cancelled && processActivity) {
       const late = await prepareAudit();
-      await writeMoreSummary(late.blocks(startedAt), env, annotation);
+      await writeLateSummary(late.blocks(startedAt), {
+        reported,
+        actionRepo,
+        processActivity,
+        isAudit: proxyMode === "audit",
+        env,
+        annotation,
+      });
     }
     await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
     stopListening();

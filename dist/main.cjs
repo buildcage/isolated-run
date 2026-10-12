@@ -68482,10 +68482,10 @@ function pathCell({ path, deleted }) {
 	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
 }
 function markdownRows(header, rows) {
-	let line = (cells) => `| ${cells.join(" | ")} |`;
+	let line = (cells) => `| ${cells.join(" | ")} |`, rule = header.map((h) => h === "Count" ? "---:" : "---");
 	return [
 		line(header),
-		line(header.map(() => "---")),
+		line(rule),
 		...rows.map(line)
 	].join("\n");
 }
@@ -68661,7 +68661,7 @@ function fmtFlags(a) {
 	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
 	return out;
 }
-const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "\n### 🗂️ Filesystem audit";
+const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "\n### ⚙️ Process Activity";
 function refusedNote(rows) {
 	let byName = new Map(), killed = new Set(), anyKilled = !1;
 	for (let { syscall, comm } of inRecordingOrder(rows)) {
@@ -68674,14 +68674,14 @@ function refusedNote(rows) {
 		let by = killed.size ? `: ${comms(killed)}` : "";
 		parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call${by}`);
 	}
-	return `> ${parts.join("; ")}.`;
+	return `> 🚫 ${parts.join("; ")}.`;
 }
 function skippedNote(count, url) {
 	let why = url ? ` [Why](${url})` : "";
-	return `> ⚠️ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
+	return `> ❗ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
 > accesses may be missing from this summary and from the artifact.${why}`;
 }
-const SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
+const SECTION$1 = "filesystem", DETAILS_OPEN = "<details>\n<summary>🔍 Process details</summary>\n\n", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
 	executed: "filesystem-executed",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
@@ -68832,7 +68832,7 @@ function inRecordingOrder(rows) {
 function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote, skippedHooksUrl) {
 	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut, detailsCut } = summary, heading = [
 		HEADING,
-		...ended && !lost ? [] : ["> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
+		...ended && !lost ? [] : ["> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
 		...hostMissed ? [skippedNote(hostMissed, skippedHooksUrl)] : [],
 		...refused.length ? [refusedNote(refused)] : []
 	].join("\n\n"), frame = (text) => ({
@@ -68859,12 +68859,12 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		cut: "lines",
 		head: legend ? 6 : 4
 	};
-	executed.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, 2, "Executed", markdownRows(["Path", "Runs"], executed.map((e) => [pathCell(e), String(e.runs)]))));
+	executed.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, 2, "Executed Programs", markdownRows(["Path", "Count"], executed.map((e) => [pathCell(e), String(e.runs)]))));
 	let byPath = paths && inRecordingOrder(paths).sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return ca - cb || (pa < pb ? -1 : +(pa > pb));
 	});
-	if (byPath?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.paths, 3, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map((r) => [r.flags, pathCell(r)])), pathsCut, LEGEND)), !byPath) return blocks;
+	if (byPath?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.paths, 3, "Accessed Paths", byPath && markdownRows(["Path", "Access"], byPath.map((r) => [pathCell(r), r.flags])), pathsCut, LEGEND)), !byPath) return blocks;
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
@@ -68905,7 +68905,7 @@ function unreadableSummaryBlocks() {
 		priority: 0,
 		level: 1,
 		section: SECTION$1,
-		text: `${HEADING}\n\n> ⚠️ **The recording could not be read**, so this summary has none of its accesses and no
+		text: `${HEADING}\n\n> ❗ **The recording could not be read**, so this summary has none of its accesses and no
 > artifact was uploaded.\n`,
 		cut: "keep"
 	}];
@@ -69063,6 +69063,10 @@ function markdownTable(formats, rows) {
 }
 //#endregion
 //#region src/core/lib/report/render/host-table.ts
+const OUTCOME_MARK = {
+	blocked: "🚫 ",
+	failed: "⚠️ "
+};
 function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
 	let formats = [{
 		key: "host",
@@ -69085,9 +69089,9 @@ function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
 	}), markdownTable(formats, rows.map((r) => ({
 		host: r.display ?? (r.port === "-" ? r.host : `${r.host}:${r.port}`),
 		ruleType: r.ruleType,
-		reason: r.reason,
+		reason: r.outcome ? OUTCOME_MARK[r.outcome] + r.reason : r.reason,
 		count: r.count,
-		expected: r.expected ? "✅" : ""
+		expected: r.outcome === "failed" ? "—" : r.expected ? "✅" : ""
 	})));
 }
 function hostTableTruncationNote(artifactAvailable) {
@@ -69329,11 +69333,123 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 	});
 }
 //#endregion
+//#region src/core/lib/report/outcome/blocked-outcome.ts
+function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible }) {
+	if (!logLooksPlausible) return isAudit ? {
+		level: "notice",
+		shouldFail: !1
+	} : failOnBlocked ? {
+		level: "error",
+		shouldFail: !0
+	} : {
+		level: "notice",
+		shouldFail: !1
+	};
+	if (!blockedCount) return {
+		level: "none",
+		shouldFail: !1
+	};
+	if (isAudit) return {
+		level: "notice",
+		shouldFail: !1
+	};
+	let hasUnexpected = blockedRows.length === 0 || blockedRows.some((row) => !row.expected);
+	return failOnBlocked && hasUnexpected ? {
+		level: "error",
+		shouldFail: !0
+	} : {
+		level: "notice",
+		shouldFail: !1
+	};
+}
+const COUNT_NOUN = "connection(s) and lookup(s)";
+function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }) {
+	let base = `${blockedCount} blocked ${COUNT_NOUN} detected by buildcage ${engineLabel}`;
+	if (isAudit) return base;
+	let unexpected = blockedRows.filter((row) => !row.expected).length;
+	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known_blocked_rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known_blocked_rules)`;
+}
+function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, engineLabel }) {
+	let outcome = determineBlockedOutcome({
+		isAudit,
+		failOnBlocked,
+		blockedCount,
+		blockedRows,
+		logLooksPlausible
+	}), base = buildBlockedMessage({
+		blockedCount,
+		blockedRows,
+		engineLabel,
+		isAudit
+	});
+	if (logLooksPlausible) return {
+		...outcome,
+		message: base
+	};
+	if (isAudit) return {
+		...outcome,
+		message: `${base}, but the logs are incomplete and this is not a full record`
+	};
+	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. Either the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
+	return {
+		...outcome,
+		message
+	};
+}
+//#endregion
+//#region src/core/lib/report/outcome/report-outcomes.ts
+function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
+	let emissions = [describeBlockedOutcome({
+		isAudit: report.parameters.mode === "audit",
+		failOnBlocked,
+		blockedCount: report.blockedCount,
+		blockedRows: report.blocked,
+		logLooksPlausible: report.logLooksPlausible,
+		engineLabel
+	})], undecided = describeUndecidedRequests(report, engineLabel);
+	undecided && emissions.push(undecided);
+	let failed = describeFailedConnections(report, engineLabel);
+	return failed && emissions.push(failed), emissions;
+}
+function countUndecidedRequests(report) {
+	let isNoise = clientEndedNoise(report.timeline);
+	return report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
+}
+function describeUndecidedRequests(report, engineLabel) {
+	let count = countUndecidedRequests(report);
+	if (count !== 0) return {
+		level: "warning",
+		shouldFail: !1,
+		message: `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in Communication details. Each ended before a whole request had arrived, so no rule decided it and none reached an origin: the client closed or failed the TLS handshake, its own timeout expired, or this proxy ran into an error while still reading. None of them fails the step. Bytes this proxy would not read as a request are not among them: that is a refusal, and it is in Blocked Hosts.`
+	};
+}
+function describeFailedConnections(report, engineLabel) {
+	let count = report.failed.reduce((total, row) => total + row.count, 0);
+	if (count !== 0) return {
+		level: "notice",
+		shouldFail: !1,
+		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed with ⚠️ under Failed Hosts. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
+	};
+}
+//#endregion
+//#region src/core/lib/report/render/verdict.ts
+function renderVerdict(report, extraItems = []) {
+	let unexpected = 0, expected = 0;
+	for (let row of report.blocked) row.expected ? expected += row.count : unexpected += row.count;
+	report.blocked.length === 0 && (unexpected = report.blockedCount);
+	let failed = report.failed.reduce((total, row) => total + row.count, 0), undecided = countUndecidedRequests(report), items = [
+		...unexpected ? [`🚫 ${unexpected} refused`] : [],
+		...extraItems,
+		...failed ? [`⚠️ ${failed} failed`] : [],
+		...undecided ? [`⚠️ ${undecided} not acted on`] : []
+	];
+	return expected && items.push(`${items.length ? "" : "✅ "}${expected} refused as expected`), `**${items.length ? items.join(" · ") : "✅ Nothing was refused"}**\n\n`;
+}
+//#endregion
 //#region src/core/lib/report/render/render-report-markdown.ts
 const SECTION = "traffic", TRAFFIC_BLOCK = {
 	example: "traffic-example",
 	blocked: "traffic-blocked",
-	failed: "traffic-failed",
 	passed: "traffic-passed",
 	log: "traffic-log"
 };
@@ -69343,7 +69459,6 @@ function trafficNotice(block, artifactAvailable) {
 		case TRAFFIC_BLOCK.example: return restrictExampleTruncationNote(artifactAvailable);
 		case TRAFFIC_BLOCK.log: return communicationTruncationNote(artifactAvailable);
 		case TRAFFIC_BLOCK.blocked:
-		case TRAFFIC_BLOCK.failed:
 		case TRAFFIC_BLOCK.passed: return hostTableTruncationNote(artifactAvailable);
 		default: return;
 	}
@@ -69359,26 +69474,36 @@ function trafficTableBlock(id, priority, before, table, after) {
 		head: before.split("\n").length + 1
 	};
 }
-const frame = (text) => ({
+const frame$1 = (text) => ({
 	priority: 0,
 	level: 1,
 	section: SECTION,
 	text,
 	cut: "keep"
 });
-function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", refusalLabel, extraBlocks = () => [], ...step } = {}) {
-	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
-	report.logLooksPlausible || (top += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(frame(top));
+function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", refusalLabel, verdictItems, section, footer = !0, extraBlocks = () => [], ...step } = {}) {
+	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, h = section ? "####" : "###", heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
+	top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), section && (top += `### ${section}\n\n`), blocks.push(frame$1(top));
 	let wrote = !1, gap = () => wrote ? "\n" : "";
-	if (report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), report.blocked.length > 0) {
-		let blocked = foldExpectedBlockedRows(report.blocked);
-		blocks.push(trafficTableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${gap()}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
+	if (report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `${h} ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), report.blocked.length > 0 || report.failed.length > 0) {
+		let blocked = foldExpectedBlockedRows(report.blocked).map((r) => ({
+			...r,
+			outcome: "blocked"
+		})), failed = report.failed.map((r) => ({
+			...r,
+			outcome: "failed"
+		})), rows = [
+			...blocked.filter((r) => !r.expected),
+			...failed,
+			...blocked.filter((r) => r.expected)
+		], tableTitle = blocked.length === 0 ? "⚠️ Failed Hosts" : failed.length === 0 ? "🚫 Blocked Hosts" : "🚫 Blocked / ⚠️ Failed Hosts", note = failed.length === 0 ? "" : "\n<sub>*Note: no rule refused the ⚠️ rows; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n";
+		blocks.push(trafficTableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${gap()}${h} ${tableTitle}\n\n`, renderHostTable(rows, {
 			showReason: !0,
 			showExpected
-		}), "\n")), wrote = !0;
+		}), `\n${note}`)), wrote = !0;
 	}
-	let extra = extraBlocks(gap());
-	if (blocks.push(...extra), wrote ||= extra.some((b) => b.text !== ""), report.failed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap()}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n")), wrote = !0), isAudit) {
+	let extra = extraBlocks(gap(), h);
+	if (blocks.push(...extra), wrote ||= extra.some((b) => b.text !== ""), isAudit) {
 		let example = report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 			...step,
 			allowedIpRules: report.parameters.allowedIpRules,
@@ -69394,7 +69519,7 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 		}), wrote ||= example !== "";
 	}
 	let bottom = "";
-	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame(`${gap()}_(no communication)_\n\n`));
+	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame$1(`${gap()}_(no communication)_\n\n`));
 	let details = renderInspectDetailsBody(report.timeline, report.startedAt, refusalLabel);
 	return details && blocks.push({
 		id: TRAFFIC_BLOCK.log,
@@ -69405,20 +69530,22 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 		open: "\n<details>\n<summary>💬 Communication details</summary>\n\n",
 		text: details,
 		close: "</details>\n"
-	}), report.engine === "universal" && (bottom += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), bottom += `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n`, bottom += "\n<hr>\n", blocks.push(frame(bottom)), blocks;
+	}), report.engine === "universal" && (bottom += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), footer && (bottom += reportFooter(actionRepo)), bottom && blocks.push(frame$1(bottom)), blocks;
+}
+function reportFooter(actionRepo) {
+	return `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n\n<hr>\n`;
 }
 //#endregion
 //#region src/lib/summary-priorities.ts
 const TRAFFIC_PRIORITIES = {
 	[TRAFFIC_BLOCK.example]: 1,
 	[TRAFFIC_BLOCK.blocked]: 3,
-	[TRAFFIC_BLOCK.failed]: 4,
-	[TRAFFIC_BLOCK.passed]: 5,
-	[TRAFFIC_BLOCK.log]: 8
+	[TRAFFIC_BLOCK.passed]: 4,
+	[TRAFFIC_BLOCK.log]: 7
 }, FILESYSTEM_PRIORITIES = {
-	[FILESYSTEM_BLOCK.executed]: 6,
-	[FILESYSTEM_BLOCK.paths]: 7,
-	[FILESYSTEM_BLOCK.log]: 9
+	[FILESYSTEM_BLOCK.executed]: 5,
+	[FILESYSTEM_BLOCK.paths]: 6,
+	[FILESYSTEM_BLOCK.log]: 8
 }, CHUNK_BYTES = 1 << 20;
 function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
 	let fd = (0, node_fs.openSync)(path, "r");
@@ -73183,101 +73310,6 @@ function applyOutcomeAnnotations(annotation, emissions) {
 	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
 }
 //#endregion
-//#region src/core/lib/report/outcome/blocked-outcome.ts
-function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible }) {
-	if (!logLooksPlausible) return isAudit ? {
-		level: "notice",
-		shouldFail: !1
-	} : failOnBlocked ? {
-		level: "error",
-		shouldFail: !0
-	} : {
-		level: "notice",
-		shouldFail: !1
-	};
-	if (!blockedCount) return {
-		level: "none",
-		shouldFail: !1
-	};
-	if (isAudit) return {
-		level: "notice",
-		shouldFail: !1
-	};
-	let hasUnexpected = blockedRows.length === 0 || blockedRows.some((row) => !row.expected);
-	return failOnBlocked && hasUnexpected ? {
-		level: "error",
-		shouldFail: !0
-	} : {
-		level: "notice",
-		shouldFail: !1
-	};
-}
-const COUNT_NOUN = "connection(s) and lookup(s)";
-function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }) {
-	let base = `${blockedCount} blocked ${COUNT_NOUN} detected by buildcage ${engineLabel}`;
-	if (isAudit) return base;
-	let unexpected = blockedRows.filter((row) => !row.expected).length;
-	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known_blocked_rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known_blocked_rules)`;
-}
-function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, engineLabel }) {
-	let outcome = determineBlockedOutcome({
-		isAudit,
-		failOnBlocked,
-		blockedCount,
-		blockedRows,
-		logLooksPlausible
-	}), base = buildBlockedMessage({
-		blockedCount,
-		blockedRows,
-		engineLabel,
-		isAudit
-	});
-	if (logLooksPlausible) return {
-		...outcome,
-		message: base
-	};
-	if (isAudit) return {
-		...outcome,
-		message: `${base}, but the logs are incomplete and this is not a full record`
-	};
-	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. Either the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
-	return {
-		...outcome,
-		message
-	};
-}
-//#endregion
-//#region src/core/lib/report/outcome/report-outcomes.ts
-function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
-	let emissions = [describeBlockedOutcome({
-		isAudit: report.parameters.mode === "audit",
-		failOnBlocked,
-		blockedCount: report.blockedCount,
-		blockedRows: report.blocked,
-		logLooksPlausible: report.logLooksPlausible,
-		engineLabel
-	})], undecided = describeUndecidedRequests(report, engineLabel);
-	undecided && emissions.push(undecided);
-	let failed = describeFailedConnections(report, engineLabel);
-	return failed && emissions.push(failed), emissions;
-}
-function describeUndecidedRequests(report, engineLabel) {
-	let isNoise = clientEndedNoise(report.timeline), count = report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
-	if (count !== 0) return {
-		level: "warning",
-		shouldFail: !1,
-		message: `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in Communication details. Each ended before a whole request had arrived, so no rule decided it and none reached an origin: the client closed or failed the TLS handshake, its own timeout expired, or this proxy ran into an error while still reading. None of them fails the step. Bytes this proxy would not read as a request are not among them: that is a refusal, and it is in Blocked Hosts.`
-	};
-}
-function describeFailedConnections(report, engineLabel) {
-	let count = report.failed.reduce((total, row) => total + row.count, 0);
-	if (count !== 0) return {
-		level: "notice",
-		shouldFail: !1,
-		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed under Failed Connections. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
-	};
-}
-//#endregion
 //#region src/proxy/haproxy-aws-keys.ts
 const vpceHost = (service) => `^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.${service}\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$`, apiHost = (service, vpceService = service) => `^${service}(-fips)?(\\.[a-z0-9-]+)?\\.(amazonaws\\.(com|com\\.cn|eu)|(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu))$|${vpceHost(vpceService)}`;
 apiHost("sts"), `${apiHost("ec2", "ec2(-fips)?")}`, "" + vpceHost("git-codecommit(-fips)?");
@@ -73328,6 +73360,10 @@ const WOULD_REFUSE_BLOCK = "traffic-would-refuse";
 function wouldRefuseTruncationNote(artifactAvailable) {
 	return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
 }
+function wouldRefuseVerdictItems(timeline) {
+	let count = timeline.filter(letThrough).length;
+	return count === 0 ? [] : [`🚨 ${count} restrict would refuse`];
+}
 function describeWouldRefuse(timeline) {
 	let count = timeline.filter(letThrough).length;
 	if (count !== 0) return {
@@ -73336,8 +73372,8 @@ function describeWouldRefuse(timeline) {
 		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section counts them by key or by host and reason.`
 	};
 }
-function wouldRefuseBlocks(timeline, keys, priority, gap) {
-	let heading = `${gap}### 🚨 Restrict Would Refuse\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
+function wouldRefuseBlocks(timeline, keys, priority, gap, level) {
+	let heading = `${gap}${level} 🚨 Restrict Would Refuse\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
 	if (audited.length > 0) {
 		let table = markdownTable([
 			{
@@ -73402,6 +73438,24 @@ function fetchReport(containerName, parameters, proxyEngine) {
 function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
 }
+function reportTitle(label, processActivity) {
+	let title = processActivity ? "Traffic & Process Activity Report" : "Outbound Traffic Report";
+	return label ? `${title} — ${label}` : title;
+}
+const frame = (text) => ({
+	priority: 0,
+	level: 1,
+	section: "traffic",
+	cut: "keep",
+	text
+});
+function summaryFooter(actionRepo) {
+	return frame(reportFooter(actionRepo));
+}
+function missingReportFrame(title, isAudit) {
+	return frame(`## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.
+`);
+}
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => e.wouldRefuse?.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
 	if (!refusedByAwsCheck || at === -1) return blocks;
@@ -73418,7 +73472,7 @@ function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 		...blocks.slice(at + 1)
 	];
 }
-function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
+function computeReportOutcomes(report, { stepLabel, processActivity = !1, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
@@ -73427,13 +73481,16 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 	let keys = refusedKeys(report.timeline);
 	return {
 		blocks: withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
-			title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
+			title: reportTitle(stepLabel, processActivity),
+			section: "🌐 Network",
+			footer: !1,
+			verdictItems: wouldRefuseVerdictItems(report.timeline),
 			stepName: "Start isolated-run",
 			runCommand,
 			extraInputs,
 			actionVersion,
 			refusalLabel: keyRefusalLabel(keys),
-			extraBlocks: (gap) => wouldRefuseBlocks(report.timeline, keys, 2, gap)
+			extraBlocks: (gap, level) => wouldRefuseBlocks(report.timeline, keys, 2, gap, level)
 		}), report, actionRepo, actionRef),
 		emissions
 	};
@@ -73534,7 +73591,7 @@ const realDeps$1 = {
 	setTrafficArtifactOutput,
 	readStepLabel
 };
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [] }, overrides = {}) {
+async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], processActivity, closeSummary = !0 }, overrides = {}) {
 	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
 		...realDeps$1,
 		...overrides
@@ -73544,7 +73601,11 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	} catch (e) {
 		fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
 	}
-	let extraBlocks = moreBlocks(report?.startedAt), writeRest = () => writeMoreSummary(extraBlocks, env, annotation, { writeSummaryBlocks }), artifactName = "";
+	let stepLabel = readStepLabel(), rest = moreBlocks(report?.startedAt), footer = closeSummary ? [summaryFooter(actionRepo)] : [], writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
+		missingReportFrame(reportTitle(stepLabel, processActivity), parameters.mode === "audit"),
+		...rest,
+		...footer
+	], env, annotation, { writeSummaryBlocks }), artifactName = "", reported = !1;
 	if (!report) await writeRest();
 	else {
 		try {
@@ -73554,10 +73615,11 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 				runCommand,
 				extraInputs: extraInputs?.(report),
 				actionVersion: readActionVersion(containerName, proxyEngine),
-				stepLabel: readStepLabel(),
+				stepLabel,
+				processActivity,
 				failOnBlocked,
-				extraBlocks
-			}, trafficArtifact.upload, env);
+				extraBlocks: [...rest, ...footer]
+			}, trafficArtifact.upload, env), reported = !0;
 		} catch (e) {
 			fail(`Failed to write the report summary: ${errorMessage(e)}`), await writeRest();
 		}
@@ -73572,7 +73634,21 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	} catch (e) {
 		fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
 	}
-	return report?.startedAt;
+	return {
+		startedAt: report?.startedAt,
+		reported
+	};
+}
+async function writeLateSummary(blocks, { reported, actionRepo, processActivity, isAudit, env, annotation }, overrides = {}) {
+	let { readStepLabel } = {
+		...realDeps$1,
+		...overrides
+	};
+	(reported || blocks.length !== 0) && await writeMoreSummary([
+		...reported ? [] : [missingReportFrame(reportTitle(readStepLabel(), processActivity), isAudit)],
+		...blocks,
+		summaryFooter(actionRepo)
+	], env, annotation, overrides);
 }
 async function writeMoreSummary(blocks, env, annotation, overrides = {}) {
 	let { writeSummaryBlocks } = {
@@ -73642,7 +73718,7 @@ const realDeps = {
 	stopSandboxProxy,
 	runSandboxedCommand,
 	reportStepTraffic,
-	writeMoreSummary,
+	writeLateSummary,
 	prepareStepFilesystemAudit,
 	rewriteOutputFile,
 	replaceIfNotRegularFile,
@@ -73686,7 +73762,7 @@ function putRunnerFileRight(env, name, annotation, putRight) {
 	}
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, rewriteOutputFile, replaceIfNotRegularFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeLateSummary, prepareStepFilesystemAudit, rewriteOutputFile, replaceIfNotRegularFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -73800,7 +73876,7 @@ async function runSandboxStep(env, overrides = {}) {
 			actionRepo,
 			actionRef: reportActionRef,
 			failClosed: proxyMode !== "audit" && failOnBlocked
-		}), cancelled = cancel.signal.aborted, filesystemReport = cancelled ? void 0 : await prepareAudit(), startedAt = await reportStepTraffic({
+		}), cancelled = cancel.signal.aborted, filesystemReport = cancelled ? void 0 : await prepareAudit(), processActivity = audit !== void 0, { startedAt, reported } = await reportStepTraffic({
 			containerName,
 			proxyEngine,
 			parameters: {
@@ -73820,9 +73896,18 @@ async function runSandboxStep(env, overrides = {}) {
 			failOnBlocked,
 			trafficArtifact,
 			env,
-			moreBlocks: filesystemReport?.blocks
+			moreBlocks: filesystemReport?.blocks,
+			processActivity,
+			closeSummary: !(cancelled && processActivity)
 		});
-		cancelled && await writeMoreSummary((await prepareAudit()).blocks(startedAt), env, annotation), await stopSandboxProxy({
+		cancelled && processActivity && await writeLateSummary((await prepareAudit()).blocks(startedAt), {
+			reported,
+			actionRepo,
+			processActivity,
+			isAudit: proxyMode === "audit",
+			env,
+			annotation
+		}), await stopSandboxProxy({
 			composeFile,
 			projectName,
 			composeEnv,

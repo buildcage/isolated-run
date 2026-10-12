@@ -26,7 +26,7 @@ while the step runs.
   1. Run the step with `filesystem_mode: ephemeral` and `filesystem_audit: record`, and in
      `write_through` only what you already know a later step reads, such as `$GITHUB_OUTPUT` if the
      step sets outputs.
-  2. Look at the `W`, `D` and `A` rows under **Accessed paths**, and at the `M` rows. `M` marks
+  2. Look at the `W`, `D` and `A` rows under **Accessed Paths**, and at the `M` rows. `M` marks
      only the path a file was moved away from, so a file a tool writes under a temporary name and
      then renames into place shows under the temporary name; the artifact has where it went, as
      `to` on its `rename` line.
@@ -98,8 +98,9 @@ A host that falls short fails the step before the command runs, with the reason;
     run: npm ci
 ```
 
-The step's Job Summary gets a **Filesystem audit** section after the traffic report. The full
-record, with every access in order, is uploaded only when asked for, as the traffic artifact is:
+The step's Job Summary gets a **⚙️ Process Activity** section after the traffic report, and its
+title becomes `Traffic & Process Activity Report`. The full record, with every access in order, is
+uploaded only when asked for, as the traffic artifact is:
 
 ```yaml
 - id: build
@@ -134,27 +135,27 @@ like the traffic artifact.
 ## Reading the summary
 
 ```
-### 🗂️ Filesystem audit
-> Refused system calls: io_uring_setup (node).
+### ⚙️ Process Activity
+> 🚫 Refused system calls: io_uring_setup (node).
 ./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
 buildcage-filesystem-audit-<id> artifact · how to read this
 
-#### Executed
-| Path                  | Runs |
-| --------------------- | ---- |
-| `/usr/local/bin/node` | 1    |
-| `/usr/bin/dash`       | 12   |
+#### Executed Programs
+| Path                  | Count |
+| --------------------- | ----: |
+| `/usr/local/bin/node` |     1 |
+| `/usr/bin/dash`       |    12 |
 
-#### Accessed paths
+#### Accessed Paths
 R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied
-| Access | Path                  |
-| ------ | --------------------- |
-| RWD    | `./node_modules/**`   |
-| R      | `./package.json`      |
-| Rr!    | `/etc/**`             |
-| w!     | `/usr/local/bin/node` |
+| Path                  | Access |
+| --------------------- | ------ |
+| `./node_modules/**`   | RWD    |
+| `./package.json`      | R      |
+| `/etc/**`             | Rr!    |
+| `/usr/local/bin/node` | w!     |
 
-📂 Filesystem details
+🔍 Process details
 first-last access since the proxy started · flags · command · path
 00:00.401-00:00.420: Xw! node /usr/local/bin/node
 00:00.402:           !   node syscall:io_uring_setup
@@ -168,12 +169,13 @@ Where there is no artifact, the line under the heading says how to ask for one, 
 failed. A step that touched no file shows `No file access was recorded.` instead of the tables. One
 that only ran programs has no accessed paths table, and the flag legend opens the details instead.
 
-- **Executed** lists each program once, in the order it first ran, with how many times it ran.
-- **Accessed paths** combines every command's actions on a path in one row, in path order: the
+- **Executed Programs** lists each program once, in the order it first ran, with how many times it
+  ran.
+- **Accessed Paths** combines every command's actions on a path in one row, in path order: the
   workspace first, then `$HOME`, then the rest. Running a program is left to the executed table.
   A `dir/**` row does not say which path under it was refused. The details fold each command's
   paths on their own, so they often name it; the artifact always does.
-- **📂 Filesystem details**, folded, has one row per command and path, in the order the rows were
+- **🔍 Process details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
   that command first and last touched the path, counted from the proxy's start like the
   communication details, or from the first access if that start is unknown.

@@ -229,9 +229,11 @@ function pathCell({ path, deleted }: Shown): string {
   return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
 }
 
+// A count column aligns right, as in the traffic report's tables.
 function markdownRows(header: string[], rows: string[][]): string {
   const line = (cells: string[]): string => `| ${cells.join(" | ")} |`;
-  return [line(header), line(header.map(() => "---")), ...rows.map(line)].join("\n");
+  const rule = header.map((h) => (h === "Count" ? "---:" : "---"));
+  return [line(header), line(rule), ...rows.map(line)].join("\n");
 }
 
 // Workspace-relative paths first, then $HOME, then the rest.
@@ -641,9 +643,9 @@ const LEGEND =
   "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied";
 // After the traffic report's closing </details>, a heading with no blank line
 // before it would read as part of that HTML block.
-const HEADING = "\n### 🗂️ Filesystem audit";
+const HEADING = "\n### ⚙️ Process Activity";
 const INCOMPLETE_NOTE =
-  "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
+  "> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
   "> some accesses are missing from this summary and from the artifact.";
 // The note names this many syscalls, and this many commands for each; the
 // details, where they fit, show the rest.
@@ -676,7 +678,7 @@ function refusedNote(rows: RefusedRow[]): string {
     const by = killed.size ? `: ${comms(killed)}` : "";
     parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call${by}`);
   }
-  return `> ${parts.join("; ")}.`;
+  return `> 🚫 ${parts.join("; ")}.`;
 }
 
 // A skip may have been any process's on the host, so unlike INCOMPLETE_NOTE
@@ -684,17 +686,17 @@ function refusedNote(rows: RefusedRow[]): string {
 function skippedNote(count: number, url: string | undefined): string {
   const why = url ? ` [Why](${url})` : "";
   return (
-    `> ⚠️ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ` +
+    `> ❗ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ` +
     `${count === 1 ? "time" : "times"}** on the\n` +
     "> runner host while this step ran. Any of them may have been this step's, so some of its\n" +
     `> accesses may be missing from this summary and from the artifact.${why}`
   );
 }
 const UNREADABLE_NOTE =
-  "> ⚠️ **The recording could not be read**, so this summary has none of its accesses and no\n" +
+  "> ❗ **The recording could not be read**, so this summary has none of its accesses and no\n" +
   "> artifact was uploaded.";
 const SECTION = "filesystem";
-const DETAILS_OPEN = "<details>\n<summary>📂 Filesystem details</summary>\n\n";
+const DETAILS_OPEN = "<details>\n<summary>🔍 Process details</summary>\n\n";
 const DETAILS_CLOSE = "</details>\n";
 
 /** The ids renderFilesystemAuditBlocks gives its blocks. */
@@ -1063,9 +1065,9 @@ export function renderAuditSummaryBlocks(
       table(
         FILESYSTEM_BLOCK.executed,
         2,
-        "Executed",
+        "Executed Programs",
         markdownRows(
-          ["Path", "Runs"],
+          ["Path", "Count"],
           executed.map((e) => [pathCell(e), String(e.runs)]),
         ),
       ),
@@ -1086,11 +1088,11 @@ export function renderAuditSummaryBlocks(
       table(
         FILESYSTEM_BLOCK.paths,
         3,
-        "Accessed paths",
+        "Accessed Paths",
         byPath &&
           markdownRows(
-            ["Access", "Path"],
-            byPath.map((r) => [r.flags, pathCell(r)]),
+            ["Path", "Access"],
+            byPath.map((r) => [pathCell(r), r.flags]),
           ),
         pathsCut,
         // The flags are explained where they first appear.

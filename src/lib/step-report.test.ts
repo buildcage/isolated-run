@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
+import { missingReportFrame, summaryFooter } from "./report.ts";
 import {
   reportStepTraffic,
+  writeLateSummary,
   writeMoreSummary,
   type ReportStepDeps,
   type ReportStepOptions,
@@ -29,6 +31,8 @@ const CONTAINER = "buildcage-proxy-deadbeef";
 
 const annotation = { warning: vi.fn(), notice: vi.fn(), error: vi.fn() };
 
+const FOOTER = summaryFooter("buildcage/isolated-run");
+
 function options(overrides: Partial<ReportStepOptions> = {}): ReportStepOptions {
   return {
     containerName: CONTAINER,
@@ -41,6 +45,7 @@ function options(overrides: Partial<ReportStepOptions> = {}): ReportStepOptions 
     runCommand: "npm ci",
     failOnBlocked: true,
     trafficArtifact: { upload: false },
+    processActivity: false,
     ...overrides,
   };
 }
@@ -77,8 +82,13 @@ describe("reportStepTraffic", () => {
     await reportStepTraffic(options({ moreBlocks }), deps);
 
     expect(moreBlocks).toHaveBeenCalledWith(1_791_244_800);
-    expect(mocks.writeReportSummary.mock.calls[0][2].extraBlocks).toEqual([block]);
+    expect(mocks.writeReportSummary.mock.calls[0][2].extraBlocks).toEqual([block, FOOTER]);
     expect(mocks.writeSummaryBlocks).not.toHaveBeenCalled();
+  });
+
+  it("leaves the footer to a later write when asked", async () => {
+    await reportStepTraffic(options({ closeSummary: false }), deps);
+    expect(mocks.writeReportSummary.mock.calls[0][2].extraBlocks).toEqual([]);
   });
 
   it("writes the rest of the summary alone when there is no report", async () => {
@@ -89,7 +99,30 @@ describe("reportStepTraffic", () => {
     await reportStepTraffic(options({ moreBlocks }), deps);
 
     expect(moreBlocks).toHaveBeenCalledWith(undefined);
-    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith([block], {});
+    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
+      [missingReportFrame("Outbound Traffic Report — build", false), block, FOOTER],
+      {},
+    );
+  });
+
+  it("titles the rest after what it holds, in the report's mode", async () => {
+    mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
+    const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
+
+    await reportStepTraffic(
+      options({
+        moreBlocks: () => [block],
+        processActivity: true,
+        closeSummary: false,
+        parameters: reportParams({ mode: "audit" }),
+      }),
+      deps,
+    );
+
+    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
+      [missingReportFrame("Traffic & Process Activity Report — build", true), block],
+      {},
+    );
   });
 
   it("writes the rest of the summary alone when the report's own write fails", async () => {
@@ -98,7 +131,10 @@ describe("reportStepTraffic", () => {
 
     await reportStepTraffic(options({ moreBlocks: () => [block] }), deps);
 
-    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith([block], {});
+    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
+      [missingReportFrame("Outbound Traffic Report — build", false), block, FOOTER],
+      {},
+    );
   });
 
   it("writes nothing when there is neither a report nor anything else", async () => {
@@ -133,8 +169,9 @@ describe("reportStepTraffic", () => {
       extraInputs: ["aws_key_check: true"],
       actionVersion: "1.2.3",
       stepLabel: "build",
+      processActivity: false,
       failOnBlocked: true,
-      extraBlocks: [],
+      extraBlocks: [FOOTER],
     });
     expect(mocks.readActionVersion).toHaveBeenCalledWith(CONTAINER, "inspect");
   });
@@ -189,7 +226,7 @@ describe("reportStepTraffic", () => {
 
       await expect(
         reportStepTraffic(options({ parameters: reportParams({ mode }), failOnBlocked }), deps),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({ startedAt: undefined });
 
       expect(mocks.writeReportSummary).not.toHaveBeenCalled();
       if (fails) {
@@ -209,7 +246,9 @@ describe("reportStepTraffic", () => {
   it("fails the step when writing the summary fails under restrict with fail_on_blocked", async () => {
     mocks.writeReportSummary.mockRejectedValue(new Error("summary file is gone"));
 
-    await expect(reportStepTraffic(options(), deps)).resolves.toBeUndefined();
+    await expect(reportStepTraffic(options(), deps)).resolves.toMatchObject({
+      startedAt: undefined,
+    });
     expect(annotation.error).toHaveBeenCalledWith(
       "Failed to write the report summary: summary file is gone; failing the step under restrict with fail_on_blocked",
     );
@@ -236,7 +275,7 @@ describe("reportStepTraffic", () => {
 
     await expect(
       reportStepTraffic(options({ trafficArtifact: { upload: true } }), deps),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ startedAt: undefined });
     expect(annotation.warning).toHaveBeenCalledWith(
       "Failed to upload the traffic artifact: artifact service down",
     );
@@ -273,19 +312,28 @@ describe("reportStepTraffic", () => {
       throw new Error("Missing file at path: /github/output");
     });
 
-    await expect(reportStepTraffic(options(), deps)).resolves.toBeUndefined();
+    await expect(reportStepTraffic(options(), deps)).resolves.toMatchObject({
+      startedAt: undefined,
+    });
     expect(annotation.error).toHaveBeenCalledWith(
       "Failed to set the traffic_artifact_name output: Missing file at path: /github/output; failing the step under restrict with fail_on_blocked",
     );
     expect(process.exitCode).toBe(1);
   });
 
-  it("resolves to the proxy's start, or undefined without a report", async () => {
+  it("resolves to the proxy's start and whether the report was written", async () => {
     mocks.fetchReport.mockResolvedValue({ engine: "inspect", startedAt: 1_791_244_800 });
-    await expect(reportStepTraffic(options(), deps)).resolves.toBe(1_791_244_800);
+    await expect(reportStepTraffic(options(), deps)).resolves.toStrictEqual({
+      startedAt: 1_791_244_800,
+      reported: true,
+    });
+    mocks.writeReportSummary.mockRejectedValue(new Error("summary file is gone"));
+    await expect(reportStepTraffic(options({ failOnBlocked: false }), deps)).resolves.toStrictEqual(
+      { startedAt: 1_791_244_800, reported: false },
+    );
     mocks.fetchReport.mockRejectedValue(new Error("proxy is gone"));
-    await expect(reportStepTraffic(options({ failOnBlocked: false }), deps)).resolves.toBe(
-      undefined,
+    await expect(reportStepTraffic(options({ failOnBlocked: false }), deps)).resolves.toStrictEqual(
+      { startedAt: undefined, reported: false },
     );
   });
 });
@@ -310,5 +358,36 @@ describe("writeMoreSummary", () => {
     expect(annotation.warning).toHaveBeenCalledWith(
       "Failed to write the Job Summary: summary file is gone",
     );
+  });
+});
+
+describe("writeLateSummary", () => {
+  const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
+  const late = {
+    actionRepo: "buildcage/isolated-run",
+    processActivity: true,
+    isAudit: false,
+    env: {},
+    annotation: annotation as unknown as ReportStepOptions["annotation"],
+  };
+
+  it("closes a written report's summary after the blocks", async () => {
+    await writeLateSummary([block], { ...late, reported: true }, deps);
+    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith([block, FOOTER], {});
+    await writeLateSummary([], { ...late, reported: true }, deps);
+    expect(mocks.writeSummaryBlocks).toHaveBeenLastCalledWith([FOOTER], {});
+  });
+
+  it("opens under a title of its own when the report was not written", async () => {
+    await writeLateSummary([block], { ...late, reported: false }, deps);
+    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
+      [missingReportFrame("Traffic & Process Activity Report — build", false), block, FOOTER],
+      {},
+    );
+  });
+
+  it("writes nothing when neither has anything to say", async () => {
+    await writeLateSummary([], { ...late, reported: false }, deps);
+    expect(mocks.writeSummaryBlocks).not.toHaveBeenCalled();
   });
 });

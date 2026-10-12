@@ -98,6 +98,12 @@ export function wouldRefuseTruncationNote(artifactAvailable: boolean): string {
   return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${rest}._\n\n`;
 }
 
+/** The verdict line's count of the requests restrict would refuse, if any. */
+export function wouldRefuseVerdictItems(timeline: TrafficEvent[]): string[] {
+  const count = timeline.filter(letThrough).length;
+  return count === 0 ? [] : [`🚨 ${count} restrict would refuse`];
+}
+
 /**
  * The warning for requests audit let through that restrict would refuse, or
  * undefined when there were none. Without it a step would pass audit and fail
@@ -121,15 +127,17 @@ export function describeWouldRefuse(timeline: TrafficEvent[]): OutcomeEmission |
  * own, one row per key whatever the host: every request a key not allowed signs
  * is refused, and a row for each host would bury the other refusals. The rest
  * are counted by host and reason, as in Blocked Hosts. The first block opens
- * with `gap`, the blank line renderReportBlocks owes a block before it.
+ * with `gap`, the blank line renderReportBlocks owes a block before it, and
+ * the heading takes `level`'s, the host tables'.
  */
 export function wouldRefuseBlocks(
   timeline: TrafficEvent[],
   keys: Map<string, RefusedKey>,
   priority: number,
   gap: string,
+  level: string,
 ): SummaryBlock[] {
-  const heading = `${gap}### 🚨 Restrict Would Refuse\n\n`;
+  const heading = `${gap}${level} 🚨 Restrict Would Refuse\n\n`;
   const blocks: SummaryBlock[] = [];
   const audited = [...keys.values()].filter((key) => key.count > 0);
   if (audited.length > 0) {

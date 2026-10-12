@@ -16,6 +16,8 @@ import { reportParams } from "#core/lib/test/report-data.node.ts";
 
 import {
   computeReportOutcomes,
+  missingReportFrame,
+  reportTitle,
   readActionVersion,
   writeReportSummary,
   writeSummaryBlocks,
@@ -57,6 +59,23 @@ function report(overrides: Partial<UniversalReportData> = {}): UniversalReportDa
     ...overrides,
   };
 }
+
+describe("reportTitle", () => {
+  it("names the process activity only when the step records it, then the label", () => {
+    expect(reportTitle(undefined, false)).toBe("Outbound Traffic Report");
+    expect(reportTitle("npm ci", true)).toBe("Traffic & Process Activity Report — npm ci");
+  });
+});
+
+describe("missingReportFrame", () => {
+  it("opens with the title, escaped, in the report's mode, and says the traffic is missing", () => {
+    expect(missingReportFrame("Outbound Traffic Report — a|b", true).text).toBe(
+      "## Outbound Traffic Report — a\\|b (audit mode)\n\n" +
+        "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n",
+    );
+    expect(missingReportFrame("T", false).text).toMatch(/^## T\n/);
+  });
+});
 
 // The decision matrix itself is tested elsewhere; these only verify that the
 // annotations and the rendered markdown combine correctly. Markdown content
@@ -154,7 +173,7 @@ describe("computeReportOutcomes", () => {
         ],
       };
       const markdown = markdownOf(r, options());
-      expect(markdown).toMatch(/### 🚨 Restrict Would Refuse\n\n(\|.*\n)+\n<sub>\*For an `aws-`/);
+      expect(markdown).toMatch(/#### 🚨 Restrict Would Refuse\n\n(\|.*\n)+\n<sub>\*For an `aws-`/);
     });
 
     it("is left out when known_blocked_rules expects every such refusal", () => {
@@ -308,8 +327,10 @@ describe("computeReportOutcomes", () => {
         }),
       );
       expect(markdown).toContain(
-        "### 🚨 Restrict Would Refuse\n\n| Key (aws-key-not-allowed) | Hosts | Count |\n",
+        "#### 🚨 Restrict Would Refuse\n\n| Key (aws-key-not-allowed) | Hosts | Count |\n",
       );
+      // Every request audit let through that restrict would refuse, by key or by host.
+      expect(markdown).toMatch(/^\*\*🚨 7 restrict would refuse\*\*$/m);
       expect(tables(markdown)).toStrictEqual([
         [
           "| key 1 from a role in 222222222222 | s3.amazonaws.com, ssm.amazonaws.com | 3 |",
@@ -390,7 +411,7 @@ describe("computeReportOutcomes", () => {
     expect(details(markdown)).toContain(
       "🚫 00:01.000: GET https://s3.amazonaws.com/ -> aws-key-not-allowed, key from a role in 222222222222",
     );
-    expect(markdown).toContain("| s3.amazonaws.com:443 | HTTPS | aws-key-not-allowed | 1 |");
+    expect(markdown).toContain("| s3.amazonaws.com:443 | HTTPS | 🚫 aws-key-not-allowed | 1 |");
     expect(markdown).not.toContain("### 🚨");
   });
 
@@ -431,6 +452,20 @@ describe("computeReportOutcomes", () => {
     expect(markdown).toMatch(/- name: Start isolated-run\n/);
     expect(markdown).toMatch(/uses: buildcage\/isolated-run@v1/);
     expect(markdown).toMatch(/run: \|\n\s+npm install/);
+  });
+
+  it("titles a step that records its process activity for both, and puts its tables under Network", () => {
+    const markdown = markdownOf(
+      report({
+        passed: [{ host: "a.com", port: "443", ruleType: "HTTPS", reason: "-", count: 1 }],
+      }),
+      options({ stepLabel: "build", processActivity: true }),
+    );
+    expect(markdown).toMatch(
+      /^## Traffic & Process Activity Report — build\n\n\*\*✅ Nothing was refused\*\*\n\n### 🌐 Network\n\n#### ✅ Allowed Hosts\n/,
+    );
+    // The step closes the summary after the process activity.
+    expect(markdown).not.toMatch(/Reported by/);
   });
 
   it("writes the extra inputs into the restrict example", () => {
