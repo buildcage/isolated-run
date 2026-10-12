@@ -394,7 +394,8 @@ static __always_inline u32 tails_for(u32 data_len)
 }
 
 // Takes n tails, or none when fewer are free, so a hold never runs out
-// halfway. Tries lost to other CPUs all along count as none free.
+// halfway. Taking them is one atomic add, which no other CPU can make fail;
+// one that would pass the limit is given back at once.
 static __always_inline int take_tails(u32 n)
 {
 	if (!n)
@@ -403,17 +404,14 @@ static __always_inline int take_tails(u32 n)
 	struct tail_use *u = bpf_map_lookup_elem(&tail_use, &zero);
 	if (!u)
 		return -1;
-	for (int i = 0; i < 32; i++) {
-		u64 v = *(volatile u64 *)&u->taken;
-		if (v + n > N_TAILS)
-			return -1;
-		if (__sync_val_compare_and_swap(&u->taken, v, v + n) == v) {
-			if (v + n > u->peak)
-				u->peak = v + n; // racy, so a near miss at worst
-			return 0;
-		}
+	u64 v = __sync_fetch_and_add(&u->taken, n) + n;
+	if (v > N_TAILS) {
+		__sync_fetch_and_add(&u->taken, -(u64)n);
+		return -1;
 	}
-	return -1;
+	if (v > u->peak)
+		u->peak = v; // racy, so a near miss at worst
+	return 0;
 }
 
 static __always_inline void give_tails(u32 n)
