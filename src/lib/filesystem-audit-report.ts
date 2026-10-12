@@ -234,8 +234,8 @@ export async function prepareStepFilesystemAudit(
         : "upload-failed";
     const cutNote = (cause?: CutCause): string => filesystemTruncationNote(uploaded, cause);
     const notice = cutNote();
-    const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`;
-    const legendNote = filesystemLegendNote(uploaded, guide);
+    const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+    const legendNote = filesystemLegendNote(uploaded, `${guide}#reading-the-summary`);
 
     // The summary and the upload are independent: a render failure must not
     // also drop the artifact, which is most wanted when the recording is
@@ -250,6 +250,7 @@ export async function prepareStepFilesystemAudit(
           FILESYSTEM_PRIORITIES,
           cutNote,
           legendNote,
+          guide,
         );
       } catch (e) {
         annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
