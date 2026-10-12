@@ -179,7 +179,9 @@ that only ran programs has no accessed paths table, and the flag legend opens th
 - **🔍 Process details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
   that command first and last touched the path, counted from the proxy's start like the
-  communication details, or from the first access if that start is unknown.
+  communication details, or from the first access if that start is unknown. A command or path
+  holding a space is quoted there, as `"VM Thread"`, except a memfd's name, which is quoted
+  already, and a refused system call.
 - A **refused system call** is one the sandbox's seccomp profile does not allow, such as
   `io_uring_setup` or `unshare`, which fails with `EPERM`. The note under the heading names each one
   with the first commands that made it, and the details, where they fit, show it once per program,
@@ -212,18 +214,18 @@ artifact has every access in order.
 
 ### Paths
 
-| Shown as               | Means                                                                                                                                                            |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `./…`                  | Under `$GITHUB_WORKSPACE`                                                                                                                                        |
-| `~/…`                  | Under `$HOME`                                                                                                                                                    |
-| `dir/**`               | `dir` and the entries touched directly under it would take three or more rows, so they are shown as one with the flags of everything at and under `dir` combined |
-| `/proc/<pid>/…`        | Under a process's own directory in `/proc`, every process's shown as one                                                                                         |
-| `…/name`               | A relative name whose directory was closed before it could be read, or a path too deep to record in full                                                         |
-| `path…`                | A failed open's name too long to record in full, cut at its end                                                                                                  |
-| `memfd:"name"`         | A file that exists only in memory and has no path; the name is whatever its creator chose                                                                        |
-| `path (deleted)`       | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row                                                 |
-| `\n`, `\u{202e}`, `\\` | A control or invisible character, or a backslash, in a path or command name                                                                                      |
-| `\xff`                 | A byte that is not UTF-8 in a path or command name                                                                                                               |
+| Shown as                     | Means                                                                                                                                                            |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./…`                        | Under `$GITHUB_WORKSPACE`                                                                                                                                        |
+| `~/…`                        | Under `$HOME`                                                                                                                                                    |
+| `dir/**`                     | `dir` and the entries touched directly under it would take three or more rows, so they are shown as one with the flags of everything at and under `dir` combined |
+| `/proc/<pid>/…`              | Under a process's own directory in `/proc`, every process's shown as one                                                                                         |
+| `…/name`                     | A relative name whose directory was closed before it could be read, or a path too deep to record in full                                                         |
+| `path…`                      | A failed open's name too long to record in full, cut at its end                                                                                                  |
+| `memfd:"name"`               | A file that exists only in memory and has no path; the name is whatever its creator chose                                                                        |
+| `path (deleted)`             | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row                                                 |
+| `\n`, `\u{202e}`, `\"`, `\\` | A control, invisible or blank character, a space at either end, a quote or a backslash, in a path or command name                                                |
+| `\xff`                       | A byte that is not UTF-8 in a path or command name                                                                                                               |
 
 Never folded into a `dir/**` row, nor counted toward its three rows:
 

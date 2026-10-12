@@ -9,7 +9,7 @@
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { fmtFlags, newAgg, type Access, type Agg } from "./agg.ts";
-import { escapeForDisplay, UNSAFE_QUOTED } from "./escape.ts";
+import { escapeForDisplay } from "./escape.ts";
 import { keyOf, Lines, type CutCause } from "./fold-tree.ts";
 import {
   canonical,
@@ -273,8 +273,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   const shown = (path: string): Shown => {
     if (path === MEMFDS) return { path: `${MEMFD_PREFIX}**` };
     if (path.startsWith(MEMFD)) {
-      const name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
-      return { path: `${MEMFD_PREFIX}"${name}"` };
+      const name = escapeForDisplay(path.slice(MEMFD.length));
+      return { path: `${MEMFD_PREFIX}"${name}"`, memfd: true };
     }
     if (!path.endsWith(DELETED)) return { path: escapeForDisplay(relativize(path, prefixes)) };
     const p = relativize(path.slice(0, -DELETED.length), prefixes);

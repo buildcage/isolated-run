@@ -1,7 +1,7 @@
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { fmtSpan } from "./agg.ts";
-import { codeSpan, markdownRows, pathCell } from "./escape.ts";
+import { codeSpan, field, markdownRows, pathCell } from "./escape.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
 import type { AuditSummary, Executed, RefusedRow, Row } from "./reduce.ts";
@@ -188,6 +188,9 @@ function pathsBlock(
   );
 }
 
+// A memfd's name is quoted already, and a refused syscall's row names no path.
+const shownField = (r: Row): string => (r.memfd || "syscall" in r ? r.path : field(r.path));
+
 function detailsBlock(
   { details, refused, detailsCut }: AuditSummary,
   /** Whether the flag legend is still to be shown. */
@@ -216,7 +219,8 @@ function detailsBlock(
   // communication details.
   const timeW = times.reduce((m, t) => Math.max(m, t.length), 0);
   const flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0);
-  const commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0);
+  const comms = rows.map((r) => field(r.comm));
+  const commW = comms.reduce((m, c) => Math.max(m, c.length), 0);
   const columns = [
     timeW &&
       (startedAt === undefined ? "first-last access" : "first-last access since the proxy started"),
@@ -228,7 +232,7 @@ function detailsBlock(
     .map(
       (r, i) =>
         `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}` +
-        `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`,
+        `${r.flags.padEnd(flagsW)} ${comms[i].padEnd(commW)} ${shownField(r)}${r.deleted ? DELETED_MARK : ""}`,
     )
     .join("\n");
   const legend = legendDue ? `<sub>${LEGEND}</sub>\n\n` : "";

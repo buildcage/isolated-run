@@ -206,6 +206,23 @@ describe("renderAuditSummaryBlocks: tables", () => {
     );
     expect(lines(md)).toContain('W py memfd:"/usr/bin/a\\"b"');
     expect(lines(md)).toContain("W py /tmp/p (deleted)");
+    expect(lines(md)).toContain('W py "/tmp/q (deleted)"');
+  });
+
+  it("quotes a details name holding a space, so it cannot pass for another column", () => {
+    const md = render(
+      { kind: "read", comm: "VM Thread", path: "/work/a b" },
+      { kind: "read", comm: "cat /etc/x", path: "/work/c" },
+      { kind: "read", comm: 'a"b', path: '/work/d"e' },
+      { kind: "write", comm: "py", path: "memfd:x y", memfd: true },
+    );
+    expect(md.match(/```\n([\s\S]*?)\n```/)?.[1].split("\n")).toEqual([
+      'R "VM Thread"  "./a b"',
+      'R "cat /etc/x" ./c',
+      'R a\\"b         ./d\\"e',
+      'W py           memfd:"x y"',
+    ]);
+    expect(md).toContain('| `./d\\"e` | R |');
   });
 
   it("folds a deleted file with its siblings but keeps a memfd on its own line", () => {

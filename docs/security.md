@@ -635,8 +635,9 @@ copy, unless the kernel refused the name as too long, when it is read like the o
 shown cut at its end, with `…`. A row's command name is the one
 the process gave itself, not a thread's, so it says which process acted, not which binary, and a
 process named `run-script.sh` is shown as the step's shell, `bash`. A memfd's name is whatever its creator chose,
-so it is quoted after `memfd:` and never reads as a path. A control, format or separator character,
-a backslash or a byte that is not UTF-8 in a name is shown escaped, so no name can rewrite the Job
+so it is quoted after `memfd:` and never reads as a path. A control, format, separator, invisible or
+blank character, a space at either end, a quote, a backslash or a byte that is not UTF-8 in a name
+is shown escaped, and the details quote a name holding a space, so no name can rewrite the Job
 Summary or pass for another.
 
 **Going unrecorded.** The step cannot leave the cgroup: it sees the cgroup filesystem read-only and

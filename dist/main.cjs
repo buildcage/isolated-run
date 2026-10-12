@@ -69096,20 +69096,21 @@ function spell(parts) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/escape.ts
-const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\\`, UNSAFE_CHARS = RegExp(`[${UNSAFE}]`, "gu"), UNSAFE_QUOTED = RegExp(`[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
 	"\n": "\\n",
 	"\r": "\\r",
 	"	": "\\t",
 	"\\": "\\\\",
 	"\"": "\\\""
 };
-function escapeForDisplay(name, unsafe = UNSAFE_CHARS) {
-	return name.replace(unsafe, (c) => {
-		let named = NAMED_ESCAPES[c];
-		if (named !== void 0) return named;
-		let cp = Number(c.codePointAt(0));
-		return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
-	});
+function escapeForDisplay(name) {
+	return name.replace(UNSAFE_CHARS, (m) => m.startsWith(" ") ? escapeChar(" ").repeat(m.length) : escapeChar(m));
+}
+function escapeChar(c) {
+	let named = NAMED_ESCAPES[c];
+	if (named !== void 0) return named;
+	let cp = Number(c.codePointAt(0));
+	return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
 }
 function codeSpan(text) {
 	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
@@ -69117,6 +69118,9 @@ function codeSpan(text) {
 }
 function codeCell(text) {
 	return codeSpan(text.replace(/\|/g, "\\|"));
+}
+function field(text) {
+	return text.includes(" ") ? `"${text}"` : text;
 }
 function pathCell({ path, deleted }) {
 	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
@@ -69193,6 +69197,7 @@ function byPath(paths) {
 function pathsBlock(rows, cause, opts) {
 	return table(opts, FILESYSTEM_BLOCK.paths, 3, "Accessed Paths", rows && markdownRows(["Path", "Access"], rows.map((r) => [pathCell(r), r.flags])), cause, LEGEND);
 }
+const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
 function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, priorities, cutNote }) {
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
@@ -69207,12 +69212,12 @@ function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, 
 		cut: "atomic",
 		text: cutNote(detailsCut)
 	};
-	let rows = inRecordingOrder([...details, ...refused]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), columns = [
+	let rows = inRecordingOrder([...details, ...refused]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), comms = rows.map((r) => field(r.comm)), commW = comms.reduce((m, c) => Math.max(m, c.length), 0), columns = [
 		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
 		"flags",
 		"command",
 		"path"
-	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`).join("\n"), legend = legendDue ? `<sub>${LEGEND}</sub>\n\n` : "";
+	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${comms[i].padEnd(commW)} ${shownField(r)}${r.deleted ? DELETED_MARK : ""}`).join("\n"), legend = legendDue ? `<sub>${LEGEND}</sub>\n\n` : "";
 	return {
 		...log,
 		cut: "lines",
@@ -69638,8 +69643,11 @@ function createAuditSummary(prefixes) {
 	}, shown = (path) => {
 		if (path === MEMFDS) return { path: `${MEMFD_PREFIX}**` };
 		if (path.startsWith(MEMFD)) {
-			let name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
-			return { path: `${MEMFD_PREFIX}"${name}"` };
+			let name = escapeForDisplay(path.slice(MEMFD.length));
+			return {
+				path: `${MEMFD_PREFIX}"${name}"`,
+				memfd: !0
+			};
 		}
 		return path.endsWith(DELETED) ? {
 			path: escapeForDisplay(relativize(path.slice(0, -DELETED.length), prefixes)),
