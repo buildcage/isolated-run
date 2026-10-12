@@ -21,6 +21,7 @@ import {
   writeSummaryBlocks,
   type ComputeReportOutcomesOptions,
 } from "./report.ts";
+import { wouldRefuseTruncationNote } from "./would-refuse.ts";
 
 function options(
   overrides: Partial<ComputeReportOutcomesOptions> = {},
@@ -187,6 +188,19 @@ describe("computeReportOutcomes", () => {
 
     it("is left out when no refusal is the check's", () => {
       const markdown = markdownOf(restrict("not-allowed"), options());
+      expect(markdown).not.toContain("aws.md");
+    });
+
+    it("is left out when a request blocked for another reason only carries wr=", () => {
+      const timeline: TrafficEvent[] = [
+        { ...refused("ip-not-allowed"), wouldRefuse: "aws-key-not-allowed" },
+      ];
+      const r: InspectReportData = {
+        ...report({ blockedCount: 1, blocked: annotateKnownBlocked(timeline, []), timeline }),
+        engine: "inspect",
+      };
+      const markdown = markdownOf(r, options());
+      expect(markdown).toContain("ip-not-allowed");
       expect(markdown).not.toContain("aws.md");
     });
   });
@@ -613,6 +627,50 @@ describe("writeReportSummary", () => {
 
     expect(written[0]).toContain(restrictExampleTruncationNote(true));
     expect(written[0]).toContain(hostTableTruncationNote(true));
+  });
+
+  it("gives Restrict Would Refuse's key and host tables one cut notice between them", async () => {
+    const written: string[] = [];
+    const timeline: TrafficEvent[] = [
+      {
+        time: 1,
+        action: "audit",
+        protocol: "https",
+        host: "s3.amazonaws.com",
+        port: 443,
+        method: "GET",
+        url: "https://s3.amazonaws.com/",
+        status: 200,
+        wouldRefuse: "aws-key-not-allowed",
+        extensions: { aws: { keyRef: "aaaa1111" } },
+      },
+      {
+        time: 2,
+        action: "audit",
+        protocol: "https",
+        host: "sts.amazonaws.com",
+        port: 443,
+        method: "POST",
+        url: "https://sts.amazonaws.com/",
+        status: 200,
+        wouldRefuse: "aws-no-credential",
+      },
+    ];
+
+    await writeReportSummary(
+      { ...report({ parameters: reportParams({ mode: "audit" }), timeline }), engine: "inspect" },
+      createAnnotation(true),
+      options(),
+      true,
+      { GITHUB_STEP_SUMMARY: "/summary.md" },
+      {
+        fileSize: () => 1024 * 1024,
+        writeSummary: async (markdown) => void written.push(markdown),
+      },
+    );
+
+    const note = wouldRefuseTruncationNote(true);
+    expect(written[0].split(note).length - 1).toBe(1);
   });
 
   it.each([

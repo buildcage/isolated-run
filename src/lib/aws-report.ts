@@ -3,7 +3,7 @@ import { TRAFFIC_BLOCK, trafficFrame } from "#core/lib/report/render/render-repo
 import type { ReportData } from "#core/lib/report/types.ts";
 
 import { AWS_REASON_PREFIX } from "../proxy/haproxy-aws-keys.ts";
-import { WOULD_REFUSE_BLOCK } from "./would-refuse.ts";
+import { letThrough, WOULD_REFUSE_BLOCK } from "./would-refuse.ts";
 
 /**
  * Links what to do about the AWS access key check's refusals under the last
@@ -18,7 +18,7 @@ export function withAwsTroubleshootingLink(
 ): SummaryBlock[] {
   const refusedByAwsCheck =
     report.blocked.some((r) => !r.expected && r.reason.startsWith(AWS_REASON_PREFIX)) ||
-    report.timeline.some((e) => e.wouldRefuse?.startsWith(AWS_REASON_PREFIX));
+    report.timeline.some((e) => letThrough(e) && e.wouldRefuse.startsWith(AWS_REASON_PREFIX));
   const tables = new Set<string>([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]);
   const at = blocks.findLastIndex((b) => b.id !== undefined && tables.has(b.id));
   if (!refusedByAwsCheck || at === -1) return blocks;

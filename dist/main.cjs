@@ -73486,15 +73486,18 @@ function wouldRefuseBlocks(timeline, keys, priority, gap, level) {
 		reason: e.wouldRefuse
 	}]));
 	if (rows.length > 0) {
-		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 });
-		blocks.push(trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n"));
+		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 }), host = trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n");
+		blocks.push(blocks.length > 0 ? {
+			...host,
+			level: host.level + 1
+		} : host);
 	}
 	return blocks;
 }
 //#endregion
 //#region src/lib/aws-report.ts
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
-	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => e.wouldRefuse?.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
+	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => letThrough(e) && e.wouldRefuse.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
 	if (!refusedByAwsCheck || at === -1) return blocks;
 	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, link = trafficFrame(`\n<sub>*For an \`aws-\` reason, see [what to do](${url}).*</sub>\n`);
 	return [

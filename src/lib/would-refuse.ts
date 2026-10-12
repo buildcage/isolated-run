@@ -68,7 +68,7 @@ function refusedKeyRef(e: TrafficEvent): string | undefined {
 
 /** A request audit let through that restrict would refuse. One refused for
  *  another reason is in Blocked Hosts already. */
-function letThrough(e: TrafficEvent): e is TrafficEvent & { wouldRefuse: string } {
+export function letThrough(e: TrafficEvent): e is TrafficEvent & { wouldRefuse: string } {
   return e.wouldRefuse !== undefined && e.action !== "block";
 }
 
@@ -164,7 +164,11 @@ export function wouldRefuseBlocks(
   if (rows.length > 0) {
     const before = blocks.length > 0 ? "\n" : heading;
     const table = renderHostTable(rows, { showReason: true });
-    blocks.push(trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n"));
+    const host = trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n");
+    // Nest the host table under the key table when both print: once a block is
+    // cut, fitStepSummary skips the deeper ones of its section, so the section's
+    // truncation notice appears once rather than on each table in turn.
+    blocks.push(blocks.length > 0 ? { ...host, level: host.level + 1 } : host);
   }
   return blocks;
 }

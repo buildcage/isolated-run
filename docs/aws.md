@@ -201,6 +201,11 @@ allowed_aws_role_accounts: |
   222222222222 # assumed in this run, check it is yours
 ```
 
+The example brings the URL rules and the accounts over, not the credentials. A `key N` row with no
+`from a role in` is a key no STS answer in the run issued, such as a long-lived one, and
+`aws-no-credential` is a request with no signature the check could read; neither is a URL rule, so
+both still refuse after the switch. [Troubleshooting](#troubleshooting) says what each needs.
+
 ### In the traffic artifact
 
 Each request to an AWS API host that the check let through has an `aws` object in the
