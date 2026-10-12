@@ -490,8 +490,8 @@ static long del_tail(u64 i, struct tails_ctx *c)
 	return 0;
 }
 
-// Runs fn over tails from..to-1; reports where a run of get_tail stopped
-// short, or 0.
+// Runs fn over tails from..to-1, and returns 0 unless fn failed: for
+// get_tail, the missing tail it stopped at.
 static __always_inline u32 tails_loop(void *fn, struct held_key *k, void *buf, u32 from, u32 to)
 {
 	struct tails_ctx c = { .k = *k, .buf = buf, .from = from, .to = to, .err = 0 };
