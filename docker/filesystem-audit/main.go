@@ -33,7 +33,7 @@ import (
 
 // -mcpu=v3 for the fetch-and-add that takes tails; every kernel the tracer
 // runs on has it.
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cflags -mcpu=v3 -type event filesystemAudit bpf/filesystem_audit.bpf.c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cflags -mcpu=v3 -type event -type kind filesystemAudit bpf/filesystem_audit.bpf.c
 
 func main() {
 	cgPath := flag.String("cgroup", "", "cgroup v2 directory to watch, created if missing")

@@ -68,7 +68,8 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 };
 
 /**
- * Fixed header (mirrored by hdrLen in decode.go), then data_len bytes of data:
+ * Fixed header (decode.go reads it through the type bpf2go generates), then
+ * data_len bytes of data:
  *
  * - open: d_path result (path_len is its return value)
  * - failed open: the name as passed to open(2), then its base directory if it
@@ -82,7 +83,7 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
  *   more for a rename or link target
  */
 struct event {
-	u32 kind;
+	enum kind kind;
 	u32 pid;
 	u32 ppid;
 	u32 flags;
