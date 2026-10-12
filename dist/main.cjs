@@ -72966,7 +72966,7 @@ function incompleteReason(terminationState, method) {
 }
 //#endregion
 //#region src/core/lib/log/inspect.ts
-const REQUEST = /^buildcage (\d+) (https?) (\S+) (-?\d+) (\d+) ts=(\S*) reason=(\S+) tlserr=(\S+) dst=(\S+):(\d+) (?:wr=(\S+) )?((?:[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*=\S+ )*)(?:fcerr=(\S+) )?(?:sni=(\S+) )?host=(\S+) (\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
+const REQUEST = /^buildcage (?<ms>\d+) (?<scheme>https?) (?<method>\S+) (?<status>-?\d+) (?<bytes>\d+) ts=(?<ts>\S*) reason=(?<reason>\S+) tlserr=(?<tlserr>\S+) dst=(?<dstHost>\S+):(?<dstPort>\d+) (?:wr=(?<wr>\S+) )?(?<ext>(?:[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*=\S+ )*)(?:fcerr=(?<fcerr>\S+) )?(?:sni=(?<sni>\S+) )?host=(?<host>\S+) (?<target>\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
 function timeOf(stamp) {
 	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
 	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
@@ -73028,23 +73028,23 @@ function extensionFields(tokens) {
 function parseProxyLine(line, isAudit) {
 	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
 	if (request) {
-		let fcerr = request[13] ?? "", incomplete = request[3] === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(request[6], request[3]), tlsError = request[2] === "https" ? request[8] : void 0, reason = incomplete ?? (isRefusal(request[6]) ? reasonFor(request[7], request[6], tlsError, request[3]) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = request[3] !== BAD_REQUEST_METHOD, scheme = request[2], sent = splitHostPort(request[15]), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(request[14], request[9]) : void 0, event = {
-			time: Number(request[1]) / 1e3,
+		let r = request.groups, fcerr = r.fcerr ?? "", incomplete = r.method === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(r.ts, r.method), tlsError = r.scheme === "https" ? r.tlserr : void 0, reason = incomplete ?? (isRefusal(r.ts) ? reasonFor(r.reason, r.ts, tlsError, r.method) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = r.method !== BAD_REQUEST_METHOD, scheme = r.scheme, sent = splitHostPort(r.host), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(r.sni, r.dstHost) : void 0, event = {
+			time: Number(r.ms) / 1e3,
 			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
 			protocol: unnamed?.byAddress ? "tcp" : scheme,
 			host: unnamed?.host ?? host,
-			port: Number(request[10]),
-			destination: `${request[9]}:${request[10]}`
+			port: Number(r.dstPort),
+			destination: `${r.dstHost}:${r.dstPort}`
 		};
 		if (parsedRequest) {
-			event.method = request[3];
-			let url = urlOf(scheme, unnamed ? authorityOf(unnamed.host, request[10], scheme) : authority, request[16]);
+			event.method = r.method;
+			let url = urlOf(scheme, unnamed ? authorityOf(unnamed.host, r.dstPort, scheme) : authority, r.target);
 			url !== void 0 && (event.url = url);
 		}
-		let wouldRefuse = request[11];
+		let wouldRefuse = r.wr;
 		wouldRefuse !== void 0 && wouldRefuse !== "-" && (event.wouldRefuse = wouldRefuse);
-		let extensions = extensionFields(request[12]);
-		return extensions && (event.extensions = extensions), reason === void 0 ? (event.status = Number(request[4]), event.bytes = Number(request[5])) : event.reason = reason, event;
+		let extensions = extensionFields(r.ext);
+		return extensions && (event.extensions = extensions), reason === void 0 ? (event.status = Number(r.status), event.bytes = Number(r.bytes)) : event.reason = reason, event;
 	}
 	let pass = PASSTHROUGH.exec(trimmed);
 	if (pass) {
