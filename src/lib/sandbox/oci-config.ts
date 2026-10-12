@@ -83,8 +83,6 @@ export interface BuildOciConfigOptions {
   readonlyHostPaths?: string[];
   /** See host-commands.ts's renameGuardDirs. */
   renameGuardDirs?: string[];
-  /** See host-commands.ts's sandboxInPlaceFileCommands. */
-  inPlaceFiles?: string[];
 }
 
 /**
@@ -150,7 +148,6 @@ export function buildOciConfig(
     caTrust,
     readonlyHostPaths = [],
     renameGuardDirs = [],
-    inPlaceFiles = [],
   }: BuildOciConfigOptions,
   probes: HostProbes = realHostProbes,
 ): BuiltOciSpec {
@@ -203,7 +200,7 @@ export function buildOciConfig(
   // (/dev, /proc), which under write_through: / would bring the host's back.
   const overlapsFresh = (p: string) =>
     [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p));
-  const renameGuards = [...renameGuardDirs, ...inPlaceFiles]
+  const renameGuards = renameGuardDirs
     .filter((p) => !overlapsFresh(p))
     .map((p) => ({
       destination: p,

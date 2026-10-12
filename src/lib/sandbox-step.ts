@@ -62,7 +62,7 @@ import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
-import { rewriteOutputFile } from "./step-output-file.ts";
+import { replaceIfNotRegularFile, rewriteOutputFile } from "./step-output-file.ts";
 import { reportStepTraffic, writeMoreSummary } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
@@ -126,6 +126,7 @@ export interface SandboxStepDeps {
   writeMoreSummary: typeof writeMoreSummary;
   prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
   rewriteOutputFile: typeof rewriteOutputFile;
+  replaceIfNotRegularFile: typeof replaceIfNotRegularFile;
   setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
   setFilesystemAuditOutput: typeof setFilesystemAuditOutput;
   /** Calls listener on each signal a cancelled run sends this process, and
@@ -192,6 +193,7 @@ const realDeps: SandboxStepDeps = {
   writeMoreSummary,
   prepareStepFilesystemAudit,
   rewriteOutputFile,
+  replaceIfNotRegularFile,
   setTrafficArtifactOutput,
   setFilesystemAuditOutput,
   onCancel,
@@ -284,6 +286,7 @@ export async function runSandboxStep(
     writeMoreSummary,
     prepareStepFilesystemAudit,
     rewriteOutputFile,
+    replaceIfNotRegularFile,
     setTrafficArtifactOutput,
     setFilesystemAuditOutput,
     onCancel,
@@ -496,6 +499,24 @@ export async function runSandboxStep(
         }
       } catch (e) {
         annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`);
+        process.exitCode = 1;
+      }
+    }
+    // The reports append to $GITHUB_STEP_SUMMARY, which the command can have
+    // replaced too.
+    if (env.GITHUB_STEP_SUMMARY) {
+      try {
+        const replaced = replaceIfNotRegularFile(env.GITHUB_STEP_SUMMARY);
+        if (replaced) {
+          annotation.error(
+            `$GITHUB_STEP_SUMMARY was replaced with an empty file (${replaced}); failing the step`,
+          );
+          process.exitCode = 1;
+        }
+      } catch (e) {
+        annotation.error(
+          `Failed to check $GITHUB_STEP_SUMMARY: ${errorMessage(e)}; failing the step`,
+        );
         process.exitCode = 1;
       }
     }

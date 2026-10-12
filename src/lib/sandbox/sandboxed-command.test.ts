@@ -708,42 +708,6 @@ describe("runSandboxedCommand", () => {
         env.GITHUB_STATE,
       ]);
     });
-
-    describe("the two this action writes after the command", () => {
-      const written = {
-        ...env,
-        GITHUB_OUTPUT: `${COMMANDS}/set_output_1`,
-        GITHUB_STEP_SUMMARY: `${COMMANDS}/step_summary_1`,
-      };
-      const present = (...paths: string[]) =>
-        mocks.lstat.mockImplementation((p: string) =>
-          paths.includes(p) ? { isSymbolicLink: () => false } : undefined,
-        );
-
-      it("binds each onto itself where the command's writes persist, so it cannot be replaced", async () => {
-        present(written.GITHUB_OUTPUT, written.GITHUB_STEP_SUMMARY);
-        await runSandboxedCommand(options({ env: written }), deps);
-
-        expect(mocks.buildOciConfig.mock.calls[0][1].inPlaceFiles).toStrictEqual([
-          written.GITHUB_OUTPUT,
-          written.GITHUB_STEP_SUMMARY,
-        ]);
-      });
-
-      it("leaves out one the runner did not create, and both where the writes are discarded", async () => {
-        present(written.GITHUB_STEP_SUMMARY);
-        await runSandboxedCommand(options({ env: written }), deps);
-        expect(mocks.buildOciConfig.mock.calls[0][1].inPlaceFiles).toStrictEqual([
-          written.GITHUB_STEP_SUMMARY,
-        ]);
-
-        await runSandboxedCommand(
-          options({ env: written, filesystemMode: "ephemeral", overlayRoots: ["/home/runner"] }),
-          deps,
-        );
-        expect(mocks.buildOciConfig.mock.calls[1][1].inPlaceFiles).toStrictEqual([]);
-      });
-    });
   });
 
   it("says so when the runner's primary group forced a GID substitution", async () => {

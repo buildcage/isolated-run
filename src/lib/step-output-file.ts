@@ -112,6 +112,22 @@ const WIDE_BOMS = [
 ];
 
 /**
+ * Replaces anything but a regular file the command left at `path`, such as
+ * $GITHUB_STEP_SUMMARY, with an empty one before this action appends to it,
+ * and says why. Appending through a symlink would reach a file the command
+ * cannot, and to a FIFO would block.
+ */
+export function replaceIfNotRegularFile(
+  path: string,
+  overrides: Partial<RewriteOutputFileDeps> = {},
+): string | undefined {
+  const { kind, replaceFile } = { ...realDeps, ...overrides };
+  if (kind(path) !== "other") return undefined;
+  replaceFile(path, "");
+  return "it is not a regular file";
+}
+
+/**
  * Rewrites the file with every entry the runner reads, as it was written,
  * ending in a newline, so the outputs this action appends after it are read.
  * What it could not read is dropped, and the reason returned. A symlink, a FIFO

@@ -71651,12 +71651,6 @@ function sandboxReadonlyFileCommands(writeThroughPaths, persisting, env, deps = 
 		return [resolved.real, ...aliases];
 	});
 }
-function sandboxInPlaceFileCommands(persisting, env, realpath, lstat) {
-	return ["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"].flatMap((name) => {
-		let path = env[name], real = path && realpath(path);
-		return !real || !lstat(real) ? [] : persisting.some((root) => isAtOrUnder(real, root)) ? [real] : [];
-	});
-}
 function renameGuardDirs(readonlyDirs, persisting) {
 	let writable = (dir) => persisting.includes(innermost(dir, [...persisting, ...readonlyDirs])), guards = new Set();
 	for (let dir of readonlyDirs) {
@@ -72043,7 +72037,7 @@ function sandboxNamespaces(base, netnsPath) {
 function cgroupsPathFor(runnerCgroup, name) {
 	if (runnerCgroup !== void 0) return `${runnerCgroup.replace(/\/$/, "")}/${name}`;
 }
-function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [], inPlaceFiles = [] }, probes = realHostProbes) {
+function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [] }, probes = realHostProbes) {
 	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, cgroupName, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [], scratchBaseAliases = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
 	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths, (path) => probes.realpath(path));
 	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
@@ -72051,7 +72045,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 		type: "none",
 		source: resolvConfPath,
 		options: ["rbind", "ro"]
-	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), overlapsFresh = (p) => [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p)), renameGuards = [...renameGuardDirs, ...inPlaceFiles].filter((p) => !overlapsFresh(p)).map((p) => ({
+	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), overlapsFresh = (p) => [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p)), renameGuards = renameGuardDirs.filter((p) => !overlapsFresh(p)).map((p) => ({
 		destination: p,
 		type: "none",
 		source: p,
@@ -72356,8 +72350,7 @@ function assembleBundle(dir, options, deps) {
 			env,
 			caTrust,
 			readonlyHostPaths: [...readonlyHostDirs, ...readonlyFiles],
-			renameGuardDirs: renameGuardDirs$1,
-			inPlaceFiles: sandboxInPlaceFileCommands(persisting, env, deps.realpath, deps.lstat)
+			renameGuardDirs: renameGuardDirs$1
 		});
 	} catch (e) {
 		throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
@@ -72546,6 +72539,13 @@ const realDeps$2 = {
 		255
 	]
 ];
+function replaceIfNotRegularFile(path, overrides = {}) {
+	let { kind, replaceFile } = {
+		...realDeps$2,
+		...overrides
+	};
+	if (kind(path) === "other") return replaceFile(path, ""), "it is not a regular file";
+}
 function rewriteOutputFile(path, overrides = {}) {
 	let { kind, readFile, replaceFile } = {
 		...realDeps$2,
@@ -73604,6 +73604,7 @@ const realDeps = {
 	writeMoreSummary,
 	prepareStepFilesystemAudit,
 	rewriteOutputFile,
+	replaceIfNotRegularFile,
 	setTrafficArtifactOutput,
 	setFilesystemAuditOutput,
 	onCancel,
@@ -73631,7 +73632,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, rewriteOutputFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, rewriteOutputFile, replaceIfNotRegularFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -73732,6 +73733,12 @@ async function runSandboxStep(env, overrides = {}) {
 			unreadable && (annotation.error(`$GITHUB_OUTPUT was rewritten without what the runner could not read (${unreadable}); failing the step`), process.exitCode = 1);
 		} catch (e) {
 			annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
+		}
+		if (env.GITHUB_STEP_SUMMARY) try {
+			let replaced = replaceIfNotRegularFile(env.GITHUB_STEP_SUMMARY);
+			replaced && (annotation.error(`$GITHUB_STEP_SUMMARY was replaced with an empty file (${replaced}); failing the step`), process.exitCode = 1);
+		} catch (e) {
+			annotation.error(`Failed to check $GITHUB_STEP_SUMMARY: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
 		}
 		for (let set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) try {
 			set("");

@@ -56,6 +56,7 @@ const mocks = {
   writeMoreSummary: vi.fn(),
   prepareStepFilesystemAudit: vi.fn(),
   rewriteOutputFile: vi.fn(),
+  replaceIfNotRegularFile: vi.fn(),
   setTrafficArtifactOutput: vi.fn(),
   setFilesystemAuditOutput: vi.fn(),
   onCancel: vi.fn(),
@@ -733,9 +734,42 @@ describe("runSandboxStep", () => {
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
     });
 
+    it("replaces whatever but a regular file the command left at $GITHUB_STEP_SUMMARY, before the report", async () => {
+      await runSandboxStep(ENV, deps);
+
+      expect(mocks.replaceIfNotRegularFile.mock.calls).toStrictEqual([[ENV.GITHUB_STEP_SUMMARY]]);
+      expect(orderOf(mocks.replaceIfNotRegularFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
+      expect(annotation.error).not.toHaveBeenCalled();
+    });
+
+    it("fails the step but still reports when $GITHUB_STEP_SUMMARY was not a regular file", async () => {
+      mocks.replaceIfNotRegularFile.mockReturnValue("it is not a regular file");
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      expect(annotation.error).toHaveBeenCalledWith(
+        "$GITHUB_STEP_SUMMARY was replaced with an empty file (it is not a regular file); failing the step",
+      );
+      expect(process.exitCode).toBe(1);
+      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails the step but still reports when $GITHUB_STEP_SUMMARY cannot be checked", async () => {
+      mocks.replaceIfNotRegularFile.mockImplementation(() => {
+        throw new Error("EACCES");
+      });
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      expect(annotation.error).toHaveBeenCalledWith(
+        "Failed to check $GITHUB_STEP_SUMMARY: EACCES; failing the step",
+      );
+      expect(process.exitCode).toBe(1);
+      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+    });
+
     it("rewrites nothing where the runner gave no $GITHUB_OUTPUT", async () => {
-      await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "" }, deps);
+      await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "", GITHUB_STEP_SUMMARY: "" }, deps);
       expect(mocks.rewriteOutputFile).not.toHaveBeenCalled();
+      expect(mocks.replaceIfNotRegularFile).not.toHaveBeenCalled();
       expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
     });
 

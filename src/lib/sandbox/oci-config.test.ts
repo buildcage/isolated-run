@@ -544,15 +544,6 @@ describe("buildOciConfig", () => {
     });
   });
 
-  it("binds each in-place file onto itself read-write", () => {
-    const file = "/home/runner/work/_temp/_runner_file_commands/step_summary_1";
-    const config = build(fakeBaseSpec(), { ...baseArgs, inPlaceFiles: [file] });
-    expect(config.mounts.find((m) => m.destination === file)).toMatchObject({
-      source: file,
-      options: ["rbind", "rw"],
-    });
-  });
-
   it("never binds a rename guard on or around a path the sandbox mounts fresh", () => {
     const config = build(fakeBaseSpec(), {
       ...baseArgs,

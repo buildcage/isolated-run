@@ -12,7 +12,11 @@ import { join } from "node:path";
 
 import { describe, it, expect, afterEach } from "vitest";
 
-import { readOutputEntries, rewriteOutputFile } from "./step-output-file.ts";
+import {
+  readOutputEntries,
+  replaceIfNotRegularFile,
+  rewriteOutputFile,
+} from "./step-output-file.ts";
 
 // Each case is what actions/runner's EnvFileKeyValuePairs does with the text.
 describe("readOutputEntries", () => {
@@ -176,5 +180,33 @@ describe("rewriteOutputFile", () => {
       expect(readFileSync(path, "utf8")).toBe("");
       expect(readFileSync(target, "utf8")).toBe("secret=1\n");
     });
+  });
+});
+
+describe("replaceIfNotRegularFile", () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("leaves a regular file, and a missing one, as they are", () => {
+    dir = mkdtempSync(join(tmpdir(), "step-summary-"));
+    const path = join(dir, "summary");
+    expect(replaceIfNotRegularFile(path)).toBeUndefined();
+    expect(() => lstatSync(path)).toThrow();
+    writeFileSync(path, "the command's own\n");
+    expect(replaceIfNotRegularFile(path)).toBeUndefined();
+    expect(readFileSync(path, "utf8")).toBe("the command's own\n");
+  });
+
+  it("replaces a symlink with an empty file, leaving what it pointed at alone", () => {
+    dir = mkdtempSync(join(tmpdir(), "step-summary-"));
+    const target = join(dir, "elsewhere");
+    const path = join(dir, "summary");
+    writeFileSync(target, "untouched\n");
+    symlinkSync(target, path);
+
+    expect(replaceIfNotRegularFile(path)).toBe("it is not a regular file");
+    expect(lstatSync(path).isFile()).toBe(true);
+    expect(readFileSync(path, "utf8")).toBe("");
+    expect(readFileSync(target, "utf8")).toBe("untouched\n");
   });
 });
