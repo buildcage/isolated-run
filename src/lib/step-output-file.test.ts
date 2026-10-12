@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -206,6 +208,22 @@ describe("replaceIfNotRegularFile", () => {
 
     expect(replaceIfNotRegularFile(path)).toBe(true);
     expect(lstatSync(path).isFile()).toBe(true);
+  });
+
+  it("gives its directory back the write permission the command took away", () => {
+    dir = mkdtempSync(join(tmpdir(), "step-summary-"));
+    const commands = join(dir, "commands");
+    const path = join(commands, "summary");
+    mkdirSync(commands);
+    symlinkSync(join(dir, "elsewhere"), path);
+    chmodSync(commands, 0o555);
+
+    expect(replaceIfNotRegularFile(path)).toBe(true);
+    expect(lstatSync(path).isFile()).toBe(true);
+    // And still fails on any other error, a directory at the path among them.
+    rmSync(path);
+    mkdirSync(path);
+    expect(() => replaceIfNotRegularFile(path)).toThrow();
   });
 
   it("replaces a symlink with an empty file, leaving what it pointed at alone", () => {

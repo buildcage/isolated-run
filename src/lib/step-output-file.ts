@@ -7,7 +7,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 export interface OutputEntries {
@@ -93,15 +93,30 @@ const realDeps: RewriteOutputFileDeps = {
   },
   readFile: (path) => readFileSync(path),
   replaceFile: (path, text) => {
-    const temporary = join(dirname(path), `.${basename(path)}.${randomBytes(8).toString("hex")}`);
     try {
-      writeFileSync(temporary, text, { flag: "wx", mode: 0o644 });
-      renameSync(temporary, path);
-    } finally {
-      rmSync(temporary, { force: true });
+      writeBeside(path, text);
+    } catch (e) {
+      const { code } = e as NodeJS.ErrnoException;
+      if (code !== "EACCES" && code !== "EPERM") throw e;
+      // The command runs as the user who owns the directory and can take its
+      // write permission away; left in place, what it put at the path is
+      // what the runner reads after the step.
+      const dir = dirname(path);
+      chmodSync(dir, lstatSync(dir).mode | 0o700);
+      writeBeside(path, text);
     }
   },
 };
+
+function writeBeside(path: string, text: string): void {
+  const temporary = join(dirname(path), `.${basename(path)}.${randomBytes(8).toString("hex")}`);
+  try {
+    writeFileSync(temporary, text, { flag: "wx", mode: 0o644 });
+    renameSync(temporary, path);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
 
 // UTF-16 and UTF-32 byte order marks: the runner decodes by them, this reads
 // UTF-8 only.

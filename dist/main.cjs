@@ -72519,17 +72519,28 @@ const realDeps$2 = {
 	},
 	readFile: (path) => (0, node_fs.readFileSync)(path),
 	replaceFile: (path, text) => {
-		let temporary = (0, node_path.join)((0, node_path.dirname)(path), `.${(0, node_path.basename)(path)}.${(0, node_crypto.randomBytes)(8).toString("hex")}`);
 		try {
-			(0, node_fs.writeFileSync)(temporary, text, {
-				flag: "wx",
-				mode: 420
-			}), (0, node_fs.renameSync)(temporary, path);
-		} finally {
-			(0, node_fs.rmSync)(temporary, { force: !0 });
+			writeBeside(path, text);
+		} catch (e) {
+			let { code } = e;
+			if (code !== "EACCES" && code !== "EPERM") throw e;
+			let dir = (0, node_path.dirname)(path);
+			(0, node_fs.chmodSync)(dir, (0, node_fs.lstatSync)(dir).mode | 448), writeBeside(path, text);
 		}
 	}
-}, WIDE_BOMS = [
+};
+function writeBeside(path, text) {
+	let temporary = (0, node_path.join)((0, node_path.dirname)(path), `.${(0, node_path.basename)(path)}.${(0, node_crypto.randomBytes)(8).toString("hex")}`);
+	try {
+		(0, node_fs.writeFileSync)(temporary, text, {
+			flag: "wx",
+			mode: 420
+		}), (0, node_fs.renameSync)(temporary, path);
+	} finally {
+		(0, node_fs.rmSync)(temporary, { force: !0 });
+	}
+}
+const WIDE_BOMS = [
 	[255, 254],
 	[254, 255],
 	[
