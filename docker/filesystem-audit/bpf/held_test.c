@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: MIT OR GPL-2.0-only
 /**
  * @file held_test.c
  * Tests for held.h, built for the host with its maps and helpers replaced by

@@ -136,8 +136,9 @@ Go modules linked into /opt/buildcage/bin/filesystem-audit
     Source  : https://go.dev/src/
 
   The binary also embeds an eBPF object compiled from buildcage's own source
-  (docker/filesystem-audit/bpf, GPL-2.0, as the kernel's BPF helpers require);
-  that source ships in this repository.
+  (docker/filesystem-audit/bpf, MIT OR GPL-2.0-only: the kernel's BPF helpers
+  it calls require a GPL-compatible license); that source ships in this
+  repository.
 
   Compiled from source at image build time; no Go toolchain remains in
   the published image.
