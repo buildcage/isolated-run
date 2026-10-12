@@ -142,6 +142,16 @@ describe("findPinnableCommand", () => {
     );
   });
 
+  it("skips a symlink in a persisting PATH directory even to a file of the command's name", () => {
+    const deps = host(["/opt/old/bin/docker", "/usr/bin/docker"], {
+      [`${HOME}/.local/bin/docker`]: "/opt/old/bin/docker",
+    });
+
+    expect(findPinnableCommand("docker", `${HOME}/.local/bin:/usr/bin`, PERSISTENT, deps)).toBe(
+      "/usr/bin/docker",
+    );
+  });
+
   it("takes the file a directory symlink in a persisting path leads to", () => {
     // /usr/local/bin/docker -> /opt/tools/docker, where /opt/tools -> ~/tools -> /usr/lib/tools.
     const deps = host(["/usr/lib/tools/docker", "/usr/bin/docker"], {
@@ -238,6 +248,16 @@ describe("jvmTools", () => {
       "/usr/bin/keytool",
     );
     expect(jvmTools({ PATH: path }, PERSISTENT, deps).keytool).toBe("/usr/bin/keytool");
+  });
+
+  it("takes the JDK's keytool behind /etc/alternatives under write_through: /etc", () => {
+    const deps = host([`${JDK}/bin/keytool`], {
+      "/usr/bin/keytool": "/etc/alternatives/keytool",
+      "/etc/alternatives/keytool": `${JDK}/bin/keytool`,
+    });
+    expect(jvmTools({ PATH: "/usr/bin" }, [...PERSISTENT, "/etc"], deps).keytool).toBe(
+      `${JDK}/bin/keytool`,
+    );
   });
 
   it("finds neither on a runner without a JDK", () => {
