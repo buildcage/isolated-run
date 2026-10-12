@@ -364,7 +364,8 @@ static __always_inline void open_exit(u32 slot, long ret, int dfd, u32 flags, co
 	if (!e)
 		return;
 	open_failed(slot, e, ret, dfd, flags);
-	// Held, ended, so a second open exit for this open does not record it too.
+	// Leave an ended hold, so a second open exit for this open does not record
+	// it again.
 	e = scratch_get(slot);
 	if (e) {
 		e->kind = K_OPEN_ENDED;

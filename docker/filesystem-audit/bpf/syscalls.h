@@ -223,8 +223,8 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 const volatile long nr_open = -1, nr_openat = -1, nr_openat2 = -1, nr_creat = -1;
 
 /**
- * Whether the current task is in an open(2) family call, which getname runs
- * for only to read the name being opened (see open_name()).
+ * Whether the current task is in an open(2) family call, whose getname copies
+ * the name being opened (see open_name()).
  */
 static __always_inline int in_open_call(void)
 {
