@@ -32,16 +32,19 @@ function deps(overrides: PostCleanupDeps = {}): {
   released: string[];
   killed: number[];
   removedFiles: string[];
+  removedRunnerFiles: string[];
 } {
   const removed: { dir: string; ephemeralRoots?: string[] }[] = [];
   const released: string[] = [];
   const killed: number[] = [];
   const removedFiles: string[] = [];
+  const removedRunnerFiles: string[] = [];
   return {
     removed,
     released,
     killed,
     removedFiles,
+    removedRunnerFiles,
     deps: {
       readOwner: () => OWNER,
       // The tracer pidfile is absent unless a test sets it.
@@ -55,6 +58,7 @@ function deps(overrides: PostCleanupDeps = {}): {
       readFile: (p) => (p === AUDIT.pidFilePath ? "4321\n" : "filesystem-audi\n"),
       killTracer: (pid) => killed.push(pid),
       removeFile: (p) => removedFiles.push(p),
+      removeRunnerFilesDir: (dir) => removedRunnerFiles.push(dir),
       ...overrides,
     },
   };
@@ -92,6 +96,38 @@ describe("planPostCleanup", () => {
     planPostCleanup(STATE, ENV, annotation(), d);
 
     expect(released).toStrictEqual([]);
+  });
+
+  it("reclaims the runner-file backing dir a hard kill left beside the scratch dir", () => {
+    const { deps: d, removedRunnerFiles } = deps();
+
+    planPostCleanup(STATE, ENV, annotation(), d);
+
+    expect(removedRunnerFiles).toStrictEqual([`${SANDBOX_SCRATCH_BASE}/runner-files-deadbeef`]);
+  });
+
+  it("leaves the runner-file backing dir alone when it is not there", () => {
+    const { deps: d, removedRunnerFiles } = deps({ fileExists: () => false });
+
+    planPostCleanup(STATE, ENV, annotation(), d);
+
+    expect(removedRunnerFiles).toStrictEqual([]);
+  });
+
+  it("warns but still reclaims the rest when the runner-file backing dir cannot be removed", () => {
+    const note = annotation();
+    const { deps: d, released } = deps({
+      removeRunnerFilesDir: () => {
+        throw new Error("EACCES");
+      },
+    });
+
+    planPostCleanup(STATE, ENV, note, d);
+
+    expect(note.warning).toHaveBeenCalledWith(
+      "run post-cleanup: failed to remove the runner-file backing dir: EACCES",
+    );
+    expect(released).toStrictEqual(["after the scratch dir", "nssdb:sandbox-deadbeef"]);
   });
 
   it("leaves the uses registered when the scratch dir is still there after its removal", () => {

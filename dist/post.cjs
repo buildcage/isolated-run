@@ -665,6 +665,30 @@ function releaseNssDb(name, deps = {}) {
 		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for Chromium's NSS database are left in place for a later step to remove`);
 	}
 }
+function removeBackingDir(path) {
+	let pending = [path];
+	for (let dir = pending.pop(); dir !== void 0; dir = pending.pop()) {
+		let stats;
+		try {
+			stats = (0, node_fs.lstatSync)(dir);
+		} catch (e) {
+			if (e.code === "ENOENT") continue;
+			throw e;
+		}
+		if (stats.isDirectory()) {
+			(stats.mode & 448) != 448 && (0, node_fs.chmodSync)(dir, stats.mode | 448);
+			for (let entry of (0, node_fs.readdirSync)(dir)) pending.push((0, node_path.join)(dir, entry));
+		}
+	}
+	(0, node_fs.rmSync)(path, {
+		recursive: !0,
+		force: !0
+	});
+}
+function runnerFilesDirFor(containerName) {
+	let scratchName = (0, node_path.basename)(scratchDirFor(containerName));
+	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchName.replace(/^sandbox-/, "runner-files-"));
+}
 //#endregion
 //#region src/lib/post-cleanup.ts
 function defaultKillTracer(pid) {
@@ -706,7 +730,7 @@ function startedByThisStep(containerName, env, readOwner) {
 	return owner === null || owner === ownerToken(env);
 }
 function planPostCleanup(state, env, annotation, deps = {}) {
-	let { readOwner = readContainerOwner, fileExists = node_fs.existsSync, removeScratchDir = cleanupScratchDir, releaseNssDb: releaseNssDbUse = releaseNssDb } = deps, { targets, problems } = resolvePostState(state);
+	let { readOwner = readContainerOwner, fileExists = node_fs.existsSync, removeScratchDir = cleanupScratchDir, releaseNssDb: releaseNssDbUse = releaseNssDb, removeRunnerFilesDir = removeBackingDir } = deps, { targets, problems } = resolvePostState(state);
 	for (let problem of problems) annotation.error(`run post-cleanup: ${problem}`);
 	if (!targets) return null;
 	if (!startedByThisStep(targets.containerName, env, readOwner)) return annotation.error("run post-cleanup: the proxy container named in GITHUB_STATE was started by a different step. Skipping all post-step cleanup: tearing it down would stop that step's proxy and delete its sandbox scratch directory."), null;
@@ -724,6 +748,12 @@ function planPostCleanup(state, env, annotation, deps = {}) {
 		}), reclaimed = !fileExists(scratchDir);
 	} catch (e) {
 		annotation.warning(`run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`);
+	}
+	try {
+		let runnerFilesDir = runnerFilesDirFor(targets.containerName);
+		fileExists(runnerFilesDir) && removeRunnerFilesDir(runnerFilesDir);
+	} catch (e) {
+		annotation.warning(`run post-cleanup: failed to remove the runner-file backing dir: ${errorMessage(e)}`);
 	}
 	return reclaimed && releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning }), targets;
 }

@@ -820,12 +820,13 @@ describe("runSandboxStep", () => {
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
     });
 
-    // The sandbox sees the backing directory only through its bind.
-    it("keeps the backing directory under the scratch base, and removes it after the write-back", async () => {
+    // The sandbox sees the backing directory only through its bind, and the
+    // post step finds it by the container name.
+    it("keeps the backing directory beside the scratch dir, and removes it after the write-back", async () => {
       await runSandboxStep(ENV, deps);
 
-      const backingDir = mocks.mediateRunnerOutputFiles.mock.calls[0][1] as string;
-      expect(backingDir).toMatch(new RegExp(`^${SANDBOX_SCRATCH_BASE}/runner-files-[0-9a-f]{16}$`));
+      const backingDir = `${SANDBOX_SCRATCH_BASE}/runner-files-deadbeef`;
+      expect(mocks.mediateRunnerOutputFiles.mock.calls[0][1]).toBe(backingDir);
       expect(mocks.removeBackingDir).toHaveBeenCalledExactlyOnceWith(backingDir);
       expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.removeBackingDir));
     });

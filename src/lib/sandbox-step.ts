@@ -9,9 +9,7 @@
  * and sandbox/sandboxed-command.ts.
  */
 
-import { randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 
 import * as core from "@actions/core";
 
@@ -68,6 +66,7 @@ import {
   mediateRunnerOutputFiles,
   readBackingFile,
   removeBackingDir,
+  runnerFilesDirFor,
   type MediatedRunnerFile,
   type RunnerOutputMediation,
 } from "./sandbox/runner-output-files.ts";
@@ -266,8 +265,7 @@ function saveCleanupState(
  * $GITHUB_OUTPUT is trimmed to the entries the runner can read; a dropped entry
  * fails the step, since the runner would stop at it. A backing copy the command
  * made unreadable (a symlink, FIFO, one over 64 MiB, or permissions taken
- * away) leaves the real file
- * empty and fails the step too.
+ * away) leaves the real file empty and fails the step too.
  */
 function writeBackMediatedFile(
   file: MediatedRunnerFile,
@@ -528,13 +526,11 @@ export async function runSandboxStep(
   // after the step. The backing directory sits beside the sandbox's scratch
   // dir, not in it, so it outlives the command. The scratch base is hidden from
   // the sandbox (/tmp is writable there), so the command reaches the directory
-  // only through the bind and cannot move it aside. It is removed below. The path is settled here (no I/O), but the directory is
-  // only created inside the try, so a failure there still tears the proxy down
-  // in the finally.
-  const runnerFilesBackingDir = join(
-    SANDBOX_SCRATCH_BASE,
-    `runner-files-${randomBytes(8).toString("hex")}`,
-  );
+  // only through the bind and cannot move it aside. It is removed below, or by
+  // the post step after a hard kill. The path is settled here (no I/O), but the
+  // directory is only created inside the try, so a failure there still tears
+  // the proxy down in the finally.
+  const runnerFilesBackingDir = runnerFilesDirFor(containerName);
   let mediation: RunnerOutputMediation | undefined;
 
   // 1 unless the isolated command itself reports otherwise: every way out of
