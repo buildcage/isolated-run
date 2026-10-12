@@ -200,7 +200,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (r.kind === "syscall") {
       const name = escapeForDisplay(r.syscall || "?");
       const path = SYSCALL_PREFIX + (r.killed ? `32-bit ${name} (killed)` : name);
-      const comm = escapeForDisplay(r.comm ?? "");
+      const comm = escapeForDisplay(r.comm ?? "", UNSAFE_QUOTED);
       const key = keyOf(comm, path);
       const t = Date.parse(r.t ?? "");
       let row = refused.get(key);
@@ -254,22 +254,24 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   };
 
   // A memfd shows its name quoted, as one its creator chose; a deleted file
-  // shows the mark outside its path.
+  // shows the mark outside its path. Every name escapes its quotes, so the
+  // details can quote one.
   const shown = (path: string): Shown => {
     if (path.startsWith(MEMFD)) {
       const name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
-      return { path: `${MEMFD_PREFIX}"${name}"` };
+      return { path: `${MEMFD_PREFIX}"${name}"`, memfd: true };
     }
-    if (!path.endsWith(DELETED)) return { path: escapeForDisplay(relativize(path, prefixes)) };
+    if (!path.endsWith(DELETED))
+      return { path: escapeForDisplay(relativize(path, prefixes), UNSAFE_QUOTED) };
     const p = relativize(path.slice(0, -DELETED.length), prefixes);
-    return { path: escapeForDisplay(p), deleted: true };
+    return { path: escapeForDisplay(p, UNSAFE_QUOTED), deleted: true };
   };
 
   const rows = (lines: { comm: string; path: string; agg: Agg }[] | undefined): Row[] | undefined =>
     lines?.map(({ comm, path, agg }) => ({
       agg,
       flags: fmtFlags(agg),
-      comm: escapeForDisplay(comm),
+      comm: escapeForDisplay(comm, UNSAFE_QUOTED),
       ...shown(path),
     }));
 

@@ -82,4 +82,5 @@ export function spell(parts: string[]): string {
 export interface Shown {
   path: string;
   deleted?: boolean;
+  memfd?: boolean;
 }

@@ -69096,7 +69096,7 @@ function spell(parts) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/escape.ts
-const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\\`, UNSAFE_CHARS = RegExp(`[${UNSAFE}]`, "gu"), UNSAFE_QUOTED = RegExp(`[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, unsafe = (chars) => RegExp(`^ | $|(?! )[${chars}]`, "gu"), UNSAFE_CHARS = unsafe(UNSAFE), UNSAFE_QUOTED = unsafe(`${UNSAFE}"`), NAMED_ESCAPES = {
 	"\n": "\\n",
 	"\r": "\\r",
 	"	": "\\t",
@@ -69117,6 +69117,9 @@ function codeSpan(text) {
 }
 function codeCell(text) {
 	return codeSpan(text.replace(/\|/g, "\\|"));
+}
+function field(text) {
+	return text.includes(" ") ? `"${text}"` : text;
 }
 function pathCell({ path, deleted }) {
 	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
@@ -69193,6 +69196,7 @@ function byPath(paths) {
 function pathsBlock(rows, cause, opts) {
 	return table(opts, FILESYSTEM_BLOCK.paths, 3, "Accessed Paths", rows && markdownRows(["Path", "Access"], rows.map((r) => [pathCell(r), r.flags])), cause, LEGEND);
 }
+const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
 function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, priorities, cutNote }) {
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
@@ -69207,12 +69211,12 @@ function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, 
 		cut: "atomic",
 		text: cutNote(detailsCut)
 	};
-	let rows = inRecordingOrder([...details, ...refused]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), columns = [
+	let rows = inRecordingOrder([...details, ...refused]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), comms = rows.map((r) => field(r.comm)), commW = comms.reduce((m, c) => Math.max(m, c.length), 0), columns = [
 		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
 		"flags",
 		"command",
 		"path"
-	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`).join("\n"), legend = legendDue ? `<sub>${LEGEND}</sub>\n\n` : "";
+	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${comms[i].padEnd(commW)} ${shownField(r)}${r.deleted ? DELETED_MARK : ""}`).join("\n"), legend = legendDue ? `<sub>${LEGEND}</sub>\n\n` : "";
 	return {
 		...log,
 		cut: "lines",
@@ -69503,7 +69507,7 @@ function createAuditSummary(prefixes) {
 				return;
 			}
 			if (r.kind === "syscall") {
-				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
+				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? "", UNSAFE_QUOTED), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
 				if (!row) {
 					if (refused.size >= 200 && !r.killed) return;
 					row = {
@@ -69546,16 +69550,19 @@ function createAuditSummary(prefixes) {
 	}, shown = (path) => {
 		if (path.startsWith(MEMFD)) {
 			let name = escapeForDisplay(path.slice(MEMFD.length), UNSAFE_QUOTED);
-			return { path: `${MEMFD_PREFIX}"${name}"` };
+			return {
+				path: `${MEMFD_PREFIX}"${name}"`,
+				memfd: !0
+			};
 		}
 		return path.endsWith(DELETED) ? {
-			path: escapeForDisplay(relativize(path.slice(0, -DELETED.length), prefixes)),
+			path: escapeForDisplay(relativize(path.slice(0, -DELETED.length), prefixes), UNSAFE_QUOTED),
 			deleted: !0
-		} : { path: escapeForDisplay(relativize(path, prefixes)) };
+		} : { path: escapeForDisplay(relativize(path, prefixes), UNSAFE_QUOTED) };
 	}, rows = (lines) => lines?.map(({ comm, path, agg }) => ({
 		agg,
 		flags: fmtFlags(agg),
-		comm: escapeForDisplay(comm),
+		comm: escapeForDisplay(comm, UNSAFE_QUOTED),
 		...shown(path)
 	}));
 	return {
