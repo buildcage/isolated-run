@@ -47,7 +47,7 @@ type record struct {
 	Exchange bool `json:"exchange,omitempty"`
 	// Syscall names a refused syscall, or gives its number where the tracer
 	// has no name for it; Compat marks one of the 32-bit ABI, and Killed one
-	// whose thread the kernel killed with SIGSYS.
+	// seccomp killed the program for.
 	Syscall string `json:"syscall,omitempty"`
 	Compat  bool   `json:"compat,omitempty"`
 	Killed  bool   `json:"killed,omitempty"`
@@ -485,11 +485,16 @@ func mmapAccess(prot, flags uint32) string {
 	}
 }
 
+// x32SyscallBit marks an x32 syscall, numbered as the native one it shares.
+const x32SyscallBit = 0x40000000
+
 // syscallName is the name of syscall nr, of the 32-bit ABI when compat, or
 // its number where the table has none.
 func syscallName(nr int64, compat bool) string {
 	names := syscallNames
-	if compat {
+	if compat && nr&x32SyscallBit != 0 {
+		nr &^= x32SyscallBit
+	} else if compat {
 		names = compatSyscallNames
 	}
 	if n, ok := names[nr]; ok {

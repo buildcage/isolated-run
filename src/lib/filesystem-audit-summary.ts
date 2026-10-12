@@ -646,33 +646,32 @@ const INCOMPLETE_NOTE =
   "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
   "> some accesses are missing from this summary and from the artifact.";
 // The note names this many syscalls, and this many commands for each; the
-// details have them all.
+// details, where they fit, show the rest.
 const REFUSED_SHOWN = 10;
 const REFUSED_COMMS_SHOWN = 3;
 // Past this many command and syscall pairs, the rest are left to the artifact.
-const REFUSED_KEPT = 1000;
+const REFUSED_KEPT = 200;
 
 // Each refused syscall with the commands it was refused to, in the order
 // first refused, then each command killed for a 32-bit one.
-function refusedNote(rows: Row[]): string {
+function refusedNote(rows: RefusedRow[]): string {
   const byName = new Map<string, Set<string>>();
   const killed = new Set<string>();
-  for (const r of inRecordingOrder(rows)) {
-    if (r.path.endsWith(" (killed)")) killed.add(r.comm);
-    else {
-      const name = r.path.slice(SYSCALL_PREFIX.length);
-      byName.set(name, (byName.get(name) ?? new Set()).add(r.comm));
-    }
+  for (const { syscall, comm } of inRecordingOrder(rows)) {
+    const comms = syscall.killed ? killed : (byName.get(syscall.name) ?? new Set<string>());
+    if (!syscall.killed) byName.set(syscall.name, comms);
+    if (comm) comms.add(comm);
   }
   const list = (items: string[], shown: number): string =>
     items.slice(0, shown).join(", ") +
     (items.length > shown ? ` and ${items.length - shown} more` : "");
   const comms = (c: Set<string>): string => list([...c].map(codeSpan), REFUSED_COMMS_SHOWN);
-  const names = [...byName].map(([name, c]) => `${codeSpan(name)} (${comms(c)})`);
+  const names = [...byName].map(([name, c]) => codeSpan(name) + (c.size ? ` (${comms(c)})` : ""));
   const parts = [];
   if (names.length) parts.push(`Refused system calls: ${list(names, REFUSED_SHOWN)}`);
-  if (killed.size) {
-    parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call: ${comms(killed)}`);
+  if (killed.size || rows.some((r) => r.syscall.killed)) {
+    const by = killed.size ? `: ${comms(killed)}` : "";
+    parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call${by}`);
   }
   return `> ${parts.join("; ")}.`;
 }
@@ -741,6 +740,11 @@ interface Row extends Shown {
   comm: string;
 }
 
+/** A refused syscall's row: its name, and whether it killed the program. */
+interface RefusedRow extends Row {
+  syscall: { name: string; killed: boolean };
+}
+
 /** What the summary is rendered from, reduced from the recording. */
 export interface AuditSummary {
   // From the tracer's end line, which a recording cut short lacks.
@@ -754,7 +758,7 @@ export interface AuditSummary {
   paths: Row[] | undefined;
   details: Row[] | undefined;
   /** Each refused syscall per command, as a details row. */
-  refused: Row[];
+  refused: RefusedRow[];
   /** Why the paths and the details were given up, where they were. */
   pathsCut?: CutCause;
   detailsCut?: CutCause;
@@ -868,7 +872,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   let hostMissed = 0;
   let seq = 0;
   const added = new Map<number | undefined, number>();
-  const refused = new Map<string, Row>();
+  const refused = new Map<string, RefusedRow>();
 
   const add = (r: unknown, counted = true): void => {
     if (!isRecord(r)) return;
@@ -890,7 +894,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       let row = refused.get(key);
       if (!row) {
         if (refused.size >= REFUSED_KEPT) return;
-        row = { agg: newAgg(), flags: "!", comm, path };
+        row = { agg: newAgg(), flags: "!", comm, path, syscall: { name, killed: !!r.killed } };
         refused.set(key, row);
       }
       if (!Number.isNaN(t)) {
@@ -975,7 +979,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
 
 // In recording order, not by time, which a clock step could reorder. Rows
 // with no time go last, in path order.
-function inRecordingOrder(rows: Row[]): Row[] {
+function inRecordingOrder<R extends Row>(rows: R[]): R[] {
   return rows.toSorted((a, b) => {
     const [ca, pa] = sortKey(a.path);
     const [cb, pb] = sortKey(b.path);

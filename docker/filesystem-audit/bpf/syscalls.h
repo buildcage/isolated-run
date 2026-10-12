@@ -250,18 +250,29 @@ static __always_inline int in_open_call(void)
 #endif
 #define SIGSYS 31
 
-/**
- * Calls whose EPERM is how they answer an ordinary request, not a refusal:
- * epoll on a regular file, setsid or setpgid on a process group leader.
- */
-const volatile long nr_epoll_ctl = -1, nr_setsid = -1, nr_setpgid = -1;
-
 /** The native architecture as seccomp names it (AUDIT_ARCH_*), set by the loader. */
 const volatile long native_arch = -1;
 
-static __always_inline int eperm_ordinary(long nr)
+#define N_REFUSABLE 1024
+
+/**
+ * The native syscalls the sandbox's seccomp profile does not allow outright,
+ * marked by the loader: one of them failing EPERM is the profile's refusal.
+ */
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, N_REFUSABLE);
+	__type(key, u32);
+	__type(value, u8);
+} refusable SEC(".maps");
+
+static __always_inline int is_refusable(long nr)
 {
-	return nr == nr_epoll_ctl || nr == nr_setsid || nr == nr_setpgid;
+	if (nr < 0 || nr >= N_REFUSABLE)
+		return 0;
+	u32 k = nr;
+	u8 *v = bpf_map_lookup_elem(&refusable, &k);
+	return v && *v;
 }
 
 /** A program and a syscall it was refused, recorded once. */
@@ -280,7 +291,7 @@ struct {
 
 /**
  * Records the step's syscall @p nr as refused, once per program: with
- * @p killed, one whose thread the kernel killed with SIGSYS, else one that
+ * @p killed, a 32-bit one seccomp killed the program for, else one that
  * failed with EPERM.
  */
 static __always_inline void syscall_refused(u32 slot, long nr, u32 killed)

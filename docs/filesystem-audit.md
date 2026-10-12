@@ -177,13 +177,12 @@ that only ran programs has no accessed paths table, and the flag legend opens th
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
   that command first and last touched the path, counted from the proxy's start like the
   communication details, or from the first access if that start is unknown.
-- A **refused system call** is one the sandbox or the kernel refused for want of permission
-  (`EPERM`), as the sandbox refuses `io_uring_setup` and `unshare`. The note under the heading names
-  each one with the commands that made it, and the details show it once per program, as
-  `syscall:io_uring_setup` with `!`. A refused call on a path shows as that path instead, and
-  `epoll_ctl`, `setsid` and `setpgid`, whose `EPERM` answers an ordinary request, are left out. A
-  program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a thread
-  killed while others run on is not recorded.
+- A **refused system call** is one the sandbox's seccomp profile does not allow, such as
+  `io_uring_setup` or `unshare`, which fails with `EPERM`. The note under the heading names each one
+  with the first commands that made it, and the details, where they fit, show it once per program,
+  as `syscall:io_uring_setup` with `!`. One already recorded as a failed change to a path is not
+  repeated. A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a
+  thread killed while others run on is not recorded.
 
 ### Flags
 
@@ -310,7 +309,7 @@ Unlike the summary, it also lists a directory that was made and then written und
 | `exchange` | `rename`                                       | a swap of two paths, which shows `M` on both in the summary                                                                                          |
 | `syscall`  | `syscall`                                      | the system call's name, or its number where the tracer has no name for it                                                                            |
 | `compat`   | `syscall`                                      | a 32-bit system call                                                                                                                                 |
-| `killed`   | `syscall`                                      | the kernel killed the thread that made it, with `SIGSYS`; `err` is absent                                                                            |
+| `killed`   | `syscall`                                      | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                    |
 
 A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted` and `exchange`
 are absent rather than `false`.
@@ -348,7 +347,7 @@ failing can show as an `open` with `x`.
 | `mkdir`, `mknod`, `symlink`, `truncate` | a directory, a special file or Unix socket, or a symlink made; or a file cut to size                                                                                                                                                                                                                                | `W`                                                          |
 | `link`                                  | a hard link made from `path` to `to`. One across mounts, such as from `$HOME` into the workspace, fails (`EXDEV`). A refused one marks `to` refused, except on `EPERM`, which marks `path`, as `EPERM` mostly comes from `protected_hardlinks` refusing a file the step does not own and cannot both read and write | `W` on `to`, `L` on `path` unless it is `deleted` or `memfd` |
 | `chmod`, `chown`, `attr`                | a mode, an owner, or times or extended attributes changed                                                                                                                                                                                                                                                           | `A`                                                          |
-| `syscall`                               | a system call refused with `EPERM`, other than one on a path, once per program; or a 32-bit one the kernel killed the program for                                                                                                                                                                                   | `!` in the details                                           |
+| `syscall`                               | a system call the sandbox's seccomp profile refused, once per program, unless recorded as a failed path change; or a 32-bit one seccomp killed the program for                                                                                                                                                      | `!` in the details                                           |
 | `end`                                   | the last line; see below                                                                                                                                                                                                                                                                                            | none                                                         |
 
 ### Access letters

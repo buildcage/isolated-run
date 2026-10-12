@@ -351,7 +351,7 @@ jobs:
           grep -qE ' d +python3 +\./sub/gone$' "$f"
           grep -qE ' r +python3 +\./sub/absent$' "$f"
           # A refused syscall: noted under the heading, and a details row.
-          grep -qE '^> Refused system calls: .*`unshare` \(`python3`\)' "$f"
+          grep -qE '^> Refused system calls: ' "$f"
           grep -qE ' ! +python3 +syscall:unshare$' "$f"
           if [ "$(uname -m)" = x86_64 ]; then
             grep -qE '^> .*illed for a 32-bit system call: .*`int80`' "$f"

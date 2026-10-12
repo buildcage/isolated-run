@@ -146,7 +146,10 @@ describe("runSandboxedCommand", () => {
     function auditing() {
       mocks.buildOciConfig.mockReturnValue({
         process: {},
-        linux: { cgroupsPath: "/system.slice/runner.service/buildcage-proxy-deadbeef" },
+        linux: {
+          cgroupsPath: "/system.slice/runner.service/buildcage-proxy-deadbeef",
+          seccomp: { syscalls: [{ names: ["read", "write"], action: "SCMP_ACT_ALLOW" }] },
+        },
       });
       return options({ filesystemAudit: AUDIT });
     }
@@ -177,6 +180,7 @@ describe("runSandboxedCommand", () => {
         pidFilePath: AUDIT.pidFilePath,
         readyPath: `${SCRATCH}/filesystem-audit.ready`,
         watchPid: process.pid,
+        allowedSyscalls: ["read", "write"],
         cancel,
       });
       expect(mocks.startFilesystemAudit.mock.invocationCallOrder[0]).toBeLessThan(

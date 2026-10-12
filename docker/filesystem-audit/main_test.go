@@ -77,7 +77,7 @@ func TestRunRefusesAnActionAlreadyGone(t *testing.T) {
 	dir := t.TempDir()
 	pidfile := filepath.Join(dir, "pid")
 	// Above the kernel's pid_max ceiling (2^22), so no process has it.
-	err := run(filepath.Join(dir, "cgroup"), filepath.Join(dir, "out"), "", pidfile, 1<<30)
+	err := run(filepath.Join(dir, "cgroup"), filepath.Join(dir, "out"), "", pidfile, 1<<30, "")
 	if err == nil || err.Error() != "the action that started it has already exited" {
 		t.Fatalf("run: %v", err)
 	}

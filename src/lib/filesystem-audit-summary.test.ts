@@ -122,11 +122,14 @@ describe("renderFilesystemAuditSummary", () => {
       { kind: "syscall", killed: true, failed: true },
       { kind: "end", dropped: 0, untracked: 0 },
     );
-    expect(md).toContain("> Killed for a 32-bit system call: ``, `a.out`.");
+    expect(md).toContain("> Killed for a 32-bit system call: `a.out`.");
+    expect(
+      render({ kind: "syscall", killed: true }, { kind: "syscall", syscall: "mount" }),
+    ).toContain("> Refused system calls: `mount`; killed for a 32-bit system call.");
     expect(lines(md)).toEqual(["! syscall:32-bit (killed)", "! a.out syscall:32-bit (killed)"]);
   });
 
-  it("names the first commands of a refused syscall, and keeps the first thousand pairs", () => {
+  it("names the first commands of a refused syscall, and keeps the first 200 pairs", () => {
     const refused = (comm: string, t?: string): object => ({
       ...(t && { t }),
       kind: "syscall",
@@ -147,9 +150,9 @@ describe("renderFilesystemAuditSummary", () => {
     // Placed by its first time, though its first record had none.
     expect(lines(md)[0]).toBe("00:00.000: ! a syscall:unshare");
 
-    const many = render(...Array.from({ length: 1001 }, (_, i) => refused(`p${i}`)));
-    expect(many).toContain("! p999 syscall:unshare");
-    expect(many).not.toContain("p1000");
+    const many = render(...Array.from({ length: 201 }, (_, i) => refused(`p${i}`)));
+    expect(many).toContain("! p199 syscall:unshare");
+    expect(many).not.toContain("p200");
   });
 
   it("lists the first refused syscalls in the note and leaves the rest to the details", () => {

@@ -106,6 +106,20 @@ export function withoutCompatSyscalls(profile: unknown, arch = process.arch): un
   return { ...p, architectures: p.architectures.filter((a) => a === native) };
 }
 
+/** The syscalls a seccomp profile allows whatever their arguments; the tracer
+ *  records any other that fails EPERM as one the profile refused. */
+export function alwaysAllowedSyscalls(profile: unknown): string[] {
+  const p = profile as { syscalls?: unknown } | null;
+  if (!p || !Array.isArray(p.syscalls)) return [];
+  return p.syscalls.flatMap((s: { names?: unknown; action?: unknown; args?: unknown }) =>
+    s.action === "SCMP_ACT_ALLOW" &&
+    !(Array.isArray(s.args) && s.args.length) &&
+    Array.isArray(s.names)
+      ? s.names.filter((n): n is string => typeof n === "string")
+      : [],
+  );
+}
+
 /** Fails the step before the proxy starts on a host the tracer cannot watch.
  *  The kernel version is left to the tracer, which checks the kernel by
  *  feature. */
@@ -267,6 +281,8 @@ export interface StartFilesystemAuditOptions {
   readyPath: string;
   /** The action's own process, whose exit stops the tracer if nothing else did. */
   watchPid: number;
+  /** See alwaysAllowedSyscalls. */
+  allowedSyscalls: string[];
   /** Aborted when the step is cancelled, which ends the wait. */
   cancel?: AbortSignal;
 }
@@ -288,6 +304,7 @@ export async function startFilesystemAudit(
     pidFilePath,
     readyPath,
     watchPid,
+    allowedSyscalls,
     cancel,
   }: StartFilesystemAuditOptions,
   deps: FilesystemAuditDeps = {},
@@ -315,6 +332,8 @@ export async function startFilesystemAudit(
     readyPath,
     "--watch-pid",
     String(watchPid),
+    "--allowed-syscalls",
+    allowedSyscalls.join(","),
   ]);
   let exited = false;
   void child.exited.then(() => {

@@ -11,6 +11,7 @@ import {
   hostCannotAudit,
   startFilesystemAudit,
   withoutCompatSyscalls,
+  alwaysAllowedSyscalls,
   type AuditChild,
 } from "./filesystem-audit.ts";
 
@@ -30,6 +31,24 @@ describe("filesystemAuditPaths", () => {
 const REQUIREMENTS =
   "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF: " +
   "https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting";
+
+describe("alwaysAllowedSyscalls", () => {
+  it("lists the syscalls allowed whatever their arguments", () => {
+    const profile = {
+      syscalls: [
+        { names: ["read", "write"], action: "SCMP_ACT_ALLOW" },
+        { names: ["clone"], action: "SCMP_ACT_ALLOW", args: [{ index: 0 }] },
+        { names: ["personality"], action: "SCMP_ACT_ALLOW", args: [] },
+        { names: ["clone3"], action: "SCMP_ACT_ERRNO" },
+        { names: [7, "uname"], action: "SCMP_ACT_ALLOW" },
+        { action: "SCMP_ACT_ALLOW" },
+      ],
+    };
+    expect(alwaysAllowedSyscalls(profile)).toStrictEqual(["read", "write", "personality", "uname"]);
+    expect(alwaysAllowedSyscalls(null)).toStrictEqual([]);
+    expect(alwaysAllowedSyscalls({})).toStrictEqual([]);
+  });
+});
 
 describe("withoutCompatSyscalls", () => {
   it("keeps only the native ABI and the rest of the profile", () => {
@@ -153,6 +172,7 @@ const START_OPTIONS = {
   pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.pid",
   readyPath: `${DEST}/filesystem-audit.ready`,
   watchPid: 4242,
+  allowedSyscalls: ["read", "write"],
 };
 
 /** A tracer that never exits on its own; resolves only once killed. */
@@ -192,6 +212,8 @@ describe("startFilesystemAudit", () => {
       START_OPTIONS.readyPath,
       "--watch-pid",
       "4242",
+      "--allowed-syscalls",
+      "read,write",
     ]);
 
     await handle.stop();

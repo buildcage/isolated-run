@@ -202,6 +202,11 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "syscall", Comm: "a.out", Syscall: compatSyscallNames[1], Compat: true, Killed: true, Failed: true},
 		},
 		{
+			name: "x32 syscall killed",
+			ev:   event{kind: 31, comm: "x32", flags: 0x40000000 | 39, mode: 1},
+			want: record{Kind: "syscall", Comm: "x32", Syscall: syscallNames[39], Compat: true, Killed: true, Failed: true},
+		},
+		{
 			name: "refused syscall with no name",
 			ev:   event{kind: 31, comm: "x", flags: 9999, pathRet: int32(unix.EPERM)},
 			want: record{Kind: "syscall", Comm: "x", Syscall: "9999", Err: int32(unix.EPERM), Failed: true},

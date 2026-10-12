@@ -68669,13 +68669,16 @@ function fmtFlags(a) {
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "\n### 🗂️ Filesystem audit";
 function refusedNote(rows) {
 	let byName = new Map(), killed = new Set();
-	for (let r of inRecordingOrder(rows)) if (r.path.endsWith(" (killed)")) killed.add(r.comm);
-	else {
-		let name = r.path.slice(8);
-		byName.set(name, (byName.get(name) ?? new Set()).add(r.comm));
+	for (let { syscall, comm } of inRecordingOrder(rows)) {
+		let comms = syscall.killed ? killed : byName.get(syscall.name) ?? new Set();
+		syscall.killed || byName.set(syscall.name, comms), comm && comms.add(comm);
 	}
-	let list = (items, shown) => items.slice(0, shown).join(", ") + (items.length > shown ? ` and ${items.length - shown} more` : ""), comms = (c) => list([...c].map(codeSpan), 3), names = [...byName].map(([name, c]) => `${codeSpan(name)} (${comms(c)})`), parts = [];
-	return names.length && parts.push(`Refused system calls: ${list(names, 10)}`), killed.size && parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call: ${comms(killed)}`), `> ${parts.join("; ")}.`;
+	let list = (items, shown) => items.slice(0, shown).join(", ") + (items.length > shown ? ` and ${items.length - shown} more` : ""), comms = (c) => list([...c].map(codeSpan), 3), names = [...byName].map(([name, c]) => codeSpan(name) + (c.size ? ` (${comms(c)})` : "")), parts = [];
+	if (names.length && parts.push(`Refused system calls: ${list(names, 10)}`), killed.size || rows.some((r) => r.syscall.killed)) {
+		let by = killed.size ? `: ${comms(killed)}` : "";
+		parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call${by}`);
+	}
+	return `> ${parts.join("; ")}.`;
 }
 function skippedNote(count, url) {
 	let why = url ? ` [Why](${url})` : "";
@@ -68753,12 +68756,16 @@ function createAuditSummary(prefixes) {
 					"(killed)"
 				].filter(Boolean).join(" ") : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
 				if (!row) {
-					if (refused.size >= 1e3) return;
+					if (refused.size >= 200) return;
 					row = {
 						agg: newAgg(),
 						flags: "!",
 						comm,
-						path
+						path,
+						syscall: {
+							name,
+							killed: !!r.killed
+						}
 					}, refused.set(key, row);
 				}
 				Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
@@ -70374,6 +70381,10 @@ function withoutCompatSyscalls(profile, arch = process.arch) {
 		architectures: p.architectures.filter((a) => a === native)
 	};
 }
+function alwaysAllowedSyscalls(profile) {
+	let p = profile;
+	return !p || !Array.isArray(p.syscalls) ? [] : p.syscalls.flatMap((s) => s.action === "SCMP_ACT_ALLOW" && !(Array.isArray(s.args) && s.args.length) && Array.isArray(s.names) ? s.names.filter((n) => typeof n == "string") : []);
+}
 function checkFilesystemAuditHost(probes = realHostProbes) {
 	if (probes.cgroupPath() === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
 	if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
@@ -70453,7 +70464,7 @@ function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = n
 		hostPath: tracerPath
 	})), chmod(tracerPath, 493), tracerPath;
 }
-async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath, watchPid, cancel }, deps = {}) {
+async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath, watchPid, allowedSyscalls, cancel }, deps = {}) {
 	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2, readTail = defaultReadTail } = deps, child = spawn("sudo", [
 		"-n",
 		"--",
@@ -70467,7 +70478,9 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		"--ready",
 		readyPath,
 		"--watch-pid",
-		String(watchPid)
+		String(watchPid),
+		"--allowed-syscalls",
+		allowedSyscalls.join(",")
 	]), exited = !1;
 	child.exited.then(() => {
 		exited = !0;
@@ -72450,6 +72463,7 @@ async function startAudit(dir, config, options, deps) {
 		pidFilePath: filesystemAudit.pidFilePath,
 		readyPath: (0, node_path.join)(dir, "filesystem-audit.ready"),
 		watchPid: process.pid,
+		allowedSyscalls: alwaysAllowedSyscalls(config.linux.seccomp),
 		cancel: options.cancel
 	});
 	return options.onAuditAttached?.(), handle;

@@ -86,22 +86,29 @@ int BPF_PROG(on_task_exit, struct task_struct *p)
 }
 
 #define SYS_SECCOMP 1
+#define X32_SYSCALL_BIT 0x40000000
 
 /**
- * seccomp kills a process's last thread for a 32-bit syscall, which the
- * audit's profile allows none of, with a SIGSYS naming the syscall and its
- * architecture. One of the native architecture comes from a filter of the
- * step's own. A thread killed while others live on gets no signal, and is
- * not recorded.
+ * seccomp kills a process's last thread for a 32-bit or x32 syscall, which
+ * the audit's profile allows none of, with a SIGSYS to that thread naming the
+ * syscall it is making and its architecture. A native one comes from a filter
+ * of the step's own, and one naming another call was queued by the process
+ * itself. A thread killed while others live on gets no signal, and is not
+ * recorded.
  */
 SEC("tp_btf/signal_generate")
-int BPF_PROG(on_signal, int sig, struct kernel_siginfo *info)
+int BPF_PROG(on_signal, int sig, struct kernel_siginfo *info, struct task_struct *task)
 {
 	if (sig != SIGSYS || (unsigned long)info <= 2 || !in_target())
 		return 0;
-	if (BPF_CORE_READ(info, si_code) == SYS_SECCOMP &&
-	    BPF_CORE_READ(info, _sifields._sigsys._arch) != (u32)native_arch)
-		syscall_refused(slot, BPF_CORE_READ(info, _sifields._sigsys._syscall), 1);
+	if (task != bpf_get_current_task_btf() || BPF_CORE_READ(info, si_code) != SYS_SECCOMP)
+		return 0;
+	long nr = BPF_CORE_READ(info, _sifields._sigsys._syscall);
+	if (nr != sys_nr((struct pt_regs *)bpf_task_pt_regs(task)))
+		return 0;
+	if (BPF_CORE_READ(info, _sifields._sigsys._arch) != (u32)native_arch ||
+	    (nr & X32_SYSCALL_BIT))
+		syscall_refused(slot, nr, 1);
 	return 0;
 }
 
@@ -558,7 +565,7 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 		op_exit(slot, &call, ret);
 	if (is_open_nr(nr))
 		open_returned(slot, regs, nr, ret);
-	else if (ret == -EPERM && !watched && !held && nr >= 0 && !eperm_ordinary(nr))
+	else if (ret == -EPERM && !watched && !held && is_refusable(nr))
 		syscall_refused(slot, nr, 0);
 	return 0;
 }
