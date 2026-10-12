@@ -570,6 +570,20 @@ static void test_open_caller_name(void)
 	CHECK_ACCOUNTS();
 }
 
+/** A caller's name longer than PATH_LEN is marked cut, and not counted. */
+static void test_open_caller_name_past_read(void)
+{
+	static char name[PATH_LEN + 10];
+	reset();
+	name_of(name, sizeof(name) - 1, 'n');
+	open_name(0, name, 1);
+	struct event *e = open_return(0, -36);
+	CHECK(e && e->data_len == PATH_LEN && e->n2 == NAME_CUT_READ);
+	CHECK(untracked_count() == 0);
+	CHECK(heads.count == 0 && use()->taken == 0);
+	CHECK_ACCOUNTS();
+}
+
 /** A second name for one open, as open_returned() gives, finds the name read. */
 static void test_open_name_read_once(void)
 {
@@ -605,7 +619,7 @@ static void test_open_long_name_no_tails(void)
 	name_of(long_name, sizeof(long_name) - 1, 'n');
 	open_name(0, long_name, 0);
 	struct event *h = head_of(1, HELD_OPEN);
-	CHECK(h && h->truncated && h->n2 && h->data_len == HEAD_DATA);
+	CHECK(h && !h->truncated && h->n2 == NAME_CUT_HELD && h->data_len == HEAD_DATA);
 	CHECK(h && !memcmp(h->data, long_name, HEAD_DATA - 1) && h->data[HEAD_DATA - 1] == 0);
 	CHECK(untracked_count() == 0);
 }
@@ -732,6 +746,7 @@ int main(void)
 	test_reclaim_held();
 	test_open_short_name_refused_early();
 	test_open_caller_name();
+	test_open_caller_name_past_read();
 	test_open_name_read_once();
 	test_open_long_name();
 	test_open_long_name_no_tails();

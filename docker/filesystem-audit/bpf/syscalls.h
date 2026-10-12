@@ -12,6 +12,7 @@
 #include "path.h"
 
 #define AT_REMOVEDIR 0x200
+#define AT_EMPTY_PATH 0x1000
 #ifndef EEXIST
 #define EEXIST 17
 #endif
@@ -27,6 +28,7 @@ struct path_call {
 	s32 dfd2;
 	u32 val1;      ///< a chmod's new mode, or a chown's new uid
 	u32 val2;      ///< a chown's new gid
+	u32 empty_dfd; ///< an empty p1 names dfd1's own file (AT_EMPTY_PATH)
 };
 
 /**
@@ -92,8 +94,9 @@ static __always_inline long current_sys_nr(void)
 #define OP(k, ok, quiet, d1, a1, d2, a2)						\
 	({ p->kind = k; p->kind_ok = ok; p->quiet_err = quiet;				\
 	   p->dfd1 = d1; p->p1 = a1; p->dfd2 = d2; p->p2 = a2;			\
-	   p->val1 = 0; p->val2 = 0; 1; })
+	   p->val1 = 0; p->val2 = 0; p->empty_dfd = 0; 1; })
 #define VALS(v1, v2) ({ p->val1 = v1; p->val2 = v2; 1; })
+#define EMPTY_DFD(f) ({ p->empty_dfd = (f) != 0; 1; })
 
 /**
  * Making a name. The kernel refuses one on a read-only mount before the
@@ -145,7 +148,9 @@ static __always_inline int classify(long nr, struct pt_regs *regs, struct path_c
 		return OP(K_CHOWN_FAILED, 0, 0, ARG(0), ARG(1), 0, 0) && VALS(ARG(2), ARG(3));
 	if (nr == nr_chown || nr == nr_lchown)
 		return OP(K_CHOWN_FAILED, 0, 0, AT_FDCWD, ARG(0), 0, 0) && VALS(ARG(1), ARG(2));
-	if (nr == nr_utimensat || nr == nr_futimesat)
+	if (nr == nr_utimensat)
+		return attr_op(p, ARG(0), ARG(1)) && EMPTY_DFD(ARG(3) & AT_EMPTY_PATH);
+	if (nr == nr_futimesat)
 		return attr_op(p, ARG(0), ARG(1));
 	if (nr == nr_utime || nr == nr_utimes || nr == nr_setxattr || nr == nr_lsetxattr)
 		return attr_op(p, AT_FDCWD, ARG(0));
@@ -202,14 +207,19 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 	// mode and flags count the base components of the first and second name;
 	// flags holds val1 instead for an op with one name.
 	u8 nb = 0;
-	if (!call->p1) {
-		// No name (futimens): the descriptor's path, or no record if it
-		// was not open.
+	// An empty string reads as 1 byte, or as 0 before Linux 6.16.
+	if (!call->p1 || (call->empty_dfd && (r == 0 || r == 1))) {
+		// No name (futimens), or an empty one (AT_EMPTY_PATH): the
+		// descriptor's path. One closed by the time the call returned
+		// names nothing, so a change made through it counts in untracked.
 		e->data[0] = 0;
 		off = add_base(e, 1, call->dfd1, &nb, &e->truncated, 1, 0);
 		e->mode = nb;
-		if (!(e->bases & 1))
+		if (!(e->bases & 1)) {
+			if (ret >= 0)
+				bump(&untracked);
 			return;
+		}
 	} else if (r > 1 && e->data[0] != '/') {
 		off = add_base(e, off, call->dfd1, &nb, &e->truncated, 1, e->n1);
 		e->mode = nb;

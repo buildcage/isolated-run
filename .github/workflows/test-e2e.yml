@@ -224,6 +224,9 @@ jobs:
             (cd "$GITHUB_WORKSPACE" && touch subshell.txt || true)
             # Times set through a descriptor (futimens), which names no path.
             python3 -c 'import os, sys; os.utime(os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT))' "$GITHUB_WORKSPACE/futimens.txt"
+            # Times set through an empty name and AT_EMPTY_PATH.
+            python3 -c 'import ctypes, os, sys; fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT)
+            assert ctypes.CDLL(None, use_errno=True).utimensat(fd, b"", None, 0x1000) == 0' "$GITHUB_WORKSPACE/empty-name.txt"
             # Failed calls on relative names: one against a changed working
             # directory, one against a directory passed by descriptor.
             mkdir -p "$GITHUB_WORKSPACE/sub"
@@ -339,8 +342,10 @@ jobs:
           # Running a program is left to the executed table.
           if sed -n '/^#### Accessed/,/<details>/p' "$f" | grep -qE '\| [A-Za-z!]*X[A-Za-z!]* \|$'; then exit 1; fi
           grep -qF '| `./futimens.txt` | WA |' "$f"
+          grep -qF '| `./empty-name.txt` | WA |' "$f"
           grep -q '<summary>🔍 Process details</summary>' "$f"
           grep -qE ' WA +python3 +\./futimens\.txt$' "$f"
+          grep -qE ' WA +python3 +\./empty-name\.txt$' "$f"
           # A subshell's command still counts as the step's. GNU touch then
           # sets the new file's times through the descriptor; uutils' does not.
           a=; if touch --version | grep -q 'GNU coreutils'; then a=A; fi

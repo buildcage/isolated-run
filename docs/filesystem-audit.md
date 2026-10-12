@@ -218,6 +218,7 @@ artifact has every access in order.
 | `dir/**`               | `dir` and the entries touched directly under it would take three or more rows, so they are shown as one with the flags of everything at and under `dir` combined |
 | `/proc/<pid>/…`        | Under a process's own directory in `/proc`, every process's shown as one                                                                                         |
 | `…/name`               | A relative name whose directory was closed before it could be read, or a path too deep to record in full                                                         |
+| `path…`                | A failed open's name too long to record in full, cut at its end                                                                                                  |
 | `memfd:"name"`         | A file that exists only in memory and has no path; the name is whatever its creator chose                                                                        |
 | `path (deleted)`       | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row                                                 |
 | `\n`, `\u{202e}`, `\\` | A control or invisible character, or a backslash, in a path or command name                                                                                      |
@@ -320,7 +321,8 @@ are absent rather than `false`.
 
 `path` is absolute except for a file in memory only (`memfd:…`), a pipe, socket or other file the
 kernel names without a path (such as `pipe:[1234]`), a path too deep to record in full (`…/…`), and
-the relative name of a failed call or an attribute change whose directory could not be read.
+the relative name of a failed call or an attribute change whose directory could not be read. A failed
+open's `path` and `name` end in `…` where its name was too long to record in full.
 
 A byte of a name that is not UTF-8 is written as a lone surrogate, `\udcff` for the byte `0xff`, as
 Python's `surrogateescape` does, so `os.fsencode` gives back the name's exact bytes. jq prints it as
