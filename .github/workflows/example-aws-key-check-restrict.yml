@@ -15,6 +15,10 @@ jobs:
       id-token: write
 
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Get the role's keys through OIDC
         id: aws
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -23,10 +27,10 @@ jobs:
           aws-region: us-east-1
 
       # Same command as the audit example, with the rules and the account that
-      # run produced, plus a call signed with a key from outside the step, as a
-      # stolen one would be. It is refused even though the URL rule allows its
-      # host. fail_on_blocked is false only because this example blocks on
-      # purpose; leave it at its default so a real workflow fails on a refusal.
+      # run produced. The compromised dependency's call is refused even though
+      # the URL rule allows its host. fail_on_blocked is false only because this
+      # example blocks on purpose; leave it at its default so a real workflow
+      # fails on a refusal.
       - name: Call AWS with outbound network isolation
         uses: buildcage/isolated-run@4533b0b5f31b7084de488a0d7a46b8917afcbb4d # v2.2.0-rc4
         env:
@@ -38,20 +42,4 @@ jobs:
           aws_key_check: true
           allowed_aws_role_accounts: ${{ steps.aws.outputs.aws-account-id }}
           fail_on_blocked: false
-          run: |
-            aws sts get-caller-identity
-
-            # Passes: the role is in an account allowed_aws_role_accounts names.
-            (
-              read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN < <(
-                aws sts assume-role --role-arn "$SWITCHED_ROLE_ARN" --role-session-name buildcage-example \
-                  --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text
-              )
-              export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
-              aws sts get-caller-identity
-            )
-
-            # Refused: aws-key-not-allowed. AWS's documented example key ID,
-            # built at run time so the file holds no key-shaped literal.
-            env -u AWS_SESSION_TOKEN AWS_ACCESS_KEY_ID="AKIA$(printf IOSFODNN7EXAMPLE)" AWS_SECRET_ACCESS_KEY=example \
-              aws sts get-caller-identity || true
+          run: .github/examples/aws-key-check/deploy.sh
