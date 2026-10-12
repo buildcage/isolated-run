@@ -665,8 +665,11 @@ spells a path. What it can do:
   record is incomplete, as it does when the tracer did not stop cleanly. Flooding can hide which
   accesses happened, not that some are missing.
 - Touch so many paths that a table or the details would pass GitHub's Job Summary size limit, or
-  hold more than 200,000 files and directories after folding. That part is cut or left out under a
-  note, and every access stays in the artifact when one was uploaded.
+  hold more than 200,000 files and directories after folding. A few hundred long paths with `..`
+  are enough, so a part past 300 KB folds more first, down to rows such as `/**` and `~/**` that
+  still carry every flag, and past the limit even so keeps the rows that fit under a note. Every
+  access stays in the artifact when one was uploaded, which needs
+  `upload_filesystem_audit_artifact: true`, off by default.
 
 Where the tracer cannot start or cannot attach a probe the kernel offers, for want of cgroup v2,
 BTF or Linux 6.1 (6.4 on arm64), the step fails before the command runs rather than keep

@@ -130,7 +130,8 @@ describe("createAuditSummary: properties", () => {
 
   it("drops walked directories exactly as comparing every pair would", () => {
     // The definition, checked pair by pair: a bare line goes when the same
-    // command has a line strictly below it and those lines carry all its flags.
+    // command has a line strictly below it, or its own "dir/**" line (as a kept
+    // directory folded loose has), and those lines carry all its flags.
     const base = (p: string): string => (p.endsWith("/**") ? p.slice(0, -3) : p);
     const reference = (lines: Map<string, { comm: string; path: string; flags: string[] }>) => {
       const kept = new Set<string>();
@@ -138,7 +139,10 @@ describe("createAuditSummary: properties", () => {
         const lb = base(l.path);
         const prefix = lb === "/" ? "/" : `${lb}/`;
         const below = [...lines.values()].filter(
-          (d) => d.comm === l.comm && base(d.path) !== lb && base(d.path).startsWith(prefix),
+          (d) =>
+            d.comm === l.comm &&
+            ((base(d.path) !== lb && base(d.path).startsWith(prefix)) ||
+              (d !== l && d.path.endsWith("/**") && base(d.path) === lb)),
         );
         // "R", "r" and "r!" all count as the action, and a refused line stays.
         const actions = (flags: string[]): string[] => flags.map((f) => f[0].toUpperCase());
