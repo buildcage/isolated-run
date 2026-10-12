@@ -189,17 +189,17 @@ static __always_inline int first_time(struct file *file, u8 bit)
 }
 
 /**
- * Threads past an exec's point of no return and not yet through it. Its other
- * threads are gone by then and this one runs no code of its own, so whatever
- * it maps meanwhile is the kernel loading the new program, its dynamic
- * loader and a script's interpreter.
+ * Whether the current task is in execve, so a mapping it makes is the kernel
+ * loading the new program, its dynamic loader and a script's interpreter, not
+ * the program mapping a file of its own. Read from the task each time rather
+ * than held across the call, so a skipped exec hook cannot leave it set and
+ * hide the program's later mappings. in_execve spans the whole call, but the
+ * task maps nothing before the exec's point of no return.
  */
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 8192);
-	__type(key, u64);
-	__type(value, u8);
-} in_exec SEC(".maps");
+static __always_inline int in_execve(void)
+{
+	return BPF_CORE_READ_BITFIELD_PROBED(bpf_get_current_task_btf(), in_execve);
+}
 
 static __always_inline void map_event(u32 slot, struct file *file, struct dentry *d, struct vfsmount *mnt,
 				     unsigned long prot, unsigned long flags, u8 bit, int image)
@@ -211,8 +211,7 @@ static __always_inline void map_event(u32 slot, struct file *file, struct dentry
 		return;
 	e->mode = prot;
 	e->flags = flags;
-	u64 id = bpf_get_current_pid_tgid();
-	e->path_len = image && bpf_map_lookup_elem(&in_exec, &id) ? 1 : 0;
+	e->path_len = image && in_execve() ? 1 : 0;
 	e->data_len = d ? path_walk(e, d, mnt) : file_walk(e, file);
 	submit(e);
 }

@@ -493,6 +493,38 @@ static void test_refused_deletes(void)
 }
 
 /**
+ * reclaim_held drops a hold a thread left behind, gives back its tails, and
+ * counts it in untracked, bar a K_OPEN_RECORDED marker, which stands for an
+ * open already recorded.
+ */
+static void test_reclaim_held(void)
+{
+	reset();
+	struct held_key op = held_key(HELD_OP);
+	CHECK(hold_new(make(K_UNLINK, HEAD_DATA, 1), HELD_OP) == 0);
+	reclaim_held(&op);
+	CHECK(heads.count == 0 && untracked_count() == 1);
+	CHECK_ACCOUNTS();
+
+	reset();
+	CHECK(hold_new(make(K_RENAME, HEAD_DATA + 3 * CHUNK, 2), HELD_OP) == 0);
+	reclaim_held(&op);
+	CHECK(heads.count == 0 && tails.count == 0 && use()->taken == 0);
+	CHECK(untracked_count() == 1);
+	CHECK_ACCOUNTS();
+
+	reset();
+	struct held_key open = held_key(HELD_OPEN);
+	CHECK(hold_new(make(K_OPEN_RECORDED, 0, 0), HELD_OPEN) == 0);
+	reclaim_held(&open);
+	CHECK(heads.count == 0 && untracked_count() == 0);
+
+	reset();
+	reclaim_held(&op);
+	CHECK(heads.count == 0 && untracked_count() == 0);
+}
+
+/**
  * A name longer than a head holds, for the open(2) tests below, which drive
  * the hooks in order: entry, name, file, exit.
  */
@@ -697,6 +729,7 @@ int main(void)
 	test_tail_busy_loses_hold();
 	test_missing_tail_drops();
 	test_refused_deletes();
+	test_reclaim_held();
 	test_open_short_name_refused_early();
 	test_open_caller_name();
 	test_open_name_read_once();

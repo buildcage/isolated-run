@@ -82,6 +82,12 @@ static __always_inline long sys_nr(struct pt_regs *regs)
 	return ((struct pt_regs___arm64 *)regs)->syscallno;
 }
 
+/** The number of the syscall the current task is in. */
+static __always_inline long current_sys_nr(void)
+{
+	return sys_nr((struct pt_regs *)bpf_task_pt_regs(bpf_get_current_task_btf()));
+}
+
 #define ARG(i) sys_arg(regs, i)
 #define OP(k, ok, quiet, d1, a1, d2, a2)						\
 	({ p->kind = k; p->kind_ok = ok; p->quiet_err = quiet;				\
@@ -242,7 +248,7 @@ static __always_inline int is_open_nr(long nr)
  */
 static __always_inline int in_open_call(void)
 {
-	return is_open_nr(sys_nr((struct pt_regs *)bpf_task_pt_regs(bpf_get_current_task_btf())));
+	return is_open_nr(current_sys_nr());
 }
 
 #ifndef EPERM
