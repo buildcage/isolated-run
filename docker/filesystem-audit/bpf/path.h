@@ -253,6 +253,34 @@ static __always_inline int in_step_ns(struct vfsmount *vfs)
 	return BPF_CORE_READ(m, mnt_ns) == t->nsproxy->mnt_ns;
 }
 
+#define OVERLAYFS_SUPER_MAGIC 0x794c7630
+#define FUSE_SUPER_MAGIC 0x65735546
+
+/**
+ * Sets @p d and @p mnt to the path the step reached @p file by. That is the
+ * file's own, or for one overlayfs or FUSE uses in place of the step's file,
+ * the step's file. FMODE_BACKING's value differs between releases, so the
+ * filesystem tells a backing file.
+ *
+ * @return 0 for a file of a mount the step cannot reach, leaving @p d and
+ *         @p mnt unusable.
+ */
+static __always_inline int step_path_of(struct file *file, struct dentry **d,
+					struct vfsmount **mnt)
+{
+	*d = BPF_CORE_READ(file, f_path.dentry);
+	*mnt = BPF_CORE_READ(file, f_path.mnt);
+	if (in_step_ns(*mnt))
+		return 1;
+	if (!bpf_core_field_exists(struct backing_file, user_path))
+		return 0;
+	struct backing_file *bf = (void *)file;
+	*d = BPF_CORE_READ(bf, user_path.dentry);
+	*mnt = BPF_CORE_READ(bf, user_path.mnt);
+	unsigned long magic = *d ? BPF_CORE_READ(*d, d_sb, s_magic) : 0;
+	return (magic == OVERLAYFS_SUPER_MAGIC || magic == FUSE_SUPER_MAGIC) && in_step_ns(*mnt);
+}
+
 static __always_inline int on_layer(struct file *file)
 {
 	if (in_step_ns(file->f_path.mnt))

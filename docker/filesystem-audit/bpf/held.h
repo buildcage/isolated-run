@@ -275,11 +275,17 @@ static __always_inline void drop_tails(struct held_key *k, u32 from, u32 to)
 	give_tails(run_tails(del_tail, k, 0, from, to).gone);
 }
 
+/** @return The key of thread @p id's head under @p use. */
+static __always_inline struct held_key held_key_for(u64 id, u32 use)
+{
+	struct held_key k = { .id = id, .use = use, .n = 0 };
+	return k;
+}
+
 /** @return The key of the current thread's head under @p use. */
 static __always_inline struct held_key held_key(u32 use)
 {
-	struct held_key k = { .id = bpf_get_current_pid_tgid(), .use = use, .n = 0 };
-	return k;
+	return held_key_for(bpf_get_current_pid_tgid(), use);
 }
 
 /**
@@ -580,15 +586,17 @@ static __always_inline void open_recorded(struct event *e)
 }
 
 /**
- * Ends the open(2) hold as its call returned @p ret, recording a held open,
- * so no hold outlives its call.
+ * Ends thread @p id's open(2) hold as its call returned @p ret, recording a
+ * held open, so no hold outlives its call.
  *
+ * @param had_head Set to whether the call had a hold.
  * @return The failed open to record, assembled in scratch, or 0.
  */
-static __always_inline struct event *open_return(u32 slot, long ret)
+static __always_inline struct event *open_return(u32 slot, u64 id, long ret, int *had_head)
 {
-	struct held_key k = held_key(HELD_OPEN);
+	struct held_key k = held_key_for(id, HELD_OPEN);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
+	*had_head = head != 0;
 	if (!head)
 		return 0;
 	struct event *failed = 0;

@@ -162,12 +162,17 @@ int BPF_PROG(on_fork, struct task_struct *parent, struct task_struct *child)
 /**
  * The security_path_* hooks run once per syscall at the VFS entry, unlike
  * security_inode_*, which overlayfs calls again for each layer it touches.
+ *
+ * @param name The program's name, short enough to stay whole in the
+ *             kernel's 15 characters.
+ * @param skip Evaluated only for a watched thread, last; it may act, as
+ *             open_creating() does.
  */
-#define DIR_ENTRY_HOOK(hook, kind_)						\
+#define DIR_ENTRY_HOOK(name, hook, kind_, skip)				\
 SEC("fentry/" #hook)								\
-int BPF_PROG(on_##hook, const struct path *dir, struct dentry *dentry)		\
+int BPF_PROG(name, const struct path *dir, struct dentry *dentry)		\
 {										\
-	if (!in_target())							\
+	if (!in_target() || (skip))						\
 		return 0;							\
 	struct event *e = start(slot, kind_);						\
 	if (!e)									\
@@ -178,9 +183,9 @@ int BPF_PROG(on_##hook, const struct path *dir, struct dentry *dentry)		\
 	return 0;								\
 }
 
-DIR_ENTRY_HOOK(security_path_unlink, K_UNLINK)
-DIR_ENTRY_HOOK(security_path_rmdir, K_RMDIR)
-DIR_ENTRY_HOOK(security_path_mkdir, K_MKDIR)
+DIR_ENTRY_HOOK(on_unlink, security_path_unlink, K_UNLINK, 0)
+DIR_ENTRY_HOOK(on_rmdir, security_path_rmdir, K_RMDIR, 0)
+DIR_ENTRY_HOOK(on_mkdir, security_path_mkdir, K_MKDIR, 0)
 
 SEC("fentry/security_path_symlink")
 int BPF_PROG(on_symlink, const struct path *dir, struct dentry *dentry, const char *old_name)
@@ -325,19 +330,7 @@ int BPF_PROG(on_open, struct file *file)
  * mknod(2) and bind(2) to a path. A creating open also passes here, from
  * may_o_create, and is skipped: the open records it.
  */
-SEC("fentry/security_path_mknod")
-int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
-{
-	if (!in_target() || open_creating())
-		return 0;
-	struct event *e = start(slot, K_MKNOD);
-	if (!e)
-		return 0;
-	u32 off = leaf(e, 0, dentry, &e->n1);
-	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated);
-	hold_op(e);
-	return 0;
-}
+DIR_ENTRY_HOOK(on_mknod, security_path_mknod, K_MKNOD, open_creating())
 
 /**
  * Records the failed open assembled in @p e, its name in place, called with
@@ -479,24 +472,11 @@ int BPF_PROG(on_mprotect, struct vm_area_struct *vma, unsigned long reqprot, uns
 	// S_PRIVATE marks the file behind shared anonymous memory.
 	if (!file || BPF_CORE_READ(file, f_inode, i_flags) & S_PRIVATE)
 		return 0;
-	struct dentry *d = BPF_CORE_READ(file, f_path.dentry);
-	struct vfsmount *mnt = BPF_CORE_READ(file, f_path.mnt);
-	// overlayfs maps its backing file in place of the step's file.
-	if (!in_step_ns(mnt)) {
-		if (!bpf_core_field_exists(struct backing_file, user_path)) {
-			bump(&skipped_internal);
-			return 0;
-		}
-		// FMODE_BACKING's value differs between releases; check the
-		// filesystem instead.
-		struct backing_file *bf = (void *)file;
-		d = BPF_CORE_READ(bf, user_path.dentry);
-		mnt = BPF_CORE_READ(bf, user_path.mnt);
-		unsigned long magic = d ? BPF_CORE_READ(d, d_sb, s_magic) : 0;
-		if ((magic != OVERLAYFS_SUPER_MAGIC && magic != FUSE_SUPER_MAGIC) || !in_step_ns(mnt)) {
-			bump(&skipped_internal);
-			return 0;
-		}
+	struct dentry *d;
+	struct vfsmount *mnt;
+	if (!step_path_of(file, &d, &mnt)) {
+		bump(&skipped_internal);
+		return 0;
 	}
 	map_events(slot, file, d, mnt, reqprot, flags, 0);
 	return 0;
@@ -521,15 +501,17 @@ int BPF_PROG(on_file_free, struct file *file)
  * getname refused as too long, read from the caller as a failed path
  * syscall's is, so a filter or tracer returning ENAMETOOLONG records one too.
  */
-static __always_inline void open_returned(u32 slot, struct pt_regs *regs, long nr, long ret)
+static __always_inline void open_returned(u32 slot, struct pt_regs *regs, u64 id, long nr,
+					  long ret)
 {
 	int at = nr == nr_openat || nr == nr_openat2;
+	// First: a name refused as too long has no hold until open_name makes one.
 	if (ret == -ENAMETOOLONG)
 		open_name(slot, (const char *)sys_arg(regs, at), 1);
-	struct held_key k = held_key(HELD_OPEN);
-	if (ret < 0 && !is_restart(ret) && !bpf_map_lookup_elem(&heads, &k))
+	int had_head;
+	struct event *e = open_return(slot, id, ret, &had_head);
+	if (ret < 0 && !is_restart(ret) && !had_head)
 		bump(&open_unheld);
-	struct event *e = open_return(slot, ret);
 	if (!e)
 		return;
 	u32 flags;
@@ -559,7 +541,8 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	struct path_call call = {}; // so no field reaches the stack unset
 	long nr = sys_nr(regs);
 	int watched = classify(nr, regs, &call);
-	struct held_key k = held_key(HELD_OP);
+	u64 id = bpf_get_current_pid_tgid();
+	struct held_key k = held_key_for(id, HELD_OP);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
 	// A hold tagged with another syscall is one whose own exit was skipped,
 	// left for this call to find; it belongs to no call now returning, so it
@@ -577,7 +560,7 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	if (watched)
 		op_exit(slot, &call, ret);
 	if (is_open_nr(nr))
-		open_returned(slot, regs, nr, ret);
+		open_returned(slot, regs, id, nr, ret);
 	else if (ret == -EPERM && !watched && !held && is_refusable(nr))
 		syscall_refused(slot, nr, 0);
 	return 0;
