@@ -68869,7 +68869,6 @@ const SECTION$1 = "traffic", TRAFFIC_BLOCK = {
 	passed: "traffic-passed",
 	log: "traffic-log"
 };
-Object.fromEntries(Object.values(TRAFFIC_BLOCK).map((id) => [id, 0]));
 function trafficNotice(block, artifactAvailable) {
 	switch (block.id) {
 		case TRAFFIC_BLOCK.example: return restrictExampleTruncationNote(artifactAvailable);
