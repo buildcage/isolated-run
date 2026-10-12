@@ -331,11 +331,47 @@ static __always_inline void open_failed(u32 slot, struct event *e, long ret, int
 	submit(e);
 }
 
-static __always_inline void open_exit(u32 slot, long ret, int dfd, u32 flags)
+/**
+ * The @p name a failed open with no hold was given, read into scratch from
+ * the caller's memory, best-effort as a failed path syscall's is: getname
+ * refused the name, as for one too long, or no getname program ran for the
+ * open. 0 when it cannot be read, a call that names nothing.
+ */
+static __always_inline struct event *open_user_name(u32 slot, const char *name)
 {
-	struct event *e = open_end(slot, ret);
-	if (e)
-		open_failed(slot, e, ret, dfd, flags);
+	struct event *e = scratch_get(slot);
+	if (!e)
+		return 0;
+	long r = bpf_probe_read_user_str(e->data, PATH_LEN, name);
+	if (r <= 0)
+		return 0;
+	e->data_len = r;
+	e->truncated = 0; // a name cut at PATH_LEN failed ENAMETOOLONG, which says so
+	e->n2 = 0;
+	return e;
+}
+
+static __always_inline void open_exit(u32 slot, long ret, int dfd, u32 flags, const char *name)
+{
+	int held;
+	struct event *e = open_end(slot, ret, &held);
+	if (held || ret >= 0 || is_restart(ret) || !in_target()) {
+		if (e)
+			open_failed(slot, e, ret, dfd, flags);
+		return;
+	}
+	e = open_user_name(slot, name);
+	if (!e)
+		return;
+	open_failed(slot, e, ret, dfd, flags);
+	// Held, ended, so a second open exit for this open does not record it too.
+	e = scratch_get(slot);
+	if (e) {
+		e->kind = K_OPEN_ENDED;
+		e->data_len = 0;
+		struct held_key k = held_key(HELD_OPEN);
+		bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
+	}
 }
 
 /** Starts holding the open(2) the thread is in, if any, from its name. */
@@ -347,7 +383,7 @@ static __always_inline void stash_name(u32 slot, u64 *ctx)
 	bpf_get_func_ret(ctx, (u64 *)&ret);
 	if ((long)ret < 0 && (long)ret >= -4095)
 		return;
-	open_name(slot, (u64)ret, BPF_CORE_READ(ret, name));
+	open_name(slot, BPF_CORE_READ(ret, name));
 }
 
 /**
@@ -370,11 +406,11 @@ int on_getname_outer(u64 *ctx)
 
 /**
  * open/openat reach do_sys_openat2 through do_sys_open, which may inline it;
- * hooking both covers either build. When both fire, the inner exit emits and
- * the outer one finds nothing left. The descriptor is the first argument of
- * both and the flags, or the open_how holding them, the third; the return
- * value comes from bpf_get_func_ret, as its type changed (long, later int),
- * so only its low 32 bits are used.
+ * hooking both covers either build. When both fire, the inner exit records the
+ * open and the outer one finds its hold ended. The descriptor is the first
+ * argument of both, the name the second, and the flags, or the open_how holding
+ * them, the third; the return value comes from bpf_get_func_ret, as its type
+ * changed (long, later int), so only its low 32 bits are used.
  */
 SEC("fexit/do_sys_openat2")
 int on_openat2_exit(u64 *ctx)
@@ -382,7 +418,7 @@ int on_openat2_exit(u64 *ctx)
 	u64 ret = 0;
 	bpf_get_func_ret(ctx, &ret);
 	struct open_how *how = (void *)ctx[2];
-	open_exit(__COUNTER__, (int)ret, (int)ctx[0], BPF_CORE_READ(how, flags));
+	open_exit(__COUNTER__, (int)ret, (int)ctx[0], BPF_CORE_READ(how, flags), (void *)ctx[1]);
 	return 0;
 }
 
@@ -391,7 +427,7 @@ int on_open_exit(u64 *ctx)
 {
 	u64 ret = 0;
 	bpf_get_func_ret(ctx, &ret);
-	open_exit(__COUNTER__, (int)ret, (int)ctx[0], (u32)ctx[2]);
+	open_exit(__COUNTER__, (int)ret, (int)ctx[0], (u32)ctx[2], (void *)ctx[1]);
 	return 0;
 }
 
@@ -513,6 +549,10 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	}
 	if (watched)
 		op_exit(slot, &call, ret);
+	// An open hold ends here, whether its open's exit ended it or, as when
+	// getname ran for another call, nothing did, so none outlives its syscall.
+	k = held_key(HELD_OPEN);
+	drop_held(&k);
 	return 0;
 }
 

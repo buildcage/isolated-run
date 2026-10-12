@@ -29,6 +29,7 @@ static __always_inline int is_restart(long ret)
 }
 
 #define HELD_OP 1   ///< A path change, held from its security_path_* hook.
+#define K_OPEN_ENDED 0 ///< An open hold its exit has ended, dropped with its syscall.
 #define HELD_OPEN 2 ///< An open(2), held from its entry.
 
 /** Where a held event's head, or one of its tails, is kept. */
@@ -425,36 +426,32 @@ static __always_inline void report_held(u32 slot, struct held_key *k, struct eve
 
 /**
  * Starts holding the open(2) the thread is in, from the @p name it was given,
- * as the kernel copied it into @p fn (getname_flags), not the user pointer,
- * which the caller could rewrite before the syscall returns.
+ * as the kernel copied it (getname_flags), not the user pointer, which the
+ * caller could rewrite before the syscall returns.
  *
  * An open holds one event from here until it returns. A refused or missing
  * file never reaches security_file_open, so until then the event is the failed
- * open it would be (K_OPEN_FAILED), and its ts holds @p fn: some builds run
- * both getname programs for one open, and the second finds its name already
- * read. The file's own open method, an LSM or the FIFO checks can still refuse
- * it after that hook, so from there the event is the open (K_OPEN), reported
- * as done or refused once the syscall returns. bases, which neither record
- * uses, says whether the open reached its create step (see open_creating()).
+ * open it would be (K_OPEN_FAILED). The file's own open method, an LSM or the
+ * FIFO checks can still refuse it after that hook, so from there the event is
+ * the open (K_OPEN), reported as done or refused once the syscall returns.
+ * bases, which neither record uses, says whether the open reached its create
+ * step (see open_creating()).
  *
- * A name that needs tails when none are free is kept cut, marked in n2. A
- * full pool counts in untracked even if this open then succeeds and is
- * recorded.
+ * No hold outlives its syscall (see on_sys_exit), so one already there is this
+ * open's: some builds run both getname programs for one open, and the second
+ * finds the name read. A name that needs tails when none are free is kept cut,
+ * marked in n2. A full pool counts in untracked even if this open then
+ * succeeds and is recorded.
  */
-static __always_inline void open_name(u32 slot, u64 fn, const char *name)
+static __always_inline void open_name(u32 slot, const char *name)
 {
 	struct held_key k = held_key(HELD_OPEN);
-	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	if (head && head->kind == K_OPEN_FAILED && head->ts == fn)
+	if (bpf_map_lookup_elem(&heads, &k))
 		return;
-	// One an earlier open left, its exit missed, gives way.
-	if (head)
-		drop_held(&k);
 	struct event *e = scratch_get(slot);
 	if (!e)
 		return;
 	e->kind = K_OPEN_FAILED;
-	e->ts = fn;
 	e->bases = 0;
 	e->err = 0;
 	e->truncated = 0;
@@ -514,25 +511,31 @@ static __always_inline int hold_open(struct event *e)
 	if (hold_as(e, HELD_OPEN, old, 0) == 0)
 		return 0;
 	// Recorded as done, though something may still refuse it, and not also
-	// as the failed open it was held as.
+	// as the failed open it was held as: the hold is ended.
 	bump(&untracked);
 	e->bases = 0;
-	drop_held(&k);
+	head = bpf_map_lookup_elem(&heads, &k);
+	if (head)
+		head->kind = K_OPEN_ENDED;
 	return -1;
 }
 
 /**
  * Ends the open(2) hold as the call returned @p ret, recording a held open.
+ * The hold stays, marked K_OPEN_ENDED, until its syscall returns (see
+ * on_sys_exit), so a second open exit, which some builds run for one open,
+ * finds it ended.
  *
+ * @param[out] held Whether there was a hold, ended or not.
  * @return The failed open to record, assembled in scratch, or 0.
  */
-static __always_inline struct event *open_end(u32 slot, long ret)
+static __always_inline struct event *open_end(u32 slot, long ret, int *held)
 {
 	struct held_key k = held_key(HELD_OPEN);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	if (!head)
+	*held = head != 0;
+	if (!head || head->kind == K_OPEN_ENDED)
 		return 0;
-	u32 t = tails_for(head->data_len);
 	struct event *failed = 0;
 	int restart = is_restart(ret);
 	if (!restart && head->kind == K_OPEN) {
@@ -544,7 +547,7 @@ static __always_inline struct event *open_end(u32 slot, long ret)
 	} else if (!restart && ret < 0) {
 		failed = assemble(slot, &k, head);
 	}
-	release(&k, t);
+	head->kind = K_OPEN_ENDED;
 	return failed;
 }
 
