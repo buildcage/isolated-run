@@ -714,7 +714,7 @@ describe("runSandboxStep", () => {
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
       expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_OUTPUT was rewritten without what the runner could not read (it is not a regular file); failing the step",
+        "$GITHUB_OUTPUT was rewritten without what the runner could not read: it is not a regular file; failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);

@@ -159,7 +159,7 @@ export function rewriteOutputFile(
     } catch {
       throw e;
     }
-    return `it could not be read (${errorMessage(e)})`;
+    return `reading it failed with ${errorMessage(e)}, so it was emptied`;
   }
 }
 

@@ -72559,7 +72559,7 @@ function rewriteOutputFile(path, overrides = {}) {
 		} catch {
 			throw e;
 		}
-		return `it could not be read (${errorMessage(e)})`;
+		return `reading it failed with ${errorMessage(e)}, so it was emptied`;
 	}
 }
 function rewrite(path, kind, readFile, replaceFile) {
@@ -73745,7 +73745,7 @@ async function runSandboxStep(env, overrides = {}) {
 	} finally {
 		putRunnerFileRight(env, "GITHUB_OUTPUT", annotation, (path) => {
 			let unreadable = rewriteOutputFile(path);
-			return unreadable && `was rewritten without what the runner could not read (${unreadable})`;
+			return unreadable && `was rewritten without what the runner could not read: ${unreadable}`;
 		}), putRunnerFileRight(env, "GITHUB_STEP_SUMMARY", annotation, (path) => replaceIfNotRegularFile(path) ? "held something other than a regular file, now replaced with an empty one" : void 0);
 		for (let set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) try {
 			set("");

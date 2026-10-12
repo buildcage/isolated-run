@@ -119,7 +119,7 @@ describe("rewriteOutputFile", () => {
         },
         replaceFile: (_, t) => written.push(t),
       }),
-    ).toBe("it could not be read (EIO)");
+    ).toBe("reading it failed with EIO, so it was emptied");
     expect(written).toStrictEqual([""]);
   });
 

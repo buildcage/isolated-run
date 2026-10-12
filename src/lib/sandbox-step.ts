@@ -520,7 +520,7 @@ export async function runSandboxStep(
     // $GITHUB_STEP_SUMMARY, which the command can have replaced too.
     putRunnerFileRight(env, "GITHUB_OUTPUT", annotation, (path) => {
       const unreadable = rewriteOutputFile(path);
-      return unreadable && `was rewritten without what the runner could not read (${unreadable})`;
+      return unreadable && `was rewritten without what the runner could not read: ${unreadable}`;
     });
     putRunnerFileRight(env, "GITHUB_STEP_SUMMARY", annotation, (path) =>
       replaceIfNotRegularFile(path)
