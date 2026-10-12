@@ -1068,13 +1068,10 @@ jobs:
           fi
           echo "OK: every step's use ended, and Chrome's database was kept without the slot"
 
-  # The AWS access key check against the real STS, through the AWS CLI the
-  # runner ships: test-integration.yml covers its rules against a fixture
-  # origin, which cannot show that a real client's requests and STS's real
-  # answers still take the shape the check reads. A job of its own so that
-  # only it gets an OIDC token. It runs only in this repository, whose
-  # environment holds the roles: a fork's pull request gets no token, and a
-  # fork's own runs have no roles to assume.
+  # The AWS access key check against the real STS, which a fixture origin
+  # cannot stand in for: the check depends on the shape of real clients'
+  # requests and STS's answers. A job of its own so only it gets an OIDC
+  # token, and only in this repository, whose environment holds the roles.
   test_sandbox_aws_key_check:
     needs: changes
     if: ${{ !cancelled() && github.repository == 'buildcage/isolated-run' && (github.event_name != 'pull_request' || (needs.changes.outputs.test_sandbox == 'true' && github.event.pull_request.head.repo.full_name == github.repository)) }}
@@ -1124,7 +1121,7 @@ jobs:
           echo "role=$(account "$ROLE_ARN")" >> "$GITHUB_OUTPUT"
           echo "switched=$(account "$SWITCHED_ROLE_ARN")" >> "$GITHUB_OUTPUT"
 
-      # Fetched here, as the step's command has no way to ask GitHub for one.
+      # The step's command cannot request one from GitHub.
       - name: Get a web identity token for the step to exchange
         run: |
           curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
@@ -1145,7 +1142,7 @@ jobs:
             POST https://sts.us-east-1.amazonaws.com/
           aws_key_check: true
           allowed_aws_role_accounts: ${{ steps.accounts.outputs.role }},${{ steps.accounts.outputs.switched }}
-          # The refusal below is expected, not a failure.
+          # The refusal below is expected.
           fail_on_blocked: false
           upload_traffic_artifact: true
           traffic_artifact_retention_days: 1
@@ -1263,8 +1260,7 @@ jobs:
           '
 
       # No account named: the switched role's key is one restrict would refuse,
-      # and the report names its account for the workflow to check. Run even
-      # when a restrict-mode check failed, so both report what they found.
+      # and the report names its account for the workflow to check.
       - name: Call STS with the AWS access key check in audit mode
         id: audit
         if: ${{ !cancelled() && steps.accounts.outcome == 'success' }}
