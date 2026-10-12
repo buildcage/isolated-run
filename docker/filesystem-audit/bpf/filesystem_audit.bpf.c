@@ -85,6 +85,34 @@ int BPF_PROG(on_task_exit, struct task_struct *p)
 	return 0;
 }
 
+#define SYS_SECCOMP 1
+#define X32_SYSCALL_BIT 0x40000000
+
+/**
+ * seccomp kills a process's last thread for a 32-bit or x32 syscall, which
+ * the audit's profile allows none of, with a SIGSYS to that thread naming the
+ * syscall it is making and its architecture. A native one comes from a filter
+ * of the step's own, and one naming another call was queued by the process
+ * itself; one naming the queuing call itself still passes, adding a record
+ * only about that process. A thread killed while others live on gets no
+ * signal, and is not recorded.
+ */
+SEC("tp_btf/signal_generate")
+int BPF_PROG(on_signal, int sig, struct kernel_siginfo *info, struct task_struct *task)
+{
+	if (sig != SIGSYS || (unsigned long)info <= 2 || !in_target())
+		return 0;
+	if (task != bpf_get_current_task_btf() || BPF_CORE_READ(info, si_code) != SYS_SECCOMP)
+		return 0;
+	long nr = BPF_CORE_READ(info, _sifields._sigsys._syscall);
+	if (nr != sys_nr((struct pt_regs *)bpf_task_pt_regs(task)))
+		return 0;
+	if (BPF_CORE_READ(info, _sifields._sigsys._arch) != (u32)native_arch ||
+	    (nr & X32_SYSCALL_BIT))
+		syscall_refused(slot, nr, 1);
+	return 0;
+}
+
 SEC("tp_btf/sched_process_exec")
 int BPF_PROG(on_exec, struct task_struct *p, int old_pid, struct linux_binprm *bprm)
 {
@@ -527,6 +555,7 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	int watched = classify(nr, regs, &call);
 	struct held_key k = held_key(HELD_OP);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
+	int held = head != 0;
 	if (head) {
 		u32 t = tails_for(head->data_len);
 		if (!is_restart(ret) && (ret >= 0 || !watched))
@@ -537,6 +566,8 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 		op_exit(slot, &call, ret);
 	if (is_open_nr(nr))
 		open_returned(slot, regs, nr, ret);
+	else if (ret == -EPERM && !watched && !held && is_refusable(nr))
+		syscall_refused(slot, nr, 0);
 	return 0;
 }
 

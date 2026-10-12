@@ -45,6 +45,18 @@ struct proc {
 	u32 pad;
 };
 
+/** The program the current task runs. */
+static __always_inline struct proc current_proc(void)
+{
+	struct task_struct *t = bpf_get_current_task_btf();
+	struct proc me = {
+		.start = BPF_CORE_READ(t, group_leader, start_time),
+		.exec = BPF_CORE_READ(t, group_leader, self_exec_id),
+		.tgid = bpf_get_current_pid_tgid() >> 32,
+	};
+	return me;
+}
+
 struct seen {
 	u64 gen;	  ///< when the entry was made, so a reused address is a new file
 	struct proc owner; ///< the first process to use the file
@@ -130,12 +142,7 @@ static __always_inline int first_time(struct file *file, u8 bit)
 	struct seen *v = bpf_map_lookup_elem(&seen_files, &key);
 	if (v && v->once)
 		return set_first(&v->bits, bit);
-	struct task_struct *t = bpf_get_current_task_btf();
-	struct proc me = {
-		.start = BPF_CORE_READ(t, group_leader, start_time),
-		.exec = BPF_CORE_READ(t, group_leader, self_exec_id),
-		.tgid = bpf_get_current_pid_tgid() >> 32,
-	};
+	struct proc me = current_proc();
 	if (!v) {
 		struct seen s;
 		__builtin_memset(&s, 0, sizeof(s));

@@ -22,4 +22,5 @@ var syscallNumbers = map[string]int64{
 	"nr_truncate":  unix.SYS_TRUNCATE,
 	"nr_openat":    unix.SYS_OPENAT,
 	"nr_openat2":   unix.SYS_OPENAT2,
+	"native_arch":  unix.AUDIT_ARCH_AARCH64,
 }

@@ -35,6 +35,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+//go:generate go run ./cmd/gensyscallnames
+
 // -mcpu=v3 for the fetch-and-add that takes tails; every kernel the tracer
 // runs on has it.
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cflags -mcpu=v3 -type event filesystemAudit bpf/filesystem_audit.bpf.c
@@ -62,6 +64,7 @@ func main() {
 	ready := flag.String("ready", "", "file to create once the programs are attached")
 	pidfile := flag.String("pidfile", "", "file to write this process's pid to, for the caller to stop it")
 	watchPid := flag.Int("watch-pid", 0, "process whose exit stops the tracer, as a signal would")
+	allowed := flag.String("allowed-syscalls", "", "comma-separated syscalls the sandbox's seccomp profile allows outright; any other failing EPERM is recorded as refused")
 	flag.Parse()
 	if *cgPath == "" || *out == "" {
 		flag.Usage()
@@ -70,14 +73,14 @@ func main() {
 	// stderr is a pipe the action reads; once the action is gone, a write to
 	// it must fail rather than kill the tracer before it flushes the record.
 	signal.Ignore(syscall.SIGPIPE)
-	if err := run(*cgPath, *out, *ready, *pidfile, *watchPid); err != nil {
+	if err := run(*cgPath, *out, *ready, *pidfile, *watchPid, *allowed); err != nil {
 		// The action reports the "fatal:" line as the reason the step failed.
 		fmt.Fprintln(os.Stderr, "filesystem-audit: fatal:", err)
 		os.Exit(1)
 	}
 }
 
-func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
+func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscalls string) error {
 	// Set up before loading, which takes a while, so an action that dies or
 	// stops the tracer meanwhile does not leave it recording.
 	sig := make(chan os.Signal, 1)
@@ -147,6 +150,9 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int) error {
 	// Before attaching: an empty slot matches no task.
 	if err := coll.Maps["target"].Put(uint32(0), uint32(cg.Fd())); err != nil {
 		return fmt.Errorf("set watched cgroup: %w", err)
+	}
+	if err := markRefusable(coll.Maps["refusable"], allowedSyscalls); err != nil {
+		return err
 	}
 
 	if stopRequested(sig) {
@@ -358,6 +364,28 @@ func setSyscallNumbers(spec *ebpf.CollectionSpec) error {
 		}
 		if err := v.Set(nr); err != nil {
 			return fmt.Errorf("set %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// markRefusable marks each native syscall the sandbox's seccomp profile does
+// not allow outright, given the comma-separated names it does; with none
+// given, no refusal is recorded.
+func markRefusable(m *ebpf.Map, allowed string) error {
+	if allowed == "" {
+		return nil
+	}
+	ok := map[string]bool{}
+	for _, name := range strings.Split(allowed, ",") {
+		ok[name] = true
+	}
+	for nr, name := range syscallNames {
+		if ok[name] || nr < 0 || nr >= int64(m.MaxEntries()) {
+			continue
+		}
+		if err := m.Put(uint32(nr), uint8(1)); err != nil {
+			return fmt.Errorf("mark %s refusable: %w", name, err)
 		}
 	}
 	return nil

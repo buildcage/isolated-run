@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -44,6 +45,12 @@ type record struct {
 	Deleted bool `json:"deleted,omitempty"`
 	// Exchange marks a rename that swapped Path and To (RENAME_EXCHANGE).
 	Exchange bool `json:"exchange,omitempty"`
+	// Syscall names a refused syscall, or gives its number where the tracer
+	// has no name for it; Compat marks one of the 32-bit ABI, and Killed one
+	// seccomp killed the program for.
+	Syscall string `json:"syscall,omitempty"`
+	Compat  bool   `json:"compat,omitempty"`
+	Killed  bool   `json:"killed,omitempty"`
 	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the reader
 	// turns it into Time.
 	boot uint64
@@ -78,9 +85,12 @@ func (r record) MarshalJSON() ([]byte, error) {
 		Memfd    bool    `json:"memfd,omitempty"`
 		Deleted  bool    `json:"deleted,omitempty"`
 		Exchange bool    `json:"exchange,omitempty"`
+		Syscall  string  `json:"syscall,omitempty"`
+		Compat   bool    `json:"compat,omitempty"`
+		Killed   bool    `json:"killed,omitempty"`
 	}{r.Time, r.Kind, r.PID, r.PPID, rawName(r.Comm), rawName(r.Path), rawName(r.Name),
 		rawName(r.To), rawName(r.ToName), r.Access, r.Flags, r.Mode, r.Owner, r.Err,
-		r.Failed, r.Image, r.Memfd, r.Deleted, r.Exchange})
+		r.Failed, r.Image, r.Memfd, r.Deleted, r.Exchange, r.Syscall, r.Compat, r.Killed})
 }
 
 // rawName is a file or process name as the kernel holds it: bytes, not
@@ -127,6 +137,7 @@ var kindNames = map[uint32]string{
 	16: "unlink", 17: "rename", 18: "chmod", 19: "chown", 20: "attr", 21: "attr",
 	22: "fork", 23: "exec-file", 24: "mknod", 25: "rmdir",
 	26: "mkdir", 27: "mknod", 28: "symlink", 29: "link", 30: "truncate",
+	31: "syscall",
 }
 
 // Mirrors the fixed header of struct event in bpf/event.h:
@@ -404,6 +415,13 @@ func decode(raw []byte) (record, error) {
 		}
 		r.Err = pathRet
 		r.Failed = true
+	case 31: // a refused syscall
+		r.Killed = mode == 1
+		// Under the audit, seccomp kills only a 32-bit syscall.
+		r.Compat = r.Killed
+		r.Syscall = syscallName(int64(flags), r.Compat)
+		r.Err = pathRet
+		r.Failed = true
 	case 20: // attr via utimes / setxattr
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 	case 21: // failed attr via utimes / setxattr
@@ -465,4 +483,22 @@ func mmapAccess(prot, flags uint32) string {
 	default:
 		return "r"
 	}
+}
+
+// x32SyscallBit marks an x32 syscall, numbered as the native one it shares.
+const x32SyscallBit = 0x40000000
+
+// syscallName is the name of syscall nr, of the 32-bit ABI when compat, or
+// its number where the table has none.
+func syscallName(nr int64, compat bool) string {
+	names := syscallNames
+	if compat && nr&x32SyscallBit != 0 {
+		nr &^= x32SyscallBit
+	} else if compat {
+		names = compatSyscallNames
+	}
+	if n, ok := names[nr]; ok {
+		return n
+	}
+	return strconv.FormatInt(nr, 10)
 }

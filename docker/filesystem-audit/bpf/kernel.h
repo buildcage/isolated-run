@@ -107,6 +107,20 @@ struct task_struct {
 	struct nsproxy *nsproxy;
 } __attribute__((preserve_access_index));
 
+/** The fields of the SIGSYS seccomp sends, with si_code SYS_SECCOMP. */
+struct kernel_siginfo {
+	int si_signo;
+	int si_errno;
+	int si_code;
+	union {
+		struct {
+			void *_call_addr;
+			int _syscall;
+			unsigned int _arch;
+		} _sigsys;
+	} _sifields;
+} __attribute__((preserve_access_index));
+
 struct filename {
 	const char *name;
 } __attribute__((preserve_access_index));

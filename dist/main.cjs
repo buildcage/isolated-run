@@ -68476,9 +68476,12 @@ function canonical(path, prefixes) {
 	}
 	return path;
 }
-function codeCell(text) {
+function codeSpan(text) {
 	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
-	return `${fence}${pad}${text.replace(/\|/g, "\\|")}${pad}${fence}`;
+	return `${fence}${pad}${text}${pad}${fence}`;
+}
+function codeCell(text) {
+	return codeSpan(text.replace(/\|/g, "\\|"));
 }
 function pathCell({ path, deleted }) {
 	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
@@ -68664,6 +68667,20 @@ function fmtFlags(a) {
 	return out;
 }
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "\n### 🗂️ Filesystem audit";
+function refusedNote(rows) {
+	let byName = new Map(), killed = new Set(), anyKilled = !1;
+	for (let { syscall, comm } of inRecordingOrder(rows)) {
+		anyKilled ||= syscall.killed;
+		let comms = syscall.killed ? killed : byName.get(syscall.name) ?? new Set();
+		syscall.killed || byName.set(syscall.name, comms), comm && comms.add(comm);
+	}
+	let list = (items, shown) => items.slice(0, shown).join(", ") + (items.length > shown ? ` and ${items.length - shown} more` : ""), comms = (c) => list([...c].map(codeSpan), 3), names = [...byName].map(([name, c]) => codeSpan(name) + (c.size ? ` (${comms(c)})` : "")), parts = [];
+	if (names.length && parts.push(`Refused system calls: ${list(names, 10)}`), anyKilled) {
+		let by = killed.size ? `: ${comms(killed)}` : "";
+		parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call${by}`);
+	}
+	return `> ${parts.join("; ")}.`;
+}
 function skippedNote(count, url) {
 	let why = url ? ` [Why](${url})` : "";
 	return `> ⚠️ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
@@ -68725,12 +68742,30 @@ function createAuditSummary(prefixes) {
 		limit,
 		nodes: limits.nodes,
 		rowBytes: (p, comm) => relLength(p) + comm.length + 3
-	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), add = (r, counted = !0) => {
+	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (counted) {
 			if (r.kind === "end") {
 				ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = typeof r.host_missed == "number" ? r.host_missed : 0;
+				return;
+			}
+			if (r.kind === "syscall") {
+				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
+				if (!row) {
+					if (refused.size >= 200 && !r.killed) return;
+					row = {
+						agg: newAgg(),
+						flags: "!",
+						comm,
+						path,
+						syscall: {
+							name,
+							killed: !!r.killed
+						}
+					}, refused.set(key, row);
+				}
+				Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
 				return;
 			}
 			if (r.kind === "exec" && r.path) {
@@ -68786,6 +68821,7 @@ function createAuditSummary(prefixes) {
 				})),
 				paths: byPath,
 				details: log,
+				refused: [...refused.values()],
 				pathsCut: paths.stopped,
 				detailsCut: details.stopped
 			};
@@ -68799,10 +68835,11 @@ function inRecordingOrder(rows) {
 	});
 }
 function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legendNote, skippedHooksUrl) {
-	let { ended, lost, hostMissed, executed, paths, details, pathsCut, detailsCut } = summary, heading = [
+	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut, detailsCut } = summary, heading = [
 		HEADING,
 		...ended && !lost ? [] : ["> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
-		...hostMissed ? [skippedNote(hostMissed, skippedHooksUrl)] : []
+		...hostMissed ? [skippedNote(hostMissed, skippedHooksUrl)] : [],
+		...refused.length ? [refusedNote(refused)] : []
 	].join("\n\n"), frame = (text) => ({
 		priority: 0,
 		level: 1,
@@ -68810,7 +68847,7 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		text,
 		cut: "keep"
 	});
-	if (details?.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
+	if (details?.length === 0 && !refused.length) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
 	let blocks = [frame(legendNote ? `${heading}\n\n<sub>${legendNote}</sub>\n\n` : `${heading}\n\n`)], table = (id, level, title, md, cause, legend) => md === void 0 ? {
 		id,
 		priority: priorities[id],
@@ -68846,7 +68883,7 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		text: cutNote(detailsCut),
 		close: DETAILS_CLOSE
 	}), blocks;
-	let rows = inRecordingOrder(details), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), columns = [
+	let rows = inRecordingOrder([...details, ...refused]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), commW = rows.reduce((m, r) => Math.max(m, r.comm.length), 0), columns = [
 		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
 		"flags",
 		"command",
@@ -70341,6 +70378,10 @@ function withoutCompatSyscalls(profile, arch = process.arch) {
 		architectures: p.architectures.filter((a) => a === native)
 	};
 }
+function allowedSyscalls(profile) {
+	let p = profile;
+	return !p || !Array.isArray(p.syscalls) ? [] : p.syscalls.flatMap((s) => s.action === "SCMP_ACT_ALLOW" && Array.isArray(s.names) ? s.names.filter((n) => typeof n == "string") : []);
+}
 function checkFilesystemAuditHost(probes = realHostProbes) {
 	if (probes.cgroupPath() === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
 	if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
@@ -70420,7 +70461,7 @@ function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = n
 		hostPath: tracerPath
 	})), chmod(tracerPath, 493), tracerPath;
 }
-async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath, watchPid, cancel }, deps = {}) {
+async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath, watchPid, allowedSyscalls, cancel }, deps = {}) {
 	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2, readTail = defaultReadTail } = deps, child = spawn("sudo", [
 		"-n",
 		"--",
@@ -70434,7 +70475,9 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 		"--ready",
 		readyPath,
 		"--watch-pid",
-		String(watchPid)
+		String(watchPid),
+		"--allowed-syscalls",
+		allowedSyscalls.join(",")
 	]), exited = !1;
 	child.exited.then(() => {
 		exited = !0;
@@ -72417,6 +72460,7 @@ async function startAudit(dir, config, options, deps) {
 		pidFilePath: filesystemAudit.pidFilePath,
 		readyPath: (0, node_path.join)(dir, "filesystem-audit.ready"),
 		watchPid: process.pid,
+		allowedSyscalls: allowedSyscalls(config.linux.seccomp),
 		cancel: options.cancel
 	});
 	return options.onAuditAttached?.(), handle;

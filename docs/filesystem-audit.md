@@ -78,7 +78,8 @@ A host that falls short fails the step before the command runs, with the reason;
 - **No 32-bit programs.** The tracer reads only the native 64-bit system calls, so with the audit on
   the sandbox refuses one through a 32-bit ABI, from an i386 or ARM32 program or `int 0x80`: the
   kernel kills the thread that made it with `SIGSYS`. A single-threaded program dies, and a shell
-  reports it as `Bad system call`. Run such a program in a step without the audit.
+  reports it as `Bad system call`, and the record names the call. Run such a program in a step
+  without the audit.
 - **Cost to the whole host.** While the step runs, the tracer's hooks run on every system call and
   every file read or write on the runner host, not only the step's, since a hook has to run to tell
   whose call it is. That adds roughly 60 nanoseconds to each system call of every process on the
@@ -134,6 +135,7 @@ like the traffic artifact.
 
 ```
 ### 🗂️ Filesystem audit
+> Refused system calls: io_uring_setup (node).
 ./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
 buildcage-filesystem-audit-<id> artifact · how to read this
 
@@ -155,6 +157,7 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 📂 Filesystem details
 first-last access since the proxy started · flags · command · path
 00:00.401-00:00.420: Xw! node /usr/local/bin/node
+00:00.402:           !   node syscall:io_uring_setup
 00:00.412:           R   node ./package.json
 00:00.415-00:00.418: Rr! node /etc/**
 00:00.530-00:41.207: RWD node ./node_modules/**
@@ -174,6 +177,14 @@ that only ran programs has no accessed paths table, and the flag legend opens th
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
   that command first and last touched the path, counted from the proxy's start like the
   communication details, or from the first access if that start is unknown.
+- A **refused system call** is one the sandbox's seccomp profile does not allow, such as
+  `io_uring_setup` or `unshare`, which fails with `EPERM`. The note under the heading names each one
+  with the first commands that made it, and the details, where they fit, show it once per program,
+  as `syscall:io_uring_setup` with `!`. One already recorded as a failed change to a path is not
+  repeated, and one the profile allows only for some arguments, as `clone`, is not recorded even
+  when refused, since the kernel's own `EPERM` for it would read the same. A program killed for a
+  32-bit system call shows as `syscall:32-bit <name> (killed)`; a thread killed while others run on
+  is not recorded.
 
 ### Flags
 
@@ -284,7 +295,7 @@ Unlike the summary, it also lists a directory that was made and then written und
 | `pid`      | every line but `end`                           | the process, as the runner host numbers it                                                                                                           |
 | `ppid`     | every line but `end`                           | its parent at the time; on `fork`, the process that made it                                                                                          |
 | `comm`     | every line but `end`                           | the name the process gave itself, up to 15 bytes                                                                                                     |
-| `path`     | all but `fork`, `end`                          | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path |
+| `path`     | all but `fork`, `syscall`, `end`               | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path |
 | `to`       | `rename`, `link`, `symlink`                    | the new name; on `symlink`, the link's contents as written, absent on a failed one                                                                   |
 | `name`     | where it differs from `path`, and every `exec` | the name the command passed; on `exec`, the name it was run by                                                                                       |
 | `to_name`  | where it differs from `to`                     | as `name`, for `to`                                                                                                                                  |
@@ -298,6 +309,9 @@ Unlike the summary, it also lists a directory that was made and then written und
 | `memfd`    | a file in memory only                          | `path` is `memfd:` and the name its creator chose                                                                                                    |
 | `deleted`  | a deleted or never-named file                  | a file deleted while it was open, or created without a name and never given one                                                                      |
 | `exchange` | `rename`                                       | a swap of two paths, which shows `M` on both in the summary                                                                                          |
+| `syscall`  | `syscall`                                      | the system call's name, or its number where the tracer has no name for it                                                                            |
+| `compat`   | `syscall`                                      | a 32-bit or x32 system call                                                                                                                          |
+| `killed`   | `syscall`                                      | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                    |
 
 A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted` and `exchange`
 are absent rather than `false`.
@@ -335,6 +349,7 @@ failing can show as an `open` with `x`.
 | `mkdir`, `mknod`, `symlink`, `truncate` | a directory, a special file or Unix socket, or a symlink made; or a file cut to size                                                                                                                                                                                                                                | `W`                                                          |
 | `link`                                  | a hard link made from `path` to `to`. One across mounts, such as from `$HOME` into the workspace, fails (`EXDEV`). A refused one marks `to` refused, except on `EPERM`, which marks `path`, as `EPERM` mostly comes from `protected_hardlinks` refusing a file the step does not own and cannot both read and write | `W` on `to`, `L` on `path` unless it is `deleted` or `memfd` |
 | `chmod`, `chown`, `attr`                | a mode, an owner, or times or extended attributes changed                                                                                                                                                                                                                                                           | `A`                                                          |
+| `syscall`                               | a system call the sandbox's seccomp profile refused, once per program, unless recorded as a failed path change; or a 32-bit one seccomp killed the program for                                                                                                                                                      | `!` in the details                                           |
 | `end`                                   | the last line; see below                                                                                                                                                                                                                                                                                            | none                                                         |
 
 ### Access letters
@@ -443,7 +458,8 @@ kernel offers that mode.
   name already there, and one made by `bind(2)` that the kernel refuses before reaching its file.
 - The sandbox's own setup, and the step's shell reading its script.
 
-io_uring is not among them: the sandbox refuses `io_uring_setup`, so no access goes through it.
+io_uring is not among them: the sandbox refuses `io_uring_setup`, so no access goes through it, and
+the refusal is recorded as a `syscall`.
 
 [Filesystem audit](./security.md#filesystem-audit) in the security details covers what the step
 itself can do to the record, and what the record can be trusted for.
