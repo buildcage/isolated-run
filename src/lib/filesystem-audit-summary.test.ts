@@ -443,9 +443,62 @@ describe("renderFilesystemAuditSummary", () => {
     const md = render(
       { kind: "open", failed: true, comm: "c", path: "/work/d", err: 13 },
       { kind: "open", failed: true, comm: "c", path: "/work/d/x", err: 13 },
-      { kind: "read", comm: "c", path: "/work/d/y" },
     );
-    expect(lines(md)).toEqual(["r! c ./d", "r! c ./d/x", "R c ./d/y"]);
+    expect(lines(md)).toEqual(["r! c ./d", "r! c ./d/x"]);
+  });
+
+  it("counts a directory's own line toward a fold where it prints", () => {
+    // Made, written into, then listed: its own line prints for the read.
+    const listed = render(
+      { kind: "mkdir", comm: "npm", path: "/home/u/.npm/_logs" },
+      { kind: "write", comm: "npm", path: "/home/u/.npm/_logs/1.log" },
+      { kind: "read", comm: "npm", path: "/home/u/.npm/_logs" },
+      { kind: "write", comm: "npm", path: "/home/u/.npm/_logs/2.log" },
+    );
+    expect(lines(listed)).toEqual(["RW npm ~/.npm/_logs/**"]);
+    // Its own line arriving last folds it too.
+    const late = render(
+      { kind: "write", comm: "npm", path: "/home/u/.npm/_logs/1.log" },
+      { kind: "write", comm: "npm", path: "/home/u/.npm/_logs/2.log" },
+      { kind: "read", comm: "npm", path: "/home/u/.npm/_logs" },
+    );
+    expect(lines(late)).toEqual(["RW npm ~/.npm/_logs/**"]);
+    // Made and written into only: its line is the walk to them, so it does not count.
+    const walked = render(
+      { kind: "mkdir", comm: "c", path: "/work/dist" },
+      { kind: "write", comm: "c", path: "/work/dist/a" },
+      { kind: "write", comm: "c", path: "/work/dist/b" },
+    );
+    expect(lines(walked)).toEqual(["W c ./dist/a", "W c ./dist/b"]);
+    // Nor once a later access below makes it the walk: the order does not matter.
+    const read = { kind: "read", comm: "c", path: "/work/d" };
+    const writeA = { kind: "write", comm: "c", path: "/work/d/a" };
+    const writeB = { kind: "write", comm: "c", path: "/work/d/b" };
+    const readA = { kind: "read", comm: "c", path: "/work/d/a" };
+    expect(lines(render(read, writeA, writeB, readA))).toEqual(["RW c ./d/a", "W c ./d/b"]);
+    expect(lines(render(readA, writeA, writeB, read))).toEqual(["RW c ./d/a", "W c ./d/b"]);
+    // Folded with what it holds, a directory folded already among it.
+    expect(
+      lines(
+        render(
+          { kind: "read", comm: "c", path: "/work/d" },
+          { kind: "write", comm: "c", path: "/work/d/s/1" },
+          { kind: "write", comm: "c", path: "/work/d/s/2" },
+          { kind: "write", comm: "c", path: "/work/d/s/3" },
+          { kind: "write", comm: "c", path: "/work/d/e" },
+        ),
+      ),
+    ).toEqual(["RW c ./d/**"]);
+    // A refused open of it always prints, so it counts even with its flag below.
+    expect(
+      lines(
+        render(
+          { kind: "open", failed: true, comm: "c", path: "/work/d", err: 13 },
+          { kind: "open", failed: true, comm: "c", path: "/work/d/x", err: 13 },
+          { kind: "read", comm: "c", path: "/work/d/y" },
+        ),
+      ),
+    ).toEqual(["Rr! c ./d/**"]);
   });
 
   it("still drops a directory read whose only lines below are misses", () => {

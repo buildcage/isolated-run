@@ -40,9 +40,7 @@
 | a! | `./root-owned.txt` |
 | w! | `./root-owned/x` |
 | W | `./shared.txt` |
-| W | `./sub` |
-| d | `./sub/gone` |
-| r | `./sub/missing.txt` |
+| Wrd | `./sub/**` |
 | WA | `./subshell.txt` |
 | W | `/dev/null` |
 | rw | `/dev/tty` |

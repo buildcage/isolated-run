@@ -68535,7 +68535,7 @@ function walkedNodes(top) {
 	}
 	return walked;
 }
-function* treeLines(top) {
+function* treeLines(top, fanout) {
 	let walked = walkedNodes(top), pathTo = (e) => {
 		let parts = [];
 		for (let at = e; at; at = at.up) parts.push(at.part);
@@ -68545,14 +68545,28 @@ function* treeLines(top) {
 		part
 	}));
 	for (; stack.length > 0;) {
-		let e = stack.pop(), { folded, own, kids } = e.node;
-		folded && flagBits(folded) && (yield [`${pathTo(e)}/**`, folded]), own && flagBits(own) && !walked.has(e.node) && (yield [pathTo(e), own]);
+		let e = stack.pop(), { folded, own, kids, kept } = e.node;
+		folded && flagBits(folded) && (yield [`${pathTo(e)}/**`, folded]);
+		let ownLine = own && flagBits(own) && !walked.has(e.node) ? own : void 0;
+		if (kids?.size && !kept && kids.size + +!!ownLine >= fanout) {
+			yield [`${pathTo(e)}/**`, treeAgg(e.node)];
+			continue;
+		}
+		ownLine && (yield [pathTo(e), ownLine]);
 		for (let [part, node] of [...kids ?? []].reverse()) stack.push({
 			node,
 			part,
 			up: e
 		});
 	}
+}
+function treeAgg(node) {
+	let agg = newAgg(), stack = [node];
+	for (; stack.length > 0;) {
+		let n = stack.pop();
+		n.own && mergeAgg(agg, n.own), n.folded && mergeAgg(agg, n.folded), stack.push(...n.kids?.values() ?? []);
+	}
+	return agg;
 }
 var Lines = class {
 	trees = new Map();
@@ -68628,7 +68642,7 @@ var Lines = class {
 		return out;
 	}
 	*lines() {
-		for (let [comm, top] of this.trees) for (let [path, agg] of treeLines(top)) {
+		for (let [comm, top] of this.trees) for (let [path, agg] of treeLines(top, this.opts.fanout)) {
 			let ran = this.climbing.get(keyOf(comm, path));
 			ran ? mergeAgg(ran, agg) : yield {
 				comm,

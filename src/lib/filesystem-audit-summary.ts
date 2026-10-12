@@ -365,7 +365,7 @@ function walkedNodes(top: Map<string, Node>): Set<Node> {
 // Every line of a tree that prints, with its path, but walked directories.
 // Each node links to its parent's entry, so only a printed line's path is
 // ever spelled out.
-function* treeLines(top: Map<string, Node>): Generator<[string, Agg]> {
+function* treeLines(top: Map<string, Node>, fanout: number): Generator<[string, Agg]> {
   interface Entry {
     node: Node;
     part: string;
@@ -381,11 +381,31 @@ function* treeLines(top: Map<string, Node>): Generator<[string, Agg]> {
   const stack: Entry[] = [...top].reverse().map(([part, node]) => ({ node, part }));
   while (stack.length > 0) {
     const e = stack.pop()!;
-    const { folded, own, kids } = e.node;
+    const { folded, own, kids, kept } = e.node;
     if (folded && flagBits(folded)) yield [`${pathTo(e)}/**`, folded];
-    if (own && flagBits(own) && !walked.has(e.node)) yield [pathTo(e), own];
+    const ownLine = own && flagBits(own) && !walked.has(e.node) ? own : undefined;
+    // Its own line counts toward a fold too. Whether that line prints can
+    // change until every access is in, so this fold waits for them.
+    if (kids?.size && !kept && kids.size + (ownLine ? 1 : 0) >= fanout) {
+      yield [`${pathTo(e)}/**`, treeAgg(e.node)];
+      continue;
+    }
+    if (ownLine) yield [pathTo(e), ownLine];
     for (const [part, node] of [...(kids ?? [])].reverse()) stack.push({ node, part, up: e });
   }
+}
+
+// The accesses of a node and everything below it, as one "node/**" line.
+function treeAgg(node: Node): Agg {
+  const agg = newAgg();
+  const stack = [node];
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    if (n.own) mergeAgg(agg, n.own);
+    if (n.folded) mergeAgg(agg, n.folded);
+    stack.push(...(n.kids?.values() ?? []));
+  }
+  return agg;
 }
 
 /**
@@ -587,7 +607,7 @@ class Lines {
 
   private *lines(): Generator<{ comm: string; path: string; agg: Agg }> {
     for (const [comm, top] of this.trees)
-      for (const [path, agg] of treeLines(top)) {
+      for (const [path, agg] of treeLines(top, this.opts.fanout)) {
         // A command that also ran the file keeps one row for it.
         const ran = this.climbing.get(keyOf(comm, path));
         if (ran) mergeAgg(ran, agg);
