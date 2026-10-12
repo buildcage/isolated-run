@@ -22,15 +22,13 @@ import {
   setFilesystemAuditOutput,
   uploadFilesystemAuditArtifact,
 } from "./filesystem-audit-artifact.ts";
-import { createStripper } from "./filesystem-audit-strip.ts";
+import { reduceRecording, type ReducedRecording } from "./filesystem-audit-reduce.ts";
 import {
   createAuditSummary,
   filesystemLegendNote,
   filesystemTruncationNote,
-  parseLine,
   renderAuditSummaryBlocks,
   unreadableSummaryBlocks,
-  type AuditSummary,
   type CutCause,
   type RecordArtifact,
   type SummaryOptions,
@@ -276,19 +274,12 @@ export async function prepareStepFilesystemAudit(
   }
 }
 
-interface Reduced {
-  /** Undefined when reducing failed, for summaryError. */
-  summary: AuditSummary | undefined;
-  summaryError?: unknown;
+interface Reduced extends ReducedRecording {
   /** False when the copy holds nothing or could not be written. */
   written: boolean;
 }
 
-// Reads the recording twice, a line at a time: first to find buildcage's own
-// machinery and what each process loaded, then to write the step's lines to
-// the stripped copy and reduce them to the summary. Undefined when there is no
-// recording; throws when it cannot be read. A summary that fails is reported
-// on its own, so it never costs the artifact.
+// Undefined when there is no recording; throws when it cannot be read.
 function reduce(
   outPath: string,
   /** Where to write the stripped copy to upload; undefined writes none. */
@@ -297,38 +288,6 @@ function reduce(
   annotation: Annotation,
   deps: FilesystemAuditReportDeps,
 ): Reduced | undefined {
-  // The recording sits under the scratch base (see sandbox/filesystem-audit.ts),
-  // next to the exec wrapper's own files, so its directory is the one holding
-  // buildcage's own machinery.
-  const stripper = createStripper(dirname(outPath));
-  const summary = deps.createSummary(options);
-  let summaryError: unknown;
-  let failedSummary = false;
-  const summarize = (step: () => void): void => {
-    if (failedSummary) return;
-    try {
-      step();
-    } catch (e) {
-      [failedSummary, summaryError] = [true, e];
-    }
-  };
-
-  let lines = 0;
-  let length = 0;
-  try {
-    deps.readLines(outPath, (line) => {
-      lines++;
-      length += line.length;
-      const r = parseLine(line);
-      stripper.observe(r);
-      summarize(() => summary.observe(r));
-    });
-  } catch (e) {
-    // The tracer never started, or something removed the file.
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw e;
-  }
-
   let writer: ReturnType<typeof openWriter> | undefined;
   let written = false;
   const dropCopy = (e: unknown): void => {
@@ -342,28 +301,43 @@ function reduce(
       // already reported
     }
   };
-  try {
-    if (cleanPath !== undefined) writer = deps.openWriter(cleanPath);
-  } catch (e) {
-    dropCopy(e);
-  }
-  let again = 0;
-  let lengthAgain = 0;
-  try {
-    deps.readLines(outPath, (line) => {
-      again++;
-      lengthAgain += line.length;
-      const r = parseLine(line);
-      const kept = stripper.filter(line, r);
-      summarize(() => summary.add(kept ? kept.record : r, kept !== undefined));
-      if (!kept || !writer) return;
+  const openSink = (): ((line: string) => void) => {
+    try {
+      if (cleanPath !== undefined) writer = deps.openWriter(cleanPath);
+    } catch (e) {
+      dropCopy(e);
+    }
+    return (line) => {
+      if (!writer) return;
       try {
-        writer.write(kept.line);
+        writer.write(line);
         written = true;
       } catch (e) {
         dropCopy(e);
       }
-    });
+    };
+  };
+
+  let readOnce = false;
+  let reduced: ReducedRecording;
+  try {
+    // The recording sits under the scratch base (see sandbox/filesystem-audit.ts),
+    // next to the exec wrapper's own files, so its directory is the one holding
+    // buildcage's own machinery.
+    reduced = reduceRecording(
+      (onLine) => {
+        deps.readLines(outPath, onLine);
+        readOnce = true;
+      },
+      dirname(outPath),
+      options,
+      openSink,
+      deps.createSummary,
+    );
+  } catch (e) {
+    // The tracer never started, or something removed the file.
+    if (!readOnce && (e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw e;
   } finally {
     const open = writer;
     writer = undefined;
@@ -373,14 +347,8 @@ function reduce(
       dropCopy(e);
     }
   }
-  // The tracer has stopped, so the two reads see the same lines, which the
-  // line positions the first pass found depend on.
-  if (again !== lines || lengthAgain !== length)
-    throw new Error("the recording changed while it was being read");
-
-  let result: AuditSummary | undefined;
-  summarize(() => (result = summary.finish()));
-  return { summary: result, summaryError, written };
+  // After the close, which can still drop the copy.
+  return { ...reduced, written };
 }
 
 // Debug-only mirror, matching writeReportSummary's: GITHUB_STEP_SUMMARY is

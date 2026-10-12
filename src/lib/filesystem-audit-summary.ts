@@ -8,7 +8,6 @@
 
 import { formatElapsedVariable } from "#core/lib/report/elapsed-time.ts";
 import {
-  joinSummaryBlocks,
   STEP_SUMMARY_LIMIT_BYTES,
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
@@ -699,7 +698,7 @@ const SECTION = "filesystem";
 const DETAILS_OPEN = "<details>\n<summary>🔍 Process details</summary>\n\n";
 const DETAILS_CLOSE = "</details>\n";
 
-/** The ids renderFilesystemAuditBlocks gives its blocks. */
+/** The ids renderAuditSummaryBlocks gives its blocks. */
 export const FILESYSTEM_BLOCK = {
   executed: "filesystem-executed",
   paths: "filesystem-paths",
@@ -710,11 +709,6 @@ export type FilesystemBlockId = (typeof FILESYSTEM_BLOCK)[keyof typeof FILESYSTE
 
 /** The priority of each block that can be cut; see SummaryBlock.priority. */
 export type FilesystemPriorities = Record<FilesystemBlockId, number>;
-
-// Joined whole, the summary never compares priorities.
-const JOINED = Object.fromEntries(
-  Object.values(FILESYSTEM_BLOCK).map((id) => [id, 0]),
-) as FilesystemPriorities;
 
 interface Limits {
   /** The Job Summary's size limit, past which a part is not printed. */
@@ -1166,20 +1160,6 @@ export function parseLine(line: string): unknown {
   }
 }
 
-/** The summary of a recording held as a string, as blocks. */
-export function renderFilesystemAuditBlocks(
-  jsonl: string,
-  prefixes: SummaryOptions,
-  priorities: FilesystemPriorities,
-  cutNote = (cause?: CutCause) => filesystemTruncationNote("upload-failed", cause),
-): SummaryBlock[] {
-  const summary = createAuditSummary(prefixes);
-  const records = jsonl.split("\n").map(parseLine);
-  for (const r of records) summary.observe(r);
-  for (const r of records) summary.add(r);
-  return renderAuditSummaryBlocks(summary.finish(), prefixes.startedAt, priorities, cutNote);
-}
-
 /** The summary of a recording that could not be read. */
 export function unreadableSummaryBlocks(): SummaryBlock[] {
   return [
@@ -1191,11 +1171,6 @@ export function unreadableSummaryBlocks(): SummaryBlock[] {
       cut: "keep",
     },
   ];
-}
-
-/** The summary as one string, with nothing cut. */
-export function renderFilesystemAuditSummary(jsonl: string, prefixes: SummaryOptions): string {
-  return joinSummaryBlocks(renderFilesystemAuditBlocks(jsonl, prefixes, JOINED));
 }
 
 /** The artifact the summary points the reader to, or why there is none. */

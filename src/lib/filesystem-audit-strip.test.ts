@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { stripSandboxMachinery } from "./filesystem-audit-strip.ts";
+import { stripSandboxMachinery } from "./test/filesystem-audit.ts";
 
 const BASE = "/var/tmp/buildcage-0";
 const RUN_SCRIPT = `${BASE}/sandbox-x/exec/run-script.sh`;

@@ -58,9 +58,11 @@ export default defineConfig({
         "**/*.test.ts",
         ...fixtures,
         "**/*.d.ts",
-        // Test scaffolding: the QuickJS shims and the QuickJS test runner.
+        // Test scaffolding: the QuickJS shims, the QuickJS test runner and the
+        // helpers tests share.
         "src/core/lib/test/**",
         "src/core/scripts/test/**",
+        "src/lib/test/**",
         // QuickJS entry points, which vitest cannot run. What they call is
         // measured where it lives.
         "**/*.qjs.ts",
