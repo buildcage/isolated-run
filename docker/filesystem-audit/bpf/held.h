@@ -5,7 +5,7 @@
  *
  * A path change's security_path_* hook runs before the kernel's own
  * permission checks (may_delete, may_create, notify_change), so whether it
- * happened is known only then; for an open, see open_begin(). held_test.c
+ * happened is known only then; for an open, see open_name(). held_test.c
  * builds this with the maps and helpers it uses replaced (HELD_MOCK_MAPS), so
  * its accounting runs without a kernel.
  */
@@ -29,7 +29,13 @@ static __always_inline int is_restart(long ret)
 }
 
 #define HELD_OP 1   ///< A path change, held from its security_path_* hook.
-#define HELD_OPEN 2 ///< An open(2), held from its entry.
+#define HELD_OPEN 2 ///< An open(2), held from its getname (see open_name()).
+
+/**
+ * The kind of an open hold whose open was recorded at its hook, as it could
+ * not be held, so its call records nothing more. No event has this kind.
+ */
+#define K_OPEN_RECORDED 0xffffffffu
 
 /** Where a held event's head, or one of its tails, is kept. */
 struct held_key {
@@ -424,89 +430,59 @@ static __always_inline void report_held(u32 slot, struct held_key *k, struct eve
 }
 
 /**
- * Starts holding an open(2) called with @p dfd and @p flags.
+ * Starts holding the open(2) the thread is in, from the @p name it was given,
+ * as the kernel copied it (getname_flags), not the user pointer, which the
+ * caller could rewrite before the syscall returns. When getname refused the
+ * name, as for one too long, @p user says @p name is the caller's own,
+ * best-effort as a failed path syscall's is.
  *
- * An open holds one event from its entry until it returns. A refused or
- * missing file never reaches security_file_open, so until then the event is
- * the failed open it would be (K_OPEN_FAILED): when the open was called, its
- * flags, and the name from the kernel's own copy (getname_flags), not the
- * user pointer, which the caller could rewrite before the syscall returns.
- * The file's own open method, an LSM or the FIFO checks can still refuse it
- * after that hook, so from there the event is the open (K_OPEN), reported as
- * done or refused once the syscall returns. bases, which neither record uses,
- * says whether the open reached its create step (see open_creating()); before
- * the hook, gid holds the descriptor a relative name resolves against.
+ * An open holds one event from here until it returns. A refused or missing
+ * file never reaches security_file_open, so until then the event is the failed
+ * open it would be (K_OPEN_FAILED). The file's own open method, an LSM or the
+ * FIFO checks can still refuse it after that hook, so from there the event is
+ * the open (K_OPEN), reported as done or refused once the syscall returns.
+ * bases, which neither record uses, says whether the open reached its create
+ * step (see open_creating()).
  *
- * A full pool counts in untracked even if this open then succeeds and is
- * recorded.
+ * No hold outlives its syscall (see on_sys_exit), so one already there is this
+ * open's: some builds run both getname programs for one open, and the second
+ * finds the name read. A name that needs tails when none are free is kept cut,
+ * marked in n2. A full pool counts in untracked even if this open then
+ * succeeds and is recorded.
  */
-static __always_inline void open_begin(u32 slot, int dfd, u32 flags)
+static __always_inline void open_name(u32 slot, const char *name, int user)
 {
+	struct held_key k = held_key(HELD_OPEN);
+	if (bpf_map_lookup_elem(&heads, &k))
+		return;
 	struct event *e = scratch_get(slot);
 	if (!e)
 		return;
 	e->kind = K_OPEN_FAILED;
-	e->ts = bpf_ktime_get_boot_ns();
-	e->flags = flags;
-	e->gid = dfd;
 	e->bases = 0;
 	e->err = 0;
 	e->truncated = 0;
 	e->n2 = 0;
-	e->data_len = 0;
-	e->data[0] = 0;
-	struct held_key k = held_key(HELD_OPEN);
-	long r = bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
-	if (r == -EEXIST) {
-		// Held already: do_sys_open's, when both hooks fire, or one an
-		// earlier open left. Either way this call's values replace it.
-		struct event *head = bpf_map_lookup_elem(&heads, &k);
-		if (head && head->kind == K_OPEN_FAILED && !head->data_len) {
-			__builtin_memcpy(head, e, HEAD);
+	long r = user ? bpf_probe_read_user_str(e->data, PATH_LEN, name) :
+			bpf_probe_read_kernel_str(e->data, PATH_LEN, name);
+	if (r <= 0) {
+		// Only the kernel's copy failing to read loses a record.
+		if (!user)
+			bump(&untracked);
+		return;
+	}
+	e->data_len = r;
+	if (hold_new(e, HELD_OPEN) == 0)
+		return;
+	if (e->data_len > HEAD_DATA) {
+		e->data[HEAD_DATA - 1] = 0;
+		e->data_len = HEAD_DATA;
+		e->truncated = 1;
+		e->n2 = 1;
+		if (hold_new(e, HELD_OPEN) == 0)
 			return;
-		}
-		drop_held(&k);
-		r = bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
 	}
-	if (r != 0)
-		bump(&untracked);
-}
-
-/**
- * Reads the @p name an open(2) was given into its head.
- *
- * One that fills the head moves, whole, to tails, or stays there cut, marked
- * in n2, when there are none to take. When both getname programs fire, the
- * second finds the name already read.
- */
-static __always_inline void hold_name(u32 slot, const char *name)
-{
-	struct held_key k = held_key(HELD_OPEN);
-	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	if (!head || head->kind != K_OPEN_FAILED || head->data_len)
-		return;
-	long r = bpf_probe_read_kernel_str(head->data, HEAD_DATA, name);
-	head->data_len = r > 0 ? r : 0;
-	char more = 0;
-	if (r == HEAD_DATA)
-		bpf_probe_read_kernel(&more, 1, name + HEAD_DATA - 1);
-	if (!more)
-		return;
-	struct event *e = scratch_get(slot);
-	if (!e)
-		return;
-	__builtin_memcpy(e, head, HEAD);
-	r = bpf_probe_read_kernel_str(e->data, PATH_LEN, name);
-	e->data_len = r > 0 ? r : 0;
-	if (hold_as(e, HELD_OPEN, 0, 0) == 0)
-		return;
-	head = bpf_map_lookup_elem(&heads, &k);
-	if (head) {
-		head->truncated = 1;
-		head->n2 = 1;
-	} else {
-		bump(&untracked); // lost with its head, so a failure goes unrecorded
-	}
+	bump(&untracked);
 }
 
 /**
@@ -532,7 +508,8 @@ static __always_inline int open_creating(void)
  * to wait for here, nor has one nested in an open already held, such as a FUSE
  * passthrough's backing file, or one with no room to be held.
  *
- * @return 0 when held, nonzero when it is to be recorded at once.
+ * @return 0 when held; else @p e is to be recorded at once, and after that,
+ *         when 1, open_recorded() called so its open(2) records nothing more.
  */
 static __always_inline int hold_open(struct event *e)
 {
@@ -548,38 +525,55 @@ static __always_inline int hold_open(struct event *e)
 	}
 	if (hold_as(e, HELD_OPEN, old, 0) == 0)
 		return 0;
-	// Recorded as done, though something may still refuse it, and not also
-	// as the failed open it was held as.
+	// Recorded as done, though something may still refuse it.
 	bump(&untracked);
 	e->bases = 0;
-	drop_held(&k);
-	return -1;
+	return 1;
 }
 
 /**
- * Ends the open(2) hold as the call returned @p ret, recording a held open.
+ * Marks the open(2) the thread is in as recorded at its hook, from @p e, the
+ * open just submitted, so it is not also recorded as failed when it returns.
+ * A failed hold may have taken the head with it, so one is left in its place.
+ */
+static __always_inline void open_recorded(struct event *e)
+{
+	struct held_key k = held_key(HELD_OPEN);
+	struct event *head = bpf_map_lookup_elem(&heads, &k);
+	if (head) {
+		head->kind = K_OPEN_RECORDED;
+		return;
+	}
+	e->kind = K_OPEN_RECORDED;
+	e->data_len = 0;
+	bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
+}
+
+/**
+ * Ends the open(2) hold as its call returned @p ret, recording a held open,
+ * so no hold outlives its call.
  *
  * @return The failed open to record, assembled in scratch, or 0.
  */
-static __always_inline struct event *open_end(u32 slot, long ret)
+static __always_inline struct event *open_return(u32 slot, long ret)
 {
 	struct held_key k = held_key(HELD_OPEN);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
 	if (!head)
 		return 0;
-	u32 t = tails_for(head->data_len);
 	struct event *failed = 0;
-	int restart = is_restart(ret);
-	if (!restart && head->kind == K_OPEN) {
+	if (is_restart(ret)) {
+		// The kernel runs the open again, and that run records it.
+	} else if (head->kind == K_OPEN) {
 		// Reaching the file after its create step means it was created,
 		// whatever then refused the open.
 		u32 created = head->bases;
 		head->bases = 0;
 		report_held(slot, &k, head, ret < 0 ? -ret : 0, created);
-	} else if (!restart && ret < 0) {
+	} else if (head->kind == K_OPEN_FAILED && ret < 0) {
 		failed = assemble(slot, &k, head);
 	}
-	release(&k, t);
+	release(&k, tails_for(head->data_len));
 	return failed;
 }
 

@@ -314,7 +314,8 @@ Python's `surrogateescape` does, so `os.fsencode` gives back the name's exact by
 A failed operation keeps the kind it would have had, with `"failed":true` and `err`, and shows its
 letter lowercase in the summary. A failed `open`, `unlink`, `rmdir` or `rename`, and a failed
 `chmod`, `chown`, `attr` or `truncate` on a path, is recorded however it failed; through a file
-descriptor, as `fchmod` or `ftruncate` do, only if the kernel refused it after checking the file. A
+descriptor, as `fchmod` or `ftruncate` do, only if the kernel refused it after checking the file. An
+`open` refused before the kernel read its name, as one a seccomp filter stopped, is not recorded. A
 failed `mkdir`, `mknod`, `symlink` or `link` is recorded too unless its name was already there
 (`EEXIST`), which changed nothing and which `mkdir -p` meets at every level it keeps. A failed
 `mmap` is not recorded, nor is a failed `exec`, though the file it opened before failing can show

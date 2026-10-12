@@ -44,7 +44,7 @@ const cgroupRoot = "/sys/fs/cgroup"
 // optionalProgs are programs whose attach target some supported kernels do
 // not expose; each is dropped before load when its function is absent from
 // kernel BTF. getname has two spellings (one inlined into the other) and
-// names a failed open.
+// starts an open's hold with the name it copies.
 var optionalProgs = map[string]string{
 	"on_getname":       "getname_flags",
 	"on_getname_outer": "getname",
@@ -52,8 +52,8 @@ var optionalProgs = map[string]string{
 	"on_file_truncate": "security_file_truncate",
 }
 
-// getnameProgs is the subset of optionalProgs that records a failed open's
-// name; at least one must attach.
+// getnameProgs is the subset of optionalProgs that starts an open's hold; at
+// least one must attach.
 var getnameProgs = map[string]bool{"on_getname": true, "on_getname_outer": true}
 
 func main() {
@@ -365,8 +365,8 @@ func setSyscallNumbers(spec *ebpf.CollectionSpec) error {
 
 // attachAll attaches every loaded program, and any that fails is fatal; those
 // the kernel does not offer were dropped before load. The exception is one of
-// the two getname spellings, of which at least one must attach or a failed
-// open would have no name.
+// the two getname spellings, of which at least one must attach or no open
+// would be held.
 func attachAll(coll *ebpf.Collection) ([]link.Link, error) {
 	var links []link.Link
 	getnames := 0

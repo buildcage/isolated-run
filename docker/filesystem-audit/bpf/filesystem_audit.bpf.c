@@ -277,8 +277,12 @@ int BPF_PROG(on_open, struct file *file)
 	e->flags = file->f_flags;
 	e->mode = file->f_mode;
 	file_path(e, file);
-	if (hold_open(e) != 0)
+	int r = hold_open(e);
+	if (r) {
 		submit(e);
+		if (r > 0)
+			open_recorded(e);
+	}
 	return 0;
 }
 
@@ -300,18 +304,12 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 	return 0;
 }
 
-static __always_inline void open_enter(u32 slot, int dfd, u32 flags)
+/**
+ * Records the failed open assembled in @p e, its name in place, called with
+ * @p dfd and @p flags.
+ */
+static __always_inline void open_failed(u32 slot, struct event *e, long ret, int dfd, u32 flags)
 {
-	if (in_target())
-		open_begin(slot, dfd, flags);
-}
-
-/** Records the failed open assembled in e, its name in place. */
-static __always_inline void open_failed(u32 slot, struct event *e, long ret)
-{
-	u64 ts = e->ts;
-	u32 flags = e->flags;
-	s32 dfd = e->gid;
 	u8 cut = e->truncated;
 	u32 off = e->data_len;
 	// A name kept cut for want of tails, marked in n2, has lost its end, the
@@ -321,14 +319,11 @@ static __always_inline void open_failed(u32 slot, struct event *e, long ret)
 	// start resets the header of the scratch e is in.
 	if (start(slot, K_OPEN_FAILED) != e)
 		return;
-	e->ts = ts;
 	e->path_len = -ret;
 	e->flags = flags;
 	e->truncated = cut;
-	if (off == 0 || off > PATH_LEN) {
-		e->data[0] = 0; // the name could not be read: an empty one
-		off = 1;
-	}
+	if (off > PATH_LEN) // never, but the verifier needs the bound
+		return;
 	u8 n = 0;
 	if (off > 1 && e->data[0] != '/') {
 		off = add_base(e, off, dfd, &n, &e->truncated, 1, 0);
@@ -338,39 +333,18 @@ static __always_inline void open_failed(u32 slot, struct event *e, long ret)
 	submit(e);
 }
 
-static __always_inline void open_exit(u32 slot, long ret)
-{
-	struct event *e = open_end(slot, ret);
-	if (e)
-		open_failed(slot, e, ret);
-}
-
-/**
- * open/openat reach do_sys_openat2 through do_sys_open, which may inline
- * it; hooking both covers either build. When both fire, the inner exit
- * emits and the outer one finds nothing left.
- */
-SEC("fentry/do_sys_openat2")
-int BPF_PROG(on_openat2_enter, int dfd, const char *filename, struct open_how *how)
-{
-	open_enter(slot, dfd, BPF_CORE_READ(how, flags));
-	return 0;
-}
-
-SEC("fentry/do_sys_open")
-int BPF_PROG(on_open_enter, int dfd, const char *filename, int flags)
-{
-	open_enter(slot, dfd, flags);
-	return 0;
-}
-
+/** Starts holding the open(2) the thread is in, if any, from its name. */
 static __always_inline void stash_name(u32 slot, u64 *ctx)
 {
+	if (!in_target() || !in_open_call())
+		return;
 	struct filename *ret = 0;
 	bpf_get_func_ret(ctx, (u64 *)&ret);
+	// getname refused the name, as one too long: read the caller's instead.
 	if ((long)ret < 0 && (long)ret >= -4095)
-		return;
-	hold_name(slot, BPF_CORE_READ(ret, name));
+		open_name(slot, (const char *)ctx[0], 1);
+	else
+		open_name(slot, BPF_CORE_READ(ret, name), 0);
 }
 
 /**
@@ -388,29 +362,6 @@ SEC("fexit/getname")
 int on_getname_outer(u64 *ctx)
 {
 	stash_name(__COUNTER__, ctx);
-	return 0;
-}
-
-/**
- * bpf_get_func_ret rather than a declared ret argument: the argument lists
- * of these internal functions change between kernel releases. The return
- * type does too (long, later int), so only the low 32 bits are used.
- */
-SEC("fexit/do_sys_openat2")
-int on_openat2_exit(u64 *ctx)
-{
-	u64 ret = 0;
-	bpf_get_func_ret(ctx, &ret);
-	open_exit(__COUNTER__, (int)ret);
-	return 0;
-}
-
-SEC("fexit/do_sys_open")
-int on_open_exit(u64 *ctx)
-{
-	u64 ret = 0;
-	bpf_get_func_ret(ctx, &ret);
-	open_exit(__COUNTER__, (int)ret);
 	return 0;
 }
 
@@ -510,6 +461,31 @@ int BPF_PROG(on_file_free, struct file *file)
 }
 
 /**
+ * Ends an open(2) family call's hold as the call returns, recording the open,
+ * with the descriptor and flags from its arguments for a failed one. A call
+ * with no hold names nothing the kernel looked up: a seccomp filter or a
+ * tracer stopped it, or getname never copied its name.
+ */
+static __always_inline void open_returned(u32 slot, struct pt_regs *regs, long nr, long ret)
+{
+	int at = nr == nr_openat || nr == nr_openat2;
+	struct event *e = open_return(slot, ret);
+	if (!e)
+		return;
+	u32 flags;
+	if (nr == nr_creat) {
+		flags = O_CREAT | O_WRONLY | O_TRUNC;
+	} else if (nr == nr_openat2) {
+		u64 f = 0; // open_how's first field
+		bpf_probe_read_user(&f, sizeof(f), (void *)sys_arg(regs, 2));
+		flags = f;
+	} else {
+		flags = sys_arg(regs, at + 1);
+	}
+	open_failed(slot, e, ret, at ? (int)sys_arg(regs, 0) : AT_FDCWD, flags);
+}
+
+/**
  * Reports a held path change when its syscall returns: as done if it
  * succeeded (a truncating open returns a descriptor), else as failed with the
  * errno, unless the call is one recorded from its exit (see classify()),
@@ -521,7 +497,8 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	if (!in_target())
 		return 0;
 	struct path_call call = {}; // so no field reaches the stack unset
-	int watched = classify(sys_nr(regs), regs, &call);
+	long nr = sys_nr(regs);
+	int watched = classify(nr, regs, &call);
 	struct held_key k = held_key(HELD_OP);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
 	if (head) {
@@ -532,6 +509,8 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	}
 	if (watched)
 		op_exit(slot, &call, ret);
+	if (is_open_nr(nr))
+		open_returned(slot, regs, nr, ret);
 	return 0;
 }
 
