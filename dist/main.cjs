@@ -69012,7 +69012,11 @@ function classifyLink(r, letter, failed, perm) {
 		perm: fileRefused
 	}), out;
 }
-const BIT = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i]));
+const BIT = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i])), letterBits = new Map();
+function bitsOf(letter) {
+	let bits = letterBits.get(letter);
+	return bits === void 0 && (bits = [...letter].reduce((b, l) => b | BIT[l], 0), letterBits.set(letter, bits)), bits;
+}
 function procOf(gens, r) {
 	r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
 	let gen = gens.get(r.pid) ?? 0;
@@ -69315,9 +69319,8 @@ var Lines = class {
 	constructor(opts) {
 		this.opts = opts;
 	}
-	add(x) {
+	add(x, parts = components(x.path)) {
 		if (this.stopped || !x.bit) return;
-		let parts = components(x.path);
 		if (unfoldable(parts, x.path) || x.bit === BIT.X) {
 			let key = keyOf(x.comm, x.path), a = this.climbing.get(key);
 			a || (this.climbing.set(key, a = newAgg()), this.count(this.opts.rowBytes(x.path, x.comm))), apply(a, x);
@@ -69511,21 +69514,21 @@ function createAuditSummary(prefixes) {
 			}
 			if (!isLibraryMap(r)) for (let c of classify(r)) {
 				let path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
-				if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) continue;
-				let loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path)), t = loadRead ? NaN : Date.parse(r.t ?? ""), x = {
+				if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
+				let t = Date.parse(r.t ?? ""), x = {
 					comm: r.comm ?? "",
 					path: normalize$2(path),
-					bit: loadRead ? 0 : c.letter.split("").reduce((bits, l) => bits | BIT[l], 0),
+					bit: bitsOf(c.letter),
 					failed: c.failed,
 					perm: c.perm,
 					t,
 					seq: Number.isNaN(t) ? Infinity : seq++
-				};
-				details.add(x), paths.add({
+				}, parts = components(x.path);
+				details.add(x, parts), paths.add({
 					...x,
 					comm: "",
 					bit: x.bit & ~BIT.X
-				});
+				}, parts);
 			}
 		}
 	}, shown = (path) => {
@@ -69565,6 +69568,12 @@ function createAuditSummary(prefixes) {
 		}
 	};
 }
+function firstPassNeeds(line) {
+	let at = line.indexOf("\"kind\":\"");
+	if (at === -1) return !1;
+	let kind = at + 8;
+	return line.startsWith("exec\"", kind) || line.startsWith("fork\"", kind) || line.startsWith("mmap\"", kind);
+}
 function reduceRecording(forEachLine, scratchBase, options, openSink, createSummary = createAuditSummary) {
 	let stripper = createStripper(scratchBase), summary = createSummary(options), summaryError, failedSummary = !1, summarize = (step) => {
 		if (!failedSummary) try {
@@ -69575,7 +69584,7 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 	}, lines = 0, length = 0;
 	forEachLine((line) => {
 		lines++, length += line.length;
-		let r = parseLine(line);
+		let r = firstPassNeeds(line) ? parseLine(line) : void 0;
 		stripper.observe(r), summarize(() => summary.observe(r));
 	});
 	let sink = openSink?.(), again = 0, lengthAgain = 0;
