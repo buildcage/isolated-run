@@ -68663,7 +68663,7 @@ function fmtFlags(a) {
 	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
 	return out;
 }
-const HEADING = "\n### 🗂️ Filesystem audit";
+const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "\n### 🗂️ Filesystem audit";
 function skippedNote(count, url) {
 	let why = url ? ` [Why](${url})` : "";
 	return `> ⚠️ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
@@ -68832,7 +68832,7 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return ca - cb || (pa < pb ? -1 : +(pa > pb));
 	});
-	if (byPath?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.paths, 3, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map((r) => [r.flags, pathCell(r)])), pathsCut, "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied")), !byPath) return blocks;
+	if (byPath?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.paths, 3, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map((r) => [r.flags, pathCell(r)])), pathsCut, LEGEND)), !byPath) return blocks;
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
@@ -68851,13 +68851,13 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		"flags",
 		"command",
 		"path"
-	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`).join("\n");
+	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`).join("\n"), legend = byPath.length === 0 ? `<sub>${LEGEND}</sub>\n\n` : "";
 	return blocks.push({
 		...log,
 		section: SECTION$1,
 		cut: "lines",
 		open: DETAILS_OPEN,
-		text: `<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`,
+		text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`,
 		close: DETAILS_CLOSE
 	}), blocks;
 }

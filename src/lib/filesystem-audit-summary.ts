@@ -922,11 +922,11 @@ function inRecordingOrder(rows: Row[]): Row[] {
 }
 
 /**
- * The summary as blocks for fitStepSummary, in print order: a frame (heading
- * and legend) kept whole, the executed-paths and accessed-paths tables, and
- * the full per-command record folded into a details element. The tables and
- * the record take their priorities from `priorities`; one too large to print
- * at all says `cutNote` in its place.
+ * The summary as blocks for fitStepSummary, in print order: a frame (heading,
+ * notes and `legendNote`) kept whole, the executed table, the accessed-paths
+ * table under the flag legend, and the full per-command record folded into a
+ * details element. The tables and the record take their priorities from
+ * `priorities`; one too large to print at all says `cutNote` in its place.
  */
 export function renderAuditSummaryBlocks(
   summary: AuditSummary,
@@ -1067,12 +1067,15 @@ export function renderAuditSummaryBlocks(
         `${r.flags.padEnd(flagsW)} ${r.comm.padEnd(commW)} ${r.path}${r.deleted ? DELETED_MARK : ""}`,
     )
     .join("\n");
+  // A step that only ran programs has no accessed paths table, so the
+  // details are the first to show flags.
+  const legend = byPath.length === 0 ? `<sub>${LEGEND}</sub>\n\n` : "";
   blocks.push({
     ...log,
     section: SECTION,
     cut: "lines",
     open: DETAILS_OPEN,
-    text: `<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`,
+    text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n`,
     close: DETAILS_CLOSE,
   });
   return blocks;

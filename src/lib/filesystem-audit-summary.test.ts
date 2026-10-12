@@ -89,6 +89,10 @@ describe("renderFilesystemAuditSummary", () => {
       md.indexOf("#### Executed"),
     );
     expect(md.split("<sub>R read")).toHaveLength(2);
+    // With no accessed paths table, the details are the first to show flags.
+    const ran = render({ kind: "exec", comm: "sh", path: "/usr/bin/cat" });
+    expect(ran).not.toContain("#### Accessed paths");
+    expect(ran.slice(ran.indexOf("<details>"))).toContain("<sub>R read");
   });
 
   it("escapes control, format and separator characters so a name cannot close the code block", () => {
@@ -1089,7 +1093,9 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "write", comm: "sh", path: "/work/a" },
       );
       expect(md).toContain(
-        "| Access | Path |\n| --- | --- |\n| RW | `./a` |\n| R | `/etc/hosts` |\n",
+        "#### Accessed paths\n\n<sub>R read · W write · X exec · M move · L link · D delete · A attr · " +
+          "lowercase = failed · ! = denied</sub>\n\n" +
+          "| Access | Path |\n| --- | --- |\n| RW | `./a` |\n| R | `/etc/hosts` |\n",
       );
     });
 
