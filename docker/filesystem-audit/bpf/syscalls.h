@@ -207,7 +207,8 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 	// mode and flags count the base components of the first and second name;
 	// flags holds val1 instead for an op with one name.
 	u8 nb = 0;
-	if (!call->p1 || (call->empty_dfd && r == 1)) {
+	// An empty string reads as 1 byte, or as 0 before Linux 6.16.
+	if (!call->p1 || (call->empty_dfd && (r == 0 || r == 1))) {
 		// No name (futimens), or an empty one (AT_EMPTY_PATH): the
 		// descriptor's path. One closed by the time the call returned
 		// names nothing, so a change made through it counts in untracked.
