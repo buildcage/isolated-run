@@ -1,6 +1,5 @@
-### Filesystem audit
 
-<sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied</sub>
+### 🗂️ Filesystem audit
 
 #### Executed
 
@@ -24,6 +23,8 @@
 | `./int80` | 1 |
 
 #### Accessed paths
+
+<sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied</sub>
 
 | Access | Path |
 | --- | --- |

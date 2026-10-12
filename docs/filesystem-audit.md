@@ -132,8 +132,7 @@ like the traffic artifact.
 ## Reading the summary
 
 ```
-### Filesystem audit
-R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied
+### 🗂️ Filesystem audit
 ./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
 buildcage-filesystem-audit-<id> artifact · how to read this
 
@@ -144,6 +143,7 @@ buildcage-filesystem-audit-<id> artifact · how to read this
 | `/usr/bin/dash`       | 12   |
 
 #### Accessed paths
+R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied
 | Access | Path                  |
 | ------ | --------------------- |
 | RWD    | `./node_modules/**`   |
@@ -160,8 +160,9 @@ first-last access since the proxy started · flags · command · path
 00:00.531-00:40.982: X   sh   /usr/bin/dash
 ```
 
-Where there is no artifact, the legend says how to ask for one, or that the upload failed. A step
-that touched no file shows `No file access was recorded.` instead of the tables.
+Where there is no artifact, the line under the heading says how to ask for one, or that the upload
+failed. A step that touched no file shows `No file access was recorded.` instead of the tables. One
+that only ran programs has no accessed paths table, and the flag legend opens the details instead.
 
 - **Executed** lists each program once, in the order it first ran, with how many times it ran.
 - **Accessed paths** combines every command's actions on a path in one row, in path order: the
