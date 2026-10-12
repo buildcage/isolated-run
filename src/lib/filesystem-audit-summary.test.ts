@@ -24,7 +24,9 @@ function lines(md: string): string[] {
 
 // The rows of the "Accessed paths" table.
 function tableRows(md: string): string[] {
-  const m = md.match(/#### Accessed paths\n\n[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/);
+  const m = md.match(
+    /#### Accessed paths\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
+  );
   return m ? m[1].split("\n") : [];
 }
 
@@ -40,7 +42,7 @@ describe("renderFilesystemAuditSummary", () => {
 
   it("warns unless the tracer's end line is there and counts nothing lost", () => {
     const read = { kind: "read", comm: "cat", path: "/etc/hostname" };
-    const warning = "### Filesystem audit\n\n> ⚠️ **This record is incomplete.**";
+    const warning = "### 🗂️ Filesystem audit\n\n> ⚠️ **This record is incomplete.**";
     expect(render(read, { kind: "end", dropped: 0, untracked: 0 })).not.toContain("⚠️");
     expect(render(read)).toContain(warning); // cut short before the end line
     const dropped = render(read, { kind: "end", dropped: 3, untracked: 0 });
@@ -58,7 +60,7 @@ describe("renderFilesystemAuditSummary", () => {
       "> runner host while this step ran. Any of them may have been this step's, so some of its\n" +
       "> accesses may be missing from this summary and from the artifact.\n";
     const skipped = render(read, { kind: "end", dropped: 0, untracked: 0, host_missed: 15779 });
-    expect(skipped).toContain(`### Filesystem audit\n\n${note}`);
+    expect(skipped).toContain(`### 🗂️ Filesystem audit\n\n${note}`);
     expect(skipped).not.toContain("incomplete");
     expect(lines(skipped)).toEqual(["R cat /etc/hostname"]);
     // Both, the incomplete warning first.
@@ -74,11 +76,19 @@ describe("renderFilesystemAuditSummary", () => {
     );
   });
 
-  it("includes a heading and the flag legend", () => {
-    const md = render({ kind: "read", comm: "cat", path: "/etc/hostname" });
-    expect(md).toContain("### Filesystem audit");
-    // No record carries a time, so the legend leaves out the time column.
-    expect(md).toContain("<sub>R read");
+  it("opens on a blank line and explains the flags under the accessed paths", () => {
+    const md = render(
+      { kind: "exec", comm: "cat", path: "/usr/bin/cat" },
+      { kind: "read", comm: "cat", path: "/etc/hostname" },
+    );
+    // Appended after the traffic report's </details>, which a heading right
+    // after it would be read as part of.
+    expect(`</details>\n${md}`).toContain("</details>\n\n### 🗂️ Filesystem audit\n");
+    // Below the executed table, which shows no flags.
+    expect(md.indexOf("#### Accessed paths\n\n<sub>R read")).toBeGreaterThan(
+      md.indexOf("#### Executed"),
+    );
+    expect(md.split("<sub>R read")).toHaveLength(2);
   });
 
   it("escapes control, format and separator characters so a name cannot close the code block", () => {
@@ -1079,7 +1089,7 @@ describe("renderFilesystemAuditSummary", () => {
         { kind: "write", comm: "sh", path: "/work/a" },
       );
       expect(md).toContain(
-        "#### Accessed paths\n\n| Access | Path |\n| --- | --- |\n| RW | `./a` |\n| R | `/etc/hosts` |\n",
+        "| Access | Path |\n| --- | --- |\n| RW | `./a` |\n| R | `/etc/hosts` |\n",
       );
     });
 
@@ -1153,6 +1163,8 @@ describe("renderFilesystemAuditSummary: limits", () => {
     expect(section(md, "#### Executed", "#### Accessed paths")).toContain("`/usr/bin/c`");
     // The table's note stands for the details too.
     expect(section(md, "#### Accessed paths")).toContain(CUT);
+    // A table cut whole takes its legend with it.
+    expect(md).not.toContain("<sub>R read");
     expect(md.split(CUT)).toHaveLength(2);
     expect(md).not.toContain("<details>");
     expect(md).not.toContain("/tmp/f0");

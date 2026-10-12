@@ -631,7 +631,9 @@ function fmtFlags(a: Agg): string {
 
 const LEGEND =
   "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied";
-const HEADING = "### Filesystem audit";
+// After the traffic report's closing </details>, a heading with no blank line
+// before it would read as part of that HTML block.
+const HEADING = "\n### 🗂️ Filesystem audit";
 const INCOMPLETE_NOTE =
   "> ⚠️ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
   "> some accesses are missing from this summary and from the artifact.";
@@ -950,8 +952,9 @@ export function renderAuditSummaryBlocks(
   });
   if (details?.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
 
-  const legend = legendNote ? `${LEGEND}<br>${legendNote}` : LEGEND;
-  const blocks: SummaryBlock[] = [frame(`${heading}\n\n<sub>${legend}</sub>\n\n`)];
+  const blocks: SummaryBlock[] = [
+    frame(legendNote ? `${heading}\n\n<sub>${legendNote}</sub>\n\n` : `${heading}\n\n`),
+  ];
   // Each part sits a level below the one before it, so once one is cut the
   // parts after it print nothing and its note stands for them all.
   const table = (
@@ -960,6 +963,7 @@ export function renderAuditSummaryBlocks(
     title: string,
     md: string | undefined,
     cause?: CutCause,
+    legend?: string,
   ): SummaryBlock =>
     md === undefined
       ? {
@@ -975,9 +979,9 @@ export function renderAuditSummaryBlocks(
           priority: priorities[id],
           level,
           section: SECTION,
-          text: `#### ${title}\n\n${md}\n\n`,
+          text: `#### ${title}\n\n${legend ? `<sub>${legend}</sub>\n\n` : ""}${md}\n\n`,
           cut: "lines",
-          head: 4,
+          head: legend ? 6 : 4,
         };
 
   if (executed.length !== 0) {
@@ -1015,6 +1019,8 @@ export function renderAuditSummaryBlocks(
             byPath.map((r) => [r.flags, pathCell(r)]),
           ),
         pathsCut,
+        // The flags are explained where they first appear.
+        LEGEND,
       ),
     );
   }

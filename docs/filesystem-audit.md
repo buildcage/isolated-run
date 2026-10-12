@@ -132,8 +132,7 @@ like the traffic artifact.
 ## Reading the summary
 
 ```
-### Filesystem audit
-R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied
+### 🗂️ Filesystem audit
 ./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
 buildcage-filesystem-audit-<id> artifact · how to read this
 
@@ -144,6 +143,7 @@ buildcage-filesystem-audit-<id> artifact · how to read this
 | `/usr/bin/dash`       | 12   |
 
 #### Accessed paths
+R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied
 | Access | Path                  |
 | ------ | --------------------- |
 | RWD    | `./node_modules/**`   |

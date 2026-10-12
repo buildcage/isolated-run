@@ -68663,7 +68663,7 @@ function fmtFlags(a) {
 	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
 	return out;
 }
-const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "### Filesystem audit";
+const HEADING = "\n### 🗂️ Filesystem audit";
 function skippedNote(count, url) {
 	let why = url ? ` [Why](${url})` : "";
 	return `> ⚠️ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
@@ -68811,7 +68811,7 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		cut: "keep"
 	});
 	if (details?.length === 0) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
-	let blocks = [frame(`${heading}\n\n<sub>${legendNote ? `${LEGEND}<br>${legendNote}` : LEGEND}</sub>\n\n`)], table = (id, level, title, md, cause) => md === void 0 ? {
+	let blocks = [frame(legendNote ? `${heading}\n\n<sub>${legendNote}</sub>\n\n` : `${heading}\n\n`)], table = (id, level, title, md, cause, legend) => md === void 0 ? {
 		id,
 		priority: priorities[id],
 		level,
@@ -68823,16 +68823,16 @@ function renderAuditSummaryBlocks(summary, startedAt, priorities, cutNote, legen
 		priority: priorities[id],
 		level,
 		section: SECTION$1,
-		text: `#### ${title}\n\n${md}\n\n`,
+		text: `#### ${title}\n\n${legend ? `<sub>${legend}</sub>\n\n` : ""}${md}\n\n`,
 		cut: "lines",
-		head: 4
+		head: legend ? 6 : 4
 	};
 	executed.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.executed, 2, "Executed", markdownRows(["Path", "Runs"], executed.map((e) => [pathCell(e), String(e.runs)]))));
 	let byPath = paths && inRecordingOrder(paths).sort((a, b) => {
 		let [ca, pa] = sortKey(a.path), [cb, pb] = sortKey(b.path);
 		return ca - cb || (pa < pb ? -1 : +(pa > pb));
 	});
-	if (byPath?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.paths, 3, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map((r) => [r.flags, pathCell(r)])), pathsCut)), !byPath) return blocks;
+	if (byPath?.length !== 0 && blocks.push(table(FILESYSTEM_BLOCK.paths, 3, "Accessed paths", byPath && markdownRows(["Access", "Path"], byPath.map((r) => [r.flags, pathCell(r)])), pathsCut, "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied")), !byPath) return blocks;
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
