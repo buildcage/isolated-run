@@ -1,132 +1,18 @@
 import { describe, it, expect, vi } from "vitest";
 
 import { SandboxError } from "../errors.ts";
+import { auditUnavailable, hostCannotAudit } from "./filesystem-audit-host.ts";
 import {
-  auditUnavailable,
   cgroupFsPath,
-  checkFilesystemAuditHost,
   exitReason,
   extractTracer,
-  filesystemAuditPaths,
-  hostCannotAudit,
+  haltTracer,
   startFilesystemAudit,
-  withoutCompatSyscalls,
-  allowedSyscalls,
   type AuditChild,
-} from "./filesystem-audit.ts";
+} from "./filesystem-audit-tracer.ts";
 
 const CONTAINER = "buildcage-proxy-abcd1234";
 const DEST = "/var/tmp/buildcage-0/sandbox-abcd1234";
-
-describe("filesystemAuditPaths", () => {
-  it("names the files by the container's own suffix, under the scratch base", () => {
-    expect(filesystemAuditPaths(CONTAINER, "/var/tmp/buildcage-0")).toStrictEqual({
-      outPath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.jsonl",
-      pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.pid",
-      stepPath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.step.jsonl",
-    });
-  });
-});
-
-const REQUIREMENTS =
-  "It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF: " +
-  "https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting";
-
-describe("allowedSyscalls", () => {
-  it("lists the syscalls allowed for any arguments or some", () => {
-    const profile = {
-      syscalls: [
-        { names: ["read", "write"], action: "SCMP_ACT_ALLOW" },
-        { names: ["clone"], action: "SCMP_ACT_ALLOW", args: [{ index: 0 }] },
-        { names: ["personality"], action: "SCMP_ACT_ALLOW", args: [] },
-        { names: ["clone3"], action: "SCMP_ACT_ERRNO" },
-        { names: [7, "uname"], action: "SCMP_ACT_ALLOW" },
-        { action: "SCMP_ACT_ALLOW" },
-      ],
-    };
-    expect(allowedSyscalls(profile)).toStrictEqual([
-      "read",
-      "write",
-      "clone",
-      "personality",
-      "uname",
-    ]);
-    expect(allowedSyscalls(null)).toStrictEqual([]);
-    expect(allowedSyscalls({})).toStrictEqual([]);
-  });
-});
-
-describe("withoutCompatSyscalls", () => {
-  it("keeps only the native ABI and the rest of the profile", () => {
-    const profile = {
-      defaultAction: "SCMP_ACT_ERRNO",
-      architectures: ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"],
-      syscalls: [{ names: ["read"], action: "SCMP_ACT_ALLOW" }],
-    };
-    expect(withoutCompatSyscalls(profile, "x64")).toStrictEqual({
-      ...profile,
-      architectures: ["SCMP_ARCH_X86_64"],
-    });
-    expect(
-      withoutCompatSyscalls({ architectures: ["SCMP_ARCH_AARCH64", "SCMP_ARCH_ARM"] }, "arm64"),
-    ).toStrictEqual({ architectures: ["SCMP_ARCH_AARCH64"] });
-  });
-
-  it("leaves a profile naming no architectures, or one for a runner it cannot audit, as it is", () => {
-    const profile = { defaultAction: "SCMP_ACT_ERRNO" };
-    expect(withoutCompatSyscalls(profile, "x64")).toBe(profile);
-    expect(withoutCompatSyscalls(null, "x64")).toBeNull();
-    const s390 = { architectures: ["SCMP_ARCH_S390X", "SCMP_ARCH_S390"] };
-    expect(withoutCompatSyscalls(s390, "s390x")).toBe(s390);
-  });
-});
-
-describe("auditUnavailable", () => {
-  it("says why and that the command did not run", () => {
-    expect(auditUnavailable("docker cp failed")).toStrictEqual(
-      new SandboxError(
-        "filesystem_audit could not start (docker cp failed); the command was not run.",
-        "FILESYSTEM_AUDIT_UNAVAILABLE",
-      ),
-    );
-  });
-});
-
-describe("hostCannotAudit", () => {
-  it("adds what the tracer needs of the host", () => {
-    expect(hostCannotAudit("the tracer exited")).toStrictEqual(
-      new SandboxError(
-        `filesystem_audit could not start (the tracer exited); the command was not run. ${REQUIREMENTS}`,
-        "FILESYSTEM_AUDIT_UNAVAILABLE",
-      ),
-    );
-  });
-});
-
-describe("checkFilesystemAuditHost", () => {
-  const host = (cgroup: string | undefined, btf: boolean) => ({
-    cgroupPath: () => cgroup,
-    kernelBtf: () => btf,
-  });
-
-  it("passes on a cgroup v2 host with kernel BTF", () => {
-    expect(() =>
-      checkFilesystemAuditHost(host("/system.slice/runner.service", true)),
-    ).not.toThrow();
-  });
-
-  it("fails the step on a host without cgroup v2", () => {
-    expect(() => checkFilesystemAuditHost(host(undefined, true))).toThrow(
-      hostCannotAudit("the runner is not on cgroup v2"),
-    );
-  });
-
-  it("fails the step on a kernel without BTF", () => {
-    expect(() => checkFilesystemAuditHost(host("/system.slice/runner.service", false))).toThrow(
-      hostCannotAudit("the kernel exposes no BTF"),
-    );
-  });
-});
 
 describe("cgroupFsPath", () => {
   it("joins the cgroupsPath onto the cgroup root", () => {
@@ -538,5 +424,94 @@ describe("startFilesystemAudit", () => {
     await handle.stop();
 
     expect(exec).not.toHaveBeenCalled();
+  });
+});
+
+describe("haltTracer", () => {
+  const OPTIONS = { outPath: START_OPTIONS.outPath, pidFilePath: START_OPTIONS.pidFilePath };
+  const END = '{"kind":"end"}\n';
+
+  /** A tracer that exits only when told to; SIGTERM alone does not stop it. */
+  function stubborn() {
+    let resolveExit!: () => void;
+    let exited = false;
+    const done = new Promise<void>((r) => {
+      resolveExit = () => {
+        exited = true;
+        r();
+      };
+    });
+    const kill = vi.fn();
+    return {
+      tracer: { child: { exited: done, kill, reason: () => "" }, exited: () => exited },
+      kill,
+      exit: resolveExit,
+    };
+  }
+
+  /** The seams, with a sudo kill that ends `s`. */
+  function deps(s: ReturnType<typeof stubborn>, tail: () => string, pidfile = "777\n") {
+    return {
+      sleep: vi.fn(async (_ms: number, _detached?: boolean) => {}),
+      remove: vi.fn(),
+      exec: vi.fn((_command: string, args: string[]) => {
+        if (args[1] === "kill") s.exit();
+        return "";
+      }),
+      readFile: vi.fn(() => pidfile),
+      readTail: vi.fn(tail),
+    };
+  }
+
+  it("returns once the record is whole, and removes the pidfile when the tracer exits", async () => {
+    const s = stubborn();
+    const d = deps(s, () => END);
+    let parked!: () => void;
+    d.sleep.mockImplementation((_ms: number, detached?: boolean) =>
+      detached ? new Promise<void>((r) => (parked = r)) : Promise.resolve(),
+    );
+    await haltTracer(s.tracer, true, OPTIONS, d);
+    expect(s.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(d.remove).not.toHaveBeenCalled();
+    s.exit();
+    await vi.waitFor(() => expect(d.remove).toHaveBeenCalledWith(OPTIONS.pidFilePath));
+    parked();
+    expect(d.exec).not.toHaveBeenCalled();
+  });
+
+  it("kills a tracer whose record is whole but that does not exit after the detach grace", async () => {
+    const s = stubborn();
+    const d = deps(s, () => END);
+    await haltTracer(s.tracer, true, OPTIONS, d);
+    await vi.waitFor(() => expect(d.remove).toHaveBeenCalledWith(OPTIONS.pidFilePath));
+    expect(d.exec).toHaveBeenCalledWith("sudo", ["-n", "kill", "-KILL", "777"]);
+  });
+
+  it("waits for a tracer still writing, and kills it once the grace runs out", async () => {
+    const s = stubborn();
+    const d = deps(s, () => "");
+    await haltTracer(s.tracer, true, OPTIONS, d);
+    expect(d.sleep).toHaveBeenCalledTimes(300);
+    expect(d.exec).toHaveBeenCalledWith("sudo", ["-n", "kill", "-KILL", "777"]);
+    expect(d.remove).toHaveBeenCalledWith(OPTIONS.pidFilePath);
+  });
+
+  it("gives a tracer that never attached the short grace, and kills none for a junk pidfile", async () => {
+    const s = stubborn();
+    const d = deps(s, () => END, "junk");
+    const halted = haltTracer(s.tracer, false, OPTIONS, d);
+    await vi.waitFor(() => expect(d.sleep).toHaveBeenCalledTimes(20));
+    expect(d.exec).not.toHaveBeenCalled();
+    s.exit();
+    await halted;
+    expect(d.remove).toHaveBeenCalledWith(OPTIONS.pidFilePath);
+  });
+
+  it("shortens the wait once the step is cancelled", async () => {
+    const s = stubborn();
+    const d = deps(s, () => "");
+    await haltTracer(s.tracer, true, { ...OPTIONS, cancel: AbortSignal.abort() }, d);
+    expect(d.sleep).toHaveBeenCalledTimes(20);
+    expect(d.exec).toHaveBeenCalledWith("sudo", ["-n", "kill", "-KILL", "777"]);
   });
 });

@@ -70527,18 +70527,7 @@ const realHostProbes = {
 			return !1;
 		}
 	}
-}, END_LINE = /"kind":"end"[^\n]*\n$/;
-function filesystemAuditPaths(containerName, scratchBase) {
-	let suffix = containerName.split("-").at(-1);
-	return {
-		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
-		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
-		stepPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.step.jsonl`)
-	};
-}
-function cgroupFsPath(cgroupsPath) {
-	return (0, node_path.join)("/sys/fs/cgroup", cgroupsPath);
-}
+};
 function auditUnavailable(reason) {
 	return new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
 }
@@ -70565,132 +70554,18 @@ function checkFilesystemAuditHost(probes = realHostProbes) {
 	if (probes.cgroupPath() === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
 	if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
 }
-function exitReason() {
-	let partial = "", fatal = "", last = "";
+//#endregion
+//#region src/lib/sandbox/filesystem-audit-paths.ts
+function filesystemAuditPaths(containerName, scratchBase) {
+	let suffix = containerName.split("-").at(-1);
 	return {
-		push(chunk) {
-			let lines = (partial + chunk).split("\n");
-			partial = lines.pop();
-			for (let line of lines) line.startsWith("filesystem-audit: fatal: ") ? fatal = line.slice(25) : line.trim() && (last = line);
-		},
-		value: () => fatal || last || partial.trim()
+		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
+		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
+		stepPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.step.jsonl`)
 	};
 }
-function recordComplete(readTail, path) {
-	try {
-		return END_LINE.test(readTail(path));
-	} catch {
-		return !1;
-	}
-}
-function defaultExec$3(command, args) {
-	return (0, node_child_process.execFileSync)(hostCommand(command), args, {
-		encoding: "utf8",
-		env: hostCommandEnv(command)
-	});
-}
-function defaultSpawn$1(command, args) {
-	let child = (0, node_child_process.spawn)(hostCommand(command), args, {
-		stdio: [
-			"ignore",
-			"inherit",
-			"pipe"
-		],
-		env: hostCommandEnv(command)
-	}), reason = exitReason();
-	return child.stderr.setEncoding("utf8"), child.stderr.on("data", (chunk) => {
-		process.stderr.write(chunk), reason.push(chunk);
-	}), {
-		exited: new Promise((resolve) => {
-			child.on("error", (e) => {
-				reason.push(`${e.message}\n`), resolve();
-			}), child.on("close", () => resolve());
-		}),
-		kill: (signal) => child.kill(signal),
-		reason: reason.value
-	};
-}
-function defaultSleep(ms, detached = !1) {
-	return new Promise((resolve) => {
-		let t = setTimeout(resolve, ms);
-		detached && t.unref();
-	});
-}
-function defaultRemove(path) {
-	(0, node_fs.rmSync)(path, { force: !0 });
-}
-function defaultReadFile$2(path) {
-	return (0, node_fs.readFileSync)(path, "utf8");
-}
-function defaultReadTail(path) {
-	let fd = (0, node_fs.openSync)(path, "r");
-	try {
-		let buf = Buffer.alloc(512), start = Math.max(0, (0, node_fs.fstatSync)(fd).size - buf.length);
-		return buf.toString("utf8", 0, (0, node_fs.readSync)(fd, buf, 0, buf.length, start));
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-}
-const noAudit = { stop: async () => {} };
-function extractTracer(containerName, destDir, { exec = defaultExec$3, chmod = node_fs.chmodSync } = {}) {
-	let tracerPath = (0, node_path.join)(destDir, "filesystem-audit");
-	return exec("docker", buildDockerCpArgs({
-		containerName,
-		containerPath: "/opt/buildcage/bin/filesystem-audit",
-		hostPath: tracerPath
-	})), chmod(tracerPath, 493), tracerPath;
-}
-async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath, watchPid, allowedSyscalls, cancel }, deps = {}) {
-	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$3, readFile = defaultReadFile$2, readTail = defaultReadTail } = deps, child = spawn("sudo", [
-		"-n",
-		"--",
-		tracerPath,
-		"--cgroup",
-		cgroupFsPath(cgroupsPath),
-		"--out",
-		outPath,
-		"--pidfile",
-		pidFilePath,
-		"--ready",
-		readyPath,
-		"--watch-pid",
-		String(watchPid),
-		"--allowed-syscalls",
-		allowedSyscalls.join(",")
-	]), exited = !1;
-	child.exited.then(() => {
-		exited = !0;
-	});
-	let kill = () => {
-		try {
-			let pid = Number(readFile(pidFilePath).trim());
-			pid > 0 && exec("sudo", [
-				"-n",
-				"kill",
-				"-KILL",
-				String(pid)
-			]);
-		} catch {}
-	}, halt = async (untilRecorded) => {
-		child.kill("SIGTERM");
-		let grace = () => untilRecorded && !cancel?.aborted ? 3e4 : 2e3;
-		for (let waited = 0; !exited; waited += 100) {
-			if (untilRecorded && recordComplete(readTail, outPath)) {
-				Promise.race([child.exited, sleep(1e4, !0)]).then(() => (exited || kill(), child.exited)).then(() => remove(pidFilePath)).catch(() => {});
-				return;
-			}
-			if (waited >= grace()) break;
-			await sleep(100);
-		}
-		exited || kill(), await child.exited, remove(pidFilePath);
-	}, stop = () => halt(!0);
-	for (let i = 0; i < 300 && !cancel?.aborted; i++) {
-		if (exists(readyPath)) return { stop };
-		if (exited) break;
-		await sleep(100);
-	}
-	let cancelled = !exited && cancel?.aborted, failure = exited ? hostCannotAudit(child.reason() || "the tracer exited") : auditUnavailable("the tracer did not attach in time");
-	throw await halt(!1), remove(outPath), cancelled ? cancelledBeforeRun() : failure;
+function readPid(readFile, pidFilePath) {
+	return Number(readFile(pidFilePath).trim());
 }
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
@@ -70937,7 +70812,7 @@ const NSS_DB_FILES = [
 	"key4.db",
 	"pkcs11.txt"
 ];
-function defaultExec$2(command, args) {
+function defaultExec$3(command, args) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args, { env: hostCommandEnv(command) });
 }
 function defaultLstat(path) {
@@ -70992,7 +70867,7 @@ function warnNotAdded(warn, reason) {
 	warn?.(`could not add the proxy CA to Chromium's NSS database: ${reason}. Chromium in this step will not trust the proxy; use proxy_engine: universal for it.`);
 }
 function prepareNssDb(containerName, dir, home, deps = {}, { homeUpper } = {}) {
-	let { exec = defaultExec$2, lstat = defaultLstat, stat = defaultStat, realpath = node_fs.realpathSync, warn } = deps;
+	let { exec = defaultExec$3, lstat = defaultLstat, stat = defaultStat, realpath = node_fs.realpathSync, warn } = deps;
 	if (!home || stat(home)?.isDirectory() !== !0) return warnNotAdded(warn, `HOME (${JSON.stringify(home ?? "")}) is not a directory`);
 	let realHome = realpath(home), plan = planNssDb(realHome, { lstat });
 	if (typeof plan == "string") return warnNotAdded(warn, plan);
@@ -71298,10 +71173,10 @@ const SYSTEM_CA_CANDIDATES = [
 	"/etc/pki/trust/anchors",
 	"/var/lib/ca-certificates/pem"
 ], OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
-function defaultExec$1(command, args, env) {
+function defaultExec$2(command, args, env) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args, { env: hostCommandEnv(command, env) });
 }
-function defaultReadFile$1(path) {
+function defaultReadFile$2(path) {
 	return (0, node_fs.readFileSync)(path, "utf8");
 }
 function defaultWriteFile(path, contents, mode) {
@@ -71316,7 +71191,7 @@ function defaultCopyDir(source, destination) {
 		verbatimSymlinks: !0
 	});
 }
-function extractCaCert(containerName, destDir, { exec = defaultExec$1, chmod = node_fs.chmodSync } = {}) {
+function extractCaCert(containerName, destDir, { exec = defaultExec$2, chmod = node_fs.chmodSync } = {}) {
 	let caCertPath = (0, node_path.join)(destDir, "proxy-ca.pem");
 	return exec("docker", buildDockerCpArgs({
 		containerName,
@@ -71407,7 +71282,7 @@ const NSS_DB_RESERVATION = {
 	refuses: (entry, destination) => entry !== destination && isAtOrUnder(entry, destination),
 	refusal: (destination) => `is inside the NSS database at ${JSON.stringify(destination)}, which the inspect engine covers for the step. Name ${JSON.stringify(destination)} itself to have the command's changes written back.`
 };
-function writeCaTrustFiles(caCertPath, dir, env, tools, { exec = defaultExec$1, readFile = defaultReadFile$1, writeFile = defaultWriteFile, exists = node_fs.existsSync, chmod = node_fs.chmodSync, copyFile = node_fs.copyFileSync, realpath = node_fs.realpathSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir, warn } = {}) {
+function writeCaTrustFiles(caCertPath, dir, env, tools, { exec = defaultExec$2, readFile = defaultReadFile$2, writeFile = defaultWriteFile, exists = node_fs.existsSync, chmod = node_fs.chmodSync, copyFile = node_fs.copyFileSync, realpath = node_fs.realpathSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir, warn } = {}) {
 	let deps = {
 		exec,
 		readFile,
@@ -72210,6 +72085,155 @@ exit $status
 function writeEnvLoader(execDir) {
 	let loaderPath = (0, node_path.join)(execDir, "buildcage-init");
 	return (0, node_fs.writeFileSync)(loaderPath, ENV_LOADER_SCRIPT, { mode: 448 }), loaderPath;
+}
+//#endregion
+//#region src/lib/sandbox/filesystem-audit-tracer.ts
+const END_LINE = /"kind":"end"[^\n]*\n$/;
+function cgroupFsPath(cgroupsPath) {
+	return (0, node_path.join)("/sys/fs/cgroup", cgroupsPath);
+}
+function exitReason() {
+	let partial = "", fatal = "", last = "";
+	return {
+		push(chunk) {
+			let lines = (partial + chunk).split("\n");
+			partial = lines.pop();
+			for (let line of lines) line.startsWith("filesystem-audit: fatal: ") ? fatal = line.slice(25) : line.trim() && (last = line);
+		},
+		value: () => fatal || last || partial.trim()
+	};
+}
+function recordComplete(readTail, path) {
+	try {
+		return END_LINE.test(readTail(path));
+	} catch {
+		return !1;
+	}
+}
+function defaultExec$1(command, args) {
+	return (0, node_child_process.execFileSync)(hostCommand(command), args, {
+		encoding: "utf8",
+		env: hostCommandEnv(command)
+	});
+}
+function defaultSpawn$1(command, args) {
+	let child = (0, node_child_process.spawn)(hostCommand(command), args, {
+		stdio: [
+			"ignore",
+			"inherit",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	}), reason = exitReason();
+	return child.stderr.setEncoding("utf8"), child.stderr.on("data", (chunk) => {
+		process.stderr.write(chunk), reason.push(chunk);
+	}), {
+		exited: new Promise((resolve) => {
+			child.on("error", (e) => {
+				reason.push(`${e.message}\n`), resolve();
+			}), child.on("close", () => resolve());
+		}),
+		kill: (signal) => child.kill(signal),
+		reason: reason.value
+	};
+}
+function defaultSleep(ms, detached = !1) {
+	return new Promise((resolve) => {
+		let t = setTimeout(resolve, ms);
+		detached && t.unref();
+	});
+}
+function defaultRemove(path) {
+	(0, node_fs.rmSync)(path, { force: !0 });
+}
+function defaultReadFile$1(path) {
+	return (0, node_fs.readFileSync)(path, "utf8");
+}
+function defaultReadTail(path) {
+	let fd = (0, node_fs.openSync)(path, "r");
+	try {
+		let buf = Buffer.alloc(512), start = Math.max(0, (0, node_fs.fstatSync)(fd).size - buf.length);
+		return buf.toString("utf8", 0, (0, node_fs.readSync)(fd, buf, 0, buf.length, start));
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+const noAudit = { stop: async () => {} };
+function extractTracer(containerName, destDir, { exec = defaultExec$1, chmod = node_fs.chmodSync } = {}) {
+	let tracerPath = (0, node_path.join)(destDir, "filesystem-audit");
+	return exec("docker", buildDockerCpArgs({
+		containerName,
+		containerPath: "/opt/buildcage/bin/filesystem-audit",
+		hostPath: tracerPath
+	})), chmod(tracerPath, 493), tracerPath;
+}
+function killTracer(pidFilePath, { readFile, exec }) {
+	try {
+		let pid = readPid(readFile, pidFilePath);
+		pid > 0 && exec("sudo", [
+			"-n",
+			"kill",
+			"-KILL",
+			String(pid)
+		]);
+	} catch {}
+}
+async function haltTracer({ child, exited }, untilRecorded, { outPath, pidFilePath, cancel }, deps) {
+	let { sleep, remove, readTail } = deps;
+	child.kill("SIGTERM");
+	let grace = () => untilRecorded && !cancel?.aborted ? 3e4 : 2e3;
+	for (let waited = 0; !exited(); waited += 100) {
+		if (untilRecorded && recordComplete(readTail, outPath)) {
+			Promise.race([child.exited, sleep(1e4, !0)]).then(() => (exited() || killTracer(pidFilePath, deps), child.exited)).then(() => remove(pidFilePath)).catch(() => {});
+			return;
+		}
+		if (waited >= grace()) break;
+		await sleep(100);
+	}
+	exited() || killTracer(pidFilePath, deps), await child.exited, remove(pidFilePath);
+}
+async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath, watchPid, allowedSyscalls, cancel }, deps = {}) {
+	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$1, readFile = defaultReadFile$1, readTail = defaultReadTail } = deps, child = spawn("sudo", [
+		"-n",
+		"--",
+		tracerPath,
+		"--cgroup",
+		cgroupFsPath(cgroupsPath),
+		"--out",
+		outPath,
+		"--pidfile",
+		pidFilePath,
+		"--ready",
+		readyPath,
+		"--watch-pid",
+		String(watchPid),
+		"--allowed-syscalls",
+		allowedSyscalls.join(",")
+	]), exited = !1;
+	child.exited.then(() => {
+		exited = !0;
+	});
+	let tracer = {
+		child,
+		exited: () => exited
+	}, haltOptions = {
+		outPath,
+		pidFilePath,
+		cancel
+	}, haltDeps = {
+		sleep,
+		remove,
+		exec,
+		readFile,
+		readTail
+	}, stop = () => haltTracer(tracer, !0, haltOptions, haltDeps);
+	for (let i = 0; i < 300 && !cancel?.aborted; i++) {
+		if (exists(readyPath)) return { stop };
+		if (exited) break;
+		await sleep(100);
+	}
+	let cancelled = !exited && cancel?.aborted, failure = exited ? hostCannotAudit(child.reason() || "the tracer exited") : auditUnavailable("the tracer did not attach in time");
+	throw await haltTracer(tracer, !1, haltOptions, haltDeps), remove(outPath), cancelled ? cancelledBeforeRun() : failure;
 }
 //#endregion
 //#region scripts/extra-masked-proc-paths.json

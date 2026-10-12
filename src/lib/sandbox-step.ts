@@ -51,7 +51,8 @@ import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { saveWriteThroughForPost } from "./post-write-through.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
-import { checkFilesystemAuditHost, filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
+import { checkFilesystemAuditHost } from "./sandbox/filesystem-audit-host.ts";
+import { filesystemAuditPaths } from "./sandbox/filesystem-audit-paths.ts";
 import {
   resolveFilesystemPlan,
   resolveWriteThroughInput,

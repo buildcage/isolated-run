@@ -4,7 +4,7 @@ import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 
 import { SandboxError } from "./errors.ts";
 import { runSandboxStep, WRITE_THROUGH_ALL_WARNING, type SandboxStepDeps } from "./sandbox-step.ts";
-import { filesystemAuditPaths } from "./sandbox/filesystem-audit.ts";
+import { filesystemAuditPaths } from "./sandbox/filesystem-audit-paths.ts";
 import { SANDBOX_SCRATCH_BASE } from "./sandbox/scratch-dir.ts";
 
 // Assembled at runtime: a literal shaped like an AWS access key ID trips

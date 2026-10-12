@@ -19,17 +19,19 @@ import {
 import { buildEnvBlob, resolveSandboxEnv, writeEnvLoader } from "./env-loader.ts";
 import { createOverlayScratchDirs, overlayUpperFor } from "./ephemeral-fs.ts";
 import {
-  auditUnavailable,
-  extractTracer,
-  hostCannotAudit,
-  startFilesystemAudit,
-  noAudit,
-  NO_CGROUP_V2_REASON,
-  type AuditHandle,
-  type FilesystemAuditPaths,
-  withoutCompatSyscalls,
   allowedSyscalls,
-} from "./filesystem-audit.ts";
+  auditUnavailable,
+  hostCannotAudit,
+  NO_CGROUP_V2_REASON,
+  withoutCompatSyscalls,
+} from "./filesystem-audit-host.ts";
+import type { FilesystemAuditPaths } from "./filesystem-audit-paths.ts";
+import {
+  extractTracer,
+  noAudit,
+  startFilesystemAudit,
+  type AuditHandle,
+} from "./filesystem-audit-tracer.ts";
 import {
   jvmTools,
   persistingWritablePaths,

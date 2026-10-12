@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { SandboxError } from "../errors.ts";
-import { hostCannotAudit, NO_CGROUP_V2_REASON, withoutCompatSyscalls } from "./filesystem-audit.ts";
+import {
+  hostCannotAudit,
+  NO_CGROUP_V2_REASON,
+  withoutCompatSyscalls,
+} from "./filesystem-audit-host.ts";
 import { WritablePathConflictError } from "./paths.ts";
 import {
   assembleBundle,

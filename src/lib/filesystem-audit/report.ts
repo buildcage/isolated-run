@@ -18,7 +18,7 @@ import {
 } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { failOrWarn } from "../fail-or-warn.ts";
-import type { FilesystemAuditPaths } from "../sandbox/filesystem-audit.ts";
+import type { FilesystemAuditPaths } from "../sandbox/filesystem-audit-paths.ts";
 import { FILESYSTEM_PRIORITIES } from "../summary-priorities.ts";
 import { setFilesystemAuditOutput, uploadFilesystemAuditArtifact } from "./artifact.ts";
 import type { CutCause } from "./fold-tree.ts";
@@ -320,7 +320,7 @@ function reduce(
   let readOnce = false;
   let reduced: ReducedRecording;
   try {
-    // The recording sits under the scratch base (see sandbox/filesystem-audit.ts),
+    // The recording sits under the scratch base (see sandbox/filesystem-audit-paths.ts),
     // next to the exec wrapper's own files, so its directory is the one holding
     // buildcage's own machinery.
     reduced = reduceRecording(
