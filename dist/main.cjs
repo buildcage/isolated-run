@@ -73142,10 +73142,13 @@ function refusedKeys(timeline) {
 	}));
 }
 function refusedKeyRef(e) {
-	return e.action === "block" && e.reason === KEY_NOT_ALLOWED || auditedKey(e) ? e.extensions?.aws?.keyRef : void 0;
+	return e.action === "block" && e.reason === KEY_NOT_ALLOWED || e.wouldRefuse === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : void 0;
+}
+function letThrough(e) {
+	return e.wouldRefuse !== void 0 && e.action !== "block";
 }
 function auditedKey(e) {
-	return e.wouldRefuse === KEY_NOT_ALLOWED && e.extensions?.aws?.keyRef !== void 0;
+	return letThrough(e) && e.wouldRefuse === KEY_NOT_ALLOWED && e.extensions?.aws?.keyRef !== void 0;
 }
 function keyRefusalLabel(keys) {
 	return (e, reason) => {
@@ -73158,7 +73161,7 @@ function wouldRefuseTruncationNote(artifactAvailable) {
 	return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
 }
 function describeWouldRefuse(timeline) {
-	let count = timeline.filter((event) => event.wouldRefuse !== void 0).length;
+	let count = timeline.filter(letThrough).length;
 	if (count !== 0) return {
 		level: "warning",
 		shouldFail: !1,
@@ -73192,16 +73195,13 @@ function wouldRefuseBlocks(timeline, keys, priority, gap) {
 		}));
 		blocks.push(trafficTableBlock(WOULD_REFUSE_BLOCK, priority, heading, table, "\n"));
 	}
-	let rows = aggregate(timeline.flatMap((e) => e.wouldRefuse === void 0 || auditedKey(e) ? [] : [{
+	let rows = aggregate(timeline.flatMap((e) => !letThrough(e) || auditedKey(e) ? [] : [{
 		...toHostRow(e),
 		reason: e.wouldRefuse
 	}]));
 	if (rows.length > 0) {
-		let table = renderHostTable(rows, { showReason: !0 }), block = trafficTableBlock(WOULD_REFUSE_BLOCK, priority, blocks.length > 0 ? "\n" : heading, table, "\n");
-		blocks.push(blocks.length > 0 ? {
-			...block,
-			level: block.level + 1
-		} : block);
+		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 });
+		blocks.push(trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n"));
 	}
 	return blocks;
 }

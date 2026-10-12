@@ -232,8 +232,9 @@ cannot be turned back into a key ID or matched across runs.
 
 ## Troubleshooting
 
-A refused request ends in its reason, such as `(restrict would refuse: aws-key-not-allowed)` in
-`audit`, or shows it under **🚫 Blocked Hosts** in `restrict`. Look the reason up here:
+A refused request names its reason, such as `aws-key-not-allowed`, under **🚨 Restrict Would
+Refuse** in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. Look the
+reason up here:
 
 | Reason                       | Usual cause                                                                                                                                                                                                                                    | What to do                                                                                                                                                                                         |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

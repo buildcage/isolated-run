@@ -63,11 +63,19 @@ export function refusedKeys(timeline: TrafficEvent[]): Map<string, RefusedKey> {
 
 function refusedKeyRef(e: TrafficEvent): string | undefined {
   const refused = e.action === "block" && e.reason === KEY_NOT_ALLOWED;
-  return refused || auditedKey(e) ? e.extensions?.aws?.keyRef : undefined;
+  return refused || e.wouldRefuse === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : undefined;
+}
+
+/** A request audit let through that restrict would refuse. One refused for
+ *  another reason is in Blocked Hosts already. */
+function letThrough(e: TrafficEvent): e is TrafficEvent & { wouldRefuse: string } {
+  return e.wouldRefuse !== undefined && e.action !== "block";
 }
 
 function auditedKey(e: TrafficEvent): boolean {
-  return e.wouldRefuse === KEY_NOT_ALLOWED && e.extensions?.aws?.keyRef !== undefined;
+  return (
+    letThrough(e) && e.wouldRefuse === KEY_NOT_ALLOWED && e.extensions?.aws?.keyRef !== undefined
+  );
 }
 
 /** aws-key-not-allowed with the key it names, unless that says nothing more. */
@@ -96,7 +104,7 @@ export function wouldRefuseTruncationNote(artifactAvailable: boolean): string {
  * on its switch to restrict with no warning first.
  */
 export function describeWouldRefuse(timeline: TrafficEvent[]): OutcomeEmission | undefined {
-  const count = timeline.filter((event) => event.wouldRefuse !== undefined).length;
+  const count = timeline.filter(letThrough).length;
   if (count === 0) return undefined;
   return {
     level: "warning",
@@ -112,8 +120,8 @@ export function describeWouldRefuse(timeline: TrafficEvent[]): OutcomeEmission |
  * key check would refuse in restrict. aws-key-not-allowed gets a table of its
  * own, one row per key whatever the host: every request a key not allowed signs
  * is refused, and a row for each host would bury the other refusals. The rest
- * are counted by host and reason, as in Blocked Hosts. Each block opens with
- * `gap`, the blank line renderReportBlocks owes a block before it.
+ * are counted by host and reason, as in Blocked Hosts. The first block opens
+ * with `gap`, the blank line renderReportBlocks owes a block before it.
  */
 export function wouldRefuseBlocks(
   timeline: TrafficEvent[],
@@ -142,22 +150,13 @@ export function wouldRefuseBlocks(
   }
   const rows = aggregate(
     timeline.flatMap((e) =>
-      e.wouldRefuse === undefined || auditedKey(e)
-        ? []
-        : [{ ...toHostRow(e), reason: e.wouldRefuse }],
+      !letThrough(e) || auditedKey(e) ? [] : [{ ...toHostRow(e), reason: e.wouldRefuse }],
     ),
   );
   if (rows.length > 0) {
+    const before = blocks.length > 0 ? "\n" : heading;
     const table = renderHostTable(rows, { showReason: true });
-    const block = trafficTableBlock(
-      WOULD_REFUSE_BLOCK,
-      priority,
-      blocks.length > 0 ? "\n" : heading,
-      table,
-      "\n",
-    );
-    // Deeper after the key table, so a cut key table takes it along under one notice.
-    blocks.push(blocks.length > 0 ? { ...block, level: block.level + 1 } : block);
+    blocks.push(trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n"));
   }
   return blocks;
 }

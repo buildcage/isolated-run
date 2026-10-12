@@ -201,7 +201,13 @@ describe("computeReportOutcomes", () => {
     const r: InspectReportData = {
       ...report({
         parameters: reportParams({ mode: "audit" }),
-        timeline: [audited, audited, { ...audited, wouldRefuse: undefined }],
+        timeline: [
+          audited,
+          audited,
+          { ...audited, wouldRefuse: undefined },
+          // Refused already, so counted under Blocked Hosts instead.
+          { ...audited, action: "block", reason: "ip-not-allowed" },
+        ],
       }),
       engine: "inspect",
     };
@@ -283,7 +289,7 @@ describe("computeReportOutcomes", () => {
             ...wouldRefuse(7, "s3.amazonaws.com", "aws-ambiguous-credential"),
             extensions: { aws: { keyRef: "aaaa1111" } },
           },
-          // Refused for another reason, and would be for its key too.
+          // Refused for another reason, so in Blocked Hosts alone, though its line names the key.
           {
             ...signed(8, "sqs.amazonaws.com", "aaaa1111"),
             action: "block",
@@ -302,7 +308,7 @@ describe("computeReportOutcomes", () => {
       );
       expect(tables(markdown)).toStrictEqual([
         [
-          "| key 1 from a role in 222222222222 | s3.amazonaws.com, ssm.amazonaws.com, sqs.amazonaws.com | 4 |",
+          "| key 1 from a role in 222222222222 | s3.amazonaws.com, ssm.amazonaws.com | 3 |",
           "| key 2 | ssm.amazonaws.com | 1 |",
           "| key 3 | cloudformation.amazonaws.com | 1 |",
         ],
