@@ -76,8 +76,8 @@ export interface RewriteOutputFileDeps {
   replaceFile: (path: string, text: string) => void;
 }
 
-// Far beyond what GitHub keeps of a step's outputs, and short of what reading
-// would cost in memory, or in the seconds a cancelled step has left.
+// Far above what GitHub keeps of a step's outputs, and quick to read in the
+// seconds a cancelled step has left.
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 const realDeps: RewriteOutputFileDeps = {
@@ -103,8 +103,8 @@ const realDeps: RewriteOutputFileDeps = {
   },
 };
 
-// The byte order marks of UTF-16 and UTF-32, which the runner would decode by
-// and this reads as UTF-8 only.
+// UTF-16 and UTF-32 byte order marks: the runner decodes by them, this reads
+// UTF-8 only.
 const WIDE_BOMS = [
   [0xff, 0xfe],
   [0xfe, 0xff],
@@ -146,14 +146,12 @@ function rewrite(
   const found = kind(path);
   if (found === "other" || found === "large") {
     replaceFile(path, "");
-    return found === "other"
-      ? "it is not a regular file, so none of it was read"
-      : "it is over 64 MiB, so none of it was read";
+    return found === "other" ? "it is not a regular file" : "it is over 64 MiB";
   }
   const bytes = found === "file" ? readFile(path) : Buffer.alloc(0);
   if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) {
     replaceFile(path, "");
-    return "it is not UTF-8, so none of it was read";
+    return "it is not UTF-8";
   }
   // The runner drops a leading BOM.
   const { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, ""));

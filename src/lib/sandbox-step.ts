@@ -481,18 +481,16 @@ export async function runSandboxStep(
       cancel: cancel.signal,
     });
   } finally {
-    // The command can write either artifact name to $GITHUB_OUTPUT or as a
-    // ::set-output command, or leave the file so the runner stops reading
-    // before the names appended after it. Once it has stopped, the file is
-    // rewritten to what the runner reads and both names are set empty after
-    // it, which the runner applies last, so a step killed before the report
-    // keeps none of the command's names.
+    // The command can set either artifact name, in $GITHUB_OUTPUT or with
+    // ::set-output, or leave the file so the runner stops before the names
+    // appended to it. The file is rewritten to what the runner reads, then both
+    // names set empty, which the runner applies last.
     if (env.GITHUB_OUTPUT) {
       try {
         const unreadable = rewriteOutputFile(env.GITHUB_OUTPUT);
         if (unreadable) {
           annotation.error(
-            `The command left $GITHUB_OUTPUT unreadable: ${unreadable}. What the runner could not read was dropped; failing the step`,
+            `$GITHUB_OUTPUT was rewritten without what the runner could not read (${unreadable}); failing the step`,
           );
           process.exitCode = 1;
         }

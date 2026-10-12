@@ -89,14 +89,14 @@ describe("rewriteOutputFile", () => {
   it("empties, unread, anything at the path but a regular file", () => {
     expect(rewrite("keep=1\n", "other")).toStrictEqual({
       written: "",
-      error: "it is not a regular file, so none of it was read",
+      error: "it is not a regular file",
     });
   });
 
   it("empties, unread, a file over 64 MiB", () => {
     expect(rewrite("keep=1\n", "large")).toStrictEqual({
       written: "",
-      error: "it is over 64 MiB, so none of it was read",
+      error: "it is over 64 MiB",
     });
   });
 
@@ -134,7 +134,7 @@ describe("rewriteOutputFile", () => {
     ]) {
       expect(rewrite(Buffer.from([...bom, 0x61, 0x3d, 0x31]))).toStrictEqual({
         written: "",
-        error: "it is not UTF-8, so none of it was read",
+        error: "it is not UTF-8",
       });
     }
   });
@@ -160,7 +160,7 @@ describe("rewriteOutputFile", () => {
       const path = join(dir, "output");
       writeFileSync(path, "");
       truncateSync(path, 64 * 1024 * 1024 + 1);
-      expect(rewriteOutputFile(path)).toBe("it is over 64 MiB, so none of it was read");
+      expect(rewriteOutputFile(path)).toBe("it is over 64 MiB");
       expect(readFileSync(path, "utf8")).toBe("");
     });
 
@@ -171,7 +171,7 @@ describe("rewriteOutputFile", () => {
       writeFileSync(target, "secret=1\n");
       symlinkSync(target, path);
 
-      expect(rewriteOutputFile(path)).toBe("it is not a regular file, so none of it was read");
+      expect(rewriteOutputFile(path)).toBe("it is not a regular file");
       expect(lstatSync(path).isSymbolicLink()).toBe(false);
       expect(readFileSync(path, "utf8")).toBe("");
       expect(readFileSync(target, "utf8")).toBe("secret=1\n");

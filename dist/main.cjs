@@ -72555,9 +72555,9 @@ function rewriteOutputFile(path, overrides = {}) {
 }
 function rewrite(path, kind, readFile, replaceFile) {
 	let found = kind(path);
-	if (found === "other" || found === "large") return replaceFile(path, ""), found === "other" ? "it is not a regular file, so none of it was read" : "it is over 64 MiB, so none of it was read";
+	if (found === "other" || found === "large") return replaceFile(path, ""), found === "other" ? "it is not a regular file" : "it is over 64 MiB";
 	let bytes = found === "file" ? readFile(path) : Buffer.alloc(0);
-	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return replaceFile(path, ""), "it is not UTF-8, so none of it was read";
+	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return replaceFile(path, ""), "it is not UTF-8";
 	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");
 	return replaceFile(path, text === "" || text.endsWith("\n") ? text : `${text}\n`), error;
 }
@@ -73722,7 +73722,7 @@ async function runSandboxStep(env, overrides = {}) {
 	} finally {
 		if (env.GITHUB_OUTPUT) try {
 			let unreadable = rewriteOutputFile(env.GITHUB_OUTPUT);
-			unreadable && (annotation.error(`The command left $GITHUB_OUTPUT unreadable: ${unreadable}. What the runner could not read was dropped; failing the step`), process.exitCode = 1);
+			unreadable && (annotation.error(`$GITHUB_OUTPUT was rewritten without what the runner could not read (${unreadable}); failing the step`), process.exitCode = 1);
 		} catch (e) {
 			annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
 		}

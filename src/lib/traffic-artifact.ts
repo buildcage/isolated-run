@@ -85,9 +85,9 @@ export async function uploadTrafficArtifact(
 
 /**
  * Set the traffic_artifact_name output, empty when no artifact was uploaded.
- * Written on every path, after the isolated command has exited and
- * $GITHUB_OUTPUT has been rewritten so the runner reads it (see
- * step-output-file.ts), which this overrides as the last write.
+ * Written on every path, after the isolated command has exited:
+ * GITHUB_OUTPUT is last-write-wins, so this is what overrides anything the
+ * command itself wrote to the same key.
  */
 export function setTrafficArtifactOutput(name: string): void {
   core.setOutput("traffic_artifact_name", name);

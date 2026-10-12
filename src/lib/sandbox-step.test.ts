@@ -709,11 +709,11 @@ describe("runSandboxStep", () => {
     });
 
     it("fails the step but still reports when $GITHUB_OUTPUT held what the runner cannot read", async () => {
-      mocks.rewriteOutputFile.mockReturnValue("it is not a regular file, so none of it was read");
+      mocks.rewriteOutputFile.mockReturnValue("it is not a regular file");
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
       expect(annotation.error).toHaveBeenCalledWith(
-        "The command left $GITHUB_OUTPUT unreadable: it is not a regular file, so none of it was read. What the runner could not read was dropped; failing the step",
+        "$GITHUB_OUTPUT was rewritten without what the runner could not read (it is not a regular file); failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
