@@ -9,10 +9,7 @@
  * and sandbox/sandboxed-command.ts.
  */
 
-import { randomBytes } from "node:crypto";
-import { rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { writeFileSync } from "node:fs";
 
 import * as core from "@actions/core";
 
@@ -68,6 +65,8 @@ import { assertNonRootUid } from "./sandbox/identity.ts";
 import {
   mediateRunnerOutputFiles,
   readBackingFile,
+  removeBackingDir,
+  runnerFilesDirFor,
   type MediatedRunnerFile,
   type RunnerOutputMediation,
 } from "./sandbox/runner-output-files.ts";
@@ -139,6 +138,7 @@ export interface SandboxStepDeps {
   prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
   mediateRunnerOutputFiles: typeof mediateRunnerOutputFiles;
   readBackingFile: typeof readBackingFile;
+  removeBackingDir: typeof removeBackingDir;
   /** Writes a mediated runner file's real path from its validated backing
    *  content; the command never touched the real path. */
   writeRunnerFile: (path: string, content: Buffer) => void;
@@ -209,6 +209,7 @@ const realDeps: SandboxStepDeps = {
   prepareStepFilesystemAudit,
   mediateRunnerOutputFiles,
   readBackingFile,
+  removeBackingDir,
   // A one-line fs wrapper; its behaviour is writeFileSync's.
   /* v8 ignore next */
   writeRunnerFile: (path, content) => writeFileSync(path, content),
@@ -263,8 +264,8 @@ function saveCleanupState(
  * writes it directly, with no symlink, FIFO or permission to work around.
  * $GITHUB_OUTPUT is trimmed to the entries the runner can read; a dropped entry
  * fails the step, since the runner would stop at it. A backing copy the command
- * made unreadable (a symlink, FIFO, or one over 64 MiB) leaves the real file
- * empty and fails the step too.
+ * made unreadable (a symlink, FIFO, one over 64 MiB, or permissions taken
+ * away) leaves the real file empty and fails the step too.
  */
 function writeBackMediatedFile(
   file: MediatedRunnerFile,
@@ -349,6 +350,7 @@ export async function runSandboxStep(
     prepareStepFilesystemAudit,
     mediateRunnerOutputFiles,
     readBackingFile,
+    removeBackingDir,
     writeRunnerFile,
     setTrafficArtifactOutput,
     setFilesystemAuditOutput,
@@ -521,14 +523,14 @@ export async function runSandboxStep(
   // The command writes action-owned backing copies of $GITHUB_OUTPUT and
   // $GITHUB_STEP_SUMMARY, bound into the sandbox, with the real files masked
   // from it; the host reads the copies back and writes the real files itself
-  // after the step. The backing directory sits outside the sandbox's scratch
-  // so it outlives the command, and is removed below. The path is settled here
-  // (no I/O), but the directory is only created inside the try, so a failure
-  // there still tears the proxy down in the finally.
-  const runnerFilesBackingDir = join(
-    tmpdir(),
-    `buildcage-runner-files-${randomBytes(8).toString("hex")}`,
-  );
+  // after the step. The backing directory sits beside the sandbox's scratch
+  // dir, not in it, so it outlives the command. The scratch base is hidden from
+  // the sandbox (/tmp is writable there), so the command reaches the directory
+  // only through the bind and cannot move it aside. It is removed below, or by
+  // the post step after a hard kill. The path is settled here (no I/O), but the
+  // directory is only created inside the try, so a failure there still tears
+  // the proxy down in the finally.
+  const runnerFilesBackingDir = runnerFilesDirFor(containerName);
   let mediation: RunnerOutputMediation | undefined;
 
   // 1 unless the isolated command itself reports otherwise: every way out of
@@ -574,7 +576,11 @@ export async function runSandboxStep(
       for (const file of mediation.files) {
         writeBackMediatedFile(file, annotation, { readBackingFile, writeRunnerFile });
       }
-      rmSync(runnerFilesBackingDir, { recursive: true, force: true });
+      try {
+        removeBackingDir(runnerFilesBackingDir);
+      } catch (e) {
+        warn(`Could not remove ${runnerFilesBackingDir}: ${errorMessage(e)}`);
+      }
     }
     for (const set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) {
       try {

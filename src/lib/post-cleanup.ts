@@ -8,6 +8,7 @@ import { resolvePostState, type PostCleanupTargets } from "./post-state.ts";
 import { filesystemAuditPaths, readPid } from "./sandbox/filesystem-audit-paths.ts";
 import { releaseNssDb } from "./sandbox/nss-db-ledger.ts";
 import { runPinnedHostCommand } from "./sandbox/run-host-command.ts";
+import { removeBackingDir, runnerFilesDirFor } from "./sandbox/runner-output-files.ts";
 import {
   SANDBOX_SCRATCH_BASE,
   cleanupScratchDir,
@@ -23,6 +24,7 @@ export interface PostCleanupDeps {
   readFile?: (path: string) => string;
   killTracer?: (pid: number) => void;
   removeFile?: (path: string) => void;
+  removeRunnerFilesDir?: (dir: string) => void;
 }
 
 // Untested by design: the defaults behind the audit-cleanup seams, which only
@@ -126,6 +128,7 @@ export function planPostCleanup(
     fileExists = existsSync,
     removeScratchDir = cleanupScratchDir,
     releaseNssDb: releaseNssDbUse = releaseNssDb,
+    removeRunnerFilesDir = removeBackingDir,
   } = deps;
   const { targets, problems } = resolvePostState(state);
   for (const problem of problems) {
@@ -169,6 +172,17 @@ export function planPostCleanup(
   } catch (e) {
     annotation.warning(
       `run post-cleanup: failed to remove sandbox scratch dir: ${errorMessage(e)}`,
+    );
+  }
+
+  // The $GITHUB_OUTPUT/$GITHUB_STEP_SUMMARY backing directory a hard kill left
+  // beside the scratch dir, named from containerName the same way.
+  try {
+    const runnerFilesDir = runnerFilesDirFor(targets.containerName);
+    if (fileExists(runnerFilesDir)) removeRunnerFilesDir(runnerFilesDir);
+  } catch (e) {
+    annotation.warning(
+      `run post-cleanup: failed to remove the runner-file backing dir: ${errorMessage(e)}`,
     );
   }
 

@@ -1,5 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,8 +18,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   mediateRunnerOutputFiles,
   readBackingFile,
+  removeBackingDir,
   RUNNER_FILES_DIR,
+  runnerFilesDirFor,
 } from "./runner-output-files.ts";
+import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 
 const ENV = {
   GITHUB_OUTPUT: "/home/runner/work/_temp/_runner_file_commands/set_output_abc",
@@ -88,6 +101,29 @@ describe("mediateRunnerOutputFiles", () => {
       rmSync(base, { recursive: true, force: true });
     }
   });
+
+  it("refuses a backing directory already there", () => {
+    const base = mkdtempSync(join(tmpdir(), "mediate-"));
+    const backingDir = join(base, "backing");
+    mkdirSync(backingDir);
+    try {
+      expect(() => mediateRunnerOutputFiles(ENV, backingDir)).toThrow(/EEXIST/);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a parent others can write to", () => {
+    const base = mkdtempSync(join(tmpdir(), "mediate-"));
+    chmodSync(base, 0o777);
+    try {
+      expect(() => mediateRunnerOutputFiles(ENV, join(base, "backing"))).toThrow(
+        /not a private directory/,
+      );
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("readBackingFile", () => {
@@ -140,14 +176,114 @@ describe("readBackingFile", () => {
     expect(read).toStrictEqual({ reason: "it was over 64 MiB" });
   });
 
-  it("rethrows a read error that is not a missing file", () => {
-    expect(() =>
-      readBackingFile("/backing/output", {
-        lstat: () => {
-          throw Object.assign(new Error("EACCES"), { code: "EACCES" });
-        },
-        readFile: () => Buffer.alloc(0),
-      }),
-    ).toThrow("EACCES");
+  // The command can take the directory's permissions away. Only the code goes
+  // into the annotation: the message names the host-side path.
+  it("refuses a file it cannot lstat, without throwing or naming the path", () => {
+    const read = readBackingFile("/backing/output", {
+      lstat: () => {
+        throw Object.assign(new Error("EACCES: permission denied, lstat '/backing/output'"), {
+          code: "EACCES",
+        });
+      },
+      readFile: () => Buffer.alloc(0),
+    });
+    expect(read).toStrictEqual({ reason: "it could not be read (EACCES)" });
+  });
+
+  // Or the file's own.
+  it("refuses a regular file it cannot read, without throwing", () => {
+    const read = readBackingFile("/backing/output", {
+      lstat: () => ({ isFile: () => true, size: 1 }),
+      readFile: () => {
+        throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+      },
+    });
+    expect(read).toStrictEqual({ reason: "it could not be read (EACCES)" });
+  });
+
+  // Only lstat's ENOENT means the command removed the file.
+  it("refuses a regular file that is gone by the read", () => {
+    const read = readBackingFile("/backing/output", {
+      lstat: () => ({ isFile: () => true, size: 1 }),
+      readFile: () => {
+        throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+      },
+    });
+    expect(read).toStrictEqual({ reason: "it could not be read (ENOENT)" });
+  });
+
+  it("falls back to the message for an error with no code", () => {
+    const read = readBackingFile("/backing/output", {
+      lstat: () => {
+        throw new Error("odd");
+      },
+      readFile: () => Buffer.alloc(0),
+    });
+    expect(read).toStrictEqual({ reason: "it could not be read (odd)" });
+  });
+});
+
+describe("removeBackingDir", () => {
+  let base: string;
+  afterEach(() => {
+    chmodSync(base, 0o700);
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it("removes the directory and what the command left in it", () => {
+    base = mkdtempSync(join(tmpdir(), "backing-"));
+    const dir = join(base, "runner-files");
+    mkdirSync(join(dir, "nested"), { recursive: true });
+    writeFileSync(join(dir, "nested", "file"), "");
+    removeBackingDir(dir);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("gives back the permissions the command took away, down the tree", () => {
+    base = mkdtempSync(join(tmpdir(), "backing-"));
+    const dir = join(base, "runner-files");
+    mkdirSync(join(dir, "a", "b"), { recursive: true });
+    writeFileSync(join(dir, "a", "b", "file"), "");
+    chmodSync(join(dir, "a", "b"), 0);
+    chmodSync(join(dir, "a"), 0);
+    chmodSync(dir, 0);
+    removeBackingDir(dir);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("does not follow a symlink to a directory elsewhere", () => {
+    base = mkdtempSync(join(tmpdir(), "backing-"));
+    const dir = join(base, "runner-files");
+    const outside = join(base, "outside");
+    mkdirSync(dir);
+    mkdirSync(outside);
+    chmodSync(outside, 0o500);
+    symlinkSync(outside, join(dir, "link"));
+    removeBackingDir(dir);
+    expect(existsSync(dir)).toBe(false);
+    expect(lstatSync(outside).mode & 0o777).toBe(0o500);
+  });
+
+  it("does nothing when the directory is already gone", () => {
+    base = mkdtempSync(join(tmpdir(), "backing-"));
+    expect(() => removeBackingDir(join(base, "runner-files"))).not.toThrow();
+  });
+
+  it("throws on a path it cannot look at", () => {
+    base = mkdtempSync(join(tmpdir(), "backing-"));
+    writeFileSync(join(base, "file"), "");
+    expect(() => removeBackingDir(join(base, "file", "runner-files"))).toThrow(/ENOTDIR/);
+  });
+});
+
+describe("runnerFilesDirFor", () => {
+  it("names the directory beside the container's scratch dir", () => {
+    expect(runnerFilesDirFor("buildcage-proxy-deadbeef")).toBe(
+      `${SANDBOX_SCRATCH_BASE}/runner-files-deadbeef`,
+    );
+  });
+
+  it("refuses a container name that is not one of this action's", () => {
+    expect(() => runnerFilesDirFor("../etc")).toThrow(/Refusing to derive/);
   });
 });

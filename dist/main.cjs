@@ -26,11 +26,7 @@ var __create = Object.create, __defProp = Object.defineProperty, __getOwnPropDes
 //#endregion
 let node_fs = require("node:fs");
 node_fs = __toESM(node_fs, 1);
-let node_url = require("node:url"), node_crypto = require("node:crypto"), node_os = require("node:os");
-node_os = __toESM(node_os, 1);
-let node_path = require("node:path");
-node_path = __toESM(node_path, 1);
-let os = require("os");
+let node_url = require("node:url"), os = require("os");
 os = __toESM(os, 1);
 let crypto$1 = require("crypto");
 crypto$1 = __toESM(crypto$1, 1);
@@ -54,9 +50,13 @@ let node_util = require("node:util");
 node_util = __toESM(node_util, 1);
 let node_events = require("node:events"), node_zlib = require("node:zlib");
 node_zlib = __toESM(node_zlib, 1);
-let child_process = require("child_process");
+let node_crypto = require("node:crypto"), child_process = require("child_process");
 child_process = __toESM(child_process, 1), require("timers");
-let buffer = require("buffer"), node_fs_promises = require("node:fs/promises"), fs_promises = require("fs/promises");
+let node_path = require("node:path");
+node_path = __toESM(node_path, 1);
+let buffer = require("buffer"), node_os = require("node:os");
+node_os = __toESM(node_os, 1);
+let node_fs_promises = require("node:fs/promises"), fs_promises = require("fs/promises");
 fs_promises = __toESM(fs_promises, 1);
 let node_child_process = require("node:child_process"), node_process = require("node:process");
 node_process = __toESM(node_process, 1);
@@ -72092,10 +72092,9 @@ const RUNNER_FILES_DIR = "/dev/buildcage-runner-files", LEAF = {
 	GITHUB_OUTPUT: "output",
 	GITHUB_STEP_SUMMARY: "step-summary"
 }, MEDIATED_VARIABLES = Object.keys(LEAF), realMediateDeps = {
-	mkdir: (path) => void (0, node_fs.mkdirSync)(path, {
-		mode: 448,
-		recursive: !0
-	}),
+	mkdir: (path) => {
+		ensureOwnScratchBase((0, node_path.dirname)(path)), (0, node_fs.mkdirSync)(path, { mode: 448 });
+	},
 	writeFile: (path, data) => (0, node_fs.writeFileSync)(path, data, {
 		mode: 420,
 		flag: "wx"
@@ -72131,14 +72130,43 @@ const realReadBackingDeps = {
 	readFile: (path) => (0, node_fs.readFileSync)(path)
 };
 function readBackingFile(path, deps = realReadBackingDeps) {
-	let stats;
+	let unreadable = (e) => ({ reason: `it could not be read (${e.code ?? errorMessage(e)})` }), stats;
 	try {
 		stats = deps.lstat(path);
 	} catch (e) {
-		if (e.code === "ENOENT") return { empty: !0 };
-		throw e;
+		return e.code === "ENOENT" ? { empty: !0 } : unreadable(e);
 	}
-	return stats.isFile() ? stats.size > 67108864 ? { reason: "it was over 64 MiB" } : { bytes: deps.readFile(path) } : { reason: "it was not a regular file" };
+	if (!stats.isFile()) return { reason: "it was not a regular file" };
+	if (stats.size > 67108864) return { reason: "it was over 64 MiB" };
+	try {
+		return { bytes: deps.readFile(path) };
+	} catch (e) {
+		return unreadable(e);
+	}
+}
+function removeBackingDir(path) {
+	let pending = [path];
+	for (let dir = pending.pop(); dir !== void 0; dir = pending.pop()) {
+		let stats;
+		try {
+			stats = (0, node_fs.lstatSync)(dir);
+		} catch (e) {
+			if (e.code === "ENOENT") continue;
+			throw e;
+		}
+		if (stats.isDirectory()) {
+			(stats.mode & 448) != 448 && (0, node_fs.chmodSync)(dir, stats.mode | 448);
+			for (let entry of (0, node_fs.readdirSync)(dir)) pending.push((0, node_path.join)(dir, entry));
+		}
+	}
+	(0, node_fs.rmSync)(path, {
+		recursive: !0,
+		force: !0
+	});
+}
+function runnerFilesDirFor(containerName) {
+	let scratchName = (0, node_path.basename)(scratchDirFor(containerName));
+	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchName.replace(/^sandbox-/, "runner-files-"));
 }
 //#endregion
 //#region src/lib/sandbox/env-loader.ts
@@ -73925,6 +73953,7 @@ const realDeps = {
 	prepareStepFilesystemAudit,
 	mediateRunnerOutputFiles,
 	readBackingFile,
+	removeBackingDir,
 	writeRunnerFile: (path, content) => (0, node_fs.writeFileSync)(path, content),
 	setTrafficArtifactOutput,
 	setFilesystemAuditOutput,
@@ -73972,7 +74001,7 @@ function writeBackMediatedFile(file, annotation, deps) {
 	failure && fail(failure);
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeLateSummary, prepareStepFilesystemAudit, mediateRunnerOutputFiles, readBackingFile, writeRunnerFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeLateSummary, prepareStepFilesystemAudit, mediateRunnerOutputFiles, readBackingFile, removeBackingDir, writeRunnerFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -74048,7 +74077,7 @@ async function runSandboxStep(env, overrides = {}) {
 	}
 	let cancel = new AbortController(), stopListening = onCancel(() => {
 		cancel.signal.aborted || (info("buildcage: the step was cancelled; stopping the sandbox"), cancel.abort());
-	}), runnerFilesBackingDir = (0, node_path.join)((0, node_os.tmpdir)(), `buildcage-runner-files-${(0, node_crypto.randomBytes)(8).toString("hex")}`), mediation, exitCode = 1, auditAttached = !1;
+	}), runnerFilesBackingDir = runnerFilesDirFor(containerName), mediation, exitCode = 1, auditAttached = !1;
 	try {
 		let proxyNetns = getContainerNetns(containerName);
 		if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
@@ -74076,10 +74105,11 @@ async function runSandboxStep(env, overrides = {}) {
 				readBackingFile,
 				writeRunnerFile
 			});
-			(0, node_fs.rmSync)(runnerFilesBackingDir, {
-				recursive: !0,
-				force: !0
-			});
+			try {
+				removeBackingDir(runnerFilesBackingDir);
+			} catch (e) {
+				warn(`Could not remove ${runnerFilesBackingDir}: ${errorMessage(e)}`);
+			}
 		}
 		for (let set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) try {
 			set("");

@@ -57,6 +57,7 @@ const mocks = {
   prepareStepFilesystemAudit: vi.fn(),
   mediateRunnerOutputFiles: vi.fn(),
   readBackingFile: vi.fn(),
+  removeBackingDir: vi.fn(),
   writeRunnerFile: vi.fn(),
   setTrafficArtifactOutput: vi.fn(),
   setFilesystemAuditOutput: vi.fn(),
@@ -817,6 +818,31 @@ describe("runSandboxStep", () => {
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+    });
+
+    // The sandbox sees the backing directory only through its bind, and the
+    // post step finds it by the container name.
+    it("keeps the backing directory beside the scratch dir, and removes it after the write-back", async () => {
+      await runSandboxStep(ENV, deps);
+
+      const backingDir = `${SANDBOX_SCRATCH_BASE}/runner-files-deadbeef`;
+      expect(mocks.mediateRunnerOutputFiles.mock.calls[0][1]).toBe(backingDir);
+      expect(mocks.removeBackingDir).toHaveBeenCalledExactlyOnceWith(backingDir);
+      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.removeBackingDir));
+    });
+
+    // The command can leave a subdirectory it made unreadable there.
+    it("warns but still reports when the backing directory cannot be removed", async () => {
+      mocks.removeBackingDir.mockImplementation(() => {
+        throw new Error("EACCES");
+      });
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      expect(mocks.warn).toHaveBeenCalledWith(
+        expect.stringMatching(/^Could not remove .*: EACCES$/),
+      );
+      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+      expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
     });
 
     it("writes nothing back where the runner gave no $GITHUB_STEP_SUMMARY", async () => {
