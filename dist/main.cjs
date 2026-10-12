@@ -73216,6 +73216,17 @@ function reduceTimeline(timeline, knownBlockedRules) {
 		blockedCount: blockedEvents.length
 	};
 }
+async function assembleReportData(engine, proxyScan, dnsScan, parameters, droppedLogs) {
+	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	return {
+		engine,
+		parameters,
+		...reduceTimeline(timeline, parameters.knownBlockedRules),
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
+		startedAt,
+		timeline
+	};
+}
 //#endregion
 //#region src/core/lib/report/build/inspect.ts
 function resolverAllows(parameters) {
@@ -73228,15 +73239,8 @@ function resolverAllows(parameters) {
 	return (name) => allowed.some((regex) => regex.test(name));
 }
 async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedLogs) {
-	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
-	return {
-		engine: "inspect",
-		parameters,
-		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
-		startedAt,
-		timeline
-	};
+	let isAudit = parameters.mode === "audit";
+	return assembleReportData("inspect", scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanInspectDnsLog(dnsLines, isAudit), parameters, droppedLogs);
 }
 //#endregion
 //#region src/core/lib/log/haproxy.ts
@@ -73294,15 +73298,8 @@ async function scanHaproxyLog(lines, isAudit) {
 //#endregion
 //#region src/core/lib/report/build/universal.ts
 async function buildUniversalReportData(proxyLines, dnsLines, parameters, droppedLogs) {
-	let isAudit = parameters.mode === "audit", [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit)]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
-	return {
-		engine: "universal",
-		parameters,
-		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
-		startedAt,
-		timeline
-	};
+	let isAudit = parameters.mode === "audit";
+	return assembleReportData("universal", scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit), parameters, droppedLogs);
 }
 //#endregion
 //#region src/lib/report-fetch.ts
