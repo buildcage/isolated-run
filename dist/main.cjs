@@ -69104,8 +69104,8 @@ const MARK = {
 	failed: "⚠️"
 };
 function renderEvent(event, startedAt, refusalLabel) {
-	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "🚨" : MARK[event.action] ?? "✅", label = (reason) => refusalLabel(event, reason) ?? reason, note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${label(event.wouldRefuse)})`, result = event.action === "block" && event.reason !== void 0 ? label(event.reason) : outcome(event);
-	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${result}${note}`;
+	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "🚨" : MARK[event.action] ?? "✅", label = (reason) => refusalLabel(event, reason) ?? reason, note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${label(event.wouldRefuse)})`;
+	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event, label)}${note}`;
 }
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
 function credentialName(name) {
@@ -69144,8 +69144,8 @@ function subject(event) {
 	}
 	return `${event.method} ${redactCredentialQuery(event.url)}`;
 }
-function outcome(event) {
-	if (event.action === "block") return event.reason ?? "blocked";
+function outcome(event, label) {
+	if (event.action === "block") return event.reason === void 0 ? "blocked" : label(event.reason);
 	if (event.action === "incomplete") return event.reason ?? "no request";
 	if (event.action === "failed") return event.reason ?? "failed";
 	if (event.action === "discovery") return `no data (${event.queryType} is never served)`;
@@ -69331,7 +69331,7 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 		}), "\n")), wrote = !0;
 	}
 	let extra = extraBlocks(gap());
-	if (blocks.push(...extra), wrote ||= extra.length > 0, report.failed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap()}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n")), wrote = !0), isAudit) {
+	if (blocks.push(...extra), wrote ||= extra.some((b) => b.text !== ""), report.failed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap()}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n")), wrote = !0), isAudit) {
 		let example = report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 			...step,
 			allowedIpRules: report.parameters.allowedIpRules,
@@ -73127,17 +73127,17 @@ function refusedKeys(timeline) {
 		if (!keyRef) continue;
 		let key = seen.get(keyRef) ?? {
 			hosts: new Set(),
-			count: 0,
-			audited: !1
+			count: 0
 		};
-		key.hosts.add(e.host), key.count++, key.audited ||= auditedKey(e), seen.set(keyRef, key);
+		seen.set(keyRef, key), auditedKey(e) && (key.hosts.add(e.host), key.count++);
 	}
 	let numbered = seen.size > 1;
 	return new Map([...seen].map(([keyRef, key], i) => {
 		let account = issuers.get(keyRef), label = `key${numbered ? ` ${i + 1}` : ""}${account ? ` from a role in ${account}` : ""}`;
 		return [keyRef, {
 			...key,
-			label
+			label,
+			bare: !numbered && !account
 		}];
 	}));
 }
@@ -73149,8 +73149,8 @@ function auditedKey(e) {
 }
 function keyRefusalLabel(keys) {
 	return (e, reason) => {
-		let keyRef = reason === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : void 0, label = keyRef && keys.get(keyRef)?.label;
-		return label && label !== "key" ? `${KEY_NOT_ALLOWED}, ${label}` : void 0;
+		let keyRef = reason === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : void 0, key = keyRef ? keys.get(keyRef) : void 0;
+		return key && !key.bare ? `${KEY_NOT_ALLOWED}, ${key.label}` : void 0;
 	};
 }
 const WOULD_REFUSE_BLOCK = "traffic-would-refuse";
@@ -73162,11 +73162,11 @@ function describeWouldRefuse(timeline) {
 	if (count !== 0) return {
 		level: "warning",
 		shouldFail: !1,
-		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section lists them with the reason.`
+		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section counts them by key or by host and reason.`
 	};
 }
 function wouldRefuseBlocks(timeline, keys, priority, gap) {
-	let heading = `${gap}### 🚨 Restrict Would Refuse\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.audited);
+	let heading = `${gap}### 🚨 Restrict Would Refuse\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
 	if (audited.length > 0) {
 		let table = markdownTable([
 			{

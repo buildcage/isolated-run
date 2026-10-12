@@ -20,12 +20,13 @@ export interface RefusedKey {
    *  run refused one key alone, and the account when no STS answer in the
    *  run issued the key. */
   label: string;
-  /** The hosts its requests went to, in the order each first appeared. */
+  /** Whether the label is "key" alone, which names nothing a log line could use. */
+  bare: boolean;
+  /** The hosts of the requests audit let through, in the order each first
+   *  appeared, and how many there were: a key with none has no row in
+   *  Restrict Would Refuse. */
   hosts: Set<string>;
   count: number;
-  /** Whether audit let one of its requests through, so it has a row in
-   *  Restrict Would Refuse. */
-  audited: boolean;
 }
 
 /**
@@ -36,7 +37,7 @@ export interface RefusedKey {
  */
 export function refusedKeys(timeline: TrafficEvent[]): Map<string, RefusedKey> {
   const issuers = new Map<string, string>();
-  const seen = new Map<string, Omit<RefusedKey, "label">>();
+  const seen = new Map<string, Pick<RefusedKey, "hosts" | "count">>();
   for (const e of timeline) {
     const { issuedKeyRef, assumedAccount } = e.extensions?.aws ?? {};
     if (issuedKeyRef && assumedAccount && /^\d{12}$/.test(assumedAccount)) {
@@ -44,18 +45,18 @@ export function refusedKeys(timeline: TrafficEvent[]): Map<string, RefusedKey> {
     }
     const keyRef = refusedKeyRef(e);
     if (!keyRef) continue;
-    const key = seen.get(keyRef) ?? { hosts: new Set(), count: 0, audited: false };
+    const key = seen.get(keyRef) ?? { hosts: new Set(), count: 0 };
+    seen.set(keyRef, key);
+    if (!auditedKey(e)) continue;
     key.hosts.add(e.host);
     key.count++;
-    key.audited ||= auditedKey(e);
-    seen.set(keyRef, key);
   }
   const numbered = seen.size > 1;
   return new Map(
     [...seen].map(([keyRef, key], i) => {
       const account = issuers.get(keyRef);
       const label = `key${numbered ? ` ${i + 1}` : ""}${account ? ` from a role in ${account}` : ""}`;
-      return [keyRef, { ...key, label }];
+      return [keyRef, { ...key, label, bare: !numbered && !account }];
     }),
   );
 }
@@ -73,8 +74,8 @@ function auditedKey(e: TrafficEvent): boolean {
 export function keyRefusalLabel(keys: Map<string, RefusedKey>): RefusalLabel {
   return (e, reason) => {
     const keyRef = reason === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : undefined;
-    const label = keyRef && keys.get(keyRef)?.label;
-    return label && label !== "key" ? `${KEY_NOT_ALLOWED}, ${label}` : undefined;
+    const key = keyRef ? keys.get(keyRef) : undefined;
+    return key && !key.bare ? `${KEY_NOT_ALLOWED}, ${key.label}` : undefined;
   };
 }
 
@@ -102,7 +103,7 @@ export function describeWouldRefuse(timeline: TrafficEvent[]): OutcomeEmission |
     shouldFail: false,
     message:
       `${count} request(s) restrict mode would refuse. ` +
-      "The 🚨 Restrict Would Refuse section lists them with the reason.",
+      "The 🚨 Restrict Would Refuse section counts them by key or by host and reason.",
   };
 }
 
@@ -122,7 +123,7 @@ export function wouldRefuseBlocks(
 ): SummaryBlock[] {
   const heading = `${gap}### 🚨 Restrict Would Refuse\n\n`;
   const blocks: SummaryBlock[] = [];
-  const audited = [...keys.values()].filter((key) => key.audited);
+  const audited = [...keys.values()].filter((key) => key.count > 0);
   if (audited.length > 0) {
     const table = markdownTable(
       [
