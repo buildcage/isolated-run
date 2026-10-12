@@ -181,6 +181,42 @@ export function findPinnableCommand(
 }
 
 /**
+ * Why `first`, the first `command` on PATH, could not be pinned, given that no
+ * later one could either. One whose `$PATH` directory is out of reach can only
+ * have been refused for a symlink on its way.
+ */
+function unpinnableReason(
+  command: string,
+  first: string,
+  persisting: string[],
+  deps: SymlinkDeps,
+): string {
+  const under = (path: string) => persisting.find((p) => isAtOrUnder(path, p));
+  const resolved = resolveHostPath(first, deps);
+  const runsOutside = "This action runs it outside the sandbox, so it";
+  if (!reachableFrom(persisting, deps)(dirname(first)) && "real" in resolved) {
+    if (under(resolved.real)) {
+      return (
+        `'${command}' on PATH, ${first}, leads to ${resolved.real}, under ` +
+        `${under(resolved.real)}, which a sandboxed command can write to. ${runsOutside} has to ` +
+        "be a file no sandboxed command can replace."
+      );
+    }
+    const link = resolved.links.find((l) => under(l.at))!;
+    return (
+      `'${command}' on PATH, ${first}, leads through ${link.at}, under ${under(link.at)}, ` +
+      `which a sandboxed command can write to, to ${resolved.real}. ${runsOutside} is pinned ` +
+      `through such a symlink only when the file it leads to is named '${command}' too.`
+    );
+  }
+  return (
+    `'${command}' is on PATH only under paths a sandboxed command can write to ` +
+    `(${persisting.join(", ")}). ${runsOutside} has to live somewhere no sandboxed command ` +
+    "can replace it, such as /usr/bin."
+  );
+}
+
+/**
  * Pins `docker` and `sudo`, and the PATH each runs with, for the rest of this
  * process. A command missing from PATH altogether is
  * left unpinned, so the sudo preflight or docker's ENOENT reports a runner
@@ -197,11 +233,10 @@ export function pinHostCommands(
       pinCommand(command, path);
       continue;
     }
-    if (!findPinnableCommand(command, env.PATH, [], deps)) continue;
+    const first = findPinnableCommand(command, env.PATH, [], deps);
+    if (!first) continue;
     throw new SandboxError(
-      `'${command}' is on PATH only under paths a sandboxed command can write to ` +
-        `(${paths.join(", ")}). This action runs it outside the sandbox, so it has to live ` +
-        "somewhere no sandboxed command can replace it, such as /usr/bin.",
+      unpinnableReason(command, first, paths, deps),
       "HOST_COMMAND_UNPINNABLE",
     );
   }

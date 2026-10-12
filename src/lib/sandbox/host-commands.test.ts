@@ -362,7 +362,44 @@ describe("pinHostCommands", () => {
 
     expect(error).toBeInstanceOf(SandboxError);
     expect((error as SandboxError).code).toBe("HOST_COMMAND_UNPINNABLE");
-    expect((error as SandboxError).message).toContain("'docker'");
+    expect((error as SandboxError).message).toMatch(
+      /^'docker' is on PATH only under paths a sandboxed command can write to \(/,
+    );
+  });
+
+  const unpinnable = (persisting: string[], deps: FindCommandDeps) => {
+    try {
+      pinHostCommands(persisting, { PATH: "/usr/local/bin:/usr/bin" }, deps);
+    } catch (e) {
+      return (e as SandboxError).message;
+    }
+    return undefined;
+  };
+
+  it("names the symlink and the file it leads to when that file bears another name", () => {
+    const deps = host(["/usr/bin/docker", "/usr/bin/sudo.ws"], {
+      "/usr/bin/sudo": "/etc/alternatives/sudo",
+      "/etc/alternatives/sudo": "/usr/bin/sudo.ws",
+    });
+
+    expect(unpinnable([...PERSISTENT, "/etc"], deps)).toBe(
+      "'sudo' on PATH, /usr/bin/sudo, leads through /etc/alternatives/sudo, under /etc, which " +
+        "a sandboxed command can write to, to /usr/bin/sudo.ws. This action runs it outside the " +
+        "sandbox, so it is pinned through such a symlink only when the file it leads to is " +
+        "named 'sudo' too.",
+    );
+  });
+
+  it("names the file a symlink leads to when that file is where the command can write", () => {
+    const deps = host(["/usr/bin/sudo", `${HOME}/bin/docker`], {
+      "/usr/local/bin/docker": `${HOME}/bin/docker`,
+    });
+
+    expect(unpinnable(PERSISTENT, deps)).toBe(
+      `'docker' on PATH, /usr/local/bin/docker, leads to ${HOME}/bin/docker, under ${HOME}, ` +
+        "which a sandboxed command can write to. This action runs it outside the sandbox, so " +
+        "it has to be a file no sandboxed command can replace.",
+    );
   });
   it("does not fail over a command missing from PATH, leaving it to the caller's own check", () => {
     expect(() =>
