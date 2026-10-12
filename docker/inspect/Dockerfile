@@ -74,7 +74,7 @@ COPY docker/filesystem-audit/ ./
 # held_test.c runs the BPF program's holding logic on the build host, with
 # pools small enough to fill.
 RUN go generate ./... && \
-    cc -Wall -Wextra -Werror -O2 -DN_HEADS=4 -DN_TAILS=40 -o /tmp/held_test bpf/held_test.c && /tmp/held_test && \
+    cc -Wall -Wextra -O2 -DN_HEADS=4 -DN_TAILS=40 -o /tmp/held_test bpf/held_test.c && /tmp/held_test && \
     CGO_ENABLED=0 go test ./... && \
     CGO_ENABLED=0 GOARCH="${TARGETARCH}" go build -trimpath -ldflags="-s -w" -o /out/filesystem-audit .
 

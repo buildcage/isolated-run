@@ -89,7 +89,7 @@ struct event {
 	u8 truncated; ///< The path, or the first path of a two-path operation.
 	u8 trunc2;    ///< The second path of a rename or link.
 	char comm[16];
-	u32 err;   ///< A held path change's errno when its syscall refused it.
+	u32 err;   ///< A held path change's or open's errno when its syscall refused it.
 	u32 marks; ///< MARK_* for the file a path was taken from.
 	u32 gid;   ///< A failed chown's new group.
 	u64 ts;    ///< CLOCK_BOOTTIME at the access; a failed syscall at its entry.

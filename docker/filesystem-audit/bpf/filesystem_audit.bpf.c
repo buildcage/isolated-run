@@ -239,7 +239,11 @@ static __always_inline struct event *start(u32 kind)
 	return e;
 }
 
-/** cap is the size of what e points into, a constant in each caller. */
+/**
+ * Sends @p e to the reader.
+ *
+ * @param cap The size of what @p e points into, a constant in each caller.
+ */
 static __always_inline void submit_cap(struct event *e, u32 cap)
 {
 	u32 len = e->data_len;
@@ -888,18 +892,6 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 	return 0;
 }
 
-/**
- * An open(2) holds one event from its entry until it returns. A refused or
- * missing file never reaches security_file_open, so until then the event is
- * the failed open it would be (K_OPEN_FAILED): when the open was called, its
- * flags, and the name from the kernel's own copy (getname_flags), not the
- * user pointer, which the caller could rewrite before the syscall returns.
- * The file's own open method, an LSM or the FIFO checks can still refuse it
- * after that hook, so from there the event is the open (K_OPEN), reported as
- * done or refused once the syscall returns. bases, which neither record
- * uses, says whether the open reached its create step (see on_mknod); before
- * the hook, gid holds the descriptor a relative name resolves against.
- */
 SEC("fentry/security_file_open")
 int BPF_PROG(on_open, struct file *file)
 {
@@ -911,30 +903,8 @@ int BPF_PROG(on_open, struct file *file)
 	e->flags = file->f_flags;
 	e->mode = file->f_mode;
 	file_path(e, file);
-	// An open from outside open(2), such as exec opening the program, has no
-	// exit to wait for here, and is recorded at once, as is one nested in an
-	// open already held, such as a FUSE passthrough's backing file, or one
-	// with no room to be held.
-	struct held_key k = held_key(HELD_OPEN);
-	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	if (head && head->kind == K_OPEN_FAILED) {
-		e->bases = head->bases;
-		u32 old = tails_for(head->data_len);
-		if (!old && !tails_for(e->data_len)) {
-			__builtin_memcpy(head, e, HEAD);
-			return 0;
-		}
-		if (hold_as(e, HELD_OPEN, old, 0) == 0)
-			return 0;
-		// Recorded as done, though something may still refuse it, and
-		// not also as the failed open it was held as.
-		bump(&untracked);
-		e->bases = 0;
-		head = bpf_map_lookup_elem(&heads, &k);
-		if (head)
-			release(&k, tails_for(head->data_len));
-	}
-	submit(e);
+	if (hold_open(e) != 0)
+		submit(e);
 	return 0;
 }
 
@@ -945,14 +915,8 @@ int BPF_PROG(on_open, struct file *file)
 SEC("fentry/security_path_mknod")
 int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 {
-	if (!in_target())
+	if (!in_target() || open_creating())
 		return 0;
-	struct held_key k = held_key(HELD_OPEN);
-	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	if (head) {
-		head->bases = 1;
-		return 0;
-	}
 	struct event *e = start(K_MKNOD);
 	if (!e)
 		return 0;
@@ -962,44 +926,10 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 	return 0;
 }
 
-/**
- * A full pool counts in untracked even if this open then succeeds and is
- * recorded.
- */
 static __always_inline void open_enter(int dfd, u32 flags)
 {
-	if (!in_target())
-		return;
-	u32 zero = 0;
-	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
-	if (!e)
-		return;
-	e->kind = K_OPEN_FAILED;
-	e->ts = bpf_ktime_get_boot_ns();
-	e->flags = flags;
-	e->gid = dfd;
-	e->bases = 0;
-	e->err = 0;
-	e->truncated = 0;
-	e->n2 = 0;
-	e->data_len = 0;
-	e->data[0] = 0;
-	struct held_key k = held_key(HELD_OPEN);
-	long r = bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
-	if (r == -EEXIST) {
-		// Held already: do_sys_open's, when both hooks fire, or one an
-		// earlier open left. Either way this call's values replace it.
-		struct event *head = bpf_map_lookup_elem(&heads, &k);
-		if (head && head->kind == K_OPEN_FAILED && !head->data_len) {
-			__builtin_memcpy(head, e, HEAD);
-			return;
-		}
-		if (head)
-			release(&k, tails_for(head->data_len));
-		r = bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
-	}
-	if (r != 0)
-		bump(&untracked);
+	if (in_target())
+		open_begin(dfd, flags);
 }
 
 /** Records the failed open assembled in e, its name in place. */
@@ -1036,26 +966,9 @@ static __always_inline void open_failed(struct event *e, long ret)
 
 static __always_inline void open_exit(long ret)
 {
-	struct held_key k = held_key(HELD_OPEN);
-	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	if (!head)
-		return;
-	u32 t = tails_for(head->data_len);
-	// ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal interrupted the open,
-	// which the kernel runs again, and that run records it.
-	int restart = ret <= -512 && ret >= -516;
-	if (!restart && head->kind == K_OPEN) {
-		// Reaching the file after its create step means it was created,
-		// whatever then refused the open.
-		u32 created = head->bases;
-		head->bases = 0;
-		report_held(&k, head, ret < 0 ? -ret : 0, created);
-	} else if (!restart && ret < 0) {
-		struct event *e = assemble(&k, head);
-		if (e)
-			open_failed(e, ret);
-	}
-	release(&k, t);
+	struct event *e = open_end(ret);
+	if (e)
+		open_failed(e, ret);
 }
 
 /**
@@ -1077,45 +990,13 @@ int BPF_PROG(on_open_enter, int dfd, const char *filename, int flags)
 	return 0;
 }
 
-/**
- * Reads the name into the open's head; one that fills the head moves, whole,
- * to tails, or stays there cut when there are none to take. When both
- * getname programs fire, the second finds the name already read.
- */
 static __always_inline void stash_name(u64 *ctx)
 {
 	struct filename *ret = 0;
 	bpf_get_func_ret(ctx, (u64 *)&ret);
 	if ((long)ret < 0 && (long)ret >= -4095)
 		return;
-	struct held_key k = held_key(HELD_OPEN);
-	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	if (!head || head->kind != K_OPEN_FAILED || head->data_len)
-		return;
-	const char *name = BPF_CORE_READ(ret, name);
-	long r = bpf_probe_read_kernel_str(head->data, HEAD_DATA, name);
-	head->data_len = r > 0 ? r : 0;
-	char more = 0;
-	if (r == HEAD_DATA)
-		bpf_probe_read_kernel(&more, 1, name + HEAD_DATA - 1);
-	if (!more)
-		return;
-	u32 zero = 0;
-	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
-	if (!e)
-		return;
-	__builtin_memcpy(e, head, HEAD);
-	r = bpf_probe_read_kernel_str(e->data, PATH_LEN, name);
-	e->data_len = r > 0 ? r : 0;
-	if (hold_as(e, HELD_OPEN, 0, 0) == 0)
-		return;
-	head = bpf_map_lookup_elem(&heads, &k);
-	if (head) {
-		head->truncated = 1;
-		head->n2 = 1; // see open_failed
-	} else {
-		bump(&untracked); // lost with its head, so a failure goes unrecorded
-	}
+	hold_name(BPF_CORE_READ(ret, name));
 }
 
 /**
