@@ -58,7 +58,7 @@ export function renderFilesystemAuditBlocks(
   cutNote = (cause?: CutCause) => filesystemTruncationNote("upload-failed", cause),
 ): SummaryBlock[] {
   const { summary } = reduceText(jsonl, options);
-  return renderAuditSummaryBlocks(summary, options.startedAt, priorities, cutNote);
+  return renderAuditSummaryBlocks(summary, { startedAt: options.startedAt, priorities, cutNote });
 }
 
 /** Joined whole, with nothing cut. */
