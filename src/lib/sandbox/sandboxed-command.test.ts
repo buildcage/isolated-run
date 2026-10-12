@@ -592,7 +592,12 @@ describe("runSandboxedCommand", () => {
     await runSandboxedCommand(options(), deps);
 
     expect(mocks.withScratchDir.mock.calls[0][1].warn).toBe(mocks.warn);
-    expect(mocks.resolveSandboxEnv).toHaveBeenCalledWith(expect.anything(), undefined, mocks.warn);
+    expect(mocks.resolveSandboxEnv).toHaveBeenCalledWith(
+      expect.anything(),
+      undefined,
+      mocks.warn,
+      undefined,
+    );
   });
 
   it("leaves persistent mode with no overlay at all", async () => {

@@ -26,7 +26,11 @@ var __create = Object.create, __defProp = Object.defineProperty, __getOwnPropDes
 //#endregion
 let node_fs = require("node:fs");
 node_fs = __toESM(node_fs, 1);
-let node_url = require("node:url"), os = require("os");
+let node_url = require("node:url"), node_crypto = require("node:crypto"), node_os = require("node:os");
+node_os = __toESM(node_os, 1);
+let node_path = require("node:path");
+node_path = __toESM(node_path, 1);
+let os = require("os");
 os = __toESM(os, 1);
 let crypto$1 = require("crypto");
 crypto$1 = __toESM(crypto$1, 1);
@@ -50,13 +54,9 @@ let node_util = require("node:util");
 node_util = __toESM(node_util, 1);
 let node_events = require("node:events"), node_zlib = require("node:zlib");
 node_zlib = __toESM(node_zlib, 1);
-let node_crypto = require("node:crypto"), child_process = require("child_process");
+let child_process = require("child_process");
 child_process = __toESM(child_process, 1), require("timers");
-let node_path = require("node:path");
-node_path = __toESM(node_path, 1);
-let buffer = require("buffer"), node_os = require("node:os");
-node_os = __toESM(node_os, 1);
-let node_fs_promises = require("node:fs/promises"), fs_promises = require("fs/promises");
+let buffer = require("buffer"), node_fs_promises = require("node:fs/promises"), fs_promises = require("fs/promises");
 fs_promises = __toESM(fs_promises, 1);
 let node_child_process = require("node:child_process"), node_process = require("node:process");
 node_process = __toESM(node_process, 1);
@@ -69647,7 +69647,7 @@ function openWriter(path, chunkBytes = CHUNK_BYTES) {
 		}
 	};
 }
-const realDeps$5 = {
+const realDeps$4 = {
 	readLines,
 	createSummary: createAuditSummary,
 	openWriter,
@@ -69670,7 +69670,7 @@ function prefixes(value, realpath) {
 const NONE = { blocks: () => [] };
 async function prepareStepFilesystemAudit({ audit, attached, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
 	let deps = {
-		...realDeps$5,
+		...realDeps$4,
 		...overrides
 	}, artifactName = "";
 	try {
@@ -71526,16 +71526,9 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 	"HOME",
 	"GITHUB_WORKSPACE",
 	"RUNNER_TEMP",
-	"GITHUB_OUTPUT",
 	"GITHUB_ENV",
-	"GITHUB_PATH",
-	"GITHUB_STEP_SUMMARY"
-], KNOWN_FILE_VARS = [
-	"GITHUB_OUTPUT",
-	"GITHUB_ENV",
-	"GITHUB_PATH",
-	"GITHUB_STEP_SUMMARY"
-], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
+	"GITHUB_PATH"
+], KNOWN_FILE_VARS = ["GITHUB_ENV", "GITHUB_PATH"], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
 function resolveWriteThroughEntry(rawLine, env) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
@@ -71585,7 +71578,7 @@ function assertNoSymlinkInWriteThrough(path, { lstat = realSymlinkDeps.lstat, re
 }
 function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
 	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
-	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
+	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_ENV/GITHUB_PATH) and should already be present -- something is wrong with the environment.`);
 }
 function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists, canWrite = defaultCanWrite, mkdir = defaultMkdir } = {}) {
 	let missing = resolvedPaths.filter((path) => !exists(path));
@@ -71927,6 +71920,130 @@ function resolveSandboxGid(primaryGid, env, options = {}) {
 	if (!isPrivileged(FALLBACK_GID)) return substitute(FALLBACK_GID);
 	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group${nssError === void 0 ? "" : " or couldn't be verified through NSS"}, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
 }
+function readOutputEntries(text) {
+	let entries = [], index = 0, readLine = () => {
+		if (index >= text.length) return;
+		let lf = text.indexOf("\n", index), end = lf === -1 ? text.length : lf, line = text.slice(index, end);
+		return index = lf === -1 ? text.length : lf + 1, {
+			line,
+			newline: lf !== -1
+		};
+	};
+	for (;;) {
+		let start = index, read = readLine();
+		if (!read) return { entries };
+		let { line } = read;
+		if (line === "") continue;
+		let equals = line.indexOf("="), heredoc = line.indexOf("<<");
+		if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
+			if (equals === 0) return {
+				entries,
+				error: "an entry has an empty name"
+			};
+			entries.push({
+				name: line.slice(0, equals),
+				text: text.slice(start, index)
+			});
+			continue;
+		}
+		if (heredoc === -1) return {
+			entries,
+			error: "a line is neither NAME=VALUE nor NAME<<DELIMITER"
+		};
+		let name = line.slice(0, heredoc), delimiter = line.slice(heredoc + 2);
+		if (name === "" || delimiter === "") return {
+			entries,
+			error: "a NAME<<DELIMITER line has an empty name or delimiter"
+		};
+		for (;;) {
+			let value = readLine();
+			if (!value || value.line !== delimiter && !value.newline) return {
+				entries,
+				error: "a NAME<<DELIMITER entry never reaches its delimiter"
+			};
+			if (value.line === delimiter) break;
+		}
+		entries.push({
+			name,
+			text: text.slice(start, index)
+		});
+	}
+}
+const WIDE_BOMS = [
+	[255, 254],
+	[254, 255],
+	[
+		0,
+		0,
+		254,
+		255
+	]
+];
+function validatedOutputText(bytes) {
+	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return {
+		text: "",
+		error: "it is not UTF-8"
+	};
+	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");
+	return {
+		text: text === "" || text.endsWith("\n") ? text : `${text}\n`,
+		error
+	};
+}
+//#endregion
+//#region src/lib/sandbox/runner-output-files.ts
+const RUNNER_FILES_DIR = "/dev/buildcage-runner-files", LEAF = {
+	GITHUB_OUTPUT: "output",
+	GITHUB_STEP_SUMMARY: "step-summary"
+}, MEDIATED_VARIABLES = Object.keys(LEAF), realMediateDeps = {
+	mkdir: (path) => void (0, node_fs.mkdirSync)(path, {
+		mode: 448,
+		recursive: !0
+	}),
+	writeFile: (path, data) => (0, node_fs.writeFileSync)(path, data, {
+		mode: 420,
+		flag: "wx"
+	})
+};
+function mediateRunnerOutputFiles(env, backingDir, deps = realMediateDeps) {
+	let present = MEDIATED_VARIABLES.filter((v) => env[v]);
+	if (present.length === 0) return;
+	deps.mkdir(backingDir);
+	let files = [], envOverrides = {};
+	for (let variable of present) {
+		let leaf = LEAF[variable], backingPath = (0, node_path.join)(backingDir, leaf);
+		deps.writeFile(backingPath, ""), envOverrides[variable] = `${RUNNER_FILES_DIR}/${leaf}`, files.push({
+			variable,
+			realPath: env[variable],
+			backingPath
+		});
+	}
+	return {
+		envOverrides,
+		mounts: [{
+			destination: RUNNER_FILES_DIR,
+			type: "none",
+			source: backingDir,
+			options: ["rbind", "rw"]
+		}],
+		maskedPaths: files.map((f) => f.realPath),
+		files
+	};
+}
+const realReadBackingDeps = {
+	lstat: (path) => (0, node_fs.lstatSync)(path),
+	readFile: (path) => (0, node_fs.readFileSync)(path)
+};
+function readBackingFile(path, deps = realReadBackingDeps) {
+	let stats;
+	try {
+		stats = deps.lstat(path);
+	} catch (e) {
+		if (e.code === "ENOENT") return { empty: !0 };
+		throw e;
+	}
+	return stats.isFile() ? stats.size > 67108864 ? { reason: "it was over 64 MiB" } : { bytes: deps.readFile(path) } : { reason: "it was not a regular file" };
+}
 //#endregion
 //#region src/lib/sandbox/env-loader.ts
 const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = new Set([
@@ -71964,13 +72081,16 @@ const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-
 function isRunnerOnly(key) {
 	return RUNNER_ONLY_ENV_KEYS.has(key) || ACTION_INPUT_ENV_KEYS.has(key);
 }
-function resolveSandboxEnv(env, caTrust, warn) {
+function resolveSandboxEnv(env, caTrust, warn, overrides = {}) {
 	let merged = {
 		...env,
 		...caTrust ? caTrustAdditions(caTrust, env).env : void 0
 	}, resolved = {}, skipped = [];
 	for (let [key, value] of Object.entries(merged)) value !== void 0 && (isRunnerOnly(key) || (ENV_KEY.test(key) ? resolved[key] = value : skipped.push(key)));
-	return skipped.length > 0 && warn?.(`Not passing environment variables whose names a shell cannot export: ${skipped.join(", ")}`), resolved;
+	return skipped.length > 0 && warn?.(`Not passing environment variables whose names a shell cannot export: ${skipped.join(", ")}`), {
+		...resolved,
+		...overrides
+	};
 }
 function buildEnvBlob(resolved) {
 	let records = [...Object.entries(resolved).map(([k, v]) => `${k}=${v}`), ENV_BLOB_TERMINATOR];
@@ -72284,15 +72404,19 @@ function sandboxNamespaces(base, netnsPath) {
 function cgroupsPathFor(runnerCgroup, name) {
 	if (runnerCgroup !== void 0) return `${runnerCgroup.replace(/\/$/, "")}/${name}`;
 }
-function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [] }, probes = realHostProbes) {
+function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [], extraInternalMounts = [], extraMaskedPaths = [] }, probes = realHostProbes) {
 	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, cgroupName, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [], scratchBaseAliases = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
 	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths, (path) => probes.realpath(path));
-	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [{
-		destination: RESOLV_CONF_DESTINATION,
-		type: "none",
-		source: resolvConfPath,
-		options: ["rbind", "ro"]
-	}, ...caAdditions?.mounts ?? []], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), overlapsFresh = (p) => [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p)), renameGuards = renameGuardDirs.filter((p) => !overlapsFresh(p)).map((p) => ({
+	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [
+		{
+			destination: RESOLV_CONF_DESTINATION,
+			type: "none",
+			source: resolvConfPath,
+			options: ["rbind", "ro"]
+		},
+		...caAdditions?.mounts ?? [],
+		...extraInternalMounts
+	], nofile = probes.nofileRlimit(), freshMountDestinations = freshMountDestinationsFrom(baseSpec), layers = ephemeral ? ephemeralLayers(ephemeral, freshMountDestinations) : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly }), overlapsFresh = (p) => [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p)), renameGuards = renameGuardDirs.filter((p) => !overlapsFresh(p)).map((p) => ({
 		destination: p,
 		type: "none",
 		source: p,
@@ -72359,7 +72483,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 			...cgroupsPath !== void 0 && { cgroupsPath },
 			namespaces,
 			seccomp: seccompProfile,
-			maskedPaths,
+			maskedPaths: [...new Set([...maskedPaths, ...extraMaskedPaths])],
 			readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostPaths])]
 		}
 	};
@@ -72481,7 +72605,7 @@ function extractRuncBootstrap({ containerName, destDir }, deps = {}) {
 //#endregion
 //#region src/lib/sandbox/sandboxed-command.ts
 init_core();
-const realDeps$4 = {
+const realDeps$3 = {
 	withScratchDir,
 	extractRuncBootstrap,
 	extractCaCert,
@@ -72597,7 +72721,9 @@ function assembleBundle(dir, options, deps) {
 			env,
 			caTrust,
 			readonlyHostPaths: [...readonlyHostDirs, ...readonlyFiles],
-			renameGuardDirs: renameGuardDirs$1
+			renameGuardDirs: renameGuardDirs$1,
+			extraInternalMounts: options.internalMounts,
+			extraMaskedPaths: options.maskedPaths
 		});
 	} catch (e) {
 		throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e instanceof SandboxError ? e : e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : new SandboxError(`Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`, "OCI_CONFIG_BUILD_FAILED");
@@ -72670,7 +72796,7 @@ async function startAudit(dir, config, options, deps) {
 }
 async function runSandboxedCommand(options, overrides = {}) {
 	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {
-		...realDeps$4,
+		...realDeps$3,
 		...overrides
 	}, { withScratchDir, writeOciConfig, resolveSandboxEnv, buildEnvBlob, runIsolated } = deps;
 	return withScratchDir(async (dir) => {
@@ -72680,7 +72806,7 @@ async function runSandboxedCommand(options, overrides = {}) {
 			let audit = await startAudit(dir, config, options, deps);
 			try {
 				exitCode = await runIsolated({
-					envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn)),
+					envBlob: buildEnvBlob(resolveSandboxEnv(env, caTrust, warn, options.envOverrides)),
 					runcPath,
 					proxyNetns,
 					bundleDir: dir,
@@ -72703,120 +72829,6 @@ async function runSandboxedCommand(options, overrides = {}) {
 		ephemeralRoots: filesystemMode === "ephemeral" ? overlayRoots : void 0,
 		warn
 	});
-}
-//#endregion
-//#region src/lib/step-output-file.ts
-function readOutputEntries(text) {
-	let entries = [], index = 0, readLine = () => {
-		if (index >= text.length) return;
-		let lf = text.indexOf("\n", index), end = lf === -1 ? text.length : lf, line = text.slice(index, end);
-		return index = lf === -1 ? text.length : lf + 1, {
-			line,
-			newline: lf !== -1
-		};
-	};
-	for (;;) {
-		let start = index, read = readLine();
-		if (!read) return { entries };
-		let { line } = read;
-		if (line === "") continue;
-		let equals = line.indexOf("="), heredoc = line.indexOf("<<");
-		if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
-			if (equals === 0) return {
-				entries,
-				error: "an entry has an empty name"
-			};
-			entries.push({
-				name: line.slice(0, equals),
-				text: text.slice(start, index)
-			});
-			continue;
-		}
-		if (heredoc === -1) return {
-			entries,
-			error: "a line is neither NAME=VALUE nor NAME<<DELIMITER"
-		};
-		let name = line.slice(0, heredoc), delimiter = line.slice(heredoc + 2);
-		if (name === "" || delimiter === "") return {
-			entries,
-			error: "a NAME<<DELIMITER line has an empty name or delimiter"
-		};
-		for (;;) {
-			let value = readLine();
-			if (!value || value.line !== delimiter && !value.newline) return {
-				entries,
-				error: "a NAME<<DELIMITER entry never reaches its delimiter"
-			};
-			if (value.line === delimiter) break;
-		}
-		entries.push({
-			name,
-			text: text.slice(start, index)
-		});
-	}
-}
-const realDeps$3 = {
-	kind: (path) => {
-		try {
-			let stats = (0, node_fs.lstatSync)(path);
-			return stats.isFile() ? stats.size > 67108864 ? "large" : "file" : "other";
-		} catch (e) {
-			if (e.code === "ENOENT") return "missing";
-			throw e;
-		}
-	},
-	readFile: (path) => (0, node_fs.readFileSync)(path),
-	ownDirectory: (path) => {
-		let dir = (0, node_path.dirname)(path), { mode } = (0, node_fs.lstatSync)(dir);
-		(mode & 448) != 448 && (0, node_fs.chmodSync)(dir, mode | 448);
-	},
-	replaceFile: (path, text) => {
-		let temporary = (0, node_path.join)((0, node_path.dirname)(path), `.${(0, node_path.basename)(path)}.${(0, node_crypto.randomBytes)(8).toString("hex")}`);
-		try {
-			(0, node_fs.writeFileSync)(temporary, text, {
-				flag: "wx",
-				mode: 420
-			}), (0, node_fs.renameSync)(temporary, path);
-		} finally {
-			(0, node_fs.rmSync)(temporary, { force: !0 });
-		}
-	}
-}, WIDE_BOMS = [
-	[255, 254],
-	[254, 255],
-	[
-		0,
-		0,
-		254,
-		255
-	]
-];
-function replaceIfNotRegularFile(path) {
-	return realDeps$3.ownDirectory(path), realDeps$3.kind(path) === "other" && (realDeps$3.replaceFile(path, ""), !0);
-}
-function rewriteOutputFile(path, overrides = {}) {
-	let { kind, readFile, ownDirectory, replaceFile } = {
-		...realDeps$3,
-		...overrides
-	};
-	try {
-		return ownDirectory(path), rewrite(path, kind, readFile, replaceFile);
-	} catch (e) {
-		try {
-			replaceFile(path, "");
-		} catch {
-			throw e;
-		}
-		return `reading it failed with ${errorMessage(e)}, so it was emptied`;
-	}
-}
-function rewrite(path, kind, readFile, replaceFile) {
-	let found = kind(path);
-	if (found === "other" || found === "large") return replaceFile(path, ""), found === "other" ? "it is not a regular file" : "it is over 64 MiB";
-	let bytes = found === "file" ? readFile(path) : Buffer.alloc(0);
-	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return replaceFile(path, ""), "it is not UTF-8";
-	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");
-	return replaceFile(path, text === "" || text.endsWith("\n") ? text : `${text}\n`), error;
 }
 //#endregion
 //#region src/core/lib/docker/container-env.ts
@@ -73815,8 +73827,9 @@ const realDeps = {
 	reportStepTraffic,
 	writeLateSummary,
 	prepareStepFilesystemAudit,
-	rewriteOutputFile,
-	replaceIfNotRegularFile,
+	mediateRunnerOutputFiles,
+	readBackingFile,
+	writeRunnerFile: (path, content) => (0, node_fs.writeFileSync)(path, content),
 	setTrafficArtifactOutput,
 	setFilesystemAuditOutput,
 	onCancel,
@@ -73843,21 +73856,27 @@ async function resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, { ve
 function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, saveState) {
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
-function putRunnerFileRight(env, name, annotation, putRight) {
-	let path = env[name];
-	if (path) {
-		try {
-			let done = putRight(path);
-			if (done === void 0) return;
-			annotation.error(`$${name} ${done}; failing the step`);
-		} catch (e) {
-			annotation.error(`$${name} could not be put right: ${errorMessage(e)}; leaving it unwritten and failing the step`), delete env[name];
-		}
-		process.exitCode = 1;
+function writeBackMediatedFile(file, annotation, deps) {
+	let fail = (reason) => {
+		annotation.error(`$${file.variable} ${reason}; failing the step`), process.exitCode = 1;
+	}, read = deps.readBackingFile(file.backingPath), content = Buffer.alloc(0), failure;
+	if ("reason" in read) failure = read.reason;
+	else if ("bytes" in read) {
+		if (file.variable === "GITHUB_OUTPUT") {
+			let { text, error } = validatedOutputText(read.bytes);
+			content = Buffer.from(text, "utf8"), error && (failure = `was written without what the runner could not read: ${error}`);
+		} else content = read.bytes;
 	}
+	try {
+		deps.writeRunnerFile(file.realPath, content);
+	} catch (e) {
+		fail(`could not be written: ${errorMessage(e)}`);
+		return;
+	}
+	failure && fail(failure);
 }
 async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeLateSummary, prepareStepFilesystemAudit, rewriteOutputFile, replaceIfNotRegularFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
+	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeLateSummary, prepareStepFilesystemAudit, mediateRunnerOutputFiles, readBackingFile, writeRunnerFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
 		...overrides
 	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -73933,11 +73952,11 @@ async function runSandboxStep(env, overrides = {}) {
 	}
 	let cancel = new AbortController(), stopListening = onCancel(() => {
 		cancel.signal.aborted || (info("buildcage: the step was cancelled; stopping the sandbox"), cancel.abort());
-	}), exitCode = 1, auditAttached = !1;
+	}), runnerFilesBackingDir = (0, node_path.join)((0, node_os.tmpdir)(), `buildcage-runner-files-${(0, node_crypto.randomBytes)(8).toString("hex")}`), mediation, exitCode = 1, auditAttached = !1;
 	try {
 		let proxyNetns = getContainerNetns(containerName);
 		if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
-		exitCode = await runSandboxedCommand({
+		mediation = mediateRunnerOutputFiles(env, runnerFilesBackingDir), exitCode = await runSandboxedCommand({
 			containerName,
 			proxyNetns,
 			runInput,
@@ -73950,13 +73969,22 @@ async function runSandboxStep(env, overrides = {}) {
 			filesystemAudit: audit,
 			onAuditAttached: () => auditAttached = !0,
 			warn,
-			cancel: cancel.signal
+			cancel: cancel.signal,
+			internalMounts: mediation?.mounts,
+			maskedPaths: mediation?.maskedPaths,
+			envOverrides: mediation?.envOverrides
 		});
 	} finally {
-		putRunnerFileRight(env, "GITHUB_OUTPUT", annotation, (path) => {
-			let unreadable = rewriteOutputFile(path);
-			return unreadable && `was rewritten without what the runner could not read: ${unreadable}`;
-		}), putRunnerFileRight(env, "GITHUB_STEP_SUMMARY", annotation, (path) => replaceIfNotRegularFile(path) ? "held something other than a regular file, now replaced with an empty one" : void 0);
+		if (mediation) {
+			for (let file of mediation.files) writeBackMediatedFile(file, annotation, {
+				readBackingFile,
+				writeRunnerFile
+			});
+			(0, node_fs.rmSync)(runnerFilesBackingDir, {
+				recursive: !0,
+				force: !0
+			});
+		}
 		for (let set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) try {
 			set("");
 		} catch {}

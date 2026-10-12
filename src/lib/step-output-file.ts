@@ -1,16 +1,14 @@
 /**
- * The step's $GITHUB_OUTPUT, put in order before this action sets its own
- * outputs there. The isolated command can write the file too, and the runner
- * reads it top to bottom, setting each output as it goes and stopping at the
- * first entry it cannot read, so one the command leaves unreadable keeps every
- * line appended after it from being read.
+ * The step's $GITHUB_OUTPUT, read from the backing file the command wrote and
+ * validated to what the runner can read before this action writes the real
+ * file. The runner reads the file top to bottom, setting each output as it
+ * goes and stopping at the first entry it cannot read, so one the command left
+ * unreadable would keep every line appended after it from being read.
  */
 
-import { randomBytes } from "node:crypto";
-import { chmodSync, lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
-
-import { errorMessage } from "#core/lib/errors.ts";
+/** Far above what GitHub keeps of a step's outputs, and quick to read in the
+ *  seconds a cancelled step has left. */
+export const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 export interface OutputEntries {
   /** Each entry the runner reads, as the text it was written in. */
@@ -68,53 +66,6 @@ export function readOutputEntries(text: string): OutputEntries {
   }
 }
 
-export interface RewriteOutputFileDeps {
-  /** What is at `path`: nothing, a regular file, one too large to read, or
-   *  anything else. */
-  kind: (path: string) => "missing" | "file" | "large" | "other";
-  readFile: (path: string) => Buffer;
-  /** Gives the directory holding `path` back its owner's permissions. */
-  ownDirectory: (path: string) => void;
-  /** Writes `text` beside `path` and moves it over `path`, so whatever the
-   *  command left there is replaced rather than written through. */
-  replaceFile: (path: string, text: string) => void;
-}
-
-// Far above what GitHub keeps of a step's outputs, and quick to read in the
-// seconds a cancelled step has left.
-const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
-
-const realDeps: RewriteOutputFileDeps = {
-  kind: (path) => {
-    try {
-      const stats = lstatSync(path);
-      if (!stats.isFile()) return "other";
-      return stats.size > MAX_OUTPUT_BYTES ? "large" : "file";
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") return "missing";
-      throw e;
-    }
-  },
-  readFile: (path) => readFileSync(path),
-  // The command runs as the user who owns the directory and can take its
-  // permissions away, so that what it put at the path cannot be replaced and
-  // is what the runner reads after the step.
-  ownDirectory: (path) => {
-    const dir = dirname(path);
-    const { mode } = lstatSync(dir);
-    if ((mode & 0o700) !== 0o700) chmodSync(dir, mode | 0o700);
-  },
-  replaceFile: (path, text) => {
-    const temporary = join(dirname(path), `.${basename(path)}.${randomBytes(8).toString("hex")}`);
-    try {
-      writeFileSync(temporary, text, { flag: "wx", mode: 0o644 });
-      renameSync(temporary, path);
-    } finally {
-      rmSync(temporary, { force: true });
-    }
-  },
-};
-
 // UTF-16 and UTF-32 byte order marks: the runner decodes by them, this reads
 // UTF-8 only.
 const WIDE_BOMS = [
@@ -124,64 +75,18 @@ const WIDE_BOMS = [
 ];
 
 /**
- * Replaces anything but a regular file the command left at `path`, such as
- * $GITHUB_STEP_SUMMARY, with an empty one before this action appends to it,
- * and says whether it did. Appending through a symlink would reach a file the
- * command cannot, and to a FIFO would block.
+ * The runner-readable text of a $GITHUB_OUTPUT the command wrote, as `bytes`:
+ * every entry the runner reads, in the order it wrote them, ending in a
+ * newline so the outputs this action appends after it are read. What the runner
+ * could not read is dropped, and the reason returned. A non-UTF-8 file is
+ * dropped whole, as the runner would read none of it.
  */
-export function replaceIfNotRegularFile(path: string): boolean {
-  realDeps.ownDirectory(path);
-  if (realDeps.kind(path) !== "other") return false;
-  realDeps.replaceFile(path, "");
-  return true;
-}
-
-/**
- * Rewrites the file with every entry the runner reads, as it was written,
- * ending in a newline, so the outputs this action appends after it are read.
- * What it could not read is dropped, and the reason returned. A symlink, a FIFO
- * or anything else but a regular file is not read at all: the runner would read
- * through it, to a file the command cannot reach, or block.
- */
-export function rewriteOutputFile(
-  path: string,
-  overrides: Partial<RewriteOutputFileDeps> = {},
-): string | undefined {
-  const { kind, readFile, ownDirectory, replaceFile } = { ...realDeps, ...overrides };
-  try {
-    ownDirectory(path);
-    return rewrite(path, kind, readFile, replaceFile);
-  } catch (e) {
-    // Left as the command wrote it, the file could still stop the runner
-    // before the names set after it.
-    try {
-      replaceFile(path, "");
-    } catch {
-      throw e;
-    }
-    return `reading it failed with ${errorMessage(e)}, so it was emptied`;
-  }
-}
-
-function rewrite(
-  path: string,
-  kind: RewriteOutputFileDeps["kind"],
-  readFile: RewriteOutputFileDeps["readFile"],
-  replaceFile: RewriteOutputFileDeps["replaceFile"],
-): string | undefined {
-  const found = kind(path);
-  if (found === "other" || found === "large") {
-    replaceFile(path, "");
-    return found === "other" ? "it is not a regular file" : "it is over 64 MiB";
-  }
-  const bytes = found === "file" ? readFile(path) : Buffer.alloc(0);
+export function validatedOutputText(bytes: Buffer): { text: string; error?: string } {
   if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) {
-    replaceFile(path, "");
-    return "it is not UTF-8";
+    return { text: "", error: "it is not UTF-8" };
   }
   // The runner drops a leading BOM.
   const { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, ""));
   const text = entries.map((e) => e.text).join("");
-  replaceFile(path, text === "" || text.endsWith("\n") ? text : `${text}\n`);
-  return error;
+  return { text: text === "" || text.endsWith("\n") ? text : `${text}\n`, error };
 }

@@ -81,38 +81,44 @@ fi
 rm -f "$HOME_MARKER" "$HOME_PRELOADED"
 rm -rf "$CASE1"
 
-# --- Case 2+3: the runner's own generated files are discarded by default
-# and persisted when named in write_through:. Placed under RUNNER_TEMP (as
-# they are for real) so they're covered by RUNNER_TEMP's own overlay in the
-# default case. GITHUB_ENV is read-only rather than discarded; see
-# integration-test-file-commands.sh.
+# --- Case 2: $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY are mediated, so a write
+# reaches the runner even in ephemeral with no write_through: entry -- the host
+# writes the real files from the backing copies after the step. Placed under
+# RUNNER_TEMP (as they are for real). GITHUB_ENV is read-only rather than
+# mediated; see integration-test-file-commands.sh.
 CASE2=$(mktemp -d)
 GITHUB_OUTPUT_FILE2=$(mktemp)
-touch "$CASE2/state.env" "$CASE2/summary.md"
+GITHUB_SUMMARY_FILE2=$(mktemp)
+touch "$CASE2/state.env"
 # Not via run_ephemeral: GITHUB_OUTPUT/RUNNER_TEMP need to be set together
 # below, unlike its fixed default env.
 GITHUB_OUTPUT="$GITHUB_OUTPUT_FILE2" \
 GITHUB_WORKSPACE="$CASE2" \
 GITHUB_STATE="$CASE2/state.env" \
-GITHUB_STEP_SUMMARY="$CASE2/summary.md" \
+GITHUB_STEP_SUMMARY="$GITHUB_SUMMARY_FILE2" \
 RUNNER_TEMP="$(dirname "$GITHUB_OUTPUT_FILE2")" \
 BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_FILESYSTEM_MODE="ephemeral" \
 INPUT_WRITE_THROUGH="" \
-INPUT_RUN='echo "SHOULD_NOT_PERSIST=1" >> "$GITHUB_OUTPUT"' \
+INPUT_RUN='echo "mediated_output=1" >> "$GITHUB_OUTPUT"
+echo "MEDIATED_SUMMARY" >> "$GITHUB_STEP_SUMMARY"' \
   node "$REPO_ROOT/dist/main.cjs" >"$CASE2/out.log" 2>&1
 CODE2=$?
-if [ "$CODE2" = "0" ] && ! grep -q SHOULD_NOT_PERSIST "$GITHUB_OUTPUT_FILE2"; then
-  pass "an append to \$GITHUB_OUTPUT during the step is not reflected afterwards (default)"
+if [ "$CODE2" = "0" ] &&
+  grep -q "mediated_output=1" "$GITHUB_OUTPUT_FILE2" &&
+  grep -q MEDIATED_SUMMARY "$GITHUB_SUMMARY_FILE2"; then
+  pass "ephemeral: \$GITHUB_OUTPUT and \$GITHUB_STEP_SUMMARY are mediated back with no write_through: entry"
 else
-  fail "an append to \$GITHUB_OUTPUT during the step was reflected afterwards despite no write_through: entry (exit $CODE2) -- see $CASE2/out.log"
+  fail "ephemeral: mediated files were not reflected afterwards (exit $CODE2) -- see $CASE2/out.log"
   cat "$CASE2/out.log"
 fi
-rm -rf "$CASE2" "$GITHUB_OUTPUT_FILE2"
+rm -rf "$CASE2" "$GITHUB_OUTPUT_FILE2" "$GITHUB_SUMMARY_FILE2"
 
-# Case 3 covers all three files a step realistically produces output
-# through, since the README tells readers to name any of them.
+# Case 3: write_through: persists $GITHUB_ENV (still a write_through file),
+# while $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY reach the runner through the
+# mediation without an entry, and this action's own report lands in the summary
+# alongside the command's markdown.
 CASE3=$(mktemp -d)
 GITHUB_ENV_FILE3=$(mktemp)
 GITHUB_OUTPUT_FILE3=$(mktemp)
@@ -128,9 +134,7 @@ RUNNER_TEMP="$(dirname "$GITHUB_ENV_FILE3")" \
 BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_FILESYSTEM_MODE="ephemeral" \
-INPUT_WRITE_THROUGH='$GITHUB_ENV
-$GITHUB_OUTPUT
-$GITHUB_STEP_SUMMARY' \
+INPUT_WRITE_THROUGH='$GITHUB_ENV' \
 INPUT_RUN='echo "SHOULD_PERSIST=1" >> "$GITHUB_ENV"
 echo "persisted_output=1" >> "$GITHUB_OUTPUT"
 echo "SHOULD_PERSIST_SUMMARY" >> "$GITHUB_STEP_SUMMARY"' \
@@ -145,17 +149,16 @@ else
   fail "write_through: \$GITHUB_ENV did not persist the append"
 fi
 if [ "$CODE3" = "0" ] && grep -q "persisted_output=1" "$GITHUB_OUTPUT_FILE3"; then
-  pass "write_through: \$GITHUB_OUTPUT persists a step output the command sets"
+  pass "\$GITHUB_OUTPUT is mediated back beside a write_through: entry"
 else
-  fail "write_through: \$GITHUB_OUTPUT did not persist the step output"
+  fail "\$GITHUB_OUTPUT was not mediated back"
 fi
-# Also asserts this action's own report is in the same file: it is written
-# from the host after the sandbox exits, so naming $GITHUB_STEP_SUMMARY
-# puts the command's markdown alongside it rather than in place of it.
+# The report is written from the host after the sandbox exits, so the command's
+# markdown ends up alongside it rather than in place of it.
 if [ "$CODE3" = "0" ] && grep -q SHOULD_PERSIST_SUMMARY "$GITHUB_SUMMARY_FILE3" && grep -q "^## " "$GITHUB_SUMMARY_FILE3"; then
-  pass "write_through: \$GITHUB_STEP_SUMMARY persists the command's markdown next to this action's report"
+  pass "\$GITHUB_STEP_SUMMARY carries the command's markdown next to this action's report"
 else
-  fail "write_through: \$GITHUB_STEP_SUMMARY did not persist the command's markdown next to the report"
+  fail "\$GITHUB_STEP_SUMMARY did not carry the command's markdown next to the report"
 fi
 if [ "$FAILURES" != "$FAILURES_BEFORE3" ]; then
   cat "$CASE3/out.log"

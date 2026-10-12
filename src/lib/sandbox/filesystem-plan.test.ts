@@ -291,10 +291,10 @@ describe("resolveFilesystemPlan", () => {
   });
 
   it("wraps a missing well-known runner file as WRITE_THROUGH_TARGET_MISSING", () => {
-    const envWithOutput = { ...ENV, GITHUB_OUTPUT: "/home/runner/_temp/set_output" };
+    const envWithEnvFile = { ...ENV, GITHUB_ENV: "/home/runner/_temp/set_env" };
     expect.assertions(2);
     try {
-      resolveFilesystemPlan("ephemeral", "$GITHUB_OUTPUT", envWithOutput, {
+      resolveFilesystemPlan("ephemeral", "$GITHUB_ENV", envWithEnvFile, {
         exists: () => false,
       });
     } catch (err) {
@@ -304,11 +304,11 @@ describe("resolveFilesystemPlan", () => {
   });
 
   it("still reports a missing runner file as missing when its directory sits behind a symlink", () => {
-    const envBehindLink = { ...ENV, GITHUB_OUTPUT: "/work/_temp/set_output" };
+    const envBehindLink = { ...ENV, GITHUB_ENV: "/work/_temp/set_env" };
     const mkdir = vi.fn();
     expect.assertions(3);
     try {
-      resolveFilesystemPlan("persistent", "$GITHUB_OUTPUT", envBehindLink, {
+      resolveFilesystemPlan("persistent", "$GITHUB_ENV", envBehindLink, {
         exists: (p) =>
           p === "/work" || p === "/mnt" || p === "/mnt/work" || p === "/mnt/work/_temp",
         lstat: (p) => ({ isSymbolicLink: () => p === "/work" }),
