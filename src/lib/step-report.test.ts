@@ -86,6 +86,18 @@ describe("reportStepTraffic", () => {
     expect(mocks.writeSummaryBlocks).not.toHaveBeenCalled();
   });
 
+  it("names the process activity in the title only when its section is there", async () => {
+    const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
+    await reportStepTraffic(options({ processActivity: true, moreBlocks: () => [block] }), deps);
+    expect(mocks.writeReportSummary.mock.calls[0][2].processActivity).toBe(true);
+    // Recorded, but its section failed to render.
+    await reportStepTraffic(options({ processActivity: true, moreBlocks: () => [] }), deps);
+    expect(mocks.writeReportSummary.mock.calls[1][2].processActivity).toBe(false);
+    // Written later, so named for what is to come.
+    await reportStepTraffic(options({ processActivity: true, closeSummary: false }), deps);
+    expect(mocks.writeReportSummary.mock.calls[2][2].processActivity).toBe(true);
+  });
+
   it("leaves the footer to a later write when asked", async () => {
     await reportStepTraffic(options({ closeSummary: false }), deps);
     expect(mocks.writeReportSummary.mock.calls[0][2].extraBlocks).toEqual([]);
@@ -365,7 +377,6 @@ describe("writeLateSummary", () => {
   const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
   const late = {
     actionRepo: "buildcage/isolated-run",
-    processActivity: true,
     isAudit: false,
     env: {},
     annotation: annotation as unknown as ReportStepOptions["annotation"],

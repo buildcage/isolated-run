@@ -864,7 +864,6 @@ describe("runSandboxStep", () => {
       expect(mocks.writeLateSummary.mock.calls[0][1]).toMatchObject({
         reported: false,
         actionRepo: "buildcage/isolated-run",
-        processActivity: true,
         isAudit: false,
         env: ENV,
       });

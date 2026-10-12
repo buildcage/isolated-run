@@ -74,7 +74,11 @@ export interface ReportStepOptions {
    * when unknown), fitted into GitHub's limit together with the report.
    */
   moreBlocks?: (startedAt: number | undefined) => SummaryBlock[];
-  /** Whether the step records its process activity, which the title names. */
+  /**
+   * Whether the step records its process activity. The title names it when it
+   * is written with the report and `moreBlocks` has it, or, with
+   * `closeSummary: false`, when it is to come later.
+   */
   processActivity: boolean;
   /** False leaves the footer to a part of the summary written later. */
   closeSummary?: boolean;
@@ -142,15 +146,14 @@ export async function reportStepTraffic(
   const stepLabel = readStepLabel();
   const rest = moreBlocks(report?.startedAt);
   const footer = closeSummary ? [summaryFooter(actionRepo)] : [];
+  // A section that failed to render leaves nothing for the title to name.
+  const named = closeSummary ? processActivity && rest.length > 0 : processActivity;
   const writeRest = () =>
     writeMoreSummary(
       rest.length === 0
         ? []
         : [
-            missingReportFrame(
-              reportTitle(stepLabel, processActivity),
-              parameters.mode === "audit",
-            ),
+            missingReportFrame(reportTitle(stepLabel, named), parameters.mode === "audit"),
             ...rest,
             ...footer,
           ],
@@ -175,7 +178,7 @@ export async function reportStepTraffic(
           extraInputs: extraInputs?.(report),
           actionVersion: readActionVersion(containerName, proxyEngine),
           stepLabel,
-          processActivity,
+          processActivity: named,
           failOnBlocked,
           extraBlocks: [...rest, ...footer],
         },
@@ -217,7 +220,6 @@ export interface LateSummaryOptions {
   /** See ReportedTraffic.reported. */
   reported: boolean;
   actionRepo: string;
-  processActivity: boolean;
   isAudit: boolean;
   env: NodeJS.ProcessEnv;
   annotation: Annotation;
@@ -231,14 +233,12 @@ export interface LateSummaryOptions {
  */
 export async function writeLateSummary(
   blocks: SummaryBlock[],
-  { reported, actionRepo, processActivity, isAudit, env, annotation }: LateSummaryOptions,
+  { reported, actionRepo, isAudit, env, annotation }: LateSummaryOptions,
   overrides: Partial<ReportStepDeps> = {},
 ): Promise<void> {
   const { readStepLabel } = { ...realDeps, ...overrides };
   if (!reported && blocks.length === 0) return;
-  const head = reported
-    ? []
-    : [missingReportFrame(reportTitle(readStepLabel(), processActivity), isAudit)];
+  const head = reported ? [] : [missingReportFrame(reportTitle(readStepLabel(), true), isAudit)];
   await writeMoreSummary(
     [...head, ...blocks, summaryFooter(actionRepo)],
     env,

@@ -21,10 +21,11 @@ import {
   withNotices,
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
-import { escapeCell } from "#core/lib/report/render/markdown-table.ts";
 import {
+  frame,
   renderReportBlocks,
   reportFooter,
+  reportHeading,
   TRAFFIC_BLOCK,
   trafficNotice,
 } from "#core/lib/report/render/render-report-markdown.ts";
@@ -125,14 +126,6 @@ export function reportTitle(label: string | undefined, processActivity: boolean)
   return label ? `${title} — ${label}` : title;
 }
 
-const frame = (text: string): SummaryBlock => ({
-  priority: 0,
-  level: 1,
-  section: "traffic",
-  cut: "keep",
-  text,
-});
-
 /** The footer, after everything else the step writes to its Job Summary. */
 export function summaryFooter(actionRepo: string): SummaryBlock {
   return frame(reportFooter(actionRepo));
@@ -141,7 +134,7 @@ export function summaryFooter(actionRepo: string): SummaryBlock {
 /** The title, for a summary written with no traffic report to open it. */
 export function missingReportFrame(title: string, isAudit: boolean): SummaryBlock {
   return frame(
-    `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n` +
+    reportHeading(title, isAudit) +
       "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n",
   );
 }

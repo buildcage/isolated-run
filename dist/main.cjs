@@ -69438,6 +69438,7 @@ function renderVerdict(report, extraItems = []) {
 	for (let row of report.blocked) row.expected ? expected += row.count : unexpected += row.count;
 	report.blocked.length === 0 && (unexpected = report.blockedCount);
 	let failed = report.failed.reduce((total, row) => total + row.count, 0), undecided = countUndecidedRequests(report), items = [
+		...report.logLooksPlausible ? [] : ["❗ report incomplete"],
 		...unexpected ? [`🚫 ${unexpected} refused`] : [],
 		...extraItems,
 		...failed ? [`⚠️ ${failed} failed`] : [],
@@ -69474,7 +69475,7 @@ function trafficTableBlock(id, priority, before, table, after) {
 		head: before.split("\n").length + 1
 	};
 }
-const frame$1 = (text) => ({
+const frame = (text) => ({
 	priority: 0,
 	level: 1,
 	section: SECTION,
@@ -69482,8 +69483,8 @@ const frame$1 = (text) => ({
 	cut: "keep"
 });
 function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", refusalLabel, verdictItems, section, footer = !0, extraBlocks = () => [], ...step } = {}) {
-	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, h = section ? "####" : "###", heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
-	top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), section && (top += `### ${section}\n\n`), blocks.push(frame$1(top));
+	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, h = section ? "####" : "###", heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = reportHeading(title, isAudit);
+	top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), section && (top += `### ${section}\n\n`), blocks.push(frame(top));
 	let wrote = !1, gap = () => wrote ? "\n" : "";
 	if (report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `${h} ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), report.blocked.length > 0 || report.failed.length > 0) {
 		let blocked = foldExpectedBlockedRows(report.blocked).map((r) => ({
@@ -69519,7 +69520,7 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 		}), wrote ||= example !== "";
 	}
 	let bottom = "";
-	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame$1(`${gap()}_(no communication)_\n\n`));
+	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame(`${gap()}_(no communication)_\n\n`));
 	let details = renderInspectDetailsBody(report.timeline, report.startedAt, refusalLabel);
 	return details && blocks.push({
 		id: TRAFFIC_BLOCK.log,
@@ -69530,7 +69531,10 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 		open: "\n<details>\n<summary>💬 Communication details</summary>\n\n",
 		text: details,
 		close: "</details>\n"
-	}), report.engine === "universal" && (bottom += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), footer && (bottom += reportFooter(actionRepo)), bottom && blocks.push(frame$1(bottom)), blocks;
+	}), report.engine === "universal" && (bottom += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), footer && (bottom += reportFooter(actionRepo)), bottom && blocks.push(frame(bottom)), blocks;
+}
+function reportHeading(title, isAudit) {
+	return `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
 }
 function reportFooter(actionRepo) {
 	return `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n\n<hr>\n`;
@@ -73442,19 +73446,11 @@ function reportTitle(label, processActivity) {
 	let title = processActivity ? "Traffic & Process Activity Report" : "Outbound Traffic Report";
 	return label ? `${title} — ${label}` : title;
 }
-const frame = (text) => ({
-	priority: 0,
-	level: 1,
-	section: "traffic",
-	cut: "keep",
-	text
-});
 function summaryFooter(actionRepo) {
 	return frame(reportFooter(actionRepo));
 }
 function missingReportFrame(title, isAudit) {
-	return frame(`## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.
-`);
+	return frame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
 }
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => e.wouldRefuse?.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
@@ -73601,8 +73597,8 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	} catch (e) {
 		fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
 	}
-	let stepLabel = readStepLabel(), rest = moreBlocks(report?.startedAt), footer = closeSummary ? [summaryFooter(actionRepo)] : [], writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
-		missingReportFrame(reportTitle(stepLabel, processActivity), parameters.mode === "audit"),
+	let stepLabel = readStepLabel(), rest = moreBlocks(report?.startedAt), footer = closeSummary ? [summaryFooter(actionRepo)] : [], named = closeSummary ? processActivity && rest.length > 0 : processActivity, writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
+		missingReportFrame(reportTitle(stepLabel, named), parameters.mode === "audit"),
 		...rest,
 		...footer
 	], env, annotation, { writeSummaryBlocks }), artifactName = "", reported = !1;
@@ -73616,7 +73612,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 				extraInputs: extraInputs?.(report),
 				actionVersion: readActionVersion(containerName, proxyEngine),
 				stepLabel,
-				processActivity,
+				processActivity: named,
 				failOnBlocked,
 				extraBlocks: [...rest, ...footer]
 			}, trafficArtifact.upload, env), reported = !0;
@@ -73639,13 +73635,13 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 		reported
 	};
 }
-async function writeLateSummary(blocks, { reported, actionRepo, processActivity, isAudit, env, annotation }, overrides = {}) {
+async function writeLateSummary(blocks, { reported, actionRepo, isAudit, env, annotation }, overrides = {}) {
 	let { readStepLabel } = {
 		...realDeps$1,
 		...overrides
 	};
 	(reported || blocks.length !== 0) && await writeMoreSummary([
-		...reported ? [] : [missingReportFrame(reportTitle(readStepLabel(), processActivity), isAudit)],
+		...reported ? [] : [missingReportFrame(reportTitle(readStepLabel(), !0), isAudit)],
 		...blocks,
 		summaryFooter(actionRepo)
 	], env, annotation, overrides);
@@ -73903,7 +73899,6 @@ async function runSandboxStep(env, overrides = {}) {
 		cancelled && processActivity && await writeLateSummary((await prepareAudit()).blocks(startedAt), {
 			reported,
 			actionRepo,
-			processActivity,
 			isAudit: proxyMode === "audit",
 			env,
 			annotation

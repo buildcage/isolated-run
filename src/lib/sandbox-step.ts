@@ -584,7 +584,6 @@ export async function runSandboxStep(
       await writeLateSummary(late.blocks(startedAt), {
         reported,
         actionRepo,
-        processActivity,
         isAudit: proxyMode === "audit",
         env,
         annotation,
