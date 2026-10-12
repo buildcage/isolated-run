@@ -235,7 +235,7 @@ func decode(raw []byte) (record, error) {
 	case 7: // chmod
 		r.Path, _ = components(data, n1, truncated)
 		applyMarks(&r, marks, false)
-		r.Mode = fmt.Sprintf("%04o", mode&0o7777)
+		r.Mode = permBits(mode)
 	case 11: // chown
 		r.Path, _ = components(data, n1, truncated)
 		applyMarks(&r, marks, false)
@@ -261,7 +261,7 @@ func decode(raw []byte) (record, error) {
 		r.Failed = true
 		switch kind {
 		case 18:
-			r.Mode = fmt.Sprintf("%04o", flags&0o7777)
+			r.Mode = permBits(flags)
 		case 19:
 			r.Owner = owner(flags, gid)
 		}
@@ -306,13 +306,19 @@ func decode(raw []byte) (record, error) {
 	return r, nil
 }
 
+// permBits renders a mode's permission bits in octal, four digits at least.
+func permBits(mode uint32) string {
+	s := strconv.FormatUint(uint64(mode&0o7777), 8)
+	return "0000"[len(s):] + s
+}
+
 // owner renders a chown's new uid:gid, with -1 for a side it leaves as is.
 func owner(uid, gid uint32) string {
 	id := func(v uint32) string {
 		if v == ^uint32(0) {
 			return "-1"
 		}
-		return fmt.Sprint(v)
+		return strconv.FormatUint(uint64(v), 10)
 	}
 	return id(uid) + ":" + id(gid)
 }
