@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0
-// Holding an event per thread until its syscall returns, in heads and tails.
 // The tests in held_test.c build this with the maps and helpers it uses
 // replaced (HELD_MOCK_MAPS), so its accounting runs without a kernel.
 #ifndef FILESYSTEM_AUDIT_HELD_H
@@ -280,7 +279,7 @@ static __always_inline void hold(struct event *e)
 		bump(&untracked);
 }
 
-// The held event whose head is head, whole in scratch.
+// Assembles the held event whose head is head in scratch.
 static __always_inline struct event *assemble(struct held_key *k, struct event *head)
 {
 	u32 zero = 0;
