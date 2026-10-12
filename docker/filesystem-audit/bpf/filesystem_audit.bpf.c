@@ -472,6 +472,8 @@ int BPF_PROG(on_mprotect, struct vm_area_struct *vma, unsigned long reqprot, uns
 	// S_PRIVATE marks the file behind shared anonymous memory.
 	if (!file || BPF_CORE_READ(file, f_inode, i_flags) & S_PRIVATE)
 		return 0;
+	// Before 6.7 this is overlayfs's layer file, not the file the mapping was
+	// recorded under, so making it executable later records it again.
 	struct dentry *d;
 	struct vfsmount *mnt;
 	if (!step_path_of(file, &d, &mnt)) {

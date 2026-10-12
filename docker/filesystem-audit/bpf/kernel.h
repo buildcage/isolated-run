@@ -26,6 +26,7 @@ struct dentry {
 	struct hlist_bl_node d_hash;
 	struct dentry *d_parent;
 	struct qstr d_name;
+	struct inode *d_inode;
 	struct super_block *d_sb;
 } __attribute__((preserve_access_index));
 
