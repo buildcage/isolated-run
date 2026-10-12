@@ -136,7 +136,8 @@ describe("hosts that name the resource", () => {
   it("covers every form AWS documents for them", () => {
     for (const host of [
       // S3: virtual-hosted, legacy, path style, dual-stack, FIPS, access
-      // points, control, website, acceleration, China.
+      // points, control, Outposts, Object Lambda, VPC endpoints, website,
+      // acceleration, China.
       "bucket.s3.us-east-1.amazonaws.com",
       "bucket.s3-us-west-2.amazonaws.com",
       "bucket.s3.amazonaws.com",
@@ -147,6 +148,13 @@ describe("hosts that name the resource", () => {
       "ap-111111111111.s3-accesspoint.us-east-1.amazonaws.com",
       "ap-111111111111.s3-accesspoint-fips.dualstack.us-east-1.amazonaws.com",
       "111111111111.s3-control.us-east-1.amazonaws.com",
+      "111111111111.s3-control-fips.dualstack.us-east-1.amazonaws.com",
+      "my-ap-111111111111.op-01ac5d28a6a232904.s3-outposts.us-west-2.amazonaws.com",
+      "my-ap-111111111111.s3-object-lambda.us-east-1.amazonaws.com",
+      "bucket.vpce-1a2b3c4d-5e6f.s3.us-east-1.vpce.amazonaws.com",
+      "my-bucket.bucket.vpce-1a2b3c4d-5e6f.s3.us-east-1.vpce.amazonaws.com",
+      "my-ap-111111111111.accesspoint.vpce-1a2b3c4d-5e6f.s3.us-east-1.vpce.amazonaws.com",
+      "111111111111.control.vpce-1a2b3c4d-5e6f.s3.us-east-1.vpce.amazonaws.com",
       "bucket.s3-website-us-east-1.amazonaws.com",
       "bucket.s3-website.eu-central-1.amazonaws.com",
       "bucket.s3-accelerate.amazonaws.com",
@@ -190,6 +198,17 @@ describe("hosts that name the resource", () => {
       "api.ecr.us-east-1.amazonaws.com",
       "codeartifact.us-east-1.amazonaws.com",
       "s3tables.us-east-1.amazonaws.com",
+      "s3-control.us-east-1.amazonaws.com",
+      "s3-control.dualstack.us-east-1.amazonaws.com",
+      "s3-control-fips.us-east-1.amazonaws.com",
+      "s3-outposts.us-west-2.amazonaws.com",
+      "s3-outposts-fips.us-east-1.amazonaws.com",
+      "s3-outposts.dualstack.us-west-2.amazonaws.com",
+      "s3-accesspoint.us-east-1.amazonaws.com",
+      "s3-accesspoint-fips.dualstack.us-east-1.amazonaws.com",
+      "s3-object-lambda.us-east-1.amazonaws.com",
+      "control.vpce-1a2b3c4d-5e6f.s3.us-east-1.vpce.amazonaws.com",
+      "accesspoint.vpce-1a2b3c4d-5e6f.s3-fips.us-east-1.vpce.amazonaws.com",
       "ec2.us-east-1.amazonaws.com",
       "elasticloadbalancing.us-east-1.amazonaws.com",
       "sts.us-east-1.api.aws",

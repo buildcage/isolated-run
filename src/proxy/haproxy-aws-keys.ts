@@ -73,8 +73,10 @@ export const EC2_HOST = apiHost("ec2", "ec2(-fips)?");
 // CodeArtifact repositories, API Gateway, AppSync, Managed Grafana
 // workspaces, Amazon MQ brokers, OpenSearch domains, EKS clusters and OIDC
 // issuers, load balancers and EC2 public names. Every other API host names
-// only a service and a region.
-export const S3_HOST = `(^|\\.)s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.${AMAZONAWS_DOMAINS}$`;
+// only a service and a region, as S3's control, access point, Object Lambda
+// and Outposts endpoints do with no account or access point in front, public
+// or behind a VPC endpoint.
+export const S3_HOST = `^(?!s3-(accesspoint|control|object-lambda|outposts)(-fips)?\\.|(accesspoint|control)\\.vpce-)(.*\\.)?s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.${AMAZONAWS_DOMAINS}$`;
 export const AWS_RESOURCE_HOST =
   S3_HOST +
   `|\\.(dkr\\.ecr(-fips)?|d\\.codeartifact|execute-api|appsync-api|appsync-realtime-api)\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$` +
