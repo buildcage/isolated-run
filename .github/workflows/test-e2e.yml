@@ -1068,6 +1068,202 @@ jobs:
           fi
           echo "OK: every step's use ended, and Chrome's database was kept without the slot"
 
+  # The AWS access key check against the real STS, through the AWS CLI the
+  # runner ships: test-integration.yml covers its rules against a fixture
+  # origin, which cannot show that a real client's requests and STS's real
+  # answers still take the shape the check reads. A job of its own so that
+  # only it gets an OIDC token; a fork's pull request gets none and skips it.
+  test_sandbox_aws_key_check:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || (needs.changes.outputs.test_sandbox == 'true' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+    runs-on: ubuntu-latest
+    # The role trusts only jobs in this environment. Its only permission is
+    # assuming a second role, which has none.
+    environment: aws-e2e
+    permissions:
+      contents: read
+      id-token: write
+    name: "e2e: test (sandbox, inspect engine, AWS access key check)"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-vp
+
+      - name: Build local inspect proxy image
+        run: PROXY_ENGINE=inspect docker compose build proxy
+
+      - name: Resolve local image ref
+        id: local_image
+        run: echo "ref=$(PROXY_ENGINE=inspect docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
+
+      - name: Rebuild the action with the local-image test hook enabled
+        env:
+          BUILDCAGE_BUILD_TEST_HOOKS: "1"
+        run: vp run build
+
+      - name: Get the role's keys through OIDC
+        id: aws
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      # Fetched here, as the step's command has no way to ask GitHub for one.
+      - name: Get a web identity token for the step to exchange
+        run: |
+          curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value > web-identity-token
+
+      - name: Call STS with the AWS access key check in restrict mode
+        id: restrict
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/aws-restrict-summary.md
+          ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          SWITCHED_ROLE_ARN: ${{ vars.AWS_SWITCHED_ROLE_ARN }}
+        with:
+          proxy_engine: inspect
+          proxy_mode: restrict
+          allowed_url_rules: |
+            POST https://sts.us-east-1.amazonaws.com/
+          aws_key_check: true
+          allowed_aws_role_accounts: ${{ steps.aws.outputs.aws-account-id }}
+          # The refusal below is expected, not a failure.
+          fail_on_blocked: false
+          upload_traffic_artifact: true
+          traffic_artifact_retention_days: 1
+          run: |
+            echo "=== the key the step was given ==="
+            aws sts get-caller-identity > /dev/null
+
+            echo "=== a key AssumeRole issued for a role in the allowed account ==="
+            (
+              read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN < <(
+                aws sts assume-role --role-arn "$SWITCHED_ROLE_ARN" --role-session-name buildcage-e2e \
+                  --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text
+              )
+              export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+              arn=$(aws sts get-caller-identity --query Arn --output text)
+              case "$arn" in
+                *":assumed-role/${SWITCHED_ROLE_ARN##*/}/buildcage-e2e") ;;
+                *) echo "UNEXPECTED: signed as $arn, not the switched role"; exit 1 ;;
+              esac
+            )
+
+            echo "=== a key AssumeRoleWithWebIdentity issued, through the CLI's own credential provider ==="
+            arn=$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+              AWS_ROLE_ARN="$ROLE_ARN" AWS_ROLE_SESSION_NAME=buildcage-e2e-web-identity \
+              AWS_WEB_IDENTITY_TOKEN_FILE="$GITHUB_WORKSPACE/web-identity-token" \
+              aws sts get-caller-identity --query Arn --output text)
+            case "$arn" in
+              *":assumed-role/${ROLE_ARN##*/}/buildcage-e2e-web-identity") ;;
+              *) echo "UNEXPECTED: signed as $arn, not the web identity session"; exit 1 ;;
+            esac
+
+            echo "=== a key from outside the step must be refused ==="
+            # AWS's documented example key ID, built at run time so the file
+            # holds no key-shaped literal.
+            if env -u AWS_SESSION_TOKEN AWS_ACCESS_KEY_ID="AKIA$(printf IOSFODNN7EXAMPLE)" AWS_SECRET_ACCESS_KEY=example \
+              aws sts get-caller-identity 2>&1; then
+              echo "UNEXPECTED: the call signed with a key from outside the step got through"
+              exit 1
+            fi
+
+      - name: Remove the web identity token
+        if: always()
+        run: rm -f web-identity-token
+
+      - name: Verify the restrict-mode report
+        if: always() && steps.restrict.outcome != 'skipped'
+        env:
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/aws-restrict-summary.md
+          ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+        run: ./test/assert-sandbox-aws-key-check.sh restrict
+
+      - name: Download the traffic artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ steps.restrict.outputs.traffic_artifact_name }}
+          path: ${{ runner.temp }}/aws-traffic
+
+      # Each key the step signed with is told apart, and each STS call that
+      # issued one points at the requests signed with it.
+      - name: Verify the traffic artifact's aws objects
+        env:
+          ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const account = process.env.ACCOUNT_ID;
+            const rows = JSON.parse(
+              fs.readFileSync(process.env.RUNNER_TEMP + "/aws-traffic/traffic.json", "utf8"),
+            ).filter((r) => r.host === "sts.us-east-1.amazonaws.com" && r.method === "POST");
+            const check = (ok, message) => {
+              if (!ok) {
+                console.log("::error::" + message);
+                console.log(JSON.stringify(rows, null, 2));
+                process.exit(1);
+              }
+            };
+            const allowed = rows.filter((r) => r.action === "allow");
+            const env = allowed.filter((r) => r.aws?.key === "env");
+            const assumed = allowed.filter((r) => r.aws?.key === "assumed");
+            const assumeRole = env.find((r) => r.aws.assumedAccount === account && r.aws.issuedKeyRef);
+            check(assumeRole, "no AssumeRole signed with the starting key names the account and the key it issued");
+            check(
+              assumed.some((r) => r.aws.keyRef === assumeRole.aws.issuedKeyRef && r.aws.accountId === account),
+              "no request was signed with the key AssumeRole issued, credited to its account",
+            );
+            const webIdentity = allowed.find((r) => r.aws?.key === "none" && r.aws.accountId === account);
+            check(webIdentity?.aws.issuedKeyRef, "the unsigned AssumeRoleWithWebIdentity names no issued key");
+            check(
+              assumed.some((r) => r.aws.keyRef === webIdentity.aws.issuedKeyRef),
+              "no request was signed with the key AssumeRoleWithWebIdentity issued",
+            );
+            const refused = rows.filter((r) => r.action === "block" && r.reason === "aws-key-not-allowed");
+            check(refused.length > 0, "the call signed with a key from outside the step is not recorded as refused");
+            const known = new Set(allowed.map((r) => r.aws?.keyRef).filter(Boolean));
+            check(
+              refused.every((r) => r.aws?.keyRef && !known.has(r.aws.keyRef)),
+              "a refused call carries no keyRef, or that of a key the check let through",
+            );
+            console.log("Traffic artifact verified.");
+          '
+
+      # No account named: the switched role's key is one restrict would refuse,
+      # and the report names its account for the workflow to check.
+      - name: Call STS with the AWS access key check in audit mode
+        id: audit
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/aws-audit-summary.md
+          SWITCHED_ROLE_ARN: ${{ vars.AWS_SWITCHED_ROLE_ARN }}
+        with:
+          proxy_engine: inspect
+          proxy_mode: audit
+          aws_key_check: true
+          run: |
+            aws sts get-caller-identity > /dev/null
+            read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN < <(
+              aws sts assume-role --role-arn "$SWITCHED_ROLE_ARN" --role-session-name buildcage-e2e \
+                --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text
+            )
+            export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+            aws sts get-caller-identity > /dev/null
+
+      - name: Verify the audit-mode report
+        if: always() && steps.audit.outcome != 'skipped'
+        env:
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/aws-audit-summary.md
+          ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+        run: ./test/assert-sandbox-aws-key-check.sh audit
+
   # Single, stably-named required status check for branch protection: the
   # jobs above vary their own names by matrix entry, so branch protection
   # can't target them directly without listing every combination.
@@ -1082,6 +1278,7 @@ jobs:
         test_sandbox_enforcement,
         test_sandbox_concurrency,
         test_sandbox_concurrency_inspect,
+        test_sandbox_aws_key_check,
       ]
     if: always()
     permissions: {}

@@ -2,7 +2,8 @@
 # Drives dist/main.cjs against a real inspect-engine proxy with the AWS access
 # key check on: restrict refuses what the check refuses (scenarios in
 # test/inspect-aws-keys-scenarios.sh), audit lets it through and notes it, and
-# a step with no key to start from fails before the proxy starts.
+# a step with no key to start from, or under proxy_engine: universal, fails
+# before the proxy starts.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 
@@ -179,6 +180,27 @@ if grep -qF "proxy image:" "$TMPDIR/nokey.log"; then
   fail "the step got as far as the proxy image before failing"
 else
   pass "the step failed before any setup"
+fi
+
+echo ""
+echo "--- under proxy_engine: universal ---"
+run_step universal \
+  AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
+  INPUT_PROXY_ENGINE="universal" \
+  INPUT_PROXY_MODE="audit" \
+  INPUT_ALLOWED_URL_RULES="" \
+  INPUT_RUN="true"
+RUN_EXIT=$?
+if [ "$RUN_EXIT" != "0" ] && grep -qF "has no effect with proxy_engine: universal" "$TMPDIR/universal.log"; then
+  pass "a universal step with the check on fails in audit too, naming the engine"
+else
+  fail "a universal step with the check on did not fail in audit (exit $RUN_EXIT)"
+  cat "$TMPDIR/universal.log"
+fi
+if grep -qF "proxy image:" "$TMPDIR/universal.log"; then
+  fail "the universal step got as far as the proxy image before failing"
+else
+  pass "the universal step failed before any setup"
 fi
 
 rm -rf "$TMPDIR"
