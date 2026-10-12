@@ -143,9 +143,9 @@ export class Lines {
     this.opts = opts;
   }
 
-  add(x: Access): void {
+  /** `parts` is x.path's components, for a caller that already has them. */
+  add(x: Access, parts = components(x.path)): void {
     if (this.stopped || !x.bit) return;
-    const parts = components(x.path);
     // A program run is never folded away, nor makes its directory fold.
     if (unfoldable(parts, x.path) || x.bit === BIT.X) {
       const key = keyOf(x.comm, x.path);

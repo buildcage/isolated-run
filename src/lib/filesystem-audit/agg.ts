@@ -35,8 +35,8 @@ export function mergeAgg(dst: Agg, src: Agg): void {
   dst.seq = Math.min(dst.seq, src.seq);
 }
 
-// One access, as a line records it. bit is 0 for a read of what the process
-// loaded, which prints nothing and so does not count toward a directory's fold.
+// One access, as a line records it. bit is 0 where it prints nothing, as a run
+// does in the paths table, and so does not count toward a directory's fold.
 export interface Access {
   comm: string;
   path: string;

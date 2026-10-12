@@ -24,7 +24,7 @@ import {
   type Prefixes,
   type Shown,
 } from "./paths.ts";
-import { BIT, classify, isRecord, parseLine, procOf, type AuditRecord } from "./record.ts";
+import { BIT, bitsOf, classify, isRecord, parseLine, procOf, type AuditRecord } from "./record.ts";
 import { createStripper } from "./strip.ts";
 
 // A shared object or a Node.js addon, by file name.
@@ -97,6 +97,8 @@ export interface AuditSummary {
  * Reduces a recording to an AuditSummary in two passes over its records:
  * `observe` each in order, then `add` each in the same order, with `counted`
  * false for one that is not the step's, so the processes stay in step.
+ * `observe` reads only fork, exec and mmap records, so it may be passed
+ * undefined for any other.
  *
  * Libraries are left out and an exec'd binary is shown by its X, so a process
  * that mapped or ran one has its reads of it dropped, and of /etc/ld.so.cache
@@ -232,20 +234,22 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // an attribute change whose directory descriptor closed meanwhile, which
       // is lost; a failed one may keep the relative name it was given.
       if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) continue;
-      const loadRead = !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path));
-      const t = loadRead ? NaN : Date.parse(r.t ?? "");
+      // A read of what the process loaded prints nothing.
+      if (!c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
+      const t = Date.parse(r.t ?? "");
       const x: Access = {
         comm: r.comm ?? "",
         path: normalize(path),
-        bit: loadRead ? 0 : c.letter.split("").reduce((bits, l) => bits | BIT[l], 0),
+        bit: bitsOf(c.letter),
         failed: c.failed,
         perm: c.perm,
         t,
         seq: Number.isNaN(t) ? Infinity : seq++,
       };
-      details.add(x);
+      const parts = components(x.path);
+      details.add(x, parts);
       // The executed table lists what ran, so this one leaves it out.
-      paths.add({ ...x, comm: "", bit: x.bit & ~BIT.X });
+      paths.add({ ...x, comm: "", bit: x.bit & ~BIT.X }, parts);
     }
   };
 
@@ -288,6 +292,23 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   return { observe, add, finish };
 }
 
+// The tracer writes Go's encoding/json, with no space after a colon, and kind
+// right after the time, before any field whose text the step chooses.
+const KIND = '"kind":"';
+
+// Whether the first pass needs the line parsed: only an exec, fork or mmap
+// matters to either observer, and most lines are none of them.
+function firstPassNeeds(line: string): boolean {
+  const at = line.indexOf(KIND);
+  if (at === -1) return false;
+  const kind = at + KIND.length;
+  return (
+    line.startsWith('exec"', kind) ||
+    line.startsWith('fork"', kind) ||
+    line.startsWith('mmap"', kind)
+  );
+}
+
 export interface ReducedRecording {
   /** Undefined when summarizing failed, for summaryError. */
   summary: AuditSummary | undefined;
@@ -326,7 +347,7 @@ export function reduceRecording(
   forEachLine((line) => {
     lines++;
     length += line.length;
-    const r = parseLine(line);
+    const r = firstPassNeeds(line) ? parseLine(line) : undefined;
     stripper.observe(r);
     summarize(() => summary.observe(r));
   });

@@ -48,7 +48,8 @@ interface Record_ {
  * Strips a recording in two passes over its lines: `observe` each in order,
  * then `filter` each in the same order, which gives the line to keep (with the
  * record it now holds) or undefined to drop it. A line is passed with its
- * parsed record, undefined when it does not parse.
+ * parsed record, undefined when it does not parse. `observe` reads only exec
+ * records, so it may be passed undefined for any other.
  */
 export function createStripper(scratchBase: string): {
   observe: (r: unknown) => void;

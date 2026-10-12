@@ -100,6 +100,17 @@ function classifyLink(
 export const BIT: Record<string, number> = Object.fromEntries(
   ORDER.split("").map((c, i) => [c, 1 << i]),
 );
+const letterBits = new Map<string, number>();
+
+/** The actions classify's letter names, as bits. */
+export function bitsOf(letter: string): number {
+  let bits = letterBits.get(letter);
+  if (bits === undefined) {
+    bits = [...letter].reduce((b, l) => b | BIT[l], 0);
+    letterBits.set(letter, bits);
+  }
+  return bits;
+}
 
 // A process: its pid and how many forks and execs have handed that pid a new
 // one. Call once per record, in order.
