@@ -65,8 +65,11 @@ const apiHost = (service: string, vpceService = service) =>
 export const STS_HOST = apiHost("sts");
 // EC2's API. It reads the request body as a Query form whatever the
 // Content-Type says; as of 2026-10-12 it was the only Query service that does.
-// The `ec2-<ip>.compute` public names are a resource host, not this.
-export const EC2_HOST = apiHost("ec2", "ec2(-fips)?");
+// `<region>.ec2.amazonaws.com` is its pre-regional endpoint name, still
+// resolved (us-east-1's as a CNAME to ec2.amazonaws.com) and reaching the same
+// API, in the commercial partition alone. The `ec2-<ip>.compute` public names
+// are a resource host, not this.
+export const EC2_HOST = `${apiHost("ec2", "ec2(-fips)?")}|^[a-z0-9-]+\\.ec2\\.amazonaws\\.com$`;
 // Hosts that name the resource a request is for, in the host or (S3's path
 // style, an EKS OIDC issuer) the path, so the URL rules can pin it and an
 // unsigned request is left to them: S3 in every form, ECR registries,
@@ -206,8 +209,9 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     "    acl aws_form var(txn.aws_form) -m bool",
     "    http-request wait-for-body time 30s use-large-buffer if aws_form",
     "    # Matched undecoded, since a value carries & and = encoded, but each",
-    "    # letter of the name may be.",
-    `    http-request set-var(txn.aws_unsupported) bool(true) if aws_form { req.body -m reg -i (^|&)(${SIGV2_PARAM}|${SIGV4_PARAM})= }`,
+    "    # letter of the name may be. EC2 splits a body on ; too, which a value",
+    "    # encodes as %3B.",
+    `    http-request set-var(txn.aws_unsupported) bool(true) if aws_form { req.body -m reg -i (^|[&;])(${SIGV2_PARAM}|${SIGV4_PARAM})= }`,
     "    # A non-form body would carry a SigV2 past the form-body check above, and",
     "    # EC2 takes it over the Authorization header. EC2 has no JSON API, so a",
     "    # non-form POST is never legitimate.",
