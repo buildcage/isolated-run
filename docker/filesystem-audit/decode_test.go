@@ -319,6 +319,17 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "unlink", Comm: "rm", Path: "x", Err: int32(unix.EBADF), Failed: true},
 		},
 		{
+			name: "failed open, name cut",
+			ev:   event{kind: 12, comm: "node", pathRet: int32(unix.ENOENT), n2: 1, data: []byte("/a/b/lon\x00")},
+			want: record{Kind: "open", Comm: "node", Path: "/a/b/lon…", Access: "r", Err: int32(unix.ENOENT), Failed: true},
+		},
+		{
+			name: "failed open, relative name cut",
+			ev: event{kind: 12, comm: "node", pathRet: int32(unix.ENOENT), n2: 1, bases: 1, mode: 1,
+				data: append([]byte("a/lon\x00"), comps("w")...)},
+			want: record{Kind: "open", Comm: "node", Path: "/w/a/lon…", Name: "a/lon…", Access: "r", Err: int32(unix.ENOENT), Failed: true},
+		},
+		{
 			name: "failed rename, each name on its own base",
 			ev: event{kind: 17, comm: "mv", pathRet: int32(unix.EXDEV), n1: 1, bases: 3, mode: 1, flags: 1,
 				data: append(append([]byte("a\x00b\x00"), comps("src")...), comps("dst")...)},

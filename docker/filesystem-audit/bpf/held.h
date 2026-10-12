@@ -25,6 +25,8 @@
 /**
  * Whether @p ret is one of ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal
  * interrupted the call, which the kernel runs again, and that run records it.
+ * One the kernel turns into EINTR instead, as ERESTARTSYS without SA_RESTART,
+ * is not run again, and goes unrecorded and uncounted.
  */
 static __always_inline int is_restart(long ret)
 {
@@ -495,7 +497,6 @@ static __always_inline void open_name(u32 slot, const char *name, int user)
 	if (e->data_len > HEAD_DATA) {
 		e->data[HEAD_DATA - 1] = 0;
 		e->data_len = HEAD_DATA;
-		e->truncated = 1;
 		e->n2 = 1;
 		if (hold_new(e, HELD_OPEN) == 0)
 			return;

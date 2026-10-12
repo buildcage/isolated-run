@@ -620,7 +620,9 @@ or uses as a symlink's target, is kept.
 
 **Falsifying what it says.** A successful access and a program the step ran are recorded with the
 path the kernel resolved. A delete, move, mkdir, mknod, symlink, link, chmod, chown or truncate
-counts as done only if its syscall succeeds; one the kernel refuses is recorded as failed. An open
+counts as done only if its syscall succeeds; one the kernel refuses is recorded as failed. A
+failed record means only that the call returned an error: the step can install its own seccomp
+filter to fail a call before the kernel looks at the file. An open
 refused after the kernel reached its file is recorded as failed with the path it resolved. Any
 other failed call, and an attribute change through `utimensat`, `utime`,
 `utimes`, `futimesat`, `setxattr` or `lsetxattr`, are recorded under the name the command passed,
@@ -629,7 +631,8 @@ that name as `name` where it differs from `path`. These names are best-effort: t
 command's memory when the call returns, so another thread can rewrite one first, or change
 directory so that a relative one is joined to another, and a process tracing the command can change
 the call's arguments. A failed open's flags are read the same way, but its name is the kernel's
-copy, unless the kernel refused the name as too long, when it is read like the others. A path too deep to record in full is shown cut, with `…/`. A row's command name is the one
+copy, unless the kernel refused the name as too long, when it is read like the others. A path too deep to record in full is shown cut, with `…/`. A failed open's name the tracer had no room to hold
+whole is shown cut at its end, with `…`. A row's command name is the one
 the process gave itself, not a thread's, so it says which process acted, not which binary, and a
 process named `run-script.sh` is shown as the step's shell, `bash`. A memfd's name is whatever its creator chose,
 so it is quoted after `memfd:` and never reads as a path. A control, format or separator character,

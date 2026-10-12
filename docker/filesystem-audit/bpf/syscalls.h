@@ -202,9 +202,10 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 	// mode and flags count the base components of the first and second name;
 	// flags holds val1 instead for an op with one name.
 	u8 nb = 0;
-	if (!call->p1) {
-		// No name (futimens): the descriptor's path, or no record if it
-		// was not open.
+	int attr = kind == K_ATTR || kind == K_ATTR_FAILED;
+	if (!call->p1 || (attr && r == 1)) {
+		// No name (futimens), or an empty one (AT_EMPTY_PATH): the
+		// descriptor's path, or no record if it was not open.
 		e->data[0] = 0;
 		off = add_base(e, 1, call->dfd1, &nb, &e->truncated, 1, 0);
 		e->mode = nb;

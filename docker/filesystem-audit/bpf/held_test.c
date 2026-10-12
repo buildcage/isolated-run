@@ -605,7 +605,7 @@ static void test_open_long_name_no_tails(void)
 	name_of(long_name, sizeof(long_name) - 1, 'n');
 	open_name(0, long_name, 0);
 	struct event *h = head_of(1, HELD_OPEN);
-	CHECK(h && h->truncated && h->n2 && h->data_len == HEAD_DATA);
+	CHECK(h && !h->truncated && h->n2 && h->data_len == HEAD_DATA);
 	CHECK(h && !memcmp(h->data, long_name, HEAD_DATA - 1) && h->data[HEAD_DATA - 1] == 0);
 	CHECK(untracked_count() == 0);
 }

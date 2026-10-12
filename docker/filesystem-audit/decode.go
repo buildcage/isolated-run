@@ -206,6 +206,13 @@ func decode(raw []byte) (record, error) {
 		r.Access = openAccess(flags, mode)
 	case 12: // failed open
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
+		// n2 marks a name the BPF side had to cut, which lost its end.
+		if n2 != 0 {
+			r.Path += "…"
+			if r.Name != "" {
+				r.Name += "…"
+			}
+		}
 		r.Err = pathRet // the positive errno the BPF side stored as -ret
 		r.Flags = flags
 		r.Access = openAccess(flags, 0)
