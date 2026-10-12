@@ -68930,16 +68930,17 @@ function createStripper(scratchBase) {
 function usesLine(actionRepo, actionRef, actionVersion) {
 	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
 }
-function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", actionVersion, runCommand } = {}) {
+function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", actionVersion } = {}) {
 	let yaml = `- name: ${stepName}\n`;
-	if (yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", runCommand) {
+	return yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", yaml;
+}
+function exampleStepTail({ extraInputs = [], runCommand }) {
+	let yaml = extraInputs.map((line) => `    ${line}\n`).join("");
+	if (runCommand) {
 		yaml += "    run: |\n";
 		for (let line of runCommand.replace(/\r?\n$/, "").split(/\r?\n/)) yaml += `      ${line}\n`;
 	}
 	return yaml;
-}
-function extraInputLines({ extraInputs = [] }) {
-	return extraInputs.map((line) => `    ${line}\n`).join("");
 }
 function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
 	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "\n<details>\n";
@@ -68969,7 +68970,7 @@ function buildRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
 		yaml += `    ${param}: >-\n`;
 		for (let rule of rules) yaml += `      ${rule}\n`;
 	}
-	return yaml += extraInputLines(step), restrictExampleBlock(yaml);
+	return yaml += exampleStepTail(step), restrictExampleBlock(yaml);
 }
 function communicationTruncationNote(artifactAvailable) {
 	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
@@ -69290,7 +69291,7 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 		yaml += "    allowed_ip_rules: |\n";
 		for (let rule of allowedIpRules) yaml += `      ${rule}\n`;
 	}
-	return yaml += extraInputLines(step), restrictExampleBlock(yaml, {
+	return yaml += exampleStepTail(step), restrictExampleBlock(yaml, {
 		appendix: leftOut.length > 0 ? leftOutSection(leftOut) : void 0,
 		footnote: "Permits exactly what this build did; a versioned or dated URL may drift."
 	});
