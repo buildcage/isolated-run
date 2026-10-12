@@ -711,11 +711,11 @@ describe("runSandboxStep", () => {
     });
 
     it("fails the step but still reports when $GITHUB_OUTPUT held what the runner cannot read", async () => {
-      mocks.rewriteOutputFile.mockReturnValue("the delimiter EOF never comes");
+      mocks.rewriteOutputFile.mockReturnValue("it is not a regular file");
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
       expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_OUTPUT holds what the runner cannot read: the delimiter EOF never comes. The outputs from there on were dropped; failing the step",
+        "The command left $GITHUB_OUTPUT unreadable (it is not a regular file), so what it held from there on was dropped; failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);

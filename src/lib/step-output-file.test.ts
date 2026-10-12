@@ -19,10 +19,6 @@ describe("readOutputEntries", () => {
     });
   });
 
-  it("takes an empty name before =, as the runner does", () => {
-    expect(names("=1\n")).toStrictEqual([""]);
-  });
-
   it("reads NAME<<DELIMITER up to the line that is the delimiter alone", () => {
     const text = "a<<EOF\nline\n\nEOF x\nEOF\nb=2\n";
     expect(readOutputEntries(text)).toStrictEqual({
@@ -41,6 +37,7 @@ describe("readOutputEntries", () => {
   it.each([
     ["a line with neither = nor <<", "a=1\ngarbage\nb=2\n"],
     ["< alone", "a=1\nx<y\n"],
+    ["an empty name before =, which the runner takes", "a=1\n=1\n"],
     ["an empty name before <<", "a=1\n<<EOF\nv\nEOF\n"],
     ["an empty delimiter", "a=1\nx<<\nv\n"],
     ["a delimiter that never comes", "a=1\nx<<NEVER\ntraffic_artifact_name=ok\n"],
@@ -53,10 +50,11 @@ describe("readOutputEntries", () => {
 });
 
 describe("rewriteOutputFile", () => {
-  const rewrite = (text: string) => {
+  const rewrite = (content: string | Buffer, kind: "file" | "other" = "file") => {
     let written: string | undefined;
     const error = rewriteOutputFile("/out", ["mine"], {
-      readFile: () => text,
+      kind: () => kind,
+      readFile: () => (typeof content === "string" ? Buffer.from(content) : content),
       replaceFile: (_, t) => (written = t),
     });
     return { written, error };
@@ -82,7 +80,27 @@ describe("rewriteOutputFile", () => {
   it("drops what the runner could not read, and says why", () => {
     const { written, error } = rewrite("mine=evil\na=1\nx<<NEVER\nmine=ok\n");
     expect(written).toBe("a=1\n");
-    expect(error).toBe("the delimiter NEVER never comes");
+    expect(error).toBe("a NAME<<DELIMITER entry never reaches its delimiter");
+  });
+
+  it("empties, unread, anything at the path but a regular file", () => {
+    expect(rewrite("keep=1\n", "other")).toStrictEqual({
+      written: "",
+      error: "it is not a regular file",
+    });
+  });
+
+  it("empties a file in UTF-16 or UTF-32, which the runner would decode otherwise", () => {
+    for (const bom of [
+      [0xff, 0xfe],
+      [0xfe, 0xff],
+      [0x00, 0x00, 0xfe, 0xff],
+    ]) {
+      expect(rewrite(Buffer.from([...bom, 0x61, 0x3d, 0x31]))).toStrictEqual({
+        written: "",
+        error: "it is not UTF-8",
+      });
+    }
   });
 
   describe("on a real file", () => {
@@ -94,19 +112,23 @@ describe("rewriteOutputFile", () => {
       const path = join(dir, "output");
       expect(rewriteOutputFile(path, ["mine"])).toBeUndefined();
       expect(readFileSync(path, "utf8")).toBe("");
+      writeFileSync(path, "mine=evil\nkeep=1\n");
+      expect(rewriteOutputFile(path, ["mine"])).toBeUndefined();
+      expect(readFileSync(path, "utf8")).toBe("keep=1\n");
       expect(() => rewriteOutputFile(dir, ["mine"])).toThrow();
+      expect(() => rewriteOutputFile(join(path, "below-a-file"), ["mine"])).toThrow(/ENOTDIR/);
     });
 
-    it("replaces a symlink left at the path instead of writing through it", () => {
+    it("replaces a symlink left at the path, reading and writing nothing through it", () => {
       dir = mkdtempSync(join(tmpdir(), "step-output-"));
       const target = join(dir, "elsewhere");
       const path = join(dir, "output");
       writeFileSync(target, "mine=evil\nkeep=1\n");
       symlinkSync(target, path);
 
-      expect(rewriteOutputFile(path, ["mine"])).toBeUndefined();
+      expect(rewriteOutputFile(path, ["mine"])).toBe("it is not a regular file");
       expect(lstatSync(path).isSymbolicLink()).toBe(false);
-      expect(readFileSync(path, "utf8")).toBe("keep=1\n");
+      expect(readFileSync(path, "utf8")).toBe("");
       expect(readFileSync(target, "utf8")).toBe("mine=evil\nkeep=1\n");
     });
   });

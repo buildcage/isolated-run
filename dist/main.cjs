@@ -72475,6 +72475,10 @@ function readOutputEntries(text) {
 		if (line === "") continue;
 		let equals = line.indexOf("="), heredoc = line.indexOf("<<");
 		if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
+			if (equals === 0) return {
+				entries,
+				error: "an entry has an empty name"
+			};
 			entries.push({
 				name: line.slice(0, equals),
 				text: text.slice(start, index)
@@ -72492,15 +72496,11 @@ function readOutputEntries(text) {
 		};
 		for (;;) {
 			let value = readLine();
-			if (!value) return {
+			if (!value || value.line !== delimiter && !value.newline) return {
 				entries,
-				error: `the delimiter ${delimiter} never comes`
+				error: "a NAME<<DELIMITER entry never reaches its delimiter"
 			};
 			if (value.line === delimiter) break;
-			if (!value.newline) return {
-				entries,
-				error: `the delimiter ${delimiter} never comes`
-			};
 		}
 		entries.push({
 			name,
@@ -72509,14 +72509,15 @@ function readOutputEntries(text) {
 	}
 }
 const realDeps$2 = {
-	readFile: (path) => {
+	kind: (path) => {
 		try {
-			return (0, node_fs.readFileSync)(path, "utf8");
+			return (0, node_fs.lstatSync)(path).isFile() ? "file" : "other";
 		} catch (e) {
-			if (e.code === "ENOENT") return "";
+			if (e.code === "ENOENT") return "missing";
 			throw e;
 		}
 	},
+	readFile: (path) => (0, node_fs.readFileSync)(path),
 	replaceFile: (path, text) => {
 		let temporary = (0, node_path.join)((0, node_path.dirname)(path), `.${(0, node_path.basename)(path)}.${(0, node_crypto.randomBytes)(8).toString("hex")}`);
 		try {
@@ -72528,12 +72529,25 @@ const realDeps$2 = {
 			(0, node_fs.rmSync)(temporary, { force: !0 });
 		}
 	}
-};
+}, WIDE_BOMS = [
+	[255, 254],
+	[254, 255],
+	[
+		0,
+		0,
+		254,
+		255
+	]
+];
 function rewriteOutputFile(path, names, overrides = {}) {
-	let { readFile, replaceFile } = {
+	let { kind, readFile, replaceFile } = {
 		...realDeps$2,
 		...overrides
-	}, { entries, error } = readOutputEntries(readFile(path).replace(/^\uFEFF/, "")), dropped = new Set(names.map((n) => n.toLowerCase())), text = entries.filter((e) => !dropped.has(e.name.toLowerCase())).map((e) => e.text).join("");
+	}, found = kind(path);
+	if (found === "other") return replaceFile(path, ""), "it is not a regular file";
+	let bytes = found === "file" ? readFile(path) : Buffer.alloc(0);
+	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return replaceFile(path, ""), "it is not UTF-8";
+	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), dropped = new Set(names.map((n) => n.toLowerCase())), text = entries.filter((e) => !dropped.has(e.name.toLowerCase())).map((e) => e.text).join("");
 	return replaceFile(path, text === "" || text.endsWith("\n") ? text : `${text}\n`), error;
 }
 //#endregion
@@ -73698,7 +73712,7 @@ async function runSandboxStep(env, overrides = {}) {
 	} finally {
 		if (env.GITHUB_OUTPUT) try {
 			let unreadable = rewriteOutputFile(env.GITHUB_OUTPUT, [TRAFFIC_ARTIFACT_OUTPUT, FILESYSTEM_AUDIT_OUTPUT]);
-			unreadable && (annotation.error(`$GITHUB_OUTPUT holds what the runner cannot read: ${unreadable}. The outputs from there on were dropped; failing the step`), process.exitCode = 1);
+			unreadable && (annotation.error(`The command left $GITHUB_OUTPUT unreadable (${unreadable}), so what it held from there on was dropped; failing the step`), process.exitCode = 1);
 		} catch (e) {
 			annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
 		}

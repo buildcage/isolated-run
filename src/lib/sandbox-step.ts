@@ -494,7 +494,7 @@ export async function runSandboxStep(
         ]);
         if (unreadable) {
           annotation.error(
-            `$GITHUB_OUTPUT holds what the runner cannot read: ${unreadable}. The outputs from there on were dropped; failing the step`,
+            `The command left $GITHUB_OUTPUT unreadable (${unreadable}), so what it held from there on was dropped; failing the step`,
           );
           process.exitCode = 1;
         }
