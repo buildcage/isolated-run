@@ -84,8 +84,8 @@ A host that falls short fails the step before the command runs, with the reason;
   whose call it is. That adds roughly 60 nanoseconds to each system call of every process on the
   machine, the proxy, Docker and other jobs on a shared runner included, and about 100 to each read
   or write. Copying a file a byte at a time outside the step took about one and a half times as long
-  in a test, while a typical build, which spends little of its time in system calls, barely changes. Inside the step, each program's first read or
-  write of a file is also recorded, which costs more.
+  in a test, while a typical build, which spends little of its time in system calls, barely changes.
+  Inside the step, each program's first read or write of a file is also recorded, which costs more.
 
 ## Getting started
 

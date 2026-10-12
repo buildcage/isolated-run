@@ -167,10 +167,12 @@ static __always_inline int classify(long nr, struct pt_regs *regs, struct path_c
 /** Emits the call as it ended with @p ret. */
 static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 {
-	if (ret < 0 && -ret == call->quiet_err)
+	if (is_restart(ret) || (ret < 0 && -ret == call->quiet_err))
 		return;
 	u32 kind = ret < 0 ? call->kind : call->kind_ok;
-	if (kind == 0)
+	// Only an attribute change names its file by descriptor alone (futimens);
+	// any other call given no name names nothing.
+	if (kind == 0 || (!call->p1 && kind != K_ATTR && kind != K_ATTR_FAILED))
 		return;
 	struct event *e = start(slot, kind);
 	if (!e)

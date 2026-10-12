@@ -526,7 +526,7 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
 	if (head) {
 		u32 t = tails_for(head->data_len);
-		if (ret >= 0 || !watched)
+		if (!is_restart(ret) && (ret >= 0 || !watched))
 			report_held(slot, &k, head, ret < 0 ? -ret : 0, 0);
 		release(&k, t);
 	}
