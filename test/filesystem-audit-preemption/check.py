@@ -17,6 +17,7 @@ NAME = re.compile(r"^/tmp/w/([abc])/([abc])-(\d+)-(\d+)$")
 counts = collections.Counter()
 seen = collections.Counter()
 bad = []
+repeats = []
 end = None
 for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
     r = json.loads(line)
@@ -38,11 +39,15 @@ for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
     seen[key] += 1
     if seen[key] == 2:
         counts["repeated"] += 1
+        if len(repeats) < 10:
+            repeats.append(r)
 
 print("records:", dict(counts))
 print("end:", end)
 for r in bad:
     print("MIXED", json.dumps(r))
+for r in repeats:
+    print("REPEATED", json.dumps(r))
 missing = [comm for comm in EXPECT if counts[comm] == 0]
 if end is None or missing or counts["mixed"] or counts["repeated"]:
     print("FAIL: no end line" if end is None else f"FAIL: missing {missing}" if missing else "FAIL")
