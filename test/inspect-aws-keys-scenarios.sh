@@ -234,6 +234,12 @@ check_status "a POST with no Content-Type" \
 # A form body's SigV2 is still caught by the form-body check.
 check_status "a form POST hiding the attacker's SigV2" \
   "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data "Action=X&AWSAccessKeyId=${AKIA}TESTATTACKER0001&SignatureVersion=2" $EC2)" "403"
+# EC2 splits a form body on ; too, so a SigV2 after one is caught.
+check_status "a form POST hiding the attacker's SigV2 after a ;" \
+  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/x-www-form-urlencoded" --data "Action=X;AWSAccessKeyId=${AKIA}TESTATTACKER0001;SignatureVersion=2" $EC2)" "403"
+# EC2's pre-regional name <region>.ec2.amazonaws.com reaches the same API.
+check_status "a JSON Content-Type POST to EC2's pre-regional name, hiding the attacker's SigV2" \
+  "$($C -X POST -H "Authorization: $(sigv4 ${AKIA}TESTSTARTKEY0001)" -H "Content-Type: application/json" --data "Action=DescribeRegions&AWSAccessKeyId=${AKIA}TESTATTACKER0001&SignatureVersion=2&Signature=ab" https://us-east-1.ec2.amazonaws.com/)" "403"
 # Scoped to EC2: a strict service ignores a non-form body, so a JSON POST there
 # stays allowed on its header key.
 check_status "a JSON Content-Type POST to CloudFormation, which does not read a form body" \

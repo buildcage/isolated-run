@@ -94,7 +94,7 @@ describe("AWS API hosts", () => {
 describe("EC2's API host", () => {
   const ec2Host = new RegExp(EC2_HOST);
 
-  it("names EC2 by its regional, region-less, FIPS, dual-stack and VPC-endpoint names", () => {
+  it("names EC2 by its regional, region-less, FIPS, dual-stack, pre-regional and VPC-endpoint names", () => {
     for (const host of [
       "ec2.us-east-1.amazonaws.com",
       "ec2.amazonaws.com",
@@ -102,6 +102,8 @@ describe("EC2's API host", () => {
       "ec2.cn-north-1.amazonaws.com.cn",
       "ec2.us-east-1.api.aws",
       "ec2-fips.us-east-1.api.aws",
+      "us-west-2.ec2.amazonaws.com",
+      "eu-west-1.ec2.amazonaws.com",
       "vpce-0123456789abcdef0-abcdefgh.ec2.us-east-1.vpce.amazonaws.com",
     ]) {
       expect(ec2Host.test(host)).toBe(true);
@@ -114,6 +116,8 @@ describe("EC2's API host", () => {
       "ec2messages.us-east-1.amazonaws.com",
       "ec2instanceconnect.us-east-1.amazonaws.com",
       "ec2.amazonaws.com.evil",
+      // The pre-regional name is the commercial partition's alone.
+      "cn-north-1.ec2.amazonaws.com.cn",
     ]) {
       expect(ec2Host.test(host)).toBe(false);
     }
@@ -263,24 +267,27 @@ describe("public hosts", () => {
 });
 
 describe("the SigV2 credential in a form body", () => {
-  const credential = new RegExp(`(^|&)${SIGV2_PARAM}=`, "i");
+  const credential = new RegExp(`(^|[&;])${SIGV2_PARAM}=`, "i");
 
-  it("counts the name in any case and with any letter percent-encoded", () => {
+  it("counts the name in any case, with any letter percent-encoded, after & or ;", () => {
     for (const body of [
       "AWSAccessKeyId=K&Action=X",
       "Action=X&AWSAccessKeyId=K",
       "Action=X&awsaccesskeyid=K",
       "Action=X&AWSAccessK%65yId=K",
       "Action=X&%41%57%53AccessKeyId=K",
+      // EC2 splits a body on ; too.
+      "Action=X;AWSAccessKeyId=K",
     ]) {
       expect(credential.test(body)).toBe(true);
     }
   });
 
-  it("does not count the name inside a value, whose & and = are encoded", () => {
+  it("does not count the name inside a value, whose &, = and ; are encoded", () => {
     for (const body of [
       "Action=Publish&Message=https%3A%2F%2Fb.s3.amazonaws.com%2Fk%3FExpires%3D1%26AWSAccessKeyId%3DK",
       "Action=X&MyAWSAccessKeyId=K",
+      "Action=X&M=a%3BAWSAccessKeyId%3DK",
     ]) {
       expect(credential.test(body)).toBe(false);
     }
@@ -288,13 +295,14 @@ describe("the SigV2 credential in a form body", () => {
 });
 
 describe("SigV4's credential in a form body", () => {
-  const credential = new RegExp(`(^|&)${SIGV4_PARAM}=`, "i");
+  const credential = new RegExp(`(^|[&;])${SIGV4_PARAM}=`, "i");
 
-  it("counts the name in any case and with any character percent-encoded", () => {
+  it("counts the name in any case, with any character percent-encoded, after & or ;", () => {
     for (const body of [
       "X-Amz-Credential=K",
       "Action=X&x-amz-credential=K",
       "Action=X&X%2DAmz-Cr%65dential=K",
+      "Action=X;X-Amz-Credential=K",
     ]) {
       expect(credential.test(body)).toBe(true);
     }
