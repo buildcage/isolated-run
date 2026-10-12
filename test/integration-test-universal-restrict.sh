@@ -68,40 +68,40 @@ assert_summary_contains "| sub.wildcard.example.com:443 | HTTPS |" "wildcard-mat
 # matching side. From inside the sandbox every one of them looks the same,
 # "not 200", so the reason is what tells a rule that refused the name from a
 # fixture that was never reachable in the first place.
-assert_summary_contains "| not-ok.regex.example.com:443 | HTTPS | not-allowed |" "an anchorless regex did not match a name merely containing it, reason not-allowed"
-assert_summary_contains "| deep.sub.wildcard.example.com:443 | HTTPS | not-allowed |" "a wildcard did not reach a nested subdomain, reason not-allowed"
-assert_summary_contains "| ports.regex.example.com:80 | HTTP | not-allowed |" "a regex naming https ports only did not cover :80, reason not-allowed"
-assert_summary_contains "| blocked.example.com:443 | HTTPS | not-allowed |" "blocked.example.com:443 recorded as blocked, reason not-allowed"
+assert_summary_contains "| not-ok.regex.example.com:443 | HTTPS | 🚫 not-allowed |" "an anchorless regex did not match a name merely containing it, reason not-allowed"
+assert_summary_contains "| deep.sub.wildcard.example.com:443 | HTTPS | 🚫 not-allowed |" "a wildcard did not reach a nested subdomain, reason not-allowed"
+assert_summary_contains "| ports.regex.example.com:80 | HTTP | 🚫 not-allowed |" "a regex naming https ports only did not cover :80, reason not-allowed"
+assert_summary_contains "| blocked.example.com:443 | HTTPS | 🚫 not-allowed |" "blocked.example.com:443 recorded as blocked, reason not-allowed"
 # The same name on the three other ports the scenarios request it on. The
 # keep-alive check further down reads blocked.example.com:80 out of the Allowed
 # Hosts table only, so it and the row below are about different tables.
-assert_summary_contains "| blocked.example.com:80 | HTTP | not-allowed |" "blocked.example.com:80 recorded as blocked, reason not-allowed"
-assert_summary_contains "| blocked.example.com:8443 | HTTPS | not-allowed |" "blocked.example.com:8443 recorded as blocked, reason not-allowed"
-assert_summary_contains "| blocked.example.com:8080 | HTTP | not-allowed |" "blocked.example.com:8080 recorded as blocked, reason not-allowed"
-assert_summary_contains "| 10.200.0.100:80 | IP | ip-not-allowed |" "direct IP recorded as blocked, reason ip-not-allowed"
+assert_summary_contains "| blocked.example.com:80 | HTTP | 🚫 not-allowed |" "blocked.example.com:80 recorded as blocked, reason not-allowed"
+assert_summary_contains "| blocked.example.com:8443 | HTTPS | 🚫 not-allowed |" "blocked.example.com:8443 recorded as blocked, reason not-allowed"
+assert_summary_contains "| blocked.example.com:8080 | HTTP | 🚫 not-allowed |" "blocked.example.com:8080 recorded as blocked, reason not-allowed"
+assert_summary_contains "| 10.200.0.100:80 | IP | 🚫 ip-not-allowed |" "direct IP recorded as blocked, reason ip-not-allowed"
 assert_summary_contains "| 10.200.0.100:8443 | IP |" "an allowed address recorded as allowed, whatever name its SNI carried"
 assert_summary_contains "| 10.200.0.100:2525 | IP |" "an allowed address the client sent nothing on recorded as allowed"
-assert_summary_contains "| 10.200.0.101:8443 | IP | ip-not-allowed |" "an address no rule allows recorded as blocked, though its SNI named an allowed one"
+assert_summary_contains "| 10.200.0.101:8443 | IP | 🚫 ip-not-allowed |" "an address no rule allows recorded as blocked, though its SNI named an allowed one"
 # No rule refused these and none can clear them, so they are tabled apart.
-assert_summary_contains "### ⚠️ Failed Connections" "a name that resolved nowhere is tabled apart from what the rules refused"
-assert_summary_contains "| nxdomain.wildcard.example.com:443 | HTTPS | dns-failed |" "unresolvable allowlisted name recorded as dns-failed"
-assert_summary_contains "| nxdomain.wildcard.example.com:80 | HTTP | dns-failed |" "unresolvable allowlisted name recorded as dns-failed on the HTTP path too"
-assert_summary_contains "| v6only.wildcard.example.com:443 | HTTPS | dns-failed |" "allowlisted name with AAAA records only recorded as dns-failed"
-assert_summary_contains "| v6only.wildcard.example.com:80 | HTTP | dns-failed |" "allowlisted name with AAAA records only recorded as dns-failed on the HTTP path too"
-assert_summary_contains "| internal.wildcard.example.com:443 | HTTPS | internal-address |" "SSRF via allowlisted name recorded as blocked, reason internal-address"
-assert_summary_contains "| internal.wildcard.example.com:80 | HTTP | internal-address |" "SSRF via allowlisted name (HTTP) recorded as blocked, reason internal-address"
-assert_summary_contains "| runner.wildcard.example.com:443 | HTTPS | internal-address |" "a name resolving to an address the runner holds recorded as blocked, reason internal-address"
-assert_summary_contains "| runner.wildcard.example.com:80 | HTTP | internal-address |" "a name resolving to an address the runner holds (HTTP) recorded as blocked, reason internal-address"
+assert_summary_contains "#### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the refusals"
+assert_summary_contains "| nxdomain.wildcard.example.com:443 | HTTPS | ⚠️ dns-failed |" "unresolvable allowlisted name recorded as dns-failed"
+assert_summary_contains "| nxdomain.wildcard.example.com:80 | HTTP | ⚠️ dns-failed |" "unresolvable allowlisted name recorded as dns-failed on the HTTP path too"
+assert_summary_contains "| v6only.wildcard.example.com:443 | HTTPS | ⚠️ dns-failed |" "allowlisted name with AAAA records only recorded as dns-failed"
+assert_summary_contains "| v6only.wildcard.example.com:80 | HTTP | ⚠️ dns-failed |" "allowlisted name with AAAA records only recorded as dns-failed on the HTTP path too"
+assert_summary_contains "| internal.wildcard.example.com:443 | HTTPS | 🚫 internal-address |" "SSRF via allowlisted name recorded as blocked, reason internal-address"
+assert_summary_contains "| internal.wildcard.example.com:80 | HTTP | 🚫 internal-address |" "SSRF via allowlisted name (HTTP) recorded as blocked, reason internal-address"
+assert_summary_contains "| runner.wildcard.example.com:443 | HTTPS | 🚫 internal-address |" "a name resolving to an address the runner holds recorded as blocked, reason internal-address"
+assert_summary_contains "| runner.wildcard.example.com:80 | HTTP | 🚫 internal-address |" "a name resolving to an address the runner holds (HTTP) recorded as blocked, reason internal-address"
 # Neither of these names a host, so the row carries whatever address the
 # connection was headed for, the proxy's own. The reason is the assertion.
-assert_summary_contains "| HTTPS | missing-sni |" "a TLS ClientHello with no SNI recorded as blocked, reason missing-sni"
-assert_summary_contains "| HTTP | missing-host-header |" "an HTTP request with no Host header recorded as blocked, reason missing-host-header"
+assert_summary_contains "| HTTPS | 🚫 missing-sni |" "a TLS ClientHello with no SNI recorded as blocked, reason missing-sni"
+assert_summary_contains "| HTTP | 🚫 missing-host-header |" "an HTTP request with no Host header recorded as blocked, reason missing-host-header"
 # The crafted SNI arrives as one row whose host cell is the sanitized name.
-assert_summary_contains "x__-__t__buildcage__allowed___https___forged.example.com:443 | HTTPS | invalid-sni |" \
+assert_summary_contains "x__-__t__buildcage__allowed___https___forged.example.com:443 | HTTPS | 🚫 invalid-sni |" \
   "the forged SNI was sanitized into a single blocked row"
-assert_summary_contains "| tlsany.example.com_x.evil.example.net:443 | HTTPS | invalid-sni |" \
+assert_summary_contains "| tlsany.example.com_x.evil.example.net:443 | HTTPS | 🚫 invalid-sni |" \
   "an SNI holding a colon was refused before a ~ rule's port pattern could match it"
-assert_summary_contains "| tlsany.example.com_x.evil.example.net:80 | HTTP | invalid-host |" \
+assert_summary_contains "| tlsany.example.com_x.evil.example.net:80 | HTTP | 🚫 invalid-host |" \
   "a plaintext Host holding a colon was refused the same way"
 
 # The Allowed Hosts table never shows a reason column, so a plain substring
@@ -109,7 +109,7 @@ assert_summary_contains "| tlsany.example.com_x.evil.example.net:80 | HTTP | inv
 # of its correct Blocked Hosts row ("| blocked.example.com:80 | HTTP |
 # not-allowed |"). Scope the search to just the Allowed Hosts section instead.
 ALLOWED_SECTION=$(awk '
-  /^### / { in_section = (index($0, "Allowed Hosts") > 0) ? 1 : 0; next }
+  /^###/ { in_section = (index($0, "Allowed Hosts") > 0) ? 1 : 0; next }
   in_section { print }
 ' <<< "$SUMMARY")
 

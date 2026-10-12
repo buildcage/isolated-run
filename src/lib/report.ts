@@ -22,7 +22,10 @@ import {
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
+  frame,
   renderReportBlocks,
+  reportFooter,
+  reportHeading,
   TRAFFIC_BLOCK,
   trafficNotice,
 } from "#core/lib/report/render/render-report-markdown.ts";
@@ -38,6 +41,7 @@ import {
   WOULD_REFUSE_BLOCK,
   wouldRefuseBlocks,
   wouldRefuseTruncationNote,
+  wouldRefuseVerdictItems,
 } from "./would-refuse.ts";
 
 export type Report = ReportData;
@@ -114,8 +118,29 @@ export function readActionVersion(
   return readImageActionVersion(client, containerName, proxyEngine);
 }
 
+/** `label` is untrusted input; the renderer escapes the whole title. */
+export function reportTitle(label: string | undefined, processActivity: boolean): string {
+  const title = processActivity ? "Traffic & Process Activity Report" : "Outbound Traffic Report";
+  return label ? `${title} — ${label}` : title;
+}
+
+/** The footer, after everything else the step writes to its Job Summary. */
+export function summaryFooter(actionRepo: string): SummaryBlock {
+  return frame(reportFooter(actionRepo));
+}
+
+/** The title, for a summary written with no traffic report to open it. */
+export function missingReportFrame(title: string, isAudit: boolean): SummaryBlock {
+  return frame(
+    reportHeading(title, isAudit) +
+      "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n",
+  );
+}
+
 export interface ComputeReportOutcomesOptions {
   stepLabel?: string;
+  /** Whether the step's summary has a process activity section after the report. */
+  processActivity?: boolean;
   actionRepo: string;
   actionRef: string;
   runCommand?: string;
@@ -168,6 +193,7 @@ export function computeReportOutcomes(
   report: Report,
   {
     stepLabel,
+    processActivity = false,
     failOnBlocked,
     actionRepo,
     actionRef,
@@ -184,15 +210,18 @@ export function computeReportOutcomes(
   if (wouldRefuse) emissions.push(wouldRefuse);
   const keys = refusedKeys(report.timeline);
   const rendered = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
-    // stepLabel is the untrusted `label` input; the renderer escapes the whole
-    // title, so it is folded in raw here rather than pre-sanitized twice.
-    title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : undefined,
+    title: reportTitle(stepLabel, processActivity),
+    section: "🌐 Network",
+    // The step closes its summary itself, after the process activity.
+    footer: false,
+    verdictItems: wouldRefuseVerdictItems(report.timeline),
     stepName: "Start isolated-run",
     runCommand,
     extraInputs,
     actionVersion,
     refusalLabel: keyRefusalLabel(keys),
-    extraBlocks: (gap) => wouldRefuseBlocks(report.timeline, keys, WOULD_REFUSE_PRIORITY, gap),
+    extraBlocks: (gap, level) =>
+      wouldRefuseBlocks(report.timeline, keys, WOULD_REFUSE_PRIORITY, gap, level),
   });
   const blocks = withAwsTroubleshootingLink(rendered, report, actionRepo, actionRef);
 

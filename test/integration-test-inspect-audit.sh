@@ -62,7 +62,7 @@ assert_report_complete
 assert_summary_contains "📋 Audited Hosts" "audited-hosts heading present"
 assert_summary_contains "| allowed.example.com:443 | HTTPS |" "allowed.example.com:443 audited"
 assert_summary_contains "| blocked.example.com:443 | HTTPS |" "blocked.example.com:443 audited (nothing enforced)"
-if grep -qF "🚫 Blocked Hosts" <<< "$SUMMARY"; then
+if grep -qF "🚫 Blocked" <<< "$SUMMARY"; then
   fail "audit mode produced a Blocked Hosts table"
 else
   pass "no Blocked Hosts table in audit mode"

@@ -53,7 +53,7 @@ const mocks = {
   stopSandboxProxy: vi.fn(),
   runSandboxedCommand: vi.fn(),
   reportStepTraffic: vi.fn(),
-  writeMoreSummary: vi.fn(),
+  writeLateSummary: vi.fn(),
   prepareStepFilesystemAudit: vi.fn(),
   rewriteOutputFile: vi.fn(),
   replaceIfNotRegularFile: vi.fn(),
@@ -126,7 +126,7 @@ beforeEach(() => {
   mocks.startSandboxProxy.mockResolvedValue(undefined);
   mocks.stopSandboxProxy.mockResolvedValue(undefined);
   mocks.runSandboxedCommand.mockResolvedValue(0);
-  mocks.reportStepTraffic.mockResolvedValue(undefined);
+  mocks.reportStepTraffic.mockResolvedValue({ startedAt: undefined, reported: true });
   mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks: () => [] });
   mocks.onCancel.mockReturnValue(stopListening);
 });
@@ -218,10 +218,15 @@ describe("runSandboxStep", () => {
   it("prepares the audit first and writes its summary with the traffic report", async () => {
     const blocks = vi.fn(() => []);
     mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks });
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
 
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.reportStepTraffic.mock.calls[0][0].moreBlocks).toBe(blocks);
+    expect(mocks.reportStepTraffic.mock.calls[0][0]).toMatchObject({
+      moreBlocks: blocks,
+      processActivity: true,
+      closeSummary: true,
+    });
     expect(orderOf(mocks.prepareStepFilesystemAudit)).toBeLessThan(
       orderOf(mocks.reportStepTraffic),
     );
@@ -837,7 +842,8 @@ describe("runSandboxStep", () => {
       const block = { kind: "text", text: "audit" };
       const blocks = vi.fn(() => [block]);
       mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks });
-      mocks.reportStepTraffic.mockResolvedValue(1_700_000_000);
+      mocks.readFilesystemAuditInput.mockReturnValue("record");
+      mocks.reportStepTraffic.mockResolvedValue({ startedAt: 1_700_000_000, reported: false });
       mocks.runSandboxedCommand.mockImplementation(async () => {
         cancelListener()();
         return 143;
@@ -845,19 +851,42 @@ describe("runSandboxStep", () => {
 
       await runSandboxStep(ENV, deps);
 
-      expect(mocks.reportStepTraffic.mock.calls[0][0].moreBlocks).toBeUndefined();
+      expect(mocks.reportStepTraffic.mock.calls[0][0]).toMatchObject({
+        moreBlocks: undefined,
+        closeSummary: false,
+      });
       expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
       expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(
         orderOf(mocks.prepareStepFilesystemAudit),
       );
       expect(blocks).toHaveBeenCalledWith(1_700_000_000);
-      expect(mocks.writeMoreSummary.mock.calls[0].slice(0, 2)).toStrictEqual([[block], ENV]);
-      expect(orderOf(mocks.writeMoreSummary)).toBeLessThan(orderOf(mocks.stopSandboxProxy));
+      expect(mocks.writeLateSummary.mock.calls[0][0]).toStrictEqual([block]);
+      expect(mocks.writeLateSummary.mock.calls[0][1]).toMatchObject({
+        reported: false,
+        actionRepo: "buildcage/isolated-run",
+        isAudit: false,
+        env: ENV,
+      });
+      expect(orderOf(mocks.writeLateSummary)).toBeLessThan(orderOf(mocks.stopSandboxProxy));
+    });
+
+    it("lets the traffic report close the summary when cancelled with no audit", async () => {
+      mocks.runSandboxedCommand.mockImplementation(async () => {
+        cancelListener()();
+        return 143;
+      });
+      await runSandboxStep(ENV, deps);
+      expect(mocks.reportStepTraffic.mock.calls[0][0]).toMatchObject({
+        processActivity: false,
+        closeSummary: true,
+      });
+      expect(mocks.writeLateSummary).not.toHaveBeenCalled();
     });
 
     it("writes no separate audit summary when not cancelled", async () => {
+      mocks.readFilesystemAuditInput.mockReturnValue("record");
       await runSandboxStep(ENV, deps);
-      expect(mocks.writeMoreSummary).not.toHaveBeenCalled();
+      expect(mocks.writeLateSummary).not.toHaveBeenCalled();
     });
   });
 });

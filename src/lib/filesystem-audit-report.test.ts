@@ -130,7 +130,7 @@ describe("prepareStepFilesystemAudit", () => {
       d,
     );
 
-    expect(summaries[0]).toContain("Filesystem audit");
+    expect(summaries[0]).toContain("Process Activity");
     expect(summaries[0]).toContain("W node ./a.txt");
     expect(summaries[0]).toContain(
       "<sub>`./` workspace · `~/` $HOME · `dir/**` a folded directory · " +
@@ -442,7 +442,7 @@ describe("prepareStepFilesystemAudit", () => {
       d,
     );
 
-    expect(appended[0]).toContain("Filesystem audit");
+    expect(appended[0]).toContain("Process Activity");
   });
 
   it("mirrors the raw recording to the debug file for fixture capture", async () => {
@@ -531,7 +531,7 @@ describe("prepareStepFilesystemAudit", () => {
       d,
     );
 
-    expect(summaries[0]).toContain("Filesystem audit");
+    expect(summaries[0]).toContain("Process Activity");
   });
 
   it("fails the step under restrict with fail_on_blocked when the output cannot be set", async () => {
@@ -555,7 +555,7 @@ describe("prepareStepFilesystemAudit", () => {
       );
       expect(note.warning).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
-      expect(summaries[0]).toContain("Filesystem audit");
+      expect(summaries[0]).toContain("Process Activity");
     } finally {
       process.exitCode = exitCode;
     }
@@ -605,7 +605,7 @@ describe("prepareStepFilesystemAudit", () => {
     expect(note.warning).toHaveBeenCalledWith(
       "Failed to set the filesystem_audit_artifact_name output: GITHUB_OUTPUT is gone",
     );
-    expect(summaries[0]).toContain("Filesystem audit");
+    expect(summaries[0]).toContain("Process Activity");
   });
 
   it("strips buildcage's own records from both the copy and the summary", async () => {

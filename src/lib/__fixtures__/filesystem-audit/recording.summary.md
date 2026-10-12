@@ -1,10 +1,10 @@
 
-### 🗂️ Filesystem audit
+### ⚙️ Process Activity
 
-#### Executed
+#### Executed Programs
 
-| Path | Runs |
-| --- | --- |
+| Path | Count |
+| --- | ---: |
 | `/usr/bin/cat` | 3 |
 | `/usr/bin/mv` | 1 |
 | `/usr/bin/rm` | 1 |
@@ -22,37 +22,37 @@
 | `/usr/bin/uname` | 1 |
 | `./int80` | 1 |
 
-#### Accessed paths
+#### Accessed Paths
 
 <sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied</sub>
 
-| Access | Path |
+| Path | Access |
 | --- | --- |
-| WA | `./A/run.sh` |
-| W | `./execd.txt` |
-| W | `./fifo` |
-| WDA | `./gone-bin` |
-| RW | `./mapped.bin` |
-| RW | `./mprotected-rwx.bin` |
-| RW | `./mprotected.bin` |
-| WM | `./probe.txt` |
-| D | `./probe2.txt` |
-| W | `./ro-mapped.bin` |
-| a! | `./root-owned.txt` |
-| w! | `./root-owned/x` |
-| W | `./shared.txt` |
-| Wrd | `./sub/**` |
-| WA | `./subshell.txt` |
-| W | `/dev/null` |
-| rw | `/dev/tty` |
-| R | `/etc/**` |
-| R | `/proc/<pid>/stat` |
-| R | `/proc/filesystems` |
-| Rw! | `/usr/**` |
-| W | `memfd:"probe-memfd"` |
+| `./A/run.sh` | WA |
+| `./execd.txt` | W |
+| `./fifo` | W |
+| `./gone-bin` | WDA |
+| `./mapped.bin` | RW |
+| `./mprotected-rwx.bin` | RW |
+| `./mprotected.bin` | RW |
+| `./probe.txt` | WM |
+| `./probe2.txt` | D |
+| `./ro-mapped.bin` | W |
+| `./root-owned.txt` | a! |
+| `./root-owned/x` | w! |
+| `./shared.txt` | W |
+| `./sub/**` | Wrd |
+| `./subshell.txt` | WA |
+| `/dev/null` | W |
+| `/dev/tty` | rw |
+| `/etc/**` | R |
+| `/proc/<pid>/stat` | R |
+| `/proc/filesystems` | R |
+| `/usr/**` | Rw! |
+| `memfd:"probe-memfd"` | W |
 
 <details>
-<summary>📂 Filesystem details</summary>
+<summary>🔍 Process details</summary>
 
 <sub>first-last access since the proxy started · flags · command · path</sub>
 

@@ -18,7 +18,10 @@ import { failOrWarn } from "./fail-or-warn.ts";
 import { readStepLabel } from "./inputs.ts";
 import {
   fetchReport,
+  missingReportFrame,
   readActionVersion,
+  reportTitle,
+  summaryFooter,
   writeReportSummary,
   writeSummaryBlocks,
   type Report,
@@ -71,13 +74,26 @@ export interface ReportStepOptions {
    * when unknown), fitted into GitHub's limit together with the report.
    */
   moreBlocks?: (startedAt: number | undefined) => SummaryBlock[];
+  /** Whether the step records its process activity, which the title names
+   *  when its section is there or still to come. */
+  processActivity: boolean;
+  /** False leaves the footer to a part of the summary written later. */
+  closeSummary?: boolean;
+}
+
+export interface ReportedTraffic {
+  /** The proxy's start, undefined when unknown. */
+  startedAt: number | undefined;
+  /** Whether the report, with its title, made it into the summary. */
+  reported: boolean;
 }
 
 /**
  * Fetch the proxy's report, write the Job Summary, and upload the traffic
  * artifact if one was asked for. The rest of the summary, `moreBlocks`, is
- * written with the report, or alone when there is no report to write.
- * Resolves to the proxy's start, for a part of the summary written later.
+ * written with the report, or under a title of its own when there is no report
+ * to write. Resolves to the proxy's start and whether the report was written,
+ * for a part of the summary written later.
  *
  * Never throws. A failure here is a warning naming the step that failed, and
  * under `restrict` with fail_on_blocked it also fails the step: a report that
@@ -98,9 +114,11 @@ export async function reportStepTraffic(
     trafficArtifact,
     env,
     moreBlocks = () => [],
+    processActivity,
+    closeSummary = true,
   }: ReportStepOptions,
   overrides: Partial<ReportStepDeps> = {},
-): Promise<number | undefined> {
+): Promise<ReportedTraffic> {
   const {
     fetchReport,
     readActionVersion,
@@ -122,10 +140,27 @@ export async function reportStepTraffic(
 
   // Written alone when there is no report or its write failed, so the report
   // cannot take the rest of the summary down with it.
-  const extraBlocks = moreBlocks(report?.startedAt);
-  const writeRest = () => writeMoreSummary(extraBlocks, env, annotation, { writeSummaryBlocks });
+  const stepLabel = readStepLabel();
+  const rest = moreBlocks(report?.startedAt);
+  const footer = closeSummary ? [summaryFooter(actionRepo)] : [];
+  // A section that failed to render leaves nothing for the title to name.
+  const named = closeSummary ? processActivity && rest.length > 0 : processActivity;
+  const writeRest = () =>
+    writeMoreSummary(
+      rest.length === 0
+        ? []
+        : [
+            missingReportFrame(reportTitle(stepLabel, named), parameters.mode === "audit"),
+            ...rest,
+            ...footer,
+          ],
+      env,
+      annotation,
+      { writeSummaryBlocks },
+    );
 
   let artifactName = "";
+  let reported = false;
   if (!report) {
     await writeRest();
   } else {
@@ -139,13 +174,15 @@ export async function reportStepTraffic(
           runCommand,
           extraInputs: extraInputs?.(report),
           actionVersion: readActionVersion(containerName, proxyEngine),
-          stepLabel: readStepLabel(),
+          stepLabel,
+          processActivity: named,
           failOnBlocked,
-          extraBlocks,
+          extraBlocks: [...rest, ...footer],
         },
         trafficArtifact.upload,
         env,
       );
+      reported = true;
     } catch (e) {
       fail(`Failed to write the report summary: ${errorMessage(e)}`);
       await writeRest();
@@ -173,7 +210,37 @@ export async function reportStepTraffic(
   } catch (e) {
     fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
   }
-  return report?.startedAt;
+  return { startedAt: report?.startedAt, reported };
+}
+
+export interface LateSummaryOptions {
+  /** See ReportedTraffic.reported. */
+  reported: boolean;
+  actionRepo: string;
+  isAudit: boolean;
+  env: NodeJS.ProcessEnv;
+  annotation: Annotation;
+}
+
+/**
+ * Writes what follows a report written with `closeSummary: false`, then the
+ * footer. Opens under its own title when the report was not written; writes
+ * nothing when neither has anything to say.
+ */
+export async function writeLateSummary(
+  blocks: SummaryBlock[],
+  { reported, actionRepo, isAudit, env, annotation }: LateSummaryOptions,
+  overrides: Partial<ReportStepDeps> = {},
+): Promise<void> {
+  const { readStepLabel } = { ...realDeps, ...overrides };
+  if (!reported && blocks.length === 0) return;
+  const head = reported ? [] : [missingReportFrame(reportTitle(readStepLabel(), true), isAudit)];
+  await writeMoreSummary(
+    [...head, ...blocks, summaryFooter(actionRepo)],
+    env,
+    annotation,
+    overrides,
+  );
 }
 
 /** Fits `blocks` into what the Job Summary has left and writes them; never

@@ -273,10 +273,15 @@ Any other blocked request to that host still fails the step. See
 ## The report
 
 Every step appends its own section to the Job Summary: the hosts it reached, the ones it was
-refused, and, in `audit`, the allowlist to switch to `restrict` with. Under `inspect` a
-**Communication details** section lists every request in order with its method, URL, status and
-size, refusals included, so a blocked entry names the URL that was attempted rather than a bare
-host. A query parameter that names a credential has its value replaced, see
+refused, and, in `audit`, the allowlist to switch to `restrict` with. A line under its title counts
+what needs a look: requests refused, requests `restrict` would refuse, connections that failed and
+requests nothing acted on. The tables follow under **🌐 Network**, refusals marked 🚫 and failed
+connections ⚠️, then under **⚙️ Process Activity** when the
+[filesystem audit](./docs/filesystem-audit.md) is on, which the title then names too.
+
+Under `inspect` a **Communication details** section lists every request in order with its method,
+URL, status and size, refusals included, so a blocked entry names the URL that was attempted rather
+than a bare host. A query parameter that names a credential has its value replaced, see
 [Credentials in a URL](docs/security.md#credentials-in-a-url).
 
 In `restrict` mode a blocked connection fails the step, and so does a report that could not be read
@@ -682,16 +687,16 @@ reported as blocked; see
 ### The Job Summary size cap
 
 GitHub caps a Job Summary at 1 MiB per step, counting what the command itself wrote there, and drops
-the whole summary rather than truncating it. When the report, with the filesystem audit's section if
-one was recorded, would push the step over that limit, its parts give way in order: the filesystem
-audit's details, the timeline, the filesystem audit's tables, then the allowed, failed and blocked
-tables, then the 🚨 tables of requests `restrict` would refuse, and last the `restrict` example. A part
-that does not fit is cut at a line boundary with a note after what is kept, or replaced by the note
-when nothing of it fits; the example is always replaced whole rather than printed in part. Once a
-table is cut, the timeline is left out with it, under that one note. The filesystem
-audit's parts follow the same rule in their order, the executed table, the accessed paths, then the
-details: once one is cut, those after it are left out under its note. The report is written to the
-Job Summary only, so what was cut is recovered from the [traffic
+the whole summary rather than truncating it. When the report, with its Process Activity section if
+the filesystem audit was on, would push the step over that limit, its parts give way in order: the
+process details, the timeline, the Process Activity tables, then the allowed table, the blocked and
+failed one, then the 🚨 tables of requests `restrict` would refuse, and last the `restrict` example.
+A part that does not fit is cut at a line boundary with a note after what is kept, or replaced by
+the note when nothing of it fits; the example is always replaced whole rather than printed in part.
+Once a table is cut, the timeline is left out with it, under that one note. The Process Activity
+parts follow the same rule in their order, Executed Programs, Accessed Paths, then the details: once
+one is cut, those after it are left out under its note. The report is written to the Job Summary
+only, so what was cut is recovered from the [traffic
 artifact](./docs/reference.md#traffic-artifact), or the filesystem audit's own artifact for its
 section; when neither was uploaded, it is not kept anywhere.
 

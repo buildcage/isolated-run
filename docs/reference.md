@@ -540,8 +540,8 @@ through.
 
 ### The ones Buildcage refused
 
-These are refusals: they are in **🚫 Blocked Hosts**, counted in the blocked-connections annotation,
-and they fail the step under `fail_on_blocked: true` like any other refused connection.
+These are refusals: they are 🚫 rows in **Blocked Hosts**, counted in the blocked-connections
+annotation, and they fail the step under `fail_on_blocked: true` like any other refused connection.
 
 ```
 🚫 00:14.002: GET http://10.0.0.9/pkg.tgz?token=*** -> missing-host-header
@@ -596,8 +596,10 @@ server to speak first (SMTP, FTP) ends as one nobody decided. No rule on the nam
 ## Connections that failed
 
 A request no rule refused can still come to nothing: the origin answers nothing usable, breaks off
-mid-transfer, or its name resolves nowhere. The report tables those apart from what the rules did
-refuse, under **⚠️ Failed Connections**. **Communication details** shows each with ⚠️ too:
+mid-transfer, or its name resolves nowhere. The report lists them as ⚠️ rows in the refusals' table,
+headed **Blocked / Failed Hosts** when it holds both and **Failed Hosts** when it holds only them.
+They come after the unexpected refusals and show `—` for Expected, since `known_blocked_rules` never
+matches a failure. **Communication details** shows each with ⚠️ too:
 
 ```
 ⚠️ 00:12.004: GET https://registry.npmjs.org/big.tgz -> origin-aborted
@@ -678,7 +680,7 @@ The check refuses after the URL rules have allowed a request, with a reason that
 `aws-unreadable` or `aws-ambiguous-credential`. [Troubleshooting](./aws.md#troubleshooting) gives
 each one's usual causes and what to do.
 
-These are refusals like `not-allowed`: they are in **🚫 Blocked Hosts** and fail the step under
+These are refusals like `not-allowed`: they are 🚫 rows in **Blocked Hosts** and fail the step under
 `fail_on_blocked: true`. `known_blocked_rules` marks them as expected the same way, matching the
 host or URL whatever the reason, and in `restrict` the report no longer links to
 [Troubleshooting](./aws.md#troubleshooting) once every one is expected. In `audit` mode nothing is
@@ -781,8 +783,9 @@ short form.
   It needs a cgroup v2 host on Linux 6.1 or newer (6.4 on arm64) with kernel BTF; elsewhere the step
   fails before the command runs. A 32-bit system call in the step kills the thread that made it,
   with `SIGSYS`.
-- The step's Job Summary gets a section listing the programs it ran and how often, and every path it
-  touched, with a flag for each action, and folded below them one row per command and path.
+- The step's Job Summary gets a **Process Activity** section listing the programs it ran and how
+  often, and every path it touched, with a flag for each action, and folded below them one row per
+  command and path.
 - `upload_filesystem_audit_artifact: true` uploads the full record as JSON lines in an artifact
   named `buildcage-filesystem-audit-<id>`, whose name the `filesystem_audit_artifact_name` output
   carries; `filesystem_audit_retention_days` sets how long it is kept. It leaves out each program's
