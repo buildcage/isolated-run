@@ -386,6 +386,22 @@ static void test_new_over_existing_short_drops_it(void)
 	CHECK_ACCOUNTS();
 }
 
+/**
+ * A replacement that fails halfway, its head then kept by a refused delete,
+ * is dropped with the tails its own head took, not those of the hold it was
+ * replacing.
+ */
+static void test_failed_replace_head_kept(void)
+{
+	reset();
+	CHECK(hold_new(make(K_UNLINK, HEAD_DATA, 1), HELD_OP) == 0);
+	tails.busy_after = 2;     // the third tail is refused
+	heads.del_busy_after = 0; // and so, once, is deleting the head
+	hold(make(K_RMDIR, HEAD_DATA + 5 * CHUNK, 2));
+	CHECK(untracked_count() == 1 && heads.count == 0 && tails.count == 0 && use()->taken == 0);
+	CHECK_ACCOUNTS();
+}
+
 static void test_head_busy_keeps_old_hold(void)
 {
 	reset();
@@ -622,6 +638,7 @@ int main(void)
 	test_new_over_existing();
 	test_new_over_existing_when_full();
 	test_new_over_existing_short_drops_it();
+	test_failed_replace_head_kept();
 	test_head_busy_keeps_old_hold();
 	test_tail_busy_loses_hold();
 	test_missing_tail_drops();

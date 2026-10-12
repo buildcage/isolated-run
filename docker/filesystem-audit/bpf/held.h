@@ -214,14 +214,21 @@ static long del_tail(u64 i, struct tails_ctx *c)
 /**
  * Runs @p fn over tails @p from to @p to - 1 of the hold at @p k.
  *
- * @return 0 unless @p fn failed.
+ * @return The context @p fn worked on.
  */
-static __always_inline int tails_loop(void *fn, struct held_key *k, void *buf, u32 from, u32 to)
+static __always_inline struct tails_ctx run_tails(void *fn, struct held_key *k, void *buf, u32 from,
+						 u32 to)
 {
-	struct tails_ctx c = { .k = *k, .buf = buf, .from = from, .to = to, .err = 0 };
+	struct tails_ctx c = { .k = *k, .buf = buf, .from = from, .to = to, .err = 0, .gone = 0 };
 	if (from < to)
 		bpf_loop(MAX_TAILS, fn, &c, 0);
-	return c.err;
+	return c;
+}
+
+/** @return 0 unless @p fn, run as run_tails() does, failed. */
+static __always_inline int tails_loop(void *fn, struct held_key *k, void *buf, u32 from, u32 to)
+{
+	return run_tails(fn, k, buf, from, to).err;
 }
 
 /**
@@ -233,10 +240,7 @@ static __always_inline int tails_loop(void *fn, struct held_key *k, void *buf, u
  */
 static __always_inline void drop_tails(struct held_key *k, u32 from, u32 to)
 {
-	struct tails_ctx c = { .k = *k, .from = from, .to = to, .gone = 0 };
-	if (from < to)
-		bpf_loop(MAX_TAILS, del_tail, &c, 0);
-	give_tails(c.gone);
+	give_tails(run_tails(del_tail, k, 0, from, to).gone);
 }
 
 /** @return The key of the current thread's head under @p use. */
@@ -249,14 +253,22 @@ static __always_inline struct held_key held_key(u32 use)
 /**
  * Ends a hold: its head, and the @p ntails tails it took.
  *
- * A head the map would not delete keeps its tails, which whatever replaces it
- * then accounts for.
+ * Only the call that deletes the head drops the tails, so no hold gives them
+ * back twice. A head the map would not delete keeps its tails, which
+ * whatever replaces it then accounts for.
  */
 static __always_inline void release(struct held_key *k, u32 ntails)
 {
-	long r = bpf_map_delete_elem(&heads, k);
-	if (r == 0 || r == -ENOENT)
+	if (bpf_map_delete_elem(&heads, k) == 0)
 		drop_tails(k, 1, ntails + 1);
+}
+
+/** Ends the hold at @p k, if any, with the tails its head says it took. */
+static __always_inline void drop_held(struct held_key *k)
+{
+	struct event *head = bpf_map_lookup_elem(&heads, k);
+	if (head)
+		release(k, tails_for(head->data_len));
 }
 
 /**
@@ -306,8 +318,7 @@ static __always_inline int hold_over(struct held_key *k, struct event *e, u32 us
 	u32 ot = old ? tails_for(old->data_len) : 0;
 	if (hold_as(e, use, ot, have) == 0)
 		return 0;
-	if (bpf_map_lookup_elem(&heads, k))
-		release(k, ot);
+	drop_held(k);
 	return -1;
 }
 
@@ -444,8 +455,7 @@ static __always_inline void open_begin(int dfd, u32 flags)
 			__builtin_memcpy(head, e, HEAD);
 			return;
 		}
-		if (head)
-			release(&k, tails_for(head->data_len));
+		drop_held(&k);
 		r = bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
 	}
 	if (r != 0)
@@ -533,9 +543,7 @@ static __always_inline int hold_open(struct event *e)
 	// as the failed open it was held as.
 	bump(&untracked);
 	e->bases = 0;
-	head = bpf_map_lookup_elem(&heads, &k);
-	if (head)
-		release(&k, tails_for(head->data_len));
+	drop_held(&k);
 	return -1;
 }
 
