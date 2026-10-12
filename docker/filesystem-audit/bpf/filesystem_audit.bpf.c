@@ -1037,9 +1037,9 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 // user pointer, which the caller could rewrite before the syscall returns.
 // The file's own open method, an LSM or the FIFO checks can still refuse it
 // after that hook, so from there the slot is the open (K_OPEN), reported as
-// done or refused once the syscall returns. Throughout, err says whether the
-// open reached its create step (see on_mknod), and gid holds the descriptor
-// a relative name resolves against; open_exit sets err before reporting.
+// done or refused once the syscall returns. bases, which neither record
+// uses, says whether the open reached its create step (see on_mknod); before
+// the hook, gid holds the descriptor a relative name resolves against.
 SEC("fentry/security_file_open")
 int BPF_PROG(on_open, struct file *file)
 {
@@ -1059,10 +1059,12 @@ int BPF_PROG(on_open, struct file *file)
 	int in_long;
 	struct event *held = find_held(&k, &in_long);
 	if (held && held->kind == K_OPEN_FAILED) {
-		e->err = held->err;
+		e->bases = held->bases;
 		if (hold_as(e, HELD_OPEN) == 0)
 			return 0;
-		e->err = 0;
+		// Recorded as done, though something may still refuse it.
+		bump(&untracked);
+		e->bases = 0;
 	}
 	submit(e);
 	return 0;
@@ -1079,7 +1081,7 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 	int in_long;
 	struct event *held = find_held(&k, &in_long);
 	if (held) {
-		held->err = 1;
+		held->bases = 1;
 		return 0;
 	}
 	struct event *e = start(K_MKNOD);
@@ -1105,6 +1107,7 @@ static __always_inline void open_enter(int dfd, u32 flags)
 	e->ts = bpf_ktime_get_boot_ns();
 	e->flags = flags;
 	e->gid = dfd;
+	e->bases = 0;
 	e->err = 0;
 	e->truncated = 0;
 	e->data_len = 0;
@@ -1153,10 +1156,10 @@ static __always_inline void open_exit(long ret)
 	if (held->kind == K_OPEN) {
 		// Reaching the file after its create step means it was created,
 		// whatever then refused the open.
-		if (ret >= 0 || held->err) {
-			held->err = 0;
+		u32 created = held->bases;
+		held->bases = 0;
+		if (ret >= 0 || created)
 			submit_held(held, in_long);
-		}
 		if (ret < 0) {
 			held->err = -ret;
 			submit_held(held, in_long);
@@ -1209,7 +1212,10 @@ static __always_inline void stash_name(u64 *ctx)
 	}
 	r = bpf_probe_read_kernel_str(held->data, SHORT_DATA, name);
 	held->data_len = r > 0 ? r : 0;
-	if (r < SHORT_DATA)
+	char more = 0;
+	if (r == SHORT_DATA)
+		bpf_probe_read_kernel(&more, 1, name + SHORT_DATA - 1);
+	if (!more)
 		return;
 	u32 zero = 0;
 	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
