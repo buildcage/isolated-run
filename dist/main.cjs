@@ -73732,12 +73732,12 @@ async function runSandboxStep(env, overrides = {}) {
 			let unreadable = rewriteOutputFile(env.GITHUB_OUTPUT);
 			unreadable && (annotation.error(`$GITHUB_OUTPUT was rewritten without what the runner could not read (${unreadable}); failing the step`), process.exitCode = 1);
 		} catch (e) {
-			annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
+			annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; leaving it unwritten and failing the step`), process.exitCode = 1, delete env.GITHUB_OUTPUT;
 		}
 		if (env.GITHUB_STEP_SUMMARY) try {
 			replaceIfNotRegularFile(env.GITHUB_STEP_SUMMARY) && (annotation.error("The command left something other than a regular file at $GITHUB_STEP_SUMMARY, now replaced with an empty one; failing the step"), process.exitCode = 1);
 		} catch (e) {
-			annotation.error(`Failed to put a regular file at $GITHUB_STEP_SUMMARY: ${errorMessage(e)}; failing the step`), process.exitCode = 1;
+			annotation.error(`Failed to put a regular file at $GITHUB_STEP_SUMMARY: ${errorMessage(e)}; leaving it unwritten and failing the step`), process.exitCode = 1, delete env.GITHUB_STEP_SUMMARY;
 		}
 		for (let set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) try {
 			set("");

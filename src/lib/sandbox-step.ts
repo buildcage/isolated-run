@@ -498,8 +498,13 @@ export async function runSandboxStep(
           process.exitCode = 1;
         }
       } catch (e) {
-        annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`);
+        annotation.error(
+          `Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; leaving it unwritten and failing the step`,
+        );
         process.exitCode = 1;
+        // It may still be the command's symlink or FIFO; @actions/core then
+        // sets the outputs as ::set-output commands instead.
+        delete env.GITHUB_OUTPUT;
       }
     }
     // The reports append to $GITHUB_STEP_SUMMARY, which the command can have
@@ -514,9 +519,12 @@ export async function runSandboxStep(
         }
       } catch (e) {
         annotation.error(
-          `Failed to put a regular file at $GITHUB_STEP_SUMMARY: ${errorMessage(e)}; failing the step`,
+          `Failed to put a regular file at $GITHUB_STEP_SUMMARY: ${errorMessage(e)}; leaving it unwritten and failing the step`,
         );
         process.exitCode = 1;
+        // It may still be the command's symlink or FIFO; the reports then go
+        // to the step's log instead.
+        delete env.GITHUB_STEP_SUMMARY;
       }
     }
     for (const set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) {

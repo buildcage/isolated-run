@@ -503,7 +503,7 @@ before it ends, and the key with it.
 | Ignores the proxy variables entirely                                                               | No effect: interception is at the network level, not opt-in                                                                                                            |
 | Sends `*` as its method, `Host` or path in audit, to plant a wildcard in the suggested rules       | Left out of the suggested `allowed_url_rules` and listed beside it, so pasting them never permits more than the command sent                                           |
 | Floods the proxy log until earlier entries rotate away                                             | A log that no longer starts where a real run does is not accepted as a complete record: the step fails under `restrict` with `fail_on_blocked` (the default)           |
-| Removes or locks `$GITHUB_STEP_SUMMARY` so no report is written                                    | The outcome is decided first, a summary that cannot be written fails the step under `restrict` with `fail_on_blocked`, and a requested artifact is still uploaded      |
+| Removes, locks or replaces `$GITHUB_STEP_SUMMARY` so no report is written                          | The outcome comes first; a summary that cannot be written fails under `restrict` with `fail_on_blocked`, a symlink or FIFO there always, an artifact is still uploaded |
 | Writes its own `traffic_artifact_name` or `filesystem_audit_artifact_name` to `$GITHUB_OUTPUT`     | Set empty after the file is rewritten to what the runner reads, then to the artifact's name. One it cannot read or rewrite, or a symlink or FIFO there, fails the step |
 
 ## What the engines cannot see
@@ -774,9 +774,10 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   beforehand and leave markdown of its own beside the real report. Removing or locking the file
   instead leaves the report nowhere to go, which fails the step under `restrict` with
   `fail_on_blocked`. A symlink or a FIFO left in its place is replaced with an empty file before
-  the report is written, and fails the step. Where the report is meant to be an audit trail, take
-  it from `upload_traffic_artifact: true` instead: the JSON is uploaded when the step ends, and is
-  not a file a later step can append a line to.
+  the report is written, and fails the step; one that cannot be replaced gets nothing written
+  through it, and the report goes to the step's log. Where the report is meant to be an audit
+  trail, take it from `upload_traffic_artifact: true` instead: the JSON is uploaded when the step
+  ends, and is not a file a later step can append a line to.
 - **Exhausting the host.** The OCI spec sets no `linux.resources`, so there is no memory, pids or
   CPU ceiling, and capability bounding and seccomp cannot close this either, since a legitimate
   build calls `fork(2)` and `mmap(2)` freely. A fork bomb consumes host memory or the process table

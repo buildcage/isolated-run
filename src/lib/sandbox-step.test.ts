@@ -721,16 +721,18 @@ describe("runSandboxStep", () => {
       expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
     });
 
-    it("fails the step but still reports when $GITHUB_OUTPUT cannot be rewritten", async () => {
+    it("fails the step but still reports, writing nothing more to $GITHUB_OUTPUT, when it cannot be rewritten", async () => {
       mocks.rewriteOutputFile.mockImplementation(() => {
         throw new Error("EACCES");
       });
+      const env = { ...ENV };
 
-      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      await expect(runSandboxStep(env, deps)).resolves.toBe(0);
       expect(annotation.error).toHaveBeenCalledWith(
-        "Failed to rewrite $GITHUB_OUTPUT: EACCES; failing the step",
+        "Failed to rewrite $GITHUB_OUTPUT: EACCES; leaving it unwritten and failing the step",
       );
       expect(process.exitCode).toBe(1);
+      expect(env.GITHUB_OUTPUT).toBeUndefined();
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
     });
 
@@ -753,17 +755,18 @@ describe("runSandboxStep", () => {
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
     });
 
-    it("fails the step but still reports when $GITHUB_STEP_SUMMARY cannot be checked", async () => {
+    it("fails the step and reports to the log instead when $GITHUB_STEP_SUMMARY cannot be replaced", async () => {
       mocks.replaceIfNotRegularFile.mockImplementation(() => {
         throw new Error("EACCES");
       });
+      const env = { ...ENV };
 
-      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      await expect(runSandboxStep(env, deps)).resolves.toBe(0);
       expect(annotation.error).toHaveBeenCalledWith(
-        "Failed to put a regular file at $GITHUB_STEP_SUMMARY: EACCES; failing the step",
+        "Failed to put a regular file at $GITHUB_STEP_SUMMARY: EACCES; leaving it unwritten and failing the step",
       );
       expect(process.exitCode).toBe(1);
-      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+      expect(mocks.reportStepTraffic.mock.calls[0][0].env.GITHUB_STEP_SUMMARY).toBeUndefined();
     });
 
     it("checks nothing where the runner gave no $GITHUB_STEP_SUMMARY", async () => {
