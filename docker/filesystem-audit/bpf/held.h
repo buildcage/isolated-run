@@ -36,6 +36,8 @@ struct held_key {
 #endif
 #define MAX_TAILS 32 // for DATA_SZ + NAME_LEN of data
 
+_Static_assert((DATA_SZ + NAME_LEN - HEAD_DATA + CHUNK - 1) / CHUNK <= MAX_TAILS,
+	       "MAX_TAILS is short of the tails the longest event takes");
 _Static_assert(HEAD + MAX_TAILS * CHUNK <= sizeof(struct scratch_buf),
 	       "scratch has no room for the last tail");
 
@@ -233,6 +235,19 @@ static __always_inline int hold_as(struct event *e, u32 use, u32 old, u32 have)
 	return 0;
 }
 
+// Holds e in place of a hold left there, with have tails already taken. One
+// that cannot replace it drops it too: it is no event of this syscall's.
+static __always_inline int hold_over(struct held_key *k, struct event *e, u32 use, u32 have)
+{
+	struct event *old = bpf_map_lookup_elem(&heads, k);
+	u32 ot = old ? tails_for(old->data_len) : 0;
+	if (hold_as(e, use, ot, have) == 0)
+		return 0;
+	if (bpf_map_lookup_elem(&heads, k))
+		release(k, ot);
+	return -1;
+}
+
 // Holds e, in scratch, under use, where the thread normally holds nothing
 // yet; finding a hold there after all, it replaces it.
 static __always_inline int hold_new(struct event *e, u32 use)
@@ -241,8 +256,9 @@ static __always_inline int hold_new(struct event *e, u32 use)
 	u32 t = tails_for(e->data_len);
 	if (take_tails(t) != 0) {
 		// Too few free, but a hold already there frees its own.
-		struct event *old = bpf_map_lookup_elem(&heads, &k);
-		return old ? hold_as(e, use, tails_for(old->data_len), 0) : -1;
+		if (!bpf_map_lookup_elem(&heads, &k))
+			return -1;
+		return hold_over(&k, e, use, 0);
 	}
 	long r = bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
 	if (r == 0) {
@@ -255,8 +271,7 @@ static __always_inline int hold_new(struct event *e, u32 use)
 		give_tails(t);
 		return -1;
 	}
-	struct event *old = bpf_map_lookup_elem(&heads, &k);
-	return hold_as(e, use, old ? tails_for(old->data_len) : 0, t);
+	return hold_over(&k, e, use, t);
 }
 
 static __always_inline void hold(struct event *e)
@@ -275,9 +290,15 @@ static __always_inline struct event *assemble(struct held_key *k, struct event *
 	__builtin_memcpy(e, head, HEAD);
 	u32 missing = tails_loop(get_tail, k, e, 1, tails_for(e->data_len) + 1);
 	if (missing) {
-		// Cut before the missing tail; the reader takes it as a path too
-		// deep to keep whole.
-		e->data_len = HEAD_DATA + (missing - 1) * CHUNK;
+		// Cut before the missing tail, ending in a NUL as every name does;
+		// the reader takes it as a path too deep to keep whole.
+		u32 end = HEAD_DATA + (missing - 1) * CHUNK;
+		asm volatile("" : "+r"(end)); // as in tail_at
+		if (end > DATA_SZ)
+			end = DATA_SZ;
+		if (end)
+			e->data[end - 1] = 0;
+		e->data_len = end;
 		e->truncated = 1;
 		bump(&untracked);
 	}

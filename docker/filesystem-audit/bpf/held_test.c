@@ -336,6 +336,21 @@ static void test_new_over_existing_when_full(void)
 	CHECK_ACCOUNTS();
 }
 
+// A hold left in place that the new one cannot replace for want of tails is
+// dropped, rather than reported later as this syscall's.
+static void test_new_over_existing_short_drops_it(void)
+{
+	reset();
+	current_id = 2;
+	CHECK(hold_new(make(K_UNLINK, HEAD_DATA + MAX_TAILS * CHUNK, 1), HELD_OP) == 0);
+	current_id = 1;
+	CHECK(hold_new(make(K_UNLINK, HEAD_DATA + CHUNK, 1), HELD_OP) == 0);
+	// Needs more than the one tail it would free and the few still free.
+	hold(make(K_RMDIR, HEAD_DATA + (N_TAILS - MAX_TAILS + 1) * CHUNK, 2));
+	CHECK(untracked_count() == 1 && head_of(1, HELD_OP) == NULL && use()->taken == MAX_TAILS);
+	CHECK_ACCOUNTS();
+}
+
 static void test_head_busy_keeps_old_hold(void)
 {
 	reset();
@@ -373,7 +388,8 @@ static void test_missing_tail_cuts(void)
 	bpf_map_delete_elem(&tails, &k);
 	k.n = 0;
 	struct event *e = assemble(&k, head_of(1, HELD_OP));
-	CHECK(e && e->truncated && e->data_len == HEAD_DATA + CHUNK && data_matches(e, HEAD_DATA + CHUNK, 8));
+	CHECK(e && e->truncated && e->data_len == HEAD_DATA + CHUNK);
+	CHECK(e && data_matches(e, HEAD_DATA + CHUNK - 1, 8) && e->data[HEAD_DATA + CHUNK - 1] == 0);
 	CHECK(untracked_count() == 1);
 }
 
@@ -403,6 +419,7 @@ int main(void)
 	test_replace_shorter_and_longer();
 	test_new_over_existing();
 	test_new_over_existing_when_full();
+	test_new_over_existing_short_drops_it();
 	test_head_busy_keeps_old_hold();
 	test_tail_busy_loses_hold();
 	test_missing_tail_cuts();

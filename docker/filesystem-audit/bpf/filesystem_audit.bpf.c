@@ -874,9 +874,13 @@ int BPF_PROG(on_open, struct file *file)
 		}
 		if (hold_as(e, HELD_OPEN, old, 0) == 0)
 			return 0;
-		// Recorded as done, though something may still refuse it.
+		// Recorded as done, though something may still refuse it, and
+		// not also as the failed open it was held as.
 		bump(&untracked);
 		e->bases = 0;
+		head = bpf_map_lookup_elem(&heads, &k);
+		if (head)
+			release(&k, tails_for(head->data_len));
 	}
 	submit(e);
 	return 0;
@@ -954,7 +958,9 @@ static __always_inline void open_failed(struct event *e, long ret)
 	// part that names the file.
 	if (e->n2)
 		bump(&untracked);
-	start(K_OPEN_FAILED);
+	// start resets the header of the scratch e is in.
+	if (start(K_OPEN_FAILED) != e)
+		return;
 	e->ts = ts;
 	e->path_len = -ret;
 	e->flags = flags;
