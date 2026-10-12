@@ -73642,6 +73642,19 @@ async function resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, { ve
 function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, saveState) {
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
+function putRunnerFileRight(env, name, annotation, putRight) {
+	let path = env[name];
+	if (path) {
+		try {
+			let done = putRight(path);
+			if (done === void 0) return;
+			annotation.error(`$${name} ${done}; failing the step`);
+		} catch (e) {
+			annotation.error(`$${name} could not be put right: ${errorMessage(e)}; leaving it unwritten and failing the step`), delete env[name];
+		}
+		process.exitCode = 1;
+	}
+}
 async function runSandboxStep(env, overrides = {}) {
 	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeMoreSummary, prepareStepFilesystemAudit, rewriteOutputFile, replaceIfNotRegularFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
 		...realDeps,
@@ -73739,17 +73752,10 @@ async function runSandboxStep(env, overrides = {}) {
 			cancel: cancel.signal
 		});
 	} finally {
-		if (env.GITHUB_OUTPUT) try {
-			let unreadable = rewriteOutputFile(env.GITHUB_OUTPUT);
-			unreadable && (annotation.error(`$GITHUB_OUTPUT was rewritten without what the runner could not read (${unreadable}); failing the step`), process.exitCode = 1);
-		} catch (e) {
-			annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; leaving it unwritten and failing the step`), process.exitCode = 1, delete env.GITHUB_OUTPUT;
-		}
-		if (env.GITHUB_STEP_SUMMARY) try {
-			replaceIfNotRegularFile(env.GITHUB_STEP_SUMMARY) && (annotation.error("The command left something other than a regular file at $GITHUB_STEP_SUMMARY, now replaced with an empty one; failing the step"), process.exitCode = 1);
-		} catch (e) {
-			annotation.error(`Failed to put a regular file at $GITHUB_STEP_SUMMARY: ${errorMessage(e)}; leaving it unwritten and failing the step`), process.exitCode = 1, delete env.GITHUB_STEP_SUMMARY;
-		}
+		putRunnerFileRight(env, "GITHUB_OUTPUT", annotation, (path) => {
+			let unreadable = rewriteOutputFile(path);
+			return unreadable && `was rewritten without what the runner could not read (${unreadable})`;
+		}), putRunnerFileRight(env, "GITHUB_STEP_SUMMARY", annotation, (path) => replaceIfNotRegularFile(path) ? "held something other than a regular file, now replaced with an empty one" : void 0);
 		for (let set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) try {
 			set("");
 		} catch {}

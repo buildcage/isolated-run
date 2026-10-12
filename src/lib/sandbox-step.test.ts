@@ -729,7 +729,7 @@ describe("runSandboxStep", () => {
 
       await expect(runSandboxStep(env, deps)).resolves.toBe(0);
       expect(annotation.error).toHaveBeenCalledWith(
-        "Failed to rewrite $GITHUB_OUTPUT: EACCES; leaving it unwritten and failing the step",
+        "$GITHUB_OUTPUT could not be put right: EACCES; leaving it unwritten and failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(env.GITHUB_OUTPUT).toBeUndefined();
@@ -749,7 +749,7 @@ describe("runSandboxStep", () => {
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
       expect(annotation.error).toHaveBeenCalledWith(
-        "The command left something other than a regular file at $GITHUB_STEP_SUMMARY, now replaced with an empty one; failing the step",
+        "$GITHUB_STEP_SUMMARY held something other than a regular file, now replaced with an empty one; failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
@@ -763,7 +763,7 @@ describe("runSandboxStep", () => {
 
       await expect(runSandboxStep(env, deps)).resolves.toBe(0);
       expect(annotation.error).toHaveBeenCalledWith(
-        "Failed to put a regular file at $GITHUB_STEP_SUMMARY: EACCES; leaving it unwritten and failing the step",
+        "$GITHUB_STEP_SUMMARY could not be put right: EACCES; leaving it unwritten and failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic.mock.calls[0][0].env.GITHUB_STEP_SUMMARY).toBeUndefined();
