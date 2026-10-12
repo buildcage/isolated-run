@@ -166,7 +166,8 @@ describe("runSandboxedCommand", () => {
 
     it("starts the tracer over the sandbox cgroup and stops it after the command", async () => {
       const cancel = new AbortController().signal;
-      await runSandboxedCommand({ ...auditing(), cancel }, deps);
+      const onAuditAttached = vi.fn();
+      await runSandboxedCommand({ ...auditing(), cancel, onAuditAttached }, deps);
 
       expect(mocks.extractTracer).toHaveBeenCalledWith(CONTAINER, SCRATCH);
       expect(mocks.startFilesystemAudit.mock.calls[0][0]).toStrictEqual({
@@ -179,6 +180,9 @@ describe("runSandboxedCommand", () => {
         cancel,
       });
       expect(mocks.startFilesystemAudit.mock.invocationCallOrder[0]).toBeLessThan(
+        onAuditAttached.mock.invocationCallOrder[0],
+      );
+      expect(onAuditAttached.mock.invocationCallOrder[0]).toBeLessThan(
         mocks.runIsolated.mock.invocationCallOrder[0],
       );
       expect(mocks.auditStop.mock.invocationCallOrder[0]).toBeGreaterThan(
@@ -230,7 +234,12 @@ describe("runSandboxedCommand", () => {
         new SandboxError("no tracer", "FILESYSTEM_AUDIT_UNAVAILABLE"),
       );
 
-      await expect(runSandboxedCommand(auditing(), deps)).rejects.toThrow("no tracer");
+      const onAuditAttached = vi.fn();
+
+      await expect(runSandboxedCommand({ ...auditing(), onAuditAttached }, deps)).rejects.toThrow(
+        "no tracer",
+      );
+      expect(onAuditAttached).not.toHaveBeenCalled();
       expect(mocks.runIsolated).not.toHaveBeenCalled();
     });
   });

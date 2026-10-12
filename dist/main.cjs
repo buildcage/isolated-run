@@ -69442,7 +69442,7 @@ function prefixes(value, realpath) {
 	return out;
 }
 const NONE = { blocks: () => [] };
-async function prepareStepFilesystemAudit({ audit, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
+async function prepareStepFilesystemAudit({ audit, attached, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
 	let deps = {
 		...realDeps$3,
 		...overrides
@@ -69458,7 +69458,7 @@ async function prepareStepFilesystemAudit({ audit, upload, retentionDays, contai
 		} catch (e) {
 			return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), { blocks: () => unreadableSummaryBlocks() };
 		}
-		if (!reduced) return NONE;
+		if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, { blocks: () => unreadableSummaryBlocks() }) : NONE;
 		let { summary, summaryError } = reduced;
 		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
 		let uploaded = upload ? artifactName ? { name: artifactName } : "upload-failed" : "not-requested", cutNote = (cause) => filesystemTruncationNote(uploaded, cause), notice = cutNote(), legendNote = filesystemLegendNote(uploaded, `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md#reading-the-summary`);
@@ -72403,7 +72403,7 @@ async function startAudit(dir, config, options, deps) {
 	} catch (e) {
 		throw auditUnavailable(errorMessage(e));
 	}
-	return deps.startFilesystemAudit({
+	let handle = await deps.startFilesystemAudit({
 		tracerPath,
 		cgroupsPath,
 		outPath: filesystemAudit.outPath,
@@ -72412,6 +72412,7 @@ async function startAudit(dir, config, options, deps) {
 		watchPid: process.pid,
 		cancel: options.cancel
 	});
+	return options.onAuditAttached?.(), handle;
 }
 async function runSandboxedCommand(options, overrides = {}) {
 	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {
@@ -73544,7 +73545,7 @@ async function runSandboxStep(env, overrides = {}) {
 	}
 	let cancel = new AbortController(), stopListening = onCancel(() => {
 		cancel.signal.aborted || (info("buildcage: the step was cancelled; stopping the sandbox"), cancel.abort());
-	}), exitCode = 1;
+	}), exitCode = 1, auditAttached = !1;
 	try {
 		let proxyNetns = getContainerNetns(containerName);
 		if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
@@ -73559,12 +73560,14 @@ async function runSandboxStep(env, overrides = {}) {
 			overlayRoots,
 			failOnCaResidue,
 			filesystemAudit: audit,
+			onAuditAttached: () => auditAttached = !0,
 			warn,
 			cancel: cancel.signal
 		});
 	} finally {
 		let prepareAudit = () => prepareStepFilesystemAudit({
 			audit,
+			attached: auditAttached,
 			upload: filesystemAuditArtifact.upload,
 			retentionDays: filesystemAuditArtifact.retentionDays,
 			containerName,

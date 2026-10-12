@@ -230,8 +230,9 @@ function saveCleanupState(
 /**
  * Runs one `run:` step start to finish and returns the exit code the workflow
  * step should take, which is the isolated command's own. Anything that stops
- * the command from running rejects instead. Never sets process.exitCode
- * itself: that belongs to whoever invoked the action.
+ * the command from running rejects instead. Sets process.exitCode only for a
+ * failure a report finds; the command's own exit code is left to whoever
+ * invoked the action.
  */
 export async function runSandboxStep(
   env: NodeJS.ProcessEnv,
@@ -441,6 +442,7 @@ export async function runSandboxStep(
   // 1 unless the isolated command itself reports otherwise: every way out of
   // the block below that isn't the command's own exit code is a failure.
   let exitCode = 1;
+  let auditAttached = false;
   try {
     const proxyNetns = getContainerNetns(containerName);
     if (proxyNetns === null) {
@@ -461,6 +463,7 @@ export async function runSandboxStep(
       overlayRoots,
       failOnCaResidue,
       filesystemAudit: audit,
+      onAuditAttached: () => (auditAttached = true),
       warn,
       cancel: cancel.signal,
     });
@@ -469,6 +472,7 @@ export async function runSandboxStep(
     const prepareAudit = () =>
       prepareStepFilesystemAudit({
         audit,
+        attached: auditAttached,
         upload: filesystemAuditArtifact.upload,
         retentionDays: filesystemAuditArtifact.retentionDays,
         containerName,
