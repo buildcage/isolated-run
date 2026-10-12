@@ -617,12 +617,12 @@ static void test_open_held_and_reported(void)
 static void test_open_not_held(void)
 {
 	reset();
-	CHECK(hold_open(make(K_OPEN, 30, 1)) == -2); // outside open(2)
+	CHECK(hold_open(make(K_OPEN, 30, 1)) < 0); // outside open(2)
 	CHECK(!open_creating());
 	CHECK(open_return(0, -2) == NULL);
 	open_name(0, "/f", 0);
 	CHECK(hold_open(make(K_OPEN, 30, 1)) == 0);
-	CHECK(hold_open(make(K_OPEN, 30, 2)) == -1); // nested in the one held
+	CHECK(hold_open(make(K_OPEN, 30, 2)) < 0); // nested in the one held
 	CHECK(head_of(1, HELD_OPEN)->data[0] == (char)1);
 }
 

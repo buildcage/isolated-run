@@ -470,14 +470,11 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missed
 	dropped, errDropped := sumPerCPU(coll.Maps["drops"])
 	untracked, errUntracked := sumPerCPU(coll.Maps["untracked"])
 	internal, _ := sumPerCPU(coll.Maps["skipped_internal"])
-	// do_filp_open's program attached but never ran for the step's opens, as
-	// where the kernel inlined it into its callers: every failed open went
-	// unrecorded.
-	named, _ := sumPerCPU(coll.Maps["open_named"])
-	unnamed, _ := sumPerCPU(coll.Maps["open_unnamed"])
-	if named == 0 && unnamed > 0 {
-		fmt.Fprintf(os.Stderr, "filesystem-audit: no open passed do_filp_open; failed opens went unrecorded\n")
-		untracked += unnamed
+	named, errNamed := sumPerCPU(coll.Maps["open_named"])
+	unheld, errUnheld := sumPerCPU(coll.Maps["open_unheld"])
+	if named == 0 && unheld > 0 {
+		fmt.Fprintln(os.Stderr, "filesystem-audit: no open passed do_filp_open; failed opens went unrecorded")
+		untracked += unheld
 	}
 	kinds := make([]string, 0, len(counts))
 	for k := range counts {
@@ -492,7 +489,7 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missed
 		total, dropped, untracked, missed.n, internal, preExec, tailsPeak(coll), coll.Maps["tails"].MaxEntries())
 	// Without every count the recording cannot claim to be complete, so it is
 	// left without its end line.
-	if err := errors.Join(errDropped, errUntracked, missed.err); err != nil {
+	if err := errors.Join(errDropped, errUntracked, errNamed, errUnheld, missed.err); err != nil {
 		fmt.Fprintln(os.Stderr, "filesystem-audit: read loss counters:", err)
 		return w.Flush()
 	}

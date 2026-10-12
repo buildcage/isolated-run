@@ -266,18 +266,6 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 	return 0;
 }
 
-/**
- * Open(2) calls of the step's that reached do_filp_open, and ones that reached
- * security_file_open with no hold, which do_filp_open's program, attached but
- * never run, would leave as the only ones.
- */
-struct {
-	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 1);
-	__type(key, u32);
-	__type(value, u64);
-} open_named SEC(".maps"), open_unnamed SEC(".maps");
-
 SEC("fentry/security_file_open")
 int BPF_PROG(on_open, struct file *file)
 {
@@ -294,8 +282,6 @@ int BPF_PROG(on_open, struct file *file)
 		submit(e);
 		if (r > 0)
 			open_recorded(e);
-		else if (r == -2 && in_open_call())
-			bump(&open_unnamed);
 	}
 	return 0;
 }
@@ -348,6 +334,18 @@ static __always_inline void open_failed(u32 slot, struct event *e, long ret, int
 }
 
 /**
+ * The step's open(2) calls that reached do_filp_open, and its failed ones that
+ * returned with no hold, all of them lost if do_filp_open's program attached
+ * but never ran, as where the kernel inlined it into its callers.
+ */
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, u64);
+} open_named SEC(".maps"), open_unheld SEC(".maps");
+
+/**
  * Starts holding the open(2) the thread is in, if any, from its name, the
  * struct filename in @p ctx's second argument.
  */
@@ -365,8 +363,8 @@ static __always_inline void hold_name(u32 slot, u64 *ctx)
 }
 
 /**
- * Only an open, and exec's open of the program, reach do_filp_open, renamed
- * do_file_open in 7.0, with the name getname copied; both are optional.
+ * Only open(2) and exec reach do_filp_open, renamed do_file_open in 7.0, with
+ * the name getname copied; both are optional.
  */
 SEC("fentry/do_filp_open")
 int BPF_PROG(on_filp_open, int dfd, struct filename *name)
@@ -484,14 +482,18 @@ int BPF_PROG(on_file_free, struct file *file)
  * Ends an open(2) family call's hold as the call returns, recording the open,
  * with the descriptor and flags from its arguments for a failed one. A call
  * with no hold names nothing the kernel looked up, as one a seccomp filter or
- * a tracer stopped, unless getname refused its name as too long, which is then
- * read from the caller.
+ * a tracer stopped, or one with no free descriptor. The exception is a name
+ * getname refused as too long, read from the caller as a failed path
+ * syscall's is, so a filter or tracer returning ENAMETOOLONG records one too.
  */
 static __always_inline void open_returned(u32 slot, struct pt_regs *regs, long nr, long ret)
 {
 	int at = nr == nr_openat || nr == nr_openat2;
 	if (ret == -ENAMETOOLONG)
 		open_name(slot, (const char *)sys_arg(regs, at), 1);
+	struct held_key k = held_key(HELD_OPEN);
+	if (ret < 0 && !is_restart(ret) && !bpf_map_lookup_elem(&heads, &k))
+		bump(&open_unheld);
 	struct event *e = open_return(slot, ret);
 	if (!e)
 		return;

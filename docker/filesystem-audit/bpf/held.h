@@ -17,6 +17,8 @@
 #endif
 #ifndef EEXIST
 #define EEXIST 17
+#endif
+#ifndef ENAMETOOLONG
 #define ENAMETOOLONG 36
 #endif
 
@@ -446,9 +448,9 @@ static __always_inline void report_held(u32 slot, struct held_key *k, struct eve
  * step (see open_creating()).
  *
  * No hold outlives its syscall (see on_sys_exit), so one already there is this
- * open's, and its name is read. A name that needs tails when none are free is kept cut,
- * marked in n2. A full pool counts in untracked even if this open then
- * succeeds and is recorded.
+ * open's, and its name is read. A name that needs tails when none are free is
+ * kept cut, marked in n2. A full pool counts in untracked even if this open
+ * then succeeds and is recorded.
  */
 static __always_inline void open_name(u32 slot, const char *name, int user)
 {
@@ -510,15 +512,12 @@ static __always_inline int open_creating(void)
  *
  * @return 0 when held; else @p e is to be recorded at once, and after that,
  *         when 1, open_recorded() called so its open(2) records nothing more.
- *         -2 when there is no hold, -1 when it is another open's.
  */
 static __always_inline int hold_open(struct event *e)
 {
 	struct held_key k = held_key(HELD_OPEN);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	if (!head)
-		return -2;
-	if (head->kind != K_OPEN_FAILED)
+	if (!head || head->kind != K_OPEN_FAILED)
 		return -1;
 	e->bases = head->bases;
 	u32 old = tails_for(head->data_len);
