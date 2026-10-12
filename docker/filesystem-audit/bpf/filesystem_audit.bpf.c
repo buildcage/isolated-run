@@ -366,8 +366,8 @@ struct {
 	__type(value, struct chunk);
 } tails SEC(".maps");
 
-// Tails taken, by the heads that hold them, and the most ever taken at once,
-// which the loader reports.
+// How many tails the heads hold, and the most they held at once, which the
+// loader reports.
 struct tail_use {
 	u64 taken;
 	u64 peak;
@@ -515,7 +515,8 @@ static __always_inline int hold_as(struct event *e, u32 use, u32 old)
 		return -1;
 	}
 	if (tails_loop(put_tail, &k, e, 1, t + 1) != 0) {
-		// Refused for want of nothing it could take; the hold is lost.
+		// Refused with the tails already taken, as when the map is busy;
+		// the hold is lost.
 		release(&k, t > old ? t : old);
 		return -1;
 	}
