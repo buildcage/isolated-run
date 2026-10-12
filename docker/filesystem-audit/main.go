@@ -472,7 +472,7 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missed
 	internal, _ := sumPerCPU(coll.Maps["skipped_internal"])
 	named, errNamed := sumPerCPU(coll.Maps["open_named"])
 	unheld, errUnheld := sumPerCPU(coll.Maps["open_unheld"])
-	if named == 0 && unheld > 0 {
+	if errNamed == nil && errUnheld == nil && named == 0 && unheld > 0 {
 		fmt.Fprintln(os.Stderr, "filesystem-audit: no open passed do_filp_open; failed opens went unrecorded")
 		untracked += unheld
 	}

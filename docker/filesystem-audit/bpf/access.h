@@ -78,6 +78,7 @@ struct {
  */
 static __always_inline u32 *seen_count(u64 addr)
 {
+	_Static_assert(N_SEEN_COUNTS == 1 << 16, "the index is the hash's top 16 bits");
 	u32 i = ((u32)addr * 0x9e3779b1u) >> 16;
 	return bpf_map_lookup_elem(&seen_counts, &i);
 }

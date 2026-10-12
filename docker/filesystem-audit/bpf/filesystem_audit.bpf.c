@@ -355,7 +355,7 @@ static __always_inline void hold_name(u32 slot, u64 *ctx)
 		return;
 	bump(&open_named);
 	u64 name = 0;
-	bpf_get_func_arg(ctx, 1, &name);
+	bpf_get_func_arg(ctx, 1, &name); // a number, which unlike a pointer can be range-checked
 	// 7.0 passes on getname's error, which open_returned() handles.
 	if ((long)name < 0 && (long)name >= -4095)
 		return;

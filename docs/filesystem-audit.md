@@ -317,10 +317,11 @@ letter lowercase in the summary. A failed `open`, `unlink`, `rmdir` or `rename`,
 `chmod`, `chown`, `attr` or `truncate` on a path, is recorded however it failed; through a file
 descriptor, as `fchmod` or `ftruncate` do, only if the kernel refused it after checking the file. An
 `open` refused before the kernel looked its name up, as one a seccomp filter stopped or one with no
-free descriptor, is not recorded. A failed `mkdir`, `mknod`, `symlink` or `link` is recorded too
-unless its name was already there (`EEXIST`), which changed nothing and which `mkdir -p` meets at
-every level it keeps. A failed `mmap` is not recorded, nor is a failed `exec`, though the file it
-opened before failing can show as an `open` with `x`.
+free descriptor, is not recorded, unless it failed with `ENAMETOOLONG`, which is recorded under the
+name the command passed. A failed `mkdir`, `mknod`, `symlink` or `link` is recorded too unless its
+name was already there (`EEXIST`), which changed nothing and which `mkdir -p` meets at every level
+it keeps. A failed `mmap` is not recorded, nor is a failed `exec`, though the file it opened before
+failing can show as an `open` with `x`.
 
 | `kind`                                  | Records                                                                                                                                                                                                                                                                                                             | Summary                                                      |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
