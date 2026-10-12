@@ -505,9 +505,8 @@ type end struct {
 	HostMissed uint64 `json:"host_missed"`
 }
 
-// tailsPeak is the most tails, the chunks a long path takes past its head,
-// held at once, so a step's log shows how close it came to running out; "?"
-// when it cannot be read.
+// tailsPeak is the most tails held at once, for the step log; "?" when it
+// cannot be read.
 func tailsPeak(coll *ebpf.Collection) string {
 	var use struct{ Taken, Peak uint64 }
 	if err := coll.Maps["tail_use"].Lookup(uint32(0), &use); err != nil {

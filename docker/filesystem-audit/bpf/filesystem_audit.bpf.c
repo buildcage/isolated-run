@@ -342,9 +342,9 @@ struct held_key {
 // bytes, its header and the start of its path, and tail n the CHUNK bytes
 // after the head and the n - 1 tails before it. Nearly every path, a deep
 // node_modules one included, fits the head alone, and a longer one takes as
-// many tails as it needs, so the tails hold as many bytes of path as they
-// have room for, whatever the paths' lengths. Both are preallocated, so a
-// hold fails only when they are full.
+// many tails as it needs, so the tails fill by bytes of path, whatever the
+// paths' lengths. Both are preallocated, so a hold fails only when they are
+// full.
 #define HEAD 512
 #define HEAD_DATA (HEAD - __builtin_offsetof(struct event, data))
 #define N_TAILS 24576
@@ -581,8 +581,8 @@ static __always_inline struct event *assemble(struct held_key *k, struct event *
 	__builtin_memcpy(e, head, HEAD);
 	u32 missing = tails_loop(get_tail, k, e, 1, tails_for(e->data_len) + 1);
 	if (missing) {
-		// Cut where the data stops being the event's, which the reader
-		// takes as it takes a path too deep to keep whole.
+		// Cut before the missing tail; the reader takes it as a path too
+		// deep to keep whole.
 		e->data_len = HEAD_DATA + (missing - 1) * CHUNK;
 		e->truncated = 1;
 		bump(&untracked);
@@ -1267,8 +1267,7 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 	return 0;
 }
 
-// When both hooks fire, the second finds do_sys_open's event already held. A
-// full pool counts in untracked even if this open then succeeds and is
+// A full pool counts in untracked even if this open then succeeds and is
 // recorded.
 static __always_inline void open_enter(int dfd, u32 flags)
 {
@@ -1291,8 +1290,8 @@ static __always_inline void open_enter(int dfd, u32 flags)
 	struct held_key k = held_key(HELD_OPEN);
 	long r = bpf_map_update_elem(&heads, &k, e, BPF_NOEXIST);
 	if (r == -EEXIST) {
-		// do_sys_open's, when both hooks fire, or one an earlier open left:
-		// this open's own call stands in it, as it would in a new one.
+		// Held already: do_sys_open's, when both hooks fire, or one an
+		// earlier open left. Either way this call's values replace it.
 		struct event *head = bpf_map_lookup_elem(&heads, &k);
 		if (head && head->kind == K_OPEN_FAILED && !head->data_len) {
 			__builtin_memcpy(head, e, HEAD);
@@ -1306,7 +1305,7 @@ static __always_inline void open_enter(int dfd, u32 flags)
 		bump(&untracked);
 }
 
-// The failed open held in e, in scratch, with its name in place.
+// Records the failed open assembled in e, its name in place.
 static __always_inline void open_failed(struct event *e, long ret)
 {
 	u64 ts = e->ts;
