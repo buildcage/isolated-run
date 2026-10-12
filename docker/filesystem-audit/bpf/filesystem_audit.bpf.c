@@ -156,7 +156,8 @@ int BPF_PROG(on_symlink, const struct path *dir, struct dentry *dentry, const ch
 	struct event *e = start(slot, K_SYMLINK);
 	if (!e)
 		return 0;
-	long r = bpf_probe_read_kernel_str(e->data, NAME_LEN, old_name);
+	// The kernel caps a target at PATH_MAX, so it is read whole.
+	long r = bpf_probe_read_kernel_str(e->data, PATH_LEN, old_name);
 	u32 off = r > 0 ? r : 0;
 	e->path_len = off;
 	off = leaf(e, off, dentry, &e->n1);
