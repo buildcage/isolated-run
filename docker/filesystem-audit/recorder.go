@@ -16,25 +16,31 @@ import (
 // tallies them for the step log.
 type recorder struct {
 	w   *bufio.Writer
-	enc *json.Encoder
 	log io.Writer
 	// offset is bootOffset, read once per line written.
-	offset  func() (int64, error)
-	files   execFiles
-	counts  map[string]int
+	offset func() (int64, error)
+	files  execFiles
+	// line is reused for each line written.
+	line    []byte
+	counts  map[tally]int
 	preExec int
 	total   int
 	started bool
 }
 
+// tally is what the step log counts lines by.
+type tally struct {
+	kind   string
+	failed bool
+}
+
 func newRecorder(w *bufio.Writer, log io.Writer, offset func() (int64, error)) *recorder {
 	return &recorder{
 		w:      w,
-		enc:    json.NewEncoder(w),
 		log:    log,
 		offset: offset,
 		files:  execFiles{},
-		counts: map[string]int{},
+		counts: map[tally]int{},
 	}
 }
 
@@ -62,14 +68,11 @@ func (r *recorder) add(raw []byte) error {
 	if err != nil {
 		return err
 	}
-	rec.Time = wallTime(rec.boot, offset)
-	if rec.Failed {
-		r.counts[rec.Kind+" failed"]++
-	} else {
-		r.counts[rec.Kind]++
-	}
+	r.counts[tally{rec.Kind, rec.Failed}]++
 	r.total++
-	return r.enc.Encode(rec)
+	r.line = appendRecord(r.line[:0], &rec, wallClock(rec.boot, offset))
+	_, err = r.w.Write(r.line)
+	return err
 }
 
 // loss is what the BPF side counted, read once the ring buffer is drained,
@@ -90,13 +93,17 @@ func (r *recorder) finish(l loss) error {
 		fmt.Fprintln(r.log, "filesystem-audit: no open passed do_filp_open; failed opens went unrecorded")
 		untracked += l.unheld
 	}
-	kinds := make([]string, 0, len(r.counts))
-	for k := range r.counts {
-		kinds = append(kinds, k)
+	lines := make([]string, 0, len(r.counts))
+	for k, n := range r.counts {
+		name := k.kind
+		if k.failed {
+			name += " failed"
+		}
+		lines = append(lines, fmt.Sprintf("filesystem-audit: %-13s %d", name, n))
 	}
-	sort.Strings(kinds)
-	for _, k := range kinds {
-		fmt.Fprintf(r.log, "filesystem-audit: %-13s %d\n", k, r.counts[k])
+	sort.Strings(lines)
+	for _, l := range lines {
+		fmt.Fprintln(r.log, l)
 	}
 	fmt.Fprintf(r.log, "filesystem-audit: total=%d dropped=%d untracked=%d host-missed=%d internal-skipped=%d pre-exec-skipped=%d tails-peak=%s/%d\n",
 		r.total, l.dropped, untracked, l.missed.n, l.internal, r.preExec, l.tailsPeak, l.tailsMax)
@@ -106,7 +113,7 @@ func (r *recorder) finish(l loss) error {
 		fmt.Fprintln(r.log, "filesystem-audit: read loss counters:", err)
 		return r.w.Flush()
 	}
-	if err := r.enc.Encode(end{Kind: "end", Dropped: l.dropped, Untracked: untracked, HostMissed: l.missed.n}); err != nil {
+	if err := json.NewEncoder(r.w).Encode(end{Kind: "end", Dropped: l.dropped, Untracked: untracked, HostMissed: l.missed.n}); err != nil {
 		return err
 	}
 	return r.w.Flush()
@@ -159,7 +166,7 @@ func bootOffset() (int64, error) {
 	return real.Nano() - boot.Nano(), nil
 }
 
-// wallTime formats an event's boot timestamp as UTC to the millisecond.
-func wallTime(boot uint64, offset int64) string {
-	return time.Unix(0, int64(boot)+offset).UTC().Format("2006-01-02T15:04:05.000Z07:00")
+// wallClock is an event's boot timestamp as UTC wall-clock time.
+func wallClock(boot uint64, offset int64) time.Time {
+	return time.Unix(0, int64(boot)+offset).UTC()
 }

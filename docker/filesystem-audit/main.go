@@ -200,10 +200,11 @@ func stopRequested(sig <-chan os.Signal) bool {
 // flushed.
 func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missedRun <-chan count) error {
 	rec := newRecorder(w, os.Stderr, bootOffset)
+	// Reused for each sample: what decode keeps of it is copied.
+	var sample ringbuf.Record
 	for {
 		rd.SetDeadline(time.Now().Add(100 * time.Millisecond))
-		sample, err := rd.Read()
-		if err != nil {
+		if err := rd.ReadInto(&sample); err != nil {
 			if errors.Is(err, ringbuf.ErrFlushed) {
 				break
 			}

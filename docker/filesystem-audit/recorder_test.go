@@ -81,6 +81,27 @@ func TestRecorderGivesAnExecTheFileItResolvedTo(t *testing.T) {
 	}
 }
 
+// The tracer reads each sample into the same buffer, so nothing a line keeps
+// may point into it.
+func TestRecorderKeepsNothingOfASample(t *testing.T) {
+	r, out, _ := newTestRecorder()
+	raw := event{kind: 23, pid: 9, comm: "sh", n1: 3, data: comps("gradlew", "A", "work")}.bytes()
+	add(t, r, stepExec)
+	if err := r.add(raw); err != nil {
+		t.Fatal(err)
+	}
+	for i := range raw {
+		raw[i] = 'x'
+	}
+	add(t, r, event{kind: 2, pid: 9, comm: "sh", data: []byte("./gradlew\x00")})
+	if err := r.finish(loss{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := lines(t, out); got[1]["path"] != "/work/A/gradlew" {
+		t.Fatalf("recording = %v, want the exec under the path read before the buffer changed", got)
+	}
+}
+
 func TestRecorderStopsAtAClockItCannotRead(t *testing.T) {
 	out := &bytes.Buffer{}
 	broken := errors.New("no clock")
@@ -151,8 +172,8 @@ func TestRecorderCountsUnheldOpensUntrackedWhenNoOpenWasNamed(t *testing.T) {
 func TestWallTime(t *testing.T) {
 	// 1.5 s after boot, with boot at 2026-10-06T00:00:00Z.
 	offset := int64(1_791_244_800) * 1_000_000_000
-	if got, want := wallTime(1_500_000_000, offset), "2026-10-06T00:00:01.500Z"; got != want {
-		t.Fatalf("wallTime = %s, want %s", got, want)
+	if got, want := wallClock(1_500_000_000, offset).Format(timeLayout), "2026-10-06T00:00:01.500Z"; got != want {
+		t.Fatalf("wallClock = %s, want %s", got, want)
 	}
 }
 
@@ -165,10 +186,7 @@ func TestBootOffset(t *testing.T) {
 	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &boot); err != nil {
 		t.Fatal(err)
 	}
-	got, err := time.Parse(time.RFC3339Nano, wallTime(uint64(boot.Nano()), off))
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := wallClock(uint64(boot.Nano()), off)
 	if d := time.Since(got); d < -time.Second || d > time.Second {
 		t.Fatalf("boot time now converts to %s, %s from the wall clock", got, d)
 	}
