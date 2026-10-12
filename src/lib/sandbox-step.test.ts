@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 
@@ -55,6 +55,7 @@ const mocks = {
   reportStepTraffic: vi.fn(),
   writeMoreSummary: vi.fn(),
   prepareStepFilesystemAudit: vi.fn(),
+  rewriteOutputFile: vi.fn(),
   setTrafficArtifactOutput: vi.fn(),
   setFilesystemAuditOutput: vi.fn(),
   onCancel: vi.fn(),
@@ -78,9 +79,16 @@ const ENV = {
   HOME: "/home/runner",
   GITHUB_STEP_SUMMARY: "/home/runner/work/_temp/summary",
   GITHUB_STATE: "/home/runner/work/_temp/state",
+  GITHUB_OUTPUT: "/home/runner/work/_temp/output",
   GITHUB_ACTION_REF: "v1.2.3",
   GITHUB_ACTION_REPOSITORY: "buildcage/isolated-run",
 };
+
+// A failure the step reports by process.exitCode must not fail the test run.
+const exitCode = process.exitCode;
+afterEach(() => {
+  process.exitCode = exitCode;
+});
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -625,8 +633,7 @@ describe("runSandboxStep", () => {
       });
 
       await expect(runSandboxStep(ENV, deps)).rejects.toThrow("runc: exec failed");
-      expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
-      expect(mocks.setFilesystemAuditOutput).toHaveBeenCalledWith("");
+      expect(mocks.rewriteOutputFile).toHaveBeenCalledTimes(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
       expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
       expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(orderOf(mocks.stopSandboxProxy));
@@ -662,25 +669,36 @@ describe("runSandboxStep", () => {
       expect(mocks.onCancel).not.toHaveBeenCalled();
     });
 
-    // The command can write either name itself; a step killed during the
-    // report must not leave one of its names behind.
-    it("clears both artifact names once the command has stopped, before the report", async () => {
+    // The command can leave the file so the runner never reads the names
+    // appended after it.
+    it("rewrites $GITHUB_OUTPUT once the command has stopped, before the report", async () => {
+      await runSandboxStep(ENV, deps);
+
+      expect(mocks.rewriteOutputFile.mock.calls).toStrictEqual([[ENV.GITHUB_OUTPUT]]);
+      expect(orderOf(mocks.runSandboxedCommand)).toBeLessThan(orderOf(mocks.rewriteOutputFile));
+      expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(
+        orderOf(mocks.prepareStepFilesystemAudit),
+      );
+      expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
+      expect(annotation.error).not.toHaveBeenCalled();
+    });
+
+    // The runner applies the file after ::set-output commands, and its last
+    // entry for a name, so an empty value there overrides any the command set.
+    it("then sets both names empty, before the report sets them", async () => {
       await runSandboxStep(ENV, deps);
 
       expect(mocks.setTrafficArtifactOutput.mock.calls).toStrictEqual([[""]]);
       expect(mocks.setFilesystemAuditOutput.mock.calls).toStrictEqual([[""]]);
-      expect(orderOf(mocks.runSandboxedCommand)).toBeLessThan(
+      expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(
         orderOf(mocks.setTrafficArtifactOutput),
       );
       expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
         orderOf(mocks.prepareStepFilesystemAudit),
       );
-      expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
-        orderOf(mocks.reportStepTraffic),
-      );
     });
 
-    it("still clears the other name and reports when one cannot be cleared", async () => {
+    it("still sets the other name empty and reports when one cannot be set", async () => {
       mocks.setTrafficArtifactOutput.mockImplementation(() => {
         throw new Error("EACCES");
       });
@@ -688,7 +706,37 @@ describe("runSandboxStep", () => {
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
       expect(mocks.setFilesystemAuditOutput).toHaveBeenCalledWith("");
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails the step but still reports when $GITHUB_OUTPUT held what the runner cannot read", async () => {
+      mocks.rewriteOutputFile.mockReturnValue("it is not a regular file");
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      expect(annotation.error).toHaveBeenCalledWith(
+        "$GITHUB_OUTPUT was rewritten without what the runner could not read (it is not a regular file); failing the step",
+      );
+      expect(process.exitCode).toBe(1);
+      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
       expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails the step but still reports when $GITHUB_OUTPUT cannot be rewritten", async () => {
+      mocks.rewriteOutputFile.mockImplementation(() => {
+        throw new Error("EACCES");
+      });
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      expect(annotation.error).toHaveBeenCalledWith(
+        "Failed to rewrite $GITHUB_OUTPUT: EACCES; failing the step",
+      );
+      expect(process.exitCode).toBe(1);
+      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+    });
+
+    it("rewrites nothing where the runner gave no $GITHUB_OUTPUT", async () => {
+      await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "" }, deps);
+      expect(mocks.rewriteOutputFile).not.toHaveBeenCalled();
+      expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
     });
 
     it("creates nothing when docker or sudo cannot be pinned", async () => {
@@ -755,9 +803,7 @@ describe("runSandboxStep", () => {
       await runSandboxStep(ENV, deps);
 
       expect(mocks.reportStepTraffic.mock.calls[0][0].moreBlocks).toBeUndefined();
-      expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
-        orderOf(mocks.reportStepTraffic),
-      );
+      expect(orderOf(mocks.rewriteOutputFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
       expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(
         orderOf(mocks.prepareStepFilesystemAudit),
       );

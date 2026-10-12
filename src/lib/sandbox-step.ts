@@ -23,6 +23,7 @@ import { readTrafficArtifactInputs } from "#core/lib/actions/inputs.ts";
 import { logRules, withLogGroup } from "#core/lib/actions/log.ts";
 import { readRuleInputs } from "#core/lib/actions/rule-inputs.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
+import { errorMessage } from "#core/lib/errors.ts";
 import { resolveBuildcageImageRef } from "#core/lib/provenance/image-ref.ts";
 import { verifyImageDigestOrThrow, type ResolvedImage } from "#core/lib/provenance/verify-image.ts";
 import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts";
@@ -61,6 +62,7 @@ import { assertNonRootUid } from "./sandbox/identity.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
+import { rewriteOutputFile } from "./step-output-file.ts";
 import { reportStepTraffic, writeMoreSummary } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
@@ -123,6 +125,7 @@ export interface SandboxStepDeps {
   reportStepTraffic: typeof reportStepTraffic;
   writeMoreSummary: typeof writeMoreSummary;
   prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
+  rewriteOutputFile: typeof rewriteOutputFile;
   setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
   setFilesystemAuditOutput: typeof setFilesystemAuditOutput;
   /** Calls listener on each signal a cancelled run sends this process, and
@@ -188,6 +191,7 @@ const realDeps: SandboxStepDeps = {
   reportStepTraffic,
   writeMoreSummary,
   prepareStepFilesystemAudit,
+  rewriteOutputFile,
   setTrafficArtifactOutput,
   setFilesystemAuditOutput,
   onCancel,
@@ -237,8 +241,8 @@ function saveCleanupState(
  * Runs one `run:` step start to finish and returns the exit code the workflow
  * step should take, which is the isolated command's own. Anything that stops
  * the command from running rejects instead. Sets process.exitCode only for a
- * failure a report finds; the command's own exit code is left to whoever
- * invoked the action.
+ * failure a report finds, or a $GITHUB_OUTPUT the command left unreadable; the
+ * command's own exit code is left to whoever invoked the action.
  */
 export async function runSandboxStep(
   env: NodeJS.ProcessEnv,
@@ -279,6 +283,7 @@ export async function runSandboxStep(
     reportStepTraffic,
     writeMoreSummary,
     prepareStepFilesystemAudit,
+    rewriteOutputFile,
     setTrafficArtifactOutput,
     setFilesystemAuditOutput,
     onCancel,
@@ -476,9 +481,24 @@ export async function runSandboxStep(
       cancel: cancel.signal,
     });
   } finally {
-    // The command can write either artifact name to $GITHUB_OUTPUT. Cleared
-    // once it has stopped, so a step killed before the report sets them
-    // leaves none of its names.
+    // The command can set either artifact name, in $GITHUB_OUTPUT or with
+    // ::set-output, or leave the file so the runner stops before the names
+    // appended to it. The file is rewritten to what the runner reads, then both
+    // names set empty, which the runner applies last.
+    if (env.GITHUB_OUTPUT) {
+      try {
+        const unreadable = rewriteOutputFile(env.GITHUB_OUTPUT);
+        if (unreadable) {
+          annotation.error(
+            `$GITHUB_OUTPUT was rewritten without what the runner could not read (${unreadable}); failing the step`,
+          );
+          process.exitCode = 1;
+        }
+      } catch (e) {
+        annotation.error(`Failed to rewrite $GITHUB_OUTPUT: ${errorMessage(e)}; failing the step`);
+        process.exitCode = 1;
+      }
+    }
     for (const set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) {
       try {
         set("");

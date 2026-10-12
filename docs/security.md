@@ -504,7 +504,7 @@ before it ends, and the key with it.
 | Sends `*` as its method, `Host` or path in audit, to plant a wildcard in the suggested rules       | Left out of the suggested `allowed_url_rules` and listed beside it, so pasting them never permits more than the command sent                                           |
 | Floods the proxy log until earlier entries rotate away                                             | A log that no longer starts where a real run does is not accepted as a complete record: the step fails under `restrict` with `fail_on_blocked` (the default)           |
 | Removes or locks `$GITHUB_STEP_SUMMARY` so no report is written                                    | The outcome is decided first, a summary that cannot be written fails the step under `restrict` with `fail_on_blocked`, and a requested artifact is still uploaded      |
-| Writes its own `traffic_artifact_name` or `filesystem_audit_artifact_name` to `$GITHUB_OUTPUT`     | Cleared when the command exits, then set to the uploaded artifact's name, or left empty; if setting that fails, the step fails under `restrict` with `fail_on_blocked` |
+| Writes its own `traffic_artifact_name` or `filesystem_audit_artifact_name` to `$GITHUB_OUTPUT`     | Set empty after the file is rewritten to what the runner reads, then to the artifact's name. One it cannot read or rewrite, or a symlink or FIFO there, fails the step |
 
 ## What the engines cannot see
 
