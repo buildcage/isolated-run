@@ -494,6 +494,46 @@ describe("writeSummaryBlocks", () => {
     );
     expect(written).toStrictEqual(["cut\n"]);
   });
+
+  it("returns the ids of the blocks it cut, by id rather than by notice text", async () => {
+    const cutIds = await writeSummaryBlocks(
+      [
+        { id: "kept", priority: 1, level: 1, section: "k", cut: "keep", text: "frame\n" },
+        {
+          id: "trimmed",
+          priority: 2,
+          level: 1,
+          section: "t",
+          cut: "lines",
+          text: "a\nb\nc\n",
+          notice: "cut\n",
+        },
+      ],
+      { GITHUB_STEP_SUMMARY: "/summary.md" },
+      { fileSize: () => 1024 * 1024, writeSummary: async () => {} },
+    );
+    expect(cutIds.has("trimmed")).toBe(true);
+    expect(cutIds.has("kept")).toBe(false);
+  });
+
+  it("returns an empty set when everything fits", async () => {
+    const cutIds = await writeSummaryBlocks(
+      [
+        {
+          id: "x",
+          priority: 1,
+          level: 1,
+          section: "s",
+          cut: "lines",
+          text: "a\n",
+          notice: "cut\n",
+        },
+      ],
+      { GITHUB_STEP_SUMMARY: "/summary.md" },
+      { fileSize: () => 0, writeSummary: async () => {} },
+    );
+    expect(cutIds.size).toBe(0);
+  });
 });
 
 describe("writeReportSummary", () => {

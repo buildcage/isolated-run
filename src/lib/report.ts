@@ -142,23 +142,26 @@ function summarySize(path: string | undefined, fileSize: (p: string) => number):
   }
 }
 
-/** `blocks` fitted into what is left of the step's Job Summary. */
-function fitSummaryBlocks(
-  blocks: SummaryBlock[],
-  env: NodeJS.ProcessEnv,
-  fileSize: (p: string) => number,
-): string {
-  return fitStepSummary(blocks, { usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize) });
-}
-
-/** Fits `blocks` into what is left of the step's Job Summary and writes them. */
+/**
+ * Fits `blocks` into what is left of the step's Job Summary, writes them, and
+ * returns the ids of the blocks it cut, so a caller can warn about a section
+ * lost below the fold.
+ */
 export async function writeSummaryBlocks(
   blocks: SummaryBlock[],
   env: NodeJS.ProcessEnv,
   overrides: Partial<Pick<WriteReportSummaryDeps, "fileSize" | "writeSummary">> = {},
-): Promise<void> {
+): Promise<Set<string>> {
   const { fileSize, writeSummary } = { ...realDeps, ...overrides };
-  await writeSummary(fitSummaryBlocks(blocks, env, fileSize), env.GITHUB_STEP_SUMMARY);
+  const cutIds = new Set<string>();
+  const summary = fitStepSummary(blocks, {
+    usedBytes: summarySize(env.GITHUB_STEP_SUMMARY, fileSize),
+    onCut: (b) => {
+      if (b.id !== undefined) cutIds.add(b.id);
+    },
+  });
+  await writeSummary(summary, env.GITHUB_STEP_SUMMARY);
+  return cutIds;
 }
 
 export interface WriteReportSummaryOptions extends ComputeReportOutcomesOptions {
@@ -192,7 +195,7 @@ export async function writeReportSummary(
   // cannot take the step's outcome down with it.
   applyOutcomeAnnotations(annotation, outcomes.emissions);
 
-  const summary = fitSummaryBlocks(
+  const cutIds = await writeSummaryBlocks(
     [
       ...withNotices(outcomes.blocks, (b) =>
         b.id === WOULD_REFUSE_BLOCK
@@ -202,10 +205,10 @@ export async function writeReportSummary(
       ...extraBlocks,
     ],
     env,
-    fileSize,
+    { fileSize, writeSummary },
   );
   // The section's own notice is easy to miss below the fold.
-  if (summary.includes(wouldRefuseTruncationNote(artifactAvailable))) {
+  if (cutIds.has(WOULD_REFUSE_BLOCK)) {
     annotation.warning(
       "The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " +
         (artifactAvailable
@@ -213,7 +216,6 @@ export async function writeReportSummary(
           : "Set upload_traffic_artifact: true to get every request as an artifact."),
     );
   }
-  await writeSummary(summary, env.GITHUB_STEP_SUMMARY);
 
   // Debug-only mirror: GITHUB_STEP_SUMMARY is unique per step and can't be
   // reassigned, so a later step has no way to read this step's copy back.
