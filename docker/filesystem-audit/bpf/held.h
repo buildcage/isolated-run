@@ -365,10 +365,9 @@ static __always_inline void hold(struct event *e)
  * @return The event, or 0 when a tail is missing: what is left of a path
  *         cannot be told from a shorter one.
  */
-static __always_inline struct event *assemble(struct held_key *k, struct event *head)
+static __always_inline struct event *assemble(u32 slot, struct held_key *k, struct event *head)
 {
-	u32 zero = 0;
-	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
+	struct event *e = scratch_get(slot);
 	if (!e)
 		return 0;
 	__builtin_memcpy(e, head, HEAD);
@@ -401,13 +400,13 @@ static __always_inline void report_at(struct event *e, u32 cap, u32 err, u32 cre
  * Records the held event whose head is @p head, as report_at() does:
  * straight from the head when it has no tails, else assembled in scratch.
  */
-static __always_inline void report_held(struct held_key *k, struct event *head, u32 err, u32 created)
+static __always_inline void report_held(u32 slot, struct held_key *k, struct event *head, u32 err, u32 created)
 {
 	if (!tails_for(head->data_len)) {
 		report_at(head, HEAD, err, created);
 		return;
 	}
-	struct event *e = assemble(k, head);
+	struct event *e = assemble(slot, k, head);
 	if (e)
 		report_at(e, sizeof(struct event), err, created);
 }
@@ -429,10 +428,9 @@ static __always_inline void report_held(struct held_key *k, struct event *head, 
  * A full pool counts in untracked even if this open then succeeds and is
  * recorded.
  */
-static __always_inline void open_begin(int dfd, u32 flags)
+static __always_inline void open_begin(u32 slot, int dfd, u32 flags)
 {
-	u32 zero = 0;
-	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
+	struct event *e = scratch_get(slot);
 	if (!e)
 		return;
 	e->kind = K_OPEN_FAILED;
@@ -469,7 +467,7 @@ static __always_inline void open_begin(int dfd, u32 flags)
  * in n2, when there are none to take. When both getname programs fire, the
  * second finds the name already read.
  */
-static __always_inline void hold_name(const char *name)
+static __always_inline void hold_name(u32 slot, const char *name)
 {
 	struct held_key k = held_key(HELD_OPEN);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
@@ -482,8 +480,7 @@ static __always_inline void hold_name(const char *name)
 		bpf_probe_read_kernel(&more, 1, name + HEAD_DATA - 1);
 	if (!more)
 		return;
-	u32 zero = 0;
-	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
+	struct event *e = scratch_get(slot);
 	if (!e)
 		return;
 	__builtin_memcpy(e, head, HEAD);
@@ -552,7 +549,7 @@ static __always_inline int hold_open(struct event *e)
  *
  * @return The failed open to record, assembled in scratch, or 0.
  */
-static __always_inline struct event *open_end(long ret)
+static __always_inline struct event *open_end(u32 slot, long ret)
 {
 	struct held_key k = held_key(HELD_OPEN);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
@@ -568,9 +565,9 @@ static __always_inline struct event *open_end(long ret)
 		// whatever then refused the open.
 		u32 created = head->bases;
 		head->bases = 0;
-		report_held(&k, head, ret < 0 ? -ret : 0, created);
+		report_held(slot, &k, head, ret < 0 ? -ret : 0, created);
 	} else if (!restart && ret < 0) {
-		failed = assemble(&k, head);
+		failed = assemble(slot, &k, head);
 	}
 	release(&k, t);
 	return failed;

@@ -165,6 +165,11 @@ static void submit_cap(struct event *e, u32 cap)
 	}
 }
 
+static struct event *scratch_get(u32 slot)
+{
+	return bpf_map_lookup_elem(&scratch, &slot);
+}
+
 #define HELD_MOCK_MAPS
 #include "held.h"
 
@@ -193,10 +198,10 @@ static __u64 untracked_count(void)
 	return *(__u64 *)bpf_map_lookup_elem(&untracked, &zero);
 }
 
+/** The scratch event of the program under test, slot 0. */
 static struct event *scratch_event(void)
 {
-	__u32 zero = 0;
-	return bpf_map_lookup_elem(&scratch, &zero);
+	return scratch_get(0);
 }
 
 static void reset(void)
@@ -204,7 +209,7 @@ static void reset(void)
 	map_init(&heads, "heads", sizeof(struct held_key), HEAD, N_HEADS, 0);
 	map_init(&tails, "tails", sizeof(struct held_key), CHUNK, N_TAILS, 0);
 	map_init(&tail_use, "tail_use", 4, sizeof(struct tail_use), 1, 1);
-	map_init(&scratch, "scratch", 4, sizeof(struct scratch_buf), 1, 1);
+	map_init(&scratch, "scratch", 4, sizeof(struct scratch_buf), 2, 1);
 	map_init(&untracked, "untracked", 4, 8, 1, 1);
 	current_id = 1;
 	now = 1000;
@@ -272,7 +277,7 @@ static void test_short_hold(void)
 	CHECK(hold_new(make(K_UNLINK, HEAD_DATA, 1), HELD_OP) == 0);
 	CHECK(heads.count == 1 && tails.count == 0 && use()->taken == 0);
 	struct held_key k = held_key(HELD_OP);
-	report_held(&k, head_of(1, HELD_OP), 0, 0);
+	report_held(0, &k, head_of(1, HELD_OP), 0, 0);
 	CHECK(nsent == 1 && sent[0].size == HEAD && data_matches(&sent[0].e, HEAD_DATA, 1));
 	release(&k, 0);
 	CHECK(heads.count == 0);
@@ -288,13 +293,31 @@ static void test_long_hold_round_trip(void)
 	CHECK_ACCOUNTS();
 	make(K_OPEN, 0, 0); // scratch reused by another event meanwhile
 	struct held_key k = held_key(HELD_OP);
-	struct event *e = assemble(&k, head_of(1, HELD_OP));
+	struct event *e = assemble(0, &k, head_of(1, HELD_OP));
 	CHECK(e && e->kind == K_RENAME && e->data_len == len && data_matches(e, len, 9));
 	CHECK(!e->truncated && untracked_count() == 0);
-	report_held(&k, head_of(1, HELD_OP), 2, 0);
+	report_held(0, &k, head_of(1, HELD_OP), 2, 0);
 	CHECK(nsent == 1 && sent[0].e.err == 2 && data_matches(&sent[0].e, len, 9));
 	release(&k, MAX_TAILS);
 	CHECK(heads.count == 0 && use()->taken == 0);
+	CHECK_ACCOUNTS();
+}
+
+/**
+ * Another program writing its own scratch event mid-assembly, as one on the
+ * same CPU can while this one is preempted, leaves this one's event whole.
+ */
+static void test_scratch_per_program(void)
+{
+	reset();
+	u32 len = DATA_SZ + NAME_LEN;
+	CHECK(hold_new(make(K_RENAME, len, 9), HELD_OP) == 0);
+	struct held_key k = held_key(HELD_OP);
+	struct event *e = assemble(0, &k, head_of(1, HELD_OP));
+	struct event *other = scratch_get(1);
+	memset(other, 0x5a, sizeof(struct scratch_buf));
+	CHECK(e && e != other && e->kind == K_RENAME && data_matches(e, len, 9));
+	release(&k, MAX_TAILS);
 	CHECK_ACCOUNTS();
 }
 
@@ -330,7 +353,7 @@ static void test_replace_shorter_and_longer(void)
 	CHECK(use()->taken == 5);
 	CHECK_ACCOUNTS();
 	struct held_key k = held_key(HELD_OPEN);
-	struct event *e = assemble(&k, head_of(1, HELD_OPEN));
+	struct event *e = assemble(0, &k, head_of(1, HELD_OPEN));
 	CHECK(e && e->kind == K_OPEN && data_matches(e, HEAD_DATA + 5 * CHUNK, 7));
 }
 
@@ -442,8 +465,8 @@ static void test_missing_tail_drops(void)
 	k.n = 2;
 	bpf_map_delete_elem(&tails, &k);
 	k.n = 0;
-	CHECK(assemble(&k, head_of(1, HELD_OP)) == NULL && untracked_count() == 1);
-	report_held(&k, head_of(1, HELD_OP), 0, 0);
+	CHECK(assemble(0, &k, head_of(1, HELD_OP)) == NULL && untracked_count() == 1);
+	report_held(0, &k, head_of(1, HELD_OP), 0, 0);
 	CHECK(nsent == 0 && untracked_count() == 2);
 }
 
@@ -490,9 +513,9 @@ static void name_of(char *buf, unsigned len, char c)
 static void test_open_short_name_refused_early(void)
 {
 	reset();
-	open_begin(-100, 0x241);
-	hold_name("/tmp/missing");
-	struct event *e = open_end(-2);
+	open_begin(0, -100, 0x241);
+	hold_name(0, "/tmp/missing");
+	struct event *e = open_end(0, -2);
 	CHECK(e && e->kind == K_OPEN_FAILED && e->flags == 0x241 && e->gid == (u32)-100);
 	CHECK(e && !strcmp(e->data, "/tmp/missing") && e->data_len == 13 && !e->n2);
 	CHECK(heads.count == 0);
@@ -502,23 +525,23 @@ static void test_open_short_name_refused_early(void)
 static void test_open_both_entry_hooks(void)
 {
 	reset();
-	open_begin(3, 1);
+	open_begin(0, 3, 1);
 	now = 2000;
-	open_begin(-100, 2); // do_sys_openat2's, after do_sys_open's
+	open_begin(0, -100, 2); // do_sys_openat2's, after do_sys_open's
 	struct event *h = head_of(1, HELD_OPEN);
 	CHECK(heads.count == 1 && h->flags == 2 && h->gid == (u32)-100 && h->ts == 2000);
-	hold_name("/a");
-	hold_name("/b"); // the second getname program: already read
+	hold_name(0, "/a");
+	hold_name(0, "/b"); // the second getname program: already read
 	CHECK(!strcmp(head_of(1, HELD_OPEN)->data, "/a"));
 }
 
 static void test_open_replaces_left_hold(void)
 {
 	reset();
-	open_begin(-100, 0);
+	open_begin(0, -100, 0);
 	struct event *e = make(K_OPEN, HEAD_DATA + 2 * CHUNK, 4);
 	CHECK(hold_open(e) == 0 && use()->taken == 2);
-	open_begin(-100, 1); // an open whose exit was missed left that one
+	open_begin(0, -100, 1); // an open whose exit was missed left that one
 	CHECK(heads.count == 1 && head_of(1, HELD_OPEN)->kind == K_OPEN_FAILED && use()->taken == 0);
 	CHECK_ACCOUNTS();
 }
@@ -527,10 +550,10 @@ static void test_open_long_name(void)
 {
 	reset();
 	name_of(long_name, sizeof(long_name) - 1, 'n');
-	open_begin(-100, 0);
-	hold_name(long_name);
+	open_begin(0, -100, 0);
+	hold_name(0, long_name);
 	CHECK(use()->taken == tails_for(sizeof(long_name)));
-	struct event *e = open_end(-2);
+	struct event *e = open_end(0, -2);
 	CHECK(e && !strcmp(e->data, long_name) && !e->truncated && !e->n2);
 	CHECK(heads.count == 0 && use()->taken == 0);
 	CHECK_ACCOUNTS();
@@ -544,8 +567,8 @@ static void test_open_long_name_no_tails(void)
 	current_id = 1;
 	use()->taken = N_TAILS; // and the rest taken elsewhere
 	name_of(long_name, sizeof(long_name) - 1, 'n');
-	open_begin(-100, 0);
-	hold_name(long_name);
+	open_begin(0, -100, 0);
+	hold_name(0, long_name);
 	struct event *h = head_of(1, HELD_OPEN);
 	CHECK(h && h->truncated && h->n2 && h->data_len == HEAD_DATA);
 	CHECK(h && !memcmp(h->data, long_name, HEAD_DATA - 1) && h->data[HEAD_DATA - 1] == 0);
@@ -554,21 +577,21 @@ static void test_open_long_name_no_tails(void)
 static void test_open_held_and_reported(void)
 {
 	reset();
-	open_begin(-100, 0);
-	hold_name("/tmp/f");
+	open_begin(0, -100, 0);
+	hold_name(0, "/tmp/f");
 	struct event *e = make(K_OPEN, 30, 5);
 	CHECK(hold_open(e) == 0); // in place, no tails
 	CHECK(head_of(1, HELD_OPEN)->kind == K_OPEN && tails.count == 0);
-	CHECK(open_end(0) == NULL && nsent == 1 && sent[0].e.err == 0);
+	CHECK(open_end(0, 0) == NULL && nsent == 1 && sent[0].e.err == 0);
 	CHECK(sent[0].size == __builtin_offsetof(struct event, data) + 30);
 	CHECK(heads.count == 0);
 
 	reset();
-	open_begin(-100, 0);
+	open_begin(0, -100, 0);
 	CHECK(open_creating());
 	e = make(K_OPEN, HEAD_DATA + 2 * CHUNK, 6);
 	CHECK(hold_open(e) == 0 && use()->taken == 2);
-	CHECK(open_end(-13) == NULL && nsent == 2 && sent[0].e.err == 0 && sent[1].e.err == 13);
+	CHECK(open_end(0, -13) == NULL && nsent == 2 && sent[0].e.err == 0 && sent[1].e.err == 13);
 	CHECK(data_matches(&sent[1].e, HEAD_DATA + 2 * CHUNK, 6));
 	CHECK(heads.count == 0 && use()->taken == 0);
 	CHECK_ACCOUNTS();
@@ -579,7 +602,7 @@ static void test_open_not_held(void)
 	reset();
 	CHECK(hold_open(make(K_OPEN, 30, 1)) != 0); // outside open(2)
 	CHECK(!open_creating());
-	open_begin(-100, 0);
+	open_begin(0, -100, 0);
 	CHECK(hold_open(make(K_OPEN, 30, 1)) == 0);
 	CHECK(hold_open(make(K_OPEN, 30, 2)) != 0); // nested in the one held
 	CHECK(head_of(1, HELD_OPEN)->data[0] == (char)1);
@@ -593,22 +616,22 @@ static void test_open_no_tails(void)
 {
 	reset();
 	use()->taken = N_TAILS;
-	open_begin(-100, 0);
-	hold_name("/tmp/f");
+	open_begin(0, -100, 0);
+	hold_name(0, "/tmp/f");
 	CHECK(hold_open(make(K_OPEN, HEAD_DATA + CHUNK, 1)) != 0);
 	CHECK(untracked_count() == 1 && heads.count == 0);
-	CHECK(open_end(-6) == NULL && nsent == 0);
+	CHECK(open_end(0, -6) == NULL && nsent == 0);
 }
 
 static void test_open_restarted(void)
 {
 	reset();
-	open_begin(-100, 0);
+	open_begin(0, -100, 0);
 	hold_open(make(K_OPEN, HEAD_DATA + CHUNK, 1));
-	CHECK(open_end(-512) == NULL && nsent == 0 && heads.count == 0 && use()->taken == 0);
-	open_begin(-100, 0);
-	hold_name("/x");
-	CHECK(open_end(0) == NULL && nsent == 0 && heads.count == 0);
+	CHECK(open_end(0, -512) == NULL && nsent == 0 && heads.count == 0 && use()->taken == 0);
+	open_begin(0, -100, 0);
+	hold_name(0, "/x");
+	CHECK(open_end(0, 0) == NULL && nsent == 0 && heads.count == 0);
 }
 
 static void test_report_outcomes(void)
@@ -633,6 +656,7 @@ int main(void)
 	test_tails_for();
 	test_short_hold();
 	test_long_hold_round_trip();
+	test_scratch_per_program();
 	test_pool_limit();
 	test_replace_shorter_and_longer();
 	test_new_over_existing();

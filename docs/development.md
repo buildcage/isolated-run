@@ -74,6 +74,12 @@ The filesystem audit tracer's Go tests, and `docker/filesystem-audit/bpf/held_te
 the BPF program's holding logic on the build host with its maps replaced, run while the proxy image
 is built, so every job that builds it runs them.
 
+The kernels on GitHub-hosted runners never preempt the tracer's programs mid-run, so no job there
+can catch two of them sharing a buffer. After changing the BPF program, run "Test / Filesystem audit
+under preemption" by hand: it boots Ubuntu's 7.0 and 6.8 `generic` kernels in a VM, lets three
+processes on one CPU make changes under names of their own, and fails on a record mixing two of
+them (`test/filesystem-audit-preemption/`).
+
 ### Refreshing the filesystem audit fixtures
 
 The filesystem audit's golden test strips and renders a real recording from the

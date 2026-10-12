@@ -15,6 +15,26 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
+/**
+ * libbpf's BPF_PROG, with the body also given @p slot, a number of its own
+ * that picks its scratch event (see scratch_get()). A program not written
+ * with BPF_PROG passes its own __COUNTER__.
+ */
+#undef BPF_PROG
+#define BPF_PROG(name, args...)						    \
+name(unsigned long long *ctx);						    \
+static __always_inline typeof(name(0))					    \
+____##name(u32 slot, unsigned long long *ctx, ##args);			    \
+typeof(name(0)) name(unsigned long long *ctx)				    \
+{									    \
+	_Pragma("GCC diagnostic push")					    \
+	_Pragma("GCC diagnostic ignored \"-Wint-conversion\"")		    \
+	return ____##name(__COUNTER__, ___bpf_ctx_cast(args));		    \
+	_Pragma("GCC diagnostic pop")					    \
+}									    \
+static __always_inline typeof(name(0))					    \
+____##name(u32 slot, unsigned long long *ctx, ##args)
+
 #include "event.h"
 
 struct qstr {
@@ -173,15 +193,30 @@ static __always_inline void bump(void *counter)
 	u32 zero = 0;
 	u64 *v = bpf_map_lookup_elem(counter, &zero);
 	if (v)
-		*v += 1; // per-CPU, no atomics needed
+		__sync_fetch_and_add(v, 1); // another program on this CPU may be mid-update
 }
 
+#define N_SLOTS 32 ///< Programs that can take a scratch event; checked at the end.
+
+/**
+ * The event being assembled, one per program and CPU. Where the kernel has
+ * PREEMPT_RCU and preempts in the kernel (full or lazy), a program can be
+ * preempted mid-run, and the kernel's recursion check covers only that
+ * program, so an event shared by the programs on a CPU could be rewritten by
+ * another and record a path spliced from two.
+ */
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 1);
+	__uint(max_entries, N_SLOTS);
 	__type(key, u32);
 	__type(value, struct scratch_buf);
 } scratch SEC(".maps");
+
+/** The scratch event of the program whose BPF_PROG @p slot is. */
+static __always_inline struct event *scratch_get(u32 slot)
+{
+	return bpf_map_lookup_elem(&scratch, &slot);
+}
 
 struct pending {
 	u64 p1;
@@ -210,10 +245,9 @@ static __always_inline int in_target(void)
 	return bpf_current_task_under_cgroup(&target, 0) == 1;
 }
 
-static __always_inline struct event *start(u32 kind)
+static __always_inline struct event *start(u32 slot, u32 kind)
 {
-	u32 zero = 0;
-	struct event *e = bpf_map_lookup_elem(&scratch, &zero);
+	struct event *e = scratch_get(slot);
 	if (!e)
 		return 0;
 	struct task_struct *t = bpf_get_current_task_btf();
@@ -666,7 +700,7 @@ int BPF_PROG(on_exec_file, struct linux_binprm *bprm)
 {
 	if (!in_target())
 		return 0;
-	struct event *e = start(K_EXEC_FILE);
+	struct event *e = start(slot, K_EXEC_FILE);
 	if (!e)
 		return 0;
 	struct file *f = BPF_CORE_READ(bprm, file);
@@ -718,7 +752,7 @@ int BPF_PROG(on_exec, struct task_struct *p, int old_pid, struct linux_binprm *b
 		return 0;
 	u64 id = bpf_get_current_pid_tgid();
 	bpf_map_delete_elem(&in_exec, &id);
-	struct event *e = start(K_EXEC);
+	struct event *e = start(slot, K_EXEC);
 	if (!e)
 		return 0;
 	e->path_len = bpf_probe_read_kernel_str(e->data, PATH_LEN, BPF_CORE_READ(bprm, filename));
@@ -740,7 +774,7 @@ int BPF_PROG(on_fork, struct task_struct *parent, struct task_struct *child)
 	int tgid = BPF_CORE_READ(child, tgid);
 	if (tgid == BPF_CORE_READ(parent, tgid))
 		return 0; // a new thread, not a process
-	struct event *e = start(K_FORK);
+	struct event *e = start(slot, K_FORK);
 	if (!e)
 		return 0;
 	e->pid = tgid;
@@ -761,7 +795,7 @@ int BPF_PROG(on_##hook, const struct path *dir, struct dentry *dentry)		\
 {										\
 	if (!in_target())							\
 		return 0;							\
-	struct event *e = start(kind_);						\
+	struct event *e = start(slot, kind_);						\
 	if (!e)									\
 		return 0;							\
 	u32 off = leaf(e, 0, dentry, &e->n1);					\
@@ -779,7 +813,7 @@ int BPF_PROG(on_symlink, const struct path *dir, struct dentry *dentry, const ch
 {
 	if (!in_target())
 		return 0;
-	struct event *e = start(K_SYMLINK);
+	struct event *e = start(slot, K_SYMLINK);
 	if (!e)
 		return 0;
 	long r = bpf_probe_read_kernel_str(e->data, NAME_LEN, old_name);
@@ -797,7 +831,7 @@ int BPF_PROG(on_rename, const struct path *old_dir, struct dentry *old_dentry,
 {
 	if (!in_target())
 		return 0;
-	struct event *e = start(K_RENAME);
+	struct event *e = start(slot, K_RENAME);
 	if (!e)
 		return 0;
 	e->flags = flags;
@@ -815,7 +849,7 @@ int BPF_PROG(on_chmod, const struct path *path, unsigned short mode)
 {
 	if (!in_target())
 		return 0;
-	struct event *e = start(K_CHMOD);
+	struct event *e = start(slot, K_CHMOD);
 	if (!e)
 		return 0;
 	e->mode = mode;
@@ -834,7 +868,7 @@ int BPF_PROG(on_link, struct dentry *old_dentry, const struct path *new_dir,
 {
 	if (!in_target())
 		return 0;
-	struct event *e = start(K_LINK);
+	struct event *e = start(slot, K_LINK);
 	if (!e)
 		return 0;
 	struct vfsmount *mnt = BPF_CORE_READ(new_dir, mnt); // link(2) stays on one mount
@@ -852,7 +886,7 @@ int BPF_PROG(on_truncate, const struct path *path)
 {
 	if (!in_target())
 		return 0;
-	struct event *e = start(K_TRUNCATE);
+	struct event *e = start(slot, K_TRUNCATE);
 	if (!e)
 		return 0;
 	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
@@ -869,7 +903,7 @@ int BPF_PROG(on_file_truncate, struct file *file)
 {
 	if (!in_target())
 		return 0;
-	struct event *e = start(K_TRUNCATE);
+	struct event *e = start(slot, K_TRUNCATE);
 	if (!e)
 		return 0;
 	e->data_len = file_walk(e, file);
@@ -882,7 +916,7 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 {
 	if (!in_target())
 		return 0;
-	struct event *e = start(K_CHOWN);
+	struct event *e = start(slot, K_CHOWN);
 	if (!e)
 		return 0;
 	e->flags = uid;
@@ -897,7 +931,7 @@ int BPF_PROG(on_open, struct file *file)
 {
 	if (!in_target() || on_layer(file))
 		return 0;
-	struct event *e = start(K_OPEN);
+	struct event *e = start(slot, K_OPEN);
 	if (!e)
 		return 0;
 	e->flags = file->f_flags;
@@ -917,7 +951,7 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 {
 	if (!in_target() || open_creating())
 		return 0;
-	struct event *e = start(K_MKNOD);
+	struct event *e = start(slot, K_MKNOD);
 	if (!e)
 		return 0;
 	u32 off = leaf(e, 0, dentry, &e->n1);
@@ -926,14 +960,14 @@ int BPF_PROG(on_mknod, const struct path *dir, struct dentry *dentry)
 	return 0;
 }
 
-static __always_inline void open_enter(int dfd, u32 flags)
+static __always_inline void open_enter(u32 slot, int dfd, u32 flags)
 {
 	if (in_target())
-		open_begin(dfd, flags);
+		open_begin(slot, dfd, flags);
 }
 
 /** Records the failed open assembled in e, its name in place. */
-static __always_inline void open_failed(struct event *e, long ret)
+static __always_inline void open_failed(u32 slot, struct event *e, long ret)
 {
 	u64 ts = e->ts;
 	u32 flags = e->flags;
@@ -945,7 +979,7 @@ static __always_inline void open_failed(struct event *e, long ret)
 	if (e->n2)
 		bump(&untracked);
 	// start resets the header of the scratch e is in.
-	if (start(K_OPEN_FAILED) != e)
+	if (start(slot, K_OPEN_FAILED) != e)
 		return;
 	e->ts = ts;
 	e->path_len = -ret;
@@ -964,11 +998,11 @@ static __always_inline void open_failed(struct event *e, long ret)
 	submit(e);
 }
 
-static __always_inline void open_exit(long ret)
+static __always_inline void open_exit(u32 slot, long ret)
 {
-	struct event *e = open_end(ret);
+	struct event *e = open_end(slot, ret);
 	if (e)
-		open_failed(e, ret);
+		open_failed(slot, e, ret);
 }
 
 /**
@@ -979,24 +1013,24 @@ static __always_inline void open_exit(long ret)
 SEC("fentry/do_sys_openat2")
 int BPF_PROG(on_openat2_enter, int dfd, const char *filename, struct open_how *how)
 {
-	open_enter(dfd, BPF_CORE_READ(how, flags));
+	open_enter(slot, dfd, BPF_CORE_READ(how, flags));
 	return 0;
 }
 
 SEC("fentry/do_sys_open")
 int BPF_PROG(on_open_enter, int dfd, const char *filename, int flags)
 {
-	open_enter(dfd, flags);
+	open_enter(slot, dfd, flags);
 	return 0;
 }
 
-static __always_inline void stash_name(u64 *ctx)
+static __always_inline void stash_name(u32 slot, u64 *ctx)
 {
 	struct filename *ret = 0;
 	bpf_get_func_ret(ctx, (u64 *)&ret);
 	if ((long)ret < 0 && (long)ret >= -4095)
 		return;
-	hold_name(BPF_CORE_READ(ret, name));
+	hold_name(slot, BPF_CORE_READ(ret, name));
 }
 
 /**
@@ -1006,14 +1040,14 @@ static __always_inline void stash_name(u64 *ctx)
 SEC("fexit/getname_flags")
 int on_getname(u64 *ctx)
 {
-	stash_name(ctx);
+	stash_name(__COUNTER__, ctx);
 	return 0;
 }
 
 SEC("fexit/getname")
 int on_getname_outer(u64 *ctx)
 {
-	stash_name(ctx);
+	stash_name(__COUNTER__, ctx);
 	return 0;
 }
 
@@ -1027,7 +1061,7 @@ int on_openat2_exit(u64 *ctx)
 {
 	u64 ret = 0;
 	bpf_get_func_ret(ctx, &ret);
-	open_exit((int)ret);
+	open_exit(__COUNTER__, (int)ret);
 	return 0;
 }
 
@@ -1036,7 +1070,7 @@ int on_open_exit(u64 *ctx)
 {
 	u64 ret = 0;
 	bpf_get_func_ret(ctx, &ret);
-	open_exit((int)ret);
+	open_exit(__COUNTER__, (int)ret);
 	return 0;
 }
 
@@ -1063,7 +1097,7 @@ int BPF_PROG(on_file_permission, struct file *file, int mask)
 	}
 	if (!first_time(file, bit))
 		return 0;
-	struct event *e = start(kind);
+	struct event *e = start(slot, kind);
 	if (!e)
 		return 0;
 	file_path(e, file);
@@ -1071,12 +1105,12 @@ int BPF_PROG(on_file_permission, struct file *file, int mask)
 	return 0;
 }
 
-static __always_inline void map_event(struct file *file, struct dentry *d, struct vfsmount *mnt,
+static __always_inline void map_event(u32 slot, struct file *file, struct dentry *d, struct vfsmount *mnt,
 				     unsigned long prot, unsigned long flags, u8 bit, int image)
 {
 	if (!first_time(file, bit))
 		return;
-	struct event *e = start(K_MMAP);
+	struct event *e = start(slot, K_MMAP);
 	if (!e)
 		return;
 	e->mode = prot;
@@ -1088,17 +1122,17 @@ static __always_inline void map_event(struct file *file, struct dentry *d, struc
 }
 
 /** The write drops PROT_EXEC from its mode so it decodes as a write. */
-static __always_inline void map_events(struct file *file, struct dentry *d, struct vfsmount *mnt,
+static __always_inline void map_events(u32 slot, struct file *file, struct dentry *d, struct vfsmount *mnt,
 				      unsigned long prot, unsigned long flags, int at_mmap)
 {
 	int exec = prot & PROT_EXEC;
 	int write = (prot & PROT_WRITE) && (flags & MAP_SHARED);
 	if (exec)
-		map_event(file, d, mnt, prot, flags, SEEN_EXEC, at_mmap);
+		map_event(slot, file, d, mnt, prot, flags, SEEN_EXEC, at_mmap);
 	if (write)
-		map_event(file, d, mnt, prot & ~PROT_EXEC, flags, SEEN_WRITE, 0);
+		map_event(slot, file, d, mnt, prot & ~PROT_EXEC, flags, SEEN_WRITE, 0);
 	if (!exec && !write && at_mmap)
-		map_event(file, d, mnt, prot, flags, SEEN_READ, 1);
+		map_event(slot, file, d, mnt, prot, flags, SEEN_READ, 1);
 }
 
 /**
@@ -1109,21 +1143,21 @@ static __always_inline void map_events(struct file *file, struct dentry *d, stru
  * may have it inlined; one mapping seen at both is recorded once (first_time).
  * The return value is read with bpf_get_func_ret, as for the open exits.
  */
-static __always_inline void mapped(u64 *ctx, struct file *file, unsigned long prot,
+static __always_inline void mapped(u32 slot, u64 *ctx, struct file *file, unsigned long prot,
 				   unsigned long flags)
 {
 	u64 ret = 0;
 	bpf_get_func_ret(ctx, &ret);
 	if (!file || ret >= (u64)-4095 || !in_target() || on_layer(file))
 		return;
-	map_events(file, 0, 0, prot, flags, 1);
+	map_events(slot, file, 0, 0, prot, flags, 1);
 }
 
 SEC("fexit/vm_mmap_pgoff")
 int BPF_PROG(on_mmap, struct file *file, unsigned long addr, unsigned long len,
 	     unsigned long prot, unsigned long flags)
 {
-	mapped(ctx, file, prot, flags);
+	mapped(slot, ctx, file, prot, flags);
 	return 0;
 }
 
@@ -1131,7 +1165,7 @@ SEC("fexit/vm_mmap")
 int BPF_PROG(on_vm_mmap, struct file *file, unsigned long addr, unsigned long len,
 	     unsigned long prot, unsigned long flags)
 {
-	mapped(ctx, file, prot, flags);
+	mapped(slot, ctx, file, prot, flags);
 	return 0;
 }
 
@@ -1171,7 +1205,7 @@ int BPF_PROG(on_mprotect, struct vm_area_struct *vma, unsigned long reqprot, uns
 			return 0;
 		}
 	}
-	map_events(file, d, mnt, reqprot, flags, 0);
+	map_events(slot, file, d, mnt, reqprot, flags, 0);
 	return 0;
 }
 
@@ -1337,14 +1371,14 @@ int BPF_PROG(on_sys_enter, struct pt_regs *regs, long nr)
 }
 
 /** Emits the call its entry stashed, as it ended. */
-static __always_inline void op_exit(struct pending *pend, long ret)
+static __always_inline void op_exit(u32 slot, struct pending *pend, long ret)
 {
 	if (ret < 0 && -ret == pend->quiet_err)
 		return;
 	u32 kind = ret < 0 ? pend->kind : pend->kind_ok;
 	if (kind == 0)
 		return;
-	struct event *e = start(kind);
+	struct event *e = start(slot, kind);
 	if (!e)
 		return;
 	e->ts = pend->ts;
@@ -1420,11 +1454,11 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 		u32 t = tails_for(head->data_len);
 		// A failure the syscall's entry recorded stands for this one.
 		if (ret >= 0 || !pend)
-			report_held(&k, head, ret < 0 ? -ret : 0, 0);
+			report_held(slot, &k, head, ret < 0 ? -ret : 0, 0);
 		release(&k, t);
 	}
 	if (pend) {
-		op_exit(pend, ret);
+		op_exit(slot, pend, ret);
 		bpf_map_delete_elem(&pending_ops, &id);
 	}
 	return 0;
@@ -1433,3 +1467,5 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 /** @} */
 
 char LICENSE[] SEC("license") = "GPL";
+
+_Static_assert(__COUNTER__ <= N_SLOTS, "a program has no scratch event of its own");

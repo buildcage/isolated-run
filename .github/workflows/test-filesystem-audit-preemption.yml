@@ -1,0 +1,59 @@
+name: Test / Filesystem audit under preemption
+run-name: Test / Filesystem audit under preemption (${{ github.ref_name }})
+
+# Run by hand after changing the tracer's BPF program. The kernels on
+# GitHub-hosted runners never preempt it mid-run; Ubuntu's generic kernels
+# can, so this boots them in a VM and fails on a record assembled from two
+# events.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  vm:
+    name: test (${{ matrix.package }}, ${{ matrix.mode }})
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 7.0 as Ubuntu 26.04 ships it: lazy by default, and full.
+          - { package: linux-image-generic-hwe-24.04, version: "7.", mode: default }
+          - { package: linux-image-generic-hwe-24.04, version: "7.", mode: full }
+          # 6.8: voluntary by default, and full.
+          - { package: linux-image-generic, version: "6.8.", mode: default }
+          - { package: linux-image-generic, version: "6.8.", mode: full }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the tracer
+        run: |
+          docker build -t filesystem-audit-build --target filesystem-audit-build -f docker/inspect/Dockerfile .
+          id=$(docker create filesystem-audit-build)
+          docker cp "$id:/out/filesystem-audit" test/filesystem-audit-preemption/
+          docker rm "$id"
+      - name: Run in a VM
+        env:
+          PACKAGE: ${{ matrix.package }}
+          VERSION: ${{ matrix.version }}
+          MODE: ${{ matrix.mode }}
+        run: |
+          sudo chmod 666 /dev/kvm
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 "$PACKAGE" >/dev/null
+          pipx install virtme-ng==1.41 >/dev/null
+          sudo chmod 644 /boot/vmlinuz-*
+          kernel=$(ls /boot/vmlinuz-"$VERSION"*-generic | sort -V | tail -1)
+          [ -n "$kernel" ]
+          append=""; [ "$MODE" = default ] || append="preempt=$MODE"
+          timeout 900 vng -r "$kernel" -p 4 -m 4G --user root --append "$append" -- \
+            sh "$PWD/test/filesystem-audit-preemption/vm.sh" "$PWD/test/filesystem-audit-preemption" |
+            tee "$RUNNER_TEMP/vm.log"
+          # vng may not pass the guest's exit status on, so the log decides.
+          grep -q '^records:' "$RUNNER_TEMP/vm.log"
+          if grep -q '^FAIL' "$RUNNER_TEMP/vm.log"; then exit 1; fi
