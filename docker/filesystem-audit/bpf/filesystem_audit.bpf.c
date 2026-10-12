@@ -391,10 +391,12 @@ static __always_inline u32 tails_for(u32 data_len)
 // halfway. A few tries lost to other CPUs count as none free.
 static __always_inline int take_tails(u32 n)
 {
+	if (!n)
+		return 0;
 	u32 zero = 0;
 	struct tail_use *u = bpf_map_lookup_elem(&tail_use, &zero);
-	if (!n || !u)
-		return n ? -1 : 0;
+	if (!u)
+		return -1;
 	for (int i = 0; i < 8; i++) {
 		u64 v = *(volatile u64 *)&u->taken;
 		if (v + n > N_TAILS)
@@ -410,9 +412,11 @@ static __always_inline int take_tails(u32 n)
 
 static __always_inline void give_tails(u32 n)
 {
+	if (!n)
+		return;
 	u32 zero = 0;
 	struct tail_use *u = bpf_map_lookup_elem(&tail_use, &zero);
-	if (n && u)
+	if (u)
 		__sync_fetch_and_add(&u->taken, -(u64)n);
 }
 
