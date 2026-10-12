@@ -7,7 +7,6 @@ import { writeStepSummary } from "#core/lib/actions/write-step-summary.ts";
 import { createDocker, type Docker } from "#core/lib/docker/client.ts";
 import { readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
 import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
-import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { readActionVersion as readImageActionVersion } from "#core/lib/report/action-version.ts";
 import { buildInspectReportData } from "#core/lib/report/build/inspect.ts";
 import { buildUniversalReportData } from "#core/lib/report/build/universal.ts";
@@ -23,10 +22,6 @@ import {
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
-  renderWouldRefuseBody,
-  wouldRefuseTruncationNote,
-} from "#core/lib/report/render/inspect-details.ts";
-import {
   renderReportBlocks,
   TRAFFIC_BLOCK,
   trafficNotice,
@@ -35,7 +30,15 @@ import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts"
 
 import { AWS_REASON_PREFIX } from "../proxy/haproxy-aws-keys.ts";
 import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
-import { TRAFFIC_PRIORITIES } from "./summary-priorities.ts";
+import { TRAFFIC_PRIORITIES, WOULD_REFUSE_PRIORITY } from "./summary-priorities.ts";
+import {
+  describeWouldRefuse,
+  keyRefusalLabel,
+  refusedKeys,
+  WOULD_REFUSE_BLOCK,
+  wouldRefuseBlocks,
+  wouldRefuseTruncationNote,
+} from "./would-refuse.ts";
 
 export type Report = ReportData;
 export type { ProxyEngine };
@@ -144,7 +147,7 @@ function withAwsTroubleshootingLink(
   const refusedByAwsCheck =
     report.blocked.some((r) => !r.expected && r.reason.startsWith(AWS_REASON_PREFIX)) ||
     report.timeline.some((e) => e.wouldRefuse?.startsWith(AWS_REASON_PREFIX));
-  const tables = new Set<string>([TRAFFIC_BLOCK.blocked, TRAFFIC_BLOCK.wouldRefuse]);
+  const tables = new Set<string>([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]);
   const at = blocks.findLastIndex((b) => b.id !== undefined && tables.has(b.id));
   if (!refusedByAwsCheck || at === -1) return blocks;
   const url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`;
@@ -156,71 +159,6 @@ function withAwsTroubleshootingLink(
     text: `\n<sub>*For an \`aws-\` reason, see [what to do](${url}).*</sub>\n`,
   };
   return [...blocks.slice(0, at + 1), link, ...blocks.slice(at + 1)];
-}
-
-/**
- * Restrict Would Refuse with the first request of each host and reason, in the
- * order each first appeared, and how many more there were. A role assumed in an
- * account not given has every later request signed with its key refused, and a
- * line for each would bury the other refusals, so aws-key-not-allowed is
- * grouped by key instead, whatever the host, and names the account of the role
- * whose AssumeRole answer issued the key. The time is left out, since a line
- * stands for requests made at different times.
- */
-function withWouldRefuseGrouped(blocks: SummaryBlock[], report: Report): SummaryBlock[] {
-  const at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse);
-  if (at === -1) return blocks;
-  const issuers = new Map<string, string>();
-  for (const e of report.timeline) {
-    const { issuedKeyRef, assumedAccount } = e.extensions?.aws ?? {};
-    if (issuedKeyRef && assumedAccount && /^\d{12}$/.test(assumedAccount)) {
-      issuers.set(issuedKeyRef, assumedAccount);
-    }
-  }
-  const keyNotAllowed = `${AWS_REASON_PREFIX}key-not-allowed`;
-  const keys = new Map<string, number>();
-  const groups = new Map<string, TrafficEvent[]>();
-  for (const e of report.timeline) {
-    if (e.wouldRefuse === undefined) continue;
-    const keyRef = e.wouldRefuse === keyNotAllowed ? e.extensions?.aws?.keyRef : undefined;
-    // The action too, so a line's mark and outcome hold for the requests it stands for.
-    const key = keyRef
-      ? [e.action, "key", keyRef].join(" ")
-      : [e.action, e.protocol, e.host, e.port, e.wouldRefuse].join(" ");
-    const group = groups.get(key);
-    if (group) {
-      group.push(e);
-      continue;
-    }
-    if (keyRef && !keys.has(keyRef)) keys.set(keyRef, keys.size + 1);
-    const account = keyRef && issuers.get(keyRef);
-    const label = keyRef
-      ? `${keyNotAllowed}, key ${keys.get(keyRef)}${account ? ` from a role in ${account}` : ""}`
-      : e.wouldRefuse;
-    groups.set(key, [{ ...e, wouldRefuse: label }]);
-  }
-  const counts = [...groups.values()];
-  // One line per request inside the fence, each starting with its mark and time.
-  const lines = renderWouldRefuseBody(
-    counts.map((events) => events[0]),
-    report.startedAt,
-  )
-    .split("\n")
-    .slice(1, -2)
-    .map((line, i) => {
-      const rest = counts[i].length - 1;
-      return line.replace(/^(\S+) \S+: /, "$1 ") + (rest > 0 ? ` (+${rest} more)` : "");
-    });
-  const note =
-    "Requests audit let through that restrict would refuse, the first for each host and reason, " +
-    "or for each key under `aws-key-not-allowed`.";
-  const { text } = blocks[at];
-  const before = `${text.slice(0, text.indexOf("###"))}### 🚨 Restrict Would Refuse\n\n<sub>*${note}*</sub>\n\n`;
-  return blocks.with(at, {
-    ...blocks[at],
-    text: `${before}\`\`\`\n${lines.join("\n")}\n\`\`\`\n`,
-    head: before.split("\n").length,
-  });
 }
 
 /**
@@ -243,6 +181,9 @@ export function computeReportOutcomes(
     failOnBlocked: failOnBlocked ?? false,
     engineLabel: "sandbox",
   });
+  const wouldRefuse = describeWouldRefuse(report.timeline);
+  if (wouldRefuse) emissions.push(wouldRefuse);
+  const keys = refusedKeys(report.timeline);
   const rendered = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
     // stepLabel is the untrusted `label` input; the renderer escapes the whole
     // title, so it is folded in raw here rather than pre-sanitized twice.
@@ -251,13 +192,10 @@ export function computeReportOutcomes(
     runCommand,
     extraInputs,
     actionVersion,
+    refusalLabel: keyRefusalLabel(keys),
+    extraBlocks: (gap) => wouldRefuseBlocks(report.timeline, keys, WOULD_REFUSE_PRIORITY, gap),
   });
-  const blocks = withAwsTroubleshootingLink(
-    withWouldRefuseGrouped(rendered, report),
-    report,
-    actionRepo,
-    actionRef,
-  );
+  const blocks = withAwsTroubleshootingLink(rendered, report, actionRepo, actionRef);
 
   return { markdown: joinSummaryBlocks(blocks), blocks, emissions };
 }
@@ -333,7 +271,14 @@ export async function writeReportSummary(
   applyOutcomeAnnotations(annotation, outcomes.emissions);
 
   const summary = fitSummaryBlocks(
-    [...withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)), ...extraBlocks],
+    [
+      ...withNotices(outcomes.blocks, (b) =>
+        b.id === WOULD_REFUSE_BLOCK
+          ? wouldRefuseTruncationNote(artifactAvailable)
+          : trafficNotice(b, artifactAvailable),
+      ),
+      ...extraBlocks,
+    ],
     env,
     deps.fileSize,
   );

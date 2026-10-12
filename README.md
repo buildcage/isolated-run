@@ -684,10 +684,10 @@ GitHub caps a Job Summary at 1 MiB per step, counting what the command itself wr
 the whole summary rather than truncating it. When the report, with the filesystem audit's section if
 one was recorded, would push the step over that limit, its parts give way in order: the filesystem
 audit's details, the timeline, the filesystem audit's tables, then the allowed, failed and blocked
-tables, then the 🚨 list of requests `restrict` would refuse, and last the `restrict` example. A part
+tables, then the 🚨 tables of requests `restrict` would refuse, and last the `restrict` example. A part
 that does not fit is cut at a line boundary with a note after what is kept, or replaced by the note
 when nothing of it fits; the example is always replaced whole rather than printed in part. Once a
-table or the 🚨 list is cut, the timeline is left out with it, under that one note. The filesystem
+table is cut, the timeline is left out with it, under that one note. The filesystem
 audit's parts follow the same rule in their order, the executed table, the accessed paths, then the
 details: once one is cut, those after it are left out under its note. The report is written to the
 Job Summary only, so what was cut is recovered from the [traffic

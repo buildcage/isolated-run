@@ -107,11 +107,8 @@ if grep -qE "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(rest
 else
   fail "an AssumeRole answer to a key restrict would refuse taught its key"
 fi
-if grep -qE "POST https://ssm\.us-east-1\.amazonaws\.com/ -> .*\(restrict would refuse: aws-key-not-allowed, key 3 from a role in 999999999999\) \(\+1 more\)$" <<< "$SUMMARY"; then
-  pass "the requests signed with a key an AssumeRole answer issued are one line, naming the role's account"
-else
-  fail "the requests signed with a key an AssumeRole answer issued are not one line naming the role's account"
-fi
+assert_summary_contains "| key 3 from a role in 999999999999 | ssm.us-east-1.amazonaws.com, sqs.us-east-1.amazonaws.com | 2 |" \
+  "the requests signed with a key an AssumeRole answer issued are one row, naming the role's account"
 assert_summary_contains "allowed_aws_role_accounts: |" "the restrict example lists the accounts one to a line"
 if grep -qE "^ +111111111111$" <<< "$SUMMARY"; then
   pass "the restrict example names the account given, unmarked"

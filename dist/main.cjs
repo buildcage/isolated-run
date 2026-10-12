@@ -69107,18 +69107,9 @@ function isRedundantDns(event, connected) {
 }
 //#endregion
 //#region src/core/lib/report/render/inspect-details.ts
-function renderInspectDetailsBody(timeline, startedAt) {
-	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), body = fenced(relevant.filter((e) => !isRedundantDns(e, connected)), startedAt);
-	return body && `${body}\n`;
-}
-function renderWouldRefuseBody(timeline, startedAt) {
-	return fenced(timeline.filter((e) => e.wouldRefuse !== void 0), startedAt);
-}
-function fenced(events, startedAt) {
-	return events.length === 0 ? "" : `\`\`\`\n${events.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n`;
-}
-function wouldRefuseTruncationNote(artifactAvailable) {
-	return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
+function renderInspectDetailsBody(timeline, startedAt, refusalLabel = () => void 0) {
+	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
+	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, refusalLabel)).join("\n")}\n\`\`\`\n\n`;
 }
 const MARK = {
 	block: "🚫",
@@ -69126,9 +69117,9 @@ const MARK = {
 	incomplete: "⚠️",
 	failed: "⚠️"
 };
-function renderEvent(event, startedAt) {
-	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "🚨" : MARK[event.action] ?? "✅", note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${event.wouldRefuse})`;
-	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}${note}`;
+function renderEvent(event, startedAt, refusalLabel) {
+	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "🚨" : MARK[event.action] ?? "✅", label = (reason) => refusalLabel(event, reason) ?? reason, note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${label(event.wouldRefuse)})`;
+	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event, label)}${note}`;
 }
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
 function credentialName(name) {
@@ -69167,8 +69158,8 @@ function subject(event) {
 	}
 	return `${event.method} ${redactCredentialQuery(event.url)}`;
 }
-function outcome(event) {
-	if (event.action === "block") return event.reason ?? "blocked";
+function outcome(event, label) {
+	if (event.action === "block") return event.reason === void 0 ? "blocked" : label(event.reason);
 	if (event.action === "incomplete") return event.reason ?? "no request";
 	if (event.action === "failed") return event.reason ?? "failed";
 	if (event.action === "discovery") return `no data (${event.queryType} is never served)`;
@@ -69308,7 +69299,6 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 //#region src/core/lib/report/render/render-report-markdown.ts
 const SECTION = "traffic", TRAFFIC_BLOCK = {
 	example: "traffic-example",
-	wouldRefuse: "traffic-would-refuse",
 	blocked: "traffic-blocked",
 	failed: "traffic-failed",
 	passed: "traffic-passed",
@@ -69318,7 +69308,6 @@ Object.fromEntries(Object.values(TRAFFIC_BLOCK).map((id) => [id, 0]));
 function trafficNotice(block, artifactAvailable) {
 	switch (block.id) {
 		case TRAFFIC_BLOCK.example: return restrictExampleTruncationNote(artifactAvailable);
-		case TRAFFIC_BLOCK.wouldRefuse: return wouldRefuseTruncationNote(artifactAvailable);
 		case TRAFFIC_BLOCK.log: return communicationTruncationNote(artifactAvailable);
 		case TRAFFIC_BLOCK.blocked:
 		case TRAFFIC_BLOCK.failed:
@@ -69326,7 +69315,7 @@ function trafficNotice(block, artifactAvailable) {
 		default: return;
 	}
 }
-function tableBlock(id, priority, before, table, after) {
+function trafficTableBlock(id, priority, before, table, after) {
 	return {
 		id,
 		priority,
@@ -69344,11 +69333,19 @@ const frame = (text) => ({
 	text,
 	cut: "keep"
 });
-function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", ...step } = {}) {
+function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", refusalLabel, extraBlocks = () => [], ...step } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
 	report.logLooksPlausible || (top += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(frame(top));
 	let wrote = !1, gap = () => wrote ? "\n" : "";
-	if (report.passed.length > 0 && (blocks.push(tableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), isAudit) {
+	if (report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), report.blocked.length > 0) {
+		let blocked = foldExpectedBlockedRows(report.blocked);
+		blocks.push(trafficTableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${gap()}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
+			showReason: !0,
+			showExpected
+		}), "\n")), wrote = !0;
+	}
+	let extra = extraBlocks(gap());
+	if (blocks.push(...extra), wrote ||= extra.some((b) => b.text !== ""), report.failed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap()}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n")), wrote = !0), isAudit) {
 		let example = report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 			...step,
 			allowedIpRules: report.parameters.allowedIpRules,
@@ -69363,30 +69360,9 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 			text: example
 		}), wrote ||= example !== "";
 	}
-	if (report.blocked.length > 0) {
-		let blocked = foldExpectedBlockedRows(report.blocked);
-		blocks.push(tableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${gap()}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
-			showReason: !0,
-			showExpected
-		}), "\n")), wrote = !0;
-	}
-	let wouldRefuse = renderWouldRefuseBody(report.timeline, report.startedAt);
-	if (wouldRefuse) {
-		let before = `${gap()}### 🚨 Restrict Would Refuse\n\n`;
-		blocks.push({
-			id: TRAFFIC_BLOCK.wouldRefuse,
-			priority: priorities[TRAFFIC_BLOCK.wouldRefuse],
-			level: 2,
-			section: SECTION,
-			text: before + wouldRefuse,
-			cut: "lines",
-			head: before.split("\n").length
-		}), wrote = !0;
-	}
-	report.failed.length > 0 && blocks.push(tableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap()}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
 	let bottom = "";
 	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame(`${gap()}_(no communication)_\n\n`));
-	let details = renderInspectDetailsBody(report.timeline, report.startedAt);
+	let details = renderInspectDetailsBody(report.timeline, report.startedAt, refusalLabel);
 	return details && blocks.push({
 		id: TRAFFIC_BLOCK.log,
 		priority: priorities[TRAFFIC_BLOCK.log],
@@ -69402,7 +69378,6 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 //#region src/lib/summary-priorities.ts
 const TRAFFIC_PRIORITIES = {
 	[TRAFFIC_BLOCK.example]: 1,
-	[TRAFFIC_BLOCK.wouldRefuse]: 2,
 	[TRAFFIC_BLOCK.blocked]: 3,
 	[TRAFFIC_BLOCK.failed]: 4,
 	[TRAFFIC_BLOCK.passed]: 5,
@@ -73130,17 +73105,7 @@ function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 	})], undecided = describeUndecidedRequests(report, engineLabel);
 	undecided && emissions.push(undecided);
 	let failed = describeFailedConnections(report, engineLabel);
-	failed && emissions.push(failed);
-	let wouldRefuse = describeWouldRefuse(report);
-	return wouldRefuse && emissions.push(wouldRefuse), emissions;
-}
-function describeWouldRefuse(report) {
-	let count = report.timeline.filter((event) => event.wouldRefuse !== void 0).length;
-	if (count !== 0) return {
-		level: "warning",
-		shouldFail: !1,
-		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section lists them with the reason.`
-	};
+	return failed && emissions.push(failed), emissions;
 }
 function describeUndecidedRequests(report, engineLabel) {
 	let isNoise = clientEndedNoise(report.timeline), count = report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
@@ -73164,6 +73129,96 @@ const vpceHost = (service) => `^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.${service}\\.[
 apiHost("sts"), apiHost("ec2", "ec2(-fips)?"), "" + vpceHost("git-codecommit(-fips)?");
 const formName = (name) => name.split("").map((c) => `(${[c, ...new Set([c, c.toUpperCase()].map((l) => `%${l.charCodeAt(0).toString(16)}`))].join("|")})`).join("");
 formName("awsaccesskeyid"), formName("x-amz-credential"), formName("rolearn"), formName("action");
+//#endregion
+//#region src/lib/would-refuse.ts
+const KEY_NOT_ALLOWED = "aws-key-not-allowed";
+function refusedKeys(timeline) {
+	let issuers = new Map(), seen = new Map();
+	for (let e of timeline) {
+		let { issuedKeyRef, assumedAccount } = e.extensions?.aws ?? {};
+		issuedKeyRef && assumedAccount && /^\d{12}$/.test(assumedAccount) && issuers.set(issuedKeyRef, assumedAccount);
+		let keyRef = refusedKeyRef(e);
+		if (!keyRef) continue;
+		let key = seen.get(keyRef) ?? {
+			hosts: new Set(),
+			count: 0
+		};
+		seen.set(keyRef, key), auditedKey(e) && (key.hosts.add(e.host), key.count++);
+	}
+	let numbered = seen.size > 1;
+	return new Map([...seen].map(([keyRef, key], i) => {
+		let account = issuers.get(keyRef), label = `key${numbered ? ` ${i + 1}` : ""}${account ? ` from a role in ${account}` : ""}`;
+		return [keyRef, {
+			...key,
+			label,
+			bare: !numbered && !account
+		}];
+	}));
+}
+function refusedKeyRef(e) {
+	return e.action === "block" && e.reason === KEY_NOT_ALLOWED || e.wouldRefuse === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : void 0;
+}
+function letThrough(e) {
+	return e.wouldRefuse !== void 0 && e.action !== "block";
+}
+function auditedKey(e) {
+	return letThrough(e) && e.wouldRefuse === KEY_NOT_ALLOWED && e.extensions?.aws?.keyRef !== void 0;
+}
+function keyRefusalLabel(keys) {
+	return (e, reason) => {
+		let keyRef = reason === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : void 0, key = keyRef ? keys.get(keyRef) : void 0;
+		return key && !key.bare ? `${KEY_NOT_ALLOWED}, ${key.label}` : void 0;
+	};
+}
+const WOULD_REFUSE_BLOCK = "traffic-would-refuse";
+function wouldRefuseTruncationNote(artifactAvailable) {
+	return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
+}
+function describeWouldRefuse(timeline) {
+	let count = timeline.filter(letThrough).length;
+	if (count !== 0) return {
+		level: "warning",
+		shouldFail: !1,
+		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section counts them by key or by host and reason.`
+	};
+}
+function wouldRefuseBlocks(timeline, keys, priority, gap) {
+	let heading = `${gap}### 🚨 Restrict Would Refuse\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
+	if (audited.length > 0) {
+		let table = markdownTable([
+			{
+				key: "key",
+				title: `Key (${KEY_NOT_ALLOWED})`
+			},
+			{
+				key: "hosts",
+				title: "Hosts"
+			},
+			{
+				key: "count",
+				title: "Count",
+				align: "right"
+			}
+		], audited.map(({ label, hosts, count }) => {
+			let rest = hosts.size - 3, shown = [...hosts].slice(0, 3).join(", ");
+			return {
+				key: label,
+				hosts: rest > 0 ? `${shown} and ${rest} more` : shown,
+				count
+			};
+		}));
+		blocks.push(trafficTableBlock(WOULD_REFUSE_BLOCK, priority, heading, table, "\n"));
+	}
+	let rows = aggregate(timeline.flatMap((e) => !letThrough(e) || auditedKey(e) ? [] : [{
+		...toHostRow(e),
+		reason: e.wouldRefuse
+	}]));
+	if (rows.length > 0) {
+		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 });
+		blocks.push(trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n"));
+	}
+	return blocks;
+}
 //#endregion
 //#region src/lib/report.ts
 const HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
@@ -73194,7 +73249,7 @@ function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
 }
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
-	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => e.wouldRefuse?.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, TRAFFIC_BLOCK.wouldRefuse]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
+	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => e.wouldRefuse?.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
 	if (!refusedByAwsCheck || at === -1) return blocks;
 	let link = {
 		priority: 0,
@@ -73209,60 +73264,21 @@ function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 		...blocks.slice(at + 1)
 	];
 }
-function withWouldRefuseGrouped(blocks, report) {
-	let at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse);
-	if (at === -1) return blocks;
-	let issuers = new Map();
-	for (let e of report.timeline) {
-		let { issuedKeyRef, assumedAccount } = e.extensions?.aws ?? {};
-		issuedKeyRef && assumedAccount && /^\d{12}$/.test(assumedAccount) && issuers.set(issuedKeyRef, assumedAccount);
-	}
-	let keyNotAllowed = "aws-key-not-allowed", keys = new Map(), groups = new Map();
-	for (let e of report.timeline) {
-		if (e.wouldRefuse === void 0) continue;
-		let keyRef = e.wouldRefuse === keyNotAllowed ? e.extensions?.aws?.keyRef : void 0, key = keyRef ? [
-			e.action,
-			"key",
-			keyRef
-		].join(" ") : [
-			e.action,
-			e.protocol,
-			e.host,
-			e.port,
-			e.wouldRefuse
-		].join(" "), group = groups.get(key);
-		if (group) {
-			group.push(e);
-			continue;
-		}
-		keyRef && !keys.has(keyRef) && keys.set(keyRef, keys.size + 1);
-		let account = keyRef && issuers.get(keyRef), label = keyRef ? `${keyNotAllowed}, key ${keys.get(keyRef)}${account ? ` from a role in ${account}` : ""}` : e.wouldRefuse;
-		groups.set(key, [{
-			...e,
-			wouldRefuse: label
-		}]);
-	}
-	let counts = [...groups.values()], lines = renderWouldRefuseBody(counts.map((events) => events[0]), report.startedAt).split("\n").slice(1, -2).map((line, i) => {
-		let rest = counts[i].length - 1;
-		return line.replace(/^(\S+) \S+: /, "$1 ") + (rest > 0 ? ` (+${rest} more)` : "");
-	}), { text } = blocks[at], before = `${text.slice(0, text.indexOf("###"))}### 🚨 Restrict Would Refuse\n\n<sub>*Requests audit let through that restrict would refuse, the first for each host and reason, or for each key under \`aws-key-not-allowed\`.*</sub>\n\n`;
-	return blocks.with(at, {
-		...blocks[at],
-		text: `${before}\`\`\`\n${lines.join("\n")}\n\`\`\`\n`,
-		head: before.split("\n").length
-	});
-}
 function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
-	}), blocks = withAwsTroubleshootingLink(withWouldRefuseGrouped(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
+	}), wouldRefuse = describeWouldRefuse(report.timeline);
+	wouldRefuse && emissions.push(wouldRefuse);
+	let keys = refusedKeys(report.timeline), blocks = withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
 		title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
 		stepName: "Start isolated-run",
 		runCommand,
 		extraInputs,
-		actionVersion
-	}), report), report, actionRepo, actionRef);
+		actionVersion,
+		refusalLabel: keyRefusalLabel(keys),
+		extraBlocks: (gap) => wouldRefuseBlocks(report.timeline, keys, 2, gap)
+	}), report, actionRepo, actionRef);
 	return {
 		markdown: joinSummaryBlocks(blocks),
 		blocks,
@@ -73286,7 +73302,7 @@ async function writeSummaryBlocks(blocks, env, { fileSize, writeSummary = writeS
 async function writeReportSummary(report, annotation, { extraBlocks = [], ...options }, artifactAvailable, env, { appendFile = node_fs.appendFileSync, ...deps } = {}) {
 	let outcomes = computeReportOutcomes(report, options);
 	applyOutcomeAnnotations(annotation, outcomes.emissions);
-	let summary = fitSummaryBlocks([...withNotices(outcomes.blocks, (b) => trafficNotice(b, artifactAvailable)), ...extraBlocks], env, deps.fileSize);
+	let summary = fitSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-refuse" ? wouldRefuseTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, deps.fileSize);
 	summary.includes(wouldRefuseTruncationNote(artifactAvailable)) && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")), await (deps.writeSummary ?? writeStepSummary)(summary, env.GITHUB_STEP_SUMMARY);
 }
 //#endregion
