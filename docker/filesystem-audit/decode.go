@@ -6,28 +6,77 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
-// kindNames maps the kind field of struct event to a name. A failed operation
-// decodes to the name of the one that succeeded, with Failed set: the kinds
-// only a failure has (12, 16-19, 21, 25-30), and any path change the kernel
-// refused after its hook saw it.
-var kindNames = map[uint32]string{
-	1: "open", 2: "exec", 3: "unlink", 4: "rmdir", 5: "rename", 6: "mkdir",
-	7: "chmod", 8: "symlink", 9: "link", 10: "truncate", 11: "chown",
-	12: "open", 13: "read", 14: "write", 15: "mmap",
-	16: "unlink", 17: "rename", 18: "chmod", 19: "chown", 20: "attr", 21: "attr",
-	22: "fork", 23: "exec-file", 24: "mknod", 25: "rmdir",
-	26: "mkdir", 27: "mknod", 28: "symlink", 29: "link", 30: "truncate",
-	31: "syscall",
+// kindNames names each kind of struct event. A failed operation decodes to
+// the name of the one that succeeded, with Failed set: the *_FAILED kinds, and
+// any path change the kernel refused after its hook saw it.
+var kindNames = [...]string{
+	filesystemAuditKindK_OPEN:            "open",
+	filesystemAuditKindK_EXEC:            "exec",
+	filesystemAuditKindK_UNLINK:          "unlink",
+	filesystemAuditKindK_RMDIR:           "rmdir",
+	filesystemAuditKindK_RENAME:          "rename",
+	filesystemAuditKindK_MKDIR:           "mkdir",
+	filesystemAuditKindK_CHMOD:           "chmod",
+	filesystemAuditKindK_SYMLINK:         "symlink",
+	filesystemAuditKindK_LINK:            "link",
+	filesystemAuditKindK_TRUNCATE:        "truncate",
+	filesystemAuditKindK_CHOWN:           "chown",
+	filesystemAuditKindK_OPEN_FAILED:     "open",
+	filesystemAuditKindK_READ:            "read",
+	filesystemAuditKindK_WRITE:           "write",
+	filesystemAuditKindK_MMAP:            "mmap",
+	filesystemAuditKindK_UNLINK_FAILED:   "unlink",
+	filesystemAuditKindK_RENAME_FAILED:   "rename",
+	filesystemAuditKindK_CHMOD_FAILED:    "chmod",
+	filesystemAuditKindK_CHOWN_FAILED:    "chown",
+	filesystemAuditKindK_ATTR:            "attr",
+	filesystemAuditKindK_ATTR_FAILED:     "attr",
+	filesystemAuditKindK_FORK:            "fork",
+	filesystemAuditKindK_EXEC_FILE:       "exec-file",
+	filesystemAuditKindK_MKNOD:           "mknod",
+	filesystemAuditKindK_RMDIR_FAILED:    "rmdir",
+	filesystemAuditKindK_MKDIR_FAILED:    "mkdir",
+	filesystemAuditKindK_MKNOD_FAILED:    "mknod",
+	filesystemAuditKindK_SYMLINK_FAILED:  "symlink",
+	filesystemAuditKindK_LINK_FAILED:     "link",
+	filesystemAuditKindK_TRUNCATE_FAILED: "truncate",
+	filesystemAuditKindK_SYSCALL:         "syscall",
 }
 
-// Mirrors the fixed header of struct event in bpf/event.h:
-// eight u32 fields, four u8 fields, comm[16], u32 err, marks and gid, the u64
-// timestamp, then the data bytes.
-const hdrLen = 8*4 + 4 + 16 + 4 + 4 + 4 + 8
+func kindName(kind filesystemAuditKind) string {
+	if int(kind) < len(kindNames) {
+		return kindNames[kind]
+	}
+	return ""
+}
+
+// Where struct event's fields sit in a sample, from the type bpf2go generates
+// from bpf/event.h, so a change there moves them too.
+const (
+	offKind      = int(unsafe.Offsetof(filesystemAuditEvent{}.Kind))
+	offPid       = int(unsafe.Offsetof(filesystemAuditEvent{}.Pid))
+	offPpid      = int(unsafe.Offsetof(filesystemAuditEvent{}.Ppid))
+	offFlags     = int(unsafe.Offsetof(filesystemAuditEvent{}.Flags))
+	offMode      = int(unsafe.Offsetof(filesystemAuditEvent{}.Mode))
+	offPathLen   = int(unsafe.Offsetof(filesystemAuditEvent{}.PathLen))
+	offBases     = int(unsafe.Offsetof(filesystemAuditEvent{}.Bases))
+	offN1        = int(unsafe.Offsetof(filesystemAuditEvent{}.N1))
+	offN2        = int(unsafe.Offsetof(filesystemAuditEvent{}.N2))
+	offTruncated = int(unsafe.Offsetof(filesystemAuditEvent{}.Truncated))
+	offTrunc2    = int(unsafe.Offsetof(filesystemAuditEvent{}.Trunc2))
+	offComm      = int(unsafe.Offsetof(filesystemAuditEvent{}.Comm))
+	commLen      = len(filesystemAuditEvent{}.Comm)
+	offErr       = int(unsafe.Offsetof(filesystemAuditEvent{}.Err))
+	offMarks     = int(unsafe.Offsetof(filesystemAuditEvent{}.Marks))
+	offGid       = int(unsafe.Offsetof(filesystemAuditEvent{}.Gid))
+	offTs        = int(unsafe.Offsetof(filesystemAuditEvent{}.Ts))
+	hdrLen       = int(unsafe.Offsetof(filesystemAuditEvent{}.Data))
+)
 
 const (
 	markInternal = 1
@@ -171,31 +220,31 @@ func decode(raw []byte) (record, error) {
 		return record{}, fmt.Errorf("short event: %d bytes", len(raw))
 	}
 	le := binary.LittleEndian
-	kind := le.Uint32(raw[0:])
-	flags := le.Uint32(raw[12:])
-	mode := le.Uint32(raw[16:])
-	pathRet := int32(le.Uint32(raw[20:]))
-	bases := le.Uint32(raw[24:])
-	n1, n2 := int(raw[32]), int(raw[33])
-	truncated, truncated2 := raw[34] != 0, raw[35] != 0
+	kind := filesystemAuditKind(le.Uint32(raw[offKind:]))
+	flags := le.Uint32(raw[offFlags:])
+	mode := le.Uint32(raw[offMode:])
+	pathRet := int32(le.Uint32(raw[offPathLen:]))
+	bases := le.Uint32(raw[offBases:])
+	n1, n2 := int(raw[offN1]), int(raw[offN2])
+	truncated, truncated2 := raw[offTruncated] != 0, raw[offTrunc2] != 0
 	data := raw[hdrLen:]
-	marks := le.Uint32(raw[56:])
-	gid := le.Uint32(raw[60:]) // a failed chown's; a held one's is in mode
+	marks := le.Uint32(raw[offMarks:])
+	gid := le.Uint32(raw[offGid:]) // a failed chown's; a held one's is in mode
 	r := record{
-		Kind: kindNames[kind],
-		PID:  le.Uint32(raw[4:]),
-		PPID: le.Uint32(raw[8:]),
-		Comm: cstr(raw[36:52]),
-		boot: le.Uint64(raw[64:]),
+		Kind: kindName(kind),
+		PID:  le.Uint32(raw[offPid:]),
+		PPID: le.Uint32(raw[offPpid:]),
+		Comm: cstr(raw[offComm : offComm+commLen]),
+		boot: le.Uint64(raw[offTs:]),
 	}
 	// A held path change or open its syscall refused carries the errno; its
 	// path and kind are as for one that succeeded.
-	if heldErr := le.Uint32(raw[52:]); heldErr != 0 {
+	if heldErr := le.Uint32(raw[offErr:]); heldErr != 0 {
 		r.Err = int32(heldErr)
 		r.Failed = true
 	}
 	switch kind {
-	case 1: // open
+	case filesystemAuditKindK_OPEN:
 		var pathErr int32
 		r.Path, pathErr = filePath(data, pathRet, n1, truncated)
 		if !r.Failed {
@@ -204,7 +253,7 @@ func decode(raw []byte) (record, error) {
 		applyMarks(&r, marks, pathRet >= 0)
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
-	case 12: // failed open
+	case filesystemAuditKindK_OPEN_FAILED:
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		// n2 marks a name the BPF side had to cut, which lost its end.
 		if n2 != 0 {
@@ -217,30 +266,31 @@ func decode(raw []byte) (record, error) {
 		r.Flags = flags
 		r.Access = openAccess(flags, 0)
 		r.Failed = true
-	case 13, 14: // read, write
+	case filesystemAuditKindK_READ, filesystemAuditKindK_WRITE:
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 		applyMarks(&r, marks, pathRet >= 0)
-	case 15: // mmap
+	case filesystemAuditKindK_MMAP:
 		r.Path, _ = components(data, n1, truncated)
 		applyMarks(&r, marks, false)
 		r.Access = mmapAccess(mode, flags)
 		r.Image = pathRet == 1
-	case 2: // exec
+	case filesystemAuditKindK_EXEC:
 		r.Path = cstr(data)
-	case 3, 4, 6, 24: // unlink, rmdir, mkdir, mknod
+	case filesystemAuditKindK_UNLINK, filesystemAuditKindK_RMDIR, filesystemAuditKindK_MKDIR,
+		filesystemAuditKindK_MKNOD:
 		r.Path, _ = components(data, n1, truncated)
-	case 10, 23: // truncate, exec-file
+	case filesystemAuditKindK_TRUNCATE, filesystemAuditKindK_EXEC_FILE:
 		r.Path, _ = components(data, n1, truncated)
 		applyMarks(&r, marks, false)
-	case 7: // chmod
+	case filesystemAuditKindK_CHMOD:
 		r.Path, _ = components(data, n1, truncated)
 		applyMarks(&r, marks, false)
 		r.Mode = permBits(mode)
-	case 11: // chown
+	case filesystemAuditKindK_CHOWN:
 		r.Path, _ = components(data, n1, truncated)
 		applyMarks(&r, marks, false)
 		r.Owner = owner(flags, mode)
-	case 8: // symlink
+	case filesystemAuditKindK_SYMLINK:
 		r.To = cstr(data)
 		// pathRet is the link body's length, i.e. the offset of the path
 		// components; clamp it so a malformed sample cannot slice out of range.
@@ -249,23 +299,26 @@ func decode(raw []byte) (record, error) {
 			off = len(data)
 		}
 		r.Path, _ = components(data[off:], n1, truncated)
-	case 5, 9: // rename, link
+	case filesystemAuditKindK_RENAME, filesystemAuditKindK_LINK:
 		var rest []byte
 		r.Path, rest = components(data, n1, truncated)
 		r.To, _ = components(rest, n2, truncated2)
 		applyMarks(&r, marks, false) // only a link's source is marked
-		r.Exchange = kind == 5 && flags&unix.RENAME_EXCHANGE != 0
-	case 16, 18, 19, 25, 26, 27, 28, 30: // a failed change to one name
+		r.Exchange = kind == filesystemAuditKindK_RENAME && flags&unix.RENAME_EXCHANGE != 0
+	case filesystemAuditKindK_UNLINK_FAILED, filesystemAuditKindK_CHMOD_FAILED,
+		filesystemAuditKindK_CHOWN_FAILED, filesystemAuditKindK_RMDIR_FAILED,
+		filesystemAuditKindK_MKDIR_FAILED, filesystemAuditKindK_MKNOD_FAILED,
+		filesystemAuditKindK_SYMLINK_FAILED, filesystemAuditKindK_TRUNCATE_FAILED:
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
 		switch kind {
-		case 18:
+		case filesystemAuditKindK_CHMOD_FAILED:
 			r.Mode = permBits(flags)
-		case 19:
+		case filesystemAuditKindK_CHOWN_FAILED:
 			r.Owner = owner(flags, gid)
 		}
-	case 17, 29: // a failed rename or link: from one name to another
+	case filesystemAuditKindK_RENAME_FAILED, filesystemAuditKindK_LINK_FAILED: // from one name to another
 		// n1 == 1 marks a second name after the first; both come before the
 		// base directories.
 		name := cstr(data)
@@ -285,22 +338,22 @@ func decode(raw []byte) (record, error) {
 		}
 		r.Err = pathRet
 		r.Failed = true
-	case 31: // a refused syscall
+	case filesystemAuditKindK_SYSCALL:
 		r.Killed = mode == 1
 		// Under the audit, seccomp kills only a 32-bit syscall.
 		r.Compat = r.Killed
 		r.Syscall = syscallName(int64(flags), r.Compat)
 		r.Err = pathRet
 		r.Failed = true
-	case 20: // attr via utimes / setxattr
+	case filesystemAuditKindK_ATTR: // via utimes / setxattr
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
-	case 21: // failed attr via utimes / setxattr
+	case filesystemAuditKindK_ATTR_FAILED: // via utimes / setxattr
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		r.Err = pathRet
 		r.Failed = true
 	}
 	// futimens names no file, so its path is the descriptor's own.
-	if (kind == 20 || kind == 21) && cstr(data) == "" {
+	if (kind == filesystemAuditKindK_ATTR || kind == filesystemAuditKindK_ATTR_FAILED) && cstr(data) == "" {
 		applyMarks(&r, marks, false)
 	}
 	return r, nil

@@ -46,9 +46,9 @@ func add(t *testing.T, r *recorder, events ...event) {
 }
 
 var (
-	runcOpen = event{kind: 1, pid: 5, comm: "runc", flags: unix.O_RDONLY, data: []byte("/etc/passwd\x00")}
-	stepExec = event{kind: 2, pid: 9, comm: "sh", data: []byte("/bin/sh\x00")}
-	stepOpen = event{kind: 1, pid: 9, comm: "sh", flags: unix.O_RDONLY, data: []byte("/etc/hosts\x00")}
+	runcOpen = event{kind: filesystemAuditKindK_OPEN, pid: 5, comm: "runc", flags: unix.O_RDONLY, data: []byte("/etc/passwd\x00")}
+	stepExec = event{kind: filesystemAuditKindK_EXEC, pid: 9, comm: "sh", data: []byte("/bin/sh\x00")}
+	stepOpen = event{kind: filesystemAuditKindK_OPEN, pid: 9, comm: "sh", flags: unix.O_RDONLY, data: []byte("/etc/hosts\x00")}
 )
 
 func TestRecorderDropsWhatComesBeforeTheFirstExec(t *testing.T) {
@@ -69,8 +69,8 @@ func TestRecorderDropsWhatComesBeforeTheFirstExec(t *testing.T) {
 func TestRecorderGivesAnExecTheFileItResolvedTo(t *testing.T) {
 	r, out, _ := newTestRecorder()
 	add(t, r,
-		event{kind: 23, pid: 9, comm: "sh", n1: 3, data: comps("gradlew", "A", "work")},
-		event{kind: 2, pid: 9, comm: "sh", data: []byte("./gradlew\x00")},
+		event{kind: filesystemAuditKindK_EXEC_FILE, pid: 9, comm: "sh", n1: 3, data: comps("gradlew", "A", "work")},
+		event{kind: filesystemAuditKindK_EXEC, pid: 9, comm: "sh", data: []byte("./gradlew\x00")},
 	)
 	if err := r.finish(loss{}); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestRecorderGivesAnExecTheFileItResolvedTo(t *testing.T) {
 // may point into it.
 func TestRecorderKeepsNothingOfASample(t *testing.T) {
 	r, out, _ := newTestRecorder()
-	raw := event{kind: 23, pid: 9, comm: "sh", n1: 3, data: comps("gradlew", "A", "work")}.bytes()
+	raw := event{kind: filesystemAuditKindK_EXEC_FILE, pid: 9, comm: "sh", n1: 3, data: comps("gradlew", "A", "work")}.bytes()
 	add(t, r, stepExec)
 	if err := r.add(raw); err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestRecorderKeepsNothingOfASample(t *testing.T) {
 	for i := range raw {
 		raw[i] = 'x'
 	}
-	add(t, r, event{kind: 2, pid: 9, comm: "sh", data: []byte("./gradlew\x00")})
+	add(t, r, event{kind: filesystemAuditKindK_EXEC, pid: 9, comm: "sh", data: []byte("./gradlew\x00")})
 	if err := r.finish(loss{}); err != nil {
 		t.Fatal(err)
 	}
