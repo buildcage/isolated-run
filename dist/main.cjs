@@ -68913,6 +68913,170 @@ function createStripper(scratchBase) {
 		}
 	};
 }
+//#endregion
+//#region src/core/lib/log/aggregate.ts
+function entryKey(e) {
+	return `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
+}
+function compareAggregated(a, b) {
+	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
+}
+function aggregate(filtered) {
+	let map = {};
+	for (let e of filtered) {
+		let key = entryKey(e);
+		map[key] = (map[key] || 0) + 1;
+	}
+	return Object.keys(map).map((key) => {
+		let [host, portStr, ruleType, reason] = key.split("	");
+		return {
+			host,
+			port: portStr,
+			ruleType,
+			reason,
+			count: map[key]
+		};
+	}).sort(compareAggregated);
+}
+//#endregion
+//#region src/core/lib/log/authority.ts
+const DEFAULT_PORT = {
+	https: "443",
+	http: "80"
+};
+function splitHostPort(authority) {
+	let colon = authority.lastIndexOf(":");
+	return colon <= 0 || authority.slice(colon + 1).includes("]") ? {
+		host: authority,
+		port: void 0
+	} : {
+		host: authority.slice(0, colon),
+		port: authority.slice(colon + 1)
+	};
+}
+function ruleHost(host) {
+	return sniHost(host).replace(/\.$/, "");
+}
+function sniHost(sni) {
+	return sni.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+//#endregion
+//#region src/core/lib/log/traffic-event.ts
+const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
+function clientEndedNoise(timeline) {
+	let completed = new Set();
+	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
+	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason) && completed.has(ruleHost(event.host));
+}
+function connectedHosts(timeline) {
+	let connected = {
+		any: new Set(),
+		blocked: new Set()
+	};
+	for (let event of timeline) {
+		if (event.protocol === "dns" || event.action === "incomplete") continue;
+		let host = ruleHost(event.host);
+		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
+	}
+	return connected;
+}
+function isRedundantDns(event, connected) {
+	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
+}
+//#endregion
+//#region src/core/lib/report/build/aggregate.ts
+function targetOf(event) {
+	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
+}
+function requestPath(url) {
+	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
+	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
+}
+function matchesUrlRule({ rule, hostRe, pathRe }, event) {
+	if (event.method === void 0 || event.url === void 0) return !1;
+	let scheme = rule.schemes.find((s) => s === event.protocol);
+	if (scheme === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
+	let hostPort = `${event.host}:${event.port}`;
+	if (rule.isRegex) {
+		let defaultPort = Number(DEFAULT_PORT$1[scheme]);
+		return event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
+	}
+	return hostRe.test(hostPort);
+}
+function buildMatchers(knownBlockedRules) {
+	return knownBlockedRules.map((line) => {
+		if (isKnownBlockedUrlRule(line)) {
+			let urlRule = convertUrlRule(line), compiled = {
+				rule: urlRule,
+				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex, "i"),
+				pathRe: new RegExp(urlRule.pathRegex)
+			};
+			return {
+				rule: urlRule.raw,
+				matches: (event) => matchesUrlRule(compiled, event)
+			};
+		}
+		let completed = completeRulePort(line), re = new RegExp(convertRule(completed), "i");
+		return {
+			rule: completed,
+			matches: (event) => re.test(targetOf(event))
+		};
+	});
+}
+function annotateKnownBlocked(blockedEvents, knownBlockedRules) {
+	let matchers = buildMatchers(knownBlockedRules), accumulators = new Map();
+	for (let event of blockedEvents) {
+		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = entryKey(entry), accumulator = accumulators.get(key);
+		accumulator ? (accumulator.count++, index === -1 ? accumulator.expectedAll = !1 : index < accumulator.bestIndex && (accumulator.bestIndex = index, accumulator.bestRule = matchers[index].rule)) : accumulators.set(key, {
+			entry,
+			count: 1,
+			expectedAll: index !== -1,
+			bestIndex: index === -1 ? Infinity : index,
+			bestRule: index === -1 ? void 0 : matchers[index].rule
+		});
+	}
+	return [...accumulators.values()].map(({ entry, count, expectedAll, bestRule }) => expectedAll ? {
+		...entry,
+		count,
+		expected: !0,
+		expectedBy: bestRule
+	} : {
+		...entry,
+		count,
+		expected: !1
+	}).sort(compareAggregated);
+}
+const RULE_TYPE = {
+	https: "HTTPS",
+	http: "HTTP",
+	tls: "TLS",
+	tcp: "IP",
+	dns: "DNS"
+};
+function toHostRow(event) {
+	return {
+		host: event.host,
+		port: event.port === void 0 ? "-" : String(event.port),
+		ruleType: RULE_TYPE[event.protocol],
+		reason: event.reason ?? "-"
+	};
+}
+function wouldRefuseRows(timeline) {
+	return aggregate(timeline.flatMap((event) => event.wouldRefuse === void 0 ? [] : [{
+		...toHostRow(event),
+		reason: event.wouldRefuse
+	}]));
+}
+function reduceTimeline(timeline, knownBlockedRules) {
+	let passedRows = [], blockedEvents = [], failedRows = [], connected = connectedHosts(timeline);
+	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : event.action === "block" ? blockedEvents.push(event) : passedRows.push(toHostRow(event))));
+	return {
+		passed: aggregate(passedRows),
+		blocked: annotateKnownBlocked(blockedEvents, knownBlockedRules),
+		failed: aggregate(failedRows),
+		blockedCount: blockedEvents.length
+	};
+}
 function usesLine(actionRepo, actionRef, actionVersion) {
 	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
 }
@@ -69047,61 +69211,10 @@ function hostTableTruncationNote(artifactAvailable) {
 	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload_traffic_artifact: true to get every request as a downloadable artifact"}._\n\n`;
 }
 //#endregion
-//#region src/core/lib/log/authority.ts
-const DEFAULT_PORT = {
-	https: "443",
-	http: "80"
-};
-function splitHostPort(authority) {
-	let colon = authority.lastIndexOf(":");
-	return colon <= 0 || authority.slice(colon + 1).includes("]") ? {
-		host: authority,
-		port: void 0
-	} : {
-		host: authority.slice(0, colon),
-		port: authority.slice(colon + 1)
-	};
-}
-function ruleHost(host) {
-	return sniHost(host).replace(/\.$/, "");
-}
-function sniHost(sni) {
-	return sni.replace(/[A-Z]/g, (c) => c.toLowerCase());
-}
-//#endregion
-//#region src/core/lib/log/traffic-event.ts
-const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
-function clientEndedNoise(timeline) {
-	let completed = new Set();
-	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
-	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason) && completed.has(ruleHost(event.host));
-}
-function connectedHosts(timeline) {
-	let connected = {
-		any: new Set(),
-		blocked: new Set()
-	};
-	for (let event of timeline) {
-		if (event.protocol === "dns" || event.action === "incomplete") continue;
-		let host = ruleHost(event.host);
-		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
-	}
-	return connected;
-}
-function isRedundantDns(event, connected) {
-	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
-}
-//#endregion
 //#region src/core/lib/report/render/inspect-details.ts
-function renderInspectDetailsBody(timeline, startedAt) {
-	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), body = fenced(relevant.filter((e) => !isRedundantDns(e, connected)), startedAt);
-	return body && `${body}\n`;
-}
-function renderWouldRefuseBody(timeline, startedAt) {
-	return fenced(timeline.filter((e) => e.wouldRefuse !== void 0), startedAt);
-}
-function fenced(events, startedAt) {
-	return events.length === 0 ? "" : `\`\`\`\n${events.map((event) => renderEvent(event, startedAt)).join("\n") + "\n"}\`\`\`\n`;
+function renderInspectDetailsBody(timeline, startedAt, refusalLabel = () => void 0) {
+	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
+	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, refusalLabel)).join("\n")}\n\`\`\`\n\n`;
 }
 function wouldRefuseTruncationNote(artifactAvailable) {
 	return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
@@ -69112,9 +69225,9 @@ const MARK = {
 	incomplete: "⚠️",
 	failed: "⚠️"
 };
-function renderEvent(event, startedAt) {
-	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "🚨" : MARK[event.action] ?? "✅", note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${event.wouldRefuse})`;
-	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}${note}`;
+function renderEvent(event, startedAt, refusalLabel) {
+	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "🚨" : MARK[event.action] ?? "✅", label = refusalLabel(event), note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${label ?? event.wouldRefuse})`, result = event.action === "block" && label !== void 0 ? label : outcome(event);
+	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${result}${note}`;
 }
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
 function credentialName(name) {
@@ -69330,11 +69443,19 @@ const frame = (text) => ({
 	text,
 	cut: "keep"
 });
-function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", ...step } = {}) {
+function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", refusalLabel, ...step } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
 	report.logLooksPlausible || (top += "> ⚠️ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(frame(top));
 	let wrote = !1, gap = () => wrote ? "\n" : "";
-	if (report.passed.length > 0 && (blocks.push(tableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), isAudit) {
+	if (report.passed.length > 0 && (blocks.push(tableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), report.blocked.length > 0) {
+		let blocked = foldExpectedBlockedRows(report.blocked);
+		blocks.push(tableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${gap()}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
+			showReason: !0,
+			showExpected
+		}), "\n")), wrote = !0;
+	}
+	let wouldRefuse = wouldRefuseRows(report.timeline);
+	if (wouldRefuse.length > 0 && (blocks.push(tableBlock(TRAFFIC_BLOCK.wouldRefuse, priorities[TRAFFIC_BLOCK.wouldRefuse], `${gap()}### 🚨 Restrict Would Refuse\n\n`, renderHostTable(wouldRefuse, { showReason: !0 }), "\n")), wrote = !0), report.failed.length > 0 && (blocks.push(tableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap()}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n")), wrote = !0), isAudit) {
 		let example = report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 			...step,
 			allowedIpRules: report.parameters.allowedIpRules,
@@ -69349,30 +69470,9 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 			text: example
 		}), wrote ||= example !== "";
 	}
-	if (report.blocked.length > 0) {
-		let blocked = foldExpectedBlockedRows(report.blocked);
-		blocks.push(tableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${gap()}### 🚫 Blocked Hosts\n\n`, renderHostTable(blocked, {
-			showReason: !0,
-			showExpected
-		}), "\n")), wrote = !0;
-	}
-	let wouldRefuse = renderWouldRefuseBody(report.timeline, report.startedAt);
-	if (wouldRefuse) {
-		let before = `${gap()}### 🚨 Restrict Would Refuse\n\n`;
-		blocks.push({
-			id: TRAFFIC_BLOCK.wouldRefuse,
-			priority: priorities[TRAFFIC_BLOCK.wouldRefuse],
-			level: 2,
-			section: SECTION,
-			text: before + wouldRefuse,
-			cut: "lines",
-			head: before.split("\n").length
-		}), wrote = !0;
-	}
-	report.failed.length > 0 && blocks.push(tableBlock(TRAFFIC_BLOCK.failed, priorities[TRAFFIC_BLOCK.failed], `${gap()}### ⚠️ Failed Connections\n\n`, renderHostTable(report.failed, { showReason: !0 }), "\n\n<sub>*Note: no rule refused these; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n"));
 	let bottom = "";
 	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(frame(`${gap()}_(no communication)_\n\n`));
-	let details = renderInspectDetailsBody(report.timeline, report.startedAt);
+	let details = renderInspectDetailsBody(report.timeline, report.startedAt, refusalLabel);
 	return details && blocks.push({
 		id: TRAFFIC_BLOCK.log,
 		priority: priorities[TRAFFIC_BLOCK.log],
@@ -72834,119 +72934,6 @@ async function scanInspectDnsLog(lines, isAudit = !1) {
 	};
 }
 //#endregion
-//#region src/core/lib/log/aggregate.ts
-function entryKey(e) {
-	return `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
-}
-function compareAggregated(a, b) {
-	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
-}
-function aggregate(filtered) {
-	let map = {};
-	for (let e of filtered) {
-		let key = entryKey(e);
-		map[key] = (map[key] || 0) + 1;
-	}
-	return Object.keys(map).map((key) => {
-		let [host, portStr, ruleType, reason] = key.split("	");
-		return {
-			host,
-			port: portStr,
-			ruleType,
-			reason,
-			count: map[key]
-		};
-	}).sort(compareAggregated);
-}
-//#endregion
-//#region src/core/lib/report/build/aggregate.ts
-function targetOf(event) {
-	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
-}
-function requestPath(url) {
-	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
-	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
-}
-function matchesUrlRule({ rule, hostRe, pathRe }, event) {
-	if (event.method === void 0 || event.url === void 0) return !1;
-	let scheme = rule.schemes.find((s) => s === event.protocol);
-	if (scheme === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
-	let hostPort = `${event.host}:${event.port}`;
-	if (rule.isRegex) {
-		let defaultPort = Number(DEFAULT_PORT$1[scheme]);
-		return event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
-	}
-	return hostRe.test(hostPort);
-}
-function buildMatchers(knownBlockedRules) {
-	return knownBlockedRules.map((line) => {
-		if (isKnownBlockedUrlRule(line)) {
-			let urlRule = convertUrlRule(line), compiled = {
-				rule: urlRule,
-				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex, "i"),
-				pathRe: new RegExp(urlRule.pathRegex)
-			};
-			return {
-				rule: urlRule.raw,
-				matches: (event) => matchesUrlRule(compiled, event)
-			};
-		}
-		let completed = completeRulePort(line), re = new RegExp(convertRule(completed), "i");
-		return {
-			rule: completed,
-			matches: (event) => re.test(targetOf(event))
-		};
-	});
-}
-function annotateKnownBlocked(blockedEvents, knownBlockedRules) {
-	let matchers = buildMatchers(knownBlockedRules), accumulators = new Map();
-	for (let event of blockedEvents) {
-		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = entryKey(entry), accumulator = accumulators.get(key);
-		accumulator ? (accumulator.count++, index === -1 ? accumulator.expectedAll = !1 : index < accumulator.bestIndex && (accumulator.bestIndex = index, accumulator.bestRule = matchers[index].rule)) : accumulators.set(key, {
-			entry,
-			count: 1,
-			expectedAll: index !== -1,
-			bestIndex: index === -1 ? Infinity : index,
-			bestRule: index === -1 ? void 0 : matchers[index].rule
-		});
-	}
-	return [...accumulators.values()].map(({ entry, count, expectedAll, bestRule }) => expectedAll ? {
-		...entry,
-		count,
-		expected: !0,
-		expectedBy: bestRule
-	} : {
-		...entry,
-		count,
-		expected: !1
-	}).sort(compareAggregated);
-}
-const RULE_TYPE = {
-	https: "HTTPS",
-	http: "HTTP",
-	tls: "TLS",
-	tcp: "IP",
-	dns: "DNS"
-};
-function toHostRow(event) {
-	return {
-		host: event.host,
-		port: event.port === void 0 ? "-" : String(event.port),
-		ruleType: RULE_TYPE[event.protocol],
-		reason: event.reason ?? "-"
-	};
-}
-function reduceTimeline(timeline, knownBlockedRules) {
-	let passedRows = [], blockedEvents = [], failedRows = [], connected = connectedHosts(timeline);
-	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : event.action === "block" ? blockedEvents.push(event) : passedRows.push(toHostRow(event))));
-	return {
-		passed: aggregate(passedRows),
-		blocked: annotateKnownBlocked(blockedEvents, knownBlockedRules),
-		failed: aggregate(failedRows),
-		blockedCount: blockedEvents.length
-	};
-}
-//#endregion
 //#region src/core/lib/report/build/inspect.ts
 function resolverAllows(parameters) {
 	let { resolverHosts } = compileRuleSet({
@@ -73195,60 +73182,95 @@ function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 		...blocks.slice(at + 1)
 	];
 }
-function withWouldRefuseGrouped(blocks, report) {
-	let at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse);
-	if (at === -1) return blocks;
+const KEY_NOT_ALLOWED = "aws-key-not-allowed";
+function refusedKeys(timeline) {
 	let issuers = new Map();
-	for (let e of report.timeline) {
+	for (let e of timeline) {
 		let { issuedKeyRef, assumedAccount } = e.extensions?.aws ?? {};
 		issuedKeyRef && assumedAccount && /^\d{12}$/.test(assumedAccount) && issuers.set(issuedKeyRef, assumedAccount);
 	}
-	let keyNotAllowed = "aws-key-not-allowed", keys = new Map(), groups = new Map();
-	for (let e of report.timeline) {
-		if (e.wouldRefuse === void 0) continue;
-		let keyRef = e.wouldRefuse === keyNotAllowed ? e.extensions?.aws?.keyRef : void 0, key = keyRef ? [
-			e.action,
-			"key",
-			keyRef
-		].join(" ") : [
-			e.action,
-			e.protocol,
-			e.host,
-			e.port,
-			e.wouldRefuse
-		].join(" "), group = groups.get(key);
-		if (group) {
-			group.push(e);
-			continue;
-		}
-		keyRef && !keys.has(keyRef) && keys.set(keyRef, keys.size + 1);
-		let account = keyRef && issuers.get(keyRef), label = keyRef ? `${keyNotAllowed}, key ${keys.get(keyRef)}${account ? ` from a role in ${account}` : ""}` : e.wouldRefuse;
-		groups.set(key, [{
-			...e,
-			wouldRefuse: label
-		}]);
+	let keys = new Map();
+	for (let e of timeline) {
+		let keyRef = refusedKeyRef(e);
+		if (!keyRef) continue;
+		let key = keys.get(keyRef) ?? {
+			label: "",
+			hosts: [],
+			count: 0
+		};
+		key.hosts.includes(e.host) || key.hosts.push(e.host), key.count++, keys.set(keyRef, key);
 	}
-	let counts = [...groups.values()], lines = renderWouldRefuseBody(counts.map((events) => events[0]), report.startedAt).split("\n").slice(1, -2).map((line, i) => {
-		let rest = counts[i].length - 1;
-		return line.replace(/^(\S+) \S+: /, "$1 ") + (rest > 0 ? ` (+${rest} more)` : "");
-	}), { text } = blocks[at], before = `${text.slice(0, text.indexOf("###"))}### 🚨 Restrict Would Refuse\n\n<sub>*Requests audit let through that restrict would refuse, the first for each host and reason, or for each key under \`aws-key-not-allowed\`.*</sub>\n\n`;
-	return blocks.with(at, {
+	let n = 0;
+	for (let [keyRef, key] of keys) {
+		let account = issuers.get(keyRef);
+		key.label = `key${keys.size > 1 ? ` ${++n}` : ""}${account ? ` from a role in ${account}` : ""}`;
+	}
+	return keys;
+}
+function refusedKeyRef(e) {
+	return (e.action === "block" ? e.reason : e.wouldRefuse) === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : void 0;
+}
+function keyRefusalLabel(keys) {
+	return (e) => {
+		let keyRef = refusedKeyRef(e), label = keyRef && keys.get(keyRef)?.label;
+		return label && label !== "key" ? `${KEY_NOT_ALLOWED}, ${label}` : void 0;
+	};
+}
+function withKeyTable(blocks, timeline, keys) {
+	let at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse), audited = [...keys].filter(([keyRef]) => timeline.some((e) => e.wouldRefuse !== void 0 && refusedKeyRef(e) === keyRef));
+	if (at === -1 || audited.length === 0) return blocks;
+	let table = markdownTable([
+		{
+			key: "key",
+			title: "Key"
+		},
+		{
+			key: "hosts",
+			title: "Hosts"
+		},
+		{
+			key: "count",
+			title: "Count",
+			align: "right"
+		}
+	], audited.map(([, { label, hosts, count }]) => {
+		let rest = hosts.length - 3, shown = hosts.slice(0, 3).join(", ");
+		return {
+			key: label,
+			hosts: rest > 0 ? `${shown} and ${rest} more` : shown,
+			count
+		};
+	})), { text } = blocks[at], heading = text.slice(0, text.indexOf("| Host |")), keyBlock = {
 		...blocks[at],
-		text: `${before}\`\`\`\n${lines.join("\n")}\n\`\`\`\n`,
-		head: before.split("\n").length
-	});
+		text: `${heading}${table}\n`,
+		head: heading.split("\n").length + 1
+	}, rows = wouldRefuseRows(timeline.filter((e) => !refusedKeyRef(e)));
+	if (rows.length === 0) return blocks.with(at, keyBlock);
+	let restBlock = {
+		...blocks[at],
+		level: blocks[at].level + 1,
+		text: `\n${renderHostTable(rows, { showReason: !0 })}\n`,
+		head: 3
+	};
+	return [
+		...blocks.slice(0, at),
+		keyBlock,
+		restBlock,
+		...blocks.slice(at + 1)
+	];
 }
 function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
-	}), blocks = withAwsTroubleshootingLink(withWouldRefuseGrouped(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
+	}), keys = refusedKeys(report.timeline), blocks = withAwsTroubleshootingLink(withKeyTable(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
 		title: stepLabel ? `Outbound Traffic Report — ${stepLabel}` : void 0,
 		stepName: "Start isolated-run",
 		runCommand,
 		extraInputs,
-		actionVersion
-	}), report), report, actionRepo, actionRef);
+		actionVersion,
+		refusalLabel: keyRefusalLabel(keys)
+	}), report.timeline, keys), report, actionRepo, actionRef);
 	return {
 		markdown: joinSummaryBlocks(blocks),
 		blocks,

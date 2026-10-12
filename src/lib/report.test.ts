@@ -150,9 +150,7 @@ describe("computeReportOutcomes", () => {
         ],
       };
       const { markdown } = computeReportOutcomes(r, options());
-      expect(markdown).toMatch(
-        /### 🚨 Restrict Would Refuse\n\n<sub>.*<\/sub>\n\n```\n.*\n```\n\n<sub>\*For an `aws-`/,
-      );
+      expect(markdown).toMatch(/### 🚨 Restrict Would Refuse\n\n(\|.*\n)+\n<sub>\*For an `aws-`/);
     });
 
     it("is left out when known_blocked_rules expects every such refusal", () => {
@@ -178,6 +176,19 @@ describe("computeReportOutcomes", () => {
     });
   });
 
+  /** An AssumeRole answer that issued keyRef to a role in account. */
+  const assumed = (account: string, issuedKeyRef: string): TrafficEvent => ({
+    time: 0,
+    action: "allow",
+    protocol: "https",
+    host: "sts.amazonaws.com",
+    port: 443,
+    extensions: { aws: { key: "env", assumedAccount: account, issuedKeyRef } },
+  });
+  /** Communication details, one line per request. */
+  const details = (markdown: string): string[] =>
+    markdown.slice(markdown.indexOf("💬")).split("```\n")[1].trimEnd().split("\n");
+
   describe("Restrict Would Refuse", () => {
     const wouldRefuse = (time: number, host: string, reason: string): TrafficEvent => ({
       time,
@@ -190,55 +201,46 @@ describe("computeReportOutcomes", () => {
       status: 200,
       wouldRefuse: reason,
     });
+    const signed = (time: number, host: string, keyRef: string): TrafficEvent => ({
+      ...wouldRefuse(time, host, "aws-key-not-allowed"),
+      extensions: { aws: { keyRef } },
+    });
     const audit = (timeline: TrafficEvent[]): InspectReportData => ({
       ...report({ parameters: reportParams({ mode: "audit" }), timeline, startedAt: 0 }),
       engine: "inspect",
     });
-    const section = (markdown: string) =>
-      markdown.slice(
-        markdown.indexOf("### 🚨"),
-        markdown.indexOf("```\n\n", markdown.indexOf("### 🚨")),
-      );
+    /** The section's tables, each as its rows. */
+    const tables = (markdown: string): string[][] => {
+      const start = markdown.indexOf("### 🚨");
+      const section = markdown.slice(start, markdown.indexOf("\n### ", start + 1));
+      return section
+        .split("\n\n")
+        .filter((part) => part.startsWith("|"))
+        .map((table) => table.trim().split("\n").slice(2));
+    };
 
-    it("shows the first request of each host and reason without its time, and counts the rest", () => {
+    it("counts each host and reason in a table", () => {
       const { markdown } = computeReportOutcomes(
         audit([
           wouldRefuse(1, "s3.amazonaws.com", "aws-key-not-allowed"),
-          wouldRefuse(2, "ssm.amazonaws.com", "aws-key-not-allowed"),
           { time: 2, action: "allow", protocol: "https", host: "s3.amazonaws.com", port: 443 },
           wouldRefuse(3, "s3.amazonaws.com", "aws-key-not-allowed"),
           wouldRefuse(4, "s3.amazonaws.com", "aws-no-credential"),
-          wouldRefuse(5, "s3.amazonaws.com", "aws-key-not-allowed"),
         ]),
         options(),
       );
-      expect(section(markdown).split("```\n")[1]).toBe(
+      expect(tables(markdown)).toStrictEqual([
         [
-          "🚨 GET https://s3.amazonaws.com/1 -> 200 (restrict would refuse: aws-key-not-allowed) (+2 more)",
-          "🚨 GET https://ssm.amazonaws.com/2 -> 200 (restrict would refuse: aws-key-not-allowed)",
-          "🚨 GET https://s3.amazonaws.com/4 -> 200 (restrict would refuse: aws-no-credential)",
-          "",
-        ].join("\n"),
-      );
+          "| s3.amazonaws.com:443 | HTTPS | aws-key-not-allowed | 2 |",
+          "| s3.amazonaws.com:443 | HTTPS | aws-no-credential | 1 |",
+        ],
+      ]);
     });
 
-    it("groups aws-key-not-allowed by key, whatever the host, naming the account a role was assumed in", () => {
-      const signed = (time: number, host: string, keyRef: string): TrafficEvent => ({
-        ...wouldRefuse(time, host, "aws-key-not-allowed"),
-        extensions: { aws: { keyRef } },
-      });
+    it("puts aws-key-not-allowed in a table of keys, whatever the host, naming the account a role was assumed in", () => {
       const { markdown } = computeReportOutcomes(
         audit([
-          {
-            time: 0,
-            action: "allow",
-            protocol: "https",
-            host: "sts.amazonaws.com",
-            port: 443,
-            extensions: {
-              aws: { key: "env", assumedAccount: "222222222222", issuedKeyRef: "aaaa1111" },
-            },
-          },
+          assumed("222222222222", "aaaa1111"),
           // An ECR redirect names no account.
           {
             time: 0,
@@ -262,47 +264,87 @@ describe("computeReportOutcomes", () => {
         ]),
         options(),
       );
-      expect(section(markdown).split("```\n")[1]).toBe(
+      expect(markdown).toContain("### 🚨 Restrict Would Refuse\n\n| Key | Hosts | Count |\n");
+      expect(tables(markdown)).toStrictEqual([
         [
-          "🚨 GET https://s3.amazonaws.com/1 -> 200 (restrict would refuse: aws-key-not-allowed, key 1 from a role in 222222222222) (+2 more)",
-          "🚨 GET https://ssm.amazonaws.com/2 -> 200 (restrict would refuse: aws-key-not-allowed, key 2)",
-          "🚨 GET https://s3.amazonaws.com/4 -> 200 (restrict would refuse: aws-no-credential)",
-          "🚨 GET https://cloudformation.amazonaws.com/6 -> 200 (restrict would refuse: aws-key-not-allowed, key 3)",
-          "🚨 GET https://s3.amazonaws.com/7 -> 200 (restrict would refuse: aws-ambiguous-credential)",
-          "",
-        ].join("\n"),
+          "| key 1 from a role in 222222222222 | s3.amazonaws.com, ssm.amazonaws.com | 3 |",
+          "| key 2 | ssm.amazonaws.com | 1 |",
+          "| key 3 | cloudformation.amazonaws.com | 1 |",
+        ],
+        [
+          "| s3.amazonaws.com:443 | HTTPS | aws-no-credential | 1 |",
+          "| s3.amazonaws.com:443 | HTTPS | aws-ambiguous-credential | 1 |",
+        ],
+      ]);
+      expect(details(markdown)).toContain(
+        "🚨 00:01.000: GET https://s3.amazonaws.com/1 -> 200 (restrict would refuse: aws-key-not-allowed, key 1 from a role in 222222222222)",
+      );
+      expect(details(markdown)).toContain(
+        "🚨 00:02.000: GET https://ssm.amazonaws.com/2 -> 200 (restrict would refuse: aws-key-not-allowed, key 2)",
       );
     });
 
-    it("says what it lists", () => {
-      const { markdown } = computeReportOutcomes(
-        audit([wouldRefuse(1, "s3.amazonaws.com", "aws-key-not-allowed")]),
-        options({
-          extraInputs: [
-            "aws_key_check: true",
-            'allowed_aws_role_accounts: "222222222222" # assumed in this run, check it is yours',
-          ],
-        }),
-      );
-      expect(section(markdown)).toContain(
-        "<sub>*Requests audit let through that restrict would refuse, the first for each host and reason, or for each key under `aws-key-not-allowed`.*</sub>",
-      );
-      expect(section(markdown)).not.toContain("assumed in this run");
-    });
-
-    it("keeps a request that came to nothing on a line of its own", () => {
+    it("names three hosts of a key and counts the rest", () => {
+      const hosts = ["a", "b", "c", "d", "e"].map((h) => `${h}.amazonaws.com`);
       const { markdown } = computeReportOutcomes(
         audit([
-          { ...wouldRefuse(1, "s3.amazonaws.com", "aws-key-not-allowed"), action: "incomplete" },
-          wouldRefuse(2, "s3.amazonaws.com", "aws-key-not-allowed"),
-          wouldRefuse(3, "s3.amazonaws.com", "aws-key-not-allowed"),
+          ...hosts.map((host, i) => signed(i, host, "aaaa1111")),
+          signed(5, hosts[0], "bbbb2222"),
         ]),
         options(),
       );
-      const lines = section(markdown).split("```\n")[1].trimEnd().split("\n");
-      expect(lines).toHaveLength(2);
-      expect(lines[1]).toMatch(/^🚨 GET https:\/\/s3\.amazonaws\.com\/2 .*\(\+1 more\)$/);
+      expect(tables(markdown)[0][0]).toBe(
+        "| key 1 | a.amazonaws.com, b.amazonaws.com, c.amazonaws.com and 2 more | 5 |",
+      );
     });
+
+    it("numbers no key when the run refused one alone, and leaves a bare key out of the log", () => {
+      const one = computeReportOutcomes(
+        audit([assumed("222222222222", "aaaa1111"), signed(1, "s3.amazonaws.com", "aaaa1111")]),
+        options(),
+      ).markdown;
+      expect(tables(one)).toStrictEqual([
+        ["| key from a role in 222222222222 | s3.amazonaws.com | 1 |"],
+      ]);
+      expect(details(one).at(-1)).toContain(
+        "(restrict would refuse: aws-key-not-allowed, key from a role in 222222222222)",
+      );
+      const bare = computeReportOutcomes(
+        audit([signed(1, "s3.amazonaws.com", "aaaa1111")]),
+        options(),
+      ).markdown;
+      expect(tables(bare)).toStrictEqual([["| key | s3.amazonaws.com | 1 |"]]);
+      expect(details(bare).at(-1)).toMatch(/\(restrict would refuse: aws-key-not-allowed\)$/);
+    });
+  });
+
+  it("names the key of a request restrict refused in Communication details, leaving the table alone", () => {
+    const refused: TrafficEvent = {
+      time: 1,
+      action: "block",
+      protocol: "https",
+      host: "s3.amazonaws.com",
+      port: 443,
+      method: "GET",
+      url: "https://s3.amazonaws.com/",
+      reason: "aws-key-not-allowed",
+      extensions: { aws: { keyRef: "aaaa1111" } },
+    };
+    const r: InspectReportData = {
+      ...report({
+        blockedCount: 1,
+        blocked: annotateKnownBlocked([refused], []),
+        timeline: [assumed("222222222222", "aaaa1111"), refused],
+        startedAt: 0,
+      }),
+      engine: "inspect",
+    };
+    const { markdown } = computeReportOutcomes(r, options());
+    expect(details(markdown)).toContain(
+      "🚫 00:01.000: GET https://s3.amazonaws.com/ -> aws-key-not-allowed, key from a role in 222222222222",
+    );
+    expect(markdown).toContain("| s3.amazonaws.com:443 | HTTPS | aws-key-not-allowed | 1 |");
+    expect(markdown).not.toContain("### 🚨");
   });
 
   it("warns about a request no rule decided, naming this action", () => {
@@ -497,14 +539,14 @@ describe("writeReportSummary", () => {
     "warns when Restrict Would Refuse is cut (artifact: $artifact)",
     async ({ artifact, says }) => {
       const warning = vi.fn();
-      const timeline: TrafficEvent[] = Array.from({ length: 2000 }, (_, i) => ({
+      const timeline: TrafficEvent[] = Array.from({ length: 5000 }, (_, i) => ({
         time: i,
         action: "audit",
         protocol: "https",
-        host: `h${i}.example.com`,
+        host: `${"x".repeat(200)}${i}.example.com`,
         port: 443,
         method: "GET",
-        url: `https://h${i}.example.com/${"x".repeat(500)}`,
+        url: `https://h${i}.example.com/`,
         status: 200,
         wouldRefuse: "aws-key-not-allowed",
       }));

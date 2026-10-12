@@ -9,6 +9,7 @@ import { readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
 import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { readActionVersion as readImageActionVersion } from "#core/lib/report/action-version.ts";
+import { wouldRefuseRows } from "#core/lib/report/build/aggregate.ts";
 import { buildInspectReportData } from "#core/lib/report/build/inspect.ts";
 import { buildUniversalReportData } from "#core/lib/report/build/universal.ts";
 import {
@@ -22,10 +23,12 @@ import {
   withNotices,
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
+import { renderHostTable } from "#core/lib/report/render/host-table.ts";
 import {
-  renderWouldRefuseBody,
   wouldRefuseTruncationNote,
+  type RefusalLabel,
 } from "#core/lib/report/render/inspect-details.ts";
+import { markdownTable } from "#core/lib/report/render/markdown-table.ts";
 import {
   renderReportBlocks,
   TRAFFIC_BLOCK,
@@ -158,69 +161,111 @@ function withAwsTroubleshootingLink(
   return [...blocks.slice(0, at + 1), link, ...blocks.slice(at + 1)];
 }
 
+const KEY_NOT_ALLOWED = `${AWS_REASON_PREFIX}key-not-allowed`;
+
+/** How many hosts the key table names before counting the rest. */
+const KEY_HOSTS_SHOWN = 3;
+
+interface RefusedKey {
+  /** "key 2 from a role in 111111111111"; the number is left out when the
+   *  run refused one key alone, and the account when no STS answer in the
+   *  run issued the key. */
+  label: string;
+  /** The hosts its requests went to, in the order each first appeared. */
+  hosts: string[];
+  count: number;
+}
+
 /**
- * Restrict Would Refuse with the first request of each host and reason, in the
- * order each first appeared, and how many more there were. A role assumed in an
- * account not given has every later request signed with its key refused, and a
- * line for each would bury the other refusals, so aws-key-not-allowed is
- * grouped by key instead, whatever the host, and names the account of the role
- * whose AssumeRole answer issued the key. The time is left out, since a line
- * stands for requests made at different times.
+ * Every key aws-key-not-allowed refused, or in audit would refuse, by keyRef,
+ * numbered in the order each first appeared. A role assumed in an account not
+ * given has every later request signed with its key refused, so the report
+ * names the account of the role whose AssumeRole answer issued the key.
  */
-function withWouldRefuseGrouped(blocks: SummaryBlock[], report: Report): SummaryBlock[] {
-  const at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse);
-  if (at === -1) return blocks;
+function refusedKeys(timeline: TrafficEvent[]): Map<string, RefusedKey> {
   const issuers = new Map<string, string>();
-  for (const e of report.timeline) {
+  for (const e of timeline) {
     const { issuedKeyRef, assumedAccount } = e.extensions?.aws ?? {};
     if (issuedKeyRef && assumedAccount && /^\d{12}$/.test(assumedAccount)) {
       issuers.set(issuedKeyRef, assumedAccount);
     }
   }
-  const keyNotAllowed = `${AWS_REASON_PREFIX}key-not-allowed`;
-  const keys = new Map<string, number>();
-  const groups = new Map<string, TrafficEvent[]>();
-  for (const e of report.timeline) {
-    if (e.wouldRefuse === undefined) continue;
-    const keyRef = e.wouldRefuse === keyNotAllowed ? e.extensions?.aws?.keyRef : undefined;
-    // The action too, so a line's mark and outcome hold for the requests it stands for.
-    const key = keyRef
-      ? [e.action, "key", keyRef].join(" ")
-      : [e.action, e.protocol, e.host, e.port, e.wouldRefuse].join(" ");
-    const group = groups.get(key);
-    if (group) {
-      group.push(e);
-      continue;
-    }
-    if (keyRef && !keys.has(keyRef)) keys.set(keyRef, keys.size + 1);
-    const account = keyRef && issuers.get(keyRef);
-    const label = keyRef
-      ? `${keyNotAllowed}, key ${keys.get(keyRef)}${account ? ` from a role in ${account}` : ""}`
-      : e.wouldRefuse;
-    groups.set(key, [{ ...e, wouldRefuse: label }]);
+  const keys = new Map<string, RefusedKey>();
+  for (const e of timeline) {
+    const keyRef = refusedKeyRef(e);
+    if (!keyRef) continue;
+    const key = keys.get(keyRef) ?? { label: "", hosts: [], count: 0 };
+    if (!key.hosts.includes(e.host)) key.hosts.push(e.host);
+    key.count++;
+    keys.set(keyRef, key);
   }
-  const counts = [...groups.values()];
-  // One line per request inside the fence, each starting with its mark and time.
-  const lines = renderWouldRefuseBody(
-    counts.map((events) => events[0]),
-    report.startedAt,
-  )
-    .split("\n")
-    .slice(1, -2)
-    .map((line, i) => {
-      const rest = counts[i].length - 1;
-      return line.replace(/^(\S+) \S+: /, "$1 ") + (rest > 0 ? ` (+${rest} more)` : "");
-    });
-  const note =
-    "Requests audit let through that restrict would refuse, the first for each host and reason, " +
-    "or for each key under `aws-key-not-allowed`.";
+  let n = 0;
+  for (const [keyRef, key] of keys) {
+    const account = issuers.get(keyRef);
+    key.label = `key${keys.size > 1 ? ` ${++n}` : ""}${account ? ` from a role in ${account}` : ""}`;
+  }
+  return keys;
+}
+
+function refusedKeyRef(e: TrafficEvent): string | undefined {
+  const reason = e.action === "block" ? e.reason : e.wouldRefuse;
+  return reason === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : undefined;
+}
+
+/** aws-key-not-allowed with the key it names, unless that says nothing more. */
+function keyRefusalLabel(keys: Map<string, RefusedKey>): RefusalLabel {
+  return (e) => {
+    const keyRef = refusedKeyRef(e);
+    const label = keyRef && keys.get(keyRef)?.label;
+    return label && label !== "key" ? `${KEY_NOT_ALLOWED}, ${label}` : undefined;
+  };
+}
+
+/**
+ * Restrict Would Refuse with aws-key-not-allowed taken out of the host table
+ * into a table of its own, one row per key whatever the host: every request a
+ * key not allowed signs is refused, and a row for each host would bury the
+ * other refusals.
+ */
+function withKeyTable(
+  blocks: SummaryBlock[],
+  timeline: TrafficEvent[],
+  keys: Map<string, RefusedKey>,
+): SummaryBlock[] {
+  const at = blocks.findIndex((b) => b.id === TRAFFIC_BLOCK.wouldRefuse);
+  const audited = [...keys].filter(([keyRef]) =>
+    timeline.some((e) => e.wouldRefuse !== undefined && refusedKeyRef(e) === keyRef),
+  );
+  if (at === -1 || audited.length === 0) return blocks;
+  const table = markdownTable(
+    [
+      { key: "key", title: "Key" },
+      { key: "hosts", title: "Hosts" },
+      { key: "count", title: "Count", align: "right" },
+    ],
+    audited.map(([, { label, hosts, count }]) => {
+      const rest = hosts.length - KEY_HOSTS_SHOWN;
+      const shown = hosts.slice(0, KEY_HOSTS_SHOWN).join(", ");
+      return { key: label, hosts: rest > 0 ? `${shown} and ${rest} more` : shown, count };
+    }),
+  );
   const { text } = blocks[at];
-  const before = `${text.slice(0, text.indexOf("###"))}### 🚨 Restrict Would Refuse\n\n<sub>*${note}*</sub>\n\n`;
-  return blocks.with(at, {
+  const heading = text.slice(0, text.indexOf("| Host |"));
+  const keyBlock = {
     ...blocks[at],
-    text: `${before}\`\`\`\n${lines.join("\n")}\n\`\`\`\n`,
-    head: before.split("\n").length,
-  });
+    text: `${heading}${table}\n`,
+    head: heading.split("\n").length + 1,
+  };
+  const rows = wouldRefuseRows(timeline.filter((e) => !refusedKeyRef(e)));
+  if (rows.length === 0) return blocks.with(at, keyBlock);
+  // Deeper, so a cut key table takes it along under the key table's notice.
+  const restBlock = {
+    ...blocks[at],
+    level: blocks[at].level + 1,
+    text: `\n${renderHostTable(rows, { showReason: true })}\n`,
+    head: 3,
+  };
+  return [...blocks.slice(0, at), keyBlock, restBlock, ...blocks.slice(at + 1)];
 }
 
 /**
@@ -243,6 +288,7 @@ export function computeReportOutcomes(
     failOnBlocked: failOnBlocked ?? false,
     engineLabel: "sandbox",
   });
+  const keys = refusedKeys(report.timeline);
   const rendered = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
     // stepLabel is the untrusted `label` input; the renderer escapes the whole
     // title, so it is folded in raw here rather than pre-sanitized twice.
@@ -251,9 +297,10 @@ export function computeReportOutcomes(
     runCommand,
     extraInputs,
     actionVersion,
+    refusalLabel: keyRefusalLabel(keys),
   });
   const blocks = withAwsTroubleshootingLink(
-    withWouldRefuseGrouped(rendered, report),
+    withKeyTable(rendered, report.timeline, keys),
     report,
     actionRepo,
     actionRef,
