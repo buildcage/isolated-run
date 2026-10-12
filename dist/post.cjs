@@ -907,40 +907,59 @@ function pathOutside(pathEnv = "", persisting, deps = realSymlinkDeps) {
 	let reachable = reachableFrom(persisting, deps);
 	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !reachable(dir)).join(node_path.delimiter);
 }
-function findPinnableCommand(command, pathEnv, persisting, deps = realFindCommandDeps) {
-	let optedOut = persisting.includes("/"), inside = insideOf(persisting), reachable = reachableFrom(persisting, deps);
+function searchPath(command, pathEnv, persisting, deps) {
+	let optedOut = persisting.includes("/"), inside = insideOf(persisting), reachable = reachableFrom(persisting, deps), search = { onPath: !1 };
 	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
 		if (!(0, node_path.isAbsolute)(dir)) continue;
 		let candidate = (0, node_path.join)(dir, command);
 		if (!deps.isExecutable(candidate)) continue;
-		if (optedOut || !reachable(candidate)) return candidate;
+		if (search.onPath = !0, optedOut || !reachable(candidate)) return {
+			...search,
+			pinned: candidate
+		};
 		if (reachable(dir)) continue;
 		let resolved = resolveHostPath(candidate, deps);
-		if ("real" in resolved && !inside(resolved.real) && (0, node_path.basename)(resolved.real) === command) return resolved.real;
-	}
-}
-function unpinnableReason(command, pathEnv, persisting, deps) {
-	let under = (path) => persisting.find((p) => isAtOrUnder(path, p)), reachable = reachableFrom(persisting, deps);
-	for (let dir of pathEnv.split(node_path.delimiter)) {
-		let candidate = (0, node_path.join)(dir, command);
-		if (!(0, node_path.isAbsolute)(dir) || !deps.isExecutable(candidate) || reachable(dir)) continue;
-		let resolved = resolveHostPath(candidate, deps);
 		if (!("real" in resolved)) continue;
-		let realUnder = under(resolved.real);
-		if (realUnder) return `'${command}' on PATH, ${candidate}, leads to ${resolved.real}, under ${realUnder}, which a sandboxed command can write to. This action runs it outside the sandbox, so it has to be a file no sandboxed command can replace.`;
-		let link = resolved.links.find((l) => under(l.at));
-		return `'${command}' on PATH, ${candidate}, leads to ${resolved.real} through ${link.at}, under ${under(link.at)}, which a sandboxed command can write to. This action runs it outside the sandbox, so through such a symlink it pins only a file named '${command}'.`;
+		let { real } = resolved;
+		if (inside(real)) {
+			search.refusal ??= {
+				candidate,
+				real
+			};
+			continue;
+		}
+		if ((0, node_path.basename)(real) === command) return {
+			...search,
+			pinned: real
+		};
+		search.refusal ??= {
+			candidate,
+			real,
+			link: resolved.links.find((l) => inside(l.at)).at
+		};
 	}
-	return `'${command}' is on PATH only under paths a sandboxed command can write to (${persisting.join(", ")}). This action runs it outside the sandbox, so it has to live somewhere no sandboxed command can replace it, such as /usr/bin.`;
+	return search;
+}
+function unpinnableMessage(command, refusal, persisting) {
+	let under = (path) => persisting.find((p) => isAtOrUnder(path, p)), tail = "which a sandboxed command can write to. This action runs it outside the sandbox, so";
+	if (refusal?.link) {
+		let { candidate, real, link } = refusal;
+		return `'${command}' on PATH, ${candidate}, leads to ${real} through ${link}, under ${under(link)}, ${tail} through such a symlink it pins only a file named '${command}'.`;
+	}
+	if (refusal) {
+		let { candidate, real } = refusal;
+		return `'${command}' on PATH, ${candidate}, ${real === candidate ? "is" : `leads to ${real},`} under ${under(real)}, ${tail} it has to be a file no sandboxed command can replace.`;
+	}
+	return `'${command}' is on PATH only in directories a sandboxed command can write to or reach through a symlink it can repoint (${persisting.join(", ")}). This action runs it outside the sandbox, so it has to be found in a \$PATH directory outside those paths.`;
 }
 function pinHostCommands(paths, env, deps = realFindCommandDeps) {
 	for (let command of PINNED_COMMANDS) {
-		let path = findPinnableCommand(command, env.PATH, paths, deps);
-		if (path) {
-			pinCommand(command, path);
+		let { pinned, onPath, refusal } = searchPath(command, env.PATH, paths, deps);
+		if (pinned) {
+			pinCommand(command, pinned);
 			continue;
 		}
-		if (findPinnableCommand(command, env.PATH, [], deps)) throw new SandboxError(unpinnableReason(command, env.PATH, paths, deps), "HOST_COMMAND_UNPINNABLE");
+		if (onPath) throw new SandboxError(unpinnableMessage(command, refusal, paths), "HOST_COMMAND_UNPINNABLE");
 	}
 	pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps)), pinCommandPathEnv("sudo", pathOutside("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", paths, deps));
 }

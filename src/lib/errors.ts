@@ -34,7 +34,8 @@ import { ActionError } from "#core/lib/errors.ts";
  *   SCRATCH_BASE_UNSAFE               the sandbox scratch base exists but isn't a private directory the action owns
  *   CONTAINER_NAME_INVALID            a value read back from GITHUB_STATE isn't a name this action generates
  *   SCRATCH_DIR_UNSAFE                the sudo rm -rf fallback's target isn't owned by the runner uid
- *   HOST_COMMAND_UNPINNABLE           `docker` or `sudo` is only on PATH somewhere the sandboxed command can write
+ *   HOST_COMMAND_UNPINNABLE           every `docker` or `sudo` on PATH is, or leads through a symlink, somewhere
+ *                                     the sandboxed command can write
  *   HOST_DIR_UNPROTECTABLE            a directory kept read-only (the docker config, an action checkout, the
  *                                     runner's install directory) or the runner's
  *                                     GITHUB_ENV/GITHUB_PATH/GITHUB_STATE file goes through a symlink the

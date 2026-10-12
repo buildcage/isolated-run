@@ -61,6 +61,13 @@ describe("readOutputEntries", () => {
     });
   });
 
+  it("escapes what JSON leaves as it is: DEL, C1 controls, format characters, separators", () => {
+    expect(readOutputEntries("x\u202e\u{e0001}<<\u007f\u0085\u2028\n").error).toBe(
+      'line 1, output "x\\u202e\\udb40\\udc01", never reaches its delimiter ' +
+        '"\\u007f\\u0085\\u2028"',
+    );
+  });
+
   it("quotes a name or delimiter escaped and cut short, and never a value", () => {
     const long = "d".repeat(65);
     expect(readOutputEntries(`x\r<<${long}\nsecret\n`).error).toBe(

@@ -81,8 +81,13 @@ const MAX_QUOTED = 64;
 
 function quoted(text: string): string {
   const chars = Array.from(text);
-  return JSON.stringify(
-    chars.length > MAX_QUOTED ? `${chars.slice(0, MAX_QUOTED).join("")}…` : text,
+  const cut = chars.length > MAX_QUOTED ? `${chars.slice(0, MAX_QUOTED).join("")}…` : text;
+  // JSON leaves DEL, C1 controls, format characters such as bidi overrides and
+  // the line and paragraph separators as they are.
+  return JSON.stringify(cut).replace(/[\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu, (c) =>
+    Array.from({ length: c.length }, (_, i) => {
+      return `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`;
+    }).join(""),
   );
 }
 
