@@ -31,6 +31,12 @@ static __always_inline int is_restart(long ret)
 #define HELD_OP 1   ///< A path change, held from its security_path_* hook.
 #define HELD_OPEN 2 ///< An open(2), held from its getname (see open_name()).
 
+/**
+ * The kind of an open hold whose open was recorded at its hook, as it could
+ * not be held, so its call records nothing more. No event has this kind.
+ */
+#define K_OPEN_RECORDED 0xffffffffu
+
 /** Where a held event's head, or one of its tails, is kept. */
 struct held_key {
 	u64 id;  ///< The thread, as bpf_get_current_pid_tgid() gives it.
@@ -426,7 +432,9 @@ static __always_inline void report_held(u32 slot, struct held_key *k, struct eve
 /**
  * Starts holding the open(2) the thread is in, from the @p name it was given,
  * as the kernel copied it (getname_flags), not the user pointer, which the
- * caller could rewrite before the syscall returns.
+ * caller could rewrite before the syscall returns. When getname refused the
+ * name, as for one too long, @p user says @p name is the caller's own,
+ * best-effort as a failed path syscall's is.
  *
  * An open holds one event from here until it returns. A refused or missing
  * file never reaches security_file_open, so until then the event is the failed
@@ -442,7 +450,7 @@ static __always_inline void report_held(u32 slot, struct held_key *k, struct eve
  * marked in n2. A full pool counts in untracked even if this open then
  * succeeds and is recorded.
  */
-static __always_inline void open_name(u32 slot, const char *name)
+static __always_inline void open_name(u32 slot, const char *name, int user)
 {
 	struct held_key k = held_key(HELD_OPEN);
 	if (bpf_map_lookup_elem(&heads, &k))
@@ -455,8 +463,11 @@ static __always_inline void open_name(u32 slot, const char *name)
 	e->err = 0;
 	e->truncated = 0;
 	e->n2 = 0;
-	long r = bpf_probe_read_kernel_str(e->data, PATH_LEN, name);
-	e->data_len = r > 0 ? r : 0;
+	long r = user ? bpf_probe_read_user_str(e->data, PATH_LEN, name) :
+			bpf_probe_read_kernel_str(e->data, PATH_LEN, name);
+	if (r <= 0)
+		return; // names nothing
+	e->data_len = r;
 	if (hold_new(e, HELD_OPEN) == 0)
 		return;
 	if (e->data_len > HEAD_DATA) {
@@ -538,14 +549,12 @@ static __always_inline void open_recorded(struct event *e)
  * Ends the open(2) hold as its call returned @p ret, recording a held open,
  * so no hold outlives its call.
  *
- * @param[out] none Whether there was no hold to end.
  * @return The failed open to record, assembled in scratch, or 0.
  */
-static __always_inline struct event *open_return(u32 slot, long ret, int *none)
+static __always_inline struct event *open_return(u32 slot, long ret)
 {
 	struct held_key k = held_key(HELD_OPEN);
 	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	*none = !head;
 	if (!head)
 		return 0;
 	struct event *failed = 0;

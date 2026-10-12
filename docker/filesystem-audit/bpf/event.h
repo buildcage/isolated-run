@@ -57,10 +57,8 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	 * @{
 	 */
 	K_MKDIR_FAILED = 26, K_MKNOD_FAILED = 27, K_SYMLINK_FAILED = 28,
-	K_LINK_FAILED = 29, K_TRUNCATE_FAILED = 30,
+	K_LINK_FAILED = 29, K_TRUNCATE_FAILED = 30
 	/** @} */
-	/** Never recorded: an open recorded at its hook, held so its call records nothing more. */
-	K_OPEN_RECORDED = 31
 };
 
 /**

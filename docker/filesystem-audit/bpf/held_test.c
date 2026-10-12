@@ -111,8 +111,17 @@ static long bpf_loop(__u32 nr, void *fn, void *ctx, __u64 flags)
 }
 
 static __u64 current_id = 1;
+static long bpf_probe_read_kernel_str(void *dst, __u32 size, const void *src);
+
+static long bpf_probe_read_user_str(void *dst, __u32 size, const void *src)
+{
+	return bpf_probe_read_kernel_str(dst, size, src);
+}
+
 static long bpf_probe_read_kernel_str(void *dst, __u32 size, const void *src)
 {
+	if (!src)
+		return -EFAULT;
 	__u32 n = strnlen(src, size - 1);
 	memcpy(dst, src, n);
 	((char *)dst)[n] = 0;
@@ -499,36 +508,48 @@ static void name_of(char *buf, unsigned len, char c)
 static void test_open_short_name_refused_early(void)
 {
 	reset();
-	int none;
-	open_name(0, "/tmp/missing");
-	struct event *e = open_return(0, -2, &none);
-	CHECK(!none && e && e->kind == K_OPEN_FAILED && !strcmp(e->data, "/tmp/missing"));
+	open_name(0, "/tmp/missing", 0);
+	struct event *e = open_return(0, -2);
+	CHECK(e && e->kind == K_OPEN_FAILED && !strcmp(e->data, "/tmp/missing"));
 	CHECK(e && e->data_len == 13 && !e->n2);
 	CHECK(heads.count == 0);
 	CHECK_ACCOUNTS();
+}
+
+/**
+ * A name getname refused, as one too long, is held from the caller's own;
+ * one that cannot be read names nothing, and is neither held nor counted.
+ */
+static void test_open_caller_name(void)
+{
+	reset();
+	open_name(0, NULL, 1);
+	CHECK(heads.count == 0 && untracked_count() == 0);
+	open_name(0, "/too/long", 1);
+	struct event *e = open_return(0, -36);
+	CHECK(e && e->kind == K_OPEN_FAILED && !strcmp(e->data, "/too/long"));
+	CHECK(heads.count == 0);
 }
 
 /** Both getname programs of one open: the second finds the name read. */
 static void test_open_name_read_once(void)
 {
 	reset();
-	int none;
-	open_name(0, "/a");
-	open_name(0, "/b");
+	open_name(0, "/a", 0);
+	open_name(0, "/b", 0);
 	CHECK(heads.count == 1 && !strcmp(head_of(1, HELD_OPEN)->data, "/a"));
-	open_return(0, 0, &none);
-	open_name(0, "/c");
+	open_return(0, 0);
+	open_name(0, "/c", 0);
 	CHECK(heads.count == 1 && !strcmp(head_of(1, HELD_OPEN)->data, "/c"));
 }
 
 static void test_open_long_name(void)
 {
 	reset();
-	int none;
 	name_of(long_name, sizeof(long_name) - 1, 'n');
-	open_name(0, long_name);
+	open_name(0, long_name, 0);
 	CHECK(use()->taken == tails_for(sizeof(long_name)));
-	struct event *e = open_return(0, -2, &none);
+	struct event *e = open_return(0, -2);
 	CHECK(e && !strcmp(e->data, long_name) && !e->truncated && !e->n2);
 	CHECK(heads.count == 0 && use()->taken == 0);
 	CHECK_ACCOUNTS();
@@ -543,7 +564,7 @@ static void test_open_long_name_no_tails(void)
 	current_id = 1;
 	use()->taken = N_TAILS; // and the rest taken elsewhere
 	name_of(long_name, sizeof(long_name) - 1, 'n');
-	open_name(0, long_name);
+	open_name(0, long_name, 0);
 	struct event *h = head_of(1, HELD_OPEN);
 	CHECK(h && h->truncated && h->n2 && h->data_len == HEAD_DATA);
 	CHECK(h && !memcmp(h->data, long_name, HEAD_DATA - 1) && h->data[HEAD_DATA - 1] == 0);
@@ -553,36 +574,34 @@ static void test_open_long_name_no_tails(void)
 static void test_open_no_head(void)
 {
 	reset();
-	int none;
 	for (int i = 0; i < N_HEADS; i++) {
 		current_id = 10 + i;
-		open_name(0, "/f");
+		open_name(0, "/f", 0);
 	}
 	CHECK(heads.count == N_HEADS && untracked_count() == 0);
 	current_id = 1;
-	open_name(0, "/g");
+	open_name(0, "/g", 0);
 	CHECK(untracked_count() == 1 && head_of(1, HELD_OPEN) == NULL);
-	CHECK(open_return(0, -2, &none) == NULL && none); // left to the caller's name
+	CHECK(open_return(0, -2) == NULL);
 }
 
 static void test_open_held_and_reported(void)
 {
 	reset();
-	int none;
-	open_name(0, "/tmp/f");
+	open_name(0, "/tmp/f", 0);
 	struct event *e = make(K_OPEN, 30, 5);
 	CHECK(hold_open(e) == 0); // in place, no tails
 	CHECK(head_of(1, HELD_OPEN)->kind == K_OPEN && tails.count == 0);
-	CHECK(open_return(0, 0, &none) == NULL && nsent == 1 && sent[0].e.err == 0);
+	CHECK(open_return(0, 0) == NULL && nsent == 1 && sent[0].e.err == 0);
 	CHECK(sent[0].size == __builtin_offsetof(struct event, data) + 30);
 	CHECK(heads.count == 0);
 
 	reset();
-	open_name(0, "/tmp/f");
+	open_name(0, "/tmp/f", 0);
 	CHECK(open_creating());
 	e = make(K_OPEN, HEAD_DATA + 2 * CHUNK, 6);
 	CHECK(hold_open(e) == 0 && use()->taken == 2);
-	CHECK(open_return(0, -13, &none) == NULL && nsent == 2 && sent[0].e.err == 0 && sent[1].e.err == 13);
+	CHECK(open_return(0, -13) == NULL && nsent == 2 && sent[0].e.err == 0 && sent[1].e.err == 13);
 	CHECK(data_matches(&sent[1].e, HEAD_DATA + 2 * CHUNK, 6));
 	CHECK(heads.count == 0 && use()->taken == 0);
 	CHECK_ACCOUNTS();
@@ -591,11 +610,10 @@ static void test_open_held_and_reported(void)
 static void test_open_not_held(void)
 {
 	reset();
-	int none;
 	CHECK(hold_open(make(K_OPEN, 30, 1)) < 0); // outside open(2)
 	CHECK(!open_creating());
-	CHECK(open_return(0, -2, &none) == NULL && none);
-	open_name(0, "/f");
+	CHECK(open_return(0, -2) == NULL);
+	open_name(0, "/f", 0);
 	CHECK(hold_open(make(K_OPEN, 30, 1)) == 0);
 	CHECK(hold_open(make(K_OPEN, 30, 2)) < 0); // nested in the one held
 	CHECK(head_of(1, HELD_OPEN)->data[0] == (char)1);
@@ -609,36 +627,34 @@ static void test_open_not_held(void)
 static void test_open_no_tails(void)
 {
 	reset();
-	int none;
-	open_name(0, "/tmp/f");
+	open_name(0, "/tmp/f", 0);
 	use()->taken = N_TAILS;
 	struct event *e = make(K_OPEN, HEAD_DATA + CHUNK, 1);
 	CHECK(hold_open(e) > 0 && untracked_count() == 1);
 	open_recorded(e);
 	CHECK(head_of(1, HELD_OPEN)->kind == K_OPEN_RECORDED);
-	CHECK(open_return(0, -6, &none) == NULL && !none && nsent == 0 && heads.count == 0);
+	CHECK(open_return(0, -6) == NULL && nsent == 0 && heads.count == 0);
 
 	reset();
-	open_name(0, "/tmp/f");
+	open_name(0, "/tmp/f", 0);
 	tails.busy_after = 0; // the hold fails after replacing the head, which goes too
 	e = make(K_OPEN, HEAD_DATA + CHUNK, 1);
 	CHECK(hold_open(e) > 0 && heads.count == 0);
 	tails.busy_after = -1;
 	open_recorded(e);
 	CHECK(head_of(1, HELD_OPEN)->kind == K_OPEN_RECORDED);
-	CHECK(open_return(0, -6, &none) == NULL && !none && nsent == 0);
+	CHECK(open_return(0, -6) == NULL && nsent == 0);
 }
 
 static void test_open_restarted(void)
 {
 	reset();
-	int none;
-	open_name(0, "/f");
+	open_name(0, "/f", 0);
 	hold_open(make(K_OPEN, HEAD_DATA + CHUNK, 1));
-	CHECK(open_return(0, -512, &none) == NULL && nsent == 0);
+	CHECK(open_return(0, -512) == NULL && nsent == 0);
 	CHECK(heads.count == 0 && use()->taken == 0);
-	open_name(0, "/x");
-	CHECK(open_return(0, 0, &none) == NULL && nsent == 0 && heads.count == 0);
+	open_name(0, "/x", 0);
+	CHECK(open_return(0, 0) == NULL && nsent == 0 && heads.count == 0);
 }
 
 static void test_report_outcomes(void)
@@ -675,6 +691,7 @@ int main(void)
 	test_missing_tail_drops();
 	test_refused_deletes();
 	test_open_short_name_refused_early();
+	test_open_caller_name();
 	test_open_name_read_once();
 	test_open_long_name();
 	test_open_long_name_no_tails();

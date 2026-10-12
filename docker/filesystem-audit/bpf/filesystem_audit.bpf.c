@@ -335,25 +335,6 @@ static __always_inline void open_failed(u32 slot, struct event *e, long ret, int
 	submit(e);
 }
 
-/**
- * The @p name a failed open with no hold was given, read into scratch from
- * the caller's memory, best-effort as a failed path syscall's is. 0 when it
- * cannot be read, a call that names nothing.
- */
-static __always_inline struct event *open_user_name(u32 slot, const char *name)
-{
-	struct event *e = scratch_get(slot);
-	if (!e)
-		return 0;
-	long r = bpf_probe_read_user_str(e->data, PATH_LEN, name);
-	if (r <= 0)
-		return 0;
-	e->data_len = r;
-	e->truncated = 0; // a name cut at PATH_LEN failed ENAMETOOLONG, which says so
-	e->n2 = 0;
-	return e;
-}
-
 /** Starts holding the open(2) the thread is in, if any, from its name. */
 static __always_inline void stash_name(u32 slot, u64 *ctx)
 {
@@ -361,9 +342,12 @@ static __always_inline void stash_name(u32 slot, u64 *ctx)
 		return;
 	struct filename *ret = 0;
 	bpf_get_func_ret(ctx, (u64 *)&ret);
+	// getname refused the name, as one too long: the caller's own, its first
+	// argument.
 	if ((long)ret < 0 && (long)ret >= -4095)
-		return;
-	open_name(slot, BPF_CORE_READ(ret, name));
+		open_name(slot, (const char *)ctx[0], 1);
+	else
+		open_name(slot, BPF_CORE_READ(ret, name), 0);
 }
 
 /**
@@ -481,18 +465,14 @@ int BPF_PROG(on_file_free, struct file *file)
 
 /**
  * Ends an open(2) family call's hold as the call returns, recording the open,
- * with the descriptor and flags from its arguments for a failed one. With no
- * hold, records a failed call from the name the caller passed: getname refused
- * the name, as for one too long, the pool was full, or no getname program ran
- * for the open.
+ * with the descriptor and flags from its arguments for a failed one. A call
+ * with no hold names nothing the kernel looked up: a seccomp filter or a
+ * tracer stopped it, or getname never copied its name.
  */
 static __always_inline void open_returned(u32 slot, struct pt_regs *regs, long nr, long ret)
 {
-	int none;
 	int at = nr == nr_openat || nr == nr_openat2;
-	struct event *e = open_return(slot, ret, &none);
-	if (none && ret < 0 && !is_restart(ret))
-		e = open_user_name(slot, (const char *)sys_arg(regs, at));
+	struct event *e = open_return(slot, ret);
 	if (!e)
 		return;
 	u32 flags;
