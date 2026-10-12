@@ -1072,10 +1072,12 @@ jobs:
   # runner ships: test-integration.yml covers its rules against a fixture
   # origin, which cannot show that a real client's requests and STS's real
   # answers still take the shape the check reads. A job of its own so that
-  # only it gets an OIDC token; a fork's pull request gets none and skips it.
+  # only it gets an OIDC token. It runs only in this repository, whose
+  # environment holds the roles: a fork's pull request gets no token, and a
+  # fork's own runs have no roles to assume.
   test_sandbox_aws_key_check:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || (needs.changes.outputs.test_sandbox == 'true' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+    if: ${{ !cancelled() && github.repository == 'buildcage/isolated-run' && (github.event_name != 'pull_request' || (needs.changes.outputs.test_sandbox == 'true' && github.event.pull_request.head.repo.full_name == github.repository)) }}
     runs-on: ubuntu-latest
     # The role trusts only jobs in this environment. Its only permission is
     # assuming a second role, which has none.
@@ -1112,6 +1114,16 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
+      - name: Read the roles' accounts
+        id: accounts
+        env:
+          ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          SWITCHED_ROLE_ARN: ${{ vars.AWS_SWITCHED_ROLE_ARN }}
+        run: |
+          account() { local rest="${1#arn:*:iam::}"; echo "${rest%%:*}"; }
+          echo "role=$(account "$ROLE_ARN")" >> "$GITHUB_OUTPUT"
+          echo "switched=$(account "$SWITCHED_ROLE_ARN")" >> "$GITHUB_OUTPUT"
+
       # Fetched here, as the step's command has no way to ask GitHub for one.
       - name: Get a web identity token for the step to exchange
         run: |
@@ -1132,7 +1144,7 @@ jobs:
           allowed_url_rules: |
             POST https://sts.us-east-1.amazonaws.com/
           aws_key_check: true
-          allowed_aws_role_accounts: ${{ steps.aws.outputs.aws-account-id }}
+          allowed_aws_role_accounts: ${{ steps.accounts.outputs.role }},${{ steps.accounts.outputs.switched }}
           # The refusal below is expected, not a failure.
           fail_on_blocked: false
           upload_traffic_artifact: true
@@ -1168,9 +1180,15 @@ jobs:
             echo "=== a key from outside the step must be refused ==="
             # AWS's documented example key ID, built at run time so the file
             # holds no key-shaped literal.
-            if env -u AWS_SESSION_TOKEN AWS_ACCESS_KEY_ID="AKIA$(printf IOSFODNN7EXAMPLE)" AWS_SECRET_ACCESS_KEY=example \
-              aws sts get-caller-identity 2>&1; then
+            if out=$(env -u AWS_SESSION_TOKEN AWS_ACCESS_KEY_ID="AKIA$(printf IOSFODNN7EXAMPLE)" AWS_SECRET_ACCESS_KEY=example \
+              aws sts get-caller-identity 2>&1); then
               echo "UNEXPECTED: the call signed with a key from outside the step got through"
+              exit 1
+            fi
+            echo "$out"
+            # STS's own answer to an unknown key: the call left the proxy.
+            if grep -q InvalidClientTokenId <<<"$out"; then
+              echo "UNEXPECTED: STS, not the proxy, refused the call"
               exit 1
             fi
 
@@ -1182,8 +1200,16 @@ jobs:
         if: always() && steps.restrict.outcome != 'skipped'
         env:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/aws-restrict-summary.md
-          ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
         run: ./test/assert-sandbox-aws-key-check.sh restrict
+
+      - name: Check the traffic_artifact_name output was set
+        env:
+          NAME: ${{ steps.restrict.outputs.traffic_artifact_name }}
+        run: |
+          if [ -z "$NAME" ]; then
+            echo "::error::traffic_artifact_name output was empty despite upload_traffic_artifact: true"
+            exit 1
+          fi
 
       - name: Download the traffic artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -1195,11 +1221,12 @@ jobs:
       # issued one points at the requests signed with it.
       - name: Verify the traffic artifact's aws objects
         env:
-          ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+          ROLE_ACCOUNT: ${{ steps.accounts.outputs.role }}
+          SWITCHED_ACCOUNT: ${{ steps.accounts.outputs.switched }}
         run: |
           node -e '
             const fs = require("node:fs");
-            const account = process.env.ACCOUNT_ID;
+            const { ROLE_ACCOUNT, SWITCHED_ACCOUNT } = process.env;
             const rows = JSON.parse(
               fs.readFileSync(process.env.RUNNER_TEMP + "/aws-traffic/traffic.json", "utf8"),
             ).filter((r) => r.host === "sts.us-east-1.amazonaws.com" && r.method === "POST");
@@ -1213,13 +1240,13 @@ jobs:
             const allowed = rows.filter((r) => r.action === "allow");
             const env = allowed.filter((r) => r.aws?.key === "env");
             const assumed = allowed.filter((r) => r.aws?.key === "assumed");
-            const assumeRole = env.find((r) => r.aws.assumedAccount === account && r.aws.issuedKeyRef);
+            const assumeRole = env.find((r) => r.aws.assumedAccount === SWITCHED_ACCOUNT && r.aws.issuedKeyRef);
             check(assumeRole, "no AssumeRole signed with the starting key names the account and the key it issued");
             check(
-              assumed.some((r) => r.aws.keyRef === assumeRole.aws.issuedKeyRef && r.aws.accountId === account),
+              assumed.some((r) => r.aws.keyRef === assumeRole.aws.issuedKeyRef && r.aws.accountId === SWITCHED_ACCOUNT),
               "no request was signed with the key AssumeRole issued, credited to its account",
             );
-            const webIdentity = allowed.find((r) => r.aws?.key === "none" && r.aws.accountId === account);
+            const webIdentity = allowed.find((r) => r.aws?.key === "none" && r.aws.accountId === ROLE_ACCOUNT);
             check(webIdentity?.aws.issuedKeyRef, "the unsigned AssumeRoleWithWebIdentity names no issued key");
             check(
               assumed.some((r) => r.aws.keyRef === webIdentity.aws.issuedKeyRef),
@@ -1236,9 +1263,11 @@ jobs:
           '
 
       # No account named: the switched role's key is one restrict would refuse,
-      # and the report names its account for the workflow to check.
+      # and the report names its account for the workflow to check. Run even
+      # when a restrict-mode check failed, so both report what they found.
       - name: Call STS with the AWS access key check in audit mode
         id: audit
+        if: ${{ !cancelled() && steps.accounts.outcome == 'success' }}
         uses: ./
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
@@ -1261,7 +1290,7 @@ jobs:
         if: always() && steps.audit.outcome != 'skipped'
         env:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/aws-audit-summary.md
-          ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+          SWITCHED_ACCOUNT: ${{ steps.accounts.outputs.switched }}
         run: ./test/assert-sandbox-aws-key-check.sh audit
 
   # Single, stably-named required status check for branch protection: the
