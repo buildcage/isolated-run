@@ -72899,7 +72899,13 @@ function resolveIdentity(env, warn, { resolveSandboxGid, info }) {
 	};
 }
 function assembleBundle(dir, options, deps) {
-	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options, { listHostMounts, buildOciConfig } = deps, layout = resolveWritableLayout(options, deps.realpath), { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, layout, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
+	let { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options, { listHostMounts, buildOciConfig } = deps, { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps), layout;
+	try {
+		layout = resolveWritableLayout(options, deps.realpath);
+	} catch (e) {
+		throw asSandboxError(e, "Failed to build the sandbox's OCI bundle", "OCI_CONFIG_BUILD_FAILED");
+	}
+	let caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, layout, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
 		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), { readonlyHostPaths, renameGuardDirs } = prepareReadonlyHostPaths(layout.persisting, options, hostMounts, deps);
 		config = buildOciConfig(baseSpec, {

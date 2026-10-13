@@ -187,7 +187,8 @@ export interface AssembledBundle {
   caTrust: CaTrustFiles | undefined;
   netnsName: string;
   rootfsBindDir: string;
-  /** See WritableLayout.persisting. */
+  /** The paths whose writes persist, as the mounts were built from them;
+   *  what is settled after the command goes by these. */
   persisting: string[];
 }
 
@@ -408,8 +409,13 @@ export function assembleBundle(
   const { containerName, writeThroughPaths, env, proxyEngine, filesystemMode } = options;
   const { listHostMounts, buildOciConfig } = deps;
 
-  const layout = resolveWritableLayout(options, deps.realpath);
   const { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps);
+  let layout;
+  try {
+    layout = resolveWritableLayout(options, deps.realpath);
+  } catch (e) {
+    throw asSandboxError(e, "Failed to build the sandbox's OCI bundle", "OCI_CONFIG_BUILD_FAILED");
+  }
   const caTrust =
     proxyEngine === "inspect"
       ? extractCaTrust(containerName, dir, options, layout, deps)
@@ -464,10 +470,11 @@ export function assembleBundle(
     });
   } catch (e) {
     if (caTrust?.nssDb) deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps));
-    // A step in here that already speaks to the user keeps its own words:
-    // resolveSandboxGid's UNSAFE_PRIMARY_GID, and the writable-path guards
-    // buildOciConfig runs, which resolveFilesystemPlan reports under the
-    // same code when its own early copy catches the input first.
+    // A step in here that already speaks to the user keeps its own words
+    // (resolveSandboxGid's UNSAFE_PRIMARY_GID passes through asSandboxError),
+    // and so do the writable-path guards buildOciConfig runs, which
+    // resolveFilesystemPlan reports under the same code when its own early
+    // copy catches the input first.
     if (e instanceof WritablePathConflictError) {
       throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
     }

@@ -764,6 +764,7 @@ describe("runSandboxedCommand", () => {
     ["extractRuncBootstrap", () => mocks.extractRuncBootstrap, "RUNC_EXTRACT_FAILED", {}],
     ["extractCaCert", () => mocks.extractCaCert, "CA_EXTRACT_FAILED", { proxyEngine: "inspect" }],
     ["buildOciConfig", () => mocks.buildOciConfig, "OCI_CONFIG_BUILD_FAILED", {}],
+    ["realpath", () => mocks.realpath, "OCI_CONFIG_BUILD_FAILED", { proxyEngine: "inspect" }],
   ])("turns a %s failure into its own SandboxError", async (_name, target, code, overrides) => {
     target().mockImplementation(() => {
       throw new Error("boom");
