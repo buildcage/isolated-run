@@ -1,0 +1,59 @@
+name: Prepare a local proxy
+description: Build the proxy image for each engine from this checkout, and the action with the local-image test hook
+# Callers must run actions/checkout before this: a local-path action can't
+# be located at all until the calling job has checked out the repo. Each
+# `uses: ./` step still names its image in BUILDCAGE_LOCAL_IMAGE_REF itself:
+# set through $GITHUB_ENV, it would reach the sandboxed command's environment
+# too.
+
+inputs:
+  # Required: each build sets PROXY_ENGINE itself, so a job's own PROXY_ENGINE
+  # never picks the engine.
+  engines:
+    description: Space-separated engines to build an image for
+    required: true
+  proxy-test-hooks:
+    description: Whether the inspect image carries its test hooks
+    default: "false"
+
+outputs:
+  universal:
+    description: The universal image's ref, if one was built
+    value: ${{ steps.build.outputs.universal }}
+  inspect:
+    description: The inspect image's ref, if one was built
+    value: ${{ steps.build.outputs.inspect }}
+
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-vp
+
+    # compose.yaml names the image the same for either engine, so each build
+    # is retagged before the next one overwrites it.
+    - name: Build the proxy images
+      id: build
+      shell: bash
+      env:
+        ENGINES: ${{ inputs.engines }}
+        TEST_HOOKS: ${{ inputs.proxy-test-hooks }}
+      run: |
+        for engine in $ENGINES; do
+          case "$engine" in
+            universal | inspect) ;;
+            *) echo "::error::unknown engine: $engine" && exit 1 ;;
+          esac
+          args=()
+          if [ "$engine" = inspect ] && [ "$TEST_HOOKS" = true ]; then
+            args=(--build-arg BUILDCAGE_TEST_HOOKS=1)
+          fi
+          PROXY_ENGINE=$engine docker compose build proxy "${args[@]}"
+          docker tag "$(PROXY_ENGINE=$engine docker compose config --images proxy)" "buildcage-local-proxy:$engine"
+          echo "$engine=buildcage-local-proxy:$engine" >> "$GITHUB_OUTPUT"
+        done
+
+    - name: Rebuild the action with the local-image test hook enabled
+      shell: bash
+      env:
+        BUILDCAGE_BUILD_TEST_HOOKS: "1"
+      run: vp run build

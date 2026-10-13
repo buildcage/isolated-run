@@ -51,6 +51,7 @@ jobs:
               - 'test/**'
               - 'Makefile'
               - '.github/actions/setup-vp/**'
+              - '.github/actions/prepare-local-proxy/**'
               - '.github/workflows/test-integration.yml'
 
             test_sandbox:
@@ -92,23 +93,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-vp
-
-      - name: Build local sandbox proxy image
-        run: docker compose build proxy
-
-      - name: Resolve local image ref
-        id: local_image
-        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
-
-      - name: Rebuild the action with the local-image test hook enabled
-        env:
-          BUILDCAGE_BUILD_TEST_HOOKS: "1"
-        run: vp run build
+      - name: Prepare the local proxy
+        id: local_proxy
+        uses: ./.github/actions/prepare-local-proxy
+        with:
+          engines: universal
 
       - name: Run integration tests
         env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
         run: make test_integration_sandbox_linux_${{ matrix.part }}
 
   # Three groups side by side, each under its own Compose project and test-net
@@ -138,26 +131,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-vp
-
-      # compose.yaml names the image the same for either engine, so each build
-      # is retagged before the next one overwrites it.
-      - name: Build local proxy images for both engines
-        run: |
-          PROXY_ENGINE=universal docker compose build proxy
-          docker tag "$(PROXY_ENGINE=universal docker compose config --images proxy)" buildcage-it-proxy:universal
-          PROXY_ENGINE=inspect docker compose build proxy --build-arg BUILDCAGE_TEST_HOOKS=1
-          docker tag "$(PROXY_ENGINE=inspect docker compose config --images proxy)" buildcage-it-proxy:inspect
-
-      - name: Rebuild the action with the local-image test hook enabled
-        env:
-          BUILDCAGE_BUILD_TEST_HOOKS: "1"
-        run: vp run build
+      - name: Prepare the local proxy
+        id: local_proxy
+        uses: ./.github/actions/prepare-local-proxy
+        with:
+          engines: universal inspect
+          proxy-test-hooks: true
 
       - parallel:
           - name: Run universal-engine fixture-based integration tests
             env:
-              BUILDCAGE_LOCAL_IMAGE_REF: buildcage-it-proxy:universal
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
               PROXY_ENGINE: universal
               BUILDCAGE_WORKTREE_SUFFIX: ${{ env.UNIVERSAL_SUFFIX }}
               COMPOSE_PROJECT_NAME: ${{ env.UNIVERSAL_PROJECT }}
@@ -166,7 +150,7 @@ jobs:
 
           - name: Run the inspect engine's CA half
             env:
-              BUILDCAGE_LOCAL_IMAGE_REF: buildcage-it-proxy:inspect
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
               PROXY_ENGINE: inspect
               BUILDCAGE_WORKTREE_SUFFIX: ${{ env.CA_SUFFIX }}
               COMPOSE_PROJECT_NAME: ${{ env.CA_PROJECT }}
@@ -211,23 +195,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-vp
-
-      - name: Build local inspect-engine proxy image (with test hooks)
-        env:
-          PROXY_ENGINE: inspect
-        run: docker compose build proxy --build-arg BUILDCAGE_TEST_HOOKS=1
-
-      - name: Resolve local image ref
-        id: local_image
-        env:
-          PROXY_ENGINE: inspect
-        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
-
-      - name: Rebuild the action with the local-image test hook enabled
-        env:
-          BUILDCAGE_BUILD_TEST_HOOKS: "1"
-        run: vp run build
+      - name: Prepare the local proxy
+        id: local_proxy
+        uses: ./.github/actions/prepare-local-proxy
+        with:
+          engines: inspect
+          proxy-test-hooks: true
 
       # The runner's python3 is older than 3.13, which the Python scenario needs.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -236,7 +209,7 @@ jobs:
 
       - name: Run inspect-engine integration tests
         env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
         run: make test_integration_sandbox_inspect_rules
 
       - name: Verify no leftover fixture/proxy containers or networks
