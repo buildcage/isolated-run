@@ -3,7 +3,7 @@ import {
   caTrustAdditions,
   type CaTrustFiles,
 } from "./ca-trust.ts";
-import { ENV_BLOB_TERMINATOR } from "./env-loader.ts";
+import { envLoaderArgs } from "./env-loader.ts";
 import { realHostProbes, type HostProbes, type NofileLimit } from "./host-probes.ts";
 import {
   ephemeralLayers,
@@ -278,9 +278,7 @@ export function buildOciConfig(
         probes.setprivPath(),
         "--pdeathsig=KILL",
         "--",
-        envLoaderPath,
-        ENV_BLOB_TERMINATOR,
-        scriptPath,
+        ...envLoaderArgs(envLoaderPath, scriptPath),
       ],
       // Empty by design: envLoaderPath applies the step's environment from
       // stdin before execing scriptPath, keeping `env:` secrets off the

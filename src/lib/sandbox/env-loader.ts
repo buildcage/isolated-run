@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { ACTION_INPUTS } from "../inputs.ts";
 import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
@@ -87,7 +88,10 @@ export function buildEnvBlob(resolved: Record<string, string>): Buffer {
   return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
 }
 
-/** The sandbox's PID 1, shipped beside dist/ as run-isolated.sh is. */
+// Resolved from the bundle's own location: dist/main.cjs sits beside scripts/.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** The sandbox's PID 1, shipped in scripts/ as run-isolated.sh is. */
 export const ENV_LOADER_SOURCE = join(__dirname, "..", "scripts", "buildcage-init.sh");
 
 /** Copies the loader into `execDir`. bash reads a script as it runs, and the
@@ -97,4 +101,10 @@ export function writeEnvLoader(execDir: string, source = ENV_LOADER_SOURCE): str
   const loaderPath = join(execDir, "buildcage-init");
   writeFileSync(loaderPath, readFileSync(source), { mode: 0o700 });
   return loaderPath;
+}
+
+/** How the loader is started: the record that ends the environment, then the
+ *  script to run. */
+export function envLoaderArgs(loaderPath: string, scriptPath: string): string[] {
+  return [loaderPath, ENV_BLOB_TERMINATOR, scriptPath];
 }

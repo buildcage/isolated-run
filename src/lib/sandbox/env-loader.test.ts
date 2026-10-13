@@ -21,11 +21,12 @@ import {
   buildEnvBlob,
   writeEnvLoader,
   ACTION_INPUT_ENV_KEYS,
-  ENV_BLOB_TERMINATOR,
+  envLoaderArgs,
 } from "./env-loader.ts";
 import { withScratchDir } from "./scratch-dir.ts";
 
-// The checkout's copy: ENV_LOADER_SOURCE is resolved against dist/.
+// The checkout's copy. ENV_LOADER_SOURCE is resolved for dist/main.cjs, so from
+// this test's directory it names no file.
 const LOADER_SOURCE = join(
   dirname(fileURLToPath(import.meta.url)),
   "../../../scripts/buildcage-init.sh",
@@ -220,7 +221,7 @@ async function runLoader(
     writeFileSync(scriptPath, `#!/bin/bash\n${script}\n`, { mode: 0o700 });
     const startedPath = join(dir, "started");
     const startedFd = openSync(startedPath, "w");
-    const loader = spawn("bash", [loaderPath, ENV_BLOB_TERMINATOR, scriptPath], {
+    const loader = spawn("bash", envLoaderArgs(loaderPath, scriptPath), {
       stdio: ["pipe", "pipe", "pipe", startedFd],
     });
     closeSync(startedFd);

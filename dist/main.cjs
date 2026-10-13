@@ -23263,7 +23263,7 @@ function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, http
 }
 //#endregion
 //#region src/lib/compose-file.ts
-const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$2, "../docker/compose.action.yaml");
+const __dirname$3 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$3, "../docker/compose.action.yaml");
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
 }
@@ -72187,10 +72187,17 @@ function buildEnvBlob(resolved) {
 	let records = [...Object.entries(resolved).map(([k, v]) => `${k}=${v}`), ENV_BLOB_TERMINATOR];
 	return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
 }
-const ENV_LOADER_SOURCE = (0, node_path.join)(__dirname, "..", "scripts", "buildcage-init.sh");
+const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), ENV_LOADER_SOURCE = (0, node_path.join)(__dirname$2, "..", "scripts", "buildcage-init.sh");
 function writeEnvLoader(execDir, source = ENV_LOADER_SOURCE) {
 	let loaderPath = (0, node_path.join)(execDir, "buildcage-init");
 	return (0, node_fs.writeFileSync)(loaderPath, (0, node_fs.readFileSync)(source), { mode: 448 }), loaderPath;
+}
+function envLoaderArgs(loaderPath, scriptPath) {
+	return [
+		loaderPath,
+		ENV_BLOB_TERMINATOR,
+		scriptPath
+	];
 }
 //#endregion
 //#region src/lib/sandbox/filesystem-audit-tracer.ts
@@ -72528,9 +72535,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 				probes.setprivPath(),
 				"--pdeathsig=KILL",
 				"--",
-				envLoaderPath,
-				ENV_BLOB_TERMINATOR,
-				scriptPath
+				...envLoaderArgs(envLoaderPath, scriptPath)
 			],
 			env: [],
 			cwd: workdir || "/",
