@@ -206,25 +206,28 @@ type HaltTracerDeps = Required<
   Pick<FilesystemAuditDeps, "sleep" | "remove" | "exec" | "readFile" | "readTail">
 >;
 
-// SIGKILL to the sudo wrapper would not reach the tracer, so this kills the
-// tracer itself.
-function killTracer(
+// Signals the tracer itself rather than its sudo wrapper: sudo cannot pass on
+// SIGKILL, and an older sudo such as Ubuntu 22.04's 1.9.9 drops any signal sent
+// from its own process group, which is the action's.
+function signalTracer(
   pidFilePath: string,
+  signal: "TERM" | "KILL",
   { readFile, exec }: Pick<HaltTracerDeps, "readFile" | "exec">,
 ): void {
   try {
     const pid = readPid(readFile, pidFilePath);
-    if (pid > 0) exec("sudo", ["-n", "kill", "-KILL", String(pid)]);
+    if (pid > 0) exec("sudo", ["-n", "kill", `-${signal}`, String(pid)]);
   } catch {
     // The tracer is already gone, or its pidfile cannot be read.
   }
 }
 
 /**
- * Stops the tracer. sudo relays SIGTERM to it for a clean flush. Once its end
- * line is written the record is whole, and the seconds the kernel takes to
- * detach its probes are left to it, so it can remove its cgroup. One that
- * neither writes it nor exits in time is killed. Removing the pidfile once it
+ * Stops the tracer with SIGTERM for a clean flush, sent through sudo as well
+ * for a tracer that has not written its pidfile yet. Once its end line is
+ * written the record is whole, and the seconds the kernel takes to detach its
+ * probes are left to it, so it can remove its cgroup. One that neither writes
+ * it nor exits in time is killed. Removing the pidfile once it
  * is gone tells the post step the tracer is stopped, so it only acts on one a
  * cancel orphaned.
  *
@@ -239,13 +242,14 @@ export async function haltTracer(
 ): Promise<void> {
   const { sleep, remove, readTail } = deps;
   child.kill("SIGTERM");
+  signalTracer(pidFilePath, "TERM", deps);
   // Read each round, so a cancel that comes while waiting cuts the wait.
   const grace = () => (untilRecorded && !cancel?.aborted ? STOP_GRACE_MS : SHORT_STOP_GRACE_MS);
   for (let waited = 0; !exited(); waited += READY_POLL_MS) {
     if (untilRecorded && recordComplete(readTail, outPath)) {
       void Promise.race([child.exited, sleep(DETACH_GRACE_MS, true)])
         .then(() => {
-          if (!exited()) killTracer(pidFilePath, deps);
+          if (!exited()) signalTracer(pidFilePath, "KILL", deps);
           return child.exited;
         })
         .then(() => remove(pidFilePath))
@@ -255,7 +259,7 @@ export async function haltTracer(
     if (waited >= grace()) break;
     await sleep(READY_POLL_MS);
   }
-  if (!exited()) killTracer(pidFilePath, deps);
+  if (!exited()) signalTracer(pidFilePath, "KILL", deps);
   await child.exited;
   remove(pidFilePath);
 }

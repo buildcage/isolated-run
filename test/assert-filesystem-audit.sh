@@ -20,6 +20,8 @@ echo "=== Filesystem Audit Summary Assertions ==="
 echo ""
 
 assert_file_has "$f" "The summary has the Process Activity section" "Process Activity"
+# The tracer stopped on SIGTERM and wrote its whole record.
+assert_file_lacks "$f" "The record is not marked incomplete" "This record is incomplete"
 # The probe writes show as a flagged, command-tagged line under the
 # workspace, led by its elapsed time (MM:SS.mmm) and a colon.
 t='[0-9]{2}:[0-9]{2}\.[0-9]{3}'
