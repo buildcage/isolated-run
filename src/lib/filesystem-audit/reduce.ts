@@ -42,8 +42,8 @@ export interface SummaryOptions extends Prefixes {
   limits?: Partial<Limits>;
 }
 
-// Past this many command and syscall pairs, the rest but kills are left to the
-// artifact.
+// Past this many command and syscall pairs, only kills and each syscall's
+// first command get a row; the artifact has the rest.
 const REFUSED_KEPT = 200;
 
 interface Limits {
@@ -81,9 +81,12 @@ export interface Row extends Shown {
   comm: string;
 }
 
-/** A refused syscall's row: its name, and whether it killed the program. */
+/**
+ * A refused syscall's row: its name, whether it killed the program, and
+ * whether some command refused it got no row.
+ */
 export interface RefusedRow extends Row {
-  syscall: { name: string; killed: boolean };
+  syscall: { name: string; killed: boolean; cut?: boolean };
 }
 
 /** What the summary is rendered from, reduced from the recording. */
@@ -201,6 +204,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   let seq = 0;
   const added = new Map<number | undefined, number>();
   const refused = new Map<string, RefusedRow>();
+  // Each refused syscall's first row, by name.
+  const refusedFirst = new Map<string, RefusedRow>();
 
   const add = (r: unknown, counted = true): void => {
     if (!isRecord(r)) return;
@@ -220,10 +225,17 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const t = Date.parse(r.t ?? "");
       let row = refused.get(key);
       if (!row) {
-        // A kill explains a step's "Bad system call", so it is always kept.
-        if (refused.size >= REFUSED_KEPT && !r.killed) return;
+        // A kill explains a step's "Bad system call", and a syscall's first row
+        // keeps it in the note, so both are always kept. The profile bounds
+        // how many names there are.
+        const first = r.killed ? undefined : refusedFirst.get(name);
+        if (refused.size >= REFUSED_KEPT && first) {
+          first.syscall.cut = true;
+          return;
+        }
         row = { agg: newAgg(), flags: "!", comm, path, syscall: { name, killed: !!r.killed } };
         refused.set(key, row);
+        if (!r.killed && !first) refusedFirst.set(name, row);
       }
       if (!Number.isNaN(t)) {
         if (row.agg.seq === Infinity) row.agg.seq = seq++;
