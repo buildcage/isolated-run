@@ -6,7 +6,15 @@
 set -eu
 list=$1 dir=$2
 rc=0
-installed=$(apk list -I | sed -E 's/^(.*)-[^-]+-r[0-9]+ [^ ]+ \{[^}]*\} \((.*)\) \[installed\]$/\1 | \2/')
+# Through a file: sh has no pipefail to report apk failing mid-list.
+raw=$(mktemp)
+apk list -I >"$raw"
+installed=$(sed -E 's/^(.*)-[^-]+-r[0-9]+ [^ ]+ \{[^}]*\} \((.*)\) \[installed\]$/\1 | \2/' "$raw")
+rm -f "$raw"
+if [ -z "$installed" ] || echo "$installed" | grep -qv ' | '; then
+  echo "cannot read the installed packages from apk list -I" >&2
+  exit 1
+fi
 while IFS= read -r line; do
   pkg=${line%% | *} declared=${line#* | }
   entry=$(awk -F ' [|] ' -v p="$pkg" '$1 == p { print; exit }' "$list")
