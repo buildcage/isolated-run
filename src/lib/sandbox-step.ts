@@ -114,9 +114,10 @@ function onCancel(listener: () => void): () => void {
  * standing in for twenty modules at once; each one is tested in its own file.
  *
  * Pure steps are left out on purpose and run for real (resolveWriteThroughInput,
- * pinningPaths, deriveProjectName, buildComposeEnv, resolveComposeFile,
- * formatFilesystemPlanLog, resolveBuildcageImageRef): what a test wants to see
- * of those is the value that reached the next step, not the call.
+ * deriveProjectName, buildComposeEnv, resolveComposeFile,
+ * formatFilesystemPlanLog, resolveBuildcageImageRef, and pinningPaths with
+ * realPathOf injected): what a test wants to see of those is the value that
+ * reached the next step, not the call.
  */
 const realDeps = {
   applyConfigFile,
@@ -140,7 +141,7 @@ const realDeps = {
   resolveFilesystemPlan,
   pinHostCommands,
   /** Resolves a path on the host for pinningPaths. */
-  realPathOf: realPathOf as (path: string) => string,
+  realPathOf,
   getuid: process.getuid,
   readLocalImageOverride,
   verifyImageDigestOrThrow,
@@ -265,8 +266,8 @@ function writeBackMediatedFile(
 type StepInputs = ReturnType<typeof readStepInputs>;
 
 /**
- * Reads every input and runs the checks that need nothing but the inputs, so
- * a typo or a rule the engine cannot enforce fails before any setup.
+ * Reads every input and runs the checks that need no privilege, so a typo or a
+ * rule the engine cannot enforce fails before any privileged setup.
  */
 export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const { log, notice } = deps;
@@ -428,13 +429,14 @@ function logConfiguredRules({ rules, aws }: StepInputs, deps: SandboxStepDeps): 
 }
 
 /** What the step has set up by the time its command has run or failed to. */
-interface StepRun {
+export interface StepRun {
   inputs: StepInputs;
   env: NodeJS.ProcessEnv;
   containerName: string;
   stopProxy: () => Promise<void>;
   audit: FilesystemAuditPaths | undefined;
-  auditAttached: boolean;
+  /** Whether the tracer attached, read when the audit is prepared. */
+  auditAttached: () => boolean;
   mediation: RunnerOutputMediation | undefined;
   runnerFilesBackingDir: string;
   cancelled: boolean;
@@ -443,9 +445,10 @@ interface StepRun {
 /**
  * Everything after the command, whether it ran or not: the runner files
  * written back, the artifact outputs cleared, the reports, and the proxy
- * stopped. None of it throws, so the proxy is always stopped.
+ * stopped. None of the calls throws, so the proxy is always stopped. Returns
+ * whether a runner file failed the step.
  */
-export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise<void> {
+export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise<boolean> {
   const { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run;
   const { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs;
   // Write $GITHUB_OUTPUT and then $GITHUB_STEP_SUMMARY back from their backing
@@ -453,9 +456,10 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
   // @actions/core (last-write-wins over anything the command set), and the
   // reports onto the summary. The command never reached the real files, so
   // there is no symlink, FIFO or permission to put right here.
+  let runnerFileFailed = false;
   if (mediation) {
     for (const file of mediation.files) {
-      if (writeBackMediatedFile(file, annotation, deps)) process.exitCode = 1;
+      if (writeBackMediatedFile(file, annotation, deps)) runnerFileFailed = true;
     }
     try {
       deps.removeBackingDir(runnerFilesBackingDir);
@@ -473,7 +477,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
   const prepareAudit = () =>
     deps.prepareStepFilesystemAudit({
       audit,
-      attached: run.auditAttached,
+      attached: run.auditAttached(),
       upload: inputs.filesystemAuditArtifact.upload,
       retentionDays: inputs.filesystemAuditArtifact.retentionDays,
       containerName,
@@ -524,6 +528,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     });
   }
   await run.stopProxy();
+  return runnerFileFailed;
 }
 
 /**
@@ -543,11 +548,13 @@ export async function runSandboxStep(
   const { imageRef, pullPolicy, composeFile } = await resolveProxyImage(inputs, env, deps);
   logConfiguredRules(inputs, deps);
 
-  const { proxyEngine, proxyMode, filesystemMode, rules, aws, annotation } = inputs;
+  const { runInput, proxyEngine, proxyMode, filesystemMode, filesystemAudit, failOnCaResidue } =
+    inputs;
+  const { rules, aws, annotation } = inputs;
   const containerName = deps.generateContainerName();
   const projectName = deriveProjectName(containerName);
   const audit =
-    inputs.filesystemAudit === "record"
+    filesystemAudit === "record"
       ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE)
       : undefined;
   saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, deps.saveState);
@@ -625,13 +632,13 @@ export async function runSandboxStep(
     exitCode = await deps.runSandboxedCommand({
       containerName,
       proxyNetns,
-      runInput: inputs.runInput,
+      runInput,
       writeThroughPaths,
       env,
       proxyEngine,
       filesystemMode,
       overlayRoots,
-      failOnCaResidue: inputs.failOnCaResidue,
+      failOnCaResidue,
       filesystemAudit: audit,
       onAuditAttached: () => (auditAttached = true),
       warn: deps.warn,
@@ -641,20 +648,21 @@ export async function runSandboxStep(
       envOverrides: mediation?.envOverrides,
     });
   } finally {
-    await finalizeStep(
+    const runnerFileFailed = await finalizeStep(
       {
         inputs,
         env,
         containerName,
         stopProxy,
         audit,
-        auditAttached,
+        auditAttached: () => auditAttached,
         mediation,
         runnerFilesBackingDir,
         cancelled: cancel.signal.aborted,
       },
       deps,
     );
+    if (runnerFileFailed) process.exitCode = 1;
     stopListening();
   }
 

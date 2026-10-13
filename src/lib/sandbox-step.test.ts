@@ -970,7 +970,7 @@ describe("runSandboxStep", () => {
 });
 
 describe("readStepInputs", () => {
-  it("reads every input and checks the rules, touching nothing on the host", () => {
+  it("reads every input and checks the rules, before any privileged check", () => {
     const inputs = readStepInputs(ENV, deps);
 
     expect(inputs).toMatchObject({
@@ -1018,7 +1018,7 @@ describe("finalizeStep", () => {
     containerName: "buildcage-proxy-deadbeef",
     stopProxy: vi.fn().mockResolvedValue(undefined),
     audit: undefined,
-    auditAttached: false,
+    auditAttached: () => false,
     mediation: undefined,
     runnerFilesBackingDir: "/var/tmp/buildcage-runner-files",
     cancelled: false,
@@ -1028,7 +1028,7 @@ describe("finalizeStep", () => {
   it("reports, then stops the proxy, with nothing to write back", async () => {
     const step = run();
 
-    await finalizeStep(step, deps);
+    expect(await finalizeStep(step, deps)).toBe(false);
 
     expect(mocks.readBackingFile).not.toHaveBeenCalled();
     expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
@@ -1036,7 +1036,7 @@ describe("finalizeStep", () => {
     expect(mocks.writeLateSummary).not.toHaveBeenCalled();
   });
 
-  it("fails the step for a runner file it could not write back, and still reports", async () => {
+  it("says a runner file it could not write back failed the step, and still reports", async () => {
     mocks.writeRunnerFile.mockImplementation(() => {
       throw new Error("EACCES");
     });
@@ -1053,12 +1053,12 @@ describe("finalizeStep", () => {
       ],
     };
 
-    await finalizeStep(run({ mediation }), deps);
+    const failed = await finalizeStep(run({ mediation }), deps);
 
     expect(annotation.error).toHaveBeenCalledWith(
       "$GITHUB_OUTPUT could not be written: EACCES; failing the step",
     );
-    expect(process.exitCode).toBe(1);
+    expect(failed).toBe(true);
     expect(mocks.reportStepTraffic).toHaveBeenCalled();
   });
 });

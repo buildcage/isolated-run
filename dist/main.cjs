@@ -74119,9 +74119,9 @@ function logConfiguredRules({ rules, aws }, deps) {
 	});
 }
 async function finalizeStep(run, deps) {
-	let { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run, { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs;
+	let { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run, { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs, runnerFileFailed = !1;
 	if (mediation) {
-		for (let file of mediation.files) writeBackMediatedFile(file, annotation, deps) && (process.exitCode = 1);
+		for (let file of mediation.files) writeBackMediatedFile(file, annotation, deps) && (runnerFileFailed = !0);
 		try {
 			deps.removeBackingDir(runnerFilesBackingDir);
 		} catch (e) {
@@ -74133,7 +74133,7 @@ async function finalizeStep(run, deps) {
 	} catch {}
 	let prepareAudit = () => deps.prepareStepFilesystemAudit({
 		audit,
-		attached: run.auditAttached,
+		attached: run.auditAttached(),
 		upload: inputs.filesystemAuditArtifact.upload,
 		retentionDays: inputs.filesystemAuditArtifact.retentionDays,
 		containerName,
@@ -74176,7 +74176,7 @@ async function finalizeStep(run, deps) {
 			annotation
 		});
 	}
-	await run.stopProxy();
+	return await run.stopProxy(), runnerFileFailed;
 }
 async function runSandboxStep(env, overrides = {}) {
 	let deps = {
@@ -74184,7 +74184,7 @@ async function runSandboxStep(env, overrides = {}) {
 		...overrides
 	}, inputs = readStepInputs(env, deps), { overlayRoots, writeThroughPaths } = preflight(inputs, env, deps), { imageRef, pullPolicy, composeFile } = await resolveProxyImage(inputs, env, deps);
 	logConfiguredRules(inputs, deps);
-	let { proxyEngine, proxyMode, filesystemMode, rules, aws, annotation } = inputs, containerName = deps.generateContainerName(), projectName = deriveProjectName(containerName), audit = inputs.filesystemAudit === "record" ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE) : void 0;
+	let { runInput, proxyEngine, proxyMode, filesystemMode, filesystemAudit, failOnCaResidue } = inputs, { rules, aws, annotation } = inputs, containerName = deps.generateContainerName(), projectName = deriveProjectName(containerName), audit = filesystemAudit === "record" ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE) : void 0;
 	saveCleanupState(env, {
 		containerName,
 		filesystemMode,
@@ -74228,13 +74228,13 @@ async function runSandboxStep(env, overrides = {}) {
 		mediation = deps.mediateRunnerOutputFiles(env, runnerFilesBackingDir), exitCode = await deps.runSandboxedCommand({
 			containerName,
 			proxyNetns,
-			runInput: inputs.runInput,
+			runInput,
 			writeThroughPaths,
 			env,
 			proxyEngine,
 			filesystemMode,
 			overlayRoots,
-			failOnCaResidue: inputs.failOnCaResidue,
+			failOnCaResidue,
 			filesystemAudit: audit,
 			onAuditAttached: () => auditAttached = !0,
 			warn: deps.warn,
@@ -74250,11 +74250,11 @@ async function runSandboxStep(env, overrides = {}) {
 			containerName,
 			stopProxy,
 			audit,
-			auditAttached,
+			auditAttached: () => auditAttached,
 			mediation,
 			runnerFilesBackingDir,
 			cancelled: cancel.signal.aborted
-		}, deps), stopListening();
+		}, deps) && (process.exitCode = 1), stopListening();
 	}
 	return exitCode;
 }
