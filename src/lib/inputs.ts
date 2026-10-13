@@ -25,7 +25,8 @@ import {
 } from "#core/lib/actions/inputs.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
-import { isAwsAccessKeyId, parseAwsAccounts } from "../proxy/aws-keys.ts";
+import { isAwsAccessKeyId, isAwsAccountId, parseAwsAccounts } from "../proxy/aws-keys.ts";
+import { awsFieldsOf } from "../proxy/aws-log.ts";
 import { SandboxError } from "./errors.ts";
 import { resolveFilesystemAudit, type FilesystemAudit } from "./filesystem-audit/mode.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
@@ -279,8 +280,8 @@ export function awsExampleInputs(
   const lines = ["aws_key_check: true"];
   // The log is the proxy's, but only an ID goes into the YAML.
   const assumed = timeline
-    .flatMap((e) => e.extensions?.aws?.assumedAccount ?? [])
-    .filter((a) => /^\d{12}$/.test(a));
+    .flatMap((e) => awsFieldsOf(e).assumedAccount ?? [])
+    .filter(isAwsAccountId);
   const added = new Set(assumed.filter((a) => !roleAccounts.includes(a)));
   const accounts = [...roleAccounts, ...added].sort();
   const mark = (a: string) => (added.has(a) ? ASSUMED_ACCOUNT_MARK : "");

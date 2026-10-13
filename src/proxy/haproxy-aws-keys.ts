@@ -31,6 +31,7 @@ import {
   STS_HOST,
   formName,
 } from "./aws-hosts.ts";
+import type { AwsTrafficFields } from "./aws-log.ts";
 
 /** Where the files the check reads are. */
 export interface AwsKeyCheck {
@@ -53,7 +54,11 @@ export const AWS_REFUSED_VERDICTS = [
   "unreadable",
   "key-not-allowed",
   "role-not-allowed",
-];
+] as const;
+
+/** A reason the check refuses with. */
+export type AwsRefusedReason =
+  `${typeof AWS_REASON_PREFIX}${(typeof AWS_REFUSED_VERDICTS)[number]}`;
 
 // A form body is read whole up to this size, less its headers, so a credential
 // cannot sit past what was read. SQS SendMessage, the largest form request, is
@@ -68,18 +73,6 @@ export const SIGV4_HEADER = "^AWS4-(HMAC-SHA256|ECDSA-P256-SHA256)\\s+Credential
 const FORM_ROLE_ARN = formName("rolearn");
 const FORM_ACTION = formName("action");
 const ROLE_ARN = "^arn:aws[a-z-]*:iam::([0-9]{12}):role/.*$";
-
-/** What the traffic record says of a request the check let through; see
- *  docs/aws.md#in-the-traffic-artifact. */
-export type AwsTrafficFields = {
-  aws: {
-    key?: "env" | "assumed" | "issued" | "none";
-    accountId?: string;
-    assumedAccount?: string;
-    keyRef?: string;
-    issuedKeyRef?: string;
-  };
-};
 
 const REF_SECRET = /^[A-Za-z0-9+/]{40}$/;
 
@@ -104,7 +97,7 @@ export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
         assumedAccount: "txn.aws_log_assumed",
         keyRef: "txn.aws_log_key_ref",
         issuedKeyRef: "txn.aws_log_issued_ref",
-      },
+      } satisfies Record<keyof AwsTrafficFields["aws"], string>,
     },
   };
 }
