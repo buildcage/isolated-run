@@ -18,13 +18,16 @@ require_local_image() {
 }
 
 # fixture_up|fixture_down <engine>: starts or removes the fixture origins of
-# compose.test-<engine>.yaml.
+# compose.test-<engine>.yaml. Both leave alone a fixture with-fixture.sh
+# started for every driver it runs.
 fixture_up() {
+  [ "${BUILDCAGE_SHARED_FIXTURE:-}" = "$1" ] && return
   echo "--- bringing up the fixture (compose.test-$1.yaml) ---"
   docker compose -f "$REPO_ROOT/compose.test-$1.yaml" up -d --build --wait
 }
 
 fixture_down() {
+  [ "${BUILDCAGE_SHARED_FIXTURE:-}" = "$1" ] && return
   docker compose -f "$REPO_ROOT/compose.test-$1.yaml" down -v >/dev/null 2>&1 || true
 }
 

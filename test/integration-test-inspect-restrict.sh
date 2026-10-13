@@ -28,6 +28,12 @@ HASH_BEFORE=$(sha256sum "$SYSTEM_CA" | awk '{print $1}')
 
 TMPDIR=$(mktemp -d)
 
+# The positive control for the scenario script's UDP case, from beside the
+# cage. It waits out nc's idle timeout, so it runs alongside the step.
+docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" exec -T test-dns sh -c \
+  'echo probe | nc -u -w 3 10.200.0.102 9999' > "$TMPDIR/udp-control" 2>/dev/null &
+UDP_CONTROL_PID=$!
+
 echo "--- running the sandboxed step (proxy_engine: inspect, restrict mode) ---"
 run_step --tee inspect "$TMPDIR/step" \
   INPUT_PROXY_MODE="restrict" \
@@ -186,8 +192,8 @@ fi
 
 echo ""
 echo "--- positive control: the UDP echo server is reachable from beside the cage ---"
-UDP_REPLY=$(docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" exec -T test-dns sh -c \
-  'echo probe | nc -u -w 3 10.200.0.102 9999' 2>/dev/null | tr -d '\r\n' || true)
+wait "$UDP_CONTROL_PID"
+UDP_REPLY=$(tr -d '\r\n' < "$TMPDIR/udp-control")
 if [ "$UDP_REPLY" = "probe" ]; then
   pass "the echo server answers on test-net, so the scenario script's silence was the cage, not a dead fixture"
 else

