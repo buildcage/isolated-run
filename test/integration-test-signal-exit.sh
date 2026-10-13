@@ -91,15 +91,7 @@ echo ""
 echo "=== Cancelled step Assertions ==="
 echo ""
 
-# The run script is the process the sandbox forwards SIGTERM to, so its own
-# trap decides the exit code.
-cancel_step handles "trap 'exit 5' TERM; sleep 301 & wait" "sleep 301"
-if [ "$CODE" != "-1" ]; then
-  check_status "handles: the command's own exit status is the step's" "$CODE" 5
-  assert_cancelled_cleanly handles "sleep 301"
-fi
-
-# The SIGTERM reaches what the run script started too, and the step waits for
+# The SIGTERM reaches what the run script started as well, and the step waits for
 # it to finish its own cleanup after the script itself has died of the signal.
 cancel_step command \
   "bash -c 'trap \"sleep 1; touch cleaned-up; exit 0\" TERM; sleep 303 & wait'" "^sleep 303"
@@ -115,11 +107,13 @@ if [ "$CODE" != "-1" ]; then
 fi
 
 # A process the command moved out of its process group with setsid gets the
-# SIGTERM too, and the step waits for its cleanup the same way.
+# SIGTERM too, and the step waits for its cleanup the same way. The run script
+# traps the SIGTERM itself, so its own exit status is the step's rather than
+# the 143 a signal death gives.
 cancel_step detached \
-  "setsid bash -c 'trap \"sleep 1; touch cleaned-up; exit 0\" TERM; sleep 304 & wait' & wait" "^sleep 304"
+  "trap 'exit 5' TERM; setsid bash -c 'trap \"sleep 1; touch cleaned-up; exit 0\" TERM; sleep 304 & wait' & wait" "^sleep 304"
 if [ "$CODE" != "-1" ]; then
-  check_status "detached: the run script died of the SIGTERM" "$CODE" 143
+  check_status "detached: the run script's own exit status is the step's" "$CODE" 5
   if [ -e "$WORKDIR/detached/cleaned-up" ]; then
     pass "detached: the setsid process finished its cleanup"
   else

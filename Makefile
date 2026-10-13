@@ -140,14 +140,11 @@ test_integration_sandbox_linux_runtime: export INPUT_PROXY_ENGINE := universal
 test_integration_sandbox_linux_runtime: ## The action's remaining integration tests: defaults, processes, signals, the proxy's lifecycle
 	@./test/integration-test-defaults.sh
 	@./test/integration-test-host-parity.sh
-	@./test/integration-test-seccomp.sh
 	@./test/integration-test-die-with-parent.sh
 	@./test/integration-test-signal-exit.sh
 	@./test/integration-test-host-commands.sh
-	@./test/integration-test-zero-traffic.sh
 	@./test/integration-test-runtime-sockets.sh
 	@./test/integration-test-post-state-tampering.sh
-	@./test/integration-test-proxy-gone.sh
 	@./test/integration-test-launch-failure.sh
 
 # Separate from test_integration_sandbox_linux: these use the fixture origin

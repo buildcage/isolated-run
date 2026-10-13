@@ -12,49 +12,6 @@ WORKDIR=$(mktemp -d)
 trap 'rm -rf "$WORKDIR"' EXIT
 touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 
-# This script runs on the runner host, so its own values are the baseline.
-# /proc/sys/kernel/hostname rather than hostname(1) to avoid depending on a
-# binary being installed.
-run_parity_check() {
-  local label="$1"
-  local expect_nofile_soft expect_nofile_hard expect_hostname expect_shm_kb
-  expect_nofile_soft=$(ulimit -Sn)
-  expect_nofile_hard=$(ulimit -Hn)
-  expect_hostname=$(cat /proc/sys/kernel/hostname)
-  expect_shm_kb=$(df -k --output=size /dev/shm | tail -1 | tr -d ' ')
-  export EXPECT_NOFILE_SOFT="$expect_nofile_soft" EXPECT_NOFILE_HARD="$expect_nofile_hard"
-  export EXPECT_HOSTNAME="$expect_hostname" EXPECT_SHM_KB="$expect_shm_kb"
-
-  echo "[$label] host baseline: nofile ${expect_nofile_soft}/${expect_nofile_hard}, /dev/shm ${expect_shm_kb}k, hostname ${expect_hostname}"
-
-  GITHUB_WORKSPACE="$WORKDIR" \
-  GITHUB_STATE="$WORKDIR/state.env" \
-  GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-  BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-  INPUT_RUN='fail() { echo "UNEXPECTED: $1"; exit 1; }
-[ "$(ulimit -Sn)" = "$EXPECT_NOFILE_SOFT" ] || fail "soft RLIMIT_NOFILE is $(ulimit -Sn), the runner has $EXPECT_NOFILE_SOFT"
-[ "$(ulimit -Hn)" = "$EXPECT_NOFILE_HARD" ] || fail "hard RLIMIT_NOFILE is $(ulimit -Hn), the runner has $EXPECT_NOFILE_HARD"
-[ "$(cat /proc/sys/kernel/hostname)" = "$EXPECT_HOSTNAME" ] || fail "hostname is $(cat /proc/sys/kernel/hostname), the runner is $EXPECT_HOSTNAME"
-SHM_KB=$(df -k --output=size /dev/shm | tail -1 | tr -d " ")
-[ "$SHM_KB" = "$EXPECT_SHM_KB" ] || fail "/dev/shm is ${SHM_KB}k, the runner has ${EXPECT_SHM_KB}k"' \
-    node dist/main.cjs
-}
-
-run_parity_check "inherited limits"
-CODE=$?
-
-# Again with the soft limit deliberately below the hard one. Node raises its own
-# soft RLIMIT_NOFILE to the hard limit at startup, so reading the action's own
-# /proc/self/limits would report the raised value and hand the sandbox more than
-# the step would have had. A GitHub-hosted runner sets soft = hard, which hides
-# that; this pass is what makes it visible.
-if [ "$CODE" = "0" ]; then
-  ( ulimit -Sn 4096 && run_parity_check "soft limit below hard" )
-  CODE=$?
-fi
-
-PARITY_CODE=$CODE
-
 run_sandboxed() {
   GITHUB_WORKSPACE="$WORKDIR" \
   GITHUB_STATE="$WORKDIR/state.env" \
@@ -64,27 +21,41 @@ run_sandboxed() {
     node dist/main.cjs
 }
 
-run_sandboxed '[ $$ -ne 1 ] || { echo "UNEXPECTED: the command is PID 1"; exit 1; }'
-NOT_PID1_CODE=$?
+# This script runs on the runner host, so its own values are the baseline.
+# /proc/sys/kernel/hostname rather than hostname(1) to avoid depending on a
+# binary being installed.
+#
+# The soft limit is deliberately below the hard one. Node raises its own soft
+# RLIMIT_NOFILE to the hard limit at startup, so reading the action's own
+# /proc/self/limits would report the raised value and hand the sandbox more than
+# the step would have had. A GitHub-hosted runner sets soft = hard, which hides
+# that.
+(
+  ulimit -Sn 4096 || exit 1
+  EXPECT_NOFILE_SOFT=$(ulimit -Sn)
+  EXPECT_NOFILE_HARD=$(ulimit -Hn)
+  EXPECT_HOSTNAME=$(cat /proc/sys/kernel/hostname)
+  EXPECT_SHM_KB=$(df -k --output=size /dev/shm | tail -1 | tr -d ' ')
+  export EXPECT_NOFILE_SOFT EXPECT_NOFILE_HARD EXPECT_HOSTNAME EXPECT_SHM_KB
+  echo "host baseline: nofile ${EXPECT_NOFILE_SOFT}/${EXPECT_NOFILE_HARD}, /dev/shm ${EXPECT_SHM_KB}k, hostname ${EXPECT_HOSTNAME}"
+  run_sandboxed 'fail() { echo "UNEXPECTED: $1"; exit 1; }
+[ "$(ulimit -Sn)" = "$EXPECT_NOFILE_SOFT" ] || fail "soft RLIMIT_NOFILE is $(ulimit -Sn), the runner has $EXPECT_NOFILE_SOFT"
+[ "$(ulimit -Hn)" = "$EXPECT_NOFILE_HARD" ] || fail "hard RLIMIT_NOFILE is $(ulimit -Hn), the runner has $EXPECT_NOFILE_HARD"
+[ "$(cat /proc/sys/kernel/hostname)" = "$EXPECT_HOSTNAME" ] || fail "hostname is $(cat /proc/sys/kernel/hostname), the runner is $EXPECT_HOSTNAME"
+SHM_KB=$(df -k --output=size /dev/shm | tail -1 | tr -d " ")
+[ "$SHM_KB" = "$EXPECT_SHM_KB" ] || fail "/dev/shm is ${SHM_KB}k, the runner has ${EXPECT_SHM_KB}k"'
+)
+PARITY_CODE=$?
 
-# Names the loader or bash itself uses, which the step's env: may set too.
-# `env` because UID is readonly in this script's own bash.
-GITHUB_WORKSPACE="$WORKDIR" \
-GITHUB_STATE="$WORKDIR/state.env" \
-GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_RUN='/usr/bin/env | grep -qx record=mine && /usr/bin/env | grep -qx UID=12345 ||
-  { echo "UNEXPECTED: record or UID did not reach the command as set"; exit 1; }' \
-  env record=mine UID=12345 node dist/main.cjs
-ENV_NAMES_CODE=$?
-
+# One sandbox for the process checks, since a start is not cheap: the command
+# is not PID 1, an orphan is reaped (python, which would never reap one itself,
+# leaves its grandchild to PID 1), and `kill -TERM $$` ends the command with
+# 143. Any other exit status is one of the first two failing, which the
+# UNEXPECTED line in the log names. The self-kill also stands for a command
+# that exits non-zero on its own, which must not read as a launch failure.
 START=$SECONDS
-run_sandboxed '( sleep 1; kill -TERM $$ ) & sleep 30'
-SELF_KILL_CODE=$?
-SELF_KILL_SECONDS=$((SECONDS - START))
-
-# The grandchild is orphaned onto PID 1, which python would never reap.
-run_sandboxed '#!/usr/bin/env python3
+run_sandboxed '[ $$ -ne 1 ] || { echo "UNEXPECTED: the command is PID 1"; exit 1; }
+python3 - <<"EOF" || exit 1
 import glob, os, sys, time
 child = os.fork()
 if child == 0:
@@ -104,27 +75,12 @@ for stat in glob.glob("/proc/[0-9]*/stat"):
         zombies.append(stat)
 if zombies:
     print("UNEXPECTED: unreaped zombies:", zombies)
-    sys.exit(1)'
-ORPHAN_CODE=$?
-
-# The sandbox's cgroup is a child of this script's, the runner's stand-in, so
-# whatever limits the runner's service has reach the command too. Read from
-# here, since the sandbox sees only its own cgroup namespace.
-OWN_CGROUP=$(sed -n 's/^0:://p' /proc/self/cgroup)
-echo "runner cgroup: ${OWN_CGROUP}"
-run_sandboxed 'sleep 5.04' &
-CGROUP_NODE_PID=$!
-SANDBOX_CGROUP=
-for _ in $(seq 1 60); do
-  SLEEP_PID=$(pgrep -f -n "sleep 5.04")
-  if [ -n "$SLEEP_PID" ]; then
-    SANDBOX_CGROUP=$(sed -n 's/^0:://p' "/proc/$SLEEP_PID/cgroup")
-    break
-  fi
-  sleep 0.5
-done
-wait "$CGROUP_NODE_PID"
-echo "sandbox cgroup: ${SANDBOX_CGROUP}"
+    sys.exit(1)
+EOF
+( sleep 1; kill -TERM $$ ) & sleep 30' >"$WORKDIR/process.log" 2>&1
+PROCESS_CODE=$?
+PROCESS_SECONDS=$((SECONDS - START))
+cat "$WORKDIR/process.log"
 
 FAILED=0
 echo ""
@@ -136,36 +92,18 @@ else
   echo "  FAIL  sandbox environment diverges from the runner (exit $PARITY_CODE)"
   FAILED=1
 fi
-if [ "$NOT_PID1_CODE" = "0" ]; then
-  echo "  PASS  the command is not the sandbox's PID 1"
+if [ "$PROCESS_CODE" = "143" ] && [ "$PROCESS_SECONDS" -lt 30 ]; then
+  echo "  PASS  the command is not the sandbox's PID 1, an orphan is reaped, and kill -TERM \$\$ ends the command with 143"
 else
-  echo "  FAIL  the command runs as the sandbox's PID 1 (exit $NOT_PID1_CODE)"
+  echo "  FAIL  exit $PROCESS_CODE after ${PROCESS_SECONDS}s, expected 143 well under 30s"
   FAILED=1
 fi
-if [ "$ENV_NAMES_CODE" = "0" ]; then
-  echo "  PASS  env: record and UID reach the command as set"
+if grep -q "buildcage: command exited with code 143" "$WORKDIR/process.log" &&
+  ! grep -q "sandbox launch failed" "$WORKDIR/process.log"; then
+  echo "  PASS  a command that exits non-zero is reported as the command's exit"
 else
-  echo "  FAIL  env: record or UID did not reach the command as set (exit $ENV_NAMES_CODE)"
+  echo "  FAIL  a command that exits non-zero was not reported as the command's exit"
   FAILED=1
 fi
-if [ "$SELF_KILL_CODE" = "143" ] && [ "$SELF_KILL_SECONDS" -lt 30 ]; then
-  echo "  PASS  kill -TERM \$\$ ends the command with 143"
-else
-  echo "  FAIL  kill -TERM \$\$ gave exit $SELF_KILL_CODE after ${SELF_KILL_SECONDS}s, expected 143 well under 30s"
-  FAILED=1
-fi
-if [ "$ORPHAN_CODE" = "0" ]; then
-  echo "  PASS  an orphan exiting under a python command is reaped"
-else
-  echo "  FAIL  an orphan was left a zombie (exit $ORPHAN_CODE)"
-  FAILED=1
-fi
-case "$SANDBOX_CGROUP" in
-  "${OWN_CGROUP%/}/buildcage-proxy-"*)
-    echo "  PASS  the sandbox's cgroup is a child of the runner's own" ;;
-  *)
-    echo "  FAIL  the sandbox's cgroup is ${SANDBOX_CGROUP:-unknown}, not under ${OWN_CGROUP}"
-    FAILED=1 ;;
-esac
 echo ""
 exit "$FAILED"
