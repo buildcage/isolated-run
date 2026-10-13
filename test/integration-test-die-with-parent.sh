@@ -58,6 +58,14 @@ if [ "$FOUND" != "1" ]; then
 fi
 sleep 0.5
 
+# The sandbox's cgroup is a child of this script's, the runner's stand-in, so
+# whatever limits the runner's service has reach the command too. Read from
+# here, since the sandbox sees only its own cgroup namespace.
+OWN_CGROUP=$(sed -n 's/^0:://p' /proc/self/cgroup)
+SLEEP_PID=$(pgrep -f -n "^sleep 300")
+SANDBOX_CGROUP=$(sed -n 's/^0:://p' "/proc/$SLEEP_PID/cgroup" 2>/dev/null)
+echo "runner cgroup: ${OWN_CGROUP}, sandbox cgroup: ${SANDBOX_CGROUP}" >&2
+
 # sudo's own argv also names run-isolated.sh, so this must target the bash
 # running it, not sudo.
 mapfile -t BASH_PIDS < <(pgrep -f "/bin/bash .*/run-isolated.sh")
@@ -70,11 +78,20 @@ BASH_PID="${BASH_PIDS[0]}"
 # run-isolated.sh runs as root (via sudo -n), so killing it requires the
 # same privilege.
 sudo -n kill -9 "$BASH_PID"
-sleep 2
+for _ in $(seq 1 20); do
+  pgrep -f "sleep 300" >/dev/null 2>&1 || break
+  sleep 0.1
+done
 
 echo ""
 echo "=== Sandbox die-with-parent Assertions ==="
 echo ""
+case "$SANDBOX_CGROUP" in
+  "${OWN_CGROUP%/}/buildcage-proxy-"*)
+    pass "the sandbox's cgroup is a child of the runner's own" ;;
+  *)
+    fail "the sandbox's cgroup is ${SANDBOX_CGROUP:-unknown}, not under ${OWN_CGROUP}" ;;
+esac
 if pgrep -f "sleep 300" >/dev/null 2>&1; then
   fail "sandboxed process survived as an orphan after run-isolated.sh was killed"
 else

@@ -34,7 +34,7 @@
       "customType": "regex",
       "managerFilePatterns": [
         "/^test/integration-test-listener-scope\\.sh$/",
-        "/^test/integration-test-proxy-gone\\.sh$/"
+        "/^test/integration-test-launch-failure\\.sh$/"
       ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)\\nALPINE_IMAGE=\"[^:\"]+:(?<currentValue>[^@\"]+)@(?<currentDigest>sha256:[a-f0-9]+)\""

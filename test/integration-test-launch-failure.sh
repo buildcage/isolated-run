@@ -1,17 +1,14 @@
 #!/bin/bash
 # A `runc run` that fails before the command starts must not read as the
-# command exiting: run-isolated.sh annotates it as a launch failure. A command
-# that does start and exits non-zero must still read as the command's own exit.
+# command exiting: run-isolated.sh annotates it as a launch failure. The other
+# half, a command that starts and exits non-zero reading as its own exit, is
+# checked in integration-test-host-parity.sh.
 #
-# The command's exit goes through dist/main.cjs and the real runc. The launch
-# failure drives scripts/run-isolated.sh directly, with /bin/false standing in
-# for a runc that cannot create the container, and a throwaway container
-# standing in for the buildcage-proxy image, as integration-test-proxy-gone.sh
-# does.
+# Drives scripts/run-isolated.sh directly, with /bin/false standing in for a
+# runc that cannot create the container, and a throwaway container standing in
+# for the buildcage-proxy image.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
-
-require_local_image
 
 # renovate: datasource=docker depName=alpine
 ALPINE_IMAGE="alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6"
@@ -33,23 +30,6 @@ trap cleanup EXIT
 echo ""
 echo "=== Sandbox launch failure Assertions ==="
 echo ""
-
-mkdir -p "$WORKDIR/step"
-touch "$WORKDIR/step/state.env" "$WORKDIR/step/summary.md"
-GITHUB_WORKSPACE="$WORKDIR/step" \
-GITHUB_STATE="$WORKDIR/step/state.env" \
-GITHUB_STEP_SUMMARY="$WORKDIR/step/summary.md" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_RUN="exit 3" \
-  node dist/main.cjs >"$WORKDIR/step.log" 2>&1
-check_status "a command that exits 3 ends the step with 3" "$?" 3
-if grep -q "buildcage: command exited with code 3" "$WORKDIR/step.log" &&
-  ! grep -q "sandbox launch failed" "$WORKDIR/step.log"; then
-  pass "a command that exits 3 is reported as the command's exit"
-else
-  fail "a command that exits 3 was not reported as the command's exit; see log below"
-  cat "$WORKDIR/step.log"
-fi
 
 if ! docker run -d --name "$CONTAINER_NAME" "$ALPINE_IMAGE" sleep 300 >/dev/null; then
   fail "could not start the throwaway container"

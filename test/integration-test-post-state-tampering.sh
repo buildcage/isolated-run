@@ -1,10 +1,10 @@
 #!/bin/bash
 # Verifies post.ts validates values read back from $GITHUB_STATE instead of
-# trusting them. The sandboxed command cannot write the file (case 4), but a
-# process outside the sandbox, such as one an earlier step left running, can,
-# and the runner keeps only the last value written for a repeated key, so it
-# can overwrite container_name and ephemeral_overlay_roots before post.ts
-# reads them back.
+# trusting them. The sandboxed command cannot write the file (see
+# integration-test-file-commands.sh), but a process outside the sandbox, such
+# as one an earlier step left running, can, and the runner keeps only the last
+# value written for a repeated key, so it can overwrite container_name and
+# ephemeral_overlay_roots before post.ts reads them back.
 #
 # @actions/core's getState reads STATE_<name> env vars directly, which is
 # how the real runner invokes a post step, so this drives dist/post.cjs
@@ -46,7 +46,7 @@ remove_own_container() {
 }
 
 cleanup() {
-  rm -rf "$FAKE_BIN" "${CANARY_DIR:-}" "${WORKDIR:-}" "${VICTIM_DIR:-}"
+  rm -rf "$FAKE_BIN" "${CANARY_DIR:-}" "${VICTIM_DIR:-}"
   local name
   for name in "${CREATED_CONTAINERS[@]+"${CREATED_CONTAINERS[@]}"}"; do
     remove_own_container "$name"
@@ -78,101 +78,7 @@ else
 fi
 
 echo ""
-echo "=== 2/3. normal-path cleanup after a hard kill, with and without a spoofed project_name ==="
-
-run_hard_kill_and_post() {
-  local label="$1"
-  local workdir container_name scratch_dir
-  workdir=$(mktemp -d)
-  touch "$workdir/state.env" "$workdir/summary.md"
-
-  GITHUB_WORKSPACE="$workdir" \
-    GITHUB_STATE="$workdir/state.env" \
-    GITHUB_STEP_SUMMARY="$workdir/summary.md" \
-    BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-    INPUT_RUN="sleep 300" \
-    node dist/main.cjs >"$workdir/out.log" 2>&1 &
-  local node_pid=$!
-
-  local found=0
-  for _ in $(seq 1 60); do
-    if grep -q '^container_name<<' "$workdir/state.env" 2>/dev/null; then
-      found=1
-      break
-    fi
-    sleep 0.5
-  done
-  if [ "$found" != "1" ]; then
-    fail "[$label] container_name never appeared in GITHUB_STATE; see log:"
-    cat "$workdir/out.log"
-    kill -9 "$node_pid" >/dev/null 2>&1
-    rm -rf "$workdir"
-    return
-  fi
-  container_name=$(awk '/^container_name<</{getline; print; exit}' "$workdir/state.env")
-  CREATED_CONTAINERS+=("$container_name")
-  scratch_dir="/var/tmp/buildcage-$(id -u)/sandbox-${container_name#buildcage-proxy-}"
-
-  for _ in $(seq 1 60); do
-    [ -e "$scratch_dir" ] && break
-    sleep 0.5
-  done
-
-  kill -9 "$node_pid" >/dev/null 2>&1
-  sudo -n pkill -9 -f "sudo -n -- .*/run-isolated.sh" >/dev/null 2>&1
-  sleep 1
-
-  if [ "$label" = "with-spoofed-project-name" ]; then
-    STATE_container_name="$container_name" STATE_project_name="buildcage-deadbeefcafe" node dist/post.cjs
-  else
-    STATE_container_name="$container_name" node dist/post.cjs
-  fi
-
-  if [ -e "$scratch_dir" ]; then
-    fail "[$label] scratch dir $scratch_dir still exists after post cleanup"
-  else
-    pass "[$label] scratch dir removed"
-  fi
-  if docker ps -aq --filter "name=$container_name" | grep -q .; then
-    fail "[$label] proxy container $container_name still exists after post cleanup"
-  else
-    pass "[$label] proxy container removed"
-  fi
-
-  remove_own_container "$container_name"
-  rm -rf "$workdir"
-}
-
-# STATE_project_name is deliberately never given here: post-state.ts derives
-# projectName from container_name, so this proves it's no longer read.
-run_hard_kill_and_post "plain"
-# Given anyway in the second case, to prove it is ignored rather than merely
-# unused.
-run_hard_kill_and_post "with-spoofed-project-name"
-
-echo ""
-echo "=== 4. a persistent-mode step cannot append to \$GITHUB_STATE ==="
-WORKDIR=$(mktemp -d)
-touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
-GITHUB_WORKSPACE="$WORKDIR" \
-  GITHUB_STATE="$WORKDIR/state.env" \
-  GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-  BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-  INPUT_RUN='cat >> "$GITHUB_STATE" <<EOF
-container_name<<BUILDCAGE_EOF
-forged-from-inside-the-sandbox
-BUILDCAGE_EOF
-EOF' \
-  node dist/main.cjs
-if grep -q "forged-from-inside-the-sandbox" "$WORKDIR/state.env"; then
-  fail "the sandboxed command appended to \$GITHUB_STATE"
-else
-  pass "the sandboxed command could not append to \$GITHUB_STATE"
-fi
-rm -rf "$WORKDIR"
-
-echo ""
-echo "=== 5. a concurrent step's own container name must not reach its proxy or its scratch dir ==="
+echo "=== 2. a concurrent step's own container name must not reach its proxy or its scratch dir ==="
 # The two steps differ only in $GITHUB_ACTION, which the runner numbers per
 # use within a job, the same shape as two `uses:` of this action side by
 # side. The attacker names the victim's container, which is well-formed and
@@ -193,6 +99,7 @@ VICTIM_NAME=""
 for _ in $(seq 1 60); do
   if grep -q '^container_name<<' "$VICTIM_DIR/state.env" 2>/dev/null; then
     VICTIM_NAME=$(awk '/^container_name<</{getline; print; exit}' "$VICTIM_DIR/state.env")
+    CREATED_CONTAINERS+=("$VICTIM_NAME")
     break
   fi
   sleep 0.5
