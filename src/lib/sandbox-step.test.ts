@@ -811,31 +811,9 @@ describe("runSandboxStep", () => {
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
     });
 
-    it("writes $GITHUB_STEP_SUMMARY back before the report", async () => {
-      await runSandboxStep(ENV, deps);
-
-      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_STEP_SUMMARY, Buffer.alloc(0));
-      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
-      expect(annotation.error).not.toHaveBeenCalled();
-    });
-
-    it("writes the command's own summary back as it is when nothing is left open", async () => {
-      mocks.readBackingFile.mockImplementation((path: string) =>
-        path.endsWith("GITHUB_STEP_SUMMARY")
-          ? { bytes: Buffer.from("## the command's own\n") }
-          : { empty: true },
-      );
-
-      await runSandboxStep(ENV, deps);
-
-      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(
-        ENV.GITHUB_STEP_SUMMARY,
-        Buffer.from("## the command's own\n"),
-      );
-      expect(annotation.error).not.toHaveBeenCalled();
-    });
-
-    it("closes a code fence the command's summary left open, so the report is not read as code", async () => {
+    // Written before the report so a cancelled step keeps it; the report step
+    // moves it after its own part.
+    it("writes $GITHUB_STEP_SUMMARY back as it is before the report, and says how much", async () => {
       mocks.readBackingFile.mockImplementation((path: string) =>
         path.endsWith("GITHUB_STEP_SUMMARY") ? { bytes: Buffer.from("```\nlog") } : { empty: true },
       );
@@ -844,7 +822,26 @@ describe("runSandboxStep", () => {
 
       expect(mocks.writeRunnerFile).toHaveBeenCalledWith(
         ENV.GITHUB_STEP_SUMMARY,
-        Buffer.from("```\nlog\n```\n"),
+        Buffer.from("```\nlog"),
+      );
+      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
+      expect(mocks.reportStepTraffic.mock.calls[0][0].commandSummaryBytes).toBe(7);
+      expect(annotation.error).not.toHaveBeenCalled();
+    });
+
+    it("counts nothing of a $GITHUB_STEP_SUMMARY it could not write", async () => {
+      mocks.readBackingFile.mockImplementation((path: string) =>
+        path.endsWith("GITHUB_STEP_SUMMARY") ? { bytes: Buffer.from("mine\n") } : { empty: true },
+      );
+      mocks.writeRunnerFile.mockImplementation((path: string) => {
+        if (path === ENV.GITHUB_STEP_SUMMARY) throw new Error("EACCES");
+      });
+
+      await runSandboxStep(ENV, deps);
+
+      expect(mocks.reportStepTraffic.mock.calls[0][0].commandSummaryBytes).toBe(0);
+      expect(annotation.error).toHaveBeenCalledWith(
+        "$GITHUB_STEP_SUMMARY could not be written: EACCES; failing the step",
       );
     });
 

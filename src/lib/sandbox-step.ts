@@ -30,7 +30,6 @@ import { resolveBuildcageImageRef } from "#core/lib/provenance/image-ref.ts";
 import { verifyImageDigestOrThrow, type ResolvedImage } from "#core/lib/provenance/verify-image.ts";
 import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts";
 
-import { closeCommandSummary } from "./command-summary.ts";
 import { buildComposeEnv } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
@@ -222,19 +221,19 @@ function saveCleanupState(
 
 /**
  * Writes a mediated runner file's real path from what the command left in its
- * backing copy, and returns whether that failed the step. The command never
- * reached the real path (masked), so the host writes it directly, with no
- * symlink, FIFO or permission to work around. $GITHUB_OUTPUT is trimmed to the
- * entries the runner can read; a dropped entry fails the step, since the
- * runner would stop at it. A backing copy the command made unreadable (a
- * symlink, FIFO, one over MAX_OUTPUT_BYTES, or permissions taken away) leaves the real
- * file empty and fails the step too.
+ * backing copy, and returns whether that failed the step and how many bytes
+ * it wrote. The command never reached the real path (masked), so the host
+ * writes it directly, with no symlink, FIFO or permission to work around.
+ * $GITHUB_OUTPUT is trimmed to the entries the runner can read; a dropped
+ * entry fails the step, since the runner would stop at it. A backing copy the
+ * command made unreadable (a symlink, FIFO, one over MAX_OUTPUT_BYTES, or
+ * permissions taken away) leaves the real file empty and fails the step too.
  */
 function writeBackMediatedFile(
   file: MediatedRunnerFile,
   annotation: Annotation,
   deps: Pick<SandboxStepDeps, "readBackingFile" | "writeRunnerFile">,
-): boolean {
+): { failed: boolean; bytes: number } {
   const fail = (reason: string) => {
     annotation.error(`$${file.variable} ${reason}; failing the step`);
     return true;
@@ -249,9 +248,7 @@ function writeBackMediatedFile(
       content = Buffer.from(text, "utf8");
       if (error) failure = `was written without what the runner could not read: ${error}`;
     } else {
-      // The step's own summary, with whatever it left open closed so the
-      // report fitted after it (see report.ts) is not swallowed.
-      content = closeCommandSummary(read.bytes);
+      content = read.bytes;
     }
   }
   // An empty read is the command removing its backing file: the real file is
@@ -259,9 +256,9 @@ function writeBackMediatedFile(
   try {
     deps.writeRunnerFile(file.realPath, content);
   } catch (e) {
-    return fail(`could not be written: ${errorMessage(e)}`);
+    return { failed: fail(`could not be written: ${errorMessage(e)}`), bytes: 0 };
   }
-  return failure ? fail(failure) : false;
+  return { failed: failure ? fail(failure) : false, bytes: content.length };
 }
 
 type StepInputs = ReturnType<typeof readStepInputs>;
@@ -452,15 +449,18 @@ export interface StepRun {
 export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise<boolean> {
   const { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run;
   const { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs;
-  // Write $GITHUB_OUTPUT and then $GITHUB_STEP_SUMMARY back from their backing
-  // copies before this action appends its own: the artifact-name outputs via
+  // Write $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY back from their backing
+  // copies before this action writes its own: the artifact-name outputs via
   // @actions/core (last-write-wins over anything the command set), and the
-  // reports onto the summary. The command never reached the real files, so
-  // there is no symlink, FIFO or permission to put right here.
+  // reports, which the command's summary is moved behind afterwards. Written
+  // now, it outlives a step cancelled before the reports are done.
   let runnerFileFailed = false;
+  let commandSummaryBytes = 0;
   if (mediation) {
     for (const file of mediation.files) {
-      if (writeBackMediatedFile(file, annotation, deps)) runnerFileFailed = true;
+      const { failed, bytes } = writeBackMediatedFile(file, annotation, deps);
+      if (failed) runnerFileFailed = true;
+      if (file.variable === "GITHUB_STEP_SUMMARY") commandSummaryBytes = bytes;
     }
     try {
       deps.removeBackingDir(runnerFilesBackingDir);
@@ -515,6 +515,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     env,
     moreBlocks: (startedAt) => readAudit.blocks(startedAt, artifact),
     processActivity,
+    commandSummaryBytes,
   });
   if (cancelled) await readAudit.upload();
   return runnerFileFailed;

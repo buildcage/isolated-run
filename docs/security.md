@@ -506,7 +506,7 @@ before it ends, and the key with it.
 | Sends `*` as its method, `Host` or path in audit, to plant a wildcard in the suggested rules                       | Left out of the suggested `allowed_url_rules` and listed beside it, so pasting them never permits more than the command sent                                                                                                                                                                                                                                                 |
 | Floods the proxy log until earlier entries rotate away                                                             | A log that no longer starts where a real run does is not accepted as a complete record: the step fails under `restrict` with `fail_on_blocked` (the default)                                                                                                                                                                                                                 |
 | Replaces its `$GITHUB_STEP_SUMMARY` with a symlink, FIFO or directory, or removes it, to stop the report           | The command writes a backing copy (an overlay copy under `ephemeral` when `write_through` does not cover the file), never the real file, and the host writes the real file itself, so the report still lands. A removed copy is read back as empty; one that is not a regular file is too, rather than followed or blocked on, and fails the step                            |
-| Fills `$GITHUB_STEP_SUMMARY` to GitHub's 1 MiB limit so the report has no room                                     | The report is fitted into what is left and gives way to a single line or to nothing rather than push the file over the limit (which drops it whole); the verdict is applied before the summary is written, so enforcement is unaffected and a requested artifact still has it                                                                                                |
+| Fills `$GITHUB_STEP_SUMMARY` to GitHub's 1 MiB limit so the report has no room                                     | The report takes its room first and the command's summary is cut to what is left, with a note and a warning annotation; the verdict is applied before the summary is written, so enforcement is unaffected                                                                                                                                                                   |
 | Writes its own `traffic_artifact_name`/`filesystem_audit_artifact_name`, or a symlink or FIFO, to `$GITHUB_OUTPUT` | The command writes a backing copy (an overlay copy, discarded, under `ephemeral` when `write_through` does not cover the file); the host writes the real file from the backing copy, trimmed to the entries the runner can read, then sets the names itself (last-write-wins). A copy that is not a regular file, or holds an entry the runner would stop at, fails the step |
 
 ## What the engines cannot see
@@ -789,23 +789,21 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 
 - **The Job Summary.** The report is rendered from the runner host after the command has exited, and
   a name or URL is escaped before it is written into a table, so the command cannot edit its own
-  report. It can still change how the report shows: an HTML element its own summary leaves open,
-  such as `<details>` or `<table>`, wraps the report that follows. A code fence, comment or raw HTML
-  block such as `<pre>` that it leaves open would hide the report or show it as code, so the host
-  closes those before writing the report. `$GITHUB_STEP_SUMMARY` is mediated wherever the command's
-  writes to it reach the runner (under `ephemeral` they otherwise go with the overlay): the command
-  writes a backing copy bound into the sandbox, the real file is masked from it, and the host writes
-  the real file after the step -- the command's own summary first, then the report after a
+  report. Its own summary comes after the report, so a code fence, comment or HTML element it leaves
+  open has nothing after it to hide or wrap. `$GITHUB_STEP_SUMMARY` is mediated wherever the
+  command's writes to it reach the runner (under `ephemeral` they otherwise go with the overlay): the
+  command writes a backing copy bound into the sandbox, the real file is masked from it, and the host
+  writes the real file after the step -- the report first, then the command's own summary after a
   horizontal rule. Because the real file is out of the command's reach, a symlink, FIFO, directory
   or permission it leaves on the backing copy reaches nothing: a copy that is not a regular file, or
   that it made unreadable, is read back as empty and fails the step, never followed or blocked on.
   The backing directory sits under `/var/tmp/buildcage-<uid>`, which the sandbox cannot see, so the
   command reaches it only through the bind and cannot move it aside. Filling the backing copy to
-  GitHub's 1 MiB Job Summary limit leaves the report no room -- GitHub drops a summary over the
-  limit whole -- so the report is fitted into what is left and, when even its frame will not fit,
-  gives way to a single pointer line or to nothing rather than push the file over. The step's
-  verdict is decided and applied as annotations before any summary is written, so whether the report
-  reaches the summary never changes what the step enforces. Where the report is meant to be an audit
+  GitHub's 1 MiB Job Summary limit cannot push the report out -- GitHub drops a summary over the
+  limit whole -- because the report takes its room first and the command's summary is cut to what
+  is left, with a note and a warning annotation saying so. The step's verdict is decided and applied
+  as annotations before any summary is written, so what reaches the summary never changes what the
+  step enforces. Where the report is meant to be an audit
   trail, take it from `upload_traffic_artifact: true` instead: the JSON is uploaded when the step
   ends, and is not a file a later step can append a line to.
 - **Masking the report, or silencing its annotations.** The command's stdout reaches the runner,

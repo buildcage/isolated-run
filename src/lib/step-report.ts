@@ -18,7 +18,9 @@ import { failOrWarn } from "./fail-or-warn.ts";
 import { readStepLabel } from "./inputs.ts";
 import { fetchReport, readActionVersion } from "./report-fetch.ts";
 import {
+  COMMAND_SUMMARY_CUT_MESSAGE,
   missingReportFrame,
+  moveCommandSummaryLast,
   reportTitle,
   summaryFooter,
   writeReportSummary,
@@ -37,6 +39,7 @@ export interface ReportStepDeps {
   readActionVersion: typeof readActionVersion;
   writeReportSummary: typeof writeReportSummary;
   writeSummaryBlocks: typeof writeSummaryBlocks;
+  moveCommandSummaryLast: typeof moveCommandSummaryLast;
   uploadTrafficArtifact: typeof uploadTrafficArtifact;
   setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
   readStepLabel: typeof readStepLabel;
@@ -47,6 +50,7 @@ const realDeps: ReportStepDeps = {
   readActionVersion,
   writeReportSummary,
   writeSummaryBlocks,
+  moveCommandSummaryLast,
   uploadTrafficArtifact,
   setTrafficArtifactOutput,
   readStepLabel,
@@ -76,6 +80,10 @@ export interface ReportStepOptions {
   /** Whether the step records its process activity, which the title names
    *  when its section is there. */
   processActivity: boolean;
+  /** The command's own summary already at the start of the file, moved
+   *  after this action's part once that is written; see
+   *  moveCommandSummaryLast. */
+  commandSummaryBytes?: number;
 }
 
 /**
@@ -103,6 +111,7 @@ export async function reportStepTraffic(
     env,
     moreBlocks = () => [],
     processActivity,
+    commandSummaryBytes = 0,
   }: ReportStepOptions,
   overrides: Partial<ReportStepDeps> = {},
 ): Promise<void> {
@@ -111,6 +120,7 @@ export async function reportStepTraffic(
     readActionVersion,
     writeReportSummary,
     writeSummaryBlocks,
+    moveCommandSummaryLast,
     uploadTrafficArtifact,
     setTrafficArtifactOutput,
     readStepLabel,
@@ -143,6 +153,7 @@ export async function reportStepTraffic(
           ],
       env,
       annotation,
+      { commandBytes: commandSummaryBytes },
       { writeSummaryBlocks },
     );
 
@@ -164,6 +175,7 @@ export async function reportStepTraffic(
           processActivity: named,
           failOnBlocked,
           extraBlocks: [...rest, ...footer],
+          commandBytes: commandSummaryBytes,
         },
         trafficArtifact.upload,
         env,
@@ -172,21 +184,33 @@ export async function reportStepTraffic(
       fail(`Failed to write the report summary: ${errorMessage(e)}`);
       await writeRest();
     }
+  }
 
-    // Uploaded even when the summary failed: the command can delete the
-    // summary file, and the artifact is then the only record left.
-    if (trafficArtifact.upload) {
-      try {
-        artifactName =
-          (await uploadTrafficArtifact(
-            report,
-            containerName,
-            trafficArtifact.retentionDays,
-            annotation,
-          )) ?? "";
-      } catch (e) {
-        annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
-      }
+  // Before the upload, which a cancelled step may not outlive. Left in place,
+  // the command's summary still holds all it wrote, only ahead of the report.
+  try {
+    if (moveCommandSummaryLast(env.GITHUB_STEP_SUMMARY ?? "", commandSummaryBytes)) {
+      annotation.warning(COMMAND_SUMMARY_CUT_MESSAGE);
+    }
+  } catch (e) {
+    annotation.warning(
+      `Failed to move this step's own Job Summary after the report: ${errorMessage(e)}`,
+    );
+  }
+
+  // Uploaded even when the summary failed: the artifact is then the only
+  // record left.
+  if (report && trafficArtifact.upload) {
+    try {
+      artifactName =
+        (await uploadTrafficArtifact(
+          report,
+          containerName,
+          trafficArtifact.retentionDays,
+          annotation,
+        )) ?? "";
+    } catch (e) {
+      annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
     }
   }
 
@@ -197,19 +221,19 @@ export async function reportStepTraffic(
   }
 }
 
-/** Fits `blocks` into what the Job Summary has left and writes them, after a
- *  rule when the command wrote a summary of its own; never throws, as a
- *  failure here only costs that part of the summary. */
+/** Fits `blocks` into what the Job Summary has left and writes them; never
+ *  throws, as a failure here only costs that part of the summary. */
 export async function writeMoreSummary(
   blocks: SummaryBlock[],
   env: NodeJS.ProcessEnv,
   annotation: Annotation,
+  { commandBytes }: { commandBytes?: number } = {},
   overrides: Partial<ReportStepDeps> = {},
 ): Promise<void> {
   const { writeSummaryBlocks } = { ...realDeps, ...overrides };
   if (blocks.length === 0) return;
   try {
-    await writeSummaryBlocks(blocks, env, { separateFromExisting: true });
+    await writeSummaryBlocks(blocks, env, { commandBytes });
   } catch (e) {
     annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
   }

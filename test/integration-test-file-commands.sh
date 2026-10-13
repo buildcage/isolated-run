@@ -13,7 +13,8 @@
 # rewrite in place (sed -i, which would EBUSY against a bind-mounted file), and
 # the host writes the real file from it. GITHUB_STEP_SUMMARY, not named, stays
 # under the overlay and is discarded, while this action's report still lands.
-# See runner-output-files.ts.
+# The persistent run's GITHUB_STEP_SUMMARY is mediated too, and lands after the
+# report. See runner-output-files.ts.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
@@ -71,6 +72,7 @@ if [ "$MODE" = persistent ]; then
   else
     echo "OK: the file command directory cannot be renamed"
   fi
+  echo "COMMAND_SUMMARY" >>"$GITHUB_STEP_SUMMARY" || rc=1
 fi
 if [ "$MODE" = ephemeral ]; then
   if echo "mediated_key=initial" >>"$GITHUB_OUTPUT" && sed -i "s/initial/final/" "$GITHUB_OUTPUT"; then
@@ -188,6 +190,15 @@ check_host_file "ephemeral: GITHUB_ENV took the write" "$COMMANDS/set_env_epheme
 check_host_file "ephemeral: GITHUB_PATH is untouched" "$COMMANDS/add_path_ephemeral" ""
 check_host_file "write_through: /: GITHUB_ENV is untouched" "$COMMANDS/set_env_whole" ""
 check_host_file "an alias in write_through: GITHUB_ENV is untouched" "$COMMANDS/env_alias" ""
+
+PERSISTENT_SUMMARY="$WORKDIR/summary_persistent.md"
+report_line=$(grep -n -m1 "^## " "$PERSISTENT_SUMMARY" | cut -d: -f1)
+command_line=$(grep -nx -m1 "COMMAND_SUMMARY" "$PERSISTENT_SUMMARY" | cut -d: -f1)
+if [ -n "$report_line" ] && [ -n "$command_line" ] && [ "$report_line" -lt "$command_line" ]; then
+  pass "persistent: GITHUB_STEP_SUMMARY has the command's markdown after this action's report"
+else
+  fail "persistent: GITHUB_STEP_SUMMARY -- got: $(cat "$PERSISTENT_SUMMARY" 2>/dev/null)"
+fi
 
 OUTPUT_FILE="$COMMANDS/set_output_ephemeral"
 SUMMARY_FILE="$WORKDIR/summary_ephemeral.md"

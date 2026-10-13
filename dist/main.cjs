@@ -23185,96 +23185,6 @@ async function verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine }) 
 	return requireDigest(digest, actionRef);
 }
 //#endregion
-//#region src/core/lib/report/render/fit-step-summary.ts
-const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
-function withNotices(blocks, noticeFor) {
-	return blocks.map((b) => b.cut === "keep" ? b : {
-		...b,
-		notice: noticeFor(b)
-	});
-}
-function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES, onCut } = {}) {
-	let full = blocks.map(whole), sizes = full.map(bytes), budget = limitBytes - 8192 - usedBytes;
-	if (sizes.reduce((sum, n) => sum + n, 0) <= budget) return full.join("");
-	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
-	for (let i of order) {
-		let b = blocks[i];
-		(cutAt.get(b.section) ?? Infinity) < b.level || (b.cut === "keep" || sizes[i] <= budget ? (out[i] = full[i], budget -= sizes[i]) : (out[i] = cutBlock(b, Math.max(0, budget)), budget -= bytes(out[i]), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level)), onCut?.(b)));
-	}
-	return out.join("");
-}
-function cutBlock(b, budget) {
-	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
-	if (b.cut === "atomic") return alone;
-	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
-	for (let pos = 0;;) {
-		let nl = b.text.indexOf("\n", pos), line = nl === -1 ? b.text.slice(pos) : b.text.slice(pos, nl), withNewline = `${line}\n`, lineBytes = bytes(withNewline);
-		if (usedBytes + lineBytes > room) break;
-		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen), pos = nl + 1;
-	}
-	let head = b.head ?? 0;
-	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
-}
-//#endregion
-//#region src/lib/command-summary.ts
-const HTML_BLOCKS = [
-	{
-		start: /^<(?:script|pre|style|textarea)(?:[\s>]|$)/i,
-		ends: (line) => /<\/(?:script|pre|style|textarea)>/i.test(line),
-		closer: "</pre>"
-	},
-	{
-		start: /^<!--/,
-		ends: (line) => line.includes("-->")
-	},
-	{
-		start: /^<\?/,
-		ends: (line) => line.includes("?>"),
-		closer: "?>"
-	},
-	{
-		start: /^<!\[CDATA\[/,
-		ends: (line) => line.includes("]]>"),
-		closer: "]]>"
-	},
-	{
-		start: /^<![A-Za-z]/,
-		ends: (line) => line.includes(">"),
-		closer: ">"
-	}
-], BLOCK_TAG = /^<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[\s>]|\/>|$)/i, LONE_TAG = /^(?:<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|<\/[A-Za-z][A-Za-z0-9-]*\s*>)\s*$/, FENCE = /^(`{3,}|~{3,})(.*)$/, CLOSING_FENCE = /^(`{3,}|~{3,})[ \t]*$/, CONTAINER = /^(?:>|[-+*](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$))/, HEADING$1 = /^#{1,6}(?:[ \t]|$)/;
-function commandSummaryClosers(text) {
-	let open, inContainer = !1, inParagraph = !1, afterBlank = !0;
-	for (let raw of text.replace(/^\uFEFF/, "").split(/\r\n|\r|\n/)) {
-		let blank = raw.trim() === "", indent = /^ */.exec(raw)[0].length, line = raw.slice(indent);
-		if (open?.kind === "fence") {
-			let close = indent <= 3 ? CLOSING_FENCE.exec(line) : null;
-			close && close[1][0] === open.marker[0] && close[1].length >= open.marker.length && (open = void 0);
-		} else open?.kind === "html" ? open.block.ends(raw) && (open = void 0) : open?.kind === "until-blank" ? blank && (open = void 0) : blank || (indent === 0 && afterBlank && !CONTAINER.test(line) && (inContainer = !1), indent <= 3 && CONTAINER.test(line) && (inContainer = !0), indent <= 3 && !(inContainer && indent > 0) && !CONTAINER.test(line) && (open = blockStart(line, inParagraph), indent === 0 && open !== void 0 && (inContainer = !1)), inParagraph = open === void 0 && !HEADING$1.test(line));
-		blank && (inParagraph = !1), afterBlank = blank;
-	}
-	let closers = [];
-	return open?.kind === "fence" && closers.push(open.marker), text.includes("<!--") && closers.push("<!-- -->"), open?.kind === "html" && open.block.closer && closers.push(open.block.closer), closers.length === 0 ? "" : `${/[\r\n]$/.test(text) ? "" : "\n"}${closers.join("\n")}\n`;
-}
-function blockStart(line, inParagraph) {
-	let fence = FENCE.exec(line);
-	if (fence && !(fence[1][0] === "`" && fence[2].includes("`"))) return {
-		kind: "fence",
-		marker: fence[1]
-	};
-	let block = HTML_BLOCKS.find((b) => b.start.test(line));
-	if (block) return block.ends(line) ? void 0 : {
-		kind: "html",
-		block
-	};
-	if (BLOCK_TAG.test(line) || !inParagraph && LONE_TAG.test(line)) return { kind: "until-blank" };
-}
-function closeCommandSummary(summary) {
-	if (summary.length > 1048576) return summary;
-	let closers = Buffer.from(commandSummaryClosers(summary.toString("utf8")), "utf8");
-	return closers.length === 0 || summary.length + closers.length > 1048576 ? summary : Buffer.concat([summary, closers]);
-}
-//#endregion
 //#region src/core/lib/docker/host-addresses.ts
 function listHostIpv4Addresses({ networkInterfaces: list = node_os.networkInterfaces } = {}) {
 	let found = new Set();
@@ -68697,6 +68607,37 @@ function setFilesystemAuditOutput(name) {
 	setOutput("filesystem_audit_artifact_name", name);
 }
 //#endregion
+//#region src/core/lib/report/render/fit-step-summary.ts
+const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
+function withNotices(blocks, noticeFor) {
+	return blocks.map((b) => b.cut === "keep" ? b : {
+		...b,
+		notice: noticeFor(b)
+	});
+}
+function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES, onCut } = {}) {
+	let full = blocks.map(whole), sizes = full.map(bytes), budget = limitBytes - 8192 - usedBytes;
+	if (sizes.reduce((sum, n) => sum + n, 0) <= budget) return full.join("");
+	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
+	for (let i of order) {
+		let b = blocks[i];
+		(cutAt.get(b.section) ?? Infinity) < b.level || (b.cut === "keep" || sizes[i] <= budget ? (out[i] = full[i], budget -= sizes[i]) : (out[i] = cutBlock(b, Math.max(0, budget)), budget -= bytes(out[i]), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level)), onCut?.(b)));
+	}
+	return out.join("");
+}
+function cutBlock(b, budget) {
+	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
+	if (b.cut === "atomic") return alone;
+	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
+	for (let pos = 0;;) {
+		let nl = b.text.indexOf("\n", pos), line = nl === -1 ? b.text.slice(pos) : b.text.slice(pos, nl), withNewline = `${line}\n`, lineBytes = bytes(withNewline);
+		if (usedBytes + lineBytes > room) break;
+		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen), pos = nl + 1;
+	}
+	let head = b.head ?? 0;
+	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
+}
+//#endregion
 //#region src/lib/fail-or-warn.ts
 function failOrWarn(annotation, failClosed) {
 	return (message) => {
@@ -74094,31 +74035,50 @@ function summarySize(path, fileSize) {
 		return 0;
 	}
 }
+const COMMAND_SEPARATOR = Buffer.from("\n\n---\n\n", "utf8"), COMMAND_SUMMARY_CUT_MESSAGE = "This step's own Job Summary was cut to fit GitHub's size limit after the buildcage report.", COMMAND_SUMMARY_CUT_NOTE = Buffer.from(`\n> ⚠️ ${COMMAND_SUMMARY_CUT_MESSAGE}\n`, "utf8");
+function cutCommandSummary(summary, room) {
+	if (summary.length <= room) return summary;
+	let keep = room - COMMAND_SUMMARY_CUT_NOTE.length;
+	if (keep < 0) return Buffer.alloc(0);
+	let end = summary.subarray(0, keep).lastIndexOf(10);
+	return Buffer.concat([summary.subarray(0, end + 1), COMMAND_SUMMARY_CUT_NOTE]);
+}
+function moveCommandSummaryLast(path, commandBytes) {
+	if (commandBytes === 0) return !1;
+	let file = (0, node_fs.readFileSync)(path), command = file.subarray(0, commandBytes), ours = file.subarray(commandBytes), separator = ours.length > 0 ? COMMAND_SEPARATOR : Buffer.alloc(0), kept = cutCommandSummary(command, 1040384 - ours.length - separator.length);
+	if (ours.length === 0 && kept === command) return !1;
+	let temp = `${path}.buildcage`;
+	return (0, node_fs.writeFileSync)(temp, Buffer.concat([
+		ours,
+		kept.length > 0 ? separator : Buffer.alloc(0),
+		kept
+	])), (0, node_fs.renameSync)(temp, path), kept !== command;
+}
 function fullReportLocation(artifactAvailable) {
 	return artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the full report" : "set upload_traffic_artifact: true to get the full report as a downloadable artifact";
 }
 function reportDidNotFitMessage(artifactAvailable) {
-	return `The buildcage traffic report did not fit in GitHub's Job Summary size limit after this step's own output; ${fullReportLocation(artifactAvailable)}. The step's verdict was still enforced.`;
+	return `The buildcage traffic report did not fit in GitHub's Job Summary size limit; ${fullReportLocation(artifactAvailable)}. The step's verdict was still enforced.`;
 }
 function reportDidNotFitLine(artifactAvailable) {
 	return `> ⚠️ ${reportDidNotFitMessage(artifactAvailable)}\n`;
 }
-async function writeSummaryBlocks(blocks, env, { separateFromExisting = !1, fallbackLine, ...overrides } = {}) {
+async function writeSummaryBlocks(blocks, env, { commandBytes = 0, fallbackLine, ...overrides } = {}) {
 	let { fileSize, writeSummary } = {
 		...realDeps$2,
 		...overrides
-	}, used = summarySize(env.GITHUB_STEP_SUMMARY, fileSize), separator = separateFromExisting && used > 0 ? "\n\n---\n\n" : "", cutIds = new Set(), fitted = fitStepSummary(blocks, {
-		usedBytes: used + bytes(separator),
+	}, used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes), cutIds = new Set(), fitted = fitStepSummary(blocks, {
+		usedBytes: used,
 		onCut: (b) => {
 			b.id !== void 0 && cutIds.add(b.id);
 		}
-	}), fits = (text) => used + bytes(separator) + bytes(text) <= 1040384, content = "", wrote = "nothing";
-	return fits(fitted) ? (content = separator + fitted, wrote = "blocks") : fallbackLine !== void 0 && fits(fallbackLine) && (content = separator + fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
+	}), fits = (text) => used + bytes(text) <= 1040384, content = "", wrote = "nothing";
+	return fits(fitted) ? (content = fitted, wrote = "blocks") : fallbackLine !== void 0 && fits(fallbackLine) && (content = fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
 		cutIds,
 		wrote
 	};
 }
-async function writeReportSummary(report, annotation, { extraBlocks = [], ...options }, artifactAvailable, env, overrides = {}) {
+async function writeReportSummary(report, annotation, { extraBlocks = [], commandBytes, ...options }, artifactAvailable, env, overrides = {}) {
 	let { appendFile, fileSize, writeSummary } = {
 		...realDeps$2,
 		...overrides
@@ -74127,7 +74087,7 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], ...opt
 	let { cutIds, wrote } = await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-refuse" ? wouldRefuseTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, {
 		fileSize,
 		writeSummary,
-		separateFromExisting: !0,
+		commandBytes,
 		fallbackLine: reportDidNotFitLine(artifactAvailable)
 	});
 	wrote === "blocks" ? cutIds.has("traffic-would-refuse") && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
@@ -74197,12 +74157,13 @@ const realDeps$1 = {
 	readActionVersion,
 	writeReportSummary,
 	writeSummaryBlocks,
+	moveCommandSummaryLast,
 	uploadTrafficArtifact,
 	setTrafficArtifactOutput,
 	readStepLabel
 };
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], processActivity }, overrides = {}) {
-	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
+async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], processActivity, commandSummaryBytes = 0 }, overrides = {}) {
+	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, moveCommandSummaryLast, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
 		...realDeps$1,
 		...overrides
 	}, fail = failOrWarn(annotation, parameters.mode !== "audit" && failOnBlocked), report;
@@ -74215,29 +74176,33 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 		missingReportFrame(reportTitle(stepLabel, named), parameters.mode === "audit"),
 		...rest,
 		...footer
-	], env, annotation, { writeSummaryBlocks }), artifactName = "";
+	], env, annotation, { commandBytes: commandSummaryBytes }, { writeSummaryBlocks }), artifactName = "";
 	if (!report) await writeRest();
-	else {
-		try {
-			await writeReportSummary(report, annotation, {
-				actionRepo,
-				actionRef,
-				runCommand,
-				extraInputs: extraInputs?.(report),
-				actionVersion: readActionVersion(containerName, proxyEngine),
-				stepLabel,
-				processActivity: named,
-				failOnBlocked,
-				extraBlocks: [...rest, ...footer]
-			}, trafficArtifact.upload, env);
-		} catch (e) {
-			fail(`Failed to write the report summary: ${errorMessage(e)}`), await writeRest();
-		}
-		if (trafficArtifact.upload) try {
-			artifactName = await uploadTrafficArtifact(report, containerName, trafficArtifact.retentionDays, annotation) ?? "";
-		} catch (e) {
-			annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
-		}
+	else try {
+		await writeReportSummary(report, annotation, {
+			actionRepo,
+			actionRef,
+			runCommand,
+			extraInputs: extraInputs?.(report),
+			actionVersion: readActionVersion(containerName, proxyEngine),
+			stepLabel,
+			processActivity: named,
+			failOnBlocked,
+			extraBlocks: [...rest, ...footer],
+			commandBytes: commandSummaryBytes
+		}, trafficArtifact.upload, env);
+	} catch (e) {
+		fail(`Failed to write the report summary: ${errorMessage(e)}`), await writeRest();
+	}
+	try {
+		moveCommandSummaryLast(env.GITHUB_STEP_SUMMARY ?? "", commandSummaryBytes) && annotation.warning(COMMAND_SUMMARY_CUT_MESSAGE);
+	} catch (e) {
+		annotation.warning(`Failed to move this step's own Job Summary after the report: ${errorMessage(e)}`);
+	}
+	if (report && trafficArtifact.upload) try {
+		artifactName = await uploadTrafficArtifact(report, containerName, trafficArtifact.retentionDays, annotation) ?? "";
+	} catch (e) {
+		annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
 	}
 	try {
 		setTrafficArtifactOutput(artifactName);
@@ -74245,13 +74210,13 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 		fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
 	}
 }
-async function writeMoreSummary(blocks, env, annotation, overrides = {}) {
+async function writeMoreSummary(blocks, env, annotation, { commandBytes } = {}, overrides = {}) {
 	let { writeSummaryBlocks } = {
 		...realDeps$1,
 		...overrides
 	};
 	if (blocks.length !== 0) try {
-		await writeSummaryBlocks(blocks, env, { separateFromExisting: !0 });
+		await writeSummaryBlocks(blocks, env, { commandBytes });
 	} catch (e) {
 		annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
 	}
@@ -74353,14 +74318,20 @@ function writeBackMediatedFile(file, annotation, deps) {
 		if (file.variable === "GITHUB_OUTPUT") {
 			let { text, error } = validatedOutputText(read.bytes);
 			content = Buffer.from(text, "utf8"), error && (failure = `was written without what the runner could not read: ${error}`);
-		} else content = closeCommandSummary(read.bytes);
+		} else content = read.bytes;
 	}
 	try {
 		deps.writeRunnerFile(file.realPath, content);
 	} catch (e) {
-		return fail(`could not be written: ${errorMessage(e)}`);
+		return {
+			failed: fail(`could not be written: ${errorMessage(e)}`),
+			bytes: 0
+		};
 	}
-	return failure ? fail(failure) : !1;
+	return {
+		failed: failure ? fail(failure) : !1,
+		bytes: content.length
+	};
 }
 function readStepInputs(env, deps) {
 	let { log, notice } = deps, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -74426,9 +74397,12 @@ function logConfiguredRules({ rules, aws }, deps) {
 	});
 }
 async function finalizeStep(run, deps) {
-	let { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run, { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs, runnerFileFailed = !1;
+	let { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run, { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs, runnerFileFailed = !1, commandSummaryBytes = 0;
 	if (mediation) {
-		for (let file of mediation.files) writeBackMediatedFile(file, annotation, deps) && (runnerFileFailed = !0);
+		for (let file of mediation.files) {
+			let { failed, bytes } = writeBackMediatedFile(file, annotation, deps);
+			failed && (runnerFileFailed = !0), file.variable === "GITHUB_STEP_SUMMARY" && (commandSummaryBytes = bytes);
+		}
 		try {
 			deps.removeBackingDir(runnerFilesBackingDir);
 		} catch (e) {
@@ -74471,7 +74445,8 @@ async function finalizeStep(run, deps) {
 		trafficArtifact: inputs.trafficArtifact,
 		env,
 		moreBlocks: (startedAt) => readAudit.blocks(startedAt, artifact),
-		processActivity
+		processActivity,
+		commandSummaryBytes
 	}), cancelled && await readAudit.upload(), runnerFileFailed;
 }
 async function runSandboxStep(env, overrides = {}) {

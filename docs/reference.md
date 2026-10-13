@@ -948,10 +948,11 @@ reads the copies back and writes the real files itself. That is every step in `p
 names the file or a directory it is in (`$RUNNER_TEMP`, say), at any of those paths; only then are they mediated and written back,
 without a bind of their own.
 `$GITHUB_OUTPUT` is written back trimmed to the entries the runner can read (a dropped entry fails
-the step); `$GITHUB_STEP_SUMMARY` is written back as the command left it, plus whatever closes a
-code fence, comment or raw HTML block it left open, then the report is fitted around it (see
-[Traffic artifact](#traffic-artifact) and the step's Job Summary). `$GITHUB_ENV`, `$GITHUB_PATH` and
-`$GITHUB_STATE` are not mediated: they stay read-only in the sandbox as before.
+the step); `$GITHUB_STEP_SUMMARY` is written back as the command left it, after the report and cut
+to what the report leaves of GitHub's limit (see [Traffic artifact](#traffic-artifact) and the
+step's Job Summary).
+`$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` are not mediated: they stay read-only in the
+sandbox as before.
 
 ### Paths under `/run`
 
