@@ -116,11 +116,11 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
   const roles = check.accountFile ? roleRules(check.accountFile) : undefined;
   return [
     ...credentialFacts(),
-    ...keyExtraction(check.refSecret),
+    ...keyExtraction(check.keyMapFile, check.refSecret),
     ...unsignedAndSts(),
     ...(roles?.facts ?? []),
-    ...verdicts(check.keyMapFile, mode, roles),
-    ...trafficRecord(check.keyMapFile, roles),
+    ...verdicts(mode, roles),
+    ...trafficRecord(roles),
     ...learnFlags(),
   ];
 }
@@ -136,6 +136,8 @@ function credentialFacts(): string[] {
     "    acl aws_host var(txn.aws_host) -m bool",
     `    http-request set-var(txn.aws_resource_host) bool(true) if aws_host { var(txn.host) -m reg ${AWS_RESOURCE_HOST} }`,
     "    acl aws_resource_host var(txn.aws_resource_host) -m bool",
+    "    http-request set-var(txn.aws_auth) bool(true) if aws_host { req.fhdr(authorization) -m found }",
+    "    acl aws_auth var(txn.aws_auth) -m bool",
     `    http-request set-var(txn.aws_sigv4) bool(true) if aws_host { req.fhdr(authorization) -m reg ${SIGV4_HEADER} }`,
     "    acl aws_sigv4 var(txn.aws_sigv4) -m bool",
     "    # A Basic login to CodeCommit is matched too. CodeCommit's Git credential",
@@ -155,7 +157,7 @@ function credentialFacts(): string[] {
     "    # SigV3's header, and any other Authorization. On a host that names a",
     "    # resource, only a scheme starting with AWS is: a Bearer or Basic token",
     "    # there, such as ECR's or CodeArtifact's, is left to the URL rules.",
-    "    http-request set-var(txn.aws_unsupported) bool(true) if aws_host !aws_resource_host !aws_sigv4 !aws_git { req.fhdr(authorization) -m found }",
+    "    http-request set-var(txn.aws_unsupported) bool(true) if aws_host !aws_resource_host !aws_sigv4 !aws_git aws_auth",
     "    http-request set-var(txn.aws_unsupported) bool(true) if aws_resource_host !aws_sigv4 { req.fhdr(authorization) -m reg -i ^aws }",
     `    http-request set-var(txn.aws_unsupported) bool(true) if aws_host { req.hdr(x-amzn-authorization) -m found } or aws_host { query -m reg -i (^|&)${SIGV2_PARAM}= }`,
     "    # An S3 POST-policy upload keeps its credential in a multipart body.",
@@ -181,7 +183,7 @@ function credentialFacts(): string[] {
 }
 
 /** The key ID a SigV4 header, a query credential or a CodeCommit login names. */
-function keyExtraction(refSecret: string): string[] {
+function keyExtraction(keyMapFile: string, refSecret: string): string[] {
   return [
     `    http-request set-var(txn.aws_key) 'req.fhdr(authorization),regsub("^AWS4-[A-Z0-9-]+\\s+Credential=([A-Za-z0-9]+)/.*$","\\1")' if aws_sigv4`,
     `    http-request set-var(txn.aws_key) 'url_param(X-Amz-Credential),url_dec,regsub("^([A-Za-z0-9]+)/.*$","\\1")' if aws_query !aws_sigv4`,
@@ -189,6 +191,10 @@ function keyExtraction(refSecret: string): string[] {
     '    http-request set-var(txn.aws_key) \'var(txn.aws_git_user),regsub("%.*$","")\' if aws_git',
     "    # A static Git credential's user name is no key ID.",
     `    http-request set-var(txn.aws_log_key_ref) ${keyRef("txn.aws_key", refSecret)} if { var(txn.aws_key) -m reg ^[A-Za-z0-9]+$ }`,
+    "    # Looked up once: only the response rules add to the map, and no rule",
+    "    # from here to the traffic record waits.",
+    `    http-request set-var(txn.aws_key_entry) var(txn.aws_key),map(${keyMapFile})`,
+    "    acl aws_key_known var(txn.aws_key_entry) -m found",
   ];
 }
 
@@ -199,9 +205,9 @@ function unsignedAndSts(): string[] {
     "    # elsewhere the account a request reaches is in the parameters or the",
     "    # body, out of sight. Git asks CodeCommit with no credential first, and",
     "    # logs in on its 401.",
-    "    http-request set-var(txn.aws_unsigned_ok) bool(true) if aws_resource_host or aws_git_host !{ req.fhdr(authorization) -m found }",
+    "    http-request set-var(txn.aws_unsigned_ok) bool(true) if aws_resource_host or aws_git_host !aws_auth",
     "    # And on a public host, which reaches no account.",
-    `    http-request set-var(txn.aws_unsigned_ok) bool(true) if aws_host !{ req.fhdr(authorization) -m found } { var(txn.host) -m reg ${AWS_PUBLIC_HOST} }`,
+    `    http-request set-var(txn.aws_unsigned_ok) bool(true) if aws_host !aws_auth { var(txn.host) -m reg ${AWS_PUBLIC_HOST} }`,
     "    acl aws_unsigned_ok var(txn.aws_unsigned_ok) -m bool",
     "    # A host that names a resource is never STS, whatever its name: S3",
     "    # takes a bucket named sts.",
@@ -211,8 +217,7 @@ function unsignedAndSts(): string[] {
 }
 
 /** The verdict, and in restrict the refusal. */
-function verdicts(keyMapFile: string, mode: "restrict" | "audit", roles?: RoleRules): string[] {
-  const map = `map(${keyMapFile}) -m found`;
+function verdicts(mode: "restrict" | "audit", roles?: RoleRules): string[] {
   return [
     "    # Where a credential could be out of sight: a form body that is",
     "    # compressed, has no Content-Length (which HAProxy drops from a chunked",
@@ -223,10 +228,9 @@ function verdicts(keyMapFile: string, mode: "restrict" | "audit", roles?: RoleRu
     "    # the least decisive to the most.",
     "    http-request set-var(txn.aws) str(allowed) if aws_host",
     ...(roles?.verdict ?? []),
-    `    http-request set-var(txn.aws) str(key-not-allowed) if aws_sigv4 !{ var(txn.aws_key),${map} } or aws_git !{ var(txn.aws_key),${map} }${roles?.gitAccountExempt ?? ""} or aws_query !{ var(txn.aws_key),${map} }`,
+    `    http-request set-var(txn.aws) str(key-not-allowed) if aws_sigv4 !aws_key_known or aws_git !aws_key_known${roles?.gitAccountExempt ?? ""} or aws_query !aws_key_known`,
     "    # A key ECR issued passes only as a presigned URL's credential to S3.",
-    `    http-request set-var(txn.aws_issued) bool(true) if { var(txn.aws_key),map(${keyMapFile}) -m str issued }`,
-    "    acl aws_issued var(txn.aws_issued) -m bool",
+    "    acl aws_issued var(txn.aws_key_entry) -m str issued",
     `    http-request set-var(txn.aws) str(key-not-allowed) if aws_issued !aws_query or aws_issued !{ var(txn.host) -m reg ${S3_HOST} }`,
     `    http-request set-var(txn.aws) str(no-credential) if aws_host !aws_sigv4 !aws_git !aws_query !aws_unsupported !aws_unsigned_ok${roles?.roleAccountExempt ?? ""}`,
     `    http-request set-var(txn.aws) str(ambiguous-credential) if aws_host { req.fhdr_cnt(authorization) gt 1 } or aws_sigv4 aws_query or aws_git aws_query or aws_query aws_query_many or aws_sigv4 { req.fhdr(authorization) -m reg -i credential=.*credential= }${roles?.ambiguous ?? ""}`,
@@ -246,14 +250,14 @@ function verdicts(keyMapFile: string, mode: "restrict" | "audit", roles?: RoleRu
 }
 
 /** What the traffic record says of a request the check let through. */
-function trafficRecord(keyMapFile: string, roles?: RoleRules): string[] {
+function trafficRecord(roles?: RoleRules): string[] {
   return [
     "    # For the traffic record: what a request the check let through was",
     "    # signed with. The map holds env for the starting key, the account for",
     "    # one STS issued, and issued for one ECR did.",
     "    acl aws_allowed var(txn.aws) -m str allowed",
     "    http-request set-var(txn.aws_log_key) str(none) if aws_allowed",
-    `    http-request set-var(txn.aws_key_owner) var(txn.aws_key),map(${keyMapFile}) if aws_allowed aws_sigv4 or aws_allowed aws_git or aws_allowed aws_query`,
+    "    http-request set-var(txn.aws_key_owner) var(txn.aws_key_entry) if aws_allowed",
     "    http-request set-var(txn.aws_log_key) str(env) if { var(txn.aws_key_owner) -m str env }",
     "    http-request set-var(txn.aws_log_key) str(assumed) if { var(txn.aws_key_owner) -m reg ^[0-9]{12}$ }",
     "    http-request set-var(txn.aws_log_key) str(issued) if { var(txn.aws_key_owner) -m str issued }",
@@ -297,7 +301,8 @@ function roleRules(accountFile: string) {
       "    acl aws_fed var(txn.aws_fed) -m bool",
       `    http-request set-var(txn.aws_role_account) 'req.body_param(RoleArn),url_dec,regsub("${ROLE_ARN}","\\1")' if aws_fed`,
       "    acl aws_role_account var(txn.aws_role_account) -m reg ^[0-9]{12}$",
-      `    http-request set-var(txn.aws_git_account) bool(true) if aws_git { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}\\z } { 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' -m str -f ${accountFile} }`,
+      `    http-request set-var(txn.aws_git_account_id) 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' if aws_git { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}\\z }`,
+      `    http-request set-var(txn.aws_git_account) bool(true) if { var(txn.aws_git_account_id) -m str -f ${accountFile} }`,
       "    acl aws_git_account var(txn.aws_git_account) -m bool",
     ],
     verdict: [
@@ -307,7 +312,7 @@ function roleRules(accountFile: string) {
     roleAccountExempt: " !aws_role_account",
     ambiguous: " or aws_fed aws_role_body_many or aws_fed aws_fed_in_query",
     logAccount: [
-      `    http-request set-var(txn.aws_log_account) 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' if aws_allowed aws_git_account`,
+      "    http-request set-var(txn.aws_log_account) var(txn.aws_git_account_id) if aws_allowed aws_git_account",
       "    http-request set-var(txn.aws_log_account) var(txn.aws_role_account) if aws_allowed aws_role_account",
     ],
   };
