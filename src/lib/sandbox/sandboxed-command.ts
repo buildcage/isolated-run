@@ -32,14 +32,12 @@ import {
   startFilesystemAudit,
   type AuditHandle,
 } from "./filesystem-audit-tracer.ts";
+import { jvmTools, persistingWritablePaths, resolveDefaultWritableDirs } from "./host-commands.ts";
 import {
-  jvmTools,
-  persistingWritablePaths,
   renameGuardDirs as renameGuards,
-  resolveDefaultWritableDirs,
   sandboxReadonlyFileCommands,
   sandboxReadonlyHostDirs,
-} from "./host-commands.ts";
+} from "./host-protected-paths.ts";
 import { resolveSandboxGid } from "./identity.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import {

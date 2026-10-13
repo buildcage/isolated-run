@@ -78,10 +78,10 @@ export interface BuildOciConfigOptions {
    *  universal engine, which never terminates TLS and so has no CA to
    *  distribute. */
   caTrust?: CaTrustFiles;
-  /** See host-commands.ts's sandboxReadonlyHostDirs and
+  /** See host-protected-paths.ts's sandboxReadonlyHostDirs and
    *  sandboxReadonlyFileCommands. */
   readonlyHostPaths?: string[];
-  /** See host-commands.ts's renameGuardDirs. */
+  /** See host-protected-paths.ts's renameGuardDirs. */
   renameGuardDirs?: string[];
   /** Action-owned binds carried in with the DNS and CA mounts, so a
    *  write_through entry containing them cannot shadow them: the mediated
