@@ -41,8 +41,8 @@ const LIST_INPUTS = [
   "write_through",
 ];
 
-/** Every input action.yml declares, in the order config_file's error lists
- *  them. */
+/** Every input action.yml declares. config_file takes these less
+ *  NOT_IN_CONFIG_FILE, and its error lists them in this order. */
 export const ACTION_INPUTS = [
   "run",
   "config_file",
