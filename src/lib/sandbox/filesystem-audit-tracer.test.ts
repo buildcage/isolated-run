@@ -547,6 +547,17 @@ describe("haltTracer", () => {
     expect(d.exec).not.toHaveBeenCalled();
   });
 
+  it("signals a pid whose comm cannot be read, as on a /proc mounted with hidepid", async () => {
+    const s = stubborn();
+    const d = deps(s, () => "");
+    d.readFile.mockImplementation((path: string) => {
+      if (path.endsWith("/comm")) throw new Error("ENOENT");
+      return "777\n";
+    });
+    await haltTracer(s.tracer, true, OPTIONS, d);
+    expect(d.exec).toHaveBeenCalledWith("sudo", ["-n", "kill", "-KILL", "777"]);
+  });
+
   it("shortens the wait once the step is cancelled", async () => {
     const s = stubborn();
     const d = deps(s, () => "");

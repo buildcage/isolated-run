@@ -208,7 +208,9 @@ type HaltTracerDeps = Required<
 
 // Signals the tracer itself rather than its sudo wrapper: sudo cannot pass on
 // SIGKILL, and an older sudo such as Ubuntu 22.04's 1.9.9 drops any signal sent
-// from its own process group, which is the action's.
+// from its own process group, which is the action's. The caller has seen it
+// running, so only a pid /proc names as another program is spared; one hidepid
+// hides is signalled, or the step would wait on a tracer nothing stops.
 function signalTracer(
   pidFilePath: string,
   signal: "TERM" | "KILL",
@@ -216,15 +218,17 @@ function signalTracer(
 ): void {
   try {
     const pid = readPid(readFile, pidFilePath);
-    if (pid > 0 && isTracer(pid, readFile)) exec("sudo", ["-n", "kill", `-${signal}`, String(pid)]);
+    if (pid > 0 && isTracer(pid, readFile) !== false)
+      exec("sudo", ["-n", "kill", `-${signal}`, String(pid)]);
   } catch {
     // The tracer is already gone, or its pidfile cannot be read.
   }
 }
 
 /**
- * Stops the tracer with SIGTERM for a clean flush, sent through sudo as well
- * for a tracer that has not written its pidfile yet. Once its end line is
+ * Stops the tracer with SIGTERM for a clean flush. It goes to the sudo wrapper,
+ * which passes it on to a tracer that has not written its pidfile yet, and,
+ * while the tracer runs, to the tracer itself through sudo. Once its end line is
  * written the record is whole, and the seconds the kernel takes to detach its
  * probes are left to it, so it can remove its cgroup. One that neither writes
  * it nor exits in time is killed. Removing the pidfile once it

@@ -71047,7 +71047,7 @@ function isTracer(pid, readFile) {
 	try {
 		return readFile(`/proc/${pid}/comm`).startsWith("filesystem-audi");
 	} catch {
-		return !1;
+		return;
 	}
 }
 //#endregion
@@ -72661,7 +72661,7 @@ function extractTracer(containerName, destDir, { exec = defaultExec$1, chmod = n
 function signalTracer(pidFilePath, signal, { readFile, exec }) {
 	try {
 		let pid = readPid(readFile, pidFilePath);
-		pid > 0 && isTracer(pid, readFile) && exec("sudo", [
+		pid > 0 && isTracer(pid, readFile) !== !1 && exec("sudo", [
 			"-n",
 			"kill",
 			`-${signal}`,

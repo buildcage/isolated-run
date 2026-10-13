@@ -29,12 +29,13 @@ export function readPid(readFile: (path: string) => string, pidFilePath: string)
 
 /**
  * Whether pid is still the tracer: a pidfile that outlived it may name a
- * reused pid. comm is truncated to 15 bytes.
+ * reused pid. Undefined where /proc does not say, for a pid that is gone or
+ * one hidepid hides. comm is truncated to 15 bytes.
  */
-export function isTracer(pid: number, readFile: (path: string) => string): boolean {
+export function isTracer(pid: number, readFile: (path: string) => string): boolean | undefined {
   try {
     return readFile(`/proc/${pid}/comm`).startsWith("filesystem-audi");
   } catch {
-    return false;
+    return undefined;
   }
 }

@@ -64,7 +64,7 @@ function cleanupLeftoverAudit(
   if (fileExists(pidFilePath)) {
     try {
       const pid = readPid(readFile, pidFilePath);
-      if (Number.isInteger(pid) && pid > 0 && isTracer(pid, readFile)) killTracer(pid);
+      if (Number.isInteger(pid) && pid > 0 && isTracer(pid, readFile) === true) killTracer(pid);
     } catch (e) {
       annotation.warning(
         `run post-cleanup: failed to stop the file-audit tracer: ${errorMessage(e)}`,
