@@ -4,14 +4,24 @@
  */
 
 // API endpoints only: the commercial, China and European Sovereign Cloud
-// domains, and the dual-stack ones.
-const AMAZONAWS_DOMAINS = "amazonaws\\.(com|com\\.cn|eu)";
-const DUALSTACK_DOMAINS =
-  "(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu)";
-const AWS_DOMAINS = `(${AMAZONAWS_DOMAINS}|${DUALSTACK_DOMAINS})`;
-// Matched against txn.host, which is lowercased and has no port. Any name
-// under these domains, whatever its labels hold, so one with a `_` is checked.
-export const AWS_API_HOST = `\\.${AWS_DOMAINS}$`;
+// domains, and the dual-stack ones, written as regexes.
+const AMAZONAWS_TLDS = ["com", "com\\.cn", "eu"];
+const DUALSTACK_NAMES = [
+  "api\\.aws",
+  "api\\.amazonwebservices\\.com\\.cn",
+  "api\\.amazonwebservices\\.eu",
+];
+const AMAZONAWS_DOMAINS = `amazonaws\\.(${AMAZONAWS_TLDS.join("|")})`;
+const DUALSTACK_DOMAINS = `(${DUALSTACK_NAMES.join("|")})`;
+export const AWS_DOMAINS = `(${AMAZONAWS_DOMAINS}|${DUALSTACK_DOMAINS})`;
+// The same domains as suffixes, which HAProxy tests without a regex. Matched
+// against txn.host, which is lowercased, has no port and holds only
+// [A-Za-z0-9._-]. Any name under these domains, whatever its labels hold, so
+// one with a `_` is checked.
+export const AWS_API_SUFFIXES = [
+  ...AMAZONAWS_TLDS.map((tld) => `amazonaws\\.${tld}`),
+  ...DUALSTACK_NAMES,
+].map((domain) => `.${domain.replaceAll("\\.", ".")}`);
 // The names an interface VPC endpoint gives a service.
 const vpceHost = (service: string) =>
   `^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.${service}\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$`;
@@ -55,9 +65,10 @@ export const AWS_RESOURCE_HOST =
 export const AWS_PUBLIC_HOST =
   "^(awscli|checkip|ip-ranges|pricing\\.us-east-1)\\.amazonaws\\.com$|^pricing\\.cn-northwest-1\\.amazonaws\\.com\\.cn$";
 // An ECR registry, whose redirect to a layer's presigned URL teaches its key:
-// the AWS API names, and the dual-stack one under on.aws, which the check
-// otherwise leaves to the URL rules.
-export const ECR_REGISTRY_HOST = `\\.dkr\\.ecr(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$|^[0-9]{12}\\.dkr-ecr\\.[a-z0-9-]+\\.on\\.aws$`;
+// its AWS API names, and below, its dual-stack name under on.aws, which the
+// check otherwise leaves to the URL rules.
+export const ECR_REGISTRY_HOST = `\\.dkr\\.ecr(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$`;
+export const ECR_DUALSTACK_REGISTRY_HOST = "^[0-9]{12}\\.dkr-ecr\\.[a-z0-9-]+\\.on\\.aws$";
 export const CODECOMMIT_HOST =
   `^git-codecommit(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$|` +
   vpceHost("git-codecommit(-fips)?");

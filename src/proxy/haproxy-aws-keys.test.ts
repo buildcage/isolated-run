@@ -1,11 +1,12 @@
 import { describe, it, expect, reportResults } from "#core/lib/test/test-shim.ts";
 
 import {
-  AWS_API_HOST,
+  AWS_API_SUFFIXES,
   AWS_PUBLIC_HOST,
   AWS_RESOURCE_HOST,
   CODECOMMIT_HOST,
   EC2_HOST,
+  ECR_DUALSTACK_REGISTRY_HOST,
   ECR_REGISTRY_HOST,
   S3_HOST,
   STS_HOST,
@@ -131,13 +132,8 @@ describe("awsKeyRequestRules", () => {
 
   it("matches each host pattern once", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    for (const pattern of [
-      AWS_API_HOST,
-      AWS_RESOURCE_HOST,
-      AWS_PUBLIC_HOST,
-      CODECOMMIT_HOST,
-      STS_HOST,
-    ]) {
+    expect(rules.split(`-m end ${AWS_API_SUFFIXES.join(" ")} }`).length).toBe(2);
+    for (const pattern of [AWS_RESOURCE_HOST, AWS_PUBLIC_HOST, CODECOMMIT_HOST, STS_HOST]) {
       expect(rules.split(`-m reg ${pattern} }`).length).toBe(2);
     }
   });
@@ -329,7 +325,7 @@ describe("a key ECR issues", () => {
   const response = awsKeyResponseRules(CHECK);
 
   it("is learned only from a registry the check let a request through to", () => {
-    const registry = new RegExp(ECR_REGISTRY_HOST);
+    const registry = new RegExp(`${ECR_REGISTRY_HOST}|${ECR_DUALSTACK_REGISTRY_HOST}`);
     for (const host of [
       "111111111111.dkr.ecr.us-east-1.amazonaws.com",
       "111111111111.dkr.ecr-fips.us-east-1.amazonaws.com",
@@ -348,9 +344,21 @@ describe("a key ECR issues", () => {
     }
     expect(
       request.includes(
-        `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
+        `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused aws_resource_host { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
       ),
     ).toBe(true);
+    expect(
+      request.includes(
+        `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused { var(txn.host) -m end .on.aws } { var(txn.host) -m reg ${ECR_DUALSTACK_REGISTRY_HOST} }`,
+      ),
+    ).toBe(true);
+    // The on.aws name's regex runs only behind a suffix test that every
+    // dual-stack registry passes.
+    const gate = request
+      .find((l) => l.includes(ECR_DUALSTACK_REGISTRY_HOST))!
+      .match(/\{ var\(txn\.host\) -m end (\S+) \}/)![1]!;
+    expect("111111111111.dkr-ecr.us-east-1.on.aws".endsWith(gate)).toBe(true);
+    expect("111111111111.dkr-ecr.us-east-1.on.aws.example".endsWith(gate)).toBe(false);
     const learning = response.filter((l) => l.includes("set-var(txn.aws_issued_key)"));
     expect(learning.length).toBe(1);
     for (const line of learning) {

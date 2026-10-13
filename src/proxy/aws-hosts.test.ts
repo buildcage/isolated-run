@@ -1,7 +1,8 @@
 import { describe, it, expect, reportResults } from "#core/lib/test/test-shim.ts";
 
 import {
-  AWS_API_HOST,
+  AWS_API_SUFFIXES,
+  AWS_DOMAINS,
   AWS_PUBLIC_HOST,
   AWS_RESOURCE_HOST,
   EC2_HOST,
@@ -12,10 +13,11 @@ import {
 
 // What the config writes is also what reaches the regex engine: HAProxy's
 // word parser leaves `\.` alone. See escapeForHaproxy.
-const apiHost = new RegExp(AWS_API_HOST);
 const stsHost = new RegExp(STS_HOST);
 const resourceHost = new RegExp(AWS_RESOURCE_HOST);
 const publicHost = new RegExp(AWS_PUBLIC_HOST);
+// HAProxy's `-m end`, which txn.host is tested with.
+const apiHost = { test: (host: string) => AWS_API_SUFFIXES.some((s) => host.endsWith(s)) };
 
 describe("AWS API hosts", () => {
   it("covers the classic, China and dual-stack domains", () => {
@@ -55,6 +57,26 @@ describe("AWS API hosts", () => {
       "evilamazonaws.com",
     ]) {
       expect(apiHost.test(host)).toBe(false);
+    }
+  });
+
+  it("agrees with the domains the other host patterns are built on", () => {
+    const domain = new RegExp(`\\.${AWS_DOMAINS}$`);
+    for (const host of [
+      "x.amazonaws.com",
+      "x.amazonaws.com.cn",
+      "x.amazonaws.eu",
+      "x.api.aws",
+      "x.api.amazonwebservices.com.cn",
+      "x.api.amazonwebservices.eu",
+      ...AWS_API_SUFFIXES.map((s) => s.slice(1)),
+      "x.amazonaws.org",
+      "x.amazonaws.cn",
+      "x.api.amazonwebservices.com",
+      "x.aws",
+      "x.amazonaws.com.evil",
+    ]) {
+      expect(apiHost.test(host)).toBe(domain.test(host));
     }
   });
 
