@@ -71926,6 +71926,167 @@ function scratchBaseLayers(execDir, aliases = []) {
 		options: ["bind", "ro"]
 	}];
 }
+function readOutputEntries(text) {
+	let entries = [], index = 0, lineNumber = 0, readLine = () => {
+		if (index >= text.length) return;
+		lineNumber++;
+		let lf = text.indexOf("\n", index), end = lf === -1 ? text.length : lf, line = text.slice(index, end);
+		return index = lf === -1 ? text.length : lf + 1, {
+			line,
+			newline: lf !== -1
+		};
+	};
+	for (;;) {
+		let start = index, read = readLine();
+		if (!read) return { entries };
+		let { line } = read, at = `line ${lineNumber}`;
+		if (line === "") continue;
+		let equals = line.indexOf("="), heredoc = line.indexOf("<<");
+		if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
+			if (equals === 0) return {
+				entries,
+				error: `${at} has an empty name before =`
+			};
+			entries.push({
+				name: line.slice(0, equals),
+				text: text.slice(start, index)
+			});
+			continue;
+		}
+		if (heredoc === -1) return {
+			entries,
+			error: `${at} is neither NAME=VALUE nor NAME<<DELIMITER`
+		};
+		let name = line.slice(0, heredoc), delimiter = line.slice(heredoc + 2);
+		if (name === "") return {
+			entries,
+			error: `${at} has an empty name before <<`
+		};
+		if (delimiter === "") return {
+			entries,
+			error: `${at}, output ${quoted(name)}, has an empty delimiter`
+		};
+		for (;;) {
+			let value = readLine();
+			if (!value || value.line !== delimiter && !value.newline) return {
+				entries,
+				error: `${at}, output ${quoted(name)}, never reaches its delimiter ${quoted(delimiter)}`
+			};
+			if (value.line === delimiter) break;
+		}
+		entries.push({
+			name,
+			text: text.slice(start, index)
+		});
+	}
+}
+function quoted(text) {
+	let chars = Array.from(text), cut = chars.length > 64 ? `${chars.slice(0, 64).join("")}…` : text;
+	return JSON.stringify(cut).replace(/[\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => Array.from({ length: c.length }, (_, i) => `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`).join(""));
+}
+const WIDE_BOMS = [
+	[255, 254],
+	[254, 255],
+	[
+		0,
+		0,
+		254,
+		255
+	]
+];
+function validatedOutputText(bytes) {
+	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return {
+		text: "",
+		error: "it is not UTF-8"
+	};
+	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");
+	return {
+		text: text === "" || text.endsWith("\n") ? text : `${text}\n`,
+		error
+	};
+}
+//#endregion
+//#region src/lib/sandbox/runner-output-files.ts
+const RUNNER_FILES_DIR = "/dev/buildcage-runner-files", LEAF = {
+	GITHUB_OUTPUT: "output",
+	GITHUB_STEP_SUMMARY: "step-summary"
+}, MEDIATED_VARIABLES = Object.keys(LEAF), realMediateDeps = {
+	mkdir: (path) => {
+		ensureOwnScratchBase((0, node_path.dirname)(path)), (0, node_fs.mkdirSync)(path, { mode: 448 });
+	},
+	writeFile: (path, data) => (0, node_fs.writeFileSync)(path, data, {
+		mode: 420,
+		flag: "wx"
+	})
+};
+function mediateRunnerOutputFiles(env, backingDir, deps = realMediateDeps) {
+	let present = MEDIATED_VARIABLES.filter((v) => env[v]);
+	if (present.length === 0) return;
+	deps.mkdir(backingDir);
+	let files = [], envOverrides = {};
+	for (let variable of present) {
+		let leaf = LEAF[variable], backingPath = (0, node_path.join)(backingDir, leaf);
+		deps.writeFile(backingPath, ""), envOverrides[variable] = `${RUNNER_FILES_DIR}/${leaf}`, files.push({
+			variable,
+			realPath: env[variable],
+			backingPath
+		});
+	}
+	return {
+		envOverrides,
+		mounts: [{
+			destination: RUNNER_FILES_DIR,
+			type: "none",
+			source: backingDir,
+			options: ["rbind", "rw"]
+		}],
+		maskedPaths: files.map((f) => f.realPath),
+		files
+	};
+}
+const realReadBackingDeps = {
+	lstat: (path) => (0, node_fs.lstatSync)(path),
+	readFile: (path) => (0, node_fs.readFileSync)(path)
+};
+function readBackingFile(path, deps = realReadBackingDeps) {
+	let unreadable = (e) => ({ reason: `it could not be read (${e.code ?? errorMessage(e)})` }), stats;
+	try {
+		stats = deps.lstat(path);
+	} catch (e) {
+		return e.code === "ENOENT" ? { empty: !0 } : unreadable(e);
+	}
+	if (!stats.isFile()) return { reason: "it was not a regular file" };
+	if (stats.size > 67108864) return { reason: "it was over 64 MiB" };
+	try {
+		return { bytes: deps.readFile(path) };
+	} catch (e) {
+		return unreadable(e);
+	}
+}
+function removeBackingDir(path) {
+	let pending = [path];
+	for (let dir = pending.pop(); dir !== void 0; dir = pending.pop()) {
+		let stats;
+		try {
+			stats = (0, node_fs.lstatSync)(dir);
+		} catch (e) {
+			if (e.code === "ENOENT") continue;
+			throw e;
+		}
+		if (stats.isDirectory()) {
+			(stats.mode & 448) != 448 && (0, node_fs.chmodSync)(dir, stats.mode | 448);
+			for (let entry of (0, node_fs.readdirSync)(dir)) pending.push((0, node_path.join)(dir, entry));
+		}
+	}
+	(0, node_fs.rmSync)(path, {
+		recursive: !0,
+		force: !0
+	});
+}
+function runnerFilesDirFor(containerName) {
+	let scratchName = (0, node_path.basename)(scratchDirFor(containerName));
+	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchName.replace(/^sandbox-/, "runner-files-"));
+}
 //#endregion
 //#region src/lib/sandbox/write-through.ts
 const ALLOWED_WRITE_THROUGH_VARS = [
@@ -71938,6 +72099,7 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 function resolveWriteThroughEntry(rawLine, env) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
+		if (MEDIATED_VARIABLES.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} names $${name}, which needs no entry: this action writes it back after the step in either filesystem_mode. Remove the entry.`);
 		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
 		let value = env[name];
 		if (!value) throw Error(`write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
@@ -72283,167 +72445,6 @@ function resolveSandboxGid(primaryGid, env, options = {}) {
 	}
 	if (!isPrivileged(FALLBACK_GID)) return substitute(FALLBACK_GID);
 	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group${nssError === void 0 ? "" : " or couldn't be verified through NSS"}, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
-}
-function readOutputEntries(text) {
-	let entries = [], index = 0, lineNumber = 0, readLine = () => {
-		if (index >= text.length) return;
-		lineNumber++;
-		let lf = text.indexOf("\n", index), end = lf === -1 ? text.length : lf, line = text.slice(index, end);
-		return index = lf === -1 ? text.length : lf + 1, {
-			line,
-			newline: lf !== -1
-		};
-	};
-	for (;;) {
-		let start = index, read = readLine();
-		if (!read) return { entries };
-		let { line } = read, at = `line ${lineNumber}`;
-		if (line === "") continue;
-		let equals = line.indexOf("="), heredoc = line.indexOf("<<");
-		if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
-			if (equals === 0) return {
-				entries,
-				error: `${at} has an empty name before =`
-			};
-			entries.push({
-				name: line.slice(0, equals),
-				text: text.slice(start, index)
-			});
-			continue;
-		}
-		if (heredoc === -1) return {
-			entries,
-			error: `${at} is neither NAME=VALUE nor NAME<<DELIMITER`
-		};
-		let name = line.slice(0, heredoc), delimiter = line.slice(heredoc + 2);
-		if (name === "") return {
-			entries,
-			error: `${at} has an empty name before <<`
-		};
-		if (delimiter === "") return {
-			entries,
-			error: `${at}, output ${quoted(name)}, has an empty delimiter`
-		};
-		for (;;) {
-			let value = readLine();
-			if (!value || value.line !== delimiter && !value.newline) return {
-				entries,
-				error: `${at}, output ${quoted(name)}, never reaches its delimiter ${quoted(delimiter)}`
-			};
-			if (value.line === delimiter) break;
-		}
-		entries.push({
-			name,
-			text: text.slice(start, index)
-		});
-	}
-}
-function quoted(text) {
-	let chars = Array.from(text), cut = chars.length > 64 ? `${chars.slice(0, 64).join("")}…` : text;
-	return JSON.stringify(cut).replace(/[\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => Array.from({ length: c.length }, (_, i) => `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`).join(""));
-}
-const WIDE_BOMS = [
-	[255, 254],
-	[254, 255],
-	[
-		0,
-		0,
-		254,
-		255
-	]
-];
-function validatedOutputText(bytes) {
-	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return {
-		text: "",
-		error: "it is not UTF-8"
-	};
-	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");
-	return {
-		text: text === "" || text.endsWith("\n") ? text : `${text}\n`,
-		error
-	};
-}
-//#endregion
-//#region src/lib/sandbox/runner-output-files.ts
-const RUNNER_FILES_DIR = "/dev/buildcage-runner-files", LEAF = {
-	GITHUB_OUTPUT: "output",
-	GITHUB_STEP_SUMMARY: "step-summary"
-}, MEDIATED_VARIABLES = Object.keys(LEAF), realMediateDeps = {
-	mkdir: (path) => {
-		ensureOwnScratchBase((0, node_path.dirname)(path)), (0, node_fs.mkdirSync)(path, { mode: 448 });
-	},
-	writeFile: (path, data) => (0, node_fs.writeFileSync)(path, data, {
-		mode: 420,
-		flag: "wx"
-	})
-};
-function mediateRunnerOutputFiles(env, backingDir, deps = realMediateDeps) {
-	let present = MEDIATED_VARIABLES.filter((v) => env[v]);
-	if (present.length === 0) return;
-	deps.mkdir(backingDir);
-	let files = [], envOverrides = {};
-	for (let variable of present) {
-		let leaf = LEAF[variable], backingPath = (0, node_path.join)(backingDir, leaf);
-		deps.writeFile(backingPath, ""), envOverrides[variable] = `${RUNNER_FILES_DIR}/${leaf}`, files.push({
-			variable,
-			realPath: env[variable],
-			backingPath
-		});
-	}
-	return {
-		envOverrides,
-		mounts: [{
-			destination: RUNNER_FILES_DIR,
-			type: "none",
-			source: backingDir,
-			options: ["rbind", "rw"]
-		}],
-		maskedPaths: files.map((f) => f.realPath),
-		files
-	};
-}
-const realReadBackingDeps = {
-	lstat: (path) => (0, node_fs.lstatSync)(path),
-	readFile: (path) => (0, node_fs.readFileSync)(path)
-};
-function readBackingFile(path, deps = realReadBackingDeps) {
-	let unreadable = (e) => ({ reason: `it could not be read (${e.code ?? errorMessage(e)})` }), stats;
-	try {
-		stats = deps.lstat(path);
-	} catch (e) {
-		return e.code === "ENOENT" ? { empty: !0 } : unreadable(e);
-	}
-	if (!stats.isFile()) return { reason: "it was not a regular file" };
-	if (stats.size > 67108864) return { reason: "it was over 64 MiB" };
-	try {
-		return { bytes: deps.readFile(path) };
-	} catch (e) {
-		return unreadable(e);
-	}
-}
-function removeBackingDir(path) {
-	let pending = [path];
-	for (let dir = pending.pop(); dir !== void 0; dir = pending.pop()) {
-		let stats;
-		try {
-			stats = (0, node_fs.lstatSync)(dir);
-		} catch (e) {
-			if (e.code === "ENOENT") continue;
-			throw e;
-		}
-		if (stats.isDirectory()) {
-			(stats.mode & 448) != 448 && (0, node_fs.chmodSync)(dir, stats.mode | 448);
-			for (let entry of (0, node_fs.readdirSync)(dir)) pending.push((0, node_path.join)(dir, entry));
-		}
-	}
-	(0, node_fs.rmSync)(path, {
-		recursive: !0,
-		force: !0
-	});
-}
-function runnerFilesDirFor(containerName) {
-	let scratchName = (0, node_path.basename)(scratchDirFor(containerName));
-	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchName.replace(/^sandbox-/, "runner-files-"));
 }
 //#endregion
 //#region src/lib/sandbox/env-loader.ts

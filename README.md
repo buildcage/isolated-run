@@ -403,29 +403,22 @@ Under `write_through: /`, only a symlink in one of the four always-writable path
 
 Use `filesystem_mode: ephemeral` when the command is untrusted and you want to stop it from planting
 something a later, non-isolated step in the same job would pick up: a rewritten `~/.bashrc`,
-`~/.npmrc`, `~/.docker/config.json`, or a `$GITHUB_OUTPUT` edit meant to run code once the sandbox
-is gone.
+`~/.npmrc` or `~/.docker/config.json`.
 
 ```yaml
 - uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
     filesystem_mode: ephemeral
     filesystem_audit: record # record what the command touches while discarding its writes
-    write_through: |
-      $GITHUB_OUTPUT
-      ./dist
+    write_through: ./dist
     run: npm ci && npm run build && npm test
 ```
 
 > [!NOTE]
-> Discarding those writes is the point, but the same overlay also drops output the command was meant
-> to produce. `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` live under `$RUNNER_TEMP`, so whatever the
-> command writes to them is gone once the step ends unless you name that file in `write_through:`.
-> Naming `$GITHUB_STEP_SUMMARY` puts the command's markdown in the same Job Summary this action
-> writes its own report to. That report and the `traffic_artifact_name` and
-> `filesystem_audit_artifact_name` outputs are unaffected either way: all are written from the runner
-> host after the sandboxed command has exited, outside the overlay. Before they are, `$GITHUB_OUTPUT`
-> is rewritten to what the runner can read of it, and a file it cannot read to the end fails the step.
+> `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` reach the runner in either mode without a
+> `write_through:` entry, and naming them there is an error: this action writes them back from the
+> runner host after the command has exited, outside the overlay. `$GITHUB_OUTPUT` is written back
+> trimmed to what the runner can read of it, and an entry it drops fails the step.
 
 Name only what a later step needs, usually the build output. Everything else the command writes is
 discarded, the rest of `$GITHUB_WORKSPACE` included: an edited `package.json` script, a new
@@ -720,12 +713,6 @@ and the lookup is reported as allowed.
 Run `audit` and read the report. PyPI, for example, uses both `pypi.org` and
 `files.pythonhosted.org`, and the audit report lists every domain the command touched, so the
 generated allowlist already has them.
-
-**My step's outputs disappear under `filesystem_mode: ephemeral`.**
-
-`$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` live under `$RUNNER_TEMP`, which the overlay discards.
-Name the ones the command writes to in `write_through:`. See
-[Filesystem access](#filesystem-access).
 
 **My step fails writing to `$GITHUB_ENV` or `$GITHUB_PATH` with `Read-only file system`.**
 

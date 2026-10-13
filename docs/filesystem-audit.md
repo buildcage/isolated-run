@@ -34,16 +34,14 @@ while the step runs.
   3. Add what a later step reads, usually the build output, to `write_through`, and run again. The
      rest is what ephemeral discards on purpose.
 
-  A build that sets outputs and writes `./dist` ends up with:
+  A build that writes `./dist` ends up with:
 
   ```yaml
   - uses: buildcage/isolated-run@<sha>
     with:
       filesystem_mode: ephemeral
       filesystem_audit: record
-      write_through: |
-        $GITHUB_OUTPUT
-        ./dist
+      write_through: ./dist
       run: npm ci && npm run build
   ```
 

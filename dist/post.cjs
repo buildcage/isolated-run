@@ -665,6 +665,10 @@ function releaseNssDb(name, deps = {}) {
 		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for Chromium's NSS database are left in place for a later step to remove`);
 	}
 }
+const MEDIATED_VARIABLES = Object.keys({
+	GITHUB_OUTPUT: "output",
+	GITHUB_STEP_SUMMARY: "step-summary"
+});
 function removeBackingDir(path) {
 	let pending = [path];
 	for (let dir = pending.pop(); dir !== void 0; dir = pending.pop()) {
@@ -848,6 +852,7 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 function resolveWriteThroughEntry(rawLine, env) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
+		if (MEDIATED_VARIABLES.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} names $${name}, which needs no entry: this action writes it back after the step in either filesystem_mode. Remove the entry.`);
 		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
 		let value = env[name];
 		if (!value) throw Error(`write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);

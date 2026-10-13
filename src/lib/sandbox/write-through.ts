@@ -1,6 +1,7 @@
 import { accessSync, constants, lstatSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize } from "node:path";
 
+import { MEDIATED_VARIABLES } from "./runner-output-files.ts";
 import { realSymlinkDeps, resolveHostPath, type SymlinkDeps } from "./symlinks.ts";
 
 /** Env vars a write_through: entry may reference via $NAME/${NAME}. Not
@@ -50,6 +51,12 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
     VAR_PATTERN,
     (_match, braced: string | undefined, bare: string | undefined) => {
       const name = (braced ?? bare)!;
+      if ((MEDIATED_VARIABLES as readonly string[]).includes(name)) {
+        throw new Error(
+          `write_through entry ${JSON.stringify(rawLine)} names $${name}, which needs no entry: ` +
+            `this action writes it back after the step in either filesystem_mode. Remove the entry.`,
+        );
+      }
       if (!(ALLOWED_WRITE_THROUGH_VARS as readonly string[]).includes(name)) {
         throw new Error(
           `write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; ` +

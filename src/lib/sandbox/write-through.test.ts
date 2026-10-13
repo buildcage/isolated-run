@@ -26,9 +26,11 @@ describe("resolveWriteThroughEntry", () => {
   });
 
   it("rejects GITHUB_OUTPUT and GITHUB_STEP_SUMMARY, which this action mediates", () => {
-    expect(() => resolveWriteThroughEntry("$GITHUB_OUTPUT", ENV)).toThrow(/unsupported variable/);
-    expect(() => resolveWriteThroughEntry("$GITHUB_STEP_SUMMARY", ENV)).toThrow(
-      /unsupported variable/,
+    expect(() => resolveWriteThroughEntry("$GITHUB_OUTPUT", ENV)).toThrow(
+      'write_through entry "$GITHUB_OUTPUT" names $GITHUB_OUTPUT, which needs no entry: this action writes it back after the step in either filesystem_mode. Remove the entry.',
+    );
+    expect(() => resolveWriteThroughEntry("${GITHUB_STEP_SUMMARY}/x", ENV)).toThrow(
+      /names \$GITHUB_STEP_SUMMARY, which needs no entry/,
     );
   });
 

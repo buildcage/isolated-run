@@ -46,7 +46,7 @@ export const RUNNER_FILES_DIR = "/dev/buildcage-runner-files";
 
 const LEAF = { GITHUB_OUTPUT: "output", GITHUB_STEP_SUMMARY: "step-summary" } as const;
 export type MediatedVariable = keyof typeof LEAF;
-const MEDIATED_VARIABLES = Object.keys(LEAF) as MediatedVariable[];
+export const MEDIATED_VARIABLES = Object.keys(LEAF) as MediatedVariable[];
 
 export interface MediatedRunnerFile {
   variable: MediatedVariable;

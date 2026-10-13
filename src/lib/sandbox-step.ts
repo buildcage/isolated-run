@@ -469,7 +469,8 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     try {
       set("");
     } catch {
-      // The report setting it again says so.
+      // Only an append to the file just written back fails here, and the
+      // traffic report's own append after it meets the same failure and says so.
     }
   }
   const prepareAudit = () =>
