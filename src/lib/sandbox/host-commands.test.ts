@@ -13,7 +13,6 @@ import {
 } from "./host-commands.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 import { realPathOf } from "./symlinks.ts";
-import type { MountinfoEntry } from "./types.ts";
 
 const HOME = "/home/runner";
 const WORKSPACE = "/home/runner/work/repo/repo";
@@ -29,10 +28,6 @@ function withLinks(links: Record<string, string>) {
 }
 const NO_LINKS = withLinks({});
 
-/** A bind mount of `root` on the host's one filesystem at `mountPoint`. */
-function mount(root: string, mountPoint: string): MountinfoEntry {
-  return { mountPoint, fsType: "ext4", device: "8:1", root };
-}
 const asWritten = (path: string) => path;
 
 /**

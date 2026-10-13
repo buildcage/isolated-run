@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 
-import { SandboxError } from "../errors.ts";
 import {
   dockerConfigDir,
   renameGuardDirs,
@@ -28,6 +27,7 @@ const NO_LINKS = withLinks({});
 function mount(root: string, mountPoint: string): MountinfoEntry {
   return { mountPoint, fsType: "ext4", device: "8:1", root };
 }
+
 describe("dockerConfigDir", () => {
   it("is DOCKER_CONFIG when set, made absolute", () => {
     expect(dockerConfigDir({ DOCKER_CONFIG: "/etc/docker-cli", HOME })).toBe("/etc/docker-cli");

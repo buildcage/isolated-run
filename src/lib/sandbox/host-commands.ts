@@ -9,22 +9,15 @@
  */
 
 import { accessSync, constants } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, delimiter, isAbsolute, join } from "node:path";
 
 import { SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
 import type { JvmTools } from "./ca-trust.ts";
 import { writableDirsOf } from "./oci-mounts.ts";
-import { isAtOrUnder, pathAliases } from "./paths.ts";
+import { isAtOrUnder } from "./paths.ts";
 import { pinCommand, pinCommandPathEnv, SYSTEM_PATH } from "./pinned-commands.ts";
-import {
-  realPathOf,
-  realSymlinkDeps,
-  resolveHostPath,
-  type ResolvedHostPath,
-  type SymlinkDeps,
-} from "./symlinks.ts";
-import type { MountinfoEntry } from "./types.ts";
+import { realPathOf, realSymlinkDeps, resolveHostPath, type SymlinkDeps } from "./symlinks.ts";
 import { resolveWriteThroughPaths } from "./write-through.ts";
 
 const PINNED_COMMANDS = ["docker", "sudo"] as const;
