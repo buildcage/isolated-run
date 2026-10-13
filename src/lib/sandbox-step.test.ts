@@ -700,6 +700,7 @@ describe("runSandboxStep", () => {
       await expect(runSandboxStep(ENV, deps)).rejects.toThrow("render failed");
       expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
       expect(stopListening).toHaveBeenCalledTimes(1);
+      expect(orderOf(mocks.stopSandboxProxy)).toBeLessThan(orderOf(stopListening));
     });
 
     it("does not catch a cancel while the proxy is still starting", async () => {
@@ -1024,7 +1025,6 @@ describe("finalizeStep", () => {
     inputs: readStepInputs(ENV, deps),
     env: ENV,
     containerName: "buildcage-proxy-deadbeef",
-    stopProxy: vi.fn().mockResolvedValue(undefined),
     audit: undefined,
     auditAttached: () => false,
     mediation: undefined,
@@ -1033,14 +1033,11 @@ describe("finalizeStep", () => {
     ...over,
   });
 
-  it("reports, then stops the proxy, with nothing to write back", async () => {
-    const step = run();
-
-    expect(await finalizeStep(step, deps)).toBe(false);
+  it("reports, with nothing to write back", async () => {
+    expect(await finalizeStep(run(), deps)).toBe(false);
 
     expect(mocks.readBackingFile).not.toHaveBeenCalled();
     expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
-    expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(orderOf(vi.mocked(step.stopProxy)));
     expect(mocks.writeLateSummary).not.toHaveBeenCalled();
   });
 

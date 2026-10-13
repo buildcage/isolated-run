@@ -433,7 +433,6 @@ export interface StepRun {
   inputs: StepInputs;
   env: NodeJS.ProcessEnv;
   containerName: string;
-  stopProxy: () => Promise<void>;
   audit: FilesystemAuditPaths | undefined;
   /** Whether the tracer attached, read when the audit is prepared. */
   auditAttached: () => boolean;
@@ -443,10 +442,9 @@ export interface StepRun {
 }
 
 /**
- * Everything after the command, whether it ran or not: the runner files
- * written back, the artifact outputs cleared, the reports, and the proxy
- * stopped, even when one of them throws. Returns whether a runner file failed
- * the step.
+ * Everything after the command, whether it ran or not, up to stopping the
+ * proxy: the runner files written back, the artifact outputs cleared, and the
+ * reports. Returns whether a runner file failed the step.
  */
 export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise<boolean> {
   const { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run;
@@ -456,82 +454,78 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
   // @actions/core (last-write-wins over anything the command set), and the
   // reports onto the summary. The command never reached the real files, so
   // there is no symlink, FIFO or permission to put right here.
-  try {
-    let runnerFileFailed = false;
-    if (mediation) {
-      for (const file of mediation.files) {
-        if (writeBackMediatedFile(file, annotation, deps)) runnerFileFailed = true;
-      }
-      try {
-        deps.removeBackingDir(runnerFilesBackingDir);
-      } catch (e) {
-        deps.warn(`Could not remove ${runnerFilesBackingDir}: ${errorMessage(e)}`);
-      }
+  let runnerFileFailed = false;
+  if (mediation) {
+    for (const file of mediation.files) {
+      if (writeBackMediatedFile(file, annotation, deps)) runnerFileFailed = true;
     }
-    for (const set of [deps.setTrafficArtifactOutput, deps.setFilesystemAuditOutput]) {
-      try {
-        set("");
-      } catch {
-        // The report setting it again says so.
-      }
+    try {
+      deps.removeBackingDir(runnerFilesBackingDir);
+    } catch (e) {
+      deps.warn(`Could not remove ${runnerFilesBackingDir}: ${errorMessage(e)}`);
     }
-    const prepareAudit = () =>
-      deps.prepareStepFilesystemAudit({
-        audit,
-        attached: run.auditAttached(),
-        upload: inputs.filesystemAuditArtifact.upload,
-        retentionDays: inputs.filesystemAuditArtifact.retentionDays,
-        containerName,
-        annotation,
-        env,
-        actionRepo,
-        actionRef: reportActionRef,
-        failClosed: proxyMode !== "audit" && failOnBlocked,
-      });
-    // The runner kills a cancelled step seconds after cancelling it, and a
-    // large recording takes a while to read and upload, so the traffic report
-    // goes first and the audit takes what the summary has left.
-    const filesystemReport = cancelled ? undefined : await prepareAudit();
-    const processActivity = audit !== undefined;
-    const { startedAt, reported } = await deps.reportStepTraffic({
+  }
+  for (const set of [deps.setTrafficArtifactOutput, deps.setFilesystemAuditOutput]) {
+    try {
+      set("");
+    } catch {
+      // The report setting it again says so.
+    }
+  }
+  const prepareAudit = () =>
+    deps.prepareStepFilesystemAudit({
+      audit,
+      attached: run.auditAttached(),
+      upload: inputs.filesystemAuditArtifact.upload,
+      retentionDays: inputs.filesystemAuditArtifact.retentionDays,
       containerName,
-      proxyEngine: inputs.proxyEngine,
-      parameters: {
-        mode: proxyMode,
-        allowedHttpsRules: rules.httpsRules,
-        allowedHttpRules: rules.httpRules,
-        allowedIpRules: rules.ipRules,
-        allowedTlsRules: rules.tlsRules,
-        allowedUrlRules: rules.urlRules,
-        knownBlockedRules: rules.knownBlockedRules,
-      },
       annotation,
+      env,
       actionRepo,
       actionRef: reportActionRef,
-      runCommand: inputs.runInput,
-      extraInputs: (report) => awsExampleInputs(inputs.aws, report.timeline),
-      failOnBlocked,
-      trafficArtifact: inputs.trafficArtifact,
-      env,
-      moreBlocks: filesystemReport?.blocks,
-      processActivity,
-      // The audit written below closes the summary instead.
-      closeSummary: !(cancelled && processActivity),
+      failClosed: proxyMode !== "audit" && failOnBlocked,
     });
-    if (cancelled && processActivity) {
-      const late = await prepareAudit();
-      await deps.writeLateSummary(late.blocks(startedAt), {
-        reported,
-        actionRepo,
-        isAudit: proxyMode === "audit",
-        env,
-        annotation,
-      });
-    }
-    return runnerFileFailed;
-  } finally {
-    await run.stopProxy();
+  // The runner kills a cancelled step seconds after cancelling it, and a
+  // large recording takes a while to read and upload, so the traffic report
+  // goes first and the audit takes what the summary has left.
+  const filesystemReport = cancelled ? undefined : await prepareAudit();
+  const processActivity = audit !== undefined;
+  const { startedAt, reported } = await deps.reportStepTraffic({
+    containerName,
+    proxyEngine: inputs.proxyEngine,
+    parameters: {
+      mode: proxyMode,
+      allowedHttpsRules: rules.httpsRules,
+      allowedHttpRules: rules.httpRules,
+      allowedIpRules: rules.ipRules,
+      allowedTlsRules: rules.tlsRules,
+      allowedUrlRules: rules.urlRules,
+      knownBlockedRules: rules.knownBlockedRules,
+    },
+    annotation,
+    actionRepo,
+    actionRef: reportActionRef,
+    runCommand: inputs.runInput,
+    extraInputs: (report) => awsExampleInputs(inputs.aws, report.timeline),
+    failOnBlocked,
+    trafficArtifact: inputs.trafficArtifact,
+    env,
+    moreBlocks: filesystemReport?.blocks,
+    processActivity,
+    // The audit written below closes the summary instead.
+    closeSummary: !(cancelled && processActivity),
+  });
+  if (cancelled && processActivity) {
+    const late = await prepareAudit();
+    await deps.writeLateSummary(late.blocks(startedAt), {
+      reported,
+      actionRepo,
+      isAudit: proxyMode === "audit",
+      env,
+      annotation,
+    });
   }
+  return runnerFileFailed;
 }
 
 /**
@@ -651,13 +645,13 @@ export async function runSandboxStep(
       envOverrides: mediation?.envOverrides,
     });
   } finally {
+    // A report that throws still leaves the proxy stopped and the signals released.
     try {
       const runnerFileFailed = await finalizeStep(
         {
           inputs,
           env,
           containerName,
-          stopProxy,
           audit,
           auditAttached: () => auditAttached,
           mediation,
@@ -668,6 +662,7 @@ export async function runSandboxStep(
       );
       if (runnerFileFailed) process.exitCode = 1;
     } finally {
+      await stopProxy();
       stopListening();
     }
   }

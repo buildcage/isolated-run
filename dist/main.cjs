@@ -74034,69 +74034,64 @@ function logConfiguredRules({ rules, aws }, deps) {
 	});
 }
 async function finalizeStep(run, deps) {
-	let { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run, { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs;
-	try {
-		let runnerFileFailed = !1;
-		if (mediation) {
-			for (let file of mediation.files) writeBackMediatedFile(file, annotation, deps) && (runnerFileFailed = !0);
-			try {
-				deps.removeBackingDir(runnerFilesBackingDir);
-			} catch (e) {
-				deps.warn(`Could not remove ${runnerFilesBackingDir}: ${errorMessage(e)}`);
-			}
+	let { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run, { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs, runnerFileFailed = !1;
+	if (mediation) {
+		for (let file of mediation.files) writeBackMediatedFile(file, annotation, deps) && (runnerFileFailed = !0);
+		try {
+			deps.removeBackingDir(runnerFilesBackingDir);
+		} catch (e) {
+			deps.warn(`Could not remove ${runnerFilesBackingDir}: ${errorMessage(e)}`);
 		}
-		for (let set of [deps.setTrafficArtifactOutput, deps.setFilesystemAuditOutput]) try {
-			set("");
-		} catch {}
-		let prepareAudit = () => deps.prepareStepFilesystemAudit({
-			audit,
-			attached: run.auditAttached(),
-			upload: inputs.filesystemAuditArtifact.upload,
-			retentionDays: inputs.filesystemAuditArtifact.retentionDays,
-			containerName,
-			annotation,
-			env,
-			actionRepo,
-			actionRef: reportActionRef,
-			failClosed: proxyMode !== "audit" && failOnBlocked
-		}), filesystemReport = cancelled ? void 0 : await prepareAudit(), processActivity = audit !== void 0, { startedAt, reported } = await deps.reportStepTraffic({
-			containerName,
-			proxyEngine: inputs.proxyEngine,
-			parameters: {
-				mode: proxyMode,
-				allowedHttpsRules: rules.httpsRules,
-				allowedHttpRules: rules.httpRules,
-				allowedIpRules: rules.ipRules,
-				allowedTlsRules: rules.tlsRules,
-				allowedUrlRules: rules.urlRules,
-				knownBlockedRules: rules.knownBlockedRules
-			},
-			annotation,
-			actionRepo,
-			actionRef: reportActionRef,
-			runCommand: inputs.runInput,
-			extraInputs: (report) => awsExampleInputs(inputs.aws, report.timeline),
-			failOnBlocked,
-			trafficArtifact: inputs.trafficArtifact,
-			env,
-			moreBlocks: filesystemReport?.blocks,
-			processActivity,
-			closeSummary: !(cancelled && processActivity)
-		});
-		if (cancelled && processActivity) {
-			let late = await prepareAudit();
-			await deps.writeLateSummary(late.blocks(startedAt), {
-				reported,
-				actionRepo,
-				isAudit: proxyMode === "audit",
-				env,
-				annotation
-			});
-		}
-		return runnerFileFailed;
-	} finally {
-		await run.stopProxy();
 	}
+	for (let set of [deps.setTrafficArtifactOutput, deps.setFilesystemAuditOutput]) try {
+		set("");
+	} catch {}
+	let prepareAudit = () => deps.prepareStepFilesystemAudit({
+		audit,
+		attached: run.auditAttached(),
+		upload: inputs.filesystemAuditArtifact.upload,
+		retentionDays: inputs.filesystemAuditArtifact.retentionDays,
+		containerName,
+		annotation,
+		env,
+		actionRepo,
+		actionRef: reportActionRef,
+		failClosed: proxyMode !== "audit" && failOnBlocked
+	}), filesystemReport = cancelled ? void 0 : await prepareAudit(), processActivity = audit !== void 0, { startedAt, reported } = await deps.reportStepTraffic({
+		containerName,
+		proxyEngine: inputs.proxyEngine,
+		parameters: {
+			mode: proxyMode,
+			allowedHttpsRules: rules.httpsRules,
+			allowedHttpRules: rules.httpRules,
+			allowedIpRules: rules.ipRules,
+			allowedTlsRules: rules.tlsRules,
+			allowedUrlRules: rules.urlRules,
+			knownBlockedRules: rules.knownBlockedRules
+		},
+		annotation,
+		actionRepo,
+		actionRef: reportActionRef,
+		runCommand: inputs.runInput,
+		extraInputs: (report) => awsExampleInputs(inputs.aws, report.timeline),
+		failOnBlocked,
+		trafficArtifact: inputs.trafficArtifact,
+		env,
+		moreBlocks: filesystemReport?.blocks,
+		processActivity,
+		closeSummary: !(cancelled && processActivity)
+	});
+	if (cancelled && processActivity) {
+		let late = await prepareAudit();
+		await deps.writeLateSummary(late.blocks(startedAt), {
+			reported,
+			actionRepo,
+			isAudit: proxyMode === "audit",
+			env,
+			annotation
+		});
+	}
+	return runnerFileFailed;
 }
 async function runSandboxStep(env, overrides = {}) {
 	let deps = {
@@ -74169,7 +74164,6 @@ async function runSandboxStep(env, overrides = {}) {
 				inputs,
 				env,
 				containerName,
-				stopProxy,
 				audit,
 				auditAttached: () => auditAttached,
 				mediation,
@@ -74177,7 +74171,7 @@ async function runSandboxStep(env, overrides = {}) {
 				cancelled: cancel.signal.aborted
 			}, deps) && (process.exitCode = 1);
 		} finally {
-			stopListening();
+			await stopProxy(), stopListening();
 		}
 	}
 	return exitCode;
