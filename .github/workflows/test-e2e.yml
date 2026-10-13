@@ -45,6 +45,7 @@ jobs:
               - '.dockerignore'
               - 'licenses/*.txt'
               - '.github/actions/setup-vp/**'
+              - '.github/actions/prepare-local-proxy/**'
               - '.github/workflows/test-e2e.yml'
               - 'action.yml'
               - 'src/**'
@@ -101,19 +102,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-vp
-
-      - name: Build local sandbox proxy image
-        run: docker compose build proxy
-
-      - name: Resolve local image ref
-        id: local_image
-        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
-
-      - name: Rebuild the action with the local-image test hook enabled
-        env:
-          BUILDCAGE_BUILD_TEST_HOOKS: "1"
-        run: vp run build
+      - name: Prepare the local proxy
+        id: local_proxy
+        uses: ./.github/actions/prepare-local-proxy
+        with:
+          engines: universal
 
       # Verifies audit mode's Job Summary includes the auto-generated
       # restrict-mode example, and that the sandbox cannot write to the runner's
@@ -122,7 +115,7 @@ jobs:
         if: matrix.audit_mode
         uses: ./
         env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-audit-summary.md
         with:
           proxy_engine: universal
@@ -150,7 +143,7 @@ jobs:
         if: matrix.audit_mode
         uses: ./
         env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
         with:
           proxy_engine: universal
           proxy_mode: audit
@@ -180,7 +173,7 @@ jobs:
         id: audit
         uses: ./
         env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/summary.md
           BUILDCAGE_RUN_DEBUG_RAW_FILE: ${{ runner.temp }}/raw.jsonl
         with:
@@ -432,7 +425,7 @@ jobs:
         if: matrix.enforcement
         uses: ./
         env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
           # A later step can't read this step's GITHUB_STEP_SUMMARY back
           # (GitHub ignores attempts to reassign it), so mirror it here too.
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
@@ -489,7 +482,7 @@ jobs:
         if: matrix.enforcement
         uses: ./
         env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
         with:
           config_file: e2e-config/buildcage.yml
           run: |
@@ -517,7 +510,7 @@ jobs:
             if: matrix.concurrency
             uses: ./
             env:
-              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
               BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-parallel-a-summary.md
             with:
               proxy_engine: universal
@@ -537,7 +530,7 @@ jobs:
             if: matrix.concurrency
             uses: ./
             env:
-              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
               BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-parallel-b-summary.md
             with:
               proxy_engine: universal
@@ -568,7 +561,7 @@ jobs:
             if: matrix.concurrency
             uses: ./
             env:
-              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
             with:
               proxy_engine: universal
               label: parallel-write-through-short-persistent
@@ -581,7 +574,7 @@ jobs:
             if: matrix.concurrency
             uses: ./
             env:
-              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
             with:
               proxy_engine: universal
               filesystem_mode: ephemeral
@@ -595,7 +588,7 @@ jobs:
             if: matrix.concurrency
             uses: ./
             env:
-              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
             with:
               proxy_engine: universal
               filesystem_mode: ephemeral
@@ -657,7 +650,7 @@ jobs:
         continue-on-error: true
         uses: ./
         env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
         with:
           proxy_engine: universal
           proxy_mode: audit
@@ -695,21 +688,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-vp
-
-      # compose.yaml names the image the same for either engine, so each build
-      # is retagged before the next one overwrites it.
-      - name: Build local proxy images for both engines
-        run: |
-          for engine in universal inspect; do
-            PROXY_ENGINE=$engine docker compose build proxy
-            docker tag "$(PROXY_ENGINE=$engine docker compose config --images proxy)" "buildcage-e2e-proxy:$engine"
-          done
-
-      - name: Rebuild the action with the local-image test hook enabled
-        env:
-          BUILDCAGE_BUILD_TEST_HOOKS: "1"
-        run: vp run build
+      - name: Prepare the local proxy
+        id: local_proxy
+        uses: ./.github/actions/prepare-local-proxy
+        with:
+          engines: universal inspect
 
       # One representative case through the real action wrapper, against real
       # internet hosts (no fixture network), proves proxy_engine: inspect wiring
@@ -724,7 +707,7 @@ jobs:
         id: sandbox
         uses: ./
         env:
-          BUILDCAGE_LOCAL_IMAGE_REF: buildcage-e2e-proxy:inspect
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-inspect-summary.md
         with:
           proxy_engine: inspect
@@ -813,7 +796,7 @@ jobs:
           - name: sandbox-parallel-short-universal
             uses: ./
             env:
-              BUILDCAGE_LOCAL_IMAGE_REF: buildcage-e2e-proxy:universal
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
             with:
               proxy_engine: universal
               allowed_https_rules: example.com:443
@@ -823,7 +806,7 @@ jobs:
           - name: sandbox-parallel-long-inspect
             uses: ./
             env:
-              BUILDCAGE_LOCAL_IMAGE_REF: buildcage-e2e-proxy:inspect
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
             with:
               proxy_engine: inspect
               allowed_url_rules: "GET https://example.com/**"
@@ -866,7 +849,7 @@ jobs:
       - name: sandbox-ephemeral-inspect-home-overlay
         uses: ./
         env:
-          BUILDCAGE_LOCAL_IMAGE_REF: buildcage-e2e-proxy:inspect
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
         with:
           proxy_engine: inspect
           filesystem_mode: ephemeral
@@ -888,7 +871,7 @@ jobs:
           - name: sandbox-parallel-short-inspect-persistent
             uses: ./
             env:
-              BUILDCAGE_LOCAL_IMAGE_REF: buildcage-e2e-proxy:inspect
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
             with:
               proxy_engine: inspect
               label: parallel-nssdb-short-persistent
@@ -897,7 +880,7 @@ jobs:
           - name: sandbox-parallel-short-inspect-ephemeral
             uses: ./
             env:
-              BUILDCAGE_LOCAL_IMAGE_REF: buildcage-e2e-proxy:inspect
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
             with:
               proxy_engine: inspect
               filesystem_mode: ephemeral
@@ -907,7 +890,7 @@ jobs:
           - name: sandbox-parallel-long-inspect-chrome
             uses: ./
             env:
-              BUILDCAGE_LOCAL_IMAGE_REF: buildcage-e2e-proxy:inspect
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
             with:
               proxy_engine: inspect
               allowed_url_rules: "GET https://example.com/**"
@@ -970,19 +953,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-vp
-
-      - name: Build local inspect proxy image
-        run: PROXY_ENGINE=inspect docker compose build proxy
-
-      - name: Resolve local image ref
-        id: local_image
-        run: echo "ref=$(PROXY_ENGINE=inspect docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
-
-      - name: Rebuild the action with the local-image test hook enabled
-        env:
-          BUILDCAGE_BUILD_TEST_HOOKS: "1"
-        run: vp run build
+      - name: Prepare the local proxy
+        id: local_proxy
+        uses: ./.github/actions/prepare-local-proxy
+        with:
+          engines: inspect
 
       - name: Get the role's keys through OIDC
         id: aws
@@ -1011,7 +986,7 @@ jobs:
         id: restrict
         uses: ./
         env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/aws-restrict-summary.md
           ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
           SWITCHED_ROLE_ARN: ${{ vars.AWS_SWITCHED_ROLE_ARN }}
@@ -1146,7 +1121,7 @@ jobs:
         if: ${{ !cancelled() && steps.accounts.outcome == 'success' }}
         uses: ./
         env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/aws-audit-summary.md
           SWITCHED_ROLE_ARN: ${{ vars.AWS_SWITCHED_ROLE_ARN }}
         with:
