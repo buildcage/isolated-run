@@ -452,12 +452,13 @@ refuses; see [What changes in the step](#what-changes-in-the-step).
 
 On some kernels one of the tracer's hooks can be paused mid-run, and is then skipped when it is
 entered again. GitHub-hosted runners boot `-azure` kernels, 7.0 on `ubuntu-26.04`, and these do not
-pause the hooks. Nor do Ubuntu 22.04's and 24.04's `generic` kernels as they boot by default. Ubuntu
-26.04's `generic` kernel and the 7.0 hardware enablement kernel of 24.04 do. On a self-hosted
-runner, `sudo cat /sys/kernel/debug/sched/preempt` prints the modes with the one in use in
-parentheses, such as `full (lazy)`, and hooks can be skipped when it is `(full)` or `(lazy)`. That
-file needs debugfs mounted at `/sys/kernel/debug`. Where it is missing even so, the kernel cannot
-switch modes, and hooks can be skipped when `/boot/config-$(uname -r)` sets `CONFIG_PREEMPT_RCU=y`.
+pause the hooks. Nor do Ubuntu 24.04's `generic` kernel and 22.04's 6.8 hardware enablement kernel
+as they boot by default. Ubuntu 26.04's `generic` kernel and the 7.0 hardware enablement kernel of
+24.04 do. On a self-hosted runner, `sudo cat /sys/kernel/debug/sched/preempt` prints the modes with
+the one in use in parentheses, such as `full (lazy)`, and hooks can be skipped when it is `(full)`
+or `(lazy)`. That file needs debugfs mounted at `/sys/kernel/debug`. Where it is missing even so,
+the kernel cannot switch modes, and hooks can be skipped when `/boot/config-$(uname -r)` sets
+`CONFIG_PREEMPT_RCU=y`.
 
 `host_missed` counts skips anywhere on the host while the step ran, so 0 means none of the step's
 accesses was skipped. A nonzero count opens the summary with a note that some accesses may be
