@@ -1,9 +1,7 @@
 #!/bin/bash
 # Drives dist/main.cjs directly against a real proxy container/HAProxy
 # log, proving the INPUT_KNOWN_BLOCKED_RULES -> report -> pass/fail wiring
-# end-to-end (the matching logic itself is already unit-tested). See
-# test-e2e.yml's test_sandbox_fail_on_blocked for the Actions-level version
-# of the "all matched" case.
+# end-to-end (the matching logic itself is already unit-tested).
 #
 # blocked.example.com is a name in the fixture origin's resolver
 # (compose.test-universal.yaml), so the blocked request this is built on stays
