@@ -1,7 +1,7 @@
 #!/bin/bash
 # Verifies how the sandbox treats real host mounts, by driving dist/main.cjs
 # directly, without the real action wrapper; see test-e2e.yml's
-# test_sandbox_enforcement for the one case that does. Two mounts, one sandbox,
+# enforcement steps for the one case that does. Two mounts, one sandbox,
 # since a start is not cheap.
 #
 # The first is a bind mount nested under $GITHUB_WORKSPACE: a separate mount

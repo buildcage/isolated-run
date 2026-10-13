@@ -60,10 +60,10 @@ jobs:
   # (privilege drop, filesystem defaults, write_through: variations, concurrent
   # lifecycles) are covered more cheaply in test-integration.yml instead.
   #
-  # Verifies audit mode's Job Summary includes the auto-generated
-  # restrict-mode example, and that the sandbox cannot write to the runner's
-  # install directory or the action checkouts.
-  test_sandbox_audit_mode:
+  # Runs a real sandboxed step with filesystem_audit under each filesystem_mode
+  # and checks the tracer recorded its file accesses; a test-hooks build
+  # surfaces the recording for the assertion.
+  test_sandbox_filesystem_audit:
     needs: changes
     # !cancelled() forces this to evaluate when `changes` is skipped (it runs
     # only on pull_request); a skipped need otherwise skips the job unevaluated.
@@ -71,11 +71,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        filesystem_mode: [persistent, ephemeral]
+        # The oldest (22.04) and newest (26.04) kernels GitHub-hosted runners
+        # ship, once per architecture.
+        include:
+          - { runner: ubuntu-22.04, filesystem_mode: persistent }
+          - { runner: ubuntu-22.04-arm, filesystem_mode: persistent }
+          - { runner: ubuntu-26.04, filesystem_mode: persistent }
+          - { runner: ubuntu-26.04-arm, filesystem_mode: persistent }
+          # The audit mode cases need the same image, so they ride along here
+          # rather than take a runner of their own.
+          - { runner: ubuntu-24.04, filesystem_mode: persistent, audit_mode: true }
+          - { runner: ubuntu-24.04-arm, filesystem_mode: persistent, audit_mode: true }
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-    name: "e2e: test (sandbox, audit mode, ${{ matrix.runner }})"
+    name: "e2e: test (filesystem_audit, ${{ matrix.filesystem_mode }}${{ matrix.audit_mode && ', audit mode' || '' }}, ${{ matrix.runner }})"
 
     env:
       PROXY_ENGINE: universal
@@ -100,7 +112,11 @@ jobs:
           BUILDCAGE_BUILD_TEST_HOOKS: "1"
         run: vp run build
 
+      # Verifies audit mode's Job Summary includes the auto-generated
+      # restrict-mode example, and that the sandbox cannot write to the runner's
+      # install directory or the action checkouts.
       - name: Run an isolated command in audit mode
+        if: matrix.audit_mode
         uses: ./
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
@@ -113,12 +129,14 @@ jobs:
             wget -q -T 5 -O /dev/null https://example.com/
 
       - name: Verify the audit-mode report includes a restrict-mode example
+        if: matrix.audit_mode
         env:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-audit-summary.md
         run: ./test/assert-sandbox-audit.sh
 
       # The shell's parent is the runner's bin/Runner.Worker.
       - name: Locate the runner's install directory
+        if: matrix.audit_mode
         run: |
           root=$(dirname "$(dirname "$(readlink -f "/proc/$PPID/exe")")")
           test -d "$root/externals"
@@ -126,6 +144,7 @@ jobs:
           echo "RUNNER_INSTALL_DIR=$root" >> "$GITHUB_ENV"
 
       - name: Try to write to the runner and the action checkouts
+        if: matrix.audit_mode
         uses: ./
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
@@ -143,55 +162,6 @@ jobs:
               fi
             done
             exit $rc
-
-      # No cleanup step: the action stops its own proxy container in its
-      # finally block.
-
-  # Runs a real sandboxed step with filesystem_audit under each filesystem_mode
-  # and checks the tracer recorded its file accesses; a test-hooks build
-  # surfaces the recording for the assertion.
-  test_sandbox_filesystem_audit:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm]
-        filesystem_mode: [persistent, ephemeral]
-        # The oldest (22.04) and newest (26.04) kernels GitHub-hosted runners
-        # ship, once per architecture.
-        include:
-          - { runner: ubuntu-22.04, filesystem_mode: persistent }
-          - { runner: ubuntu-22.04-arm, filesystem_mode: persistent }
-          - { runner: ubuntu-26.04, filesystem_mode: persistent }
-          - { runner: ubuntu-26.04-arm, filesystem_mode: persistent }
-    runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
-    name: "e2e: test (filesystem_audit, ${{ matrix.filesystem_mode }}, ${{ matrix.runner }})"
-
-    env:
-      PROXY_ENGINE: universal
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/setup-vp
-
-      - name: Build local sandbox proxy image
-        run: docker compose build proxy
-
-      - name: Resolve local image ref
-        id: local_image
-        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
-
-      - name: Rebuild the action with the local-image test hook enabled
-        env:
-          BUILDCAGE_BUILD_TEST_HOOKS: "1"
-        run: vp run build
 
       - name: Leave a file and a directory in the workspace the step does not own
         run: sudo touch "$GITHUB_WORKSPACE/root-owned.txt" && sudo mkdir "$GITHUB_WORKSPACE/root-owned"
@@ -506,20 +476,26 @@ jobs:
             echo "::error::the failed start left the audit's files"; exit 1
           fi
 
-  # One representative case through the real action wrapper, against real
-  # internet hosts (no fixture network), proves proxy_engine: universal
-  # wiring end-to-end: an allowed host reaches its origin, a blocked one does
-  # not, write_through: opens a path, and both verdicts reach the report.
-  # Which names, ports and protocols are judged which way, and the log-line
-  # sanitizing behind that, live in test/universal-restrict-scenarios.sh,
-  # which needs a fixture network this job deliberately does not set up.
-  test_sandbox_enforcement:
+  # Proves container/network/Compose-project namespacing holds under
+  # Actions' own `parallel:` keyword; the direct-script counterpart is
+  # in test-integration.yml.
+  test_sandbox_concurrency:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.04 carries the oldest kernel GitHub-hosted runners ship (6.8). Its arm
+        # image runs here, as the inspect job below needs Chrome, which it lacks.
+        runner: [ubuntu-latest, ubuntu-22.04-arm]
+        # The enforcement cases need the same image, so they ride along here
+        # rather than take a runner of their own.
+        include:
+          - { runner: ubuntu-latest, enforcement: true }
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-    name: "e2e: test (sandbox, enforcement, config_file, fail_on_blocked)"
+    name: "e2e: test (sandbox, concurrency${{ matrix.enforcement && ', enforcement, config_file, fail_on_blocked' || '' }}, ${{ matrix.runner }})"
 
     env:
       PROXY_ENGINE: universal
@@ -544,7 +520,15 @@ jobs:
           BUILDCAGE_BUILD_TEST_HOOKS: "1"
         run: vp run build
 
+      # One representative case through the real action wrapper, against real
+      # internet hosts (no fixture network), proves proxy_engine: universal
+      # wiring end-to-end: an allowed host reaches its origin, a blocked one does
+      # not, write_through: opens a path, and both verdicts reach the report.
+      # Which names, ports and protocols are judged which way, and the log-line
+      # sanitizing behind that, live in test/universal-restrict-scenarios.sh,
+      # which needs a fixture network this job deliberately does not set up.
       - name: Run an isolated command via the real action
+        if: matrix.enforcement
         uses: ./
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
@@ -586,7 +570,7 @@ jobs:
             rm -f /opt/.buildcage-writable-test
 
       - name: Verify the sandbox report contains the expected allowed/blocked entries
-        if: always()
+        if: always() && matrix.enforcement
         env:
           # Same debug-only mirror as the step above, not GITHUB_STEP_SUMMARY.
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
@@ -596,6 +580,7 @@ jobs:
       # fail_on_blocked it sets all reach the step. The image is universal either
       # way, so the step checks for the CA inspect would have put in the sandbox.
       - name: Write the config file
+        if: matrix.enforcement
         run: |
           mkdir -p e2e-config
           cat > e2e-config/buildcage.yml <<'YAML'
@@ -607,6 +592,7 @@ jobs:
           YAML
 
       - name: Run an isolated command configured by the file
+        if: matrix.enforcement
         uses: ./
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
@@ -633,6 +619,7 @@ jobs:
       # unit-tested at the logic level: this proves the wiring end-to-end,
       # reusing the same built image for both cases.
       - name: Run an isolated command that triggers a blocked connection
+        if: matrix.enforcement
         id: blocked_connection
         continue-on-error: true
         uses: ./
@@ -646,7 +633,7 @@ jobs:
           run: wget -q -T 5 -O /dev/null http://neverssl.com/ || true
 
       - name: Verify fail_on_blocked actually failed the step
-        if: always() && steps.blocked_connection.outcome != 'skipped'
+        if: always() && matrix.enforcement && steps.blocked_connection.outcome != 'skipped'
         run: |
           if [ "${{ steps.blocked_connection.outcome }}" != "failure" ]; then
             echo "::error::Expected the blocked-connection step to fail (fail_on_blocked defaults to true), but it reported '${{ steps.blocked_connection.outcome }}'"
@@ -655,6 +642,7 @@ jobs:
           echo "OK: fail_on_blocked correctly failed the step"
 
       - name: Run an isolated command whose only blocked connection is known_blocked_rules-listed
+        if: matrix.enforcement
         id: known_blocked_connection
         uses: ./
         env:
@@ -668,53 +656,13 @@ jobs:
           run: wget -q -T 5 -O /dev/null http://neverssl.com/ || true
 
       - name: Verify known_blocked_rules kept the step from failing
-        if: always() && steps.known_blocked_connection.outcome != 'skipped'
+        if: always() && matrix.enforcement && steps.known_blocked_connection.outcome != 'skipped'
         run: |
           if [ "${{ steps.known_blocked_connection.outcome }}" != "success" ]; then
             echo "::error::Expected the step to succeed (the only blocked connection matches known_blocked_rules), but it reported '${{ steps.known_blocked_connection.outcome }}'"
             exit 1
           fi
           echo "OK: known_blocked_rules correctly kept the step from failing"
-
-  # Proves container/network/Compose-project namespacing holds under
-  # Actions' own `parallel:` keyword; the direct-script counterpart is
-  # in test-integration.yml.
-  test_sandbox_concurrency:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # 22.04 carries the oldest kernel GitHub-hosted runners ship (6.8). Its arm
-        # image runs here, as the inspect job below needs Chrome, which it lacks.
-        runner: [ubuntu-latest, ubuntu-22.04-arm]
-    runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
-    name: "e2e: test (sandbox, concurrency, ${{ matrix.runner }})"
-
-    env:
-      PROXY_ENGINE: universal
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/setup-vp
-
-      - name: Build local sandbox proxy image
-        run: docker compose build proxy
-
-      - name: Resolve local image ref
-        id: local_image
-        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
-
-      - name: Rebuild the action with the local-image test hook enabled
-        env:
-          BUILDCAGE_BUILD_TEST_HOOKS: "1"
-        run: vp run build
 
       - parallel:
           - name: sandbox-parallel-a
@@ -1323,9 +1271,7 @@ jobs:
     needs:
       [
         changes,
-        test_sandbox_audit_mode,
         test_sandbox_filesystem_audit,
-        test_sandbox_enforcement,
         test_sandbox_concurrency,
         test_sandbox_concurrency_inspect,
         test_sandbox_aws_key_check,

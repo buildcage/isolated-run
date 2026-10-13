@@ -3,7 +3,7 @@
 # blocks the two syscall classes docs/security.md names as motivating
 # examples (unprivileged user-namespace creation, io_uring) by driving
 # dist/main.cjs directly, without the real action wrapper; see
-# test-e2e.yml's test_sandbox_enforcement for the one case that does.
+# test-e2e.yml's enforcement steps for the one case that does.
 set -uo pipefail
 
 : "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"

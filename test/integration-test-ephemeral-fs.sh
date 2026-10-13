@@ -1,7 +1,7 @@
 #!/bin/bash
 # Verifies filesystem_mode: ephemeral / write_through: end-to-end by driving
 # dist/main.cjs directly, without the real action wrapper; test-e2e.yml's
-# test_sandbox_enforcement covers write_through: through the real action, and
+# enforcement steps cover write_through: through the real action, and
 # nothing there sets filesystem_mode: at all.
 # The mount-composition/path-resolution rules themselves are already
 # unit-tested (ephemeral-fs.test.ts, oci-config.test.ts); this proves runc
